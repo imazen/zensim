@@ -23,8 +23,8 @@ ENSEMBLE rows (2026-08-04): a fulleval JSON carrying ``model.kind == "ensemble"`
 named, and its Model-details card leads with a warning that the architecture/repro shown is the
 ANCHOR member. An ensemble is a Rust-servable composition — its rank/dial/
 corruption numbers come from the identical verdict invocation as every single-bake row and are
-directly comparable, but ``m3_coherence``/``m3a_coherence`` are **null** because the coherence
-instrument loads one ZNPR. Null renders as an em-dash (NOT MEASURED) and is excluded from column
+directly comparable. Complete-ensemble M3/M3a come from the explicitly weighted
+coherence sweep; absent measurements remain null. Null renders as an em-dash (NOT MEASURED) and is excluded from column
 shading and min/max — it is never displayed or shaded as a measured zero.
 
 NO external requests: all CSS/JS/data are inlined (no CDN, no web fonts) so the file opens
@@ -122,7 +122,7 @@ REFERENCES = ["mos", "jnd", "ssim2", "butter", "cvvdp"]
 REF_LABELS = {"mos": "MOS (human)", "jnd": "JND (human)", "ssim2": "SSIMULACRA2",
               "butter": "butteraugli (↑=better)", "cvvdp": "ColorVideoVDP"}
 # scoreboard columns beyond CID22: (key, header, higher_is_better, fmt)
-CORP_ORDER = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "live", "csiq", "kadid", "tid"]
+CORP_ORDER = ["cid22", "nonphoto", "konjnd", "konfig", "aic3", "aic4", "live", "csiq", "kadid", "tid"]
 SCATTER_MAX = 500  # subsample dense per_pair for embedding — keeps the offline file responsive
 MODEL_TRANSFORMS_EMBED = 48  # Model-details shows at most 48 transform chips (+ "+N more");
                              # embedding more per bake (944 on the A-arm lasso cells) is payload
@@ -298,11 +298,21 @@ SPRINT_BEST = [
     ("balance campaign", "W10L9PH_s4004_packed"),
 ]
 
+# September 14: fixed nine-composition diagnostic review, with LEGACY badges intact.
+CURATED_BOARD.extend(["MT914_matched_B", "MT914_matched_D", "peer_ssim2_mt914"])
+CURATED_BOARD.extend(["MT913_" + name for name in (
+    "y40_h32_ens5", "y40_h128_ens5", "y60_h32_ens5", "y60_h128_ens5",
+    "local120_h128_ens5", "selected619_h128_ens5", "full944_h128_ens5",
+    "full944_h256_ens5", "linear60")])
+# September 15: frozen TRAIN-only recovery, fully assessed without promotion.
+CURATED_BOARD.extend(["R915_y60_h32_ens5", "R915_basic228_h128_ens5"])
 CURATED = set(CURATED_BOARD)
 
 
 def family_of(name: str) -> str:
     """Control-bar family grouping (group toggles). Input = the board name."""
+    if name.startswith("MT913_"):
+        return "minimal / wide train-eval study"
     if name.endswith(ERA372_CUR_SUFFIX):
         # Era-suffixed rows read the SAME bake on the 2026-08-30 current-extractor 372
         # root; checked FIRST so a pair's two halves never land in different families
@@ -861,7 +871,8 @@ def fairness_of(o, ann_entries, seed_groups, name_to_group):
     # every cell whose composite is the Rust product_composite. A cell whose composite
     # came from gauntlet's legacy fallback is flagged instead of trusted.
     if o.get("composite") is None and not o.get("peer"):
-        notes.append("composite absent (legacy fallback would be used)")
+        notes.append("composite incomplete: " + ", ".join(o["composite_coverage"]["missing"])
+                     if o.get("composite_coverage") else "composite not measured")
     for c in TRAIN_EQ_VAL_AXES:
         if (o.get("rank", {}).get(c) or {}).get("train_eq_val") is False:
             fails.append("c_no_train_eq_val")   # a cell claiming KADID/TID are held out
@@ -1122,7 +1133,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # cloud is stripped, and its per-pair data stays in the source verdict (never
         # deleted) exactly as `--strip-per-pair` already does for grid-interior cells.
         # This is what buys the fair view its size budget without dropping any DATA.
-        pp = o.get("per_pair", {}) if (curated and fair["tier"] != "LEGACY") else {}
+        pp = o.get("per_pair", {}) if ((curated and fair["tier"] != "LEGACY") or (name.startswith("MT913_") and ("ens5" in name or "linear60" in name))) else {}
         sc_json = o.get("scatter", {})
         for corp, cols in pp.items():
             pred = cols.get("pred")
@@ -1141,34 +1152,13 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                 stats = sc_json.get(corp, {}).get(ref)
                 if not stats:                      # JSON omitted it -> canonical panel at build
                     stats = _panel_srocc_plcc(pred, rv)
-                # Geometric plot diagnostics (user directive 2026-08-28): computed in
-                # shape-normalized space (pred mapped BY RANK onto the reference's
-                # quantiles), residual r = qq - ref in ref units:
-                #   out4      — fraction outside the ±4·MAD envelope (G-OUT severe band)
-                #   maxd/p99d — max / p99 |r| as a fraction of the ref span p1..p99
-                #   cov/clump — fraction of 20 ref-span bins holding ≥0.5% of points /
-                #               largest single-bin share (density structure)
-                #   clampLo/Hi— mass sitting AT the prediction's exact min/max value
-                #               (dial floor/ceiling saturation, the incumbent-5.4 class)
-                geo = None
-                okm = np.isfinite(pred) & np.isfinite(rv)
-                if okm.sum() >= 50:
-                    pv, rr = pred[okm], rv[okm]
-                    order = np.argsort(pv, kind="stable")
-                    qq = np.empty(len(pv)); qq[order] = np.sort(rr)
-                    r = qq - rr
-                    mad = float(np.median(np.abs(r - np.median(r))) * 1.4826) or 1e-9
-                    span = float(np.percentile(rr, 99) - np.percentile(rr, 1)) or 1e-9
-                    hist, _ = np.histogram(rr, bins=20)
-                    geo = {"out4": round(float((np.abs(r) > 4 * mad).mean()), 4),
-                           "maxd": round(float(np.max(np.abs(r)) / span), 3),
-                           "p99d": round(float(np.percentile(np.abs(r), 99) / span), 3),
-                           "cov": round(float((hist >= max(1, len(rr) // 200)).mean()), 2),
-                           "clump": round(float(hist.max() / len(rr)), 2),
-                           "clampLo": round(float((pv == pv.min()).mean()), 4),
-                           "clampHi": round(float((pv == pv.max()).mean()), 4),
-                           "mad": round(mad, 3)}
-                cell[ref] = {"pts": pts, "fit": _fit_line(pred, rv), "geo": geo,
+                assessment = o.get("scatter_assessment", {}).get(corp, {}).get(ref)
+                geo = assessment.get("geo") if assessment and assessment.get("status") == "MEASURED" else None
+                raw = assessment.get("raw") if geo is not None else None
+                mapped = cols.get("normalized_pred")
+                normalized_pts = ([[float(mapped[i]), float(rv[i]), float(pred[i])] for i in idx]
+                                  if mapped is not None and len(mapped) == n else None)
+                cell[ref] = {"pts": pts, "normalized_pts":normalized_pts, "fit": _fit_line(pred, rv), "geo": geo, "raw":raw,
                              "srocc": stats.get("srocc"), "plcc": stats.get("plcc"),
                              "n": stats.get("n", len(pts))}
             if cell:
@@ -1372,7 +1362,12 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "zones": compact_zones(o.get("dial")),
             "zoneSkip": zone_skip.get(name),
             "m3a": o.get("m3a_coherence"),
+            "coherence": o.get("coherence_assessment"),
+            "publicTestExposure": o.get("public_test_exposure"),
+            "scalarTargeting": o.get("scalar_targeting_assessment"),
+            "nativeSpatial": o.get("native_spatial_assessment"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
+            "composite_coverage": o.get("composite_coverage"),
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
             "model": model,
@@ -1567,9 +1562,10 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         nm = era_base_name(b.get("name") or "")
         fam = family_of(nm)
         if nm.startswith("peer_") or fam in ("HDR", "peers"):
-            b["knob_end_fail"] = []
+            b["knob_end_fail"] = None
             continue
         fails = []
+        measured = set()
         curves = ((b.get("dial") or {}).get("curves") or {})
         for c, pts in curves.items():
             if c not in _REACH:
@@ -1577,10 +1573,11 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             hf = sorted([p for p in pts if p[0] >= 88])
             if len(hf) < 3:
                 continue
+            measured.add(c)
             p50 = [p[2] for p in hf]
             if (p50[-1] - p50[0]) < 8 or p50[-1] < _REACH[c] - 1:
                 fails.append(c)
-        b["knob_end_fail"] = fails
+        b["knob_end_fail"] = fails if fails or len(measured) == len(_REACH) else None
     # codename registry (user directive 2026-08-28: memorable word-chain names).
     _np = Path(__file__).resolve().parents[2] / "benchmarks" / "candidate_names.json"
     _nm = {}
@@ -1615,7 +1612,10 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     _ds, _inc = [], []
     if _dp.exists():
         _dj = json.loads(_dp.read_text())
-        _ds = sorted(_dj.get("sets", []), key=lambda x: x.get("date", ""), reverse=True)
+        # Registry entries are append-only. On the same date the later entry
+        # supersedes the earlier discussion, so keep that chronology explicit.
+        _ds = [entry for _, entry in sorted(enumerate(_dj.get("sets", [])),
+               key=lambda item: (item[1].get("date", ""), item[0]), reverse=True)]
         _inc = _dj.get("incumbents", [])
     _cp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_eval_coverage.json"
     _cov = json.loads(_cp.read_text()).get("rows", []) if _cp.exists() else []
@@ -2036,6 +2036,7 @@ function applyCompare(res){
   _lastHash=null;                               // a fresh read: let the next real edit write
   if(!res.found.length)return;                  // all ids missed -> banner + default view
   state.visible=new Set(res.found);
+  state.mcorp=null;
   state.sortKey='cmp';state.sortDir=1;
   state.gateFilter=new Set();
 }
@@ -2184,7 +2185,7 @@ const GATE_DEFS=[
   ['dialv2','D','G-GRAN v2 peer-anchored dial gate (REGISTERED W12 candidate, not yet frozen)'],
   ['knob','K','knob-end check (G-GRAN v1 semantics: HF-zone reach/span; computed at build)']];
 function gateV(b,g){
-  if(g==='knob')return (b.knob_end_fail===undefined)?null:(b.knob_end_fail.length?'fail':'pass');
+  if(g==='knob')return (b.knob_end_fail==null)?null:(b.knob_end_fail.length?'fail':'pass');
   const e=(b.gatecheck||{})[g];return e?e.v:null;}
 function gateWhy(b,g){
   if(g==='knob')return b.knob_end_fail&&b.knob_end_fail.length?('fails: '+b.knob_end_fail.join(', ')):'';
@@ -2276,6 +2277,8 @@ function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
+    mk('minimal / wide',()=>{state.visible=new Set(DATA.bakes.filter(b=>b.name.startsWith('MT913_')&&(b.name.endsWith('_ens5')||b.name==='MT913_linear60')).map(b=>b.name));state.mcorp=null;rerender();renderBar();},
+      'Eight frozen five-seed ensembles and a linear control; six measured human/codec EVAL panels. Product gates remain incomplete. Available on the all-rows board.'),
     mk('target models',()=>{state.visible=new Set(PRODUCT_SET);rerender();renderBar();},
       'B, D and the constrained three-seed challenger where present. Read product qualification before composite.'),
     mk('VERIFIED-FAIR',()=>{state.visible=new Set(VFAIRSET);rerender();renderBar();},
@@ -2356,17 +2359,40 @@ function renderBar(){
   // while it is a registered-not-adopted W12 candidate).
   // discussion-set dropdown (user directive 2026-08-28): pick a board
   // generation's discussion set -> visible = set UNION incumbents UNION peers.
-  const ds=DATA.discussionSets||[];
+  // TRAIN reports retain their own population/assessment owner. They are
+  // discoverable here without inventing qualification rows or filtering to
+  // only historical incumbents when none of the study models is on this board.
+  const studies=(DATA.discussionSets||[]).filter(d=>d.role==='train-development');
+  if(studies.length){
+    const box=el('details',{id:'train-studies',style:'flex-basis:100%;padding:.4rem 0'});
+    box.append(el('summary',{text:'TRAIN development comparisons and spatial A/Bs ('+studies.length+')'}));
+    box.append(el('p',{text:'These experiments use TRAIN development populations. Open each complete comparison for scalar panels, spatial checks and failure evidence. They are not EVAL qualification rows.'}));
+    const list=el('ul');
+    studies.forEach(d=>{
+      const row=el('li');
+      row.append(el('a',{href:d.report_url,text:d.label}),el('span',{text:' — '+d.note}));
+      list.append(row);
+    });
+    box.append(list);bar.append(box);
+  }
+  const ds=(DATA.discussionSets||[]).filter(d=>d.role!=='train-development');
   if(ds.length){
     const sel=el('select',{class:'btn',title:'filter to a discussion set + incumbents + iqa peers (benchmarks/board_discussion_sets.json, latest first)'});
     sel.append(el('option',{text:'discussion set\u2026',value:''}));
-    ds.forEach((d,i)=>sel.append(el('option',{text:d.label,value:String(i)})));
+    ds.forEach((d,i)=>sel.append(el('option',{text:d.label,value:String(i),title:d.note||''})));
     sel.onchange=()=>{if(sel.value==='')return;const d=ds[+sel.value];
       const peers=DATA.bakes.filter(b=>b.name.startsWith('peer_')).map(b=>b.name);
       const want=new Set([...(d.bakes||[]),...(DATA.incumbents||[]),...peers]);
       state.visible=new Set(DATA.bakes.filter(b=>want.has(b.name)).map(b=>b.name));
+      state.mcorp=d.preferred_corpus||null;
       rerender();renderBar();};
     bar.append(sel);
+    const latestReport=ds.find(d=>d.report_url);
+    if(latestReport)bar.append(el('a',{
+      href:latestReport.report_url,
+      text:'Read latest discussion: '+latestReport.label,
+      style:'flex-basis:100%;padding:.3rem 0'
+    }));
   }
   bar.append(el('span',{text:'gate filter:',style:'margin-left:.6rem;color:var(--text-secondary);font-size:11px'}));
   const applyGF=()=>{if(state.gateFilter.size)DATA.bakes.forEach(b=>{if(gateExcluded(b))state.visible.delete(b.name);});
@@ -2515,6 +2541,9 @@ function fsid(b){return b.fsid?(b.fsid+(b.fsidInferred?' (inferred)':'')):
   ('NOT RECORDED — width '+b.regime+' is an alias, not an identity');}
 const COLS=[
   ['name','bake',true,b=>b.name],
+  ['measured','measured rank data',true,b=>{const cs=DATA.corpOrder.filter(c=>b.rank[c]&&b.rank[c].n>0);
+    return cs.length?cs[0].toUpperCase()+' n='+b.rank[cs[0]].n+(cs.length>1?' +'+(cs.length-1)+' corpora':''):'NOT MEASURED';}],
+  ['kadid','KADID SROCC',false,b=>rs(b,'kadid')],
   ['qualification','product qualification',true,b=>b.qualification?b.qualification.status:'not evaluated'],
   // FAIRNESS (2026-09-04). `fair` = the tier glyph; `k` = seed-group size; `cmean` =
   // the group's MEAN composite with its spread — the honest estimator against
@@ -2527,6 +2556,8 @@ const COLS=[
   ['trained','trained',true,b=>b.train_date?b.train_date.d+(b.train_date.src==='file'?'*':''):null],
   ['gates','gates',true,b=>gateGlyphs(b)],
   ['composite','composite',false,b=>b.composite],
+  ['composite_coverage','composite coverage',true,b=>{const c=b.composite_coverage;
+    return c?c.status+' '+(c.required.length-c.missing.length)+'/'+c.required.length:'not recorded';}],
   ['cid22','CID22',false,b=>rs(b,'cid22')],
   ['nonphoto','nonphoto',false,b=>rs(b,'nonphoto')],
   ['konjnd','KonJND',false,b=>rs(b,'konjnd')],
@@ -2568,7 +2599,7 @@ const COLS=[
 // being read as a win (exam §2.1 + registry kadid-tid-train-eq-val +
 // hfnl-ssim2-self-target-circular-2026-09-01).
 const NONRANK={
-  kadid:'train==val (100% pair overlap) — integrity guard, never ranking signal',
+  kadid:'Populations differ: historical overlap guards and separately admitted source-disjoint studies. Read study admission; do not rank across populations.',
   tid:'train==val, and retired to train-only by user ruling 2026-08-29 — historical guard',
   nonphoto:'ssim2-ANCHORED: its target IS an ssim2 score, so this is AGREEMENT with ssim2, never a win over it',
   imazen26:'ssim2-ANCHORED: agreement with ssim2, not a win over it',
@@ -2608,7 +2639,7 @@ if(LT){COLS.push(
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
   ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
 function fmtCell(key,v,b){
-  if(key==='name'||key==='regime'||key==='fair'||key==='qualification')return v;
+  if(key==='name'||key==='regime'||key==='fair'||key==='qualification'||key==='measured')return v;
   if(key==='k')return v==null?'—':(v===1?'1 ⚠':String(v));
   if(key==='cspread')return v==null?'—':f3(v);
   if(key&&key.charAt(0)==='w'&&key.length===2)return v==null?'—':v;
@@ -2652,8 +2683,8 @@ function renderTable(){
     +'measured zero. Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80). '
     +'<b>ens×k</b> = an equal-weight ENSEMBLE of k bakes, scored through the identical verdict invocation '
     +'as every single-bake row: rank/dial/corruption numbers are directly comparable, but an ensemble is an '
-    +'<b>Rust-servable composition</b>. The current coherence instrument loads one ZNPR, so '
-    +'<b>M3a/M3 are not measured for this composition</b>; the Model-details card describes '
+    +'<b>Rust-servable composition</b>. M3a/M3 require a complete-ensemble sweep; '
+    +'missing measurements stay blank. The Model-details card describes '
     +'the ANCHOR member only. Composition identity and product qualification are separate evidence. '
     +'Rows list EVERY promoted cell (dimmed = hidden from charts; click a row to toggle it). '
     +'Hidden-by-default grid cells carry the same scalar stats as curated ones — only embedded '
@@ -2666,8 +2697,8 @@ function renderTable(){
     +'<b>HF-NL/ref</b> = hfnlproxy per-reference mean signed SROCC (quality-oriented; per-ref, '
     +'never pooled — hover the header; Δ under the ~0.04 axis LSD is noise; 80 pre-pin cells were '
     +'sign-flipped and are REPAIRED per appendix O — see the HF-NL axis panel) — “— (absent)” on cells that predate '
-    +'the instrument is <b>absent-not-failed</b> (not measured ≠ measured fail); KADID/TID stay '
-    +'train==val integrity guards everywhere. <b>dom</b>-tagged rows are DOMINATED (strictly '
+    +'the instrument is <b>absent-not-failed</b> (not measured ≠ measured fail). Historical KADID/TID overlap guards '
+    +'differ from the Rev3 study’s admitted KADID eval. <b>dom</b>-tagged rows are DOMINATED (strictly '
     +'beaten by a same-class sibling on every measured floor axis + composite) — kept on the '
     +'board, dimmed + default-off behind the “dominated” chip; nothing is deleted.'
     +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
@@ -2723,6 +2754,7 @@ function renderTable(){
     COLS.forEach(c=>{
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v,b)});
+      if(c[0]==='measured')td.setAttribute('title',Object.entries(b.rank||{}).map(([corpus,r])=>corpus+': n='+r.n).join('\n')||'No rank results recorded');
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
       if(c[0]==='qualification'){td.title='Read from the qualification owner; research composite does not confer a pass.';
         td.style.color=v==='qualified'?'var(--good)':v==='failed'?'var(--critical)':'var(--warn)';}
@@ -2841,7 +2873,7 @@ function renderTable(){
     +'<p><b>The "Gate scorecard" table below</b> is a DIFFERENT system: CODEC_TARGET_GOALS soft-gates '
     +'(continuous 0–1 scores, weighted into a shippability scalar) — diagnostic shading, not pass/fail law.</p>'
     +'<p><b>Ruler caveats (read before comparing rows):</b> '
-    +'kadid rows are <b>train==eval for every current model</b> (integrity guards, not skill); '
+    +'historical kadid rows are overlap guards; the Rev3 study uses <b>3,125 separately admitted eval pairs</b>. Do not compare different populations as a matched experiment; '
     +'tid is <b>RETIRED TO TRAIN-ONLY</b> (user ruling 2026-08-29) — do not rank on it; '
     +'konjnd board rows for 372-class bakes historically scored the full 1,008-ref file while 944 bakes scored the '
     +'JPEG-504 — same-pair kon reads live in the campaign doc’s single-ruler table; '
@@ -2862,14 +2894,18 @@ function qqMap(pts){
   const ys=pts.map(p=>p[1]).sort((a,b)=>a-b);
   const order=pts.map((p,i)=>[p[0],i]).sort((a,b)=>a[0]-b[0]);
   const out=new Array(pts.length);
-  order.forEach((oi,rank)=>{const i=oi[1];out[i]=[ys[Math.min(rank,ys.length-1)],pts[i][1],pts[i][0]];});
+  for(let first=0;first<order.length;){let end=first+1;
+    while(end<order.length&&order[end][0]===order[first][0])end++;
+    const mean=ys.slice(first,end).reduce((a,b)=>a+b,0)/(end-first);
+    for(let k=first;k<end;k++){const i=order[k][1];out[i]=[mean,pts[i][1],pts[i][0]];}first=end;
+  }
   return out;
 }
 function scatterOpt(b,corp,ref,cell){
   const t=TH();const c=color(b);
   const refLab=DATA.refLabels[ref]||ref;
   const norm=state.shapeNorm!==false;
-  const pts=norm?qqMap(cell.pts):cell.pts;
+  const pts=norm?(cell.normalized_pts||qqMap(cell.pts)):cell.pts;
   const series=[{type:'scatter',name:b.name,data:pts,symbolSize:6,
     itemStyle:{color:c,opacity:.55},emphasis:{itemStyle:{opacity:1}},z:2}];
   if(norm){
@@ -2897,9 +2933,9 @@ function scatterOpt(b,corp,ref,cell){
   return{animation:false,
     title:{text:(b.name.length>30?b.name.slice(0,29)+'…':b.name)+ensTag(b),
       subtext:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n
-        +(cell.geo?('\nout '+(cell.geo.out4*100).toFixed(1)+'%·maxd '+(cell.geo.maxd*100).toFixed(0)
-          +'%sp·cov '+(cell.geo.cov*100).toFixed(0)+'%·clump '+(cell.geo.clump*100).toFixed(0)
-          +'%·clamp '+(cell.geo.clampLo*100).toFixed(1)+'/'+(cell.geo.clampHi*100).toFixed(1)+'%'):''),
+        +(cell.geo?('\nout '+(cell.geo.out4*100).toFixed(1)+'%·p99/max '+f3(cell.geo.p99d)+'/'+f3(cell.geo.maxd)+' span'
+          +'\nraw clump '+(cell.raw&&cell.raw.clump!=null?(cell.raw.clump*100).toFixed(1)+'%':'—')
+          +'·floor/ceil '+(cell.geo.clampLo*100).toFixed(1)+'/'+(cell.geo.clampHi*100).toFixed(1)+'%'):''),
       top:2,left:8,itemGap:1,
       textStyle:{color:t['text-primary'],fontSize:10.5,fontWeight:600},
       subtextStyle:{color:t['text-secondary'],fontSize:9.5}},
@@ -2909,7 +2945,7 @@ function scatterOpt(b,corp,ref,cell){
             ?('pred(raw) <b>'+f3(p.value[2])+'</b> → ref-scale <b>'+f3(p.value[0])+'</b>')
             :('pred <b>'+f3(p.value[0])+'</b>'))+'<br>'+refLab+' <b>'+f3(p.value[1])+'</b>')
         :('OLS fit')}),
-    grid:{left:42,right:10,top:38,bottom:42},
+    grid:{left:42,right:10,top:cell.geo?54:38,bottom:42},
     xAxis:axX,yAxis:axY,
     dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
               {type:'inside',yAxisIndex:0,filterMode:'none'},
@@ -3054,13 +3090,14 @@ function renderTrade(){
     if(pts.length)grid.append(mountChart('trade',390,300,tradeOpt(xc,yc,xl,yl,pts)));
   });
   if(grid.children.length)host.appendChild(grid);
+  else host.append(el('div',{class:'cap',text:'NOT MEASURED for this selection: these trade maps require paired CID22/nonphoto or CID22/KonJND results.'}));
 }
 
 // ---- FULL MOHAMMADI PANEL (all six stats per corpus, per visible bake)
 function renderMPanel(){
   const host=$('#mpanel');if(!host)return;host.innerHTML='';
   const bs=visBakes();if(!bs.length)return;
-  const corps=DATA.corpOrder.filter(c=>DATA.bakes.some(b=>b.rank[c]));
+  const corps=DATA.corpOrder.filter(c=>bs.some(b=>b.rank[c]));
   if(!state.mcorp||!corps.includes(state.mcorp))state.mcorp=corps[0];
   const TV=new Set();
   DATA.bakes.forEach(b=>Object.entries(b.rank||{}).forEach(([c,r])=>{if(r&&r.train_eq_val)TV.add(c);}));
@@ -3073,7 +3110,8 @@ function renderMPanel(){
     +'negative is the declared CONVENTION and a POSITIVE would be the defect — row shading follows the '
     +'orientation, not the bare sign. <b>per-ref / %bwd</b> = within-image mean SROCC '
     +'and share of reference ladders ranked backwards (— when the corpus carries no ref identity). '
-    +'⚠ = train==val (KADID/TID: memorization, not held-out skill). Click a header to sort.'}));
+    +'⚠ = stored historical overlap flag; explicit study admission governs source-disjoint eval. Click a header to sort.'}));
+  if(!corps.length){host.append(el('div',{class:'cap',text:'NOT MEASURED: no rank-corpus results for this selection.'}));return;}
   const sel=el('div',{class:'bar',style:'margin:6px 0 10px'});
   corps.forEach(c=>{
     const b=corpTitle(el('button',{class:'btn',text:corpMark(c)+(TV.has(c)?' ⚠':'')}),c);
@@ -3083,6 +3121,9 @@ function renderMPanel(){
   });
   host.append(sel);
   const c=state.mcorp;
+  const missing=bs.filter(b=>!b.rank[c]);
+  host.append(el('div',{class:'cap',text:c.toUpperCase()+': measured for '+(bs.length-missing.length)+' of '+bs.length+' selected models.'
+    +(missing.length?' No '+c+' result for: '+missing.map(b=>b.name).join(', '):'')}));
   const tbl=el('table',{});
   const thead=el('tr',{});
   ['bake','n','SROCC ±CI','PLCC','KROCC','OR','PWRC','Z-RMSE','per-ref','%bwd'].forEach((h,i)=>
@@ -3602,6 +3643,17 @@ function renderModels(){
       text:'Product qualification: '+(q?q.status:'not evaluated'),
       title:q?(q.checks||[]).map(c=>c.gate+': '+c.state+' — '+c.detail).join('\n'):
         'A research rank or the absence of a failing badge does not establish product qualification.'}));
+    if(b.publicTestExposure)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:'Includes frozen public TEST assessment where no EVAL split exists. Prior exposure recorded; secret holdouts untouched.'}));
+    if(b.coherence)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:b.coherence.note,
+      title:JSON.stringify(b.coherence)}));
+    if(b.scalarTargeting)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:b.scalarTargeting.note,
+      title:JSON.stringify(b.scalarTargeting)}));
+    if(b.nativeSpatial)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:b.nativeSpatial.note,
+      title:JSON.stringify(b.nativeSpatial)}));
     // An ensemble has no single ZNPR: everything below (arch, size, transforms,
     // repro, spline) is the ANCHOR member. Say so before the numbers, not after.
     if(isEns(b)){
@@ -3612,8 +3664,7 @@ function renderModels(){
       note.append(el('b',{text:'Equal-weight ensemble of '+ensK(b)+' bakes.'}),
         document.createTextNode(' The fields below describe the ANCHOR member '+(m.anchor||'?')
           +' only. Rust supports complete ensemble serving through BakeScorer; this row still needs '
-          +'product qualification. The current coherence instrument measures one ZNPR, so it cannot '
-          +'supply an ensemble M3/M3a measurement.'));
+          +'product qualification. Ensemble M3/M3a measurements use every declared member and weight.'));
       if(mem.length){
         const det=el('details',{style:'margin-top:4px'});
         det.append(el('summary',{style:'font-size:9.5px;cursor:pointer;opacity:.75',
@@ -3805,26 +3856,22 @@ function failures(b){
   Object.keys(R).forEach(c=>{
     const r=R[c];if(!r||r.frac_negative==null||r.per_ref_n==null)return;
     if(r.frac_negative<=0.02)return;
-    // aic4/sdr25 are inverted for essentially EVERY board cell — a corpus
-    // property, not a model finding (registry aic4-corpus-wide-per-ref-inversion).
-    // Report it, but never as this model's defect.
-    const corpusWide=(c==='aic4'||c==='sdr25');
+    // per_ref_mean / frac_negative are stored in each corpus's DECLARED
+    // orientation (bake_verdict pins it from EXPECTED_ORIENTATION), so a
+    // negative per-reference mean is a genuine within-image inversion on every
+    // corpus, aic4/sdr25 included (board_orientation_fix_2026-09-22).
     // A POSITIVE pooled SROCC sitting on a NEGATIVE per-reference mean is the
     // most misleading shape the board can show: the model separates images and
     // orders encodes of one image backwards, and only the pooled number is on
     // the scoreboard. Always a blocker.
-    const flipped=(r.per_ref_mean!=null&&r.per_ref_mean<0&&!corpusWide);
-    const sev=corpusWide?'watch':(flipped?'blocker':(r.frac_negative>=0.15?'serious':'watch'));
-    bad.push(F(sev,corpusWide?11:(flipped?0:1),
+    const flipped=(r.per_ref_mean!=null&&r.per_ref_mean<0);
+    const sev=flipped?'blocker':(r.frac_negative>=0.15?'serious':'watch');
+    bad.push(F(sev,flipped?0:1,
       (flipped?'INVERTED per image on '+c+' while its pooled score looks healthy'
              :'Ranks whole reference ladders backwards on '+c),
       pc(r.frac_negative)+' of '+r.per_ref_n+' references (within-image mean SROCC '
         +f3(r.per_ref_mean)+' vs pooled '+f3(rs(b,c))+')',
-      corpusWide?('a CORPUS-WIDE inversion, not evidence about this model: measured board-wide, '
-        +(c==='aic4'?'median 60% of aic4 references are backwards across 373 cells'
-                    :'median 20% of sdr25 references are backwards across 356 cells (sdr25 is a '
-                     +'subset of aic4)'))
-        :(flipped?('a per-image tuning loop on '+situ(c)+' — and the scoreboard’s pooled '
+      (flipped?('a per-image tuning loop on '+situ(c)+' — and the scoreboard’s pooled '
           +f3(rs(b,c))+' does not show it')
         :('a per-image tuning loop on '+situ(c))),
       'rank.'+c+'.frac_negative / per_ref_mean'));
@@ -3930,7 +3977,7 @@ function failures(b){
       'm3_coherence'));
   }
   if(b.m3a==null&&b.m3==null)nm.push({what:'Steering coherence (M3 / M3a)',
-    why:isEns(b)?'ensemble — the coherence instrument loads one ZNPR':'not measured for this cell'});
+    why:'No complete-composition coherence measurement is attached to this row'});
   // ---- 9. band tails -------------------------------------------------------
   Object.keys(R).forEach(c=>{
     const r=R[c];if(!r||!r.bands)return;
@@ -4300,6 +4347,7 @@ if(typeof MutationObserver==='function'&&document.documentElement){
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
+    ap.add_argument("--spatial-gallery", help="Render a recorded SPATIAL_MATRIX.json / SPATIAL_CASES.json directory as an A/B gallery")
     ap.add_argument("--fulleval-dir", default="/mnt/v/output/zensim/reports/fulleval")
     ap.add_argument("--best-per-day", default=None)
     ap.add_argument("--loop-targeting", default=DEFAULT_LOOP_TARGETING,
@@ -4315,6 +4363,11 @@ if __name__ == "__main__":
     ap.add_argument("--fairness-tsv", default=None,
                     help="also write the per-row fairness audit TSV here")
     a = ap.parse_args()
+    if a.spatial_gallery:
+        from gauntlet_spatial import build_spatial_gallery
+        out, size, failed, total = build_spatial_gallery(a.spatial_gallery, a.out)
+        print(f"wrote {out} ({size // 1024} KB); {failed}/{total} failed cells")
+        raise SystemExit(0)
     bakes = load_fulleval(a.fulleval_dir, a.best_per_day)
     if a.fairness_tsv:
         tp, n = write_fairness_tsv(bakes, a.fairness_tsv)

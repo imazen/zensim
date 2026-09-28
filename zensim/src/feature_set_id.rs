@@ -101,8 +101,40 @@ pub enum ComputeToken {
     /// The class-C bounded-error tranche
     /// (`V1FreeExtras::RawMomentsPlusBoundedErr`) — 24 scattered slots.
     ClassC,
-    /// RESERVED for the future HDR block. Append-only, above `csfw`.
+    /// RESERVED for the future HDR block. Append-only; its enum position
+    /// (and so its `bit()`) predates `Dvifm` and must not move.
     Hdr,
+    /// DVIFM block-visibility pyramid, `f956..985`.
+    ///
+    /// Declared after `Hdr` so every existing variant's `bit()` stays put;
+    /// `ALL` renders it in slot order (between `csfw` and `moments`).
+    Dvifm,
+    /// Rev4 grid-aligned blocking phase profile, `f986..1081`.
+    ///
+    /// Declared after `Dvifm` so every existing variant's `bit()` stays put;
+    /// `ALL` renders it in slot order (between `dvifm` and `moments`).
+    Gridblk,
+    /// Rev4 ringing-magnitude basis histogram, `f1082..1153`.
+    Ringbasis,
+    /// Rev4 tail histograms of the dense per-pixel maps, `f1154..1297`.
+    Tailhist,
+    /// Rev4 artifact-type descriptors, `f1298..1321`.
+    Arttype,
+    /// Experimental GMSBANK gradient similarity basis, `f1322..1501`.
+    Gmsbank,
+    /// Restored cut (COST_CUTS_AUDIT A1): per-scale, per-channel deviation
+    /// (std) of the MSE and HF-energy/magnitude maps, `f1502..1561`.
+    Mapdev,
+    /// Restored cut (COST_CUTS_AUDIT B2): the 228-slot basic+peaks surface
+    /// pooled over ungated 5x5 block maxima instead of pixels, `f1562..1789`.
+    Z1max,
+    /// Restored cut (COST_CUTS_AUDIT Ambiguous 7): C8's X/B gradient
+    /// loss/gain/deviation bank at native scale, `f1790..1819`.
+    Gmsnative,
+    /// Restored cut (COST_CUTS_AUDIT B1): C7's F1 with the two-state gate
+    /// visibility instead of the smooth curve, one slot per level,
+    /// `f1790+30..`.
+    Dvifmgate,
 }
 
 impl ComputeToken {
@@ -117,6 +149,16 @@ impl ComputeToken {
         ComputeToken::Append,
         ComputeToken::Append2,
         ComputeToken::Csfw,
+        ComputeToken::Dvifm,
+        ComputeToken::Gridblk,
+        ComputeToken::Ringbasis,
+        ComputeToken::Tailhist,
+        ComputeToken::Arttype,
+        ComputeToken::Gmsbank,
+        ComputeToken::Mapdev,
+        ComputeToken::Z1max,
+        ComputeToken::Gmsnative,
+        ComputeToken::Dvifmgate,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -136,6 +178,16 @@ impl ComputeToken {
             ComputeToken::Append => "append",
             ComputeToken::Append2 => "append2",
             ComputeToken::Csfw => "csfw",
+            ComputeToken::Dvifm => "dvifm",
+            ComputeToken::Gridblk => "gridblk",
+            ComputeToken::Ringbasis => "ringbasis",
+            ComputeToken::Tailhist => "tailhist",
+            ComputeToken::Arttype => "arttype",
+            ComputeToken::Gmsbank => "gmsbank",
+            ComputeToken::Mapdev => "mapdev",
+            ComputeToken::Z1max => "z1max",
+            ComputeToken::Gmsnative => "gmsnative",
+            ComputeToken::Dvifmgate => "dvifmgate",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",
@@ -149,8 +201,8 @@ impl ComputeToken {
         Self::ALL.iter().copied().find(|t| t.as_str() == s)
     }
 
-    const fn bit(self) -> u16 {
-        1u16 << (self as u16)
+    const fn bit(self) -> u32 {
+        1u32 << (self as u32)
     }
 }
 
@@ -163,7 +215,7 @@ impl fmt::Display for ComputeToken {
 /// A set of [`ComputeToken`]s. Renders in registry order regardless of
 /// insertion order; the empty set renders `none`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
-pub struct ComputeParts(u16);
+pub struct ComputeParts(u32);
 
 impl ComputeParts {
     /// No families at all.

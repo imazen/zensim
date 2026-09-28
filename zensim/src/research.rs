@@ -53,11 +53,11 @@
 //! pool sizes 1/2/3/8/16 **and** equal to the serial answer — the standard
 //! `v1_feature_width_pure_function.rs` already holds the v1 extractor to.
 
+use crate::ZensimError;
 use crate::feature_defs::{self, Channel, CostClass, RevisionStatus};
 use crate::feature_plan::{Plan, PlanError};
 use crate::feature_set_id::{ComputeToken, FeatureSetId, SlotSet};
 use crate::source::ImageSource;
-use crate::{Zensim, ZensimError, ZensimProfile};
 
 /// The build commit this binary was compiled from, when the build environment
 /// recorded one (`ZENSIM_BUILD_COMMIT`).
@@ -150,6 +150,373 @@ impl core::fmt::Display for ResearchError {
 
 impl std::error::Error for ResearchError {}
 
+/// Training-only (`feature = "training"`): the DVIFM family's per-level
+/// constants as an extraction-time override — what the screen's spec JSON
+/// carries. All values are the kernel's own; conversion to
+/// `crate::dvifm::DvifmParams` is one-for-one.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone)]
+pub struct DvifmLevelSpec {
+    /// Signed-power contrast exponent (φ_g).
+    pub g: f64,
+    /// Error power applied to the block hard max.
+    pub p: f64,
+    /// Visibility half-energy contrast.
+    pub c0: f64,
+    /// Visibility log-slope.
+    pub beta: f64,
+    /// Visibility knee sharpness.
+    pub sharp: f64,
+    /// Upper knee (`f64::INFINITY` = the design's one-knee form).
+    pub c_hi: f64,
+    /// Triangular F2 bin centres on the `ln(min C̃ + 1e-6)` axis (5).
+    pub f2_centers: [f64; 5],
+    /// Band construction for this level.
+    pub band: DvifmBand,
+    /// Corner-min edge discount.
+    pub edge: bool,
+}
+
+/// Training-only: the DVIFM band-construction switch (the screen's
+/// Laplacian-vs-local arms).
+#[cfg(feature = "training")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DvifmBand {
+    /// `L_l = G_l − blur(G_{l+1}↑)` — the default.
+    Laplacian,
+    /// `L_l = G_l − B²G_l` — the local-band arm.
+    Local,
+}
+
+/// Training-only: which scale-0 plane feeds the DVIFM pump — the spec
+/// JSON's top-level `"input_plane"` (`"xyb_y"` default = the historical
+/// XYB-Y tap; `"ycbcr_y"`/`"ycbcr_cb"`/`"ycbcr_cr"` = the BT.709 planes).
+/// SDR-only: a non-`xyb_y` plane on the HDR front-end is refused.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DvifmInputPlane {
+    /// XYB Y (default; byte-identical to the pre-field path).
+    #[default]
+    XybY,
+    /// BT.709 full-range Y′ on the gamma-encoded sRGB signal.
+    YcbcrY,
+    /// BT.709 full-range Cb.
+    YcbcrCb,
+    /// BT.709 full-range Cr.
+    YcbcrCr,
+}
+
+/// Training-only: the full DVIFM spec — one [`DvifmLevelSpec`] per pyramid
+/// level (exactly five) plus the input-plane selection.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone)]
+pub struct DvifmSpec {
+    /// Level-major constants; `levels.len() == 5` (asserted in `extract`).
+    pub levels: Vec<DvifmLevelSpec>,
+    /// Scale-0 plane the pump consumes (default [`DvifmInputPlane::XybY`]).
+    pub input_plane: DvifmInputPlane,
+}
+
+#[cfg(feature = "training")]
+impl DvifmSpec {
+    fn to_params(&self) -> crate::dvifm::DvifmParams {
+        assert_eq!(
+            self.levels.len(),
+            crate::dvifm::DVIFM_LEVELS,
+            "DvifmSpec needs exactly {} level entries",
+            crate::dvifm::DVIFM_LEVELS,
+        );
+        let levels: [crate::dvifm::DvifmLevelParams; crate::dvifm::DVIFM_LEVELS] =
+            std::array::from_fn(|l| {
+                let s = &self.levels[l];
+                crate::dvifm::DvifmLevelParams {
+                    g: s.g,
+                    p: s.p,
+                    c0: s.c0,
+                    beta: s.beta,
+                    sharp: s.sharp,
+                    c_hi: s.c_hi,
+                    f2_centers: s.f2_centers,
+                    band: match s.band {
+                        DvifmBand::Laplacian => crate::dvifm::BandMode::Laplacian,
+                        DvifmBand::Local => crate::dvifm::BandMode::Local,
+                    },
+                    edge: s.edge,
+                }
+            });
+        crate::dvifm::DvifmParams {
+            levels,
+            input_plane: match self.input_plane {
+                DvifmInputPlane::XybY => crate::dvifm::DvifmInputPlane::XybY,
+                DvifmInputPlane::YcbcrY => crate::dvifm::DvifmInputPlane::YcbcrY,
+                DvifmInputPlane::YcbcrCb => crate::dvifm::DvifmInputPlane::YcbcrCb,
+                DvifmInputPlane::YcbcrCr => crate::dvifm::DvifmInputPlane::YcbcrCr,
+            },
+        }
+    }
+}
+
+/// Training-only (`feature = "training"`): one extraction's collected DVIFM
+/// block records — the constants-fit cache row.
+///
+/// `grid[l] = (nby, nbx)` is level `l`'s full-block lattice and
+/// `records[l]` its records in block-row-major order, each the 20-f32
+/// serialization of `crate::dvifm::BlockRec`
+/// (`[m, peak, cmax_s×4, cmin_s×4, cmax_d×4, cmin_d×4, mean_s, mean_d]`,
+/// so `records[l].len() == nby * nbx * 20`). The last two fields are the
+/// block means of the pedestal each band was differenced from (the
+/// Weber-contrast denominator); the 18-f32 v1 prefix is unchanged so v1
+/// readers still parse a v2 blob given its record width. Partial border blocks are dropped per the family's spec —
+/// the same lattice the pooled features read.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone)]
+pub struct DvifmBlockStats {
+    /// Per-level full-block grid `(nby, nbx)`.
+    pub grid: [(u32, u32); 5],
+    /// Per-level flattened 20-f32 records (`nby*nbx*20` each).
+    pub records: Vec<Vec<f32>>,
+}
+
+/// Training-only (`feature = "training"`, plus `custom-profiles` for the
+/// [`AttributionResult`](crate::attribution::AttributionResult) map owner):
+/// the DVIFM steering field for one extraction — the spatial block map P3
+/// asks about. Per pyramid level it
+/// carries each full block's `ε_b = v_b · m_b^P` painted `ε_b / N_b` over
+/// the block's pixels, plus the `v_b` and `m_b` planes, all on the same
+/// lattice the pooled features read (5×5 blocks, partial border blocks
+/// dropped).
+///
+/// The field is assembled from the SAME cached block records and the SAME
+/// `block_terms` arithmetic the pump pools, so each level's painted ε mass
+/// equals the pooled F1 numerator bit-for-bit. The painted ε map is an
+/// [`AttributionResult`](crate::attribution::AttributionResult) — the
+/// existing map owner, not a parallel pipeline — so codec consumers query
+/// it with the usual rectangle integrals.
+#[cfg(all(feature = "training", feature = "custom-profiles"))]
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct DvifmFieldMap {
+    /// The scale-0 input plane the pump consumed.
+    plane: DvifmInputPlane,
+    /// Per-level fields, level-major (`DVIFM_LEVELS` entries).
+    levels: Vec<DvifmLevelField>,
+}
+
+#[cfg(all(feature = "training", feature = "custom-profiles"))]
+impl DvifmFieldMap {
+    /// The input plane the field was computed over.
+    #[must_use]
+    pub fn plane(&self) -> DvifmInputPlane {
+        self.plane
+    }
+
+    /// The per-level fields (level 0 = scale 0, level 4 = the low-pass).
+    #[must_use]
+    pub fn levels(&self) -> &[DvifmLevelField] {
+        &self.levels
+    }
+
+    /// Assemble the whole field from one walk's block-record take — the
+    /// records' emit order IS the pump's accumulation order, so each level's
+    /// `f1_sum` is bitwise the pooled numerator.
+    pub(crate) fn from_take(
+        plane: DvifmInputPlane,
+        params: &crate::dvifm::DvifmParams,
+        grid: [(u32, u32); 5],
+        dims: [(u32, u32); 5],
+        levels: Vec<Vec<crate::dvifm::BlockRec>>,
+    ) -> Self {
+        Self {
+            plane,
+            levels: levels
+                .iter()
+                .enumerate()
+                .map(|(l, recs)| {
+                    DvifmLevelField::from_records(l, recs, &params.levels[l], dims[l], grid[l])
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Training-only (`training` + `custom-profiles`): one pyramid level's
+/// DVIFM steering field.
+///
+/// Three views of the same per-block truth:
+///
+/// * `eps_map` — `ε_b / 25` painted over each block's pixels, an
+///   [`AttributionResult`](crate::attribution::AttributionResult). Its total
+///   mass equals `f1_sum` (the level's pooled F1 numerator) exactly;
+///   rectangle queries integrate the painted density.
+/// * `vis_plane` / `err_plane` — the `v_b` and `m_b` fields painted
+///   block-constant over the same lattice (inspection/visualization planes;
+///   they do not carry score mass).
+/// * `*_blocks` — the raw `ε_b`, `v_b`, `m_b` vectors in block-row-major
+///   order over [`block_grid`](Self::block_grid), for consumers that work
+///   directly on the lattice.
+///
+/// Rectangle cut rule: a rectangle edge that cuts a block receives that
+/// block's `ε_b` weighted by covered area — the uniform-density reading of
+/// the painted map.
+#[cfg(all(feature = "training", feature = "custom-profiles"))]
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct DvifmLevelField {
+    /// Pyramid level index (0 = scale 0).
+    level: usize,
+    /// Level plane dims `(w, h)` the painted maps cover.
+    dims: (u32, u32),
+    /// Full-block lattice `(nby, nbx)` — partial border blocks dropped.
+    grid: (u32, u32),
+    /// ε density painted `ε_b/25` per block pixel (total mass = `f1_sum`).
+    eps_map: crate::attribution::AttributionResult,
+    /// `v_b` block-constant plane, row-major `dims.0 × dims.1`.
+    vis_plane: Vec<f32>,
+    /// `m_b` block-constant plane, row-major `dims.0 × dims.1`.
+    err_plane: Vec<f32>,
+    /// `ε_b` per block, block-row-major over `grid`.
+    eps_blocks: Vec<f64>,
+    /// `v_b` per block.
+    vis_blocks: Vec<f64>,
+    /// `m_b` per block.
+    err_blocks: Vec<f64>,
+    /// `Σ_b ε_b` accumulated in emit order — bitwise the pump's pooled F1
+    /// numerator (the emitted feature is `f1_sum / n_blocks`).
+    f1_sum: f64,
+}
+
+#[cfg(all(feature = "training", feature = "custom-profiles"))]
+impl DvifmLevelField {
+    fn from_records(
+        level: usize,
+        recs: &[crate::dvifm::BlockRec],
+        lp: &crate::dvifm::DvifmLevelParams,
+        dims: (u32, u32),
+        grid: (u32, u32),
+    ) -> Self {
+        let f = crate::dvifm::block_field(recs, lp, grid.0 as usize, grid.1 as usize);
+        let painted = crate::dvifm::paint_block_field(&f, dims.0 as usize, dims.1 as usize);
+        Self {
+            level,
+            dims,
+            grid,
+            eps_map: crate::attribution::AttributionResult::from_f64_canvas(
+                painted.eps_density,
+                dims.0 as usize,
+                dims.1 as usize,
+            ),
+            vis_plane: painted.vis,
+            err_plane: painted.err,
+            eps_blocks: f.eps,
+            vis_blocks: f.vis,
+            err_blocks: f.err,
+            f1_sum: f.f1_sum,
+        }
+    }
+
+    /// The pyramid level this field covers (0 = scale 0).
+    #[must_use]
+    pub fn level(&self) -> usize {
+        self.level
+    }
+
+    /// Level plane dims `(w, h)` — the painted maps' canvas.
+    #[must_use]
+    pub fn dims(&self) -> (u32, u32) {
+        self.dims
+    }
+
+    /// The full-block lattice `(nby, nbx)` the block vectors index.
+    #[must_use]
+    pub fn block_grid(&self) -> (u32, u32) {
+        self.grid
+    }
+
+    /// `nby * nbx` — the level's block count (the F1 denominator).
+    #[must_use]
+    pub fn n_blocks(&self) -> usize {
+        (self.grid.0 * self.grid.1) as usize
+    }
+
+    /// The painted ε map — `ε_b/25` per block pixel — for direct
+    /// [`AttributionResult`](crate::attribution::AttributionResult)
+    /// consumers (density view, integer `query_rect`, `block_sums`).
+    #[must_use]
+    pub fn eps_map(&self) -> &crate::attribution::AttributionResult {
+        &self.eps_map
+    }
+
+    /// The `v_b` field painted over the level plane (block-constant).
+    #[must_use]
+    pub fn vis_plane(&self) -> &[f32] {
+        &self.vis_plane
+    }
+
+    /// The `m_b` field painted over the level plane (block-constant).
+    #[must_use]
+    pub fn err_plane(&self) -> &[f32] {
+        &self.err_plane
+    }
+
+    /// `ε_b` per block (block-row-major) — the F1 mass each block carries.
+    #[must_use]
+    pub fn eps_blocks(&self) -> &[f64] {
+        &self.eps_blocks
+    }
+
+    /// `v_b` per block.
+    #[must_use]
+    pub fn vis_blocks(&self) -> &[f64] {
+        &self.vis_blocks
+    }
+
+    /// `m_b` per block.
+    #[must_use]
+    pub fn err_blocks(&self) -> &[f64] {
+        &self.err_blocks
+    }
+
+    /// `Σ_b ε_b` — the level's unnormalised F1 mass (bitwise the pooled
+    /// numerator).
+    #[must_use]
+    pub fn f1_sum(&self) -> f64 {
+        self.f1_sum
+    }
+
+    /// The emitted F1 feature value: `f1_sum / n_blocks` (`0.0` when the
+    /// level has no full blocks — the `level_out` degenerate case).
+    #[must_use]
+    pub fn f1(&self) -> f64 {
+        let n = self.n_blocks();
+        if n == 0 { 0.0 } else { self.f1_sum / n as f64 }
+    }
+
+    /// The level's ε mass under `[x0, x1) × [y0, y1)` in LEVEL pixel
+    /// coordinates, fractional edges allowed — the cut rule is
+    /// area-weighted (uniform density within a block).
+    #[must_use]
+    pub fn query_eps(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+        self.eps_map.query_rect_frac(x0, y0, x1, y1)
+    }
+
+    /// The level's ε mass under the scale-0 pixel rectangle
+    /// `[x0, x1) × [y0, y1)` — the query a codec makes: "how much of this
+    /// level's F1 mass sits inside this scale-0 region". Internally the
+    /// rect is scaled by `2^-level`, so a rect covering a level block's
+    /// scale-0 footprint counts it in full and partial footprints count by
+    /// covered area.
+    #[must_use]
+    pub fn query_eps_scale0(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> f64 {
+        let inv = 1.0 / (1u64 << self.level) as f64;
+        self.query_eps(
+            x0 as f64 * inv,
+            y0 as f64 * inv,
+            x1 as f64 * inv,
+            y1 as f64 * inv,
+        )
+    }
+}
+
 impl From<PlanError> for ResearchError {
     fn from(e: PlanError) -> Self {
         match e {
@@ -169,6 +536,15 @@ pub struct Request {
     era_label: String,
     parallel: bool,
     dense: bool,
+    /// `feature = "training"`: DVIFM constants override for this extraction.
+    #[cfg(feature = "training")]
+    dvifm_spec: Option<DvifmSpec>,
+    /// `feature = "training"`: collect the DVIFM per-block records.
+    #[cfg(feature = "training")]
+    dvifm_blocks: bool,
+    /// `feature = "training"`: build the DVIFM steering field.
+    #[cfg(feature = "training")]
+    dvifm_fields: bool,
 }
 
 impl Request {
@@ -184,6 +560,12 @@ impl Request {
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
             dense: false,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
+            #[cfg(feature = "training")]
+            dvifm_fields: false,
         }
     }
 
@@ -197,6 +579,12 @@ impl Request {
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
             dense: false,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
+            #[cfg(feature = "training")]
+            dvifm_fields: false,
         }
     }
 
@@ -257,6 +645,12 @@ impl Request {
             era_label: id.era().to_string(),
             parallel: false,
             dense,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
+            #[cfg(feature = "training")]
+            dvifm_fields: false,
         })
     }
 
@@ -265,6 +659,14 @@ impl Request {
     pub fn for_bake_bytes(bytes: &[u8]) -> Result<Request, ResearchError> {
         let model =
             crate::mlp::Model::from_bytes(bytes).map_err(|_| ResearchError::UnreadableBake)?;
+        // This untyped slot request cannot carry a sampling contract. Use the
+        // complete BakeScorer pixel surface for sampling-bound extraction.
+        if crate::sampling::Sampling::from_model(&model)
+            .map_err(|_| ResearchError::UnreadableBake)?
+            .is_some()
+        {
+            return Err(ResearchError::UnreadableBake);
+        }
         let want =
             crate::feature_plan::bake_read_slots(&model).ok_or(ResearchError::UnreadableBake)?;
         // `want` is in ID space. For an identity bake the caller width IS the
@@ -283,6 +685,12 @@ impl Request {
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
             dense: false,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
+            #[cfg(feature = "training")]
+            dvifm_fields: false,
         })
     }
 
@@ -323,6 +731,56 @@ impl Request {
     pub fn with_parallel(mut self, parallel: bool) -> Request {
         self.parallel = parallel;
         self
+    }
+
+    /// Training-only (`feature = "training"`): run the DVIFM family under
+    /// `spec`'s per-level constants instead of [`DvifmParams::default`].
+    ///
+    /// The emitted features are the spec-constant features — used by the
+    /// screen's bake-and-rescreen loop. It changes ONLY the DVIFM block:
+    /// the other 956 slots are untouched, and a request without the
+    /// `dvifm_block` compute token ignores the spec (asserted in
+    /// [`extract`]).
+    #[cfg(feature = "training")]
+    #[must_use]
+    pub fn with_dvifm_spec(mut self, spec: DvifmSpec) -> Request {
+        self.dvifm_spec = Some(spec);
+        self
+    }
+
+    /// Training-only (`feature = "training"`): collect the DVIFM family's
+    /// per-block records (the 20-f32 [`DvifmBlockStats`] side output) while
+    /// extracting. The records are raw block statistics — independent of
+    /// the constants — so ONE cache serves every spec a screen wants to
+    /// evaluate.
+    #[cfg(feature = "training")]
+    #[must_use]
+    pub fn collect_dvifm_blocks(mut self, on: bool) -> Request {
+        self.dvifm_blocks = on;
+        self
+    }
+
+    /// Training-only (`feature = "training"`, plus `custom-profiles` for
+    /// the map owner): build the DVIFM steering field ([`DvifmFieldMap`])
+    /// while extracting — per level, per-block `ε_b = v_b·m_b^P` painted
+    /// `ε_b/25` over each full block, plus the `v_b` and `m_b` planes.
+    /// Assembled from the SAME cached block records the pump pooled, so
+    /// each level's painted mass equals the pooled F1 numerator bit-for-bit;
+    /// the painted ε map is an
+    /// [`AttributionResult`](crate::attribution::AttributionResult), the
+    /// existing map owner — not a parallel pipeline.
+    #[cfg(all(feature = "training", feature = "custom-profiles"))]
+    #[must_use]
+    pub fn collect_dvifm_fields(mut self, on: bool) -> Request {
+        self.dvifm_fields = on;
+        self
+    }
+
+    /// The DVIFM spec override attached by [`Request::with_dvifm_spec`]
+    /// (`None` = the kernel defaults, XYB-Y plane).
+    #[cfg(feature = "training")]
+    pub fn dvifm_spec(&self) -> Option<&DvifmSpec> {
+        self.dvifm_spec.as_ref()
     }
 
     /// The slots asked for.
@@ -437,6 +895,14 @@ pub struct Extraction {
     feature_set_id: Option<FeatureSetId>,
     revision: RevisionRef,
     build_commit: Option<&'static str>,
+    /// `feature = "training"`: the DVIFM block-record side output —
+    /// `Some` iff the request had `collect_dvifm_blocks(true)`.
+    #[cfg(feature = "training")]
+    dvifm_blocks: Option<DvifmBlockStats>,
+    /// `training` + `custom-profiles`: the DVIFM steering field — `Some`
+    /// iff the request had `collect_dvifm_fields(true)`.
+    #[cfg(all(feature = "training", feature = "custom-profiles"))]
+    dvifm_fields: Option<DvifmFieldMap>,
 }
 
 impl Extraction {
@@ -456,6 +922,22 @@ impl Extraction {
     #[must_use]
     pub fn provenance(&self) -> &[FeatureProvenance] {
         &self.provenance
+    }
+
+    /// Training-only (`feature = "training"`): the collected DVIFM block
+    /// records, or `None` when the request did not ask for them.
+    #[cfg(feature = "training")]
+    #[must_use]
+    pub fn dvifm_blocks(&self) -> Option<&DvifmBlockStats> {
+        self.dvifm_blocks.as_ref()
+    }
+
+    /// Training-only (`training` + `custom-profiles`): the DVIFM steering
+    /// field, or `None` when the request did not ask for it.
+    #[cfg(all(feature = "training", feature = "custom-profiles"))]
+    #[must_use]
+    pub fn dvifm_fields(&self) -> Option<&DvifmFieldMap> {
+        self.dvifm_fields.as_ref()
     }
 
     /// The declared layout width.
@@ -809,8 +1291,8 @@ fn provenance_for(plan: &Plan, n_scales: usize) -> Vec<FeatureProvenance> {
 
 /// Run a research extraction over one SDR pair.
 ///
-/// The walk is `Zensim::compute_folded720_features_streaming` driven by the
-/// plan's own toggles — the SAME entry production scores through, so
+/// The walk is the same folded owner as `Zensim::compute_folded720_features_streaming`,
+/// driven by the complete plan (including its channel selection), so
 /// bit-exact parity on every shared id is a property of the code rather than
 /// of a second implementation kept in step by hand.
 ///
@@ -827,12 +1309,50 @@ pub fn extract(
     let plan = Plan::derive_with_layout(&req.want, req.layout())?;
     check_revision(req, &plan.emit)?;
 
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(req.parallel);
     let mut scratch = crate::feature_v2::V2Scratch::new();
     let toggles = plan.toggles();
-    let result = z
-        .compute_folded720_features_streaming(source, distorted, toggles, &mut scratch)
-        .map_err(ResearchError::Compute)?;
+    #[cfg(feature = "training")]
+    let mut extras = crate::feature_v2::FoldWalkExtras {
+        compute: Some(plan.compute),
+        ..Default::default()
+    };
+    #[cfg(not(feature = "training"))]
+    let extras = crate::feature_v2::FoldWalkExtras {
+        compute: Some(plan.compute),
+        ..Default::default()
+    };
+    // Training-only DVIFM side channel: a constants spec and/or the
+    // block-record sink, carried through the SAME walk — the records are
+    // raw stats, so one cached pass serves every spec the screen wants.
+    #[cfg(feature = "training")]
+    let mut dvifm_extras = if req.dvifm_spec.is_some() || req.dvifm_blocks || req.dvifm_fields {
+        assert!(
+            plan.compute.dvifm,
+            "a DVIFM spec/block/field request needs the dvifm compute \
+                 token — extraction without it would silently emit nothing"
+        );
+        Some(crate::feature_v2::DvifmWalkExtras {
+            params: req.dvifm_spec.as_ref().map(DvifmSpec::to_params),
+            cache: (req.dvifm_blocks || req.dvifm_fields)
+                .then(crate::feature_v2::DvifmBlockCacheOut::default),
+        })
+    } else {
+        None
+    };
+    #[cfg(feature = "training")]
+    {
+        extras.dvifm = dvifm_extras.as_mut();
+    }
+    let result = crate::feature_v2::compute_folded720_streaming_extras(
+        source,
+        distorted,
+        Some(120_000_000),
+        req.parallel,
+        toggles,
+        &mut scratch,
+        extras,
+    )
+    .map_err(ResearchError::Compute)?;
 
     // GATHER into the declared LAYOUT. The walk emits at its own identity
     // width; the layout says which id lives at which position, so a narrower
@@ -873,6 +1393,45 @@ pub fn extract(
             )
         });
 
+    // Training side output: flatten each level's records to their 20-f32
+    // wire form (level-major, block-row-major — the lattice `grid` names).
+    #[cfg(feature = "training")]
+    let dvifm_cache_out = dvifm_extras.and_then(|de| de.cache);
+    #[cfg(feature = "training")]
+    let dvifm_blocks = if req.dvifm_blocks {
+        dvifm_cache_out.as_ref().map(|out| DvifmBlockStats {
+            grid: out.grid,
+            records: out
+                .levels
+                .iter()
+                .map(|recs| recs.iter().flat_map(|r| r.to_f32()).collect())
+                .collect(),
+        })
+    } else {
+        None
+    };
+    // The steering field: SAME records, SAME `block_terms` arithmetic —
+    // assembled through the attribution map owner, never a parallel one.
+    #[cfg(all(feature = "training", feature = "custom-profiles"))]
+    let dvifm_fields = if req.dvifm_fields {
+        dvifm_cache_out.map(|out| {
+            let params = req
+                .dvifm_spec
+                .as_ref()
+                .map(DvifmSpec::to_params)
+                .unwrap_or_default();
+            let plane = match params.input_plane {
+                crate::dvifm::DvifmInputPlane::XybY => DvifmInputPlane::XybY,
+                crate::dvifm::DvifmInputPlane::YcbcrY => DvifmInputPlane::YcbcrY,
+                crate::dvifm::DvifmInputPlane::YcbcrCb => DvifmInputPlane::YcbcrCb,
+                crate::dvifm::DvifmInputPlane::YcbcrCr => DvifmInputPlane::YcbcrCr,
+            };
+            DvifmFieldMap::from_take(plane, &params, out.grid, out.dims, out.levels)
+        })
+    } else {
+        None
+    };
+
     Ok(Extraction {
         values,
         provenance,
@@ -882,6 +1441,10 @@ pub fn extract(
         feature_set_id,
         revision: req.revision.clone(),
         build_commit: BUILD_COMMIT,
+        #[cfg(feature = "training")]
+        dvifm_blocks,
+        #[cfg(all(feature = "training", feature = "custom-profiles"))]
+        dvifm_fields,
     })
 }
 
@@ -1453,5 +2016,293 @@ mod tests {
             assert!(seen.insert(p.name.clone()), "duplicate name {}", p.name);
         }
         assert_eq!(seen.len(), full_width());
+    }
+
+    /// The training side output: `collect_dvifm_blocks` fills the record
+    /// cache (full-block grids, level-major), a spec override moves ONLY
+    /// the f956+ DVIFM slots, and an unrequested extraction returns `None`.
+    #[cfg(feature = "training")]
+    #[test]
+    fn dvifm_training_side_output() {
+        let (w, h) = (80usize, 96usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let all = SlotSet::from_ranges([(0, 986)]);
+
+        let base = extract(&Request::for_slots(all.clone(), 986), &rs, &rd)
+            .expect("w986 extract")
+            .into_values();
+        assert_eq!(base.len(), 986);
+
+        // No flag → no cache.
+        let e = extract(&Request::for_slots(all.clone(), 986), &rs, &rd).expect("extract");
+        assert!(e.dvifm_blocks().is_none());
+
+        // Collect → five levels, each `floor(dim/5)·floor(dim/5)·20` wide
+        // (the walk's level dims halve the source dims).
+        let e = extract(
+            &Request::for_slots(all.clone(), 986).collect_dvifm_blocks(true),
+            &rs,
+            &rd,
+        )
+        .expect("collect");
+        let stats = e.dvifm_blocks().expect("blocks requested");
+        assert_eq!(stats.records.len(), 5);
+        let (mut wl, mut hl) = (w, h);
+        for l in 0..5 {
+            let (nby, nbx) = stats.grid[l];
+            assert_eq!((nby as usize, nbx as usize), (hl / 5, wl / 5));
+            assert_eq!(stats.records[l].len(), nby as usize * nbx as usize * 20);
+            assert!(stats.records[l].iter().all(|v| v.is_finite()));
+            wl = wl.div_ceil(2);
+            hl = hl.div_ceil(2);
+        }
+
+        // A spec override moves ONLY the f956+ block — the other 956 slots
+        // are byte-identical, and the records (raw stats) are unchanged by
+        // constants. The spec keeps each level's band identical to the
+        // default's (bands change the band plane, hence the records) and
+        // perturbs only constants, so EVERY level's records must match.
+        let levels: Vec<DvifmLevelSpec> = crate::dvifm::DvifmParams::default()
+            .levels
+            .iter()
+            .map(|lp| DvifmLevelSpec {
+                g: lp.g + 0.4,
+                p: lp.p,
+                c0: lp.c0,
+                beta: lp.beta,
+                sharp: lp.sharp,
+                c_hi: lp.c_hi,
+                f2_centers: lp.f2_centers,
+                band: match lp.band {
+                    crate::dvifm::BandMode::Laplacian => DvifmBand::Laplacian,
+                    crate::dvifm::BandMode::Local => DvifmBand::Local,
+                },
+                edge: lp.edge,
+            })
+            .collect();
+        let e2 = extract(
+            &Request::for_slots(all, 986)
+                .with_dvifm_spec(DvifmSpec {
+                    levels,
+                    input_plane: DvifmInputPlane::XybY,
+                })
+                .collect_dvifm_blocks(true),
+            &rs,
+            &rd,
+        )
+        .expect("spec extract");
+        let v2 = e2.values();
+        for i in 0..956 {
+            assert_eq!(
+                base[i].to_bits(),
+                v2[i].to_bits(),
+                "f{i} moved under a dvifm-only spec"
+            );
+        }
+        assert!(
+            base[956..986] != v2[956..986],
+            "a spec that differs from the defaults must move f956+"
+        );
+        let stats2 = e2.dvifm_blocks().expect("blocks");
+        // Band-matched levels: constants never enter the record, so all
+        // five levels' caches are bit-identical across the two collects.
+        assert_eq!(stats.grid, stats2.grid);
+        for l in 0..5 {
+            assert_eq!(
+                stats.records[l], stats2.records[l],
+                "level {l} records moved under a constants-only spec"
+            );
+        }
+    }
+
+    /// The `input_plane` routes feed the same pump the plane the
+    /// converter produces: an extraction under each `ycbcr_*` spec must
+    /// equal the whole-plane oracle (converter output →
+    /// `dvifm_features_stream` under the route's norm), and an `xyb_y`
+    /// spec must be bit-identical to no spec at all.
+    #[cfg(feature = "training")]
+    #[test]
+    fn dvifm_input_plane_routes_match_whole_plane_oracle() {
+        let default_spec = || DvifmSpec {
+            levels: crate::dvifm::DvifmParams::default()
+                .levels
+                .iter()
+                .map(|lp| DvifmLevelSpec {
+                    g: lp.g,
+                    p: lp.p,
+                    c0: lp.c0,
+                    beta: lp.beta,
+                    sharp: lp.sharp,
+                    c_hi: lp.c_hi,
+                    f2_centers: lp.f2_centers,
+                    band: match lp.band {
+                        crate::dvifm::BandMode::Laplacian => DvifmBand::Laplacian,
+                        crate::dvifm::BandMode::Local => DvifmBand::Local,
+                    },
+                    edge: lp.edge,
+                })
+                .collect(),
+            input_plane: DvifmInputPlane::XybY,
+        };
+        for &(w, h) in &[(80usize, 96usize), (150, 170)] {
+            let (s, d) = pair(w, h);
+            let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+            let all = SlotSet::from_ranges([(0, 986)]);
+            let base = extract(&Request::for_slots(all.clone(), 986), &rs, &rd)
+                .expect("base extract")
+                .into_values();
+
+            // xyb_y spec == no spec, on every slot.
+            let mut spec = default_spec();
+            let tagged = extract(
+                &Request::for_slots(all.clone(), 986).with_dvifm_spec(spec.clone()),
+                &rs,
+                &rd,
+            )
+            .expect("xyb_y spec extract")
+            .into_values();
+            for (i, (a, b)) in base.iter().zip(tagged.iter()).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "{w}x{h}: xyb_y spec moved f{i} off the default path"
+                );
+            }
+
+            for (plane_sel, conv_plane, norm) in [
+                (
+                    DvifmInputPlane::YcbcrY,
+                    crate::streaming::YcbcrPlane::Y,
+                    crate::dvifm::DVIFM_NORM_YCBCR_Y,
+                ),
+                (
+                    DvifmInputPlane::YcbcrCb,
+                    crate::streaming::YcbcrPlane::Cb,
+                    crate::dvifm::DVIFM_NORM_YCBCR_C,
+                ),
+                (
+                    DvifmInputPlane::YcbcrCr,
+                    crate::streaming::YcbcrPlane::Cr,
+                    crate::dvifm::DVIFM_NORM_YCBCR_C,
+                ),
+            ] {
+                spec.input_plane = plane_sel;
+                let got = extract(
+                    &Request::for_slots(all.clone(), 986).with_dvifm_spec(spec.clone()),
+                    &rs,
+                    &rd,
+                )
+                .expect("ycbcr spec extract")
+                .into_values();
+                let mut ps = vec![0.0f32; w * h];
+                let mut pd = vec![0.0f32; w * h];
+                crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                    &rs, &mut ps, w, 0, conv_plane,
+                );
+                crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                    &rd, &mut pd, w, 0, conv_plane,
+                );
+                let oracle =
+                    crate::dvifm::dvifm_features_stream(&ps, &pd, w, h, norm, &spec.to_params());
+                for i in 0..956 {
+                    assert_eq!(
+                        base[i].to_bits(),
+                        got[i].to_bits(),
+                        "{w}x{h} {plane_sel:?}: non-dvifm slot f{i} moved"
+                    );
+                }
+                for i in 0..30 {
+                    assert_eq!(
+                        got[956 + i].to_bits(),
+                        oracle[i].to_bits(),
+                        "{w}x{h} {plane_sel:?}: f956+{i} {} != oracle {}",
+                        got[956 + i],
+                        oracle[i]
+                    );
+                }
+                // The plane actually changed the features (not a no-op tap).
+                assert!(
+                    got[956..986] != base[956..986],
+                    "{w}x{h} {plane_sel:?}: f956+ identical to XYB-Y — tap not engaged"
+                );
+            }
+        }
+    }
+
+    /// Small inputs: the walk reflect-pads to the pyramid minimum before
+    /// the producer runs, so the Y′CbCr oracle must convert the PADDED
+    /// image — the pump's accumulator takes the strip's own dims.
+    #[cfg(feature = "training")]
+    #[test]
+    fn dvifm_input_plane_routes_match_oracle_on_padded_inputs() {
+        let (w, h) = (40usize, 50usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let ps = crate::metric::reflect_pad_to_min(&rs);
+        let pd = crate::metric::reflect_pad_to_min(&rd);
+        let (pw, ph) = (ps.width(), ps.height());
+        let spec = DvifmSpec {
+            levels: crate::dvifm::DvifmParams::default()
+                .levels
+                .iter()
+                .map(|lp| DvifmLevelSpec {
+                    g: lp.g,
+                    p: lp.p,
+                    c0: lp.c0,
+                    beta: lp.beta,
+                    sharp: lp.sharp,
+                    c_hi: lp.c_hi,
+                    f2_centers: lp.f2_centers,
+                    band: match lp.band {
+                        crate::dvifm::BandMode::Laplacian => DvifmBand::Laplacian,
+                        crate::dvifm::BandMode::Local => DvifmBand::Local,
+                    },
+                    edge: lp.edge,
+                })
+                .collect(),
+            input_plane: DvifmInputPlane::YcbcrCb,
+        };
+        let got = extract(
+            &Request::for_slots(SlotSet::from_ranges([(0, 986)]), 986)
+                .with_dvifm_spec(spec.clone()),
+            &rs,
+            &rd,
+        )
+        .expect("ycbcr spec extract")
+        .into_values();
+        let mut s_plane = vec![0.0f32; pw * ph];
+        let mut d_plane = vec![0.0f32; pw * ph];
+        crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+            &ps,
+            &mut s_plane,
+            pw,
+            0,
+            crate::streaming::YcbcrPlane::Cb,
+        );
+        crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+            &pd,
+            &mut d_plane,
+            pw,
+            0,
+            crate::streaming::YcbcrPlane::Cb,
+        );
+        let oracle = crate::dvifm::dvifm_features_stream(
+            &s_plane,
+            &d_plane,
+            pw,
+            ph,
+            crate::dvifm::DVIFM_NORM_YCBCR_C,
+            &spec.to_params(),
+        );
+        for i in 0..30 {
+            assert_eq!(
+                got[956 + i].to_bits(),
+                oracle[i].to_bits(),
+                "padded {w}x{h}: f956+{i} {} != oracle {}",
+                got[956 + i],
+                oracle[i]
+            );
+        }
     }
 }

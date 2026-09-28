@@ -23,3 +23,32 @@ op-store graveyard) — every commit below is resurrectable by hash:
 
 Detailed negative-result findings (per-commit) live in
 `ABANDONED_EXPERIMENTS_principled-activity_2026-06-01.md`.
+
+## Mac checkout audit — 2026-09-26
+
+The resumed Mac checkout had three uncommitted documentation edits in
+`CHANGELOG.md`, `docs/CODEC_TARGET_METRIC.md`, and `zensim/src/profile.rs`.
+Their complete patch ID is `4a4afd1bd05eb7a1725331f833bbde8bb915d20b`, exactly
+matching `e833c8fef2191c6bdcfc55f8dfe8cfed5600920e`, which is an ancestor of
+remote main. Reapplying them to September main would restore obsolete August
+bake descriptions. No unique edits need landing. The snapshot before rebase
+is `77521aeaed78aa9ebddf01b701f43c8706b2eae0`; the duplicate rebased change
+`llnqrznsktlx` is retired after this verification.
+
+The two other non-main heads are already published archive history:
+
+- `2fe8bec9d2bac3d55f4b5ab8e24ceefd68373093`: the graveyard commit, reached
+  by remote tag `abandoned/principled-activity-2026-06-01/graveyard`
+  (annotated tag object `d3b8901b7ebdc5cf76609d93f5c108250c3e4221`).
+- `e4ac1925ca06ee779828839e1c7e354d94e967fc`: the unused row-iterator XYB
+  helpers, reached by remote tag `abandoned/principled-activity-2026-06-01/xyb-planar`
+  (annotated tag object `99fcbe890f8fa166231e8347f847edf095be72c1`). Current
+  `streaming.rs` reads `ImageSource::row_bytes` and handles strided images;
+  those two proposed public wrappers still have no caller in main. They add
+  no required behavior for the Margarine work and are not being imported.
+
+GitHub's ref API matched both local annotated-tag objects; their peeled
+commits match the hashes above. Excluding remote-main ancestry and tag
+ancestry leaves only the duplicate documentation change and the active
+Margarine x86 tail repair. There is one jj workspace (`default`) and no
+checkout from this audit to remove. Archive tags are preserved unchanged.

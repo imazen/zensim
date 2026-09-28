@@ -123,5 +123,39 @@ printf '  M3 =0.8\n  M3a =0.9\nmass: 0.2\n'
         self.assertEqual(self.counts(), (1,0))
         self.assertTrue((self.out/'control.verdict-stage.json').exists())
 
+    def test_coherence_preserves_complete_ensemble_and_order(self):
+        second = self.root/'second member.bin'
+        second.write_text('model-two')
+        instrument = self.program('ensemble-instrument', '''#!/usr/bin/env python3
+import json,os,pathlib,sys
+with open(os.environ['TEST_ROOT']+'/ensemble.calls','a') as f:
+    f.write(json.dumps(sys.argv[1:])+'\\n')
+print('  M3 =0.8\\n  M3a =0.9\\nmass: 0.2')
+''')
+        cmd = [str(REPO/'scripts/m3a_sweep.sh'), '--bin', str(instrument),
+               '--ensemble', f'{self.bake},{second}', '--ensemble-weights', '0.25,0.75',
+               '--logdir', str(self.root/'sweep')]
+        def identity(command):
+            return json.loads(subprocess.check_output(command+['--print-inputs'], env=self.env))
+        before = identity(cmd)
+        result = subprocess.run(cmd, env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(s) for s in (self.root/'ensemble.calls').read_text().splitlines()]
+        self.assertEqual(len(calls), 27)
+        for call in calls:
+            self.assertNotIn('--bake', call)
+            self.assertEqual(call[call.index('--ensemble')+1], f'{self.bake},{second}')
+            self.assertEqual(call[call.index('--ensemble-weights')+1], '0.25,0.75')
+        swapped = cmd.copy()
+        swapped[swapped.index('--ensemble')+1] = f'{second},{self.bake}'
+        self.assertNotEqual(before, identity(swapped))
+        second.write_text('changed companion')
+        self.assertNotEqual(before, identity(cmd))
+        bad = cmd.copy()
+        bad[bad.index('--ensemble-weights')+1] = '1'
+        result = subprocess.run(bad, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len((self.root/'ensemble.calls').read_text().splitlines()), 27)
+
 if __name__ == '__main__':
     unittest.main()

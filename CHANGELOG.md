@@ -2,6 +2,387 @@
 
 ## [Unreleased]
 
+- Revise the unconsumed experimental C8 GMSBANK definition (2026-09-24):
+  native Y gradients, coarse X/Y/B gradients with separately calibrated
+  chroma stabilizers, and coarse joint X/B chromaticity loss/deviation.
+  The 180-slot block remains opt-in and ends at f1501, but its previous
+  sidecars are incompatible with this dated revision. f0–f1321 are unchanged.
+  Qualification records are quarantined in `benchmarks/gmsd-chroma_*`.
+
+### Added
+
+- `bake_dial_refit` gains three opt-in flags for the Rev4 feature-potential
+  run's diagnostic fits (unpublished validation tool; defaults unchanged, so
+  invocations without them produce the same output): `fit-lasso --path-out
+  <file>` (a 50-point log-λ lasso path from λ_max down to 1e-4·λ_max, raw f64
+  fits, lasso solver only), `fit-lasso --diagnostic-fit-only` (requires
+  `--emit-fit-npz`; writes the f64 fit and returns before any bake is built)
+  and `gram --per-reference-out-dir <dir>` (a raw per-reference Gram set with
+  a sum check against the whole Gram). Commit a99a5d3c.
+
+- Restored cost cuts (COST_CUTS_AUDIT, 2026-09-24), four default-off opt-in
+  families appended after C8 (widths 1562, 1790, 1820, 1825): `mapdev`
+  f1502–f1561 (per-scale, per-channel population std of the squared-error
+  and four HF maps), `z1max` f1562–f1789 (the 228-slot basic+peaks surface
+  pooled over ungated 5×5 block maxima), `gmsnative` f1790–f1819 (C8's X/B
+  gradient bank at native scale) and `dvifmgate` f1820–f1824 (C7's F1 under
+  the two-state gate visibility). f0–f1501 are unchanged. The exact new
+  public Rust items are the additive `ComputeToken::{Mapdev, Z1max,
+  Gmsnative, Dvifmgate}` arms of the existing `#[non_exhaustive]` enum and
+  the doc-hidden `V2NewFeatureToggles::{mapdev, z1max, gmsnative,
+  dvifmgate}` fields defaulting to false. No other public Rust item is
+  added. The extractor gains `--restore-cuts <tokens>` and its audit accepts
+  the registered widths 1322–1825; implementation commit 384d15e1.
+
+- Experimental C8 GMSBANK adds 180 gradient-similarity slots at f1322–f1501.
+  The exact new public Rust items are `ComputeToken::Gmsbank`, an additive arm
+  of the existing `#[non_exhaustive]` enum, and
+  `V2NewFeatureToggles::gmsbank`, an opt-in field defaulting to false. No other
+  public Rust item is added.
+
+- The Rev4 research feature bank appends f986–f1321 (C1 `gridblk`, C2
+  `ringbasis`, C3 `tailhist`, C4 `arttype`; width 1322). Its exact new
+  supported public API items are the additive, `#[non_exhaustive]` enum
+  variants `ComputeToken::{Gridblk,Ringbasis,Tailhist,Arttype}` and
+  `FeatureRegime::Folded720Rev4`. The four doc-hidden
+  `V2NewFeatureToggles::rev4_{gridblk,ringbasis,tailhist,arttype}` fields
+  select the independent compute families for research extraction.
+
+- `diffmap_heatmap` example renders `Zensim::compute_with_diffmap`'s spatial map
+  as a colour heatmap and as an overlay on the distorted image, and prints the
+  score plus map percentiles as one JSON line. Normalization defaults to a fixed
+  absolute scale shared across images (`--scale-max`), so a low-quality encode
+  renders hotter than a high-quality one; the map is already at full image
+  resolution, so nothing is upsampled. `gen_jpeg_distortion` gained optional
+  `--max-dim` / `--ref-out` so it owns building a matched (reference, distorted)
+  pair at a display size. `scripts/demos/diffmap_gallery.py` (`just
+  demo-diffmap`) drives both over six imazen-26 TRAIN sources and a zenjpeg
+  q20/q50/q80 ladder into a self-contained page. Demo tooling only: no library
+  behaviour changes, and the page is an illustration, not evidence.
+
+- Native `BakeScorer::prepare_steering_hdr` binds PQ/HLG/absolute-linear inputs
+  to the existing prepared steering session. Basic/peak scoring and map assembly
+  share retained signals, eliminating repeated extraction. Candidate reference
+  pyramids now follow canonical natural-width geometry at odd dimensions.
+- HDR datagen accepts declared PQ cICP primaries in PNG and JXL, preserving
+  native16 samples and live peak features. JXL format preferences select storage;
+  codestream metadata defines color. Partial extractions are refused.
+
+- Native PQ16 decoding caches the existing EOTF for all 65,536 codes (256 KiB),
+  retaining per-comparison display parameters and exact float-route results.
+- Wide feature extraction rejects mismatched explicit/process formula revisions
+  instead of mixing incompatible moment interpretations.
+
+- Native SDR peer audits reuse the scorer's u16/f32 color conversion and pass
+  linear floats to fast-ssim2, with hashes of the transformed inputs.
+- Fused basic/L8 spatial combination shares loads, division and powers while
+  preserving the separate accumulation rounding points.
+- HDR ImageSource paths now normalize declared primaries without SDR clipping;
+  HLG uses luminance coefficients for the declared source basis. This is input
+  era `hdr-common-primaries-v2`; affected historical HDR caches/calibrations
+  need regeneration and assessment. HDR datagen extraction now requires an
+  explicit input contract and presents BT.2020 PQ as BT.2020.
+
+- Complete-candidate canonical-feature auditing covers active ensemble members
+  and corruption companions through the hidden `BakeScorer::consumed_feature_ids`
+  diagnostic. Structural planning now includes replacement min-max head inputs
+  even when the placeholder network does not read them.
+
+- Opt-in `BakeScorer::with_finite_moment_refinement` retains binned base-image
+  L2/L4/L8 moments for finite rectangle corrections. Disabled by default;
+  scalar scores and existing additive density are preserved. This experimental
+  approximation requires independent accuracy and cost qualification.
+
+- Saved spatial-intervention analysis separates finite L2/L4/L8 root curvature
+  from remaining map error, without new pixel comparisons. These are diagnostic
+  oracle results; production features, scores and steering are unchanged.
+
+- Prepared `BakeScorer` steering accepts servable corruption companions. It
+  returns the perceptual map when the head is inactive and the typed
+  `ZensimError::CorruptionDetected` when active, including activations that
+  would not lower an already-negative score. Failed calls preserve protection.
+- Evaluation emits Rust-owned, complete-population scatter geometry and raw
+  residual tails. Tied predictions no longer acquire artificial rank order;
+  model clumping is separated from reference clumping. Degenerate evidence
+  remains unmeasured. No model is qualified by these instrument changes.
+
+- Feature-screen v2 requires separate admitted train/eval segments, rejects
+  legacy mixed caches and test/terminal paths, and evaluates frozen Rust bakes
+  only after training. Eval groups no longer enter checkpoint selection.
+
+- `BakeScorer::prepare_steering` creates a source-bound reusable SDR worker
+  returning the complete score and refinement gains. It rejects unsupported
+  feature contracts before use. `BakeScorer::with_parallel` lets codec workers
+  disable internal threading. Coverage does not certify finite-edit accuracy.
+- Basic/peak bakes honor their declared SSIM revision per comparison, allowing
+  Rev1/Rev2/Rev3 workers in the same process without environment mutation.
+
+- Opt-in, versioned sampling metadata for basic/peak bakes, using zenresize
+  Triangle, Mitchell and RobidouxSharp at 1.5×, 2× and 3×. Rust extraction,
+  training metadata admission, public BakeScorer serving and spatial ownership
+  share the declared sampling contract. Alternate pyramids require fresh fits;
+  named models and default inference retain their existing sampling.
+
+- `FormulaRevision::Rev3` — the v1 SSIM signal is formed once per pixel from
+  a DIRECT error moment `Σ(a−b)²` (no covariance subtraction) inside the
+  existing fused H/V pass, and retained, so basic, peak, masked and IW pools
+  and the attribution planes all consume the SAME value (#61). MEASURED on the
+  integrated banded walk: a local replacement with reference pixels moves
+  8,293 out-of-support signals by up to 4.886e-4 under revision 1 and
+  11,163 by up to **4.277e-6** under revision 3 — bounded (registered
+  ≤ 2e-5), not structural, because the f32 sliding sums stay path-dependent;
+  the direct moment removes the cancellation that made the drift ~114× larger.
+  Existing bakes and the shipped default stay revision 1; revision 3 needs
+  freshly extracted features and a refit, and relabelling an old bake does not make it a valid refit.
+
+### Fixed
+
+- `bake_verdict` takes the per-reference statistic, the SROCC cell's ⛔INVERTED flag and the SVG bars on aic4, sdr25 and KonJND from the declared `EXPECTED_ORIENTATION` registry (b0c0cd11). aic4/sdr25 store `q_jnd`, which rises with distortion, so every correctly ranking bake had read ~100% of references backwards since the 2026-08-04 pin. The board's 330 aic4 and 253 sdr25 stored blocks were repaired in place with the sha-gated `promote_fulleval --repair-rank-orientation` (now with `--repair-tag`, and a value-based equality gate, 021d5226); the false `aic4-corpus-wide-per-ref-inversion` entry is retired and the gauntlet's `corpusWide` exemption is gone (ef8cd804, bea2ca45). JSON `srocc`/`srocc_signed` are unchanged. The 372 roots' unidentified `ext_sdr25.parquet` (63 cells) was left as stored; see Known Bugs. Record: `benchmarks/board_orientation_fix_2026-09-22.md`.
+- `build_fr_corpus_pairs.py aic4` rebuilds the AIC-4 pairs from the committed `site/data/parquet/aic4_sample.parquet` labels, crops and full resolution, so AIC-4 is refreshable (4b202e4e).
+- Align x86 edge-only horizontal-blur tail accumulation with the full-feature path; cover narrow and odd-width tails in the bit-exact regression (7d6d7451).
+  Served-score effect, measured with and without the same six lines on an abe694a0 snapshot, on 27 synthetic pairs (9 sizes from 64x64 to 1920x1081, three distortions each; AVX-512 host):
+  - `PreviewV0_2` scores move on every pair whose height is ragged and at least 131 px (128x131 through 1920x1081),
+    by at most 1.4e-10; raw distance moves by at most 7.7e-12 relative. That profile reads the edge-only route.
+    Heights 53 and 61 are unchanged.
+  - `PreviewV0_1`, `A`, `B`, `C` and `D`, and the 372-column extended features, are bit-unchanged.
+  - Rev3 full-gmsbank extraction (1502 columns) is bit-identical on 2,532 real pairs.
+- Gate fractional attribution helpers with their actual v2 callers, avoiding dead-code warnings in partial-feature builds (ad18b444).
+
+- `BakeScorer` no longer refuses a corruption companion whose feature ids a
+  narrow (local-only basic) base plan does not populate; the extraction is the
+  union of both plans (2695ef5f).
+- Feature-permutation dead-code errors: the Y'CbCr plane helpers (0e78b76f) and
+  `AttributionResult::query_rect_frac`/`grid_coord_f` (e6c60486, narrowed in
+  ea6957e5 to `test` or `training` + `feature-regime-v2`) are gated on the
+  features their callers sit behind.
+
+- Scalar tier (the tier i686 always runs, and any host with no vector token): the bulk
+  sRGB→XYB, sRGB→positive-XYB and linear→positive-XYB conversions gave a pixel different
+  bits in the last `n mod 8` pixels of a band than in a full 8-pixel chunk, so a flat
+  image was not flat after conversion and
+  `feature_v2::tests::gmsbank_constant_chroma_shift_is_visible_without_gradients` failed on
+  i686. The remainder now zero-pads into one more chunk and runs the chunk arithmetic
+  (26f29228). **Changes values on the scalar tier only**, for bands whose pixel count is not a
+  multiple of 8; user decision 2026-09-25, "You can change i686 values fine."
+  The unclamped `GamutMapping::Preserve` converter takes the same chunk arithmetic on the scalar tier.
+  x86_64 v4x/v4/v3, aarch64 NEON and wasm128 are unchanged bit for bit. Those tiers'
+  own chunk-vs-remainder divergence stays open (CLAUDE.md Known Bugs).
+
+- Corrected the registered claim that `BakeScorer` serves a declared-revision
+  bake at the process revision. No serving behaviour changed: measured on the
+  ten frozen R915 bakes and on reconstructed Y60/basic228 bakes, every scalar,
+  HDR and steering number is bit-identical with `ZENSIM_FORMULA_REV` unset, `=1`
+  and `=3`, while a revision-1 bake over the same ids scores differently in the
+  same process — the narrow route selects the declared revision, and the
+  variable is not a serving requirement. The gap was in coverage, now closed for
+  the 60-id Y plan, `compute_hdr` and `prepare_steering` across revision-1/2/3
+  processes.
+
+- `Zensim::compute_with_diffmap`, `Zensim::compute_streaming_strips` and
+  `Zensim::compute_folded944_score_and_attribution{,_binned}` now certify
+  identity through the same owner `Zensim::compute` uses, instead of scoring a
+  perfect copy through the model on an all-zero feature row. A byte-identical
+  pair returned 96.2017 from the diffmap path and 96.2368 from the strip and
+  fused-944 paths (Profile B, measured at 900x675 and 129x128) while `compute`
+  returned exactly 100 on the same pair; the diffmap and the fused-944
+  attribution map are now exactly zero rather than ~1e-5 float residue. The 944
+  feature row the fused entry returns is unchanged — its bitwise contract with
+  `compute_folded720_append2_features` is unconditional. Entries that take a `PrecomputedReference` instead
+  of the source image (`compute_with_ref`, `compute_with_ref_into`,
+  `compute_with_ref_streaming_strips`, `compute_with_ref_and_diffmap`,
+  `compute_with_ref_and_diffmap_linear_planar`,
+  `compute_with_ref_score_and_attribution`) still cannot decide identity — the
+  cache holds an XYB pyramid, not the source pixels — and that limitation is
+  now pinned by a test and stated on the public docs rather than left implicit.
+
+- Tree corruption companions now reject a base/profile with a different
+  feature arithmetic revision. Legacy ZCTH v1/v2 remain Rev1; new ZCTH v3
+  stores a hash-bound revision with f32 input semantics. Existing valid legacy
+  inference is unchanged. This does not qualify a new corruption model.
+
+- Selective v2 attribution skips cells with no active sensitivity before
+  normalizing retained samples. Omitted fine-scale/chroma cells could otherwise
+  inject NaNs into valid coarse-feature maps. Active contributions and scalar
+  extraction are preserved; finite maps still require spatial quality gates.
+
+- Cached spatial HF-gain coefficients now differentiate the model's actual
+  gain formula. Saturating revision-3 gains previously used the revision-1
+  ratio derivative. Independent finite differences cover all four gain forms;
+  revision-1 coefficient arithmetic is preserved exactly.
+
+### Changed
+
+- Spatial bin folding skips repeated footprint intersections when scale cells
+  align with bins, preserving accumulation order and clipped edge behavior.
+  Complete finite-moment maps measure 8–13% faster on the registered 1MP/4MP
+  controls; no model or default changes. See the September 14 aligned-bin report.
+
+- Local basic-feature plans can omit X/B moment computation at selected coarse
+  scales as well as full resolution. Y and the shared XYB pyramid remain intact;
+  retained features match canonical extraction. Wider families keep conservative
+  dependency coverage. No named model or default profile changed.
+- The feature-screen owner can reuse explicitly hash-bound prepared tables,
+  select objectives and compare configurable head capacities. Existing ensemble
+  row-scoring and performance instruments accept explicit ensemble weights.
+
+- Corruption companions now activate strictly below their score threshold,
+  then return `min(perceptual, corruption_score)` instead of flooring to zero.
+  Inactive companions leave the perceptual score unchanged. Activation remains
+  a failure signal even when an already lower perceptual score is unchanged.
+  Existing head thresholds require reevaluation; no named profile was replaced.
+
+- Declared local-only basic subsets skip peak and whole-image HF reductions.
+  Candidate map assembly skips channels with zero sensitivity and unneeded
+  reference HF sweeps, masked/IW pools and the unused intermediate profile head.
+  Prepared basic/peak comparisons reuse the reference pyramid for scalar
+  extraction as well as map assembly. Read feature IDs retain canonical arithmetic.
+- Candidate gradients reuse the canonical structural read analysis to skip
+  unreachable finite-difference probes, including sparse wide bakes and active
+  ensemble unions. Unknown contracts retain the conservative declared-input path.
+
+- Basic/peak models and research requests that do not read full-resolution X/B
+  now select a Rust const-generic extraction path retaining full-resolution Y
+  and all coarser XYB. Retained feature arithmetic is unchanged. Other feature
+  families conservatively keep full-resolution X/B. Channel subsets use explicit
+  feature IDs; the family-only feature-set shorthand cannot represent them.
+
+- For families without request-local arithmetic, bake/process revision disagreement
+  is refused by comparing the REVISION, not
+  only the luminance form it selects — revisions 2 and 3 both select `Clamp`,
+  so the form comparison alone would serve revision 2 coefficients against
+  revision 3 pixels (#61).
+- Routes an arithmetic revision does not serve now return an explicit
+  `ZensimError` from every fallible entry that builds a `ZensimConfig`
+  (`ssim_form::check_route`), instead of reaching the strip walk. Revision 3
+  serves `blur_passes == 1` only; its moments are one reflect-101 box.
+- The built-in-profile scoring path warns once per process when
+  `ZENSIM_FORMULA_REV` pins a non-shipped revision: a built-in bake declares no
+  revision, so it IS revision 1, and its score then prices revision-1
+  coefficients against another era's features. Not a refusal — the same call
+  emits the features a research extraction exists to collect — and silent
+  unless a revision is pinned, so no shipping path is affected (#61).
+- New non-default feature `cross-revision-diagnostic`. It lets a bake be scored
+  against pixels from a different arithmetic revision, so an already-fit
+  candidate can be replayed on a corrected extraction before any refit. It
+  needs BOTH the cargo feature and `ZENSIM_CROSS_REVISION_DIAGNOSTIC=1`, and
+  warns on stderr when it fires; a product build does not contain the bypass.
+  Numbers produced this way measure the extraction change against fixed
+  coefficients and are never a served score (#61).
+
+### Changed (revision 3, fused)
+
+- Revision 3 is now FUSED into the existing H/V pass and no longer runs a
+  second traversal. `blur::fused_blur_h_ssim` accumulates the direct error
+  moment `Σ(a−b)²` in its fourth plane in place of `Σa·b` (same two FMAs;
+  read once per call from the active revision, loop-unswitched in every
+  tier), and `fused::fused_vblur_features_ssim` forms
+  `loss + (1−loss)·E_err/(var1+var2+C2)` from the same four f32 planes it
+  always V-blurred. The exact f64 second-pass kernel and its thread-local
+  scratch are gone from the served path; `ssim_form::stable_ssim_plane` is
+  retained as the reference the bounds are measured against (#61).
+- The revision-3 acceptance is BOUNDED, not exact, by user directive
+  ("bounded error is fine, speed above minor flaws"). Registered on the
+  locality fixture: peak out-of-support movement ≤ 2e-5 (measured 4.277e-6;
+  the shipped revision 1 measures 4.886e-4), max abs error vs the exact f64
+  kernel ≤ 1e-3, all-equal-window residue ≤ 1e-5 (measured 3.689e-6). The
+  blast radius is unchanged: exactly the 132 registered SSIM slots move, and
+  every revision 1/2 golden and parity gate is bit-identical (#61).
+
+### Measured
+
+- FUSED revision 3 is at single-thread cost PARITY with the shipped revision:
+  at 2048², one pinned core, paired A/B, `fold944_full` 263.3 → 259.9 ms
+  (−1.3%, anchor −1.0%), `fold156_basic` 80.8 → 80.9 ms, `buf_v1_372`
+  178.6 → 154.0 ms (−13.8%: the masked/IW pools read the retained signal
+  instead of V-blurring the two sigma planes and re-deriving the covariance
+  per strip), no arm slower beyond noise; `fold944_full` at
+  revision 3 is again under `fast_ssim2` (288.6 ms). The revision-1 arms are
+  unchanged on the fused build, and a two-binary A/B against the tree before
+  any #61 change (`main@f7b9f39a`) shows the DEFAULT path unchanged: every
+  2048² arm inside ±1% with the anchor at +0.6%
+  (`benchmarks/rev3_default_path_base_vs_current_2026-09-10.json`). Against
+  crates.io 0.2.7 in one interleaved binary, single thread at 2048²: the
+  shared v1 extraction is 22% faster (134.6 → 104.8 ms) while the product
+  entry is 34% slower (126.7 → 169.5 ms) because it computes a different,
+  wider metric (`benchmarks/crates_io_speed_bar_2026-09-10.json`). 4K on the
+  current commit (`benchmarks/k4_st_mt_2026-09-10.md`): served profile `B` at
+  4096² is 709 ms single-threaded, 194 ms on eight threads, 102 ms on sixteen
+  cores; the folded 944 extraction scales only 2.2× / 2.5×, the buffered v1
+  path 3.8× / 5.4× — the fold walk's serial share is the threaded-performance
+  target. At eight
+  threads (one CCD) the paired deltas
+  are inside the instrument's own 7-17% A-A spread (`fold944_full` +1.0%,
+  two-block medians) — no threaded regression the box can resolve
+  (`benchmarks/rev3_fused_cost_{st,mt,mt2}_2026-09-09.json`,
+  `benchmarks/stable_ssim_kernel_2026-09-08.md` "Fusion") (#61).
+- SUPERSEDED — the exact f64 second-pass form of revision 3 cost **+27% to
+  +87%** of extraction time depending on how much
+  non-SSIM work the walk does (2048², one pinned core, paired A/B, anchor
+  within 0.3%; `benchmarks/stable_ssim_kernel_2026-09-08.md`). At revision 1
+  `fold944_full` (265.1 ms) beats `fast_ssim2` (294.1 ms); at revision 3 it is
+  336.5 ms and **does not**, which breaks the scorecard's "≤ fast-ssim2"
+  clause. Peak RSS is a non-issue: +0.7 to +3.0 MB, every arm far under the
+  128 bytes/pixel clause.
+- Skipping the sigma-moment V-blur accumulation under revision 3 (they have no
+  reader there) was implemented, measured at ≤1% — inside cross-build noise,
+  with `fast_ssim2` moving more between builds than the change did — and
+  REVERTED. The dead moments cost their time in the H pass that writes two full
+  strip planes, not in the V accumulators. Recorded so it is not re-attempted.
+- Replaying the 23 registered spatial coherence cells with revision-1 bakes on
+  FUSED revision-3 pixels (cross-revision diagnostic) moves M3a ≥ 0.70 from
+  7/23 to 20/23 and M2 ≥ 0.99 from 16/23 to 19/23, concentrated on the
+  small-block cells — the same counts the superseded exact form produced, cell
+  values within a few thousandths. Three cells regress on M2 by more than
+  0.005 (`row199-b32` 0.9845 → 0.9415 is the largest). This measures the
+  extraction change against fixed coefficients — it is not model quality and
+  not a qualification (`benchmarks/rev3_fused_spatial_cells_2026-09-09.json`).
+
+- Add `ScoredAttribution::refinement_gain` and separate refinement coverage:
+  finite max-signal rectangle effects include ties and reflected/coarse source
+  footprints without changing additive density semantics. Extend the existing
+  coherence instrument to complete ensembles and per-block JSON evidence.
+
+- Include the 36 L8 peak terms in candidate `BakeScorer` attribution, using
+  retained canonical signals and finite f64 normalization. Preserve scalar
+  scores and legacy map APIs; keep hard max and masked/IW coverage gaps explicit.
+
+- Apply the same arithmetic-preserving padded-row storage to v4x horizontal
+  activity box blur, reducing full-pool extraction cost. Retain exact image/map
+  replay and complete-surface timing controls in the September 8 activity record.
+
+- Stage v4x horizontal SSIM rows with padded physical pitch at cache-sensitive
+  widths, preserving logical dimensions, tile boundaries and every feature/
+  score bit. Reduce observed complete-scoring cost with bounded per-thread
+  scratch; retain explicit performance-qualification limitations and image/
+  spatial parity evidence in the September 8 padded-row record.
+
+- Add a strict canonical importer for retained honest native JXL/AVIF map-arm
+  outputs. Bind sources/roles/bytes and independently decode through the existing
+  Rust surface. Refuse differing feature vectors for duplicate pixel pairs.
+  The expanded head still fails calibration; record a separate native JXL
+  decoder-contract discrepancy that must be resolved before qualification.
+
+- Add explicitly versioned f32 input semantics for ZCTH corruption heads;
+  legacy v1 arithmetic remains unchanged. Canonical training can export v2
+  heads with pixel/cache precision parity. Extend the audit with actual served
+  pixel raw/probability comparisons. The repaired candidate still fails honest
+  output protection and does not replace a default model.
+
+- Canonical corruption training now declares the head's feature IDs separately
+  from its source schema, supporting D's existing basic+peak regime. Add a
+  training-only cost screen, separate fit/calibration reports, keyed channel
+  operation diagnostics and complete `BakeScorer` performance arms. The new
+  candidate fails honest-output protection; no default model changes.
+
+- Add an explicit PNG/EXR linear-luminance mode to the existing reference
+  overlap audit, using pinned zenexr, exact coverage, source metadata and
+  declared untagged-PNG interpretation. The previous PNG hash era is unchanged.
+
+- Add `BakeScorer::score_features_with_identity` for cached pair records with
+  independently verified decoded-pixel identity. It preserves the same exact
+  identity score as SDR/HDR pixel scoring while ordinary feature rows retain
+  their complete model inference, including corruption composition.
+
 - Extend the existing RD analyzer to validate native complete-encode targeting, bound coverage, emitted-byte identity and separate reconstruction/map costs.
 
 - The unpublished `zensim-target` tool now exposes its shared median/envelope `SeedCurve` and candidate search with a native codec backend. Built-in adapters keep their feature checks; native JXL experiments can reuse the same Rust controller and training calibration without copying them.

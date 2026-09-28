@@ -40,7 +40,7 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 FIX=${ZENSIM_M3_FIXTURES:-/mnt/v/output/zensim/diffmap-coherence-2026-07-18}
 TGT="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
 
-BAKE=""; BIN="$TGT/release/examples/diffmap_block_coherence"
+BAKE=""; ENSEMBLE=""; WEIGHTS=""; JSON_CELLS=0; BIN="$TGT/release/examples/diffmap_block_coherence"
 GRID=full; TSV=""; LABEL=""; LOGDIR=""; PRINT_INPUTS=0
 
 die() { echo "m3a_sweep: $*" >&2; exit 2; }
@@ -48,6 +48,9 @@ die() { echo "m3a_sweep: $*" >&2; exit 2; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --bake)   BAKE=${2:?};   shift 2 ;;
+        --ensemble) ENSEMBLE=${2:?}; shift 2 ;;
+        --ensemble-weights) WEIGHTS=${2:?}; shift 2 ;;
+        --json-cells) JSON_CELLS=1; shift ;;
         --bin)    BIN=${2:?};    shift 2 ;;
         --grid)   GRID=${2:?};   shift 2 ;;
         --print-inputs) PRINT_INPUTS=1; shift ;;
@@ -58,10 +61,26 @@ while [ $# -gt 0 ]; do
         *) die "unknown arg: $1" ;;
     esac
 done
-[ -n "$BAKE" ] || die "need --bake <file>"
-[ -s "$BAKE" ] || die "bake not found or empty: $BAKE"
+MODEL_ARGS=(); MODEL_FILES=()
+if [ -n "$ENSEMBLE" ]; then
+    [ -z "$BAKE" ] || die "--bake conflicts with --ensemble"
+    [ -n "$WEIGHTS" ] || die "--ensemble requires explicit --ensemble-weights"
+    python3 - "$ENSEMBLE" "$WEIGHTS" <<'PYMODEL' || exit 2
+import math, pathlib, sys
+paths = sys.argv[1].split(','); weights = [float(x) for x in sys.argv[2].split(',')]
+assert len(paths) == len(weights) and all(pathlib.Path(p).is_file() for p in paths)
+assert all(math.isfinite(w) and w >= 0 for w in weights) and abs(sum(weights)-1) < 1e-12
+PYMODEL
+    IFS=',' read -r -a MODEL_FILES <<< "$ENSEMBLE"
+    MODEL_ARGS=(--ensemble "$ENSEMBLE" --ensemble-weights "$WEIGHTS")
+else
+    [ -z "$WEIGHTS" ] || die "weights require --ensemble"
+    [ -n "$BAKE" ] || die "need --bake or --ensemble"
+    [ -s "$BAKE" ] || die "bake not found or empty: $BAKE"
+    MODEL_FILES=("$BAKE"); MODEL_ARGS=(--bake "$BAKE")
+fi
 [ -x "$BIN" ]  || die "diffmap binary not found or not executable: $BIN"
-LABEL=${LABEL:-$(basename "$BAKE" .bin)}
+LABEL=${LABEL:-$(basename "${MODEL_FILES[0]}" .bin)}
 LOGDIR=${LOGDIR:-$(mktemp -d "${TMPDIR:-$HOME/tmp}/m3a_sweep.XXXXXX")}
 mkdir -p "$LOGDIR"
 
@@ -110,20 +129,22 @@ esac
 # Identity is emitted by the grid owner, using the exact cell list below.
 # No caller maintains a second fixture/grid definition.
 if [ "$PRINT_INPUTS" = 1 ]; then
-    input_files=("$BAKE" "$BIN" "${BASH_SOURCE[0]}")
+    input_files=("${MODEL_FILES[@]}" "$BIN" "${BASH_SOURCE[0]}")
     for cell in "${CELLS[@]}"; do
         read -r ref sz q <<<"$cell"
         if [ "$sz" = 576 ]; then input_files+=("$FIX/${ref}.png"); else input_files+=("$FIX/${ref}_${sz}.png"); fi
         input_files+=("$FIX/${ref}_${sz}_q${q}.jpg")
     done
-    python3 - "$GRID" "${input_files[@]}" <<'PYIDENTITY'
+    python3 - "$GRID" "$ENSEMBLE" "$WEIGHTS" "${input_files[@]}" <<'PYIDENTITY'
 import hashlib, json, os, pathlib, sys
 files = []
-for name in sorted(set(sys.argv[2:])):
+for name in sorted(set(sys.argv[4:])):
     p = pathlib.Path(name).resolve()
     with p.open('rb') as f: sha = hashlib.file_digest(f, 'sha256').hexdigest()
     files.append({'path': str(p), 'sha256': sha})
-print(json.dumps({'schema': 1, 'grid': sys.argv[1], 'expected_cells': 27, 'files': files,
+print(json.dumps({'schema': 2, 'grid': sys.argv[1], 'expected_cells': 27, 'files': files,
+    'ensemble': sys.argv[2].split(',') if sys.argv[2] else None,
+    'weights': [float(x) for x in sys.argv[3].split(',')] if sys.argv[3] else None,
     'environment': {k: v for k, v in sorted(os.environ.items()) if k.startswith('ZENSIM_') and not k.startswith(('ZENSIM_FULLEVAL', 'ZENSIM_EVAL', 'ZENSIM_M3_ONLY', 'ZENSIM_M3_REUSE'))}}, sort_keys=True))
 PYIDENTITY
     exit $?
@@ -140,7 +161,9 @@ for cell in "${CELLS[@]}"; do
         echo "   skip ${ref}/${sz}/q${q}: missing pair" >&2; continue
     fi
     log="$LOGDIR/$LABEL.m3.${ref}_${sz}_q${q}.log"
-    if ! "${HEAVY[@]}" "$BIN" "$R" "$D" --bake "$BAKE" >"$log" 2>&1; then
+    JSON_ARGS=()
+    if [ "$JSON_CELLS" = 1 ]; then JSON_ARGS=(--json "${log%.log}.json"); fi
+    if ! "${HEAVY[@]}" "$BIN" "$R" "$D" "${MODEL_ARGS[@]}" "${JSON_ARGS[@]}" >"$log" 2>&1; then
         echo "   skip ${ref}/${sz}/q${q}: diffmap_block_coherence failed" >&2; continue
     fi
     m3=$(awk -F'=' '/^  M3 /{split($2,a," "); print a[1]; exit}' "$log")

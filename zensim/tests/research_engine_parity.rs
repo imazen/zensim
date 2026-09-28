@@ -118,10 +118,16 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
     }
 }
 
-/// **G2.1, the COMPLETE half** — the full registered width (956) agrees
-/// bit-exactly with the production CSFW walk.
+/// **G2.1, the COMPLETE half** — the full registered width agrees
+/// bit-exactly with the production walk at the widest registered regime
+/// (1825 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
+/// feature-bank families + C8 `gmsbank` + the four restored cuts `mapdev`,
+/// `z1max`, `gmsnative`, `dvifmgate`; the DVIFM tail is itself
+/// bit-identical to the whole-plane oracle per the dvifm gates). The
+/// production toggles must name every registered block: a block left off
+/// here makes the two widths differ.
 #[test]
-fn research_everything_agrees_with_the_production_csfw_walk() {
+fn research_everything_agrees_with_the_production_walk() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
     let full = research::full_width();
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
@@ -136,15 +142,26 @@ fn research_everything_agrees_with_the_production_csfw_walk() {
                 V2NewFeatureToggles {
                     append2_block: true,
                     csfw_block: true,
+                    dvifm_block: true,
+                    rev4_gridblk: true,
+                    rev4_ringbasis: true,
+                    rev4_tailhist: true,
+                    rev4_arttype: true,
+                    gmsbank: true,
+                    mapdev: true,
+                    z1max: true,
+                    gmsnative: true,
+                    dvifmgate: true,
                     v1_pools: V1PoolsMode::Full,
                     ..V2NewFeatureToggles::default()
                 },
                 &mut scratch,
             )
-            .unwrap_or_else(|e| panic!("production 956 walk at {w}x{h}: {e:?}"));
+            .unwrap_or_else(|e| panic!("production {full} walk at {w}x{h}: {e:?}"));
         assert_eq!(prod.features().len(), full, "at {w}x{h}");
         let e = research::extract(&Request::everything(), &rs, &rd)
             .unwrap_or_else(|e| panic!("research everything at {w}x{h}: {e}"));
+        assert_eq!(e.values().len(), full, "research width at {w}x{h}");
         for (i, (p, r)) in prod.features().iter().zip(e.values()).enumerate() {
             assert_eq!(p.to_bits(), r.to_bits(), "f{i} differs at {w}x{h}");
         }
@@ -211,6 +228,14 @@ fn dropping_a_family_perturbs_only_its_own_slots() {
             ComputeToken::Append,
             ComputeToken::Masked,
             ComputeToken::Iw,
+            // REV4: each family independently droppable — dropping one
+            // must leave every still-populated slot (including the other
+            // three rev4 families' AND the whole f0..985 prefix)
+            // bit-identical.
+            ComputeToken::Gridblk,
+            ComputeToken::Ringbasis,
+            ComputeToken::Tailhist,
+            ComputeToken::Arttype,
         ] {
             let fam_slots = research::family_slots(fam);
             let want = SlotSet::from_slots(all.iter_slots().filter(|s| !fam_slots.contains(*s)));

@@ -1,0 +1,220 @@
+[
+ {
+  "id": "luma-curve-talk-cid22",
+  "family": "dvifm",
+  "planes": "Y′",
+  "label": "talk configuration, CID22 fit (`luma-curve-talk-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "ycbcr3-curve-talk-cid22",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "talk configuration, CID22 fit (`ycbcr3-curve-talk-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "talk-faithful-luma",
+  "family": "dvifm",
+  "planes": "Y′",
+  "label": "talk configuration (`talk-faithful-luma`)",
+  "fitted_on": "human: CID22-A + TID2013 & KADID-10k JPEG/J2K",
+  "exposure": {
+   "tid2013_codec": "fit",
+   "kadid10k_nt_codec": "fit",
+   "tid2013_full": "partly",
+   "kadid10k_nt": "partly",
+   "nncd": "overlap"
+  }
+ },
+ {
+  "id": "talk-faithful-ycbcr3",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "talk configuration (`talk-faithful-ycbcr3`)",
+  "fitted_on": "human: CID22-A + TID2013 & KADID-10k JPEG/J2K",
+  "exposure": {
+   "tid2013_codec": "fit",
+   "kadid10k_nt_codec": "fit",
+   "tid2013_full": "partly",
+   "kadid10k_nt": "partly",
+   "nncd": "overlap"
+  }
+ },
+ {
+  "id": "luma-curve-ours-cid22",
+  "family": "dvifm",
+  "planes": "Y′",
+  "label": "our structure, curve, CID22 fit (`luma-curve-ours-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "ycbcr3-curve-ours-cid22",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "our structure, curve, CID22 fit (`ycbcr3-curve-ours-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "xyb3-curve-ours-cid22",
+  "family": "dvifm",
+  "planes": "XYB",
+  "label": "screen winner's form (XYB three-plane, curve), CID22 fit (`xyb3-curve-ours-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "luma-gate-ours-cid22",
+  "family": "dvifm",
+  "planes": "Y′",
+  "label": "our structure, gate, CID22 fit (`luma-gate-ours-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "ycbcr3-gate-ours-cid22",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "our structure, gate, CID22 fit (`ycbcr3-gate-ours-cid22`)",
+  "fitted_on": "human: all 4,292 CID22 validation pairs",
+  "exposure": {
+   "cid22_49": "fit"
+  }
+ },
+ {
+  "id": "xyb3-curve-ours-safesyn",
+  "family": "dvifm",
+  "planes": "XYB",
+  "label": "screen round 2: XYB three-plane, fitted curve (`xyb3-curve-ours-safesyn`)",
+  "fitted_on": "teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset)",
+  "exposure": {},
+  "screen": true
+ },
+ {
+  "id": "ycbcr3-curve-ours-safesyn",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "screen: smooth curve, constants fitted on SafeSyn (`ycbcr3-curve-ours-safesyn`)",
+  "fitted_on": "teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset)",
+  "exposure": {},
+  "screen": true
+ },
+ {
+  "id": "ycbcr3-gate-ours-safesyn",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "screen: constants fitted on SafeSyn (`ycbcr3-gate-ours-safesyn`)",
+  "fitted_on": "teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset)",
+  "exposure": {},
+  "screen": true
+ },
+ {
+  "id": "ycbcr3-curve-1331-safesyn",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "screen round 2: [1 3 3 1] kernel, fitted curve (`ycbcr3-curve-1331-safesyn`)",
+  "fitted_on": "teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset)",
+  "exposure": {},
+  "screen": true
+ },
+ {
+  "id": "serving-gate-ycbcr3",
+  "family": "dvifm",
+  "planes": "Y′CbCr",
+  "label": "our serving gate (`serving-gate-ycbcr3`)",
+  "fitted_on": "mixed: 4,893 pairs of our training corpus (mostly teacher; some TID2013, KADID-10k, KonFiG training rows)",
+  "exposure": {
+   "tid2013_codec": "partly",
+   "tid2013_full": "partly",
+   "kadid10k_nt_codec": "partly",
+   "kadid10k_nt": "partly",
+   "nncd": "overlap"
+  }
+ },
+ {
+  "id": "ours-full-luma",
+  "family": "dvifm",
+  "planes": "Y′",
+  "label": "our deviations, teacher fit (`ours-full-luma`)",
+  "fitted_on": "teacher: 3,785 CID22 training-set pairs",
+  "exposure": {}
+ },
+ {
+  "id": "fastssim2",
+  "family": "peer",
+  "planes": "–",
+  "label": "SSIMULACRA2 (our `fast-ssim2` port)",
+  "fitted_on": "its authors' tuning: CID22 training refs, TID2013, KADID-10k, KonFiG",
+  "exposure": {
+   "tid2013_codec": "fit",
+   "tid2013_full": "fit",
+   "kadid10k_nt_codec": "fit",
+   "kadid10k_nt": "fit",
+   "nncd": "overlap"
+  }
+ },
+ {
+  "id": "zensim_b",
+  "family": "peer",
+  "planes": "–",
+  "label": "zensim B",
+  "fitted_on": "zensim training corpus (incl. TID2013, KADID-10k training refs)",
+  "exposure": {
+   "tid2013_codec": "fit",
+   "tid2013_full": "fit",
+   "kadid10k_nt_codec": "partly",
+   "kadid10k_nt": "partly",
+   "nncd": "overlap",
+   "aic4_ptc": "exposed",
+   "aic4_full": "exposed"
+  }
+ },
+ {
+  "id": "zensim_d",
+  "family": "peer",
+  "planes": "–",
+  "label": "zensim D",
+  "fitted_on": "zensim training corpus (incl. TID2013, KADID-10k training refs)",
+  "exposure": {
+   "tid2013_codec": "fit",
+   "tid2013_full": "fit",
+   "kadid10k_nt_codec": "partly",
+   "kadid10k_nt": "partly",
+   "nncd": "overlap",
+   "aic4_ptc": "exposed",
+   "aic4_full": "exposed"
+  }
+ },
+ {
+  "id": "rev3_basic228_ens5",
+  "family": "peer",
+  "planes": "–",
+  "label": "zensim Rev3 basic228 ensemble",
+  "fitted_on": "zensim training corpus (incl. TID2013, KADID-10k training refs)",
+  "exposure": {
+   "tid2013_codec": "fit",
+   "tid2013_full": "fit",
+   "kadid10k_nt_codec": "partly",
+   "kadid10k_nt": "partly",
+   "nncd": "overlap",
+   "aic4_ptc": "exposed",
+   "aic4_full": "exposed"
+  }
+ }
+]

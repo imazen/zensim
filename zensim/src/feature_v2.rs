@@ -51,6 +51,8 @@ use crate::det_math::DetRoots;
 use crate::error::ZensimError;
 use crate::source::ImageSource;
 
+mod restore_cuts;
+
 use archmage::incant;
 use archmage::magetypes;
 use magetypes::simd::backends::F32x8Backend;
@@ -197,6 +199,7 @@ pub const K_PJND_MASK_HIGH: f64 = 16.0;
 /// in unit-XYB scale, not blur residuals, but the dynamic range is
 /// comparable).
 pub const C_GMS: f64 = 1e-4;
+use crate::gmsbank_constants::{GMSBANK_B_C, GMSBANK_C, GMSBANK_CS_C, GMSBANK_X_C};
 /// Saturating half-point for the reference-edge indicator used by ringing
 /// (`edge_r` in the A.10 table's `err · dilate(edge_r) · (1−edge_r)` form).
 pub const C_RING_EDGE: f64 = 0.02;
@@ -574,6 +577,884 @@ pub mod idx_csfw {
     pub const W_GLOBAL_CLOSS: usize = 2;
 }
 
+// ============================================================================
+// REV4 candidate bank (2026-09-23 lane — `benchmarks/rev4_featbank_impl_
+// 2026-09-23.md`, spec `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md` §1.1).
+// Four append-only families at f986+; every slot is difference-form and
+// every flag is independent (the emit tail is absolute-positioned, so any
+// subset stays index-stable). Layouts mirror `feature_defs::BLOCKS`:
+// gridblk/ringbasis/tailhist are PerChannel (`(scale*3 + ch)*per_cell +
+// local`), arttype is PerScale (`scale*ARTTYPE_PER_SCALE + local`).
+// ============================================================================
+
+/// Registered base of the rev4 candidate bank (`feature_defs::BLOCKS`
+/// derives the same number — asserted in `rev4_base_matches_registry`).
+#[cfg_attr(not(test), allow(dead_code))] // the registered rev4 base — read by the parity/layout gates
+pub(crate) const REV4_BASE: usize = 986;
+#[cfg(test)]
+pub(crate) const GMSBANK_BASE: usize = 1322;
+pub(crate) const GMSBANK_PER_CELL: usize = 15;
+/// mapdev slots per (scale, channel) cell (`feature_defs::MAPDEV_SIGNALS`).
+pub(crate) const MAPDEV_PER_CELL: usize = 5;
+/// z1max slots per (scale, channel) cell: 13 basic + 6 peaks.
+pub(crate) const Z1MAX_PER_CELL: usize = 19;
+/// gmsnative slots in total: X then B, 15 each, at scale 0.
+pub(crate) const GMSNATIVE_WIDTH: usize = 30;
+/// dvifmgate slots in total: the gate F1 of each of DVIFM's five levels.
+pub(crate) const DVIFMGATE_WIDTH: usize = 5;
+
+fn gmsbank_width(n_scales: usize) -> usize {
+    crate::feature_defs::block_base(crate::feature_set_id::ComputeToken::Gmsbank, n_scales)
+        .expect("registered C8")
+        .1
+        .width(n_scales)
+}
+
+/// gridblk slots per (scale, channel) cell: 6 signed log-magnitude bins
+/// of the on-grid boundary step excess + on-grid mean + on/off ratio.
+pub(crate) const GRIDBLK_PER_CELL: usize = 8;
+/// ringbasis slots per (scale, channel) cell: 6 triangular
+/// log-magnitude bins of the RINGING per-pixel term.
+pub(crate) const RINGBASIS_PER_CELL: usize = 6;
+/// tailhist slots per (scale, channel) cell: p95/p99/max for each of the
+/// SSIM/ART/DET/MSE per-pixel maps (4 maps × 3).
+pub(crate) const TAILHIST_PER_CELL: usize = 12;
+/// arttype slots per scale (no channel axis — like append2/CSFW, each
+/// signal names its channel): blur(Y), noise_x/y/b, bleed_x/b.
+pub(crate) const ARTTYPE_PER_SCALE: usize = 6;
+/// Tail histogram bin count per map (31 true-log interior edges
+/// `10^(-6 + k*6/32)`, k = 1..31 → 32 partition cells).
+pub(crate) const TAILHIST_BINS: usize = 32;
+/// Flat-reference activity ceiling for the C4 noise descriptors — the
+/// plan's `C4_FLAT_ACT`, pinned equal to [`C_ACTIVITY`] (design note
+/// §C4): "flat" is the same saturator scale the masking/ringing
+/// formulas already use.
+pub(crate) const C4_FLAT_ACT: f64 = C_ACTIVITY;
+
+/// Named local offsets within one scale's arttype block.
+pub(crate) mod idx_arttype {
+    /// Y-channel blur descriptor: `EDGE_WIDTH_CHANGE × HF_LOSS`, both
+    /// already-emitted v2 slots at the Y cell.
+    pub const BLUR: usize = 0;
+    /// Flat-reference HF_GAIN mean on the X channel (`act ≤ C4_FLAT_ACT`).
+    pub const NOISE_X: usize = 1;
+    /// Flat-reference HF_GAIN mean on the Y channel.
+    pub const NOISE_Y: usize = 2;
+    /// Flat-reference HF_GAIN mean on the B channel.
+    pub const NOISE_B: usize = 3;
+    /// X-channel colour bleed: `bounded_excess(Σ_out g_dst, Σ_out g_src,
+    /// C_GMS)` outside the ±1-px dilated dst-luma-edge mask.
+    pub const BLEED_X: usize = 4;
+    /// B-channel colour bleed (same form as [`BLEED_X`]).
+    pub const BLEED_B: usize = 5;
+}
+
+/// Triangular-hat bin count shared by gridblk and ringbasis.
+pub(crate) const REV4_HATS: usize = 6;
+/// Largest lattice period any rev4 cell can take (chroma at scale 0).
+pub(crate) const GRIDBLK_MAX_PERIOD: usize = 16;
+/// C1 magnitude-hat centres, as the `u()` bit-domain coordinates of
+/// TRAIN on-grid |ẽ| quantiles near 5/20/40/60/80/95% (2026-09-23
+/// registry revision; design note §C1).
+const GRIDBLK_LEVELS: [f64; REV4_HATS] = [1e-3, 4e-2, 1e-1, 2e-1, 5e-1, 1.0];
+/// C2 magnitude-hat centres, as the `u()` coordinates of
+/// `[1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]` (design note §C2).
+const RINGBASIS_LEVELS: [f64; REV4_HATS] = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0];
+
+/// The shared rev4 log-magnitude coordinate: the IEEE-754 bit pattern of
+/// the positive value, read as an f64 (design note "shared log-magnitude
+/// coordinate" — monotone in `v` for `v > 0`, transcendental-free,
+/// tier/libc-invariant).
+#[inline(always)]
+fn rev4_u(v: f64) -> f64 {
+    v.to_bits() as f64
+}
+
+/// `u(level)` per hat centre — const-computed through `to_bits`/`as`
+/// (the same map `rev4_u` applies per pixel).
+const fn u_centres(levels: [f64; REV4_HATS]) -> [f64; REV4_HATS] {
+    let mut c = [0.0f64; REV4_HATS];
+    let mut i = 0;
+    while i < REV4_HATS {
+        c[i] = levels[i].to_bits() as f64;
+        i += 1;
+    }
+    c
+}
+
+/// C1's six u-domain hat centres.
+const GRIDBLK_UC: [f64; REV4_HATS] = u_centres(GRIDBLK_LEVELS);
+/// C2's six u-domain hat centres.
+const RINGBASIS_UC: [f64; REV4_HATS] = u_centres(RINGBASIS_LEVELS);
+
+/// Evaluate all six triangular memberships at `u` — `hat_memberships`
+/// (`dvifm.rs`) exactly, at six bins: clamp to `[c0, c5]`, `searchsorted`
+/// side="left" picks the adjacent pair, `1−t`/`t` weights with
+/// `t = (u − c_j)/(c_{j+1} − c_j)`. Exactly two entries of the result
+/// are nonzero.
+fn rev4_hats(c: &[f64; REV4_HATS], u: f64) -> [f64; REV4_HATS] {
+    let mut h = [0.0f64; REV4_HATS];
+    let uc = u.clamp(c[0], c[REV4_HATS - 1]);
+    let i = c.partition_point(|&x| x < uc);
+    let j = i.saturating_sub(1).min(REV4_HATS - 2);
+    let t = (uc - c[j]) / (c[j + 1] - c[j]);
+    h[j] = 1.0 - t;
+    h[j + 1] = t;
+    h
+}
+
+/// Pinned IEEE-754 bit patterns for C3's 31 true-log interior edges
+/// `10^(-6 + k*log10(2e6)/32)` (k = 1..31). The 2026-09-23 TRAIN-only
+/// registry revision extended the top endpoint from 1 to 2; the final
+/// interior edge is 1.2709334445868168. Runtime binning and quantile
+/// emission use only this table, independent of platform `powf`.
+const TAIL_EDGE_BITS: [u64; 31] = [
+    0x3eba66c2a74a2306,
+    0x3ec4c5f32ba53f33,
+    0x3ed0584963ee7360,
+    0x3ed9b8969445d847,
+    0x3ee43ce83c83f32c,
+    0x3eefd8eaa4b1df44,
+    0x3ef90ee7884af44e,
+    0x3f03b76562438fa3,
+    0x3f0f06d135f4b230,
+    0x3f186997e71fea72,
+    0x3f2335535097fe64,
+    0x3f2e3a21d1f34d40,
+    0x3f37c88ad7e2850b,
+    0x3f42b69b54e81970,
+    0x3f4d72b8c0d9ca6c,
+    0x3f572ba43fff3718,
+    0x3f623b275257b423,
+    0x3f6cb0733676d0d9,
+    0x3f7692c8be49a365,
+    0x3f81c2e1bdebc593,
+    0x3f8bf32f4c29143a,
+    0x3f95fddda6357e33,
+    0x3fa14db59ac807b4,
+    0x3fab3acbfaf4e35d,
+    0x3fb56cc8fb2ef3d0,
+    0x3fc0db8e76856372,
+    0x3fca872915c0bda2,
+    0x3fd4df716c11c450,
+    0x3fe06c5865a085fb,
+    0x3fe9d82743b7eddb,
+    0x3ff455be4ebe49c1,
+];
+
+/// Binade LUT for the pinned C3 edges, used to bin in ~5 ops.
+struct TailEdges {
+    /// 31 ascending interior-edge bit patterns.
+    edges: [u64; 31],
+    /// `base[e]` = #edges strictly below binade `e`'s low end;
+    /// `inner[e]` = #edges inside binade `e` (≤ 2: edge spacing
+    /// 6/32 decade > binade width 0.301... i.e. at most `ceil(0.301/
+    /// 0.1875) = 2` — asserted at build).
+    base: Box<[u8; 1024]>,
+    inner: Box<[u8; 1024]>,
+}
+
+impl TailEdges {
+    fn build() -> Self {
+        let edges = TAIL_EDGE_BITS;
+        let mut base = Box::new([0u8; 1024]);
+        let mut inner = Box::new([0u8; 1024]);
+        for e in 0..=1023usize {
+            let lo = (e as u64) << 52;
+            let hi = ((e as u64) + 1) << 52;
+            let b = edges.partition_point(|&x| x < lo);
+            let n_in = edges[b..].partition_point(|&x| x < hi);
+            debug_assert!(
+                n_in <= 2,
+                "edge spacing admits at most two edges per binade"
+            );
+            base[e] = b as u8;
+            inner[e] = n_in as u8;
+        }
+        Self { edges, base, inner }
+    }
+
+    /// Bin index `#{edges strictly below v}` — the C3 cell convention
+    /// (an exact edge hit lands in the cell below it).
+    /// `v >= 0` by construction; values above the last edge enter the
+    /// top cell.
+    #[inline(always)]
+    fn bin(&self, v: f64) -> usize {
+        let ub = v.to_bits();
+        let e = ((ub >> 52) as usize).min(1023);
+        let b = self.base[e] as usize;
+        let inner = self.inner[e];
+        let mut bin = b;
+        if inner > 0 && ub > self.edges[b] {
+            bin += 1;
+            if inner > 1 && ub > self.edges[b + 1] {
+                bin += 1;
+            }
+        }
+        bin
+    }
+}
+
+fn tail_edges() -> &'static TailEdges {
+    use std::sync::OnceLock;
+    static E: OnceLock<TailEdges> = OnceLock::new();
+    E.get_or_init(TailEdges::build)
+}
+
+// ---------------------------------------------------------------------------
+// Calibration diagnostics (registry-revision tooling, 2026-09-24).
+// `ZENSIM_REV4_DIAG` set at process start enables per-cell fine-grained
+// histogram dumps on stderr at finalize — used only for the C3 top-edge
+// and C1 hat-centre calibration over TRAIN corpora. Default off; the
+// `Option` check is one predictable branch per scatter/rescan pass.
+// ---------------------------------------------------------------------------
+
+/// 64 log bins per diagnostic histogram.
+const DIAG_BINS: usize = 64;
+
+fn rev4_diag_enabled() -> bool {
+    use std::sync::OnceLock;
+    static D: OnceLock<bool> = OnceLock::new();
+    *D.get_or_init(|| std::env::var_os("ZENSIM_REV4_DIAG").is_some())
+}
+
+/// Diag bin for the C3 maps (range [0, 1]): 16 log bins per decade over
+/// [1e-4, 1]. `v <= 0` folds into bin 0, `v >= 1` into the last bin.
+/// Diagnostic-only — a `log10` per pixel is fine on the gated path.
+fn diag_bin01(v: f64) -> usize {
+    if v <= 0.0 || v.is_nan() {
+        return 0;
+    }
+    ((v.log10() + 4.0) * 16.0)
+        .floor()
+        .clamp(0.0, (DIAG_BINS - 1) as f64) as usize
+}
+
+/// Diag bin for C1 `|ẽ|` (unbounded, observed ≪ 100): 8 log bins per
+/// decade over [1e-5, 1e3]. `v <= 0` folds into bin 0.
+fn diag_bin_abs(v: f64) -> usize {
+    if v <= 0.0 || v.is_nan() {
+        return 0;
+    }
+    ((v.log10() + 5.0) * 8.0)
+        .floor()
+        .clamp(0.0, (DIAG_BINS - 1) as f64) as usize
+}
+
+// ---------------------------------------------------------------------------
+// REV4 per-(scale, channel) accumulator cell
+//
+// Merge-free by construction: the streaming and materialized walks both run
+// the SAME kernel strips in the SAME order and write into the cell directly
+// (the `blockiness_sparse_strip_wide` running-total pattern — "a per-strip
+// partial would reassociate"), so serial, parallel-channel and
+// streaming-vs-materialized paths all produce identical f64 op sequences.
+// ---------------------------------------------------------------------------
+
+/// C3: 32-bin log histograms + exact maxima of the four dense per-pixel
+/// maps (`d`, `art`, `det`, `mse` — in emitted order). Integer counts are
+/// merge- and order-invariant; the max is order-free.
+#[derive(Clone)]
+struct TailAccum {
+    hist: [[u32; TAILHIST_BINS]; 4],
+    max: [f64; 4],
+    /// Env-gated fine histogram for the top-edge calibration dump
+    /// (`ZENSIM_REV4_DIAG`); `None` in every production/test path.
+    diag: Option<Box<[[u32; DIAG_BINS]; 4]>>,
+}
+
+impl Default for TailAccum {
+    fn default() -> Self {
+        Self {
+            hist: [[0; TAILHIST_BINS]; 4],
+            max: [0.0; 4],
+            diag: rev4_diag_enabled().then(|| Box::new([[0; DIAG_BINS]; 4])),
+        }
+    }
+}
+
+impl TailAccum {
+    /// One map value into its bin + running max. `v >= 0` by construction.
+    #[inline(always)]
+    fn scatter(&mut self, edges: &TailEdges, v: f64, map: usize) {
+        self.hist[map][edges.bin(v)] += 1;
+        self.max[map] = self.max[map].max(v);
+        if let Some(d) = self.diag.as_deref_mut() {
+            d[map][diag_bin01(v)] += 1;
+        }
+    }
+}
+
+/// C4-noise: flat-reference-region HF-gain mass for one cell.
+#[derive(Clone, Copy, Default)]
+struct FlatAccum {
+    /// Σ `hf_gain_i` over pixels with `act ≤ C4_FLAT_ACT` (scan order).
+    hfg: f64,
+    /// Count of flat pixels.
+    n: u64,
+}
+
+/// C2: the 6 triangular `u`-domain bins of the per-pixel RINGING term —
+/// `bins[k] = Σ_px ring·m_k(u(ring))` in scan order.
+#[derive(Clone, Copy, Default)]
+struct RingAccum {
+    bins: [f64; REV4_HATS],
+}
+
+/// C4-bleed: gradient magnitudes summed OUTSIDE the dilated dst-luma-edge
+/// mask (scan order).
+#[derive(Clone, Copy, Default)]
+struct BleedAccum {
+    out_src: f64,
+    out_dst: f64,
+}
+
+/// C1: the stored `ẽ` boundary planes plus the per-phase profiles that
+/// pick the winning phase at finalize (design note §C1 "Accumulation" —
+/// the winning phase gates the emitted bins but is only known after the
+/// whole plane is walked, so the kernel stores `ẽ` per boundary and the
+/// rescan touches only on-grid positions: `2n/P` hat evaluations instead
+/// of membership work on all `2n` boundaries).
+///
+/// `plane_v[y*w + x]` holds `ẽ` of the vertical boundary between columns
+/// `x−1` and `x` (x ∈ 1..w); `plane_h[y*w + x]` holds the horizontal
+/// boundary between rows `y−1` and `y` (y ∈ 1..h). Both are written by
+/// `gridblk_strip_wide` in the SAME f32 arithmetic on every engine, so
+/// the rescan reads bitwise-identical values in the streaming and
+/// materialized walks. `abs_*`/`signed_*` are the per-phase `Σ|ẽ|`/`Σẽ`
+/// profiles — f64 running totals fed by the kernel's lane-folded V8
+/// accumulators (the lane map `(x−1, chunk parity) → phase` is fixed by
+/// construction, so the accumulation order is identical on every tier,
+/// engine and thread count — this family's determinism contract).
+struct GridblkAccum {
+    plane_v: Vec<f32>,
+    plane_h: Vec<f32>,
+    abs_v: [f64; GRIDBLK_MAX_PERIOD],
+    signed_v: [f64; GRIDBLK_MAX_PERIOD],
+    abs_h: [f64; GRIDBLK_MAX_PERIOD],
+    signed_h: [f64; GRIDBLK_MAX_PERIOD],
+}
+
+impl Default for GridblkAccum {
+    fn default() -> Self {
+        Self {
+            plane_v: Vec::new(),
+            plane_h: Vec::new(),
+            abs_v: [0.0; GRIDBLK_MAX_PERIOD],
+            signed_v: [0.0; GRIDBLK_MAX_PERIOD],
+            abs_h: [0.0; GRIDBLK_MAX_PERIOD],
+            signed_h: [0.0; GRIDBLK_MAX_PERIOD],
+        }
+    }
+}
+
+/// All rev4 state for one (scale, channel) cell. Untouched when every
+/// rev4 compute flag is off.
+#[derive(Default)]
+struct Rev4CellAccum {
+    grid: GridblkAccum,
+    ring: RingAccum,
+    tail: TailAccum,
+    flat: FlatAccum,
+    bleed: BleedAccum,
+    bank: [GmsBankCell; 5],
+    chroma: [GmsBankCell; 5],
+}
+
+/// REV4 hook bundle for the dense kernel — carries C3 (`tail`) and C4's
+/// noise descriptor (`flat`) for ONE cell. `None` on every non-rev4 call:
+/// inside the kernel the Option is one loop-invariant branch (the same
+/// shape `transducer_bank` already carries here).
+struct Rev4Dense<'a> {
+    /// C3 target when `tailhist` is on.
+    tail: Option<&'a mut TailAccum>,
+    /// C4-noise target when `arttype` is on.
+    flat: Option<&'a mut FlatAccum>,
+    /// Resolved once by the caller (a `OnceLock` hit per strip, not per
+    /// pixel).
+    edges: &'static TailEdges,
+}
+
+/// One pixel's contribution to the C3/C4 dense targets — the single code
+/// path shared by the era-1 SIMD chunk lanes, the era-1 scalar tail, and
+/// the era-2 V8 lanes so the three cannot drift.
+#[inline(always)]
+fn rev4_dense_pixel(
+    r4: &mut Rev4Dense<'_>,
+    d: f64,
+    art: f64,
+    det: f64,
+    mse: f64,
+    hfg: f64,
+    act: f64,
+) {
+    if let Some(t) = r4.tail.as_deref_mut() {
+        t.scatter(r4.edges, d, 0);
+        t.scatter(r4.edges, art, 1);
+        t.scatter(r4.edges, det, 2);
+        t.scatter(r4.edges, mse, 3);
+    }
+    if let Some(f) = r4.flat.as_deref_mut()
+        && act <= C4_FLAT_ACT
+    {
+        f.hfg += hfg;
+        f.n += 1;
+    }
+}
+
+/// REV4 hook bundle for the gradient kernel — C2's ring bins on every
+/// channel and C4's bleed sums on the chroma channels (`mask` present).
+struct Rev4Grad<'a> {
+    /// C2 target when `ringbasis` is on.
+    ring: Option<&'a mut RingAccum>,
+    /// C4 bleed: `(outside-weight mask slice, target)` — `None` on the Y
+    /// channel (and whenever `arttype` is off).
+    bleed: Option<(&'a [f32], &'a mut BleedAccum)>,
+    bank: GmsBankWork<'a>,
+}
+
+/// One pixel's contribution to the C2/C4 gradient targets — shared by the
+/// scalar border path and the SIMD chunk lanes. `i` is the pixel's
+/// strip-local index (`y*width + x`) — the C4 outside-mask weight is
+/// `1 − mask[i]`, read inside so the slice borrow never leaves `r4`.
+#[inline(always)]
+fn rev4_grad_pixel(
+    r4: &mut Rev4Grad<'_>,
+    centres: &[f64; REV4_HATS],
+    ring: f64,
+    g_src: f64,
+    g_dst: f64,
+    i: usize,
+) {
+    if let Some(bins) = r4.ring.as_deref_mut()
+        && ring > 0.0
+    {
+        let h = rev4_hats(centres, rev4_u(ring));
+        for (b, h) in bins.bins.iter_mut().zip(h.iter()) {
+            *b += ring * h;
+        }
+    }
+    if let Some((m, b)) = r4.bleed.as_mut() {
+        let out_w = 1.0 - m[i] as f64;
+        b.out_src += g_src * out_w;
+        b.out_dst += g_dst * out_w;
+    }
+}
+
+/// One (strip, channel)'s rev4 work order — the at-scale [`ComputeSet`]
+/// flags resolved against the channel, handed to [`stream_phase_b`] (and
+/// the materialized [`compute_channel_scale_v2`]). `gridblk_period == 0`
+/// is the C1-off marker (a period can never legitimately be 0), and
+/// `bleed_mask` is `Some` only on the two chroma channels.
+#[derive(Clone, Copy)]
+struct Rev4Work<'a> {
+    /// C1 lattice period for this (channel, scale) — `8 >> s` on Y,
+    /// `16 >> s` on X/B — or 0 when `gridblk` is off or degenerate (`< 2`).
+    gridblk_period: usize,
+    /// C2 ring bins run in the gradient kernel.
+    ringbasis: bool,
+    /// C3 tail histograms run in the dense kernel.
+    tailhist: bool,
+    /// C4 flat-region HF-gain noise runs in the dense kernel.
+    flat: bool,
+    /// C4 dilated dst-luma-edge mask (strip_n bytes of 0.0/1.0), `Some`
+    /// only when `arttype` is on AND this is a chroma channel.
+    bleed_mask: Option<&'a [f32]>,
+    /// C8 gradient-similarity bank runs in the same gradient pass.
+    gmsbank: bool,
+    bank: GmsBankWork<'a>,
+}
+
+/// Does the C8 gradient bank run for this (scale, channel)? C8 proper: every
+/// coarse channel plus native Y. `gmsnative` (restored cut) adds the native X
+/// and B cells; they reuse the same per-channel stabilisers and accumulators.
+fn gmsbank_cell_live(local: &ComputeSet, scale: usize, ch: usize) -> bool {
+    (local.gmsbank && (scale > 0 || ch == 1)) || (local.gmsnative && scale == 0 && ch != 1)
+}
+
+/// Materialized-path REV4 work order for one (scale, channel) — the
+/// [`ComputeSet::rev4_work`] analogue for [`compute_channel_scale_v2`],
+/// which resolves flags itself and owns the strip loop the bleed mask is
+/// built inside. `bleed_y` is the same-scale dst LUMA plane (full
+/// `width*height`), `Some` only on the chroma channels when `arttype` is
+/// on; the mask is gathered + built per strip from it.
+struct Rev4CellArgs<'a> {
+    /// The (scale, channel)'s accumulator — every enabled hook writes here.
+    cell: &'a mut Rev4CellAccum,
+    /// Same semantics as [`Rev4Work::gridblk_period`].
+    gridblk_period: usize,
+    /// Same semantics as [`Rev4Work::ringbasis`].
+    ringbasis: bool,
+    /// Same semantics as [`Rev4Work::tailhist`].
+    tailhist: bool,
+    /// Same semantics as [`Rev4Work::flat`].
+    flat: bool,
+    /// Same-scale dst-Y plane for the C4 mask — see the struct doc.
+    bleed_y: Option<&'a [f32]>,
+    gmsbank: bool,
+    bank: GmsBankWork<'a>,
+}
+
+/// Resolve one (scale, channel)'s [`Rev4CellArgs`] from the at-scale
+/// [`ComputeSet`] — the [`ComputeSet::rev4_work`] flag logic verbatim,
+/// `bleed_mask` replaced by `bleed_y` (the materialized strip loop builds
+/// the mask itself). Single owner of "which hooks this cell needs" on the
+/// materialized side.
+fn rev4_cell_args<'a>(
+    cell: &'a mut Rev4CellAccum,
+    local: &ComputeSet,
+    scale: usize,
+    ch: usize,
+    src_planes: &'a [Vec<f32>],
+    dst_planes: &'a [Vec<f32>],
+) -> Rev4CellArgs<'a> {
+    let period = (if ch == 1 {
+        BLOCK_LATTICE
+    } else {
+        2 * BLOCK_LATTICE
+    }) >> scale;
+    Rev4CellArgs {
+        cell,
+        gridblk_period: if local.gridblk && period >= 2 {
+            period
+        } else {
+            0
+        },
+        ringbasis: local.ringbasis,
+        tailhist: local.tailhist,
+        flat: local.arttype,
+        bleed_y: (local.arttype && ch != 1).then(|| &dst_planes[1][..]),
+        gmsbank: gmsbank_cell_live(local, scale, ch),
+        bank: GmsBankWork::new(
+            ch,
+            (local.gmsbank && scale > 0 && ch == 0).then(|| ChromaStrip {
+                reference: &src_planes[2],
+                distorted: &dst_planes[2],
+            }),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// REV4 emission: one PerChannel cell = gridblk(8) + ringbasis(6) +
+// tailhist(12) = 26 slots in that order; arttype is emitted per scale by
+// `finish_arttype_scale` (its blur term needs the cross-scale EWC value,
+// which only exists at finalize).
+// ---------------------------------------------------------------------------
+
+/// `#{x ∈ [1, n) : x mod P == φ}` — the per-phase boundary count of one
+/// row (V) or column (H) of the lattice. Closed form: the positions are
+/// the lattice, not the data.
+fn gridblk_phase_count(n: usize, phi: usize, period: usize) -> usize {
+    debug_assert!(phi < period);
+    if phi == 0 {
+        (n - 1) / period
+    } else if phi < n {
+        (n - 1 - phi) / period + 1
+    } else {
+        0
+    }
+}
+
+/// Strict-`>` argmax over the per-phase `Σ|ẽ|` profile (ties resolve to
+/// the lowest phase — `Rev4` spec §C1). Returns `None` when no phase has
+/// a boundary (degenerate plane).
+fn gridblk_winner(
+    abs: &[f64; GRIDBLK_MAX_PERIOD],
+    cnt: &[usize; GRIDBLK_MAX_PERIOD],
+    period: usize,
+) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    let mut best_sum = 0.0f64;
+    for p in 0..period {
+        if cnt[p] != 0 && abs[p] > best_sum {
+            best_sum = abs[p];
+            best = Some(p);
+        }
+    }
+    best
+}
+
+/// Emit the 8 `gridblk` slots for one cell. `period < 2` (Y at scale 3)
+/// or a degenerate side emits zeros — the cell is still fully registered.
+/// The magnitude bins rescan the stored `ẽ` planes at the winning phase's
+/// positions only (V: `x ≡ pv`, H: `y ≡ ph`, both in y-major scan order —
+/// the fixed rescan order every engine replays).
+fn finish_gridblk_cell(
+    grid: &GridblkAccum,
+    period: usize,
+    width: usize,
+    height: usize,
+    out: &mut [f64; GRIDBLK_PER_CELL],
+) -> Option<[u32; DIAG_BINS]> {
+    *out = [0.0; GRIDBLK_PER_CELL];
+    if period < 2 || grid.plane_v.is_empty() {
+        return None;
+    }
+    debug_assert_eq!(grid.plane_v.len(), width * height);
+    debug_assert_eq!(grid.plane_h.len(), width * height);
+    let mut cnt_v = [0usize; GRIDBLK_MAX_PERIOD];
+    let mut cnt_h = [0usize; GRIDBLK_MAX_PERIOD];
+    for p in 0..period {
+        cnt_v[p] = gridblk_phase_count(width, p, period) * height;
+        cnt_h[p] = gridblk_phase_count(height, p, period) * width;
+    }
+    let (Some(pv), Some(ph)) = (
+        gridblk_winner(&grid.abs_v, &cnt_v, period),
+        gridblk_winner(&grid.abs_h, &cnt_h, period),
+    ) else {
+        return None;
+    };
+    // On-grid = the winning phase of each orientation, V and H pooled.
+    let n_on = (cnt_v[pv] + cnt_h[ph]) as f64;
+    let (mut off_abs, mut n_off) = (0.0f64, 0.0f64);
+    for p in 0..period {
+        if p != pv {
+            off_abs += grid.abs_v[p];
+            n_off += cnt_v[p] as f64;
+        }
+        if p != ph {
+            off_abs += grid.abs_h[p];
+            n_off += cnt_h[p] as f64;
+        }
+    }
+    if n_off == 0.0 {
+        return None;
+    }
+    // On-grid rescan: 6 triangular-hat memberships of `u(|ẽ|)`, weighted
+    // by the SIGNED `ẽ` — ~2n/P evaluations, the store-then-rescan shape
+    // the design note's C1 "Accumulation" paragraph commits.
+    let mut bins = [0.0f64; REV4_HATS];
+    let mut diag = rev4_diag_enabled().then_some([0u32; DIAG_BINS]);
+    let xv0 = if pv == 0 { period } else { pv };
+    for y in 0..height {
+        let row = y * width;
+        let mut x = xv0;
+        while x < width {
+            let v = grid.plane_v[row + x] as f64;
+            if v != 0.0 {
+                let a = v.abs();
+                let h = rev4_hats(&GRIDBLK_UC, rev4_u(a));
+                for k in 0..REV4_HATS {
+                    bins[k] += v * h[k];
+                }
+                if let Some(d) = diag.as_mut() {
+                    d[diag_bin_abs(a)] += 1;
+                }
+            }
+            x += period;
+        }
+    }
+    let yh0 = if ph == 0 { period } else { ph };
+    for y in (yh0..height).step_by(period) {
+        let row = y * width;
+        for x in 0..width {
+            let v = grid.plane_h[row + x] as f64;
+            if v != 0.0 {
+                let a = v.abs();
+                let h = rev4_hats(&GRIDBLK_UC, rev4_u(a));
+                for k in 0..REV4_HATS {
+                    bins[k] += v * h[k];
+                }
+                if let Some(d) = diag.as_mut() {
+                    d[diag_bin_abs(a)] += 1;
+                }
+            }
+        }
+    }
+    for k in 0..REV4_HATS {
+        out[k] = bins[k] / n_on;
+    }
+    // `on_mean` is the SIGNED mean (design note §C1 — a suppression reads
+    // negative); `onoff_ratio` is the abs-mean contrast with the C_BLOCK
+    // denominator guard, not a bare ratio.
+    out[6] = (grid.signed_v[pv] + grid.signed_h[ph]) / n_on;
+    out[7] = (grid.abs_v[pv] + grid.abs_h[ph]) / n_on / (off_abs / n_off + C_BLOCK);
+    diag
+}
+
+/// Emit the 6 `ringbasis` slots for one cell: `bins[k]/n_px`.
+fn finish_ringbasis_cell(ring: &RingAccum, n_px: usize, out: &mut [f64; RINGBASIS_PER_CELL]) {
+    *out = [0.0; RINGBASIS_PER_CELL];
+    if n_px == 0 {
+        return;
+    }
+    let inv = 1.0 / n_px as f64;
+    for (o, b) in out.iter_mut().zip(ring.bins.iter()) {
+        *o = b * inv;
+    }
+}
+
+/// Emit the 12 `tailhist` slots for one cell: p95/p99/max over SSIM-d,
+/// ART, DET, MSE in that order. `p_q` is the LOWER EDGE of the first bin
+/// whose cumulative count reaches `ceil(q·n)`; bin 0 emits 0.0.
+fn finish_tailhist_cell(tail: &TailAccum, n_px: usize, out: &mut [f64; TAILHIST_PER_CELL]) {
+    *out = [0.0; TAILHIST_PER_CELL];
+    if n_px == 0 {
+        return;
+    }
+    let edges = tail_edges();
+    for m in 0..4 {
+        let h = &tail.hist[m];
+        let p95 = tail_quantile_edge(h, n_px, 0.95, edges);
+        let p99 = tail_quantile_edge(h, n_px, 0.99, edges);
+        out[m * 3] = p95;
+        out[m * 3 + 1] = p99;
+        out[m * 3 + 2] = tail.max[m];
+    }
+}
+
+/// Lower edge (as the true-log value, not bits) of the first bin whose
+/// cumulative count reaches `ceil(q·n)`. Bin 0's lower edge is 0.0 (the
+/// exact-identity cell). Only called with `n > 0`.
+fn tail_quantile_edge(h: &[u32; TAILHIST_BINS], n: usize, q: f64, edges: &TailEdges) -> f64 {
+    let target = (q * n as f64).ceil() as u64;
+    let mut cum = 0u64;
+    for (i, &c) in h.iter().enumerate() {
+        cum += c as u64;
+        if cum >= target {
+            return if i == 0 {
+                0.0
+            } else {
+                f64::from_bits(edges.edges[i - 1])
+            };
+        }
+    }
+    // Unreachable given target <= n, but keep the function total.
+    f64::from_bits(edges.edges[TAILHIST_BINS - 2])
+}
+
+/// Emit the 6 `arttype` slots for one scale. `ewc_y`/`hfl_y` are the
+/// already-finished Y EDGE_WIDTH_CHANGE and HF_LOSS values for this scale
+/// (the blur term multiplies finished feature values — design note §C4).
+/// `flat`/`bleed` are the three channels' accumulator cells in the walk's
+/// `accums` order (`[X=0, Y=1, B=2]`).
+fn finish_arttype_scale(
+    ewc_y: f64,
+    hfl_y: f64,
+    flat: &[FlatAccum; 3],
+    bleed: &[BleedAccum; 3],
+    out: &mut [f64; ARTTYPE_PER_SCALE],
+) {
+    out[idx_arttype::BLUR] = ewc_y * hfl_y;
+    // `flat`/`bleed` are indexed by CHANNEL (0 = X, 1 = Y, 2 = B — the
+    // walk's `accums` order); the registry's NOISE_* order is X, Y, B.
+    out[idx_arttype::NOISE_X] = if flat[0].n == 0 {
+        0.0
+    } else {
+        flat[0].hfg / flat[0].n as f64
+    };
+    out[idx_arttype::NOISE_Y] = if flat[1].n == 0 {
+        0.0
+    } else {
+        flat[1].hfg / flat[1].n as f64
+    };
+    out[idx_arttype::NOISE_B] = if flat[2].n == 0 {
+        0.0
+    } else {
+        flat[2].hfg / flat[2].n as f64
+    };
+    out[idx_arttype::BLEED_X] = bounded_excess(bleed[0].out_dst, bleed[0].out_src, C_GMS);
+    out[idx_arttype::BLEED_B] = bounded_excess(bleed[2].out_dst, bleed[2].out_src, C_GMS);
+}
+
+/// Emit all four rev4 families for one scale into their feature slices.
+/// `cells` are the channels' `Rev4CellAccum`s in channel order (0 = X,
+/// 1 = Y, 2 = B — the walk's `accums` order); `out_*`
+/// are the family slices for this scale (`None` when the family is off —
+/// emission is skipped, the slots still exist in the vector as zeros
+/// only when the layout declared them).
+#[allow(clippy::too_many_arguments)]
+fn finish_rev4_scale(
+    cs: &ComputeSet,
+    scale: usize,
+    cells: [&Rev4CellAccum; 3],
+    width: usize,
+    height: usize,
+    ewc_y: f64,
+    hfl_y: f64,
+    out_grid: Option<&mut [f64]>,
+    out_ring: Option<&mut [f64]>,
+    out_tail: Option<&mut [f64]>,
+    out_art: Option<&mut [f64]>,
+) {
+    let n_px = width * height;
+    let period_y = BLOCK_LATTICE >> scale;
+    let period_c = (BLOCK_LATTICE * 2) >> scale;
+    if let Some(o) = out_grid {
+        debug_assert_eq!(o.len(), 3 * GRIDBLK_PER_CELL);
+        if cs.gridblk {
+            for ch in 0..3 {
+                // `cells`/`o` are channel-ordered [X, Y, B]: only Y is luma.
+                let period = if ch == 1 { period_y } else { period_c };
+                let diag = finish_gridblk_cell(
+                    &cells[ch].grid,
+                    period,
+                    width,
+                    height,
+                    (&mut o[ch * GRIDBLK_PER_CELL..(ch + 1) * GRIDBLK_PER_CELL])
+                        .try_into()
+                        .unwrap(),
+                );
+                if let Some(d) = diag {
+                    eprintln!(
+                        "REV4DIAGABS s{scale} c{ch} {}",
+                        d.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+                    );
+                }
+            }
+        }
+    }
+    if let Some(o) = out_ring {
+        debug_assert_eq!(o.len(), 3 * RINGBASIS_PER_CELL);
+        if cs.ringbasis {
+            for ch in 0..3 {
+                finish_ringbasis_cell(
+                    &cells[ch].ring,
+                    n_px,
+                    (&mut o[ch * RINGBASIS_PER_CELL..(ch + 1) * RINGBASIS_PER_CELL])
+                        .try_into()
+                        .unwrap(),
+                );
+            }
+        }
+    }
+    if let Some(o) = out_tail {
+        debug_assert_eq!(o.len(), 3 * TAILHIST_PER_CELL);
+        if cs.tailhist {
+            for ch in 0..3 {
+                finish_tailhist_cell(
+                    &cells[ch].tail,
+                    n_px,
+                    (&mut o[ch * TAILHIST_PER_CELL..(ch + 1) * TAILHIST_PER_CELL])
+                        .try_into()
+                        .unwrap(),
+                );
+                if let Some(d) = cells[ch].tail.diag.as_deref() {
+                    for (m, h) in d.iter().enumerate() {
+                        eprintln!(
+                            "REV4DIAGTAIL s{scale} c{ch} m{m} {}",
+                            h.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if let Some(o) = out_art {
+        debug_assert_eq!(o.len(), ARTTYPE_PER_SCALE);
+        if cs.arttype {
+            finish_arttype_scale(
+                ewc_y,
+                hfl_y,
+                &[cells[0].flat, cells[1].flat, cells[2].flat],
+                &[cells[0].bleed, cells[1].bleed, cells[2].bleed],
+                o.try_into().unwrap(),
+            );
+        }
+    }
+}
+
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
 pub(crate) const BLUR_RADIUS: usize = 5;
 /// Oriented-blockiness lattice period (JPEG's 8x8 MCU grid).
@@ -704,15 +1585,29 @@ pub(crate) fn gather_strip_halo(
 /// divide on every target ISA this crate SIMD-dispatches to. Kept for the
 /// scalar tail loop; see `ssim_d_local_v` for the SIMD sibling, which
 /// additionally routes the single division through `.recip()` (step 2).
+///
+/// `direct` (revision 3, issue #61): the fourth plane is the DIRECT error
+/// moment `E[(a-b)²]` rather than `E[ab]` — the H pass accumulates it in the
+/// `sigma12` plane's place — so the covariance subtraction, which cancels
+/// catastrophically on flat content, is replaced through the identity
+/// `2cov = var_sum - err_var`. Then `1 - (a/b)(c/d)` becomes
+/// `(d(b-a) + a·err_var) / (b·d)`: still one division, and the same
+/// bounded-error contract as the v1 signal (`ssim_form::SsimSplats16::direct`).
 #[inline]
-fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64) -> f64 {
+fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64, direct: bool) -> f64 {
     let a = 2.0 * mu1 * mu2 + C1_V2;
     let b = mu1 * mu1 + mu2 * mu2 + C1_V2;
-    let cov = s12 - mu1 * mu2;
-    let c = 2.0 * cov + C2_V2;
     let d = ssq - mu1 * mu1 - mu2 * mu2 + C2_V2;
-    let local = (a * c) / (b * d);
-    (1.0 - local).max(0.0)
+    if direct {
+        let mu_diff = mu1 - mu2;
+        let err_var = (s12 - mu_diff * mu_diff).max(0.0);
+        ((d * (b - a) + a * err_var) / (b * d)).max(0.0)
+    } else {
+        let cov = s12 - mu1 * mu2;
+        let c = 2.0 * cov + C2_V2;
+        let local = (a * c) / (b * d);
+        (1.0 - local).max(0.0)
+    }
 }
 
 /// GMSD/FSIM/DISTS canonical bounded-similarity form: `(2ab+c)/(a²+b²+c)`.
@@ -854,17 +1749,25 @@ fn ssim_d_local_v<T: F32x8Backend + Copy>(
     ssq: V8<T>,
     c1: V8<T>,
     c2: V8<T>,
+    // Revision 3: `s12` carries the direct error moment; see `ssim_d_local`.
+    direct: bool,
 ) -> V8<T> {
     let two = V8::<T>::splat(token, 2.0);
     let one = V8::<T>::splat(token, 1.0);
     let zero = V8::<T>::zero(token);
     let a = two * mu1 * mu2 + c1;
     let b = mu1 * mu1 + mu2 * mu2 + c1;
-    let cov = s12 - mu1 * mu2;
-    let c = two * cov + c2;
     let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
-    let local = (a * c) / (b * d);
-    (one - local).max(zero)
+    if direct {
+        let mu_diff = mu1 - mu2;
+        let err_var = (s12 - mu_diff * mu_diff).max(zero);
+        ((d * (b - a) + a * err_var) / (b * d)).max(zero)
+    } else {
+        let cov = s12 - mu1 * mu2;
+        let c = two * cov + c2;
+        let local = (a * c) / (b * d);
+        (one - local).max(zero)
+    }
 }
 
 /// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`. Bounded `(0, 1]`.
@@ -1095,8 +1998,23 @@ pub enum FeatureRegime {
     /// chunk-3 tier-1, Y-only luminance-CSF-weighted GLOBAL_* twins).
     /// Additive-only and default-OFF — new-regime rows only (the HDR
     /// backfill wave); never mixed into 944- or 924-regime tables. The
-    /// chroma tiers (f956..f979) are a later wave.
+    /// chroma tiers' old f956..f979 claim was released (CSF design doc);
+    /// f956..f985 is now DVIFM's — see [`Folded720Dvifm`].
     Folded720Csfw,
+    /// [`Folded720Csfw`](Self::Folded720Csfw) plus the f956+ DVIFM
+    /// block-visibility block (30 flat slots — the family's own five-level
+    /// pyramid off the scale-0 Y rows; see [`crate::dvifm`]). Additive-only
+    /// and default-OFF — a pre-screen qualification regime; never mixed
+    /// into 956- or narrower-regime tables.
+    Folded720Dvifm,
+    /// [`Folded720Dvifm`](Self::Folded720Dvifm) plus the four REV4
+    /// feature-bank families (f986..f1321: `gridblk` 96, `ringbasis` 72,
+    /// `tailhist` 144, `arttype` 24 — see `docs/REV4_FEATURE_BANK_PLAN_*
+    /// .md`). Assigned only when ALL FOUR rev4 layout flags are on
+    /// (the full 1322 row, also used by the additive C8 1502 row); a rev4-subset request keeps the regime of
+    /// its widest fully-registered block — the slot provenance still
+    /// disambiguates exactly which tail cells are populated.
+    Folded720Rev4,
 }
 
 /// Result of [`compute_v2_features_impl`]/[`crate::Zensim::compute_v2_features`].
@@ -1160,6 +2078,15 @@ impl ZensimV2Result {
                 let end = self.features.len() - tail;
                 &self.features[end - v2_len..end]
             }
+            FeatureRegime::Folded720Dvifm => {
+                let tail = self.n_scales
+                    * (3 * FEATURES_PER_CHANNEL_APPEND + APPEND2_PER_SCALE + CSFW_PER_SCALE)
+                    + crate::dvifm::DVIFM_FEATURES;
+                let end = self.features.len() - tail;
+                &self.features[end - v2_len..end]
+            }
+            // Both 1322 and 1502 retain the same fixed v2 block at f372.
+            FeatureRegime::Folded720Rev4 => &self.features[372..372 + v2_len],
             _ => &self.features[..],
         };
         FeatureViewV2::new(v2_block, self.n_scales)
@@ -1187,13 +2114,22 @@ impl ZensimV2Result {
                     - self.n_scales * (APPEND2_PER_SCALE + CSFW_PER_SCALE);
                 Some(&self.features[start..start + append_len])
             }
+            FeatureRegime::Folded720Dvifm => {
+                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
+                let start = self.features.len()
+                    - append_len
+                    - self.n_scales * (APPEND2_PER_SCALE + CSFW_PER_SCALE)
+                    - crate::dvifm::DVIFM_FEATURES;
+                Some(&self.features[start..start + append_len])
+            }
             _ => None,
         }
     }
 
     /// The f924+ append2 slots (`n_scales × APPEND2_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Append2`] or
-    /// [`FeatureRegime::Folded720Csfw`]).
+    /// result carries them ([`FeatureRegime::Folded720Append2`],
+    /// [`FeatureRegime::Folded720Csfw`], or
+    /// [`FeatureRegime::Folded720Dvifm`]).
     pub fn append2_features(&self) -> Option<&[f64]> {
         match self.regime {
             FeatureRegime::Folded720Append2 => {
@@ -1205,16 +2141,44 @@ impl ZensimV2Result {
                 let start = self.features.len() - len - self.n_scales * CSFW_PER_SCALE;
                 Some(&self.features[start..start + len])
             }
+            FeatureRegime::Folded720Dvifm => {
+                let len = self.n_scales * APPEND2_PER_SCALE;
+                let start = self.features.len()
+                    - len
+                    - self.n_scales * CSFW_PER_SCALE
+                    - crate::dvifm::DVIFM_FEATURES;
+                Some(&self.features[start..start + len])
+            }
             _ => None,
         }
     }
 
     /// The f944+ CSFW slots (`n_scales × CSFW_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Csfw`]).
+    /// result carries them ([`FeatureRegime::Folded720Csfw`] or
+    /// [`FeatureRegime::Folded720Dvifm`]).
     pub fn csfw_features(&self) -> Option<&[f64]> {
         match self.regime {
             FeatureRegime::Folded720Csfw => {
                 let len = self.n_scales * CSFW_PER_SCALE;
+                Some(&self.features[self.features.len() - len..])
+            }
+            FeatureRegime::Folded720Dvifm => {
+                let len = self.n_scales * CSFW_PER_SCALE;
+                let start = self.features.len() - len - crate::dvifm::DVIFM_FEATURES;
+                Some(&self.features[start..start + len])
+            }
+            _ => None,
+        }
+    }
+
+    /// The f956+ DVIFM slots ([`crate::dvifm::DVIFM_FEATURES`] flat slots —
+    /// `level*6 + local`, F1 then five F2 bins per level), when the result
+    /// carries them ([`FeatureRegime::Folded720Dvifm`]).
+    #[cfg(test)]
+    pub(crate) fn dvifm_features(&self) -> Option<&[f64]> {
+        match self.regime {
+            FeatureRegime::Folded720Dvifm => {
+                let len = crate::dvifm::DVIFM_FEATURES;
                 Some(&self.features[self.features.len() - len..])
             }
             _ => None,
@@ -1441,6 +2405,15 @@ pub struct V2NewFeatureToggles {
     /// at f944+ after append2. Additive-only; joins the NEXT extraction
     /// regime wave (the HDR backfill).
     pub csfw_block: bool,
+    /// Emit the f956+ DVIFM block-visibility block
+    /// ([`crate::dvifm::DVIFM_FEATURES`] flat slots — the family's own
+    /// five-level binomial pyramid off the scale-0 Y rows, F1 + five F2
+    /// bins per level). Default OFF: with this false the DVIFM pump never
+    /// runs and every existing path, layout, and byte — SDR and HDR
+    /// routes — is unchanged. Requires `csfw_block` (asserted): the block
+    /// sits at f956+ after CSFW. Additive-only; pre-screen qualification
+    /// stage — the constants are seed placeholders, not fitted.
+    pub dvifm_block: bool,
     /// BANDVIS dst-activity plane (the recorded V3(b)/(c) cross-fire fix
     /// from `benchmarks/append2_bandvis_gates_2026-07-27.md` REMAINDERS
     /// #3, implemented + adjudicated 2026-08-02 for the SOTA-944 P1.5
@@ -1558,6 +2531,61 @@ pub struct V2NewFeatureToggles {
     /// to be visible.
     #[doc(hidden)]
     pub free_extras: V1FreeExtras,
+    /// REV4 CANDIDATE BANK (2026-09-23, `benchmarks/rev4_featbank_impl_
+    /// 2026-09-23.md`): the f986+ grid-phase blocking block
+    /// ([`crate::feature_defs::BLOCKS`] `gridblk` — 8 signals per
+    /// (scale, channel): 6 signed log-magnitude bins of the
+    /// activity-normalised lattice-boundary step excess at the estimated
+    /// grid phase, plus on-grid mean and on/off ratio). Default OFF: with
+    /// this false every existing path, layout, and byte is unchanged.
+    /// Independent of the other rev4 families — the emit tail is
+    /// absolute-positioned, so any subset stays index-stable; requires
+    /// `dvifm_block` (asserted) since the family's base sits at f986.
+    #[doc(hidden)]
+    pub rev4_gridblk: bool,
+    /// REV4 C2 ringing-magnitude basis (f1082+ — 6 triangular
+    /// log-magnitude bins of the gradient kernel's own per-pixel RINGING
+    /// term, per (scale, channel)). Independent of the other rev4
+    /// families; requires `dvifm_block` (asserted). Default OFF.
+    #[doc(hidden)]
+    pub rev4_ringbasis: bool,
+    /// REV4 C3 tail pooling (f1154+ — per (scale, channel): p95/p99/max
+    /// of the SSIM/ART/DET/MSE per-pixel maps from the family's fixed
+    /// 32-bin log-edged histogram). Independent of the other rev4
+    /// families; requires `dvifm_block` (asserted). Default OFF.
+    #[doc(hidden)]
+    pub rev4_tailhist: bool,
+    /// REV4 C4 artifact-type descriptors (f1298+ — per scale: Y
+    /// EDGE_WIDTH_CHANGE×HF_LOSS blur, flat-region HF_GAIN noise per
+    /// channel, dst-chroma gradient excess outside a ±1-px dilated
+    /// dst-luma-edge mask for X/B bleeding). Independent of the other
+    /// rev4 families; requires `dvifm_block` (asserted). Default OFF.
+    #[doc(hidden)]
+    pub rev4_arttype: bool,
+    /// Experimental C8 GMSBANK f1322..f1501, default off. The 2026-09-24
+    /// revision carries native Y and coarse X/Y/B gradient loss/gain/deviation,
+    /// plus coarse joint X/B chromaticity loss/deviation, each at five pinned
+    /// stabilizers. Earlier C8 sidecars are incompatible despite equal width.
+    /// The 1502-slot layout requires DVIFM and the four preceding Rev4 blocks.
+    #[doc(hidden)]
+    pub gmsbank: bool,
+    /// Restored cut A1 `mapdev` f1502..1561: per-(scale, channel) population
+    /// std of the raw squared-error and the four HF maps. Default OFF. The
+    /// layout requires the full C8 prefix (f0..f1501).
+    #[doc(hidden)]
+    pub mapdev: bool,
+    /// Restored cut B2 `z1max` f1562..1789: the basic+peaks surface pooled
+    /// over ungated 5x5 block maxima. Default OFF. Requires `mapdev`'s layout.
+    #[doc(hidden)]
+    pub z1max: bool,
+    /// Restored cut `gmsnative` f1790..1819: C8's X/B gradient bank at native
+    /// scale. Default OFF. Requires `z1max`'s layout.
+    #[doc(hidden)]
+    pub gmsnative: bool,
+    /// Restored cut `dvifmgate` f1820..1824: C7's per-level F1 under the
+    /// two-state gate visibility. Default OFF. Requires `gmsnative`'s layout.
+    #[doc(hidden)]
+    pub dvifmgate: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -1780,11 +2808,21 @@ impl Default for V2NewFeatureToggles {
             append_block: false,
             append2_block: false,
             csfw_block: false,
+            dvifm_block: false,
             append2_dst_activity: false,
             formula_revision: crate::ssim_form::active_revision(),
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
             free_extras: V1FreeExtras::Off,
+            rev4_gridblk: false,
+            rev4_ringbasis: false,
+            rev4_tailhist: false,
+            rev4_arttype: false,
+            gmsbank: false,
+            mapdev: false,
+            z1max: false,
+            gmsnative: false,
+            dvifmgate: false,
         }
     }
 }
@@ -1909,8 +2947,22 @@ pub(crate) struct ComputeSet {
     /// The v1 basic fold (`f0..155`). Always on today; a field so that a
     /// v2-only request is expressible rather than impossible.
     pub v1_basic: bool,
+    /// Full-resolution X/B moments. Plans may omit them for basic/peak subsets.
+    /// Conversion and the coarser XYB pyramid always remain complete.
+    pub full_res_xb: bool,
+    /// Coarse scales whose basic/peak moments need only Y (bits 1..3).
+    pub coarse_y_only_scales: u8,
+    /// Only basic local SSIM/edge moments and MSE; no peaks or HF ratios.
+    pub local_only: bool,
+    pub omit_edges: bool,
+    pub sampling: Option<crate::sampling::Sampling>,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
+    /// Scales that run the shared masked/IW activity chain in Full mode.
+    /// Public extraction retains all scales; declared-ID plans narrow this.
+    pub v1_full_scales: u8,
+    /// Actual v2-era work, including adjacent-scale gradient dependencies.
+    pub v2_scales: u8,
     /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
     /// request, which then computes NOTHING v2-era.
     pub v2_blocks: bool,
@@ -1922,6 +2974,33 @@ pub(crate) struct ComputeSet {
     pub append2: bool,
     pub append2_dst_activity: bool,
     pub csfw: bool,
+    /// The DVIFM block-visibility pump (f956+; the family's own pyramid off
+    /// the scale-0 Y rows — NOT replicated per walk scale).
+    pub dvifm: bool,
+    /// REV4 C1 grid-phase blocking (f986+, `gridblk`): the strip kernel
+    /// over the wide src/dst/activity windows. Independent compute gate —
+    /// the emit tail is absolute-positioned, so each family can run alone.
+    pub gridblk: bool,
+    /// REV4 C2 ringing-magnitude bins (f1082+): the gradient kernel's
+    /// per-pixel RINGING term folded into 6 triangular log-magnitude bins.
+    pub ringbasis: bool,
+    /// REV4 C3 tail pooling (f1154+): the dense kernel's d/art/det/mse
+    /// per-pixel values folded into the family's 32-bin log histograms.
+    pub tailhist: bool,
+    /// REV4 C4 artifact-type descriptors (f1298+): flat-region HF_GAIN
+    /// noise in the dense kernel, dst-chroma bleed outside the dilated
+    /// dst-luma-edge mask in the gradient kernel, and the finalize-time
+    /// EWC×HF_LOSS blur product.
+    pub arttype: bool,
+    pub gmsbank: bool,
+    /// Restored cut A1 (`mapdev`): the per-band map side pass runs.
+    pub mapdev: bool,
+    /// Restored cut B2 (`z1max`): the block-max pooled side pass runs.
+    pub z1max: bool,
+    /// Restored cut `gmsnative`: C8's native-scale X/B gradient bank runs.
+    pub gmsnative: bool,
+    /// Restored cut `dvifmgate`: the DVIFM pump also accumulates the gate F1.
+    pub dvifmgate: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -1969,6 +3048,54 @@ pub fn active_formula_revision() -> FormulaRevision {
 }
 
 impl ComputeSet {
+    pub(crate) const ALL_SCALES: u8 = (1 << crate::NUM_SCALES) - 1;
+
+    /// Narrow kernels without changing layout or the within-scale arithmetic.
+    pub(crate) fn at_scale(self, scale: usize) -> Self {
+        let live = self.v2_scales & (1 << scale) != 0;
+        Self {
+            v1_pools: self.pools_at(scale),
+            v2_blocks: self.v2_blocks && live,
+            gradient: self.gradient && live,
+            blockiness: self.blockiness && live,
+            append: self.append && live,
+            append2: self.append2 && live,
+            csfw: self.csfw && live,
+            // DVIFM's pump reads the scale-0 strips only, so this flag can
+            // ever be live at scale 0 — and `def_at` reports its flat slots
+            // as scale 0, which is the same attribution.
+            dvifm: self.dvifm && live,
+            gridblk: self.gridblk && live,
+            ringbasis: self.ringbasis && live,
+            tailhist: self.tailhist && live,
+            arttype: self.arttype && live,
+            gmsbank: self.gmsbank && live,
+            mapdev: self.mapdev && live,
+            z1max: self.z1max && live,
+            gmsnative: self.gmsnative && live,
+            dvifmgate: self.dvifmgate && live,
+            ..self
+        }
+    }
+
+    /// Only Full has a per-scale restriction. Peaks keeps the same basic
+    /// and peak accumulators while omitting the activity/weighted-pool chain.
+    pub(crate) fn pools_at(&self, scale: usize) -> V1PoolsMode {
+        if self.v1_pools == V1PoolsMode::Full && self.v1_full_scales & (1 << scale) == 0 {
+            V1PoolsMode::Peaks
+        } else {
+            self.v1_pools
+        }
+    }
+
+    pub(crate) fn full_pool_scales(&self) -> u8 {
+        match self.v1_pools {
+            V1PoolsMode::Full => self.v1_full_scales,
+            V1PoolsMode::Carriers => 0b0011,
+            _ => 0,
+        }
+    }
+
     /// The ONE derivation from the public request type. Every `&&
     /// v2_blocks` here was previously written out at a call site; the
     /// invariant is that a v1-only request forces every v2-era block off
@@ -1981,7 +3108,14 @@ impl ComputeSet {
         Self {
             formula_revision: t.formula_revision,
             v1_basic: true,
+            full_res_xb: true,
+            coarse_y_only_scales: 0,
+            local_only: false,
+            omit_edges: false,
+            sampling: None,
             v1_pools: t.v1_pools,
+            v1_full_scales: Self::ALL_SCALES,
+            v2_scales: Self::ALL_SCALES,
             v2_blocks,
             gradient: t.gradient_features && v2_blocks,
             blockiness: t.blockiness && v2_blocks,
@@ -1991,6 +3125,16 @@ impl ComputeSet {
             append2,
             append2_dst_activity: t.append2_dst_activity && append2,
             csfw: t.csfw_block && v2_blocks,
+            dvifm: t.dvifm_block && v2_blocks,
+            gridblk: t.rev4_gridblk && v2_blocks,
+            ringbasis: t.rev4_ringbasis && v2_blocks,
+            tailhist: t.rev4_tailhist && v2_blocks,
+            arttype: t.rev4_arttype && v2_blocks,
+            gmsbank: t.gmsbank && v2_blocks,
+            mapdev: t.mapdev && v2_blocks,
+            z1max: t.z1max && v2_blocks,
+            gmsnative: t.gmsnative && v2_blocks,
+            dvifmgate: t.dvifmgate && v2_blocks,
             free_extras: t.free_extras,
         }
     }
@@ -2027,6 +3171,9 @@ impl ComputeSet {
     pub(crate) fn free_work(&self, ch: usize) -> crate::fused::FreeExtrasWork {
         let bounded_err = self.bounded_err();
         crate::fused::FreeExtrasWork {
+            revision: Some(self.formula_revision),
+            local_only: self.local_only,
+            omit_edges: self.omit_edges,
             raw_moments: self.raw_moments(),
             bounded_err,
             lum_bins: bounded_err && !self.append && ch == APPEND2_CHANNEL,
@@ -2105,6 +3252,36 @@ impl ComputeSet {
         if self.csfw {
             p = p.with(T::Csfw);
         }
+        if self.dvifm {
+            p = p.with(T::Dvifm);
+        }
+        if self.gridblk {
+            p = p.with(T::Gridblk);
+        }
+        if self.ringbasis {
+            p = p.with(T::Ringbasis);
+        }
+        if self.tailhist {
+            p = p.with(T::Tailhist);
+        }
+        if self.arttype {
+            p = p.with(T::Arttype);
+        }
+        if self.gmsbank {
+            p = p.with(T::Gmsbank);
+        }
+        if self.mapdev {
+            p = p.with(T::Mapdev);
+        }
+        if self.z1max {
+            p = p.with(T::Z1max);
+        }
+        if self.gmsnative {
+            p = p.with(T::Gmsnative);
+        }
+        if self.dvifmgate {
+            p = p.with(T::Dvifmgate);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -2130,6 +3307,22 @@ impl ComputeSet {
         layout_width: usize,
     ) -> crate::feature_set_id::SlotSet {
         use crate::feature_set_id::SlotSet;
+        if self.v2_scales != Self::ALL_SCALES {
+            return SlotSet::from_slots((0..n_scales).flat_map(|scale| {
+                let local = Self {
+                    v2_scales: Self::ALL_SCALES,
+                    ..self.at_scale(scale)
+                };
+                local
+                    .populated_slots(n_scales, layout_width)
+                    .iter_slots()
+                    .filter(move |&id| {
+                        crate::feature_defs::def_at(id, n_scales)
+                            .is_some_and(|d| usize::from(d.scale) == scale)
+                    })
+                    .collect::<Vec<_>>()
+            }));
+        }
         let basic = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_BASIC;
         let peaks_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
         let masked_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED;
@@ -2138,6 +3331,21 @@ impl ComputeSet {
         let append_end = v2_end + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
         let append2_end = append_end + n_scales * APPEND2_PER_SCALE;
         let csfw_end = append2_end + n_scales * CSFW_PER_SCALE;
+        // Flat block: 30 slots at `csfw_end` regardless of `n_scales`
+        // (`feature_defs::Replication::Flat` owns the same arithmetic).
+        let dvifm_end = csfw_end + crate::dvifm::DVIFM_FEATURES;
+        // REV4 families: registered (absolute) bases — the emit tail is
+        // absolute-positioned, so each family's range lands at its
+        // registered slots whether or not the families before it ran.
+        let gridblk_end = dvifm_end + n_scales * 3 * GRIDBLK_PER_CELL;
+        let ringbasis_end = gridblk_end + n_scales * 3 * RINGBASIS_PER_CELL;
+        let tailhist_end = ringbasis_end + n_scales * 3 * TAILHIST_PER_CELL;
+        let arttype_end = tailhist_end + n_scales * ARTTYPE_PER_SCALE;
+        let gmsbank_end = arttype_end + gmsbank_width(n_scales);
+        let mapdev_end = gmsbank_end + n_scales * 3 * MAPDEV_PER_CELL;
+        let z1max_end = mapdev_end + n_scales * 3 * Z1MAX_PER_CELL;
+        let gmsnative_end = z1max_end + GMSNATIVE_WIDTH;
+        let dvifmgate_end = gmsnative_end + DVIFMGATE_WIDTH;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -2162,15 +3370,125 @@ impl ComputeSet {
         if self.csfw {
             ranges.push((append2_end, csfw_end));
         }
+        if self.dvifm {
+            ranges.push((csfw_end, dvifm_end));
+        }
+        if self.gridblk {
+            ranges.push((dvifm_end, gridblk_end));
+        }
+        if self.ringbasis {
+            ranges.push((gridblk_end, ringbasis_end));
+        }
+        if self.tailhist {
+            ranges.push((ringbasis_end, tailhist_end));
+        }
+        if self.arttype {
+            ranges.push((tailhist_end, arttype_end));
+        }
+        if self.gmsbank {
+            ranges.push((arttype_end, gmsbank_end));
+        }
+        if self.mapdev {
+            ranges.push((gmsbank_end, mapdev_end));
+        }
+        if self.z1max {
+            ranges.push((mapdev_end, z1max_end));
+        }
+        if self.gmsnative {
+            ranges.push((z1max_end, gmsnative_end));
+        }
+        if self.dvifmgate {
+            ranges.push((gmsnative_end, dvifmgate_end));
+        }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
         }
         if self.bounded_err() {
             scattered.extend(class_c_slot_indices(n_scales));
         }
-        SlotSet::from_ranges(ranges)
+        let slots = SlotSet::from_ranges(ranges)
             .union(&SlotSet::from_slots(scattered))
-            .clipped_to(layout_width)
+            .clipped_to(layout_width);
+        SlotSet::from_slots(slots.iter_slots().filter(|&id| {
+            (!self.local_only
+                || (id < basic && id % crate::metric::FEATURES_PER_CHANNEL_BASIC < 10))
+                && (!self.omit_edges || (id < basic && matches!(id % 13, 0..=2 | 9)))
+                && (self.full_res_xb || !Self::is_full_res_xb(id, n_scales))
+                && !crate::feature_defs::def_at(id, n_scales).is_some_and(|d| {
+                    d.scale > 0
+                        && self.coarse_y_only_scales & (1 << d.scale) != 0
+                        && matches!(
+                            d.channel,
+                            crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                        )
+                })
+                && !(self.v1_pools == V1PoolsMode::Full
+                    && (peaks_end..v1_total).contains(&id)
+                    && crate::feature_defs::def_at(id, n_scales)
+                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full))
+        }))
+    }
+
+    /// The v1 activity chains are channel-local, so masked/IW subsets may
+    /// also omit finest X/B. Cross-channel and free-extra families retain
+    /// the complete walk until their dependencies have their own plan.
+    pub(crate) fn allows_full_res_y_subset(&self) -> bool {
+        (!self.v2_blocks || self.v2_scales & 1 == 0)
+            && self.free_extras == V1FreeExtras::Off
+            && matches!(
+                self.v1_pools,
+                V1PoolsMode::Off | V1PoolsMode::Peaks | V1PoolsMode::Full
+            )
+    }
+
+    #[inline]
+    pub(crate) fn channel_active(&self, scale: usize, channel: usize) -> bool {
+        channel == 1
+            || if scale == 0 {
+                self.full_res_xb
+            } else {
+                self.coarse_y_only_scales & (1 << scale) == 0
+            }
+    }
+
+    /// The REV4 work order for one (scale, channel) phase-B call — the
+    /// SINGLE owner of the channel-dependent parts (C1's luma-vs-chroma
+    /// lattice period, C4 bleed's chroma-only mask). `mask` is the strip's
+    /// dilated dst-luma-edge mask built by the caller; it is forwarded
+    /// only when `arttype` is on and `ch` is chroma (0 or 2), so the Y
+    /// channel can be handed the same slice and still take the `None`
+    /// path.
+    fn rev4_work<'m>(
+        &self,
+        scale: usize,
+        ch: usize,
+        mask: Option<&'m [f32]>,
+        chroma: Option<ChromaStrip<'m>>,
+    ) -> Rev4Work<'m> {
+        let period = (if ch == 1 {
+            BLOCK_LATTICE
+        } else {
+            2 * BLOCK_LATTICE
+        }) >> scale;
+        Rev4Work {
+            gridblk_period: if self.gridblk && period >= 2 {
+                period
+            } else {
+                0
+            },
+            ringbasis: self.ringbasis,
+            tailhist: self.tailhist,
+            flat: self.arttype,
+            bleed_mask: mask.filter(|_| self.arttype && ch != 1),
+            gmsbank: gmsbank_cell_live(self, scale, ch),
+            bank: GmsBankWork::new(ch, chroma.filter(|_| self.gmsbank && scale > 0 && ch == 0)),
+        }
+    }
+
+    pub(crate) fn is_full_res_xb(id: usize, n_scales: usize) -> bool {
+        use crate::feature_defs::Channel;
+        crate::feature_defs::def_at(id, n_scales)
+            .is_some_and(|d| d.scale == 0 && matches!(d.channel, Channel::X | Channel::B))
     }
 
     /// This request's full feature-set id at `era` — the producer-side id an
@@ -2181,6 +3499,17 @@ impl ComputeSet {
         layout_width: usize,
         era: &str,
     ) -> Option<crate::feature_set_id::FeatureSetId> {
+        // Family tokens cannot reconstruct a channel subset. Its explicit
+        // feature IDs and per-slot provenance remain the authoritative identity;
+        // do not issue a shorthand that Request::for_set cannot reproduce.
+        if !self.full_res_xb
+            || self.coarse_y_only_scales != 0
+            || self.local_only
+            || self.sampling.is_some()
+            || (self.v1_pools == V1PoolsMode::Full && self.v1_full_scales != Self::ALL_SCALES)
+        {
+            return None;
+        }
         // The emitted width rides along as the legacy `@w<N>` hint — a
         // PRODUCER's id is exactly where recording it pays, because a reader
         // rebuilding this sparse set from its compute tokens needs the clip.
@@ -2382,6 +3711,7 @@ fn run_blur_pass(
         // above this call; a nested band fan-out here is not its axis.
         false,
         0,
+        crate::ssim_form::active_revision(),
     );
 }
 
@@ -2430,6 +3760,7 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         // above this call; a nested band fan-out here is not its axis.
         false,
         0,
+        crate::ssim_form::active_revision(),
     );
 }
 
@@ -2630,6 +3961,7 @@ fn fused_blur_h_ssim_banded(
     width: usize,
     height_local: usize,
     #[allow(unused_variables)] parallel: bool,
+    revision: FormulaRevision,
 ) {
     #[cfg(feature = "threads")]
     if parallel && height_local > H_BLUR_BAND_ROWS && width > 0 {
@@ -2651,7 +3983,7 @@ fn fused_blur_h_ssim_banded(
                 // inside this row band automatically: the band gives the
                 // thread its rows, the tile keeps that band's 6-plane window
                 // dense. Each worker owns its own thread-local tile arena.
-                crate::blur::fused_blur_h_ssim(
+                crate::blur::fused_blur_h_ssim_at_revision(
                     &src[lo..hi],
                     &dst[lo..hi],
                     m1,
@@ -2661,12 +3993,13 @@ fn fused_blur_h_ssim_banded(
                     width,
                     rows,
                     BLUR_RADIUS,
+                    revision,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BlurBandBusy, 0);
             });
         return;
     }
-    crate::blur::fused_blur_h_ssim(
+    crate::blur::fused_blur_h_ssim_at_revision(
         src,
         dst,
         mu1_h,
@@ -2676,6 +4009,7 @@ fn fused_blur_h_ssim_banded(
         width,
         height_local,
         BLUR_RADIUS,
+        revision,
     );
 }
 
@@ -2703,6 +4037,7 @@ fn run_blur_pass_inner(
     // Diagnostic-only: which `fold_timing` scale slot this call's v2-plane
     // chain is attributed to. Never read by any kernel.
     t_scale: usize,
+    revision: FormulaRevision,
 ) {
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
@@ -2720,6 +4055,7 @@ fn run_blur_pass_inner(
         width,
         height_local,
         parallel,
+        revision,
     );
     crate::fold_timing::stop(__t_h, crate::fold_timing::Phase::BlurHWall, 0);
 
@@ -2950,7 +4286,12 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    mut r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let c1 = V8::<T>::splat(token, C1_V2 as f32);
@@ -3018,7 +4359,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             let m2 = ld!(mu2);
             let act = ld!(activity);
 
-            let d = ssim_d_local_v(token, m1, m2, ld!(s12), ld!(ssq), c1, c2);
+            let d = ssim_d_local_v(token, m1, m2, ld!(s12), ld!(ssq), c1, c2, direct);
             r_d += d;
             let d2 = d * d;
             r_d2 += d2;
@@ -3089,6 +4430,28 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
                 p_sal_artv += sal_art * art_i;
                 p_sal_det += sal_det;
                 p_sal_detv += sal_det * det_i;
+                // REV4 (POOL_SIMD arm): the lane arrays this arm skips are
+                // extracted only when the hook is live — one Option check
+                // per chunk, identical op sequence when None.
+                if let Some(r4) = r4.as_mut() {
+                    let d_arr = d.to_array();
+                    let art_arr = art_i.to_array();
+                    let det_arr = det_i.to_array();
+                    let mse_arr = mse_i.to_array();
+                    let hfg_arr = hfg_i.to_array();
+                    let act_arr = act.to_array();
+                    for lane in 0..8 {
+                        rev4_dense_pixel(
+                            r4,
+                            d_arr[lane] as f64,
+                            art_arr[lane] as f64,
+                            det_arr[lane] as f64,
+                            mse_arr[lane] as f64,
+                            hfg_arr[lane] as f64,
+                            act_arr[lane] as f64,
+                        );
+                    }
+                }
             } else {
                 // §A.14 register-pressure fix (see the row-header comment
                 // above): extract this chunk's d/art_i/det_i/mse_i/act lanes
@@ -3109,6 +4472,22 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
                         mse_arr[lane] as f64,
                         act_arr[lane] as f64,
                     );
+                }
+                // REV4: same six lanes plus `hfg_i` — the C3 histogram
+                // scatters every pixel, C4-noise counts only the flat.
+                if let Some(r4) = r4.as_mut() {
+                    let hfg_arr = hfg_i.to_array();
+                    for lane in 0..8 {
+                        rev4_dense_pixel(
+                            r4,
+                            d_arr[lane] as f64,
+                            art_arr[lane] as f64,
+                            det_arr[lane] as f64,
+                            mse_arr[lane] as f64,
+                            hfg_arr[lane] as f64,
+                            act_arr[lane] as f64,
+                        );
+                    }
                 }
             }
 
@@ -3172,7 +4551,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             let m2 = mu2[i] as f64;
             let act = activity[i] as f64;
 
-            let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
+            let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64, direct);
             acc.sum_d += d;
             acc.sum_d2 += d * d;
             acc.sum_d3 += d * d * d;
@@ -3216,6 +4595,11 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             }
 
             weighted_pool_accumulate_scalar(&mut acc, d, art_i, det_i, mse_i, act);
+            // REV4: the tail's f64 values go through the same per-pixel
+            // helper — no re-derivation.
+            if let Some(r4) = r4.as_mut() {
+                rev4_dense_pixel(r4, d, art_i, det_i, mse_i, hf_gain_i, act);
+            }
         }
     }
 
@@ -3242,6 +4626,7 @@ fn dense_block_kernel_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_generic::<_, true>(
         token,
@@ -3255,6 +4640,7 @@ fn dense_block_kernel_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3272,6 +4658,7 @@ fn dense_block_kernel_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_generic::<_, false>(
         token,
@@ -3285,6 +4672,7 @@ fn dense_block_kernel_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3305,6 +4693,7 @@ fn dense_block_kernel_entry_pools_scalar(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_generic::<_, false>(
         token,
@@ -3318,6 +4707,7 @@ fn dense_block_kernel_entry_pools_scalar(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3335,6 +4725,7 @@ fn dense_block_kernel_pools_scalar(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_entry_pools_scalar(
@@ -3347,7 +4738,8 @@ fn dense_block_kernel_pools_scalar(
             activity,
             width,
             height,
-            transducer_bank
+            transducer_bank,
+            r4
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -3384,6 +4776,9 @@ fn era2_dense_enabled() -> bool {
 }
 
 /// The production dense entry: dispatches on [`era2_dense_enabled`].
+/// `r4`: REV4's C3 tail-histogram / C4 flat-HF-gain hook bundle — `None`
+/// on every non-rev4 call (one loop-invariant Option check per chunk,
+/// the `transducer_bank` shape).
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel(
     src: &[f32],
@@ -3396,6 +4791,7 @@ fn dense_block_kernel(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     if era2_dense_enabled() {
         return dense_block_kernel_era2(
@@ -3409,6 +4805,7 @@ fn dense_block_kernel(
             width,
             height,
             transducer_bank,
+            r4,
         );
     }
     dense_block_kernel_era1(
@@ -3422,6 +4819,7 @@ fn dense_block_kernel(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3439,6 +4837,7 @@ fn dense_block_kernel_era1(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_entry(
@@ -3451,10 +4850,123 @@ fn dense_block_kernel_era1(
             activity,
             width,
             height,
-            transducer_bank
+            transducer_bank,
+            r4
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
+}
+
+/// Co-sited B samples for the X gradient walk. Packed f32 XYB B, one sample
+/// per pixel, with the same width/height as the current strip (no halo).
+#[derive(Clone, Copy)]
+struct ChromaStrip<'a> {
+    reference: &'a [f32],
+    distorted: &'a [f32],
+}
+
+#[derive(Clone, Copy)]
+struct GmsBankWork<'a> {
+    gradient: &'static [f64; 5],
+    chroma: Option<ChromaStrip<'a>>,
+}
+
+impl<'a> GmsBankWork<'a> {
+    fn new(channel: usize, chroma: Option<ChromaStrip<'a>>) -> Self {
+        Self {
+            gradient: match channel {
+                0 => &GMSBANK_X_C,
+                1 => &GMSBANK_C,
+                2 => &GMSBANK_B_C,
+                _ => unreachable!(),
+            },
+            chroma,
+        }
+    }
+
+    fn rows(self, start: usize, end: usize) -> Self {
+        Self {
+            chroma: self.chroma.map(|p| ChromaStrip {
+                reference: &p.reference[start..end],
+                distorted: &p.distorted[start..end],
+            }),
+            ..self
+        }
+    }
+}
+
+/// Difference-form joint opponent loss. Equal constants reproduce 1-MDSI CS
+/// on the author's unshifted H/M coordinates. XYB uses its declared centering.
+/// Called inside the existing magetypes/arcane gradient entries; the generic
+/// backend cannot carry a standalone rite token attribute.
+#[inline(always)]
+fn chromaticity_loss(reference: [f64; 2], distorted: [f64; 2], constants: [f64; 2]) -> f64 {
+    let [xr, br] = reference;
+    let [xd, bd] = distorted;
+    let [cx, cb] = constants;
+    let dx = xr - xd;
+    let db = br - bd;
+    (dx * dx / cx + db * db / cb)
+        / (xr * xr / cx + xd * xd / cx + br * br / cb + bd * bd / cb + 1.0)
+}
+
+/// C8 per-constant pair of signed gradient-change means and a Welford
+/// population variance of `1-GMS`. Variance is unchanged by the translation
+/// `GMS = 1 - delta`, while this form makes identity exactly zero.
+#[derive(Default, Clone, Copy)]
+struct GmsBankCell {
+    loss: f64,
+    gain: f64,
+    n: u64,
+    mean: f64,
+    m2: f64,
+}
+
+impl GmsBankCell {
+    #[inline]
+    fn push(&mut self, delta: f64, loss: bool) {
+        if loss {
+            self.loss += delta;
+        } else {
+            self.gain += delta;
+        }
+        self.n += 1;
+        // std(GMS) == std(1-GMS) exactly. Welford on delta=1-GMS
+        // preserves small deviations that would round away in 1-delta.
+        let change = delta - self.mean;
+        self.mean += change / self.n as f64;
+        self.m2 += change * (delta - self.mean);
+    }
+
+    #[inline]
+    fn merge(&mut self, other: &Self) {
+        if other.n == 0 {
+            return;
+        }
+        self.loss += other.loss;
+        self.gain += other.gain;
+        if self.n == 0 {
+            self.n = other.n;
+            self.mean = other.mean;
+            self.m2 = other.m2;
+            return;
+        }
+        let total = self.n + other.n;
+        let shift = other.mean - self.mean;
+        self.m2 += other.m2 + shift * shift * (self.n as f64 * other.n as f64 / total as f64);
+        self.mean += shift * (other.n as f64 / total as f64);
+        self.n = total;
+    }
+}
+
+#[inline(always)]
+fn gmsbank_pixel(cells: &mut [GmsBankCell; 5], mr: f64, md: f64, constants: &[f64; 5]) {
+    let diff = mr - md;
+    let numer = diff * diff;
+    let denom_base = mr * mr + md * md;
+    for (cell, c) in cells.iter_mut().zip(constants) {
+        cell.push(numer / (denom_base + c), md < mr);
+    }
 }
 
 /// Per-row-reduced f64 accumulator for the gradient block.
@@ -3479,6 +4991,8 @@ struct GradientAccum {
     /// bit-identical when append2 is off.
     sum_bv_gain: f64,
     sum_bv_loss: f64,
+    bank: [GmsBankCell; 5],
+    chroma: [GmsBankCell; 5],
 }
 
 impl GradientAccum {
@@ -3494,6 +5008,32 @@ impl GradientAccum {
         self.sum_grad_dst += other.sum_grad_dst;
         self.sum_bv_gain += other.sum_bv_gain;
         self.sum_bv_loss += other.sum_bv_loss;
+        for (mine, next) in self.bank.iter_mut().zip(&other.bank) {
+            mine.merge(next);
+        }
+        for (mine, next) in self.chroma.iter_mut().zip(&other.chroma) {
+            mine.merge(next);
+        }
+    }
+}
+
+fn finish_gmsbank_cell(bank: &[GmsBankCell; 5], n_px: usize, out: &mut [f64]) {
+    debug_assert_eq!(out.len(), GMSBANK_PER_CELL);
+    for (k, cell) in bank.iter().enumerate() {
+        assert_eq!(cell.n as usize, n_px, "C8 gradient sample count");
+        let base = k * 3;
+        out[base] = cell.loss / n_px as f64;
+        out[base + 1] = cell.gain / n_px as f64;
+        out[base + 2] = (cell.m2.max(0.0) / n_px as f64).sqrt();
+    }
+}
+
+fn finish_chroma_cell(cells: &[GmsBankCell; 5], n: usize, out: &mut [f64]) {
+    assert_eq!(out.len(), 10);
+    for (k, cell) in cells.iter().enumerate() {
+        assert_eq!(cell.n as usize, n, "C8 chromaticity sample count");
+        out[2 * k] = cell.loss / n as f64;
+        out[2 * k + 1] = (cell.m2.max(0.0) / n as f64).sqrt();
     }
 }
 
@@ -3537,6 +5077,7 @@ fn gradient_block_kernel_generic<
     T: F32x8Backend + Copy,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
+    const BANK: bool,
 >(
     token: T,
     src_h: &[f32],
@@ -3547,10 +5088,14 @@ fn gradient_block_kernel_generic<
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
+    mut r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     debug_assert_eq!(src_h.len(), width * (height + 2));
     debug_assert_eq!(dst_h.len(), width * (height + 2));
     debug_assert_eq!(activity.len(), width * height);
+    if let Some((m, _)) = r4.as_ref().and_then(|r| r.bleed.as_ref()) {
+        debug_assert_eq!(m.len(), width * height);
+    }
     if BV_DSTACT {
         debug_assert!(BANDVIS, "BV_DSTACT is a BANDVIS refinement");
         debug_assert_eq!(act_dst.len(), width * height);
@@ -3571,13 +5116,43 @@ fn gradient_block_kernel_generic<
 
     let mut acc = GradientAccum::default();
 
+    let bank = r4
+        .as_ref()
+        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    if let Some(chroma) = bank.chroma {
+        debug_assert_eq!(chroma.reference.len(), width * height);
+        debug_assert_eq!(chroma.distorted.len(), width * height);
+    }
+    let chroma_pixel = |x: usize, y: usize, cells: &mut [GmsBankCell; 5]| {
+        if let Some(chroma) = bank.chroma {
+            let i = y * width + x;
+            let h = i + width;
+            let reference = [
+                f64::from(src_h[h]) - f64::from(0.42_f32),
+                f64::from(chroma.reference[i]) - f64::from(0.55_f32),
+            ];
+            let distorted = [
+                f64::from(dst_h[h]) - f64::from(0.42_f32),
+                f64::from(chroma.distorted[i]) - f64::from(0.55_f32),
+            ];
+            for (cell, constants) in cells.iter_mut().zip(GMSBANK_CS_C) {
+                cell.push(chromaticity_loss(reference, distorted, constants), true);
+            }
+        }
+    };
+
     // Scalar helper for one pixel — used for the first/last COLUMN of
     // every row (x-axis boundary only; the y-axis "first/last row"
     // special case from phase 4 is GONE, per this function's new halo
     // contract — every row `y` has valid `row_u`/`row_d` neighbor data
     // in `src_h`/`dst_h` by construction, either real interior-strip
     // rows or a caller-supplied reflected true-edge row).
-    let scalar_pixel = |x: usize, y: usize, acc: &mut GradientAccum| {
+    let scalar_pixel = |x: usize,
+                        y: usize,
+                        acc: &mut GradientAccum,
+                        r4: &mut Option<Rev4Grad<'_>>,
+                        bank_row: &mut [GmsBankCell; 5],
+                        chroma_row: &mut [GmsBankCell; 5]| {
         let xl = x.saturating_sub(1);
         let xr = (x + 1).min(width - 1);
         let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
@@ -3603,6 +5178,11 @@ fn gradient_block_kernel_generic<
         let gy_dst = dyd - dyu;
         let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
+        if BANK {
+            gmsbank_pixel(bank_row, grad_src_mag, grad_dst_mag, bank.gradient);
+            chroma_pixel(x, y, chroma_row);
+        }
+
         acc.sum_grad_src += grad_src_mag;
         acc.sum_grad_dst += grad_dst_mag;
         let g = 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
@@ -3613,7 +5193,20 @@ fn gradient_block_kernel_generic<
         let err_b = saturate(raw_abs_err, C_RING_ERR);
         let act_b = saturate(act, C_ACTIVITY);
         let edge_r = saturate(grad_src_mag, C_RING_EDGE);
-        acc.sum_ringing += err_b * act_b * (1.0 - edge_r);
+        let ring_i = err_b * act_b * (1.0 - edge_r);
+        acc.sum_ringing += ring_i;
+        // REV4: C2's ring bins + C4's outside-mask bleed — same values,
+        // scalar per lane like the SIMD arm's `to_array()` tail.
+        if let Some(r4) = r4.as_mut() {
+            rev4_grad_pixel(
+                r4,
+                &RINGBASIS_UC,
+                ring_i,
+                grad_src_mag,
+                grad_dst_mag,
+                y * width + x,
+            );
+        }
 
         let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
         let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
@@ -3675,12 +5268,14 @@ fn gradient_block_kernel_generic<
     };
 
     for y in 0..height {
+        let mut bank_row = [GmsBankCell::default(); 5];
+        let mut chroma_row = [GmsBankCell::default(); 5];
         let row = (y + 1) * width;
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
 
-        scalar_pixel(0, y, &mut acc);
+        scalar_pixel(0, y, &mut acc, &mut r4, &mut bank_row, &mut chroma_row);
         if width > 2 {
             let interior_end = width - 1;
             let interior_w = interior_end - 1; // pixels [1, width-2]
@@ -3716,6 +5311,20 @@ fn gradient_block_kernel_generic<
                 let gy_dst = dyd - dyu;
                 let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
+                if BANK {
+                    let src_mag = grad_src_mag.to_array();
+                    let dst_mag = grad_dst_mag.to_array();
+                    for lane in 0..8 {
+                        gmsbank_pixel(
+                            &mut bank_row,
+                            f64::from(src_mag[lane]),
+                            f64::from(dst_mag[lane]),
+                            bank.gradient,
+                        );
+                        chroma_pixel(x + lane, y, &mut chroma_row);
+                    }
+                }
+
                 r_gsrc += grad_src_mag;
                 r_gdst += grad_dst_mag;
                 let g = one - bounded_sim_v(token, grad_src_mag, grad_dst_mag, c_gms);
@@ -3726,7 +5335,26 @@ fn gradient_block_kernel_generic<
                 let err_b = saturate_v(token, raw_abs_err, c_ring_err);
                 let act_b = saturate_v(token, act, c_activity);
                 let edge_r = saturate_v(token, grad_src_mag, c_ring_edge);
-                r_ring += err_b * act_b * (one - edge_r);
+                let ring_i = err_b * act_b * (one - edge_r);
+                r_ring += ring_i;
+                // REV4: C2 ring bins + C4 outside-mask bleed — scalarized
+                // per lane (the §A.14 register-pressure pattern; the
+                // u-domain bit lookup cannot vectorize anyway).
+                if let Some(r4) = r4.as_mut() {
+                    let ring_a = ring_i.to_array();
+                    let gs_a = grad_src_mag.to_array();
+                    let gd_a = grad_dst_mag.to_array();
+                    for lane in 0..8 {
+                        rev4_grad_pixel(
+                            r4,
+                            &RINGBASIS_UC,
+                            ring_a[lane] as f64,
+                            gs_a[lane] as f64,
+                            gd_a[lane] as f64,
+                            act_row + x + lane,
+                        );
+                    }
+                }
 
                 let edge_excess = bounded_excess_v(token, grad_dst_mag, grad_src_mag, c_band_dst);
                 let src_smooth_b = one - saturate_v(token, grad_src_mag, c_band_src);
@@ -3782,10 +5410,25 @@ fn gradient_block_kernel_generic<
             }
 
             for x in chunk_end..=interior_end - 1 {
-                scalar_pixel(x, y, &mut acc);
+                scalar_pixel(x, y, &mut acc, &mut r4, &mut bank_row, &mut chroma_row);
             }
         }
-        scalar_pixel(width - 1, y, &mut acc);
+        scalar_pixel(
+            width - 1,
+            y,
+            &mut acc,
+            &mut r4,
+            &mut bank_row,
+            &mut chroma_row,
+        );
+        if BANK {
+            for (sum, row) in acc.bank.iter_mut().zip(&bank_row) {
+                sum.merge(row);
+            }
+            for (sum, row) in acc.chroma.iter_mut().zip(&chroma_row) {
+                sum.merge(row);
+            }
+        }
     }
 
     acc
@@ -3799,8 +5442,9 @@ fn gradient_block_kernel_entry(
     activity: &[f32],
     width: usize,
     height: usize,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, false, false>(
+    gradient_block_kernel_generic::<_, false, false, false>(
         token,
         src,
         dst,
@@ -3810,6 +5454,7 @@ fn gradient_block_kernel_entry(
         height,
         0.0,
         0.0,
+        r4,
     )
 }
 
@@ -3823,8 +5468,9 @@ fn gradient_block_kernel_entry_bandvis(
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, false>(
+    gradient_block_kernel_generic::<_, true, false, false>(
         token,
         src,
         dst,
@@ -3834,6 +5480,7 @@ fn gradient_block_kernel_entry_bandvis(
         height,
         bv_delta_lo,
         bv_delta_hi,
+        r4,
     )
 }
 
@@ -3848,8 +5495,9 @@ fn gradient_block_kernel_entry_bandvis_dstact(
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, true>(
+    gradient_block_kernel_generic::<_, true, true, false>(
         token,
         src,
         dst,
@@ -3859,6 +5507,84 @@ fn gradient_block_kernel_entry_bandvis_dstact(
         height,
         bv_delta_lo,
         bv_delta_hi,
+        r4,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_gmsbank(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    r4: Option<Rev4Grad<'_>>,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, false, false, true>(
+        token,
+        src,
+        dst,
+        activity,
+        &[],
+        width,
+        height,
+        0.0,
+        0.0,
+        r4,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_bandvis_gmsbank(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    bv_delta_lo: f32,
+    bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, true, false, true>(
+        token,
+        src,
+        dst,
+        activity,
+        &[],
+        width,
+        height,
+        bv_delta_lo,
+        bv_delta_hi,
+        r4,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_bandvis_dstact_gmsbank(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    height: usize,
+    bv_delta_lo: f32,
+    bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, true, true, true>(
+        token,
+        src,
+        dst,
+        activity,
+        act_dst,
+        width,
+        height,
+        bv_delta_lo,
+        bv_delta_hi,
+        r4,
     )
 }
 
@@ -3868,7 +5594,10 @@ fn gradient_block_kernel_entry_bandvis_dstact(
 /// `Some(dst-activity strip)` switches the BANDVIS dst band term to the
 /// dst self-mask (`append2_dst_activity` — a third const-split
 /// instantiation; `None` runs the pre-fix bytes exactly). Ignored without
-/// `bandvis`.
+/// `bandvis`. `r4`: REV4's C2 ring-bin / C4 bleed hook bundle — `None`
+/// on every non-rev4 call, and the `Option` check is one loop-invariant
+/// branch (the `transducer_bank` shape), so the OFF path's op sequence
+/// is the pre-REV4 one bit for bit.
 fn gradient_block_kernel(
     src: &[f32],
     dst: &[f32],
@@ -3877,19 +5606,37 @@ fn gradient_block_kernel(
     height: usize,
     bandvis: Option<(f32, f32)>,
     bv_act_dst: Option<&[f32]>,
+    r4: Option<Rev4Grad<'_>>,
+    gmsbank: bool,
 ) -> GradientAccum {
-    match (bandvis, bv_act_dst) {
-        (None, _) => incant!(
-            gradient_block_kernel_entry(src, dst, activity, width, height),
+    match (bandvis, bv_act_dst, gmsbank) {
+        (None, _, false) => incant!(
+            gradient_block_kernel_entry(src, dst, activity, width, height, r4),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
-        (Some((lo, hi)), None) => incant!(
-            gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi),
+        (None, _, true) => incant!(
+            gradient_block_kernel_entry_gmsbank(src, dst, activity, width, height, r4),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
-        (Some((lo, hi)), Some(act_dst)) => incant!(
+        (Some((lo, hi)), None, false) => incant!(
+            gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi, r4),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), None, true) => incant!(
+            gradient_block_kernel_entry_bandvis_gmsbank(
+                src, dst, activity, width, height, lo, hi, r4
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), Some(act_dst), false) => incant!(
             gradient_block_kernel_entry_bandvis_dstact(
-                src, dst, activity, act_dst, width, height, lo, hi
+                src, dst, activity, act_dst, width, height, lo, hi, r4
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), Some(act_dst), true) => incant!(
+            gradient_block_kernel_entry_bandvis_dstact_gmsbank(
+                src, dst, activity, act_dst, width, height, lo, hi, r4
             ),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
@@ -5000,13 +6747,12 @@ fn square_into(input: &[f32], out: &mut [f32]) {
     }
 }
 
-/// Per-channel-scale f64 sums for the v1 BASIC-13 fold — the exact subset
-/// of v1's `streaming::ChannelAccum` fields that the basic block
-/// (`f0..156`) finalizes from. Filled by v1's own
-/// [`crate::fused::fused_vblur_features_ssim`] kernel run over the v2
-/// strip walk's shared H-planes; the peak accumulators the kernel also
-/// returns (max/L8) are deliberately dropped — v1's peak block `f156..228`
-/// is deprecated (no current model reads it).
+/// Per-channel, per-scale raw sums for the folded v1 feature blocks.
+/// The canonical fused kernel supplies basic and peak (max/L8) accumulators,
+/// plus the weighted pools and free extras requested by the feature plan.
+/// Finalizers below emit the corresponding slots with global scale
+/// normalization. Peak slots 156..228 are supported and consumed by candidate
+/// models; they are not deprecated or silently discarded.
 #[derive(Debug, Clone, Copy, Default)]
 struct V1BasicSums {
     ssim_d: f64,
@@ -5166,14 +6912,21 @@ impl V1BasicSums {
     /// `streaming::ScaleAccumulators::finalize` + `metric.rs`'s pass-2/3/4
     /// pushes (`.abs()` on the masked/IW ssim + art/det L4 slots, none on
     /// the peaks / mse).
-    fn finalize_pools_into(&self, n: usize, peaks: &mut [f64], masked: &mut [f64], iw: &mut [f64]) {
+    fn finalize_pools_into(
+        &self,
+        n: usize,
+        peaks: &mut [f64],
+        masked: &mut [f64],
+        iw: &mut [f64],
+        revision: crate::feature_defs::FormulaRevision,
+    ) {
         debug_assert_eq!(peaks.len(), 6);
         debug_assert_eq!(masked.len(), 6);
         debug_assert_eq!(iw.len(), 6);
         let one_over_n = 1.0 / n as f64;
         // Hoisted out of the nine root calls below: it reads a `OnceLock`,
         // which LLVM cannot hoist for you. Same discipline as `gain_form`.
-        let root_form = crate::det_math::active_root_form();
+        let root_form = crate::det_math::RootForm::at_revision(Some(revision));
         peaks[0] = f64::from(self.ssim_max);
         peaks[1] = f64::from(self.edge_art_max);
         peaks[2] = f64::from(self.edge_det_max);
@@ -5279,10 +7032,15 @@ impl V1BasicSums {
     /// three HF ratio features with their `1e-10` guards. `n` is the
     /// scale's full pixel count (`w_s * h_s`) — identical to v1's per-scale
     /// accumulator `n` since both walks cover every row exactly once.
-    fn finalize_into(&self, n: usize, out: &mut [f64]) {
+    fn finalize_into(
+        &self,
+        n: usize,
+        out: &mut [f64],
+        revision: crate::feature_defs::FormulaRevision,
+    ) {
         debug_assert_eq!(out.len(), 13);
         let one_over_n = 1.0 / n as f64;
-        let root_form = crate::det_math::active_root_form();
+        let root_form = crate::det_math::RootForm::at_revision(Some(revision));
         out[0] = (self.ssim_d * one_over_n).abs();
         out[1] = (self.ssim_d4 * one_over_n)
             .max(0.0)
@@ -5305,7 +7063,7 @@ impl V1BasicSums {
         // Same owner as the buffered walk (`crate::hf_gain_form`), which is
         // what keeps the fold's v1 pools bit-identical to v1's under EVERY
         // arm rather than only under the shipped one.
-        let gain_form = crate::hf_gain_form::active_gain_form();
+        let gain_form = crate::hf_gain_form::HfGainForm::at_revision(Some(revision));
         let var_src = self.hf_sq_src * one_over_n;
         let var_dst = self.hf_sq_dst * one_over_n;
         out[10] = crate::hf_gain_form::hf_energy_loss(var_src, var_dst);
@@ -5360,6 +7118,12 @@ enum BandPoolWork {
     Full,
 }
 
+#[cfg(test)]
+thread_local! {
+    // Observe actual weighted-pool execution, not planner declarations.
+    static POOL_TEST_WIDTHS: std::cell::RefCell<Option<Vec<usize>>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Band-local planes for the v1 pool replay (`V2NewFeatureToggles::v1_pools`):
 /// sized for one v1 band buffer (`V1_BAND_ROWS + 2 * V1_BAND_OVERLAP` rows ×
 /// width), grown on first use per channel accumulator and reused across
@@ -5367,6 +7131,7 @@ enum BandPoolWork {
 #[derive(Debug, Clone, Default)]
 struct FoldPoolScratch {
     /// V-blurred `mu1` / `mu2` (the fused kernel's `store_mu` side-output).
+    stable_sd: Vec<f32>,
     mu1_v: Vec<f32>,
     mu2_v: Vec<f32>,
     /// `|src − H_blur(src)|` (v1's `bufs.mask` role).
@@ -5515,7 +7280,7 @@ fn fold_v1_one_band(
             // emitted peak slots are bit-identical to `Full`'s.
             if self_blur {
                 let [h0, h1, h2, h3] = &mut ps.h;
-                crate::blur::fused_blur_h_ssim(
+                crate::blur::fused_blur_h_ssim_at_revision(
                     &src[span.clone()],
                     &dst[span.clone()],
                     &mut h0[..band_n],
@@ -5525,6 +7290,7 @@ fn fold_v1_one_band(
                     width,
                     h_local,
                     BLUR_RADIUS,
+                    free.revision(),
                 );
             }
             let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = if self_blur {
@@ -5562,14 +7328,27 @@ fn fold_v1_one_band(
                 &mut [],
                 false,
                 free,
+                crate::fused::ExtPoolsWork::default(),
+                &[],
             ));
             return b1;
         }
+        #[cfg(test)]
+        POOL_TEST_WIDTHS.with_borrow_mut(|widths| {
+            if let Some(widths) = widths {
+                widths.push(width);
+            }
+        });
         let full = work == BandPoolWork::Full;
+        let stable = free.revision() == crate::feature_defs::FormulaRevision::Rev3;
+        if stable && full {
+            ps.stable_sd.resize(band_cap_n, 0.0);
+        }
         ps.ensure(band_cap_n);
         // ONE destructure, so the band-local H planes can be READ while the
         // pool planes stay mutable — disjoint fields of the same `&mut`.
         let FoldPoolScratch {
+            stable_sd,
             mu1_v,
             mu2_v,
             act_raw,
@@ -5584,7 +7363,7 @@ fn fold_v1_one_band(
             // Bit-identical to reading those rows out of a whole-window call
             // (`phase_a_blur_bands_are_bit_exact`); the point is that these
             // four planes never leave this task.
-            crate::blur::fused_blur_h_ssim(
+            crate::blur::fused_blur_h_ssim_at_revision(
                 &src[span.clone()],
                 &dst[span.clone()],
                 &mut h0[..band_n],
@@ -5594,6 +7373,7 @@ fn fold_v1_one_band(
                 width,
                 h_local,
                 BLUR_RADIUS,
+                free.revision(),
             );
         }
         let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = match h_src {
@@ -5624,14 +7404,38 @@ fn fold_v1_one_band(
             &mu1_h[span_h.clone()],
             &mut act_raw[..band_n],
         );
-        crate::blur::box_blur_1pass_into(
-            &act_raw[..band_n],
-            &mut act[..band_n],
-            &mut ssq_v[..band_n],
-            width,
-            h_local,
-            BLUR_RADIUS,
-        );
+        // Revision 3: the SAME fused extension the streaming path runs
+        // (`streaming.rs`, `fused_ext`) — the activity's V blur and every
+        // masked/IW pool ride inside the SSIM V sweep, over the same bands
+        // in the same order, which is what keeps the rev-3 fold/streaming
+        // pool parity gate bit-exact. Here `act` then holds the H-BLURRED
+        // activity the sweep V-blurs in-register.
+        let fused_ext = stable;
+        if fused_ext {
+            crate::blur::box_blur_h(
+                &act_raw[..band_n],
+                &mut act[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+        } else {
+            crate::blur::box_blur_1pass_into(
+                &act_raw[..band_n],
+                &mut act[..band_n],
+                &mut ssq_v[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+        }
+        let ext = crate::fused::ExtPoolsWork {
+            on: fused_ext,
+            mask: true,
+            iw: true,
+            k_mask: V1_MASK_K,
+            k_iw: V1_IW_K,
+        };
         // `store_sigma` replaces the two `box_blur_v_from_copy(ssq_h →
         // ssq_v)` / `(s12_h → s12_v)` band sweeps the `Full` arm used to
         // run after this call: the fused kernel already carries the same
@@ -5641,7 +7445,7 @@ fn fold_v1_one_band(
         // the only rows the masked/IW SSIM kernel reads). `Carriers`
         // needs no sigma, so it stores none and `ssq_v` simply stays the
         // activity temp.
-        sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+        let acc = crate::fused::fused_vblur_features_ssim(
             &mu1_h[span_h.clone()],
             &mu2_h[span_h.clone()],
             &ssq_h[span_h.clone()],
@@ -5656,13 +7460,37 @@ fn fold_v1_one_band(
             &mut mu1_v[..band_n],
             &mut mu2_v[..band_n],
             true,
-            &mut empty_sd,
-            false,
+            if stable && full {
+                &mut stable_sd[..band_n]
+            } else {
+                &mut empty_sd
+            },
+            stable && full,
             &mut ssq_v[..band_n],
             &mut s12_v[..band_n],
             full,
             free,
-        ));
+            ext,
+            if fused_ext { &act[..band_n] } else { &[] },
+        );
+        sums.accumulate(&acc);
+        if fused_ext {
+            if full {
+                sums.masked_mse += acc.masked_mse;
+                sums.iw_mse += acc.iw_mse;
+                sums.masked_ssim_d += acc.masked_ssim_d;
+                sums.masked_ssim_d4 += acc.masked_ssim_d4;
+                sums.masked_ssim_d2 += acc.masked_ssim_d2;
+                sums.iw_ssim_d += acc.iw_ssim_d;
+                sums.iw_ssim_d4 += acc.iw_ssim_d4;
+                sums.iw_ssim_d2 += acc.iw_ssim_d2;
+            }
+            sums.masked_art4 += acc.masked_art4;
+            sums.masked_det4 += acc.masked_det4;
+            sums.iw_art4 += acc.iw_art4;
+            sums.iw_det4 += acc.iw_det4;
+            return b1;
+        }
         let inner = inner_start * width..(inner_start + inner_h) * width;
         let inner_src = &src[span.start + inner.start..span.start + inner.end];
         let inner_dst = &dst[span.start + inner.start..span.start + inner.end];
@@ -5679,7 +7507,20 @@ fn fold_v1_one_band(
             );
             sums.masked_mse += mse_m;
             sums.iw_mse += mse_i;
-            let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
+            let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = if stable {
+                // `stable_sd` is sized under `stable && full` above and read
+                // here under `stable` — equivalent only because this arm IS
+                // the `full` one. Pinned rather than assumed: moving this
+                // pooling out of `if full` would otherwise read a zeroed
+                // buffer and quietly emit zero masked/IW SSIM.
+                debug_assert!(full && stable_sd.len() >= inner.end);
+                crate::simd_ops::ssim_signal_inline_both(
+                    &stable_sd[inner.clone()],
+                    act_inner,
+                    V1_MASK_K,
+                    V1_IW_K,
+                )
+            } else {
                 crate::simd_ops::ssim_channel_inline_both(
                     inner_mu1,
                     inner_mu2,
@@ -5688,7 +7529,8 @@ fn fold_v1_one_band(
                     act_inner,
                     V1_MASK_K,
                     V1_IW_K,
-                );
+                )
+            };
             sums.masked_ssim_d += sd_m;
             sums.masked_ssim_d4 += sd4_m;
             sums.masked_ssim_d2 += sd2_m;
@@ -5731,6 +7573,8 @@ fn fold_v1_one_band(
             &mut [],
             false,
             free,
+            crate::fused::ExtPoolsWork::default(),
+            &[],
         ));
     }
     b1
@@ -5977,6 +7821,7 @@ fn compute_channel_scale_v2(
     moments: Option<(&[f32], &[f32])>,
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
+    mut r4a: Option<Rev4CellArgs<'_>>,
 ) -> (f64, f64) {
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
@@ -6001,8 +7846,11 @@ fn compute_channel_scale_v2(
     // doc) so this comparison is a permanent `false` today — written
     // generically (not as a dead-code-eliding special case) so a future
     // session re-enabling the lever only needs to change the constant.
+    // REV4: the whole-image path carries no rev4 hooks — if the lever is
+    // ever re-enabled, a rev4-enabled call must NOT take it (the cells
+    // would silently stay zero). `r4a.is_none()` keeps that honest.
     #[allow(clippy::absurd_extreme_comparisons)]
-    if height <= STRIP_BYPASS_HEIGHT {
+    if height <= STRIP_BYPASS_HEIGHT && r4a.is_none() {
         return compute_channel_scale_v2_whole(src, dst, width, height, toggles, scratch, out);
     }
 
@@ -6011,6 +7859,13 @@ fn compute_channel_scale_v2(
         width * max_wide_h <= scratch.mu1.len(),
         "scratch buffers must be sized for the largest strip+halo"
     );
+
+    // REV4: the bleed-mask workspace for this cell — allocated once,
+    // filled per strip (chroma cells only; `bleed_y` is `Some` exactly
+    // there).
+    let mut bleed_work = r4a
+        .as_ref()
+        .and_then(|a| a.bleed_y.map(|_| BleedMaskWork::sized(width, STRIP_ROWS)));
 
     let mut dense = DenseAccum::default();
     let mut grad = GradientAccum::default();
@@ -6048,8 +7903,17 @@ fn compute_channel_scale_v2(
         // --- Blur pass on the strip+halo buffer only (§A.15's actual
         //     memory-traffic reduction: `wide_h` is O(STRIP_ROWS), not
         //     O(height)). With cached reference moments the mu1 V-blur +
-        //     activity chain drop out of the per-pair cost entirely. ---
-        if moments.is_some() {
+        //     activity chain drop out of the per-pair cost entirely —
+        //     EXCEPT when Rev4 C1 is on: `gridblk_strip_wide` reads the
+        //     WIDE activity window including halo rows, and activity is
+        //     a sliding-window V-blur whose f32 running-sum history is
+        //     local to each strip geometry — `act_full` rows are
+        //     bit-identical only where that row was a STRIP row of the
+        //     replayed walk, so gathering it would feed divergent
+        //     values at halo positions. The full strip pass reproduces
+        //     the streaming path's wide window bitwise. ---
+        let need_wide_activity = r4a.as_ref().is_some_and(|a| a.gridblk_period >= 2);
+        if moments.is_some() && !need_wide_activity {
             run_blur_pass_strip_cached_ref(width, wide_h, scratch);
         } else {
             run_blur_pass_strip(width, wide_h, scratch);
@@ -6079,6 +7943,38 @@ fn compute_channel_scale_v2(
         let ssq_strip = &scratch.ssq[off..off + strip_n];
         let s12_strip = &scratch.s12[off..off + strip_n];
 
+        // REV4 C4: dst-Y dilated-edge mask for this strip — gathered with
+        // a ±2-row halo from the same-scale luma plane, built by the SAME
+        // `dst_y_edge_mask_strip` the streaming walk uses (parity input).
+        let bleed_mask: Option<&[f32]> =
+            match (r4a.as_ref().and_then(|a| a.bleed_y), bleed_work.as_mut()) {
+                (Some(dy), Some(mw)) => {
+                    gather_strip_halo(
+                        dy,
+                        width,
+                        height,
+                        y0,
+                        strip_h + 4,
+                        2,
+                        &mut mw.dh[..width * (strip_h + 4)],
+                    );
+                    dst_y_edge_mask_strip(width, y0, strip_h, height, mw);
+                    Some(&mw.mask[..strip_n])
+                }
+                _ => None,
+            };
+
+        // REV4 hook bundle — identical construction to `stream_phase_b`'s
+        // (`Rev4Dense`/`Rev4Grad` feed the same `rev4_*_pixel` helpers),
+        // so a cell's accumulator is bitwise-identical across walks.
+        let r4d = match r4a.as_mut() {
+            Some(a) if a.tailhist || a.flat => Some(Rev4Dense {
+                tail: a.tailhist.then_some(&mut a.cell.tail),
+                flat: a.flat.then_some(&mut a.cell.flat),
+                edges: tail_edges(),
+            }),
+            _ => None,
+        };
         let strip_dense = dense_block_kernel(
             src_strip,
             dst_strip,
@@ -6090,10 +7986,12 @@ fn compute_channel_scale_v2(
             width,
             strip_h,
             toggles.transducer_bank,
+            r4d,
         );
         dense.accumulate(&strip_dense);
 
-        if toggles.gradient_features {
+        let bank_on = r4a.as_ref().is_some_and(|a| a.gmsbank);
+        if toggles.gradient_features || bank_on {
             // Gradient needs src/dst at [y0-1, y0+strip_h+1) — 1-row
             // halo, comfortably inside the HALO_P(=10)-row buffer we
             // already gathered. Buffer-local offset HALO_P-1.
@@ -6101,9 +7999,46 @@ fn compute_channel_scale_v2(
             let g_n = width * (strip_h + 2);
             let src_g = &scratch.src_wide[g_off..g_off + g_n];
             let dst_g = &scratch.dst_wide[g_off..g_off + g_n];
-            let strip_grad =
-                gradient_block_kernel(src_g, dst_g, activity_strip, width, strip_h, None, None);
+            let r4g = match r4a.as_mut() {
+                Some(a) if a.ringbasis || bleed_mask.is_some() || a.gmsbank => Some(Rev4Grad {
+                    ring: a.ringbasis.then_some(&mut a.cell.ring),
+                    bleed: bleed_mask.map(|m| (m, &mut a.cell.bleed)),
+                    bank: a.bank.rows(y0 * width, (y0 + strip_h) * width),
+                }),
+                _ => None,
+            };
+            let strip_grad = gradient_block_kernel(
+                src_g,
+                dst_g,
+                activity_strip,
+                width,
+                strip_h,
+                None,
+                None,
+                r4g,
+                bank_on,
+            );
             grad.accumulate(&strip_grad);
+        }
+
+        // REV4 C1: boundary `ẽ` planes off the just-gathered wide buffers.
+        // `scratch.activity` is strip-computed over the same wide window
+        // in every blur path that can reach this point (the cached-moments
+        // branch is gated off above when C1 is on).
+        if let Some(a) = r4a.as_mut()
+            && a.gridblk_period >= 2
+        {
+            gridblk_strip_wide(
+                &scratch.src_wide[..n_wide],
+                &scratch.dst_wide[..n_wide],
+                &scratch.activity[..n_wide],
+                width,
+                y0,
+                strip_h,
+                height,
+                a.gridblk_period,
+                &mut a.cell.grid,
+            );
         }
 
         y0 += strip_h;
@@ -6115,6 +8050,12 @@ fn compute_channel_scale_v2(
         0.0
     };
 
+    if let Some(a) = r4a.as_mut()
+        && a.gmsbank
+    {
+        a.cell.bank = grad.bank;
+        a.cell.chroma = grad.chroma;
+    }
     finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
 }
 
@@ -6168,6 +8109,7 @@ fn compute_channel_scale_v2_whole(
         width,
         height,
         toggles.transducer_bank,
+        None,
     );
 
     let grad = if toggles.gradient_features {
@@ -6180,7 +8122,9 @@ fn compute_channel_scale_v2_whole(
         let mut dst_g = vec![0.0f32; width * (height + 2)];
         gather_strip_halo(src, width, height, 0, height + 2, 1, &mut src_g);
         gather_strip_halo(dst, width, height, 0, height + 2, 1, &mut dst_g);
-        gradient_block_kernel(&src_g, &dst_g, activity, width, height, None, None)
+        gradient_block_kernel(
+            &src_g, &dst_g, activity, width, height, None, None, None, false,
+        )
     } else {
         GradientAccum::default()
     };
@@ -6413,6 +8357,10 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     height: usize,
     weights: &[f64; FEATURES_PER_CHANNEL_V2_TOTAL],
 ) -> Vec<f32> {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -6527,7 +8475,13 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
                 // --- Dense (always-on) family — bit-for-bit the same
                 //     formulas as `dense_block_kernel_generic`'s scalar
                 //     tail. ---
-                let d = ssim_d_local(m1, m2, s12_strip[i_local] as f64, ssq_strip[i_local] as f64);
+                let d = ssim_d_local(
+                    m1,
+                    m2,
+                    s12_strip[i_local] as f64,
+                    ssq_strip[i_local] as f64,
+                    direct,
+                );
                 acc += weights[idx::SSIM_MEAN] * d;
 
                 let diff_src = (s - m1).abs();
@@ -6978,7 +8932,7 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
     compute_v2_features_with_ref_impl_inner(
-        prepared, distorted, max_pixels, parallel, toggles, scratch,
+        prepared, distorted, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -6993,6 +8947,7 @@ pub(crate) fn compute_folded720_impl_with_toggles(
     parallel: bool,
     toggles: V2NewFeatureToggles,
 ) -> Result<ZensimV2Result, ZensimError> {
+    validate_wide_revision(toggles)?;
     let mut scratch = V2Scratch::new();
     compute_folded720_streaming_impl(
         source,
@@ -7001,6 +8956,7 @@ pub(crate) fn compute_folded720_impl_with_toggles(
         parallel,
         toggles,
         &mut scratch,
+        None,
     )
 }
 
@@ -7063,6 +9019,11 @@ struct StreamChannelAccums {
     /// CSFW weighted-pool partials (Y channel + `csfw_block` only —
     /// untouched zeros otherwise).
     csfw: Vec<CsfwAccum>,
+    /// REV4 per-scale cells (`gridblk`/`ringbasis`/`tailhist` plus this
+    /// channel's share of `arttype`) — written by the dense/gradient hook
+    /// bundles and the gridblk strip kernel, all inside `stream_phase_b`.
+    /// Untouched zeros when every rev4 compute flag is off.
+    rev4: Vec<Rev4CellAccum>,
     /// Band-local planes for the v1 pool replay (`v1_pools`); empty
     /// (never allocated) when the toggle is off.
     /// One scratch per band SLOT within a strip (`STRIP_ROWS /
@@ -7085,6 +9046,7 @@ impl StreamChannelAccums {
             v1: vec![V1BasicSums::default(); n_scales],
             block: vec![(0.0, 0.0); n_scales],
             csfw: vec![CsfwAccum::default(); n_scales],
+            rev4: (0..n_scales).map(|_| Rev4CellAccum::default()).collect(),
             pool_scratch: (0..n_band_slots.clamp(1, V1_BANDS_PER_STRIP))
                 .map(|_| FoldPoolScratch::default())
                 .collect(),
@@ -7315,6 +9277,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     // its second axis.
     parallel: bool,
     scr: &mut ScratchV2Strip,
+    revision: FormulaRevision,
 ) {
     use crate::feature_v2_stream::Side;
     let width = info.plane_w;
@@ -7367,6 +9330,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         want_v2,
         parallel,
         info.scale,
+        revision,
     );
     // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
     // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
@@ -7451,11 +9415,13 @@ fn stream_phase_b(
     cross: Option<(&[f32], &[f32])>,
     append2: Option<Append2Params>,
     csfw: Option<CsfwParams>,
-    // `ch`: which channel this strip pass is. Only the free-extras work
-    // order reads it (the class-C luminance bins are a register carry on Y
-    // alone — [`ComputeSet::free_work`]); every other decision here is
-    // already carried by an explicit argument.
-    ch: usize,
+    // The resolved per-channel work order. Do not reconstruct it from public
+    // toggles: that loses private subset restrictions and runs dead reductions.
+    free: crate::fused::FreeExtrasWork,
+    // REV4's resolved per-(strip, channel) work order — `Rev4Work::OFF`
+    // on every non-rev4 call (loop-invariant Option branches inside the
+    // kernels, same shape as `transducer_bank`).
+    r4w: Rev4Work<'_>,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -7481,6 +9447,22 @@ fn stream_phase_b(
         let act_strip = &scr.activity[off..off + strip_n];
 
         let __t_dense = crate::fold_timing::start();
+        // REV4 C3/C4-noise hook — `None` when both are off (the
+        // `transducer_bank`-shaped invariant branch inside the kernel).
+        let cell = &mut acc.rev4[scale];
+        let r4d = if r4w.tailhist || r4w.flat {
+            Some(Rev4Dense {
+                tail: if r4w.tailhist {
+                    Some(&mut cell.tail)
+                } else {
+                    None
+                },
+                flat: if r4w.flat { Some(&mut cell.flat) } else { None },
+                edges: tail_edges(),
+            })
+        } else {
+            None
+        };
         let d = dense_block_kernel(
             src_strip,
             dst_strip,
@@ -7492,11 +9474,16 @@ fn stream_phase_b(
             width,
             strip_h,
             toggles.transducer_bank,
+            r4d,
         );
         crate::fold_timing::stop(__t_dense, crate::fold_timing::Phase::DenseKernel, scale);
         acc.dense[scale].accumulate(&d);
 
-        if toggles.gradient_features {
+        // REV4 C2/C4-bleed ride the gradient kernel too — it must run
+        // whenever either hook has work, even with `gradient_features`
+        // off (the hook's `Option` gates keep the rev4-off call
+        // byte-identical to the pre-rev4 signature).
+        if toggles.gradient_features || r4w.ringbasis || r4w.bleed_mask.is_some() || r4w.gmsbank {
             let g_off = (HALO_P - 1) * width;
             let g_n = width * (strip_h + 2);
             // BANDVIS accumulates only on (Y, append2 on) — the const-split
@@ -7509,6 +9496,20 @@ fn stream_phase_b(
             let bv_act_dst = append2
                 .filter(|p| cross.is_some() && p.dst_activity)
                 .map(|_| &scr.activity_dst[off..off + strip_n]);
+            let cell = &mut acc.rev4[scale];
+            let r4g = if r4w.ringbasis || r4w.bleed_mask.is_some() || r4w.gmsbank {
+                Some(Rev4Grad {
+                    ring: if r4w.ringbasis {
+                        Some(&mut cell.ring)
+                    } else {
+                        None
+                    },
+                    bleed: r4w.bleed_mask.map(|m| (m, &mut cell.bleed)),
+                    bank: r4w.bank,
+                })
+            } else {
+                None
+            };
             let __t_grad = crate::fold_timing::start();
             let g = gradient_block_kernel(
                 &src_win[g_off..g_off + g_n],
@@ -7518,9 +9519,30 @@ fn stream_phase_b(
                 strip_h,
                 bandvis,
                 bv_act_dst,
+                r4g,
+                r4w.gmsbank,
             );
             crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
+        }
+
+        // REV4 C1 — the full-boundary pass over the wide window (the
+        // phase-A activity plane covers the halo rows, which is exactly
+        // what `gridblk_strip_wide`'s contract requires).
+        if r4w.gridblk_period >= 2 {
+            let __t_r4 = crate::fold_timing::start();
+            gridblk_strip_wide(
+                &src_win[..n_wide],
+                &dst_win[..n_wide],
+                &scr.activity[..n_wide],
+                width,
+                y0,
+                strip_h,
+                info.plane_h,
+                r4w.gridblk_period,
+                &mut acc.rev4[scale].grid,
+            );
+            crate::fold_timing::stop(__t_r4, crate::fold_timing::Phase::Rev4Kernel, scale);
         }
     }
 
@@ -7563,7 +9585,7 @@ fn stream_phase_b(
             // free_work`). With the owning blocks on, their own kernels own
             // those slots and every flag is false, so the full 944 walk is
             // untouched.
-            ComputeSet::from_toggles(toggles).free_work(ch),
+            free,
         );
     }
 
@@ -7676,6 +9698,436 @@ fn blockiness_sparse_strip_wide(
     }
 }
 
+// ============================================================================
+// REV4 C1 `gridblk` strip kernel (design note §C1).
+//
+// `ẽ = (|Δdst| − |Δsrc|) / ((act_a + act_b)/2 + C_ACTIVITY)` is computed
+// for EVERY vertical boundary (x ∈ 1..w) and horizontal boundary
+// (y ∈ 1..h) — not the sparse lattice-only subset `blockiness` visits,
+// because the winning phase is data-dependent and the profile needs all
+// `2n` boundaries. The winning phase is only known after the whole plane
+// is walked, so the kernel STORES `ẽ` into the cell's `plane_v`/`plane_h`
+// f32 buffers and `finish_gridblk_cell` rescans the on-grid positions
+// only (~2n/P hat evaluations — the store-then-rescan shape).
+//
+// Wide-window contract (same as `blockiness_sparse_strip_wide`, extended
+// by the activity plane): `*_wide` are `width * (strip_h + 2*HALO_P)`,
+// buffer row `HALO_P + k` = plane row `y0 + k`. `act_wide` covers the
+// identical wide window including halo rows (phase A fills all of
+// `scratch.activity`), so the H boundary at plane row `y0` reads the REAL
+// plane row `y0 − 1` from the halo, and the scalar/V8 paths index the
+// same offsets.
+//
+// PROFILE DETERMINISM: the emitted values are defined by THIS kernel —
+// per-phase `Σ|ẽ|`/`Σẽ` accumulate as: (a) two V8 lane pairs for the
+// chunked V span (chunks start at x = 1 + 8c, so lane k of parity-j
+// chunks covers positions ≡ (1 + 8j + k) mod period — the fold happens
+// once per strip into the f64 phase totals); (b) per-row V8 accumulators
+// for H (a row's boundaries share phase `y mod period`), lane-summed in
+// fixed f32 order then added to f64; (c) scalar tails fold into the f64
+// phase totals in row order. Every engine, tier and thread count replays
+// the identical sequence, so the feature is bit-deterministic while its
+// values carry f32-lane accumulation precision — the documented
+// exception to the row-ordered-f64 convention, chosen because a
+// per-boundary scalar scatter cannot meet the family's runtime budget.
+// ============================================================================
+
+/// Per-cell C1 accumulation entry — lazily sizes the `ẽ` planes and runs
+/// the dispatched strip kernel. `plane_h` is the FULL plane height.
+#[allow(clippy::too_many_arguments)]
+fn gridblk_strip_wide(
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    incant!(
+        gridblk_strip_wide_entry(
+            src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gridblk_strip_wide_entry(
+    token: Token,
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    gridblk_strip_wide_generic::<_>(
+        token, src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    debug_assert!((2..=GRIDBLK_MAX_PERIOD).contains(&period));
+    debug_assert!(period.is_power_of_two());
+    debug_assert_eq!(src_wide.len(), width * (strip_h + 2 * HALO_P));
+    debug_assert_eq!(dst_wide.len(), src_wide.len());
+    debug_assert_eq!(act_wide.len(), src_wide.len());
+    let n_plane = width * plane_h;
+    if acc.plane_v.len() != n_plane {
+        acc.plane_v.resize(n_plane, 0.0);
+        acc.plane_h.resize(n_plane, 0.0);
+    }
+    let half = V8::<T>::splat(token, 0.5);
+    let c_act = V8::<T>::splat(token, C_ACTIVITY as f32);
+    // Lane-phase accumulators for the chunked V span — folded to f64 once
+    // per strip (see module doc above for the lane→phase map).
+    let mut acc_v_abs = [V8::<T>::zero(token), V8::<T>::zero(token)];
+    let mut acc_v_sgn = [V8::<T>::zero(token), V8::<T>::zero(token)];
+    macro_rules! ld_at {
+        ($plane:expr, $off:expr) => {
+            V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+        };
+    }
+    for k in 0..strip_h {
+        let y = y0 + k;
+        let row = (HALO_P + k) * width;
+        let prow = y * width;
+
+        // ---- Vertical boundaries (x ∈ 1..width), phase `x mod period`.
+        // Full chunks from x = 1 step 8 keep a fixed lane→phase map.
+        let interior_w = width - 1;
+        let chunk_end = 1 + interior_w - (interior_w % 8);
+        let mut x = 1usize;
+        let mut c = 0usize;
+        while x < chunk_end {
+            let i = row + x;
+            let e = (ld_at!(dst_wide, i) - ld_at!(dst_wide, i - 1)).abs()
+                - (ld_at!(src_wide, i) - ld_at!(src_wide, i - 1)).abs();
+            let norm = (ld_at!(act_wide, i - 1) + ld_at!(act_wide, i)) * half + c_act;
+            let et = e / norm;
+            et.store(
+                (&mut acc.plane_v[prow + x..prow + x + 8])
+                    .try_into()
+                    .unwrap(),
+            );
+            let j = c & 1;
+            acc_v_abs[j] += et.abs();
+            acc_v_sgn[j] += et;
+            x += 8;
+            c += 1;
+        }
+        while x < width {
+            let i = row + x;
+            let e = (dst_wide[i] - dst_wide[i - 1]).abs() - (src_wide[i] - src_wide[i - 1]).abs();
+            let et = e / ((act_wide[i - 1] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
+            acc.plane_v[prow + x] = et;
+            let p = x % period;
+            acc.abs_v[p] += et.abs() as f64;
+            acc.signed_v[p] += et as f64;
+            x += 1;
+        }
+
+        // ---- Horizontal boundaries (row y vs y−1), phase `y mod period`.
+        // `y == 0` never fires: the lattice has no boundary above the
+        // plane. For interior strips the halo row is the real `y − 1`.
+        if y > 0 {
+            let ph = y % period;
+            let row_u = row - width;
+            let mut acc_h_abs = V8::<T>::zero(token);
+            let mut acc_h_sgn = V8::<T>::zero(token);
+            let chunk_end_h = width - (width % 8);
+            let mut x = 0usize;
+            while x < chunk_end_h {
+                let i = row + x;
+                let e = (ld_at!(dst_wide, i) - ld_at!(dst_wide, row_u + x)).abs()
+                    - (ld_at!(src_wide, i) - ld_at!(src_wide, row_u + x)).abs();
+                let norm = (ld_at!(act_wide, row_u + x) + ld_at!(act_wide, i)) * half + c_act;
+                let et = e / norm;
+                et.store(
+                    (&mut acc.plane_h[prow + x..prow + x + 8])
+                        .try_into()
+                        .unwrap(),
+                );
+                acc_h_abs += et.abs();
+                acc_h_sgn += et;
+                x += 8;
+            }
+            let mut t_abs = 0.0f32;
+            let mut t_sgn = 0.0f32;
+            while x < width {
+                let i = row + x;
+                let iu = row_u + x;
+                let e = (dst_wide[i] - dst_wide[iu]).abs() - (src_wide[i] - src_wide[iu]).abs();
+                let et = e / ((act_wide[iu] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
+                acc.plane_h[prow + x] = et;
+                t_abs += et.abs();
+                t_sgn += et;
+                x += 1;
+            }
+            let a = acc_h_abs.to_array();
+            let s = acc_h_sgn.to_array();
+            let row_abs = a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6] + a[7] + t_abs;
+            let row_sgn = s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7] + t_sgn;
+            acc.abs_h[ph] += row_abs as f64;
+            acc.signed_h[ph] += row_sgn as f64;
+        }
+    }
+    // Strip-end lane fold — phase (1 + 8j + k) mod period per doc above.
+    for (j, (av, sv)) in acc_v_abs.iter().zip(acc_v_sgn.iter()).enumerate() {
+        let a = av.to_array();
+        let s = sv.to_array();
+        for k in 0..8 {
+            let p = (1 + 8 * j + k) % period;
+            acc.abs_v[p] += a[k] as f64;
+            acc.signed_v[p] += s[k] as f64;
+        }
+    }
+}
+
+// ============================================================================
+// REV4 C4 `arttype` bleed mask builder (design note §C4).
+//
+// The mask marks every pixel within Chebyshev distance 1 of a dst-Y
+// edge — where "edge" is the gradient kernel's own test
+// (`(gx² + gy²).sqrt() >= C_RING_EDGE`, x-neighbours column-clamped,
+// y-neighbours the caller-supplied rows). Built once per strip before
+// the channel fan-out so the serial path (X/B processed before Y) has it
+// ready for the chroma gradient hooks.
+//
+// `dh` holds the dst-Y plane rows `reflect_101(y0 − 2 + r, plane_h)` for
+// `r ∈ 0..strip_h + 4`, fetched by the caller (producer `rows` in the
+// streaming walk, `gather_strip_halo` in the materialized path). The
+// edge formula is evaluated in V8 f32 uniformly at every position —
+// the deterministic definition; scalar tails use the identical f32 op
+// sequence. `mul_add` is deliberately NOT used (its FMA fusion is
+// tier-dependent — the same reason the production kernels spell
+// `a*b + c` out).
+// ============================================================================
+
+/// Per-strip C4 mask scratch (sized by the caller once per walk).
+#[derive(Default)]
+struct BleedMaskWork {
+    /// Dst-Y rows for `reflect_101(y0 − 2 + r)`, r ∈ 0..strip_h+4.
+    dh: Vec<f32>,
+    /// One raw edge-flag row (width f32, {0,1}).
+    e_row: Vec<f32>,
+    /// Horizontally-dilated edge rows j ∈ 0..strip_h+2 (E at plane row
+    /// `y0 − 1 + j`, zero when that row is out of plane).
+    ehd: Vec<f32>,
+    /// The finished mask, `width * strip_h`, {0.0, 1.0}.
+    mask: Vec<f32>,
+}
+
+impl BleedMaskWork {
+    /// Size all buffers for `width` × strips of at most `max_strip_h`.
+    fn sized(width: usize, max_strip_h: usize) -> Self {
+        Self {
+            dh: vec![0.0; width * (max_strip_h + 4)],
+            e_row: vec![0.0; width],
+            ehd: vec![0.0; width * (max_strip_h + 2)],
+            mask: vec![0.0; width * max_strip_h],
+        }
+    }
+}
+
+/// Build the strip's dilated dst-Y edge mask into `mw.mask[..n_strip]`.
+#[allow(clippy::too_many_arguments)]
+fn dst_y_edge_mask_strip(
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    mw: &mut BleedMaskWork,
+) {
+    incant!(
+        dst_y_edge_mask_entry(
+            &mw.dh[..width * (strip_h + 4)],
+            width,
+            y0,
+            strip_h,
+            plane_h,
+            &mut mw.e_row[..width],
+            &mut mw.ehd[..width * (strip_h + 2)],
+            &mut mw.mask[..width * strip_h]
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn dst_y_edge_mask_entry(
+    token: Token,
+    dh: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    e_row: &mut [f32],
+    ehd: &mut [f32],
+    mask: &mut [f32],
+) {
+    dst_y_edge_mask_generic::<_>(token, dh, width, y0, strip_h, plane_h, e_row, ehd, mask)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dst_y_edge_mask_generic<T: F32x8Backend + Copy>(
+    token: T,
+    dh: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    e_row: &mut [f32],
+    ehd: &mut [f32],
+    mask: &mut [f32],
+) {
+    debug_assert_eq!(dh.len(), width * (strip_h + 4));
+    debug_assert_eq!(ehd.len(), width * (strip_h + 2));
+    debug_assert_eq!(mask.len(), width * strip_h);
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let c_edge = V8::<T>::splat(token, C_RING_EDGE as f32);
+    macro_rules! ld_at {
+        ($plane:expr, $off:expr) => {
+            V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+        };
+    }
+    // Scalar edge flag at plane row py = y0−1+j, column x — x-neighbours
+    // clamped, f32 arithmetic identical to the V8 lanes.
+    let edge_at = |j: usize, x: usize| -> f32 {
+        let xl = x.saturating_sub(1);
+        let xr = (x + 1).min(width - 1);
+        let (ru, rc, rd) = (j * width, (j + 1) * width, (j + 2) * width);
+        let gx = dh[rc + xr] - dh[rc + xl];
+        let gy = dh[rd + x] - dh[ru + x];
+        if (gx * gx + gy * gy).sqrt() >= C_RING_EDGE as f32 {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    // Pass 1: edge rows (hdilated) into `ehd`. Row j is E at plane row
+    // `y0 − 1 + j`; rows outside the plane stay zero — the plane-clamped
+    // dilation of the spec falls out for free.
+    for j in 0..strip_h + 2 {
+        let py = y0 as isize + j as isize - 1;
+        let ehd_row = &mut ehd[j * width..(j + 1) * width];
+        if py < 0 || py >= plane_h as isize {
+            ehd_row.fill(0.0);
+            continue;
+        }
+        let (ru, rc, rd) = (j * width, (j + 1) * width, (j + 2) * width);
+        let mut x = 0usize;
+        if width > 2 {
+            e_row[0] = edge_at(j, 0);
+            let interior_end = width - 1;
+            let interior_w = interior_end - 1;
+            let chunk_end = 1 + interior_w - (interior_w % 8);
+            x = 1;
+            while x < chunk_end {
+                let gx = ld_at!(dh, rc + x + 1) - ld_at!(dh, rc + x - 1);
+                let gy = ld_at!(dh, rd + x) - ld_at!(dh, ru + x);
+                let m = (gx * gx + gy * gy).sqrt();
+                let flag = V8::<T>::blend(m.simd_ge(c_edge), one, zero);
+                flag.store((&mut e_row[x..x + 8]).try_into().unwrap());
+                x += 8;
+            }
+            while x < interior_end {
+                e_row[x] = edge_at(j, x);
+                x += 1;
+            }
+            e_row[width - 1] = edge_at(j, width - 1);
+        } else {
+            while x < width {
+                e_row[x] = edge_at(j, x);
+                x += 1;
+            }
+        }
+        // Horizontal 3-tap dilation, column-clamped — pure max ops, so
+        // the V8 and scalar shapes emit identical bits.
+        if width == 1 {
+            ehd_row[0] = e_row[0];
+        } else if width == 2 {
+            let m = e_row[0].max(e_row[1]);
+            ehd_row[0] = m;
+            ehd_row[1] = m;
+        } else {
+            ehd_row[0] = e_row[0].max(e_row[1]);
+            let interior_w = width - 2;
+            let chunk_end = 1 + interior_w - (interior_w % 8);
+            let mut x = 1usize;
+            while x < chunk_end {
+                let m = V8::<T>::from_array(token, e_row[x - 1..x + 7].try_into().unwrap())
+                    .max(V8::<T>::from_array(
+                        token,
+                        e_row[x..x + 8].try_into().unwrap(),
+                    ))
+                    .max(V8::<T>::from_array(
+                        token,
+                        e_row[x + 1..x + 9].try_into().unwrap(),
+                    ));
+                m.store((&mut ehd_row[x..x + 8]).try_into().unwrap());
+                x += 8;
+            }
+            while x < width - 1 {
+                ehd_row[x] = e_row[x - 1].max(e_row[x]).max(e_row[x + 1]);
+                x += 1;
+            }
+            ehd_row[width - 1] = e_row[width - 2].max(e_row[width - 1]);
+        }
+    }
+    // Pass 2: vertical 3-tap dilation — mask row k = max(ehd[k..k+3]),
+    // the ±1-row neighbourhood (out-of-plane ehd rows are already zero).
+    for k in 0..strip_h {
+        let (a, b, c) = (k * width, (k + 1) * width, (k + 2) * width);
+        let mrow = &mut mask[k * width..(k + 1) * width];
+        let mut x = 0usize;
+        while x + 8 <= width {
+            let m = ld_at!(ehd, a + x)
+                .max(ld_at!(ehd, b + x))
+                .max(ld_at!(ehd, c + x));
+            m.store((&mut mrow[x..x + 8]).try_into().unwrap());
+            x += 8;
+        }
+        while x < width {
+            mrow[x] = ehd[a + x].max(ehd[b + x]).max(ehd[c + x]);
+            x += 1;
+        }
+    }
+}
+
+// Wide kernels still consult process arithmetic. Never feed them direct-error
+// moments prepared under a different explicit revision. Basic-only plans carry
+// their revision through both passes and remain safe to serve side by side.
+fn validate_wide_revision(toggles: V2NewFeatureToggles) -> Result<(), ZensimError> {
+    if !toggles.v1_only && toggles.formula_revision != crate::ssim_form::active_revision() {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "wide feature extraction requires matching process and requested formula revisions",
+        });
+    }
+    Ok(())
+}
+
 /// Streaming folded-720[+append] pair entry: validation + sub-64
 /// reflect-pad exactly like the materialized pair entry
 /// ([`compute_folded720_impl_with_toggles`] → prepare → with-ref inner),
@@ -7688,7 +10140,36 @@ pub(crate) fn compute_folded720_streaming_impl(
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
+    planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
+    compute_folded720_streaming_extras(
+        source,
+        distorted,
+        max_pixels,
+        parallel,
+        toggles,
+        scratch,
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
+    )
+}
+
+/// [`compute_folded720_streaming_impl`] with the caller's
+/// [`FoldWalkExtras`] carried into the walk — the training surface's
+/// entry (DVIFM constants override + block-record sink). Identical
+/// validation, HDR routing and padding; the extras are the only delta.
+pub(crate) fn compute_folded720_streaming_extras(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> Result<ZensimV2Result, ZensimError> {
+    validate_wide_revision(toggles)?;
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     // HDR routing (HDR_PLAN chunk 2) in the exact position the
@@ -7718,7 +10199,7 @@ pub(crate) fn compute_folded720_streaming_impl(
                 distorted.alpha_mode(),
             )
         {
-            return compute_folded720_hdr_streaming_impl(
+            return compute_folded720_hdr_streaming_extras(
                 source,
                 distorted,
                 HdrEncoding::Linear,
@@ -7726,6 +10207,7 @@ pub(crate) fn compute_folded720_streaming_impl(
                 parallel,
                 toggles,
                 scratch,
+                extras,
             );
         }
         return Err(ZensimError::HdrInputRequiresPuPath);
@@ -7742,7 +10224,7 @@ pub(crate) fn compute_folded720_streaming_impl(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
-            FoldWalkExtras::default(),
+            extras,
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -7752,7 +10234,7 @@ pub(crate) fn compute_folded720_streaming_impl(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
-        FoldWalkExtras::default(),
+        extras,
     ))
 }
 
@@ -7805,6 +10287,28 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             ..V2NewFeatureToggles::default()
         },
     };
+    if let Some(p) = plan
+        && let Some(sampling) = p.compute.sampling
+    {
+        let dims = sampling.dims(source.width(), source.height());
+        let mut mo = MeanOffsetRows::new(dims[0].0, dims[0].1);
+        let res = foldapp_streaming_walk(
+            source,
+            distorted,
+            parallel,
+            toggles,
+            crate::feature_v2_stream::FrontEnd::Sdr,
+            scratch,
+            FoldWalkExtras {
+                compute: Some(p.compute),
+                mean_offset: Some(&mut mo),
+                #[cfg(feature = "custom-profiles")]
+                retention,
+                ..Default::default()
+            },
+        );
+        return Ok((res.into_features(), mo.finish()));
+    }
     // Sub-64 reflect-pad BEFORE the walk, exactly as
     // `metric::compute_with_config_inner` does — so both engines' features
     // AND mean_offset are taken over the same padded plane. The two arms are
@@ -7824,6 +10328,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
             FoldWalkExtras {
+                compute: plan.map(|p| p.compute),
                 mean_offset: Some(&mut mo),
                 #[cfg(feature = "custom-profiles")]
                 retention,
@@ -7841,6 +10346,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
         FoldWalkExtras {
+            compute: plan.map(|p| p.compute),
             mean_offset: Some(&mut mo),
             #[cfg(feature = "custom-profiles")]
             retention,
@@ -7903,7 +10409,14 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     parallel: bool,
     scratch: &mut V2Scratch,
     pool_mode: Option<V1PoolsMode>,
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> Option<(Vec<f64>, [f64; 3])> {
+    if precomputed.sampling.is_some()
+        || plan.is_some_and(|p| p.compute.sampling.is_some() || p.compute.v2_blocks)
+        || distorted.is_hdr()
+    {
+        return None;
+    }
     let (cw, ch) = (precomputed.scales[0].1, precomputed.scales[0].2);
     if distorted.width() != cw || distorted.height() != ch {
         return None;
@@ -7911,11 +10424,14 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     if !cached_ref_feed_usable(&precomputed.scales, cw, ch) {
         return None;
     }
-    let toggles = V2NewFeatureToggles {
-        v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
-        v1_only: true,
-        ..V2NewFeatureToggles::default()
-    };
+    let toggles = plan.map_or(
+        V2NewFeatureToggles {
+            v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
+            v1_only: true,
+            ..V2NewFeatureToggles::default()
+        },
+        crate::feature_plan::Plan::toggles,
+    );
     let mut mo = MeanOffsetRows::new(cw, ch);
     // `source` is unused by the producer on the cached feed (every source-side
     // row is copied from the cache); it is still the type parameter, so pass
@@ -7932,6 +10448,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
         FoldWalkExtras {
             mean_offset: Some(&mut mo),
             ref_planes: Some(&precomputed.scales),
+            compute: plan.map(|p| p.compute),
             ..Default::default()
         },
     );
@@ -7949,8 +10466,9 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
 /// values for `Pq`/`Hlg`) or `Srgb16Rgba` (u16 code values, `Pq`/`Hlg`
 /// only) — both with `AlphaMode::Opaque` (the alpha noise-background
 /// compositor is `[0,1]`-relative and NOT validated on absolute-light
-/// pixels). `ColorPrimaries` are taken as-is (no gamut mapping — the
-/// `compute_pu_linear` contract). Everything else:
+/// pixels). Declared primaries are converted to linear sRGB before opsin,
+/// preserving negative and above-one components (no SDR display clamp).
+/// Everything else:
 /// `HdrInputRequiresPuPath`.
 pub(crate) fn compute_folded720_hdr_streaming_impl(
     source: &impl ImageSource,
@@ -7960,9 +10478,83 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
+    planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
+    compute_folded720_hdr_streaming_extras(
+        source,
+        distorted,
+        encoding,
+        max_pixels,
+        parallel,
+        toggles,
+        scratch,
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
+    )
+}
+
+/// [`compute_folded720_hdr_streaming_impl`] with the caller's
+/// [`FoldWalkExtras`] carried into the walk — the training surface's
+/// declared-HDR entry.
+pub(crate) fn compute_folded720_hdr_streaming_extras(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> Result<ZensimV2Result, ZensimError> {
+    validate_wide_revision(toggles)?;
+    validate_hdr_pair(source, distorted, encoding, max_pixels)?;
+    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        return Ok(foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            front_end,
+            scratch,
+            extras,
+        ));
+    }
+    Ok(foldapp_streaming_walk(
+        source, distorted, parallel, toggles, front_end, scratch, extras,
+    ))
+}
+
+pub(crate) fn validate_hdr_pair(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+) -> Result<(), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let valid_display = match encoding {
+        HdrEncoding::Linear => true,
+        HdrEncoding::Pq { peak_nits } => peak_nits.is_finite() && peak_nits > 0.0,
+        HdrEncoding::Hlg {
+            peak_nits,
+            ambient_lux,
+        } => {
+            peak_nits.is_finite()
+                && peak_nits > 0.0
+                && ambient_lux.is_finite()
+                && ambient_lux >= 0.0
+        }
+    };
+    if !valid_display {
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
     let shape_ok = |fmt: crate::source::PixelFormat, alpha: crate::source::AlphaMode| {
         let fmt_ok = match encoding {
             HdrEncoding::Linear => fmt == crate::source::PixelFormat::LinearF32Rgba,
@@ -7978,31 +10570,7 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     {
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
-    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
-    if source.width() < crate::metric::MIN_PYRAMID_DIM
-        || source.height() < crate::metric::MIN_PYRAMID_DIM
-    {
-        let padded_src = crate::metric::reflect_pad_to_min(source);
-        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
-        return Ok(foldapp_streaming_walk(
-            &padded_src,
-            &padded_dst,
-            parallel,
-            toggles,
-            front_end,
-            scratch,
-            FoldWalkExtras::default(),
-        ));
-    }
-    Ok(foldapp_streaming_walk(
-        source,
-        distorted,
-        parallel,
-        toggles,
-        front_end,
-        scratch,
-        FoldWalkExtras::default(),
-    ))
+    Ok(())
 }
 
 /// Folded-720+append+append2 pair entry (944; [`FeatureRegime::
@@ -8033,7 +10601,7 @@ pub(crate) fn compute_folded720_append2_hdr_streaming_impl(
     toggles.append_block = true;
     toggles.append2_block = true;
     compute_folded720_hdr_streaming_impl(
-        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -8161,6 +10729,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
         parallel,
         scratch,
         &mut crate::attribution::AttrSinkF32::Canvas(&mut canvas),
+        None,
     );
     // Trim the (possibly reflect-padded sub-64) canvas to the original.
     let out = if orig_w == w0 && orig_h == h0 {
@@ -8190,6 +10759,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
     parallel: bool,
     scratch: &mut PassBScratchF32,
     accum: &mut crate::attribution::BinAccum,
+    geometry: Option<&crate::sampling::Geometry>,
 ) {
     retention_pass_b_all_scales(
         ret,
@@ -8199,7 +10769,30 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
         parallel,
         scratch,
         &mut crate::attribution::AttrSinkF32::Bins(accum),
+        geometry,
     );
+}
+
+/// Whether this cell has any contribution to the requested attribution.
+#[cfg(feature = "custom-profiles")]
+fn attribution_cell_active(
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    scale: usize,
+    ch: usize,
+) -> bool {
+    let active = |values: &[f64], cell: usize, width: usize| {
+        values
+            .iter()
+            .skip(cell * width)
+            .take(width)
+            .any(|&v| v != 0.0)
+    };
+    let cell = scale * 3 + ch;
+    active(s_v2, cell, FEATURES_PER_CHANNEL_V2_TOTAL)
+        || s_append.is_some_and(|s| active(s, cell, FEATURES_PER_CHANNEL_APPEND))
+        || (ch == APPEND2_CHANNEL && s_append2.is_some_and(|s| active(s, scale, APPEND2_PER_SCALE)))
 }
 
 /// Shared per-scale pass-B loop over the retention for both sinks.
@@ -8212,6 +10805,7 @@ fn retention_pass_b_all_scales(
     parallel: bool,
     scratch: &mut PassBScratchF32,
     sink: &mut crate::attribution::AttrSinkF32<'_>,
+    geometry: Option<&crate::sampling::Geometry>,
 ) {
     let n_scales = ret.dims.len();
     let (w0, h0) = ret.dims[0];
@@ -8220,6 +10814,13 @@ fn retention_pass_b_all_scales(
     scratch.scale_density.resize(n0, 0.0);
     scratch.win_plane.resize(n0, 0.0);
     for scale in 0..n_scales {
+        // A selectively omitted cell can have no retained samples. Deriving
+        // its coefficients would evaluate 0 * (1 / 0), poisoning an otherwise
+        // valid coarse map. Zero sensitivity makes its contribution exactly
+        // zero; skip its work before any normalization or plane access.
+        if !(0..3).any(|ch| attribution_cell_active(s_v2, s_append, s_append2, scale, ch)) {
+            continue;
+        }
         attr_pass_b_for_scale_f32(
             scale,
             [
@@ -8249,6 +10850,7 @@ fn retention_pass_b_all_scales(
             sink,
             &mut scratch.spread_tmp,
             &mut scratch.spread_out,
+            geometry,
         );
     }
 }
@@ -8268,6 +10870,46 @@ pub(crate) fn compute_folded720_csfw_impl(
     compute_folded720_impl_with_toggles(source, distorted, max_pixels, parallel, toggles)
 }
 
+/// Folded-720+append+append2+CSFW+DVIFM pair entry (986; [`FeatureRegime::
+/// Folded720Dvifm`]): forces `append_block` + `append2_block` +
+/// `csfw_block` + `dvifm_block`. `pub(crate)` only — no `Zensim` surface
+/// yet; the qualification gates drive it through the test entry.
+#[allow(dead_code)] // used by the DVIFM gates; no product caller yet
+pub(crate) fn compute_folded720_dvifm_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    toggles.append2_block = true;
+    toggles.csfw_block = true;
+    toggles.dvifm_block = true;
+    compute_folded720_impl_with_toggles(source, distorted, max_pixels, parallel, toggles)
+}
+
+/// Declared-HDR 986 entry: [`compute_folded720_hdr_streaming_impl`] with
+/// append + append2 + CSFW + DVIFM forced on (PU-route normalisation).
+#[allow(dead_code)] // used by the DVIFM gates; no product caller yet
+pub(crate) fn compute_folded720_dvifm_hdr_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    toggles.append2_block = true;
+    toggles.csfw_block = true;
+    toggles.dvifm_block = true;
+    compute_folded720_hdr_streaming_impl(
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
+    )
+}
+
 /// Declared-HDR 956 entry: [`compute_folded720_hdr_streaming_impl`] with
 /// append + append2 + CSFW forced on (PU-route φ constants).
 pub(crate) fn compute_folded720_csfw_hdr_streaming_impl(
@@ -8283,7 +10925,7 @@ pub(crate) fn compute_folded720_csfw_hdr_streaming_impl(
     toggles.append2_block = true;
     toggles.csfw_block = true;
     compute_folded720_hdr_streaming_impl(
-        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -8300,7 +10942,7 @@ pub(crate) fn compute_folded720_append_hdr_streaming_impl(
 ) -> Result<ZensimV2Result, ZensimError> {
     toggles.append_block = true;
     compute_folded720_hdr_streaming_impl(
-        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -8315,7 +10957,9 @@ pub(crate) fn compute_folded720_append_streaming_impl(
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
     toggles.append_block = true;
-    compute_folded720_streaming_impl(source, distorted, max_pixels, parallel, toggles, scratch)
+    compute_folded720_streaming_impl(
+        source, distorted, max_pixels, parallel, toggles, scratch, None,
+    )
 }
 
 /// The streaming walk body (inputs already validated + ≥ 64px).
@@ -8464,6 +11108,39 @@ impl MeanOffsetRows {
     }
 }
 
+/// Training-only DVIFM side channel (`feature = "training"`): substitute
+/// the per-level constants the walk's DVIFM pump would otherwise take from
+/// [`crate::dvifm::DvifmParams::default`], and collect every block's
+/// 20-float [`crate::dvifm::BlockRec`] for the constants-fit cache
+/// (`research::Extraction::dvifm_block_stats`). `None` on every served
+/// path — nothing allocates.
+///
+/// The cache is filled AFTER the finalize flush inside the walk, so the
+/// records cover the same full-block lattice the pooled features read.
+#[cfg(feature = "training")]
+#[derive(Default)]
+pub(crate) struct DvifmWalkExtras {
+    /// Constants to run the pump under this walk (`None` = `DvifmParams::default()`).
+    pub(crate) params: Option<crate::dvifm::DvifmParams>,
+    /// Keep the per-block records: `Some` here enables the accumulator's
+    /// `block_cache`; the walk moves it in on finalize.
+    pub(crate) cache: Option<DvifmBlockCacheOut>,
+}
+
+/// The collected DVIFM block records one training walk produced —
+/// level-major, block-row-major over each level's full-block grid
+/// (`grid[l] = (nby, nbx)`; partial border blocks are dropped per spec).
+#[cfg(feature = "training")]
+#[derive(Debug, Default)]
+pub(crate) struct DvifmBlockCacheOut {
+    /// Per-level full-block grid `(nby, nbx)`.
+    pub(crate) grid: [(u32, u32); crate::dvifm::DVIFM_LEVELS],
+    /// Per-level plane dims `(w, h)` — the canvas the steering field paints.
+    pub(crate) dims: [(u32, u32); crate::dvifm::DVIFM_LEVELS],
+    /// `levels[l]` = the records the level's pump emitted, in order.
+    pub(crate) levels: Vec<Vec<crate::dvifm::BlockRec>>,
+}
+
 /// The fold walk's optional SIDE CHANNELS, bundled so the walk keeps one
 /// options parameter instead of growing a positional tail.
 ///
@@ -8471,6 +11148,8 @@ impl MeanOffsetRows {
 /// byte-for-byte the walk as it was before any of them existed.
 #[derive(Default)]
 pub(crate) struct FoldWalkExtras<'a> {
+    /// Resolved model/research plan; raw public extraction keeps all channels.
+    pub(crate) compute: Option<ComputeSet>,
     /// Appendix-N retention hooks (the fused-944 attribution session).
     pub(crate) retention: Option<&'a mut FoldRetention>,
     /// Per-scale-0-row `Σ_x (src − dst)` sums, for the fold-backed engine's
@@ -8479,9 +11158,38 @@ pub(crate) struct FoldWalkExtras<'a> {
     /// A pre-built source-side XYB pyramid the producer copies from instead
     /// of decoding + converting + downscaling (the ref-cached fold form).
     pub(crate) ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
+    /// Training-only DVIFM constants/cache sink (`feature = "training"`).
+    /// `None` everywhere the gate is off — and even under the gate the
+    /// served callers leave it `None`.
+    #[cfg(feature = "training")]
+    pub(crate) dvifm: Option<&'a mut DvifmWalkExtras>,
 }
 
 fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
+    source: &S,
+    distorted: &D,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    front_end: crate::feature_v2_stream::FrontEnd,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> ZensimV2Result {
+    let compute = extras
+        .compute
+        .unwrap_or_else(|| ComputeSet::from_toggles(toggles));
+    if compute.full_res_xb && compute.coarse_y_only_scales == 0 {
+        foldapp_streaming_walk_impl::<S, D, true>(
+            source, distorted, parallel, toggles, front_end, scratch, extras,
+        )
+    } else {
+        assert!(compute.allows_full_res_y_subset());
+        foldapp_streaming_walk_impl::<S, D, false>(
+            source, distorted, parallel, toggles, front_end, scratch, extras,
+        )
+    }
+}
+
+fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
     source: &S,
     distorted: &D,
     parallel: bool,
@@ -8494,11 +11202,17 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         mut retention,
         mut mean_offset,
         ref_planes,
+        compute,
+        // Training-only DVIFM side channel (`feature = "training"`): a
+        // params override + the block-record sink. `None` on every
+        // served path.
+        #[cfg(feature = "training")]
+        dvifm,
     } = extras;
     use crate::feature_v2_stream::StripPlaneProducer;
     // ITEM D: one derivation of WHAT this request computes. Every local
     // below reads from it instead of re-deriving from `toggles`.
-    let compute = ComputeSet::from_toggles(toggles);
+    let compute = compute.unwrap_or_else(|| ComputeSet::from_toggles(toggles));
     let fold_v1 = compute.v1_basic;
     // BLOCK-SKIPPING: a v1-only request computes NOTHING v2-era. Every
     // v2 toggle is forced off in `ComputeSet::from_toggles` rather than
@@ -8519,6 +11233,23 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     let layout_append = toggles.append_block;
     let layout_append2 = toggles.append2_block;
     let layout_csfw = toggles.csfw_block;
+    let layout_dvifm = toggles.dvifm_block;
+    // REV4 family layout flags — independent (each family emits iff its
+    // own layout flag, so a rev4-subset request keeps its exact width).
+    let layout_gridblk = toggles.rev4_gridblk;
+    let layout_ringbasis = toggles.rev4_ringbasis;
+    let layout_tailhist = toggles.rev4_tailhist;
+    let layout_arttype = toggles.rev4_arttype;
+    let layout_gmsbank = toggles.gmsbank;
+    let layout_mapdev = toggles.mapdev;
+    let layout_z1max = toggles.z1max;
+    let layout_gmsnative = toggles.gmsnative;
+    let layout_dvifmgate = toggles.dvifmgate;
+    // Only read below under `threads` (the `fuse_channels` derivation a few
+    // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
+    // without it, so `--no-default-features --features feature-regime-v2`
+    // (no `threads`) sees this as a genuinely unused binding.
+    #[cfg(feature = "threads")]
     let append_on = compute.append;
     let append2_on = compute.append2;
     assert!(
@@ -8551,6 +11282,31 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         !layout_csfw || layout_append2,
         "csfw_block requires append2_block (f944+ sits after the append2 block)"
     );
+    assert!(
+        !layout_dvifm || layout_csfw,
+        "dvifm_block requires csfw_block (f956+ sits after the CSFW block)"
+    );
+    assert!(
+        !layout_gmsbank
+            || (layout_gridblk && layout_ringbasis && layout_tailhist && layout_arttype),
+        "gmsbank requires the full f1322 prefix layout"
+    );
+    assert!(
+        !layout_mapdev || layout_gmsbank,
+        "mapdev requires the C8 layout (f1502 sits after f1501)"
+    );
+    assert!(
+        !layout_z1max || layout_mapdev,
+        "z1max requires the mapdev layout (f1562 sits after f1561)"
+    );
+    assert!(
+        !layout_gmsnative || layout_z1max,
+        "gmsnative requires the z1max layout (f1790 sits after f1789)"
+    );
+    assert!(
+        !layout_dvifmgate || layout_gmsnative,
+        "dvifmgate requires the gmsnative layout (f1820 sits after f1819)"
+    );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
     // never inverts an encoding; the route-dependence lives entirely in
@@ -8562,6 +11318,34 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             FrontEnd::Hdr(_) => CsfwParams::for_phi(CSFW_PHI_Y_PU),
         }
     });
+    // DVIFM's normalization is route-local for the same reason append2's
+    // deltas and CSFW's φ are: the baked constants are measured over the
+    // Y range each front-end actually produces (`dvifm::DVIFM_NORM_*`).
+    // The DVIFM input plane rides on the params (training-gated spec
+    // override); `XybY` is the default and keeps the historical producer
+    // tap. A non-XYB plane is SDR-only and incompatible with a sampling
+    // contract (the producer would serve sampled XYB rows, not the
+    // requested plane).
+    #[cfg(feature = "training")]
+    let dvifm_plane = dvifm
+        .as_deref()
+        .and_then(|de| de.params)
+        .map(|p| p.input_plane)
+        .unwrap_or_default();
+    #[cfg(not(feature = "training"))]
+    let dvifm_plane = crate::dvifm::DvifmInputPlane::default();
+    let dvifm_norm = crate::dvifm::dvifm_norm_for(
+        dvifm_plane,
+        matches!(front_end, crate::feature_v2_stream::FrontEnd::Hdr(_)),
+        compute.sampling.is_some(),
+    );
+    // The accumulator is created on the first scale-0 strip, whose `info`
+    // carries the producer's OWN scale-0 dims (post-sampling, post any
+    // minimum-size padding) — not `dims[0]`.
+    let mut dvifm_acc: Option<crate::dvifm::DvifmAccum> = None;
+    // Scratch for the non-XYB plane route: two strips of `strip_max_n`
+    // f32 (src + dst), allocated only when a Y'CbCr plane is requested.
+    let mut dvifm_plane_scratch: Vec<f32> = Vec::new();
     let n_scales = crate::NUM_SCALES;
     let (w0, h0) = (source.width(), source.height());
 
@@ -8577,7 +11361,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         }
     }
 
-    let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P);
+    if let Some(sampling) = compute.sampling {
+        dims = sampling.dims(w0, h0);
+    }
+    let strip_max_n = dims[0].0 * (STRIP_ROWS + 2 * HALO_P);
     // HOISTED so the strip scratch can be sized to the planes this walk will
     // actually write (fold-footprint lane). Both flags are strip-independent —
     // they were computed inside the loop purely because that is where they are
@@ -8598,6 +11385,11 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
     let mut accums: [StreamChannelAccums; 3] =
         std::array::from_fn(|_| StreamChannelAccums::new(n_scales, band_slots_for(band_parallel)));
+    // REV4 C4's strip scratch — sized for the largest plane width; the
+    // per-strip build slices it down to `info.plane_w`.
+    let mut bleed_work = compute
+        .arttype
+        .then(|| BleedMaskWork::sized(dims[0].0, STRIP_ROWS));
     if let Some(ret) = retention.as_deref_mut() {
         ret.ensure(&dims);
     }
@@ -8605,6 +11397,12 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     // channel's dst-activity plane (and ONLY the Y channel's — the block
     // is Y-only, so X/B never pay the chain).
     let act_dst_on = append2.map(|p| p.dst_activity).unwrap_or(false);
+    // The restored-cut side passes (mapdev / z1max) rebuild both pyramids from
+    // the pair, so they cannot serve a ref-fed walk (no source pixels), a
+    // sampled walk, or the HDR front end.
+    let restore_side_ok = ref_planes.is_none()
+        && compute.sampling.is_none()
+        && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr);
     let mut producer = StripPlaneProducer::new_with_ref_feed(
         source,
         distorted,
@@ -8612,6 +11410,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         stream_pool,
         front_end,
         ref_planes,
+        compute.sampling,
     );
 
     let __t_walk = crate::fold_timing::start();
@@ -8623,6 +11422,19 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             break;
         };
         let scale = info.scale;
+        let local = compute.at_scale(scale);
+        let v2_blocks = local.v2_blocks;
+        let append_on = local.append;
+        let append2_on = local.append2;
+        let append2 = append2.filter(|_| append2_on);
+        let csfw = csfw.filter(|_| local.csfw);
+        let toggles = V2NewFeatureToggles {
+            v1_pools: local.v1_pools,
+            v1_only: !v2_blocks,
+            gradient_features: local.gradient,
+            blockiness: local.blockiness,
+            ..toggles
+        };
         crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, scale);
 
         // mean_offset side-channel (fold-engine lane): the scale-0 strips
@@ -8650,6 +11462,132 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
             crate::fold_timing::stop(__t_mo, crate::fold_timing::Phase::MeanOffset, scale);
         }
+
+        // DVIFM block-visibility pump (f956+): the scale-0 strips tile
+        // [0, h0) exactly once in ascending order — the same guarantee
+        // `mean_offset` relies on — so the pyramid pump sees each Y row
+        // once, serially, before the channel fan-out. `local.dvifm` is the
+        // compute-set flag (dvifm && scale-0 live in `v2_scales`), matching
+        // `populated_slots`' attribution of the flat slots to scale 0.
+        if scale == 0 && (local.dvifm || local.dvifmgate) {
+            let __t_dv = crate::fold_timing::start();
+            let y1 = info.y0 + info.strip_h;
+            let acc = dvifm_acc.get_or_insert_with(|| {
+                #[cfg(feature = "training")]
+                let params = dvifm
+                    .as_deref()
+                    .and_then(|de| de.params)
+                    .unwrap_or_default();
+                #[cfg(not(feature = "training"))]
+                let params = crate::dvifm::DvifmParams::default();
+                #[allow(unused_mut)] // mutated only under `training` below
+                let mut acc =
+                    crate::dvifm::DvifmAccum::new(info.plane_w, info.plane_h, dvifm_norm, &params);
+                #[cfg(feature = "training")]
+                if dvifm.as_deref().is_some_and(|de| de.cache.is_some()) {
+                    acc.enable_block_cache();
+                }
+                acc
+            });
+            match dvifm_plane {
+                crate::dvifm::DvifmInputPlane::XybY => {
+                    let src =
+                        producer.rows(crate::feature_v2_stream::Side::Source, 1, 0, info.y0, y1);
+                    let dst =
+                        producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
+                    crate::dvifm::dvifm_push_rows_walk(acc, src, dst);
+                }
+                plane => {
+                    // The DVIFM pump sees each scale-0 row once in ascending
+                    // order; the Y'CbCr planes are produced from the same
+                    // source rows the producer converts (same padding,
+                    // same alpha/gamut semantics — see the converter's
+                    // contract), so the pump's arithmetic is unchanged and
+                    // only the input plane differs.
+                    let n = info.strip_h * info.plane_w;
+                    if dvifm_plane_scratch.len() < 2 * n {
+                        dvifm_plane_scratch.resize(2 * n, 0.0);
+                    }
+                    let (sbuf, rest) = dvifm_plane_scratch.split_at_mut(n);
+                    let dbuf = &mut rest[..n];
+                    let ycbcr_plane = match plane {
+                        crate::dvifm::DvifmInputPlane::YcbcrY => crate::streaming::YcbcrPlane::Y,
+                        crate::dvifm::DvifmInputPlane::YcbcrCb => crate::streaming::YcbcrPlane::Cb,
+                        crate::dvifm::DvifmInputPlane::YcbcrCr => crate::streaming::YcbcrPlane::Cr,
+                        crate::dvifm::DvifmInputPlane::XybY => unreachable!(),
+                    };
+                    let sub_s = crate::source::SubsetView::new(source, info.y0, info.strip_h);
+                    crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                        &sub_s,
+                        sbuf,
+                        info.plane_w,
+                        info.y0,
+                        ycbcr_plane,
+                    );
+                    let sub_d = crate::source::SubsetView::new(distorted, info.y0, info.strip_h);
+                    crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                        &sub_d,
+                        dbuf,
+                        info.plane_w,
+                        info.y0,
+                        ycbcr_plane,
+                    );
+                    crate::dvifm::dvifm_push_rows_walk(acc, sbuf, dbuf);
+                }
+            }
+            crate::fold_timing::stop(__t_dv, crate::fold_timing::Phase::DvifmKernel, scale);
+        }
+
+        // REV4 C4: the strip's ±1-px dilated dst-Y edge mask — built once
+        // per strip, serially before the channel fan-out (the DVIFM
+        // pump's slot), so the serial order's X/B phase B has it ready.
+        // Only a live chroma channel consumes it (the mask is dst-LUMA
+        // edges read by the chroma gradient hooks).
+        let bleed_mask: Option<&[f32]> = if local.arttype
+            && (ALL_CHANNELS
+                || compute.channel_active(scale, 0)
+                || compute.channel_active(scale, 2))
+        {
+            let __t_m = crate::fold_timing::start();
+            let mw = bleed_work.as_mut().expect("arttype implies mask work");
+            let w = info.plane_w;
+            for r in 0..info.strip_h + 4 {
+                let gy = info.y0 as isize - 2 + r as isize;
+                let gr = reflect_101(gy, info.plane_h);
+                let row = producer.rows(
+                    crate::feature_v2_stream::Side::Distorted,
+                    1,
+                    scale,
+                    gr,
+                    gr + 1,
+                );
+                mw.dh[r * w..(r + 1) * w].copy_from_slice(row);
+            }
+            dst_y_edge_mask_strip(w, info.y0, info.strip_h, info.plane_h, mw);
+            crate::fold_timing::stop(__t_m, crate::fold_timing::Phase::Rev4Kernel, scale);
+            Some(&mw.mask[..w * info.strip_h])
+        } else {
+            None
+        };
+
+        // C8 reads the co-sited B rows directly from the existing producer.
+        // These immutable strip views stay live across the channel fan-out.
+        let chroma_strip = (local.gmsbank && scale > 0).then(|| ChromaStrip {
+            reference: producer.rows(
+                crate::feature_v2_stream::Side::Source,
+                2,
+                scale,
+                info.y0,
+                info.y0 + info.strip_h,
+            ),
+            distorted: producer.rows(
+                crate::feature_v2_stream::Side::Distorted,
+                2,
+                scale,
+                info.y0,
+                info.y0 + info.strip_h,
+            ),
+        });
 
         // ref_y strip rows straight from the producer's rolling plane
         // (valid until the next `next_strip` call).
@@ -8713,7 +11651,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // `fuse_channels` conjunct stays because it is a runtime parallelism
         // fact the compute set does not model.
         #[cfg(feature = "threads")]
-        let self_blur = fuse_channels && compute.self_blur_eligible();
+        let self_blur = fuse_channels && local.self_blur_eligible();
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
@@ -8723,13 +11661,26 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 .zip(accums.par_iter_mut())
                 .enumerate()
                 .for_each(|(ch, (scr, acc))| {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        return;
+                    }
                     let __t = crate::fold_timing::start();
                     if self_blur {
                         // Phase A is skipped whole; only the wide-window
                         // gather it also performs is still needed.
                         stream_gather_windows(&producer, &info, ch, scr);
                     } else {
-                        stream_phase_a(&producer, &info, ch, false, false, v2_blocks, true, scr);
+                        stream_phase_a(
+                            &producer,
+                            &info,
+                            ch,
+                            false,
+                            false,
+                            v2_blocks,
+                            true,
+                            scr,
+                            compute.formula_revision,
+                        );
                     }
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                     stream_phase_b(
@@ -8747,7 +11698,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         None,
                         append2,
                         csfw,
-                        ch,
+                        local.free_work(ch),
+                        local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                         acc,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -8769,6 +11721,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(ch, scr)| {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        return;
+                    }
                     let __t = crate::fold_timing::start();
                     stream_phase_a(
                         &producer,
@@ -8779,6 +11734,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         v2_blocks,
                         true,
                         scr,
+                        compute.formula_revision,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::ABusy, scale);
                 });
@@ -8789,6 +11745,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             // fan-outs — pure reads of the phase-A scratches + windows.
             if let Some(ret) = retention.as_deref_mut() {
                 for (ch, scr) in scratches.iter().enumerate() {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        continue;
+                    }
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                     ret.copy_strip(
                         &info,
@@ -8803,6 +11762,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             crate::fold_timing::stop(__t_between, crate::fold_timing::Phase::Between, scale);
             let __t_b = crate::fold_timing::start();
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                    return;
+                }
                 let __t = crate::fold_timing::start();
                 let (src_win, dst_win) =
                     stream_windows_shared(&producer, &info, ch, &scratches[ch]);
@@ -8831,7 +11793,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     cross,
                     append2,
                     csfw,
-                    ch,
+                    local.free_work(ch),
+                    local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     acc,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -8864,8 +11827,21 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             let (stash_x_buf, stash_b_buf) = s_rest.split_at_mut(1);
             let y_active = append_cell_active(append_on, 1, scale);
             for ch in [0usize, 2] {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                    continue;
+                }
                 let active = append_cell_active(append_on, ch, scale);
-                stream_phase_a(&producer, &info, ch, active, false, v2_blocks, false, scr);
+                stream_phase_a(
+                    &producer,
+                    &info,
+                    ch,
+                    active,
+                    false,
+                    v2_blocks,
+                    false,
+                    scr,
+                    compute.formula_revision,
+                );
                 if y_active {
                     let stash = if ch == 0 {
                         &mut stash_x_buf[0].activity
@@ -8893,7 +11869,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     None,
                     append2,
                     csfw,
-                    ch,
+                    local.free_work(ch),
+                    local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     &mut accums[ch],
                 );
             }
@@ -8907,6 +11884,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     v2_blocks,
                     false,
                     scr,
+                    compute.formula_revision,
                 );
                 let cross = if y_active {
                     Some((
@@ -8935,7 +11913,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     cross,
                     append2,
                     csfw,
-                    1,
+                    local.free_work(1),
+                    local.rev4_work(scale, 1, bleed_mask, chroma_strip),
                     &mut accums[1],
                 );
             }
@@ -8967,14 +11946,96 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     } else {
         0
     };
-    let mut features = vec![0.0f64; v12_total + append_total + append2_total + csfw_total];
+    let dvifm_total = if layout_dvifm {
+        crate::dvifm::DVIFM_FEATURES
+    } else {
+        0
+    };
+    // REV4 tail blocks — emit order `gridblk | ringbasis | tailhist |
+    // arttype` after DVIFM (design note §Wiring); each is 3×per-cell
+    // except PerScale `arttype`.
+    let gridblk_total = if layout_gridblk {
+        n_scales * 3 * GRIDBLK_PER_CELL
+    } else {
+        0
+    };
+    let ringbasis_total = if layout_ringbasis {
+        n_scales * 3 * RINGBASIS_PER_CELL
+    } else {
+        0
+    };
+    let tailhist_total = if layout_tailhist {
+        n_scales * 3 * TAILHIST_PER_CELL
+    } else {
+        0
+    };
+    let arttype_total = if layout_arttype {
+        n_scales * ARTTYPE_PER_SCALE
+    } else {
+        0
+    };
+    let gmsbank_total = if layout_gmsbank {
+        gmsbank_width(n_scales)
+    } else {
+        0
+    };
+    let mapdev_total = if layout_mapdev {
+        n_scales * 3 * MAPDEV_PER_CELL
+    } else {
+        0
+    };
+    let z1max_total = if layout_z1max {
+        n_scales * 3 * Z1MAX_PER_CELL
+    } else {
+        0
+    };
+    let gmsnative_total = if layout_gmsnative { GMSNATIVE_WIDTH } else { 0 };
+    let dvifmgate_total = if layout_dvifmgate { DVIFMGATE_WIDTH } else { 0 };
+    let mut features = vec![
+        0.0f64;
+        v12_total
+            + append_total
+            + append2_total
+            + csfw_total
+            + dvifm_total
+            + gridblk_total
+            + ringbasis_total
+            + tailhist_total
+            + arttype_total
+            + gmsbank_total
+            + mapdev_total
+            + z1max_total
+            + gmsnative_total
+            + dvifmgate_total
+    ];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
-    let (features_app2, features_csfw) = features_tail2.split_at_mut(append2_total);
+    let (features_app2, features_tail3) = features_tail2.split_at_mut(append2_total);
+    let (features_csfw, features_tail4) = features_tail3.split_at_mut(csfw_total);
+    let (features_dvifm, features_tail5) = features_tail4.split_at_mut(dvifm_total);
+    let (features_gridblk, features_tail6) = features_tail5.split_at_mut(gridblk_total);
+    let (features_ring, features_tail7) = features_tail6.split_at_mut(ringbasis_total);
+    let (features_thist, features_tail8) = features_tail7.split_at_mut(tailhist_total);
+    let (features_art, features_tail9) = features_tail8.split_at_mut(arttype_total);
+    let (features_gmsbank, features_tail10) = features_tail9.split_at_mut(gmsbank_total);
+    let (features_mapdev, features_tail11) = features_tail10.split_at_mut(mapdev_total);
+    let (features_z1max, features_tail12) = features_tail11.split_at_mut(z1max_total);
+    let (features_gmsnative, features_dvifmgate) = features_tail12.split_at_mut(gmsnative_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
     for scale in 0..n_scales {
+        let local = compute.at_scale(scale);
+        let v2_blocks = local.v2_blocks;
+        let append_on = local.append;
+        let append2_on = local.append2;
+        let toggles = V2NewFeatureToggles {
+            v1_pools: local.v1_pools,
+            v1_only: !v2_blocks,
+            gradient_features: local.gradient,
+            blockiness: local.blockiness,
+            ..toggles
+        };
         let (width, height) = dims[scale];
         let n = width * height;
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -8982,6 +12043,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
 
         for (ch, acc) in accums.iter().enumerate() {
+            if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                continue;
+            }
             let out = &mut features_v12
                 [v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL..]
                 [..FEATURES_PER_CHANNEL_V2_TOTAL];
@@ -9015,6 +12079,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // 1e-9-parity pass-A replication instead).
         if let Some(ret) = retention.as_deref_mut() {
             for (ch, acc) in accums.iter().enumerate() {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                    continue;
+                }
                 ret.cells[scale][ch] = AttrCellSums {
                     dense: acc.dense[scale],
                     grad: acc.grad[scale],
@@ -9032,8 +12099,15 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
         if fold_v1 {
             for (ch, acc) in accums.iter().enumerate() {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                    continue;
+                }
                 let base = scale * 39 + ch * 13;
-                acc.v1[scale].finalize_into(n, &mut features_v12[base..base + 13]);
+                acc.v1[scale].finalize_into(
+                    n,
+                    &mut features_v12[base..base + 13],
+                    compute.formula_revision,
+                );
                 // FREE EXTRAS ([`V1FreeExtras::RawMoments`]): the v2-era
                 // slots this walk can finalize from the fused kernel's raw
                 // moments, written ONLY where the owning block is off — so
@@ -9102,7 +12176,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     let mut peaks = [0.0f64; 6];
                     let mut masked = [0.0f64; 6];
                     let mut iw = [0.0f64; 6];
-                    acc.v1[scale].finalize_pools_into(n, &mut peaks, &mut masked, &mut iw);
+                    acc.v1[scale].finalize_pools_into(
+                        n,
+                        &mut peaks,
+                        &mut masked,
+                        &mut iw,
+                        compute.formula_revision,
+                    );
                     if toggles.v1_pools == V1PoolsMode::Full {
                         features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
                         features_v12[masked0..masked0 + 6].copy_from_slice(&masked);
@@ -9131,7 +12211,10 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
         for ch in 0..3 {
             let (gsrc, gdst) = grads[ch];
-            if let Some((prev_gsrc, prev_gdst)) = prev_grad[ch] {
+            if let Some((prev_gsrc, prev_gdst)) = prev_grad[ch]
+                && compute.at_scale(scale).gradient
+                && compute.at_scale(scale - 1).gradient
+            {
                 let decay_src = gsrc / (prev_gsrc + C_GRAD_DECAY);
                 let decay_dst = gdst / (prev_gdst + C_GRAD_DECAY);
                 let prev_base = v1_total
@@ -9159,6 +12242,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     if append2_on {
         #[allow(clippy::needless_range_loop)] // scale derives offsets across distinct arrays
         for scale in 0..n_scales {
+            if !compute.at_scale(scale).append2 {
+                continue;
+            }
             let (width, height) = dims[scale];
             let n_f = (width * height) as f64;
             let base = scale * APPEND2_PER_SCALE;
@@ -9183,6 +12269,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     //     from the Y CSFW accumulators (design §4.1). ---
     if csfw_on {
         for scale in 0..n_scales {
+            if !compute.at_scale(scale).csfw {
+                continue;
+            }
             let base = scale * CSFW_PER_SCALE;
             finish_csfw(
                 &accums[1].csfw[scale],
@@ -9191,6 +12280,176 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         }
     }
 
+    // --- DVIFM finalize (flat block, fed by the scale-0 strips): one
+    //     cascade flush, then the 30 slots. `dvifm_acc` is `Some` only when
+    //     `local.dvifm` saw a scale-0 strip — with `layout_dvifm` off the
+    //     pump never ran and the (absent) tail is already the structural 0.
+    if let Some(mut acc) = dvifm_acc {
+        debug_assert!(
+            layout_dvifm,
+            "dvifm ran without dvifm_block — the tail has nowhere to land"
+        );
+        let out = crate::dvifm::dvifm_finish_walk(&mut acc);
+        // The pump also runs for `dvifmgate` alone; C7's own 30 slots are
+        // written only when C7 itself was requested, so a gate-only request
+        // leaves them structural zero like every other unrequested family.
+        if compute.at_scale(0).dvifm {
+            features_dvifm[..crate::dvifm::DVIFM_FEATURES].copy_from_slice(&out);
+        }
+        if layout_dvifmgate && compute.at_scale(0).dvifmgate {
+            features_dvifmgate.copy_from_slice(&acc.gate_f1());
+        }
+        // Training side output: take AFTER the finish flush — the flush
+        // emits the tail's block records, so an earlier take would
+        // truncate them.
+        #[cfg(feature = "training")]
+        if let Some(de) = dvifm
+            && let Some(sink) = de.cache.as_mut()
+            && let Some((grid, dims, levels)) = acc.take_block_cache()
+        {
+            sink.grid = grid;
+            sink.dims = dims;
+            sink.levels = levels;
+        }
+    }
+
+    // --- REV4 finalize (per scale): C1 cells rescan their stored `ẽ`
+    //     planes; C2/C3 fold their accumulators; C4's blur reads the
+    //     already-emitted EWC_Y × HF_LOSS_Y — final only after the scale
+    //     loop's cross-scale EWC fill, which is why this sits after it.
+    if layout_gridblk || layout_ringbasis || layout_tailhist || layout_arttype {
+        #[allow(clippy::needless_range_loop)] // scale derives offsets across distinct arrays
+        for scale in 0..n_scales {
+            let local = compute.at_scale(scale);
+            if !local.gridblk && !local.ringbasis && !local.tailhist && !local.arttype {
+                continue;
+            }
+            let (width, height) = dims[scale];
+            let cells = [
+                &accums[0].rev4[scale],
+                &accums[1].rev4[scale],
+                &accums[2].rev4[scale],
+            ];
+            let (ewc_y, hfl_y) = if local.arttype {
+                let yb = v1_total
+                    + scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + FEATURES_PER_CHANNEL_V2_TOTAL;
+                (
+                    features_v12[yb + idx::EDGE_WIDTH_CHANGE],
+                    features_v12[yb + idx::HF_LOSS],
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            finish_rev4_scale(
+                &local,
+                scale,
+                cells,
+                width,
+                height,
+                ewc_y,
+                hfl_y,
+                if layout_gridblk {
+                    Some(
+                        &mut features_gridblk
+                            [scale * 3 * GRIDBLK_PER_CELL..(scale + 1) * 3 * GRIDBLK_PER_CELL],
+                    )
+                } else {
+                    None
+                },
+                if layout_ringbasis {
+                    Some(
+                        &mut features_ring
+                            [scale * 3 * RINGBASIS_PER_CELL..(scale + 1) * 3 * RINGBASIS_PER_CELL],
+                    )
+                } else {
+                    None
+                },
+                if layout_tailhist {
+                    Some(
+                        &mut features_thist
+                            [scale * 3 * TAILHIST_PER_CELL..(scale + 1) * 3 * TAILHIST_PER_CELL],
+                    )
+                } else {
+                    None
+                },
+                if layout_arttype {
+                    Some(
+                        &mut features_art
+                            [scale * ARTTYPE_PER_SCALE..(scale + 1) * ARTTYPE_PER_SCALE],
+                    )
+                } else {
+                    None
+                },
+            );
+        }
+    }
+
+    if layout_gmsbank {
+        for (scale, &(width, height)) in dims.iter().enumerate().take(n_scales) {
+            if !compute.at_scale(scale).gmsbank {
+                continue;
+            }
+            for (ch, channel) in accums.iter().enumerate() {
+                if scale == 0 && ch != 1 {
+                    continue;
+                }
+                let base = if scale == 0 {
+                    0
+                } else {
+                    15 + (scale - 1) * 55 + ch * 15
+                };
+                finish_gmsbank_cell(
+                    &channel.grad[scale].bank,
+                    width * height,
+                    &mut features_gmsbank[base..base + GMSBANK_PER_CELL],
+                );
+            }
+            if scale > 0 {
+                let base = 15 + (scale - 1) * 55 + 45;
+                finish_chroma_cell(
+                    &accums[0].grad[scale].chroma,
+                    width * height,
+                    &mut features_gmsbank[base..base + 10],
+                );
+            }
+        }
+    }
+
+    if layout_gmsnative && compute.at_scale(0).gmsnative {
+        assert!(
+            compute.full_res_xb,
+            "gmsnative needs the native-scale X/B strips (full_res_xb)"
+        );
+        let (width, height) = dims[0];
+        for (cell, ch) in [0usize, 2].into_iter().enumerate() {
+            finish_gmsbank_cell(
+                &accums[ch].grad[0].bank,
+                width * height,
+                &mut features_gmsnative[cell * GMSBANK_PER_CELL..(cell + 1) * GMSBANK_PER_CELL],
+            );
+        }
+    }
+
+    let restore_work = restore_cuts::Work {
+        mapdev: layout_mapdev && compute.mapdev,
+        z1max: layout_z1max && compute.z1max,
+    };
+    if restore_work.any() {
+        assert!(
+            restore_side_ok,
+            "mapdev/z1max need the SDR pair path (no ref-fed, sampled or HDR walk)"
+        );
+        restore_cuts::run(
+            source,
+            distorted,
+            parallel,
+            compute.formula_revision,
+            restore_work,
+            features_mapdev,
+            features_z1max,
+        );
+    }
     ZensimV2Result {
         features,
         n_scales,
@@ -9199,11 +12458,19 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         } else {
             V1PoolsMode::Off
         },
-        regime: match (layout_append, layout_append2, layout_csfw) {
-            (true, true, true) => FeatureRegime::Folded720Csfw,
-            (true, true, false) => FeatureRegime::Folded720Append2,
-            (true, false, _) => FeatureRegime::Folded720Append,
-            (false, _, _) => FeatureRegime::Folded720,
+        regime: match (
+            layout_append,
+            layout_append2,
+            layout_csfw,
+            layout_dvifm,
+            layout_gridblk && layout_ringbasis && layout_tailhist && layout_arttype,
+        ) {
+            (true, true, true, true, true) => FeatureRegime::Folded720Rev4,
+            (true, true, true, true, false) => FeatureRegime::Folded720Dvifm,
+            (true, true, true, false, _) => FeatureRegime::Folded720Csfw,
+            (true, true, false, _, _) => FeatureRegime::Folded720Append2,
+            (true, false, _, _, _) => FeatureRegime::Folded720Append,
+            (false, _, _, _, _) => FeatureRegime::Folded720,
         },
     }
 }
@@ -9215,6 +12482,13 @@ fn compute_v2_features_with_ref_impl_inner(
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
+    // REV4 cell out-param — `None` on every production call (the
+    // materialized walk never emits rev4 slots; the streaming walk owns
+    // that tail). `Some(&mut [n_scales * 3 cells])` — flat `(scale*3+ch)`
+    // order — turns the same strip walk into the materialized half of the
+    // streaming-vs-materialized parity gate: identical hook math into
+    // caller-visible accumulators.
+    mut rev4_cells: Option<&mut [Rev4CellAccum]>,
 ) -> Result<ZensimV2Result, ZensimError> {
     if distorted.width() != prepared.orig_width || distorted.height() != prepared.orig_height {
         return Err(ZensimError::DimensionMismatch);
@@ -9245,6 +12519,20 @@ fn compute_v2_features_with_ref_impl_inner(
     );
 
     let n_scales = prepared.scales.len();
+    if let Some(c) = rev4_cells.as_ref() {
+        assert_eq!(
+            c.len(),
+            n_scales * 3,
+            "rev4 cell slice must carry one cell per (scale, channel)"
+        );
+    }
+    // REV4's resolved compute flags for this call — the same
+    // `ComputeSet::at_scale`/`rev4_work` gating the streaming walk uses
+    // (minus `bleed_mask`, which `compute_channel_scale_v2`'s strip loop
+    // builds from `bleed_y`).
+    let rev4_compute = rev4_cells
+        .is_some()
+        .then(|| ComputeSet::from_toggles(toggles));
     let mut features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
     // Per-channel (mean_grad_src, mean_grad_dst) from the previous
     // (finer) scale, for the edge-width-change cross-scale comparison.
@@ -9298,16 +12586,25 @@ fn compute_v2_features_with_ref_impl_inner(
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
         let out_region = &mut features[scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
 
+        // REV4's at-scale flags for this scale — resolved once, handed to
+        // `rev4_cell_args` per channel (mirrors `rev4_work` minus the mask).
+        let local = rev4_compute.as_ref().map(|cs| cs.at_scale(scale));
+
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
             use rayon::prelude::*;
+            let cell_opts: Vec<Option<&mut Rev4CellAccum>> = match rev4_cells.as_deref_mut() {
+                Some(c) => c[scale * 3..scale * 3 + 3].iter_mut().map(Some).collect(),
+                None => vec![None, None, None],
+            };
             let results: Vec<(f64, f64)> = out_region
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .zip(scratch.par_iter_mut())
+                .zip(cell_opts)
                 .enumerate()
-                .map(|(ch, (out, scr))| {
+                .map(|(ch, ((out, scr), cell))| {
                     let g = compute_channel_scale_v2(
                         &src_planes[ch],
                         &dst_planes[ch],
@@ -9317,6 +12614,16 @@ fn compute_v2_features_with_ref_impl_inner(
                         moments_for(ch),
                         scr,
                         out,
+                        cell.map(|c| {
+                            rev4_cell_args(
+                                c,
+                                local.as_ref().unwrap(),
+                                scale,
+                                ch,
+                                src_planes,
+                                &dst_planes,
+                            )
+                        }),
                     );
                     apply_transducer_luma_gate(out, ch, toggles);
                     g
@@ -9335,6 +12642,16 @@ fn compute_v2_features_with_ref_impl_inner(
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
                 .enumerate()
             {
+                let r4a = rev4_cells.as_deref_mut().map(|c| {
+                    rev4_cell_args(
+                        &mut c[scale * 3 + ch],
+                        local.as_ref().unwrap(),
+                        scale,
+                        ch,
+                        src_planes,
+                        &dst_planes,
+                    )
+                });
                 grads[ch] = compute_channel_scale_v2(
                     &src_planes[ch],
                     &dst_planes[ch],
@@ -9344,6 +12661,7 @@ fn compute_v2_features_with_ref_impl_inner(
                     moments_for(ch),
                     &mut scratch[ch],
                     out,
+                    r4a,
                 );
                 apply_transducer_luma_gate(out, ch, toggles);
             }
@@ -9628,6 +12946,7 @@ fn attr_pass_a_kernels(
             width,
             strip_h,
             true, // transducer_bank (V2NewFeatureToggles::default())
+            None,
         );
         cell.dense.accumulate(&d);
         // Gradient needs a 1-row halo; gather from the full planes (real
@@ -9646,6 +12965,8 @@ fn attr_pass_a_kernels(
             strip_h,
             None,
             None,
+            None,
+            false,
         );
         cell.grad.accumulate(&g);
         if want_append && append_active {
@@ -10007,6 +13328,10 @@ fn attr_pass_b_rows(
     id_plane: &mut [f64],
     win_plane: &mut [f64],
 ) {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let out_off = y0 * width;
     let cross_on = cross.is_some();
     for y in y0..y1 {
@@ -10029,7 +13354,7 @@ fn attr_pass_b_rows(
             let mut a_res = 0.0f64;
 
             // Dense family (same formulas as `dense_block_kernel`'s tail).
-            let d = ssim_d_local(m1, m2, s12v, sq);
+            let d = ssim_d_local(m1, m2, s12v, sq, direct);
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
             let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
@@ -10614,6 +13939,10 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
     id_plane: &mut [f32],
     win_plane: &mut [f32],
 ) {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let sp = |v: f32| V8::<T>::splat(token, v);
@@ -10665,7 +13994,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             let mut a_win = zero;
             let mut a_res = zero;
             // Dense family.
-            let d = ssim_d_local_v(token, m1, m2, ld!(s12), sq, c1, c2);
+            let d = ssim_d_local_v(token, m1, m2, ld!(s12), sq, c1, c2, direct);
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
             let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
@@ -11448,6 +14777,7 @@ fn attr_pass_b_for_scale_f32(
     sink: &mut crate::attribution::AttrSinkF32<'_>,
     spread_tmp: &mut Vec<f32>,
     spread_out: &mut Vec<f32>,
+    geometry: Option<&crate::sampling::Geometry>,
 ) {
     let tpb = std::time::Instant::now();
     let (ws, hs) = dims[scale];
@@ -11455,6 +14785,9 @@ fn attr_pass_b_for_scale_f32(
     scale_density[..n].fill(0.0);
     win_plane[..n].fill(0.0);
     for ch in 0..3 {
+        if !attribution_cell_active(s_v2, s_append, s_append2, scale, ch) {
+            continue;
+        }
         let append_active = append_cell_active(want_append, ch, scale);
         let cross: Option<(&[f32], &[f32])> = if ch == 1 {
             Some((&planes[0].act, &planes[2].act))
@@ -11513,7 +14846,13 @@ fn attr_pass_b_for_scale_f32(
             );
         }
         crate::attribution::AttrSinkF32::Bins(accum) => {
-            accum.add_scale_plane_f32(&scale_density[..n], ws, hs, 1usize << scale);
+            if let Some(geometry) = geometry {
+                let projected = geometry.project(&scale_density[..n], scale);
+                let (w, h) = geometry.logical_dimensions();
+                accum.add_scale_plane_f32(&projected, w, h, 1);
+            } else {
+                accum.add_scale_plane_f32(&scale_density[..n], ws, hs, 1usize << scale);
+            }
         }
     }
 }
@@ -11941,7 +15280,12 @@ fn compute_v2_append_attribution_impl(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::source::RgbSlice;
+    use crate::PixelFormat;
+    use crate::source::{RgbSlice, StridedBytes};
+
+    // Explicit calibration tool; compiled only by calibration_instrument.sh.
+    #[cfg(gmsbank_calibration_instrument)]
+    include!("gmsbank_calibration_instrument.rs");
 
     /// imazen/zensim#56 regression gate: the MSCN divisive normalizer must
     /// be the CORRECTLY-ROUNDED IEEE `resid / sqrt(var + c)` on every SIMD
@@ -12918,6 +16262,7 @@ pub(crate) mod tests {
             None,
             &mut scratch,
             &mut feat,
+            None,
         );
 
         // --- Diffmap under test: weight 1.0 on every spatialized family,
@@ -13086,6 +16431,7 @@ pub(crate) mod tests {
                     None,
                     &mut scratch,
                     &mut feat,
+                    None,
                 );
                 let base = scale * per_scale + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 for &local in &supported {
@@ -13257,6 +16603,1109 @@ pub(crate) mod tests {
         }
     }
 
+    /// REV4 streaming-vs-materialized parity: the materialized walk's
+    /// `Rev4CellAccum` cells, finalized by [`finish_rev4_scale`], must
+    /// equal the streaming walk's emitted rev4 segments bit-for-bit.
+    /// Both engines run the same kernel strips in the same order into
+    /// merge-free accumulators (the `blockiness_sparse_strip_wide`
+    /// running-total contract), so serial-vs-streaming differences are
+    /// storage, not arithmetic. Covers both activity routes: the
+    /// strip-computed `scratch.activity` plane and the cached full-plane
+    /// `moments` (whose per-strip gather must reproduce it exactly).
+    #[test]
+    fn rev4_streaming_materialized_parity() {
+        let toggles = V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            rev4_gridblk: true,
+            rev4_ringbasis: true,
+            rev4_tailhist: true,
+            rev4_arttype: true,
+            v1_pools: V1PoolsMode::Full,
+            ..Default::default()
+        };
+        let compute = ComputeSet::from_toggles(toggles);
+        for &(w, h) in &[(96usize, 80usize), (200, 136), (65, 129)] {
+            let src = textured_image(w, h, 0xBEEF);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+
+            let mut scratch = V2Scratch::new();
+            let streamed = compute_folded720_streaming_impl(
+                &source,
+                &distorted,
+                None,
+                false,
+                toggles,
+                &mut scratch,
+                None,
+            )
+            .expect("streaming walk computes");
+            assert_eq!(
+                streamed.features.len(),
+                REV4_BASE + 96 + 72 + 144 + 24,
+                "all-rev4 layout must emit the full 1322"
+            );
+
+            // The rev4 tail is thread-invariant too: the parallel channel
+            // fan-out changes only which thread runs a cell's strips, not
+            // their order (the merge-free-accumulator contract).
+            #[cfg(feature = "threads")]
+            {
+                let mut pscratch = V2Scratch::new();
+                let par = compute_folded720_streaming_impl(
+                    &source,
+                    &distorted,
+                    None,
+                    true,
+                    toggles,
+                    &mut pscratch,
+                    None,
+                )
+                .expect("parallel streaming computes");
+                assert_eq!(
+                    &par.features[REV4_BASE..],
+                    &streamed.features[REV4_BASE..],
+                    "parallel-vs-serial streaming rev4 tail {w}x{h}"
+                );
+            }
+
+            for cache_moments in [false, true] {
+                let prep = prepare_v2_reference_impl(&source, None, false, cache_moments)
+                    .expect("prepare computes");
+                let ns = prep.scales.len();
+                let mut cells: Vec<Rev4CellAccum> =
+                    (0..ns * 3).map(|_| Rev4CellAccum::default()).collect();
+                let mat = compute_v2_features_with_ref_impl_inner(
+                    &prep,
+                    &distorted,
+                    None,
+                    false,
+                    toggles,
+                    &mut scratch,
+                    Some(&mut cells[..]),
+                )
+                .expect("materialized walk computes");
+
+                for scale in 0..ns {
+                    let local = compute.at_scale(scale);
+                    let (sw, sh) = (prep.scales[scale].1, prep.scales[scale].2);
+                    // Y channel is index 1 of the [X, Y, B] channel blocks.
+                    let yb =
+                        scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + FEATURES_PER_CHANNEL_V2_TOTAL;
+                    let ewc = mat.features[yb + idx::EDGE_WIDTH_CHANGE];
+                    let hfl = mat.features[yb + idx::HF_LOSS];
+                    let mut og = [0.0f64; 3 * GRIDBLK_PER_CELL];
+                    let mut or_ = [0.0f64; 3 * RINGBASIS_PER_CELL];
+                    let mut ot = [0.0f64; 3 * TAILHIST_PER_CELL];
+                    let mut oa = [0.0f64; ARTTYPE_PER_SCALE];
+                    finish_rev4_scale(
+                        &local,
+                        scale,
+                        [
+                            &cells[scale * 3],
+                            &cells[scale * 3 + 1],
+                            &cells[scale * 3 + 2],
+                        ],
+                        sw,
+                        sh,
+                        ewc,
+                        hfl,
+                        Some(&mut og),
+                        Some(&mut or_),
+                        Some(&mut ot),
+                        Some(&mut oa),
+                    );
+                    let tag = format!("{w}x{h} s{scale} moments={cache_moments}");
+                    let gb = REV4_BASE + scale * 3 * GRIDBLK_PER_CELL;
+                    assert_eq!(
+                        &og[..],
+                        &streamed.features[gb..gb + og.len()],
+                        "gridblk {tag}"
+                    );
+                    let rb = REV4_BASE + 96 + scale * 3 * RINGBASIS_PER_CELL;
+                    assert_eq!(
+                        &or_[..],
+                        &streamed.features[rb..rb + or_.len()],
+                        "ringbasis {tag}"
+                    );
+                    let tb = REV4_BASE + 96 + 72 + scale * 3 * TAILHIST_PER_CELL;
+                    assert_eq!(
+                        &ot[..],
+                        &streamed.features[tb..tb + ot.len()],
+                        "tailhist {tag}"
+                    );
+                    let ab = REV4_BASE + 96 + 72 + 144 + scale * ARTTYPE_PER_SCALE;
+                    assert_eq!(
+                        &oa[..],
+                        &streamed.features[ab..ab + oa.len()],
+                        "arttype {tag}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// All-rev4 toggles for the family unit tests (the same literal the
+    /// parity test uses — every block on, v1 pools full).
+    fn rev4_all_toggles() -> V2NewFeatureToggles {
+        V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            rev4_gridblk: true,
+            rev4_ringbasis: true,
+            rev4_tailhist: true,
+            rev4_arttype: true,
+            v1_pools: V1PoolsMode::Full,
+            ..Default::default()
+        }
+    }
+
+    fn gmsbank_extract(
+        src: &[[u8; 3]],
+        dst: &[[u8; 3]],
+        w: usize,
+        h: usize,
+        parallel: bool,
+    ) -> Vec<f64> {
+        let mut scratch = V2Scratch::new();
+        compute_folded720_streaming_impl(
+            &RgbSlice::new(src, w, h),
+            &RgbSlice::new(dst, w, h),
+            None,
+            parallel,
+            V2NewFeatureToggles {
+                gmsbank: true,
+                ..rev4_all_toggles()
+            },
+            &mut scratch,
+            None,
+        )
+        .expect("C8 extraction")
+        .into_features()
+    }
+
+    #[test]
+    fn gmsbank_strict_contrast_reduction_routes_only_to_loss() {
+        let mut cells = [GmsBankCell::default(); 5];
+        for i in 1..=257 {
+            let mr = i as f64 / 257.0;
+            let md = mr * 0.5;
+            assert!(md < mr);
+            gmsbank_pixel(&mut cells, mr, md, &GMSBANK_C);
+        }
+        for cell in cells {
+            assert!(cell.loss > 0.0);
+            assert_eq!(cell.gain.to_bits(), 0.0f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn gmsbank_constant_chroma_shift_is_visible_without_gradients() {
+        let (w, h) = (97, 161);
+        let reference = vec![[120, 100, 60]; w * h];
+        let distorted = vec![[100, 120, 60]; w * h];
+        let values = gmsbank_extract(&reference, &distorted, w, h, false);
+        assert!(
+            values[GMSBANK_BASE..GMSBANK_BASE + 15]
+                .iter()
+                .all(|v| v.to_bits() == 0),
+            "flat inputs have no scale-0 Y gradient: {:?}",
+            &values[GMSBANK_BASE..GMSBANK_BASE + 15]
+        );
+        for scale in 1..4 {
+            let base = GMSBANK_BASE + 15 + (scale - 1) * 55;
+            assert!(
+                values[base..base + 45].iter().all(|v| v.to_bits() == 0),
+                "flat inputs have no scale-{scale} gradient: {:?}",
+                &values[base..base + 45]
+            );
+            for k in 0..5 {
+                assert!(
+                    values[base + 45 + 2 * k] > 0.0,
+                    "flat colour shift must register CS loss"
+                );
+                assert_eq!(
+                    values[base + 46 + 2 * k].to_bits(),
+                    0,
+                    "constant loss map has zero deviation"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gmsbank_identity_and_constant_monotonicity() {
+        assert_eq!(
+            crate::feature_defs::block_base(
+                crate::feature_set_id::ComputeToken::Gmsbank,
+                crate::NUM_SCALES
+            )
+            .unwrap()
+            .0,
+            GMSBANK_BASE,
+        );
+        let (w, h) = (97usize, 161usize);
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let x = i % w;
+                let y = i / w;
+                let a = ((x * 7 + y * 13 + (x * y) % 31) % 256) as u8;
+                [a, a.wrapping_add(37), a.wrapping_sub(41)]
+            })
+            .collect();
+        let identity = gmsbank_extract(&src, &src, w, h, false);
+        assert_eq!(identity.len(), 1502);
+        assert!(identity[GMSBANK_BASE..].iter().all(|v| v.to_bits() == 0));
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let offset = if (i / w + i % w) % 2 == 0 { 9 } else { -9 };
+                p.map(|c| (i32::from(c) + offset).clamp(0, 255) as u8)
+            })
+            .collect();
+        let serial = gmsbank_extract(&src, &dst, w, h, false);
+        let parallel = gmsbank_extract(&src, &dst, w, h, true);
+        assert_eq!(serial, parallel, "C8 row order must survive MT extraction");
+        for scale in 0..4 {
+            for ch in 0..3 {
+                if scale == 0 && ch != 1 {
+                    continue;
+                }
+                let base = GMSBANK_BASE
+                    + if scale == 0 {
+                        0
+                    } else {
+                        15 + (scale - 1) * 55 + ch * 15
+                    };
+                let cell = &serial[base..base + 15];
+                for k in 0..4 {
+                    let now = cell[k * 3] + cell[k * 3 + 1];
+                    let next = cell[(k + 1) * 3] + cell[(k + 1) * 3 + 1];
+                    assert!(now + 1e-14 >= next, "loss+gain must fall as c grows");
+                }
+            }
+            if scale > 0 {
+                let base = GMSBANK_BASE + 15 + (scale - 1) * 55 + 45;
+                for k in 0..4 {
+                    assert!(serial[base + 2 * k] >= serial[base + 2 * (k + 1)]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gmsbank_materialized_matches_streaming() {
+        for (w, h) in [(97usize, 161usize), (151, 83)] {
+            let src = textured_image(w, h, 0xC8B4);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+            let toggles = V2NewFeatureToggles {
+                gmsbank: true,
+                ..rev4_all_toggles()
+            };
+            let streamed = gmsbank_extract(&src, &dst, w, h, false);
+            let prep = prepare_v2_reference_impl(&source, None, false, false).unwrap();
+            let ns = prep.scales.len();
+            let mut cells: Vec<Rev4CellAccum> =
+                (0..ns * 3).map(|_| Rev4CellAccum::default()).collect();
+            let mut scratch = V2Scratch::new();
+            compute_v2_features_with_ref_impl_inner(
+                &prep,
+                &distorted,
+                None,
+                false,
+                toggles,
+                &mut scratch,
+                Some(&mut cells[..]),
+            )
+            .unwrap();
+            for scale in 0..ns {
+                let n = prep.scales[scale].1 * prep.scales[scale].2;
+                for ch in 0..3 {
+                    if scale == 0 && ch != 1 {
+                        continue;
+                    }
+                    let cell = &cells[scale * 3 + ch];
+                    let mut out = [0.0; GMSBANK_PER_CELL];
+                    finish_gmsbank_cell(&cell.bank, n, &mut out);
+                    let base = GMSBANK_BASE
+                        + if scale == 0 {
+                            0
+                        } else {
+                            15 + (scale - 1) * 55 + ch * 15
+                        };
+                    assert_eq!(
+                        out,
+                        streamed[base..base + GMSBANK_PER_CELL],
+                        "C8 materialized vs streamed {w}x{h} scale={scale} ch={ch}"
+                    );
+                }
+                if scale > 0 {
+                    let mut out = [0.0; 10];
+                    finish_chroma_cell(&cells[scale * 3].chroma, n, &mut out);
+                    let base = GMSBANK_BASE + 15 + (scale - 1) * 55 + 45;
+                    assert_eq!(
+                        out,
+                        streamed[base..base + 10],
+                        "C8 materialized CS scale {scale}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gmsbank_stride_matches_tight() {
+        let (w, h) = (97usize, 161usize);
+        let src = textured_image(w, h, 0xC8C8);
+        let dst = quantize_distort(&src, w, h);
+        let stride = w * 3 + 13;
+        let mut padded_src = vec![0u8; stride * h];
+        let mut padded_dst = vec![0u8; stride * h];
+        for y in 0..h {
+            for x in 0..w {
+                let at = y * stride + x * 3;
+                padded_src[at..at + 3].copy_from_slice(&src[y * w + x]);
+                padded_dst[at..at + 3].copy_from_slice(&dst[y * w + x]);
+            }
+        }
+        let source = StridedBytes::try_new(&padded_src, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided source");
+        let distorted = StridedBytes::try_new(&padded_dst, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided distortion");
+        let mut scratch = V2Scratch::new();
+        let strided = compute_folded720_streaming_impl(
+            &source,
+            &distorted,
+            None,
+            false,
+            V2NewFeatureToggles {
+                gmsbank: true,
+                ..rev4_all_toggles()
+            },
+            &mut scratch,
+            None,
+        )
+        .unwrap()
+        .into_features();
+        let tight = gmsbank_extract(&src, &dst, w, h, false);
+        assert_eq!(tight[GMSBANK_BASE..], strided[GMSBANK_BASE..]);
+    }
+
+    /// Extract the full 1322-slot vector for a pair through the streaming
+    /// walk (the served engine).
+    fn rev4_extract(src: &[[u8; 3]], dst: &[[u8; 3]], w: usize, h: usize) -> Vec<f64> {
+        let source = RgbSlice::new(src, w, h);
+        let distorted = RgbSlice::new(dst, w, h);
+        let mut scratch = V2Scratch::new();
+        compute_folded720_streaming_impl(
+            &source,
+            &distorted,
+            None,
+            false,
+            rev4_all_toggles(),
+            &mut scratch,
+            None,
+        )
+        .expect("streaming walk computes")
+        .features
+    }
+
+    /// REV4 is difference-form end to end: an identical pair emits exact
+    /// 0.0 in C1 (`ẽ ≡ 0` → no winning phase), C2 (`ring` factors
+    /// `|s − dd|` ≡ 0) and C4 (`hfg`/`bleed`/`ewc·hfl` all factor a
+    /// dst−src difference). C3 alone is not exact-0: it histograms the
+    /// existing `d` map, whose direct-form `ssim_d_local` carries the
+    /// REGISTERED identity floating-point residue shared with the parent
+    /// v2 slots (`feature_invariants.rs` class 3, bar 2e-3 — the design
+    /// note's stated justification for C3's non-difference form). The
+    /// tailhist quantiles on identity must therefore sit under the same
+    /// bar, not at zero.
+    #[test]
+    fn rev4_identity_emits_zero() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xF00D);
+        let f = rev4_extract(&src, &src, w, h);
+        assert_eq!(f.len(), 1322);
+        let tail_base = REV4_BASE + 96 + 72;
+        let art_base = tail_base + 144;
+        let mut bad = Vec::new();
+        for (i, &v) in f[REV4_BASE..].iter().enumerate() {
+            let abs_i = REV4_BASE + i;
+            if abs_i < tail_base || abs_i >= art_base {
+                // C1 / C2 / C4: exact zero on identity.
+                if v.to_bits() != 0.0f64.to_bits() {
+                    bad.push((abs_i, v));
+                }
+            } else {
+                // C3: registered fp-residue bound, same bar as the
+                // parent identity gate.
+                assert!(
+                    v.abs() <= 2e-3,
+                    "tailhist slot {abs_i} = {v:e} exceeds the registered \
+                     2e-3 identity-residue bar"
+                );
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "nonzero identity rev4 slots (C1/C2/C4): {bad:?}"
+        );
+    }
+
+    /// A strided (padded-row) source must produce the same rev4 tail as
+    /// the tight buffer — the front end's row reads are stride-aware and
+    /// nothing downstream may observe the padding.
+    #[test]
+    fn rev4_strided_equals_tight() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xBEEF);
+        let dst = quantize_distort(&src, w, h);
+        // Padded copy: stride = w*3 + 13 (odd byte pad, deliberately not
+        // a multiple of anything the kernels could silently consume).
+        let stride = w * 3 + 13;
+        let mut pad_src = vec![0u8; stride * h];
+        let mut pad_dst = vec![0u8; stride * h];
+        for y in 0..h {
+            for x in 0..w {
+                let o = y * stride + x * 3;
+                pad_src[o..o + 3].copy_from_slice(&src[y * w + x]);
+                pad_dst[o..o + 3].copy_from_slice(&dst[y * w + x]);
+            }
+        }
+        let tight = rev4_extract(&src, &dst, w, h);
+        let s_src = StridedBytes::try_new(&pad_src, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided src");
+        let s_dst = StridedBytes::try_new(&pad_dst, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided dst");
+        let mut scratch = V2Scratch::new();
+        let strided = compute_folded720_streaming_impl(
+            &s_src,
+            &s_dst,
+            None,
+            false,
+            rev4_all_toggles(),
+            &mut scratch,
+            None,
+        )
+        .expect("strided walk computes")
+        .features;
+        for (i, (a, b)) in tight[REV4_BASE..]
+            .iter()
+            .zip(strided[REV4_BASE..].iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "rev4 slot {} strided != tight",
+                REV4_BASE + i
+            );
+        }
+    }
+
+    /// Low-contrast content (gentle gradient + ±3 LCG noise) — content
+    /// steps stay ≪ block-flatten steps so a planted 8-px lattice
+    /// dominates the phase profile (the phase test's fixture).
+    fn smooth_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
+        let mut state = seed | 1;
+        let mut px = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let noise = ((state >> 24) as i32 % 7) - 3;
+                let base = 96 + ((x * 48) / w.max(1)) as i32 + ((y * 32) / h.max(1)) as i32;
+                let v = (base + noise).clamp(0, 255) as u8;
+                px.push([v, (v as i32 + (noise >> 1)).clamp(0, 255) as u8, v]);
+            }
+        }
+        px
+    }
+
+    /// Alternating ±shift per 8-px column block: steps appear ONLY at
+    /// `x ≡ 0 mod 8` boundaries (the two sides inside a block share the
+    /// shift), planting a pure phase-0 lattice of added edges.
+    fn block_shift_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
+        let mut out = src.to_vec();
+        for y in 0..h {
+            for x in 0..w {
+                let delta = if (x / 8) % 2 == 0 { 24i32 } else { -24i32 };
+                for c in out[y * w + x].iter_mut() {
+                    *c = (*c as i32 + delta).clamp(0, 255) as u8;
+                }
+            }
+        }
+        out
+    }
+
+    /// C1 phase recovery: shift a reference's 8-px block columns and crop
+    /// the DISTORTED image 5 columns left against a matching crop of the
+    /// reference — the planted lattice then sits at phase `(8−5) mod 8
+    /// = 3` in the compared frame with content still aligned. The
+    /// per-phase `Σ|ẽ|` argmax must be exactly 3, and its magnitude must
+    /// match the unshifted pair's phase-0 response within the stated
+    /// tolerance (±40% — the crop removes the leftmost content and the
+    /// off-lattice content steps re-partition, but the on-grid excess is
+    /// the same physical boundary set).
+    #[test]
+    fn rev4_gridblk_phase_shift_three() {
+        let (w, h) = (128usize, 96usize);
+        let src = smooth_image(w, h, 0xC1);
+        let dst_full = block_shift_distort(&src, w, h);
+        // Unshifted pair (phase 0 expected).
+        let f0 = rev4_extract(&src, &dst_full, w, h);
+        // Cropped pair: dst's lattice lands at phase 3, content aligned.
+        let wc = w - 5;
+        let src_c: Vec<[u8; 3]> = (0..h)
+            .flat_map(|y| src[y * w + 5..y * w + w].iter().copied())
+            .collect();
+        let dst_c: Vec<[u8; 3]> = (0..h)
+            .flat_map(|y| dst_full[y * w + 5..y * w + w].iter().copied())
+            .collect();
+        let source_c = RgbSlice::new(&src_c, wc, h);
+        let distorted_c = RgbSlice::new(&dst_c, wc, h);
+        let prep = prepare_v2_reference_impl(&source_c, None, false, false).expect("prepare");
+        let mut cells: Vec<Rev4CellAccum> = (0..prep.scales.len() * 3)
+            .map(|_| Rev4CellAccum::default())
+            .collect();
+        let mut scratch = V2Scratch::new();
+        let _ = compute_v2_features_with_ref_impl_inner(
+            &prep,
+            &distorted_c,
+            None,
+            false,
+            rev4_all_toggles(),
+            &mut scratch,
+            Some(&mut cells[..]),
+        )
+        .expect("materialized computes");
+        // Scale 0, Y channel (index 1): V-phase argmax must be 3.
+        let g = &cells[1].grid;
+        let pv = gridblk_winner(&g.abs_v, &[usize::MAX; GRIDBLK_MAX_PERIOD], 8)
+            .expect("a winning V phase");
+        assert_eq!(
+            pv,
+            3,
+            "V lattice phase must be 3, abs_v={:?}",
+            &g.abs_v[..8]
+        );
+        // Response magnitude vs the unshifted phase-0 profile: use the
+        // emitted on-grid mean as the stated response (blocking ADDS
+        // steps → positive signed ẽ on-grid).
+        let on_mean0 = f0[REV4_BASE + 8 + 6];
+        let f3 = rev4_extract(&src_c, &dst_c, wc, h);
+        let on_mean3 = f3[REV4_BASE + 8 + 6];
+        assert!(
+            on_mean3 > 0.4 * on_mean0 && on_mean3 < 1.6 * on_mean0,
+            "phase-3 response {on_mean3} vs unshifted {on_mean0} outside ±40%"
+        );
+    }
+
+    /// C1 broad sanity bound: blur-only and noise-only distortions carry
+    /// no planted lattice. The [0.5, 2.0] range catches gross numerical
+    /// faults; it does not discriminate JPEG blocking (whose measured
+    /// on/off range, 1.01–1.24, falls inside this interval).
+    #[test]
+    fn rev4_gridblk_blur_noise_band() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xBEEF);
+        // 3x3 box blur.
+        let mut blur = src.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 3];
+                let mut n = 0u32;
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        let yy = (y as i32 + dy).clamp(0, h as i32 - 1) as usize;
+                        let xx = (x as i32 + dx).clamp(0, w as i32 - 1) as usize;
+                        for c in 0..3 {
+                            acc[c] += src[yy * w + xx][c] as u32;
+                        }
+                        n += 1;
+                    }
+                }
+                for c in 0..3 {
+                    blur[y * w + x][c] = (acc[c] / n) as u8;
+                }
+            }
+        }
+        // ±6 LCG noise.
+        let mut noise = src.clone();
+        let mut st = 0x9E3779B9u32;
+        for p in noise.iter_mut() {
+            for c in p.iter_mut() {
+                st = st.wrapping_mul(1664525).wrapping_add(1013904223);
+                let d = ((st >> 24) as i32 % 13) - 6;
+                *c = (*c as i32 + d).clamp(0, 255) as u8;
+            }
+        }
+        for (name, dst) in [("blur", &blur), ("noise", &noise)] {
+            let f = rev4_extract(&src, dst, w, h);
+            for ch in 0..3 {
+                let r = f[REV4_BASE + ch * 8 + 7];
+                assert!(
+                    (0.5..=2.0).contains(&r),
+                    "{name}: s0 ch{ch} on/off ratio {r} outside [0.5, 2.0]"
+                );
+            }
+        }
+    }
+
+    /// C3 machinery: `TailAccum`/`finish_tailhist_cell` against a
+    /// sorted-array reference on a controlled multiset — max exact,
+    /// p95/p99 equal to the lower edge of the true quantile's bin (the
+    /// "within one bin" contract), counts partition-invariant.
+    #[test]
+    fn rev4_tailhist_quantile_semantics() {
+        let edges = tail_edges();
+        // Deterministic multiset: 1000 values spanning [1e-6, 1e-1]
+        // plus 200 exact zeros (bin-0 mass) and 40 saturating values.
+        let mut vals: Vec<f64> = (0..1000)
+            .map(|i| 10f64.powf(-6.0 + (i as f64 / 999.0) * 5.0))
+            .collect();
+        vals.extend(std::iter::repeat_n(0.0, 200));
+        vals.extend(std::iter::repeat_n(2.5, 40));
+        let n = vals.len();
+        let mut acc = TailAccum::default();
+        for &v in &vals {
+            acc.scatter(edges, v, 0);
+        }
+        let mut out = [0.0f64; TAILHIST_PER_CELL];
+        finish_tailhist_cell(&acc, n, &mut out);
+        // max = true max exactly.
+        let sorted_max = vals.iter().copied().fold(0.0f64, f64::max);
+        assert_eq!(out[2].to_bits(), sorted_max.to_bits(), "max must be exact");
+        // p95/p99 within one bin of the sorted-array quantile: the
+        // emitted lower edge must equal the lower edge of the bin that
+        // contains the true order statistic (or be the adjacent bin
+        // when the cumulative target lands mid-bin — at most one bin of
+        // slack, asserted as: true value's bin lower edge <= emitted <=
+        // next edge above true value's bin).
+        let mut sorted = vals.clone();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        for (k, q) in [(0usize, 0.95f64), (1, 0.99)] {
+            let idx = ((q * n as f64).ceil() as usize)
+                .saturating_sub(1)
+                .min(n - 1);
+            let tv = sorted[idx];
+            let emitted = out[k];
+            let tv_bin = edges.bin(tv);
+            let lo = if tv_bin == 0 {
+                0.0
+            } else {
+                f64::from_bits(edges.edges[tv_bin - 1])
+            };
+            let hi = f64::from_bits(edges.edges[tv_bin.min(TAILHIST_BINS - 2)]);
+            assert!(
+                emitted >= lo && emitted <= hi.max(lo),
+                "q={q}: emitted {emitted} not within one bin of {tv} (bin {tv_bin} edges [{lo}, {hi}])"
+            );
+        }
+        // Partition invariance: three different strip partitionings of
+        // the same sequence produce identical count arrays.
+        for split in [vec![0usize, n], vec![0, 400, 800, n], vec![0, 1, 999, n]] {
+            let mut h = [[0u32; TAILHIST_BINS]; 4];
+            for w in split.windows(2) {
+                for &v in &vals[w[0]..w[1]] {
+                    h[0][edges.bin(v)] += 1;
+                }
+            }
+            assert_eq!(h, acc.hist, "counts must be partition-invariant");
+        }
+    }
+
+    /// C4 bleed on a mostly flat grey source: a localized equal-RGB
+    /// luma step leaves an unmasked area and emits zero bleed. Adding a
+    /// chroma texture outside that step must produce positive bleed.
+    #[test]
+    fn rev4_arttype_bleed_luma_vs_chroma() {
+        let (w, h) = (96usize, 80usize);
+        let src = vec![[128u8; 3]; w * h];
+        // Localized equal-RGB change, without clipping or per-pixel noise.
+        let mut luma = src.clone();
+        for y in 12..32 {
+            for x in 12..32 {
+                luma[y * w + x] = [152; 3];
+            }
+        }
+        // Compute the same scale-0 dst-Y mask as the production strip.
+        // Its coverage is part of this test: an all-masked plane makes a
+        // zero bleed value vacuous.
+        let prepared = prepare_v2_reference_impl(&RgbSlice::new(&luma, w, h), None, false, false)
+            .expect("prepare luma-only dst");
+        let dst_y = &prepared.scales[0].0[1];
+        let mut mask_work = BleedMaskWork::sized(w, h);
+        for r in 0..h + 4 {
+            let row = reflect_101(r as isize - 2, h);
+            mask_work.dh[r * w..(r + 1) * w].copy_from_slice(&dst_y[row * w..(row + 1) * w]);
+        }
+        dst_y_edge_mask_strip(w, 0, h, h, &mut mask_work);
+        let covered = mask_work.mask[..w * h]
+            .iter()
+            .filter(|&&v| v != 0.0)
+            .count();
+        assert!(covered < w * h, "luma mask covered all {covered} pixels");
+        let fl = rev4_extract(&src, &luma, w, h);
+        let ab = REV4_BASE + 96 + 72 + 144; // arttype s0
+        assert_eq!(
+            fl[ab + idx_arttype::BLEED_X].to_bits(),
+            0.0f64.to_bits(),
+            "luma-only bleed X must be exactly 0"
+        );
+        assert_eq!(
+            fl[ab + idx_arttype::BLEED_B].to_bits(),
+            0.0f64.to_bits(),
+            "luma-only bleed B must be exactly 0"
+        );
+        // Negative control: retain the luma step and add opponent-colour
+        // stripes in a separate patch. Both RGB colours have nearly the
+        // same converted XYB Y as [128; 3] (<0.001 difference), but their
+        // X/B values differ strongly. Thus the chroma edges remain outside
+        // the dst-Y mask instead of filling it vacuously.
+        let mut luma_chroma = luma.clone();
+        for y in 44..68 {
+            for x in 48..80 {
+                luma_chroma[y * w + x] = if (x + y) % 4 < 2 {
+                    [80, 142, 128]
+                } else {
+                    [176, 100, 128]
+                };
+            }
+        }
+        let fc = rev4_extract(&src, &luma_chroma, w, h);
+        assert!(
+            fc[ab + idx_arttype::BLEED_X] > 0.0 || fc[ab + idx_arttype::BLEED_B] > 0.0,
+            "luma+chroma must produce positive bleed, got X={} B={}",
+            fc[ab + idx_arttype::BLEED_X],
+            fc[ab + idx_arttype::BLEED_B]
+        );
+    }
+
+    /// f64 accumulation shows no cancellation on flat high-value inputs:
+    /// scatter one large constant into the f64 accumulators and compare
+    /// against the n·v algebraic reference — the running sums must stay
+    /// within a tiny relative bound (1e-12), i.e. no catastrophic
+    /// cancellation or drift, not merely "approximately" right.
+    #[test]
+    fn rev4_accumulators_flat_no_cancellation() {
+        const N: usize = 200_000;
+        let big = 0.75f64; // high-value flat term
+        // RingAccum: Σ ring·h_k — constant ring ⇒ fixed hat weights.
+        let mut ring = RingAccum::default();
+        let h = rev4_hats(&RINGBASIS_UC, rev4_u(big));
+        for _ in 0..N {
+            for (b, h) in ring.bins.iter_mut().zip(h.iter()) {
+                *b += big * h;
+            }
+        }
+        for (k, (&b, &h)) in ring.bins.iter().zip(h.iter()).enumerate() {
+            let expect = N as f64 * big * h;
+            let rel = ((b - expect) / expect).abs();
+            assert!(
+                rel < 1e-10 || expect == 0.0 && b == 0.0,
+                "ring bin {k} drifted on flat input: {b} vs {expect} (rel {rel:e})",
+            );
+        }
+        // FlatAccum: Σ hfg over flat pixels ≈ N · hfg.
+        let mut flat = FlatAccum::default();
+        for _ in 0..N {
+            flat.hfg += big;
+            flat.n += 1;
+        }
+        let expect = N as f64 * big;
+        assert!(
+            ((flat.hfg - expect) / expect).abs() < 1e-10,
+            "flat hfg drifted: {} vs {expect}",
+            flat.hfg
+        );
+        // GridblkAccum signed sums over an alternating ±big pattern: the
+        // equal-magnitude pairs cancel EXACTLY (same-bits add/sub), and
+        // |ẽ| stays on the algebraic bound.
+        let mut g = GridblkAccum::default();
+        for i in 0..N {
+            g.signed_v[0] += if i % 2 == 0 { big } else { -big };
+            g.abs_v[0] += big;
+        }
+        assert_eq!(g.signed_v[0].to_bits(), 0.0f64.to_bits());
+        assert!(
+            ((g.abs_v[0] - expect) / expect).abs() < 1e-10,
+            "gridblk abs drifted: {} vs {expect}",
+            g.abs_v[0]
+        );
+    }
+
+    /// C3 (and every rev4 slot) is merge-order free: serial walk and the
+    /// band-parallel walk at pool sizes {1,2,8,16} must emit BIT-IDENTICAL
+    /// rev4 segments. Height 200 forces a 128+72 strip decomposition —
+    /// mixed strip heights inside one image — and widths crossing
+    /// `H_TILE_WIDTH` exercise the horizontal tile split.
+    #[cfg(all(feature = "training", feature = "threads"))]
+    #[test]
+    fn rev4_thread_and_strip_invariance() {
+        for &(w, h) in &[(200usize, 200usize), (300, 200), (96, 320)] {
+            let src = textured_image(w, h, 0xC3);
+            let dst = quantize_distort(&src, w, h);
+            let mut reference: Option<Vec<f64>> = None;
+            for &parallel in &[false, true] {
+                for threads in [1usize, 2, 8, 16] {
+                    if !parallel && threads != 1 {
+                        continue;
+                    }
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .build()
+                        .expect("build rayon pool");
+                    let got = pool.install(|| {
+                        let mut scratch = V2Scratch::new();
+                        compute_folded720_streaming_impl(
+                            &RgbSlice::new(&src, w, h),
+                            &RgbSlice::new(&dst, w, h),
+                            None,
+                            parallel,
+                            rev4_all_toggles(),
+                            &mut scratch,
+                            None,
+                        )
+                        .unwrap()
+                        .features
+                    });
+                    match &reference {
+                        None => reference = Some(got),
+                        Some(first) => {
+                            for i in 0..first.len().min(got.len()) {
+                                assert_eq!(
+                                    first[i].to_bits(),
+                                    got[i].to_bits(),
+                                    "{w}x{h}: slot {i} moved at par={parallel} t={threads} \
+                                     ({:e} -> {:e})",
+                                    first[i],
+                                    got[i]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// C1 JPEG ladder: the internal winning-phase Σ|ẽ|, which is not an
+    /// emitted slot, must be non-decreasing as zenjpeg quality descends
+    /// 95 → 10 on four imazen-26 TRAIN references. Signed `on_mean`
+    /// and on/off ratio are logged only; neither is claimed monotone.
+    /// Caller opts in with `ZENSIM_REV4_CORPUS_ROOT` and `--ignored`.
+    #[test]
+    #[ignore = "explicit corpus gate: use just rev4-corpus-tests"]
+    fn rev4_gridblk_zenjpeg_ladder() {
+        use enough::Unstoppable;
+        use zenjpeg::decoder::Decoder;
+        use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig, PixelLayout};
+
+        let root_path = std::env::var("ZENSIM_REV4_CORPUS_ROOT")
+            .expect("caller must set ZENSIM_REV4_CORPUS_ROOT");
+        let root = std::path::Path::new(&root_path);
+        assert!(root.is_dir(), "corpus root {root:?} is missing");
+        // TRAIN refs: leading numeric stem ends in {0,2,4,6,8}.
+        const REFS: [&str; 4] = [
+            "20210608_123424__pristine2x.png",
+            "20220616_102219__pristine2x.png",
+            "20230704_121114__pristine2x.png",
+            "20240424_123020__pristine2x.png",
+        ];
+        let jpeg_roundtrip = |px: &[[u8; 3]], w: usize, h: usize, q: u8| -> Vec<[u8; 3]> {
+            let flat: Vec<u8> = px.iter().flat_map(|p| p.iter().copied()).collect();
+            let config = EncoderConfig::ycbcr(q, ChromaSubsampling::Quarter);
+            let mut enc = config
+                .encode_from_bytes(w as u32, h as u32, PixelLayout::Rgb8Srgb)
+                .expect("zenjpeg encoder init");
+            enc.push_packed(&flat, Unstoppable).expect("zenjpeg push");
+            let bytes = enc.finish().expect("zenjpeg finish");
+            let dec = Decoder::new()
+                .decode(&bytes, Unstoppable)
+                .expect("zenjpeg decode");
+            let out = dec.pixels_u8().expect("u8 jpeg output");
+            out.as_chunks::<3>()
+                .0
+                .iter()
+                .map(|c| [c[0], c[1], c[2]])
+                .collect()
+        };
+        for name in REFS {
+            let img = image::open(root.join(name))
+                .unwrap_or_else(|e| panic!("decode {name}: {e}"))
+                .to_rgb8();
+            let (w, h) = (img.width() as usize, img.height() as usize);
+            let src: Vec<[u8; 3]> = img
+                .as_raw()
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|c| [c[0], c[1], c[2]])
+                .collect();
+            let prep = prepare_v2_reference_impl(&RgbSlice::new(&src, w, h), None, false, false)
+                .expect("prepare");
+            let mut prev = f64::NEG_INFINITY;
+            let mut series = Vec::new();
+            for q in (10u8..=95).rev().step_by(5) {
+                let dst = jpeg_roundtrip(&src, w, h, q);
+                let mut cells: Vec<Rev4CellAccum> = (0..prep.scales.len() * 3)
+                    .map(|_| Rev4CellAccum::default())
+                    .collect();
+                let mut scratch = V2Scratch::new();
+                let _ = compute_v2_features_with_ref_impl_inner(
+                    &prep,
+                    &RgbSlice::new(&dst, w, h),
+                    None,
+                    false,
+                    rev4_all_toggles(),
+                    &mut scratch,
+                    Some(&mut cells[..]),
+                )
+                .expect("materialized computes");
+                let f = rev4_extract(&src, &dst, w, h);
+                // Scale-0 Y cell: on-grid excess = Σ|ẽ| at the winning
+                // phase (V + H), the raw magnitude the phase argmax
+                // selects; signed on_mean + on/off recorded alongside.
+                let g = &cells[1].grid;
+                let pv = gridblk_winner(&g.abs_v, &[usize::MAX; GRIDBLK_MAX_PERIOD], 8)
+                    .expect("V winner");
+                let ph = gridblk_winner(&g.abs_h, &[usize::MAX; GRIDBLK_MAX_PERIOD], 8)
+                    .expect("H winner");
+                let on_abs = g.abs_v[pv] + g.abs_h[ph];
+                let (m, r) = (f[REV4_BASE + 8 + 6], f[REV4_BASE + 8 + 7]);
+                series.push((q, on_abs, m, r, pv, ph));
+                assert!(
+                    on_abs >= prev,
+                    "{name}: internal on-grid |excess| decreased at q{q}: {on_abs:e} < {prev:e}"
+                );
+                prev = on_abs;
+            }
+            let first = series.first().unwrap().1;
+            let last = series.last().unwrap().1;
+            assert!(
+                last > first,
+                "{name}: q10 on-grid |excess| not above q95: {series:?}"
+            );
+            eprintln!("{name} C1 ladder (q, Σon|ẽ|, on_mean, onoff, pv, ph): {series:?}");
+        }
+    }
+
+    /// Existing-slot bit-identity gate: the shared dense/gradient kernels
+    /// carry rev4 hooks, so an all-rev4-ON extraction must emit the SAME
+    /// f0..f985 bits as the all-rev4-OFF one (the hooks write only the
+    /// rev4 accumulators; `Option::None` skips them entirely). Geometries
+    /// include multi-strip heights, sub-64 dims (reflect-padded),
+    /// non-tight strides and `H_TILE_WIDTH`-crossing widths. The
+    /// SIMD-tier matrix for this same property lives in
+    /// `tests/rev4_featbank_parity.rs` — token permutation is
+    /// process-wide and cannot run inside the parallel unit-test
+    /// process.
+    #[test]
+    fn rev4_existing_slots_unmoved_by_toggles() {
+        for &(w, h, strided) in &[
+            (200usize, 200usize, false),
+            (96, 80, false),
+            (300, 200, false),
+            (127, 288, true),
+            (50, 300, false),
+            (300, 50, false),
+            (40, 40, false),
+        ] {
+            let src = textured_image(w, h, 0xE0 + w as u32);
+            let dst = quantize_distort(&src, w, h);
+            // Optional padded copy (non-tight stride + 13 bytes).
+            let stride = w * 3 + 13;
+            let (pad_src, pad_dst) = if strided {
+                let mut ps = vec![0u8; stride * h];
+                let mut pd = vec![0u8; stride * h];
+                for y in 0..h {
+                    for x in 0..w {
+                        let o = y * stride + x * 3;
+                        ps[o..o + 3].copy_from_slice(&src[y * w + x]);
+                        pd[o..o + 3].copy_from_slice(&dst[y * w + x]);
+                    }
+                }
+                (ps, pd)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            let toggles_on = rev4_all_toggles();
+            // Same request minus ONLY the rev4 flags — identical work
+            // everywhere except the rev4 hooks.
+            let toggles_off = V2NewFeatureToggles {
+                rev4_gridblk: false,
+                rev4_ringbasis: false,
+                rev4_tailhist: false,
+                rev4_arttype: false,
+                ..rev4_all_toggles()
+            };
+            let run_once = || {
+                let mut scratch = V2Scratch::new();
+                let mut run = |toggles: V2NewFeatureToggles| -> Vec<f64> {
+                    if strided {
+                        let s =
+                            StridedBytes::try_new(&pad_src, w, h, stride, PixelFormat::Srgb8Rgb)
+                                .expect("strided src");
+                        let d =
+                            StridedBytes::try_new(&pad_dst, w, h, stride, PixelFormat::Srgb8Rgb)
+                                .expect("strided dst");
+                        compute_folded720_streaming_impl(
+                            &s,
+                            &d,
+                            None,
+                            false,
+                            toggles,
+                            &mut scratch,
+                            None,
+                        )
+                        .expect("streaming computes")
+                        .features
+                    } else {
+                        compute_folded720_streaming_impl(
+                            &RgbSlice::new(&src, w, h),
+                            &RgbSlice::new(&dst, w, h),
+                            None,
+                            false,
+                            toggles,
+                            &mut scratch,
+                            None,
+                        )
+                        .expect("streaming computes")
+                        .features
+                    }
+                };
+                let on = run(toggles_on);
+                let off = run(toggles_off);
+                assert!(
+                    on.len() >= REV4_BASE && off.len() >= REV4_BASE,
+                    "unexpected width on={} off={}",
+                    on.len(),
+                    off.len()
+                );
+                for i in 0..REV4_BASE {
+                    assert_eq!(
+                        on[i].to_bits(),
+                        off[i].to_bits(),
+                        "{w}x{h} strided={strided}: existing slot {i} moved \
+                         with rev4 toggles ({:e} -> {:e})",
+                        off[i],
+                        on[i]
+                    );
+                }
+            };
+            run_once();
+        }
+    }
+
     /// One `V2Scratch` reused across pairs of DIFFERENT sizes and content
     /// must produce the same bits as a fresh scratch per pair — i.e. no
     /// stale-buffer leakage between pairs (buffers are fully written
@@ -13357,6 +17806,98 @@ pub(crate) mod tests {
         }
     }
 
+    /// Independent f64 algebra, not a second call to the pooling helper.
+    /// Exercises actual dispatched SIMD and scalar tails with valid moments.
+    #[test]
+    fn weighted_mse_matches_normalized_positive_measure() {
+        for width in [7, 8, 13, 31, 97, 257] {
+            let height = 9;
+            let n = width * height;
+            for uniform in [false, true] {
+                let src = vec![0.2f32; n];
+                let dst: Vec<f32> = (0..n)
+                    .map(|i| {
+                        if uniform {
+                            0.25
+                        } else {
+                            0.2 + (i % 17) as f32 * 0.017
+                        }
+                    })
+                    .collect();
+                let act: Vec<f32> = (0..n).map(|i| (i % 23) as f32 * 0.023).collect();
+                let ssq: Vec<f32> = src.iter().zip(&dst).map(|(&s, &d)| s * s + d * d).collect();
+                let cross: Vec<f32> = src.iter().zip(&dst).map(|(&s, &d)| s * d).collect();
+                let actual = dense_block_kernel(
+                    &src, &dst, &src, &dst, &ssq, &cross, &act, width, height, true, None,
+                );
+                let signal: Vec<f64> = src
+                    .iter()
+                    .zip(&dst)
+                    .map(|(&s, &d)| {
+                        let e = (f64::from(s) - f64::from(d)).powi(2);
+                        e / (e + C_MSE)
+                    })
+                    .collect();
+                // Complementary activity weights partition the unweighted mass:
+                // w_mask + w_iw = 1 + floor, at every pixel.
+                let signal_sum: f64 = signal.iter().sum();
+                assert!(
+                    ((actual.ws_mask_mse.num + actual.ws_iw_mse.num) / (n as f64)
+                        - (1.0 + IW_WEIGHT_FLOOR) * signal_sum / (n as f64))
+                        .abs()
+                        < 2e-6
+                );
+                let lo = signal.iter().copied().fold(f64::INFINITY, f64::min);
+                let hi = signal.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                for (iw, pool) in [(false, actual.ws_mask_mse), (true, actual.ws_iw_mse)] {
+                    let weights: Vec<f64> = act
+                        .iter()
+                        .map(|&a| {
+                            let a = f64::from(a);
+                            if iw {
+                                a / (a + C_ACTIVITY) + IW_WEIGHT_FLOOR
+                            } else {
+                                C_ACTIVITY / (a + C_ACTIVITY)
+                            }
+                        })
+                        .collect();
+                    let denominator: f64 = weights.iter().sum();
+                    let reference: f64 =
+                        weights.iter().zip(&signal).map(|(w, e)| w * e).sum::<f64>() / denominator;
+                    let value = pool.finish();
+                    assert!(
+                        (value - reference).abs() < 2e-6,
+                        "width={width} iw={iw}: {value} vs {reference}"
+                    );
+                    assert!(value >= lo - 2e-6 && value <= hi + 2e-6);
+                    // A common weight multiplier must cancel in the ratio.
+                    let rescaled: f64 = weights
+                        .iter()
+                        .zip(&signal)
+                        .map(|(w, e)| 37.0 * w * e)
+                        .sum::<f64>()
+                        / (37.0 * denominator);
+                    assert!((reference - rescaled).abs() < 1e-12);
+                }
+                let identity = dense_block_kernel(
+                    &src,
+                    &src,
+                    &src,
+                    &src,
+                    &vec![0.08; n],
+                    &vec![0.04; n],
+                    &act,
+                    width,
+                    height,
+                    true,
+                    None,
+                );
+                assert_eq!(identity.ws_mask_mse.finish(), 0.0);
+                assert_eq!(identity.ws_iw_mse.finish(), 0.0);
+            }
+        }
+    }
+
     /// POOL_SIMD drift gate: the vectorized weighted-pool path (enabled on
     /// the v4x tier) must stay within this module's documented 5e-4
     /// relative tolerance of the §A.14 scalar-pool path — same
@@ -13410,6 +17951,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 let t = super::dense_block_kernel_era2_generic::<_, false>(
                     tok,
@@ -13423,6 +17965,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 let (fs, ts) = (oracle::dense_accum_slots(&f), oracle::dense_accum_slots(&t));
                 for i in 0..fs.len() {
@@ -13575,6 +18118,9 @@ pub(crate) mod tests {
                     append_block: bits & 16 != 0,
                     append2_block: bits & 32 != 0,
                     csfw_block: bits & 64 != 0,
+                    // The 8-bit space predates DVIFM; the family's own gates
+                    // cover `dvifm_block` directly.
+                    dvifm_block: false,
                     append2_dst_activity: bits & 128 != 0,
                     v1_pools: pm,
                     v1_only: bits & 3 == 3,
@@ -13582,6 +18128,17 @@ pub(crate) mod tests {
                     // (`free_extras_*`); this one holds the LEGACY derivation,
                     // which predates it.
                     free_extras: super::V1FreeExtras::Off,
+                    // The rev4 families likewise postdate the 8-bit space;
+                    // their own gates cover the rev4 toggles directly.
+                    rev4_gridblk: false,
+                    rev4_ringbasis: false,
+                    rev4_tailhist: false,
+                    rev4_arttype: false,
+                    gmsbank: false,
+                    mapdev: false,
+                    z1max: false,
+                    gmsnative: false,
+                    dvifmgate: false,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---
@@ -14342,6 +18899,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 let scalar_pool = dense_block_kernel_pools_scalar(
                     &src_planes[ch],
@@ -14354,6 +18912,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
 
                 let era2 = dense_block_kernel_era2(
@@ -14367,6 +18926,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 for (variant, accum) in [
                     ("dispatched", &lane_pool),
@@ -14529,6 +19089,7 @@ pub(crate) mod tests {
                 w,
                 h,
                 true,
+                None,
             );
             let b = dense_block_kernel_pools_scalar(
                 &src_planes[ch],
@@ -14541,6 +19102,7 @@ pub(crate) mod tests {
                 w,
                 h,
                 true,
+                None,
             );
             let pools = [
                 ("mask_ssim", a.ws_mask_ssim, b.ws_mask_ssim),
@@ -14595,6 +19157,47 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ZensimError::DimensionMismatch));
+    }
+
+    /// **The HDR extraction routes reach revision 3, and still hold there.**
+    ///
+    /// Declared-HDR extraction goes through `foldapp_streaming_walk`, i.e. the
+    /// same fold band replay as SDR, so it inherits the corrected SSIM signal
+    /// automatically. "Automatically" is the part worth checking: this re-runs
+    /// the existing `hdr_*` gates — route refusal, auto-vs-explicit routing,
+    /// identity zeros, and bounded output over all four encodings — in a
+    /// revision-3 process, so an HDR route that silently broke under the new
+    /// arithmetic fails here rather than in a fleet extraction.
+    ///
+    /// It does NOT establish HDR quality at revision 3; no HDR bake is fit
+    /// against corrected features.
+    #[test]
+    fn rev3_hdr_route_gates_hold() {
+        // Named so it does NOT match its own filter — a wrapper that counted
+        // itself would mask one of the four gates going missing.
+        crate::ssim_form::rerun_tests_at_revision("3", "feature_v2::tests::hdr_", 4);
+    }
+
+    /// **Folded-vs-streaming parity holds at revision 3 too.**
+    ///
+    /// The two `folded720_v1_*` gates below are the crate's exact contract
+    /// between the folded band replay and v1's own strip walk. Revision 3
+    /// changes where the SSIM signal comes from on BOTH sides, so the
+    /// contract has to be re-established at that revision rather than
+    /// assumed to survive; this re-runs those same gates in a process pinned
+    /// to revision 3 instead of copying them.
+    ///
+    /// `training`-gated for the same reason the gates themselves are: their
+    /// v1 side is `compute_zensim_with_config`, a training-only export. The
+    /// wrapper must not exist in a build where the filter would match
+    /// nothing.
+    #[cfg(feature = "training")]
+    #[test]
+    fn fold_parity_gates_hold_at_revision_three() {
+        // This wrapper is deliberately NOT named `folded720_v1_*`: the
+        // filter below must match exactly the two real gates, and a control
+        // that counted itself would hide one of them going missing.
+        crate::ssim_form::rerun_tests_at_revision("3", "folded720_v1_", 2);
     }
 
     /// FOLD PARITY GATE (2026-07-24). The folded-720 path replays v1's
@@ -14832,6 +19435,7 @@ pub(crate) mod tests {
                             raw_moments: true,
                             bounded_err: true,
                             lum_bins: true,
+                            ..Default::default()
                         },
                     );
                     sums
@@ -16390,6 +20994,7 @@ pub(crate) mod tests {
                 z_parallel,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
+                None,
             )
             .unwrap();
             assert_eq!(mat_f.features().len(), 720);
@@ -16527,6 +21132,43 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn coarse_pools_execute_only_at_requested_resolutions() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let (w, h) = (256, 192);
+        let src = vec![[127u8; 3]; w * h];
+        let mut dst = src.clone();
+        dst[w + 1] = [255, 0, 255];
+        let ids = (0..228)
+            .chain(264..300)
+            .chain(336..372)
+            .filter(|&id| !ComputeSet::is_full_res_xb(id, 4));
+        let coarse = Plan::derive(&SlotSet::from_slots(ids), 372).unwrap();
+        for (plan, expected) in [
+            (Plan::v1(V1PoolsMode::Full, 372), vec![32, 64, 128, 256]),
+            (coarse, vec![32, 64]),
+            (Plan::v1(V1PoolsMode::Peaks, 372), vec![]),
+        ] {
+            POOL_TEST_WIDTHS.with_borrow_mut(|v| *v = Some(Vec::new()));
+            compute_folded_v1_372_streaming_impl(
+                &RgbSlice::new(&src, w, h),
+                &RgbSlice::new(&dst, w, h),
+                None,
+                false,
+                &mut V2Scratch::new(),
+                Some(&plan),
+                #[cfg(feature = "custom-profiles")]
+                None,
+            )
+            .unwrap();
+            let mut widths = POOL_TEST_WIDTHS.with_borrow_mut(|v| v.take().unwrap());
+            widths.sort_unstable();
+            widths.dedup();
+            assert_eq!(widths, expected, "actual weighted-pool kernel widths");
+        }
+    }
+
     // ========================================================================
     // HDR route gates (HDR_PLAN chunk 2 — streaming PU front-end)
     // ========================================================================
@@ -16567,6 +21209,107 @@ pub(crate) mod tests {
         }
         fn is_hdr(&self) -> bool {
             true
+        }
+    }
+
+    #[test]
+    fn scale_selective_944_hdr_retained_features_are_bit_exact() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let full = Plan::derive(&SlotSet::from_slots(0..944), 944).unwrap();
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (97, 131)] {
+            let src = vec![[203.0, 170.0, 100.0]; w * h];
+            let mut dst = src.clone();
+            for (i, p) in dst.iter_mut().enumerate() {
+                if i % 19 == 0 {
+                    *p = [1000.0, 2000.0, 500.0];
+                }
+            }
+            let src = NitsImage::from_rgb_nits(&src, w, h);
+            let dst = NitsImage::from_rgb_nits(&dst, w, h);
+            for parallel in [false, true] {
+                let mut run = |plan: &Plan| {
+                    compute_folded720_streaming_impl(
+                        &src,
+                        &dst,
+                        None,
+                        parallel,
+                        plan.toggles(),
+                        &mut scratch,
+                        Some(plan.compute),
+                    )
+                    .unwrap()
+                };
+                let baseline = run(&full);
+                for mask in 1u8..16 {
+                    let want = SlotSet::from_slots((0..944).filter(|&id| {
+                        mask & (1 << crate::feature_defs::def_at(id, 4).unwrap().scale) != 0
+                    }));
+                    let plan = Plan::derive(&want, 944).unwrap();
+                    let value = run(&plan);
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            value.features()[id].to_bits(),
+                            baseline.features()[id].to_bits(),
+                            "HDR mask={mask:04b} f{id}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fullres_y_subset_hdr_retained_features_are_bit_exact() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        for (coarse, y_only) in [(false, false), (true, false), (false, true)] {
+            let want = SlotSet::from_slots((0..372).filter(|&id| {
+                !ComputeSet::is_full_res_xb(id, 4)
+                    && (!y_only || (id < 156 && id % 13 < 10 && id / 13 % 3 == 1))
+                    && (id < 228 || coarse && matches!(id,264..=299|336..=371))
+            }));
+            let plan = Plan::derive(&want, 372).unwrap();
+            let mut scratch = V2Scratch::new();
+            for (w, h) in [(17, 9), (97, 131)] {
+                let src = vec![[203.0, 170.0, 100.0]; w * h];
+                let mut dst = src.clone();
+                dst[(h / 2) * w + w / 2] = [1000.0, 2000.0, 500.0];
+                let src = NitsImage::from_rgb_nits(&src, w, h);
+                let dst = NitsImage::from_rgb_nits(&dst, w, h);
+                for parallel in [false, true] {
+                    let full = compute_folded720_hdr_streaming_impl(
+                        &src,
+                        &dst,
+                        HdrEncoding::Linear,
+                        None,
+                        parallel,
+                        plan.toggles(),
+                        &mut scratch,
+                        None,
+                    )
+                    .unwrap();
+                    // Exercise the automatic declared-linear-HDR route as well.
+                    let sub = compute_folded720_streaming_impl(
+                        &src,
+                        &dst,
+                        None,
+                        parallel,
+                        plan.toggles(),
+                        &mut scratch,
+                        Some(plan.compute),
+                    )
+                    .unwrap();
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            full.features()[id].to_bits(),
+                            sub.features()[id].to_bits(),
+                            "HDR f{id}"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -18215,6 +22958,369 @@ pub(crate) mod tests {
         }
     }
 
+    // ========================================================================
+    // DVIFM registration gates (f956..985, flat 30-slot block)
+    // ========================================================================
+
+    /// The 986 walk registers: regime, width, tail accessors, identity
+    /// zeros, and first-956 bit-stability against the CSFW walk (the full
+    /// byte-stability gate is its own commit — this pins registration).
+    #[test]
+    fn dvifm_registration_986_shape_identity_and_first956_stable() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+
+        let a956 =
+            compute_folded720_csfw_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
+        let a986 =
+            compute_folded720_dvifm_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
+        assert_eq!(a986.regime(), FeatureRegime::Folded720Dvifm);
+        assert_eq!(a986.features().len(), 986);
+        assert_eq!(a986.dvifm_features().unwrap().len(), 30);
+        assert_eq!(a986.csfw_features().unwrap().len(), 12);
+        assert_eq!(a986.append2_features().unwrap().len(), 20);
+        assert_eq!(a986.append_features().unwrap().len(), 204);
+        // The windowed accessors agree with the 956 result's views.
+        assert_eq!(a986.csfw_features().unwrap(), a956.csfw_features().unwrap());
+        // Turning DVIFM on must not move a bit of the first 956.
+        for i in 0..956 {
+            assert_eq!(
+                a956.features()[i].to_bits(),
+                a986.features()[i].to_bits(),
+                "dvifm toggled on moved f{i}"
+            );
+        }
+        // DVIFM must be finite everywhere and non-constant on a real
+        // distortion (a dead pump would read all zeros).
+        let dv = a986.dvifm_features().unwrap();
+        for (i, v) in dv.iter().enumerate() {
+            assert!(v.is_finite(), "dvifm[{i}] = {v}");
+        }
+        assert!(
+            dv.iter().any(|v| v.abs() > 1e-12),
+            "all-zero DVIFM on a distorted pair — pump inert? {dv:?}"
+        );
+
+        // Identity pair: every DVIFM slot exactly 0 (identical planes ⇒
+        // identical bands ⇒ zero block error at every level).
+        let idr =
+            compute_folded720_dvifm_impl(&sref, &sref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
+        for (i, v) in idr.dvifm_features().unwrap().iter().enumerate() {
+            assert_eq!(*v, 0.0, "identity dvifm[{i}] = {v}");
+        }
+
+        // Default OFF: a plain toggles set must not light the block.
+        let off =
+            compute_folded720_csfw_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
+        assert_eq!(off.features().len(), 956);
+        assert!(off.dvifm_features().is_none());
+    }
+
+    /// HDR route registers the same block: 986-wide PU-normalised result,
+    /// HDR entry parity, identity zeros.
+    #[test]
+    fn dvifm_hdr_route_registers() {
+        let (w, h) = (128usize, 128usize);
+        let mut scratch = V2Scratch::new();
+        let ramp: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let t = (x + y) as f32 / (w + h - 2) as f32;
+                let nits = 0.5 * (2000.0f32 / 0.5).powf(t);
+                [nits, nits, nits]
+            })
+            .collect();
+        let dst: Vec<[f32; 3]> = ramp
+            .iter()
+            .map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12])
+            .collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&dst, w, h);
+
+        let a = compute_folded720_dvifm_hdr_streaming_impl(
+            &sref,
+            &dref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        assert_eq!(a.regime(), FeatureRegime::Folded720Dvifm);
+        assert_eq!(a.features().len(), 986);
+        let dv = a.dvifm_features().unwrap();
+        for (i, v) in dv.iter().enumerate() {
+            assert!(v.is_finite(), "hdr dvifm[{i}] = {v}");
+        }
+        assert!(
+            dv.iter().any(|v| v.abs() > 1e-12),
+            "all-zero HDR DVIFM on a 12% gain pair — pump inert?"
+        );
+        let idr = compute_folded720_dvifm_hdr_streaming_impl(
+            &sref,
+            &sref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        for (i, v) in idr.dvifm_features().unwrap().iter().enumerate() {
+            assert_eq!(*v, 0.0, "HDR identity dvifm[{i}] = {v}");
+        }
+    }
+
+    /// The Y′CbCr planes are defined on the gamma-encoded SDR signal; a
+    /// non-`xyb_y` spec on the HDR walk must be refused, not silently
+    /// served on the PU plane.
+    #[cfg(feature = "training")]
+    #[test]
+    #[should_panic(expected = "SDR-only")]
+    fn dvifm_ycbcr_spec_rejects_the_hdr_route() {
+        let (w, h) = (64usize, 64usize);
+        let mut scratch = V2Scratch::new();
+        let ramp: Vec<[f32; 3]> = (0..w * h).map(|_| [10.0, 10.0, 10.0]).collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let mut dvifm = DvifmWalkExtras {
+            params: Some(crate::dvifm::DvifmParams {
+                input_plane: crate::dvifm::DvifmInputPlane::YcbcrY,
+                ..crate::dvifm::DvifmParams::default()
+            }),
+            cache: None,
+        };
+        let toggles = V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            ..Default::default()
+        };
+        let _ = compute_folded720_hdr_streaming_extras(
+            &sref,
+            &dref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            toggles,
+            &mut scratch,
+            FoldWalkExtras {
+                dvifm: Some(&mut dvifm),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// **Streaming parity gate**: the walk's f956..985 tail is BIT-IDENTICAL
+    /// to the whole-plane/pump oracle `dvifm_features_stream` run over the
+    /// producer's own scale-0 Y planes (`convert_source_to_xyb(..)[1]`).
+    /// Sizes cover: a two-strip image whose second strip is a 42-row
+    /// remainder (170 = 128 + 42, not a multiple of STRIP_ROWS), odd dims,
+    /// and dims not divisible by the 5×5 analysis block.
+    #[test]
+    fn dvifm_walk_tail_matches_streaming_oracle_bit_identical() {
+        for (w, h) in [
+            (150usize, 170usize), // second strip = 42 rows; w%5==0, h%5==0
+            (67, 83),             // single strip, both dims odd
+            (131, 129),           // two strips (129 = 128 + 1), w,h %5 != 0
+            (128, 128),           // exactly one strip, block-friendly
+        ] {
+            let src = textured_image(w, h, 23);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            let y_s = crate::streaming::convert_source_to_xyb(&sref, w, false)[1].clone();
+            let y_d = crate::streaming::convert_source_to_xyb(&dref, w, false)[1].clone();
+            let oracle = crate::dvifm::dvifm_features_stream(
+                &y_s,
+                &y_d,
+                w,
+                h,
+                crate::dvifm::DVIFM_NORM_SDR,
+                &crate::dvifm::DvifmParams::default(),
+            );
+            for parallel in [false, true] {
+                let r = compute_folded720_dvifm_impl(
+                    &sref,
+                    &dref,
+                    None,
+                    parallel,
+                    V2NewFeatureToggles::default(),
+                )
+                .unwrap();
+                let tail = r.dvifm_features().unwrap();
+                assert_eq!(tail.len(), 30);
+                for (i, (a, b)) in tail.iter().zip(oracle.iter()).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "{w}x{h} parallel={parallel}: walk f956+{i} {a:e} != oracle {b:e}"
+                    );
+                }
+            }
+        }
+
+        // Sub-MIN_PYRAMID_DIM: the producer reflect-pads to 64², and the
+        // pump must see the PADDED plane (the accumulator takes its dims
+        // from the strip info, not the request). Oracle = pad then convert.
+        let (w, h) = (40usize, 50usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let ps = crate::metric::reflect_pad_to_min(&sref);
+        let pd = crate::metric::reflect_pad_to_min(&dref);
+        let (pw, ph) = (ps.width(), ps.height());
+        let y_s = crate::streaming::convert_source_to_xyb(&ps, pw, false)[1].clone();
+        let y_d = crate::streaming::convert_source_to_xyb(&pd, pw, false)[1].clone();
+        let oracle = crate::dvifm::dvifm_features_stream(
+            &y_s,
+            &y_d,
+            pw,
+            ph,
+            crate::dvifm::DVIFM_NORM_SDR,
+            &crate::dvifm::DvifmParams::default(),
+        );
+        let r =
+            compute_folded720_dvifm_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
+        for (i, (a, b)) in r
+            .dvifm_features()
+            .unwrap()
+            .iter()
+            .zip(oracle.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "padded {w}x{h}: walk f956+{i} {a:e} != oracle {b:e}"
+            );
+        }
+    }
+
+    /// The HDR route: the walk's tail is bit-identical to the oracle over
+    /// the PU-encoded Y plane (`linear_to_pu_xyb_planar_into` ch 1) under
+    /// `DVIFM_NORM_PU`.
+    #[test]
+    fn dvifm_walk_tail_matches_streaming_oracle_hdr() {
+        let (w, h) = (96usize, 101usize); // h = 101, not a strip multiple
+        let ramp: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let t = (x + 2 * y) as f32 / (w + 2 * h - 3) as f32;
+                let nits = 0.5 * (2000.0f32 / 0.5).powf(t);
+                [nits, nits * 0.97, nits * 1.03]
+            })
+            .collect();
+        let dst: Vec<[f32; 3]> = ramp
+            .iter()
+            .map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12])
+            .collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&dst, w, h);
+        // The PU-Y plane the HDR front end produces for this pair.
+        let pu_y = |img: &Vec<[f32; 3]>| -> Vec<f32> {
+            let mut y = vec![0.0f32; w * h];
+            for row in 0..h {
+                let px: Vec<[f32; 3]> = img[row * w..(row + 1) * w].to_vec();
+                let mut o0 = vec![0.0f32; w];
+                let mut o1 = vec![0.0f32; w];
+                let mut o2 = vec![0.0f32; w];
+                crate::color::linear_to_pu_xyb_planar_into(&px, &mut o0, &mut o1, &mut o2);
+                y[row * w..(row + 1) * w].copy_from_slice(&o1);
+            }
+            y
+        };
+        let oracle = crate::dvifm::dvifm_features_stream(
+            &pu_y(&ramp),
+            &pu_y(&dst),
+            w,
+            h,
+            crate::dvifm::DVIFM_NORM_PU,
+            &crate::dvifm::DvifmParams::default(),
+        );
+        let mut scratch = V2Scratch::new();
+        let r = compute_folded720_dvifm_hdr_streaming_impl(
+            &sref,
+            &dref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        for (i, (a, b)) in r
+            .dvifm_features()
+            .unwrap()
+            .iter()
+            .zip(oracle.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "HDR walk f956+{i} {a:e} != PU oracle {b:e}"
+            );
+        }
+    }
+
+    /// Byte-stability gate: enabling `dvifm_block` must not perturb any of
+    /// the 956 slots that exist without it — the family is append-only.
+    /// Compares the 956-wide CSFW result against the 986-wide DVIFM result
+    /// prefix, bit-for-bit, in both walk parallelisms. (Toggle-OFF
+    /// stability against pre-DVIFM bytes is the job of the pre-existing
+    /// golden/regression suite, which does not touch this toggle.)
+    #[test]
+    fn dvifm_toggle_on_preserves_prefix_slots() {
+        for &(w, h) in &[(150usize, 170usize), (131, 129)] {
+            let src = textured_image(w, h, 5);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            for parallel in [false, true] {
+                let off = compute_folded720_csfw_impl(
+                    &sref,
+                    &dref,
+                    None,
+                    parallel,
+                    V2NewFeatureToggles::default(),
+                )
+                .unwrap();
+                let on = compute_folded720_dvifm_impl(
+                    &sref,
+                    &dref,
+                    None,
+                    parallel,
+                    V2NewFeatureToggles::default(),
+                )
+                .unwrap();
+                assert_eq!(off.features().len(), 956);
+                assert_eq!(on.features().len(), 986);
+                for i in 0..956 {
+                    assert_eq!(
+                        off.features()[i].to_bits(),
+                        on.features()[i].to_bits(),
+                        "{w}x{h} parallel={parallel}: slot f{i} changed by \
+                         dvifm_block: {:e} -> {:e}",
+                        off.features()[i],
+                        on.features()[i]
+                    );
+                }
+            }
+        }
+    }
+
     /// CSFW φ-constant derivation (design §13, the
     /// `bandvis_delta_derivation_table` pattern): recompute the derived
     /// weight `w(L) = S_Ach(L) / (L · dV/dL)` from castleCSF Eq. 21 and
@@ -19300,7 +24406,14 @@ pub(crate) mod oracle {
                 let m2 = mu2[i] as f64;
                 let act = activity[i] as f64;
 
-                let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
+                let d = ssim_d_local(
+                    m1,
+                    m2,
+                    s12[i] as f64,
+                    ssq[i] as f64,
+                    crate::ssim_form::active_revision()
+                        == crate::feature_defs::FormulaRevision::Rev3,
+                );
                 push(&mut s, &mut sum_abs, 0, d);
                 push(&mut s, &mut sum_abs, 1, d * d);
                 push(&mut s, &mut sum_abs, 2, d * d * d);
@@ -19519,6 +24632,7 @@ pub fn harness_dense_slots(
             width,
             height,
             transducer_bank,
+            None,
         )
     } else {
         dense_block_kernel_era1(
@@ -19532,6 +24646,7 @@ pub fn harness_dense_slots(
             width,
             height,
             transducer_bank,
+            None,
         )
     };
     oracle::dense_accum_slots(&a)
@@ -19593,6 +24708,7 @@ pub fn bench_dense_era1(
         width,
         height,
         transducer_bank,
+        None,
     );
     a.sum_d + a.ws_iw_mse.num
 }
@@ -19623,6 +24739,7 @@ pub fn bench_dense_era2(
         width,
         height,
         transducer_bank,
+        None,
     );
     a.sum_d + a.ws_iw_mse.num
 }
@@ -19650,6 +24767,7 @@ fn dense_block_kernel_era2(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_era2_entry(
@@ -19662,7 +24780,8 @@ fn dense_block_kernel_era2(
             activity,
             width,
             height,
-            transducer_bank
+            transducer_bank,
+            r4
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -19697,6 +24816,7 @@ fn dense_block_kernel_era2_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_era2_generic::<_, false>(
         token,
@@ -19710,6 +24830,7 @@ fn dense_block_kernel_era2_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -19727,6 +24848,7 @@ fn dense_block_kernel_era2_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_era2_generic::<_, false>(
         token,
@@ -19740,6 +24862,7 @@ fn dense_block_kernel_era2_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -19789,7 +24912,12 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    mut r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let _ = FUSED; // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
@@ -19828,7 +24956,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
             macro_rules! terms {
                 ($s:expr, $dd:expr, $m1:expr, $m2:expr, $q:expr, $p:expr, $act:expr) => {{
                     let (s, dd, m1, m2, q, p, act) = ($s, $dd, $m1, $m2, $q, $p, $act);
-                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2);
+                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct);
                     let d2 = d * d;
                     let diff_src = (s - m1).abs();
                     let diff_dst = (dd - m2).abs();
@@ -19938,6 +25066,29 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                     p_kn[j] += kn[j];
                     p_kd[j] += kd[j];
                 }
+                // REV4: C3 histogram + C4 flat-HF — scalarized per lane
+                // (the §A.14 pattern; the bit-domain edges cannot
+                // vectorize). `t[7]` is `hfg`. One Option check per
+                // chunk; `None` is the pre-REV4 op sequence bit for bit.
+                if let Some(r4) = r4.as_mut() {
+                    let d_a = d.to_array();
+                    let art_a = art_i.to_array();
+                    let det_a = det_i.to_array();
+                    let mse_a = mse_i.to_array();
+                    let hfg_a = t[7].to_array();
+                    let act_a = act.to_array();
+                    for lane in 0..8 {
+                        rev4_dense_pixel(
+                            r4,
+                            d_a[lane] as f64,
+                            art_a[lane] as f64,
+                            det_a[lane] as f64,
+                            mse_a[lane] as f64,
+                            hfg_a[lane] as f64,
+                            act_a[lane] as f64,
+                        );
+                    }
+                }
                 x += 8;
             }
             // TAIL: masked, never zero-padded (see `v8_add_first`).
@@ -19970,6 +25121,28 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                 for j in 0..3 {
                     p_kn[j] = v8_add_first(token, p_kn[j], &kn[j].to_array(), rem);
                     p_kd[j] = v8_add_first(token, p_kd[j], &kd[j].to_array(), rem);
+                }
+                // REV4 tail: only the first `rem` lanes are real pixels
+                // (the padded lanes' values are discarded, matching the
+                // masked-fold convention).
+                if let Some(r4) = r4.as_mut() {
+                    let d_a = d.to_array();
+                    let art_a = art_i.to_array();
+                    let det_a = det_i.to_array();
+                    let mse_a = mse_i.to_array();
+                    let hfg_a = t[7].to_array();
+                    let act_a = act.to_array();
+                    for lane in 0..rem {
+                        rev4_dense_pixel(
+                            r4,
+                            d_a[lane] as f64,
+                            art_a[lane] as f64,
+                            det_a[lane] as f64,
+                            mse_a[lane] as f64,
+                            hfg_a[lane] as f64,
+                            act_a[lane] as f64,
+                        );
+                    }
                 }
             }
 

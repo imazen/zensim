@@ -283,3 +283,345 @@ fn a_dense_bake_refuses_a_feature_vector_that_does_not_reach_its_ids() {
         "the gradient must be nonzero somewhere, else the control proves nothing"
     );
 }
+
+/// A model can select the full-resolution Y subset without a public toggle.
+/// Compare pixel serving and research extraction to full-feature inference.
+#[test]
+fn fullres_y_subset_bake_matches_full_inputs() {
+    check_v1_subset_bake(false, false);
+}
+
+#[test]
+fn coarse_pool_subset_bake_matches_full_inputs() {
+    check_v1_subset_bake(true, false);
+    check_v1_subset_bake(true, true);
+}
+
+fn check_v1_subset_bake(weighted: bool, fine: bool) {
+    let width = if weighted { 372 } else { 228 };
+    let ids: Vec<usize> = (0..width)
+        .filter(|&i| i < 228 || fine || matches!(i,264..=299|336..=371))
+        .filter(|&i| !matches!(i,228..=233|240..=245|300..=305|312..=317))
+        .filter(|&i| !matches!(i, 0..=12 | 26..=38 | 156..=161 | 168..=173))
+        .collect();
+    let n = ids.len();
+    let recipe = serde_json::json!({
+        "schema_hash": 1, "scaler_mean": vec![0.0; n], "scaler_scale": vec![1.0; n],
+        "metadata": [
+            {"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+            {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_| "1".into())}
+        ],
+        "layers": [{"in_dim": n, "out_dim": 1, "activation":"identity", "dtype":"f32",
+                    "weights": (0..n).map(|i| (i+1) as f32 / 1000.0).collect::<Vec<_>>(), "biases":[0.0]}]
+    });
+    let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+    let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+    let (w, h) = (97, 131);
+    let src = vec![[127u8; 3]; w * h];
+    let mut dst = src.clone();
+    for (i, p) in dst.iter_mut().enumerate() {
+        if (i % w) % 8 == 0 || (i / w) % 8 == 0 {
+            *p = [165, 90, 180];
+        }
+    }
+    let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+    let full = research::extract(
+        &research::Request::for_slots(SlotSet::from_slots(0..width), width).with_parallel(true),
+        &rs,
+        &ds,
+    )
+    .unwrap();
+    let sub = research::extract(
+        &research::Request::for_slots(SlotSet::from_slots(ids.iter().copied()), width)
+            .with_parallel(true),
+        &rs,
+        &ds,
+    )
+    .unwrap();
+    let served = scorer.compute(&rs, &ds, None).unwrap();
+    for &id in &ids {
+        assert_eq!(
+            served.features()[id].to_bits(),
+            full.values()[id].to_bits(),
+            "served f{id}"
+        );
+        assert_eq!(
+            sub.values()[id].to_bits(),
+            full.values()[id].to_bits(),
+            "research f{id}"
+        );
+    }
+    let expected = scorer
+        .score_features(full.values(), w as u32, h as u32, None)
+        .unwrap();
+    assert_eq!(served.score().to_bits(), expected.to_bits());
+    let pre = scorer.precompute_reference(&rs).unwrap();
+    let mapped = scorer
+        .compute_with_ref_and_attribution(
+            &rs,
+            &pre,
+            &ds,
+            None,
+            &mut zensim::Fused944Session::new(),
+            8,
+        )
+        .unwrap();
+    assert_eq!(mapped.result().score().to_bits(), served.score().to_bits());
+    for &id in &ids {
+        assert_eq!(
+            mapped.result().features()[id].to_bits(),
+            full.values()[id].to_bits(),
+            "mapped f{id}"
+        );
+    }
+    // Max features have no additive density; retain the owner's explicit
+    // coverage report instead of claiming the whole 190-input model maps.
+    assert!(
+        mapped
+            .unsupported_feature_ids()
+            .iter()
+            .all(|id| ids.contains(id))
+    );
+    eprintln!(
+        "subset density omissions: {:?}; refinement omissions: {:?}",
+        mapped.unsupported_feature_ids(),
+        mapped.unsupported_refinement_feature_ids()
+    );
+    assert_eq!(sub.emitted(), &SlotSet::from_slots(ids.iter().copied()));
+    assert!(
+        sub.feature_set_id().is_none(),
+        "family-only shorthand cannot encode this subset"
+    );
+    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.0);
+}
+
+#[test]
+fn sampling_contracts_serve_and_spatialize_through_public_api() {
+    for mode in ["y", "xyb"] {
+        let ids: Vec<usize> = (0..228)
+            .filter(|&i| mode != "y" || !matches!(i,0..=12|26..=38|156..=161|168..=173))
+            .collect();
+        for filter in ["triangle", "mitchell", "robidouxsharp"] {
+            for ratio in ["3/2", "2", "3"] {
+                let tag = format!("v1:{mode}:{filter}:{ratio}");
+                let n = ids.len();
+                let recipe = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+                    "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_|"1".into())},
+                    {"key":"zentrain.sampling","type":"utf8","text":tag}],
+                    "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+                let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+                for (w, h) in [(17, 9), (97, 131), (257, 259)] {
+                    let src: Vec<_> = (0..w * h)
+                        .map(|i| {
+                            [
+                                (i % 211) as u8,
+                                ((i * 7) % 239) as u8,
+                                ((i * 13) % 251) as u8,
+                            ]
+                        })
+                        .collect();
+                    let mut dst = src.clone();
+                    for y in h / 3..(h / 3 + 8).min(h) {
+                        for x in w / 3..(w / 3 + 8).min(w) {
+                            dst[y * w + x] = [255, 0, 128];
+                        }
+                    }
+                    let rs = RgbSlice::new(&src, w, h);
+                    let ds = RgbSlice::new(&dst, w, h);
+                    let direct = scorer.compute(&rs, &ds, None).unwrap();
+                    let cached = scorer
+                        .score_features(direct.features(), w as u32, h as u32, None)
+                        .unwrap();
+                    assert_eq!(direct.score().to_bits(), cached.to_bits(), "{tag}");
+                    let pre = scorer.precompute_reference(&rs).unwrap();
+                    assert!(
+                        zensim::Zensim::new(zensim::ZensimProfile::B)
+                            .compute_with_ref(&pre, &ds)
+                            .is_err()
+                    );
+                    assert!(
+                        scorer
+                            .compute_hdr(&rs, &ds, zensim::feature_v2::HdrEncoding::Linear, None)
+                            .is_err()
+                    );
+
+                    let legacy = zensim::Zensim::new(zensim::ZensimProfile::B);
+                    assert!(
+                        legacy
+                            .compute_with_ref_score_and_attribution(&pre, &ds, &[0.0; 156])
+                            .is_err()
+                    );
+                    assert!(
+                        legacy
+                            .compute_with_ref_score_and_attribution_binned(
+                                &pre,
+                                &ds,
+                                &[0.0; 156],
+                                8
+                            )
+                            .is_err()
+                    );
+                    let mapped = scorer
+                        .compute_with_ref_and_attribution(
+                            &rs,
+                            &pre,
+                            &ds,
+                            None,
+                            &mut zensim::Fused944Session::new(),
+                            8,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        mapped.result().features(),
+                        direct.features(),
+                        "{tag} {w}x{h}"
+                    );
+                    assert_eq!(mapped.result().score(), direct.score(), "{tag}");
+                    assert_eq!(
+                        mapped.result().raw_distance(),
+                        direct.raw_distance(),
+                        "{tag}"
+                    );
+                    assert!(mapped.attribution().density().iter().all(|v| v.is_finite()));
+                    assert!(mapped.refinement_gain(0, 0, w, h).is_finite());
+                    assert!(
+                        mapped.unsupported_refinement_feature_ids().is_empty(),
+                        "{tag}: {:?}",
+                        mapped.unsupported_refinement_feature_ids()
+                    );
+                    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.);
+                    let wrong = zensim::Zensim::new(zensim::ZensimProfile::B)
+                        .precompute_reference(&rs)
+                        .unwrap();
+                    assert!(
+                        scorer
+                            .compute_with_ref_and_attribution(
+                                &rs,
+                                &wrong,
+                                &ds,
+                                None,
+                                &mut zensim::Fused944Session::new(),
+                                8
+                            )
+                            .is_err()
+                    );
+                }
+
+                let bytes_static: &'static [u8] = Box::leak(bytes.clone().into_boxed_slice());
+                BAKE.with(|b| b.set(bytes_static));
+                fn sampling_fixture() -> &'static [u8] {
+                    BAKE.with(|b| b.get())
+                }
+                let params = Box::leak(Box::new(
+                    zensim::profile::ProfileParams::builder()
+                        .weights(zensim::WEIGHTS)
+                        .mlp(sampling_fixture)
+                        .skip_score_mapping(true)
+                        .build(),
+                ));
+                let legacy = Zensim::new(ZensimProfile::Custom {
+                    name: "sampling-refusal",
+                    params,
+                });
+                let r = vec![[100, 120, 140]; 64 * 64];
+                let d = vec![[110, 125, 130]; 64 * 64];
+                assert!(
+                    legacy
+                        .compute(&RgbSlice::new(&r, 64, 64), &RgbSlice::new(&d, 64, 64))
+                        .is_err()
+                );
+                let compatible = [
+                    zenpredict::Model::from_bytes(&bytes).unwrap(),
+                    zenpredict::Model::from_bytes(&bytes).unwrap(),
+                ];
+                assert!(zensim::BakeScorer::ensemble(&compatible, None).is_ok());
+                let other_tag = if ratio == "2" {
+                    format!("v1:{mode}:{filter}:3")
+                } else {
+                    format!("v1:{mode}:{filter}:2")
+                };
+                let other =
+                    zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.sampling", &other_tag)
+                        .unwrap();
+                let incompatible = [
+                    zenpredict::Model::from_bytes(&bytes).unwrap(),
+                    zenpredict::Model::from_bytes(&other).unwrap(),
+                ];
+                assert!(zensim::BakeScorer::ensemble(&incompatible, None).is_err());
+                let bad =
+                    zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.sampling", "unknown")
+                        .unwrap();
+                let bad = zenpredict::Model::from_bytes(&bad).unwrap();
+                assert!(zensim::BakeScorer::new(&bad).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn direct_prime_944_sampling_serves_native_and_cached_spatial_values() {
+    for filter in ["triangle", "mitchell", "robidouxsharp"] {
+        for divisors in ["1,2,4,8", "1,3,5,7", "1,2,3,5"] {
+            let tag = format!("v2:xyb:{filter}:{divisors}");
+            for ids in [
+                (0usize..944).collect::<Vec<_>>(),
+                (0usize..944)
+                    .filter(|&i| i < 228 || (546..720).contains(&i))
+                    .collect(),
+            ] {
+                let n = ids.len();
+                let spec = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+                    "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_|"1".into())},
+                    {"key":"zentrain.sampling","type":"utf8","text":tag}],
+                    "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+                let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).unwrap();
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+                for (w, h) in [(17, 9), (97, 131), (257, 193)] {
+                    let r: Vec<_> = (0..w * h)
+                        .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
+                        .collect();
+                    let mut d = r.clone();
+                    for (i, p) in d.iter_mut().enumerate() {
+                        if i % 19 == 0 {
+                            *p = [255, 0, 128];
+                        }
+                    }
+                    let rs = zensim::RgbSlice::new(&r, w, h);
+                    let ds = zensim::RgbSlice::new(&d, w, h);
+                    let direct = scorer.compute(&rs, &ds, None).unwrap();
+                    let pre = scorer.precompute_reference(&rs).unwrap();
+                    let mapped = scorer
+                        .compute_with_ref_and_attribution(
+                            &rs,
+                            &pre,
+                            &ds,
+                            None,
+                            &mut zensim::Fused944Session::new(),
+                            8,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        mapped.result().features(),
+                        direct.features(),
+                        "{tag} {w}x{h}"
+                    );
+                    assert_eq!(mapped.result().score(), direct.score());
+                    assert!(mapped.attribution().density().iter().all(|v| v.is_finite()));
+                    assert!(mapped.refinement_gain(0, 0, w, h).is_finite());
+                    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.);
+                    assert!(
+                        scorer
+                            .compute_hdr(&rs, &ds, zensim::feature_v2::HdrEncoding::Linear, None)
+                            .is_err()
+                    );
+                }
+            }
+        }
+    }
+}

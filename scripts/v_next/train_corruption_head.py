@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Train + rigorously evaluate the structural-corruption DETECTOR (2nd head).
 
-The head is 372-FEATURE (v1 f0..f371 — a subset of the 720 already extracted at
-deployment, so zero extra cost) so it can compose directly with the breakthrough
+The historical head is 372-FEATURE (v1 f0..f371; these are NOT all computed by
+D's fast extraction plan) so it can compose directly with the breakthrough
 **negrich** severe-honest hard negatives (266k rows, 372-feat, provenance-gapped →
 cannot be re-extracted at 720). Classes:
   - POSITIVES: structural corruptions from build_corruption_corpus.py (many
@@ -32,7 +32,11 @@ L8/max tier"), while masked/IW (`f228..371`) would force `Full`. So a head for D
 is free on `f0..155` AND on `f0..227`, and NOT free past that. The 2026-07-24
 head read all 372 including masked/IW, so it is not a D companion at any price.
 
-Select the slice with `--feat-range 0:156` / `--feat-range 0:228`.
+Select the slice with `--feat-range 0:156` / `--feat-range 0:228` in legacy mode.
+Canonical manifests keep the full 372-column input contract and declare the
+head's separate `head_feature_ids` (September 8: f0..227 for D). Only estimator
+inputs are sliced; Rust parity and pixel scoring still receive the full row.
+These features add no extraction work to D; tree inference has its own cost.
 
 `--broad-honest LABEL:PATH[:IDCOL]` (repeatable) replaces the hard-coded ext720
 list, so the broad negatives can be an era-matched instrument instead of whatever
@@ -121,9 +125,8 @@ def make_classifier(name="logistic", seed=0):
     estimator exactly (`C=0.05, class_weight="balanced", max_iter=3000`), so the
     default path is unchanged.
 
-    Only `logistic` can be BAKED — `emit_znpr` writes one identity layer from
-    `coef_`/`intercept_`, which the non-linear forms do not have. `main()`
-    refuses `--bake-out` for them loudly rather than emitting a wrong head.
+    `logistic` exports through `emit_znpr`; `hgb` exports through `emit_zcth`.
+    The MLP forms have no serving format and cannot be baked.
     """
     if name == "logistic":
         return LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000)
@@ -183,7 +186,8 @@ def _fnv1a64(b):
     return h
 
 
-def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_knots):
+def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_knots,
+                     version=ZCTH_VERSION, formula_revision=None):
     """The canonical shape descriptor, byte-for-byte what
     `corruption_head::schema_descriptor` builds. Covers SHAPE and the read set,
     never the fitted numbers: the hash answers "is this structurally the head I
@@ -191,18 +195,27 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
     a different file, not a corrupted one."""
     import struct as _s
     d = bytearray(ZCTH_MAGIC)
-    d += _s.pack("<H", ZCTH_VERSION)
+    d += _s.pack("<H", version)
     d += _s.pack("<IIII", caller_width, n_declared, n_trees, n_nodes)
     d += _s.pack("<f", clip)
     for i in ids:
         d += _s.pack("<H", int(i))
     d += _s.pack("<I", n_knots)
+    if version == 3:
+        if formula_revision not in (1, 2, 3):
+            raise ValueError("ZCTH v3 requires formula revision 1, 2 or 3")
+        d += _s.pack("<I", formula_revision)
+    elif formula_revision is not None:
+        raise ValueError("explicit formula revision requires ZCTH v3")
     return _fnv1a64(bytes(d))
 
 
 def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
-              deadband_t, provenance):
-    """Emit a gradient-boosted-tree corruption head as a ZCTH v1 file.
+              deadband_t, provenance, *, input_precision="native", formula_revision=None):
+    """Emit legacy Rev1 ZCTH v1/v2, or explicit-revision v3 with f32 inputs.
+
+    Explicit formula_revision opts into v3; it requires freshly matching
+    extraction, not relabeling historical weights. Defaults preserve v1/v2 bytes.
 
     The mirror of `emit_znpr`, and the reason `can_bake` is no longer
     `name == "logistic"`. Every field is copied out of the fitted estimator;
@@ -223,6 +236,14 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     """
     import struct as _s
     import numpy as _np
+
+    if input_precision not in ("native", "f32"):
+        raise SystemExit(f"unsupported ZCTH input precision: {input_precision}")
+    version = 2 if input_precision == "f32" else ZCTH_VERSION
+    if formula_revision is not None:
+        if formula_revision not in (1, 2, 3) or input_precision != "f32":
+            raise ValueError("ZCTH v3 requires f32 inputs and formula revision 1, 2 or 3")
+        version = 3
 
     if getattr(clf, "n_trees_per_iteration_", 1) != 1:
         raise SystemExit(f"ZCTH is binary-only; this estimator emits "
@@ -281,10 +302,10 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
 
     flags = ZCTH_FLAG_SCALER | (ZCTH_FLAG_ISOTONIC if len(iso_x) else 0)
     schema = zcth_schema_hash(caller_width, len(ids), len(preds), n_nodes,
-                              float(clip), ids, len(iso_x))
+                              float(clip), ids, len(iso_x), version=version, formula_revision=formula_revision)
     h = bytearray(ZCTH_HEADER_LEN)
     h[0:4] = ZCTH_MAGIC
-    h[4:6] = _s.pack("<H", ZCTH_VERSION)
+    h[4:6] = _s.pack("<H", version)
     h[6:8] = _s.pack("<H", flags)
     h[8:16] = _s.pack("<Q", schema)
     h[16:20] = _s.pack("<I", caller_width)
@@ -294,13 +315,15 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     h[32:40] = _s.pack("<d", baseline)
     h[40:48] = _s.pack("<d", float(deadband_t))
     h[48:52] = _s.pack("<f", float(clip))
+    if version == 3:
+        h[52:56] = _s.pack("<I", formula_revision)
     for k, (off, ln) in enumerate(secs):
         h[56 + k * 8: 64 + k * 8] = _s.pack("<II", off, ln)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(bytes(h) + bytes(body))
-    print(f"BAKED (ZCTH v1) -> {out_path} ({os.path.getsize(out_path)} B; "
+    print(f"BAKED (ZCTH v{version}) -> {out_path} ({os.path.getsize(out_path)} B; "
           f"caller width {caller_width}, reads {len(ids)}; {len(preds)} trees / "
           f"{n_nodes} nodes; schema {schema:#018x}; deadband P>{deadband_t}, "
           f"i.e. score < {100.0 * (1.0 - deadband_t):g})")
@@ -436,7 +459,413 @@ def emit_znpr(out_path, bake_bin, caller_width, feat_idx, mean, scale, coef,
     return out_path
 
 
+
+def fit_canonical_hgb(Z, y, fit, calibrate, weights, seed, hyperparameters):
+    """Fit one source-weighted estimator and its separate calibration leg."""
+    from sklearn.isotonic import IsotonicRegression
+    clf = make_classifier("hgb", seed).set_params(**hyperparameters)
+    sw = weights[fit] / weights[fit].mean()
+    clf.fit(Z[fit], y[fit], sample_weight=sw)
+    iso = IsotonicRegression(out_of_bounds="clip").fit(
+        clf.predict_proba(Z[calibrate])[:,1], y[calibrate], sample_weight=weights[calibrate])
+    return clf, iso
+
+
+def _strict_scoring_command(manifest, role, out_dir, head, input_contract):
+    """The trainer's final public-score audit, with the same admitted input era."""
+    native = input_contract == "sdr-native-clip-v1"
+    command = [manifest["extractor"]["path"], "--corpus", "pairs-tsv" if native else "pairs",
+               "--path", manifest["pairs"][role]["path"], "--out", str(out_dir / (role + ".csv")),
+               "--audit-jsonl", str(out_dir / (role + ".jsonl")),
+               "--audit-bake", manifest["base_bake"]["path"], "--audit-corruption-head", str(head)]
+    if native:
+        command += ["--input-contract", input_contract]
+    return command
+
+
+def strict_train_main(argv):
+    """One fit on an explicitly admitted, severity-reviewed TRAIN-only packet."""
+    from collections import Counter
+    from pathlib import Path
+    import pandas as pd
+    from corruption_gate_eval import integrity_summary, audit_input_keys, bind_native_audit
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--strict-train-manifest", type=Path, required=True)
+    ap.add_argument("--out-dir", type=Path, required=True)
+    args = ap.parse_args(argv)
+    m = json.loads(args.strict_train_manifest.read_text())
+    def require(ok, why):
+        if not ok: raise ValueError(why)
+    require(m["schema"] in ("integrity-head-train-v1", "integrity-head-train-v2", "integrity-head-train-v3"), "strict training schema")
+    native_input = m["schema"] == "integrity-head-train-v3"
+    input_contract = "sdr-native-clip-v1" if native_input else "legacy-rgb8"
+    require(m.get("input_contract", "legacy-rgb8") == input_contract, "explicit matching input contract required")
+    if native_input:
+        require(m.get("root_form") == "sqrt", "native Rev3 root contract required")
+    rev3 = m["schema"] != "integrity-head-train-v1"
+    revision = 3 if rev3 else 1
+    require(m["formula_revision"] == revision and m["head_feature_ids"] == list(range(228)), "registered D228 arithmetic")
+    require(m["seed"] == 4101 and m["deadband"] == 0.9, "registered seed/threshold")
+    require(not args.out_dir.exists(), "fresh fit output required")
+    # Bind all roles BEFORE opening feature payloads. No test/eval path is legal.
+    admission_path = Path(m["admission"]["path"])
+    require(_sha256(admission_path) == m["admission"]["sha256"], "changed admission")
+    admission = json.loads(admission_path.read_text())
+    require(admission["schema"] == ("integrity-train-diagnostic-v2" if native_input else "integrity-train-diagnostic-v1" if rev3 else "integrity-train-admission-v1"), "train admission schema")
+    require(admission.get("input_contract", "legacy-rgb8") == input_contract, "admission input era mismatch")
+    roles = admission["origins"]
+    expected_roles = {"fit", "development", "calibration"} if rev3 else {"fit", "calibrate"}
+    require(set(roles) == expected_roles, "train-only source roles")
+    require(sum(len(v) for v in roles.values()) == len(set().union(*map(set, roles.values()))), "overlapping source roles")
+    records = admission["records"]
+    require(not set().union(*map(set, roles.values())) & {"8462", "9066"}, "retired test origins forbidden")
+    families = {}
+    for row in records:
+        require(families.setdefault(row["source_family"], row["fit_role"]) == row["fit_role"], "source family crosses train roles")
+    require(len({r["index"] for r in records}) == len(records), "unique row keys")
+    for row in records:
+        require(row["role"] == "train" and row["fit_role"] in roles and row["origin"] in roles[row["fit_role"]], "forbidden or mismatched role")
+        require(row["disposition"] in ("valid", "catastrophic_proxy"), "unreviewed binary disposition")
+    require(set(m["features"]) == set(roles), "feature roles")
+    records_by_key = {r["index"]: r for r in records}
+    role_keys = {role: {r["index"] for r in records if r["fit_role"] == role} for role in roles}
+    for spec in [m["base_bake"], m["extractor"], m["parity_binary"]]:
+        require(_sha256(spec["path"]) == spec["sha256"], "changed pinned tool/input")
+    # Validate audit roles and input interpretation before feature payloads.
+    require(set(m["audit"]) == set(roles), "audit roles")
+    native_model_inputs = None
+    native = {}
+    for role, spec in m["audit"].items():
+        require(role in roles and _sha256(spec["path"]) == spec["sha256"], "changed native audit")
+        for line in Path(spec["path"]).read_text().splitlines():
+            a = json.loads(line); key = int(a["human_score"])
+            require(key == a["human_score"] and key not in native, "duplicate/noninteger audit key")
+            require(key in role_keys[role], "audit role mismatch")
+            require((a.get("schema") == "canonical-feature-audit-v2") == native_input, "audit input era mismatch")
+            if native_input:
+                row = records_by_key[key]
+                input_keys = bind_native_audit(a, row)
+                require(a["reference"] == row["reference"] and a["distorted"] == row["distorted"]
+                        and a["reference_file_sha256"] == row["reference_sha256"]
+                        and a["distorted_file_sha256"] == row["expected_distorted_file_sha256"], "native source binding mismatch")
+                require(a["pixels_identical"] == (input_keys[0] == input_keys[1]), "native identity flag mismatch")
+                require(a.get("model_inputs") and a["model_inputs"][0] == [m["base_bake"]["path"], m["base_bake"]["sha256"]], "native audit base identity mismatch")
+                if native_model_inputs is None: native_model_inputs = a["model_inputs"]
+                require(a["model_inputs"] == native_model_inputs, "mixed native audit models")
+            native[key] = a
+    require(set(native) == {r["index"] for r in records}, "native audit coverage")
+    if native_input:
+        require(set(m["pairs"]) == set(roles), "native pairs roles")
+        import csv
+        for role, spec in m["pairs"].items():
+            require(_sha256(spec["path"]) == spec["sha256"], "changed native scoring paths")
+            with open(spec["path"], newline="") as f:
+                pairs = list(csv.DictReader(f, delimiter="\t"))
+            expected = {r["index"]: r for r in records if r["fit_role"] == role}
+            require(len(pairs) == len(expected), "native scoring pair coverage")
+            seen_pairs = set()
+            for pair in pairs:
+                number = float(pair["human_score"]); key = int(number)
+                require(number == key and key in expected and key not in seen_pairs, "native scoring pair keys")
+                seen_pairs.add(key); row = expected[key]
+                require(pair["ref_path"] == row["reference"] and pair["dist_path"] == row["distorted"], "native scoring pair paths")
+    frames = []
+    for role, spec in m["features"].items():
+        require(_sha256(spec["path"]) == spec["sha256"], "changed feature payload")
+        f = pd.read_csv(spec["path"], float_precision="round_trip" if native_input else None).set_index("human_score")
+        require(f.index.is_unique and set(f.index) == {r["index"] for r in records if r["fit_role"] == role}, "feature row coverage")
+        frames.append(f)
+    frame = pd.concat(frames)
+    X = np.stack([frame.loc[r["index"], [f"f{i}" for i in range(372)]].to_numpy(dtype=np.float32).astype(np.float64) for r in records])
+    require(np.isfinite(X).all(), "nonfinite train features")
+    if native_input:
+        import hashlib
+        for row, values in zip(records, X):
+            digest = hashlib.sha256(values.astype("<f4").tobytes()).hexdigest()
+            require(digest == native[row["index"]]["canonical_features_f32_le_sha256"], "canonical feature payload mismatch")
+    y = np.array([r["disposition"] == "catastrophic_proxy" for r in records], dtype=np.int64)
+    fit = np.array([r["fit_role"] == "fit" for r in records])
+    cal = np.array([r["fit_role"] == ("calibration" if rev3 else "calibrate") for r in records])
+    keep=[];seen={}
+    for i,row in enumerate(records):
+        a=native[row["index"]]
+        require(a["distorted_file_sha256"]==row["expected_distorted_file_sha256"] and a["distorted_pixels_sha256"]==row["expected_distorted_pixels_sha256"], "native input era mismatch")
+        key=(row["origin"], *audit_input_keys(a))
+        if key in seen:
+            require(y[seen[key]]==y[i] and np.array_equal(X[seen[key]],X[i]), "duplicate conflict")
+        else:seen[key]=i;keep.append(i)
+    X=X[keep];y=y[keep];fit=fit[keep];cal=cal[keep];fit_records=[records[i] for i in keep]
+    origin_counts = Counter(r["origin"] for r in fit_records)
+    weights=np.array([1/origin_counts[r["origin"]] for r in fit_records])
+    require(set(y[fit])=={0,1} and set(y[cal])=={0,1}, "both classes in each train role")
+    scaler=StandardScaler().fit(X[fit,:228], sample_weight=weights[fit])
+    Z=np.clip(scaler.transform(X[:,:228]),-8,8);fw=weights.copy();fw[fit & (y==0)]*=4
+    clf,iso=fit_canonical_hgb(Z,y,fit,cal,fw,4101,dict(early_stopping=False,max_iter=100,max_leaf_nodes=31))
+    args.out_dir.mkdir(parents=True)
+    head=args.out_dir/"head.zcth"
+    provenance=dict(manifest_sha256=_sha256(args.strict_train_manifest),trainer_sha256=_sha256(__file__),seed=4101,formula_revision=revision,input_precision="f32",input_contract=input_contract,fit_rows=int(fit.sum()),calibration_rows=int(cal.sum()),development_rows=int((~fit & ~cal).sum()),model_qualified=False)
+    if native_input:
+        provenance["root_form"] = "sqrt"
+    export_options = {"formula_revision": 3} if rev3 else {}
+    emit_zcth(str(head),372,list(range(228)),scaler.mean_,scaler.scale_,8.0,clf,iso,0.9,provenance,input_precision="f32",**export_options)
+    np.savez_compressed(args.out_dir/"parity.npz",train_X=X[:,:228],train_raw=clf.decision_function(Z),train_p=iso.predict(clf.predict_proba(Z)[:,1]))
+    subprocess.run([m["parity_binary"]["path"],"--head",str(head),"--parity",str(args.out_dir/"parity.npz"),"--set","train"],check=True)
+    audits={}
+    for role in roles:
+        pairs=m["pairs"][role];require(_sha256(pairs["path"])==pairs["sha256"],"changed scoring paths")
+        command = _strict_scoring_command(m, role, args.out_dir, head, input_contract)
+        prepared_env = {"ZENSIM_AUDIT_PREPARED_STEERING": "1"} if rev3 and role == "development" else {}
+        with (args.out_dir/(role+".log")).open("w") as log:
+            subprocess.run(command,env=dict(os.environ,ZENSIM_FORMULA_REV=str(revision),ZENSIM_ROOT_FORM="sqrt" if native_input else "libm",RAYON_NUM_THREADS="8",**prepared_env),stdout=log,stderr=subprocess.STDOUT,check=True)
+        for line in (args.out_dir/(role+".jsonl")).read_text().splitlines():
+            a=json.loads(line);key=int(a["human_score"]);require(key not in audits,"duplicate score audit");audits[key]=a
+    report=integrity_summary(records,audits);c=report["by_role"]["calibration" if rev3 else "calibrate"]
+    gates=dict(zero_native_activation=c["native_activation"]["n"]>0 and c["native_activation"]["count"]==0,
+               honest_activation_le_1pct=c["honest_activation"]["rate"] is not None and c["honest_activation"]["rate"]<=.01,
+               catastrophic_recall_ge_95pct=c["catastrophic_detection"]["rate"] is not None and c["catastrophic_detection"]["rate"]>=.95,
+               real_bug_recall_ge_90pct=c["real_bug_detection"]["rate"] is not None and c["real_bug_detection"]["rate"]>=.9)
+    if rev3:
+        # Development stays out of both the estimator and probability calibration.
+        # Score all registered gates using the same deduplication/assessment owner.
+        gates = {}
+        for role in ("calibration", "development"):
+            subset = [r for r in records if r["fit_role"] == role and not audits[r["index"]]["pixels_identical"]]
+            scoped = integrity_summary(subset, {r["index"]: audits[r["index"]] for r in subset})
+            values = scoped["by_role"][role]
+            for name, field, limit, higher in (
+                    ("honest_activation_le_1pct", "honest_activation", .01, False),
+                    ("catastrophic_recall_ge_95pct", "catastrophic_detection", .95, True),
+                    ("real_bug_recall_ge_90pct", "real_bug_detection", .90, True)):
+                rate = values[field]["rate"]
+                gates[role + "_" + name] = rate is not None and (rate >= limit if higher else rate <= limit)
+            swaps = [r for r in scoped["rows"] if r["family"] == "channel" and r["disposition"] == "catastrophic_proxy"]
+            gates[role + "_channel_detection_100pct"] = bool(swaps) and all(r["active"] for r in swaps)
+        spatial = [r for r in report["rows"] if r["kind"] == "honest_spatial"]
+        gates["zero_native_spatial_activation"] = bool(spatial) and not any(r["active"] for r in spatial)
+        gates["native_prepared_steering"] = bool(spatial) and all(
+            audits[r["index"]].get("prepared_steering", {}).get("status") == "ACCEPTED"
+            and audits[r["index"]]["prepared_steering"].get("map_queries", 0) > 0 for r in spatial)
+        blockers = admission.get("qualification_blockers", [])
+        require(isinstance(blockers, list) and all(isinstance(v, str) for v in blockers), "invalid qualification blockers")
+        report["qualification_blockers"] = blockers
+        gates["registered_coverage_complete"] = not blockers
+    report.update(schema="integrity-training-screen-v1",gates=gates,advance_to_eval=all(gates.values()),model_qualified=False,head_sha256=_sha256(head),provenance=provenance)
+    (args.out_dir/"REPORT.json").write_text(json.dumps(report,indent=2,allow_nan=False)+"\n")
+    print(json.dumps(dict(gates=gates,calibration=c,advance_to_eval=all(gates.values()))),flush=True)
+
+
+def canonical_main(argv):
+    """Source-owned canonical fit; report the exact exported Rust composition."""
+    from pathlib import Path
+    import pandas as pd
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--canonical-manifest", required=True, type=Path)
+    ap.add_argument("--out-dir", required=True, type=Path)
+    ap.add_argument("--prepare-only", action="store_true")
+    ap.add_argument("--training-screen-only", action="store_true",
+                    help="score only fit/calibration origins; select on calibration, never validation")
+    a = ap.parse_args(argv)
+    def require(ok, message):
+        if not ok:
+            raise ValueError(message)
+    def pinned(spec):
+        require(set(spec) == {"path", "sha256"}, "invalid pinned input")
+        require(_sha256(spec["path"]) == spec["sha256"], "changed input: " + spec["path"])
+        return Path(spec["path"])
+    m = json.loads(a.canonical_manifest.read_text())
+    require(m["schema"] == "canonical-corruption-fit-v1", "canonical manifest schema")
+    require(m["feature_ids"] == list(range(372)) and m["formula_revision"] == 1
+            and m["root_form"] == "libm", "canonical feature contract")
+    # Keep the original all-372 experiment reproducible. The D companion is
+    # an explicit new declaration, never inferred from the source table width.
+    head_ids = m.get("head_feature_ids", m["feature_ids"])
+    require(head_ids in (list(range(228)), list(range(372)))
+            and all(type(i) is int for i in head_ids), "unregistered head feature regime")
+    negative_fit_weight = m.get("negative_fit_weight", 1)
+    require(type(negative_fit_weight) is int and negative_fit_weight in (1, 4, 16, 64),
+            "unregistered honest fit weight")
+    require(negative_fit_weight == 1 or head_ids == list(range(228)), "honest-weight study requires D regime")
+    require(not a.out_dir.exists(), "canonical output directory must be fresh")
+    ip = pinned(m["serving_inputs"]); audit_path = pinned(m["serving_audit"])
+    base = pinned(m["base_bake"]); extractor = pinned(m["extractor"])
+    parity_bin = pinned(m["parity_binary"])
+    inputs = json.loads(ip.read_text())
+    require(inputs["schema"] == "canonical-corruption-serving-inputs-v1", "serving input schema")
+    for path, digest in inputs["files_sha256"].items():
+        require(_sha256(path) == digest, "changed feature/source input: " + path)
+    require(m["pairs_tsv"] in inputs["files_sha256"], "unbound scoring pairs")
+    roles = m["origins"]
+    require(set(roles) == {"fit", "calibrate", "evaluate"}, "explicit three-role split required")
+    owner = {}
+    for role, origins in roles.items():
+        require(origins and len(origins) == len(set(origins)), "empty/duplicate origins")
+        for origin in origins:
+            require(origin not in owner, "origin appears in multiple roles")
+            owner[origin] = role
+    audit = {}
+    with audit_path.open() as f:
+        for line in f:
+            r = json.loads(line); key = r["human_score"]
+            require(key not in audit and key == int(key), "audit key")
+            audit[int(key)] = r
+    require(set(audit) == {r["index"] for r in inputs["records"]}, "audit coverage")
+    cols = [f"f{i}" for i in range(372)]
+    tables = {p: pd.read_parquet(p).set_index("row_id") for p in {r["source_table"] for r in inputs["records"]}}
+    require(all(t.index.is_unique for t in tables.values()), "ambiguous feature table keys")
+    rows, vectors, unique, families = [], [], {}, {}
+    for meta in inputs["records"]:
+        require(meta["label"] in (0, 1), "nonbinary corruption label")
+        origin = meta["origin"]; require(origin in owner, "undeclared origin")
+        role = owner[origin]
+        require((meta["role"] == "train") == (role != "evaluate"), "canonical corpus role mismatch")
+        family = meta["source_family"]
+        require(families.setdefault(family, role) == role, "source family crosses roles")
+        v = audit[meta["index"]]
+        require(v["reference"] == meta["reference"] and v["distorted"] == meta["distorted"], "audit path join")
+        require(not meta["label"] or not v["pixels_identical"], "positive identity label")
+        key = (origin, v["width"], v["height"], v["reference_pixels_sha256"], v["distorted_pixels_sha256"])
+        vector = tables[meta["source_table"]].loc[meta["source_row_id"], cols].to_numpy(dtype=np.float32).astype(np.float64)
+        if key in unique:
+            require(rows[unique[key]]["label"] == meta["label"], "duplicate label conflict")
+            require(np.array_equal(vectors[unique[key]], vector), "duplicate pixels have different features")
+            rows[unique[key]]["catalog_families"] = sorted(set(rows[unique[key]]["catalog_families"] + [meta["family"]]))
+            continue
+        unique[key] = len(rows)
+        row = dict(meta, fit_role=role, pixels_identical=v["pixels_identical"],
+                   width=v["width"], height=v["height"],
+                   reference_pixels_sha256=v["reference_pixels_sha256"],
+                   distorted_pixels_sha256=v["distorted_pixels_sha256"], catalog_families=[meta["family"]])
+        rows.append(row)
+        vectors.append(vector)
+    require(set(owner) == {r["origin"] for r in rows}, "declared origin coverage")
+    X = np.stack(vectors); y = np.array([r["label"] for r in rows], dtype=np.int64)
+    require(np.isfinite(X).all() and set(y) == {0, 1}, "finite binary training data")
+    masks = {role: np.array([r["fit_role"] == role for r in rows]) for role in roles}
+    for role, mask in masks.items():
+        require(set(y[mask]) == {0, 1}, "both classes required in " + role)
+    admission = None
+    if not a.prepare_only:
+        admission = json.loads(pinned(m["admission"]).read_text())
+        require(admission["schema"] == "canonical-corruption-content-admission-v1"
+                and admission["complete"] is True and not admission["unresolved"]
+                and set(admission["origins"]) == set(roles["fit"] + roles["calibrate"]), "content admission incomplete")
+        require(admission["coverage"] == {"cid22":49,"aic3":10,"aic4":5,"sdr25":5,
+                    "csiq":30,"live":29,"upiq-sdr":54,"upiq-hdr":30}
+                and bool(admission["files_sha256"]), "protected reference coverage incomplete")
+        for path, digest in admission["files_sha256"].items():
+            require(_sha256(path) == digest, "changed admission evidence: " + path)
+    a.out_dir.mkdir(parents=True)
+    np.savez_compressed(a.out_dir/"prepared.npz", X=X, y=y, **masks)
+    (a.out_dir/"rows.json").write_text(json.dumps(rows, indent=2)+"\n")
+    views = pd.DataFrame(X.astype(np.float32), columns=cols)
+    for name in ["origin", "width", "height", "reference_pixels_sha256", "distorted_pixels_sha256"]:
+        views[name] = [r[name] for r in rows]
+    views["human_score"] = y.astype(np.float32)
+    views["row_id"] = [r["index"] for r in rows]
+    contracts = {}
+    for role, mask in masks.items():
+        filename = role + ".parquet"
+        views[mask].to_parquet(a.out_dir/filename, index=False)
+        contracts[filename] = dict(duplicate_key_columns=["origin","width","height","reference_pixels_sha256","distorted_pixels_sha256"])
+    (a.out_dir/"contracts.json").write_text(json.dumps(contracts, indent=2)+"\n")
+    subprocess.run([sys.executable,str(Path(__file__).with_name("validate_parquet.py")),
+                    *[str(a.out_dir/(r+".parquet")) for r in masks],"--kind","train",
+                    "--contracts",str(a.out_dir/"contracts.json")],check=True)
+    preparation = dict(schema="canonical-corruption-preparation-v1", raw_rows=len(inputs["records"]),
+                       unique_rows=len(rows), removed_duplicates=len(inputs["records"])-len(rows),
+                       roles={k:dict(rows=int(v.sum()), positives=int(y[v].sum()), origins=roles[k]) for k,v in masks.items()},
+                       head_feature_ids=head_ids,
+                       manifest_sha256=_sha256(a.canonical_manifest), admitted=admission is not None, model_qualified=False)
+    (a.out_dir/"PREPARATION.json").write_text(json.dumps(preparation, indent=2)+"\n")
+    if a.prepare_only:
+        print(json.dumps(preparation, indent=2)); return
+    # Fixed source weights: each origin has equal total mass within its role.
+    weights = np.empty(len(rows))
+    for origin in owner:
+        idx = np.array([r["origin"] == origin for r in rows])
+        weights[idx] = 1.0 / idx.sum()
+    fit, cal = masks["fit"], masks["calibrate"]
+    head_X = X[:, head_ids]
+    scaler = StandardScaler().fit(head_X[fit], sample_weight=weights[fit])
+    Z = np.clip(scaler.transform(head_X), -8, 8)
+    fit_weights = weights.copy()
+    fit_weights[fit & (y == 0)] *= negative_fit_weight
+    require(m["hyperparameters"] == {"early_stopping":False,"max_iter":100,"max_leaf_nodes":31}, "unregistered HGB settings")
+    input_precision = m.get("input_precision", "native")
+    require(input_precision in ("native", "f32"), "unregistered input precision")
+    allowed_seeds = [[4101,4103,4107]]
+    if input_precision == "f32":
+        allowed_seeds.append([4101])
+    require(m["deadband"] == 0.9 and m["seeds"] in allowed_seeds, "unregistered threshold/seeds")
+    scoring_inputs, scoring_pairs = ip, Path(m["pairs_tsv"])
+    parity_rows = np.ones(len(rows), dtype=bool)
+    if a.training_screen_only:
+        import csv
+        # Keep original global row keys and complete train coverage. This is
+        # a declared projection of pinned inputs, not a new random split.
+        subset = [r for r in inputs["records"] if owner[r["origin"]] != "evaluate"]
+        scoring_pairs = a.out_dir/"training-pairs.tsv"
+        with scoring_pairs.open("w", newline="") as f:
+            writer = csv.writer(f, delimiter="\t", lineterminator="\n")
+            writer.writerow(["ref_path", "dist_path", "human_score"])
+            writer.writerows((r["reference"], r["distorted"], r["index"]) for r in subset)
+        scoring_inputs = a.out_dir/"TRAINING_INPUTS.json"
+        projected = dict(inputs, records=subset,
+                         files_sha256=dict(inputs["files_sha256"], **{str(scoring_pairs):_sha256(scoring_pairs)}))
+        scoring_inputs.write_text(json.dumps(projected, indent=2)+"\n")
+        parity_rows = ~masks["evaluate"]
+    for seed in m["seeds"]:
+        run = a.out_dir/f"seed-{seed}"; run.mkdir()
+        # Rescale source weights to unit mean so HGB's leaf regularization has
+        # its ordinary sample-mass scale; class balancing stays in the factory.
+        clf, iso = fit_canonical_hgb(Z, y, fit, cal, fit_weights, seed, m["hyperparameters"])
+        head = run/"head.zcth"
+        provenance = dict(manifest_sha256=_sha256(a.canonical_manifest), seed=seed,
+                          sklearn=_sklearn_version(), trainer_sha256=_sha256(__file__),
+                          feature_ids=head_ids, formula_revision=1, root_form="libm",
+                          negative_fit_weight=negative_fit_weight, input_precision=input_precision)
+        emit_zcth(str(head),372,head_ids,scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance,
+                  input_precision=input_precision)
+        # Export and evaluate THIS fitted estimator, never a CV ensemble.
+        prob = iso.predict(clf.predict_proba(Z[parity_rows])[:,1])
+        # The parity owner's matrix is in declared-ID order; Rust scatters
+        # it into a full caller-width row before testing the real gather.
+        np.savez_compressed(run/"parity.npz", test_X=np.ascontiguousarray(head_X[parity_rows]),
+                            test_raw=clf.decision_function(Z[parity_rows]), test_p=prob)
+        with (run/"parity.log").open("w") as log:
+            subprocess.run([str(parity_bin),"--head",str(head),"--parity",str(run/"parity.npz"),"--set","test"],
+                           stdout=log,stderr=subprocess.STDOUT,check=True)
+        command = [str(extractor),"--corpus","pairs","--path",str(scoring_pairs),"--out",str(run/"features.csv"),
+                   "--audit-jsonl",str(run/"audit.jsonl"),"--audit-bake",str(base),"--audit-corruption-head",str(head)]
+        env = dict(os.environ, ZENSIM_FORMULA_REV="1", ZENSIM_ROOT_FORM="libm", RAYON_NUM_THREADS="8")
+        with (run/"surface.log").open("w") as log:
+            subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        subprocess.run([sys.executable,str(Path(__file__).with_name("corruption_gate_eval.py")),"--audit-jsonl",str(run/"audit.jsonl"),
+                        "--inputs-json",str(scoring_inputs),"--out-json",str(run/"report.json"),
+                        "--model-context","canonical-fit","--fit-manifest",str(a.canonical_manifest)],check=True)
+        report = json.loads((run/"report.json").read_text())
+        summary = report["fit_roles"]["calibrate"] if a.training_screen_only else report["splits"]["validate"]
+        require(set(summary["by_codec"]) == {"jxl", "avif"}, "native codec screen coverage")
+        gates = dict(
+            zero_native_codec_activation=all(v["head_fp"]["count"] == 0 for v in summary["by_codec"].values()),
+            honest_activation_le_1pct=summary["head_fp"]["rate"] <= .01,
+            zero_native_codec_lowering=all(v["honest_score_lowered"]["count"] == 0 for v in summary["by_codec"].values()),
+            honest_lowering_le_1pct=summary["honest_score_lowered"]["rate"] <= .01,
+            detection_ge_95pct=summary["detection"]["rate"] >= .95,
+            real_bug_detection_ge_90pct=summary["by_family"]["real_bug"]["detection"]["rate"] >= .90,
+            below_q20_ge_99pct=summary["composed_below_q20"]["rate"] >= .99)
+        scope = "training calibration screen only" if a.training_screen_only else "registered companion development screen only"
+        (run/"SCREEN.json").write_text(json.dumps(dict(scope=scope,
+                    gates=gates, selection_pass=all(gates.values()), model_qualified=False),indent=2)+"\n")
+        (run/"COMPLETE.json").write_text(json.dumps(dict(head_sha256=_sha256(head), model_qualified=False,
+                    scope=scope, source="exact exported single fit through Rust pixel/cache audit", command=command),indent=2)+"\n")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--strict-train-manifest":
+        return strict_train_main(sys.argv[1:])
+    if len(sys.argv) > 1 and sys.argv[1] == "--canonical-manifest":
+        return canonical_main(sys.argv[1:])
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--negrich", default=NEGRICH)

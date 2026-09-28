@@ -64,7 +64,9 @@ fn main() {
             (r.score(), 0usize)
         }
         "ext372" => {
-            let r = z.compute_extended_features(&s, &d).expect("compute_extended_features");
+            let r = z
+                .compute_extended_features(&s, &d)
+                .expect("compute_extended_features");
             let sc = r.score();
             let f = r.into_features();
             (sc, f.len())

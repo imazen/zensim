@@ -1,0 +1,1549 @@
+{
+  "scope": "TRAIN_runtime_descriptive_not_quiet_qualified",
+  "qualified": false,
+  "all_completed": true,
+  "quiet_qualified_runs": 0,
+  "observations": 3150,
+  "runs": [
+    {
+      "name": "native-scalar",
+      "raw_observations": 1350,
+      "gate_waits": 15,
+      "exported_unreliable": false,
+      "clean_round_status_present": false,
+      "quiet_qualification": false,
+      "driver_acceptance_superseded": true,
+      "reason": "noisy checks recorded and per-round status absent; old engine also omits strict verdict propagation"
+    },
+    {
+      "name": "native-prepared",
+      "raw_observations": 900,
+      "gate_waits": 15,
+      "exported_unreliable": false,
+      "clean_round_status_present": false,
+      "quiet_qualification": false,
+      "driver_acceptance_superseded": true,
+      "reason": "noisy checks recorded and per-round status absent; old engine also omits strict verdict propagation"
+    },
+    {
+      "name": "synthetic-scalar",
+      "raw_observations": 540,
+      "gate_waits": 5,
+      "exported_unreliable": false,
+      "clean_round_status_present": false,
+      "quiet_qualification": false,
+      "driver_acceptance_superseded": true,
+      "reason": "noisy checks recorded and per-round status absent; old engine also omits strict verdict propagation"
+    },
+    {
+      "name": "synthetic-prepared",
+      "raw_observations": 360,
+      "gate_waits": 1,
+      "exported_unreliable": false,
+      "clean_round_status_present": false,
+      "quiet_qualification": false,
+      "driver_acceptance_superseded": true,
+      "reason": "noisy checks recorded and per-round status absent; old engine also omits strict verdict propagation"
+    }
+  ],
+  "latencies": [
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 9.746627,
+      "p95_ms": 10.525329000000001,
+      "max_ms": 10.65634,
+      "min_ms": 9.58673
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 37.341248,
+      "p95_ms": 38.1527,
+      "max_ms": 38.510904,
+      "min_ms": 36.957879
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.862163,
+      "p95_ms": 10.728830499999999,
+      "max_ms": 10.884282,
+      "min_ms": 9.665861
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.775337,
+      "p95_ms": 10.405828,
+      "max_ms": 10.60177,
+      "min_ms": 9.682011
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 4.694489,
+      "p95_ms": 5.545282,
+      "max_ms": 5.604362,
+      "min_ms": 4.550843
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.0933855,
+      "p95_ms": 10.018494,
+      "max_ms": 10.135545,
+      "min_ms": 9.001145
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.8537325,
+      "p95_ms": 10.68816405,
+      "max_ms": 10.727751,
+      "min_ms": 9.663111
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.783062000000001,
+      "p95_ms": 10.8549805,
+      "max_ms": 10.925343,
+      "min_ms": 9.670561
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row405",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 25.96966,
+      "p95_ms": 26.7662325,
+      "max_ms": 26.786573,
+      "min_ms": 25.200348
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 15.4385955,
+      "p95_ms": 16.1135475,
+      "max_ms": 16.258083,
+      "min_ms": 14.8281
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 53.5055955,
+      "p95_ms": 54.866488499999996,
+      "max_ms": 54.901899,
+      "min_ms": 52.413555
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 15.516681,
+      "p95_ms": 16.39008655,
+      "max_ms": 16.575086,
+      "min_ms": 14.918631
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 15.325299000000001,
+      "p95_ms": 16.0251025,
+      "max_ms": 16.362484,
+      "min_ms": 14.89774
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 6.938505,
+      "p95_ms": 7.503482,
+      "max_ms": 7.589871,
+      "min_ms": 6.321209
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 13.83015,
+      "p95_ms": 14.861419099999999,
+      "max_ms": 15.057752,
+      "min_ms": 13.594118
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 15.480781,
+      "p95_ms": 16.309191000000002,
+      "max_ms": 16.396885,
+      "min_ms": 14.83903
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 15.208368499999999,
+      "p95_ms": 16.4537291,
+      "max_ms": 16.570766,
+      "min_ms": 14.930141
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row2428",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 38.328412,
+      "p95_ms": 38.93510655,
+      "max_ms": 39.21861,
+      "min_ms": 37.860228
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 18.202722,
+      "p95_ms": 18.8909355,
+      "max_ms": 18.951819,
+      "min_ms": 17.927599
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 63.858858,
+      "p95_ms": 64.38314799999999,
+      "max_ms": 64.60057,
+      "min_ms": 63.373799
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 18.3000625,
+      "p95_ms": 18.68887105,
+      "max_ms": 18.863998,
+      "min_ms": 18.02323
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 18.255057,
+      "p95_ms": 18.8074435,
+      "max_ms": 18.827038,
+      "min_ms": 17.968069
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 8.335628,
+      "p95_ms": 8.676353,
+      "max_ms": 8.721142,
+      "min_ms": 8.169777
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 16.845964,
+      "p95_ms": 17.363286,
+      "max_ms": 17.480495,
+      "min_ms": 16.585306
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 18.252492,
+      "p95_ms": 18.880233,
+      "max_ms": 19.295082,
+      "min_ms": 17.98101
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 18.277222000000002,
+      "p95_ms": 18.8900155,
+      "max_ms": 18.997959,
+      "min_ms": 18.026
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row4589",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 55.4189535,
+      "p95_ms": 56.03237405,
+      "max_ms": 56.157781,
+      "min_ms": 54.936299
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 1.620805,
+      "p95_ms": 2.033649,
+      "max_ms": 2.17513,
+      "min_ms": 1.561124
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 3.6785845000000004,
+      "p95_ms": 4.439551,
+      "max_ms": 4.461212,
+      "min_ms": 3.451252
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 1.7513610000000002,
+      "p95_ms": 2.29736,
+      "max_ms": 2.641174,
+      "min_ms": 1.671685
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 1.757746,
+      "p95_ms": 2.1819245999999994,
+      "max_ms": 2.280461,
+      "min_ms": 1.678325
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 0.796387,
+      "p95_ms": 1.0059005,
+      "max_ms": 1.494704,
+      "min_ms": 0.757857
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 1.567559,
+      "p95_ms": 2.0192565,
+      "max_ms": 2.11834,
+      "min_ms": 1.535524
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 1.7936415,
+      "p95_ms": 2.2668484999999996,
+      "max_ms": 2.391222,
+      "min_ms": 1.666945
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 1.870172,
+      "p95_ms": 2.2220960499999998,
+      "max_ms": 2.463993,
+      "min_ms": 1.681105
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row5325",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 4.518477,
+      "p95_ms": 5.6855225,
+      "max_ms": 5.870955,
+      "min_ms": 4.377721
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 9.358518,
+      "p95_ms": 9.7672165,
+      "max_ms": 9.936983,
+      "min_ms": 9.188256
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 33.206978500000005,
+      "p95_ms": 33.65861055,
+      "max_ms": 34.563296,
+      "min_ms": 32.660988
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.442559,
+      "p95_ms": 9.811593,
+      "max_ms": 9.894383,
+      "min_ms": 9.263197
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.396713,
+      "p95_ms": 9.653952499999999,
+      "max_ms": 9.719111,
+      "min_ms": 9.269097
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 4.540222,
+      "p95_ms": 4.8105554999999995,
+      "max_ms": 4.823915,
+      "min_ms": 4.421911
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 8.756277,
+      "p95_ms": 9.13995,
+      "max_ms": 9.217877,
+      "min_ms": 8.657721
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.4125485,
+      "p95_ms": 9.8986555,
+      "max_ms": 10.107285,
+      "min_ms": 9.273837
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 9.413183499999999,
+      "p95_ms": 9.789781999999999,
+      "max_ms": 9.809412,
+      "min_ms": 9.293867
+    },
+    {
+      "population": "native",
+      "mode": "scalar",
+      "case": "native_row6569",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 25.781678,
+      "p95_ms": 26.0892495,
+      "max_ms": 26.416329,
+      "min_ms": 25.615982
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row405",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 41.2396275,
+      "p95_ms": 41.78091455,
+      "max_ms": 41.943211,
+      "min_ms": 40.717702
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row405",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 40.000053,
+      "p95_ms": 40.495837449999996,
+      "max_ms": 42.613784,
+      "min_ms": 39.616809
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row405",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 11.4286955,
+      "p95_ms": 11.615088,
+      "max_ms": 11.752156,
+      "min_ms": 11.126776
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row405",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 22.9853125,
+      "p95_ms": 23.4763306,
+      "max_ms": 23.610278,
+      "min_ms": 22.553987
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row405",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 25.9562805,
+      "p95_ms": 26.3186612,
+      "max_ms": 26.610132,
+      "min_ms": 25.579623
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row405",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 27.741377,
+      "p95_ms": 28.3035125,
+      "max_ms": 28.42353,
+      "min_ms": 27.19479
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row2428",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 61.5735725,
+      "p95_ms": 62.34055315,
+      "max_ms": 62.505213,
+      "min_ms": 60.830742
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row2428",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 60.4301825,
+      "p95_ms": 60.9191837,
+      "max_ms": 61.033572,
+      "min_ms": 59.795492
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row2428",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 16.3899695,
+      "p95_ms": 16.8464164,
+      "max_ms": 16.965507,
+      "min_ms": 16.076985
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row2428",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 36.465272,
+      "p95_ms": 36.97065645,
+      "max_ms": 37.594482,
+      "min_ms": 36.029266
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row2428",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 40.9481785,
+      "p95_ms": 41.73427985,
+      "max_ms": 42.458506,
+      "min_ms": 40.45412
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row2428",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 43.5362535,
+      "p95_ms": 44.4149785,
+      "max_ms": 44.735426,
+      "min_ms": 43.088537
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row4589",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 86.6098945,
+      "p95_ms": 87.73172555,
+      "max_ms": 88.051094,
+      "min_ms": 85.546303
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row4589",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 85.57424,
+      "p95_ms": 86.4129956,
+      "max_ms": 86.750831,
+      "min_ms": 84.718733
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row4589",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 24.884484,
+      "p95_ms": 25.281761499999998,
+      "max_ms": 25.361792,
+      "min_ms": 24.544183
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row4589",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 55.672443,
+      "p95_ms": 56.6851034,
+      "max_ms": 57.031439,
+      "min_ms": 54.842283
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row4589",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 60.6588735,
+      "p95_ms": 61.21669605,
+      "max_ms": 61.587178,
+      "min_ms": 59.880526
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row4589",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 63.490545,
+      "p95_ms": 64.61829425,
+      "max_ms": 64.960771,
+      "min_ms": 62.897662
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row5325",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 7.936637,
+      "p95_ms": 8.111972549999999,
+      "max_ms": 8.197355,
+      "min_ms": 7.766964
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row5325",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 6.704938,
+      "p95_ms": 6.89285315,
+      "max_ms": 6.943864,
+      "min_ms": 6.608918
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row5325",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 1.611952,
+      "p95_ms": 1.8557912999999997,
+      "max_ms": 2.067999,
+      "min_ms": 1.587326
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row5325",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 4.006398,
+      "p95_ms": 4.1807151000000005,
+      "max_ms": 4.234074,
+      "min_ms": 3.9499
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row5325",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 4.8025459999999995,
+      "p95_ms": 4.9955830500000005,
+      "max_ms": 5.179259,
+      "min_ms": 4.727937
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row5325",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 5.7307805,
+      "p95_ms": 5.9480716000000005,
+      "max_ms": 6.041471,
+      "min_ms": 5.546967
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row6569",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 39.879912000000004,
+      "p95_ms": 40.41817895,
+      "max_ms": 40.724923,
+      "min_ms": 39.527205
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row6569",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 38.69912,
+      "p95_ms": 39.177529,
+      "max_ms": 39.20853,
+      "min_ms": 38.249263
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row6569",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 11.170853000000001,
+      "p95_ms": 11.30929455,
+      "max_ms": 11.352787,
+      "min_ms": 10.974979
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row6569",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 22.348997,
+      "p95_ms": 22.6475602,
+      "max_ms": 22.763077,
+      "min_ms": 22.141337
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row6569",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 25.091514,
+      "p95_ms": 25.47303705,
+      "max_ms": 25.591603,
+      "min_ms": 24.787404
+    },
+    {
+      "population": "native",
+      "mode": "prepared",
+      "case": "native_row6569",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 26.669445500000002,
+      "p95_ms": 26.968195050000002,
+      "max_ms": 26.994201,
+      "min_ms": 26.35502
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 17.0360765,
+      "p95_ms": 17.5813131,
+      "max_ms": 17.803777,
+      "min_ms": 16.818744
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 63.879724499999995,
+      "p95_ms": 64.59890275000001,
+      "max_ms": 64.763044,
+      "min_ms": 63.332056
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 17.250379000000002,
+      "p95_ms": 18.228061699999998,
+      "max_ms": 18.527732,
+      "min_ms": 17.029571
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 17.1831965,
+      "p95_ms": 17.716966499999998,
+      "max_ms": 17.952752,
+      "min_ms": 16.99073
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 8.318878999999999,
+      "p95_ms": 8.6805985,
+      "max_ms": 9.411016,
+      "min_ms": 8.162464
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 16.2924365,
+      "p95_ms": 16.68316005,
+      "max_ms": 16.863296,
+      "min_ms": 16.063629
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 17.215378,
+      "p95_ms": 18.1237773,
+      "max_ms": 18.540372,
+      "min_ms": 16.966899
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 17.155806,
+      "p95_ms": 17.74420705,
+      "max_ms": 18.127468,
+      "min_ms": 16.922808
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "1024",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 54.004752999999994,
+      "p95_ms": 54.66135855,
+      "max_ms": 54.685886,
+      "min_ms": 53.528147
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "D_current_revision",
+      "n": 30,
+      "p50_ms": 78.952926,
+      "p95_ms": 80.2912446,
+      "max_ms": 80.981619,
+      "min_ms": 77.940527
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "fast_ssim2_st",
+      "n": 30,
+      "p50_ms": 298.2632165,
+      "p95_ms": 300.17454855,
+      "max_ms": 306.861365,
+      "min_ms": 295.448562
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 79.28774250000001,
+      "p95_ms": 81.01063574999999,
+      "max_ms": 83.766893,
+      "min_ms": 78.262798
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 78.89976949999999,
+      "p95_ms": 80.22287765,
+      "max_ms": 80.276545,
+      "min_ms": 78.118603
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 37.7556175,
+      "p95_ms": 38.63598375,
+      "max_ms": 39.544868,
+      "min_ms": 37.208899
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 75.80773049999999,
+      "p95_ms": 77.0341175,
+      "max_ms": 77.398869,
+      "min_ms": 74.924016
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 79.3178235,
+      "p95_ms": 80.18964505,
+      "max_ms": 80.330537,
+      "min_ms": 78.155604
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 79.403031,
+      "p95_ms": 80.2522161,
+      "max_ms": 80.626927,
+      "min_ms": 78.103703
+    },
+    {
+      "population": "synthetic",
+      "mode": "scalar",
+      "case": "2048",
+      "model": "PT914U_full944_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 240.8032415,
+      "p95_ms": 243.21674445,
+      "max_ms": 244.18215,
+      "min_ms": 239.1208
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "1024",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 84.795154,
+      "p95_ms": 86.1008758,
+      "max_ms": 86.419273,
+      "min_ms": 84.154007
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "1024",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 83.971926,
+      "p95_ms": 85.016764,
+      "max_ms": 87.450918,
+      "min_ms": 83.235776
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "1024",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 26.3053785,
+      "p95_ms": 26.9586356,
+      "max_ms": 27.049358,
+      "min_ms": 25.504227
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "1024",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 55.2318055,
+      "p95_ms": 55.9219625,
+      "max_ms": 56.467587,
+      "min_ms": 54.399597
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "1024",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 59.230999999999995,
+      "p95_ms": 60.3730001,
+      "max_ms": 60.655258,
+      "min_ms": 58.581038
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "1024",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 61.703423,
+      "p95_ms": 62.6141295,
+      "max_ms": 63.09855,
+      "min_ms": 60.900656
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "2048",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 335.765922,
+      "p95_ms": 338.29471264999995,
+      "max_ms": 342.650653,
+      "min_ms": 333.805366
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "2048",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 334.8633165,
+      "p95_ms": 336.00495225000003,
+      "max_ms": 336.521467,
+      "min_ms": 330.892648
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "2048",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "n": 30,
+      "p50_ms": 104.1803505,
+      "p95_ms": 107.6610696,
+      "max_ms": 109.643134,
+      "min_ms": 102.828465
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "2048",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 215.972182,
+      "p95_ms": 219.6577528,
+      "max_ms": 222.62252,
+      "min_ms": 212.762219
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "2048",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 232.1171895,
+      "p95_ms": 233.934762,
+      "max_ms": 235.220744,
+      "min_ms": 226.49432
+    },
+    {
+      "population": "synthetic",
+      "mode": "prepared",
+      "case": "2048",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "n": 30,
+      "p50_ms": 242.5999465,
+      "p95_ms": 246.8525518,
+      "max_ms": 248.943805,
+      "min_ms": 239.665083
+    }
+  ],
+  "matched_input_cross_run_ratios": [
+    {
+      "population": "native",
+      "case": "native_row405",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 3.894265507316944,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row405",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 3.891649703416201,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row405",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 2.0945892382028544,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row405",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 2.343299362159622,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row405",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 2.4624117927905496,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row405",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 2.6074217728903335,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row2428",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 3.803552407110382,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row2428",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 3.8014848079754873,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row2428",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 2.245146506648513,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row2428",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 2.4876935507457696,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row2428",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 2.558942368753913,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row2428",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 2.6993867609015147,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row4589",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 4.69432986697182,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row4589",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 4.594616785635964,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row4589",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 2.913869629324671,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row4589",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 3.264652981008319,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row4589",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 3.242369733996397,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row4589",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 3.4207644906379246,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row5325",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 3.5309975580666504,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row5325",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 3.1590702767639183,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row5325",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 1.844905435477962,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row5325",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 2.070422999752632,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row5325",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 2.203756911853616,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row5325",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 2.6767842011149794,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row6569",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 4.119430855927269,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row6569",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 4.058185390905953,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "native",
+      "case": "native_row6569",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 2.350933182248911,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row6569",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 2.477864780441906,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row6569",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 2.5733835317331732,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "native",
+      "case": "native_row6569",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 2.754728864238244,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "synthetic",
+      "case": "1024",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 4.723534362405632,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "1024",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 4.798607255931765,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "1024",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 3.105619456999422,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "1024",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 3.3520006001500895,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "1024",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 3.331148860453058,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "1024",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 3.5287082326961463,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "2048",
+      "model": "PS914_basic228_h128_plain_ens3",
+      "p95_ratio": 4.175929611193059,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "2048",
+      "model": "PP914_basic228_h32_plain_ens3",
+      "p95_ratio": 4.1883931628074675,
+      "within_three_descriptively": false
+    },
+    {
+      "population": "synthetic",
+      "case": "2048",
+      "model": "PT914U_y60_h32_plain_ens3",
+      "p95_ratio": 2.7865491997469847,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "synthetic",
+      "case": "2048",
+      "model": "PT914U_local120_h128_plain_ens3",
+      "p95_ratio": 2.8514346620508766,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "synthetic",
+      "case": "2048",
+      "model": "PP914_basic156_h128_plain_ens3",
+      "p95_ratio": 2.9172689547900674,
+      "within_three_descriptively": true
+    },
+    {
+      "population": "synthetic",
+      "case": "2048",
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "p95_ratio": 3.075959316717236,
+      "within_three_descriptively": false
+    }
+  ],
+  "numpy_version": "2.5.2",
+  "quantile_method": "linear",
+  "evidence_sha256": {
+    "REGISTRATION.json": "ac9aad8a969b75ac8844c12b540d41d8b657b431aa9fdaf75239afa357b2f6d6",
+    "PAIRS.json": "df02b2943c8baf818a5aa603e5919cc007c4827d36161c725809924dde577572",
+    "EXECUTION.json": "8a0681301cee9ba8bf10abff88ad4bd311d7bf52da3f9e1d0a1d82ad9374546c",
+    "NEGATIVE_CHECKS.json": "99323503970658f2d56a6b5cc66fe9d2691af508bb75ba5b1853ef75cd825eff",
+    "PROTOCOL.md": "5bbb1df8e80725ae4a2dee71b8ecb277b707742a6d45a2882599b2d4d595e054",
+    "GATE_CORRECTION.md": "185fbb7c6ba42f5228728b1635465528951fa9e42e5ba54556d91a1bf01305d4",
+    "METHOD_NOTE.md": "52ac0bef4a900f7e4c7eec66ab02fdb60d2fe2963b888bfdf66493773b5888ea",
+    "ASSESSMENT.json": "77cf2a4ac49065661e65e9880d2041b6065fe7437ed31c2818b75d801d867e50",
+    "CHECKS.json": "621f03636b6da2fbe193527a43386d4389d30ccf7a8f71a2e4be9fb20afe4ab2",
+    "owner-gate.patch": "113ecc21f91fbc0bef4042bcc61e06963b9b313fe409b606d292877074fb3a80",
+    "consumer.patch": "26f5a45c094e281223f131aa8f60b87bf824ebb2512c6d77e205a9d12f329982",
+    "FINAL_SMOKE_COMMAND.json": "939addef2bfb045062783cd48259fe2469064bbd19a5c67d1cd72c51d20e75f3",
+    "FINAL_SMOKE_VERIFIED.json": "d9743ed7c6163f4d425ecde24435699964a7365c5df616745e7fc3a61234d2e4",
+    "analyze.py": "d129ed5cdbf2d521acf14d130828172f8fa34db6f9ea3d200a4b83f5594171bf",
+    "run.py": "35d53351cadb2aaa3899bf1afd1e708982c71945e647044aa6aa815e85a3e235",
+    "prepare.py": "4ababb6a5d64de4f1c1b3ce03dbeb6559cbd2df3520198a3407e33e7bb27542a"
+  },
+  "checks": {
+    "negative_admission_controls": 8,
+    "forced_gate_regression_before": "FAIL_EXPECTED",
+    "gate_tests": "PASS_4_DEFAULT_AND_MINIMAL",
+    "owner_library_tests": "PASS_142_IGNORED_1",
+    "owner_clippy": "PASS",
+    "owner_api_snapshots": "PASS",
+    "root_clippy": "PASS",
+    "standalone_clippy": "PASS",
+    "format": "PASS",
+    "script_lint": "PASS_615",
+    "final_smoke": {
+      "observations": 21,
+      "rounds": 3,
+      "checked_clean": 3,
+      "flagged": 0,
+      "gate_waits": 0,
+      "unreliable": false,
+      "qualified": false,
+      "purpose": "post-fix native input and gate export smoke",
+      "result_sha256": "a24701cadc1d77e3d81769b3ca253297d82bacfd4b950bf14b4ba9caee810020"
+    },
+    "owner_revision": "53941021fd20158bb52af6654df003ca6ead9caa",
+    "owner_push_verified": true,
+    "performance_qualification": false,
+    "model_qualification": false
+  }
+}

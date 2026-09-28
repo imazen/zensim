@@ -10,7 +10,10 @@
 //!     idx<TAB>human<TAB>score
 //!
 //! One header line + one row per parquet pair, ordered as in the input.
+//! Floating-point values use round-trip decimal formatting: fixed six-place
+//! rounding can hide score differences and introduce ties in rank assessments.
 //!
+//! Repeating `--bake` serves a uniform ensemble through the public BakeScorer.
 //! Dispatch matches `bake_verdict::score_row` bit-for-bit (per-sample-α
 //! head and hybrid-head metadata are honored).
 
@@ -25,7 +28,7 @@ fn print_usage() {
         "ensemble_score_rows — per-row bake scoring for EXP-ENSEMBLE-V05\n\
 \n\
 USAGE:\n\
-    ensemble_score_rows --bake <path> --parquet <path> [--output <path>]\n\
+    ensemble_score_rows --bake <path> [--bake <path> ...] [--weights <w,...>] --parquet <path> [--output <path>]\n\
 \n\
 OUTPUT (TSV, stdout or --output):\n\
     idx\\thuman\\tscore\n"
@@ -33,13 +36,23 @@ OUTPUT (TSV, stdout or --output):\n\
 }
 
 fn main() -> Result<(), String> {
-    let mut bake: Option<PathBuf> = None;
+    let mut bakes: Vec<PathBuf> = Vec::new();
     let mut parquet: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
+    let mut weights: Option<Vec<f64>> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--bake" => bake = Some(PathBuf::from(args.next().ok_or("--bake needs value")?)),
+            "--bake" => bakes.push(PathBuf::from(args.next().ok_or("--bake needs value")?)),
+            "--weights" => {
+                weights = Some(
+                    args.next()
+                        .ok_or("--weights needs value")?
+                        .split(',')
+                        .map(|x| x.parse::<f64>().map_err(|e| e.to_string()))
+                        .collect::<Result<_, _>>()?,
+                );
+            }
             "--parquet" => {
                 parquet = Some(PathBuf::from(args.next().ok_or("--parquet needs value")?))
             }
@@ -51,12 +64,22 @@ fn main() -> Result<(), String> {
             other => return Err(format!("unknown arg: {other}")),
         }
     }
-    let bake = bake.ok_or("--bake required")?;
+    if bakes.is_empty() {
+        return Err("--bake required".into());
+    }
     let parquet = parquet.ok_or("--parquet required")?;
-    let bytes = std::fs::read(&bake).map_err(|e| format!("read {bake:?}: {e}"))?;
-    let model = Model::from_bytes(&bytes).map_err(|e| format!("model parse: {e}"))?;
-    let mut scorer = BakeScorer::new(&model).map_err(|e| e.to_string())?;
+    let bytes: Vec<Vec<u8>> = bakes
+        .iter()
+        .map(|bake| std::fs::read(bake).map_err(|e| format!("read {bake:?}: {e}")))
+        .collect::<Result<_, _>>()?;
+    let models: Vec<Model> = bytes
+        .iter()
+        .map(|b| Model::from_bytes(b).map_err(|e| format!("model parse: {e}")))
+        .collect::<Result<_, _>>()?;
+    let mut scorer =
+        BakeScorer::ensemble(&models, weights.as_deref()).map_err(|e| e.to_string())?;
     let g = parquet_loader::load_parquet(&parquet, "rows", "human_score", 1.0)?;
+    let identities = parquet_loader::load_pixel_identities(&parquet, g.feature_rows.len())?;
     let humans = g.human_scores;
     let mut writer: Box<dyn std::io::Write> = match output {
         Some(p) => Box::new(std::fs::File::create(&p).map_err(|e| format!("create {p:?}: {e}"))?),
@@ -65,9 +88,15 @@ fn main() -> Result<(), String> {
     writeln!(writer, "idx\thuman\tscore").map_err(|e| format!("write header: {e}"))?;
     for (i, row) in g.feature_rows.iter().enumerate() {
         let score = scorer
-            .score_features(row, 0, 0, None)
+            .score_features_with_identity(
+                row,
+                0,
+                0,
+                None,
+                identities.as_ref().is_some_and(|v| v[i]),
+            )
             .map_err(|e| e.to_string())?;
-        writeln!(writer, "{}\t{:.6}\t{:.6}", i, humans[i], score)
+        writeln!(writer, "{}\t{}\t{}", i, humans[i], score)
             .map_err(|e| format!("write row {i}: {e}"))?;
     }
     Ok(())

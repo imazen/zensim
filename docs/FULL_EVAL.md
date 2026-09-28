@@ -1,5 +1,113 @@
 # Full-eval — one comprehensive Rust eval per bake → machine-readable JSON
 
+## September 14: frozen public TEST assessment and complete ensembles
+
+The [September 14 clarification](DATA_SPLITS.md#september-14-clarification-test-evaluation-when-no-eval-split-exists)
+permits published TEST assessment of frozen candidates when no EVAL exists.
+Record exposure and preserve original roles; no adaptive training, calibration
+or selection may use these results. Secret holdouts remain untouched. This
+supersedes the blanket policy below, but does not relax the v2 feature-screen
+loader's explicit train/eval contract or authorize historical default scans.
+
+For complete ensembles, `run_full_eval.sh` accepts `ZENSIM_EVAL_ENSEMBLE`
+(ordered comma-separated member paths) and `ZENSIM_EVAL_ENSEMBLE_WEIGHTS`
+(explicit weights). Both verdict and coherence stages use the complete
+composition. The positional bake remains the primary member. The coherence
+owner also accepts `--ensemble`, `--ensemble-weights`, and `--json-cells`;
+its input identity binds every member's bytes, order and weights. Missing
+coherence is not an inherent ensemble limitation.
+
+The [frozen assessment](../benchmarks/rev3_public_human_eval_2026-09-14.md)
+records the actual nine-panel, codec-ladder and ensemble-coherence results,
+including qualification failures and remaining native product gates.
+
+## Strict train/eval feature screens (September 13)
+
+The historical [user split instruction](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+forbids any test/terminal read, even for final qualification. The historical
+v1 screen recipes and their fit/dev/test caches are no longer executable via
+`feature_screen.py`. Preserve them as evidence; do not rename their segments.
+Other historical commands below are not permission to scan terminal datasets.
+
+Use `schema: zensim-feature-ceiling-recipe-v2` and
+`split_policy: train-eval-only-v1`. Keep the registered feature IDs, seeds,
+training budget and spatial thresholds explicit. Replace automatic corpus
+discovery and `reuse_prepared` with `input_segments`, each containing:
+
+```json
+{
+  "role": "train",
+  "path": "/absolute/path/train-segment.json",
+  "sha256": "<segment SHA256>",
+  "admission": {
+    "path": "/absolute/path/train-admission.json",
+    "sha256": "<admission SHA256>"
+  }
+}
+```
+
+Supply train and eval segments for every requested task. An admission file has
+`schema: zensim-source-admission-v1`, a named `authority` identifying the
+canonical split manifest/rule and its revision/hash, and a `sources` array.
+Each source records `corpus`, `origin`, globally consistent `source_family`,
+and `split` (`train` or `eval`). Source-only sidecars must be reviewed against
+the canonical authority before use. Hash/schema validation is not an independent
+proof that a caller's source assignment is correct. Do not create admissions
+by relabeling old screen/test segments.
+
+Each segment file has `schema: zensim-feature-segment-v1`, `role`, and `rows`.
+Each row contains `corpus`, `origin`, `source_family`, `task` (human/codec/
+corruption), distortion `family`, `target`, and absolute `reference`/`distorted`
+paths. Every row must match its source admission. Families cannot cross roles,
+including across tasks. Protected path components and symlink targets are
+rejected before hashing pixels. Unexpected roles or changed bytes fail.
+
+Pin the `spatial_manifest` bytes with recipe field `spatial_manifest_sha256`.
+The manifest must carry the same `split_policy`; its cases retain
+their existing names/paths/hashes plus `role: eval`, `source_split: eval`, and
+`source_family`. Every case must belong to an admitted eval reference. Old
+training-origin spatial panels may remain historical diagnostics but cannot
+become eval gates by changing their role field.
+
+Stages use the existing Rust owners:
+
+- `--ceiling-stage prepare`: admit explicit segments, extract fresh canonical
+  features, write separate train/eval Parquets and an **eval-only** prediction
+  buffer. No mixed historical cache is opened.
+- `--ceiling-stage fit`: the trainer receives only train tables (or their
+  train-only half/class views), with `--no-auto-eval`, no eval group and no
+  early stopping. Its checkpoint monitoring falls back to training scores.
+  No prediction/evaluation command runs in this stage.
+- `--ceiling-stage audit`: freeze/check final bake identities, then run Rust
+  prediction, raw-error panels, pixel parity and spatial checks on eval only.
+- `--ceiling-stage report`: aggregate the stored eval results, retaining seed
+  values, mean, median and spread. No eval-driven checkpoint/capacity refit is
+  launched. `all` runs prepare, fit and audit; report remains explicit.
+
+Resume uses the same v2 recipe, input and tool identities. Old cache reuse and
+the historical `checkpoints` follow-up are refused. Scalar serving, model
+defaults and feature arithmetic are unchanged.
+
+Validation: `python3 scripts/tests/test_feature_screen_splits.py` exercises
+thirteen synthetic admission/routing boundaries, including refusal before file
+opening. A native Rust smoke with 16 train and 8 eval fixture pairs completed
+prepare, train, audit and report; the trainer's only group was `human_train`,
+all external panel labels were eval, and consumed-feature pixel parity was
+exact. Two eval-source spatial cases ran. The first smoke exposed integer CSV
+target inference; targets are now explicitly cast to floating point before
+training. Failed and corrected runs remain under
+`~/work/zensim-validation-2026-09-13/split-boundary-smoke/`.
+These generated software fixtures are not scientific corpus or model-quality
+evidence. No corpus test segment was opened for this change.
+
+The additional `run-alltasks-full` smoke covers all three training objectives
+and their eval-only audits. The tiny optional half/class fixture failed C6
+because some features were constant in that four-row subgroup; those refusals
+are retained, and the gate was not relaxed. Preparation now constructs half
+tables only for requested half-data controls. Synthetic 0/100 fixture labels
+test routing only; they are not corruption severity labels or a fitted product
+catcher. The `recipe-alltasks-full.json` file pins the final multi-task smoke.
+
 **September 7 scoring update:** all candidate scores are returned by
 `zensim::BakeScorer`. The verdict's `scoring` block records the surface version,
 member hashes, blend weights and corruption-head hash/deadband. A supplied
@@ -231,3 +339,205 @@ verdict identity still matches. It clears the previous qualification decision; r
 Product measurement JSON must carry the same `scoring` block as the verdict.
 Changing any verdict input drops these attachments; graft freshly measured evidence
 through `promote_fulleval.py` before qualifying again.
+# Five-minute feature development screen (September 13, 2026)
+
+Use the existing pipeline's `feature-screen` stage for the small T2-only
+experiment recipe. It runs canonical Rust extraction, two H32 fits, final
+`BakeScorer` pixel/cache audits and Rust correlation panels under one 300-second
+deadline. Input, label, binary, producer/revision and split identities bind the
+feature cache. `FAILED_OR_INCOMPLETE` is never a quality pass.
+
+Build once outside the iteration budget:
+
+```bash
+../scripts/run-heavy --mem 16G --jobs 8 cargo build --release -p zensim-validate --bin zensim_mlp_train --bin panel
+../scripts/run-heavy --mem 16G --jobs 8 cargo build --release --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+```
+
+Run with a fresh output directory (Python requires pyarrow for Parquet I/O):
+
+```bash
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh --stage feature-screen benchmarks/feature_screen_2026-09-13.json "$HOME/work/feature-screen-run" --cache "$HOME/work/feature-screen-cache"
+```
+
+The recipe fits to SSIMULACRA2 proxy labels from 264 admitted JXL pairs, using
+eight fit, two checkpoint-selection and two inner-test origins. All twelve
+origins remain T2 training content; the test images were examined in previous
+experiments. This cannot qualify perceptual quality or a release. It reports
+signed/raw correlations separately from the full panel's absolute/logistic
+statistics. Logistic-rescaled errors are not end-user target-score errors.
+Corruption, HDR, spatial intervention, reachable codec targets and full-size
+performance remain explicitly unmeasured in this first packet.
+
+`zensim_mlp_train --no-auto-eval` suppresses its historical automatic protected
+holdout evaluation. This stage always passes it and evaluates only its explicit
+packet. The existing full-eval and qualification stages remain separate.
+See the [measurement and next experiments](../benchmarks/fullres_y_subset_2026-09-12.md).
+
+## Opt-in sampling recipes (September 13 follow-up)
+
+The feature-screen recipe may also declare `spatial_checks` with a `manifest`
+path, its `sha256`, and a `block` size of 8, 16 or 32. Build the existing
+`zensim` example `diffmap_block_coherence` with
+`custom-profiles,feature-regime-v2,threads,training` first. Every case must
+inherit an admitted training origin, match its reference path and pass both
+PNG hash checks. The stage invokes the Rust block-repair owner for every
+final bake and retains scalar scores, measured gains, M2/M3f and unsupported
+IDs under the same 300-second deadline. Missing spatial support is
+`UNSUPPORTED`, never a passing map. These are fixed development fixtures;
+neither a successful run nor a spatial pass establishes perceptual quality.
+
+The [coarse-pool recipe](../benchmarks/coarse_pool_screen_2026-09-13.json)
+uses this option for four layouts across three seeds. The box pyramid and
+canonical Rev3 feature values are unchanged. Declared IDs now select the
+actual v1 masked/IW scales in Rust, while retaining full-resolution Y and
+omitting unused finest X/B. Masked and IW share a kernel chain, so selecting
+either activates both at that scale. They still lack spatial integrands;
+the screen exposes that limitation explicitly.
+
+The same `feature-screen` owner now accepts a `sampling` string:
+`v1:{y|xyb}:{triangle|mitchell|robidouxsharp}:{3/2|2|3}`.
+`y` retains full-resolution Y and omits finest X/B features; its subsequent
+XYB levels are at d, 2d and 4d. `xyb` starts all channels at d, then 2d, 4d
+and 8d. These are new feature values and require fresh extraction and fitting.
+They use zenresize main's signed floating-point kernels at every transition.
+
+To obtain the producer identity, run the existing extractor with `--sampling`
+and an explicit `ZENSIM_FORMULA_REV=3`. Its `.manifest.json` reports the
+Rust-generated `feature_set_id` and populated feature IDs; its `.producer.bin`
+is a diagnostic extraction model, not a trained quality model. Use those
+IDs and identity in the recipe. Optional `arm_seeds` maps arm names to paired
+training seeds. The trainer admits one sampling contract per fit and embeds
+`zentrain.sampling` in the final bake. The screen checks producer identity,
+passes the contract to the final pixel audit, and binds it into cache identity.
+
+Serve the final model through `BakeScorer::compute`, or cache its reference
+with that same scorer and call `compute_with_ref_and_attribution`. The existing
+`score_features` API consumes feature rows produced under the same contract;
+raw slices cannot carry provenance, so cache admission and pixel audits are
+required. `research::Request::for_bake_bytes` refuses these models instead of
+silently extracting the default pyramid. Mixed sampling ensembles, legacy
+reference caches, unmatched corruption companions and HDR sampling are refused.
+No named/default model is changed.
+
+Attribution uses squared, normalized resizer tap ownership back to logical
+source coordinates, including reflection. This preserves signed map mass;
+it is an approximation to finite pixel edits, not a pixel derivative.
+`refinement_gain` also includes the existing finite-max correction with the
+sampled support. Use `diffmap_block_coherence --bake MODEL --block 8` (also
+16 and 32) to compare these predictions against actual reference-pixel
+replacements scored through the public API. A successful serving audit does
+not imply accurate spatial steering.
+
+The [integrated sampling report](../benchmarks/sampling_serving_2026-09-13.md)
+records all 20 layouts, three paired training seeds, scalar/spatial timings,
+and intervention results. This supersedes the earlier filter-only status.
+# Representative feature/scale capability study (September 13, 2026)
+
+The `feature-screen` owner also accepts `zensim-feature-ceiling-recipe-v1`.
+Its representative preparation is separate from the small T2 screen's strict
+300-second budget. See the preregistered
+[protocol](../benchmarks/feature_ceiling_2026-09-13.md) and
+[recipe](../benchmarks/feature_ceiling_2026-09-13.json).
+
+```bash
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage prepare
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage fit
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage checkpoints
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage audit
+scripts/run_full_eval.sh --stage feature-screen \
+  benchmarks/feature_ceiling_2026-09-13.json /absolute/fresh/output --ceiling-stage report
+```
+
+Build the existing Rust extractor, trainer, cached predictor and `panel` first.
+The extractor's `--full-944` option uses an all-live diagnostic bake through
+`BakeScorer::compute` and emits an explicit producer manifest; it conflicts with
+`--sampling`. It creates no new feature arithmetic. Fresh 944 tables retain v1
+peaks/masked/IW slots, unlike historical wide producers that left those empty.
+Do not infer compatibility from width. Python preparation/reporting live in the
+bounded `feature_screen_ceiling` module; Rust owns features, fitting and scoring.
+
+Preparation pins original bytes, all row IDs, split/family admission, tools,
+feature ID and formula revision. Fitting validates tables and supports verified
+completed-bake reuse. Eight independent fits run under the campaign's eight-core
+cap. Audit uses actual pixels and finite spatial repairs; unsupported features
+remain explicit. The extra `--ceiling-panel PATH` selects a separately pinned
+raw-error-capable panel binary when preserving an active campaign's original
+tool binaries. No stage enters automatic protected full-eval defaults.
+The optional `checkpoints` follow-up adds 18 frequent-checkpoint controls and
+nine coarse262 fits to the primary 135-fit matrix. Run it before `audit`, which
+requires a fresh audits directory. `all` executes preparation, primary fitting
+and audit; it does not include this follow-up or the final `report` stage.
+
+`panel --batch jobs.tsv --raw-errors` appends **raw** MAE. The existing `mae`
+column is logistic-remapped using the evaluation rows and remains unchanged for
+compatibility. Use raw MAE for calibration/error claims. The literal cached
+feature API has no pixel-identity override; identity-aware pixel audits are
+reported separately. A capacity/data plateau within one MLP family is an
+empirical result, not a mathematical feature ceiling or product qualification.
+
+Later September 13: [scale-selective 944 study](../benchmarks/scale_selective_944_2026-09-13.md)
+uses the same owner with recipe `log_every: 1` and optional `sampling` metadata.
+`--full-944 --sampling v2:xyb:triangle:1,3,5,7` selects direct-from-original
+scales; the closed alternatives are `1,2,4,8` and `1,2,3,5`, with Triangle,
+Mitchell or RobidouxSharp. This v2 sampling tag is distinct from formula Rev3.
+It includes zenresize's binary16 input-row rounding before float filtering;
+see the independent precision test and report. Historical v1 sampling keeps
+its contract and cannot be combined with `--full-944`.
+
+The native recipe adds masked/IW separately at each scale, for both legacy
+and newer weighted families. All 32-epoch fits retain frequent dev checkpoint
+selection, fresh/native-verified features, raw Rust error panels and actual
+pixel/spatial audits. No capacity-control matrix is repeated in this follow-up.
+
+### Verified pixel identity in cached eval (September 14)
+
+`ensemble_score_rows` and `bake_verdict` corpus scoring accept an optional
+`pixels_identical` Float32/Float64 column containing only non-null 0/1 values.
+It must come from equality of decoded pixels, pinned to the same row keys and
+input hashes. Both owners call `BakeScorer::score_features_with_identity`.
+A missing column means unknown identity and retains the historical feature-only
+behavior; zero features never prove identity. Do not compare that diagnostic
+as pixel-equivalent when the admitted corpus contains identities. Native audit
+JSONL from `extract_features_372col` supplies the evidence. The September 13
+minimal/wide study's final eval corrects this distinction without retraining.
+
+### Complete scatter and integrity assessment (September 14)
+
+`bake_verdict` now stores `scatter_assessment.<corpus>.<reference>` over the
+complete scored population before capping plot rows. `panel --input pairs.tsv
+--json --scatter` uses the same `zenstats::scatter` owner. The Python statistics
+shim delegates to it; gauntlet consumes stored results and matching normalized
+plot coordinates. Missing historical measurements remain missing.
+
+Read robust envelope outlier share, p99/max relative to reference span, raw
+absolute and robust-scaled residual tails, raw density, exact extrema mass,
+range and slope together with the existing full Mohammadi panels and named
+composite floors. Rank normalization preserves geometry but can hide smooth
+score compression; raw density is a separate diagnostic. Zero scales are
+unmeasured, not epsilon-derived passes. `outlier_gate.py` returns INCOMPLETE
+(exit 2) when required statistics, peer bars or declared range are missing.
+
+The new strict corruption fit is `train_corruption_head.py
+--strict-train-manifest FIT.json --out-dir NEW`. Its manifest admits only train
+fit/calibration, pins inputs/tools, exports ZCTH and checks Rust surface parity
+before the calibration advancement gate. Legacy/canonical mixed-table modes
+are historical, not approved defaults under the September 13 ruling.
+`corruption_gate_eval.py --integrity-admission ADMISSION.json --audit-jsonl
+AUDIT.jsonl --out-json NEW.json` reports the actual complete Rust composition.
+Unlabelled operations are not negatives; duplicate pixel identities retain all
+catalog provenance and conflicting binary labels fail. Prepared steering audits
+use `ZENSIM_AUDIT_PREPARED_STEERING=1` in the existing native extractor.
+
+The [registered prototype and results](../benchmarks/steering_integrity_2026-09-14.md)
+retain all severe misses, ambiguous activations and missing product gates.
+No new head, scatter instrumentation or pipeline-parity result alone qualifies
+an all-purpose target dial or native spatial allocator.

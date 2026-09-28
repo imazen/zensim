@@ -48,6 +48,44 @@ impl Curve {
     }
 }
 
+// This is input admission only. BakeScorer owns all composition arithmetic.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Composition {
+    name: String,
+    members: Vec<Member>,
+    weights: Vec<f64>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Member {
+    path: PathBuf,
+    sha256: String,
+}
+impl Composition {
+    fn identity(&self) -> Result<String> {
+        ensure!(!self.name.is_empty(), "empty composition name");
+        Ok(format!("{}:{}", self.name, sha(&serde_json::to_vec(self)?)))
+    }
+    fn load(&self) -> Result<Vec<zenpredict::Model>> {
+        let models = self
+            .members
+            .iter()
+            .map(|m| -> Result<_> {
+                let bytes = fs::read(&m.path)?;
+                ensure!(
+                    sha(&bytes) == m.sha256,
+                    "composition member hash mismatch: {}",
+                    m.path.display()
+                );
+                Ok(zenpredict::Model::from_bytes(&bytes)?)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        BakeScorer::ensemble(&models, Some(&self.weights))?;
+        Ok(models)
+    }
+}
+
 struct Reconstruction {
     knob: f32,
     encoded: Vec<u8>,
@@ -218,10 +256,32 @@ pub(super) fn run(args: &Args) -> Result<()> {
     for m in &models {
         BakeScorer::new(m)?;
     }
-    let labels: Vec<String> = ["B".to_owned(), "D".to_owned()]
-        .into_iter()
-        .chain(bake_bytes.iter().map(|b| format!("bake:{}", sha(b))))
-        .collect();
+    let compositions: Option<Vec<Composition>> = args
+        .compositions
+        .as_ref()
+        .map(|p| -> Result<_> { Ok(serde_json::from_slice(&fs::read(p)?)?) })
+        .transpose()?;
+    let composed_models = compositions
+        .as_ref()
+        .map(|cs| -> Result<_> {
+            ensure!(!cs.is_empty(), "empty composition manifest");
+            ensure!(
+                cs.iter().map(|c| &c.name).collect::<BTreeSet<_>>().len() == cs.len(),
+                "duplicate composition name"
+            );
+            cs.iter().map(Composition::load).collect::<Result<Vec<_>>>()
+        })
+        .transpose()?;
+    let labels: Vec<String> = match &compositions {
+        Some(cs) => cs
+            .iter()
+            .map(Composition::identity)
+            .collect::<Result<_>>()?,
+        None => ["B".to_owned(), "D".to_owned()]
+            .into_iter()
+            .chain(bake_bytes.iter().map(|b| format!("bake:{}", sha(b))))
+            .collect(),
+    };
     ensure!(
         labels.iter().collect::<BTreeSet<_>>().len() == labels.len(),
         "duplicate model"
@@ -259,7 +319,7 @@ pub(super) fn run(args: &Args) -> Result<()> {
             "config":CONFIG,"formula_revision":formula,"source_manifest":sources,
             "source_manifest_sha256":sha(&fs::read(args.source_manifest.as_ref().unwrap())?),
             "fit_calibration":args.fit_calibration,"calibration_sha256":args.calibration.as_ref().map(|p|fs::read(p).map(|b|sha(&b))).transpose()?,
-            "models":labels,"codecs":args.codecs,"bound_steps":args.bound_steps,
+            "models":labels,"compositions":compositions,"codecs":args.codecs,"bound_steps":args.bound_steps,
             "requested_targets":args.targets,"witness_targets":args.witness_targets,
             "budgets":args.budgets,"tolerance":args.tolerance,"policies":["midpoint","train_curve"],
             "source_interpretation":"opaque sRGB RGB8; no ICC conversion",
@@ -322,7 +382,12 @@ pub(super) fn run(args: &Args) -> Result<()> {
                     ZensimProfile::B
                 };
                 let named = Zensim::new(profile);
-                let mut candidate = if mi >= 2 {
+                let mut candidate = if let Some(cs) = &compositions {
+                    Some(BakeScorer::ensemble(
+                        &composed_models.as_ref().unwrap()[mi],
+                        Some(&cs[mi].weights),
+                    )?)
+                } else if mi >= 2 {
                     Some(BakeScorer::new(&models[mi - 2])?)
                 } else {
                     None
@@ -520,6 +585,46 @@ pub(super) fn run(args: &Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composition_binds_all_members_weights_and_order() {
+        let member = |name: &str| {
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../zensim/weights")
+                .join(name);
+            let sha256 = sha(&fs::read(&path).unwrap());
+            Member { path, sha256 }
+        };
+        let mut c = Composition {
+            name: "complete".into(),
+            members: vec![
+                member("b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin"),
+                member("d_sdr_add156_id100_negrich_dial_2026-09-05.bin"),
+            ],
+            weights: vec![0.25, 0.75],
+        };
+        let models = c.load().unwrap();
+        let mut through_manifest = BakeScorer::ensemble(&models, Some(&c.weights)).unwrap();
+        let mut direct = BakeScorer::ensemble(&models, Some(&[0.25, 0.75])).unwrap();
+        let row = vec![0.01; 372];
+        assert_eq!(
+            through_manifest
+                .score_features(&row, 64, 64, Some("jpeg"))
+                .unwrap(),
+            direct.score_features(&row, 64, 64, Some("jpeg")).unwrap()
+        );
+        let id = c.identity().unwrap();
+        c.members.swap(0, 1);
+        assert_ne!(id, c.identity().unwrap());
+        c.members.swap(0, 1);
+        c.weights = vec![0.75, 0.25];
+        assert_ne!(id, c.identity().unwrap());
+        c.weights = vec![1.0];
+        assert!(c.load().is_err());
+        c.weights = vec![0.25, 0.75];
+        c.members[1].sha256 = "changed-companion".into();
+        assert!(c.load().is_err());
+    }
 
     #[test]
     fn witnessed_targets_exclude_gaps_and_preserve_negative_scores() {

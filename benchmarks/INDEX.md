@@ -26,6 +26,48 @@
 > outside the zen workspace, 33/33 lanes wrote a `.workongoing` marker, 27/27 workspace-cleanup
 > claims verified.** Reasoning is unauditable — all 10,404 `thinking` blocks persist empty.
 
+> **★★ SSIM FEATURE EXTRACTION WAS NUMERICALLY UNSTABLE, AND NONLOCAL, 2026-09-08/09:**
+> **4K cost on the current commit, ST and MT (2026-09-10):**
+> [`k4_st_mt_2026-09-10.md`](k4_st_mt_2026-09-10.md). At 4096², served profile `B`: 709 ms on
+> one thread, 194 ms on eight (one CCD), 102 ms on sixteen cores; `fast_ssim2` 1.34 s flat. The
+> folded 944 extraction scales only 2.2× / 2.5× (its serial share, not SSIM arithmetic); the
+> buffered v1 path 3.8× / 5.4×. UHD 3840×2160 per-call table included. Raw in `k4_2026-09-10/`.
+
+> **Cross-generation speed matrix + its speed-vs-accuracy join (2026-09-18):**
+> [`speed_matrix_2026-09-18.md`](speed_matrix_2026-09-18.md) is the measurement — every named
+> profile, both frozen Rev3 ensembles and three peers, interleaved across 64²–4096² at 1/4/8/16
+> threads, with per-column anchor validity checks and an explicit refusal where the anchor drifts
+> past 5%. [`speed_accuracy_2026-09-18.json`](speed_accuracy_2026-09-18.json) joins it to the
+> board's `fulleval` rows BY BAKE SHA256 and records the Pareto frontier at each geometry;
+> `just demo-speed-accuracy` regenerates both it and the viewable page. **Two arms have no
+> accuracy value and are not given one:** the shipped `C` bake
+> (`c_sdr_purity944_byid_2026-09-07.bin`, `996dfbb1…`) appears on no board row, and `PreviewV0_2`
+> carries no bake at all, so nothing can key a row to it. Frontier at 1024²/1T: the two Rev3
+> ensembles and `fast_ssim2`; at 4096²/1T `D` joins them. `B` is on neither one-thread frontier —
+> at both geometries it is beaten on BOTH axes by the Rev3 rich ensemble, which fails the product
+> gates. (`B` does make the eight-thread 4096² frontier, alongside `D` and `fast_ssim2`.)
+
+> [`nonmax_diagnosis_2026-09-08.md`](nonmax_diagnosis_2026-09-08.md) (diagnosis) →
+> [`stable_ssim_kernel_2026-09-08.md`](stable_ssim_kernel_2026-09-08.md) (kernel + the September 9
+> INTEGRATION section) → [`../docs/PLAN_FEATURE_REV3_2026-09-09.md`](../docs/PLAN_FEATURE_REV3_2026-09-09.md)
+> (the revision lane and its refresh/refit handoff). The shipped signal recovers variance and
+> covariance by SUBTRACTION from f32 raw moments, which on flat content cancels away most of the
+> significant bits, and its box blur is an f32 sliding recurrence, which is path-dependent — so a
+> pixel whose own window contains no changed sample still moves. MEASURED on the integrated banded
+> walk: a local replacement with reference pixels moves **8,293** signals outside the changed
+> samples' support under revision 1 (peak |Δ| 4.886e-4) and 11,163 by at most **4.277e-6** under
+> `FormulaRevision::Rev3`, which forms the error variance directly as `(a−b)²` instead of
+> `var1 + var2 − 2·cov` INSIDE the existing fused H/V pass (the Σab plane is dead under Rev3 and
+> carries Σ(a−b)² instead; no second traversal). The acceptance is bounded by user directive —
+> locality ≤ 2e-5, ≤ 1e-3 vs the exact f64 reference kernel (measured 3.150e-4 over 220,320
+> signals), identity residue ≤ 1e-5 (measured 3.689e-6). An exact f64 second-pass form measured
+> 0 / 5.821e-11 but cost +27–87% of extraction and was superseded before any data was extracted
+> at it. Rev3 also gets an explicit route contract (`blur_passes != 1`
+> returns a `ZensimError`, not a panic) and a bake/process revision refusal that distinguishes
+> revisions 2 and 3 **despite both selecting the Clamp luminance form**. **Nothing is trained on
+> corrected features**: `SHIPPED_REVISION` stays `Rev1`, every stored table is a revision-1
+> artifact, and an old bake relabelled `3` is refused rather than served. Issue #61.
+
 > **BOARD HYGIENE — fair gauntlet re-issued at 508 fullevals, 2026-09-06:**
 > [`fair_gauntlet_2026-09-06.md`](fair_gauntlet_2026-09-06.md). `summer_gauntlet_fair.html` had
 > gone stale (last built 2026-09-05 19:58, 97 of 433) while the all-rows board moved to 508; the

@@ -1,5 +1,19 @@
 # TOP MODELS COOKBOOK — the science + exact reproduction paths (2026-07-18)
 
+> **September 14 reading correction:** the statements below describe their
+> recorded experiments, not current universal limits. Non-additive max features
+> now have separate finite rectangle queries; opt-in L2/L4/L8 moment corrections
+> also execute through the complete Rust candidate API. They do not turn maxima
+> into additive density. See [finite-moment evidence](../benchmarks/finite_moments_2026-09-14.md).
+> The historical observation “M2 = 1.0 for every architecture measured” does not
+> guarantee finite-edit linearity: the current TRAIN [basic/peak comparison](../benchmarks/product_peaks_2026-09-14.md)
+> includes H128 failures. A piecewise-linear head can cross activation boundaries.
+> Current H32/H128 training and admission use the [wave playbook](WAVE_PLAYBOOK.md),
+> not the old recipe defaults below. The [September 13 split ruling](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+> prohibits historical test/terminal reads even for a frozen finalist. None of
+> these historical roster entries automatically qualifies under the current
+> [production scorecard](MODEL_SELECTION_SCORECARD.md).
+
 > **Current-reading note (2026-09-07):** this is a dated recipe/evidence
 > archive with later addenda. Current integration and bake identities live in
 > [`CODEC_TARGET_METRIC.md`](CODEC_TARGET_METRIC.md); current unresolved choices

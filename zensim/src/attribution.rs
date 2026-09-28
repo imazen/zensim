@@ -5,7 +5,11 @@
 //! retained, binned map owner. Its result reports unsupported spatial terms
 //! and discontinuous corruption gating. The basic-block construction below
 //! underlies both that route and the earlier caller-supplied-gradient APIs;
-//! the full route also covers v2, append and append2 integrands.
+//! the full route also covers v2, append and append2 integrands. The candidate
+//! route additionally covers the 36 L8 terms in f156-227.
+//! [`ScoredAttribution::refinement_gain`] adds hard maxima through a separate
+//! non-additive rectangle estimate. Its coverage report is distinct from
+//! density coverage; see that method's frozen-signal ownership contract.
 //!
 //! Builds a per-pixel **attribution density** `D(x, y)` for a scalar model's
 //! gradient `s_k = ∂score/∂f_k` over the BASIC feature block (f0-155: 13 slots
@@ -61,6 +65,10 @@
 //!   weighting against mean slots, so the `1/p` form is used. Per-slot block
 //!   RANKING is identical either way (same `M` for all blocks); only the
 //!   cross-slot mix differs.
+//!   Candidate L8 slots (offsets 3/4/5 in each six-slot peak cell) use the
+//!   same formula with p=8 and the same SSIM/artifact/detail signals. Their
+//!   historical `p95` field names do not denote quantiles. Canonical f32
+//!   eighth powers are multiplied by f64 coefficients before map rounding.
 //! - **hf ratio slots** (10-12): exact first-order integrands of the clamped
 //!   ratio, gated on the clamp state (`varSrc > 1e-10` matching `finalize`,
 //!   loss XOR gain active). With `e_i = (s_i−μ1_i)² − (d_i−μ2_i)²`:
@@ -82,11 +90,15 @@
 //!
 //! # Honest approximations / blind spots
 //!
-//! 1. **f156-371 (peak/masked/iw) and f944+ have no integrands here.**
+//! 1. **Hard maxima, masked/IW pools and f944+ have no integrands here.**
 //!    The candidate result reports locally active unsupported IDs, including
 //!    extraction variants whose matching retained integrands are unavailable.
 //!    Reference-only features and SDR highlight structural zeros contribute
-//!    exactly zero. The full map covers supported f372-943 terms.
+//!    exactly zero. The candidate covers L8 (three of each six f156-227 slots)
+//!    and supported f372-943 terms. Legacy caller-gradient APIs still ignore
+//!    all f156-371. An additive density cannot exactly represent finite max
+//!    removal: removing either of two tied maxima has no effect, but removing
+//!    both does. Coverage of L8 does not resolve that max-term limitation.
 //! 2. **Blur bleed** (C2b MEASURED): refining block `B` also changes signals
 //!    within the blur radius outside `B`. The pure-window-supported signals
 //!    (ssim `d`; v2 contrast/texture) ARE spread over their blur window via
@@ -94,10 +106,13 @@
 //!    clipped-window per-source-normalized convention) — measured NEUTRAL on
 //!    the 8-cell gate (±0.003). Residual-form signals (art/det/hf/mscn) stay
 //!    pixel-allocated: the 50/50 pixel/window split was measured and
-//!    REGRESSED all 8 cells (−0.01..−0.08), and the pure `I − K` adjoint
-//!    allocates zero net mass (wrong for removal semantics). The remaining
-//!    fine-block residual is the finite-removal floor, not an allocation
-//!    fix — see `benchmarks/attribution_map_c1_2026-07-29.md` §C2b.
+//!    REGRESSED all 8 cells (−0.01..−0.08). That result does not reject a
+//!    pixel derivative contracted with the actual repair direction. An
+//!    unweighted residual gradient sums to zero, but its repair contraction
+//!    generally does not. Reflect-101 also requires the transpose `K^T`,
+//!    not plain `K`, at boundaries. Synthetic tests establish this distinction;
+//!    finite repair fidelity and native utility remain unproven. See
+//!    `benchmarks/pixel_adjoint_2026-09-14.md` and the historical C2b results.
 //! 3. **SIMD-padding columns** (padded width − width) carry feature mass that
 //!    the trimmed map cannot attribute (≤ ~3 % of columns; near-zero signal
 //!    since both planes zero-pad identically).
@@ -144,8 +159,10 @@ mod layout_ends {
     /// End of the basic block (`f0-155`) = start of the v1 pooled block.
     /// Used by the candidate coverage report and the per-width coverage gate.
     pub(crate) const BLOCK_END_BASIC: usize = 156;
+    /// End of the v1 peak block (max and L8, f156-227).
+    pub(crate) const BLOCK_END_V1_PEAKS: usize = 228;
     /// End of the v1 peak/masked/IW pooled block (`f156-371`) = start of v2.
-    /// Structurally NOT spatialized (module blind spot 1).
+    /// Max/masked/IW remain unsupported (module blind spot 1).
     pub(crate) const BLOCK_END_V1_POOLS: usize = 372;
     /// End of the v2 block (`f372-719`) = start of the append block.
     pub(crate) const BLOCK_END_V2: usize = 720;
@@ -188,6 +205,7 @@ use layout_ends::*;
 /// partition alignment (4/8/16 for AV1, 8 for JXL var-DCT) and every real
 /// query stays exact.
 #[non_exhaustive]
+#[derive(Clone, Debug)]
 pub struct AttributionResult {
     /// Grid-resolution signed density, row-major `grid_w × grid_h`, in
     /// per-pixel units (each value is its bin's mean; for `bin == 1` this is
@@ -241,7 +259,7 @@ impl AttributionResult {
     }
 
     /// Internal: build from the f64 accumulation canvas (SAT keeps f64 truth).
-    fn from_f64_canvas(canvas: Vec<f64>, width: usize, height: usize) -> Self {
+    pub(crate) fn from_f64_canvas(canvas: Vec<f64>, width: usize, height: usize) -> Self {
         debug_assert_eq!(canvas.len(), width * height);
         let sat = build_sat(|i| canvas[i], width, height);
         let density = canvas.iter().map(|&v| v as f32).collect();
@@ -379,6 +397,85 @@ impl AttributionResult {
         let v0 = self.grid_coord(y0, self.height, self.grid_h);
         let v1 = self.grid_coord(y1, self.height, self.grid_h);
         self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
+    }
+
+    /// Fractional-edge variant of [`query_rect`](Self::query_rect) — the
+    /// integral of the stored density over `[x0, x1) × [y0, y1)` with the
+    /// rectangle edges allowed to cut cells. Each cell's mass counts with
+    /// the fraction of its area the rectangle covers (the uniform-within-
+    /// cell reading); integer edges reproduce `query_rect` exactly. This
+    /// is the stated cut-block rule for the DVIFM steering field's
+    /// rectangle queries — a rect clipped mid-block receives that block's
+    /// `ε_b` weighted by covered area.
+    ///
+    /// Coordinates clamp to the canvas; empty/inverted rects return `0.0`.
+    /// Unbinned maps integrate cell-wise at the stored `f32` density; binned
+    /// maps keep their uniform-mass-within-bin semantics via the
+    /// bilinear-SAT path.
+    // Callers: `research::DvifmLevelField` (`training` + `custom-profiles`, in the
+    // `feature-regime-v2` research module) and a `dvifm` unit test.
+    #[cfg(all(
+        feature = "feature-regime-v2",
+        any(test, all(feature = "training", feature = "custom-profiles"))
+    ))]
+    pub(crate) fn query_rect_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+        let (x0, x1) = (
+            x0.clamp(0.0, self.width as f64),
+            x1.clamp(0.0, self.width as f64),
+        );
+        let (y0, y1) = (
+            y0.clamp(0.0, self.height as f64),
+            y1.clamp(0.0, self.height as f64),
+        );
+        if x0 >= x1 || y0 >= y1 {
+            return 0.0;
+        }
+        if self.bin == 1 {
+            let mut acc = 0.0f64;
+            let r_hi = (y1.ceil() as usize).min(self.height);
+            for r in (y0.floor() as usize)..r_hi {
+                let wy = ((r + 1) as f64).min(y1) - (r as f64).max(y0);
+                if wy <= 0.0 {
+                    continue;
+                }
+                let row = &self.density[r * self.width..(r + 1) * self.width];
+                let c_hi = (x1.ceil() as usize).min(self.width);
+                for (c, &v) in row.iter().enumerate().take(c_hi).skip(x0.floor() as usize) {
+                    let wx = ((c + 1) as f64).min(x1) - (c as f64).max(x0);
+                    if wx > 0.0 {
+                        acc += wy * wx * v as f64;
+                    }
+                }
+            }
+            return acc;
+        }
+        let u0 = self.grid_coord_f(x0, self.width, self.grid_w);
+        let u1 = self.grid_coord_f(x1, self.width, self.grid_w);
+        let v0 = self.grid_coord_f(y0, self.height, self.grid_h);
+        let v1 = self.grid_coord_f(y1, self.height, self.grid_h);
+        self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
+    }
+
+    /// `f64` twin of [`grid_coord`](Self::grid_coord) for fractional-edge
+    /// queries — same "fraction measured against the cell's REAL pixel
+    /// extent" rule so edge-clamped queries stay exact.
+    // Callers: `research::DvifmLevelField` (`training` + `custom-profiles`, in the
+    // `feature-regime-v2` research module) and a `dvifm` unit test.
+    #[cfg(all(
+        feature = "feature-regime-v2",
+        any(test, all(feature = "training", feature = "custom-profiles"))
+    ))]
+    fn grid_coord_f(&self, x: f64, limit: usize, grid: usize) -> (usize, f64) {
+        if x >= limit as f64 {
+            return (grid, 0.0);
+        }
+        if x <= 0.0 {
+            return (0, 0.0);
+        }
+        let idx = (x / self.bin as f64).floor() as usize;
+        let start = idx * self.bin;
+        let real = self.bin.min(limit - start);
+        (idx, (x - start as f64) / real as f64)
     }
 
     /// Pixel coordinate → (grid node index, fractional advance into the next
@@ -687,6 +784,37 @@ impl BinAccum {
             return;
         }
         let inv_area = 1.0 / ((factor * factor) as f64);
+        if self.bin.is_multiple_of(factor) {
+            // Every coarse footprint lies in one bin. Keep each bin's
+            // source-row/source-column addition chain and the original
+            // multiply order, including underflow and signed zero handling.
+            let coarse_bin = self.bin / factor;
+            let full_cols = (self.width / factor).min(sw);
+            for sy in 0..sh.min(self.height.div_ceil(factor)) {
+                let oy = (self.height - sy * factor).min(factor) as f64;
+                let area = oy * factor as f64;
+                let row_bins =
+                    &mut self.bins[(sy / coarse_bin) * self.gw..(sy / coarse_bin + 1) * self.gw];
+                for (bx, cell) in row_bins.iter_mut().enumerate() {
+                    let first = bx * coarse_bin;
+                    let end = (first + coarse_bin).min(full_cols);
+                    for sx in first..end {
+                        let v = plane.get(sy * sw + sx) * inv_area;
+                        if v != 0.0 {
+                            *cell += v * area;
+                        }
+                    }
+                }
+                let right = self.width % factor;
+                if right != 0 && full_cols < sw {
+                    let v = plane.get(sy * sw + full_cols) * inv_area;
+                    if v != 0.0 {
+                        row_bins[full_cols / coarse_bin] += v * (oy * right as f64);
+                    }
+                }
+            }
+            return;
+        }
         for sy in 0..sh {
             let y0 = sy * factor;
             if y0 >= self.height {
@@ -874,6 +1002,8 @@ fn process_channel_banded(
             // The attribution walk emits no append/append2 slots, so it never
             // needs the free raw moments.
             crate::fused::FreeExtrasWork::default(),
+            crate::fused::ExtPoolsWork::default(),
+            &[],
         );
         merge_acc(&mut acc, &band);
         y = inner_end;
@@ -1369,6 +1499,7 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "attribution density requires blur_passes == 1 (all shipped profiles)",
@@ -1470,30 +1601,787 @@ mod tests {
     use crate::{RgbSlice, Zensim, ZensimProfile};
     use std::sync::OnceLock;
 
+    std::thread_local! {
+        pub(super) static MAX_REFERENCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static MAX_REFERENCE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn prepared_max_projection_preserves_public_outputs() {
+        let bits = |values: &[f64]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        let models: Vec<_> = if let Ok(paths) = std::env::var("ZENSIM_MAX_PROJECTION_MODELS") {
+            paths
+                .split(',')
+                .map(|path| crate::mlp::Model::from_bytes(&std::fs::read(path).unwrap()).unwrap())
+                .collect()
+        } else {
+            let recipe = serde_json::json!({
+                "schema_hash":1,"scaler_mean":vec![0.0;228],"scaler_scale":vec![1.0;228],
+                "layers":[{"in_dim":228,"out_dim":1,"activation":"identity","dtype":"f32",
+                    "weights":(0..228).map(|i| -0.001 * (1 + i % 7) as f64).collect::<Vec<_>>(),
+                    "biases":[100.0]}]
+            });
+            let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+            vec![crate::mlp::Model::from_bytes(&bytes).unwrap()]
+        };
+        let weights = vec![1.0 / models.len() as f64; models.len()];
+        let mut comparisons = 0;
+        for (w, h) in [(17, 9), (97, 131), (256, 257)] {
+            let src: Vec<_> = (0..w * h)
+                .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
+                .collect();
+            let mut dst = src.clone();
+            for i in (0..dst.len()).step_by(11) {
+                dst[i] = [0, 255, 0];
+            }
+            let rs = RgbSlice::new(&src, w, h);
+            let ds = RgbSlice::new(&dst, w, h);
+            for parallel in [false, true] {
+                for finite in [false, true] {
+                    let scorer = || {
+                        crate::BakeScorer::ensemble(&models, Some(&weights))
+                            .unwrap()
+                            .with_parallel(parallel)
+                            .with_finite_moment_refinement(finite)
+                    };
+                    let mut old = scorer();
+                    let mut new = scorer();
+                    let scalar = new.compute(&rs, &ds, None).unwrap();
+                    let mut old = old.prepare_steering(&rs, 8).unwrap();
+                    let mut new = new.prepare_steering(&rs, 8).unwrap();
+                    for image in [&ds, &rs, &ds] {
+                        let before = MAX_REFERENCE_CALLS.with(std::cell::Cell::get);
+                        MAX_REFERENCE.with(|flag| flag.set(true));
+                        let a = old.compute(image, None);
+                        MAX_REFERENCE.with(|flag| flag.set(false));
+                        let a = a.unwrap();
+                        let b = new.compute(image, None).unwrap();
+                        if !b.result().is_identical() {
+                            assert!(MAX_REFERENCE_CALLS.with(std::cell::Cell::get) > before);
+                        }
+                        assert_eq!(a.result().score().to_bits(), b.result().score().to_bits());
+                        assert_eq!(bits(a.result().features()), bits(b.result().features()));
+                        assert_eq!(bits(a.sensitivities()), bits(b.sensitivities()));
+                        assert_eq!(a.unsupported_feature_ids(), b.unsupported_feature_ids());
+                        assert_eq!(
+                            a.unsupported_refinement_feature_ids(),
+                            b.unsupported_refinement_feature_ids()
+                        );
+                        if !b.result().is_identical() {
+                            assert_eq!(bits(scalar.features()), bits(b.result().features()));
+                            assert_eq!(scalar.score().to_bits(), b.result().score().to_bits());
+                        }
+                        for (x0, y0, x1, y1) in (0..h)
+                            .step_by(8)
+                            .flat_map(|y| {
+                                (0..w)
+                                    .step_by(8)
+                                    .map(move |x| (x, y, (x + 8).min(w), (y + 8).min(h)))
+                            })
+                            .chain([
+                                (0, 0, w, h),
+                                (1, 1, w - 1, h - 1),
+                                (0, 0, 1, 1),
+                                (w, h, w, h),
+                            ])
+                        {
+                            assert_eq!(
+                                a.attribution().query_rect(x0, y0, x1, y1).to_bits(),
+                                b.attribution().query_rect(x0, y0, x1, y1).to_bits()
+                            );
+                            assert_eq!(
+                                a.refinement_gain(x0, y0, x1, y1).to_bits(),
+                                b.refinement_gain(x0, y0, x1, y1).to_bits()
+                            );
+                            comparisons += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "public max projection parity: {} model members, {comparisons} rectangle comparisons",
+            models.len()
+        );
+    }
+
+    #[test]
+    fn max_projection_matches_pixel_reference_across_sampling_and_masks() {
+        let mut contracts = vec![None];
+        for kernel in ["triangle", "mitchell", "robidouxsharp"] {
+            for (version, channels, ratio) in [
+                ("v1", "xyb", "3/2"),
+                ("v1", "xyb", "2"),
+                ("v1", "xyb", "3"),
+                ("v1", "y", "3/2"),
+                ("v1", "y", "2"),
+                ("v1", "y", "3"),
+                ("v2", "xyb", "1,2,4,8"),
+                ("v2", "xyb", "1,3,5,7"),
+                ("v2", "xyb", "1,2,3,5"),
+            ] {
+                contracts.push(Some(format!("{version}:{channels}:{kernel}:{ratio}")));
+            }
+        }
+        let mut cases = 0;
+        for contract in contracts {
+            let sampling = contract.as_ref().map(|contract| {
+                let recipe = serde_json::json!({
+                    "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+                    "metadata":[{"key":crate::sampling::KEY,"type":"utf8","text":contract}],
+                    "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                        "dtype":"f32","weights":[1.0],"biases":[0.0]}]
+                });
+                let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
+                crate::sampling::Sampling::from_model(&model)
+                    .unwrap()
+                    .unwrap()
+            });
+            for (w, h) in [(1, 1), (17, 9), (97, 83), (129, 131)] {
+                let pixels = vec![[0u8; 3]; w * h];
+                let source = RgbSlice::new(&pixels, w, h);
+                let pre = sampling.map_or_else(
+                    || test_zensim().precompute_reference(&source).unwrap(),
+                    |s| s.reference(&source, false),
+                );
+                for scale in 0..4 {
+                    let (_, sw, sh) = pre.scale(scale);
+                    let mut ret = crate::streaming::AttrScaleRetention::new(sw * sh);
+                    let mut src: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; sw * sh]);
+                    let mut dst = src.clone();
+                    for c in 0..3 {
+                        for i in 0..sw * sh {
+                            // Zeros, repeated maxima, both edge branches, and
+                            // non-binary fractions expose SIMD/reduction drift.
+                            src[c][i] = ((i * 17 + c * 3) % 29) as f32 / 31.0;
+                            dst[c][i] = ((i * 7 + c * 13) % 31) as f32 / 29.0;
+                            ret.mu1[c][i] = ((i * 11 + c) % 23) as f32 / 27.0;
+                            ret.mu2[c][i] = ((i * 3 + c) % 19) as f32 / 23.0;
+                            ret.sd[c][i] = if c == 0 { 0.0 } else { (i % 11) as f32 / 13.0 };
+                        }
+                    }
+                    for mask in 0..8 {
+                        let mut sensitivities = [0.0; 72];
+                        let mut expected = 0;
+                        for c in 0..3 {
+                            for slot in 0..3 {
+                                if mask & (1 << ((slot + c) % 3)) != 0 {
+                                    sensitivities[(scale * 3 + c) * 6 + slot] =
+                                        (c as f64 - 0.5) * 0.7;
+                                    expected += 1;
+                                }
+                            }
+                        }
+                        let mut maps = Vec::new();
+                        // The callee compares every output bit with the old
+                        // per-pixel path under cfg(test), including public tests.
+                        retain_max_removals(
+                            &mut maps,
+                            &sensitivities,
+                            scale,
+                            w,
+                            h,
+                            sw,
+                            sh,
+                            src.each_ref().map(Vec::as_slice),
+                            dst.each_ref().map(Vec::as_slice),
+                            &ret,
+                            pre.sampling_geometry.as_ref(),
+                        );
+                        assert_eq!(maps.len(), expected);
+                        cases += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 3584);
+        eprintln!("max projection exact reference cases: {cases}");
+    }
+
+    #[test]
+    fn max_rectangles_match_explicit_reflected_source_footprints() {
+        let mut queries = 0;
+        for (w, h) in [(1, 1), (3, 5), (17, 23), (65, 71), (97, 83)] {
+            // Coordinate-coded pixels let the actual reflection owner supply
+            // an independent expansion, rather than copying its index formula.
+            let src: Vec<[u8; 3]> = (0..h)
+                .flat_map(|y| (0..w).map(move |x| [x as u8, y as u8, 0]))
+                .collect();
+            let rs = RgbSlice::new(&src, w, h);
+            let extended = reflect_pad_to_min(&rs);
+            let pre = test_zensim().precompute_reference(&rs).unwrap();
+            let cuts = |n: usize| {
+                let mut v = if n <= 5 {
+                    (0..=n).collect()
+                } else {
+                    vec![0, 1, 7, 8, 16, n / 2, n - 1, n]
+                };
+                v.retain(|x| *x <= n);
+                v.sort_unstable();
+                v.dedup();
+                v
+            };
+            let xc = cuts(w);
+            let yc = cuts(h);
+            for scale in 0..4 {
+                let (_, sw, sh) = pre.scale(scale);
+                let factor = 1 << scale;
+                let xs: Vec<Vec<usize>> = (0..sw)
+                    .map(|x| {
+                        (x * factor..(x + 1) * factor)
+                            .map(|i| {
+                                usize::from(extended.row_bytes(0)[3 * i.min(extended.width() - 1)])
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let ys: Vec<Vec<usize>> = (0..sh)
+                    .map(|y| {
+                        (y * factor..(y + 1) * factor)
+                            .map(|i| {
+                                usize::from(extended.row_bytes(i.min(extended.height() - 1))[1])
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let xb = max_axis_footprints(w, sw, scale);
+                let yb = max_axis_footprints(h, sh, scale);
+                for (expanded, bounds) in xs.iter().zip(&xb).chain(ys.iter().zip(&yb)) {
+                    assert_eq!(
+                        (
+                            *expanded.iter().min().unwrap(),
+                            *expanded.iter().max().unwrap()
+                        ),
+                        *bounds
+                    );
+                }
+                let signals: Vec<f32> = (0..sw * sh)
+                    .map(|i| ((i * 13 + i / sw * 7) % 11) as f32)
+                    .collect();
+                let global = signals.iter().copied().fold(0.0_f32, f32::max);
+                let mut map = MaxRemoval::new(156, -1.0, w, h);
+                for y in 0..sh {
+                    for x in 0..sw {
+                        map.add(signals[y * sw + x], xb[x], yb[y]);
+                    }
+                }
+                map.finish();
+                assert_eq!(map.global(), f64::from(global));
+                assert_eq!(
+                    map.feature_drop(0, 0, usize::MAX, usize::MAX),
+                    f64::from(global)
+                );
+                assert_eq!(map.feature_drop(usize::MAX, 0, w, h), 0.0);
+                assert_eq!(map.feature_drop(0, usize::MAX, w, h), 0.0);
+                for &x0 in &xc {
+                    for &x1 in &xc {
+                        if x1 < x0 {
+                            continue;
+                        }
+                        let remove_x: Vec<bool> = xs
+                            .iter()
+                            .map(|v| v.iter().all(|x| x0 <= *x && *x < x1))
+                            .collect();
+                        for &y0 in &yc {
+                            for &y1 in &yc {
+                                if y1 < y0 {
+                                    continue;
+                                }
+                                let remove_y: Vec<bool> = ys
+                                    .iter()
+                                    .map(|v| v.iter().all(|y| y0 <= *y && *y < y1))
+                                    .collect();
+                                let mut outside = 0.0_f32;
+                                for y in 0..sh {
+                                    for x in 0..sw {
+                                        if !remove_x[x] || !remove_y[y] {
+                                            outside = outside.max(signals[y * sw + x]);
+                                        }
+                                    }
+                                }
+                                assert_eq!(
+                                    map.feature_drop(x0, y0, x1, y1),
+                                    f64::from(global) - f64::from(outside),
+                                    "{w}x{h} scale{scale} ({x0},{y0})..({x1},{y1})"
+                                );
+                                queries += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(queries > 10000);
+        eprintln!("max source-footprint rectangle queries: {queries}");
+    }
+
+    #[test]
+    fn max_ties_are_non_additive_and_mismatches_keep_coverage_missing() {
+        let mut map = MaxRemoval::new(156, -1.0, 3, 1);
+        for (x, v) in [4.0, 2.0, 4.0].into_iter().enumerate() {
+            map.add(v, (x, x), (0, 0));
+        }
+        map.finish();
+        assert_eq!(map.feature_drop(0, 0, 1, 1), 0.0);
+        assert_eq!(map.feature_drop(1, 0, 3, 1), 0.0);
+        assert_eq!(map.feature_drop(0, 0, 3, 1), 4.0);
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            let mut features = vec![0.0; 228];
+            features[156] = 4.0;
+            let mut maps = vec![map];
+            assert_eq!(bind_max_removals(&mut maps, &features, &[156, 228]), [228]);
+            features[156] = f64::from_bits(4.0_f64.to_bits() + 1);
+            assert_eq!(
+                bind_max_removals(&mut maps, &features, &[156, 228]),
+                [156, 228]
+            );
+            assert!(maps.is_empty());
+        }
+    }
+
     #[cfg(feature = "feature-regime-v2")]
     #[test]
     fn candidate_coverage_distinguishes_variants_reference_only_and_missing_integrands() {
         use crate::feature_plan::Plan;
         use crate::feature_set_id::SlotSet;
-        let wanted = SlotSet::from_slots([0, 156, 377, 924, 926, 927, 944]);
+        let wanted = SlotSet::from_slots([0, 156, 159, 227, 228, 377, 924, 926, 927, 944]);
         let mut plan = Plan::derive(&wanted, 960).unwrap();
         let mut sensitivities = vec![0.; 960];
-        for id in [0, 156, 377, 924, 926, 927, 944] {
+        for id in [0, 156, 159, 227, 228, 377, 924, 926, 927, 944] {
             sensitivities[id] = -1.;
         }
         let (spatial, missing) = candidate_map_sensitivities(&plan, &sensitivities);
-        assert_eq!(missing, [156, 944]);
+        assert_eq!(missing, [156, 228, 944]);
+        assert_eq!(spatial[159], -1.);
+        assert_eq!(spatial[227], -1.);
         assert_eq!(spatial[377], -1.);
         assert_eq!(spatial[924], -1.);
         assert_eq!(spatial[926], 0.); // Reference-only luma.
         assert_eq!(spatial[927], 0.); // SDR highlight structural zero.
         plan.compute.append2_dst_activity = true;
         let (_, missing) = candidate_map_sensitivities(&plan, &sensitivities);
-        assert_eq!(missing, [156, 924, 944]);
+        assert_eq!(missing, [156, 228, 924, 944]);
         plan.compute.v2_blocks = false;
         let (spatial, missing) = candidate_map_sensitivities(&plan, &sensitivities);
-        assert_eq!(missing, [156, 377, 924, 944]);
-        assert_eq!(spatial.len(), 156); // No stale retention is consulted.
+        assert_eq!(missing, [156, 228, 377, 924, 944]);
+        assert_eq!(spatial.len(), 228); // No stale v2 retention is consulted.
+        assert_eq!(spatial[159], -1.);
+        assert_eq!(spatial[227], -1.);
+    }
+
+    #[test]
+    fn fused_l8_matches_separate_passes_with_tails_and_signed_coefficients() {
+        for n in [1, 7, 8, 15, 16, 17, 63, 129, 1025] {
+            let plane = |seed: usize| -> Vec<f32> {
+                (0..n)
+                    .map(|i| ((i * 37 + seed * 53) % 257) as f32 / 128.0)
+                    .collect()
+            };
+            let planes = [plane(0), plane(1), plane(2), plane(3), plane(4)];
+            let [sd, src, dst, mu1, mu2] = planes.each_ref().map(Vec::as_slice);
+            for co in [[0.0; 12], core::array::from_fn(|i| (i as f32 - 5.0) / 13.0)] {
+                for l8 in [[1.0, -0.75, 0.5], [1e30, -1e-30, 0.0], [0.0; 3]] {
+                    let mut id = plane(5);
+                    let mut win = plane(6);
+                    let mut expected_id = id.clone();
+                    let mut expected_win = win.clone();
+                    fused_combine_plane_f32(
+                        sd,
+                        src,
+                        dst,
+                        mu1,
+                        mu2,
+                        co,
+                        &mut expected_id,
+                        &mut expected_win,
+                    );
+                    fused_combine_l8_f32(
+                        sd,
+                        src,
+                        dst,
+                        mu1,
+                        mu2,
+                        l8,
+                        &mut expected_id,
+                        &mut expected_win,
+                    );
+                    combine_basic_and_l8::<true>(sd, src, dst, mu1, mu2, co, l8, &mut id, &mut win);
+                    for (a, b) in id
+                        .iter()
+                        .chain(&win)
+                        .zip(expected_id.iter().chain(&expected_win))
+                    {
+                        assert_eq!(a.to_bits(), b.to_bits(), "length {n}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn l8_reconstructs_each_canonical_feature() {
+        let (w, h) = (128, 128);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim().with_parallel(false);
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let canonical = z.compute_with_ref(&pre, &ds).unwrap();
+        for cell in 0..12 {
+            for slot in 3..6 {
+                let k = cell * 6 + slot;
+                let mut s_peaks = [0.0; 72];
+                s_peaks[k] = if k % 2 == 0 { -1.0 } else { 0.75 };
+                let mut canvas = vec![0.0; w * h];
+                let (result, _, _) = z
+                    .fused_basic_into(
+                        &pre,
+                        &ds,
+                        &[],
+                        &s_peaks,
+                        None,
+                        None,
+                        &mut AttrSinkF32::Canvas(&mut canvas),
+                    )
+                    .unwrap();
+                assert_eq!(result.features(), canonical.features());
+                assert_eq!(result.score().to_bits(), canonical.score().to_bits());
+                let expected = -s_peaks[k] * canonical.features()[156 + k] / 8.0;
+                let actual: f64 = canvas.iter().map(|v| f64::from(*v)).sum();
+                if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
+                    panic!("f{}: {actual} != {expected}", 156 + k);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn candidate_map_skipping_matches_the_full_legacy_map() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "attribution::tests::candidate_map_skipping_matches_the_full_legacy_map",
+            "LEAN-MAP-PARITY",
+        ) {
+            return;
+        }
+        for (w, h) in [(17, 9), (127, 97), (256, 193)] {
+            let (src, dst) = test_pair(w, h);
+            let (rs, ds) = (
+                crate::RgbSlice::new(&src, w, h),
+                crate::RgbSlice::new(&dst, w, h),
+            );
+            for parallel in [false, true] {
+                let z = crate::Zensim::new(crate::ZensimProfile::B).with_parallel(parallel);
+                let pre = z.precompute_reference(&rs).unwrap();
+                for mode in 0..4 {
+                    let mut s = vec![0.0; 156];
+                    for (id, v) in s.iter_mut().enumerate() {
+                        if (mode == 0 || id % 13 < 10)
+                            && (mode < 2 || !matches!(id,0..13|26..39))
+                            && (mode < 3 || matches!(id % 13, 0..=2 | 9))
+                        {
+                            *v = -(id as f64 + 1.0) / 157.0;
+                        }
+                    }
+                    let run = |revision| {
+                        let mut bins = BinAccum::new(w, h, 8);
+                        z.fused_basic_into_at_revision(
+                            &pre,
+                            &ds,
+                            &s,
+                            &[],
+                            None,
+                            None,
+                            &mut AttrSinkF32::Bins(&mut bins),
+                            revision,
+                            None,
+                            8,
+                            None,
+                        )
+                        .unwrap();
+                        bins.into_result()
+                    };
+                    let full = run(None);
+                    let lean = run(Some(crate::feature_defs::FormulaRevision::Rev3));
+                    for y in (0..h).step_by(8) {
+                        for x in (0..w).step_by(8) {
+                            assert_eq!(
+                                full.query_rect(x, y, x + 17, y + 19).to_bits(),
+                                lean.query_rect(x, y, x + 17, y + 19).to_bits(),
+                                "{w}x{h} mode{mode} parallel{parallel}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        println!("LEAN-MAP-PARITY");
+    }
+
+    #[test]
+    fn cached_hf_gain_coefficients_follow_the_served_formula() {
+        use crate::hf_gain_form::{HfGainForm, hf_energy_gain};
+        // Differentiate the actual pooled feature by perturbing its raw sum.
+        // This fails for the former unconditional 1/sum_src derivative.
+        for form in [
+            HfGainForm::RatioExcess,
+            HfGainForm::SaturatingExcess,
+            HfGainForm::BoundedExcess,
+            HfGainForm::Log1pExcess,
+        ] {
+            for ratio in [1.1, 2.0, 100.0] {
+                let (src, n) = (0.25, 128.0);
+                let dst = src * ratio;
+                let stats = crate::metric::ScaleStats {
+                    hf_sq_dst_sum: [dst; 3],
+                    hf_energy_gain: [hf_energy_gain(form, src / n, dst / n); 3],
+                    ..Default::default()
+                };
+                let mut sensitivities = [0.0; 156];
+                sensitivities[12] = -2.5;
+                let co =
+                    SlotCoeffs::from_scale_stats(&sensitivities, 0, &stats, 0, n, src, 0.5, form);
+                let eps = dst * 1e-5;
+                let fd = -2.5
+                    * (hf_energy_gain(form, src / n, (dst + eps) / n)
+                        - hf_energy_gain(form, src / n, (dst - eps) / n))
+                    / (2.0 * eps);
+                assert!(
+                    (co.c_hfe - fd).abs() <= 1e-8 * fd.abs().max(1e-6),
+                    "{form:?} {ratio}: {} != {fd}",
+                    co.c_hfe
+                );
+                if form == HfGainForm::RatioExcess {
+                    assert_eq!(co.c_hfe, -2.5 / src);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn l8_finite_moment_removal_and_near_zero_coefficients() {
+        // Independent closed-form moment interventions, NOT pixel edits:
+        // the latter also move neighboring means and need codec experiments.
+        for amplitude in [0.0_f32, 3e-6, 0.1, 1.0] {
+            let values: Vec<f32> = (0..64).map(|i| amplitude * (i + 1) as f32 / 64.0).collect();
+            let powers: Vec<f64> = values
+                .iter()
+                .map(|v| {
+                    let v2 = v * v;
+                    let v4 = v2 * v2;
+                    f64::from(v4 * v4)
+                })
+                .collect();
+            let total: f64 = powers.iter().sum();
+            let root = (total / 64.0).powf(0.125);
+            let stats = crate::metric::ScaleStats {
+                ssim_p95: [root; 3],
+                ..Default::default()
+            };
+            let mut s = [0.0; 72];
+            s[3] = -256.0;
+            let co = l8_coefficients(&s, 0, 0, &stats, 64.0);
+            let mut id = [0.0; 64];
+            let mut win = [0.0; 64];
+            fused_combine_l8_f32(
+                &values, &[0.0; 64], &[0.0; 64], &[0.0; 64], &[0.0; 64], co, &mut id, &mut win,
+            );
+            assert!(win.iter().all(|v| v.is_finite()));
+            assert_eq!(id, [0.0; 64]);
+            if amplitude == 0.0 {
+                assert_eq!(win, [0.0; 64]);
+                continue;
+            }
+            if amplitude == 3e-6 {
+                // A f32 coefficient would overflow and poison the map even
+                // though its final density is representable and nonzero.
+                assert!(co[0] > f64::from(f32::MAX));
+                assert!(win.iter().any(|v| *v > 0.0));
+            }
+            for end in [1, 16, 32, 63, 64] {
+                let fraction = powers[..end].iter().sum::<f64>() / total;
+                let predicted: f64 = win[..end].iter().map(|v| f64::from(*v)).sum();
+                let expected = 256.0 * root * fraction / 8.0;
+                assert!((predicted - expected).abs() <= 2e-5 * expected.abs().max(1e-12));
+                let exact = 256.0 * root * (1.0 - (1.0 - fraction).powf(0.125));
+                // Concavity bounds: first order underpredicts finite removal;
+                // at full removal the true effect is eight times larger.
+                let tol = 2e-5 * (256.0 * root).max(1e-12);
+                assert!(predicted <= exact + tol);
+                assert!(exact <= 8.0 * predicted + tol);
+                let epsilon = 1e-5;
+                let derivative =
+                    256.0 * root * (1.0 - (1.0 - epsilon * fraction).powf(0.125)) / epsilon;
+                assert!((derivative - predicted).abs() <= 2e-5 * (256.0 * root).max(1e-12));
+            }
+        }
+    }
+
+    #[test]
+    fn aligned_bin_fold_matches_independent_footprint_intersections() {
+        for (width, height) in [(1, 1), (13, 19), (32, 24), (17, 8)] {
+            for factor in [2, 3, 4, 8] {
+                for bin in [1, 2, 3, 4, 6, 8, 16] {
+                    let (sw, sh) = (width / factor + 3, height / factor + 3);
+                    let values64 = [
+                        0.0,
+                        -0.0,
+                        f64::from_bits(1),
+                        1e100,
+                        -7.0,
+                        -1e100,
+                        9.125,
+                        1e-100,
+                    ];
+                    let values32 = [
+                        0.0,
+                        -0.0,
+                        f32::from_bits(1),
+                        1e20,
+                        -7.0,
+                        -1e20,
+                        9.125,
+                        1e-20,
+                    ];
+                    let p64: Vec<f64> = (0..sw * sh).map(|i| values64[i % 8]).collect();
+                    let p32: Vec<f32> = (0..sw * sh).map(|i| values32[i % 8]).collect();
+                    for plane in [PlaneRef::F64(&p64), PlaneRef::F32(&p32)] {
+                        let mut actual = BinAccum::new(width, height, bin);
+                        for (i, x) in actual.bins.iter_mut().enumerate() {
+                            *x = i as f64 * 0.125 - 2.0;
+                        }
+                        let mut expected = actual.bins.clone();
+                        // Independent geometry reference: visit every source
+                        // footprint and intersect it with every output bin.
+                        // Unlike the fast path, no alignment is assumed.
+                        for _ in 0..2 {
+                            for sy in 0..sh {
+                                for sx in 0..sw {
+                                    let v =
+                                        plane.get(sy * sw + sx) * (1.0 / (factor * factor) as f64);
+                                    if v == 0.0 {
+                                        continue;
+                                    }
+                                    for (i, cell) in expected.iter_mut().enumerate() {
+                                        let (bx, by) = (i % actual.gw, i / actual.gw);
+                                        let ox = ((sx + 1) * factor)
+                                            .min((bx + 1) * bin)
+                                            .min(width)
+                                            .saturating_sub((sx * factor).max(bx * bin));
+                                        let oy = ((sy + 1) * factor)
+                                            .min((by + 1) * bin)
+                                            .min(height)
+                                            .saturating_sub((sy * factor).max(by * bin));
+                                        if ox != 0 && oy != 0 {
+                                            *cell += v * (oy as f64 * ox as f64);
+                                        }
+                                    }
+                                }
+                            }
+                            actual.add_scale_plane(plane, sw, sh, factor);
+                            for (i, (a, b)) in actual.bins.iter().zip(&expected).enumerate() {
+                                assert_eq!(
+                                    a.to_bits(),
+                                    b.to_bits(),
+                                    "{width}x{height} factor={factor} bin={bin} cell={i}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn finite_moment_correction_matches_removed_raw_powers() {
+        for p in [2_u32, 4, 8] {
+            let values: Vec<f64> = (1..=64).map(|i| f64::from(i) / 64.0).collect();
+            let powers: Vec<f64> = values.iter().map(|x| x.powi(p as i32)).collect();
+            let total: f64 = powers.iter().sum();
+            let root = (total / 64.0).powf(1.0 / f64::from(p));
+            let map = MomentRemoval {
+                sensitivity: -7.0,
+                root,
+                power: p,
+                total,
+                mass: AttributionResult::from_bin_sums(powers.clone(), 64, 1, 1),
+            };
+            for end in [0, 1, 16, 63, 64] {
+                let removed: f64 = powers[..end].iter().sum();
+                let next = ((total - removed).max(0.0) / 64.0).powf(1.0 / f64::from(p));
+                let first_order = 7.0 * root * removed / (f64::from(p) * total);
+                let actual = first_order + map.correction(0, 0, end, 1);
+                assert!((actual - 7.0 * (root - next)).abs() < 2e-12);
+            }
+            assert_eq!(finite_root_extra(0.0, p), 0.0);
+            assert!(finite_root_extra(1e-12, p).abs() < 1e-23);
+            assert_eq!(finite_root_extra(1.0, p), 1.0 - 1.0 / f64::from(p));
+        }
+    }
+
+    #[test]
+    fn l8_bins_preserve_aligned_queries_on_padded_and_tiny_images() {
+        let s_peaks: Vec<f64> = (0..72)
+            .map(|k| if k % 6 >= 3 { -1.0 } else { 0.0 })
+            .collect();
+        for (w, h) in [(1, 1), (17, 23), (97, 83), (128, 160)] {
+            let (src, dst) = test_pair(w, h);
+            let z = test_zensim();
+            let rs = RgbSlice::new(&src, w, h);
+            let ds = RgbSlice::new(&dst, w, h);
+            let pre = z.precompute_reference(&rs).unwrap();
+            let (_, cw, ch) = pre.scale(0);
+            let mut canvas = vec![0.0; cw * ch];
+            let (canonical, _, _) = z
+                .fused_basic_into(
+                    &pre,
+                    &ds,
+                    &[],
+                    &s_peaks,
+                    None,
+                    None,
+                    &mut AttrSinkF32::Canvas(&mut canvas),
+                )
+                .unwrap();
+            let mut trimmed = Vec::new();
+            for y in 0..h {
+                trimmed.extend_from_slice(&canvas[y * cw..y * cw + w]);
+            }
+            let full = AttributionResult::from_density(trimmed, w, h);
+            let tolerance = 2e-5 * full.query_rect(0, 0, w, h).abs().max(1e-12);
+            for bin in [1, 8, 16] {
+                let mut accum = BinAccum::new(w, h, bin);
+                let (result, _, _) = z
+                    .fused_basic_into(
+                        &pre,
+                        &ds,
+                        &[],
+                        &s_peaks,
+                        None,
+                        None,
+                        &mut AttrSinkF32::Bins(&mut accum),
+                    )
+                    .unwrap();
+                assert_eq!(result.features(), canonical.features());
+                assert_eq!(result.score().to_bits(), canonical.score().to_bits());
+                let map = accum.into_result();
+                assert!(map.density().iter().all(|v| v.is_finite()));
+                for y in (0..h).step_by(bin) {
+                    for x in (0..w).step_by(bin) {
+                        let (x1, y1) = ((x + bin).min(w), (y + bin).min(h));
+                        let delta = map.query_rect(x, y, x1, y1) - full.query_rect(x, y, x1, y1);
+                        assert!(
+                            delta.abs() <= tolerance,
+                            "{w}x{h} bin{bin} ({x},{y}): {delta}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Extended-features test profile (all channels/scales active, default
@@ -2973,7 +3861,6 @@ fn coeffs_to_f32(co: &SlotCoeffs) -> [f32; 12] {
 /// Precision class: the density-sum identities move from the f64 path's
 /// 1e-9/1e-6 to ~1e-5 relative (measured; the standalone f64 path and its
 /// strict tests are unchanged — this kernel serves the fused entry only).
-#[autoversion]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fused_combine_plane_f32(
     sd: &[f32],
@@ -2982,6 +3869,22 @@ pub(crate) fn fused_combine_plane_f32(
     mu1: &[f32],
     mu2: &[f32],
     co: [f32; 12],
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    combine_basic_and_l8::<false>(sd, src, dst, mu1, mu2, co, [0.0; 3], id_plane, win_plane);
+}
+
+#[autoversion]
+#[allow(clippy::too_many_arguments)]
+fn combine_basic_and_l8<const L8: bool>(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    co: [f32; 12],
+    l8: [f64; 3],
     id_plane: &mut [f32],
     win_plane: &mut [f32],
 ) {
@@ -3014,6 +3917,586 @@ pub(crate) fn fused_combine_plane_f32(
         let px_term = co[9] * (pd * pd);
         id_plane[i] += px_term + res_term;
         win_plane[i] += win_term;
+        if L8 {
+            // Preserve both old accumulation/rounding points. Only the loads,
+            // division and powers are shared; L8 coefficients remain f64.
+            let sd4 = sd2 * sd2;
+            let a4 = a2 * a2;
+            let d4 = dt2 * dt2;
+            win_plane[i] += (l8[0] * f64::from(sd4 * sd4)) as f32;
+            id_plane[i] += (l8[1] * f64::from(a4 * a4) + l8[2] * f64::from(d4 * d4)) as f32;
+        }
+    }
+}
+
+/// Coefficients for the three L8 slots in each six-slot peak cell. Despite
+/// their historical `p95` names, these stats are eighth-root means, not
+/// quantiles. Retain f64 coefficients: a representable f32 eighth moment can
+/// require a coefficient above f32::MAX, while its map contribution is tiny.
+fn l8_coefficients(
+    s: &[f64],
+    scale: usize,
+    channel: usize,
+    stats: &crate::metric::ScaleStats,
+    n: f64,
+) -> [f64; 3] {
+    let roots = [
+        stats.ssim_p95[channel],
+        stats.art_p95[channel],
+        stats.det_p95[channel],
+    ];
+    core::array::from_fn(|slot| {
+        let sensitivity = s
+            .get((scale * 3 + channel) * 6 + 3 + slot)
+            .copied()
+            .unwrap_or(0.0);
+        if sensitivity == 0.0 || roots[slot] <= 0.0 {
+            0.0
+        } else {
+            -sensitivity / (8.0 * n * roots[slot].powi(7))
+        }
+    })
+}
+
+/// Logical source-coordinate bounds owned by each sample along a pyramid
+/// axis. This is a frozen-signal ownership model, not the blur dependency
+/// graph. Reflection precedes zero padding; padding belongs to the nearest
+/// extended-image edge. Halving drops odd trailing samples, as the producer
+/// does. Explicit bounds also handle noncontiguous reflected footprints.
+fn max_axis_footprints(logical: usize, scale_len: usize, scale: usize) -> Vec<(usize, usize)> {
+    let extended = logical.max(MIN_PYRAMID_DIM);
+    let factor = 1usize << scale;
+    (0..scale_len)
+        .map(|i| {
+            let mut lo = logical;
+            let mut hi = 0;
+            for j in i * factor..(i + 1) * factor {
+                let source = crate::metric::reflect_index(j.min(extended - 1), logical);
+                lo = lo.min(source);
+                hi = hi.max(source);
+            }
+            (lo, hi)
+        })
+        .collect()
+}
+
+/// Non-additive max removal, retained in logical source coordinates. A signal
+/// survives a rectangle if ANY owned source coordinate is outside it. The
+/// four one-dimensional projections answer that union exactly, including
+/// ties; no full signal plane is retained.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+pub(crate) struct MaxRemoval {
+    feature_id: usize,
+    sensitivity: f64,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    top: Vec<f32>,
+    bottom: Vec<f32>,
+}
+
+/// Opt-in finite-root correction. The integral contains only base-image mass.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+pub(crate) struct MomentRemoval {
+    sensitivity: f64,
+    root: f64,
+    power: u32,
+    total: f64,
+    mass: AttributionResult,
+}
+
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+fn finite_root_extra(fraction: f64, power: u32) -> f64 {
+    let r = fraction.clamp(0.0, 1.0);
+    // Factor 1-u^p into (1-u)(1+u)... for p=2,4,8. This avoids
+    // cancellation in 1-(1-r)^(1/p) and needs only square roots.
+    let mut u = 1.0 - r;
+    let mut denominator = 1.0;
+    for _ in 0..power.trailing_zeros() {
+        u = u.sqrt();
+        denominator *= 1.0 + u;
+    }
+    r / denominator - r / f64::from(power)
+}
+
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+impl MomentRemoval {
+    fn correction(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        let fraction = self.mass.query_rect(x0, y0, x1, y1) / self.total;
+        -self.sensitivity * self.root * finite_root_extra(fraction, self.power)
+    }
+}
+
+#[autoversion]
+fn moment_signal_plane(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    signal: usize,
+    power: u32,
+    output: &mut [f32],
+) {
+    for i in 0..output.len() {
+        let value = if signal == 0 {
+            sd[i]
+        } else {
+            let ed = (1.0 + (dst[i] - mu2[i]).abs()) / (1.0 + (src[i] - mu1[i]).abs()) - 1.0;
+            if signal == 1 {
+                ed.max(0.0)
+            } else {
+                (-ed).max(0.0)
+            }
+        };
+        let p2 = value * value;
+        output[i] = if power == 2 {
+            p2
+        } else {
+            let p4 = p2 * p2;
+            if power == 4 { p4 } else { p4 * p4 }
+        };
+    }
+}
+
+fn retain_moment_removals(
+    output: &mut Vec<MomentRemoval>,
+    s: &[f64],
+    peaks: &[f64],
+    scale: usize,
+    stats: &crate::metric::ScaleStats,
+    width: usize,
+    height: usize,
+    sw: usize,
+    sh: usize,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    ret: &crate::streaming::AttrScaleRetention,
+    sampling: Option<&crate::sampling::Geometry>,
+    bin: usize,
+    radius: usize,
+) {
+    let n = sw * sh;
+    let mut plane = vec![0.0; n];
+    let mut spread = vec![0.0; n];
+    let mut tmp = Vec::new();
+    let mut scratch = Vec::new();
+    for c in 0..3 {
+        let roots = [
+            [stats.ssim_2nd[c], stats.ssim[c * 2 + 1], stats.ssim_p95[c]],
+            [
+                stats.edge_2nd[c * 2],
+                stats.edge[c * 4 + 1],
+                stats.art_p95[c],
+            ],
+            [
+                stats.edge_2nd[c * 2 + 1],
+                stats.edge[c * 4 + 3],
+                stats.det_p95[c],
+            ],
+        ];
+        for (signal, roots) in roots.into_iter().enumerate() {
+            for (j, (power, root)) in [2_u32, 4, 8].into_iter().zip(roots).enumerate() {
+                let sensitivity = if power == 8 {
+                    peaks.get((scale * 3 + c) * 6 + 3 + signal)
+                } else {
+                    s.get((scale * 3 + c) * 13 + signal * 3 + if j == 0 { 2 } else { 1 })
+                }
+                .copied()
+                .unwrap_or(0.0);
+                if sensitivity == 0.0 || root == 0.0 {
+                    continue;
+                }
+                moment_signal_plane(
+                    &ret.sd[c][..n],
+                    &src[c][..n],
+                    &dst[c][..n],
+                    &ret.mu1[c][..n],
+                    &ret.mu2[c][..n],
+                    signal,
+                    power,
+                    &mut plane,
+                );
+                let values = if signal == 0 {
+                    spread.fill(0.0);
+                    crate::blur::box_spread_merge_f32(
+                        &mut plane,
+                        &mut spread,
+                        sw,
+                        sh,
+                        radius,
+                        &mut tmp,
+                        &mut scratch,
+                        false,
+                    );
+                    &spread
+                } else {
+                    &plane
+                };
+                let mut accum = BinAccum::new(width, height, bin);
+                if let Some(geometry) = sampling {
+                    let projected = geometry.project(values, scale);
+                    accum.add_scale_plane_f32(&projected, width, height, 1);
+                } else {
+                    accum.add_scale_plane_f32(values, sw, sh, 1 << scale);
+                }
+                output.push(MomentRemoval {
+                    sensitivity,
+                    root,
+                    power,
+                    total: n as f64 * root.powi(power as i32),
+                    mass: accum.into_result(),
+                });
+            }
+        }
+    }
+}
+
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+impl MaxRemoval {
+    fn new(feature_id: usize, sensitivity: f64, width: usize, height: usize) -> Self {
+        Self {
+            feature_id,
+            sensitivity,
+            left: vec![0.0; width + 1],
+            right: vec![0.0; width + 1],
+            top: vec![0.0; height + 1],
+            bottom: vec![0.0; height + 1],
+        }
+    }
+
+    // Bounds are inclusive source-coordinate extrema, not half-open ranges.
+    // A single physical sample owns (x, x), (y, y).
+    #[cfg(test)]
+    fn add(&mut self, value: f32, x: (usize, usize), y: (usize, usize)) {
+        self.left[x.0 + 1] = self.left[x.0 + 1].max(value);
+        self.right[x.1] = self.right[x.1].max(value);
+        self.top[y.0 + 1] = self.top[y.0 + 1].max(value);
+        self.bottom[y.1] = self.bottom[y.1].max(value);
+    }
+
+    fn finish(&mut self) {
+        for prefix in [&mut self.left, &mut self.top] {
+            for i in 1..prefix.len() {
+                prefix[i] = prefix[i].max(prefix[i - 1]);
+            }
+        }
+        for suffix in [&mut self.right, &mut self.bottom] {
+            for i in (0..suffix.len() - 1).rev() {
+                suffix[i] = suffix[i].max(suffix[i + 1]);
+            }
+        }
+    }
+
+    fn global(&self) -> f64 {
+        f64::from(self.left[self.left.len() - 1])
+    }
+
+    fn feature_drop(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        let x1 = x1.min(self.left.len() - 1);
+        let y1 = y1.min(self.top.len() - 1);
+        if x0 >= x1 || y0 >= y1 {
+            return 0.0;
+        }
+        let outside = self.left[x0]
+            .max(self.right[x1])
+            .max(self.top[y0])
+            .max(self.bottom[y1]);
+        self.global() - f64::from(outside)
+    }
+}
+
+/// Row/column maxima of the unchanged canonical peak signals. Contiguous
+/// columns permit SIMD updates; only the final projections scatter through
+/// possibly reflected or fractional source-coordinate footprints.
+#[autoversion]
+#[allow(clippy::too_many_arguments)]
+fn project_max_row(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    active: [bool; 3],
+    cs: &mut [f32],
+    ca: &mut [f32],
+    cd: &mut [f32],
+) -> [f32; 3] {
+    let mut row = [0.0f32; 3];
+    if active[0] {
+        for i in 0..sd.len() {
+            cs[i] = cs[i].max(sd[i]);
+            row[0] = row[0].max(sd[i]);
+        }
+    }
+    if active[1] || active[2] {
+        for i in 0..sd.len() {
+            let ed = (1.0 + (dst[i] - mu2[i]).abs()) / (1.0 + (src[i] - mu1[i]).abs()) - 1.0;
+            if active[1] {
+                let value = ed.max(0.0);
+                ca[i] = ca[i].max(value);
+                row[1] = row[1].max(value);
+            }
+            if active[2] {
+                let value = (-ed).max(0.0);
+                cd[i] = cd[i].max(value);
+                row[2] = row[2].max(value);
+            }
+        }
+    }
+    row
+}
+
+fn retain_max_removals(
+    output: &mut Vec<MaxRemoval>,
+    s_peaks: &[f64],
+    scale: usize,
+    logical_width: usize,
+    logical_height: usize,
+    sw: usize,
+    sh: usize,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    ret: &crate::streaming::AttrScaleRetention,
+    sampling: Option<&crate::sampling::Geometry>,
+) {
+    #[cfg(test)]
+    if tests::MAX_REFERENCE.with(std::cell::Cell::get) {
+        tests::MAX_REFERENCE_CALLS.with(|count| count.set(count.get() + 1));
+        retain_max_removals_reference(
+            output,
+            s_peaks,
+            scale,
+            logical_width,
+            logical_height,
+            sw,
+            sh,
+            src,
+            dst,
+            ret,
+            sampling,
+        );
+        return;
+    }
+    #[cfg(test)]
+    let first_map = output.len();
+    if !(0..3).any(|c| {
+        (0..3).any(|slot| {
+            s_peaks
+                .get((scale * 3 + c) * 6 + slot)
+                .is_some_and(|s| *s != 0.0)
+        })
+    }) {
+        return;
+    }
+    let xs = sampling.map_or_else(
+        || max_axis_footprints(logical_width, sw, scale),
+        |s| s.footprints(0, scale),
+    );
+    let ys = sampling.map_or_else(
+        || max_axis_footprints(logical_height, sh, scale),
+        |s| s.footprints(1, scale),
+    );
+    for c in 0..3 {
+        let base = (scale * 3 + c) * 6;
+        let mut maps: [Option<MaxRemoval>; 3] = core::array::from_fn(|slot| {
+            let s = s_peaks.get(base + slot).copied().unwrap_or(0.0);
+            (s != 0.0).then(|| MaxRemoval::new(156 + base + slot, s, logical_width, logical_height))
+        });
+        if maps.iter().all(Option::is_none) {
+            continue;
+        }
+        // A column owns the same x footprint at every row, and a row
+        // owns the same y footprint at every column. Max is separable:
+        // reduce first, scatter O(sw + sh) times instead of O(sw * sh).
+        let mut columns: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; sw]);
+        let active = maps.each_ref().map(Option::is_some);
+        for (y, &yf) in ys.iter().enumerate() {
+            let range = y * sw..(y + 1) * sw;
+            let [cs, ca, cd] = &mut columns;
+            let row_max = project_max_row(
+                &ret.sd[c][range.clone()],
+                &src[c][range.clone()],
+                &dst[c][range.clone()],
+                &ret.mu1[c][range.clone()],
+                &ret.mu2[c][range],
+                active,
+                cs,
+                ca,
+                cd,
+            );
+            for (map, value) in maps.iter_mut().zip(row_max) {
+                if let Some(map) = map {
+                    map.top[yf.0 + 1] = map.top[yf.0 + 1].max(value);
+                    map.bottom[yf.1] = map.bottom[yf.1].max(value);
+                }
+            }
+        }
+        for (map, column) in maps.iter_mut().zip(&columns) {
+            if let Some(map) = map {
+                for (&xf, &value) in xs.iter().zip(column) {
+                    map.left[xf.0 + 1] = map.left[xf.0 + 1].max(value);
+                    map.right[xf.1] = map.right[xf.1].max(value);
+                }
+            }
+        }
+        for mut map in maps.into_iter().flatten() {
+            map.finish();
+            output.push(map);
+        }
+    }
+    // Exercise the historical per-pixel implementation on the actual retained
+    // planes in every serving test too, not only hand-made signal fixtures.
+    #[cfg(test)]
+    {
+        let mut reference = Vec::new();
+        retain_max_removals_reference(
+            &mut reference,
+            s_peaks,
+            scale,
+            logical_width,
+            logical_height,
+            sw,
+            sh,
+            src,
+            dst,
+            ret,
+            sampling,
+        );
+        assert_eq!(output.len() - first_map, reference.len());
+        for (actual, expected) in output[first_map..].iter().zip(&reference) {
+            assert_eq!(actual.feature_id, expected.feature_id);
+            assert_eq!(actual.sensitivity.to_bits(), expected.sensitivity.to_bits());
+            for (a, b) in [
+                (&actual.left, &expected.left),
+                (&actual.right, &expected.right),
+                (&actual.top, &expected.top),
+                (&actual.bottom, &expected.bottom),
+            ] {
+                assert_eq!(a.len(), b.len());
+                for (a, b) in a.iter().zip(b) {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "peak {} scale {scale}",
+                        actual.feature_id
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn retain_max_removals_reference(
+    output: &mut Vec<MaxRemoval>,
+    s_peaks: &[f64],
+    scale: usize,
+    logical_width: usize,
+    logical_height: usize,
+    sw: usize,
+    sh: usize,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    ret: &crate::streaming::AttrScaleRetention,
+    sampling: Option<&crate::sampling::Geometry>,
+) {
+    if !(0..3).any(|c| {
+        (0..3).any(|slot| {
+            s_peaks
+                .get((scale * 3 + c) * 6 + slot)
+                .is_some_and(|s| *s != 0.0)
+        })
+    }) {
+        return;
+    }
+    let xs = sampling.map_or_else(
+        || max_axis_footprints(logical_width, sw, scale),
+        |s| s.footprints(0, scale),
+    );
+    let ys = sampling.map_or_else(
+        || max_axis_footprints(logical_height, sh, scale),
+        |s| s.footprints(1, scale),
+    );
+    for c in 0..3 {
+        let base = (scale * 3 + c) * 6;
+        let mut maps: [Option<MaxRemoval>; 3] = core::array::from_fn(|slot| {
+            let s = s_peaks.get(base + slot).copied().unwrap_or(0.0);
+            (s != 0.0).then(|| MaxRemoval::new(156 + base + slot, s, logical_width, logical_height))
+        });
+        if maps.iter().all(Option::is_none) {
+            continue;
+        }
+        for (y, &yf) in ys.iter().enumerate() {
+            for (x, &xf) in xs.iter().enumerate() {
+                let i = y * sw + x;
+                // Same f32 expression as the canonical fused accumulator.
+                let ed = (1.0 + (dst[c][i] - ret.mu2[c][i]).abs())
+                    / (1.0 + (src[c][i] - ret.mu1[c][i]).abs())
+                    - 1.0;
+                let signals = [ret.sd[c][i], ed.max(0.0), (-ed).max(0.0)];
+                for (map, value) in maps.iter_mut().zip(signals) {
+                    if let Some(map) = map {
+                        map.add(value, xf, yf);
+                    }
+                }
+            }
+        }
+        for mut map in maps.into_iter().flatten() {
+            map.finish();
+            output.push(map);
+        }
+    }
+}
+
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) fn bind_max_removals(
+    maps: &mut Vec<MaxRemoval>,
+    features: &[f64],
+    density_missing: &[usize],
+) -> Vec<usize> {
+    // An extraction variant or numerical mismatch cannot silently gain
+    // coverage. The old density remains usable with its old coverage report.
+    maps.retain(|m| {
+        features
+            .get(m.feature_id)
+            .is_some_and(|f| f.to_bits() == m.global().to_bits())
+    });
+    density_missing
+        .iter()
+        .copied()
+        .filter(|id| !maps.iter().any(|m| m.feature_id == *id))
+        .collect()
+}
+
+/// Independent pre-fusion L8 combine retained for numerical regression tests.
+/// Evaluate the signal and
+/// eighth powers in the SAME f32 order as the canonical fused accumulator;
+/// multiply in f64 before writing finite f32 mass. Keeping this separate
+/// preserves every legacy basic/stale combine operation and rounding point.
+#[cfg(test)]
+#[autoversion]
+fn fused_combine_l8_f32(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    co: [f64; 3],
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    for i in 0..id_plane.len() {
+        let ed = (1.0 + (dst[i] - mu2[i]).abs()) / (1.0 + (src[i] - mu1[i]).abs()) - 1.0;
+        let art = ed.max(0.0);
+        let det = (-ed).max(0.0);
+        let sd2 = sd[i] * sd[i];
+        let a2 = art * art;
+        let d2 = det * det;
+        let sd4 = sd2 * sd2;
+        let a4 = a2 * a2;
+        let d4 = d2 * d2;
+        win_plane[i] += (co[0] * f64::from(sd4 * sd4)) as f32;
+        id_plane[i] += (co[1] * f64::from(a4 * a4) + co[2] * f64::from(d4 * d4)) as f32;
     }
 }
 
@@ -3082,6 +4565,7 @@ impl SlotCoeffs {
         n_f: f64,
         hf_sq_src_sum: f64,
         hf_abs_src_sum: f64,
+        gain_form: crate::hf_gain_form::HfGainForm,
     ) -> Self {
         let g = |slot: usize| s.get(base_k + slot).copied().unwrap_or(0.0);
         let inv_n = 1.0 / n_f;
@@ -3102,7 +4586,18 @@ impl SlotCoeffs {
             if stats.hf_energy_loss[c] > 0.0 {
                 -g(10) / hf_sq_src_sum
             } else if stats.hf_energy_gain[c] > 0.0 {
-                g(12) / hf_sq_src_sum
+                if gain_form == crate::hf_gain_form::HfGainForm::RatioExcess {
+                    // Preserve the established revision-1 spelling bit for bit.
+                    g(12) / hf_sq_src_sum
+                } else {
+                    g(12)
+                        * crate::hf_gain_form::hf_energy_gain_d_sum_dst_sq(
+                            gain_form,
+                            hf_sq_src_sum,
+                            stats.hf_sq_dst_sum[c],
+                            inv_n,
+                        )
+                }
             } else {
                 0.0
             }
@@ -3233,6 +4728,23 @@ impl FusedBasicCanvas {
     }
 }
 
+// Basic/peak signals retained by the scoring walk until model sensitivities
+// are available. Reference planes remain in the caller's existing cache.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+#[derive(Default)]
+struct BasicRetention {
+    scales: Vec<BasicRetainedScale>,
+    result: Option<crate::ZensimResult>,
+}
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+struct BasicRetainedScale {
+    stats: crate::metric::ScaleStats,
+    distorted: [Vec<f32>; 3],
+    planes: crate::streaming::AttrScaleRetention,
+    width: usize,
+    height: usize,
+}
+
 /// Reusable state for the fused folded-944 compare
 /// ([`crate::Zensim::compute_folded944_score_and_attribution`]): the
 /// streaming extraction's scratch + the walk retention (planes, pyramid
@@ -3245,6 +4757,7 @@ impl FusedBasicCanvas {
 #[cfg(feature = "feature-regime-v2")]
 #[derive(Default)]
 pub struct Fused944Session {
+    basic: BasicRetention,
     scratch: crate::feature_v2::V2Scratch,
     retention: crate::feature_v2::FoldRetention,
     /// f32 pass-B scratch (appendix P lever 1) — plane-sized buffers
@@ -3263,9 +4776,106 @@ impl Fused944Session {
     pub(crate) fn planned_features(
         &mut self,
         source: &impl ImageSource,
+        precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         plan: &crate::feature_plan::Plan,
+        parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
     ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
+        self.basic.result = None;
+        if plan.toggles().v1_only
+            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+            && plan.compute.sampling.is_none()
+            && matches!(
+                plan.compute.v1_pools,
+                crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
+            )
+        {
+            let mut config = config_from_params(crate::ZensimProfile::B.params(), parallel);
+            config.formula_revision = Some(plan.compute.formula_revision);
+            config.compute_all_features = true;
+            config.extended_features = false;
+            config.compute_iw_features = false;
+            config.local_only = plan.compute.local_only;
+            config.omit_edges = plan.compute.omit_edges;
+            config.attribution_channels = Some(core::array::from_fn(|scale| {
+                core::array::from_fn(|ch| plan.compute.channel_active(scale, ch))
+            }));
+            let supplied_xyb = encoding.map(|encoding| {
+                let (_, w, h) = precomputed.scale(0);
+                let mut planes = core::array::from_fn(|_| vec![0.0; w * h]);
+                if distorted.width() < 64 || distorted.height() < 64 {
+                    let padded = crate::metric::reflect_pad_to_min(distorted);
+                    crate::feature_v2_stream::hdr_source_to_xyb(&padded, encoding, &mut planes);
+                } else {
+                    crate::feature_v2_stream::hdr_source_to_xyb(distorted, encoding, &mut planes);
+                }
+                planes
+            });
+            let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes_input(
+                precomputed,
+                distorted,
+                &config,
+                crate::ZensimProfile::B.params().weights,
+                supplied_xyb,
+                |scale, stats, _src, dst, planes, w, h| {
+                    let n = w * h;
+                    if self.basic.scales.len() <= scale {
+                        self.basic.scales.push(BasicRetainedScale {
+                            stats: stats.clone(),
+                            distorted: core::array::from_fn(|_| Vec::new()),
+                            planes: crate::streaming::AttrScaleRetention::new(0),
+                            width: w,
+                            height: h,
+                        });
+                    }
+                    let out = &mut self.basic.scales[scale];
+                    out.stats.clone_from(stats);
+                    out.width = w;
+                    out.height = h;
+                    for (ch, distorted) in dst.iter().enumerate() {
+                        if !plan.compute.channel_active(scale, ch) {
+                            out.distorted[ch].clear();
+                            out.planes.sd[ch].clear();
+                            out.planes.mu1[ch].clear();
+                            out.planes.mu2[ch].clear();
+                            continue;
+                        }
+                        for (target, source) in [
+                            (&mut out.distorted[ch], *distorted),
+                            (&mut out.planes.sd[ch], &planes.sd[ch][..n]),
+                            (&mut out.planes.mu1[ch], &planes.mu1[ch][..n]),
+                            (&mut out.planes.mu2[ch], &planes.mu2[ch][..n]),
+                        ] {
+                            target.resize(n, 0.0);
+                            target.copy_from_slice(source);
+                        }
+                    }
+                },
+            );
+            let mut features = result.features().to_vec();
+            features.resize(plan.walk_width().max(372), 0.0);
+            let mean_offset = result.mean_offset();
+            self.basic.result = Some(result);
+            return Ok((features, mean_offset));
+        }
+        if encoding.is_some() {
+            return Err(ZensimError::HdrInputRequiresPuPath);
+        }
+        if plan.toggles().v1_only
+            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+            && !source.is_hdr()
+            && let Some(result) = crate::feature_v2::compute_folded_v1_372_with_ref_impl(
+                precomputed,
+                distorted,
+                parallel,
+                &mut self.scratch,
+                Some(plan.compute.v1_pools),
+                Some(plan),
+            )
+        {
+            return Ok(result);
+        }
         // Basic-only maps use the cached v1 owner. Cheap free extras do not
         // populate the v2 retention cells; they are reported as unsupported
         // below rather than read from stale/default accumulators.
@@ -3274,7 +4884,7 @@ impl Fused944Session {
             source,
             distorted,
             Some(120_000_000),
-            true,
+            parallel,
             &mut self.scratch,
             Some(plan),
             retention,
@@ -3286,8 +4896,9 @@ impl Fused944Session {
 ///
 /// The candidate's declared feature plan and complete score produce the
 /// sensitivities used by the map. Attribution remains a local approximation
-/// of finite pixel changes; inspect [`Self::unsupported_feature_ids`] and
-/// [`Self::has_corruption_gate`] when evaluating or consuming it.
+/// of finite pixel changes. [`Self::attribution`] supplies an additive density;
+/// [`Self::refinement_gain`] additionally includes finite max-signal removal.
+/// Inspect the corresponding coverage report and [`Self::has_corruption_gate`].
 #[cfg(feature = "feature-regime-v2")]
 #[non_exhaustive]
 pub struct ScoredAttribution {
@@ -3296,6 +4907,9 @@ pub struct ScoredAttribution {
     pub(crate) sensitivities: Vec<f64>,
     pub(crate) unsupported_feature_ids: Vec<usize>,
     pub(crate) has_corruption_gate: bool,
+    pub(crate) max_removals: Vec<MaxRemoval>,
+    pub(crate) moment_removals: Vec<MomentRemoval>,
+    pub(crate) unsupported_refinement_feature_ids: Vec<usize>,
 }
 
 #[cfg(feature = "feature-regime-v2")]
@@ -3315,13 +4929,61 @@ impl ScoredAttribution {
         &self.sensitivities
     }
 
-    /// Locally nonzero sensitivities whose integrands this map cannot serve.
+    /// Locally nonzero sensitivities whose integrands the additive density cannot serve.
     ///
     /// Reference-only and SDR structural-zero terms are deliberately excluded.
     /// A missing ID is not proof that a finite intervention has no effect:
     /// a clamp or gate may have zero local sensitivity and still be crossed.
     pub fn unsupported_feature_ids(&self) -> &[usize] {
         &self.unsupported_feature_ids
+    }
+
+    /// Estimated score gain for refining a half-open source-pixel rectangle.
+    ///
+    /// Adds finite max-signal removal to the additive density integral. This
+    /// result is **not additive**: two blocks may each leave a tied maximum
+    /// unchanged while their union removes it. Do not sum separate queries
+    /// to obtain the union's estimate. Coordinates are clamped to the image;
+    /// empty or inverted rectangles return zero.
+    ///
+    /// A max sample is removed only when its entire downsampled source
+    /// footprint is contained. Reflected duplicates are included; SIMD padding
+    /// belongs to the nearest extended-image edge. Partial coarse footprints
+    /// survive. This freezes the extracted signals: actual pixel edits also
+    /// change blurred neighborhoods and can create new maxima. Root curvature,
+    /// model nonlinearity and corruption/clamp crossing remain approximations.
+    /// Binning affects only the additive term, as in [`AttributionResult::query_rect`].
+    /// With [`BakeScorer::with_finite_moment_refinement`](crate::BakeScorer::with_finite_moment_refinement),
+    /// this also adds finite L2/L4/L8 removal corrections from base-image
+    /// binned moment integrals. Those corrections are non-additive and use
+    /// the same bin interpolation. Frozen-signal and head approximations remain.
+    ///
+    /// Inspect [`Self::unsupported_refinement_feature_ids`] and
+    /// [`Self::has_corruption_gate`]. Complete local coverage does not establish
+    /// accurate finite pixel or codec steering.
+    pub fn refinement_gain(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        if x0 >= x1.min(self.attribution.width()) || y0 >= y1.min(self.attribution.height()) {
+            return 0.0;
+        }
+        let mut gain = self.attribution.query_rect(x0, y0, x1, y1);
+        for map in &self.max_removals {
+            gain -= map.sensitivity * map.feature_drop(x0, y0, x1, y1);
+        }
+        for map in &self.moment_removals {
+            gain += map.correction(x0, y0, x1, y1);
+        }
+        gain
+    }
+
+    /// Locally active feature IDs not represented by [`Self::refinement_gain`].
+    ///
+    /// Unlike density-only [`Self::unsupported_feature_ids`], this excludes
+    /// max terms whose retained signal maximum exactly matches the complete
+    /// served feature. A zero local derivative is not proof that a finite
+    /// edit is inert. Reflected/coarse ownership and blur approximations still
+    /// apply even when this list is empty.
+    pub fn unsupported_refinement_feature_ids(&self) -> &[usize] {
+        &self.unsupported_refinement_feature_ids
     }
 
     /// Whether the complete score includes a discontinuous corruption gate.
@@ -3359,7 +5021,9 @@ pub(crate) fn candidate_map_sensitivities(
             *value = 0.0;
             continue;
         }
-        let missing = (BLOCK_END_BASIC..BLOCK_END_V1_POOLS).contains(&id)
+        let v1_pool_missing = (BLOCK_END_BASIC..BLOCK_END_V1_POOLS).contains(&id)
+            && !(id < BLOCK_END_V1_PEAKS && (id - BLOCK_END_BASIC) % 6 >= 3);
+        let missing = v1_pool_missing
             || id >= BLOCK_END_APPEND2
             || (toggles.v1_only && id >= BLOCK_END_V1_POOLS)
             || (toggles.append2_dst_activity && append2_slot.is_some());
@@ -3371,7 +5035,12 @@ pub(crate) fn candidate_map_sensitivities(
     // Avoid pass B when no supported v2 integrand is active, including a
     // basic-only plan after reuse of a session that previously held v2 data.
     if spatial.iter().skip(BLOCK_END_V1_POOLS).all(|s| *s == 0.0) {
-        spatial.truncate(BLOCK_END_BASIC);
+        let end = if spatial.iter().skip(BLOCK_END_BASIC).any(|s| *s != 0.0) {
+            BLOCK_END_V1_PEAKS
+        } else {
+            BLOCK_END_BASIC
+        };
+        spatial.truncate(end);
     }
     (spatial, unsupported)
 }
@@ -3440,6 +5109,7 @@ impl crate::metric::Zensim {
         s: &[f64],
         bin: usize,
     ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        validate_ref_match(precomputed, distorted)?;
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {
             return self.compute_with_ref_score_and_attribution(precomputed, distorted, s);
@@ -3449,6 +5119,8 @@ impl crate::metric::Zensim {
             precomputed,
             distorted,
             s,
+            &[],
+            None,
             None,
             &mut AttrSinkF32::Bins(&mut accum),
         )?;
@@ -3499,12 +5171,15 @@ impl crate::metric::Zensim {
         s: &[f64],
         prime: Option<&mut AttributionSession>,
     ) -> Result<FusedBasicCanvas, ZensimError> {
+        validate_ref_match(precomputed, distorted)?;
         let (_, comp_pw, comp_h) = precomputed.scale(0);
         let mut canvas = vec![0.0f32; comp_pw * comp_h];
         let (result, t_pipe_ms, combine_ms) = self.fused_basic_into(
             precomputed,
             distorted,
             s,
+            &[],
+            None,
             prime,
             &mut AttrSinkF32::Canvas(&mut canvas),
         )?;
@@ -3530,17 +5205,77 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
+        s_peaks: &[f64],
+        max_removals: Option<&mut Vec<MaxRemoval>>,
+        prime: Option<&mut AttributionSession>,
+        sink: &mut AttrSinkF32<'_>,
+    ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
+        self.fused_basic_into_at_revision(
+            precomputed,
+            distorted,
+            s,
+            s_peaks,
+            max_removals,
+            prime,
+            sink,
+            None,
+            None,
+            1,
+            None,
+        )
+    }
+
+    fn fused_basic_into_at_revision(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        s_peaks: &[f64],
+        mut max_removals: Option<&mut Vec<MaxRemoval>>,
         mut prime: Option<&mut AttributionSession>,
         sink: &mut AttrSinkF32<'_>,
+        revision: Option<crate::feature_defs::FormulaRevision>,
+        mut moment_removals: Option<&mut Vec<MomentRemoval>>,
+        moment_bin: usize,
+        retained: Option<&BasicRetention>,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
         if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
-        validate_ref_match(precomputed, distorted)?;
+        crate::metric::validate_ref_dimensions(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
-        let config = config_from_params(params, self.parallel());
+        let mut config = config_from_params(params, self.parallel());
+        config.formula_revision = revision;
+        // Only the candidate map owner may skip channels: its score/features
+        // were already computed. Legacy callers also consume the returned row.
+        if revision.is_some() {
+            // This stage consumes only basic/peak signals. The canonical
+            // planned extraction above already handled all scored families;
+            // B's inherited masked/IW switches would run an unused chain here.
+            config.compute_all_features = true;
+            config.extended_features = false;
+            config.compute_iw_features = false;
+            config.attribution_channels = Some(core::array::from_fn(|scale| {
+                core::array::from_fn(|c| {
+                    let basic = (scale * 3 + c) * FPC;
+                    let peaks = (scale * 3 + c) * 6;
+                    (0..FPC).any(|k| s.get(basic + k).is_some_and(|v| *v != 0.0))
+                        || (0..6).any(|k| s_peaks.get(peaks + k).is_some_and(|v| *v != 0.0))
+                })
+            }));
+        }
+        config.local_only = revision.is_some()
+            && s.iter()
+                .enumerate()
+                .all(|(id, v)| *v == 0.0 || id % FPC < 10)
+            && s_peaks.iter().all(|v| *v == 0.0);
+        config.omit_edges = config.local_only
+            && s.iter()
+                .enumerate()
+                .all(|(id, v)| *v == 0.0 || matches!(id % FPC, 0..=2 | 9));
+        crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",
@@ -3564,26 +5299,56 @@ impl crate::metric::Zensim {
         let mut spread_tmp: Vec<f32> = Vec::new();
         let mut spread_out: Vec<f32> = Vec::new();
 
-        let on_scale = |scale: usize,
-                        stats: &crate::metric::ScaleStats,
-                        src_planes: [&[f32]; 3],
-                        dst_planes: [&[f32]; 3],
-                        ret: &crate::streaming::AttrScaleRetention,
-                        sw: usize,
-                        sh: usize| {
+        let mut on_scale = |scale: usize,
+                            stats: &crate::metric::ScaleStats,
+                            src_planes: [&[f32]; 3],
+                            dst_planes: [&[f32]; 3],
+                            ret: &crate::streaming::AttrScaleRetention,
+                            sw: usize,
+                            sh: usize| {
             let t_c = std::time::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
+            if let Some(output) = max_removals.as_deref_mut() {
+                retain_max_removals(
+                    output,
+                    s_peaks,
+                    scale,
+                    width,
+                    height,
+                    sw,
+                    sh,
+                    src_planes,
+                    dst_planes,
+                    ret,
+                    precomputed.sampling_geometry.as_ref(),
+                );
+            }
             id_plane[..n].fill(0.0);
             win_plane[..n].fill(0.0);
-            let hf: [(f64, f64); 3] =
-                core::array::from_fn(|c| hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n]));
+            let hf: [(f64, f64); 3] = core::array::from_fn(|c| {
+                let base = (scale * 3 + c) * FPC;
+                if prime.is_some() || (10..13).any(|k| s.get(base + k).is_some_and(|v| *v != 0.0)) {
+                    hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n])
+                } else {
+                    (0.0, 0.0)
+                }
+            });
             let co32: [[f32; 12]; 3] = core::array::from_fn(|c| {
                 let base_k = scale * FPC * 3 + c * FPC;
                 coeffs_to_f32(&SlotCoeffs::from_scale_stats(
-                    s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
+                    s,
+                    base_k,
+                    stats,
+                    c,
+                    n_f,
+                    hf[c].0,
+                    hf[c].1,
+                    crate::hf_gain_form::HfGainForm::at_revision(config.formula_revision),
                 ))
             });
+            let l8_co: [[f64; 3]; 3] =
+                core::array::from_fn(|c| l8_coefficients(s_peaks, scale, c, stats, n_f));
             // task #70: prime the stale session — THIS compare's coefficient
             // packs become the NEXT stale call's fold input; the hf sums are
             // reference-side constants cached once here.
@@ -3596,13 +5361,22 @@ impl crate::metric::Zensim {
                 let off = band * 64 * sw;
                 let len = idc.len();
                 for c in 0..3 {
-                    fused_combine_plane_f32(
+                    if co32[c].iter().all(|v| *v == 0.0) && l8_co[c].iter().all(|v| *v == 0.0) {
+                        continue;
+                    }
+                    let combine = if l8_co[c].iter().any(|v| *v != 0.0) {
+                        combine_basic_and_l8::<true>
+                    } else {
+                        combine_basic_and_l8::<false>
+                    };
+                    combine(
                         &ret.sd[c][off..off + len],
                         &src_planes[c][off..off + len],
                         &dst_planes[c][off..off + len],
                         &ret.mu1[c][off..off + len],
                         &ret.mu2[c][off..off + len],
                         co32[c],
+                        l8_co[c],
                         idc,
                         winc,
                     );
@@ -3691,30 +5465,78 @@ impl crate::metric::Zensim {
                         &mut spread_out,
                         config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                     );
-                    accum.add_scale_plane_f32(&id_plane[..n], sw, sh, 1usize << scale);
+                    if let Some(geometry) = &precomputed.sampling_geometry {
+                        let projected = geometry.project(&id_plane[..n], scale);
+                        accum.add_scale_plane_f32(&projected, width, height, 1);
+                    } else {
+                        accum.add_scale_plane_f32(&id_plane[..n], sw, sh, 1usize << scale);
+                    }
                 }
             }
             combine_ms.set(combine_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
+            if let Some(output) = moment_removals.as_deref_mut() {
+                retain_moment_removals(
+                    output,
+                    s,
+                    s_peaks,
+                    scale,
+                    stats,
+                    width,
+                    height,
+                    sw,
+                    sh,
+                    src_planes,
+                    dst_planes,
+                    ret,
+                    precomputed.sampling_geometry.as_ref(),
+                    moment_bin,
+                    config.blur_radius,
+                );
+            }
         };
 
-        let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
-            precomputed,
-            distorted,
-            &config,
-            params.weights,
-            on_scale,
-        );
+        let result = if let Some(retained) = retained {
+            for (scale, cell) in retained.scales.iter().enumerate() {
+                on_scale(
+                    scale,
+                    &cell.stats,
+                    precomputed.scale(scale).0,
+                    cell.distorted.each_ref().map(Vec::as_slice),
+                    &cell.planes,
+                    cell.width,
+                    cell.height,
+                );
+            }
+            retained
+                .result
+                .as_ref()
+                .expect("successful retained extraction")
+                .clone()
+        } else {
+            crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
+                precomputed,
+                distorted,
+                &config,
+                params.weights,
+                on_scale,
+            )
+        };
         let mut result = result.with_profile(self.profile());
         // Same real-scoring step as `compute_with_ref_and_diffmap` — the
         // scalar golden gate (`fused_score_bit_matches_diffmap_path`) holds
         // this path bit-identical to the fold-diffmap call's score.
-        crate::metric::apply_mlp_scoring_with_codec(
-            &mut result,
-            params,
-            width as u32,
-            height as u32,
-            None,
-        )?;
+        // Candidate callers already scored their own model. This pass only
+        // supplies its map signals, so do not run the legacy profile's head
+        // against a deliberately narrower feature row.
+        if revision.is_none() && precomputed.sampling.is_none() {
+            crate::metric::apply_mlp_scoring_with_codec(
+                &mut result,
+                params,
+                width as u32,
+                height as u32,
+                None,
+            )?;
+        }
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
         Ok((result, t_pipe, combine_ms.get()))
@@ -3811,6 +5633,7 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",
@@ -3839,6 +5662,8 @@ impl crate::metric::Zensim {
                         precomputed,
                         distorted,
                         s,
+                        &[],
+                        None,
                         Some(session),
                         &mut AttrSinkF32::Bins(&mut accum),
                     )?;
@@ -3953,7 +5778,14 @@ impl crate::metric::Zensim {
             next_coeffs.push(core::array::from_fn(|c| {
                 let base_k = scale * FPC * 3 + c * FPC;
                 coeffs_to_f32(&SlotCoeffs::from_scale_stats(
-                    s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
+                    s,
+                    base_k,
+                    stats,
+                    c,
+                    n_f,
+                    hf[c].0,
+                    hf[c].1,
+                    crate::hf_gain_form::HfGainForm::at_revision(config.formula_revision),
                 ))
             }));
             tail_ms.set(tail_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
@@ -4059,6 +5891,13 @@ impl crate::metric::Zensim {
     /// bounds). SDR route only: HDR-declared inputs get
     /// [`ZensimError::HdrInputRequiresPuPath`].
     ///
+    /// A byte-identical pair returns exactly what
+    /// [`crate::Zensim::compute`] returns — 100 — with a zero map; the 944
+    /// feature row is the real extraction either way. Only this entry and the
+    /// [`crate::BakeScorer`] ones can make that call: the `*_with_ref*`
+    /// attribution entries hold an XYB pyramid, not the source pixels, so a
+    /// perfect copy is scored through the model there.
+    ///
     /// # Errors
     ///
     /// The C3a fused contract (all-basic-features profile,
@@ -4080,6 +5919,7 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
+        session.basic.result = None;
         validate_pair(source, distorted)?;
         // ZENSIM_ATTR_PERF=1: coarse section timing (perf lever triage).
         let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
@@ -4094,6 +5934,24 @@ impl crate::metric::Zensim {
             &mut session.retention,
         )?;
         let t_extract = t0.elapsed();
+        // Identity: the fused v1 walk has no short-circuit of its own, so a
+        // byte-identical pair scored 96.2384 here while `compute` returned
+        // exactly 100 on the same pixels. This entry is the one member of the
+        // attribution family that HOLDS the source, so it can reach the single
+        // identity owner (`metric::images_byte_identical` -> `compute`); the
+        // `*_with_ref*` entries cannot and still score a perfect copy through
+        // the model. Same disposition `BakeScorer::compute_attribution_input`
+        // already uses: identity result plus a zero map. The 944 feature row is
+        // the real extraction either way — its bitwise contract with
+        // `compute_folded720_append2_features` (G-N1) is unconditional.
+        if crate::metric::images_byte_identical(source, distorted) {
+            validate_ref_match(precomputed, distorted)?;
+            return Ok((
+                self.compute(source, distorted)?,
+                v2res,
+                zero_attribution(distorted.width(), distorted.height(), 1),
+            ));
+        }
         // 2) Fused v1 walk — basic-block canvas + the map-profile result.
         let t1 = std::time::Instant::now();
         let fb = self.fused_basic_canvas(precomputed, distorted, s, None)?;
@@ -4177,6 +6035,7 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
+        validate_ref_match(precomputed, distorted)?;
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {
             return self.compute_folded944_score_and_attribution(
@@ -4187,6 +6046,7 @@ impl crate::metric::Zensim {
                 session,
             );
         }
+        session.basic.result = None;
         validate_pair(source, distorted)?;
         let v2res = crate::feature_v2::compute_folded944_streaming_with_retention(
             source,
@@ -4196,8 +6056,26 @@ impl crate::metric::Zensim {
             &mut session.scratch,
             &mut session.retention,
         )?;
-        let (result, attribution) =
-            self.attribution_from_retention_binned(precomputed, distorted, s, session, bin)?;
+        // Same identity disposition as the per-pixel entry above, at this
+        // entry's map density.
+        if crate::metric::images_byte_identical(source, distorted) {
+            return Ok((
+                self.compute(source, distorted)?,
+                v2res,
+                zero_attribution(distorted.width(), distorted.height(), bin),
+            ));
+        }
+        let (result, attribution) = self.attribution_from_retention_binned(
+            precomputed,
+            distorted,
+            s,
+            &[],
+            None,
+            None,
+            session,
+            bin,
+            None,
+        )?;
         Ok((result, v2res, attribution))
     }
 
@@ -4209,18 +6087,28 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
+        s_peaks: &[f64],
+        max_removals: Option<&mut Vec<MaxRemoval>>,
+        moment_removals: Option<&mut Vec<MomentRemoval>>,
         session: &mut Fused944Session,
         bin: usize,
+        revision: Option<crate::feature_defs::FormulaRevision>,
     ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
         let width = distorted.width();
         let height = distorted.height();
         let mut accum = BinAccum::new(width, height, bin);
-        let (result, _, _) = self.fused_basic_into(
+        let (result, _, _) = self.fused_basic_into_at_revision(
             precomputed,
             distorted,
             s,
+            s_peaks,
+            max_removals,
             None,
             &mut AttrSinkF32::Bins(&mut accum),
+            revision,
+            moment_removals,
+            bin,
+            session.basic.result.as_ref().map(|_| &session.basic),
         )?;
         let block = |start: usize, end: usize| -> Option<&[f64]> {
             (s.len() > start).then(|| &s[start..s.len().min(end)])
@@ -4237,6 +6125,7 @@ impl crate::metric::Zensim {
                 self.parallel(),
                 &mut session.pass_b,
                 &mut accum,
+                precomputed.sampling_geometry.as_ref(),
             );
         }
         Ok((result, accum.into_result()))

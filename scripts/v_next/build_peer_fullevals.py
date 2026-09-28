@@ -14,10 +14,82 @@ hfnlproxy are deliberately omitted for ssim2 (the slice target IS
 ssim2-derived — a trivially perfect self-row would mislead) and for the
 others until the encode-key sidecar join lands (registered follow-up).
 """
-import json, os, sys, csv
+import argparse, hashlib, json, math, os, sys, csv
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 from zen_stats import panel  # noqa: E402
+
+
+def build_admitted(manifest_path, out_dir):
+    """Explicit, hash-bound eval inputs; never resolve legacy corpus defaults."""
+    from zen_stats import panel_batch, scatter
+
+    manifest_path = Path(manifest_path)
+    spec = json.loads(manifest_path.read_text())
+    public_test = spec.get("schema") == "zensim-peer-eval-v2"
+    if spec.get("schema") not in ("zensim-peer-eval-v1", "zensim-peer-eval-v2") or spec.get("role") != "eval":
+        raise ValueError("peer manifest requires explicit zensim-peer-eval-v1 eval role")
+    if public_test:
+        exposure = spec["public_test_exposure"]
+        path = Path(exposure["path"])
+        with path.open("rb") as f:
+            digest = hashlib.file_digest(f, "sha256").hexdigest()
+        if digest != exposure["sha256"]:
+            raise ValueError("public-test exposure hash mismatch")
+        record = json.loads(path.read_text())
+        if record.get("schema") != "frozen-public-test-exposure-v1" or record.get("secret_holdouts_accessed") is not False:
+            raise ValueError("explicit frozen public-test exposure required")
+    name = spec["name"]
+    if not name.startswith("peer_") or Path(name).name != name:
+        raise ValueError("peer name must be a single peer_ filename component")
+    out = Path(out_dir) / (name + ".fulleval.json")
+    if out.exists():
+        raise ValueError("admitted peer evaluation requires a fresh output")
+    doc = dict(name=name, peer=True, regime="reference-metric", n_inputs=None,
+               bake=None, model=dict(kind="reference-metric", note=spec["note"]),
+               rank={}, per_pair={}, scatter_assessment={}, peer_provenance={},
+               m3_coherence=None, m3a_coherence=None)
+    for corpus, entry in spec["corpora"].items():
+        if entry.get("role") == "test" and public_test:
+            if entry.get("use") != "frozen_eval_no_separate_eval" or corpus not in record["populations"]:
+                raise ValueError(f"{corpus}: public test is not admitted for this batch")
+        elif entry.get("role") != "eval":
+            raise ValueError(f"{corpus}: non-eval peer input refused")
+        path = Path(entry["path"])
+        with path.open("rb") as f:
+            digest = hashlib.file_digest(f, "sha256").hexdigest()
+        if digest != entry["sha256"]:
+            raise ValueError(f"{corpus}: peer input hash mismatch")
+        with path.open() as f:
+            rows = list(csv.DictReader(f, delimiter="\t"))
+        if len(rows) != entry["rows"] or not rows:
+            raise ValueError(f"{corpus}: peer row coverage mismatch")
+        pred = [float(r[entry["metric_column"]]) for r in rows]
+        target = [float(r[entry["target_column"]]) for r in rows]
+        if any(not math.isfinite(v) for v in pred + target):
+            raise ValueError(f"{corpus}: nonfinite peer pair; no silent dropping")
+        st = panel_batch([(corpus, pred, target)])[0]
+        if st["n_dropped"] != 0:
+            raise ValueError(f"{corpus}: canonical panel dropped rows")
+        doc["rank"][corpus] = {k: st[k] for k in
+            ("srocc", "srocc_signed", "plcc", "krocc", "or", "pwrc", "z_rmse", "n")}
+        assessment = scatter(pred, target)
+        normalized = assessment.pop("normalized_pred", None)
+        axis = entry["axis"]
+        if axis not in ("mos", "jnd"):
+            raise ValueError("unknown peer target axis")
+        doc["per_pair"][corpus] = dict(pred=pred, **{axis: target}, normalized_pred=normalized)
+        doc["scatter_assessment"][corpus] = {axis: assessment}
+        doc["peer_provenance"][corpus] = entry
+    doc["eval_admission"] = spec["admission"]
+    if public_test:
+        doc["public_test_exposure"] = spec["public_test_exposure"]
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    with out.open("x") as f:
+        json.dump(doc, f, indent=1, allow_nan=False)
+        f.write("\n")
+    print(f"{name}: {len(doc['rank'])} admitted corpora -> {out}")
 
 RM = "/mnt/v/output/zensim/reports/refmetrics"
 OUT = "/mnt/v/output/zensim/reports/fulleval"
@@ -52,7 +124,23 @@ PEERS = {
         "aic3": ("aic3_iwssim_heldout.tsv", None, None),
         "konjnd": ("konjnd_iwssim_heldout.tsv", None, None),
     }),
+    # CVVDP under the JPEG AIC evaluation's display (2026-09-22). `peer_cvvdp`
+    # is scored at pycvvdp's default `standard_4k` (75.40 px/deg); the AIC CTC
+    # (v2.0, wg1n101246 §4) runs `cvvdp -d standard_fhd` (37.84 px/deg), which
+    # is what the organisers' CVVDP column is. On AIC-4 that difference alone is
+    # SROCC 0.8906 (4k) vs 0.9609 (fhd); the fhd table below reproduces the
+    # organisers' per-pair values to 0.0003 JOD. Only AIC-4 is scored at fhd so
+    # far (AIC-3 / SDR25 are listed for re-scoring, not read here).
+    # zenmetrics benchmarks/cvvdp_aic_discrepancy_2026-09-22.md.
+    "cvvdp_aicfhd": (+1, {
+        "aic4": ("aic4_cvvdp_standard_fhd.tsv", None, None),
+    }),
 }
+
+# Peers whose stored tables are listed explicitly above and must NOT pick up the
+# csiq/live/aic4/sdr25 auto-discovery below (it would attach the default-display
+# tables to the AIC-display row).
+NO_AUTODISCOVER = {"cvvdp_aicfhd"}
 
 # 2026-08-28 completion (user: "don't skip any"): csiq/live/aic4/sdr25 —
 # cvvdp scored CPU locally (the CPU rung is sanctioned for cvvdp); ssim2/
@@ -63,6 +151,8 @@ PEERS = {
 # (|SROCC| convention — srocc_signed may read negative by design); sdr25 =
 # q_jnd (the 50-pair instrument = the board axis population exactly).
 for peer in list(PEERS):
+    if peer in NO_AUTODISCOVER:
+        continue
     sign, corp = PEERS[peer]
     stems = {"ssim2": ["ssim2"], "butteraugli": ["butteraugli", "butter"],
              "cvvdp": ["cvvdp"], "iwssim": ["iwssim"]}[peer]
@@ -120,8 +210,10 @@ def load_pairs(path, corpus=None):
         xs.append(m); ys.append(h)
     return xs, ys, hcol, mcol
 
-def main():
+def main(only=None):
     for peer, (sign, corpora) in PEERS.items():
+        if only and peer not in only:
+            continue
         rank = {}
         prov = {}
         per_pair_all = {}
@@ -254,4 +346,15 @@ def main():
             print(f"   carried through unchanged ({len(carried)}): {', '.join(sorted(carried))}")
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--admitted-manifest", type=Path,
+                    help="explicit hash-bound eval peer TSVs; bypass all legacy corpus reads")
+    ap.add_argument("--out-dir", type=Path, default=Path(OUT))
+    ap.add_argument("--peer", action="append", choices=sorted(PEERS),
+                    help="build only these peer rows (repeatable); default: all")
+    args = ap.parse_args()
+    if args.admitted_manifest:
+        build_admitted(args.admitted_manifest, args.out_dir)
+    else:
+        OUT = str(args.out_dir)
+        main(set(args.peer or ()))

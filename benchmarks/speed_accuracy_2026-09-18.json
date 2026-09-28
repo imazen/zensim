@@ -1,0 +1,734 @@
+{
+ "generated_by": "scripts/demos/speed_accuracy_page.py",
+ "generated_utc": "2026-09-18T10:23:45Z",
+ "git_commit": "68b34cd56444cde56bb1dfe0534a5ccc5da6550d",
+ "sources": [
+  "benchmarks/speed_matrix_2026-09-18.json",
+  "benchmarks/speed_matrix_2026-09-18.md",
+  "/mnt/v/output/zensim/reports/fulleval/<row>.fulleval.json"
+ ],
+ "speed_provenance": {
+  "bin_plain": "46ce5d96f85c1d8529ed283b7a15b864c06b678253441fcb48bb77a17e6b958b",
+  "bin_rayon": "2449b1bc1fd3b2ee7decb1d436bb269d3a4e1f7a1949036a04858ed865403613",
+  "commit": "75e8fa891457b33dff35e6130665a2f07fbb769f",
+  "cpu_1t": "2",
+  "cpu_mt": "0-15",
+  "rounds": 32,
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "sizes": "64,256,1024,2048,4096",
+  "started_utc": "2026-09-18T07:34:39Z",
+  "threads_mt": 16
+ },
+ "cell_schema": [
+  "median_ms",
+  "min_ms",
+  "p95_ms",
+  "n_rounds",
+  "ratio_vs_fast_ssim2",
+  "cv",
+  "gate_clean_rounds"
+ ],
+ "noisy_cv_threshold": 0.1,
+ "anchor_drift_1t": {
+  "64": -0.12353766963032287,
+  "256": 0.15472047389855614,
+  "1024": 0.035598681241575836,
+  "2048": 0.029546003687076272,
+  "4096": 0.01868346038839408
+ },
+ "anchor_drift_8t": {
+  "64": 0.27576243980738346,
+  "256": -0.14321734745335357,
+  "1024": -0.058330648219698245,
+  "2048": -0.09086765135889108,
+  "4096": 0.28815626918553994
+ },
+ "ssim2_agreement": {
+  "cid22": {
+   "label": "CID22",
+   "peer_ssim2": 0.8894215853,
+   "peer_ssim2_mt914": 0.889426414193653,
+   "abs_delta": 4.8288936529417015e-06
+  },
+  "aic3": {
+   "label": "AIC-3",
+   "peer_ssim2": 0.797009495,
+   "peer_ssim2_mt914": 0.7964600735277317,
+   "abs_delta": 0.0005494214722682189
+  },
+  "aic4": {
+   "label": "AIC-4",
+   "peer_ssim2": 0.9127070301,
+   "peer_ssim2_mt914": 0.9127096967744086,
+   "abs_delta": 2.6666744086245586e-06
+  }
+ },
+ "excluded_corpora": "KADID, TID, KonJND, KonFiG, nonphoto, imazen26, hfnlproxy",
+ "frontier": {
+  "1024_1t": [
+   "Rev3 fast y60 (ens5)",
+   "Rev3 rich basic228 (ens5)",
+   "fast-ssim2"
+  ],
+  "4096_1t": [
+   "Rev3 fast y60 (ens5)",
+   "zensim D",
+   "Rev3 rich basic228 (ens5)",
+   "fast-ssim2"
+  ],
+  "4096_8t_rev1": [
+   "zensim D",
+   "zensim B",
+   "fast-ssim2"
+  ]
+ },
+ "render_checks": {
+  "label_collisions": {
+   "1024_1t": [],
+   "4096_1t": [],
+   "4096_8t_rev1": []
+  },
+  "points_outside_plot": {
+   "1024_1t": [],
+   "4096_1t": [],
+   "4096_8t_rev1": []
+  }
+ },
+ "arms": [
+  {
+   "arm": "fast_ssim2",
+   "label": "fast-ssim2",
+   "class": "peer",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": "8t-rev1",
+   "identity": {
+    "row": "peer_ssim2_mt914",
+    "proof": "identified by metric, not by a bake hash (peer row)",
+    "why_missing": null
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.889426414193653,
+     "plcc": 0.8878441176430176,
+     "n": 4292,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic3": {
+     "srocc": 0.7964600735277317,
+     "plcc": 0.8086272212028429,
+     "n": 600,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic4": {
+     "srocc": 0.9127096967744086,
+     "plcc": 0.9000058223724697,
+     "n": 300,
+     "per_ref_n": null,
+     "srocc_ci": null
+    }
+   },
+   "composite": null,
+   "dial_mono_pct": null,
+   "median_ms_1t": {
+    "64": 0.2137,
+    "256": 2.701,
+    "1024": 66.6991,
+    "2048": 299.6412,
+    "4096": 1363.3984
+   },
+   "cv_1t": {
+    "64": 0.102,
+    "256": 0.049,
+    "1024": 0.0225,
+    "2048": 0.0071,
+    "4096": 0.0552
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 1.0,
+    "256": 1.0,
+    "1024": 1.0,
+    "2048": 1.0,
+    "4096": 1.0
+   },
+   "median_ms_8t": {
+    "64": 0.3115,
+    "256": 3.1728,
+    "1024": 70.1398,
+    "2048": 316.3425,
+    "4096": 1338.7361
+   }
+  },
+  {
+   "arm": "ssimulacra2_rs",
+   "label": "ssimulacra2 (rust-av)",
+   "class": "peer",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": null,
+   "identity": {
+    "row": "peer_ssim2_mt914",
+    "proof": "identified by metric, not by a bake hash (peer row)",
+    "why_missing": null
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.889426414193653,
+     "plcc": 0.8878441176430176,
+     "n": 4292,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic3": {
+     "srocc": 0.7964600735277317,
+     "plcc": 0.8086272212028429,
+     "n": 600,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic4": {
+     "srocc": 0.9127096967744086,
+     "plcc": 0.9000058223724697,
+     "n": 300,
+     "per_ref_n": null,
+     "srocc_ci": null
+    }
+   },
+   "composite": null,
+   "dial_mono_pct": null,
+   "median_ms_1t": {
+    "64": 2.4194,
+    "256": 24.6814,
+    "1024": 441.6585,
+    "2048": 1844.1464,
+    "4096": 7490.5022
+   },
+   "cv_1t": {
+    "64": 0.0942,
+    "256": 0.0087,
+    "1024": 0.0127,
+    "2048": 0.0123,
+    "4096": 0.0302
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 11.3204,
+    "256": 9.138,
+    "1024": 6.6217,
+    "2048": 6.1545,
+    "4096": 5.494
+   },
+   "median_ms_8t": null
+  },
+  {
+   "arm": "butteraugli",
+   "label": "butteraugli",
+   "class": "peer",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": null,
+   "identity": {
+    "row": "peer_butteraugli",
+    "proof": "identified by metric, not by a bake hash (peer row)",
+    "why_missing": null
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.7411606988,
+     "plcc": 0.7320799024,
+     "n": 4292,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic3": {
+     "srocc": 0.7074370503,
+     "plcc": 0.7264591227,
+     "n": 600,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic4": {
+     "srocc": 0.8655660618,
+     "plcc": 0.8521788898,
+     "n": 300,
+     "per_ref_n": null,
+     "srocc_ci": null
+    }
+   },
+   "composite": null,
+   "dial_mono_pct": 0.8816932554098879,
+   "median_ms_1t": {
+    "64": 0.6357,
+    "256": 4.3417,
+    "1024": 95.3756,
+    "2048": 427.9934,
+    "4096": 2020.2809
+   },
+   "cv_1t": {
+    "64": 0.1093,
+    "256": 0.0269,
+    "1024": 0.0152,
+    "2048": 0.0053,
+    "4096": 0.0762
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 2.9745,
+    "256": 1.6075,
+    "1024": 1.4299,
+    "2048": 1.4284,
+    "4096": 1.4818
+   },
+   "median_ms_8t": null
+  },
+  {
+   "arm": "zensim_V0_2",
+   "label": "zensim PreviewV0_2",
+   "class": "zensim",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": "8t-rev1",
+   "identity": {
+    "row": null,
+    "proof": null,
+    "why_missing": "the profile carries no bake at all (source-embedded 228-weight linear, `mlp_bytes: None`), so no `bake_sha256` can key a board row to it"
+   },
+   "accuracy": {},
+   "composite": null,
+   "dial_mono_pct": null,
+   "median_ms_1t": {
+    "64": 0.1265,
+    "256": 1.2629,
+    "1024": 29.6287,
+    "2048": 111.7408,
+    "4096": 421.2059
+   },
+   "cv_1t": {
+    "64": 0.1344,
+    "256": 0.065,
+    "1024": 0.0264,
+    "2048": 0.0229,
+    "4096": 0.0741
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 0.592,
+    "256": 0.4676,
+    "1024": 0.4442,
+    "2048": 0.3729,
+    "4096": 0.3089
+   },
+   "median_ms_8t": {
+    "64": 0.1367,
+    "256": 0.5108,
+    "1024": 5.1254,
+    "2048": 20.8152,
+    "4096": 83.2442
+   }
+  },
+  {
+   "arm": "zensim_B",
+   "label": "zensim B",
+   "class": "zensim",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": "8t-rev1",
+   "identity": {
+    "row": "MT914_matched_B",
+    "proof": "b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin sha256 a96a5a66cd16 == the row's bake_sha256",
+    "why_missing": null,
+    "bake": "b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin",
+    "bake_sha256": "a96a5a66cd16282ded84580c37207b403334f1af069c924d9883346d23941276"
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.8821305241759236,
+     "plcc": 0.8819185826171498,
+     "n": 4292,
+     "per_ref_n": 49,
+     "srocc_ci": [
+      0.8749306528056847,
+      0.8893240565153951
+     ]
+    },
+    "aic3": {
+     "srocc": 0.763672344329381,
+     "plcc": 0.773878063909216,
+     "n": 600,
+     "per_ref_n": 10,
+     "srocc_ci": [
+      0.725931766066404,
+      0.7987320504843373
+     ]
+    },
+    "aic4": {
+     "srocc": 0.8904236713741264,
+     "plcc": 0.8795354920626212,
+     "n": 300,
+     "per_ref_n": 5,
+     "srocc_ci": [
+      0.8601167798676606,
+      0.9105149803878824
+     ]
+    }
+   },
+   "composite": 0.8382365640652277,
+   "dial_mono_pct": 0.9775794283285517,
+   "median_ms_1t": {
+    "64": 0.2447,
+    "256": 1.9557,
+    "1024": 42.3863,
+    "2048": 164.9885,
+    "4096": 674.5689
+   },
+   "cv_1t": {
+    "64": 0.1318,
+    "256": 0.0542,
+    "1024": 0.0195,
+    "2048": 0.0205,
+    "4096": 0.0625
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 1.1451,
+    "256": 0.7241,
+    "1024": 0.6355,
+    "2048": 0.5506,
+    "4096": 0.4948
+   },
+   "median_ms_8t": {
+    "64": 0.2818,
+    "256": 0.7179,
+    "1024": 7.8161,
+    "2048": 33.9635,
+    "4096": 113.8909
+   }
+  },
+  {
+   "arm": "zensim_C",
+   "label": "zensim C",
+   "class": "zensim",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": "8t-rev1",
+   "identity": {
+    "row": null,
+    "proof": null,
+    "why_missing": "no row in the board directory carries c_sdr_purity944_byid_2026-09-07.bin (sha256 996dfbb16ee0); searched every `*.fulleval.json` there",
+    "bake": "c_sdr_purity944_byid_2026-09-07.bin",
+    "bake_sha256": "996dfbb16ee0abf1a4d7faeaeab7e390fdc20277bbcaa46c4f3b89b2604041f7"
+   },
+   "accuracy": {},
+   "composite": null,
+   "dial_mono_pct": null,
+   "median_ms_1t": {
+    "64": 0.9189,
+    "256": 3.792,
+    "1024": 63.595,
+    "2048": 260.8133,
+    "4096": 1095.6951
+   },
+   "cv_1t": {
+    "64": 0.1037,
+    "256": 0.0089,
+    "1024": 0.0149,
+    "2048": 0.009,
+    "4096": 0.0435
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 4.2994,
+    "256": 1.404,
+    "1024": 0.9535,
+    "2048": 0.8704,
+    "4096": 0.8036
+   },
+   "median_ms_8t": {
+    "64": 0.9173,
+    "256": 1.8701,
+    "1024": 20.7079,
+    "2048": 88.4,
+    "4096": 410.2288
+   }
+  },
+  {
+   "arm": "zensim_D",
+   "label": "zensim D",
+   "class": "zensim",
+   "speed_run_1t": "1t-rev1",
+   "speed_run_8t": "8t-rev1",
+   "identity": {
+    "row": "MT914_matched_D",
+    "proof": "d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin sha256 cd1098b450ef == the row's bake_sha256",
+    "why_missing": null,
+    "bake": "d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+    "bake_sha256": "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6"
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.8632416224331436,
+     "plcc": 0.8631388650193756,
+     "n": 4292,
+     "per_ref_n": 49,
+     "srocc_ci": [
+      0.8547464504822742,
+      0.8714528648338936
+     ]
+    },
+    "aic3": {
+     "srocc": 0.7769958141384993,
+     "plcc": 0.7895478569151403,
+     "n": 600,
+     "per_ref_n": 10,
+     "srocc_ci": [
+      0.7404524935866004,
+      0.8100846704971786
+     ]
+    },
+    "aic4": {
+     "srocc": 0.9330752563917377,
+     "plcc": 0.9232856794519361,
+     "n": 300,
+     "per_ref_n": 5,
+     "srocc_ci": [
+      0.9119615527759689,
+      0.9476415477574253
+     ]
+    }
+   },
+   "composite": 0.8307597177715339,
+   "dial_mono_pct": 0.9930931888215917,
+   "median_ms_1t": {
+    "64": 0.2013,
+    "256": 1.3401,
+    "1024": 28.384,
+    "2048": 94.3874,
+    "4096": 354.9505
+   },
+   "cv_1t": {
+    "64": 0.1838,
+    "256": 0.0668,
+    "1024": 0.023,
+    "2048": 0.0122,
+    "4096": 0.0638
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 0.9419,
+    "256": 0.4962,
+    "1024": 0.4256,
+    "2048": 0.315,
+    "4096": 0.2603
+   },
+   "median_ms_8t": {
+    "64": 0.1597,
+    "256": 0.4401,
+    "1024": 5.8022,
+    "2048": 22.4036,
+    "4096": 88.2215
+   }
+  },
+  {
+   "arm": "rev3_fast_y60_ens5",
+   "label": "Rev3 fast y60 (ens5)",
+   "class": "rev3",
+   "speed_run_1t": "1t-rev3",
+   "speed_run_8t": "8t-rev3",
+   "identity": {
+    "row": "R915_y60_h32_ens5",
+    "proof": "row bake 4545e49e378d is member 1 of the 5 frozen hashes the speed-matrix driver verified before timing this arm",
+    "why_missing": null,
+    "bake_sha256": "4545e49e378d641218683782e8af575fd3d074580b49714a7b90193ebe8c5ce5"
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.8588995277666002,
+     "plcc": 0.8547019120270456,
+     "n": 4292,
+     "per_ref_n": 49,
+     "srocc_ci": [
+      0.8486740314864529,
+      0.8684870479357713
+     ]
+    },
+    "aic3": {
+     "srocc": 0.7921685560961299,
+     "plcc": 0.8023664623550131,
+     "n": 600,
+     "per_ref_n": 10,
+     "srocc_ci": [
+      0.757333213458369,
+      0.8214501648907071
+     ]
+    },
+    "aic4": {
+     "srocc": 0.9136337070411893,
+     "plcc": 0.9014433747164149,
+     "n": 300,
+     "per_ref_n": 5,
+     "srocc_ci": [
+      0.88646254781018,
+      0.9313826214415175
+     ]
+    }
+   },
+   "composite": 0.8460441996567002,
+   "dial_mono_pct": 0.9871427053448093,
+   "median_ms_1t": {
+    "64": 0.2776,
+    "256": 0.9841,
+    "1024": 12.7377,
+    "2048": 43.3886,
+    "4096": 166.5975
+   },
+   "cv_1t": {
+    "64": 0.1762,
+    "256": 0.1202,
+    "1024": 0.046,
+    "2048": 0.0344,
+    "4096": 0.1675
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 1.4823,
+    "256": 0.3155,
+    "1024": 0.1844,
+    "2048": 0.1406,
+    "4096": 0.12
+   },
+   "median_ms_8t": {
+    "64": 0.3663,
+    "256": 0.6136,
+    "1024": 4.3235,
+    "2048": 13.2009,
+    "4096": 51.7461
+   }
+  },
+  {
+   "arm": "rev3_rich_basic228_ens5",
+   "label": "Rev3 rich basic228 (ens5)",
+   "class": "rev3",
+   "speed_run_1t": "1t-rev3",
+   "speed_run_8t": "8t-rev3",
+   "identity": {
+    "row": "R915_basic228_h128_ens5",
+    "proof": "row bake 17d17b20f78a is member 1 of the 5 frozen hashes the speed-matrix driver verified before timing this arm",
+    "why_missing": null,
+    "bake_sha256": "17d17b20f78ad9dc7b2c90a1c991488581c3c23f0130a2422bd93194c4fac099"
+   },
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.8828886799145645,
+     "plcc": 0.8831594277608004,
+     "n": 4292,
+     "per_ref_n": 49,
+     "srocc_ci": [
+      0.8755702553114942,
+      0.8899583069989254
+     ]
+    },
+    "aic3": {
+     "srocc": 0.8005572833785116,
+     "plcc": 0.813147624740221,
+     "n": 600,
+     "per_ref_n": 10,
+     "srocc_ci": [
+      0.7665739081768294,
+      0.8308099379044247
+     ]
+    },
+    "aic4": {
+     "srocc": 0.915925732508139,
+     "plcc": 0.9031810706003618,
+     "n": 300,
+     "per_ref_n": 5,
+     "srocc_ci": [
+      0.8907856758033299,
+      0.9326250676667167
+     ]
+    }
+   },
+   "composite": 0.8759503373885235,
+   "dial_mono_pct": 0.9820422909361386,
+   "median_ms_1t": {
+    "64": 0.3994,
+    "256": 1.7841,
+    "1024": 27.915,
+    "2048": 91.279,
+    "4096": 374.7912
+   },
+   "cv_1t": {
+    "64": 0.1557,
+    "256": 0.0872,
+    "1024": 0.0179,
+    "2048": 0.0154,
+    "4096": 0.1341
+   },
+   "ratio_vs_fast_ssim2_1t": {
+    "64": 2.1328,
+    "256": 0.572,
+    "1024": 0.4041,
+    "2048": 0.2959,
+    "4096": 0.2699
+   },
+   "median_ms_8t": {
+    "64": 0.3873,
+    "256": 0.7455,
+    "1024": 6.0613,
+    "2048": 19.6803,
+    "4096": 106.2163
+   }
+  }
+ ],
+ "accuracy_only": [
+  {
+   "arm": "peer_cvvdp",
+   "label": "ColorVideoVDP",
+   "note": "No arm in the speed matrix.",
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.8214143294,
+     "plcc": 0.8250759876,
+     "n": 4292,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic3": {
+     "srocc": 0.7917799519,
+     "plcc": 0.8033632637,
+     "n": 600,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic4": {
+     "srocc": 0.8905597718,
+     "plcc": 0.8797050174,
+     "n": 300,
+     "per_ref_n": null,
+     "srocc_ci": null
+    }
+   },
+   "composite": null,
+   "dial_mono_pct": 0.9846785657873953
+  },
+  {
+   "arm": "peer_iwssim",
+   "label": "IW-SSIM",
+   "note": "No arm in the speed matrix.",
+   "accuracy": {
+    "cid22": {
+     "srocc": 0.7835702035,
+     "plcc": 0.7925761711,
+     "n": 4292,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic3": {
+     "srocc": 0.773469866,
+     "plcc": 0.7906903817,
+     "n": 600,
+     "per_ref_n": null,
+     "srocc_ci": null
+    },
+    "aic4": {
+     "srocc": 0.9532691319,
+     "plcc": 0.9521948375,
+     "n": 300,
+     "per_ref_n": null,
+     "srocc_ci": null
+    }
+   },
+   "composite": null,
+   "dial_mono_pct": 0.9947875533091138
+  }
+ ]
+}

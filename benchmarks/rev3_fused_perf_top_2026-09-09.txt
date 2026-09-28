@@ -1,0 +1,15 @@
+# perf record -F 2999 -g, fused Rev3, fold944_full @2048², RAYON_NUM_THREADS=1, taskset -c 8, ZEN_XP_ITERS=10, binary 07a8b1b9…9407e, 2026-09-09 22:52Z. --no-children, percent-limit 2.
+ 26.28% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::blur::__arcane_box_blur_v_copy_inner_v4x
+ 13.10% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::fused::__arcane_fused_vblur_ssim_inner_v4x
+ 9.60% extract_paths_b libc.so.6 [.] __memmove_avx512_unaligned_erms
+ 8.96% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::blur::__arcane_fused_blur_h_ssim_inner_v4x
+ 8.66% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::feature_v2::__arcane_dense_block_kernel_era2_entry_v4x
+ 8.54% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::blur::__arcane_box_blur_h_inner_v4x
+ 2.64% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::color::__arcane_srgb_to_positive_xyb_planar_inner_v4x
+ 2.60% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::feature_v2::__arcane_append_block_kernel_entry_nocross_v4x
+ 2.53% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::feature_v2::__arcane_append_block_kernel_entry_cross_v4x
+ 2.42% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::simd_ops::__arcane_edge_diff_channel_inline_both_inner_v4
+ 2.41% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::feature_v2::__arcane_gradient_block_kernel_entry_bandvis_v4x
+ 2.33% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::feature_v2::__arcane_gradient_block_kernel_entry_v4x
+ 2.07% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::simd_ops::__arcane_ssim_signal_inline_both_inner_v4
+ 2.01% extract_paths_b extract_paths_bench-a694d0db1fd136c1 [.] zensim::simd_ops::__arcane_abs_diff_into_inner_v4

@@ -1,0 +1,97 @@
+{
+  "schema": "native-sdr-contract-result-v1",
+  "role": "train-fit-input-serving-audit",
+  "model_qualified": false,
+  "new_fits": 0,
+  "new_eval_rows": 0,
+  "pair_count": 214,
+  "unique_input_files": 215,
+  "legacy_csv_and_audit_exact": true,
+  "native372_exact_pixel_cached_f32_rows": 214,
+  "native944_ensemble_exact_pixel_cached_f32_spatial_rows": 214,
+  "max_consumed_feature_abs_delta": 0.0,
+  "native372_prepared_status": {
+    "ACCEPTED": 213,
+    "REJECTED_INTEGRITY": 1
+  },
+  "native372_map_queries": 30136,
+  "native944_refinement_queries": 626249,
+  "native944_unsupported_density_ids": [],
+  "native_identities": 33,
+  "native_identity_scores": [
+    100.0
+  ],
+  "active_integrity_row_ids": [
+    5171
+  ],
+  "scores_changed_vs_legacy": 181,
+  "native_minus_legacy_score_range": [
+    -26.085928916931152,
+    7.268062591552734
+  ],
+  "tests": {
+    "synthetic_codec_and_native_input": 23,
+    "jpeg_owner": 1,
+    "cli_refusals": 5
+  },
+  "binary_sha256": "669b5c9f83e8dc78d29b57bd84a35d5a513d46b9dbff073634839278536f8aa1",
+  "files": {
+    "PROTOCOL.md": "8d56e8244af684e915a440b0f61dcde9b041d6cdd0672a9d9ff860e322952ee4",
+    "ADMISSION.json": "8e891c8c8a611449fc58dd65b2bc68b073648593483627466424d508ae1eaec3",
+    "INPUTS_VERIFIED.json": "8145584c2cfbe04cc3a53d497be9bb0d35864d44483344ccff5a6fc3db6ea306",
+    "pairs.tsv": "b74f31dc34b80b4b93517aae8a046d98f64ce4e638fe4bfc475546953dfdd233",
+    "FINAL_REPLAY.json": "4c70f975937531c7e7913ef891627b89423709ca4db1e1827ee926cc9bc59104",
+    "REFUSALS.json": "eca7178a82e15a68c1b16c9e65f0fd357e3e0753dc1f67a63cab60e9e6fbeb2b",
+    "native372-final.csv": "08bc2ca87a0cc71a9ca41286a45293d57fadf11f88e9152d3bf9ce18bb496f57",
+    "native372-final.jsonl": "182bb8e79a880906ae50a6f76c52a26e023639a22b9760c9a5eb5aa6d671b497",
+    "native944-ensemble-final.csv": "db66ce15ade2db091863623be3f837aa12d658ce3b3ce5a803df18d0b45b42d5",
+    "native944-ensemble-final.jsonl": "3e80ed1ce03ed86b2b3de910a2c2b24e6b33df3e9ea76a5ff0b90a324f05d73c",
+    "legacy-before372.csv": "6678cbef9e3e2025b1463ef6cfcc7f5bf1a233dd2a59f45a98d9ba6cabd8d483",
+    "legacy-before372.jsonl": "50d22799306427c0d86c3d79a80b7b437f4f4055ee710b429b82ac6728e3a396",
+    "legacy-after372-final.csv": "6678cbef9e3e2025b1463ef6cfcc7f5bf1a233dd2a59f45a98d9ba6cabd8d483",
+    "legacy-after372-final.jsonl": "50d22799306427c0d86c3d79a80b7b437f4f4055ee710b429b82ac6728e3a396",
+    "native-tests-final.log": "1b0962dc916e1cf5697b307a977f8015423c5acd0157f2cbebc251471e8328bd",
+    "jpeg-tests-final.log": "e766700432616c5c5694baa376022b410201ac44f22168fc27a3aedc5a277330",
+    "native-tests-identity.log": "e21068a3815295789c1d10cd672cd9d379823096da95703dfff74d200125e316",
+    "clippy-bench-identity.log": "8f8405f9db0cb9b7873e2586e92cd6a472df5072101628093cb11454d5df243b",
+    "build-identity.log": "52806cedd0abbf13e7c3260f7ff7a52eb26d0748fd605dd77d4c1d3dc8dee859"
+  },
+  "source_revisions": {
+    "zenjpeg": "8f703a6eeaad080045aa4c1b3713a25df2e15529",
+    "zenpixels": "e56f626b14e6f0211e020159d30b3a48616e88e0",
+    "zenavif": "a7c56be9e77dc708f379eeaa288ab607f6d3f6e1",
+    "zenjxl": "4a2c021b4589b5d0465006c48568f6b520128525",
+    "zenjxl-decoder": "940d2c518b1357f0db553e641ac430180272174d",
+    "jxl-encoder": "ee80c7855d655800a789b332855cf61b48e4cd6c",
+    "zenanalyze": "b102fa5f3480f0c3911fa85a8a6ad23c64936f18"
+  },
+  "source_files": {
+    "zensim-bench/Cargo.toml": "e5f26f732d32cd054629a66ee530a90e5c21a0eb43346d5b28e50575b80d7372",
+    "zensim-bench/Cargo.lock": "d6234c1fd46442563e33d95b2079e09d3e4289f08df3b7e91e4ed5ccdc7980b1",
+    "zensim-bench/examples/shared/zen_decode.rs": "a013109fbaf5d0e9f90073aa58b653c2ccb6303f2281f1d91e3f138df6b2b772",
+    "zensim-bench/examples/shared/score_input.rs": "034c665ba4d937c704f79be6121beddf0b2ed1db327c201428de9b9bace93f8a",
+    "zensim-bench/examples/extract_features_372col.rs": "684745a6dcbe0441fc7edc09dafa6eeabf5b2eabad4c13e16c87bfe9df17857e",
+    "zensim-bench/examples/extract_features_372col/audit.rs": "e382cc471dd891c39d4936a414bf45ec66c22abe7e1810d7c09bb16ee55f5d56",
+    "zensim-bench/tests/zen_decode_formats.rs": "c171c9012e74c85c08436c2450d19685b6a8f329f8aecbf4a9f3b4908f89308a"
+  },
+  "model_inputs": [
+    [
+      "/home/lilith/work/zensim-validation-2026-09-14/integrity-rev3-train/models/base.bin",
+      "a8871222a19ec22b66add5c10840165b4b0fb5fbee96c953a0410b25014e0462"
+    ],
+    [
+      "/home/lilith/work/zensim-validation-2026-09-14/integrity-rev3-train/fit-model/head.zcth",
+      "03bf70c6d03f521c009325aa38332d5bea251d6dbb2b6df14809b541863d2838"
+    ]
+  ],
+  "ensemble_model_inputs": [
+    [
+      "/home/lilith/work/zensim-validation-2026-09-14/chroma-scale-train/fits/CS914_y70_h32_s7101.bin",
+      "9b7317ced19734d06e633da1e534be2b5cd6068d618b38da4cd52c0732aff5cd"
+    ],
+    [
+      "/home/lilith/work/zensim-validation-2026-09-14/chroma-scale-train/fits/CS914_y80_h32_s7101.bin",
+      "254fe9d6f0df94adcf7c047ef5e058eed90b4682e8dceea7d89c7e64d55f87bf"
+    ]
+  ]
+}

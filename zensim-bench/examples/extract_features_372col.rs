@@ -28,6 +28,17 @@
 //! small for the pyramid is a HARD failure that aborts the run. Tolerating any
 //! is the caller's explicit decision: `--allow-failures N` (default 0).
 //!
+//! For admitted `pairs-tsv` inputs, `--audit-jsonl PATH --audit-ssim2`
+//! additionally records fast-ssim2 scores on the audit's decoded RGB8 buffers.
+//! Pixel hashes bind both metrics to the same inputs. This flag does not alter
+//! feature extraction or permit dropped pairs.
+//!
+//! `--input-contract sdr-native-clip-v1` retains native u16/linear-f32
+//! samples for declared SDR primaries and converts arbitrary ICC through the
+//! existing CMS. It requires explicit pairs-tsv and a fresh audit, refuses HDR
+//! and unsupported/conflicting color interpretations, and records a separate
+//! input era. The RGB8-only peer audit is refused for this contract.
+//!
 //! Usage:
 //!   cargo run --release -p zensim-bench --example extract_features_372col -- \
 //!     --corpus konjnd \
@@ -51,6 +62,13 @@ use zensim::{ZensimConfig, compute_zensim_with_config};
 #[path = "shared/zen_decode.rs"]
 mod zen_decode;
 
+#[path = "shared/score_input.rs"]
+mod score_input;
+use score_input::{InputContract, ScoreInput};
+
+#[path = "extract_features_372col/audit.rs"]
+mod audit;
+
 #[derive(Debug, Clone)]
 struct Pair {
     reference: PathBuf,
@@ -65,6 +83,8 @@ struct Pair {
     extra_targets: Vec<(String, f64)>,
 }
 
+type FeatureRow = (String, f64, Vec<(String, f64)>, Vec<f64>);
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut corpus: Option<String> = None;
@@ -72,8 +92,69 @@ fn main() {
     let mut out: Option<PathBuf> = None;
     let mut max_pairs: usize = usize::MAX;
     let mut allow_failures: usize = 0;
+    let mut audit_out = None;
+    let mut audit_bake = None;
+    let mut audit_head = None;
+    let mut audit_ensemble = None;
+    let mut audit_weights = None;
+    let mut audit_ssim2 = false;
+    let mut sampling = None;
+    let mut force_tier = None;
+    let mut full_944 = false;
+    let mut full_986 = false;
+    let mut full_rev4 = false;
+    let mut full_gmsbank = false;
+    // Restored cuts (COST_CUTS_AUDIT): `--restore-cuts mapdev,z1max,gmsnative`
+    // computes ONLY those families' slots (the plan skips everything else) at
+    // the full registered layout width; every other column is a structural 0.
+    let mut restore_cuts: Option<Vec<zensim::feature_set_id::ComputeToken>> = None;
+    // `--restore-cuts prefix,...`: ALSO request f0..f1501, so the identity gate can compare the
+    // whole existing surface with the families on (a plain `--restore-cuts` list leaves the v1
+    // pools f156..371 unrequested, hence structural zero).
+    let mut restore_prefix = false;
+    let mut dvifm_spec = None;
+    let mut dvifm_blocks = None;
+    let mut dvifm_cap = 0usize;
+    let mut dvifm_quant_f16 = false;
+    let mut dvifm_hist = None;
+    let mut input_contract = None;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--input-contract" => audit::take_value(&mut input_contract, args.next()),
+            "--sampling" => sampling = Some(args.next().expect("--sampling value")),
+            "--full-944" => full_944 = true,
+            "--full-986" => full_986 = true,
+            "--full-rev4" => full_rev4 = true,
+            "--full-gmsbank" => full_gmsbank = true,
+            "--restore-cuts" => {
+                let list = args.next().expect("--restore-cuts value");
+                restore_cuts = Some(
+                    list.split(',')
+                        .filter(|t| {
+                            restore_prefix |= *t == "prefix";
+                            *t != "prefix"
+                        })
+                        .map(|t| {
+                            zensim::feature_set_id::ComputeToken::parse(t)
+                                .unwrap_or_else(|| panic!("--restore-cuts: unknown token {t:?}"))
+                        })
+                        .collect(),
+                );
+            }
+            "--dvifm-spec" => dvifm_spec = Some(args.next().expect("--dvifm-spec value")),
+            "--dvifm-block-stats" => {
+                dvifm_blocks = Some(args.next().expect("--dvifm-block-stats value"))
+            }
+            "--dvifm-cap" => dvifm_cap = args.next().expect("--dvifm-cap value").parse().unwrap(),
+            "--dvifm-quant" => {
+                dvifm_quant_f16 = match args.next().expect("--dvifm-quant value").as_str() {
+                    "f16" => true,
+                    "f32" => false,
+                    other => panic!("--dvifm-quant must be f16|f32, got {other}"),
+                }
+            }
+            "--dvifm-hist" => dvifm_hist = Some(args.next().expect("--dvifm-hist value")),
+            "--force-tier" => force_tier = Some(args.next().unwrap()),
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
@@ -81,6 +162,12 @@ fn main() {
             // How many pairs may fail extraction before the run aborts.
             // Default 0 — see the NO GRACEFUL SKIPS block below.
             "--allow-failures" => allow_failures = args.next().unwrap().parse().unwrap(),
+            "--audit-jsonl" => audit::take_path(&mut audit_out, args.next()),
+            "--audit-bake" => audit::take_path(&mut audit_bake, args.next()),
+            "--audit-corruption-head" => audit::take_path(&mut audit_head, args.next()),
+            "--audit-ensemble" => audit::take_value(&mut audit_ensemble, args.next()),
+            "--audit-ensemble-weights" => audit::take_value(&mut audit_weights, args.next()),
+            "--audit-ssim2" => audit_ssim2 = true,
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -90,6 +177,220 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
+    // Forced SIMD tier for bit-identity matrices (rev4 acceptance):
+    // disabling a parent token cascades to its descendants, so `v3` =
+    // v4 off, `scalar` = v2 off (v3/v4/v4x all cascade away; the
+    // compile-time v1 SSE2 baseline always remains — zensim's `scalar`
+    // incant arm is what runs below v3). `native` = no forcing.
+    match force_tier.as_deref() {
+        None | Some("native") => {}
+        Some("v3") => {
+            archmage::X64V4Token::dangerously_disable_token_process_wide(true)
+                .expect("disable x86-64-v4");
+            eprintln!("[tier] forced v3 (x86-64-v4/v4x/avx512 disabled)");
+        }
+        Some("scalar") => {
+            archmage::X64V2Token::dangerously_disable_token_process_wide(true)
+                .expect("disable x86-64-v2");
+            eprintln!("[tier] forced scalar (x86-64-v2 and up disabled)");
+        }
+        Some(other) => panic!("unknown --force-tier {other:?} (native|v3|scalar)"),
+    }
+    assert!(
+        [
+            full_944,
+            full_986,
+            full_rev4,
+            full_gmsbank,
+            restore_cuts.is_some()
+        ]
+        .iter()
+        .filter(|b| **b)
+        .count()
+            <= 1,
+        "--full-944/--full-986/--full-rev4/--full-gmsbank/--restore-cuts are mutually exclusive"
+    );
+    let research_path = full_986 || full_rev4 || full_gmsbank || restore_cuts.is_some();
+    assert!(
+        (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none()) || research_path,
+        "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require the research path (--full-986/--full-rev4/--full-gmsbank)"
+    );
+    assert!(
+        dvifm_hist.is_none() || dvifm_spec.is_some(),
+        "--dvifm-hist needs --dvifm-spec (per-level g/edge constants)"
+    );
+    assert!(
+        dvifm_hist.is_none() || dvifm_blocks.is_some(),
+        "--dvifm-hist accompanies --dvifm-block-stats"
+    );
+    assert!(
+        !research_path || sampling.is_none(),
+        "the research path (--full-986/--full-rev4/--full-gmsbank) does not take a sampling contract"
+    );
+    assert!(
+        !full_944 || sampling.as_deref().is_none_or(|s| s.starts_with("v2:")),
+        "--full-944 sampling requires a direct v2 contract"
+    );
+    assert!(
+        full_944 || sampling.as_deref().is_none_or(|s| !s.starts_with("v2:")),
+        "direct v2 sampling requires --full-944"
+    );
+    let input_contract = InputContract::parse(input_contract.as_deref().unwrap_or("legacy-rgb8"))
+        .expect("input contract");
+    if input_contract != InputContract::LegacyRgb8 {
+        assert!(
+            audit_out.is_some() && allow_failures == 0,
+            "native input requires --audit-jsonl and zero failures"
+        );
+        assert!(
+            matches!(corpus.as_str(), "pairs-tsv"),
+            "native input requires explicit pairs-tsv"
+        );
+        assert!(
+            !out.exists() && !audit_out.as_ref().unwrap().exists(),
+            "native extraction requires fresh outputs"
+        );
+        for suffix in [".manifest.json", ".producer.bin"] {
+            assert!(
+                !PathBuf::from(format!("{}{suffix}", out.display())).exists(),
+                "native extraction sidecar already exists"
+            );
+        }
+    }
+    // The w986/w1322 request goes through `research::extract` (the
+    // plan-driven owner) — `--dvifm-spec`/`--dvifm-block-stats` exist only
+    // there. The request is built once and shared by every pair.
+    // `--full-rev4` is the same request at the rev4 bank's full width.
+    let research_req = research_path.then(|| {
+        let w = if restore_cuts.is_some() {
+            zensim::research::full_width()
+        } else if full_gmsbank {
+            1502
+        } else if full_rev4 {
+            1322
+        } else {
+            986
+        };
+        let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
+        let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
+        let want = match &restore_cuts {
+            Some(tokens) => tokens.iter().fold(
+                if restore_prefix {
+                    zensim::feature_set_id::SlotSet::from_ranges([(0, 1502)])
+                } else {
+                    zensim::feature_set_id::SlotSet::default()
+                },
+                |acc, &t| acc.union(&zensim::research::family_slots(t)),
+            ),
+            None => zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
+        };
+        let mut req = zensim::research::Request::for_slots(want, w);
+        if let Some(spec) = spec {
+            req = req.with_dvifm_spec(spec);
+        }
+        if dvifm_blocks.is_some() {
+            req = req.collect_dvifm_blocks(true);
+        }
+        (req, spec_sha)
+    });
+    let producer = if research_path {
+        None
+    } else if full_944 {
+        Some(diagnostic_producer(
+            sampling.as_deref(),
+            &out,
+            input_contract,
+        ))
+    } else {
+        sampling
+            .as_deref()
+            .map(|tag| diagnostic_producer(Some(tag), &out, input_contract))
+    };
+    // Per-pair block-record sink: streamed (a row's records run ~4 MB —
+    // collecting them would not fit in memory). `index` keeps (row order,
+    // byte offset, per-level record counts, input hashes) for the jsonl
+    // written after the walk completes.
+    let dvifm_sink = dvifm_blocks.as_ref().map(|p| {
+        let file = std::fs::File::create(p).expect("create dvifm-block-stats file");
+        let input_plane = research_req
+            .as_ref()
+            .and_then(|(r, _)| r.dvifm_spec())
+            .map(|s| match s.input_plane {
+                zensim::research::DvifmInputPlane::XybY => "xyb_y",
+                zensim::research::DvifmInputPlane::YcbcrY => "ycbcr_y",
+                zensim::research::DvifmInputPlane::YcbcrCb => "ycbcr_cb",
+                zensim::research::DvifmInputPlane::YcbcrCr => "ycbcr_cr",
+            })
+            .unwrap_or("xyb_y");
+        let hist = dvifm_hist.as_ref().map(|_| {
+            let spec = research_req
+                .as_ref()
+                .and_then(|(r, _)| r.dvifm_spec())
+                .expect("--dvifm-hist requires --dvifm-spec");
+            DvifmHist {
+                levels: spec
+                    .levels
+                    .iter()
+                    .map(|lv| LevelHist {
+                        counts: vec![0u32; HIST_BINS * HIST_BINS],
+                        g: lv.g,
+                        edge: lv.edge,
+                        n_blocks: 0,
+                        n_c_nonpos: 0,
+                    })
+                    .collect(),
+            }
+        });
+        DvifmSink {
+            file: std::sync::Mutex::new((std::io::BufWriter::new(file), 0)),
+            index: std::sync::Mutex::new(Vec::new()),
+            input_plane,
+            cap: dvifm_cap,
+            quant_f16: dvifm_quant_f16,
+            hist: hist.map(std::sync::Mutex::new),
+        }
+    });
+    let mut audit = audit::Config::load(
+        audit_out,
+        audit::CandidateInputs {
+            bake: audit_bake,
+            head: audit_head,
+            ensemble: audit_ensemble,
+            weights: audit_weights,
+        },
+        &out,
+        allow_failures,
+        sampling.as_deref(),
+    )
+    .expect("audit configuration");
+    if audit_ssim2 {
+        audit
+            .as_mut()
+            .expect("--audit-ssim2 requires --audit-jsonl")
+            .enable_ssim2();
+    }
+    assert!(
+        audit.is_none() || matches!(corpus.as_str(), "pairs" | "pairs-tsv"),
+        "audit requires explicit pairs or pairs-tsv input"
+    );
+
+    if let Some(audit) = &audit {
+        audit
+            .validate_feature_width(if restore_cuts.is_some() {
+                zensim::research::full_width()
+            } else if full_gmsbank {
+                1502
+            } else if full_rev4 {
+                1322
+            } else if full_944 {
+                944
+            } else if full_986 {
+                986
+            } else {
+                372
+            })
+            .expect("audit feature width");
+    }
 
     let pairs: Vec<Pair> = match corpus.as_str() {
         "konjnd" => load_konjnd(&path, max_pairs),
@@ -113,19 +414,24 @@ fn main() {
     };
 
     let n_total = pairs.len();
+    if audit.is_some() {
+        audit::validate_pairs_input(&path, &pairs, max_pairs).expect("audit pair coverage");
+    }
     eprintln!("Loaded {n_total} pairs from {corpus}");
     if n_total == 0 {
         eprintln!("no pairs loaded; exiting");
         std::process::exit(3);
     }
 
+    let research_fsid = std::sync::Mutex::new(None::<String>);
     let started = std::time::Instant::now();
     let progress = AtomicUsize::new(0);
     let log_every = (n_total / 20).max(1);
 
-    let scored: Vec<Result<(String, f64, Vec<(String, f64)>, Vec<f64>), String>> = pairs
+    let scored: Vec<_> = pairs
         .par_iter()
-        .map(|kp| {
+        .enumerate()
+        .map(|(row_index, kp)| {
             let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if p.is_multiple_of(log_every) {
                 let elapsed = started.elapsed().as_secs_f64();
@@ -133,7 +439,29 @@ fn main() {
                 let eta = (n_total - p) as f64 / rate;
                 eprintln!("  {corpus} {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
             }
-            extract_features(kp)
+            let hashes = audit.as_ref().map(|_| audit::file_hashes(kp)).transpose()?;
+            let (row, research_out) = extract_features(
+                kp,
+                producer.as_deref(),
+                input_contract,
+                research_req.as_ref().map(|(r, _)| r),
+            )?;
+            if let Some(out) = research_out {
+                if let (Some(sink), Some(stats)) = (dvifm_sink.as_ref(), out.blocks) {
+                    sink.write(row_index, kp, &stats)?;
+                }
+                if let Some(id) = out.feature_set_id {
+                    let mut slot = research_fsid.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(id);
+                    }
+                }
+            }
+            let record = audit
+                .as_ref()
+                .map(|a| a.score(kp, &row.3, hashes.as_ref().unwrap(), input_contract))
+                .transpose()?;
+            Ok::<_, String>((row, record))
         })
         .collect();
 
@@ -143,11 +471,17 @@ fn main() {
     // chain instead of buried in the loop body. (This function used to
     // `.flatten()` an `Option` — a corpus could lose 30 % of its rows and the
     // only trace was a smaller row count in the "scored N/M" line.)
-    let mut rows: Vec<(String, f64, Vec<(String, f64)>, Vec<f64>)> = Vec::new();
+    let mut rows: Vec<FeatureRow> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
+    let mut audits = Vec::new();
     for r in scored {
         match r {
-            Ok(row) => rows.push(row),
+            Ok((row, record)) => {
+                rows.push(row);
+                if let Some(record) = record {
+                    audits.push(record);
+                }
+            }
             Err(e) => failures.push(e),
         }
     }
@@ -181,12 +515,25 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    if n_feat != 372 {
-        eprintln!(
-            "WARNING: expected 372 features per pair, got {n_feat} — \
-             check ZensimConfig extended/iw flags + image dimensions"
-        );
-    }
+    let expected_width = if restore_cuts.is_some() {
+        zensim::research::full_width()
+    } else if full_gmsbank {
+        1502
+    } else if full_rev4 {
+        1322
+    } else if full_944 {
+        944
+    } else if full_986 {
+        986
+    } else {
+        372
+    };
+    assert_eq!(n_feat, expected_width, "producer feature width");
+    assert!(
+        rows.iter()
+            .all(|r| r.3.len() == expected_width && r.3.iter().all(|v| v.is_finite())),
+        "invalid producer row"
+    );
 
     // Header layout: ref_basename, human_score, <extra-target columns…>, f0..f<n-1>.
     // Extra target column names come from the first row's `extra_targets`; every row
@@ -198,10 +545,10 @@ fn main() {
 
     // Write CSV
     use std::io::{BufWriter, Write};
-    if let Some(parent) = out.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent).expect("create output dir");
-        }
+    if let Some(parent) = out.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent).expect("create output dir");
     }
     let f = std::fs::File::create(&out).expect("create output CSV");
     let mut w = BufWriter::with_capacity(1 << 20, f);
@@ -225,14 +572,85 @@ fn main() {
         writeln!(w).unwrap();
     }
     w.flush().unwrap();
+    if let Some(audit) = &audit {
+        audit.write(&audits, n_total).expect("write complete audit");
+    }
     eprintln!(
         "Wrote {} rows × {n_feat} features to {}",
         rows.len(),
         out.display()
     );
+    if let Some((req, spec_sha)) = &research_req {
+        // Write the block-record index (sorted by the pairs.tsv row order)
+        // and the producer manifest once the walk is complete — the
+        // manifest carries the feature-set id the extraction produced plus
+        // the cache bytes' sha256.
+        if let Some(sink) = dvifm_sink.as_ref() {
+            let index_path = format!("{}.index.jsonl", dvifm_blocks.as_ref().unwrap());
+            let mut index = std::mem::take(&mut *sink.index.lock().unwrap());
+            index.sort_by_key(|e| e["row_index"].as_u64().unwrap());
+            std::io::Write::flush(&mut sink.file.lock().unwrap().0).unwrap();
+            let mut iw = std::io::BufWriter::new(
+                std::fs::File::create(&index_path).expect("create block index"),
+            );
+            for e in &index {
+                use std::io::Write as _;
+                writeln!(iw, "{}", serde_json::to_string(e).unwrap()).unwrap();
+            }
+            std::io::Write::flush(&mut iw).unwrap();
+            if let (Some(hist), Some(hp)) = (&sink.hist, dvifm_hist.as_ref()) {
+                let h = hist.lock().unwrap();
+                // Layout: one JSON header line, then 5×256×256 u32 LE counts.
+                let mut hw =
+                    std::io::BufWriter::new(std::fs::File::create(hp).expect("create dvifm hist"));
+                let header = serde_json::json!({
+                    "schema": "dvifm-hist-v1",
+                    "input_plane": sink.input_plane,
+                    "bins": HIST_BINS,
+                    "ln_lo": HIST_LN_LO,
+                    "ln_hi": HIST_LN_HI,
+                    "bin0_semantics": "v<=0 or NaN (C: v=1 arm; m: term=0)",
+                    "levels": h.levels.iter().map(|l| serde_json::json!({
+                        "g": l.g, "edge": l.edge,
+                        "n_blocks": l.n_blocks,
+                        "n_c_nonpos": l.n_c_nonpos,
+                    })).collect::<Vec<_>>(),
+                    "spec": dvifm_spec,
+                    "cap": sink.cap,
+                    "quant": if sink.quant_f16 { "f16" } else { "f32" },
+                });
+                use std::io::Write as _;
+                writeln!(hw, "{}", serde_json::to_string(&header).unwrap()).unwrap();
+                for l in &h.levels {
+                    for &c in &l.counts {
+                        hw.write_all(&c.to_le_bytes()).unwrap();
+                    }
+                }
+                std::io::Write::flush(&mut hw).unwrap();
+            }
+        }
+        write_research_manifest(
+            &out,
+            input_contract,
+            req,
+            research_fsid.lock().unwrap().as_deref(),
+            spec_sha.as_deref(),
+            dvifm_blocks.as_deref(),
+            force_tier.as_deref().unwrap_or("native"),
+        );
+    }
 }
 
-/// Extract one pair's 372 features.
+/// The research path's per-pair side products (`--full-986`): the DVIFM
+/// block records when `--dvifm-block-stats` was given, plus the
+/// feature-set id string the extraction derived (same for every row —
+/// captured once for the manifest).
+struct ResearchOut {
+    blocks: Option<zensim::research::DvifmBlockStats>,
+    feature_set_id: Option<String>,
+}
+
+/// Extract one pair's canonical features: default 372, or the explicit producer.
 ///
 /// Returns `Err` — never a silent skip — on every failure path. Decoding goes
 /// through [`zen_decode`], the imazen-only decode owner: magic-byte format
@@ -242,9 +660,14 @@ fn main() {
 /// corpus was dropped without a word, and (b) decodes an XYB JPEG as an
 /// ordinary JPEG, producing wrong pixels that still parse. See the module doc
 /// of `shared/zen_decode.rs`.
-fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f64>), String> {
-    let src = zen_decode::decode_rgb8_path(&kp.reference).map_err(|e| format!("reference: {e}"))?;
-    let dst = zen_decode::decode_rgb8_path(&kp.distorted).map_err(|e| format!("distorted: {e}"))?;
+fn extract_features(
+    kp: &Pair,
+    producer: Option<&[u8]>,
+    contract: InputContract,
+    research: Option<&zensim::research::Request>,
+) -> Result<(FeatureRow, Option<ResearchOut>), String> {
+    let src = ScoreInput::decode(&kp.reference, contract).map_err(|e| format!("reference: {e}"))?;
+    let dst = ScoreInput::decode(&kp.distorted, contract).map_err(|e| format!("distorted: {e}"))?;
     if src.width != dst.width || src.height != dst.height {
         return Err(format!(
             "dimension mismatch: reference {}x{} ({}) vs distorted {}x{} ({})",
@@ -264,38 +687,438 @@ fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f
             kp.reference.display()
         ));
     }
-    let src_pixels: Vec<[u8; 3]> = src
-        .pixels
-        .chunks_exact(3)
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
-    let dst_pixels: Vec<[u8; 3]> = dst
-        .pixels
-        .chunks_exact(3)
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
+    if let Some(req) = research {
+        // The plan-driven owner: emits the w986 identity layout through the
+        // SAME walk the producer path uses, and is the only surface that
+        // carries the DVIFM constants override / block-record side output.
+        let ext = zensim::research::extract(req, &src.source(), &dst.source())
+            .map_err(|e| format!("research extract ({}): {e:?}", kp.distorted.display()))?;
+        let out = ResearchOut {
+            blocks: ext.dvifm_blocks().cloned(),
+            feature_set_id: ext.feature_set_id().map(|id| id.to_string()),
+        };
+        return Ok((
+            (
+                kp.ref_basename.clone(),
+                kp.human_score,
+                kp.extra_targets.clone(),
+                ext.values().to_vec(),
+            ),
+            Some(out),
+        ));
+    }
+    if let Some(bytes) = producer {
+        let model = zenpredict::Model::from_bytes(bytes).map_err(|e| e.to_string())?;
+        let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
+        let result = scorer
+            .compute(&src.source(), &dst.source(), None)
+            .map_err(|e| e.to_string())?;
+        return Ok((
+            (
+                kp.ref_basename.clone(),
+                kp.human_score,
+                kp.extra_targets.clone(),
+                result.features().to_vec(),
+            ),
+            None,
+        ));
+    }
     let mut config = ZensimConfig::default();
     config.extended_features = true;
     config.compute_iw_features = true;
-    let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config)
-        .map_err(|e| format!("compute_zensim ({}): {e:?}", kp.distorted.display()))?;
+    let result = if contract == InputContract::LegacyRgb8 {
+        compute_zensim_with_config(
+            src.bytes().as_chunks::<3>().0,
+            dst.bytes().as_chunks::<3>().0,
+            w_us,
+            h_us,
+            config,
+        )
+    } else {
+        static PARAMS: std::sync::LazyLock<zensim::profile::ProfileParams> =
+            std::sync::LazyLock::new(|| {
+                zensim::profile::ProfileParams::builder()
+                    .extended_features(true)
+                    .compute_iw_features(true)
+                    .build()
+            });
+        zensim::Zensim::new(zensim::ZensimProfile::Custom {
+            params: &PARAMS,
+            name: "native-full372-extractor",
+        })
+        .compute_all_features(&src.source(), &dst.source())
+    }
+    .map_err(|e| format!("compute_zensim ({}): {e:?}", kp.distorted.display()))?;
     let features: Vec<f64> = result.features().to_vec();
     Ok((
-        kp.ref_basename.clone(),
-        kp.human_score,
-        kp.extra_targets.clone(),
-        features,
+        (
+            kp.ref_basename.clone(),
+            kp.human_score,
+            kp.extra_targets.clone(),
+            features,
+        ),
+        None,
     ))
 }
 
-/// KonFiG-IQA (Men/Lin/Jenadeleh/Saupe 2021): 10 sources x 7 distortions x
-/// 12 levels @ 0.25 JND (Part A) + motion blur x 30 levels @ 0.1 JND
-/// (Part B). Levels are calibrated to uniform JND spacing BY DESIGN, so the
-/// per-stimulus target comes from the level index directly — no Thurstonian
-/// reconstruction needed for ingestion. Emits human_score = 1 - q/3.2 (a
-/// [0,1] quality scale, rank-identical to the JND grid) + a native `q_jnd`
-/// extra target column. Level 0 = pristine copy → identity anchor rows.
-/// `path` = the KonFiG-IQA root (contains IMAGES/).
+// ---------------------------------------------------------------------------
+// `--dvifm-block-stats`: the training-only block-record side output.
+// ---------------------------------------------------------------------------
+
+/// `(C̃, m)` histogram axes. Both axes share one log domain: bin 0 is the
+/// nonpositive/NaN arm (visibility v = 1 for C̃ ≤ 0; the m^P factor is 0 for
+/// m = 0, so both arms carry exact semantics); bins 1..=255 cover
+/// `exp(HIST_LN_LO)..exp(HIST_LN_HI)` uniformly in ln. `HIST_LN_LO = ln(1e-7)`,
+/// `HIST_LN_HI = ln(16)` — block extrema/m differences live far inside this.
+const HIST_BINS: usize = 256;
+const HIST_LN_LO: f64 = -16.11809565095832;
+const HIST_LN_HI: f64 = 2.772588722239781;
+
+fn hist_bin(v: f64) -> usize {
+    if !(v > 0.0) {
+        return 0;
+    }
+    let t = (v.ln() - HIST_LN_LO) / (HIST_LN_HI - HIST_LN_LO);
+    let k = 1 + (t * (HIST_BINS - 1) as f64).floor() as i64;
+    k.clamp(1, (HIST_BINS - 1) as i64) as usize
+}
+
+/// One level's `(C̃, m)` accumulator plus the constants the histogram was
+/// built at — C̃ depends on (g, edge), so they ride in the header.
+struct LevelHist {
+    counts: Vec<u32>, // HIST_BINS² row-major: [c_bin][m_bin]
+    g: f64,
+    edge: bool,
+    n_blocks: u64,
+    n_c_nonpos: u64,
+}
+
+/// Per-(plane,level) pooled histograms — the exact sufficient statistic for
+/// any grid loss that is a sum of per-block terms `F(C̃_b, m_b)` evaluated at
+/// bin centres.
+struct DvifmHist {
+    levels: Vec<LevelHist>,
+}
+
+/// Per-block C̃ for one side, replicating `dvifm::contrast_g_rec`: signed
+/// power `phi_g(x) = sign(x)·|x|^g`; `edge` = min over the 4 corner
+/// quadrants, else whole-block range.
+fn dvifm_contrast(rec: &[f32], side: usize, g: f64, edge: bool) -> f64 {
+    let (mx, mn) = if side == 0 {
+        (&rec[2..6], &rec[6..10])
+    } else {
+        (&rec[10..14], &rec[14..18])
+    };
+    let phi = |x: f32| {
+        let x = x as f64;
+        x.signum() * x.abs().powf(g)
+    };
+    if edge {
+        let mut c = f64::INFINITY;
+        for q in 0..4 {
+            c = c.min(phi(mx[q]) - phi(mn[q]));
+        }
+        c
+    } else {
+        let mut a = f64::NEG_INFINITY;
+        let mut b = f64::INFINITY;
+        for q in 0..4 {
+            a = a.max(mx[q] as f64);
+            b = b.min(mn[q] as f64);
+        }
+        a.signum() * a.abs().powf(g) - b.signum() * b.abs().powf(g)
+    }
+}
+
+/// f32 → IEEE-754 binary16, round-to-nearest-even (the cache's quantisation).
+fn f32_to_f16(x: f32) -> u16 {
+    let b = x.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let exp = ((b >> 23) & 0xff) as i32;
+    let man = b & 0x007f_ffff;
+    if exp == 0xff {
+        return sign | if man == 0 { 0x7c00 } else { 0x7e00 };
+    }
+    let e = exp - 127 + 15;
+    if e >= 31 {
+        return sign | 0x7c00;
+    }
+    if e <= 0 {
+        if e < -10 {
+            return sign;
+        }
+        let m = man | 0x0080_0000;
+        let shift = (1 - e + 13) as u32;
+        let half = 1u32 << (shift - 1);
+        let rounded = (m + half - 1 + ((m >> shift) & 1)) >> shift;
+        return sign | rounded as u16;
+    }
+    let m16 = man + 0x0fff + ((man >> 13) & 1);
+    if m16 & 0x0080_0000 != 0 {
+        let e2 = e + 1;
+        if e2 >= 31 {
+            return sign | 0x7c00;
+        }
+        return sign | ((e2 as u16) << 10);
+    }
+    sign | ((e as u16) << 10) | ((m16 >> 13) as u16 & 0x3ff)
+}
+
+/// Streams each pair's records into the `.f32` blob from inside the
+/// parallel walk — records never accumulate in memory. `index` keeps one
+/// jsonl-ready entry per pair (row order, byte offset, per-level counts,
+/// input hashes); `offset` is the running byte position.
+///
+/// `cap` bounds the kept records per row across the five levels
+/// (deterministic stride per level, proportional allocation; 0 = keep all).
+/// `quant_f16` stores each field as IEEE f16 (40 B/record at the v2
+/// width, 36 B for v1 readers) instead of f32.
+/// `hist`, when set, accumulates full-resolution `(C̃, m)` histograms over
+/// ALL records — the cap never applies to the histograms.
+struct DvifmSink {
+    file: std::sync::Mutex<(std::io::BufWriter<std::fs::File>, u64)>,
+    index: std::sync::Mutex<Vec<serde_json::Value>>,
+    /// The spec's input-plane name, stamped into every index entry so a
+    /// cache row is self-describing (Y′CbCr blocks are not XYB-Y blocks).
+    input_plane: &'static str,
+    cap: usize,
+    quant_f16: bool,
+    hist: Option<std::sync::Mutex<DvifmHist>>,
+}
+
+impl DvifmSink {
+    fn write(
+        &self,
+        row_index: usize,
+        kp: &Pair,
+        stats: &zensim::research::DvifmBlockStats,
+    ) -> Result<(), String> {
+        use std::io::Write as _;
+        let (ref_sha256, dist_sha256) = audit::file_hashes(kp)?;
+        // Record width is derived, not assumed: `records[l]` is
+        // `nby*nbx*REC_W` f32 (v2 = 20 with Weber means; v1 = 18).
+        let recw = |l: usize| {
+            let nb = (stats.grid[l].0 * stats.grid[l].1) as usize;
+            if nb == 0 {
+                20
+            } else {
+                stats.records[l].len() / nb
+            }
+        };
+        // Histogram pass over the FULL record set (before any cap) — the
+        // pooled (C̃, m) census is the exact statistic the C₀×β grid reads.
+        if let Some(hist) = &self.hist {
+            let mut h = hist.lock().unwrap();
+            for (l, recs) in stats.records.iter().enumerate() {
+                let lh = &mut h.levels[l];
+                for rec in recs.chunks_exact(recw(l)) {
+                    let cs = dvifm_contrast(rec, 0, lh.g, lh.edge);
+                    let cd = dvifm_contrast(rec, 1, lh.g, lh.edge);
+                    let ctilde = cs.min(cd);
+                    let m = rec[0] as f64;
+                    lh.counts[hist_bin(ctilde) * HIST_BINS + hist_bin(m)] += 1;
+                    lh.n_blocks += 1;
+                    if !(ctilde > 0.0) {
+                        lh.n_c_nonpos += 1;
+                    }
+                }
+            }
+        }
+        // Per-level stride caps: level l keeps ceil(n_l/stride_l) records
+        // with stride_l = ceil(n_l/cap_l), cap_l ∝ n_l of the row total.
+        let n_l: Vec<usize> = stats
+            .records
+            .iter()
+            .enumerate()
+            .map(|(l, r)| r.len() / recw(l))
+            .collect();
+        let n_total: usize = n_l.iter().sum();
+        let caps: Vec<usize> = if self.cap > 0 && n_total > self.cap {
+            n_l.iter()
+                .map(|&n| {
+                    if n == 0 {
+                        0
+                    } else {
+                        (self.cap * n / n_total).max(1).min(n)
+                    }
+                })
+                .collect()
+        } else {
+            n_l.clone()
+        };
+        let mut bytes = Vec::new();
+        let mut level_records = [0u64; 5];
+        let mut level_strides = [0u64; 5];
+        for (l, recs) in stats.records.iter().enumerate() {
+            let stride = if caps[l] >= n_l[l] || n_l[l] == 0 {
+                1
+            } else {
+                n_l[l].div_ceil(caps[l])
+            };
+            level_strides[l] = stride as u64;
+            let mut kept = 0u64;
+            for (i, rec) in recs.chunks_exact(recw(l)).enumerate() {
+                if stride > 1 && i % stride != 0 {
+                    continue;
+                }
+                kept += 1;
+                if self.quant_f16 {
+                    for &v in rec {
+                        bytes.extend_from_slice(&f32_to_f16(v).to_le_bytes());
+                    }
+                } else {
+                    for &v in rec {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+            }
+            level_records[l] = kept;
+            debug_assert!(kept as usize <= n_l[l]);
+        }
+        let mut guard = self.file.lock().unwrap();
+        let (file, offset) = &mut *guard;
+        let entry_offset = *offset;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        *offset += bytes.len() as u64;
+        drop(guard);
+        self.index.lock().unwrap().push(serde_json::json!({
+            "row_index": row_index,
+            "ref_basename": kp.ref_basename,
+            "ref_path": kp.reference.display().to_string(),
+            "dist_path": kp.distorted.display().to_string(),
+            "ref_sha256": ref_sha256,
+            "dist_sha256": dist_sha256,
+            "grid": stats.grid,
+            "offset": entry_offset,
+            "level_records": level_records,
+            "level_records_full": n_l,
+            "level_strides": level_strides,
+            "quant": if self.quant_f16 { "f16" } else { "f32" },
+            "cap": self.cap,
+            "input_plane": self.input_plane,
+        }));
+        Ok(())
+    }
+}
+
+/// Parse a `--dvifm-spec` JSON file into a `research::DvifmSpec`.
+///
+/// Schema `dvifm-spec-v1`: `{"levels": [{"g","p","c0","beta","sharp","c_hi"
+/// (or null = ∞),"f2_centers":[5],"band":"laplacian"|"local","edge"}×5]}`.
+fn dvifm_spec_load(path: &Path) -> zensim::research::DvifmSpec {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("dvifm spec {}: {e}", path.display()));
+    let v: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("dvifm spec JSON: {e}"));
+    let num = |v: &serde_json::Value, k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_f64())
+            .unwrap_or_else(|| panic!("dvifm spec level missing `{k}`"))
+    };
+    let levels = v
+        .get("levels")
+        .and_then(|l| l.as_array())
+        .expect("dvifm spec needs `levels`")
+        .iter()
+        .map(|lv| zensim::research::DvifmLevelSpec {
+            g: num(lv, "g"),
+            p: num(lv, "p"),
+            c0: num(lv, "c0"),
+            beta: num(lv, "beta"),
+            sharp: num(lv, "sharp"),
+            c_hi: lv
+                .get("c_hi")
+                .and_then(|x| x.as_f64())
+                .unwrap_or(f64::INFINITY),
+            f2_centers: {
+                let c: Vec<f64> = lv
+                    .get("f2_centers")
+                    .and_then(|x| x.as_array())
+                    .expect("f2_centers")
+                    .iter()
+                    .map(|x| x.as_f64().expect("f2_centers entry"))
+                    .collect();
+                c.try_into().expect("f2_centers needs 5 entries")
+            },
+            band: match lv.get("band").and_then(|b| b.as_str()) {
+                Some("local") => zensim::research::DvifmBand::Local,
+                _ => zensim::research::DvifmBand::Laplacian,
+            },
+            edge: lv.get("edge").and_then(|x| x.as_bool()).unwrap_or(true),
+        })
+        .collect();
+    let input_plane = match v.get("input_plane").and_then(|x| x.as_str()) {
+        None | Some("xyb_y") => zensim::research::DvifmInputPlane::XybY,
+        Some("ycbcr_y") => zensim::research::DvifmInputPlane::YcbcrY,
+        Some("ycbcr_cb") => zensim::research::DvifmInputPlane::YcbcrCb,
+        Some("ycbcr_cr") => zensim::research::DvifmInputPlane::YcbcrCr,
+        Some(other) => panic!("dvifm spec input_plane {other:?} unknown"),
+    };
+    zensim::research::DvifmSpec {
+        levels,
+        input_plane,
+    }
+}
+
+fn sha256_hex_of(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).expect("hash dvifm spec");
+    Sha256::digest(&bytes)
+        .iter()
+        .map(|v| format!("{v:02x}"))
+        .collect()
+}
+
+/// The `.manifest.json` for the `--full-986` research path — same role as
+/// the diagnostic producer's manifest: records the producer surface, the
+/// feature-set identity, the formula revision, and (when present) the
+/// DVIFM spec identity + block-record cache.
+fn write_research_manifest(
+    out: &Path,
+    contract: InputContract,
+    req: &zensim::research::Request,
+    feature_set_id: Option<&str>,
+    spec_sha256: Option<&str>,
+    block_stats: Option<&str>,
+    tier: &str,
+) {
+    let revision = std::env::var("ZENSIM_FORMULA_REV")
+        .expect("diagnostic extraction requires explicit ZENSIM_FORMULA_REV");
+    let emit = req
+        .validate()
+        .expect("w986 request must plan")
+        .iter_slots()
+        .collect::<Vec<usize>>();
+    let mut manifest = serde_json::json!({
+        "formula_revision": revision,
+        "producer_surface": "zensim::research::extract",
+        "layout": format!("w{}", req.layout_width()),
+        "populated_feature_ids": emit,
+        "feature_set_id": feature_set_id,
+        "simd_tier_request": tier,
+        "rayon_num_threads": std::env::var("RAYON_NUM_THREADS").ok(),
+        "producer_binary_sha256": sha256_hex_of(
+            &std::env::current_exe().expect("extractor binary path")
+        ),
+        "dvifm_spec_sha256": spec_sha256,
+        "dvifm_block_stats": block_stats,
+        "dvifm_block_record": {
+            "schema": "dvifm-block-records-v2",
+            "record_f32": 20,
+            "fields": ["m","peak","cmax_s[4]","cmin_s[4]","cmax_d[4]","cmin_d[4]","mean_s","mean_d"],
+            "order": "level-major, block-row-major over the full-block grid",
+        },
+    });
+    if contract == InputContract::SdrNativeClipV1 {
+        manifest["input_contract"] = serde_json::json!("sdr-native-clip-v1");
+        manifest["input_era"] = serde_json::json!("native_sdr_clip_v1");
+    }
+    std::fs::write(
+        format!("{}.manifest.json", out.display()),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+}
 
 /// Generic (ref, dist) pairs from a TSV with header columns `ref_path`,
 /// `dist_path`, optional `human_score` (default 0), optional extra numeric
@@ -357,6 +1180,14 @@ fn load_pairs_tsv(tsv: &Path, max: usize) -> Vec<Pair> {
     pairs
 }
 
+/// KonFiG-IQA (Men/Lin/Jenadeleh/Saupe 2021): 10 sources x 7 distortions x
+/// 12 levels @ 0.25 JND (Part A) + motion blur x 30 levels @ 0.1 JND
+/// (Part B). Levels are calibrated to uniform JND spacing BY DESIGN, so the
+/// per-stimulus target comes from the level index directly — no Thurstonian
+/// reconstruction needed for ingestion. Emits human_score = 1 - q/3.2 (a
+/// [0,1] quality scale, rank-identical to the JND grid) + a native `q_jnd`
+/// extra target column. Level 0 = pristine copy → identity anchor rows.
+/// `path` = the KonFiG-IQA root (contains IMAGES/).
 fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
     let images = base.join("IMAGES");
     let mut pairs = Vec::new();
@@ -832,7 +1663,8 @@ fn load_cid22_train_tsv(path: &Path, max: usize) -> Vec<Pair> {
         _ => return Vec::new(),
     };
     let mut pairs = Vec::new();
-    for line in lines.flatten() {
+    for line in lines {
+        let line = line.expect("read corpus line");
         let cols: Vec<&str> = line.split('\t').collect();
         if cols.len() < 5 {
             continue;
@@ -893,7 +1725,8 @@ fn load_pairs_tsv_positional(path: &Path, max: usize) -> Vec<Pair> {
         _ => return Vec::new(),
     };
     let mut pairs = Vec::new();
-    for line in lines.flatten() {
+    for line in lines {
+        let line = line.expect("read corpus line");
         let cols: Vec<&str> = line.split('\t').collect();
         if cols.len() < 3 {
             continue;
@@ -914,10 +1747,10 @@ fn load_pairs_tsv_positional(path: &Path, max: usize) -> Vec<Pair> {
         };
         let mut extra_targets = Vec::new();
         for extra in cols.iter().skip(4) {
-            if let Some((name, val)) = extra.split_once('=') {
-                if let Ok(v) = val.parse::<f64>() {
-                    extra_targets.push((name.to_string(), v));
-                }
+            if let Some((name, val)) = extra.split_once('=')
+                && let Ok(v) = val.parse::<f64>()
+            {
+                extra_targets.push((name.to_string(), v));
             }
         }
         pairs.push(Pair {
@@ -951,7 +1784,8 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
         _ => return Vec::new(),
     };
     let mut pairs = Vec::new();
-    for line in lines.flatten() {
+    for line in lines {
+        let line = line.expect("read corpus line");
         let cols: Vec<&str> = line.split('\t').collect();
         if cols.len() < 5 {
             continue;
@@ -982,4 +1816,63 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
         }
     }
     pairs
+}
+
+/// A diagnostic all-live read-set bake makes this producer execute exactly the
+/// same public pixel API as a fitted model. It is not a quality predictor.
+fn diagnostic_producer(sampling: Option<&str>, out: &Path, contract: InputContract) -> Vec<u8> {
+    let wide = sampling.is_none_or(|tag| tag.starts_with("v2:"));
+    let keep_y = sampling.is_some_and(|tag| tag.starts_with("v1:y:"));
+    let ids: Vec<usize> = (0..if wide { 944 } else { 228 })
+        .filter(|&i| !keep_y || !matches!(i,0..=12|26..=38|156..=161|168..=173))
+        .collect();
+    let n = ids.len();
+    let revision = std::env::var("ZENSIM_FORMULA_REV")
+        .expect("diagnostic extraction requires explicit ZENSIM_FORMULA_REV");
+    let mut spec = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+        "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+        {"key":"zentrain.formula_revision","type":"utf8","text":revision}],
+        "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+    if let Some(tag) = sampling {
+        spec["metadata"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(
+            {"key":"zentrain.sampling","type":"utf8","text":tag}));
+    }
+    let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).expect("producer bake");
+    let model = zenpredict::Model::from_bytes(&bytes).expect("producer model");
+    zensim::BakeScorer::new(&model).expect("servable sampling contract");
+    let era = sampling.map_or_else(
+        || format!("ceiling_rev{revision}"),
+        |tag| {
+            format!(
+                "sampling_{}",
+                tag.replace(':', "_").replace('/', "d").replace(',', "_")
+            )
+        },
+    );
+    let hash = zensim::feature_set_id::slots_hash8(ids.iter().copied());
+    let family = if !wide {
+        "basic+peaks@w372"
+    } else {
+        "basic+peaks+masked+iw+v2+append+append2@w944"
+    };
+    let identity = format!("{family}/{era}#{hash:08x}");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    let mut manifest = serde_json::json!({"sampling":sampling,"formula_revision":revision,"feature_set_id":identity,
+        "populated_feature_ids":ids,"era":era,"producer_surface":"zensim::BakeScorer::compute"});
+    if contract == InputContract::SdrNativeClipV1 {
+        manifest["input_contract"] = serde_json::json!("sdr-native-clip-v1");
+        manifest["input_era"] = serde_json::json!("native_sdr_clip_v1");
+    }
+    std::fs::write(
+        format!("{}.manifest.json", out.display()),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(format!("{}.producer.bin", out.display()), &bytes).unwrap();
+    bytes
 }

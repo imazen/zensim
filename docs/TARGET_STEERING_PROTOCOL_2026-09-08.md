@@ -1,5 +1,27 @@
 # Reachable targets and codec steering — September 8, 2026
 
+**Latest September 8 decoder-contract repair:** the native JXL harness now
+decodes delivered RGB8 with canonical zenjxl-decoder 0.4 U8 dithering enabled.
+Its versioned configuration rejects older calibration files before encoding.
+All 756 regenerated train outputs have exact independent decoded-hash and
+f32-score parity. Same-decoder dither on/off controls account for 8,646,810
+changed samples, leaving only 178 one-code differences against the historical
+undithered decoder. The 336-row control reproduces through final source.
+This repairs measurement consistency; it does not qualify D or its failed
+allocation rule. [Evidence and exact work counts](../../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).
+
+**Preceding September 8 decoder-contract finding:** all 336 reused honest JXL
+map-arm bitstreams decode to different pixels in the canonical native extractor
+than in the earlier native target loop. Same frozen D, absolute score drift
+median 0.185 / p95 1.807 / max 2.425. All 272 AVIF counterparts are pixel-exact
+(score differences <=3.8e-6 from f32 reporting). Source paths differ in decoder
+and output quantization: upstream jxl f32+plain rounding versus the canonical
+zenjxl-decoder U8 path with default blue-noise dithering. The later controlled
+repair above establishes the cause and uses the same declared delivered-pixel
+contract for bounds, runtime comparisons and independent qualification.
+Do not silently change old scores or call their old hit counts
+evidence under a new decoder contract. [Measured rows and provenance](../benchmarks/corruption_honest_map_2026-09-08.md).
+
 User ruling: establish each image's codec range before judging steering; fit
 codec-specific seeds/heuristics on imazen/imazen-26 **training** content; compare
 1, 2 and 3 shots. JXL is the first diffmap integration, with JPEG and WebP also
@@ -330,3 +352,210 @@ screen. This conservative sparse-ladder rule does not prove gaps impossible.
 Report wider error bands, signed undershoot, tail error, selected emitted bytes,
 complete cost and matched SSIMULACRA2/Butteraugli outcomes. This is development
 validation, not terminal qualification or a newly justified perceptual tolerance.
+
+## Native finite-block analysis extension — September 8 (before outcome analysis)
+
+The existing `rd_probe_analyze_2026-07-18.py` owner will accept
+`--interventions <directory>` for the codec-owned `native-jxl-interventions-v1`
+instrument. Codec registration: sibling
+`jxl-encoder/docs/zensim-native-interventions-2026-09-08.md`.
+No scoring/controller/statistics implementation is replaced. Use SciPy's
+Spearman implementation for rank summaries; preserve constant/insufficient
+samples explicitly rather than returning a fabricated correlation.
+
+Before deriving results, verify completion and expected cell/probe coverage,
+source and emitted-byte/pixel/quantizer hashes, actual global quantizer constancy,
+neutral-repeat identity, source-clipped transform regions, deterministic raster
+sampling, requested local changes and observed local/nonlocal quantizer changes.
+Both independent judges must cover every exact reference/distorted pair without
+duplicates/nonfinite values. Include rejection controls for altered counts,
+quantizer records, image hashes and judge identities. Record native scalar and
+judge deltas for both directions. Rank associations use central local differences
+per actual log-quantizer change and report map mass, density and byte cost
+separately within each image/distance. Flat quantizers and nonpositive rate
+changes stay visible. This mechanism evidence is not a targeting or RD release
+gate; no acceptance threshold is fitted after inspecting outcomes.
+
+
+## Native IO and coarse JXL follow-up
+
+Registered 2026-09-08T20:09:41.967730+00:00, before implementation and new encodes. Extends the existing
+`zensim_diffmap_rd --native-interventions` owner and its existing analyzer.
+Previous per-transform +/-10% results remain immutable and mixed.
+
+Freeze the same D artifact, formula 1, source manifests, four training origins
+2010/6068/7066/8206, distances 1 and 3, effort 8 Reference, normal transform
+strategies/CfL/gaborish, exact decoder transfer and cached precomputed fields.
+No validation or terminal examples, no fit or policy selection.
+
+First replace this private instrument's PNG IO with zenpng 0.1.4 and record
+native decoded RGB hashes. Reproduce the old 272 transform probes using the
+new IO; require all emitted JXL bytes, raw RGB, quantizers, scores and map
+integrals to match the retained screen-final packet. PNG compression may
+change. Historical PIL checks remain only in the v1 analyzer branch.
+Source admission requires static, opaque, eight-bit sRGB-compatible PNG;
+unsupported metadata/depth/alpha fail explicitly, not silent conversion.
+
+Coarse mode: assign each complete transform to one of 4x4 grid cells by its
+anchor block: gx=floor(4*x/xsize_blocks), gy=floor(4*y/ysize_blocks).
+Keep all members whole; groups are unions of transforms, not assumed
+rectangles. Enumerate nonempty cells in raster order. Every source pixel and
+padded block belongs to exactly one group. Sum clipped areas and signed map
+integrals, with density=mass/area. Large transforms may cross grid boundaries.
+For each group change all covered raw quantizers by factors 0.8 and 1.2,
+rounding with minimum step one and clamp [1,255]. Baseline and exact neutral
+repeat plus two probes per nonempty group; at most 34 full encodes per cell.
+No response-based group sampling, threshold tuning or omitted inert probes.
+
+Measure actual captured quantizer changes, raw-pixel changes inside/outside
+the union, complete D score, bytes, CPU SSIMULACRA2 and Butteraugli. Retain
+nonpositive central byte differences; compute signed central derivatives
+normalized by actual mean-log-q span and rank associations with mass/density
+and quality gained per byte where the byte derivative is positive. Report
+each image/distance, not only pooled correlation. Count all encodes, native
+JXL decodes, comparisons, maps, source/PNG roundtrip decodes, compatibility
+decodes, times and RSS. libjxl v0.12 remains port compatibility only.
+
+Run the same coarse configuration on the existing 512-long-edge variants
+of these four origins as separate multigroup/scale coverage, not new families.
+Require whole-transform coverage, neutral byte/pixel/q/score equality, native
+PNG readback parity, complete independent judges and content hashes. Add
+negative controls for group membership, quantizer requests, PNG hashes and
+coverage. Reproduce final-source output if implementation changes after run.
+
+This bounded screen ends after these fixed experiments and integrity checks.
+It cannot establish held-out RD gains, 1/2/3-shot target accuracy, or release
+qualification. Do not turn descriptive correlation into a retrospective gate.
+No runtime oracle probing or new allocation policy is authorized by these
+measurements alone; preregister the next intervention separately.
+
+
+# Coarse JXL allocation policy — registered 2026-09-08T20:35:32.658483+00:00
+
+Question: can one complete-model coarse map improve an actual emitted JXL
+against all locally reachable global quantizer fields, not just correlate with
+single-region quality responses? No fitted model or seed, no new public API.
+
+Reuse the current native precomputed e8 Reference/CfL/gaborish/pixel-loss path,
+D bake cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6,
+formula 1, exact decoder transfer, native PNG IO and complete Rust surface.
+First canonical train origin per class: 2010/6068/7066/8206, distances 1 and 3,
+existing 256-long-edge variants. No validation or terminal sources in this
+first bounded policy screen. No new feature/model training or source admission
+exception. Frozen AC strategies are shared by all fields in each cell.
+
+Build all scalar control fields BEFORE applying the policy. Domain: multiply
+all initial integer raw q by one common factor in [2/3,3/2], half-up round,
+clamp [1,255]. Enumerate exact rational breakpoints (2n+1)/(2q), n=1..254,
+plus both endpoints; sort by integer cross-products and deduplicate resulting
+full raw fields. Every distinct state of this declared scalar operation is
+represented. Do not resample only convenient factors. Refuse more than 4096
+states in a cell rather than silently truncate. Encode/decode/score each
+unique field, retain counts/order and attained D/byte bounds. Baseline and an
+independent exact neutral repeat remain explicit. This is an exhaustive local
+raw-field comparator, not a claim to exhaust the codec's full distance range.
+
+Policy inputs are ONLY baseline complete attribution, existing whole-transform
+4x4 groups, and the original raw field. No control outcome, judge, bound or
+intervention derivative is available to the policy. For group density d and
+pixel area A, compute area-weighted center mu and mean absolute deviation m.
+If m <= 1e-20, factors are one. Otherwise set f=1+0.2*clamp((d-mu)/m,-1,1).
+Expand each factor to every block in its complete transforms. Preserve the
+initial sum of requested q before rounding by multiplying all factors by
+sum(raw)/sum(raw*f); then half-up round and clamp [1,255]. This preserves a
+quantizer-sum proxy, not actual bytes. Record unnormalized/normalized factors,
+center, dispersion, raw-sum normalization and actual requested/captured fields.
+Apply the same function to zero densities and require raw-field/byte/pixel/
+score identity with the neutral repeat. Active is one actual full encode after
+one baseline full encode and one map: two encodes and one map, with all extra
+control encodes separately labeled engineering cost. No runtime oracle probes.
+
+Every emitted control and active output receives native JXL decoding, complete
+D scoring and independent CPU SSIMULACRA2/Butteraugli. Bounded libjxl v0.12
+compatibility checks remain port-only. Report exact measured scalar frontiers:
+for each active byte budget, best scalar D/SSIM2/-BA within budget; for each
+active quality, minimum measured scalar bytes meeting/exceeding that quality.
+Keep no-match/coverage failures explicit. No interpolation or extrapolation.
+Also report a single scalar output chosen by best D within the active budget,
+including its independent judges, and any scalar output that dominates active
+on bytes and all three qualities. Only compare in the attained scalar D/byte
+ranges; do not count uncovered cells as wins.
+
+Advance this fixed policy to a separately registered broader evaluation only
+if every covered training cell is noninferior to best scalar at budget in D
+(>= -0.05), SSIM2 (>= -0.1), and -BA (>= -0.005), every content class has positive
+median D gain, and at least half the cells improve D by >= 0.05. These are
+screening bars, not new release gates. Predefine floating comparison slack
+1e-5 for D, 1e-6 for independent metrics, zero bytes. Report all counts regardless
+of verdict. If it fails, preserve the failure and revise the hypothesis before
+spending validation families. No opportunistic alternate arm/gain sweep.
+
+Require complete native hash/region/scalar-state/policy coverage, exact neutral
+identity, independently recomputed policy fields and rational state enumeration,
+negative controls, final-source reproduction, scoped Rustfmt and local CI-exact
+Clippy. Preserve any prototypes. Count all full encodes, JXL/PNG decodes, scalar
+comparisons, maps, independent judges, preparation/IO time and RSS separately.
+This screen does not establish general target attainment or shippability. The
+full goal still requires train-calibrated 1/2/3-shot targeting and matched-RD
+validation on separate families, model qualification and all four codecs.
+
+
+## Engineering multigroup coverage, registered 2026-09-08T20:47:36.951101+00:00
+
+The fixed 256 policy failed the independent-judge screen; that verdict is
+unchanged and no separate validation family will be spent on it. JXL's repo
+requires a multigroup roundtrip for changed encoding paths. Run the same final
+policy/control instrument on the existing 512 variants of the SAME four
+training origins from the previous multigroup manifest. This is software
+coverage and a descriptive scale check, not promotion or a larger independent
+validation set. Preserve all outcomes, direct scalar-state comparisons, native
+PNG/JXL hashes, exact neutral controls and independent judges. Keep results
+separate; they cannot overturn the registered 256 screening failure.
+
+
+## Existing HDR PNG inputs — user correction, September 8
+
+Use the existing imazen/imazen-26 `variant/png-v3` branch for HDR development.
+The exact branch revision is `b1faae550eba4d29efee1de1a32954ef11a0e1ed`;
+canonical main remains `187fbf338ce08e8e6654db7f04ddae58d5263da2`.
+All **76 HDR PNGs** exist locally under `/mnt/v/output/imazen-26-png-v3/`, and
+all 76 match their branch Git LFS SHA-256 OID and size (4,060,580,493 bytes).
+Git blob hashes name the small LFS pointer text, not the PNG payload; the
+verification uses the pointer's payload OID. The indexed URL supplies each
+render basename, including EXIF-rotated dimensions; do not derive filenames.
+
+The August 27 family manifest gives **38 train / 20 validate / 18 terminal**
+origins. Later August 30 URL corrections do not replace that family rule with
+individual-id splits. The 1,140 local variants in the active
+`hdr-grid-15scale@2026-08-23` set are the byte-level successor to the June 14
+set; they retain its origin membership and therefore must also inherit these
+family roles. Historical selection of all 76 does not authorize fitting on
+validation/terminal families. Use the prepared scale set for bounded HDR codec
+experiments, with native PNG decoding and explicit PQ/cICP interpretation.
+Source binding verifies bytes/membership only; metadata/pixel serving checks,
+codec experiments and model qualification remain to run. No terminal image was
+decoded, displayed, scored or used for fitting in this binding audit.
+
+`/mnt/v/output/zensim/imazen26-hdr-png-binding-2026-09-08/INPUTS.json` contains
+all exact paths, URLs, payload hashes, sizes and family roles. The PNG index SHA
+is `384c6011c5b53814336a171c61d80c3e83b3938d21e606b72d7b4f1b095aeb83`;
+the family map SHA is
+`9d07a0f63ef5fa167c5333535010f44b4ab9a087f04e560521b6d1aa1961820c`.
+
+The separate 30 UPIQ HDR EXRs are protected holdout references for content-overlap
+admission, not the HDR development corpus. Their decoder work must not be
+presented as necessary to obtain HDR training images or expand the HDR source
+corpus. Existing prepared corruption-head views remain governed by their own
+registered complete-admission requirement. Neither substituting unrelated HDR
+PNGs for UPIQ references nor silently dropping UPIQ coverage is valid.
+
+Later September 8 user direction explicitly selects the Rust `exr` crate via
+`zenextras/zenexr` for EXR decoding. The custom zenbitmaps reader is retired from
+the active checkout. The wrapper matches all 98 saved fixtures and all 30 UPIQ
+reference outputs exactly; [contract and validation](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
+The subsequent fingerprinting/contextual review is now complete: 12 sources
+against all 30 HDR references, no strict flags and two reviewed distinct-content
+matches. The first all-372 head passes Rust feature-row parity but is unservable
+with D's extraction plan. Later user direction keeps the head within D's regime:
+the new 228-feature fit serves and catches RGB swaps, but fails honest-output
+protection. [Current result and next task](../benchmarks/canonical_corruption_d228_2026-09-08.md).

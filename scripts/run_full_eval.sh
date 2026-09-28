@@ -2,6 +2,7 @@
 # One evaluation pipeline: independently reusable verdict and coherence stages.
 # Rust owns scores/statistics; bake_verdict and m3a_sweep own input identities.
 # Usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]
+# Or: run_full_eval.sh --stage feature-screen recipe.json fresh-output [--cache directory]
 # Existing ZENSIM_M3_ONLY maps to coherence; M3_REUSE requests only VALID reuse.
 # Historical results lacking identities are never a cache hit. Re-run their
 # stage to establish provenance. Every stage is saved atomically, so an
@@ -11,6 +12,11 @@ set -euo pipefail
 STAGE=${ZENSIM_EVAL_STAGE:-all}
 [[ "${ZENSIM_M3_ONLY:-0}" == 1 ]] && STAGE=coherence
 if [[ "${1:-}" == --stage ]]; then STAGE=${2:?}; shift 2; fi
+if [[ "$STAGE" == feature-screen ]]; then
+    # A bounded development recipe; reuses the Rust extractor, trainer,
+    # BakeScorer audit and panel. Never enters the protected full-eval defaults.
+    exec python3 "$(dirname "${BASH_SOURCE[0]}")/lib/feature_screen.py" "$@"
+fi
 case "$STAGE" in all|verdict|coherence|qualify) ;; *) echo "unknown stage: $STAGE" >&2; exit 2 ;; esac
 if [[ $# -lt 2 ]]; then echo "usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]" >&2; exit 2; fi
 BAKE=$1; NAME=$2; REGIME=${3:-720}
@@ -97,6 +103,10 @@ fi
 }
 
 BV_ARGS=(--bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" "${BV_EXTRA[@]}")
+if [[ -n "${ZENSIM_EVAL_ENSEMBLE:-}" ]]; then
+    [[ -n "${ZENSIM_EVAL_ENSEMBLE_WEIGHTS:-}" ]] || { echo "complete ensemble needs explicit weights" >&2; exit 2; }
+    BV_ARGS+=(--ensemble "$ZENSIM_EVAL_ENSEMBLE" --ensemble-weights "$ZENSIM_EVAL_ENSEMBLE_WEIGHTS")
+fi
 "${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --print-inputs > "$WORK/verdict-inputs.json"
 valid_verdict() {
     [[ -s "$1" ]] && jq -e --slurpfile i "$WORK/verdict-inputs.json" \
@@ -140,6 +150,10 @@ if [[ -z "${ZENSIM_DIFFMAP_BIN:-}" ]]; then
         --features custom-profiles,feature-regime-v2 --example diffmap_block_coherence >&2
 fi
 M3_ARGS=(--bake "$BAKE" --bin "$DM" --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR")
+if [[ -n "${ZENSIM_EVAL_ENSEMBLE:-}" ]]; then
+    M3_ARGS=(--ensemble "$ZENSIM_EVAL_ENSEMBLE" --ensemble-weights "$ZENSIM_EVAL_ENSEMBLE_WEIGHTS"
+        --bin "$DM" --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR")
+fi
 # A missing historical fixture is a refusal. Generating one with a newer
 # codec would silently mix fixture eras; use m3_fixture_gen in a NEW directory.
 "$REPO_ROOT/scripts/m3a_sweep.sh" "${M3_ARGS[@]}" --print-inputs > "$WORK/coherence-inputs.json"

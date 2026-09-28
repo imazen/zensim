@@ -6,7 +6,7 @@
 
 use crate::blur::{
     box_blur_1pass_into, box_blur_h_into_abs_diff, box_blur_v_from_copy, downscale_2x_inplace,
-    fused_blur_h_mu, fused_blur_h_ssim, pyramid_plane_stride,
+    fused_blur_h_mu, pyramid_plane_stride,
 };
 use crate::color::{
     apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
@@ -541,6 +541,7 @@ impl ScaleAccumulators {
     fn finalize(
         &self,
         #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_variables))] k_iw: f64,
+        revision: Option<crate::feature_defs::FormulaRevision>,
     ) -> ScaleStats {
         let one_over_n = 1.0 / self.n as f64;
 
@@ -569,12 +570,12 @@ impl ScaleAccumulators {
         #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_mut))]
         let mut iw_mean_w = [0.0f64; 3];
 
-        let gain_form = crate::hf_gain_form::active_gain_form();
+        let gain_form = crate::hf_gain_form::HfGainForm::at_revision(revision);
         // The pooled 4th/8th roots go through their ONE owner
         // (`crate::det_math`) — F18, the libc-dependent `powf`. Hoisted out
         // of the channel loop for the same reason `gain_form` is: it reads a
         // `OnceLock`.
-        let root_form = crate::det_math::active_root_form();
+        let root_form = crate::det_math::RootForm::at_revision(revision);
 
         for c in 0..3 {
             // f64 sums of per-pixel non-negative values CAN go slightly
@@ -668,6 +669,7 @@ impl ScaleAccumulators {
             edge,
             mse,
             hf_energy_loss,
+            hf_sq_dst_sum: self.hf_sq_dst,
             hf_mag_loss,
             hf_energy_gain,
             ssim_2nd,
@@ -728,6 +730,12 @@ fn active_channels(
     let mut active: ScaleActive = [None; 3];
     let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
     for (c, slot) in active.iter_mut().enumerate() {
+        if config
+            .attribution_channels
+            .is_some_and(|channels| !channels[scale_idx][c])
+        {
+            continue;
+        }
         if beyond {
             if compute_all || extended {
                 *slot = Some((c, true, true));
@@ -1123,6 +1131,90 @@ fn multiscale_stats_over_pu_xyb(
     (stats, mean_offset)
 }
 
+/// Shared native SDR conversion before XYB. The caller validated the format.
+fn native_sdr_linear_row(
+    source: &impl ImageSource,
+    y: usize,
+    absolute_y: usize,
+    out: &mut [[f32; 3]],
+) {
+    let row = source.row_bytes(y);
+    let width = source.width();
+    let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
+    match source.pixel_format() {
+        PixelFormat::Srgb16Rgba => {
+            if opaque {
+                for (x, pixel) in out.iter_mut().enumerate().take(width) {
+                    *pixel = core::array::from_fn(|c| {
+                        let off = x * 8 + c * 2;
+                        crate::color::srgb_u16_to_linear(u16::from_ne_bytes([
+                            row[off],
+                            row[off + 1],
+                        ]))
+                    });
+                }
+            } else {
+                composite_srgb16_rgba_to_linear(row, width, absolute_y, out);
+            }
+        }
+        PixelFormat::LinearF32Rgba => {
+            let pixels: &[[f32; 4]] = bytemuck::cast_slice(row);
+            if opaque {
+                for (out, p) in out.iter_mut().zip(&pixels[..width]) {
+                    *out = [p[0], p[1], p[2]];
+                }
+            } else {
+                composite_linear_f32_rgba(&pixels[..width], absolute_y, out);
+            }
+        }
+        _ => unreachable!("validated native SDR input"),
+    }
+    if source.color_primaries() != ColorPrimaries::Srgb {
+        for pixel in out {
+            apply_gamut_matrix(pixel, source.color_primaries(), source.gamut_mapping());
+        }
+    }
+}
+
+/// Native SDR audit input: the scorer's actual linear-light samples, with its
+/// sRGB-display clipping, before XYB. No decoding or second ICC transform.
+pub(crate) fn native_sdr_linear_rgb(
+    source: &impl ImageSource,
+) -> Result<Vec<[f32; 3]>, crate::ZensimError> {
+    use crate::ZensimError;
+    crate::metric::reject_hdr_input(source)?;
+    if !matches!(
+        source.pixel_format(),
+        PixelFormat::Srgb16Rgba | PixelFormat::LinearF32Rgba
+    ) || source.gamut_mapping() != crate::GamutMapping::Clip
+    {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    let (w, h) = (source.width(), source.height());
+    if w == 0 || h == 0 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    crate::metric::check_within_max_pixels(w, h, Some(120_000_000))?;
+    let count = w.checked_mul(h).ok_or(ZensimError::InvalidDataLength)?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(count)
+        .map_err(|_| ZensimError::InvalidDataLength)?;
+    pixels.resize(count, [0.0; 3]);
+    for (y, row) in pixels.chunks_exact_mut(w).enumerate() {
+        native_sdr_linear_row(source, y, y, row);
+        for pixel in row {
+            for value in pixel {
+                if !value.is_finite() {
+                    return Err(ZensimError::InvalidDataLength);
+                }
+                *value = value.clamp(0.0, 1.0);
+            }
+        }
+    }
+    Ok(pixels)
+}
+
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
 /// Handles both RGB and RGBA sources row-by-row. RGBA is composited over a noise background.
@@ -1453,33 +1545,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                 PixelFormat::Srgb16Rgba => {
                     let mut linear_row = vec![[0.0f32; 3]; width];
                     for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        if opaque {
-                            // Opaque: linearize RGB, ignore alpha
-                            for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                                let off = x * 8;
-                                let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                                let g =
-                                    u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                                let b =
-                                    u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
-                                *pixel = [
-                                    crate::color::srgb_u16_to_linear(r),
-                                    crate::color::srgb_u16_to_linear(g),
-                                    crate::color::srgb_u16_to_linear(b),
-                                ];
-                            }
-                        } else {
-                            composite_srgb16_rgba_to_linear(
-                                row_bytes,
-                                width,
-                                abs_row_offset + y,
-                                &mut linear_row,
-                            );
-                        }
-                        if need_gamut {
-                            gamut_convert_row(&mut linear_row[..width], primaries, gamut_mapping);
-                        }
+                        native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                         let row_offset = (y - row_start) * width;
                         xyb_row_convert(
                             preserve_oog,
@@ -1512,28 +1578,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
-                            let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
-                            if opaque {
-                                // Opaque non-sRGB: extract RGB + gamut
-                                for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                                    let [r, g, b, _a] = rgba_row[x];
-                                    *pixel = [r, g, b];
-                                }
-                            } else {
-                                composite_linear_f32_rgba(
-                                    &rgba_row[..width],
-                                    abs_row_offset + y,
-                                    &mut linear_row,
-                                );
-                            }
-                            if need_gamut {
-                                gamut_convert_row(
-                                    &mut linear_row[..width],
-                                    primaries,
-                                    gamut_mapping,
-                                );
-                            }
+                            native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                             let row_offset = (y - row_start) * width;
                             xyb_row_convert(
                                 preserve_oog,
@@ -1603,6 +1648,214 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     }
 }
 
+/// Which BT.709 Y′CbCr plane to emit — the DVIFM pump's native planes.
+#[cfg(feature = "feature-regime-v2")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum YcbcrPlane {
+    /// `Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′` on the gamma-encoded
+    /// display signal, range `[0, 1]`.
+    Y,
+    /// `Cb = (B′ − Y′) / 1.8556` (full-range BT.709), range `[-0.5, 0.5]`.
+    Cb,
+    /// `Cr = (R′ − Y′) / 1.5748` (full-range BT.709), range `[-0.5, 0.5]`.
+    Cr,
+}
+
+/// One pixel of the BT.709 Y′CbCr plane from a gamma-encoded sRGB triple.
+#[cfg(feature = "feature-regime-v2")]
+#[inline(always)]
+fn ycbcr_plane_value(rgb: [f32; 3], plane: YcbcrPlane) -> f32 {
+    let [r, g, b] = rgb;
+    let y = 0.2126f32.mul_add(r, 0.7152f32.mul_add(g, 0.0722 * b));
+    match plane {
+        YcbcrPlane::Y => y,
+        YcbcrPlane::Cb => (b - y) / 1.8556,
+        YcbcrPlane::Cr => (r - y) / 1.5748,
+    }
+}
+
+/// Convert `source` rows to ONE BT.709 Y′CbCr plane at `padded_width`,
+/// for the DVIFM `input_plane` research route (`feature = "training"`).
+///
+/// Same source access, alpha compositing and gamut handling as
+/// [`convert_source_to_xyb_into_slices_chunked`], but the per-pixel value
+/// is the gamma-encoded sRGB display signal transformed by full-range
+/// BT.709 — not linearised, not opsin. `abs_row_offset` keeps the
+/// translucent-source noise background in the parent image's phase,
+/// identical to the XYB converter's contract. Pad columns carry the same
+/// horizontal mirror. Serial row order — the DVIFM pump consumes strips
+/// serially, so there is nothing to parallelise across.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) fn convert_source_to_ycbcr_plane_into_slice(
+    source: &impl ImageSource,
+    out: &mut [f32],
+    padded_width: usize,
+    abs_row_offset: usize,
+    plane: YcbcrPlane,
+) {
+    let width = source.width();
+    let height = source.height();
+    debug_assert!(out.len() >= padded_width * height);
+    debug_assert!(padded_width >= width);
+
+    let pad_count = padded_width - width;
+    let mirror_offsets: Vec<usize> = if pad_count > 0 {
+        let period = 2 * (width - 1);
+        (0..pad_count)
+            .map(|i| {
+                let m = (width + i) % period;
+                if m < width { m } else { period - m }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let pixel_format = source.pixel_format();
+    let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
+    let primaries = source.color_primaries();
+    let need_gamut = primaries != ColorPrimaries::Srgb;
+
+    // One row of the gamma-encoded sRGB display signal, [0,1] triples.
+    // Mirrors the XYB converter's branches: fast paths read the stored
+    // gamma code directly; the linear/composite paths (alpha, non-sRGB
+    // primaries, float input) produce the same linear pixel the XYB path
+    // computes, then sRGB-encode it.
+    let gamma_row = |y: usize, dst: &mut [[f32; 3]], linear_scratch: &mut [[f32; 3]]| {
+        let row_bytes = source.row_bytes(y);
+        let mut direct_gamma = false;
+        match pixel_format {
+            PixelFormat::Srgb8Rgb => {
+                if need_gamut {
+                    let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                    for (x, pixel) in linear_scratch.iter_mut().enumerate().take(width) {
+                        let [r, g, b] = rgb_row[x];
+                        *pixel = [
+                            crate::color::srgb_u8_to_linear(r),
+                            crate::color::srgb_u8_to_linear(g),
+                            crate::color::srgb_u8_to_linear(b),
+                        ];
+                    }
+                } else {
+                    let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [r, g, b] = rgb_row[x];
+                        *pixel = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                    }
+                    direct_gamma = true;
+                }
+            }
+            PixelFormat::Srgb8Rgba => {
+                let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                if opaque && !need_gamut {
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [r, g, b, _a] = rgba_row[x];
+                        *pixel = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                    }
+                    direct_gamma = true;
+                } else if opaque {
+                    for (x, pixel) in linear_scratch.iter_mut().enumerate().take(width) {
+                        let [r, g, b, _a] = rgba_row[x];
+                        *pixel = [
+                            crate::color::srgb_u8_to_linear(r),
+                            crate::color::srgb_u8_to_linear(g),
+                            crate::color::srgb_u8_to_linear(b),
+                        ];
+                    }
+                } else {
+                    composite_srgb8_rgba_to_linear(
+                        &rgba_row[..width],
+                        abs_row_offset + y,
+                        linear_scratch,
+                    );
+                }
+            }
+            PixelFormat::Srgb8Bgra => {
+                let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                if opaque && !need_gamut {
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [b, g, r, _a] = bgra_row[x];
+                        *pixel = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                    }
+                    direct_gamma = true;
+                } else if opaque {
+                    for (x, pixel) in linear_scratch.iter_mut().enumerate().take(width) {
+                        let [b, g, r, _a] = bgra_row[x];
+                        *pixel = [
+                            crate::color::srgb_u8_to_linear(r),
+                            crate::color::srgb_u8_to_linear(g),
+                            crate::color::srgb_u8_to_linear(b),
+                        ];
+                    }
+                } else {
+                    composite_srgb8_bgra_to_linear(
+                        &bgra_row[..width],
+                        abs_row_offset + y,
+                        linear_scratch,
+                    );
+                }
+            }
+            PixelFormat::Srgb16Rgba => {
+                let rgba_row: &[[u16; 4]] = bytemuck::cast_slice(row_bytes);
+                if opaque && !need_gamut {
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [r, g, b, _a] = rgba_row[x];
+                        *pixel = [r as f32 / 65535.0, g as f32 / 65535.0, b as f32 / 65535.0];
+                    }
+                    direct_gamma = true;
+                } else {
+                    native_sdr_linear_row(source, y, abs_row_offset + y, linear_scratch);
+                }
+            }
+            PixelFormat::LinearF32Rgba => {
+                native_sdr_linear_row(source, y, abs_row_offset + y, linear_scratch);
+            }
+            #[allow(unreachable_patterns)]
+            other => panic!(
+                "zensim: unsupported pixel format {:?} in Y'CbCr conversion",
+                other
+            ),
+        }
+        if direct_gamma {
+            return;
+        }
+        // The linear scratch holds the same pixels the XYB path would use
+        // (linearized u8 or composite/native rows, gamut-mapped below where
+        // it applies); encode them into the gamma domain.
+        if need_gamut
+            && matches!(
+                pixel_format,
+                PixelFormat::Srgb8Rgb | PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra
+            )
+        {
+            for pixel in linear_scratch.iter_mut().take(width) {
+                apply_gamut_matrix(pixel, primaries, source.gamut_mapping());
+            }
+        }
+        for (pixel, d) in linear_scratch.iter().take(width).zip(dst.iter_mut()) {
+            *d = [
+                crate::color::linear_to_srgb_gamma(pixel[0]),
+                crate::color::linear_to_srgb_gamma(pixel[1]),
+                crate::color::linear_to_srgb_gamma(pixel[2]),
+            ];
+        }
+    };
+
+    let mut rgb_row = vec![[0.0f32; 3]; width];
+    let mut linear_scratch = vec![[0.0f32; 3]; width];
+    for y in 0..height {
+        gamma_row(y, &mut rgb_row, &mut linear_scratch);
+        let row = &mut out[y * padded_width..y * padded_width + width];
+        for (x, pixel) in rgb_row.iter().enumerate() {
+            row[x] = ycbcr_plane_value(*pixel, plane);
+        }
+        let dst_start = y * padded_width;
+        for (i, &mx) in mirror_offsets.iter().enumerate() {
+            out[dst_start + width + i] = ycbcr_plane_value(rgb_row[mx], plane);
+        }
+    }
+}
+
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
 ///
 /// Three paths based on what features the channel needs:
@@ -1661,6 +1914,33 @@ fn process_strip_channel(
         return;
     }
 
+    // Rev3 is FUSED into the one-pass route: `fused_blur_h_ssim` accumulates
+    // the direct error moment in place of `Σab` and `fused_vblur_features_ssim`
+    // forms the dissimilarity from it. The separate blur+reduce fallback below
+    // (`blur_passes != 1`, which no shipped profile selects) still builds its
+    // fourth plane with `mul_into` — i.e. `Σab` — and pools with the legacy
+    // covariance reducers, so Rev3 does not serve it. The refusal is an
+    // explicit `ZensimError` raised at the fallible entry points
+    // (`crate::ssim_form::check_route`), NOT a panic here and NOT a silent
+    // fall-through to the legacy arithmetic; this assertion only documents
+    // that the gate ran.
+    let stable = crate::ssim_form::effective_revision(
+        config
+            .formula_revision
+            .unwrap_or_else(crate::ssim_form::active_revision),
+    ) == crate::feature_defs::FormulaRevision::Rev3;
+    // Revision 3 fuses the masked/IW extension into the SSIM V sweep
+    // (`fused::ExtPoolsWork`): the activity is H-blurred from the H-only
+    // `mu1` plane the H pass already wrote, V-blurred inside the same sweep
+    // that forms the SSIM signal, and every masked/IW pool is accumulated
+    // there. The separate activity chain, the two V-blurred mu planes it
+    // needed, the retention copy and the swap below are all skipped.
+    let fused_ext = stable && need_ssim && (config.extended_features || config.compute_iw_features);
+    debug_assert!(
+        !stable || config.blur_passes == 1,
+        "Rev3 route gate must have refused blur_passes != 1 before reaching the strip walk"
+    );
+
     // Fused path: 1-pass blur (the common case for scale 0).
     // d8/max and mu1/mu2 are now computed inline by the fused kernels.
     if config.blur_passes == 1 {
@@ -1668,20 +1948,27 @@ fn process_strip_channel(
 
         let dm_needs_edge = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_edge_mse());
         let dm_needs_hf = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_hf());
-        let store_sd =
-            (diffmap.is_some() || attr_ret.is_some() || attr_fold.is_some()) && need_ssim;
+        let store_sd = (diffmap.is_some()
+            || attr_ret.is_some()
+            || attr_fold.is_some()
+            || (stable && (config.extended_features || config.compute_iw_features)))
+            && need_ssim;
         // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
         // OR when IW features are required (mu1 is the reference plane for
         // the IW weight's activity-map computation).
-        let store_mu = config.extended_features
-            || config.compute_iw_features
+        // With the extension fused into the sweep (`fused_ext`) nothing
+        // downstream reads the V-blurred mu planes for the masked/IW pools,
+        // so the two plane stores exist only for the diffmap/attribution
+        // readers that ask for them.
+        let store_mu = (!fused_ext && (config.extended_features || config.compute_iw_features))
             || dm_needs_edge
             || dm_needs_hf
             || attr_ret.is_some()
             || attr_fold.is_some();
         if need_ssim {
+            let strip_n = strip_h * width;
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
-            fused_blur_h_ssim(
+            crate::blur::fused_blur_h_ssim_at_revision(
                 src_c,
                 dst_c,
                 &mut bufs.mu1,
@@ -1691,12 +1978,42 @@ fn process_strip_channel(
                 width,
                 strip_h,
                 config.blur_radius,
+                config
+                    .formula_revision
+                    .unwrap_or_else(crate::ssim_form::active_revision),
             );
 
             // Fused V-blur + ALL feature extraction
             // mu1/mu2 outputs go to mask/mul_buf (mu1/mu2 still hold H-blurred values)
             // sd_out goes to temp_blur (only used when store_sd=true, extracted before
             // extended features which also need temp_blur for blurs)
+            let ext = crate::fused::ExtPoolsWork {
+                on: fused_ext,
+                mask: config.extended_features,
+                iw: config.compute_iw_features,
+                k_mask: config.extended_masking_strength,
+                k_iw: config.iw_strength,
+            };
+            if fused_ext {
+                // `|src - H(src)|` from the H-only mu1 plane (bit-identical
+                // to `box_blur_h_into_abs_diff`), then its H blur; the V
+                // sweep below V-blurs that into the activity in-register.
+                crate::simd_ops::abs_diff_rows_into(
+                    &src_c[..strip_n],
+                    &bufs.mu1[..strip_n],
+                    &mut bufs.act_tmp[..strip_n],
+                    width,
+                    width,
+                    strip_h,
+                );
+                crate::blur::box_blur_h(
+                    &bufs.act_tmp[..strip_n],
+                    &mut bufs.act_h[..strip_n],
+                    width,
+                    strip_h,
+                    config.blur_radius,
+                );
+            }
             strip_acc = fused_vblur_features_ssim(
                 &bufs.mu1,
                 &bufs.mu2,
@@ -1724,8 +2041,50 @@ fn process_strip_channel(
                 false,
                 // v1's 372 layout has no append/append2 block, so the free
                 // raw moments have nowhere to land on this path.
-                crate::fused::FreeExtrasWork::default(),
+                crate::fused::FreeExtrasWork {
+                    revision: config.formula_revision,
+                    local_only: config.local_only,
+                    omit_edges: config.omit_edges,
+                    ..Default::default()
+                },
+                ext,
+                if fused_ext {
+                    &bufs.act_h[..strip_n]
+                } else {
+                    &[]
+                },
             );
+            if fused_ext {
+                accum.masked_ssim_d[c] += strip_acc.masked_ssim_d;
+                accum.masked_ssim_d4[c] += strip_acc.masked_ssim_d4;
+                accum.masked_ssim_d2[c] += strip_acc.masked_ssim_d2;
+                accum.iw_ssim_d[c] += strip_acc.iw_ssim_d;
+                accum.iw_ssim_d4[c] += strip_acc.iw_ssim_d4;
+                accum.iw_ssim_d2[c] += strip_acc.iw_ssim_d2;
+                accum.masked_art4[c] += strip_acc.masked_art4;
+                accum.masked_det4[c] += strip_acc.masked_det4;
+                accum.iw_art4[c] += strip_acc.iw_art4;
+                accum.iw_det4[c] += strip_acc.iw_det4;
+                accum.masked_mse[c] += strip_acc.masked_mse;
+                accum.iw_mse[c] += strip_acc.iw_mse;
+                #[cfg(feature = "iw-diagnostics")]
+                {
+                    accum.iw_a_sum[c] += strip_acc.act_sum;
+                }
+            }
+
+            // Retain the inner-band signal BEFORE the activity work below
+            // reuses `temp_blur` as blur scratch. `store_sd` was forced on for
+            // exactly this reason, so the masked/IW pools read the same
+            // per-pixel values the basic/peak pools already consumed rather
+            // than re-deriving a second, differently-rounded signal. (Under
+            // the fused Rev3 the sigma V-blurs the legacy pools needed are
+            // also skipped: their fourth plane now holds the error moment.)
+            if stable && !fused_ext && (config.extended_features || config.compute_iw_features) {
+                let inner = inner_start * width..(inner_start + inner_h) * width;
+                bufs.stable_sd.clear();
+                bufs.stable_sd.extend_from_slice(&bufs.temp_blur[inner]);
+            }
 
             // Accumulate weighted features into diffmap before extended features
             // overwrites temp_blur. Inner rows are at inner_start..inner_start+inner_h
@@ -1848,7 +2207,7 @@ fn process_strip_channel(
         // We need the V-blurred mu1/mu2 for any path that computes activity
         // (extended-features masked block OR compute_iw_features IW block),
         // so swap whenever either is on.
-        if config.extended_features || config.compute_iw_features {
+        if !fused_ext && (config.extended_features || config.compute_iw_features) {
             std::mem::swap(&mut bufs.mu1, &mut bufs.mask);
             std::mem::swap(&mut bufs.mu2, &mut bufs.mul_buf);
         }
@@ -1882,7 +2241,7 @@ fn process_strip_channel(
         let do_ext = config.extended_features;
         let do_iw = config.compute_iw_features;
         let need_activity = do_ext || do_iw;
-        if need_activity {
+        if need_activity && !fused_ext {
             let inner_off = inner_start * width;
             let inner_n = inner_h * width;
             let strip_n = strip_h * width;
@@ -1902,19 +2261,42 @@ fn process_strip_channel(
             // map reference. Prior multi-pass V-blurred bufs.mu1 carried
             // arbitrary cross-channel stale state at overlap rows. See
             // `docs/PRINCIPLED_ACTIVITY.md`.
-            box_blur_h_into_abs_diff(
-                &src_c[..strip_n],
-                &mut bufs.mask[..strip_n],
-                width,
-                strip_h,
-                config.blur_radius,
-            );
+            // Rev-neutral (2026-09-10): on the `need_ssim` route the H-only
+            // blurred source ALREADY EXISTS — `fused_blur_h_ssim` wrote it to
+            // `bufs.mu1`, and the swap above moved it into `bufs.mask` — so
+            // the activity map is one in-place `|src - mask|` instead of a
+            // second H sweep of `src`. Bit-identical to `box_blur_h_into_abs_diff`
+            // (same scalar recurrence: `h_entries_are_bit_exact_at_a_degenerate_
+            // last_column_tile` pins both entries to it; asserted directly by
+            // `activity_from_the_fused_h_plane_is_bit_identical`). The
+            // `fused_blur_h_mu` route keeps the old entry: its scalar tail is
+            // NOT the same recurrence at ragged heights.
+            if need_ssim {
+                // The swap above left the H-only mu1 plane in `bufs.mask`
+                // (packed); the raw activity lands packed in `act_tmp`.
+                crate::simd_ops::abs_diff_rows_into(
+                    &src_c[..strip_n],
+                    &bufs.mask[..strip_n],
+                    &mut bufs.act_tmp[..strip_n],
+                    width,
+                    width,
+                    strip_h,
+                );
+            } else {
+                box_blur_h_into_abs_diff(
+                    &src_c[..strip_n],
+                    &mut bufs.act_tmp[..strip_n],
+                    width,
+                    strip_h,
+                    config.blur_radius,
+                );
+            }
 
             // Step 2: blur the activity map → mul_buf. After this,
             // mul_buf holds the per-pixel blurred reference-activity
             // signal shared by both mask and iw_weight.
             box_blur_1pass_into(
-                &bufs.mask[..strip_n],
+                &bufs.act_tmp[..strip_n],
                 &mut bufs.mul_buf[..strip_n],
                 &mut bufs.temp_blur[..strip_n],
                 width,
@@ -1962,7 +2344,47 @@ fn process_strip_channel(
             // (`sq_sum_into` + 2D blur for ssq, `mul_into` + 2D blur
             // for s12) with 2 SIMD passes (1D V-blur each), saving
             // ~30% of the masked-block setup cost.
-            if need_ssim {
+            if need_ssim && stable {
+                // Rev3: the canonical signal is already retained, so the two
+                // sigma V-blurs and the covariance re-derivation below are not
+                // just redundant — running them would give the weighted pools
+                // a DIFFERENT `d_raw` than the basic/peak pools. Same weights,
+                // same tiers, same accumulation order as the legacy arms.
+                debug_assert_eq!(bufs.stable_sd.len(), inner_n);
+                if do_ext && do_iw {
+                    let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
+                        crate::simd_ops::ssim_signal_inline_both(
+                            &bufs.stable_sd,
+                            activity_inner,
+                            k,
+                            k_iw,
+                        );
+                    accum.masked_ssim_d[c] += sd_m;
+                    accum.masked_ssim_d4[c] += sd4_m;
+                    accum.masked_ssim_d2[c] += sd2_m;
+                    accum.iw_ssim_d[c] += sd_i;
+                    accum.iw_ssim_d4[c] += sd4_i;
+                    accum.iw_ssim_d2[c] += sd2_i;
+                } else if do_ext {
+                    let (sum_d, sum_d4, sum_d2) = crate::simd_ops::ssim_signal_inline_mask(
+                        &bufs.stable_sd,
+                        activity_inner,
+                        k,
+                    );
+                    accum.masked_ssim_d[c] += sum_d;
+                    accum.masked_ssim_d4[c] += sum_d4;
+                    accum.masked_ssim_d2[c] += sum_d2;
+                } else {
+                    let (sum_d, sum_d4, sum_d2) = crate::simd_ops::ssim_signal_iw_inline(
+                        &bufs.stable_sd,
+                        activity_inner,
+                        k_iw,
+                    );
+                    accum.iw_ssim_d[c] += sum_d;
+                    accum.iw_ssim_d4[c] += sum_d4;
+                    accum.iw_ssim_d2[c] += sum_d2;
+                }
+            } else if need_ssim {
                 box_blur_v_from_copy(
                     &bufs.sigma1_sq[..strip_n],
                     &mut bufs.temp_blur[..strip_n],
@@ -2322,7 +2744,10 @@ fn process_scale_bands(
         None,
         stop,
     );
-    (accum.finalize(config.iw_strength as f64), diffmap)
+    (
+        accum.finalize(config.iw_strength as f64, config.formula_revision),
+        diffmap,
+    )
 }
 
 /// Per-scale retained planes for the fused score+attribution path (task
@@ -2824,6 +3249,9 @@ impl ZensimScratch {
 pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 
 pub struct PrecomputedReference {
+    pub(crate) sampling: Option<crate::sampling::Sampling>,
+    #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
+    pub(crate) sampling_geometry: Option<crate::sampling::Geometry>,
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
     // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2
     // (padded_width × height per plane). Enforced at construction.
@@ -2873,6 +3301,43 @@ impl PrecomputedReference {
         } else {
             Self::new_inner(source, num_scales, parallel)
         }
+    }
+
+    // Candidate folded extraction uses natural-width planes, including odd
+    // widths. Keep its cache geometry identical to its scalar producer.
+    // Both call sites (`metric/bake.rs`'s `prepare_steering_input` and
+    // `precompute_reference`) live behind `custom-profiles` in addition to
+    // `feature-regime-v2` — narrow the gate to match, or `feature-regime-v2`
+    // alone ships this as dead code (CI's "Feature permutations" `-D warnings`
+    // gate on the `feature-regime-v2`-only entry).
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    pub(crate) fn for_candidate(
+        source: &impl ImageSource,
+        parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> Self {
+        if source.width() < 64 || source.height() < 64 {
+            let padded = crate::metric::reflect_pad_to_min(source);
+            return Self::for_candidate_inner(&padded, parallel, encoding)
+                .with_ref_dims(source.width(), source.height());
+        }
+        Self::for_candidate_inner(source, parallel, encoding)
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn for_candidate_inner(
+        source: &impl ImageSource,
+        parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> Self {
+        Self::build_from_dims(4, source.width(), source.height(), parallel, |planes| {
+            if let Some(encoding) = encoding {
+                crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes);
+            } else {
+                convert_source_to_xyb_into(source, planes, source.width(), parallel);
+            }
+        })
+        .with_ref_dims(source.width(), source.height())
     }
 
     fn new_inner(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
@@ -2959,6 +3424,8 @@ impl PrecomputedReference {
         }
 
         Self {
+            sampling: None,
+            sampling_geometry: None,
             scales,
             ref_width: 0,
             ref_height: 0,
@@ -3327,7 +3794,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
     );
     let stats: Vec<ScaleStats> = accums
         .iter()
-        .map(|a| a.finalize(config.iw_strength as f64))
+        .map(|a| a.finalize(config.iw_strength as f64, config.formula_revision))
         .collect();
     let mean_offset = if pixel_count == 0 {
         [0.0; 3]
@@ -3672,7 +4139,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
 
     let final_stats: Vec<ScaleStats> = global_accums
         .iter()
-        .map(|a| a.finalize(config.iw_strength as f64))
+        .map(|a| a.finalize(config.iw_strength as f64, config.formula_revision))
         .collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
@@ -3832,7 +4299,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
 
     let final_stats: Vec<ScaleStats> = global_accums
         .iter()
-        .map(|a| a.finalize(config.iw_strength as f64))
+        .map(|a| a.finalize(config.iw_strength as f64, config.formula_revision))
         .collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
@@ -4131,6 +4598,32 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    on_scale: impl FnMut(
+        usize,
+        &ScaleStats,
+        [&[f32]; 3],
+        [&[f32]; 3],
+        &AttrScaleRetention,
+        usize,
+        usize,
+    ),
+) -> crate::metric::ZensimResult {
+    compute_zensim_streaming_with_ref_and_attr_planes_input(
+        precomputed,
+        distorted,
+        config,
+        weights,
+        None,
+        on_scale,
+    )
+}
+
+pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
+    precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    supplied_xyb: Option<[Vec<f32>; 3]>,
     mut on_scale: impl FnMut(
         usize,
         &ScaleStats,
@@ -4141,6 +4634,53 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
         usize,
     ),
 ) -> crate::metric::ZensimResult {
+    if let Some(sampling) = precomputed.sampling {
+        let levels = sampling.pyramid(distorted, config.allow_multithreading);
+        let mut cfg = *config;
+        cfg.compute_all_features = false;
+        cfg.extended_features = false;
+        cfg.compute_iw_features = false;
+        let mut active_weights = vec![1.0; 228];
+        if sampling.keep_y {
+            for range in [0..13, 26..39, 156..162, 168..174] {
+                active_weights[range].fill(0.0);
+            }
+        }
+        let mut stats = Vec::with_capacity(4);
+        let first = &levels[0];
+        let mean_offset = compute_xyb_mean_offset(
+            precomputed.scale(0).0,
+            [&first.0[0], &first.0[1], &first.0[2]],
+            first.1,
+            first.2,
+            first.1,
+        );
+        let mut retention = AttrScaleRetention::new(first.1 * first.2);
+        for (scale, (dst, w, h)) in levels.iter().enumerate() {
+            let (src, sw, sh) = precomputed.scale(scale);
+            assert_eq!((*w, *h), (sw, sh));
+            let dst = [&dst[0][..], &dst[1][..], &dst[2][..]];
+            let (accum, _) = process_scale_bands_into_accum(
+                src,
+                dst,
+                *w,
+                *h,
+                &cfg,
+                scale,
+                &active_weights,
+                None,
+                None,
+                None,
+                Some(&mut retention),
+                None,
+                None,
+            );
+            let stat = accum.finalize(cfg.iw_strength as f64, cfg.formula_revision);
+            on_scale(scale, &stat, src, dst, &retention, *w, *h);
+            stats.push(stat);
+        }
+        return combine_scores(&stats, &active_weights, &cfg, mean_offset);
+    }
     // Reference construction already reflect-pads sub-pyramid images. The
     // retained attribution walk must see the same distorted geometry, just
     // like ordinary cached scoring; otherwise its scale-0 widths disagree.
@@ -4148,19 +4688,21 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
         || distorted.height() < crate::metric::MIN_PYRAMID_DIM
     {
         let padded = crate::metric::reflect_pad_to_min(distorted);
-        return compute_zensim_streaming_with_ref_and_attr_planes(
+        return compute_zensim_streaming_with_ref_and_attr_planes_input(
             precomputed,
             &padded,
             config,
             weights,
+            supplied_xyb,
             on_scale,
         );
     }
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = pyramid_plane_stride(width);
-    let mut dst_planes =
-        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
+    let padded_width = precomputed.scale(0).1;
+    let mut dst_planes = supplied_xyb.unwrap_or_else(|| {
+        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading)
+    });
 
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
@@ -4204,7 +4746,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
             None,
             None,
         );
-        let scale_stat = accum.finalize(config.iw_strength as f64);
+        let scale_stat = accum.finalize(config.iw_strength as f64, config.formula_revision);
         on_scale(scale, &scale_stat, src_planes, dst_view, &retention, w, h);
         stats.push(scale_stat);
 
@@ -4302,7 +4844,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
             Some((&co, &mut id_plane[..n], &mut win_plane[..n])),
             None,
         );
-        let scale_stat = accum.finalize(config.iw_strength as f64);
+        let scale_stat = accum.finalize(config.iw_strength as f64, config.formula_revision);
         on_scale(
             scale,
             &scale_stat,
@@ -4870,7 +5412,8 @@ mod tests {
     /// The assertion is deliberately two-sided: chunk 64 must reproduce the
     /// default EXACTLY, and at least one other height must NOT — if the second
     /// half ever fails, the per-pixel kernels became length-invariant and this
-    /// whole constraint can be lifted.
+    /// whole constraint can be lifted. The scalar tier is the exception: it is
+    /// length-invariant since 2026-09-25, and there no height may move a byte.
     #[test]
     fn convert_chunk_rows_is_semantics_not_a_knob() {
         let mut diverged = 0usize;
@@ -4917,12 +5460,23 @@ mod tests {
                 }
             }
         }
-        assert!(
-            diverged > 0,
-            "no swept chunk height moved a byte — if the per-pixel conversion \
-             kernels became length-invariant, the producer's CONVERT_CHUNK_ROWS \
-             constraint (and this test's doc comment) can be lifted"
-        );
+        if crate::color::dispatches_scalar() {
+            // The scalar tier zero-pads its remainder through a full chunk
+            // (2026-09-25), so its conversion IS length-invariant: no chunk height
+            // may move a byte. The second half of the assertion above cannot hold
+            // here by construction; this is its stronger scalar-tier form.
+            assert_eq!(
+                diverged, 0,
+                "the scalar-tier conversion must give a pixel the same bits at any chunk height"
+            );
+        } else {
+            assert!(
+                diverged > 0,
+                "no swept chunk height moved a byte — if the per-pixel conversion \
+                 kernels became length-invariant, the producer's CONVERT_CHUNK_ROWS \
+                 constraint (and this test's doc comment) can be lifted"
+            );
+        }
     }
 
     /// Public-API end-to-end test: `compute_streaming_strips_default`
@@ -6672,10 +7226,22 @@ mod tests {
     /// content do, which is why the full-parquet scan found it and row-group-0
     /// did not.
     ///
+    /// Precision mode: set `ZENSIM_SSIM_PRECISION_PROBE` to a registered
+    /// coherence-case JSON; see `benchmarks/nonmax_diagnosis_2026-09-08.md`.
+    /// New specs pin `formula_revision`; legacy specs require revision 1.
+    ///
     /// `ZENSIM_DUMP_IMG=<png> [ZENSIM_DUMP_IMG2=<png> …] cargo test -p zensim --release dump_ssim_moment_explosion -- --ignored --nocapture`
     #[test]
     #[ignore = "needs specific images; set ZENSIM_DUMP_IMG (comma-separated) and run --ignored"]
     fn dump_ssim_moment_explosion() {
+        if let Ok(path) = std::env::var("ZENSIM_SSIM_KERNEL_PERF") {
+            dump_stable_ssim_kernel_perf(&path);
+            return;
+        }
+        if let Ok(path) = std::env::var("ZENSIM_SSIM_PRECISION_PROBE") {
+            dump_ssim_precision_from_coherence(&path);
+            return;
+        }
         let list = std::env::var("ZENSIM_DUMP_IMG")
             .expect("set ZENSIM_DUMP_IMG to comma-separated image paths");
         let config = ZensimConfig {
@@ -6821,6 +7387,1283 @@ mod tests {
         }
     }
 
+    /// Micro-cost census inside the existing SSIM diagnostic. This does not
+    /// measure complete model inference and cannot qualify a performance gate.
+    fn dump_stable_ssim_kernel_perf(path: &str) {
+        let spec: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let output = spec["output"].as_str().unwrap();
+        assert!(!std::path::Path::new(output).exists());
+        let rounds = spec["rounds"].as_u64().unwrap() as usize;
+        let mut rows = Vec::new();
+        for dim in spec["dimensions"].as_array().unwrap() {
+            let w = dim[0].as_u64().unwrap() as usize;
+            let h = dim[1].as_u64().unwrap() as usize;
+            let src: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                (0..w * h)
+                    .map(|i| 0.2 + ((i * 17 + i / w * 11 + c * 41) % 137) as f32 / 100.0)
+                    .collect()
+            });
+            let dst: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                src[c]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| if i % 13 == 0 { v * 0.7 } else { v + 0.0001 })
+                    .collect()
+            });
+            let mut out: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; w * h]);
+            let mut scratch = crate::ssim_form::StableSsimScratch::default();
+            let mut times = Vec::new();
+            for round in 0..rounds + 2 {
+                let start = std::time::Instant::now();
+                for c in 0..3 {
+                    crate::ssim_form::stable_ssim_plane(
+                        &src[c],
+                        &dst[c],
+                        w,
+                        h,
+                        5,
+                        crate::ssim_form::SsimLumaForm::Ssim2Legacy,
+                        &mut out[c],
+                        &mut scratch,
+                    );
+                }
+                let elapsed = start.elapsed().as_secs_f64() * 1e3;
+                std::hint::black_box(&out);
+                if round >= 2 {
+                    times.push(elapsed);
+                }
+            }
+            rows.push(
+                serde_json::json!({"width":w,"height":h,"channels":3,"radius":5,
+                "milliseconds":times,"scratch_formula_bytes":(2*5+2)*w*4*8}),
+            );
+        }
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output)
+            .unwrap();
+        writeln!(file,"{}",serde_json::to_string_pretty(&serde_json::json!({"schema":"zensim-stable-ssim-kernel-cost-v1","complete_inference":false,"rows":rows})).unwrap()).unwrap();
+    }
+
+    /// The existing SSIM diagnostic's precision mode. This is an independent
+    /// direct-window f64 reference, never a serving or training implementation.
+    /// It holds the actual f32 XYB pyramid fixed to isolate moment arithmetic.
+    /// A deterministic document/screenshot-flavoured pair: flat paper, hard
+    /// glyph-like edges, a smooth photographic patch, and a near-lossless
+    /// distortion. Flat, high-contrast content is where the raw-moment
+    /// cancellation this control exists for is worst (issue #61).
+    fn locality_fixture(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let mut src = vec![[247u8, 246, 244]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                // Glyph-ish bars: hard edges on flat paper.
+                if (x / 7 + y / 11) % 5 == 0 && (x % 7) < 4 && (y % 11) < 8 {
+                    src[i] = [26, 24, 30];
+                }
+                // A smooth patch, so the fixture is not purely bi-level.
+                if x >= w / 2 {
+                    let v = (110 + ((x * 3 + y * 5) % 90)) as u8;
+                    src[i] = [v, v.wrapping_sub(6), v.wrapping_add(4)];
+                }
+            }
+        }
+        // Near-lossless distortion: +/-1 LSB ripple plus a few heavier cells.
+        let mut dst = src.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                let t = ((x * 13 + y * 29) % 7) as i32 - 3;
+                let heavy = if (x / 16 + y / 16) % 9 == 0 { 6 } else { 1 };
+                for ch in &mut dst[i] {
+                    *ch = (*ch as i32 + t * heavy).clamp(0, 255) as u8;
+                }
+            }
+        }
+        (src, dst)
+    }
+
+    /// Retained per-(scale, channel) SSIM planes for one distorted image,
+    /// through the REAL banded strip walk — not the standalone kernel.
+    /// `(scale, channel, width, height, reference, distorted, retained_sd)`.
+    type RetainedPlanes = Vec<(usize, usize, usize, usize, Vec<f32>, Vec<f32>, Vec<f32>)>;
+
+    fn retained_ssim_planes(
+        pre: &PrecomputedReference,
+        pixels: &[[u8; 3]],
+        w: usize,
+        h: usize,
+        config: &ZensimConfig,
+        weights: &[f64],
+    ) -> RetainedPlanes {
+        let mut planes = Vec::new();
+        compute_zensim_streaming_with_ref_and_attr_planes(
+            pre,
+            &RgbSlice::new(pixels, w, h),
+            config,
+            weights,
+            |scale, _stats, r, d, ret, sw, sh| {
+                let n = sw * sh;
+                for c in 0..3 {
+                    planes.push((
+                        scale,
+                        c,
+                        sw,
+                        sh,
+                        r[c][..n].to_vec(),
+                        d[c][..n].to_vec(),
+                        ret.sd[c][..n].to_vec(),
+                    ));
+                }
+            },
+        );
+        planes
+    }
+
+    /// Count retained signals that MOVED although every sample in their own
+    /// window is unchanged — the registered "out-of-support movement" of
+    /// `benchmarks/nonmax_diagnosis_2026-09-08.md`, computed here on the
+    /// integrated retention route rather than on isolated planes.
+    #[cfg(feature = "feature-regime-v2")] // read only by the v2-walk locality controls
+    fn out_of_support_movement(
+        base: &RetainedPlanes,
+        changed: &RetainedPlanes,
+        radius: usize,
+    ) -> (usize, f64) {
+        assert_eq!(base.len(), changed.len());
+        let rad = radius as isize;
+        let (mut count, mut max_abs) = (0usize, 0.0f64);
+        for (b, c) in base.iter().zip(changed) {
+            let (scale, ch, sw, sh, _br, bd, bs) = b;
+            let (_, _, _, _, _cr, cd, cs) = c;
+            assert_eq!((scale, ch), (&c.0, &c.1));
+            for y in 0..*sh {
+                for x in 0..*sw {
+                    let mut supported = false;
+                    for dy in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let xx =
+                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
+                            let yy =
+                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
+                            supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
+                        }
+                    }
+                    if !supported {
+                        let i = y * sw + x;
+                        if bs[i] != cs[i] {
+                            count += 1;
+                            max_abs = max_abs.max((bs[i] as f64 - cs[i] as f64).abs());
+                        }
+                    }
+                }
+            }
+        }
+        (count, max_abs)
+    }
+
+    /// Both phases of the locality probe: score the pair, then score it again
+    /// with a small rectangle of the distorted image replaced by REFERENCE
+    /// pixels. Windows containing no changed sample must produce an unchanged
+    /// signal, because their inputs are identical.
+    #[cfg(feature = "feature-regime-v2")]
+    fn locality_probe(
+        w: usize,
+        h: usize,
+        rect: (usize, usize, usize, usize),
+        parallel: bool,
+    ) -> (usize, f64) {
+        assert!(
+            h > crate::feature_v2::STRIP_ROWS,
+            "the probe must cross a strip boundary or it never exercises the banded walk"
+        );
+        let (src, dst) = locality_fixture(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        assert_eq!(config.blur_passes, 1, "probe assumes the fused route");
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+
+        let mut refined = dst.clone();
+        for y in rect.1..rect.3 {
+            for x in rect.0..rect.2 {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        assert!(
+            refined != dst,
+            "the refinement rectangle changed nothing — the fixture is inert"
+        );
+
+        let base = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
+        let after = retained_ssim_planes(&pre, &refined, w, h, &config, params.weights);
+        out_of_support_movement(&base, &after, config.blur_radius)
+    }
+
+    /// Rectangle to overwrite with reference pixels, and the fixture size.
+    /// The height spans three 128-row strips at scale 0 and two at scale 1, so
+    /// the probe measures the BANDED walk's locality, not a single band's.
+    const LOCALITY_RECT: (usize, usize, usize, usize) = (96, 150, 112, 166);
+    const LOCALITY_DIMS: (usize, usize) = (192, 288);
+
+    /// REGISTERED bounded-error acceptance for the FUSED revision 3 (user
+    /// directive 2026-09-09: "bounded error is fine, speed above minor
+    /// flaws"). Each bound is ~3-5x above the value measured on this fixture
+    /// when it was registered, and every one is far under the shipped
+    /// revision 1 figure.
+    ///
+    /// | quantity | rev 1 (shipped) | fused rev 3 measured | bound |
+    /// |---|---:|---:|---:|
+    /// | peak out-of-support movement | 4.886e-4 | 4.277e-6 | 2e-5 |
+    /// | max abs error vs the exact f64 kernel | 3.378e-3 | printed by the test | 1e-3 |
+    /// | worst residue on an all-equal window | — | 3.689e-6 | 1e-5 |
+    #[cfg(feature = "feature-regime-v2")]
+    const REV3_LOCALITY_PEAK_BOUND: f64 = 2e-5;
+    #[cfg(feature = "feature-regime-v2")]
+    const REV3_ACCURACY_BOUND: f64 = 1e-3;
+
+    /// **The negative control that makes the Rev3 result mean something.**
+    ///
+    /// The shipped revision's raw-moment cancellation moves the retained
+    /// signal at pixels whose OWN window did not change. If this ever stops
+    /// being true the fixture has gone inert, and the Rev3 control below
+    /// would be passing on nothing — so this failing is as informative as the
+    /// other one failing.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn locality_fixture_reproduces_out_of_support_movement_on_the_shipped_revision() {
+        if crate::ssim_form::active_revision() != crate::feature_defs::FormulaRevision::Rev1 {
+            // Deliberately not an assertion about the environment: this test
+            // states a property OF Rev1 and only Rev1 can state it.
+            return;
+        }
+        let (count, max_abs) =
+            locality_probe(LOCALITY_DIMS.0, LOCALITY_DIMS.1, LOCALITY_RECT, false);
+        assert!(
+            count > 0,
+            "the shipped path showed NO out-of-support movement on this fixture — \
+             it no longer reproduces issue #61 and cannot validate the correction"
+        );
+        println!("rev1 out-of-support: {count} signals, max |delta| {max_abs:.3e}");
+    }
+
+    /// **Acceptance control (issue #61).** Under revision 3 a local
+    /// replacement with reference pixels must leave every signal outside the
+    /// changed samples' support BIT-IDENTICAL, through the integrated banded
+    /// strip walk and its retained planes — not merely through the standalone
+    /// kernel that `ssim_form`'s own tests cover.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn rev3_retained_signal_is_local_under_a_reference_replacement() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "streaming::tests::rev3_retained_signal_is_local_under_a_reference_replacement",
+            "REV3-LOCALITY-RAN",
+        ) {
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_revision(),
+            crate::feature_defs::FormulaRevision::Rev3
+        );
+        // Both walks: the serial band loop and the rayon one tile the same
+        // geometry, and a signal that is local in one and not the other would
+        // be a threading defect hiding behind a correct kernel.
+        for parallel in [false, true] {
+            let (count, max_abs) =
+                locality_probe(LOCALITY_DIMS.0, LOCALITY_DIMS.1, LOCALITY_RECT, parallel);
+            assert!(
+                max_abs <= REV3_LOCALITY_PEAK_BOUND,
+                "revision 3 (parallel={parallel}) moved {count} retained signals \
+                 outside the changed samples' support with peak |delta| {max_abs:.3e}, \
+                 above the registered bound {REV3_LOCALITY_PEAK_BOUND:e}"
+            );
+            println!(
+                "rev3 fused (parallel={parallel}): out-of-support {count} signals, \
+                 peak {max_abs:.3e} (bound {REV3_LOCALITY_PEAK_BOUND:e})"
+            );
+        }
+        println!("REV3-LOCALITY-RAN within the registered bound (serial and parallel)");
+    }
+
+    /// **Cached and uncached agree at revision 3.**
+    ///
+    /// `precomputed_ref_matches_streaming` is the crate's existing contract
+    /// between the cached-reference walk and the plain one. Revision 3 adds a
+    /// per-band f64 kernel and a retained plane to BOTH, so the contract is
+    /// re-established at that revision rather than assumed to survive — same
+    /// method as the fold-parity and HDR wrappers, re-running the real gate in
+    /// a revision-3 process instead of copying it.
+    #[test]
+    fn cached_and_uncached_agree_at_revision_three() {
+        crate::ssim_form::rerun_tests_at_revision(
+            "3",
+            "streaming::tests::precomputed_ref_matches_streaming",
+            1,
+        );
+    }
+
+    /// **Identity on the supported range, through the integrated route** —
+    /// and the honest strength of it.
+    ///
+    /// `Zensim::compute` short-circuits a byte-identical pair before any
+    /// arithmetic runs, so an all-identical fixture would prove nothing about
+    /// the kernel. This fixture differs inside one rectangle, so the walk
+    /// really executes; the claim is then made about every window at every
+    /// pyramid level whose reference and distorted samples are all EQUAL.
+    /// Equality is read off the retained planes themselves, per level, so no
+    /// footprint arithmetic has to be trusted.
+    ///
+    /// MEASURED, and NOT what was first asserted here: such a window is not
+    /// bit-zero. 1,400 of 216,222 of them carry a residue, worst **8.18e-15**.
+    /// The kernel's own `stable_moments_*` controls DO show exact identity —
+    /// on *fully* identical inputs, where the sliding recurrence never
+    /// diverges. Here the window has passed THROUGH the changed rectangle, and
+    /// `sum = (sum + entering) - leaving` in f64 is not exactly reversible
+    /// once several differing terms have gone through it, so `(a-b)²` returns
+    /// to ~1e-15 rather than to 0.
+    ///
+    /// That is inside the kernel's registered acceptance
+    /// (`2e-10 + 2e-6*|reference|`) by four orders of magnitude, and it is
+    /// also why the LOCALITY control above still measures bit-exact zeros: a
+    /// 1e-15 absolute perturbation of a signal whose value is ~1e-3 or larger
+    /// vanishes when the f64 accumulator is rounded once to f32. It survives
+    /// here only because the true value is exactly 0, where nothing rounds it
+    /// away. So the bound is asserted, and the residue is reported.
+    #[test]
+    fn rev3_identity_windows_are_exactly_zero() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "streaming::tests::rev3_identity_windows_are_exactly_zero",
+            "REV3-IDENTITY-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = LOCALITY_DIMS;
+        let (src, _) = locality_fixture(w, h);
+        let mut dst = src.clone();
+        let (x0, y0, x1, y1) = LOCALITY_RECT;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                dst[y * w + x] = [0, 0, 0];
+            }
+        }
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+        let planes = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
+
+        // Registered residue bound for the FUSED f32 revision 3 (measured
+        // 3.689e-6 on this fixture; the exact f64 kernel's figure was
+        // 8.18e-15). f32 sliding sums that have passed through a difference
+        // do not return to within f32 eps of zero; that is the accepted
+        // trade, see REV3_LOCALITY_PEAK_BOUND.
+        const IDENTITY_BOUND: f32 = 1e-5;
+        let rad = config.blur_radius as isize;
+        let (mut checked, mut nonzero, mut worst) = (0usize, 0usize, 0.0f32);
+        for (_scale, _ch, sw, sh, r, d, sd) in &planes {
+            for y in 0..*sh {
+                for x in 0..*sw {
+                    let mut differs = false;
+                    for dy in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let xx =
+                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
+                            let yy =
+                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
+                            differs |= r[yy * sw + xx] != d[yy * sw + xx];
+                        }
+                    }
+                    if !differs {
+                        checked += 1;
+                        let v = sd[y * sw + x];
+                        if v != 0.0 {
+                            nonzero += 1;
+                            worst = worst.max(v.abs());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 0, "no identity windows were examined");
+        assert!(
+            worst <= IDENTITY_BOUND,
+            "{nonzero} of {checked} windows whose samples are all EQUAL produced a \
+             signal above the registered residue bound: worst {worst:e} > {IDENTITY_BOUND:e}."
+        );
+        println!(
+            "REV3-IDENTITY-RAN {checked} identity windows, {nonzero} non-zero, \
+             worst {worst:e} (bound {IDENTITY_BOUND:e})"
+        );
+    }
+
+    /// **Which half of the correction actually restores locality?**
+    ///
+    /// The shipped kernel changed two things together — f64 accumulation, and
+    /// forming the error variance DIRECTLY from a `(a-b)^2` moment instead of
+    /// recovering it from `var1 + var2 - 2*cov`. The cost measurement makes
+    /// the difference matter: the f64 pass is ~70% of a +27..87% regression,
+    /// so if the FORMULATION carries the fix, an f32 kernel would be far
+    /// cheaper and just as local.
+    ///
+    /// Runs the 2x2 on the real XYB pyramid planes, using the same reference
+    /// replacement and the same out-of-support definition as the locality
+    /// control above. Prints the table; asserts only the two facts that are
+    /// not measurements: that the mirror reproduces the shipped kernel
+    /// bit-for-bit, and that the shipped configuration is local.
+    #[test]
+    fn precision_ablation_separates_f64_from_the_direct_error_form() {
+        let (w, h) = LOCALITY_DIMS;
+        let (src, dst) = locality_fixture(w, h);
+        let (x0, y0, x1, y1) = LOCALITY_RECT;
+        let mut refined = dst.clone();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+        let base = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
+        let after = retained_ssim_planes(&pre, &refined, w, h, &config, params.weights);
+        let form = crate::ssim_form::active_luma_form();
+        let radius = config.blur_radius;
+        let rad = radius as isize;
+
+        // Support mask per plane pair, computed ONCE and shared by all arms:
+        // a pixel is "supported" when any sample in its own reflect-101
+        // window differs between the two distorted planes.
+        let mut masks = Vec::new();
+        for (b, c) in base.iter().zip(&after) {
+            let (_, _, sw, sh, _r, bd, _bs) = b;
+            let (_, _, _, _, _, cd, _) = c;
+            let mut mask = vec![false; sw * sh];
+            for y in 0..*sh {
+                for x in 0..*sw {
+                    let mut supported = false;
+                    for dy in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let xx =
+                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
+                            let yy =
+                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
+                            supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
+                        }
+                    }
+                    mask[y * sw + x] = supported;
+                }
+            }
+            masks.push(mask);
+        }
+
+        println!(
+            "\n{:<30}{:>10}{:>14}{:>16}",
+            "arm", "moved", "peak |d|", "max err vs f64ref"
+        );
+        let mut shipped_moved = usize::MAX;
+        for (f32_mask, direct, tiled, reset) in [
+            (0u8, true, false, 0usize),
+            (0b1111, true, false, 0),
+            (0, false, false, 0),
+            (0b1111, false, false, 0),
+            // WHICH moments need the f64? The four have very different
+            // magnitudes: a, b and a^2+b^2 are order 0.5 while (a-b)^2 is
+            // order 1e-6 on near-lossless content, so their f32 drift differs
+            // by orders of magnitude. One f32 moment at a time, then the
+            // complement of the cheapest useful split.
+            (0b0001, true, false, 0),
+            (0b0010, true, false, 0),
+            (0b0100, true, false, 0),
+            (0b1000, true, false, 0),
+            (0b1011, true, false, 0),
+            (0b1001, true, false, 0),
+            // Periodic stability resets on the CHEAP sliding recurrence: one
+            // pass, f32, drift bounded to a tile instead of the whole row.
+            (0b1111, true, false, 64),
+            (0b1111, true, false, 16),
+            (0b1111, true, false, 4),
+            // The tiled (van Herk) decomposition: with tiles of exactly the
+            // window diameter, every window sum reads only its own samples, so
+            // locality should stop being a numerical property — f32 should be
+            // exactly local too.
+            (0, true, true, 0),
+            (0b1111, true, true, 0),
+            (0b1111, false, true, 0),
+        ] {
+            let (mut moved, mut peak, mut worst_err) = (0usize, 0.0f64, 0.0f64);
+            for (i, (b, c)) in base.iter().zip(&after).enumerate() {
+                let (_, _, sw, sh, r, bd, bs) = b;
+                let (_, _, _, _, _, cd, _) = c;
+                let arm = |d: &[f32]| {
+                    if tiled {
+                        crate::ssim_form::ablation_plane_tiled(
+                            r,
+                            d,
+                            *sw,
+                            *sh,
+                            radius,
+                            form,
+                            f32_mask != 0,
+                            direct,
+                        )
+                    } else {
+                        crate::ssim_form::ablation_plane(
+                            r, d, *sw, *sh, radius, form, f32_mask, direct, reset,
+                        )
+                    }
+                };
+                let (pb, pc) = (arm(bd), arm(cd));
+                // The (f64, direct) arm IS the shipped kernel; prove the
+                // mirror rather than assuming it. Compared against a
+                // WHOLE-PLANE `stable_ssim_plane`, not against `ret.sd`:
+                // the strip walk re-seeds the recurrence per strip and
+                // legitimately differs by ~6e-11 (measured separately).
+                if f32_mask == 0 && direct && !tiled && reset == 0 {
+                    let mut want = vec![0.0f32; sw * sh];
+                    let mut scratch = crate::ssim_form::StableSsimScratch::default();
+                    crate::ssim_form::stable_ssim_plane(
+                        r,
+                        bd,
+                        *sw,
+                        *sh,
+                        radius,
+                        form,
+                        &mut want,
+                        &mut scratch,
+                    );
+                    assert!(
+                        pb.iter()
+                            .zip(&want)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "the ablation mirror is not the shipped kernel at plane {i}"
+                    );
+                }
+                let _ = bs;
+                let (reference, _, _) =
+                    crate::ssim_form::precision_reference(r, bd, *sw, *sh, radius, form);
+                for (j, m) in masks[i].iter().enumerate() {
+                    worst_err = worst_err.max((pb[j] as f64 - reference[j]).abs());
+                    if !m && pb[j] != pc[j] {
+                        moved += 1;
+                        peak = peak.max((pb[j] as f64 - pc[j] as f64).abs());
+                    }
+                }
+            }
+            let label = format!(
+                "{} {}, {}",
+                match f32_mask {
+                    0 => "f64   ".to_string(),
+                    0b1111 => "f32   ".to_string(),
+                    m => format!("f32:{m:04b}"),
+                },
+                if tiled {
+                    "TILED".to_string()
+                } else if reset == 0 {
+                    "slide".to_string()
+                } else {
+                    format!("reset{reset}")
+                },
+                if direct {
+                    "direct (a-b)^2"
+                } else {
+                    "cov subtract"
+                }
+            );
+            println!("{label:<30}{moved:>10}{peak:>14.3e}{worst_err:>16.3e}");
+            if f32_mask == 0 && direct && !tiled && reset == 0 {
+                shipped_moved = moved;
+            }
+        }
+        assert_eq!(
+            shipped_moved, 0,
+            "the shipped configuration is supposed to be the local one"
+        );
+    }
+
+    /// **G3.1 for revision 3's `v1ssimstable` era** — the registry's claim
+    /// about WHICH slots this era moves, checked against a real
+    /// cross-revision re-extraction rather than against a second list.
+    ///
+    /// The two halves run in different processes (`active_revision` is a
+    /// `OnceLock`), so the revision-3 half prints its 372-wide vector as
+    /// `to_bits()` hex and the shipped-revision half diffs against its own.
+    /// A slot that moves and is NOT registered fails; so does a registered
+    /// slot that does not move, which is the half that catches a revision
+    /// wired to fewer consumers than it claims.
+    ///
+    /// This is the control that makes "basic, peaks, masked and IW all
+    /// consume the same corrected signal" checkable end-to-end: if any of the
+    /// four blocks were still reading legacy moments, its slots would be
+    /// missing from the measured set.
+    #[test]
+    fn rev3_moves_exactly_the_registered_slots() {
+        const SENTINEL: &str = "REV3-VECTOR ";
+        let path = "streaming::tests::rev3_moves_exactly_the_registered_slots";
+        let (w, h) = (192usize, 160usize);
+        let (src, dst) = locality_fixture(w, h);
+        // Struct-update, not field reassignment: `field_reassign_with_default`
+        // is warn-by-default and CI runs clippy with `-D warnings`.
+        let config = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: true,
+            allow_multithreading: false,
+            ..Default::default()
+        };
+        let vector = || {
+            compute_zensim_streaming(
+                &RgbSlice::new(&src, w, h),
+                &RgbSlice::new(&dst, w, h),
+                &config,
+                crate::metric::WEIGHTS,
+            )
+            .features()
+            .to_vec()
+        };
+
+        if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok("3") {
+            let bits: Vec<String> = vector()
+                .iter()
+                .map(|v| format!("{:016x}", v.to_bits()))
+                .collect();
+            println!("{SENTINEL}{}", bits.join(","));
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_revision(),
+            crate::ssim_form::SHIPPED_REVISION,
+            "the baseline half must run at the shipped revision"
+        );
+        let base = vector();
+        assert_eq!(base.len(), 372, "this gate reads the 372-wide v1 layout");
+
+        let exe = std::env::current_exe().expect("test binary path");
+        let out = std::process::Command::new(exe)
+            .args([path, "--exact", "--nocapture", "--test-threads=1"])
+            .env("ZENSIM_FORMULA_REV", "3")
+            .output()
+            .expect("re-exec the test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "the revision-3 half failed\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let line = stdout
+            .lines()
+            .find_map(|l| l.split(SENTINEL).nth(1))
+            .expect("the revision-3 half printed no vector — the control did not run");
+        let rev3: Vec<f64> = line
+            .trim()
+            .split(',')
+            .map(|t| f64::from_bits(u64::from_str_radix(t, 16).expect("hex bits")))
+            .collect();
+        assert_eq!(rev3.len(), base.len());
+
+        let moved: Vec<u16> = (0..base.len())
+            .filter(|&i| base[i].to_bits() != rev3[i].to_bits())
+            .map(|i| i as u16)
+            .collect();
+        assert!(
+            !moved.is_empty(),
+            "revision 3 produced an IDENTICAL 372 vector — it is not reaching the extractor"
+        );
+
+        // TWO different sets, and conflating them is the mistake this comment
+        // exists to stop anyone repeating. The measurement is a REVISION diff
+        // (1 vs 3), and revision 3 INHERITS revision 2 — its eras are
+        // `v1ssimcap`, `freecomp`, `v1hfgain`, `v1detroot`, `scorepow` AND
+        // `v1ssimstable`. So the upper bound is the revision's union, not the
+        // one era this lane added. Checking against the era alone reports
+        // `contrast_inc` (F17/`v1hfgain`) and every L4/L8-pooled edge slot
+        // (F18/`v1detroot`) as leaks, which is what it did the first time it
+        // ran; see `era_moved_slots`'s own doc for why the two forms differ.
+        let revision_bound =
+            crate::feature_defs::FormulaRevision::Rev3.moved_slots(372, crate::NUM_SCALES);
+        let outside: Vec<u16> = moved
+            .iter()
+            .copied()
+            .filter(|i| !revision_bound.contains(i))
+            .collect();
+        assert!(
+            outside.is_empty(),
+            "revision 3 moved slots NO era of it declares — it leaked outside its \
+             registered blast radius: {outside:?}"
+        );
+
+        // The lower bound is this lane's own era: every slot `v1ssimstable`
+        // claims must ACTUALLY move. This is the direction that catches a
+        // consumer still reading legacy moments — basic, peaks, masked or IW
+        // quietly left on the old signal would show up here as a claimed slot
+        // that did not move.
+        let ssim_era = crate::feature_defs::era_moved_slots("v1ssimstable", 372, crate::NUM_SCALES);
+        let unmoved: Vec<u16> = ssim_era
+            .iter()
+            .copied()
+            .filter(|i| !moved.contains(i))
+            .collect();
+        assert!(
+            unmoved.is_empty(),
+            "these slots are registered as moved by v1ssimstable but did NOT move — \
+             a consumer is still reading legacy moments: {unmoved:?}"
+        );
+        println!(
+            "rev3 moved {} of 372 slots; all {} v1ssimstable slots moved; \
+             none outside the revision's {} declared slots",
+            moved.len(),
+            ssim_era.len(),
+            revision_bound.len()
+        );
+    }
+
+    /// **G3.1 for revision 3 on the 944 layout** — the wide walk's v2 block
+    /// (`f372..`) reads the same `sigma12` plane the v1 signal does, so a
+    /// revision that redefines that plane reaches v2 too. The 372-wide gate
+    /// above cannot see that; this one can. Same shape: the revision-3 half
+    /// prints its vector, the shipped half diffs and checks both bounds —
+    /// nothing moved outside `Rev3.moved_slots(944)`, and every slot the
+    /// `v1ssimstable` and `v2ssimstable` eras claim did move.
+    ///
+    /// This gate exists because the first fused build got it wrong: the v2
+    /// dense kernel kept computing `cov = s12 - mu1*mu2` on a plane that no
+    /// longer held `Σab`. Fold-vs-streaming parity could not catch it (both
+    /// routes were equally wrong) and the 372 gate does not reach `f372+`.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn rev3_moves_exactly_the_registered_slots_on_the_944_layout() {
+        const SENTINEL: &str = "REV3-VECTOR944 ";
+        let path = "streaming::tests::rev3_moves_exactly_the_registered_slots_on_the_944_layout";
+        let (w, h) = (192usize, 160usize);
+        let (src, dst) = locality_fixture(w, h);
+        let vector = || {
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+            let toggles = crate::feature_v2::V2NewFeatureToggles {
+                append_block: true,
+                append2_block: true,
+                v1_pools: crate::feature_v2::V1PoolsMode::Full,
+                ..Default::default()
+            };
+            let mut scratch = crate::feature_v2::V2Scratch::new();
+            z.compute_folded720_append_features_streaming(
+                &RgbSlice::new(&src, w, h),
+                &RgbSlice::new(&dst, w, h),
+                toggles,
+                &mut scratch,
+            )
+            .expect("944 walk")
+            .features()
+            .to_vec()
+        };
+        if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok("3") {
+            let bits: Vec<String> = vector()
+                .iter()
+                .map(|v| format!("{:016x}", v.to_bits()))
+                .collect();
+            println!("{SENTINEL}{}", bits.join(","));
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_revision(),
+            crate::ssim_form::SHIPPED_REVISION
+        );
+        let base = vector();
+        assert_eq!(base.len(), 944, "this gate reads the 944-wide layout");
+        let exe = std::env::current_exe().expect("test binary path");
+        let out = std::process::Command::new(exe)
+            .args([path, "--exact", "--nocapture", "--test-threads=1"])
+            .env("ZENSIM_FORMULA_REV", "3")
+            .output()
+            .expect("re-exec the test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "the revision-3 half failed\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let line = stdout
+            .lines()
+            .find_map(|l| l.split(SENTINEL).nth(1))
+            .expect("the revision-3 half printed no vector — the control did not run");
+        let rev3: Vec<f64> = line
+            .trim()
+            .split(',')
+            .map(|t| f64::from_bits(u64::from_str_radix(t, 16).expect("hex bits")))
+            .collect();
+        assert_eq!(rev3.len(), base.len());
+        let moved: Vec<u16> = (0..base.len())
+            .filter(|&i| base[i].to_bits() != rev3[i].to_bits())
+            .map(|i| i as u16)
+            .collect();
+        let bound = crate::feature_defs::FormulaRevision::Rev3.moved_slots(944, crate::NUM_SCALES);
+        let outside: Vec<u16> = moved
+            .iter()
+            .copied()
+            .filter(|i| !bound.contains(i))
+            .collect();
+        assert!(
+            outside.is_empty(),
+            "revision 3 moved 944-layout slots NO era of it declares: {outside:?}"
+        );
+        let mut claimed =
+            crate::feature_defs::era_moved_slots("v1ssimstable", 944, crate::NUM_SCALES);
+        claimed.extend(crate::feature_defs::era_moved_slots(
+            "v2ssimstable",
+            944,
+            crate::NUM_SCALES,
+        ));
+        let unmoved: Vec<u16> = claimed
+            .iter()
+            .copied()
+            .filter(|i| !moved.contains(i))
+            .collect();
+        assert!(
+            unmoved.is_empty(),
+            "slots registered as moved by the SSIM eras did NOT move on the 944 layout \
+             — a consumer is still reading legacy moments: {unmoved:?}"
+        );
+        let v2_moved = moved.iter().filter(|&&i| i >= 372).count();
+        println!(
+            "rev3 moved {} of 944 slots ({v2_moved} in the v2 block); all {} SSIM-era slots moved; \
+             none outside the revision's {} declared slots",
+            moved.len(),
+            claimed.len(),
+            bound.len()
+        );
+    }
+
+    /// **The unsupported route returns an ERROR.** Revision 3's moments are
+    /// one reflect-101 box, so a `blur_passes != 1` profile is refused —
+    /// through the public entry, as a `Result`, on the thread the caller is
+    /// on. Not a panic (the draft's `assert!`), and emphatically not a silent
+    /// fall-through to revision 1 arithmetic inside a revision 3 vector.
+    ///
+    /// The same profile must still score normally on the shipped revision, so
+    /// this pins a refusal that is specific to the revision rather than a
+    /// profile that stopped working.
+    #[test]
+    #[cfg(feature = "custom-profiles")]
+    fn rev3_refuses_multi_pass_blur_profiles_through_the_public_entry() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "streaming::tests::rev3_refuses_multi_pass_blur_profiles_through_the_public_entry",
+            "REV3-ROUTE-RAN",
+        ) {
+            return;
+        }
+        use crate::profile::ProfileParams;
+        static MULTI: std::sync::OnceLock<ProfileParams> = std::sync::OnceLock::new();
+        let params = MULTI.get_or_init(|| ProfileParams::builder().blur(5, 3).build());
+        let profile = crate::ZensimProfile::Custom {
+            params,
+            name: "rev3-route-control",
+        };
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = locality_fixture(w, h);
+        let z = crate::Zensim::new(profile).with_parallel(false);
+        let err = z
+            .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h))
+            .expect_err("revision 3 must refuse a multi-pass blur profile");
+        assert!(
+            matches!(err, crate::ZensimError::ModelForwardFailed { .. }),
+            "expected an explicit route refusal, got {err:?}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("blur_passes") && text.contains("revision 3"),
+            "the refusal must name the route and the revision, got {text:?}"
+        );
+        // A single-pass custom profile at the same revision still scores.
+        static ONE: std::sync::OnceLock<ProfileParams> = std::sync::OnceLock::new();
+        let ok_params = ONE.get_or_init(|| ProfileParams::builder().blur(5, 1).build());
+        let ok = crate::Zensim::new(crate::ZensimProfile::Custom {
+            params: ok_params,
+            name: "rev3-route-control-ok",
+        })
+        .with_parallel(false)
+        .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h))
+        .expect("revision 3 serves the one-pass route");
+        assert!(
+            ok.score().is_finite(),
+            "a served route must produce a score"
+        );
+        println!("REV3-ROUTE-RAN refusal: {text}");
+    }
+
+    /// The integrated retention route is within the REGISTERED bounded error
+    /// of the exact f64 second-pass kernel it replaced.
+    ///
+    /// Everything downstream reads `ret.sd`, so this binds "basic, peaks,
+    /// masked and IW use one signal" to a number: the retained plane is the
+    /// fused f32 direct-error form, and this measures its distance from
+    /// `stable_ssim_plane`, the exactness reference, across every scale and
+    /// channel. Bound is `REV3_ACCURACY_BOUND`; the measured worst is printed
+    /// so the record carries the value, not only the verdict.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn rev3_retained_planes_are_the_canonical_stable_signal() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "streaming::tests::rev3_retained_planes_are_the_canonical_stable_signal",
+            "REV3-CANONICAL-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = LOCALITY_DIMS;
+        let (src, dst) = locality_fixture(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+        let form = crate::ssim_form::active_luma_form();
+        let mut worst = 0.0f64;
+        let mut checked = 0usize;
+        compute_zensim_streaming_with_ref_and_attr_planes(
+            &pre,
+            &RgbSlice::new(&dst, w, h),
+            &config,
+            params.weights,
+            |scale, _stats, r, d, ret, sw, sh| {
+                if scale == 0 {
+                    assert!(
+                        sh > crate::feature_v2::STRIP_ROWS,
+                        "scale 0 fits in one strip ({sh} rows) — this control would \
+                         never compare a re-seeded recurrence against the whole-plane one"
+                    );
+                }
+                let n = sw * sh;
+                let mut want = vec![0.0f32; n];
+                let mut scratch = crate::ssim_form::StableSsimScratch::default();
+                for c in 0..3 {
+                    crate::ssim_form::stable_ssim_plane(
+                        r[c],
+                        d[c],
+                        sw,
+                        sh,
+                        config.blur_radius,
+                        form,
+                        &mut want,
+                        &mut scratch,
+                    );
+                    for (i, (&got_f32, &exp_f32)) in
+                        ret.sd[c][..n].iter().zip(&want[..n]).enumerate()
+                    {
+                        let (got, exp) = (got_f32 as f64, exp_f32 as f64);
+                        assert!(got.is_finite(), "non-finite retained signal at {i}");
+                        worst = worst.max((got - exp).abs());
+                        checked += 1;
+                    }
+                }
+            },
+        );
+        assert!(checked > 0, "no planes were checked");
+        assert!(
+            worst <= REV3_ACCURACY_BOUND,
+            "fused rev3 retained signal is {worst:.3e} from the exact f64 kernel, \
+             above the registered bound {REV3_ACCURACY_BOUND:e}"
+        );
+        println!(
+            "REV3-CANONICAL-RAN checked {checked} signals, worst |delta| {worst:.3e} \
+             vs the exact kernel (bound {REV3_ACCURACY_BOUND:e})"
+        );
+    }
+
+    fn dump_ssim_precision_from_coherence(path: &str) {
+        let spec: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let revision = crate::ssim_form::active_revision();
+        let revision_number = match revision {
+            crate::feature_defs::FormulaRevision::Rev1 => 1_u64,
+            crate::feature_defs::FormulaRevision::Rev2 => 2,
+            crate::feature_defs::FormulaRevision::Rev3 => 3,
+        };
+        let expected = spec
+            .get("formula_revision")
+            .map_or(1, |v| v.as_u64().expect("integer formula revision"));
+        assert_eq!(
+            revision_number, expected,
+            "precision formula revision mismatch"
+        );
+        let form = crate::ssim_form::active_luma_form();
+        assert_eq!(
+            form,
+            crate::ssim_form::SsimLumaForm::for_revision(revision),
+            "precision luminance form mismatch"
+        );
+        let output = spec["output"].as_str().unwrap();
+        assert!(!std::path::Path::new(output).exists(), "immutable output");
+        let mut reports = Vec::new();
+        for case in spec["cases"].as_array().unwrap() {
+            let read = |key: &str| {
+                let im = image::open(case[key].as_str().unwrap()).unwrap().to_rgb8();
+                let dims = (im.width() as usize, im.height() as usize);
+                (im.pixels().map(|p| p.0).collect::<Vec<_>>(), dims)
+            };
+            let (src, (w, h)) = read("reference");
+            let (dst, dims) = read("distorted");
+            assert_eq!(dims, (w, h));
+            let bounds: Vec<usize> = case["bounds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_u64().unwrap() as usize)
+                .collect();
+            let saved: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(case["coherence"].as_str().unwrap()).unwrap(),
+            )
+            .unwrap();
+            let saved_block = saved["blocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|b| b["bounds"] == case["bounds"])
+                .unwrap();
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+            let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+            let params = z.profile().params();
+            let config = crate::metric::config_from_params(params, false);
+            assert_eq!(config.blur_passes, 1);
+            let radius = config.blur_radius as isize;
+            let mut refined = dst.clone();
+            for y in bounds[1]..bounds[3] {
+                for x in bounds[0]..bounds[2] {
+                    refined[y * w + x] = src[y * w + x];
+                }
+            }
+            let mut phases = Vec::new();
+            for pixels in [&dst, &refined] {
+                let mut planes = Vec::new();
+                compute_zensim_streaming_with_ref_and_attr_planes(
+                    &pre,
+                    &RgbSlice::new(pixels, w, h),
+                    &config,
+                    params.weights,
+                    |scale, stats, r, d, ret, sw, sh| {
+                        for c in 0..3 {
+                            let n = sw * sh;
+                            let (stable, raw_agreement, means) =
+                                crate::ssim_form::precision_reference(
+                                    r[c],
+                                    d[c],
+                                    sw,
+                                    sh,
+                                    config.blur_radius,
+                                    form,
+                                );
+                            let mut kernel = vec![0.0f32; n];
+                            let mut kernel_scratch = crate::ssim_form::StableSsimScratch::default();
+                            crate::ssim_form::stable_ssim_plane(
+                                r[c],
+                                d[c],
+                                sw,
+                                sh,
+                                config.blur_radius,
+                                form,
+                                &mut kernel,
+                                &mut kernel_scratch,
+                            );
+                            for (&a, &b) in kernel.iter().zip(&stable) {
+                                assert!(
+                                    a.is_finite() && (a as f64 - b).abs() <= 2e-10 + 2e-6 * b.abs(),
+                                    "stable kernel accuracy"
+                                );
+                            }
+                            assert!(raw_agreement < 1e-9, "independent f64 algebra mismatch");
+                            let pooled =
+                                [stats.ssim[c * 2], stats.ssim[c * 2 + 1], stats.ssim_2nd[c]];
+                            // Independent edge arithmetic on the same f32 inputs,
+                            // reusing the direct reference's already computed means.
+                            let mut edge_reference = [0.0_f64; 6];
+                            for (i, [mu1, mu2]) in means.iter().copied().enumerate() {
+                                let ed = (1.0 + (f64::from(d[c][i]) - mu2).abs())
+                                    / (1.0 + (f64::from(r[c][i]) - mu1).abs())
+                                    - 1.0;
+                                for (offset, v) in [(0, ed.max(0.0)), (3, (-ed).max(0.0))] {
+                                    edge_reference[offset] += v;
+                                    edge_reference[offset + 1] += v.powi(4);
+                                    edge_reference[offset + 2] += v * v;
+                                }
+                            }
+                            for offset in [0, 3] {
+                                edge_reference[offset] /= n as f64;
+                                edge_reference[offset + 1] =
+                                    (edge_reference[offset + 1] / n as f64).sqrt().sqrt();
+                                edge_reference[offset + 2] =
+                                    (edge_reference[offset + 2] / n as f64).sqrt();
+                            }
+                            let edge_pooled = [
+                                stats.edge[c * 4],
+                                stats.edge[c * 4 + 1],
+                                stats.edge_2nd[c * 2],
+                                stats.edge[c * 4 + 2],
+                                stats.edge[c * 4 + 3],
+                                stats.edge_2nd[c * 2 + 1],
+                            ];
+                            planes.push((
+                                scale,
+                                c,
+                                sw,
+                                sh,
+                                d[c][..n].to_vec(),
+                                ret.sd[c][..n].to_vec(),
+                                stable,
+                                pooled,
+                                raw_agreement,
+                                kernel,
+                                edge_pooled,
+                                edge_reference,
+                            ));
+                        }
+                    },
+                );
+                phases.push(planes);
+            }
+            let mut rows = Vec::new();
+            let mut canonical_gain = 0.0;
+            let mut stable_gain = 0.0;
+            let mut edge_gains = [0.0_f64; 2];
+            for (base, changed) in phases[0].iter().zip(&phases[1]) {
+                let (scale, c, sw, sh, bd, bs, bf, bpool, agreement, bk, be, ber) = base;
+                let (_, _, _, _, cd, cs, cf, cpool, _, ck, ce, cer) = changed;
+                let mut outside_changed = 0usize;
+                let mut outside_max = 0.0f64;
+                let mut outside_stable_max = 0.0f64;
+                let mut outside_kernel_max = 0.0f64;
+                for y in 0..*sh {
+                    for x in 0..*sw {
+                        let mut supported = false;
+                        for dy in -radius..=radius {
+                            for dx in -radius..=radius {
+                                let xx = crate::metric::reflect_index(
+                                    (x as isize + dx).unsigned_abs(),
+                                    *sw,
+                                );
+                                let yy = crate::metric::reflect_index(
+                                    (y as isize + dy).unsigned_abs(),
+                                    *sh,
+                                );
+                                supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
+                            }
+                        }
+                        if !supported {
+                            let i = y * sw + x;
+                            outside_changed += usize::from(bs[i] != cs[i]);
+                            outside_max = outside_max.max((bs[i] as f64 - cs[i] as f64).abs());
+                            outside_stable_max = outside_stable_max.max((bf[i] - cf[i]).abs());
+                            let delta = (bk[i] as f64 - ck[i] as f64).abs();
+                            outside_kernel_max = outside_kernel_max.max(delta);
+                            assert!(
+                                delta <= 2e-10 + 2e-6 * bf[i].abs(),
+                                "stable kernel locality"
+                            );
+                        }
+                    }
+                }
+                let pool = |v: &[f64]| {
+                    let n = v.len() as f64;
+                    [
+                        v.iter().sum::<f64>() / n,
+                        (v.iter().map(|x| x.powi(4)).sum::<f64>() / n).sqrt().sqrt(),
+                        (v.iter().map(|x| x * x).sum::<f64>() / n).sqrt(),
+                    ]
+                };
+                let stable_before = pool(bf);
+                let stable_after = pool(cf);
+                let kernel_before = pool(&bk.iter().map(|&x| x as f64).collect::<Vec<_>>());
+                let kernel_after = pool(&ck.iter().map(|&x| x as f64).collect::<Vec<_>>());
+                for (a, b) in kernel_before
+                    .iter()
+                    .chain(&kernel_after)
+                    .zip(stable_before.iter().chain(&stable_after))
+                {
+                    assert!(
+                        (a - b).abs() <= 2e-10 + 2e-6 * b.abs(),
+                        "stable kernel pool accuracy"
+                    );
+                }
+                for j in 0..3 {
+                    let k = scale * 39 + c * 13 + j;
+                    // JSON numeric parsing may round the serialized f64 by
+                    // one ULP. This is a reconstruction check, not a feature
+                    // era admission or a bit-parity claim.
+                    assert!(
+                        (bpool[j] - saved["base_features"][k].as_f64().unwrap()).abs() < 1e-12,
+                        "canonical base SSIM mismatch f{k}"
+                    );
+                    let sensitivity = saved["base_sensitivities"][k].as_f64().unwrap();
+                    let observed = sensitivity * (cpool[j] - bpool[j]);
+                    assert!(
+                        (observed - saved_block["feature_linear_deltas"][k].as_f64().unwrap())
+                            .abs()
+                            < 1e-12,
+                        "canonical intervention SSIM mismatch"
+                    );
+                    canonical_gain += observed;
+                    stable_gain += sensitivity * (stable_after[j] - stable_before[j]);
+                }
+                let mut edge_plane_gains = [0.0_f64; 2];
+                if revision_number == 3 {
+                    for j in 0..6 {
+                        let k = scale * 39 + c * 13 + 3 + j;
+                        let expected = saved["base_features"][k].as_f64().unwrap();
+                        assert!(
+                            (be[j] - expected).abs() < 1e-12,
+                            "canonical base edge mismatch f{k}"
+                        );
+                        let sensitivity = saved["base_sensitivities"][k].as_f64().unwrap();
+                        let observed = sensitivity * (ce[j] - be[j]);
+                        assert!(
+                            (observed - saved_block["feature_linear_deltas"][k].as_f64().unwrap())
+                                .abs()
+                                < 1e-12,
+                            "canonical intervention edge mismatch f{k}"
+                        );
+                        edge_plane_gains[0] += observed;
+                        edge_plane_gains[1] += sensitivity * (cer[j] - ber[j]);
+                    }
+                    for j in 0..2 {
+                        edge_gains[j] += edge_plane_gains[j];
+                    }
+                }
+                assert_eq!(outside_stable_max, 0.0, "direct reference locality");
+                rows.push(serde_json::json!({"scale":scale,"channel":c,"width":sw,"height":sh,
+                    "canonical_base":bpool,"canonical_refined":cpool,"stable_base":stable_before,"stable_refined":stable_after,
+                    "outside_support_changed_signals":outside_changed,"outside_support_max_abs":outside_max,
+                    "outside_support_f64_max_abs":outside_stable_max,"independent_f64_agreement_max_abs":agreement,
+                    "base_signal_max_abs_error":bs.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max),
+                    "kernel_base":kernel_before,"kernel_refined":kernel_after,
+                    "kernel_base_signal_max_abs_error":bk.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max),
+                    "kernel_outside_support_max_abs":outside_kernel_max}));
+                if revision_number == 3 {
+                    let row = rows.last_mut().unwrap();
+                    row["canonical_edge_base"] = serde_json::json!(be);
+                    row["canonical_edge_refined"] = serde_json::json!(ce);
+                    row["reference_edge_base"] = serde_json::json!(ber);
+                    row["reference_edge_refined"] = serde_json::json!(cer);
+                    row["edge_linear_gains"] = serde_json::json!(edge_plane_gains);
+                }
+            }
+            reports.push(serde_json::json!({"case":case,"canonical_ssim_linear_gain":canonical_gain,"stable_ssim_linear_gain":stable_gain,"planes":rows}));
+            if revision_number == 3 {
+                reports.last_mut().unwrap()["edge_linear_gains"] = serde_json::json!(edge_gains);
+            }
+        }
+        let report = serde_json::json!({"schema":"zensim-ssim-precision-diagnostic-v1",
+            "formula_revision":revision_number,"luminance_form":format!("{form:?}"),
+            "deployable":false,"cases":reports});
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output)
+            .unwrap();
+        use std::io::Write;
+        writeln!(file, "{}", serde_json::to_string_pretty(&report).unwrap()).unwrap();
+    }
+
     // ── E-JBU: guided mass-conserving redistribution (kernel-level) ─────────
 
     /// Deterministic positive pseudo-random values (LCG) for guide/src planes.
@@ -6919,6 +8762,159 @@ mod tests {
         for (a, b) in nn.iter().zip(jbu.iter()) {
             assert!(b.is_finite());
             assert_eq!(a, b);
+        }
+    }
+
+    /// BT.709 full-range anchor values: neutral → zero chroma, saturated
+    /// primaries → the documented extremes, and a mid-grey check that the
+    /// gamma-domain signal is what the matrix consumes (not linear light).
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn ycbcr_plane_bt709_anchor_values() {
+        let cases: [([f32; 3], f32, f32, f32); 5] = [
+            // (rgb, expected Y′, Cb, Cr)
+            ([0.0, 0.0, 0.0], 0.0, 0.0, 0.0),
+            ([1.0, 1.0, 1.0], 1.0, 0.0, 0.0),
+            (
+                [1.0, 0.0, 0.0],
+                0.2126,
+                -0.2126 / 1.8556,
+                (1.0 - 0.2126) / 1.5748,
+            ),
+            (
+                [0.0, 0.0, 1.0],
+                0.0722,
+                (1.0 - 0.0722) / 1.8556,
+                -0.0722 / 1.5748,
+            ),
+            ([0.5, 0.5, 0.5], 0.5, 0.0, 0.0),
+        ];
+        for (rgb, ey, ecb, ecr) in cases {
+            let y = ycbcr_plane_value(rgb, YcbcrPlane::Y);
+            let cb = ycbcr_plane_value(rgb, YcbcrPlane::Cb);
+            let cr = ycbcr_plane_value(rgb, YcbcrPlane::Cr);
+            assert!(
+                (y - ey).abs() < 1e-6 && (cb - ecb).abs() < 1e-6 && (cr - ecr).abs() < 1e-6,
+                "{rgb:?}: got ({y}, {cb}, {cr}) want ({ey}, {ecb}, {ecr})"
+            );
+            assert!((0.0..=1.0).contains(&y));
+            assert!((-0.5..=0.5).contains(&cb) && (-0.5..=0.5).contains(&cr));
+        }
+        // Saturated primaries reach the documented extremes exactly.
+        assert_eq!(ycbcr_plane_value([1.0, 0.0, 0.0], YcbcrPlane::Cr), 0.5);
+        assert_eq!(ycbcr_plane_value([0.0, 0.0, 1.0], YcbcrPlane::Cb), 0.5);
+    }
+
+    /// The u8 fast path must be the gamma code itself, bit-identical to
+    /// `v/255` fed through the matrix — no LUT round-trip error.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn ycbcr_converter_srgb8_is_exact_gamma_domain() {
+        let (w, h) = (9usize, 5usize);
+        let px: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                [
+                    (i * 37 % 251) as u8,
+                    (i * 91 % 239) as u8,
+                    (i * 53 % 233) as u8,
+                ]
+            })
+            .collect();
+        let src = RgbSlice::new(&px, w, h);
+        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
+            let mut out = vec![0.0f32; w * h];
+            convert_source_to_ycbcr_plane_into_slice(&src, &mut out, w, 0, plane);
+            for (i, &[r, g, b]) in px.iter().enumerate() {
+                let want = ycbcr_plane_value(
+                    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0],
+                    plane,
+                );
+                assert_eq!(
+                    out[i].to_bits(),
+                    want.to_bits(),
+                    "{plane:?} px {i}: {} != {want}",
+                    out[i]
+                );
+            }
+        }
+    }
+
+    /// Opaque RGBA rows must take the same fast path as RGB (alpha
+    /// ignored); translucent rows must still produce finite, in-range
+    /// planes through the composite+encode fallback.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn ycbcr_converter_rgba_alpha_contract() {
+        let (w, h) = (7usize, 4usize);
+        let rgb: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                [
+                    (i * 31 % 251) as u8,
+                    (i * 17 % 241) as u8,
+                    (i * 71 % 229) as u8,
+                ]
+            })
+            .collect();
+        let rgba: Vec<[u8; 4]> = rgb.iter().map(|&[r, g, b]| [r, g, b, 255]).collect();
+        let rgb_src = RgbSlice::new(&rgb, w, h);
+        let rgba_src =
+            crate::source::RgbaSlice::with_alpha_mode(&rgba, w, h, crate::AlphaMode::Opaque);
+        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
+            let (mut a, mut b) = (vec![0.0f32; w * h], vec![0.0f32; w * h]);
+            convert_source_to_ycbcr_plane_into_slice(&rgb_src, &mut a, w, 0, plane);
+            convert_source_to_ycbcr_plane_into_slice(&rgba_src, &mut b, w, 0, plane);
+            assert_eq!(a, b, "opaque RGBA must equal RGB for {plane:?}");
+        }
+        let translucent: Vec<[u8; 4]> = rgb
+            .iter()
+            .enumerate()
+            .map(|(i, &[r, g, b])| [r, g, b, (i % 4) as u8 * 85])
+            .collect();
+        let t_src = crate::source::RgbaSlice::new(&translucent, w, h);
+        let mut out = vec![0.0f32; w * h];
+        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
+            convert_source_to_ycbcr_plane_into_slice(&t_src, &mut out, w, 0, plane);
+            let (lo, hi) = if plane == YcbcrPlane::Y {
+                (0.0f32, 1.0f32)
+            } else {
+                (-0.5, 0.5)
+            };
+            assert!(
+                out.iter().all(|v| v.is_finite() && *v >= lo && *v <= hi),
+                "translucent {plane:?} out of [{lo}, {hi}]"
+            );
+        }
+    }
+
+    /// Pad columns carry the horizontal mirror of the plane, matching the
+    /// XYB converter's padding contract.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn ycbcr_converter_mirror_pads_columns() {
+        let (w, h, padded_w) = (5usize, 3usize, 9usize);
+        let px: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                [
+                    (i * 41 % 251) as u8,
+                    (i * 19 % 239) as u8,
+                    (i * 97 % 233) as u8,
+                ]
+            })
+            .collect();
+        let src = RgbSlice::new(&px, w, h);
+        let mut out = vec![-1.0f32; padded_w * h];
+        convert_source_to_ycbcr_plane_into_slice(&src, &mut out, padded_w, 0, YcbcrPlane::Y);
+        let period = 2 * (w - 1);
+        for y in 0..h {
+            for i in 0..(padded_w - w) {
+                let m = (w + i) % period;
+                let mx = if m < w { m } else { period - m };
+                assert_eq!(
+                    out[y * padded_w + w + i].to_bits(),
+                    out[y * padded_w + mx].to_bits(),
+                    "row {y} pad {i} must mirror column {mx}"
+                );
+            }
         }
     }
 }

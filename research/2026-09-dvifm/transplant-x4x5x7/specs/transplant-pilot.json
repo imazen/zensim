@@ -1,0 +1,10 @@
+{
+ "schema": "transplant-spec-v1",
+ "role": "c0-derivation pilot — visibility OFF, histograms ON",
+ "gate": false,
+ "c0": 0.05,
+ "g": 1.0,
+ "p": 1.0,
+ "edge": true,
+ "hist": true
+}

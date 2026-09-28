@@ -75,12 +75,36 @@ pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
 /// — the activity path uses [`crate::blur::box_blur_h_into_abs_diff`]
 /// which fuses the blur with the abs-diff. Kept as a reference
 /// implementation for the SIMD dispatch trio (v4/v3/scalar).
-#[allow(dead_code)]
 pub(crate) fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(
         abs_diff_into_inner(a, b, out),
         [v4, v3, neon, wasm128, scalar]
     );
+}
+
+/// `out[y*width + x] = |src[y*width + x] - mu[y*pitch + x]|` for `rows` rows:
+/// the activity map's first step, reading the H-only blurred source straight
+/// out of the (possibly pitched) plane `fused_blur_h_ssim` wrote, instead of
+/// re-blurring `src` (`box_blur_h_into_abs_diff`). Bit-identical to that entry
+/// (both sides equal one scalar recurrence — `blur`'s
+/// `h_entries_are_bit_exact_at_a_degenerate_last_column_tile`; asserted
+/// directly by `activity_from_the_fused_h_plane_is_bit_identical`).
+pub(crate) fn abs_diff_rows_into(
+    src: &[f32],
+    mu: &[f32],
+    out: &mut [f32],
+    width: usize,
+    pitch: usize,
+    rows: usize,
+) {
+    debug_assert!(pitch >= width);
+    for y in 0..rows {
+        abs_diff_into(
+            &src[y * width..y * width + width],
+            &mu[y * pitch..y * pitch + width],
+            &mut out[y * width..y * width + width],
+        );
+    }
 }
 
 /// Like ssim_channel but also computes 8th-power pool and max.
@@ -2924,6 +2948,58 @@ pub(crate) fn ssim_channel_inline_both(
     )
 }
 
+/// Weighted masked + IW pools over a RETAINED per-pixel SSIM signal.
+///
+/// The [`crate::feature_defs::FormulaRevision::Rev3`] counterpart of
+/// [`ssim_channel_inline_both`]: the dissimilarity is no longer re-derived
+/// from `(mu1, mu2, ssq, s12)` here, because under Rev3 the ONE canonical
+/// value was already formed by [`crate::ssim_form::stable_ssim_plane`] and
+/// retained. Reductions, weights and accumulation order are the legacy
+/// reducer's, so the only difference between the two is where `d_raw` comes
+/// from — which is exactly the property the parity controls assert.
+///
+/// `signal` and `activity` are matching contiguous inner-band pixels.
+pub(crate) fn ssim_signal_inline_both(
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+    k_iw: f32,
+) -> ((f64, f64, f64), (f64, f64, f64)) {
+    assert_eq!(signal.len(), activity.len());
+    incant!(
+        ssim_signal_inline_both_inner(signal, activity, k_mask, k_iw),
+        [v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Masked-only pool over a retained Rev3 SSIM signal — the
+/// [`ssim_channel_inline_mask`] counterpart.
+pub(crate) fn ssim_signal_inline_mask(
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+) -> (f64, f64, f64) {
+    assert_eq!(signal.len(), activity.len());
+    incant!(
+        ssim_signal_inline_mask_inner(signal, activity, k_mask),
+        [v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// IW-only pool over a retained Rev3 SSIM signal — the
+/// [`ssim_channel_iw_inline`] counterpart.
+pub(crate) fn ssim_signal_iw_inline(
+    signal: &[f32],
+    activity: &[f32],
+    k_iw: f32,
+) -> (f64, f64, f64) {
+    assert_eq!(signal.len(), activity.len());
+    incant!(
+        ssim_signal_iw_inline_inner(signal, activity, k_iw),
+        [v4, v3, neon, wasm128, scalar]
+    )
+}
+
 /// SSIM mask-only: derive mask weight inline. Returns `(sum_d, sum_d4, sum_d2)`.
 pub(crate) fn ssim_channel_inline_mask(
     mu1: &[f32],
@@ -3211,6 +3287,171 @@ fn ssim_channel_inline_mask_inner(
     (sum_d, sum_d4, sum_d2)
 }
 
+// --- Rev3 retained-signal pools ---
+//
+// One canonical `d_raw` per pixel, formed once by
+// `ssim_form::stable_ssim_plane` and retained, replaces the per-pool
+// re-derivation from `(mu1, mu2, ssq, s12)`. Everything downstream of
+// `d_raw` — the inline mask/IW weights, the `.max(0)` floor, the d/d2/d4
+// tiers and the f64 accumulation order — is copied unchanged from the
+// legacy reducers above, so a parity test that feeds the legacy `d_raw`
+// through these is exact, and the only measured difference is the signal.
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_signal_inline_both_inner(
+    token: Token,
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+    k_iw: f32,
+) -> ((f64, f64, f64), (f64, f64, f64)) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+    let kmv = f32x16::splat(token, k_mask);
+    let kiv = f32x16::splat(token, k_iw);
+
+    let (sig_chunks, sig_tail) = signal.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
+    let mut sum_da = 0.0f64;
+    let mut sum_d4a = 0.0f64;
+    let mut sum_d2a = 0.0f64;
+    let mut sum_db = 0.0f64;
+    let mut sum_d4b = 0.0f64;
+    let mut sum_d2b = 0.0f64;
+
+    for (sc, ac) in sig_chunks.iter().zip(act_chunks) {
+        let d_raw = f32x16::from_array(token, *sc);
+        let av = f32x16::from_array(token, *ac);
+
+        let mva = one / kmv.mul_add(av, one); // mask weight inline
+        let mvb = kiv.mul_add(av, one); // IW weight inline
+
+        let da = (d_raw * mva).max(zero);
+        let d2a = da * da;
+        let d4a = d2a * d2a;
+        let db = (d_raw * mvb).max(zero);
+        let d2b = db * db;
+        let d4b = d2b * d2b;
+
+        sum_da += da.reduce_add() as f64;
+        sum_d2a += d2a.reduce_add() as f64;
+        sum_d4a += d4a.reduce_add() as f64;
+        sum_db += db.reduce_add() as f64;
+        sum_d2b += d2b.reduce_add() as f64;
+        sum_d4b += d4b.reduce_add() as f64;
+    }
+
+    let off = sig_chunks.len() * 16;
+    for (i, &d_raw) in sig_tail.iter().enumerate() {
+        let j = off + i;
+        let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
+        let iw = 1.0f32 + k_iw * activity[j];
+        let da = (d_raw * mask).max(0.0f32);
+        let d2a = da * da;
+        let db = (d_raw * iw).max(0.0f32);
+        let d2b = db * db;
+        sum_da += da as f64;
+        sum_d2a += d2a as f64;
+        sum_d4a += (d2a * d2a) as f64;
+        sum_db += db as f64;
+        sum_d2b += d2b as f64;
+        sum_d4b += (d2b * d2b) as f64;
+    }
+
+    ((sum_da, sum_d4a, sum_d2a), (sum_db, sum_d4b, sum_d2b))
+}
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_signal_inline_mask_inner(
+    token: Token,
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+) -> (f64, f64, f64) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+    let kmv = f32x16::splat(token, k_mask);
+
+    let (sig_chunks, sig_tail) = signal.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
+
+    for (sc, ac) in sig_chunks.iter().zip(act_chunks) {
+        let av = f32x16::from_array(token, *ac);
+        let mv = one / kmv.mul_add(av, one);
+
+        let d = (f32x16::from_array(token, *sc) * mv).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+    }
+
+    let off = sig_chunks.len() * 16;
+    for (i, &d_raw) in sig_tail.iter().enumerate() {
+        let j = off + i;
+        let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
+        let d = (d_raw * mask).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
+    }
+
+    (sum_d, sum_d4, sum_d2)
+}
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_signal_iw_inline_inner(
+    token: Token,
+    signal: &[f32],
+    activity: &[f32],
+    k_iw: f32,
+) -> (f64, f64, f64) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+    let kiv = f32x16::splat(token, k_iw);
+
+    let (sig_chunks, sig_tail) = signal.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
+
+    for (sc, ac) in sig_chunks.iter().zip(act_chunks) {
+        let av = f32x16::from_array(token, *ac);
+        let wv = kiv.mul_add(av, one);
+
+        let d = (f32x16::from_array(token, *sc) * wv).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+    }
+
+    let off = sig_chunks.len() * 16;
+    for (i, &d_raw) in sig_tail.iter().enumerate() {
+        let j = off + i;
+        let iw = 1.0f32 + k_iw * activity[j];
+        let d = (d_raw * iw).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
+    }
+
+    (sum_d, sum_d4, sum_d2)
+}
+
 // --- edge_diff_channel_inline_both ---
 
 #[magetypes(v4, v3, neon, wasm128, scalar)]
@@ -3414,6 +3655,141 @@ mod tests {
             mask_b.push(1.0 + 2.0 * x); // IW-style weight in [1.0, 3.0]
         }
         (mu1, mu2, sum_sq, s12, mask_a, mask_b)
+    }
+
+    /// Activity plane for the Rev3 pool controls: `mask_a` is already a
+    /// smooth `[0.5, 1.0]` ramp, which is exactly the shape `activity` takes.
+    fn mk_activity(n: usize) -> Vec<f32> {
+        (0..n).map(|i| 0.75 * (i as f32) / (n as f32)).collect()
+    }
+
+    /// **The Rev3 pool contract, stated as a test.** Feed the legacy reducer
+    /// and its retained-signal counterpart the SAME `d_raw` and they must
+    /// agree — because the ONLY thing Rev3 changes is where `d_raw` comes
+    /// from, never the weights, the floor, the tiers or the accumulation.
+    ///
+    /// `d_raw` is taken from `ssim_dissim_raw_scalar`, the very expression
+    /// the legacy reducer's scalar tail uses, so any disagreement beyond
+    /// SIMD-vs-scalar rounding of that one expression is a defect in the new
+    /// reducers. The bound is relative and tight; the residual is the
+    /// `mul_add` contraction difference between the vector and scalar
+    /// spellings of `ssim_dissim`, not a difference in pooling.
+    #[test]
+    fn retained_signal_pools_agree_with_the_legacy_pools_on_the_same_d_raw() {
+        let form = crate::ssim_form::active_luma_form();
+        for &n in &[1usize, 15, 16, 17, 31, 32, 33, 100, 256, 1000, 1024] {
+            let (mu1, mu2, sum_sq, s12, _, _) = mk_test_data(n);
+            let act = mk_activity(n);
+            let signal: Vec<f32> = (0..n)
+                .map(|j| ssim_dissim_raw_scalar(form, mu1[j], mu2[j], sum_sq[j], s12[j]).max(0.0))
+                .collect();
+
+            let close = |got: f64, want: f64, what: &str| {
+                let tol = 1e-12 + 1e-6 * want.abs();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "n={n} {what}: retained {got} vs legacy {want}"
+                );
+            };
+
+            let ((m, m4, m2), (i, i4, i2)) =
+                ssim_channel_inline_both(&mu1, &mu2, &sum_sq, &s12, &act, 4.0, 4.0);
+            let ((sm, sm4, sm2), (si, si4, si2)) = ssim_signal_inline_both(&signal, &act, 4.0, 4.0);
+            close(sm, m, "both/masked d");
+            close(sm4, m4, "both/masked d4");
+            close(sm2, m2, "both/masked d2");
+            close(si, i, "both/iw d");
+            close(si4, i4, "both/iw d4");
+            close(si2, i2, "both/iw d2");
+
+            let (mm, mm4, mm2) = ssim_channel_inline_mask(&mu1, &mu2, &sum_sq, &s12, &act, 4.0);
+            let (sd, sd4, sd2) = ssim_signal_inline_mask(&signal, &act, 4.0);
+            close(sd, mm, "mask-only d");
+            close(sd4, mm4, "mask-only d4");
+            close(sd2, mm2, "mask-only d2");
+
+            let (wi, wi4, wi2) = ssim_channel_iw_inline(&mu1, &mu2, &sum_sq, &s12, &act, 4.0);
+            let (sw, sw4, sw2) = ssim_signal_iw_inline(&signal, &act, 4.0);
+            close(sw, wi, "iw-only d");
+            close(sw4, wi4, "iw-only d4");
+            close(sw2, wi2, "iw-only d2");
+        }
+    }
+
+    /// The retained-signal reducers against a plain scalar reference, so
+    /// their weights and tiers are pinned independently of the legacy
+    /// reducers they were derived from. Also covers the vector/tail split at
+    /// every residue mod 16 and the single-arm reducers' agreement with the
+    /// combined one.
+    ///
+    /// The bound is f32-relative (`1e-6`), NOT bit-exact, and deliberately:
+    /// the reducers' vector body forms the weight with `mul_add` (one
+    /// rounding) while their scalar tail spells `1 + k*a` (two) — a
+    /// pre-existing property they inherit unchanged from the legacy trio, so
+    /// no single scalar reference can be bit-exact against both halves. The
+    /// bound is still ~5 orders of magnitude tighter than any real pooling
+    /// error: dropping one tail element of a 17-element band moves the sum
+    /// ~6 %, and a wrong tier or weight moves it further.
+    #[test]
+    fn retained_signal_pools_match_a_direct_scalar_reference() {
+        for &n in &[1usize, 7, 16, 23, 48, 64, 129, 512] {
+            let signal: Vec<f32> = (0..n)
+                .map(|i| (i as f32 * 0.013).sin().abs() * 0.4)
+                .collect();
+            let act = mk_activity(n);
+            let (k, k_iw) = (4.0f32, 4.0f32);
+
+            let (mut rm, mut rm4, mut rm2) = (0.0f64, 0.0f64, 0.0f64);
+            let (mut ri, mut ri4, mut ri2) = (0.0f64, 0.0f64, 0.0f64);
+            for j in 0..n {
+                // Spelled exactly as the reducers spell it: the mask weight
+                // is formed first and MULTIPLIED in. `signal / (1 + k*a)`
+                // is the same value in exact arithmetic but a different f32
+                // rounding, and this test is about the pooling, not about
+                // which of two equivalent divisions rounds where.
+                let wm = 1.0f32 / (1.0 + k * act[j]);
+                let wi = 1.0f32 + k_iw * act[j];
+                let dm = (signal[j] * wm).max(0.0);
+                let di = (signal[j] * wi).max(0.0);
+                rm += dm as f64;
+                rm2 += (dm * dm) as f64;
+                rm4 += (dm * dm * dm * dm) as f64;
+                ri += di as f64;
+                ri2 += (di * di) as f64;
+                ri4 += (di * di * di * di) as f64;
+            }
+
+            let close = |got: f64, want: f64, what: &str| {
+                let tol = 1e-12 + 1e-6 * want.abs();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "n={n} {what}: got {got} want {want}"
+                );
+            };
+
+            let ((m, m4, m2), (i, i4, i2)) = ssim_signal_inline_both(&signal, &act, k, k_iw);
+            close(m, rm, "masked d");
+            close(m4, rm4, "masked d4");
+            close(m2, rm2, "masked d2");
+            close(i, ri, "iw d");
+            close(i4, ri4, "iw d4");
+            close(i2, ri2, "iw d2");
+
+            // The single-arm reducers must equal the combined one exactly:
+            // same lanes, same order, same expression.
+            let (om, om4, om2) = ssim_signal_inline_mask(&signal, &act, k);
+            assert_eq!(
+                (om.to_bits(), om4.to_bits(), om2.to_bits()),
+                (m.to_bits(), m4.to_bits(), m2.to_bits()),
+                "n={n} mask-only differs from the combined masked half"
+            );
+            let (oi, oi4, oi2) = ssim_signal_iw_inline(&signal, &act, k_iw);
+            assert_eq!(
+                (oi.to_bits(), oi4.to_bits(), oi2.to_bits()),
+                (i.to_bits(), i4.to_bits(), i2.to_bits()),
+                "n={n} iw-only differs from the combined IW half"
+            );
+        }
     }
 
     #[test]

@@ -18,6 +18,407 @@ TILE = "./target/release/score_tiles_with_bake"
 TILE_MIN = os.environ.get("TILE_MIN") == "1"  # task #33: tile-min pooling
 
 
+def audit_input_keys(a):
+    """Exact presented-input identities; never infer color from source tags."""
+    import json
+    schema = a.get("schema", "canonical-feature-audit-v1")
+    if schema == "canonical-feature-audit-v1":
+        if a.get("input_contract", "legacy-rgb8") != "legacy-rgb8" or any(
+                key in a for key in ("reference_color", "distorted_color")):
+            raise ValueError("native input requires explicit native audit schema")
+        return tuple((a[side + "_pixels_sha256"], "legacy-rgb8")
+                     for side in ("reference", "distorted"))
+    if schema != "canonical-feature-audit-v2" or a.get("input_contract") != "sdr-native-clip-v1":
+        raise ValueError("unsupported input audit contract")
+    keys = []
+    for side in ("reference", "distorted"):
+        color = a.get(side + "_color", {})
+        identity = color.get("scoring_identity", {})
+        if (color.get("contract") != "sdr-native-clip-v1"
+                or set(identity) != {"pixel_format", "primaries", "alpha", "gamut", "width", "height", "endianness"}
+                or identity["pixel_format"] not in ("Srgb16Rgba", "LinearF32Rgba")
+                or identity["primaries"] not in ("Srgb", "DisplayP3", "Bt2020")
+                or identity["alpha"] not in ("Unknown", "Straight") or identity["gamut"] != "Clip"
+                or identity["endianness"] not in ("little", "big")
+                or identity["endianness"] != color.get("endianness")
+                or any(type(identity[n]) is not int or identity[n] <= 0 or identity[n] != a.get(n)
+                       for n in ("width", "height"))):
+            raise ValueError("missing or unsupported native scoring identity")
+        digest = a[side + "_pixels_sha256"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("invalid native presented-pixel hash")
+        keys.append((digest, json.dumps(identity, sort_keys=True, separators=(",", ":"))))
+    return tuple(keys)
+
+
+def bind_native_audit(a, meta):
+    """Require reviewed native bindings and an actual full-input audit."""
+    import math
+    if meta.get("input_contract") != "sdr-native-clip-v1" or a.get("input_contract") != meta["input_contract"]:
+        raise ValueError("native admission input contract mismatch")
+    keys = audit_input_keys(a)
+    for side in ("reference", "distorted"):
+        if (a[side + "_color"]["scoring_identity"] != meta.get("expected_" + side + "_scoring_identity")
+                or a[side + "_pixels_sha256"] != meta.get("expected_" + side + "_pixels_sha256")):
+            raise ValueError("native admission scoring identity mismatch")
+    ids = a.get("consumed_feature_ids", [])
+    delta = a.get("max_consumed_feature_abs_delta")
+    if (a.get("feature_audit_scope") != "complete-structural-read-set-v1"
+            or a.get("formula_revision") != "Rev3"
+            or "root_form_override" not in a
+            or a["root_form_override"] not in (None, "sqrt")
+            or not a.get("candidate_formula_revisions")
+            or any(revision != "Rev3" for revision in a["candidate_formula_revisions"])
+            or a.get("canonical_feature_count") != 372
+            or not isinstance(a.get("canonical_features_f32_le_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", a["canonical_features_f32_le_sha256"]) is None
+            or not isinstance(ids, list) or any(type(i) is not int for i in ids)
+            or ids != sorted(set(ids)) or not set(range(228)).issubset(ids)
+            or any(i < 0 or i >= 372 for i in ids)
+            or not isinstance(delta, (int, float)) or not math.isfinite(delta) or delta < 0):
+        raise ValueError("native admission requires complete D228 feature audit")
+    return keys
+
+
+def integrity_summary(records, audits):
+    """Severity-reviewed train/eval rows; exact Rust composition, no q20 proxy."""
+    import math
+    expected = {r["index"]: r for r in records}
+    if len(expected) != len(records) or set(expected) != set(audits):
+        raise ValueError("integrity audit coverage mismatch")
+    if len({a.get("input_contract", "legacy-rgb8") for a in audits.values()}) > 1:
+        raise ValueError("mixed integrity input eras")
+    unique = {}
+    for key, meta in expected.items():
+        a = audits[key]
+        if (a["reference"] != meta["reference"] or a["distorted"] != meta["distorted"]
+                or a["distorted_file_sha256"] != meta["expected_distorted_file_sha256"]
+                or a["reference_file_sha256"] != meta["reference_sha256"]
+                or a["distorted_pixels_sha256"] != meta["expected_distorted_pixels_sha256"]):
+            raise ValueError("integrity audit identity mismatch")
+        if ("expected_reference_pixels_sha256" in meta
+                and a["reference_pixels_sha256"] != meta["expected_reference_pixels_sha256"]):
+            raise ValueError("integrity reference pixel mismatch")
+        inputs = bind_native_audit(a, meta) if a.get("schema") == "canonical-feature-audit-v2" else audit_input_keys(a)
+        if meta.get("input_contract") == "sdr-native-clip-v1" and a.get("schema") != "canonical-feature-audit-v2":
+            raise ValueError("native admission cannot consume a legacy audit")
+        identical = inputs[0] == inputs[1]
+        if a["pixels_identical"] != identical or ("pixels_identical" in meta and meta["pixels_identical"] != identical):
+            raise ValueError("integrity pixel identity flag mismatch")
+        for field in ("head_probability", "stored_f32_head_probability", "head_threshold", "base_score",
+                      "pixel_composed_score", "cached_composed_score", "stored_f32_composed_score"):
+            if not math.isfinite(a[field]):
+                raise ValueError("nonfinite integrity audit")
+        if abs(a["pixel_composed_score"] - a["cached_composed_score"]) > 1e-4 or abs(a["pixel_composed_score"] - a["stored_f32_composed_score"]) > 1e-4:
+            raise ValueError("integrity surface score mismatch")
+        active = not a["pixels_identical"] and a["head_probability"] > a["head_threshold"]
+        if active != (not a["pixels_identical"] and a["stored_f32_head_probability"] > a["head_threshold"]):
+            raise ValueError("integrity activation precision mismatch")
+        identity = (meta["origin"], *inputs)
+        value = dict(index=key, origin=meta["origin"], role=meta["fit_role"], disposition=meta["disposition"],
+                     family=meta["family"], kind=meta["kind"], codec=meta.get("codec"), knob=meta.get("knob"),
+                     content_class=meta["content_class"], active=active,
+                     lowered=a["pixel_composed_score"] < a["base_score"], probability=a["head_probability"])
+        for field in ("knob_direction", "knob_axis", "knob_context", "intervention"):
+            if field in meta:
+                value[field] = meta[field]
+        value["catalog_dispositions"] = [value["disposition"]]
+        value["catalog_families"] = [value["family"]]
+        if identity in unique:
+            old = unique[identity]
+            if any(old[k] != value[k] for k in ("active", "probability")):
+                raise ValueError("identical pixels have different integrity scores")
+            dispositions = sorted(set(old["catalog_dispositions"] + value["catalog_dispositions"]))
+            families = sorted(set(old["catalog_families"] + value["catalog_families"]))
+            if "valid" in dispositions and "catastrophic_proxy" in dispositions:
+                raise ValueError("conflicting positive/negative integrity labels")
+            # An excluded/unlabelled operation is not a negative label. Preserve
+            # its provenance, but count the exact same pixel pair only once.
+            if old["disposition"] not in ("valid", "catastrophic_proxy") and value["disposition"] in ("valid", "catastrophic_proxy"):
+                unique[identity] = value
+            unique[identity]["catalog_dispositions"] = dispositions
+            unique[identity]["catalog_families"] = families
+        else:
+            unique[identity] = value
+    def rates(rs):
+        honest = [x for x in rs if x["disposition"] == "valid"]
+        native = [x for x in honest if x["kind"] in ("honest_codec", "honest_spatial")]
+        positives = [x for x in rs if x["disposition"] == "catastrophic_proxy"]
+        real = [x for x in positives if x["family"] == "real_bug"]
+        def rate(xs):
+            count = sum(x["active"] for x in xs)
+            return dict(n=len(xs), count=count, rate=count/len(xs) if xs else None)
+        return dict(n=len(rs), honest_activation=rate(honest), native_activation=rate(native),
+                    catastrophic_detection=rate(positives), real_bug_detection=rate(real),
+                    honest_lowered=sum(x["lowered"] for x in honest))
+    rows = list(unique.values())
+    native = [x for x in rows if x["kind"] == "honest_codec"]
+    codec_rows = [x for x in rows if x["kind"] in ("honest_codec", "honest_spatial")]
+    worst = {}
+    directions = {}
+    for x in native:
+        key = (x["origin"], x["codec"])
+        direction = x.get("knob_direction")
+        if direction is None and x["codec"] in ("jxl", "avif"):
+            direction = "higher_is_worse"  # original native distance/CQ packets
+        if direction not in ("higher_is_worse", "higher_is_better"):
+            raise ValueError("declare knob orientation before native lower-quality stratification")
+        if "knob_direction" in x:
+            if not x.get("knob_axis") or not x.get("knob_context"):
+                raise ValueError("explicit knob orientation requires axis and comparison context")
+            key += (x["knob_axis"], x["knob_context"])
+        if directions.setdefault(key, direction) != direction:
+            raise ValueError("conflicting knob orientations in one comparison context")
+        if not isinstance(x["knob"], (int, float)) or not math.isfinite(x["knob"]):
+            raise ValueError("native knob must be finite")
+        worse = key not in worst or (
+            x["knob"] > worst[key]["knob"] if direction == "higher_is_worse"
+            else x["knob"] < worst[key]["knob"])
+        if worse:
+            worst[key] = x
+    return dict(raw_rows=len(records), unique_rows=len(rows), rows=rows,
+                by_codec={codec:rates([x for x in codec_rows if x["codec"]==codec]) for codec in sorted({x["codec"] for x in codec_rows})},
+                worst_stored_native= rates(list(worst.values())),
+                by_content={content:rates([x for x in rows if x["content_class"]==content]) for content in sorted({x["content_class"] for x in rows})},
+                disposition_inventory={d:{"n":len([x for x in rows if x["disposition"]==d]),
+                    "active":sum(x["active"] for x in rows if x["disposition"]==d)} for d in sorted({x["disposition"] for x in rows})},
+                by_role={role:rates([x for x in rows if x["role"]==role]) for role in sorted({x["role"] for x in rows})},
+                by_origin={origin:rates([x for x in rows if x["origin"]==origin]) for origin in sorted({x["origin"] for x in rows})})
+
+
+def integrity_report(argv):
+    """Report admitted integrity evidence; labels are never fitted here."""
+    import argparse, hashlib, json
+    from pathlib import Path
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--integrity-admission", type=Path, required=True)
+    ap.add_argument("--audit-jsonl", type=Path, required=True)
+    ap.add_argument("--out-json", type=Path, required=True)
+    a = ap.parse_args(argv)
+    if a.out_json.exists():
+        raise ValueError("fresh integrity report required")
+    admission = json.loads(a.integrity_admission.read_text())
+    schema = admission.get("schema")
+    if schema not in ("integrity-train-admission-v1", "integrity-eval-admission-v1", "integrity-train-diagnostic-v1", "integrity-train-diagnostic-v2"):
+        raise ValueError("explicit train/eval admission required")
+    source_role = "train" if schema in ("integrity-train-admission-v1", "integrity-train-diagnostic-v1", "integrity-train-diagnostic-v2") else "validate"
+    roles = {"fit", "calibrate"} if source_role == "train" else {"evaluate"}
+    if schema in ("integrity-train-diagnostic-v1", "integrity-train-diagnostic-v2"):
+        roles = {"fit", "development", "calibration"}
+    native = schema == "integrity-train-diagnostic-v2"
+    if native and admission.get("input_contract") != "sdr-native-clip-v1":
+        raise ValueError("native admission input contract required")
+    if set(admission["origins"]) != roles:
+        raise ValueError("invalid source-role map")
+    records = admission["records"]
+    families = {}
+    for row in records:
+        if families.setdefault(row["source_family"], row["fit_role"]) != row["fit_role"]:
+            raise ValueError("source family crosses integrity roles")
+        if row["role"] != source_role or row["fit_role"] not in roles or row["origin"] not in admission["origins"][row["fit_role"]] or row["origin"] in ("8462", "9066"):
+            raise ValueError("forbidden integrity source role")
+    audits = {}
+    for line in a.audit_jsonl.read_text().splitlines():
+        record = json.loads(line); key = int(record["human_score"])
+        if (record.get("schema") == "canonical-feature-audit-v2") != native:
+            raise ValueError("integrity admission/audit input era mismatch")
+        if key != record["human_score"] or key in audits:
+            raise ValueError("duplicate/noninteger audit key")
+        audits[key] = record
+    # Some original native manifests bound bitstreams but no decoded hash.
+    # Record that new binding from the pinned decoder audit, never replace one.
+    bound = 0
+    for row in records:
+        if "expected_distorted_pixels_sha256" not in row:
+            if native:
+                raise ValueError("native admission requires reviewed pixel bindings")
+            row["expected_distorted_pixels_sha256"] = audits[row["index"]]["distorted_pixels_sha256"]
+            bound += 1
+    result = integrity_summary(records, audits)
+    inputs = [r["model_inputs"] for r in audits.values()]
+    if not inputs or any(v != inputs[0] for v in inputs):
+        raise ValueError("mixed model identities in integrity audit")
+    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    result.update(schema="integrity-assessment-v1", model_qualified=False, model_inputs=inputs[0],
+                  admission_sha256=sha(a.integrity_admission), audit_sha256=sha(a.audit_jsonl),
+                  new_native_pixel_bindings=bound)
+    if native:
+        result["input_contract"] = "sdr-native-clip-v1"
+    a.out_json.write_text(json.dumps(result, indent=2, allow_nan=False)+"\n")
+    print(json.dumps(result["by_role"], indent=2))
+
+
+def audit_report(argv):
+    """Analyze complete Rust-surface audit records, without another scorer."""
+    import argparse, hashlib, json, math
+    from pathlib import Path
+    from collections import defaultdict
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--audit-jsonl", required=True)
+    ap.add_argument("--inputs-json", required=True)
+    ap.add_argument("--out-json", required=True)
+    ap.add_argument("--model-context", choices=["historical", "canonical-fit"], default="historical")
+    ap.add_argument("--fit-manifest", help="also report the declared fit/calibration/evaluation roles")
+    a = ap.parse_args(argv)
+    def require(ok, message):
+        if not ok:
+            raise ValueError(message)
+    def sha(path):
+        with open(path, "rb") as f:
+            return hashlib.file_digest(f, "sha256").hexdigest()
+    require(not Path(a.out_json).exists(), "report output must be fresh")
+    inputs = json.loads(Path(a.inputs_json).read_text())
+    require(inputs["schema"] == "canonical-corruption-serving-inputs-v1", "input schema")
+    for path, expected in inputs["files_sha256"].items():
+        require(sha(path) == expected, f"changed input: {path}")
+    expected = {r["index"]: r for r in inputs["records"]}
+    require(len(expected) == len(inputs["records"]) and bool(expected), "duplicate/empty input keys")
+    # Operation metadata lives in the original keyed generator tables, not
+    # encoded filenames. These tables are already part of the input SHA set.
+    import pyarrow.parquet as pq
+    channel_tables = {}
+    for path in {r["source_table"] for r in expected.values() if r["family"] == "channel"}:
+        require(path in inputs["files_sha256"], "unbound channel metadata table")
+        records = pq.read_table(path, columns=["row_id", "filename", "family", "params_json"]).to_pylist()
+        keyed = {r["row_id"]: r for r in records}
+        require(len(keyed) == len(records), "duplicate channel metadata key")
+        channel_tables[path] = keyed
+    for meta in expected.values():
+        if meta["family"] != "channel":
+            continue
+        row = channel_tables[meta["source_table"]][meta["source_row_id"]]
+        require(row["filename"] == meta["distorted"] and row["family"] == "channel", "channel metadata join")
+        params = json.loads(row["params_json"])["params"]
+        family = params["family"]
+        require(family["family"] == "channel" and len(family) == 2, "channel operation schema")
+        operation = next(k for k in family if k != "family")
+        meta["channel_operation"] = operation
+        # Canonical JSON retains structured regions and opacity values.
+        region = json.dumps(params["region"], sort_keys=True, separators=(",", ":"))
+        severity = json.dumps(params["severity"], sort_keys=True, separators=(",", ":"))
+        meta["channel_case"] = f"{operation}/{region}/{severity}"
+    seen, rows, model_inputs, precision_mode = set(), [], None, None
+    with open(a.audit_jsonl) as f:
+        for line in f:
+            record = json.loads(line)
+            require(record["schema"] == "canonical-feature-audit-v1", "audit schema")
+            key = record["human_score"]
+            require(isinstance(key, (int, float)) and math.isfinite(key) and int(key) == key, "invalid audit key")
+            key = int(key)
+            require(key in expected and key not in seen, "duplicate/unknown audit key")
+            seen.add(key); meta = expected[key]
+            require(record["reference"] == meta["reference"] and record["distorted"] == meta["distorted"], "audit path mismatch")
+            require(record["distorted_file_sha256"] == meta["expected_distorted_file_sha256"], "distorted SHA mismatch")
+            if "expected_distorted_pixels_sha256" in meta:
+                require(record["distorted_pixels_sha256"] == meta["expected_distorted_pixels_sha256"], "distorted pixel mismatch")
+            require(record["pixels_identical"] == (record["reference_pixels_sha256"] == record["distorted_pixels_sha256"]), "identity evidence mismatch")
+            numbers = [record[n] for n in ("base_score", "pixel_composed_score", "cached_composed_score",
+                       "literal_feature_composed_score", "head_probability", "head_threshold", "max_consumed_feature_abs_delta")]
+            require(all(isinstance(v, (int, float)) and math.isfinite(v) for v in numbers), "nonfinite audit result")
+            require(0 <= record["head_probability"] <= 1 and 0 <= record["head_threshold"] <= 1, "probability range")
+            require(abs(record["pixel_composed_score"] - record["cached_composed_score"]) <= 1e-4, "surface score mismatch")
+            has_precision = "stored_f32_composed_score" in record
+            if precision_mode is None:
+                precision_mode = has_precision
+            require(has_precision == precision_mode, "mixed precision-check coverage")
+            if has_precision:
+                ps, pp = record["stored_f32_composed_score"], record["stored_f32_head_probability"]
+                require(math.isfinite(ps) and math.isfinite(pp) and 0 <= pp <= 1, "nonfinite stored-f32 result")
+                require(abs(ps-record["pixel_composed_score"]) <= 1e-4, "stored-f32 score mismatch")
+                require((pp > record["head_threshold"]) == (record["head_probability"] > record["head_threshold"]), "stored-f32 fire mismatch")
+            if record["pixels_identical"]:
+                require(record["base_score"] == record["pixel_composed_score"] == 100, "identity score mismatch")
+            require(not meta["label"] or not record["pixels_identical"], "positive identity label")
+            if model_inputs is None:
+                model_inputs = record["model_inputs"]
+                require(len(model_inputs) == 2, "expected complete base and companion")
+                for path, digest in model_inputs:
+                    require(sha(path) == digest, "model SHA mismatch")
+            require(record["model_inputs"] == model_inputs, "mixed model composition")
+            rows.append(dict(meta=meta, audit=record))
+    require(seen == set(expected), "missing audit rows")
+    anchors = {}
+    for r in rows:
+        m = r["meta"]
+        if m["kind"] == "honest_anchor":
+            quality = Path(m["distorted"]).stem
+            require(quality in ("anchor-q10", "anchor-q20"), "unknown anchor")
+            key = (m["role"], m["origin"], quality)
+            require(key not in anchors, "duplicate anchor")
+            anchors[key] = r["audit"]
+    for role, origin in {(r["meta"]["role"], r["meta"]["origin"]) for r in rows}:
+        require(all((role, origin, f"anchor-q{q}") in anchors for q in (10, 20)), "missing anchor")
+    def rate(values):
+        return dict(n=len(values), count=sum(values), rate=sum(values)/len(values) if values else None)
+    def summarize(group):
+        unique = {}
+        for r in group:
+            m, v = r["meta"], r["audit"]
+            key = (m["origin"], v["reference_pixels_sha256"], v["distorted_pixels_sha256"])
+            if key in unique:
+                old = unique[key]
+                require(old["meta"]["label"] == m["label"], "duplicate label conflict")
+                require(all(old["audit"][f] == v[f] for f in ("head_probability", "base_score", "pixel_composed_score")), "duplicate score conflict")
+            unique.setdefault(key, r)
+        rs = list(unique.values()); pos = [r for r in rs if r["meta"]["label"]]; neg = [r for r in rs if not r["meta"]["label"]]
+        out = dict(raw_rows=len(group), unique_pixel_pairs=len(rs), removed_duplicates=len(group)-len(rs), positives=len(pos), negatives=len(neg),
+                   detection=rate([r["audit"]["head_probability"] > r["audit"]["head_threshold"] for r in pos]),
+                   head_fp=rate([r["audit"]["head_probability"] > r["audit"]["head_threshold"] for r in neg]),
+                   honest_score_lowered=rate([r["audit"]["pixel_composed_score"] < r["audit"]["base_score"] for r in neg]),
+                   identities=sum(r["audit"]["pixels_identical"] for r in rs))
+        for q in (10, 20):
+            for score, name in [("base_score", "base"), ("pixel_composed_score", "composed")]:
+                out[f"{name}_below_q{q}"] = rate([r["audit"][score] < anchors[(r["meta"]["role"], r["meta"]["origin"], f"anchor-q{q}")][score] for r in pos])
+        return out
+    result = dict(schema="canonical-corruption-serving-report-v1", model_qualified=False,
+                  claim=("development screen of historical frozen models; no new fit or holdout qualification"
+                         if a.model_context == "historical" else
+                         "development screen of exact canonical head fit composed with frozen base; no product qualification"),
+                  audit_sha256=sha(a.audit_jsonl), inputs_sha256=sha(a.inputs_json), model_inputs=model_inputs,
+                  complete_rows=len(rows), max_feature_abs_delta=max(r["audit"]["max_consumed_feature_abs_delta"] for r in rows),
+                  max_score_abs_delta=max(abs(r["audit"]["pixel_composed_score"]-r["audit"]["cached_composed_score"]) for r in rows),
+                  identity_rows=sum(r["audit"]["pixels_identical"] for r in rows), splits={})
+    result["stored_f32_check_rows"] = len(rows) if precision_mode else 0
+    if precision_mode:
+        result["max_stored_f32_score_delta"] = max(abs(r["audit"]["stored_f32_composed_score"]-r["audit"]["pixel_composed_score"]) for r in rows)
+        result["max_stored_f32_probability_delta"] = max(abs(r["audit"]["stored_f32_head_probability"]-r["audit"]["head_probability"]) for r in rows)
+    for role in sorted({r["meta"]["role"] for r in rows}):
+        group = [r for r in rows if r["meta"]["role"] == role]
+        summary = summarize(group)
+        for field in ("origin", "content_class", "family", "kind", "codec", "channel_operation", "channel_case"):
+            keys = sorted({r["meta"].get(field) for r in group if r["meta"].get(field) is not None})
+            summary[f"by_{field}"] = {key: summarize([r for r in group if r["meta"].get(field) == key]) for key in keys}
+        result["splits"][role] = summary
+    if a.fit_manifest:
+        manifest = json.loads(Path(a.fit_manifest).read_text())
+        require(manifest["schema"] == "canonical-corruption-fit-v1", "fit manifest schema")
+        roles = manifest["origins"]
+        require(set(roles) == {"fit", "calibrate", "evaluate"}, "fit role schema")
+        owner = {}
+        for role, origins in roles.items():
+            for origin in origins:
+                require(origin not in owner, "overlapping fit roles")
+                owner[origin] = role
+        for r in rows:
+            meta = r["meta"]
+            require(meta["origin"] in owner, "unknown fit origin")
+            require((owner[meta["origin"]] == "evaluate") == (meta["role"] == "validate"), "fit role mismatch")
+        result["fit_manifest_sha256"] = sha(a.fit_manifest)
+        result["fit_roles"] = {}
+        for role in roles:
+            group = [r for r in rows if owner[r["meta"]["origin"]] == role]
+            if not group:
+                continue
+            require({r["meta"]["origin"] for r in group} == set(roles[role]), "incomplete fit origin coverage")
+            summary = summarize(group)
+            for field in ("origin", "family", "codec", "channel_operation"):
+                keys = sorted({r["meta"].get(field) for r in group if r["meta"].get(field) is not None})
+                summary[f"by_{field}"] = {key: summarize([r for r in group if r["meta"].get(field) == key]) for key in keys}
+            result["fit_roles"][role] = summary
+    Path(a.out_json).write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
+    print(f"complete: {len(rows)} rows; identity={result['identity_rows']}; model remains unqualified")
+
+
 def score(bake, ref, dist):
     if TILE_MIN:
         # tile-min: localized-defect signal. Output cols: global min p2 p5 median n.
@@ -42,6 +443,11 @@ def score(bake, ref, dist):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--integrity-admission":
+        return integrity_report(sys.argv[1:])
+    if len(sys.argv) > 1 and sys.argv[1] == "--audit-jsonl":
+        audit_report(sys.argv[1:])
+        return
     bake, out_dir, ref = sys.argv[1], sys.argv[2], sys.argv[3]
     label = sys.argv[4] if len(sys.argv) > 4 else os.path.basename(bake)
     corruptions = sorted(glob.glob(os.path.join(out_dir, "*__corruption.png")))

@@ -23,7 +23,6 @@ Usage:
 Exit 0 = compliant (WARNs allowed), 1 = violation.
 """
 import argparse, json, re, sys, os
-import pyarrow.parquet as pq
 
 EXT944 = "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01"
 ROOT372 = "/mnt/v/zen/zensim-training/2026-05-15-full-features"
@@ -49,6 +48,36 @@ GUARDS = [
     ("konjnd_dense", "konjnd_jpeg(select+terminal)"),
 ]
 
+def validate_source_admission(declared, role):
+    """Strict screen admission using source metadata, never terminal tables.
+
+    The caller pins this sidecar to the canonical corpus split authority.
+    Historical SURFACES/guard exceptions are deliberately not consulted here.
+    This validates the declared contract, not the truth of an unreviewed sidecar.
+    """
+    if role not in {"train", "eval"}:
+        raise ValueError("only train/eval admission is permitted")
+    if declared.get("schema") != "zensim-source-admission-v1" or not declared.get("authority"):
+        raise ValueError("source admission requires a named canonical split authority")
+    sources = declared.get("sources", [])
+    if not sources:
+        raise ValueError("source admission is empty")
+    seen = set()
+    for source in sources:
+        if source.get("split") != role:
+            raise ValueError("source split disagrees with segment; test/terminal is forbidden")
+        if not all(isinstance(source.get(k), str) and source[k] for k in ("corpus", "origin", "source_family")):
+            raise ValueError("source admission needs corpus, origin and family")
+        key = source["corpus"], source["origin"]
+        if key in seen:
+            raise ValueError("duplicate source admission")
+        seen.add(key)
+        corpus = source["corpus"].lower()
+        if role == "train" and any(name in corpus for name in T0_NAMES):
+            raise ValueError("eval-only corpus cannot train")
+        if role == "eval" and corpus in {"tid", "tid2013"}:
+            raise ValueError("TID is train-only")
+
 def family_of(path):
     b = os.path.basename(path).lower()
     if "kadis" in b: return "kadis"
@@ -60,6 +89,7 @@ def family_of(path):
     return None  # safesyn/teacher/hdrmix etc: no registered surface family
 
 def ids_of(path, family):
+    import pyarrow.parquet as pq
     pf = pq.ParquetFile(path)
     cols = pf.schema_arrow.names
     if family == "kadis":

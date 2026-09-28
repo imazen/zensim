@@ -1,0 +1,156 @@
+{
+  "date": "2026-09-14",
+  "parent": "c45632a08a573e0fe866447fd1eb84ab101afdbf",
+  "decision": "retain_bit_exact_projection_reduction_latency_unqualified",
+  "correctness": {
+    "projection_cases": 3584,
+    "explicit_source_rectangle_queries": 14268,
+    "frozen_models": [
+      "PS914_basic228_h128_plain_ens3",
+      "PP914_basic228_h32_plain_ens3"
+    ],
+    "public_rectangle_comparisons_per_model": 15540,
+    "public_parity": "PASS",
+    "minimal_feature_tests": "PASS_2",
+    "attribution_tests": "PASS_37_IGNORED_2",
+    "serving_tests": "PASS_12"
+  },
+  "timing": {
+    "observations": 240,
+    "quiet_runs": 0,
+    "flagged_checks": 18,
+    "rows": [
+      {
+        "block": "0-A",
+        "geometry": "sampling_spatial_1024",
+        "rounds": 30,
+        "median_ms": 77.2069865,
+        "p95_ms": 77.9733276,
+        "flagged_checks": 3,
+        "owner_unreliable": false
+      },
+      {
+        "block": "0-A",
+        "geometry": "sampling_spatial_2048",
+        "rounds": 30,
+        "median_ms": 336.70590100000004,
+        "p95_ms": 338.2160426,
+        "flagged_checks": 0,
+        "owner_unreliable": false
+      },
+      {
+        "block": "1-B",
+        "geometry": "sampling_spatial_1024",
+        "rounds": 30,
+        "median_ms": 71.858735,
+        "p95_ms": 72.60377505,
+        "flagged_checks": 4,
+        "owner_unreliable": false
+      },
+      {
+        "block": "1-B",
+        "geometry": "sampling_spatial_2048",
+        "rounds": 30,
+        "median_ms": 288.139546,
+        "p95_ms": 290.321513,
+        "flagged_checks": 4,
+        "owner_unreliable": false
+      },
+      {
+        "block": "2-B",
+        "geometry": "sampling_spatial_1024",
+        "rounds": 30,
+        "median_ms": 71.5258605,
+        "p95_ms": 72.69323204999999,
+        "flagged_checks": 3,
+        "owner_unreliable": false
+      },
+      {
+        "block": "2-B",
+        "geometry": "sampling_spatial_2048",
+        "rounds": 30,
+        "median_ms": 290.77140699999995,
+        "p95_ms": 292.16155905,
+        "flagged_checks": 1,
+        "owner_unreliable": false
+      },
+      {
+        "block": "3-A",
+        "geometry": "sampling_spatial_1024",
+        "rounds": 30,
+        "median_ms": 84.19226950000001,
+        "p95_ms": 84.73871715,
+        "flagged_checks": 2,
+        "owner_unreliable": false
+      },
+      {
+        "block": "3-A",
+        "geometry": "sampling_spatial_2048",
+        "rounds": 30,
+        "median_ms": 336.76858500000003,
+        "p95_ms": 338.5025387,
+        "flagged_checks": 1,
+        "owner_unreliable": false
+      }
+    ],
+    "qualified": false,
+    "design": "fixed ABBA process blocks; 30 one-call rounds per synthetic geometry per block; fresh worker per round; no in-round old/new pairing; all observations retained"
+  },
+  "profile": {
+    "before_samples": 1662,
+    "after_samples": 1429,
+    "lost_samples": 0,
+    "before_retain_max_percent": 29.8,
+    "after_project_max_row_percent": 16.16,
+    "worker_reused": true,
+    "diagnostic_only": true
+  },
+  "data_access": "Synthetic pixels and existing frozen model bytes only. No fit, corpus, EVAL, TEST, TERMINAL.",
+  "model_qualified": false,
+  "spatial_accuracy_qualified": false,
+  "previous_failed_gates_unchanged": true,
+  "checks": [
+    {
+      "label": "final-PS914_basic228_h128_plain_ens3",
+      "returncode": 0,
+      "log_sha256": "38c6ab4a074c16d75a9a876a5978ea35f65f477ff547dfe2f11efdb3d69c5e3c"
+    },
+    {
+      "label": "final-PP914_basic228_h32_plain_ens3",
+      "returncode": 0,
+      "log_sha256": "4098794961100fb3845e848fdd063069366b3eb5778b447a98d132d971e70d97"
+    },
+    {
+      "label": "final-minimal",
+      "returncode": 0,
+      "log_sha256": "cdab81ccc626068f36eda8e03aa59d5a719fb99137e81da82249187dc576aec5"
+    },
+    {
+      "label": "final-clippy",
+      "returncode": 0,
+      "log_sha256": "bb0d549ca189c5e11ecd84b26b9f7516e6bda1362f2f6a90202a9269fcaaa178"
+    },
+    {
+      "label": "final-lint",
+      "returncode": 0,
+      "log_sha256": "259ecba106d38b94613602a30b474a683f4ac864636fdd5e00e0d15e0fc7b1d3"
+    },
+    {
+      "label": "final-fmt",
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "evidence_sha256": {
+    "PROTOCOL.md": "a7a70e92591ace9d044cf94102b3fdc9855b75e28bf99711c9985c88726be1b0",
+    "PROFILE_REGISTRATION.json": "4f0ddb5ce63dd4da1c3b20573686c4e98ca09ab86f4366e461539b7d669a7d62",
+    "BENCH_REGISTRATION.json": "bde1af20f011f2c73937aec9ae2e0d6e1d0b9c9600dcd6a14369ef3c55404234",
+    "BENCH_EXECUTION.json": "cd593e51629503e304d437b19093644b169b958c37c1583459355880432f9ff7",
+    "AFTER_PROFILE_REGISTRATION.json": "140c4c440799ac836aec5c0dd11a31eb3b4b3bef5f935c60148010e4aa8f562d",
+    "SOURCE_VERIFICATION.json": "da0ae369460aefef6576102958f2f6b54c59b5b6ccee1a91b977894614321388",
+    "FINAL_CHECKS.json": "b70de321a62aa938edcdc5d7f81221a253c4ceead8de6c6a3757204681fdff6d",
+    "measured-attribution.rs": "d116e7da9d8103171fbeded2f1743141cd4debbe8da441ecc4940b65d0988b8a",
+    "final-attribution.rs": "a3b3874505c9c6a0f2737fff2e08fd7378d539c27d3122b6289b8b3f6f2a9d11",
+    "production-and-tests.patch": "f73bc2e1bf137264012fe1076978d83848fb6daa98b50ca8c007111e3f032892"
+  }
+}

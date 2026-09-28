@@ -1,0 +1,157 @@
+{
+  "schema": "native-color-admission-result-v1",
+  "model_qualified": false,
+  "new_scores": 0,
+  "role": "train-fit-only",
+  "input_files": 215,
+  "pairs": 214,
+  "legacy_rgb8_matches": 215,
+  "p3_references": 33,
+  "p3_reconstructions": 180,
+  "source_profile_preserved_in_reconstructions": 0,
+  "native_icc_recognizer_matches_on_p3": 0,
+  "by_format": {
+    "Avif": {
+      "count": 43,
+      "source_depth_counts": {
+        "8": 22,
+        "10": 21
+      },
+      "source_cicp_counts": {
+        "{\"full_range\": true, \"matrix\": 6, \"primaries\": 1, \"transfer\": 13}": 29,
+        "{\"full_range\": true, \"matrix\": 0, \"primaries\": 1, \"transfer\": 13}": 14
+      },
+      "decoded_descriptor_counts": {
+        "PixelDescriptor { format: Rgb8, transfer: Srgb, alpha: None, primaries: Bt709, signal_range: Full }": 22,
+        "PixelDescriptor { format: Rgb16, transfer: Srgb, alpha: None, primaries: Bt709, signal_range: Full }": 21
+      }
+    },
+    "Jpeg": {
+      "count": 42,
+      "source_depth_counts": {
+        "8": 42
+      },
+      "source_cicp_counts": {
+        "null": 42
+      },
+      "decoded_descriptor_counts": {
+        "PixelDescriptor { format: Rgb8, transfer: Srgb, alpha: None, primaries: Bt709, signal_range: Full }": 36,
+        "PixelDescriptor { format: Rgb8, transfer: Unknown, alpha: None, primaries: Unknown, signal_range: Full }": 6
+      }
+    },
+    "Jxl": {
+      "count": 54,
+      "source_depth_counts": {
+        "8": 54
+      },
+      "source_cicp_counts": {
+        "{\"full_range\": true, \"matrix\": 0, \"primaries\": 1, \"transfer\": 13}": 54
+      },
+      "decoded_descriptor_counts": {
+        "PixelDescriptor { format: Rgb8, transfer: Srgb, alpha: None, primaries: Bt709, signal_range: Full }": 54
+      }
+    },
+    "PNG": {
+      "count": 34,
+      "source_depth_counts": {
+        "8": 34
+      },
+      "source_cicp_counts": {
+        "null": 34
+      },
+      "decoded_descriptor_counts": {
+        "PixelDescriptor { format: Rgb8, transfer: Unknown, alpha: None, primaries: Bt709, signal_range: Full }": 34
+      }
+    },
+    "WebP": {
+      "count": 42,
+      "source_depth_counts": {
+        "8": 42
+      },
+      "source_cicp_counts": {
+        "null": 42
+      },
+      "decoded_descriptor_counts": {
+        "PixelDescriptor { format: Rgb8, transfer: Srgb, alpha: None, primaries: Bt709, signal_range: Full }": 42
+      }
+    }
+  },
+  "files": {
+    "PROTOCOL.md": {
+      "sha256": "828dcc51857efcc57e5b65abc87b1e773fee9179f7485b5b2a739b351c3f5182",
+      "bytes": 2394
+    },
+    "ADMISSION.json": {
+      "sha256": "3dd5b07b2912b62befdc6c3cba985845773ea91ba38d03b7a71db55ff438e0fe",
+      "bytes": 97726
+    },
+    "files.tsv": {
+      "sha256": "3c2bfff44073c820c963525615efb8cc9d6c3375ac1a9dcd45fba754b0aed9c2",
+      "bytes": 41908
+    },
+    "inspection.jsonl": {
+      "sha256": "5ee3456bffe70ef688aa1e57fca227438413199f42cf80d0f642c121167cad0a",
+      "bytes": 250710
+    },
+    "inspection.log": {
+      "sha256": "6540874711de851d0c92bda13a9d04ffdb87640bb031a7a748e0a5583ca78817",
+      "bytes": 433
+    },
+    "native-tests-final.log": {
+      "sha256": "30ce3d98b0e281560195decb5385bc88af294996669d396df5091de1cb0c1a81",
+      "bytes": 6107
+    },
+    "native-tests-synced.log": {
+      "sha256": "718bd63968663f530cddf264f214f88a3d66da29a603315abf5237740e48f027",
+      "bytes": 6353
+    },
+    "inspect-tests.log": {
+      "sha256": "6d33bf7944a577ad2855d8df690e992acd655e4c542768f69fe23436abb5e23a",
+      "bytes": 2766
+    },
+    "build.log": {
+      "sha256": "32b7a631bdce31721fa9e35710ae5f7a49bc93efc7e1583167bd4d910e38f678",
+      "bytes": 2455
+    },
+    "admit.py": {
+      "sha256": "ed6f7f1e0e5e059c919597e8b3323a7e8e1777d8172e8f7d11b1826366e35e28",
+      "bytes": 2231
+    },
+    "summarize.py": {
+      "sha256": "8ca2f4b8e6a9519521040bc7a5c36e46ebad3690a53736c9e724dd563ba4b33d",
+      "bytes": 3097
+    },
+    "zensim-bench/Cargo.lock": {
+      "sha256": "720a8e465a88b1723467005ddf5a6d511ff3b419693c8d5331e54b8b224a1f89",
+      "bytes": 80622
+    },
+    "zensim-bench/examples/shared/zen_decode.rs": {
+      "sha256": "a013109fbaf5d0e9f90073aa58b653c2ccb6303f2281f1d91e3f138df6b2b772",
+      "bytes": 17292
+    },
+    "zensim-bench/examples/verify_bitstream_decode.rs": {
+      "sha256": "a037af81ab76ba717dc2a6993ebbcd871c84767045e0fc2ae55da881bd10d176",
+      "bytes": 27767
+    },
+    "zensim-bench/examples/verify_bitstream_decode/inspect.rs": {
+      "sha256": "3ad1e4f2ebc3d814f6eeee3e4bddf6bf64c17b1cafa0c349354af4bf97dd2dd7",
+      "bytes": 7306
+    },
+    "zensim-bench/tests/zen_decode_formats.rs": {
+      "sha256": "edec8c0780191bf76ef5ceb63d26bb1d0b1b5c131c23af939d33224a8e8cd518",
+      "bytes": 15927
+    }
+  },
+  "source_revisions": {
+    "zenpixels": "e56f626b14e6f0211e020159d30b3a48616e88e0",
+    "zenjpeg": "3d4ad0d77ecb55e78e67828538abb87068180d96",
+    "zenavif": "a7c56be9e77dc708f379eeaa288ab607f6d3f6e1",
+    "zenjxl": "4a2c021b4589b5d0465006c48568f6b520128525",
+    "zenjxl-decoder": "940d2c518b1357f0db553e641ac430180272174d",
+    "jxl-encoder": "ee80c7855d655800a789b332855cf61b48e4cd6c",
+    "zenmetrics": "3e16cb4550a7b47e534774ba5d48f9c08c7fc6c9",
+    "zenanalyze": "b102fa5f3480f0c3911fa85a8a6ad23c64936f18"
+  },
+  "binary_sha256": "3a44d3ccdecc20827d04a2a6d3ec5eb9cb0b646ed1bad796c640496a4ea21ccc",
+  "binary_bytes": 12863392
+}

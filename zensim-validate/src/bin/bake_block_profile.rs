@@ -10,7 +10,7 @@
 //! docs for the caller-width bug this guards against, instance #4 of the
 //! class).
 //!
-//! Usage: bake_block_profile --bake <bake.bin> [--json]
+//! Usage: bake_block_profile --bake <bake.bin> [--json] [--lines]
 //! Exit: 0 ok; 2 usage/load/malformed-bake error.
 
 use std::path::PathBuf;
@@ -18,18 +18,23 @@ use zenpredict::Model;
 use zensim_validate::block_profile;
 
 fn usage() -> ! {
-    eprintln!("usage: bake_block_profile --bake <bake.bin> [--json]");
+    eprintln!("usage: bake_block_profile --bake <bake.bin> [--json] [--lines]");
     std::process::exit(2);
 }
 
 fn main() {
     let mut bake: Option<PathBuf> = None;
     let mut json = false;
+    let mut lines = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--bake" => bake = args.next().map(PathBuf::from),
             "--json" => json = true,
+            "--lines" => {
+                lines = true;
+                json = true;
+            }
             _ => usage(),
         }
     }
@@ -75,7 +80,23 @@ fn main() {
             Err(_) => String::new(),
         };
         let body = prof.to_json();
-        println!("{}{id_json}}}", &body[..body.len() - 1]);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&format!("{}{id_json}}}", &body[..body.len() - 1]))
+                .expect("profile JSON");
+        if lines {
+            let (norms, _, _) =
+                block_profile::caller_line_norms(&model).expect("validated caller lines");
+            let ids: Vec<usize> = zensim::declared_feature_ids(&model)
+                .map(|ids| ids.into_iter().map(usize::from).collect())
+                .unwrap_or_else(|| (0..norms.len()).collect());
+            value["lines"] =
+                serde_json::json!(ids.iter().zip(norms).map(|(&id, norm)|
+                serde_json::json!({"feature_id": id, "layer0_l2_norm": norm})).collect::<Vec<_>>());
+            value["lines_note"] = serde_json::json!(
+                "Structural first-layer norms, not corpus contribution or marginal quality; IDs honor dense layouts and Drop/expander transforms."
+            );
+        }
+        println!("{value}");
     } else {
         print!("{}", prof.render_text(&path.display().to_string()));
         match &fsid {

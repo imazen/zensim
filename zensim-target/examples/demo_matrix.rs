@@ -41,6 +41,9 @@ struct Args {
     /// Standalone candidate bake; complete embedded head/spline executes in Rust.
     #[arg(long)]
     bake: Vec<PathBuf>,
+    /// Explicit complete compositions; replaces implicit named B/D in bounds mode.
+    #[arg(long, requires = "source_manifest", conflicts_with = "bake")]
+    compositions: Option<PathBuf>,
     #[arg(long, value_delimiter = ',', default_value = "jpeg,webp,avif")]
     codecs: Vec<String>,
     #[arg(

@@ -1,0 +1,373 @@
+diff --git a/zensim/src/research.rs b/zensim/src/research.rs
+index 78fd2d23a2..d3033f3103 100644
+--- a/zensim/src/research.rs
++++ b/zensim/src/research.rs
+@@ -559,6 +559,18 @@
+     /// (the κ-fit input) while extracting — rides the `transplant`
+     /// channel's `khist` fields.
+     pub khist: bool,
++    /// GMSD lane: append 24 gradient-magnitude-similarity columns — the
++    /// sample standard deviation (12, cell order `scale * 3 + ch`) then
++    /// the mean (12) of the GMS map `(2·g_s·g_d + c) / (g_s² + g_d² + c)`
++    /// over each (scale, channel) plane pair, `g` = zero-padded Prewitt/3
++    /// gradient magnitude, `c` = 0.0026 (Xue et al. 2014's constant for
++    /// unit-range intensities; positive XYB is ~unit range per channel).
++    pub gms_dev: bool,
++    /// GMSD lane: append 96 deviation-pooling columns — the sample
++    /// standard deviation of each of the eight materialized per-pixel maps
++    /// (`sd, art, det, mse, hf_sq_src, hf_sq_dst, hf_abs_src, hf_abs_dst`,
++    /// cell-major, map-minor) that the 228 surface pools by mean/moments.
++    pub map_dev: bool,
+ }
+ 
+ impl ZgeomSpec {
+@@ -578,6 +590,12 @@
+         if self.blockiness {
+             tag.push_str("_blk");
+         }
++        if self.gms_dev {
++            tag.push_str("_gmsdev");
++        }
++        if self.map_dev {
++            tag.push_str("_mapdev");
++        }
+         if caller_era == crate::feature_set_id::ERA_UNKNOWN {
+             tag
+         } else {
+@@ -586,13 +604,17 @@
+     }
+ 
+     /// The emitted row width — 228 per pool surface, +12 when
+-    /// `blockiness`. For widths beyond 228 the emitted row is the pool
++    /// `blockiness`, +24 when `gms_dev`, +96 when `map_dev` (in that
++    /// order). For widths beyond 228 the emitted row is the pool
+     /// surfaces concatenated in emit order (the request's slot set still
+     /// names f0..f227; the extra columns are replica-internal surfaces,
+     /// not addressable slots).
+     #[must_use]
+     pub fn emit_width(&self) -> usize {
+-        228 * (1 + self.extra_pools.len()) + 12 * self.blockiness as usize
++        228 * (1 + self.extra_pools.len())
++            + 12 * self.blockiness as usize
++            + 24 * self.gms_dev as usize
++            + 96 * self.map_dev as usize
+     }
+ }
+ 
+diff --git a/zensim/src/zgeom.rs b/zensim/src/zgeom.rs
+index 05960af177..723b22a44d 100644
+--- a/zensim/src/zgeom.rs
++++ b/zensim/src/zgeom.rs
+@@ -103,6 +103,69 @@
+     /// `blockiness_sparse(src, dst) / n` — the slot-25 value for this
+     /// cell (only filled when `spec.blockiness`).
+     blockiness: f64,
++    /// GMSD lane: `(std, mean)` of this cell's GMS map (`spec.gms_dev`).
++    gms: (f64, f64),
++    /// GMSD lane: sample std of each of the eight maps (`spec.map_dev`).
++    map_dev: [f64; 8],
++}
++
++/// GMSD's similarity constant for unit-range intensities (Xue et al.
++/// 2014: c = 0.0026; libgmsd's 170 is the same constant on 0..255).
++const GMS_C_UNIT: f64 = 0.0026;
++
++/// `(sample std, mean)` of the gradient-magnitude-similarity map of one
++/// plane pair at its native resolution: Prewitt/3 in x and y with zero
++/// padding outside the plane (GMSD's `conv2(…, 'same')`), `g = |∇|`,
++/// `q = (2·g_s·g_d + c) / (g_s² + g_d² + c)`. Research-only scalar code.
++fn gms_std_mean(sp: &[f32], dp: &[f32], w: usize, h: usize) -> (f64, f64) {
++    let at = |p: &[f32], x: isize, y: isize| -> f64 {
++        if x < 0 || y < 0 || x >= w as isize || y >= h as isize {
++            0.0
++        } else {
++            p[y as usize * w + x as usize] as f64
++        }
++    };
++    let grad = |p: &[f32], x: isize, y: isize| -> f64 {
++        let hx = (at(p, x - 1, y + 1) + at(p, x, y + 1) + at(p, x + 1, y + 1))
++            - (at(p, x - 1, y - 1) + at(p, x, y - 1) + at(p, x + 1, y - 1));
++        let hy = (at(p, x + 1, y - 1) + at(p, x + 1, y) + at(p, x + 1, y + 1))
++            - (at(p, x - 1, y - 1) + at(p, x - 1, y) + at(p, x - 1, y + 1));
++        ((hx * hx + hy * hy) / 9.0).sqrt()
++    };
++    let (mut s1, mut s2) = (0.0f64, 0.0f64);
++    for y in 0..h as isize {
++        for x in 0..w as isize {
++            let g1 = grad(sp, x, y);
++            let g2 = grad(dp, x, y);
++            let q = (2.0 * g1 * g2 + GMS_C_UNIT) / (g1 * g1 + g2 * g2 + GMS_C_UNIT);
++            let e = 1.0 - q;
++            s1 += e;
++            s2 += e * e;
++        }
++    }
++    let n = (w * h) as f64;
++    if n < 2.0 {
++        return (0.0, 1.0 - s1 / n.max(1.0));
++    }
++    let var = ((s2 - s1 * s1 / n) / (n - 1.0)).max(0.0);
++    (var.sqrt(), 1.0 - s1 / n)
++}
++
++/// Sample standard deviation of one materialized map, f64 accumulation.
++fn map_std(m: &[f32]) -> f64 {
++    let n = m.len() as f64;
++    if n < 2.0 {
++        return 0.0;
++    }
++    let mean = m.iter().map(|&v| v as f64).sum::<f64>() / n;
++    let ss = m
++        .iter()
++        .map(|&v| {
++            let d = v as f64 - mean;
++            d * d
++        })
++        .sum::<f64>();
++    (ss / (n - 1.0)).sqrt()
+ }
+ 
+ /// Compute one cell: the v1 band loop (kernel sums + materialized maps)
+@@ -125,7 +188,7 @@
+         .collect();
+     let any_block = pools.iter().any(|p| p.is_block());
+     let any_gate = pools.iter().any(|p| p.is_gated());
+-    let maps_mode = if !any_block && !spec.hist && !spec.khist {
++    let maps_mode = if !any_block && !spec.hist && !spec.khist && !spec.map_dev {
+         MapsMode::None
+     } else if any_gate || spec.hist {
+         MapsMode::Gate
+@@ -187,11 +250,32 @@
+             }
+         })
+         .collect();
++    let gms = if spec.gms_dev {
++        gms_std_mean(sp, dp, w, h)
++    } else {
++        (0.0, 0.0)
++    };
++    let map_dev = if spec.map_dev {
++        [
++            map_std(&maps.sd),
++            map_std(&maps.art),
++            map_std(&maps.det),
++            map_std(&maps.mse),
++            map_std(&maps.hf_sq_src),
++            map_std(&maps.hf_sq_dst),
++            map_std(&maps.hf_abs_src),
++            map_std(&maps.hf_abs_dst),
++        ]
++    } else {
++        [0.0; 8]
++    };
+     CellOut {
+         pools: pools_out,
+         hist,
+         khist,
+         blockiness,
++        gms,
++        map_dev,
+     }
+ }
+ 
+@@ -296,6 +380,9 @@
+         .khist
+         .then_some(([[[0u64; 128]; 8]; 12], [[0u64; 8]; 12]));
+     let mut blk = [0.0f64; 12];
++    let mut gms_std = [0.0f64; 12];
++    let mut gms_mean = [0.0f64; 12];
++    let mut map_dev = [0.0f64; 96];
+     for ((scale, ch), out) in cells.iter().zip(outs.iter()) {
+         for (pi, (sums, n)) in out.pools.iter().enumerate() {
+             sums.finalize_228(*n, *scale, *ch, &mut surfaces[pi], revision);
+@@ -303,6 +390,10 @@
+         if spec.blockiness {
+             blk[*scale * 3 + *ch] = out.blockiness;
+         }
++        let cell = *scale * 3 + *ch;
++        gms_std[cell] = out.gms.0;
++        gms_mean[cell] = out.gms.1;
++        map_dev[cell * 8..cell * 8 + 8].copy_from_slice(&out.map_dev);
+         if let (Some((bins, ns)), Some((cbins, cn))) = (hist.as_mut(), out.hist.as_ref()) {
+             for (a, b) in bins[*ch][*scale].iter_mut().zip(cbins.iter()) {
+                 *a += b;
+@@ -328,6 +419,13 @@
+     if spec.blockiness {
+         features.extend_from_slice(&blk);
+     }
++    if spec.gms_dev {
++        features.extend_from_slice(&gms_std);
++        features.extend_from_slice(&gms_mean);
++    }
++    if spec.map_dev {
++        features.extend_from_slice(&map_dev);
++    }
+     Ok((features, hist, khist))
+ }
+ 
+@@ -368,6 +466,8 @@
+             blockiness: false,
+             kappa: None,
+             khist: false,
++            gms_dev: false,
++            map_dev: false,
+         }
+     }
+ 
+@@ -410,6 +510,52 @@
+         }
+     }
+ 
++    /// GMSD lane: the 24 GMS and 96 map-deviation tail columns leave the
++    /// 228 surface bit-identical, are finite, and read as "no damage" on
++    /// an identical pair: GMS std exactly 0 and mean exactly 1 (f64, no
++    /// FMA), the `art/det/mse` map spreads exactly 0. The `sd` map is the
++    /// fused SSIM kernel's own f32/FMA output, which is NOT exactly 0 on an
++    /// identical pair (measured 3.65e-5 spread at 96×80 — the same residue
++    /// that makes zensim short-circuit identity at its API), so it is held
++    /// to a bound instead of to zero.
++    #[test]
++    fn gms_and_map_dev_tails() {
++        let (w, h) = (96usize, 80usize);
++        let (s, d) = pair(w, h);
++        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
++        let base = crate::research::extract(
++            &zgeom_req(spec(PyramidKernel::Box2, PoolMode::Global)),
++            &rs,
++            &rd,
++        )
++        .expect("base")
++        .into_values();
++        let mut sp = spec(PyramidKernel::Box2, PoolMode::Global);
++        sp.gms_dev = true;
++        sp.map_dev = true;
++        assert_eq!(sp.emit_width(), 228 + 24 + 96);
++        let wide = crate::research::extract(&zgeom_req(sp.clone()), &rs, &rd)
++            .expect("wide")
++            .into_values();
++        assert_eq!(wide.len(), 228 + 24 + 96);
++        for i in 0..228 {
++            assert_eq!(base[i].to_bits(), wide[i].to_bits(), "f{i}");
++        }
++        assert!(wide.iter().all(|v| v.is_finite()));
++        assert!(wide[228..240].iter().any(|&v| v > 0.0), "distorted GMS std");
++        let ident = crate::research::extract(&zgeom_req(sp), &rs, &rs)
++            .expect("identity")
++            .into_values();
++        for c in 0..12 {
++            assert_eq!(ident[228 + c], 0.0, "gms std cell {c}");
++            assert_eq!(ident[240 + c], 1.0, "gms mean cell {c}");
++            for m in 1..4 {
++                assert_eq!(ident[252 + c * 8 + m], 0.0, "map {m} cell {c}");
++            }
++            assert!(ident[252 + c * 8] < 1e-3, "sd spread cell {c}");
++        }
++    }
++
+     /// The other arms must produce sane, DIFFERENT values — the point of
+     /// the experiment — without NaNs or leaks outside the surface.
+     #[test]
+diff --git a/zensim-bench/examples/extract_features_372col.rs b/zensim-bench/examples/extract_features_372col.rs
+index a4ec619a83..3133606975 100644
+--- a/zensim-bench/examples/extract_features_372col.rs
++++ b/zensim-bench/examples/extract_features_372col.rs
+@@ -117,6 +117,8 @@
+     let mut zgeom_blk = false;
+     let mut zgeom_kappa = None;
+     let mut zgeom_khist = None;
++    let mut zgeom_gmsdev = false;
++    let mut zgeom_mapdev = false;
+     let mut input_contract = None;
+     while let Some(a) = args.next() {
+         match a.as_str() {
+@@ -168,6 +170,10 @@
+             "--zgeom-blk" => zgeom_blk = true,
+             "--zgeom-kappa" => zgeom_kappa = Some(args.next().expect("--zgeom-kappa value")),
+             "--zgeom-khist" => zgeom_khist = Some(args.next().expect("--zgeom-khist value")),
++            // GMSD lane: append the 24 GMS std/mean columns and/or the 96
++            // map-deviation columns (`ZgeomSpec::{gms_dev, map_dev}`).
++            "--zgeom-gmsdev" => zgeom_gmsdev = true,
++            "--zgeom-mapdev" => zgeom_mapdev = true,
+             "--corpus" => corpus = Some(args.next().unwrap()),
+             "--path" => path = Some(args.next().unwrap().into()),
+             "--out" => out = Some(args.next().unwrap().into()),
+@@ -280,6 +286,10 @@
+         !zgeom_blk || zgeom.is_some(),
+         "--zgeom-blk requires --zgeom"
+     );
++    assert!(
++        !(zgeom_gmsdev || zgeom_mapdev) || zgeom.is_some(),
++        "--zgeom-gmsdev/--zgeom-mapdev require --zgeom"
++    );
+     // Every emitted pool — the c0/kappa/khist asserts look at the whole list.
+     let zgeom_all_pools: Vec<zensim::research::PoolMode> = zgeom_kp
+         .map(|(_, p)| p)
+@@ -377,6 +387,8 @@
+                 blockiness: zgeom_blk,
+                 kappa,
+                 khist: zgeom_khist.is_some(),
++                gms_dev: zgeom_gmsdev,
++                map_dev: zgeom_mapdev,
+             })
+         } else if dvifm_only {
+             // Just the DVIFM family, dense — the walk runs only the
+@@ -506,7 +518,10 @@
+     );
+ 
+     // The zgeom emit width: 228 per pool surface + 12 blockiness.
+-    let zgeom_emit_width = 228 * (1 + zgeom_extra.len()) + 12 * zgeom_blk as usize;
++    let zgeom_emit_width = 228 * (1 + zgeom_extra.len())
++        + 12 * zgeom_blk as usize
++        + 24 * zgeom_gmsdev as usize
++        + 96 * zgeom_mapdev as usize;
+     if let Some(audit) = &audit {
+         audit
+             .validate_feature_width(if zgeom.is_some() {
+@@ -1327,7 +1342,11 @@
+     let arr = doc["kappa"]
+         .as_array()
+         .expect("zgeom kappa JSON must carry a `kappa` array");
+-    assert_eq!(arr.len(), 96, "zgeom kappa must have 96 entries (12 cells x 8 maps)");
++    assert_eq!(
++        arr.len(),
++        96,
++        "zgeom kappa must have 96 entries (12 cells x 8 maps)"
++    );
+     arr.iter()
+         .enumerate()
+         .map(|(i, v)| {
+@@ -1420,6 +1439,8 @@
+             "pool": zg.pool.token(),
+             "extra_pools": zg.extra_pools.iter().map(|p| p.token()).collect::<Vec<_>>(),
+             "blockiness": zg.blockiness,
++            "gms_dev": zg.gms_dev,
++            "map_dev": zg.map_dev,
+             "emit_width": zg.emit_width(),
+             "gate_c0_sha256": zgeom_c0_sha256,
+             "gate_c0": zg.gate_c0,
+diff --git a/zensim-bench/examples/zgeom_cost.rs b/zensim-bench/examples/zgeom_cost.rs
+index 82dcfcf2be..e23162de11 100644
+--- a/zensim-bench/examples/zgeom_cost.rs
++++ b/zensim-bench/examples/zgeom_cost.rs
+@@ -156,6 +156,8 @@
+                     // on the fitted values.
+                     kappa: Some(vec![1e-3; 96]),
+                     khist: false,
++                    gms_dev: false,
++                    map_dev: false,
+                 })
+                 .with_parallel(parallel)
+             })
+diff --git a/zensim-bench/examples/zgeom_stability.rs b/zensim-bench/examples/zgeom_stability.rs
+index 68aeac3891..46e3b95787 100644
+--- a/zensim-bench/examples/zgeom_stability.rs
++++ b/zensim-bench/examples/zgeom_stability.rs
+@@ -222,6 +222,8 @@
+                 blockiness: false,
+                 kappa: None,
+                 khist: false,
++                gms_dev: false,
++                map_dev: false,
+             })
+         })
+         .collect();

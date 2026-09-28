@@ -26,12 +26,20 @@
 //! table of `(offset, len)`, and a declared-feature-id list so a head obeys
 //! the same dense contract as [`crate::declared_feature_ids`].
 //!
-//! ## Wire format, `ZCTH` v1 (little-endian throughout)
+//! ## Wire format, `ZCTH` v1/v2/v3 (little-endian throughout)
+//!
+//! Version 2 rounds each declared input to IEEE f32, then widens to f64
+//! before standardisation. This binds pixel inference to f32 training tables.
+//! Version 1 preserves native input precision. Sections are otherwise identical;
+//! the version participates in the schema hash and old readers refuse v2.
+//! Versions 1/2 describe native-pyramid Rev1 features. Version 3 also rounds
+//! inputs to f32 and binds an explicit formula revision in the header/hash.
+//! Fractional sampling is not described by any of these versions.
 //!
 //! ```text
 //! Header, 120 bytes
 //!    0..4    magic                b"ZCTH"
-//!    4..6    format_version  u16  = 1
+//!    4..6    format_version  u16  = 1 (native) / 2 (f32) / 3 (f32 + revision)
 //!    6..8    flags           u16  bit0 has_isotonic, bit1 has_scaler
 //!    8..16   schema_hash     u64  FNV-1a over the canonical shape descriptor
 //!   16..20   caller_input_width u32
@@ -41,7 +49,7 @@
 //!   32..40   baseline        f64
 //!   40..48   deadband_t      f64  fires when P > t
 //!   48..52   clip            f32  standardisation clip, +-clip
-//!   52..56   reserved        u32  = 0
+//!   52..56   formula_revision u32 = 1/2/3 for v3; reserved zero for v1/v2
 //!   56..64   sec_declared_ids  Section  u16  * n_declared
 //!   64..72   sec_scaler_mean   Section  f64  * n_declared
 //!   72..80   sec_scaler_scale  Section  f64  * n_declared
@@ -80,8 +88,11 @@
 
 /// The magic every `ZCTH` file starts with.
 pub const MAGIC: [u8; 4] = *b"ZCTH";
-/// The only format version this build reads or writes.
+/// The legacy native-input format version, retained for existing writers.
+/// The reader also supports f32-rounded v2 and explicitly revision-bound v3.
 pub const FORMAT_VERSION: u16 = 1;
+const F32_INPUT_VERSION: u16 = 2;
+const REVISION_INPUT_VERSION: u16 = 3;
 /// Header length in bytes; the section table ends here.
 const HEADER_LEN: usize = 120;
 /// One node's serialized width.
@@ -135,7 +146,8 @@ pub enum CorruptionHeadError {
     MalformedTree { tree: u32, detail: &'static str },
     /// A declared feature id lies outside the caller's declared width.
     DeclaredIdOutOfRange { pos: usize, id: u16, width: usize },
-    /// The head reads slots the profile's extraction plan does not populate.
+    /// The head requires another arithmetic revision or reads slots the
+    /// profile's extraction plan does not populate.
     /// Attaching a head must NEVER widen the walk, so this is a refusal, not
     /// a silent upgrade.
     NotServable {
@@ -269,15 +281,16 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     h
 }
 
-/// The canonical shape descriptor the schema hash is taken over.
+/// The common shape descriptor. For v3 the caller appends the four-byte
+/// formula revision before hashing; legacy descriptors stay byte-identical.
 ///
 /// Deliberately covers SHAPE and the read set, not the fitted numbers: the
 /// hash answers "is this the head I think it is, structurally?", while a
 /// changed threshold is a different model that must get a different file, not
 /// a corrupted one. Both sides build this from the same field order.
 fn schema_descriptor(
+    version: u16,
     caller_input_width: u32,
-    n_declared: u32,
     n_trees: u32,
     n_nodes: u32,
     clip: f32,
@@ -286,9 +299,9 @@ fn schema_descriptor(
 ) -> Vec<u8> {
     let mut d = Vec::with_capacity(26 + declared_ids.len() * 2);
     d.extend_from_slice(&MAGIC);
-    d.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    d.extend_from_slice(&version.to_le_bytes());
     d.extend_from_slice(&caller_input_width.to_le_bytes());
-    d.extend_from_slice(&n_declared.to_le_bytes());
+    d.extend_from_slice(&(declared_ids.len() as u32).to_le_bytes());
     d.extend_from_slice(&n_trees.to_le_bytes());
     d.extend_from_slice(&n_nodes.to_le_bytes());
     d.extend_from_slice(&clip.to_le_bytes());
@@ -302,23 +315,22 @@ fn schema_descriptor(
 /// **THE deploy composition**, in the dial's SCORE units — one owner, used by
 /// the runtime companion and by `bake_verdict` for BOTH head kinds.
 ///
-/// A flagged row is forced to `min(perceptual, 0)` so it can no longer
-/// out-rank its own honest anchor; an unflagged row passes through untouched.
-/// This is, verbatim, the rule `bake_verdict` computed inline before this
-/// function existed (`if h < thr { d.min(0.0) } else { d }`) and the rule the
-/// theory lane measured in Python (`np.where(p > T, np.minimum(dial, 0), dial)`,
-/// with `T` and the score threshold related by `thr = 100 * (1 - T)`), so
-/// adopting it moves no number. `scripts/verify_corrhead_composition.sh` gates
-/// that on a full `--full-json`.
+/// Activate only when `head_score < deadband_score`, then return
+/// `min(perceptual, head_score)`. Otherwise pass the perceptual score through
+/// unchanged, including equality at the threshold. Both scores are quality
+/// oriented (lower is worse). For a tree head, `head_score = 100 * (1 - p)`
+/// and the score threshold is `100 * (1 - probability_deadband)`.
 ///
-/// The head is **not** a second ranker. It cannot raise a score, only floor
-/// one — which is what makes attaching it safe for a dial that is already
-/// calibrated.
+/// Activation signals an integrity failure, even when the perceptual score
+/// is already lower and its number does not change. Callers must not infer
+/// activation from score lowering. The head never raises a score and must
+/// be calibrated against valid low-quality encodes as well as high-quality
+/// ones; severe ordinary compression alone should not activate it.
 #[inline]
 #[must_use]
 pub fn gate_score(perceptual: f64, head_score: f64, deadband_score: f64) -> f64 {
     if head_score < deadband_score {
-        perceptual.min(0.0)
+        perceptual.min(head_score)
     } else {
         perceptual
     }
@@ -327,6 +339,8 @@ pub fn gate_score(perceptual: f64, head_score: f64, deadband_score: f64) -> f64 
 /// A loaded corruption head.
 #[derive(Clone, Debug)]
 pub struct CorruptionHead {
+    round_inputs_to_f32: bool,
+    formula_revision: crate::feature_defs::FormulaRevision,
     caller_input_width: usize,
     declared_ids: Vec<u16>,
     mean: Vec<f64>,
@@ -386,7 +400,7 @@ fn read_f64_vec(
 }
 
 impl CorruptionHead {
-    /// Parse a `ZCTH` v1 file.
+    /// Parse a `ZCTH` v1, v2 or v3 file.
     ///
     /// Validates the magic, the version, the schema hash, every section's
     /// range and stride, every declared id against the caller width, and every
@@ -404,12 +418,32 @@ impl CorruptionHead {
             return Err(CorruptionHeadError::BadMagic { got: magic });
         }
         let version = rd_u16(bytes, 4);
-        if version != FORMAT_VERSION {
+        if !matches!(
+            version,
+            FORMAT_VERSION | F32_INPUT_VERSION | REVISION_INPUT_VERSION
+        ) {
             return Err(CorruptionHeadError::UnsupportedVersion {
                 got: version,
-                supported: FORMAT_VERSION,
+                supported: REVISION_INPUT_VERSION,
             });
         }
+        let revision_field = rd_u32(bytes, 52);
+        use crate::feature_defs::FormulaRevision;
+        let formula_revision = match (version, revision_field) {
+            (FORMAT_VERSION | F32_INPUT_VERSION, 0) | (REVISION_INPUT_VERSION, 1) => {
+                FormulaRevision::Rev1
+            }
+            (REVISION_INPUT_VERSION, 2) => FormulaRevision::Rev2,
+            (REVISION_INPUT_VERSION, 3) => FormulaRevision::Rev3,
+            _ => {
+                return Err(CorruptionHeadError::NotServable {
+                    profile: "ZCTH",
+                    detail: format!(
+                        "unsupported formula revision field {revision_field} for format {version}"
+                    ),
+                });
+            }
+        };
         let flags = rd_u16(bytes, 6);
         let stored_hash = rd_u64(bytes, 8);
         let caller_input_width = rd_u32(bytes, 16) as usize;
@@ -512,15 +546,19 @@ impl CorruptionHead {
             .unwrap_or("")
             .to_string();
 
-        let computed = fnv1a64(&schema_descriptor(
+        let mut descriptor = schema_descriptor(
+            version,
             caller_input_width as u32,
-            n_declared as u32,
             n_trees as u32,
             n_nodes as u32,
             clip,
             &declared_ids,
             iso_x.len() as u32,
-        ));
+        );
+        if version == REVISION_INPUT_VERSION {
+            descriptor.extend_from_slice(&revision_field.to_le_bytes());
+        }
+        let computed = fnv1a64(&descriptor);
         if computed != stored_hash {
             return Err(CorruptionHeadError::SchemaHashMismatch {
                 stored: stored_hash,
@@ -529,6 +567,8 @@ impl CorruptionHead {
         }
 
         let head = Self {
+            round_inputs_to_f32: version != FORMAT_VERSION,
+            formula_revision,
             caller_input_width,
             declared_ids,
             mean,
@@ -545,6 +585,10 @@ impl CorruptionHead {
         };
         head.validate_trees()?;
         Ok(head)
+    }
+
+    pub(crate) fn formula_revision(&self) -> crate::feature_defs::FormulaRevision {
+        self.formula_revision
     }
 
     /// Every tree is a well-formed binary tree over its own node range, every
@@ -668,6 +712,8 @@ impl CorruptionHead {
     }
 
     /// `P(corrupt)` for one caller-width feature row of `f64`.
+    /// Versions 2/3 round declared inputs to f32 before standardisation;
+    /// version 1 retains the supplied precision.
     pub fn probability_f64(&self, features: &[f64]) -> Result<f64, CorruptionHeadError> {
         if features.len() != self.caller_input_width {
             return Err(CorruptionHeadError::FeatureLenMismatch {
@@ -741,7 +787,13 @@ impl CorruptionHead {
         let n = self.declared_ids.len();
         let mut z = Vec::with_capacity(n);
         for j in 0..n {
-            let v = (get(j) - self.mean[j]) / self.scale[j];
+            let input = get(j);
+            let input = if self.round_inputs_to_f32 {
+                f64::from(input as f32)
+            } else {
+                input
+            };
+            let v = (input - self.mean[j]) / self.scale[j];
             z.push(v.clamp(-self.clip, self.clip));
         }
         let mut raw = self.baseline;
@@ -786,12 +838,13 @@ pub struct CorruptionVerdict {
     pub probability: f64,
     /// The head's score in the dial's units, `100 * (1 - probability)`.
     pub head_score: f64,
-    /// Whether the deadband fired (`probability > head.deadband()`).
+    /// Whether `head_score < head.deadband_score()`. This signals an integrity
+    /// failure even if the perceptual score was already lower than the head.
     pub fired: bool,
     /// The perceptual score before the gate — unchanged, kept so a caller can
     /// see the delta without re-reading the result.
     pub perceptual_score: f64,
-    /// [`gate_score`] applied: `min(perceptual, 0)` when fired, else
+    /// [`gate_score`] applied: `min(perceptual, head_score)` when fired, else
     /// `perceptual`.
     pub gated_score: f64,
 }
@@ -874,8 +927,8 @@ fn interp_linear(q: f64, xs: &[f64], ys: &[f64]) -> f64 {
 // ── Servability: attaching a head must never widen the walk ──────────────
 #[cfg(feature = "feature-regime-v2")]
 impl CorruptionHead {
-    /// Refuse unless every declared id is a slot this profile's extraction
-    /// plan already populates.
+    /// Refuse unless the head's arithmetic revision matches the profile and
+    /// every declared id is a slot its extraction plan already populates.
     ///
     /// This is the **"make sure everything can be served"** contract applied
     /// to the head: a head is attachable exactly when the walk that produced
@@ -891,12 +944,26 @@ impl CorruptionHead {
     ) -> Result<(), CorruptionHeadError> {
         let params = profile.params();
         let config = crate::metric::config_from_params(params, false);
+        // A profile the active arithmetic revision refuses cannot serve any
+        // head — the walk that would gate the score never runs. Reported as
+        // NotServable with the refusal's own wording rather than a bare
+        // "mismatch", per this enum's contract.
+        crate::ssim_form::check_route(&config).map_err(|e| CorruptionHeadError::NotServable {
+            profile: profile.name(),
+            detail: e.to_string(),
+        })?;
         let plan = crate::fold_engine::score_plan(params, &config, true).ok_or_else(|| {
             CorruptionHeadError::NotServable {
                 profile: profile.name(),
                 detail: "the profile has no derivable extraction plan".to_string(),
             }
         })?;
+        if self.formula_revision() != plan.formula_revision() {
+            return Err(CorruptionHeadError::NotServable {
+                profile: profile.name(),
+                detail: "corruption head requires another feature revision".to_string(),
+            });
+        }
         let want = crate::feature_set_id::SlotSet::from_slots(
             self.declared_ids.iter().map(|&id| usize::from(id)),
         );
@@ -930,6 +997,7 @@ mod tests {
         pub(super) iso_x: Vec<f64>,
         pub(super) iso_y: Vec<f64>,
         pub(super) meta: &'static str,
+        revision_field: u32,
     }
 
     impl Builder {
@@ -972,10 +1040,15 @@ mod tests {
                 iso_x: Vec::new(),
                 iso_y: Vec::new(),
                 meta: "{}",
+                revision_field: 1,
             }
         }
 
         pub(super) fn build(&self) -> Vec<u8> {
+            self.build_version(FORMAT_VERSION)
+        }
+
+        fn build_version(&self, version: u16) -> Vec<u8> {
             let mut body: Vec<u8> = Vec::new();
             let push = |body: &mut Vec<u8>, data: &[u8]| -> Section {
                 let off = HEADER_LEN + body.len();
@@ -1018,18 +1091,22 @@ mod tests {
             if !self.iso_x.is_empty() {
                 flags |= FLAG_HAS_ISOTONIC;
             }
-            let hash = fnv1a64(&schema_descriptor(
+            let mut descriptor = schema_descriptor(
+                version,
                 self.caller_input_width,
-                self.declared_ids.len() as u32,
                 (self.tree_offsets.len() - 1) as u32,
                 self.nodes.len() as u32,
                 self.clip,
                 &self.declared_ids,
                 self.iso_x.len() as u32,
-            ));
+            );
+            if version == REVISION_INPUT_VERSION {
+                descriptor.extend_from_slice(&self.revision_field.to_le_bytes());
+            }
+            let hash = fnv1a64(&descriptor);
             let mut h = vec![0u8; HEADER_LEN];
             h[0..4].copy_from_slice(&MAGIC);
-            h[4..6].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+            h[4..6].copy_from_slice(&version.to_le_bytes());
             h[6..8].copy_from_slice(&flags.to_le_bytes());
             h[8..16].copy_from_slice(&hash.to_le_bytes());
             h[16..20].copy_from_slice(&self.caller_input_width.to_le_bytes());
@@ -1039,6 +1116,9 @@ mod tests {
             h[32..40].copy_from_slice(&self.baseline.to_le_bytes());
             h[40..48].copy_from_slice(&self.deadband_t.to_le_bytes());
             h[48..52].copy_from_slice(&self.clip.to_le_bytes());
+            if version == REVISION_INPUT_VERSION {
+                h[52..56].copy_from_slice(&self.revision_field.to_le_bytes());
+            }
             for (i, s) in [
                 sec_ids, sec_mean, sec_scale, sec_toff, sec_nodes, sec_ix, sec_iy, sec_meta,
             ]
@@ -1052,6 +1132,273 @@ mod tests {
             h.extend_from_slice(&body);
             h
         }
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn legacy_tree_rejects_revision_three_base() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "corruption_head::tests::legacy_tree_rejects_revision_three_base",
+            "TREE-REVISION-CHECK-RAN",
+        ) {
+            return;
+        }
+        {
+            let recipe = serde_json::json!({
+                "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+                "metadata":[
+                    {"key":"zentrain.feature_ids","type":"utf8","text":"13"},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":"3"}],
+                "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                    "dtype":"f32","weights":[-1.0],"biases":[100.0]}]
+            });
+            let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+            let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+            let mut b = Builder::single_stump(13, 0.25, -5.0, 5.0);
+            b.caller_input_width = 372;
+            let head = CorruptionHead::from_bytes(&b.build()).unwrap();
+            let result = crate::BakeScorer::new(&model)
+                .unwrap()
+                .with_corruption_head(&head, None);
+            assert!(result.is_err(), "Rev1 head must not consume Rev3 features");
+        }
+        println!("TREE-REVISION-CHECK-RAN");
+    }
+
+    #[test]
+    fn explicit_revision_is_validated_and_hash_bound() {
+        use crate::feature_defs::FormulaRevision;
+        let mut b = Builder::single_stump(3, 0.25, -5.0, 5.0);
+        b.mean[0] = 1.0;
+        b.scale[0] = 2.0_f64.powi(-24);
+        let legacy = CorruptionHead::from_bytes(&b.build_version(F32_INPUT_VERSION)).unwrap();
+        for (revision, expected) in [
+            (1, FormulaRevision::Rev1),
+            (2, FormulaRevision::Rev2),
+            (3, FormulaRevision::Rev3),
+        ] {
+            b.revision_field = revision;
+            let bytes = b.build_version(REVISION_INPUT_VERSION);
+            let head = CorruptionHead::from_bytes(&bytes).unwrap();
+            assert_eq!(head.formula_revision(), expected);
+            for value in [1.0, 1.0 + 2.0_f64.powi(-25), 1.0 + 2.0_f64.powi(-23)] {
+                let mut row = [0.0; 8];
+                row[3] = value;
+                assert_eq!(head.decision_function(&row), legacy.decision_function(&row));
+            }
+            let mut changed = bytes;
+            changed[52..56].copy_from_slice(&(revision % 3 + 1).to_le_bytes());
+            assert!(matches!(
+                CorruptionHead::from_bytes(&changed),
+                Err(CorruptionHeadError::SchemaHashMismatch { .. })
+            ));
+        }
+        for invalid in [0, 4, u32::MAX] {
+            b.revision_field = invalid;
+            assert!(CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).is_err());
+        }
+        let mut legacy_bytes = b.build();
+        legacy_bytes[52..56].copy_from_slice(&3_u32.to_le_bytes());
+        assert!(CorruptionHead::from_bytes(&legacy_bytes).is_err());
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    fn base_at_revision(revision: u32) -> zenpredict::Model {
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8","text":"13"},
+                {"key":"zentrain.formula_revision","type":"utf8","text":revision.to_string()}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                "dtype":"f32","weights":[-0.1],"biases":[-50.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        zenpredict::Model::from_bytes(&bytes).unwrap()
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn explicit_tree_rev1_composition() {
+        if !crate::ssim_form::run_at_revision(
+            "1",
+            "corruption_head::tests::explicit_tree_rev1_composition",
+            "TREE-REV1-COMPOSITION-RAN",
+        ) {
+            return;
+        }
+        tree_composition_at_revision(1);
+        println!("TREE-REV1-COMPOSITION-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn explicit_tree_rev2_composition() {
+        if !crate::ssim_form::run_at_revision(
+            "2",
+            "corruption_head::tests::explicit_tree_rev2_composition",
+            "TREE-REV2-COMPOSITION-RAN",
+        ) {
+            return;
+        }
+        tree_composition_at_revision(2);
+        println!("TREE-REV2-COMPOSITION-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn explicit_tree_rev3_composition() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "corruption_head::tests::explicit_tree_rev3_composition",
+            "TREE-REV3-COMPOSITION-RAN",
+        ) {
+            return;
+        }
+        tree_composition_at_revision(3);
+        println!("TREE-REV3-COMPOSITION-RAN");
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn tree_composition_at_revision(revision: u32) {
+        let src: Vec<_> = (0..96 * 96)
+            .map(|i| [(i % 251) as u8, (i % 199) as u8, (i % 127) as u8])
+            .collect();
+        // A global contrast change avoids the known near-identity Rev2
+        // raw-moment assertion; this test checks composition, not that formula.
+        let dst: Vec<_> = src.iter().map(|p| p.map(|v| v / 2)).collect();
+        let rs = crate::RgbSlice::new(&src, 96, 96);
+        let ds = crate::RgbSlice::new(&dst, 96, 96);
+        let base = base_at_revision(revision);
+        let mut plain = crate::BakeScorer::new(&base).unwrap().with_parallel(false);
+        let expected = plain
+            .prepare_steering(&rs, 8)
+            .unwrap()
+            .compute(&ds, None)
+            .unwrap();
+        for head_revision in [1, 2, 3] {
+            for (value, active) in [(-100.0, false), (100.0, true)] {
+                let mut b = Builder::single_stump(13, 0.25, value, value);
+                b.caller_input_width = 372;
+                b.revision_field = head_revision;
+                let head =
+                    CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).unwrap();
+                let candidate = crate::BakeScorer::new(&base)
+                    .unwrap()
+                    .with_corruption_head(&head, None);
+                if revision != head_revision {
+                    assert!(candidate.is_err(), "mismatched revision admitted");
+                    continue;
+                }
+                let mut candidate = candidate.unwrap().with_parallel(false);
+                // A negative base score masks activation in min(P,C), but not in steering.
+                assert_eq!(
+                    candidate.compute(&rs, &ds, None).unwrap().score(),
+                    expected.result().score()
+                );
+                let mut worker = candidate.prepare_steering(&rs, 8).unwrap();
+                let malformed = crate::RgbSlice::new(&dst[..64], 8, 8);
+                assert!(worker.compute(&malformed, None).is_err());
+                for _ in 0..2 {
+                    match worker.compute(&ds, None) {
+                        Err(crate::ZensimError::CorruptionDetected) => assert!(active),
+                        Ok(actual) => {
+                            assert!(!active);
+                            assert_eq!(actual.result().score(), expected.result().score());
+                            for y in [0, 32, 64] {
+                                for x in [0, 32, 64] {
+                                    assert_eq!(
+                                        actual.refinement_gain(x, y, 32, 32),
+                                        expected.refinement_gain(x, y, 32, 32)
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => panic!("unexpected prepared error: {e}"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", not(feature = "feature-regime-v2")))]
+    fn tree_revision_checked_without_feature_planner() {
+        if !crate::ssim_form::run_at_revision(
+            "1",
+            "corruption_head::tests::tree_revision_checked_without_feature_planner",
+            "TREE-NOPLAN-RAN",
+        ) {
+            return;
+        }
+        let base = base_at_revision(1);
+        for revision in [1, 2, 3] {
+            let mut b = Builder::single_stump(13, 0.25, -5.0, 5.0);
+            b.caller_input_width = 372;
+            b.revision_field = revision;
+            let head =
+                CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).unwrap();
+            let candidate = crate::BakeScorer::new(&base)
+                .unwrap()
+                .with_corruption_head(&head, None);
+            assert_eq!(candidate.is_ok(), revision == 1);
+        }
+        println!("TREE-NOPLAN-RAN");
+    }
+
+    #[test]
+    fn f32_contract_rounds_before_scaler_and_preserves_legacy_behavior() {
+        let mut b = Builder::single_stump(3, 0.25, -5.0, 5.0);
+        b.mean[0] = 1.0;
+        b.scale[0] = 2.0_f64.powi(-24);
+        let legacy = CorruptionHead::from_bytes(&b.build()).unwrap();
+        let head = CorruptionHead::from_bytes(&b.build_version(F32_INPUT_VERSION)).unwrap();
+        let mut row = [0.0_f64; 8];
+        row[3] = 1.0 + 2.0_f64.powi(-25);
+        // This perturbation vanishes in f32 BEFORE subtraction. Rounding the
+        // standardized 0.5 instead would retain the wrong branch and fire.
+        assert_eq!(legacy.decision_function(&row).unwrap(), 5.0);
+        assert_eq!(head.decision_function(&row).unwrap(), -5.0);
+        assert!(legacy.probability_f64(&row).unwrap() > legacy.deadband());
+        assert!(head.probability_f64(&row).unwrap() < head.deadband());
+        for value in [
+            1.0,
+            row[3],
+            1.0 + 2.0_f64.powi(-24),
+            1.0 + 2.0_f64.powi(-23),
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+        ] {
+            row[3] = value;
+            let stored = row.map(|x| x as f32);
+            let widened = stored.map(f64::from);
+            assert_eq!(
+                head.decision_function(&row).unwrap(),
+                legacy.decision_function(&widened).unwrap()
+            );
+            assert_eq!(
+                head.probability_f64(&row).unwrap(),
+                head.probability(&stored).unwrap()
+            );
+            assert_eq!(head.score_f64(&row).unwrap(), head.score(&stored).unwrap());
+        }
+    }
+
+    #[test]
+    fn input_precision_version_is_hash_bound_and_unknown_versions_refuse() {
+        let b = Builder::single_stump(3, 0.5, -2.0, 7.0);
+        let mut bytes = b.build();
+        bytes[4..6].copy_from_slice(&F32_INPUT_VERSION.to_le_bytes());
+        assert!(matches!(
+            CorruptionHead::from_bytes(&bytes),
+            Err(CorruptionHeadError::SchemaHashMismatch { .. })
+        ));
+        bytes[4..6].copy_from_slice(&4_u16.to_le_bytes());
+        assert!(matches!(
+            CorruptionHead::from_bytes(&bytes),
+            Err(CorruptionHeadError::UnsupportedVersion { got: 4, .. })
+        ));
     }
 
     #[test]
@@ -1197,16 +1544,35 @@ mod tests {
     }
 
     #[test]
-    fn gate_score_floors_only_a_flagged_row_and_never_raises() {
+    fn gate_score_takes_the_minimum_only_after_activation() {
         // Not flagged (head score above the deadband): passthrough.
         assert_eq!(gate_score(83.0, 55.0, 10.0), 83.0);
-        // Flagged, positive dial: floored to 0.
-        assert_eq!(gate_score(83.0, 2.0, 10.0), 0.0);
+        // Flagged, positive dial: capped by the catcher's own score.
+        assert_eq!(gate_score(83.0, 2.0, 10.0), 2.0);
         // Flagged, already-negative dial: left alone (min, not clamp).
         assert_eq!(gate_score(-40.0, 2.0, 10.0), -40.0);
+        // A ZNPR catcher can supply a negative failure score too.
+        assert_eq!(gate_score(-40.0, -60.0, 10.0), -60.0);
         // Exactly at the deadband is NOT flagged (strict `<`), matching the
         // Python rule's strict `p > T`.
         assert_eq!(gate_score(83.0, 10.0, 10.0), 83.0);
+        assert_eq!(
+            gate_score(83.0, 10.0_f64.next_down(), 10.0),
+            10.0_f64.next_down()
+        );
+        assert_eq!(gate_score(83.0, 10.0_f64.next_up(), 10.0), 83.0);
+    }
+
+    #[test]
+    fn active_verdict_does_not_require_lowering_an_already_bad_score() {
+        let head = CorruptionHead::from_bytes(&Builder::single_stump(3, 0.5, -10.0, 10.0).build())
+            .unwrap();
+        let mut features = vec![0.0_f64; head.caller_input_width()];
+        features[3] = 1.0;
+        let verdict = head.verdict(&features, -40.0).unwrap();
+        assert!(verdict.fired);
+        assert!(verdict.head_score > -40.0);
+        assert_eq!(verdict.gated_score, -40.0);
     }
 
     #[test]
@@ -1248,6 +1614,32 @@ mod servability_tests {
         let head = head_over(372, (0u16..228).collect());
         head.check_servable_by(ZensimProfile::D)
             .expect("f0..f227 must be servable by D");
+    }
+
+    #[test]
+    fn named_profile_refuses_another_head_revision() {
+        if !crate::ssim_form::run_at_revision(
+            "1",
+            "corruption_head::servability_tests::named_profile_refuses_another_head_revision",
+            "NAMED-TREE-REVISION-RAN",
+        ) {
+            return;
+        }
+        let mut head = head_over(372, (0..228).collect());
+        head.check_servable_by(ZensimProfile::D).unwrap();
+        for revision in [
+            crate::feature_defs::FormulaRevision::Rev2,
+            crate::feature_defs::FormulaRevision::Rev3,
+        ] {
+            head.formula_revision = revision;
+            match head.check_servable_by(ZensimProfile::D) {
+                Err(CorruptionHeadError::NotServable { detail, .. }) => {
+                    assert!(detail.contains("another feature revision"))
+                }
+                other => panic!("unexpected admission: {other:?}"),
+            }
+        }
+        println!("NAMED-TREE-REVISION-RAN");
     }
 
     /// The NEGATIVE CONTROL, and the one that makes the gate mean something: a
@@ -1337,10 +1729,10 @@ mod wiring_tests {
     fn an_attached_head_flips_an_ordering_the_dial_gets_wrong() {
         let refimg = fx::reference(W, H);
         // The honest anchor is a plain 3x3 blur — a heavy but HONEST loss,
-        // and (measured) a POSITIVE dial score, which is what a q20 encode
-        // looks like. That matters: the composition floors a flagged row to
-        // `min(score, 0)`, so it can only sort a corruption below an anchor
-        // whose own score is above zero.
+        // and (measured) a positive dial score. The oracle catcher's active
+        // score is near zero, so it can sort this defect below this anchor.
+        // This wiring fixture establishes neither a universal q20 score nor
+        // a catastrophic label for every duplicated row.
         let honest = fx::honest_blur_quantize(&refimg, W, H, true, 1);
         // `edge_duplicate_top_row` — the record's WORST family for the linear
         // head (17.2 % recall) and, measured here, one D's dial calls nearly
@@ -1363,7 +1755,7 @@ mod wiring_tests {
         );
         assert!(
             r_honest.score() > 0.0,
-            "the honest anchor must score above zero for the floor to be able \
+            "the honest anchor must score above zero for this oracle head to \
              to sort below it; got {:.4}",
             r_honest.score()
         );
@@ -1379,7 +1771,15 @@ mod wiring_tests {
             .unwrap()
             .with_corruption_head(&head, None)
             .unwrap();
-        for (pixels, expected) in [(&corrupt, 0.0), (&honest, r_honest.score())] {
+        for (pixels, expected) in [
+            (
+                &corrupt,
+                r_corrupt
+                    .score()
+                    .min(head.score_f64(r_corrupt.features()).unwrap()),
+            ),
+            (&honest, r_honest.score()),
+        ] {
             let result = candidate
                 .compute(
                     &crate::RgbSlice::new(&refimg, W, H),

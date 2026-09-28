@@ -499,6 +499,86 @@
       ],
       "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
       "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
+    },
+    {
+      "dial_grid_sha256": "84e154331cb0f4a2332abcfd817ec4a54dadca9a475d18c391bbe0dfc3bc5ddc",
+      "reference": "peer_ssim2",
+      "label": "Frozen ladder native Rev3 RGB8 2026-09-14; same 9593 keys, recorded exclusions -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/rev3-public-human-eval/ladder/features-rev3/dial_ladder.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-15",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif-rav1e",
+          "n_ladders": 39,
+          "represented_frac": 0.6410256410256411
+        },
+        {
+          "codec": "avif-svt",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 39,
+          "represented_frac": 0.6666666666666666
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 26,
+          "represented_frac": 0.9615384615384616
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        }
+      ],
+      "grid_truth_sha256": "62c33502aeb899f80eb75eabe3a6dd2601f63840e3c0e43feb4daed4402ff8cb",
+      "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders — different encoders, different quantizer mappings.",
+      "floor_rule": "resolvable",
+      "floor_margin": 0.5
+    },
+    {
+      "dial_grid_sha256": "56ba3135ff7512722f7711bd1f330d5f9ada46b60c280f7df6760615ae6f8829",
+      "reference": "peer_ssim2",
+      "label": "Frozen ladder native Rev1 RGB8 2026-09-14; same 9593 keys, fresh same-buffer peer -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/rev3-public-human-eval/ladder/features-rev1/dial_ladder_peer20260914.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-15",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif-rav1e",
+          "n_ladders": 39,
+          "represented_frac": 0.6410256410256411
+        },
+        {
+          "codec": "avif-svt",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 39,
+          "represented_frac": 0.6666666666666666
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 26,
+          "represented_frac": 0.9615384615384616
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        }
+      ],
+      "grid_truth_sha256": "62c33502aeb899f80eb75eabe3a6dd2601f63840e3c0e43feb4daed4402ff8cb",
+      "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders — different encoders, different quantizer mappings.",
+      "floor_rule": "resolvable",
+      "floor_margin": 0.5
     }
   ],
   "grids": [
@@ -648,6 +728,42 @@
       "tied": 0.0,
       "registered": "2026-09-05",
       "active": true
+    },
+    {
+      "dial_grid_sha256": "84e154331cb0f4a2332abcfd817ec4a54dadca9a475d18c391bbe0dfc3bc5ddc",
+      "reference": "peer_ssim2",
+      "label": "Frozen ladder native Rev3 RGB8 2026-09-14; same 9593 keys, recorded exclusions",
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/rev3-public-human-eval/ladder/features-rev3/dial_ladder.parquet",
+      "n_rows": 9593,
+      "min": -64.32659471721344,
+      "max": 100.0,
+      "p5": -16.25215022600694,
+      "p95": 93.97433532022471,
+      "reach": 164.32659471721342,
+      "dynamic_range": 110.22648554623166,
+      "mono": 0.9888428434810328,
+      "tied": 0.0,
+      "registered": "2026-09-15",
+      "active": true,
+      "instrument_kind": "floor-dense-ladder"
+    },
+    {
+      "dial_grid_sha256": "56ba3135ff7512722f7711bd1f330d5f9ada46b60c280f7df6760615ae6f8829",
+      "reference": "peer_ssim2",
+      "label": "Frozen ladder native Rev1 RGB8 2026-09-14; same 9593 keys, fresh same-buffer peer",
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/rev3-public-human-eval/ladder/features-rev1/dial_ladder_peer20260914.parquet",
+      "n_rows": 9593,
+      "min": -64.32659471721344,
+      "max": 100.0,
+      "p5": -16.25215022600694,
+      "p95": 93.97433532022471,
+      "reach": 164.32659471721342,
+      "dynamic_range": 110.22648554623166,
+      "mono": 0.9888428434810328,
+      "tied": 0.0,
+      "registered": "2026-09-15",
+      "active": true,
+      "instrument_kind": "floor-dense-ladder"
     }
   ],
   "negtail_probes": [

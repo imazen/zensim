@@ -11,7 +11,10 @@
     clippy::too_many_arguments
 )]
 
-use crate::ssim_form::{ssim_dissim_raw_scalar, ssim_dissim8, ssim_dissim16};
+use crate::ssim_form::{
+    ssim_direct_raw_scalar, ssim_direct8, ssim_direct16, ssim_dissim_raw_scalar, ssim_dissim8,
+    ssim_dissim16,
+};
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
 use archmage::incant;
@@ -69,6 +72,168 @@ use magetypes::simd::generic::f32x16;
 /// Bit-identical to the hand-inlined `fm_s = fm_s + s; …` sequence it
 /// replaces — same operations, same order, same intermediate rounding
 /// (`s * s` before adding, not any fused/reassociated form).
+/// Masked and IW pools of the v1 "372" extension, fused into the V sweep
+/// (revision 3 only). The separate passes — `simd_ops::ssim_signal_inline_both`,
+/// `edge_diff_channel_inline_both`, `build_inline_mse` — form exactly the same
+/// per-pixel values from the same inputs; what differs is the ORDER the f64
+/// chunk sums are added in (column-group-major here, row-major there), so the
+/// pooled slots move at the last f64 bits and the families are registered as
+/// a moved era. `act` is the V-blurred activity `blur(|src - H(src)|)`, from
+/// the `h_act` plane the caller H-blurred; its V recurrence is the same
+/// `sum + add - rem` the other four planes use.
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct ExtPoolsWork {
+    /// Any of it at all. When false every `h_act` read is skipped.
+    pub on: bool,
+    /// Masked (`1 / (1 + k * act)`) pools.
+    pub mask: bool,
+    /// IW (`1 + k * act`) pools.
+    pub iw: bool,
+    pub k_mask: f32,
+    pub k_iw: f32,
+}
+
+// x86_64-only: the AVX-512 (`_v4x`) and AVX2 (`_v4`) V tiers are its only
+// callers, and it uses the `f32x16` generic type which is imported only there.
+// `dead_code` allow for the same reason as the sibling 16-lane helpers: a
+// build without the `avx512` feature never dispatches the tiers that call it.
+#[cfg(target_arch = "x86_64")]
+#[allow(dead_code)]
+#[inline(always)]
+fn ext_accumulate16<T: F32x16Backend + Copy>(
+    token: T,
+    acc: &mut StripChannelAccum,
+    sd: f32x16<T>,
+    ed: f32x16<T>,
+    pd: f32x16<T>,
+    act: f32x16<T>,
+    ext: ExtPoolsWork,
+) {
+    let one = f32x16::<T>::splat(token, 1.0);
+    let zero = f32x16::<T>::zero(token);
+    acc.act_sum += act.reduce_add() as f64;
+    let d2 = pd * pd;
+    if ext.mask {
+        let w = one / f32x16::<T>::splat(token, ext.k_mask).mul_add(act, one);
+        let da = (sd * w).max(zero);
+        let d2a = da * da;
+        let d4a = d2a * d2a;
+        acc.masked_ssim_d += da.reduce_add() as f64;
+        acc.masked_ssim_d2 += d2a.reduce_add() as f64;
+        acc.masked_ssim_d4 += d4a.reduce_add() as f64;
+        let e = ed * w;
+        let a2 = e.max(zero) * e.max(zero);
+        let dl2 = (-e).max(zero) * (-e).max(zero);
+        acc.masked_art4 += (a2 * a2).reduce_add() as f64;
+        acc.masked_det4 += (dl2 * dl2).reduce_add() as f64;
+        acc.masked_mse += (d2 * w).reduce_add() as f64;
+    }
+    if ext.iw {
+        let w = f32x16::<T>::splat(token, ext.k_iw).mul_add(act, one);
+        let db = (sd * w).max(zero);
+        let d2b = db * db;
+        let d4b = d2b * d2b;
+        acc.iw_ssim_d += db.reduce_add() as f64;
+        acc.iw_ssim_d2 += d2b.reduce_add() as f64;
+        acc.iw_ssim_d4 += d4b.reduce_add() as f64;
+        let e = ed * w;
+        let a2 = e.max(zero) * e.max(zero);
+        let dl2 = (-e).max(zero) * (-e).max(zero);
+        acc.iw_art4 += (a2 * a2).reduce_add() as f64;
+        acc.iw_det4 += (dl2 * dl2).reduce_add() as f64;
+        acc.iw_mse += (d2 * w).reduce_add() as f64;
+    }
+}
+
+/// 8-lane sibling of [`ext_accumulate16`].
+#[inline(always)]
+fn ext_accumulate8<T: F32x8Backend + Copy>(
+    token: T,
+    acc: &mut StripChannelAccum,
+    sd: GenericF32x8<T>,
+    ed: GenericF32x8<T>,
+    pd: GenericF32x8<T>,
+    act: GenericF32x8<T>,
+    ext: ExtPoolsWork,
+) {
+    let one = GenericF32x8::<T>::splat(token, 1.0);
+    let zero = GenericF32x8::<T>::zero(token);
+    acc.act_sum += act.reduce_add() as f64;
+    let d2 = pd * pd;
+    if ext.mask {
+        let w = one / GenericF32x8::<T>::splat(token, ext.k_mask).mul_add(act, one);
+        let da = (sd * w).max(zero);
+        let d2a = da * da;
+        let d4a = d2a * d2a;
+        acc.masked_ssim_d += da.reduce_add() as f64;
+        acc.masked_ssim_d2 += d2a.reduce_add() as f64;
+        acc.masked_ssim_d4 += d4a.reduce_add() as f64;
+        let e = ed * w;
+        let a2 = e.max(zero) * e.max(zero);
+        let dl2 = (-e).max(zero) * (-e).max(zero);
+        acc.masked_art4 += (a2 * a2).reduce_add() as f64;
+        acc.masked_det4 += (dl2 * dl2).reduce_add() as f64;
+        acc.masked_mse += (d2 * w).reduce_add() as f64;
+    }
+    if ext.iw {
+        let w = GenericF32x8::<T>::splat(token, ext.k_iw).mul_add(act, one);
+        let db = (sd * w).max(zero);
+        let d2b = db * db;
+        let d4b = d2b * d2b;
+        acc.iw_ssim_d += db.reduce_add() as f64;
+        acc.iw_ssim_d2 += d2b.reduce_add() as f64;
+        acc.iw_ssim_d4 += d4b.reduce_add() as f64;
+        let e = ed * w;
+        let a2 = e.max(zero) * e.max(zero);
+        let dl2 = (-e).max(zero) * (-e).max(zero);
+        acc.iw_art4 += (a2 * a2).reduce_add() as f64;
+        acc.iw_det4 += (dl2 * dl2).reduce_add() as f64;
+        acc.iw_mse += (d2 * w).reduce_add() as f64;
+    }
+}
+
+/// Scalar sibling of [`ext_accumulate16`] for the ragged column tail.
+#[inline(always)]
+fn ext_accumulate_scalar(
+    acc: &mut StripChannelAccum,
+    sd: f32,
+    ed: f32,
+    pd: f32,
+    act: f32,
+    ext: ExtPoolsWork,
+) {
+    acc.act_sum += act as f64;
+    let d2 = pd * pd;
+    if ext.mask {
+        let w = 1.0f32 / (1.0f32 + ext.k_mask * act);
+        let da = (sd * w).max(0.0);
+        let d2a = da * da;
+        acc.masked_ssim_d += da as f64;
+        acc.masked_ssim_d2 += d2a as f64;
+        acc.masked_ssim_d4 += (d2a * d2a) as f64;
+        let e = ed * w;
+        let a2 = e.max(0.0) * e.max(0.0);
+        let dl2 = (-e).max(0.0) * (-e).max(0.0);
+        acc.masked_art4 += (a2 * a2) as f64;
+        acc.masked_det4 += (dl2 * dl2) as f64;
+        acc.masked_mse += (d2 * w) as f64;
+    }
+    if ext.iw {
+        let w = 1.0f32 + ext.k_iw * act;
+        let db = (sd * w).max(0.0);
+        let d2b = db * db;
+        acc.iw_ssim_d += db as f64;
+        acc.iw_ssim_d2 += d2b as f64;
+        acc.iw_ssim_d4 += (d2b * d2b) as f64;
+        let e = ed * w;
+        let a2 = e.max(0.0) * e.max(0.0);
+        let dl2 = (-e).max(0.0) * (-e).max(0.0);
+        acc.iw_art4 += (a2 * a2) as f64;
+        acc.iw_det4 += (dl2 * dl2) as f64;
+        acc.iw_mse += (d2 * w) as f64;
+    }
+}
+
 #[inline(always)]
 fn raw_moments_accumulate8<T: F32x8Backend + Copy>(
     fm_s: &mut GenericF32x8<T>,
@@ -287,6 +452,12 @@ pub(crate) const C_LUM_T_F32: f32 = 0.35;
 /// instruction sequence, unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FreeExtrasWork {
+    /// Explicit per-request SSIM arithmetic; None retains research defaults.
+    pub revision: Option<crate::feature_defs::FormulaRevision>,
+    /// Skip peak and whole-plane HF reductions when no declared input reads them.
+    pub local_only: bool,
+    /// SSIM and MSE subset: omit artifact/detail reductions as well.
+    pub omit_edges: bool,
     /// Σs, Σd, Σs², Σd² — the `V1FreeExtras::RawMoments` set.
     pub raw_moments: bool,
     /// Σ `mse_i` — the bounded per-pixel error. Every channel.
@@ -296,6 +467,23 @@ pub(crate) struct FreeExtrasWork {
     /// only channel whose `src` plane IS the reference luma the weight
     /// reads. Requires `bounded_err` (the weights multiply its `mse_i`).
     pub lum_bins: bool,
+}
+
+impl FreeExtrasWork {
+    pub(crate) fn revision(self) -> crate::feature_defs::FormulaRevision {
+        crate::ssim_form::effective_revision(
+            self.revision
+                .unwrap_or_else(crate::ssim_form::active_revision),
+        )
+    }
+    fn luma_form(self) -> crate::ssim_form::SsimLumaForm {
+        let revision = self.revision();
+        if revision == crate::ssim_form::active_revision() {
+            crate::ssim_form::active_luma_form()
+        } else {
+            crate::ssim_form::SsimLumaForm::for_revision(revision)
+        }
+    }
 }
 
 /// Accumulate one row's bounded per-pixel error into the lane sum and return
@@ -506,14 +694,14 @@ fn lum_bins_finish_scalar(
 /// The vector tiers are gated end-to-end instead (the geometry list in
 /// `class_c_extras_match_the_944_walk` covers every tier's main loop AND
 /// its 8-lane / scalar remainder).
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))] // callers live in feature_v2's tests
 pub(crate) fn test_only_bounded_err_scalar(be_m: &mut f32, pd: f32) -> f32 {
     bounded_err_accumulate_scalar(be_m, pd)
 }
 
 /// Test-only handle on [`lum_bins_accumulate_scalar`]. See
 /// [`test_only_bounded_err_scalar`].
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))] // callers live in feature_v2's tests
 pub(crate) fn test_only_lum_bins_scalar(
     wd_num: &mut f32,
     wd_den: &mut f32,
@@ -574,6 +762,21 @@ pub(crate) struct StripChannelAccum {
     /// as `feature_v2::finish_append` derives it.)
     pub lum_wb_num: f64,
     pub lum_wb_den: f64,
+    // Fused v1-extension pools (`ExtPoolsWork`), revision 3 only.
+    pub masked_ssim_d: f64,
+    pub masked_ssim_d4: f64,
+    pub masked_ssim_d2: f64,
+    pub iw_ssim_d: f64,
+    pub iw_ssim_d4: f64,
+    pub iw_ssim_d2: f64,
+    pub masked_art4: f64,
+    pub masked_det4: f64,
+    pub iw_art4: f64,
+    pub iw_det4: f64,
+    pub masked_mse: f64,
+    pub iw_mse: f64,
+    /// `sum activity` over the inner rows (the IW normaliser's numerator).
+    pub act_sum: f64,
 }
 
 impl StripChannelAccum {
@@ -610,6 +813,19 @@ impl StripChannelAccum {
             lum_wd_den: 0.0,
             lum_wb_num: 0.0,
             lum_wb_den: 0.0,
+            masked_ssim_d: 0.0,
+            masked_ssim_d4: 0.0,
+            masked_ssim_d2: 0.0,
+            iw_ssim_d: 0.0,
+            iw_ssim_d4: 0.0,
+            iw_ssim_d2: 0.0,
+            masked_art4: 0.0,
+            masked_det4: 0.0,
+            iw_art4: 0.0,
+            iw_det4: 0.0,
+            masked_mse: 0.0,
+            iw_mse: 0.0,
+            act_sum: 0.0,
         }
     }
 }
@@ -667,7 +883,17 @@ pub(crate) fn fused_vblur_features_ssim(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
 ) -> StripChannelAccum {
+    // Revision 3 is FUSED: the H pass already carries `Σ(a-b)²` in the
+    // `h_sigma12` plane (see `blur::fused_blur_h_ssim`), so the V pass forms
+    // the direct-error dissimilarity from the same four V-blurred planes it
+    // always had — no second traversal. The exact f64 second-pass kernel this
+    // replaced measured at 22% of the whole walk (perf, fold944_full@2048^2)
+    // and is kept in `ssim_form` as the reference the bounded-error tests
+    // measure against.
+    let direct = free.revision() == crate::feature_defs::FormulaRevision::Rev3;
     incant!(
         fused_vblur_ssim_inner(
             h_mu1,
@@ -689,7 +915,10 @@ pub(crate) fn fused_vblur_features_ssim(
             ssq_out,
             s12_out,
             store_sigma,
-            free
+            free,
+            direct,
+            ext,
+            h_act,
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -802,8 +1031,13 @@ fn fused_vblur_ssim_inner_v4(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -824,6 +1058,7 @@ fn fused_vblur_ssim_inner_v4(
         let mut sum_m2 = f32x16::zero(token);
         let mut sum_sq = f32x16::zero(token);
         let mut sum_s12 = f32x16::zero(token);
+        let mut sum_act = f32x16::zero(token);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -851,12 +1086,17 @@ fn fused_vblur_ssim_inner_v4(
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
+            let abase = idx * width + col_base;
             sum_m1 = sum_m1 + f32x16::from_array(token, h_mu1[base..][..16].try_into().unwrap());
             sum_m2 = sum_m2 + f32x16::from_array(token, h_mu2[base..][..16].try_into().unwrap());
             sum_sq =
                 sum_sq + f32x16::from_array(token, h_sigma_sq[base..][..16].try_into().unwrap());
             sum_s12 =
                 sum_s12 + f32x16::from_array(token, h_sigma12[base..][..16].try_into().unwrap());
+            if ext.on {
+                sum_act =
+                    sum_act + f32x16::from_array(token, h_act[abase..][..16].try_into().unwrap());
+            }
         }
 
         for y in 0..height {
@@ -875,14 +1115,20 @@ fn fused_vblur_ssim_inner_v4(
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
-                let sd = (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero);
+                let sd = if direct {
+                    ssim_direct16(token, form, mu1, mu2, ssq, s12).max(zero)
+                } else {
+                    (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 16].copy_from_slice(&sd.to_array());
                 }
@@ -905,31 +1151,43 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // === HF energy (L2): (pixel - mu)² ===
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // === HF magnitude (L1): |pixel - mu| ===
                 // diff1/diff2 already computed above
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+                if ext.on {
+                    let act = sum_act * inv_v;
+                    ext_accumulate16(token, &mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) ===
                 // Plain sums of the raw pixels already in registers — no
@@ -991,6 +1249,8 @@ fn fused_vblur_ssim_inner_v4(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
+            let aadd = add_idx * width + col_base;
+            let arem = rem_idx * width + col_base;
 
             sum_m1 = sum_m1
                 + f32x16::from_array(token, h_mu1[add_base..][..16].try_into().unwrap())
@@ -1004,6 +1264,11 @@ fn fused_vblur_ssim_inner_v4(
             sum_s12 = sum_s12
                 + f32x16::from_array(token, h_sigma12[add_base..][..16].try_into().unwrap())
                 - f32x16::from_array(token, h_sigma12[rem_base..][..16].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act
+                    + f32x16::from_array(token, h_act[aadd..][..16].try_into().unwrap())
+                    - f32x16::from_array(token, h_act[arem..][..16].try_into().unwrap());
+            }
         }
     }
 
@@ -1022,6 +1287,7 @@ fn fused_vblur_ssim_inner_v4(
         let mut sum_m2 = f32x8::zero(v3);
         let mut sum_sq = f32x8::zero(v3);
         let mut sum_s12 = f32x8::zero(v3);
+        let mut sum_act = f32x8::zero(v3);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1049,10 +1315,14 @@ fn fused_vblur_ssim_inner_v4(
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
+            let abase = idx * width + col_base;
             sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[base..][..8].try_into().unwrap());
             sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[base..][..8].try_into().unwrap());
             sum_sq = sum_sq + f32x8::from_array(v3, h_sigma_sq[base..][..8].try_into().unwrap());
             sum_s12 = sum_s12 + f32x8::from_array(v3, h_sigma12[base..][..8].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act + f32x8::from_array(v3, h_act[abase..][..8].try_into().unwrap());
+            }
         }
 
         for y in 0..height {
@@ -1066,14 +1336,20 @@ fn fused_vblur_ssim_inner_v4(
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8);
+                let sd = if direct {
+                    ssim_direct8(v3, form, mu1, mu2, ssq, s12).max(zero8)
+                } else {
+                    (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 8].copy_from_slice(&sd.to_array());
                 }
@@ -1096,30 +1372,42 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+                if ext.on {
+                    let act = sum_act * inv_v8;
+                    ext_accumulate8(v3, &mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) ===
                 // Plain sums of the raw pixels already in registers — no
@@ -1180,6 +1468,8 @@ fn fused_vblur_ssim_inner_v4(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
+            let aadd = add_idx * width + col_base;
+            let arem = rem_idx * width + col_base;
             sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(v3, h_mu1[rem_base..][..8].try_into().unwrap());
             sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[add_base..][..8].try_into().unwrap())
@@ -1190,6 +1480,10 @@ fn fused_vblur_ssim_inner_v4(
             sum_s12 = sum_s12
                 + f32x8::from_array(v3, h_sigma12[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(v3, h_sigma12[rem_base..][..8].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act + f32x8::from_array(v3, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array(v3, h_act[arem..][..8].try_into().unwrap());
+            }
         }
     }
 
@@ -1200,6 +1494,7 @@ fn fused_vblur_ssim_inner_v4(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        let mut sum_act = 0.0f32;
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1221,6 +1516,9 @@ fn fused_vblur_ssim_inner_v4(
             sum_m2 += h_mu2[idx * width + x];
             sum_sq += h_sigma_sq[idx * width + x];
             sum_s12 += h_sigma12[idx * width + x];
+            if ext.on {
+                sum_act += h_act[idx * width + x];
+            }
         }
 
         for y in 0..height {
@@ -1233,14 +1531,20 @@ fn fused_vblur_ssim_inner_v4(
                 let dv = dst[y * width + x];
 
                 // SSIM (f32 to match SIMD paths)
-                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
+                } else {
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -1263,30 +1567,42 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+                if ext.on {
+                    let act = sum_act * inv;
+                    ext_accumulate_scalar(&mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
@@ -1332,6 +1648,9 @@ fn fused_vblur_ssim_inner_v4(
             sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
             sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
             sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            if ext.on {
+                sum_act = sum_act + h_act[add_idx * width + x] - h_act[rem_idx * width + x];
+            }
         }
     }
 
@@ -1365,8 +1684,13 @@ fn fused_vblur_ssim_inner_v4x(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -1387,6 +1711,7 @@ fn fused_vblur_ssim_inner_v4x(
         let mut sum_m2 = f32x16::zero(token);
         let mut sum_sq = f32x16::zero(token);
         let mut sum_s12 = f32x16::zero(token);
+        let mut sum_act = f32x16::zero(token);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1414,12 +1739,17 @@ fn fused_vblur_ssim_inner_v4x(
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
+            let abase = idx * width + col_base;
             sum_m1 = sum_m1 + f32x16::from_array(token, h_mu1[base..][..16].try_into().unwrap());
             sum_m2 = sum_m2 + f32x16::from_array(token, h_mu2[base..][..16].try_into().unwrap());
             sum_sq =
                 sum_sq + f32x16::from_array(token, h_sigma_sq[base..][..16].try_into().unwrap());
             sum_s12 =
                 sum_s12 + f32x16::from_array(token, h_sigma12[base..][..16].try_into().unwrap());
+            if ext.on {
+                sum_act =
+                    sum_act + f32x16::from_array(token, h_act[abase..][..16].try_into().unwrap());
+            }
         }
 
         for y in 0..height {
@@ -1438,14 +1768,20 @@ fn fused_vblur_ssim_inner_v4x(
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
-                let sd = (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero);
+                let sd = if direct {
+                    ssim_direct16(token, form, mu1, mu2, ssq, s12).max(zero)
+                } else {
+                    (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 16].copy_from_slice(&sd.to_array());
                 }
@@ -1468,31 +1804,43 @@ fn fused_vblur_ssim_inner_v4x(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // === HF energy (L2): (pixel - mu)² ===
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // === HF magnitude (L1): |pixel - mu| ===
                 // diff1/diff2 already computed above
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+                if ext.on {
+                    let act = sum_act * inv_v;
+                    ext_accumulate16(token, &mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) ===
                 // Plain sums of the raw pixels already in registers — no
@@ -1554,6 +1902,8 @@ fn fused_vblur_ssim_inner_v4x(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
+            let aadd = add_idx * width + col_base;
+            let arem = rem_idx * width + col_base;
 
             sum_m1 = sum_m1
                 + f32x16::from_array(token, h_mu1[add_base..][..16].try_into().unwrap())
@@ -1567,6 +1917,11 @@ fn fused_vblur_ssim_inner_v4x(
             sum_s12 = sum_s12
                 + f32x16::from_array(token, h_sigma12[add_base..][..16].try_into().unwrap())
                 - f32x16::from_array(token, h_sigma12[rem_base..][..16].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act
+                    + f32x16::from_array(token, h_act[aadd..][..16].try_into().unwrap())
+                    - f32x16::from_array(token, h_act[arem..][..16].try_into().unwrap());
+            }
         }
     }
 
@@ -1585,6 +1940,7 @@ fn fused_vblur_ssim_inner_v4x(
         let mut sum_m2 = f32x8::zero(v3);
         let mut sum_sq = f32x8::zero(v3);
         let mut sum_s12 = f32x8::zero(v3);
+        let mut sum_act = f32x8::zero(v3);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1612,10 +1968,14 @@ fn fused_vblur_ssim_inner_v4x(
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
+            let abase = idx * width + col_base;
             sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[base..][..8].try_into().unwrap());
             sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[base..][..8].try_into().unwrap());
             sum_sq = sum_sq + f32x8::from_array(v3, h_sigma_sq[base..][..8].try_into().unwrap());
             sum_s12 = sum_s12 + f32x8::from_array(v3, h_sigma12[base..][..8].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act + f32x8::from_array(v3, h_act[abase..][..8].try_into().unwrap());
+            }
         }
 
         for y in 0..height {
@@ -1629,14 +1989,20 @@ fn fused_vblur_ssim_inner_v4x(
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8);
+                let sd = if direct {
+                    ssim_direct8(v3, form, mu1, mu2, ssq, s12).max(zero8)
+                } else {
+                    (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 8].copy_from_slice(&sd.to_array());
                 }
@@ -1659,30 +2025,42 @@ fn fused_vblur_ssim_inner_v4x(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+                if ext.on {
+                    let act = sum_act * inv_v8;
+                    ext_accumulate8(v3, &mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) ===
                 // Plain sums of the raw pixels already in registers — no
@@ -1743,6 +2121,8 @@ fn fused_vblur_ssim_inner_v4x(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
+            let aadd = add_idx * width + col_base;
+            let arem = rem_idx * width + col_base;
             sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(v3, h_mu1[rem_base..][..8].try_into().unwrap());
             sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[add_base..][..8].try_into().unwrap())
@@ -1753,6 +2133,10 @@ fn fused_vblur_ssim_inner_v4x(
             sum_s12 = sum_s12
                 + f32x8::from_array(v3, h_sigma12[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(v3, h_sigma12[rem_base..][..8].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act + f32x8::from_array(v3, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array(v3, h_act[arem..][..8].try_into().unwrap());
+            }
         }
     }
 
@@ -1763,6 +2147,7 @@ fn fused_vblur_ssim_inner_v4x(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        let mut sum_act = 0.0f32;
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1784,6 +2169,9 @@ fn fused_vblur_ssim_inner_v4x(
             sum_m2 += h_mu2[idx * width + x];
             sum_sq += h_sigma_sq[idx * width + x];
             sum_s12 += h_sigma12[idx * width + x];
+            if ext.on {
+                sum_act += h_act[idx * width + x];
+            }
         }
 
         for y in 0..height {
@@ -1796,14 +2184,20 @@ fn fused_vblur_ssim_inner_v4x(
                 let dv = dst[y * width + x];
 
                 // SSIM (f32 to match SIMD paths)
-                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
+                } else {
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -1826,30 +2220,42 @@ fn fused_vblur_ssim_inner_v4x(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+                if ext.on {
+                    let act = sum_act * inv;
+                    ext_accumulate_scalar(&mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
@@ -1895,6 +2301,9 @@ fn fused_vblur_ssim_inner_v4x(
             sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
             sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
             sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            if ext.on {
+                sum_act = sum_act + h_act[add_idx * width + x] - h_act[rem_idx * width + x];
+            }
         }
     }
 
@@ -1933,8 +2342,13 @@ fn fused_vblur_ssim_inner_v3(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -1952,6 +2366,7 @@ fn fused_vblur_ssim_inner_v3(
         let mut sum_m2 = f32x8::zero(token);
         let mut sum_sq = f32x8::zero(token);
         let mut sum_s12 = f32x8::zero(token);
+        let mut sum_act = f32x8::zero(token);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -1979,11 +2394,16 @@ fn fused_vblur_ssim_inner_v3(
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
+            let abase = idx * width + col_base;
             sum_m1 = sum_m1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
             sum_m2 = sum_m2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
             sum_sq = sum_sq + f32x8::from_array(token, h_sigma_sq[base..][..8].try_into().unwrap());
             sum_s12 =
                 sum_s12 + f32x8::from_array(token, h_sigma12[base..][..8].try_into().unwrap());
+            if ext.on {
+                sum_act =
+                    sum_act + f32x8::from_array(token, h_act[abase..][..8].try_into().unwrap());
+            }
         }
 
         for y in 0..height {
@@ -1997,14 +2417,20 @@ fn fused_vblur_ssim_inner_v3(
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero);
+                let sd = if direct {
+                    ssim_direct8(token, form, mu1, mu2, ssq, s12).max(zero)
+                } else {
+                    (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 8].copy_from_slice(&sd.to_array());
                 }
@@ -2027,30 +2453,42 @@ fn fused_vblur_ssim_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+                if ext.on {
+                    let act = sum_act * inv_v;
+                    ext_accumulate8(token, &mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) ===
                 // Plain sums of the raw pixels already in registers — no
@@ -2111,6 +2549,8 @@ fn fused_vblur_ssim_inner_v3(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
+            let aadd = add_idx * width + col_base;
+            let arem = rem_idx * width + col_base;
             sum_m1 = sum_m1 + f32x8::from_array(token, h_mu1[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(token, h_mu1[rem_base..][..8].try_into().unwrap());
             sum_m2 = sum_m2 + f32x8::from_array(token, h_mu2[add_base..][..8].try_into().unwrap())
@@ -2121,6 +2561,11 @@ fn fused_vblur_ssim_inner_v3(
             sum_s12 = sum_s12
                 + f32x8::from_array(token, h_sigma12[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(token, h_sigma12[rem_base..][..8].try_into().unwrap());
+            if ext.on {
+                sum_act = sum_act
+                    + f32x8::from_array(token, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array(token, h_act[arem..][..8].try_into().unwrap());
+            }
         }
     }
 
@@ -2131,6 +2576,7 @@ fn fused_vblur_ssim_inner_v3(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        let mut sum_act = 0.0f32;
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -2152,6 +2598,9 @@ fn fused_vblur_ssim_inner_v3(
             sum_m2 += h_mu2[idx * width + x];
             sum_sq += h_sigma_sq[idx * width + x];
             sum_s12 += h_sigma12[idx * width + x];
+            if ext.on {
+                sum_act += h_act[idx * width + x];
+            }
         }
 
         for y in 0..height {
@@ -2164,14 +2613,20 @@ fn fused_vblur_ssim_inner_v3(
                 let dv = dst[y * width + x];
 
                 // SSIM
-                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
+                } else {
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -2194,30 +2649,42 @@ fn fused_vblur_ssim_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+                if ext.on {
+                    let act = sum_act * inv;
+                    ext_accumulate_scalar(&mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
@@ -2263,6 +2730,9 @@ fn fused_vblur_ssim_inner_v3(
             sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
             sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
             sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            if ext.on {
+                sum_act = sum_act + h_act[add_idx * width + x] - h_act[rem_idx * width + x];
+            }
         }
     }
 
@@ -2300,8 +2770,13 @@ fn fused_vblur_ssim_inner(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
 
@@ -2322,6 +2797,7 @@ fn fused_vblur_ssim_inner(
         let mut sum_m2_a = [0.0f32; 8];
         let mut sum_sq_a = [0.0f32; 8];
         let mut sum_s12_a = [0.0f32; 8];
+        let mut sum_act_a = [0.0f32; 8];
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -2352,18 +2828,24 @@ fn fused_vblur_ssim_inner(
             let mut sm2 = f32x8::zero(token);
             let mut ssq = f32x8::zero(token);
             let mut ss12 = f32x8::zero(token);
+            let mut sact = f32x8::zero(token);
             for i in 0..diam {
                 let idx = mirror_idx(i, r, height);
                 let base = idx * width + col_base;
+                let abase = idx * width + col_base;
                 sm1 = sm1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
                 sm2 = sm2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
                 ssq = ssq + f32x8::from_array(token, h_sigma_sq[base..][..8].try_into().unwrap());
                 ss12 = ss12 + f32x8::from_array(token, h_sigma12[base..][..8].try_into().unwrap());
+                if ext.on {
+                    sact = sact + f32x8::from_array(token, h_act[abase..][..8].try_into().unwrap());
+                }
             }
             sm1.store(&mut sum_m1_a);
             sm2.store(&mut sum_m2_a);
             ssq.store(&mut sum_sq_a);
             ss12.store(&mut sum_s12_a);
+            sact.store(&mut sum_act_a);
         }
 
         for y in 0..height {
@@ -2382,14 +2864,20 @@ fn fused_vblur_ssim_inner(
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero);
+                let sd = if direct {
+                    ssim_direct8(token, form, mu1, mu2, ssq, s12).max(zero)
+                } else {
+                    (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd.store((&mut sd_out[base..base + 8]).try_into().unwrap());
                 }
@@ -2412,30 +2900,42 @@ fn fused_vblur_ssim_inner(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
+                if ext.on {
+                    let act = f32x8::from_array(token, sum_act_a) * inv_v;
+                    ext_accumulate8(token, &mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) ===
                 // Plain sums of the raw pixels already in registers — no
@@ -2497,6 +2997,8 @@ fn fused_vblur_ssim_inner(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
+            let aadd = add_idx * width + col_base;
+            let arem = rem_idx * width + col_base;
             let new_m1 = f32x8::from_array(token, sum_m1_a)
                 + f32x8::from_array(token, h_mu1[add_base..][..8].try_into().unwrap())
                 - f32x8::from_array(token, h_mu1[rem_base..][..8].try_into().unwrap());
@@ -2513,6 +3015,12 @@ fn fused_vblur_ssim_inner(
             new_m2.store(&mut sum_m2_a);
             new_sq.store(&mut sum_sq_a);
             new_s12.store(&mut sum_s12_a);
+            if ext.on {
+                let new_act = f32x8::from_array(token, sum_act_a)
+                    + f32x8::from_array(token, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array(token, h_act[arem..][..8].try_into().unwrap());
+                new_act.store(&mut sum_act_a);
+            }
         }
     }
 
@@ -2523,6 +3031,7 @@ fn fused_vblur_ssim_inner(
         let mut sum_m2 = 0.0f32;
         let mut sum_sq = 0.0f32;
         let mut sum_s12 = 0.0f32;
+        let mut sum_act = 0.0f32;
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
@@ -2544,6 +3053,9 @@ fn fused_vblur_ssim_inner(
             sum_m2 += h_mu2[idx * width + x];
             sum_sq += h_sigma_sq[idx * width + x];
             sum_s12 += h_sigma12[idx * width + x];
+            if ext.on {
+                sum_act += h_act[idx * width + x];
+            }
         }
 
         for y in 0..height {
@@ -2556,14 +3068,20 @@ fn fused_vblur_ssim_inner(
                 let dv = dst[y * width + x];
 
                 // SSIM
-                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
+                } else {
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -2586,30 +3104,42 @@ fn fused_vblur_ssim_inner(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
+                if ext.on {
+                    let act = sum_act * inv;
+                    ext_accumulate_scalar(&mut acc, sd, ed, pd, act, ext);
+                }
 
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
@@ -2655,6 +3185,9 @@ fn fused_vblur_ssim_inner(
             sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
             sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
             sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            if ext.on {
+                sum_act = sum_act + h_act[add_idx * width + x] - h_act[rem_idx * width + x];
+            }
         }
     }
 
@@ -3489,4 +4022,138 @@ fn fused_vblur_edge_inner(
     }
 
     acc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fused extension (`ExtPoolsWork`) must form the SAME per-pixel
+    /// values as the three separate passes it replaces; only the f64
+    /// summation order may differ. Build the H planes, run the sweep with
+    /// the extension on, then rebuild every pool the old way from the
+    /// sweep's own stored `sd`/`mu` planes and the old activity chain, and
+    /// demand agreement to f64 round-off.
+    #[test]
+    fn fused_extension_pools_match_the_separate_passes() {
+        let (w, h, r) = (200usize, 70usize, 5usize);
+        let n = w * h;
+        let src: Vec<f32> = (0..n)
+            .map(|i| ((i * 7919 + 13) % 977) as f32 / 977.0 * 0.6 + 0.1)
+            .collect();
+        let dst: Vec<f32> = src
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (v + (((i * 31) % 17) as f32 - 8.0) * 0.004).clamp(0.0, 1.0))
+            .collect();
+        let (mut m1, mut m2, mut sq, mut pr) = (
+            vec![0.0f32; n],
+            vec![0.0f32; n],
+            vec![0.0f32; n],
+            vec![0.0f32; n],
+        );
+        crate::blur::fused_blur_h_ssim(&src, &dst, &mut m1, &mut m2, &mut sq, &mut pr, w, h, r);
+        let mut act_raw = vec![0.0f32; n];
+        crate::simd_ops::abs_diff_into(&src, &m1, &mut act_raw);
+        let mut h_act = vec![0.0f32; n];
+        crate::blur::box_blur_h(&act_raw, &mut h_act, w, h, r);
+        let (inner_start, inner_h) = (8usize, 50usize);
+        let (k_mask, k_iw) = (0.7f32, 0.35f32);
+        let ext = ExtPoolsWork {
+            on: true,
+            mask: true,
+            iw: true,
+            k_mask,
+            k_iw,
+        };
+        let (mut mu1_v, mut mu2_v, mut sd_v) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+        let acc = fused_vblur_features_ssim(
+            &m1,
+            &m2,
+            &sq,
+            &pr,
+            &src,
+            &dst,
+            w,
+            h,
+            inner_start,
+            inner_h,
+            r,
+            &mut mu1_v,
+            &mut mu2_v,
+            true,
+            &mut sd_v,
+            true,
+            &mut [],
+            &mut [],
+            false,
+            FreeExtrasWork::default(),
+            ext,
+            &h_act,
+        );
+        let mut activity = vec![0.0f32; n];
+        let mut tmp = vec![0.0f32; n];
+        crate::blur::box_blur_1pass_into(&act_raw, &mut activity, &mut tmp, w, h, r);
+        let inner = inner_start * w..(inner_start + inner_h) * w;
+        let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = crate::simd_ops::ssim_signal_inline_both(
+            &sd_v[inner.clone()],
+            &activity[inner.clone()],
+            k_mask,
+            k_iw,
+        );
+        let ((art4_m, det4_m), (art4_i, det4_i)) = crate::simd_ops::edge_diff_channel_inline_both(
+            &src[inner.clone()],
+            &dst[inner.clone()],
+            &mu1_v[inner.clone()],
+            &mu2_v[inner.clone()],
+            &activity[inner.clone()],
+            k_mask,
+            k_iw,
+        );
+        let (mse_m, mse_i) = crate::simd_ops::build_inline_mse(
+            &activity[inner.clone()],
+            k_mask,
+            k_iw,
+            &src[inner.clone()],
+            &dst[inner.clone()],
+        );
+        let act_sum: f64 = activity[inner.clone()].iter().map(|&a| a as f64).sum();
+        let pairs = [
+            ("masked_ssim_d", acc.masked_ssim_d, sd_m),
+            ("masked_ssim_d4", acc.masked_ssim_d4, sd4_m),
+            ("masked_ssim_d2", acc.masked_ssim_d2, sd2_m),
+            ("iw_ssim_d", acc.iw_ssim_d, sd_i),
+            ("iw_ssim_d4", acc.iw_ssim_d4, sd4_i),
+            ("iw_ssim_d2", acc.iw_ssim_d2, sd2_i),
+            ("masked_art4", acc.masked_art4, art4_m),
+            ("masked_det4", acc.masked_det4, det4_m),
+            ("iw_art4", acc.iw_art4, art4_i),
+            ("iw_det4", acc.iw_det4, det4_i),
+            ("masked_mse", acc.masked_mse, mse_m),
+            ("iw_mse", acc.iw_mse, mse_i),
+            ("act_sum", acc.act_sum, act_sum),
+        ];
+        let mut worst = 0.0f64;
+        for (name, fused, separate) in pairs {
+            assert!(
+                separate.is_finite() && separate != 0.0,
+                "{name}: inert fixture ({separate})"
+            );
+            let rel = ((fused - separate) / separate).abs();
+            worst = worst.max(rel);
+            // The two orders differ at the f32 level, not only the f64 one:
+            // both reduce 16-lane chunks in f32 before the f64 add, and at a
+            // width that is not a multiple of 16 the separate pass's
+            // row-major chunks straddle rows while the sweep's column groups
+            // do not, so the chunks hold different pixels. Measured 1.7e-9 on
+            // this 200-wide fixture; 1e-7 is a decade of margin over a 16-term
+            // f32 partial sum, and a per-pixel arithmetic difference would be
+            // orders of magnitude larger.
+            assert!(
+                rel <= 1e-7,
+                "{name}: fused {fused:e} vs separate {separate:e} (rel {rel:e})"
+            );
+        }
+        println!("FUSED-EXT-PARITY-RAN worst rel {worst:.3e} over 13 pools");
+    }
 }

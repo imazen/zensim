@@ -1,5 +1,18 @@
 # Squintly adjudication study — pre-registered protocol (2026-09-01)
 
+> **September 15 readiness correction:** this is the historical one-observer
+> study for September 1 candidates, not authorization or a ready protocol for
+> paid current-model phone collection. The
+> [new study handoff](https://github.com/imazen/squintly/blob/main/docs/STUDY_READINESS_2026-09-15.md)
+> controls new work. The audited UI offers A/B/“can't tell,” supports integer
+> pixel zoom and shared pan, does not require viewing the reference before a
+> pair response, and has no frontend block-break prompt. These differ from
+> assumptions below. Per-observer manifest serving repeats the same sequence;
+> a cohort needs explicit allocation and counterbalancing. Revalidate pixels,
+> color, source admission, study identity and deployed behavior before paid
+> collection. This addendum does not alter old stimuli, outcomes or assert
+> whether judgments were collected after the original registration.
+
 **Status: pre-registered before any human judgment is collected.** The
 stimulus set, strata, and decision rule below are fixed. Changing any of them
 after data collection starts would turn this from a confirmatory study into

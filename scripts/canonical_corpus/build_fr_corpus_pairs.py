@@ -304,37 +304,61 @@ def build_safesyn_jpeg_full():
 
 
 def build_aic4():
-    """AIC-4 sample dataset (v2 backfill H-aic4, HOLDOUT-ONLY): 5 source
-    images x 6 codecs x 10 distortion levels ~= 300 pairs. Mirrors the v1
-    Rust loader `load_aic4` in `zensim-bench/examples/extract_features_372col.rs`
-    exactly (same CSV columns, same PTC_images path convention, same
-    human_score = signed JND `distortion` column).
+    """AIC-4 sample dataset (v2 backfill H-aic4; T0 eval-only, HOLDOUT-ONLY):
+    5 source images x 6 codecs x 10 distortion levels = 300 pairs, written TWICE —
+    once on the `PTC_images` crops the subjective study showed, once on the
+    `full_resolution_images` encodes the crops were cut from.
 
-    CSV: img_num,codec,dlevel,img_source,img_distorted,distortion,CI_min,CI_max
-    Images: <aic4_root>/PTC_images/<img_num zero-padded to 5>/<img_source|img_distorted>
-    human_score = distortion (signed JND; verdict uses |SROCC| so orientation is fine,
-    matching AIC-3's score.jnd convention)."""
-    CSV = "/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv"
+    LABELS come from the COMMITTED `site/data/parquet/aic4_sample.parquet`
+    (`human_jnd` + `human_jnd_ci_lo/hi` + the organisers' metric columns, added
+    in 709f4597), NOT from `JPEG_AIC_reconstructed_jnd_scores.csv`: that CSV lived
+    at `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/` and no longer exists, which
+    is what got AIC-4 recorded as "unrefreshable" (2026-08-30). The parquet
+    reproduces the 2026-07-20 manifest's labels to float32 precision (max |d|
+    1.2e-7 over 300/300 rows, measured 2026-09-22); labels are written at float32
+    shortest-round-trip precision because that is all the committed copy holds.
+
+    human_score = `human_jnd`, the reconstructed JND DISTANCE from the source —
+    DISTORTION-oriented (it rises on all 270 ladder steps), as declared for `aic4`
+    in check_target_orientation.py's EXPECTED_ORIENTATION. Never negate it here:
+    the orientation is carried by that declaration, not by the table."""
+    import numpy as np
+    import pyarrow.parquet as pq
+    repo = Path(__file__).resolve().parents[2]
+    LABELS = repo / "site" / "data" / "parquet" / "aic4_sample.parquet"
     AIC4_ROOT = Path("/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset")
     PTC_ROOT = AIC4_ROOT / "PTC_images"
-    OUT = "/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv"
-    out, miss = [], 0
-    with open(CSV) as f:
-        for r in csv.DictReader(f):
-            img_num = int(r["img_num"])
-            img_dir = PTC_ROOT / f"{img_num:05d}"
-            ref = img_dir / r["img_source"]
-            dist = img_dir / r["img_distorted"]
-            if not (ref.exists() and dist.exists()):
-                miss += 1
-                continue
-            out.append((str(ref), str(dist), float(r["distortion"])))
-    Path(OUT).parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT, "w", newline="") as f:
-        w = csv.writer(f, delimiter="\t")
-        w.writerow(["ref_path", "dist_path", "human_score"])
-        w.writerows(out)
-    print(f"AIC-4: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
+    FULL_ROOT = AIC4_ROOT / "full_resolution_images"
+    OUT_DIR = Path(os.environ.get(
+        "AIC4_PAIRS_OUT", "/mnt/v/output/zensim/aic4-refresh-2026-09-22"))
+    t = pq.read_table(LABELS, columns=["ref_path", "dist_path", "image_name",
+                                       "codec", "dlevel", "human_jnd"])
+    cols = {c: t.column(c).to_pylist() for c in t.column_names}
+    jnd = t.column("human_jnd").to_numpy().astype(np.float32)
+    crop, full, missing = [], [], []
+    for i in range(t.num_rows):
+        ref, dist = Path(cols["ref_path"][i]), Path(cols["dist_path"][i])
+        # The committed paths are absolute on the canonical dataset root; re-root
+        # them so the manifest names exactly the files this builder checked.
+        if ref.parent.parent != PTC_ROOT or dist.parent.parent != PTC_ROOT:
+            raise SystemExit(f"AIC-4: unexpected label path {ref} / {dist}")
+        # full_resolution_images/<NNNNN>/<name> is the crop's name minus `PTC_`.
+        fref = FULL_ROOT / ref.parent.name / ref.name.removeprefix("PTC_")
+        fdist = FULL_ROOT / dist.parent.name / dist.name.removeprefix("PTC_")
+        label = np.format_float_positional(jnd[i], unique=True, trim="-")
+        for p in (ref, dist, fref, fdist):
+            if not p.exists():
+                missing.append(str(p))
+        crop.append((str(ref), str(dist), label))
+        full.append((str(fref), str(fdist), label))
+    _require_all_resolved("AIC-4", missing, 4 * t.num_rows)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for name, rows in (("aic4_pairs.tsv", crop), ("aic4_fullres_pairs.tsv", full)):
+        with open(OUT_DIR / name, "w", newline="") as f:
+            w = csv.writer(f, delimiter="\t")
+            w.writerow(["ref_path", "dist_path", "human_score"])
+            w.writerows(rows)
+        print(f"AIC-4: {len(rows)} pairs -> {OUT_DIR / name}")
 
 
 def build_konjnd_jpeg_val():

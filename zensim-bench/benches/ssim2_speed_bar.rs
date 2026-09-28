@@ -25,6 +25,30 @@
 //! ```
 //! `ZEN_S2_SIZES` (default `576,1152,2304`), `ZEN_S2_ROUNDS`, `ZEN_S2_WALL_S`
 //! keep a matrix run from holding zenbench's exclusive lock for hours.
+//! `ZEN_S2_ENSEMBLE` (comma-separated ordered bake paths) together with
+//! `ZEN_S2_ENSEMBLE_WEIGHTS` adds the complete calibrated `bake_ensemble`
+//! surface and separate `bake_member_N` controls. Both options are required;
+//! malformed or unservable candidates fail before benchmarking.
+//! `ZEN_S2_ENSEMBLE_2` / `ZEN_S2_ENSEMBLE_2_WEIGHTS` declare a SECOND
+//! ensemble, so two frozen compositions interleave with each other and with
+//! every other arm inside ONE process rather than across two runs whose
+//! box states are not common-mode. `ZEN_S2_ENSEMBLE_NAME` /
+//! `ZEN_S2_ENSEMBLE_2_NAME` name them; unset, the first keeps its historical
+//! `bake_ensemble` / `bake_member_N` arm names and the second is
+//! `bake_ensemble_2` / `bake_ensemble_2_member_N`. Both ensembles are subject
+//! to `ZEN_S2_ARMS`, so a run can price the compositions without paying for
+//! ten member controls.
+//! `ZEN_S2_SINGLE_CALL=1` disables iteration batching for latency bounds.
+//! `ZEN_S2_CALLS=N` sets a positive base batch size for throughput controls; it
+//! cannot be combined with `ZEN_S2_SINGLE_CALL=1`. Batched means are not
+//! individual-call latency percentiles.
+//! `ZENBENCH_RESULT_PATH` saves completed paired rounds, including actual call
+//! counts, raw/compensated total durations, execution order and pre-round gate
+//! status (clean, flagged, or disabled/unknown). Use raw totals
+//! from rounds with exactly one call for latency distributions. Warmup and gate
+//! waits are excluded; sample retention alone does not establish quiet-machine
+//! admission or representative-input coverage. Historical summary-only files
+//! cannot supply latency percentiles.
 //!
 //! ## The amended-W4 arms (`benchmarks/hybrid_candidate_2026-09-01.md`, APPENDIX B)
 //!
@@ -45,6 +69,7 @@
 //! | `free156_peaks_raw` | `V1PoolsMode::Peaks` + `V1FreeExtras::RawMoments`, v1-only, 944 layout | the 156+free MLP (A3b/A4b class) |
 //! | `peaks156_no_raw`  | `V1PoolsMode::Peaks`, `V1FreeExtras::Off`, v1-only, 944 layout | the 156+peaks head — the ZERO-marginal-compute half of the free set |
 //! | `add156_plus_corrhead` | identical to `add156_156basic` | the additive head **and** the companion corruption head (`ZEN_HY_CORRHEAD`) — the delta against `add156_156basic` prices attaching the head |
+//! | `bake_surface`, `bake_surface_corruption` | `BakeScorer::compute`, actual declared plan | complete base versus base+tree composition, including calibration and the gate |
 //!
 //! Bake bytes come from the environment so none enter git:
 //! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear),
@@ -68,6 +93,81 @@
 use imgref::Img;
 use zenpredict::{Model, Predictor};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
+
+struct Ensemble {
+    models: Vec<Model>,
+    weights: Vec<f64>,
+    /// Arm name for the composition; members are `{name}_member_N`, except for
+    /// the unnamed first slot which keeps the historical `bake_member_N`.
+    name: String,
+    member_prefix: String,
+}
+
+impl Ensemble {
+    /// Every declared ensemble, in slot order. Slot `""` is the historical
+    /// `ZEN_S2_ENSEMBLE`; slot `_2` is the second. A gap (slot 2 declared with
+    /// slot 1 empty) is allowed — the slots are independent.
+    fn load_all() -> Vec<Self> {
+        ["", "_2"].iter().filter_map(|s| Self::load(s)).collect()
+    }
+
+    fn load(slot: &str) -> Option<Self> {
+        let paths = std::env::var(format!("ZEN_S2_ENSEMBLE{slot}")).ok();
+        let weights = std::env::var(format!("ZEN_S2_ENSEMBLE{slot}_WEIGHTS")).ok();
+        let (paths, weights) = match (paths, weights) {
+            (None, None) => return None,
+            (Some(paths), Some(weights)) => (paths, weights),
+            _ => panic!(
+                "ZEN_S2_ENSEMBLE{slot} and ZEN_S2_ENSEMBLE{slot}_WEIGHTS must be supplied together"
+            ),
+        };
+        let name = std::env::var(format!("ZEN_S2_ENSEMBLE{slot}_NAME"))
+            .unwrap_or_else(|_| format!("bake_ensemble{slot}"));
+        // The unnamed first slot keeps `bake_member_N` so the arm names in
+        // `benchmarks/model_blend_speed_2026-09-08.md` still resolve.
+        let member_prefix = if slot.is_empty() && std::env::var_os("ZEN_S2_ENSEMBLE_NAME").is_none()
+        {
+            "bake".to_string()
+        } else {
+            name.clone()
+        };
+        let paths: Vec<_> = paths.split(',').map(str::trim).collect();
+        assert!(paths.len() >= 2, "ensemble needs at least two members");
+        let mut identities = std::collections::HashSet::new();
+        let models = paths
+            .iter()
+            .map(|path| {
+                assert!(!path.is_empty(), "empty ensemble member");
+                let canonical = std::fs::canonicalize(path).expect("ensemble member path");
+                assert!(identities.insert(canonical), "duplicate ensemble member");
+                let bytes = std::fs::read(path).expect("read ensemble member");
+                Model::from_bytes(&bytes).expect("load ensemble member")
+            })
+            .collect();
+        let weights = weights
+            .split(',')
+            .map(|s| s.trim().parse().expect("parse explicit ensemble weight"))
+            .collect();
+        let candidate = Self {
+            models,
+            weights,
+            name,
+            member_prefix,
+        };
+        // The canonical surface owns convexity, feature and model validation.
+        candidate.scorer();
+        eprintln!(
+            "# ensemble[{slot}] name={} paths={paths:?} weights={:?}",
+            candidate.name, candidate.weights
+        );
+        Some(candidate)
+    }
+
+    fn scorer(&self) -> zensim::BakeScorer<'_> {
+        zensim::BakeScorer::ensemble(&self.models, Some(&self.weights))
+            .expect("servable complete ensemble")
+    }
+}
 
 /// One env-supplied bake, parsed once and reused across every round.
 /// The companion CORRUPTION head, in either wire format it can arrive in.
@@ -198,6 +298,24 @@ fn test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     (src, dst)
 }
 
+/// u8 sRGB -> f32 sRGB, the input form the `ssimulacra2` (rust-av) crate takes.
+/// Byte-identical to `benches/bench_compare.rs::make_f32_srgb`.
+fn make_f32_srgb(pixels: &[[u8; 3]]) -> Vec<[f32; 3]> {
+    pixels
+        .iter()
+        .map(|&[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
+        .collect()
+}
+
+/// `ZEN_S2_ARMS=a,b,c` keeps only the named arms (default: all). For profiling
+/// one arm under `perf record` without the others' samples in the way.
+fn arm_enabled(name: &str) -> bool {
+    match std::env::var("ZEN_S2_ARMS") {
+        Ok(list) if !list.trim().is_empty() => list.split(',').any(|a| a.trim() == name),
+        _ => true,
+    }
+}
+
 fn env_usize(key: &str, dflt: usize) -> usize {
     std::env::var(key)
         .ok()
@@ -233,6 +351,20 @@ fn cap_tier_v3(_cap: bool) -> Result<(), String> {
 }
 
 fn main() {
+    let calls = std::env::var("ZEN_S2_CALLS").ok().map(|s| {
+        let n: usize = s.parse().expect("ZEN_S2_CALLS must be a positive integer");
+        assert!(n > 0, "ZEN_S2_CALLS must be positive");
+        assert!(
+            env_usize("ZEN_S2_SINGLE_CALL", 0) != 1,
+            "ambiguous batch size"
+        );
+        n
+    });
+    let result_path = std::env::var_os("ZENBENCH_RESULT_PATH").map(std::path::PathBuf::from);
+    if let Some(path) = &result_path {
+        assert!(!path.exists(), "refusing to overwrite benchmark evidence");
+    }
+    let ensembles: &'static [Ensemble] = Box::leak(Ensemble::load_all().into_boxed_slice());
     if env_usize("ZEN_S2_CAP_V3", 0) == 1 {
         match cap_tier_v3(true) {
             Ok(()) => {
@@ -261,6 +393,18 @@ fn main() {
     // not visible to this crate as `cfg(feature = ...)` anyway, which is the
     // trap an earlier draft of this arm fell into.
     let zd: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::D)));
+    // ---- the cross-GENERATION row (2026-09-18 speed matrix).
+    //
+    // Every named profile goes through the SAME `Zensim::new(p).compute(..)`
+    // surface as `zensim_B`/`zensim_D`, so the arms differ in the profile and
+    // in nothing else — no hand-built toggles, no bypassed router. `PreviewV0_2`
+    // is the in-tree implementation of the profile the published 0.2.x line
+    // defaults to; it is NOT the published 0.2.7 binary (that opponent lives in
+    // `benches/crates_io_speed_bar.rs` behind the `crates-io-0-2-7` feature,
+    // which pulls the real crate). The two are not interchangeable and the
+    // published numbers say which one they are.
+    let z02: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::PreviewV0_2)));
+    let zc: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::C)));
     // Amended-W4 arms. `Box::leak` so the &'static the closures need is real;
     // both are parsed exactly once, outside every timed region.
     let mlp: Option<&'static Head> = Head::load("ZEN_HY_MLP").map(|h| &*Box::leak(Box::new(h)));
@@ -334,26 +478,195 @@ fn main() {
             let (src, dst) = test_pair(n, n);
             let src_s: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst_s: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
+            for e in ensembles {
+                let s = RgbSlice::new(src_s, n, n);
+                let d = RgbSlice::new(dst_s, n, n);
+                let member_scores: Vec<_> = e
+                    .models
+                    .iter()
+                    .map(|m| {
+                        zensim::BakeScorer::new(m)
+                            .unwrap()
+                            .compute(&s, &d, None)
+                            .unwrap()
+                            .score()
+                    })
+                    .collect();
+                let expected: f64 = member_scores
+                    .iter()
+                    .zip(&e.weights)
+                    .map(|(s, w)| s * w)
+                    .sum();
+                let actual = e.scorer().compute(&s, &d, None).unwrap().score();
+                assert!(
+                    actual.is_finite() && (actual - expected).abs() <= 1e-10,
+                    "ensemble score differs from calibrated member composition"
+                );
+                eprintln!(
+                    "# geometry={n} ensemble={} member_scores={member_scores:?} ensemble_score={actual:?}",
+                    e.name
+                );
+            }
             suite.compare(format!("ssim2_bar_{n}"), |group| {
                 group
                     .config()
                     .max_rounds(max_r)
                     .min_rounds(min_r)
                     .max_wall_time(std::time::Duration::from_secs(wall_s));
-                group.bench("fast_ssim2", move |b| {
-                    b.iter(move || {
-                        let s = Img::new(src_s, n, n);
-                        let d = Img::new(dst_s, n, n);
-                        zenbench::black_box(fast_ssim2::compute_ssimulacra2(s, d).unwrap())
-                    })
-                });
-                group.bench("zensim_B", move |b| {
-                    b.iter(move || {
-                        let s = RgbSlice::new(src_s, n, n);
-                        let d = RgbSlice::new(dst_s, n, n);
-                        zenbench::black_box(zb.compute(&s, &d).unwrap().score())
-                    })
-                });
+                if env_usize("ZEN_S2_SINGLE_CALL", 0) == 1 {
+                    group.config().min_iterations = 1;
+                    group.config().max_iterations = 1;
+                }
+                if let Some(calls) = calls {
+                    group.config().min_iterations = calls;
+                    group.config().max_iterations = calls;
+                }
+                for e in ensembles {
+                    if arm_enabled(&e.name) {
+                        group.bench(e.name.clone(), move |b| {
+                            let mut scorer = e.scorer();
+                            b.iter(move || {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                            })
+                        });
+                    }
+                    for (i, model) in e.models.iter().enumerate() {
+                        let member = format!("{}_member_{i}", e.member_prefix);
+                        if !arm_enabled(&member) {
+                            continue;
+                        }
+                        group.bench(member, move |b| {
+                            let mut scorer = zensim::BakeScorer::new(model).unwrap();
+                            b.iter(move || {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                            })
+                        });
+                    }
+                }
+                if arm_enabled("fast_ssim2") {
+                    group.bench("fast_ssim2", move |b| {
+                        b.iter(move || {
+                            let s = Img::new(src_s, n, n);
+                            let d = Img::new(dst_s, n, n);
+                            zenbench::black_box(fast_ssim2::compute_ssimulacra2(s, d).unwrap())
+                        })
+                    });
+                }
+                // ---- the two other PEER metrics, so the published matrix is
+                // not "zensim vs one opponent". Both are called exactly the way
+                // `benches/bench_compare.rs` calls them, so the two instruments
+                // cannot disagree about what a peer arm means.
+                //
+                // `butteraugli` takes u8 sRGB and does every conversion itself,
+                // so its timed region is the whole call — same contract as
+                // `fast_ssim2` and as every `zensim_*` arm.
+                if arm_enabled("butteraugli") {
+                    let src_rgb8: &'static [rgb::RGB8] = bytemuck::cast_slice(src_s);
+                    let dst_rgb8: &'static [rgb::RGB8] = bytemuck::cast_slice(dst_s);
+                    group.bench("butteraugli", move |b| {
+                        b.iter(move || {
+                            let s = Img::new(src_rgb8, n, n);
+                            let d = Img::new(dst_rgb8, n, n);
+                            zenbench::black_box(
+                                butteraugli::butteraugli(
+                                    s,
+                                    d,
+                                    &butteraugli::ButteraugliParams::default(),
+                                )
+                                .unwrap(),
+                            )
+                        })
+                    });
+                }
+                // GMSD (zenmetrics `gmsd`, a port of libgmsd): u8 sRGB in,
+                // BT.601 luma + 2x decimation + Prewitt GMS + std pooling
+                // inside — the same whole-call contract as `butteraugli` and
+                // `fast_ssim2`. Its only downscale is GMSD's own fixed 2x step.
+                // Built only with `--features gmsd-arm`.
+                #[cfg(feature = "gmsd-arm")]
+                if arm_enabled("gmsd") {
+                    let src_b: &'static [u8] = bytemuck::cast_slice(src_s);
+                    let dst_b: &'static [u8] = bytemuck::cast_slice(dst_s);
+                    group.bench("gmsd", move |b| {
+                        b.iter(move || {
+                            zenbench::black_box(
+                                gmsd::gmsd_rgb8(src_b, dst_b, n, n, n * 3).unwrap().gmsd,
+                            )
+                        })
+                    });
+                }
+                // `ssimulacra2` (rust-av) takes PLANAR-ish owned `Vec<[f32; 3]>`
+                // sRGB, not u8, so its timed region is NOT the same contract:
+                // the u8 -> f32 sRGB widening is hoisted OUT (done once, here),
+                // and what remains inside is the `Vec` clone its by-value API
+                // forces plus sRGB -> linear -> XYB and the metric itself. That
+                // clone is a real memcpy (2 x 48 MiB at 4096^2) and it is
+                // charged to this arm; the widening is not. `bench_compare.rs`
+                // draws the line in exactly the same place — this arm is a copy
+                // of it, not a second opinion about it.
+                if arm_enabled("ssimulacra2_rs") {
+                    let src_f32: &'static [[f32; 3]] =
+                        Box::leak(make_f32_srgb(src_s).into_boxed_slice());
+                    let dst_f32: &'static [[f32; 3]] =
+                        Box::leak(make_f32_srgb(dst_s).into_boxed_slice());
+                    group.bench("ssimulacra2_rs", move |b| {
+                        use ssimulacra2::{
+                            ColorPrimaries, Rgb, TransferCharacteristic, compute_frame_ssimulacra2,
+                        };
+                        b.iter(move || {
+                            let s = Rgb::new(
+                                src_f32.to_vec(),
+                                n,
+                                n,
+                                TransferCharacteristic::SRGB,
+                                ColorPrimaries::BT709,
+                            )
+                            .unwrap();
+                            let d = Rgb::new(
+                                dst_f32.to_vec(),
+                                n,
+                                n,
+                                TransferCharacteristic::SRGB,
+                                ColorPrimaries::BT709,
+                            )
+                            .unwrap();
+                            zenbench::black_box(compute_frame_ssimulacra2(s, d).unwrap())
+                        })
+                    });
+                }
+                // ---- the cross-GENERATION zensim row. Identical surface to
+                // `zensim_B` below; only the profile differs.
+                if arm_enabled("zensim_V0_2") {
+                    group.bench("zensim_V0_2", move |b| {
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(z02.compute(&s, &d).unwrap().score())
+                        })
+                    });
+                }
+                if arm_enabled("zensim_C") {
+                    group.bench("zensim_C", move |b| {
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(zc.compute(&s, &d).unwrap().score())
+                        })
+                    });
+                }
+                if arm_enabled("zensim_B") {
+                    group.bench("zensim_B", move |b| {
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(zb.compute(&s, &d).unwrap().score())
+                        })
+                    });
+                }
                 // ---- the PRODUCT fast-class path, which this bench had no arm
                 // for (added by the kernel lane, 2026-09-05).
                 //
@@ -380,15 +693,78 @@ fn main() {
                 // not redundant — `add156_156basic` requests
                 // `V1PoolsMode::Off`, which `fold_engine::pools_mode_for_need`
                 // never returns, so no production call can produce that walk.
-                group.bench("zensim_D", move |b| {
-                    b.iter(move || {
-                        let s = RgbSlice::new(src_s, n, n);
-                        let d = RgbSlice::new(dst_s, n, n);
-                        zenbench::black_box(zd.compute(&s, &d).unwrap().score())
-                    })
-                });
+                if arm_enabled("zensim_D") {
+                    group.bench("zensim_D", move |b| {
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(zd.compute(&s, &d).unwrap().score())
+                        })
+                    });
+                }
                 // ---- amended-W4: candidate = its own regime + its own forwards
                 if let Some(h) = add {
+                    // The actual candidate surface owns planning and all
+                    // score composition. The older explicit-walk arms below
+                    // remain extraction/forward diagnostics only.
+                    group.bench("bake_surface", move |b| {
+                        let mut scorer = zensim::BakeScorer::new(&h.model).expect("servable bake");
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                        })
+                    });
+                    if let Some(CorrHead::Tree(ch)) = corrhead {
+                        group.bench("bake_surface_corruption", move |b| {
+                            let mut scorer = zensim::BakeScorer::new(&h.model)
+                                .expect("servable bake")
+                                .with_corruption_head(ch, None)
+                                .expect("servable companion");
+                            b.iter(move || {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                            })
+                        });
+                    }
+                    // Full cached-reference score+map cost, using the same
+                    // source-bound worker as codec reconstructions. Rejecting
+                    // the fixture is a failure, never a faster successful map.
+                    if env_usize("ZEN_S2_PREPARED", 0) == 1 {
+                        for with_head in [false, true] {
+                            let name = if with_head {
+                                "bake_prepared_corruption"
+                            } else {
+                                "bake_prepared"
+                            };
+                            group.bench(name, move |b| {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                let mut scorer =
+                                    zensim::BakeScorer::new(&h.model).expect("servable bake");
+                                if with_head {
+                                    let Some(CorrHead::Tree(ch)) = corrhead else {
+                                        panic!("prepared integrity benchmark requires a tree head")
+                                    };
+                                    scorer = scorer
+                                        .with_corruption_head(ch, None)
+                                        .expect("servable head");
+                                }
+                                let mut worker =
+                                    scorer.prepare_steering(&s, 8).expect("prepared steering");
+                                b.iter(move || {
+                                    let value = worker
+                                        .compute(&d, None)
+                                        .expect("valid reconstruction must stay inactive");
+                                    zenbench::black_box((
+                                        value.result().score(),
+                                        value.refinement_gain(0, 0, 32, 32),
+                                    ))
+                                });
+                            });
+                        }
+                    }
                     group.bench("add156_156basic", move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         let mut pred = Predictor::new(&h.model);
@@ -631,5 +1007,7 @@ fn main() {
             });
         }
     });
-    let _ = result;
+    if let Some(path) = result_path {
+        result.save(path).expect("save benchmark evidence");
+    }
 }

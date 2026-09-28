@@ -164,6 +164,11 @@ pub enum DownscaleFilter {
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ZensimConfig {
+    /// Request-local arithmetic for model-bound serving.
+    pub(crate) formula_revision: Option<crate::feature_defs::FormulaRevision>,
+    pub(crate) local_only: bool,
+    pub(crate) omit_edges: bool,
+    pub(crate) attribution_channels: Option<[[bool; 3]; crate::NUM_SCALES]>,
     /// Box blur radius at scale 0 (default: 5, giving an 11-pixel kernel).
     ///
     /// The blur kernel width is `2 * blur_radius + 1`. Larger radii capture
@@ -284,6 +289,10 @@ pub struct ZensimConfig {
 impl Default for ZensimConfig {
     fn default() -> Self {
         Self {
+            formula_revision: None,
+            local_only: false,
+            omit_edges: false,
+            attribution_channels: None,
             blur_radius: 5,
             blur_passes: 1,
             blur_kernel: BlurKernel::default(),
@@ -755,6 +764,11 @@ pub fn compute_zensim_with_ref_and_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
+    // These two entries take a caller-built config rather than a profile, so
+    // they never pass through `config_from_params` — the route refusal has to
+    // be repeated here or a `blur_passes != 1` config would reach the strip
+    // walk under an arithmetic revision that does not serve it.
+    crate::ssim_form::check_route(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
@@ -792,7 +806,7 @@ pub fn compute_zensim_with_ref_and_config(
 }
 
 /// Per-scale statistics collected during computation.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values
     pub(crate) ssim: [f64; 6],
@@ -803,6 +817,10 @@ pub(crate) struct ScaleStats {
     /// High-frequency energy loss (L2): max(0, 1 - Σ(dst-mu_dst)²/Σ(src-mu_src)²) per channel.
     /// Measures loss of local detail energy relative to source. Sensitive to blur/smoothing.
     pub(crate) hf_energy_loss: [f64; 3],
+    /// Raw destination HF sum for the exact active gain-form derivative.
+    /// Read only by the `custom-profiles` attribution path.
+    #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
+    pub(crate) hf_sq_dst_sum: [f64; 3],
     /// High-frequency magnitude loss (L1): max(0, 1 - Σ|dst-mu_dst|/Σ|src-mu_src|) per channel.
     /// Like hf_energy_loss but with L1 norm — more robust to outliers.
     pub(crate) hf_mag_loss: [f64; 3],
@@ -1238,6 +1256,8 @@ use crate::source::ImageSource;
 
 mod bake;
 pub use bake::BakeScorer;
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub use bake::SteeringSession;
 
 /// Metric configuration. Methods on this struct are the primary API.
 ///
@@ -1680,6 +1700,7 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         self.check_stop()?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         let mut result = compute_with_config_inner(
             source,
             distorted,
@@ -1741,6 +1762,7 @@ impl Zensim {
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         config.extended_features = true;
         let result = compute_with_config_inner(
             source,
@@ -2056,6 +2078,7 @@ impl Zensim {
             self.parallel,
             toggles,
             scratch,
+            None,
         )
     }
 
@@ -2095,8 +2118,8 @@ impl Zensim {
     /// lands on the scale the downstream formulas were tuned on) feeds
     /// the UNCHANGED streaming 720 walk. Sources: `LinearF32Rgba` (f32)
     /// or `Srgb16Rgba` (code values; `Pq`/`Hlg` only), `AlphaMode::Opaque`,
-    /// primaries taken as-is. SDR sRGB extraction is untouched by this
-    /// route existing (byte-stability gated).
+    /// declared primaries converted to the opsin matrix's linear-sRGB basis
+    /// without clipping absolute light to the SDR range. SDR extraction is unchanged.
     ///
     /// # Errors
     ///
@@ -2120,6 +2143,7 @@ impl Zensim {
             self.parallel,
             toggles,
             scratch,
+            None,
         )
     }
 
@@ -2377,6 +2401,7 @@ impl Zensim {
         // here. Symmetry across the call path is preserved.
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
         // (also-padded) reference pyramid; score with the original dims. The
@@ -2471,6 +2496,18 @@ impl Zensim {
         }
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
+        // Identity is decided by ONE owner (`images_byte_identical` ->
+        // `identical_result_at`, inside `compute`). The strip walk has no
+        // short-circuit of its own, so a perfect copy scored here returned the
+        // model's forward on an all-zero feature row (96.24 for `B`) while
+        // `compute` returned exactly 100 — two paths, two answers, same pair.
+        // Delegating to `compute` cannot drift from it; `compute` short-circuits
+        // immediately so no strip work is done. Same shape as the sub-64px
+        // delegation above.
+        if images_byte_identical(source, distorted) {
+            return self.compute(source, distorted);
+        }
 
         let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_streaming_strips(
             source,
@@ -2556,6 +2593,7 @@ impl Zensim {
         }
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
 
         let (stats, mean_offset) =
             crate::streaming::compute_multiscale_stats_streaming_strips_with_ref(
@@ -2612,6 +2650,7 @@ impl Zensim {
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
         // fold since the fold-engine lane; this entry did not, so a ref LOOP —
@@ -2781,6 +2820,7 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         // Identical inputs must score exactly 100.0 through the same
         // `mark_identical` contract the SDR path uses (compares only the
         // valid `3 * width` of each row, so stride padding is ignored here
@@ -2848,6 +2888,7 @@ impl Zensim {
             }
         }
         let mut config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         config.extended_features = true;
         let identical = (0..height).all(|y| {
             ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
@@ -2908,6 +2949,7 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         // Same identity short-circuit as the interleaved entry (valid
         // `width` of each plane row only).
         let identical = ref_planes.iter().zip(dist_planes.iter()).all(|(r, d)| {
@@ -2945,6 +2987,7 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         config.compute_all_features = true;
         let result = compute_with_config_inner(
             source,
@@ -3011,6 +3054,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
+        crate::ssim_form::check_route(&config)?;
         let result = compute_with_config_inner(
             source,
             distorted,
@@ -3213,7 +3257,9 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// nits need f32 linear, so an `is_hdr()` source in a u8/u16 sRGB format is
 /// a self-contradictory descriptor and errors rather than guessing.
 fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimError> {
-    if src.pixel_format() != crate::source::PixelFormat::LinearF32Rgba {
+    if src.pixel_format() != crate::source::PixelFormat::LinearF32Rgba
+        || src.alpha_mode() != crate::source::AlphaMode::Opaque
+    {
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
     let (w, h) = (src.width(), src.height());
@@ -3222,7 +3268,13 @@ fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimEr
         let row = src.row_bytes(y);
         let px: &[f32] = bytemuck::cast_slice(&row[..w * 16]);
         for x in 0..w {
-            out.extend_from_slice(&px[x * 4..x * 4 + 3]);
+            let mut pixel = [px[x * 4], px[x * 4 + 1], px[x * 4 + 2]];
+            crate::color::apply_gamut_matrix(
+                &mut pixel,
+                src.color_primaries(),
+                crate::source::GamutMapping::Preserve,
+            );
+            out.extend_from_slice(&pixel);
         }
     }
     Ok(out)
@@ -3280,6 +3332,18 @@ pub(crate) fn validate_ref_match(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
+    if precomputed.sampling.is_some() {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "sampling-bound cache requires its BakeScorer surface",
+        });
+    }
+    validate_ref_dimensions(precomputed, distorted)
+}
+
+pub(crate) fn validate_ref_dimensions(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
     if precomputed.width() != distorted.width() || precomputed.height() != distorted.height() {
         return Err(ZensimError::DimensionMismatch);
     }
@@ -3318,7 +3382,10 @@ pub(crate) fn check_within_max_pixels(
 
 /// Check if source and distorted images have byte-identical pixel data
 /// and matching color interpretation (format + primaries).
-fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
+pub(crate) fn images_byte_identical(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> bool {
     use crate::source::{AlphaMode, PixelFormat};
 
     let (w, h) = (source.width(), source.height());
@@ -3500,7 +3567,10 @@ pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
 
 /// Reflect(mirror)-pad `src` up to [`min_pyramid_dim_for_scales`] in each dim.
 pub(crate) fn reflect_pad_for_scales(src: &impl ImageSource, num_scales: usize) -> OwnedImage {
-    let min_dim = min_pyramid_dim_for_scales(num_scales);
+    reflect_pad_to_size(src, min_pyramid_dim_for_scales(num_scales))
+}
+
+pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> OwnedImage {
     let (w, h) = (src.width(), src.height());
     let bpp = src.pixel_format().bytes_per_pixel();
     let (bw, bh) = (w.max(min_dim), h.max(min_dim));
@@ -3692,6 +3762,10 @@ fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult 
 
 pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
     ZensimConfig {
+        formula_revision: None,
+        local_only: false,
+        omit_edges: false,
+        attribution_channels: None,
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
         blur_kernel: BlurKernel::Box {
@@ -3793,6 +3867,13 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
+    // A built-in profile's bake declares no revision, so it IS revision 1.
+    // `ZENSIM_FORMULA_REV` pins the PIXELS, not the coefficients — pinning a
+    // research revision and reading a profile score therefore prices revision-1
+    // weights against another era's features. `BakeScorer` refuses that
+    // outright; this path cannot, because the same call also produces the
+    // features a research extraction is there to collect. So it says so, once.
+    crate::ssim_form::warn_pinned_revision_scoring_once();
     // **Score-disposition guard (D9).** A bake carrying
     // `zentrain.output_calibration_spline` emits an already-calibrated
     // 0-100 score. Scoring it with `skip_score_mapping == false` applies
@@ -4313,6 +4394,13 @@ fn forward_one_bake_with_codec(
     let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
         reason: "Model::from_bytes failed to parse the bake header or layer table",
     })?;
+    // Legacy profiles do not bind their front end/reference cache to this
+    // contract. Complete sampling candidates must use BakeScorer directly.
+    if model.metadata().get(crate::sampling::KEY).is_some() {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "sampling-bound bake requires the BakeScorer pixel surface",
+        });
+    }
     let bundle = cached_bake_metadata(bytes, &model)?;
     let mut scorer = BakeScorer::with_metadata(&model, bundle)?;
     scorer.score_features(features, width, height, codec_hint)
@@ -4941,7 +5029,11 @@ pub fn compute_zensim_with_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
-    // Validation
+    // Validation. The route refusal comes first: this entry takes a
+    // caller-built config, so it never passes through `config_from_params`
+    // and would otherwise carry a `blur_passes != 1` config into the strip
+    // walk under an arithmetic revision that does not serve it.
+    crate::ssim_form::check_route(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }

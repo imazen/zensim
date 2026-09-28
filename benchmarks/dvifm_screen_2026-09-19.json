@@ -1,0 +1,142 @@
+{
+ "schema": "dvifm-screen-result-v1",
+ "date": "2026-09-19",
+ "protocol": "benchmarks/dvifm_screen_prereg_2026-09-19.md",
+ "hypothesis": "block-peak error weighted by mutual contrast-masking visibility adds local-ordering information that basic228 lacks",
+ "decision_metric": "per-seed paired difference: basic228dvifm eval signed-SROCC - basic228 eval signed-SROCC",
+ "eval_segment": "preregistered development split (minimal-top eval segment, 3125 rows); frozen EVAL/test/terminal data never opened",
+ "model_qualified": false,
+ "overall_verdict": "NEGATIVE",
+ "commits": [
+  "84eb2cc5 feat(zensim): training-only DVIFM block-record side output",
+  "ae6d6ee7 feat(zensim-bench): --full-986 research path + DVIFM block-stats emission",
+  "bcc58d80 feat(scripts): feature_width/dvifm pass-through in the ceiling screen",
+  "05b36b4e style: cargo fmt peer_metric_pairs (bench package leftovers)",
+  "67aa9057 docs: DVIFM phase-2 screen preregistration (arms, seeds, budget rule, advancement rule, disk budget)",
+  "a793ee8a fix(scripts): validate_parquet C2 accepts w986 (986 feature cols)",
+  "a13079d3 feat(zensim): bake screen-2 Laplacian constants into DvifmParams::default",
+  "0c04715b feat(zensim): screen-3 local-band constants as DvifmParams::default",
+  "faae482c feat(zensim): bake screen-4 fitted DVIFM constants into DvifmParams::default"
+ ],
+ "data": {
+  "train_segment_sha256": "4ad1858d7588bedcab5eb85e0cc2c44ec0f866e553ab168de521377c31f619f6",
+  "train_admission_sha256": "9ba392cb4411bc842b4b323f8d759ee9ae54030242f9780c177523b8f07c526c",
+  "eval_segment_sha256": "22e83f0c2d570b7d90758fc09b978f4ce4ff5bcf3e594efb44a3a4fa15bf2871",
+  "eval_admission_sha256": "554e37d22e75df37d87f2c621380ec251a03e3890362f03c2b0fe3b0d36c6eec",
+  "spatial_manifest_sha256": "65137302368a3bd5bcb99dc5940d917ebd05c9fd10dc3824057c3c1f35314732",
+  "train_rows": 8000,
+  "eval_rows": 3125,
+  "feature_set_id": "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm@w986/unknown#685eb6ef"
+ },
+ "caches": {
+  "laplacian": "cache-lap.bin (8.25 GB, 11125 rows, 18 f32/block-record)",
+  "local": "cache-local.bin (8.25 GB, 11125 rows)",
+  "records_constants_independent": true,
+  "cache_to_pooled_parity_max_abs": 3.8e-09
+ },
+ "specs": {
+  "seed_laplacian_sha256": "701fbd0457239d478b18c231a1d87c0643df332948e75dfa9d3a40a38e6bed55",
+  "seed_local_sha256": "fb6a6e446e6ee7ac08ad54862598a21fb078b5c6317d665c55d407592aceb042",
+  "lap_derived_sha256": "8b90ea06abffeb9acf050009ddd8d17649985445940338a33339284248196d17",
+  "local_derived_sha256": "f7dbaadcea2fe09d6454cecebe5379a22f9f5184626f1dda046ae65e7e067cca",
+  "local_fitted_sha256": "c40fb27d6ff28ec49981b08546fb8758657cf7944f0c75438f60f0caf4ba810f",
+  "local_fitted_final_sha256": "1b8283987bb47559a0d6fceac8f88e68132d32f01f16d386a24aa6ffe45d3028"
+ },
+ "trainer": {
+  "hidden": 128,
+  "pairs_per_epoch": 8192,
+  "pair_sampling": "stratified",
+  "lr": 0.001,
+  "mse_weight": 1,
+  "early_stop_patience": 0,
+  "checkpoint": "final epoch (no auto-eval)",
+  "groups": "fit=human_train withinref,both; dev=human_eval"
+ },
+ "arms": {
+  "basic228": "f0..f227",
+  "basic228dvifm": "f0..f227 + f956..f985",
+  "y60": "60-feature speed control"
+ },
+ "seeds": [9201, 9207, 9211],
+ "screens": [
+  {
+   "n": 1,
+   "name": "mechanism check",
+   "dir": "mech/run",
+   "verdict": "PASS",
+   "evidence": "extraction+fit+audit+report at w986 on the preregistered subset (700 train / 500 eval); cache+index emitted; consumed-feature parity exact (max delta 5.6e-17); cache-to-pooled-feature replay parity 3.8e-9 (f32 narrowing)"
+  },
+  {
+   "n": 2,
+   "name": "laplacian band, TRAIN-derived constants",
+   "dir": "screen2-lap/run",
+   "spec_sha256": "8b90ea06abffeb9acf050009ddd8d17649985445940338a33339284248196d17",
+   "budget_epochs": 40,
+   "probe_deltas_last20pct": {"basic228": 0.00142, "basic228dvifm": 0.00024, "y60": 0.00055},
+   "eval_srocc_signed": {
+    "basic228": {"9201": 0.93666, "9207": 0.93498, "9211": 0.93535},
+    "basic228dvifm": {"9201": 0.93129, "9207": 0.93087, "9211": 0.93239},
+    "y60": {"9201": 0.93123, "9207": 0.92959, "9211": 0.93098}
+   },
+   "paired_diffs": {"9201": -0.00537, "9207": -0.00411, "9211": -0.00296},
+   "median_diff": -0.00411,
+   "audit_max_consumed_feature_abs_delta": 5.204170427930421e-18,
+   "verdict": "NEGATIVE"
+  },
+  {
+   "n": 3,
+   "name": "local band, TRAIN-derived constants",
+   "dir": "screen3-local/run",
+   "spec_sha256": "f7dbaadcea2fe09d6454cecebe5379a22f9f5184626f1dda046ae65e7e067cca",
+   "budget_epochs": 40,
+   "probe_deltas_last20pct": {"basic228": 0.00142, "basic228dvifm": 0.00034, "y60": 0.00055},
+   "eval_srocc_signed": {
+    "basic228": {"9201": 0.93666, "9207": 0.93498, "9211": 0.93535},
+    "basic228dvifm": {"9201": 0.93306, "9207": 0.93294, "9211": 0.93132},
+    "y60": {"9201": 0.93123, "9207": 0.92959, "9211": 0.93098}
+   },
+   "paired_diffs": {"9201": -0.0036, "9207": -0.00204, "9211": -0.00403},
+   "median_diff": -0.0036,
+   "audit_max_consumed_feature_abs_delta": 6.938893903907228e-18,
+   "verdict": "NEGATIVE",
+   "note": "local band is the less-negative screen; screen 4 fits on the local cache"
+  },
+  {
+   "n": 4,
+   "name": "local band, fitted constants",
+   "dir": "screen4-fitted/run",
+   "spec_sha256": "1b8283987bb47559a0d6fceac8f88e68132d32f01f16d386a24aa6ffe45d3028",
+   "fit": {
+    "optimizer": "Adam, 150 epochs, lr=0.03",
+    "objective": "linear 30->1 MSE head over DVIFM features replayed from the local TRAIN block cache (row_index<8000); beta prior lambda=1e-3 toward 0.65",
+    "loss": {"init": 261.1591, "final": 255.1063},
+    "replay_vs_extracted_max_abs": 8.795e-08,
+    "fitted_per_level": {
+     "g": [0.8229549277499173, 0.8740482654245578, 1.00567258718167, 0.9923898490930416, 0.5240864965287544],
+     "p": [0.839164839021145, 0.9267231301577087, 1.1373112213843213, 1.0358388140325796, 0.8345457349642225],
+     "c0": [0.001492783539634792, 0.0017371984815094774, 0.0019382839980098213, 0.003823534343442909, 0.022227412394756348],
+     "beta": [0.604101903215656, 0.6582619541066784, 0.6210656868986264, 0.6487053444624307, 0.6173566191341664],
+     "sharp": [3.5450968244265835, 4.096324180352423, 3.7036452355361607, 3.835264422374912, 4.943042371601268]
+    },
+    "f2_centres": "re-derived at fitted g as {10,30,50,70,90}% quantiles of ln(min C~ + 1e-6) on fit rows"
+   },
+   "budget_epochs": 40,
+   "probe_deltas_last20pct": {"basic228": 0.00142, "basic228dvifm": -0.00023, "y60": 0.00055},
+   "eval_srocc_signed": {
+    "basic228": {"9201": 0.93666, "9207": 0.93498, "9211": 0.93535},
+    "basic228dvifm": {"9201": 0.93395, "9207": 0.93369, "9211": 0.93303},
+    "y60": {"9201": 0.93123, "9207": 0.92959, "9211": 0.93098}
+   },
+   "paired_diffs": {"9201": -0.00271, "9207": -0.0013, "9211": -0.00232},
+   "median_diff": -0.00232,
+   "audit_max_consumed_feature_abs_delta": 2.7755575615628914e-17,
+   "verdict": "NEGATIVE"
+  }
+ ],
+ "advancement": "none: all three band/constant screens NEGATIVE; no five-seed confirmation run; family stays default-OFF and unqualified",
+ "cost_line": "DVIFM measures +31.6 ms at 1024x1024 against the 50 ms p95 bar (Phase-1 gate). For an Expensive family, optimisation is justified only by a confirmed paired gain; the observed best median is -0.0023 signed-SROCC, so no optimisation work is warranted.",
+ "determinism_check": "basic228 and y60 eval signed-SROCC are bit-identical across all three screens (they do not consume f956+); dev-metric deltas reproduce across probe sets",
+ "disk": {"used_gb": 20, "cap_gb": 40, "free_gb_after": 103, "min_free_gb": 80},
+ "seed_spread_note": "three paired seeds are a spread check, not a confidence interval",
+ "evidence_root": "/mnt/v/output/zensim/dvifm-screen-2026-09-19/"
+}

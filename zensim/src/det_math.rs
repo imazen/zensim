@@ -118,11 +118,23 @@ pub(crate) enum RootForm {
 }
 
 impl RootForm {
+    /// Resolve a per-comparison revision while retaining explicit research defaults.
+    pub(crate) fn at_revision(revision: Option<crate::feature_defs::FormulaRevision>) -> Self {
+        let rev = crate::ssim_form::effective_revision(
+            revision.unwrap_or_else(crate::ssim_form::active_revision),
+        );
+        if rev == crate::ssim_form::active_revision() {
+            active_root_form()
+        } else {
+            Self::for_revision(rev)
+        }
+    }
+
     /// The form a registered revision selects.
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev2 => Self::NestedSqrt,
+            FormulaRevision::Rev2 | FormulaRevision::Rev3 => Self::NestedSqrt,
         }
     }
 }
@@ -318,7 +330,7 @@ impl PowForm {
     pub const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev2 => Self::PureRust,
+            FormulaRevision::Rev2 | FormulaRevision::Rev3 => Self::PureRust,
         }
     }
 }

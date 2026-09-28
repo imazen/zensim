@@ -24,7 +24,8 @@ Ranges default from the bake spline decode recorded in the wave md; pass
 --range to override. Emits a per-axis clause table + PASS/FAIL per candidate.
 """
 import argparse, json, sys
-import numpy as np
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 S_CEIL, S_TOL_R, B_CEIL, D_TOP = 12.0, 0.005, 35.0, 105.0
 
@@ -39,27 +40,29 @@ DECLARED = {
     "HDR944R_t2_s4003_hfpack": (-146.92, 93.43),
 }
 
-def chart_z(pred, mos):
-    x = np.asarray(mos, float); y = np.asarray(pred, float)
-    ok = np.isfinite(x) & np.isfinite(y); x, y = x[ok], y[ok]
-    if len(x) < 100: return None, None
-    A = np.vstack([x, np.ones(len(x))]).T
-    coef, *_ = np.linalg.lstsq(A, y, rcond=None)
-    res = y - A @ coef
-    mad = np.median(np.abs(res - np.median(res))) * 1.4826 or 1e-9
-    return res / mad, y
-
 def axis_stats(o, ax):
-    blk = (o.get("per_pair") or {}).get(ax)
-    if not isinstance(blk, dict) or "pred" not in blk: return None
-    tcol = next((k for k in ("mos", "jnd", "pjnd", "target") if k in blk), None)
-    if tcol is None: return None
-    z, y = chart_z(blk["pred"], blk[tcol])
-    if z is None: return None
-    rb = (o.get("rank") or {}).get(ax) or {}
-    return {"or": rb.get("or"), "p99": float(np.percentile(np.abs(z), 99)),
-            "max": float(np.max(np.abs(z))),
-            "pred_min": float(np.min(y)), "pred_max": float(np.max(y)), "n": len(z)}
+    """Read native complete-population tails, or explicitly assess legacy raw rows."""
+    assessment = next(iter((o.get("scatter_assessment", {}).get(ax) or {}).values()), None)
+    if assessment is None:
+        blk = (o.get("per_pair") or {}).get(ax)
+        if not isinstance(blk, dict) or "pred" not in blk:
+            return None
+        tcol = next((k for k in ("mos", "jnd", "pjnd", "target") if k in blk), None)
+        if tcol is None:
+            return None
+        # Legacy summaries are not silently extrapolated from capped plot samples.
+        if len(blk["pred"]) != (o.get("rank", {}).get(ax) or {}).get("n"):
+            return None
+        from lib.zen_stats import scatter
+        assessment = scatter(blk["pred"], blk[tcol])
+    if assessment.get("status") != "MEASURED":
+        return None
+    raw = assessment["raw"]
+    # A zero robust scale is unmeasured, never an epsilon-derived gate pass.
+    if raw["p99"] is None or raw["max"] is None:
+        return None
+    return dict(raw, n=assessment["n"], **{"or": (o.get("rank", {}).get(ax) or {}).get("or")})
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -79,7 +82,7 @@ def main():
         name, axs = spec.split("="); onroute[name] = set(axs.split(","))
     peers = [json.load(open(p)) for p in args.peer]
     cands = [json.load(open(p)) for p in args.candidates]
-    axes = sorted({ax for o in cands for ax in (o.get("per_pair") or {})})
+    axes = sorted(set(args.axes.split(",")) | {ax for o in cands for ax in (o.get("rank") or {})})
     peer_best = {}
     for ax in axes:
         stats = [s for s in (axis_stats(p, ax) for p in peers) if s]
@@ -94,13 +97,23 @@ def main():
         floor = decl[0] - (decl[1] - decl[0]) / 3.0 if decl else None
         gate_axes = onroute.get(name)
         fails = []
+        missing = []
         for ax in axes:
             s = axis_stats(o, ax)
-            if s is None: continue
+            if s is None:
+                if ax in (o.get("rank") or {}) or (ax in set(args.axes.split(",")) and (gate_axes is None or ax in gate_axes)):
+                    missing.append(ax + ":statistics")
+                continue
             pb = peer_best.get(ax, {})
             gated_scope = set(args.axes.split(","))
             rsb = (gate_axes is None or ax in gate_axes) and ax in gated_scope
             cl = []
+            if rsb and (pb.get("or") is None or pb.get("p99") is None):
+                missing.append(ax + ":peer-bars")
+            if rsb and s["or"] is None:
+                missing.append(ax + ":candidate-outlier-ratio")
+            if floor is None:
+                missing.append(ax + ":declared-range")
             if rsb and pb.get("or") is not None and s["or"] is not None:
                 cl.append(("R", s["or"] <= pb["or"] + S_TOL_R))
             if rsb and pb.get("p99") is not None:
@@ -117,9 +130,9 @@ def main():
                   f"{s['p99']:>7.2f}{barS:>7.2f}{s['max']:>7.1f}"
                   f"{'['+format(s['pred_min'],'.0f')+','+format(s['pred_max'],'.0f')+']':>16}"
                   f"{floor if floor is not None else float('nan'):>8.1f}  {verdict}")
-        overall[name] = fails
-        print(f"{'':26}=> {'PASS' if not fails else 'FAIL ' + ', '.join(fails)}\n")
-    return 0 if all(not f for f in overall.values()) else 1
+        overall[name] = dict(fails=fails, missing=missing)
+        print(f"{'':26}=> {'FAIL ' + ', '.join(fails) if fails else 'INCOMPLETE ' + ', '.join(missing) if missing else 'PASS'}\n")
+    return 1 if any(v["fails"] for v in overall.values()) else 2 if any(v["missing"] for v in overall.values()) else 0
 
 if __name__ == "__main__":
     sys.exit(main())

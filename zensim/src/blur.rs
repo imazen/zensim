@@ -851,6 +851,75 @@ fn box_blur_h_inner_v4x(
     height: usize,
     radius: usize,
 ) {
+    box_blur_h_v4x_body(token, input, output, width, height, radius);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
+#[inline(always)]
+fn box_blur_h_v4x_body(
+    token: archmage::X64V4xToken,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    if width == 0 || !width.is_multiple_of(256) || height < 16 {
+        box_blur_h_v4x_strided(token, input, output, width, height, radius, width);
+        return;
+    }
+    thread_local! {
+        static PADDED: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    let rows = height / 16 * 16;
+    PADDED.with(|a| {
+        let mut arena = a.borrow_mut();
+        let stride = width + 16;
+        let per = 16 * stride;
+        arena.resize(2 * per, 0.0);
+        let (src, dst) = arena.split_at_mut(per);
+        for first in (0..rows).step_by(16) {
+            for row in 0..16 {
+                let from = (first + row) * width;
+                let to = row * stride;
+                src[to..to + width].copy_from_slice(&input[from..from + width]);
+            }
+            box_blur_h_v4x_strided(token, src, dst, width, 16, radius, stride);
+            for row in 0..16 {
+                let from = row * stride;
+                let to = (first + row) * width;
+                output[to..to + width].copy_from_slice(&dst[from..from + width]);
+            }
+        }
+    });
+    if rows < height {
+        let off = rows * width;
+        box_blur_h_v4x_strided(
+            token,
+            &input[off..],
+            &mut output[off..],
+            width,
+            height - rows,
+            radius,
+            width,
+        );
+    }
+}
+
+// Physical row pitch changes storage only; preserve the original recurrence.
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
+#[inline(always)]
+fn box_blur_h_v4x_strided(
+    token: archmage::X64V4xToken,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    stride: usize,
+) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -871,7 +940,7 @@ fn box_blur_h_inner_v4x(
             };
             let mut arr = [0.0f32; 16];
             for ro in 0..16 {
-                arr[ro] = input[(row_base + ro) * width + idx];
+                arr[ro] = input[(row_base + ro) * stride + idx];
             }
             sum = sum + f32x16::from_array(token, arr);
         }
@@ -879,7 +948,7 @@ fn box_blur_h_inner_v4x(
         for x in 0..width {
             let result = (sum * inv_v).to_array();
             for ro in 0..16 {
-                output[(row_base + ro) * width + x] = result[ro];
+                output[(row_base + ro) * stride + x] = result[ro];
             }
 
             let add_raw = x + r + 1;
@@ -894,7 +963,7 @@ fn box_blur_h_inner_v4x(
 
             let mut add_arr = [0.0f32; 16];
             for ro in 0..16 {
-                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+                add_arr[ro] = input[(row_base + ro) * stride + add_idx];
             }
             // rem-ring (2026-08-30): for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -909,7 +978,7 @@ fn box_blur_h_inner_v4x(
             } else {
                 let mut a = [0.0f32; 16];
                 for ro in 0..16 {
-                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                    a[ro] = input[(row_base + ro) * stride + rem_idx];
                 }
                 a
             };
@@ -944,14 +1013,14 @@ fn box_blur_h_inner_v4x(
             };
             let mut arr = [0.0f32; 8];
             for ro in 0..8 {
-                arr[ro] = input[(row_base + ro) * width + idx];
+                arr[ro] = input[(row_base + ro) * stride + idx];
             }
             sum = sum + f32x8::from_array(v3, arr);
         }
         for x in 0..width {
             let result = (sum * inv_v8).to_array();
             for ro in 0..8 {
-                output[(row_base + ro) * width + x] = result[ro];
+                output[(row_base + ro) * stride + x] = result[ro];
             }
             let add_raw = x + r + 1;
             let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
@@ -964,7 +1033,7 @@ fn box_blur_h_inner_v4x(
             let rem_idx = rem_idx.min(width - 1);
             let mut add_arr = [0.0f32; 8];
             for ro in 0..8 {
-                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+                add_arr[ro] = input[(row_base + ro) * stride + add_idx];
             }
             // rem-ring (2026-08-30): for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -979,7 +1048,7 @@ fn box_blur_h_inner_v4x(
             } else {
                 let mut a = [0.0f32; 8];
                 for ro in 0..8 {
-                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                    a[ro] = input[(row_base + ro) * stride + rem_idx];
                 }
                 a
             };
@@ -997,7 +1066,7 @@ fn box_blur_h_inner_v4x(
     // Scalar remainder
     let inv = 1.0 / diam as f32;
     for row in (remaining_start + remaining_8groups * 8)..height {
-        let row_off = row * width;
+        let row_off = row * stride;
         let inp = &input[row_off..row_off + width];
         let out = &mut output[row_off..row_off + width];
         let mut sum = 0.0f32;
@@ -2261,8 +2330,8 @@ fn fused_blur_h_mu_inner_v4(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
+            sum_s = sum_s + s_row[add_idx] - s_row[rem_idx];
+            sum_d = sum_d + d_row[add_idx] - d_row[rem_idx];
         }
     }
 }
@@ -2554,8 +2623,8 @@ fn fused_blur_h_mu_inner_v4x(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
+            sum_s = sum_s + s_row[add_idx] - s_row[rem_idx];
+            sum_d = sum_d + d_row[add_idx] - d_row[rem_idx];
         }
     }
 }
@@ -2726,8 +2795,8 @@ fn fused_blur_h_mu_inner_v3(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
+            sum_s = sum_s + s_row[add_idx] - s_row[rem_idx];
+            sum_d = sum_d + d_row[add_idx] - d_row[rem_idx];
         }
     }
 }
@@ -3029,6 +3098,7 @@ fn fused_blur_h_ssim_column_tiled(
     rows: usize,
     radius: usize,
     tile: usize,
+    err: bool,
 ) {
     thread_local! {
         static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
@@ -3071,6 +3141,7 @@ fn fused_blur_h_ssim_column_tiled(
                 tw,
                 rows,
                 radius,
+                err,
             );
             for y in 0..rows {
                 let o = y * width + x0;
@@ -3100,6 +3171,36 @@ pub fn fused_blur_h_ssim(
     height: usize,
     radius: usize,
 ) {
+    fused_blur_h_ssim_at_revision(
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
+        crate::ssim_form::active_revision(),
+    );
+}
+
+/// Same SIMD kernel with explicit request-local arithmetic; no global mutation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fused_blur_h_ssim_at_revision(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let err = crate::ssim_form::effective_revision(revision)
+        == crate::feature_defs::FormulaRevision::Rev3;
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         fused_blur_h_ssim_column_tiled(
@@ -3113,6 +3214,7 @@ pub fn fused_blur_h_ssim(
             height,
             radius,
             tile,
+            err,
         );
         return;
     }
@@ -3126,6 +3228,7 @@ pub fn fused_blur_h_ssim(
         width,
         height,
         radius,
+        err,
     )
 }
 
@@ -3142,6 +3245,7 @@ fn fused_blur_h_ssim_untiled(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     incant!(
         fused_blur_h_ssim_inner(
@@ -3153,7 +3257,8 @@ fn fused_blur_h_ssim_untiled(
             out_sigma12,
             width,
             height,
-            radius
+            radius,
+            err
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
@@ -3180,6 +3285,10 @@ pub fn fused_blur_h_ssim3(
     height: usize,
     radius: usize,
 ) {
+    // Revision 3 accumulates the direct error moment `Σ(a-b)²` in the
+    // `sigma12` plane in place of `Σab` — the fusion that replaced the exact
+    // f64 second pass. Read ONCE per call; every tier below unswitches on it.
+    let err = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     // The tile must be on THIS entry too, not just `fused_blur_h_ssim`: the
     // cached-reference-moments path reaches the H planes through here, and
     // tiling only the 4-output entry made it disagree with the pair path
@@ -3200,6 +3309,7 @@ pub fn fused_blur_h_ssim3(
             height,
             radius,
             tile,
+            err,
         );
         return;
     }
@@ -3213,6 +3323,7 @@ pub fn fused_blur_h_ssim3(
         width,
         height,
         radius,
+        err,
     )
 }
 
@@ -3229,6 +3340,7 @@ fn fused_blur_h_ssim3_untiled(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     #[cfg(target_arch = "x86_64")]
     {
@@ -3245,6 +3357,7 @@ fn fused_blur_h_ssim3_untiled(
                 width,
                 height,
                 radius,
+                err,
             );
             return;
         }
@@ -3259,6 +3372,7 @@ fn fused_blur_h_ssim3_untiled(
         width,
         height,
         radius,
+        err,
     );
 }
 
@@ -3276,6 +3390,7 @@ fn fused_blur_h_ssim_inner_v4(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -3324,7 +3439,12 @@ fn fused_blur_h_ssim_inner_v4(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         // Slide window
@@ -3416,7 +3536,13 @@ fn fused_blur_h_ssim_inner_v4(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -3466,7 +3592,12 @@ fn fused_blur_h_ssim_inner_v4(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -3557,7 +3688,13 @@ fn fused_blur_h_ssim_inner_v4(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -3583,7 +3720,12 @@ fn fused_blur_h_ssim_inner_v4(
             sum_s += s;
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
+            sum_prod = if err {
+                let e = s - d;
+                e.mul_add(e, sum_prod)
+            } else {
+                s.mul_add(d, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -3611,7 +3753,13 @@ fn fused_blur_h_ssim_inner_v4(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 }
@@ -3629,6 +3777,7 @@ fn fused_blur_h_ssim_inner_v4x(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     fused_blur_h_ssim_v4x_body::<true>(
         token,
@@ -3641,6 +3790,7 @@ fn fused_blur_h_ssim_inner_v4x(
         width,
         height,
         radius,
+        err,
     );
 }
 
@@ -3664,6 +3814,7 @@ fn fused_blur_h_ssim3_inner_v4x(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     fused_blur_h_ssim_v4x_body::<false>(
         token,
@@ -3676,6 +3827,7 @@ fn fused_blur_h_ssim3_inner_v4x(
         width,
         height,
         radius,
+        err,
     );
 }
 
@@ -3701,6 +3853,102 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
+) {
+    // A cache-line pad spreads the 16 row streams across cache sets. Logical
+    // width and horizontal running sums remain unchanged (unlike column
+    // tiling). Stage one vector group, not a whole image, and reuse storage.
+    if width == 0 || !width.is_multiple_of(256) || height < 16 {
+        fused_blur_h_ssim_v4x_strided::<MU1>(
+            token,
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            width,
+            err,
+        );
+        return;
+    }
+    thread_local! {
+        static PADDED: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    let rows = height / 16 * 16;
+    PADDED.with(|a| {
+        let mut arena = a.borrow_mut();
+        let stride = width + 16;
+        let per = 16 * stride;
+        arena.resize(6 * per, 0.0);
+        let (s, rest) = arena.split_at_mut(per);
+        let (d, rest) = rest.split_at_mut(per);
+        let (m1, rest) = rest.split_at_mut(per);
+        let (m2, rest) = rest.split_at_mut(per);
+        let (sq, prod) = rest.split_at_mut(per);
+        for first in (0..rows).step_by(16) {
+            for row in 0..16 {
+                let from = (first + row) * width;
+                let to = row * stride;
+                s[to..to + width].copy_from_slice(&src[from..from + width]);
+                d[to..to + width].copy_from_slice(&dst[from..from + width]);
+            }
+            fused_blur_h_ssim_v4x_strided::<MU1>(
+                token, s, d, m1, m2, sq, prod, width, 16, radius, stride, err,
+            );
+            for row in 0..16 {
+                let from = row * stride;
+                let to = (first + row) * width;
+                if MU1 {
+                    out_mu1[to..to + width].copy_from_slice(&m1[from..from + width]);
+                }
+                out_mu2[to..to + width].copy_from_slice(&m2[from..from + width]);
+                out_sigma_sq[to..to + width].copy_from_slice(&sq[from..from + width]);
+                out_sigma12[to..to + width].copy_from_slice(&prod[from..from + width]);
+            }
+        }
+    });
+    if rows < height {
+        let off = rows * width;
+        // The three-output path permits an empty, untouched mu1 slice.
+        let tail_mu1 = if MU1 { &mut out_mu1[off..] } else { &mut [] };
+        fused_blur_h_ssim_v4x_strided::<MU1>(
+            token,
+            &src[off..],
+            &dst[off..],
+            tail_mu1,
+            &mut out_mu2[off..],
+            &mut out_sigma_sq[off..],
+            &mut out_sigma12[off..],
+            width,
+            height - rows,
+            radius,
+            width,
+            err,
+        );
+    }
+}
+
+// Original arithmetic, with physical row pitch independent of logical width.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
+    token: archmage::X64V4xToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    stride: usize,
+    err: bool,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -3736,12 +3984,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + idx;
-                let cs = &src[off..off + 15 * width + 1];
-                let cd = &dst[off..off + 15 * width + 1];
+                let off = row_base * stride + idx;
+                let cs = &src[off..off + 15 * stride + 1];
+                let cd = &dst[off..off + 15 * stride + 1];
                 for ro in 0..16 {
-                    s_arr[ro] = cs[ro * width];
-                    d_arr[ro] = cd[ro * width];
+                    s_arr[ro] = cs[ro * stride];
+                    d_arr[ro] = cd[ro * stride];
                 }
             }
             let sv = f32x16::from_array(token, s_arr);
@@ -3751,7 +3999,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             }
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         // Slide window
@@ -3762,12 +4015,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             if MU1 {
                 let mu1_result = (sum_s * inv_v).to_array();
                 for ro in 0..16 {
-                    let base = (row_base + ro) * width + x;
+                    let base = (row_base + ro) * stride + x;
                     out_mu1[base] = mu1_result[ro];
                 }
             }
             for ro in 0..16 {
-                let base = (row_base + ro) * width + x;
+                let base = (row_base + ro) * stride + x;
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
                 out_sigma12[base] = prod_result[ro];
@@ -3793,12 +4046,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + add_idx;
-                let cs = &src[off..off + 15 * width + 1];
-                let cd = &dst[off..off + 15 * width + 1];
+                let off = row_base * stride + add_idx;
+                let cs = &src[off..off + 15 * stride + 1];
+                let cd = &dst[off..off + 15 * stride + 1];
                 for ro in 0..16 {
-                    s_add[ro] = cs[ro * width];
-                    d_add[ro] = cd[ro * width];
+                    s_add[ro] = cs[ro * stride];
+                    d_add[ro] = cd[ro * stride];
                 }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
@@ -3820,12 +4073,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                     // reads, so it is in bounds precisely when the old form was.
                     // Same loads, same values, same order — BIT-EXACT; this moves
                     // WHERE the bound is proven, not what is read.
-                    let off = row_base * width + rem_idx;
-                    let cs = &src[off..off + 15 * width + 1];
-                    let cd = &dst[off..off + 15 * width + 1];
+                    let off = row_base * stride + rem_idx;
+                    let cs = &src[off..off + 15 * stride + 1];
+                    let cd = &dst[off..off + 15 * stride + 1];
                     for ro in 0..16 {
-                        sa[ro] = cs[ro * width];
-                        da[ro] = cd[ro * width];
+                        sa[ro] = cs[ro * stride];
+                        da[ro] = cd[ro * stride];
                     }
                 }
                 (sa, da)
@@ -3850,7 +4103,13 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -3887,12 +4146,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + idx;
-                let cs = &src[off..off + 7 * width + 1];
-                let cd = &dst[off..off + 7 * width + 1];
+                let off = row_base * stride + idx;
+                let cs = &src[off..off + 7 * stride + 1];
+                let cd = &dst[off..off + 7 * stride + 1];
                 for ro in 0..8 {
-                    s_arr[ro] = cs[ro * width];
-                    d_arr[ro] = cd[ro * width];
+                    s_arr[ro] = cs[ro * stride];
+                    d_arr[ro] = cd[ro * stride];
                 }
             }
             let sv = f32x8::from_array(v3, s_arr);
@@ -3902,7 +4161,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             }
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -3912,12 +4176,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             if MU1 {
                 let mu1_result = (sum_s * inv_v8).to_array();
                 for ro in 0..8 {
-                    let base = (row_base + ro) * width + x;
+                    let base = (row_base + ro) * stride + x;
                     out_mu1[base] = mu1_result[ro];
                 }
             }
             for ro in 0..8 {
-                let base = (row_base + ro) * width + x;
+                let base = (row_base + ro) * stride + x;
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
                 out_sigma12[base] = prod_result[ro];
@@ -3943,12 +4207,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + add_idx;
-                let cs = &src[off..off + 7 * width + 1];
-                let cd = &dst[off..off + 7 * width + 1];
+                let off = row_base * stride + add_idx;
+                let cs = &src[off..off + 7 * stride + 1];
+                let cd = &dst[off..off + 7 * stride + 1];
                 for ro in 0..8 {
-                    s_add[ro] = cs[ro * width];
-                    d_add[ro] = cd[ro * width];
+                    s_add[ro] = cs[ro * stride];
+                    d_add[ro] = cd[ro * stride];
                 }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
@@ -3970,12 +4234,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                     // reads, so it is in bounds precisely when the old form was.
                     // Same loads, same values, same order — BIT-EXACT; this moves
                     // WHERE the bound is proven, not what is read.
-                    let off = row_base * width + rem_idx;
-                    let cs = &src[off..off + 7 * width + 1];
-                    let cd = &dst[off..off + 7 * width + 1];
+                    let off = row_base * stride + rem_idx;
+                    let cs = &src[off..off + 7 * stride + 1];
+                    let cd = &dst[off..off + 7 * stride + 1];
                     for ro in 0..8 {
-                        sa[ro] = cs[ro * width];
-                        da[ro] = cd[ro * width];
+                        sa[ro] = cs[ro * stride];
+                        da[ro] = cd[ro * stride];
                     }
                 }
                 (sa, da)
@@ -4000,14 +4264,20 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
     // Scalar remainder rows
     let inv = 1.0 / diam as f32;
     for row in (remaining_start + remaining_8groups * 8)..height {
-        let row_off = row * width;
+        let row_off = row * stride;
         let s_row = &src[row_off..row_off + width];
         let d_row = &dst[row_off..row_off + width];
         let mut sum_s = 0.0f32;
@@ -4028,7 +4298,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             }
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
+            sum_prod = if err {
+                let e = s - d;
+                e.mul_add(e, sum_prod)
+            } else {
+                s.mul_add(d, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4060,7 +4335,13 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 }
@@ -4080,6 +4361,7 @@ fn fused_blur_h_ssim_inner_v3(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -4126,7 +4408,12 @@ fn fused_blur_h_ssim_inner_v3(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4217,7 +4504,13 @@ fn fused_blur_h_ssim_inner_v3(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -4243,7 +4536,12 @@ fn fused_blur_h_ssim_inner_v3(
             sum_s += s;
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
+            sum_prod = if err {
+                let e = s - d;
+                e.mul_add(e, sum_prod)
+            } else {
+                s.mul_add(d, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4271,7 +4569,13 @@ fn fused_blur_h_ssim_inner_v3(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 }
@@ -4289,6 +4593,7 @@ fn fused_blur_h_ssim_inner(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -4339,7 +4644,12 @@ fn fused_blur_h_ssim_inner(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4406,7 +4716,13 @@ fn fused_blur_h_ssim_inner(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     };
 
@@ -5211,7 +5527,806 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn padded_box_rows_preserve_contiguous_bits() {
+        use archmage::SimdToken;
+        let Some(token) = archmage::X64V4xToken::summon() else {
+            return;
+        };
+        for width in [255, 256, 512, 1024, 1026] {
+            for height in [15, 16, 17, 24, 31, 32, 48] {
+                let len = width * height;
+                let src: Vec<_> = (0..len)
+                    .map(|i| ((i * 127 + i / width * 31) % 4093) as f32 / 1024.0 - 2.0)
+                    .collect();
+                for radius in [0, 1, 4, 16, 17] {
+                    let mut expected = vec![0.0; len];
+                    let mut actual = vec![0.0; len];
+                    super::box_blur_h_v4x_strided(
+                        token,
+                        &src,
+                        &mut expected,
+                        width,
+                        height,
+                        radius,
+                        width,
+                    );
+                    super::box_blur_h_v4x_body(token, &src, &mut actual, width, height, radius);
+                    assert!(
+                        expected
+                            .iter()
+                            .zip(&actual)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{width}x{height} radius={radius}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn padded_ssim_rows_preserve_contiguous_bits() {
+        use archmage::SimdToken;
+        let Some(token) = archmage::X64V4xToken::summon() else {
+            return;
+        };
+        for width in [255, 256, 512, 1024, 1026] {
+            for height in [15, 16, 17, 24, 31, 32, 48] {
+                let len = width * height;
+                let src: Vec<_> = (0..len)
+                    .map(|i| ((i * 127 + i / width * 31) % 4093) as f32 / 1024.0 - 2.0)
+                    .collect();
+                let dst: Vec<_> = (0..len)
+                    .map(|i| ((i * 337 + i / width * 17) % 4091) as f32 / 1024.0 - 2.0)
+                    .collect();
+                for radius in [0, 1, 4, 16, 17] {
+                    let [mut a, mut b, mut c, mut d] = core::array::from_fn(|_| vec![0.0; len]);
+                    let [mut e, mut f, mut g, mut h] = core::array::from_fn(|_| vec![0.0; len]);
+                    super::fused_blur_h_ssim_v4x_strided::<true>(
+                        token, &src, &dst, &mut a, &mut b, &mut c, &mut d, width, height, radius,
+                        width, false,
+                    );
+                    super::fused_blur_h_ssim_v4x_body::<true>(
+                        token, &src, &dst, &mut e, &mut f, &mut g, &mut h, width, height, radius,
+                        false,
+                    );
+                    for (old, new) in [&a, &b, &c, &d].into_iter().zip([&e, &f, &g, &h]) {
+                        assert!(
+                            old.iter().zip(new).all(|(x, y)| x.to_bits() == y.to_bits()),
+                            "{width}x{height} radius={radius}"
+                        );
+                    }
+                    e.fill(-123.0);
+                    super::fused_blur_h_ssim_v4x_body::<false>(
+                        token, &src, &dst, &mut e, &mut f, &mut g, &mut h, width, height, radius,
+                        false,
+                    );
+                    assert!(e.iter().all(|x| *x == -123.0));
+                    for (old, new) in [&b, &c, &d].into_iter().zip([&f, &g, &h]) {
+                        assert!(
+                            old.iter().zip(new).all(|(x, y)| x.to_bits() == y.to_bits()),
+                            "three-output {width}x{height} radius={radius}"
+                        );
+                    }
+                }
+            }
+        }
+    }
     use super::*;
+
+    // Synthetic references for the pixel-response prerequisite. These are not
+    // production attribution or finite-removal implementations.
+    fn adjoint_probe_blur(input: &[f32], w: usize, h: usize) -> Vec<f32> {
+        let mut out = vec![0.0; input.len()];
+        box_blur_1pass_into(input, &mut out, &mut vec![0.0; input.len()], w, h, 5);
+        out
+    }
+
+    fn adjoint_probe_weight(x: usize, y: usize, w: usize, h: usize) -> f32 {
+        let wx = if x == 0 || x + 1 == w { 0.5 } else { 1.0 };
+        let wy = if y == 0 || y + 1 == h { 0.5 } else { 1.0 };
+        wx * wy
+    }
+
+    fn adjoint_probe_transpose(input: &[f32], w: usize, h: usize) -> Vec<f32> {
+        // Detailed balance for reflect-101: D K = K^T D. In two dimensions
+        // D has edge weights 1/2 and corner weights 1/4. Reuse the SIMD K.
+        let scaled: Vec<_> = input
+            .iter()
+            .enumerate()
+            .map(|(i, v)| v / adjoint_probe_weight(i % w, i / w, w, h))
+            .collect();
+        adjoint_probe_blur(&scaled, w, h)
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| v * adjoint_probe_weight(i % w, i / w, w, h))
+            .collect()
+    }
+
+    fn adjoint_probe_direct(input: &[f32], w: usize, h: usize, transpose: bool) -> Vec<f64> {
+        let reflect = |i: isize, len: usize| {
+            let period = 2 * (len - 1);
+            let k = i.unsigned_abs() % period;
+            if k < len { k } else { period - k }
+        };
+        let mut out = vec![0.0; input.len()];
+        for y in 0..h {
+            for x in 0..w {
+                for dy in -5..=5 {
+                    for dx in -5..=5 {
+                        let source = reflect(y as isize + dy, h) * w + reflect(x as isize + dx, w);
+                        let center = y * w + x;
+                        let (dest, src) = if transpose {
+                            (source, center)
+                        } else {
+                            (center, source)
+                        };
+                        out[dest] += f64::from(input[src]) / 121.0;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn reflected_box_pixel_adjoint_matches_direct_scatter() {
+        let mut max_error = 0.0_f64;
+        let mut max_dot_error = 0.0_f64;
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let a: Vec<_> = (0..w * h)
+                .map(|i| ((i * 31 + i / w * 13) % 257) as f32 / 128.0 - 1.0)
+                .collect();
+            let mut b: Vec<_> = (0..w * h)
+                .map(|i| ((i * 11 + i / w * 29) % 251) as f32 / 125.0 - 1.0)
+                .collect();
+            for impulse in [false, true] {
+                if impulse {
+                    b.fill(0.0);
+                    b[0] = 1.0;
+                }
+                let ka = adjoint_probe_blur(&a, w, h);
+                let ktb = adjoint_probe_transpose(&b, w, h);
+                for (got, expected) in ka
+                    .iter()
+                    .zip(adjoint_probe_direct(&a, w, h, false))
+                    .chain(ktb.iter().zip(adjoint_probe_direct(&b, w, h, true)))
+                {
+                    let error = (f64::from(*got) - expected).abs();
+                    max_error = max_error.max(error);
+                    assert!(error <= 2e-5, "{w}x{h}: {got} vs {expected}");
+                }
+                let lhs: f64 = ka
+                    .iter()
+                    .zip(&b)
+                    .map(|(x, y)| f64::from(*x) * f64::from(*y))
+                    .sum();
+                let rhs: f64 = a
+                    .iter()
+                    .zip(&ktb)
+                    .map(|(x, y)| f64::from(*x) * f64::from(*y))
+                    .sum();
+                let error = (lhs - rhs).abs() / lhs.abs().max(rhs.abs()).max(1.0);
+                max_dot_error = max_dot_error.max(error);
+                assert!(error <= 2e-5, "adjoint pairing {w}x{h}: {lhs} vs {rhs}");
+                if impulse {
+                    let wrong = adjoint_probe_blur(&b, w, h);
+                    assert!(
+                        wrong.iter().zip(&ktb).any(|(x, y)| (x - y).abs() > 0.005),
+                        "plain reflected K must be rejected as K^T at boundaries"
+                    );
+                }
+            }
+        }
+        eprintln!("ADJOINT vector_max={max_error:.9e} normalized_dot_max={max_dot_error:.9e}");
+    }
+
+    #[test]
+    fn residual_pixel_gradient_has_nonzero_repair_contraction() {
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let d: Vec<_> = (0..w * h)
+                .map(|i| ((i * 31 + i / w * 13) % 257) as f32 / 128.0 - 1.0)
+                .collect();
+            let kd = adjoint_probe_blur(&d, w, h);
+            let residual: Vec<_> = d.iter().zip(&kd).map(|(x, y)| x - y).collect();
+            let ktr = adjoint_probe_transpose(&residual, w, h);
+            let gradient: Vec<_> = residual
+                .iter()
+                .zip(&ktr)
+                .map(|(x, y)| 2.0 * f64::from(x - y))
+                .collect();
+            let energy: f64 = residual.iter().map(|v| f64::from(*v).powi(2)).sum();
+            let sum: f64 = gradient.iter().sum();
+            let contraction: f64 = gradient
+                .iter()
+                .zip(&d)
+                .map(|(g, d)| -g * f64::from(*d))
+                .sum();
+            assert!(sum.abs() <= 2e-5 * energy.max(1.0));
+            assert!((contraction + 2.0 * energy).abs() <= 2e-5 * energy.max(1.0));
+            assert!(
+                energy > 1.0 && (contraction + energy).abs() > 0.9 * energy,
+                "a correct local derivative does not equal finite full erasure"
+            );
+            eprintln!(
+                "RESIDUAL {w}x{h} energy={energy:.9} gradient_sum={sum:.9e} repair_derivative={contraction:.9}"
+            );
+        }
+    }
+
+    fn adjoint_probe_edge_pool(
+        source: &[f32],
+        distorted: &[f32],
+        source_mean: &[f32],
+        w: usize,
+        h: usize,
+        branch: f64,
+        p: i32,
+    ) -> f64 {
+        let means = adjoint_probe_blur(distorted, w, h);
+        let unused = vec![0.0; w * h];
+        // Radius zero consumes the already blurred means. The existing fused
+        // owner computes and pools the actual f32 edge signals; SSIM output is
+        // ignored. This is a synthetic kernel test, not full pixel scoring.
+        let acc = crate::fused::fused_vblur_features_ssim(
+            source_mean,
+            &means,
+            &unused,
+            &unused,
+            source,
+            distorted,
+            w * h,
+            1,
+            0,
+            1,
+            0,
+            &mut [],
+            &mut [],
+            false,
+            &mut [],
+            false,
+            &mut [],
+            &mut [],
+            false,
+            crate::fused::FreeExtrasWork::default(),
+            crate::fused::ExtPoolsWork::default(),
+            &[],
+        );
+        let sum = match (branch > 0.0, p) {
+            (true, 1) => acc.edge_art,
+            (true, 2) => acc.edge_art2,
+            (true, 4) => acc.edge_art4,
+            (true, 8) => acc.edge_art8,
+            (false, 1) => acc.edge_det,
+            (false, 2) => acc.edge_det2,
+            (false, 4) => acc.edge_det4,
+            (false, 8) => acc.edge_det8,
+            _ => unreachable!(),
+        };
+        (sum / (w * h) as f64).powf(1.0 / f64::from(p))
+    }
+
+    #[test]
+    fn edge_pixel_adjoint_matches_smooth_directional_differences() {
+        let mut checks = 0;
+        let mut max_error = 0.0_f64;
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let n = w * h;
+            let a: Vec<_> = (0..n)
+                .map(|i| {
+                    let sign = if (i % w + i / w) % 2 == 0 { 1.0 } else { -1.0 };
+                    sign * (0.3 + 0.03 * (i % 7) as f32)
+                })
+                .collect();
+            let ka = adjoint_probe_blur(&a, w, h);
+            for (factor, branch) in [(1.3, 1.0_f64), (0.7, -1.0)] {
+                let d: Vec<_> = a.iter().map(|v| factor * v + 0.02).collect();
+                let kd = adjoint_probe_blur(&d, w, h);
+                let signals = |pixels: &[f32]| {
+                    let means = adjoint_probe_blur(pixels, w, h);
+                    (0..n)
+                        .map(|i| {
+                            let ed = (1.0 + (pixels[i] - means[i]).abs())
+                                / (1.0 + (a[i] - ka[i]).abs())
+                                - 1.0;
+                            (branch * f64::from(ed)).max(0.0)
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let signal = signals(&d);
+                assert!(signal.iter().all(|v| *v > 0.02), "smooth active branch");
+                for p in [1, 2, 4, 8] {
+                    let pool = |values: &[f64]| {
+                        (values.iter().map(|v| v.powi(p)).sum::<f64>() / n as f64)
+                            .powf(1.0 / f64::from(p))
+                    };
+                    let root = pool(&signal);
+                    let canonical_pool =
+                        |pixels: &[f32]| adjoint_probe_edge_pool(&a, pixels, &ka, w, h, branch, p);
+                    assert!(
+                        (canonical_pool(&d) - root).abs() <= 2e-6,
+                        "independent root versus canonical edge pool"
+                    );
+                    let z: Vec<_> = (0..n)
+                        .map(|i| {
+                            (root.powi(1 - p) * signal[i].powi(p - 1) / n as f64
+                                * branch
+                                * f64::from((d[i] - kd[i]).signum())
+                                / f64::from(1.0 + (a[i] - ka[i]).abs()))
+                                as f32
+                        })
+                        .collect();
+                    let ktz = adjoint_probe_transpose(&z, w, h);
+                    let g: Vec<_> = z.iter().zip(&ktz).map(|(x, y)| f64::from(x - y)).collect();
+                    for rect in [
+                        [0, 0, w, h],
+                        [0, 0, 4, 4],
+                        [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
+                    ] {
+                        let direction: Vec<_> = (0..n)
+                            .map(|i| {
+                                if i % w >= rect[0]
+                                    && i % w < rect[2]
+                                    && i / w >= rect[1]
+                                    && i / w < rect[3]
+                                {
+                                    ((i * 11 + i / w * 29) % 31) as f32 / 15.0 - 1.0
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .collect();
+                        let predicted: f64 = g
+                            .iter()
+                            .zip(&direction)
+                            .map(|(g, v)| g * f64::from(*v))
+                            .sum();
+                        for epsilon in [0.001, 0.0005] {
+                            let plus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d + epsilon * v)
+                                .collect();
+                            let minus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d - epsilon * v)
+                                .collect();
+                            let observed = (canonical_pool(&plus) - canonical_pool(&minus))
+                                / (2.0 * f64::from(epsilon));
+                            let error = (observed - predicted).abs();
+                            max_error = max_error.max(error);
+                            assert!(
+                                error <= 2e-5_f64.max(0.01 * observed.abs().max(predicted.abs())),
+                                "edge {w}x{h} factor={factor} p={p} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
+                            );
+                            checks += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("EDGE_ADJOINT checks={checks} max_abs_directional_error={max_error:.9e}");
+    }
+
+    fn adjoint_probe_ssim_state(
+        a: &[f32],
+        d: &[f32],
+        w: usize,
+        h: usize,
+    ) -> ([Vec<f32>; 5], crate::fused::StripChannelAccum) {
+        let n = w * h;
+        let mut horizontal: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; n]);
+        let [h0, h1, h2, h3] = &mut horizontal;
+        fused_blur_h_ssim_at_revision(
+            a,
+            d,
+            h0,
+            h1,
+            h2,
+            h3,
+            w,
+            h,
+            5,
+            crate::feature_defs::FormulaRevision::Rev3,
+        );
+        let mut state: [Vec<f32>; 5] = std::array::from_fn(|_| vec![0.0; n]);
+        let [m1, m2, ssq, err, sd] = &mut state;
+        let acc = crate::fused::fused_vblur_features_ssim(
+            h0,
+            h1,
+            h2,
+            h3,
+            a,
+            d,
+            w,
+            h,
+            0,
+            h,
+            5,
+            m1,
+            m2,
+            true,
+            sd,
+            true,
+            ssq,
+            err,
+            true,
+            crate::fused::FreeExtrasWork {
+                revision: Some(crate::feature_defs::FormulaRevision::Rev3),
+                ..Default::default()
+            },
+            crate::fused::ExtPoolsWork::default(),
+            &[],
+        );
+        (state, acc)
+    }
+
+    #[test]
+    fn rev3_ssim_pixel_adjoint_matches_fused_directional_differences() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "blur::tests::rev3_ssim_pixel_adjoint_matches_fused_directional_differences",
+            "SSIM-ADJOINT-RAN",
+        ) {
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_luma_form(),
+            crate::ssim_form::SsimLumaForm::Clamp
+        );
+        let mut checks = 0;
+        let mut max_error = 0.0_f64;
+        let mut max_normalized = 0.0_f64;
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let n = w * h;
+            let a: Vec<_> = (0..n)
+                .map(|i| {
+                    let sign = if (i % w + i / w) % 2 == 0 { 1.0 } else { -1.0 };
+                    sign * (0.3 + 0.03 * (i % 7) as f32)
+                })
+                .collect();
+            let (identity, _) = adjoint_probe_ssim_state(&a, &a, w, h);
+            assert!(identity[4].iter().all(|v| *v == 0.0));
+            for i in 0..n {
+                assert_eq!(
+                    crate::ssim_form::probe_rev3_ssim_partials(
+                        identity[0][i],
+                        identity[1][i],
+                        identity[2][i],
+                        identity[3][i]
+                    ),
+                    [0.0; 3]
+                );
+            }
+            for (factor, offset) in [(0.75, 0.05), (1.2, -0.1), (0.9, 1.5)] {
+                let d: Vec<_> = a
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| factor * v + offset + 0.015 * ((i * 11) % 7) as f32)
+                    .collect();
+                let (state, acc) = adjoint_probe_ssim_state(&a, &d, w, h);
+                let partials: Vec<_> = (0..n)
+                    .map(|i| {
+                        crate::ssim_form::probe_rev3_ssim_partials(
+                            state[0][i],
+                            state[1][i],
+                            state[2][i],
+                            state[3][i],
+                        )
+                    })
+                    .collect();
+                for p in [1, 2, 4, 8] {
+                    let pool = |acc: &crate::fused::StripChannelAccum| {
+                        let sum = match p {
+                            1 => acc.ssim_d,
+                            2 => acc.ssim_d2,
+                            4 => acc.ssim_d4,
+                            8 => acc.ssim_d8,
+                            _ => unreachable!(),
+                        };
+                        (sum / n as f64).powf(1.0 / f64::from(p))
+                    };
+                    let root = pool(&acc);
+                    let fields: [Vec<f32>; 3] = std::array::from_fn(|k| {
+                        (0..n)
+                            .map(|i| {
+                                (root.powi(1 - p) * f64::from(state[4][i]).powi(p - 1) / n as f64
+                                    * partials[i][k]) as f32
+                            })
+                            .collect()
+                    });
+                    let transposes = fields.map(|f| adjoint_probe_transpose(&f, w, h));
+                    let gradient: Vec<_> = (0..n)
+                        .map(|i| {
+                            f64::from(transposes[0][i])
+                                + 2.0 * f64::from(d[i]) * f64::from(transposes[1][i])
+                                + 2.0 * f64::from(d[i] - a[i]) * f64::from(transposes[2][i])
+                        })
+                        .collect();
+                    for rect in [
+                        [0, 0, w, h],
+                        [0, 0, 4, 4],
+                        [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
+                    ] {
+                        let direction: Vec<_> = (0..n)
+                            .map(|i| {
+                                if i % w >= rect[0]
+                                    && i % w < rect[2]
+                                    && i / w >= rect[1]
+                                    && i / w < rect[3]
+                                {
+                                    ((i * 11 + i / w * 29) % 31) as f32 / 15.0 - 1.0
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .collect();
+                        let predicted: f64 = gradient
+                            .iter()
+                            .zip(&direction)
+                            .map(|(g, v)| g * f64::from(*v))
+                            .sum();
+                        for epsilon in [0.001, 0.0005] {
+                            let plus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d + epsilon * v)
+                                .collect();
+                            let minus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d - epsilon * v)
+                                .collect();
+                            let observed = (pool(&adjoint_probe_ssim_state(&a, &plus, w, h).1)
+                                - pool(&adjoint_probe_ssim_state(&a, &minus, w, h).1))
+                                / (2.0 * f64::from(epsilon));
+                            let error = (observed - predicted).abs();
+                            let tolerance =
+                                2e-5_f64.max(0.01 * observed.abs().max(predicted.abs()));
+                            max_error = max_error.max(error);
+                            max_normalized = max_normalized.max(error / tolerance);
+                            assert!(
+                                error <= tolerance,
+                                "SSIM {w}x{h} factor={factor} offset={offset} p={p} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
+                            );
+                            checks += 1;
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "SSIM-ADJOINT-RAN checks={checks} max_abs_error={max_error:.9e} max_fraction_of_tolerance={max_normalized:.9e}"
+        );
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    fn adjoint_probe_linear_image(
+        pixels: &[[f32; 4]],
+        w: usize,
+        h: usize,
+    ) -> crate::source::StridedBytes<'_> {
+        crate::source::StridedBytes::with_alpha_mode(
+            bytemuck::cast_slice(pixels),
+            w,
+            h,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        )
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn rev3_ssim_color_scale_prerequisite_matches_public_mse_model() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "blur::tests::rev3_ssim_color_scale_prerequisite_matches_public_mse_model",
+            "COLOR-SCALE-RAN",
+        ) {
+            return;
+        }
+        use crate::color::*;
+        let matrix = [
+            [K_M00, K_M01, K_M02],
+            [K_M10, K_M11, K_M12],
+            [K_M20, K_M21, K_M22],
+        ];
+        let weights: Vec<f64> = (0..156)
+            .map(|i| {
+                if i % 13 == 9 {
+                    if (i / 13) % 2 == 0 { 0.7 } else { -0.4 }
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":vec![0.0;156],"scaler_scale":vec![1.0;156],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8","text":(0..156).map(|i|i.to_string()).collect::<Vec<_>>().join(" ")},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"3"}
+            ],
+            "layers":[{"in_dim":156,"out_dim":1,"activation":"identity","dtype":"f32","weights":weights,"biases":[0.0]}]
+        });
+        let model = crate::mlp::Model::from_bytes(
+            &zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap(),
+        )
+        .unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let mut checks = 0;
+        let mut max_error = 0.0_f64;
+        let mut max_feature_error = 0.0_f64;
+        for (w, h) in [(17, 9), (65, 97), (128, 96), (97, 65)] {
+            let a: Vec<[f32; 4]> = (0..w * h)
+                .map(|i| {
+                    [
+                        0.2 + 0.005 * ((i * 11) % 79) as f32,
+                        0.2 + 0.005 * ((i * 23) % 83) as f32,
+                        0.2 + 0.005 * ((i * 31) % 89) as f32,
+                        1.0,
+                    ]
+                })
+                .collect();
+            let d: Vec<[f32; 4]> = a
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    [
+                        p[0] + 0.02 * ((i % 3) as f32 - 1.0),
+                        p[1] * 0.85 + 0.02,
+                        p[2] * 0.93 + 0.05,
+                        1.0,
+                    ]
+                })
+                .collect();
+            let source = adjoint_probe_linear_image(&a, w, h);
+            let distorted = adjoint_probe_linear_image(&d, w, h);
+            let reference = crate::streaming::PrecomputedReference::new(&source, 4, false);
+            let base = crate::streaming::PrecomputedReference::new(&distorted, 4, false);
+            let served = scorer.compute(&source, &distorted, None).unwrap();
+            for (s, ((r, sw, sh), (d, _, _))) in
+                reference.scales.iter().zip(&base.scales).enumerate()
+            {
+                for ch in 0..3 {
+                    let mse = r[ch]
+                        .iter()
+                        .zip(&d[ch])
+                        .map(|(a, b)| f64::from(a - b).powi(2))
+                        .sum::<f64>()
+                        / (sw * sh) as f64;
+                    let error = (mse - served.features()[(s * 3 + ch) * 13 + 9]).abs();
+                    max_feature_error = max_feature_error.max(error);
+                    assert!(
+                        error <= 2e-6,
+                        "public MSE feature {w}x{h} scale{s} channel{ch}"
+                    );
+                }
+            }
+            for rect in [
+                [0, 0, w, h],
+                [0, 0, 4, 4],
+                [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
+            ] {
+                let direction: Vec<[f32; 3]> = (0..w * h)
+                    .map(|i| {
+                        std::array::from_fn(|ch| {
+                            if i % w >= rect[0]
+                                && i % w < rect[2]
+                                && i / w >= rect[1]
+                                && i / w < rect[3]
+                            {
+                                ((i * 11 + i / w * 29 + ch * 7) % 31) as f32 / 15.0 - 1.0
+                            } else {
+                                0.0
+                            }
+                        })
+                    })
+                    .collect();
+                let original_tangent: Vec<[f32; 3]> = d
+                    .iter()
+                    .zip(&direction)
+                    .map(|(pixel, delta)| {
+                        assert!(pixel[..3].iter().all(|v| *v > 0.0 && *v < 1.0));
+                        let dt: [f64; 3] = matrix.map(|row| {
+                            let mixed = f64::from(K_B0)
+                                + (0..3)
+                                    .map(|ch| f64::from(row[ch]) * f64::from(pixel[ch]))
+                                    .sum::<f64>();
+                            let change = (0..3)
+                                .map(|ch| f64::from(row[ch]) * f64::from(delta[ch]))
+                                .sum::<f64>();
+                            change / (3.0 * mixed.cbrt().powi(2))
+                        });
+                        [
+                            (7.0 * (dt[0] - dt[1])) as f32,
+                            (0.5 * (dt[0] + dt[1])) as f32,
+                            (dt[2] - 0.5 * (dt[0] + dt[1])) as f32,
+                        ]
+                    })
+                    .collect();
+                let mut tw = base.scales[0].1;
+                let mut th = base.scales[0].2;
+                let mut tangent: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; tw * th]);
+                for y in 0..h.max(64) {
+                    for x in 0..w.max(64) {
+                        let j = crate::metric::reflect_index(y, h) * w
+                            + crate::metric::reflect_index(x, w);
+                        for ch in 0..3 {
+                            tangent[ch][y * tw + x] = original_tangent[j][ch];
+                        }
+                    }
+                }
+                let mut predicted = 0.0;
+                for (s, ((r, sw, sh), (d, _, _))) in
+                    reference.scales.iter().zip(&base.scales).enumerate()
+                {
+                    assert_eq!((tw, th), (*sw, *sh));
+                    for ch in 0..3 {
+                        let coefficient = f64::from(weights[(s * 3 + ch) * 13 + 9] as f32);
+                        predicted += coefficient
+                            * 2.0
+                            * r[ch]
+                                .iter()
+                                .zip(&d[ch])
+                                .zip(&tangent[ch])
+                                .map(|((a, b), delta)| f64::from(b - a) * f64::from(*delta))
+                                .sum::<f64>()
+                            / (sw * sh) as f64;
+                    }
+                    if s < 3 {
+                        let (nw, nh) = (tw / 2, th / 2);
+                        tangent = tangent.map(|v| {
+                            let mut out = vec![0.0; nw * nh];
+                            downscale_2x_into(&v, tw, &mut out, nw, nh);
+                            out
+                        });
+                        tw = nw;
+                        th = nh;
+                    }
+                }
+                for epsilon in [0.001, 0.0005] {
+                    let perturb = |sign: f32| {
+                        d.iter()
+                            .zip(&direction)
+                            .map(|(p, v)| {
+                                [
+                                    p[0] + sign * epsilon * v[0],
+                                    p[1] + sign * epsilon * v[1],
+                                    p[2] + sign * epsilon * v[2],
+                                    1.0,
+                                ]
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    let plus = perturb(1.0);
+                    let minus = perturb(-1.0);
+                    let high = scorer
+                        .compute(&source, &adjoint_probe_linear_image(&plus, w, h), None)
+                        .unwrap()
+                        .score();
+                    let low = scorer
+                        .compute(&source, &adjoint_probe_linear_image(&minus, w, h), None)
+                        .unwrap()
+                        .score();
+                    let observed = (high - low) / (2.0 * f64::from(epsilon));
+                    let error = (observed - predicted).abs();
+                    max_error = max_error.max(error);
+                    assert!(
+                        error <= 2e-5_f64.max(0.01 * observed.abs().max(predicted.abs())),
+                        "public color/scale {w}x{h} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
+                    );
+                    checks += 1;
+                }
+            }
+        }
+        println!(
+            "COLOR-SCALE-RAN checks={checks} max_abs_error={max_error:.9e} max_feature_error={max_feature_error:.9e}"
+        );
+    }
 
     /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64
     /// rounding) on arbitrary signed planes including edge-heavy mass, and
@@ -6133,24 +7248,15 @@ mod tests {
     /// `fused_blur_h_mu` and `fused_blur_h_ssim` (+ the `ssim3` MU1=false
     /// specialisation, which shares the ring code path).
     ///
-    /// HEIGHTS ARE MULTIPLES OF 8 HERE, and that is load-bearing rather than
-    /// convenient. `fused_blur_h_mu_inner_{v4,v4x,v3}` still carry a SCALAR
-    /// remainder for the last `height % 8` rows which accumulates
-    /// `sum += add - rem` — i.e. `sum + (add - rem)` — while their vector
-    /// bodies evaluate `(sum + add) - rem`. f32 addition is not associative,
-    /// so those tail rows differ from the vector rows in the last ulp or two
-    /// (MEASURED: 2528.7349 vs 2528.7344 at 7x3 r=1). That is PRE-EXISTING
-    /// and unrelated to the rem-ring — the identical assertion fails
-    /// identically on the pre-ring kernels — and the ring never touches a
-    /// scalar tail, so restricting to full groups isolates what this test is
-    /// for. `fused_blur_h_ssim`'s generic variant already fixed the same
-    /// wart by switching its tail to a masked vector group (see the comment
-    /// above `run_group`); the `mu` family has not been converted, and doing
-    /// so would move v1's shipped bytes, so it needs the golden-gate policy
-    /// and is deliberately NOT done here.
+    /// Includes scalar tail rows: the edge-only and full-feature means must
+    /// retain the same `(sum + add) - remove` operation order there too.
     #[test]
     fn fused_h_ring_matches_regathered_reference() {
         const FUSED_GEOM: &[(usize, usize)] = &[
+            (7, 3),
+            (17, 19),
+            (64, 1),
+            (127, 17),
             (7, 8),
             (11, 16),
             (12, 16),
@@ -6173,12 +7279,12 @@ mod tests {
                 let (mut s1, mut s2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
                 super::fused_blur_h_ssim_untiled(
-                    &src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius,
+                    &src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius, false,
                 );
                 let (mut t1, mut t2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut tq, mut tp) = (vec![0.0f32; n], vec![0.0f32; n]);
                 super::fused_blur_h_ssim3_untiled(
-                    &src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius,
+                    &src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius, false,
                 );
 
                 let (mut wm1, mut wm2) = (vec![0.0f32; n], vec![0.0f32; n]);
@@ -6330,6 +7436,51 @@ mod tests {
     /// means the same thing under a `ZENSIM_H_TILE` override as it does at
     /// the era-2 default; `base + 2` and `2 * base` are the in-range controls
     /// (first safe remainder, and no remainder tile at all).
+    /// The streaming activity map is `|src - mu1_h|` on the plane
+    /// `fused_blur_h_ssim` already produced (`simd_ops::abs_diff_rows_into`)
+    /// instead of `box_blur_h_into_abs_diff`'s second H sweep. Both must be
+    /// the SAME BYTES at every geometry the H entries are pinned on, ragged
+    /// heights and tiled widths included — otherwise the masked/IW families
+    /// would move on the shipped revision.
+    #[test]
+    fn activity_from_the_fused_h_plane_is_bit_identical() {
+        let tile = super::h_blur_tile_width();
+        let base = if tile == 0 { super::H_TILE_WIDTH } else { tile };
+        let mut checked = 0usize;
+        for &w in &[64usize, 129, 257, base + 1, 2 * base + 1, base + 129] {
+            for &h in &[3usize, 8, 33, 40, 130] {
+                for &radius in &[1usize, 2, 5, 8] {
+                    let src = ring_plane(w, h, 11);
+                    let dst = ring_plane(w, h, 7919);
+                    let n = w * h;
+                    let mut old = vec![0.0f32; n];
+                    super::box_blur_h_into_abs_diff(&src, &mut old, w, h, radius);
+                    let (mut m1, mut m2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    super::fused_blur_h_ssim(
+                        &src, &dst, &mut m1, &mut m2, &mut sq, &mut pr, w, h, radius,
+                    );
+                    let mut got = vec![0.0f32; n];
+                    crate::simd_ops::abs_diff_rows_into(&src, &m1, &mut got, w, w, h);
+                    for i in 0..n {
+                        assert_eq!(
+                            got[i].to_bits(),
+                            old[i].to_bits(),
+                            "{w}x{h} r={radius} tile={tile} idx {i}: {} != {}",
+                            got[i],
+                            old[i]
+                        );
+                    }
+                    checked += n;
+                }
+            }
+        }
+        assert!(
+            checked > 1_000_000,
+            "the probe must cover real planes, covered {checked}"
+        );
+    }
+
     #[test]
     fn h_entries_are_bit_exact_at_a_degenerate_last_column_tile() {
         let tile = super::h_blur_tile_width();

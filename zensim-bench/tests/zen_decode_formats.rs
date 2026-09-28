@@ -23,6 +23,9 @@ use std::path::Path;
 #[path = "../examples/shared/zen_decode.rs"]
 mod zen_decode;
 
+#[path = "../examples/shared/score_input.rs"]
+mod score_input;
+
 /// A deterministic 96×64 RGB8 test image with structure at several scales:
 /// a smooth gradient, a hard vertical edge, and a high-frequency checker.
 /// Enough signal that a colour-space mistake cannot hide in it.
@@ -324,4 +327,92 @@ fn missing_file_fails_loud() {
     let err = zen_decode::decode_rgb8_path(Path::new("/nonexistent/zen_decode_gate.png"))
         .expect_err("a missing file must error");
     assert!(err.to_string().contains("read "), "got: {err}");
+}
+
+#[test]
+fn native_png_retains_low_bits_and_icc() {
+    let pixels: Vec<rgb::Rgb<u16>> = (0..W * H)
+        .map(|i| rgb::Rgb::new(0x1200 | (i as u16 & 255), 0x4567, 0xabcd))
+        .collect();
+    let icc = zenpixels_convert::icc_profiles::DISPLAY_P3_V4;
+    let metadata = zencodec::Metadata::none().with_icc(icc);
+    let bytes = zenpng::encode_rgb16(
+        imgref::Img::new(pixels.as_slice(), W, H),
+        Some(&metadata),
+        &zenpng::EncodeConfig::default(),
+        &enough::Unstoppable,
+        &enough::Unstoppable,
+    )
+    .expect("encode native 16-bit PNG");
+    let native = zen_decode::decode_native_bytes(&bytes, "p3-lowbits.png").unwrap();
+    assert_eq!(
+        native.pixels.copy_to_contiguous_bytes(),
+        bytemuck::cast_slice::<_, u8>(&pixels)
+    );
+    let zen_decode::NativeMetadata::Png(info) = &native.metadata else {
+        panic!("PNG metadata")
+    };
+    assert_eq!(info.bit_depth, 16);
+    assert_eq!(info.icc_profile.as_deref(), Some(icc));
+    assert!(info.cicp.is_none());
+    let legacy = zen_decode::decode_rgb8_bytes(&bytes, "p3-lowbits.png").unwrap();
+    assert_eq!(
+        legacy.pixels,
+        native.to_rgb8("p3-lowbits.png").unwrap().pixels
+    );
+    // Input red carries all 256 distinct low-byte values at a fixed high byte.
+    // Native decode must preserve them; an 8-bit representation cannot.
+    assert_eq!(native.pixels.copy_to_contiguous_bytes().len(), W * H * 6);
+    assert_eq!(legacy.pixels.len(), W * H * 3);
+}
+
+#[test]
+fn native_png_retains_pq_cicp_without_reinterpreting_codes() {
+    let pixels = vec![rgb::Rgb::new(1_u16, 32769, 65534); W * H];
+    let cicp = zenpixels::Cicp::new(9, 16, 0, true);
+    let metadata = zencodec::Metadata::none().with_cicp(cicp);
+    let bytes = zenpng::encode_rgb16(
+        imgref::Img::new(pixels.as_slice(), W, H),
+        Some(&metadata),
+        &zenpng::EncodeConfig::default(),
+        &enough::Unstoppable,
+        &enough::Unstoppable,
+    )
+    .unwrap();
+    let native = zen_decode::decode_native_bytes(&bytes, "pq.png").unwrap();
+    let zen_decode::NativeMetadata::Png(info) = &native.metadata else {
+        panic!("PNG metadata")
+    };
+    assert_eq!(info.cicp, Some(cicp));
+    assert_eq!(info.bit_depth, 16);
+    assert_eq!(
+        native.pixels.copy_to_contiguous_bytes(),
+        bytemuck::cast_slice::<_, u8>(&pixels)
+    );
+}
+
+#[test]
+fn native_jpeg_retains_source_info_and_legacy_pixels() {
+    let pixels = fixture_rgb8(W, H);
+    for xyb in [false, true] {
+        let bytes = encode_jpeg(&pixels, xyb);
+        let native = zen_decode::decode_native_bytes(&bytes, "codec.jpg").unwrap();
+        let zen_decode::NativeMetadata::Codec(info) = &native.metadata else {
+            panic!("JPEG metadata")
+        };
+        assert_eq!(info.format, zencodec::ImageFormat::Jpeg);
+        assert_eq!((info.width, info.height), (W as u32, H as u32));
+        assert_eq!(
+            native.pixels.descriptor(),
+            zenpixels::PixelDescriptor::RGB8_SRGB
+        );
+        if xyb {
+            assert!(
+                info.source_color.icc_profile.is_some(),
+                "retain encoded XYB profile"
+            );
+        }
+        let legacy = zen_decode::decode_rgb8_bytes(&bytes, "codec.jpg").unwrap();
+        assert_eq!(native.to_rgb8("codec.jpg").unwrap().pixels, legacy.pixels);
+    }
 }

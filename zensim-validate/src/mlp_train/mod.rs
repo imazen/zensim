@@ -22,7 +22,8 @@
 //!
 //! This trainer takes [`TrainingGroup`]s with explicit `train_weight`.
 //! Groups with `train_weight > 0` contribute to RankNet pair sampling
-//! in proportion to their weight; groups with `train_weight == 0` are
+//! in proportion to their weight under uniform sampling; stratified sampling
+//! instead visits eligible strata equally. Groups with `train_weight == 0` are
 //! validation-only — their per-epoch SROCC is logged and the best
 //! model is the one with the highest validation mean.
 
@@ -1071,7 +1072,12 @@ fn l2_feature_mult() -> Option<std::sync::Arc<Vec<f64>>> {
 fn add_l2_grad_layer1(g: &mut [f64], w: &[f64], scale: f64, n_hidden: usize, mult: Option<&[f64]>) {
     let n = g.len().min(w.len());
     let (g, w) = (&mut g[..n], &w[..n]);
+    let avx = l2_row_avx_available();
     let Some(mult) = mult else {
+        if avx {
+            unsafe { l2_row_avx(g, w, scale) };
+            return;
+        }
         for (g, &w) in g.iter_mut().zip(w.iter()) {
             *g += scale * w;
         }
@@ -1089,9 +1095,63 @@ fn add_l2_grad_layer1(g: &mut [f64], w: &[f64], scale: f64, n_hidden: usize, mul
         // Indexing `mult[feat]` panics on the same feature index the
         // divided form would have.
         let sm = scale * mult[feat];
-        for (g, &w) in grow.iter_mut().zip(wrow.iter()) {
-            *g += sm * w;
+        if avx {
+            unsafe { l2_row_avx(grow, wrow, sm) };
+        } else {
+            for (g, &w) in grow.iter_mut().zip(wrow.iter()) {
+                *g += sm * w;
+            }
         }
+    }
+}
+
+/// 4-lane f64 `*g += sm * w` as SEPARATE multiply then add — deliberately not
+/// FMA — so each lane keeps the scalar reference's two roundings exactly.
+/// `g`/`w` tails under 4 lanes stay scalar.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx")]
+unsafe fn l2_row_avx(g: &mut [f64], w: &[f64], sm: f64) {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+    };
+    unsafe {
+        let sm_v = _mm256_set1_pd(sm);
+        let gp = g.as_mut_ptr();
+        let wp = w.as_ptr();
+        let n = g.len().min(w.len());
+        for c in 0..n / 4 {
+            let off = c * 4;
+            let gv = _mm256_loadu_pd(gp.add(off));
+            let wv = _mm256_loadu_pd(wp.add(off));
+            _mm256_storeu_pd(gp.add(off), _mm256_add_pd(gv, _mm256_mul_pd(sm_v, wv)));
+        }
+        for o in n / 4 * 4..n {
+            *gp.add(o) += sm * *wp.add(o);
+        }
+    }
+}
+
+/// Scalar stand-in so the call sites compile on non-x86 targets; `avx` is
+/// always false there, so this is never reached.
+#[cfg(not(target_arch = "x86_64"))]
+#[allow(dead_code)]
+unsafe fn l2_row_avx(g: &mut [f64], w: &[f64], sm: f64) {
+    for (g, &w) in g.iter_mut().zip(w.iter()) {
+        *g += sm * w;
+    }
+}
+
+/// Runtime AVX detection for `l2_row_avx`; `is_x86_feature_detected!` caches
+/// the cpuid bit, so the per-call cost is one atomic load.
+#[inline]
+fn l2_row_avx_available() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::is_x86_feature_detected!("avx")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
     }
 }
 
@@ -1394,8 +1454,9 @@ impl<'a> FeatureRows<'a> {
 /// One named slice of training/validation data.
 ///
 /// Multi-group training resolves V0_2's "synthetic dominates by 15×"
-/// imbalance: per-step sampling picks a group in proportion to
-/// `train_weight`, then samples a pair within.
+/// imbalance: uniform sampling picks a group in proportion to `train_weight`,
+/// then samples a pair within. Stratified sampling instead weights each
+/// eligible reference/band stratum equally; see [`PairSampling::Stratified`].
 ///
 /// `train_weight` and `validation_weight` are independent: a group
 /// can be in both pools (trained on AND gated against), in only one,
@@ -1412,9 +1473,10 @@ pub struct TrainingGroup<'a> {
     /// the MSE loss divides by max(σ, ε) per pair — errors on
     /// high-consensus stimuli (low σ) are penalized more.
     pub metric_sigmas: Option<&'a [f64]>,
-    /// Weight in the per-step group selection distribution. The
-    /// per-pair sampling probability is `train_weight / total_weight`,
-    /// so doubling `train_weight` doubles the sampling rate.
+    /// Weight in uniform sampling's group selection distribution. Its draw
+    /// probability is `train_weight / total_weight`; same-row collisions may
+    /// change the shares of usable pairs. Relative weights are ignored by
+    /// stratified sampling, whose shares follow eligible stratum counts.
     /// Set to `0.0` to exclude this group from training.
     pub train_weight: f64,
     /// Weight in the per-epoch validation aggregation. `0.0` excludes
@@ -1521,6 +1583,9 @@ pub enum PairSampling {
     /// the sample seed: two sample seeds touch the same rows, refs and
     /// cells, and differ only in pair order. See
     /// [`sampling::StratifiedPlan`].
+    /// Group weights only determine eligibility in this mode: relative draw
+    /// shares follow each group's number of non-singleton strata. Use
+    /// [`Self::Uniform`] for weighted group draws and singleton-band coverage.
     Stratified,
 }
 
@@ -1549,6 +1614,26 @@ fn build_pair_plan(
         hyperparams.pairs_per_epoch,
         hyperparams.sample_seed.unwrap_or(hyperparams.seed),
     );
+    if train_indices.len() > 1 {
+        let total_weight: f64 = train_indices.iter().map(|&i| groups[i].train_weight).sum();
+        let mut counts = vec![0usize; train_indices.len()];
+        for stratum in &plan.strata {
+            counts[stratum.train_pos] += 1;
+        }
+        eprintln!(
+            "WARNING: stratified sampling ignores relative group weights; \
+             each eligible stratum gets equal draws. Use --pair-sampling uniform \
+             for weighted group draws. Singleton reference/band cells are excluded."
+        );
+        for (position, &index) in train_indices.iter().enumerate() {
+            eprintln!(
+                "  group {}: requested weight share {:.6}, stratum-cycle share {:.6}",
+                groups[index].name,
+                groups[index].train_weight / total_weight,
+                counts[position] as f64 / plan.strata.len().max(1) as f64,
+            );
+        }
+    }
     println!(
         "  pair-sampling: STRATIFIED — {} strata over {} train groups ({} singleton strata \
          excluded: a 1-row cell cannot yield an in-stratum pair){}",
@@ -1903,14 +1988,16 @@ impl OutputPolarity {
     }
 }
 
-/// TV (total-variation) regularizer for adjacent-q monotonicity.
+/// TV pair-margin regularizer for known quality preferences.
 ///
 /// `pairs[k] = (lo_idx, hi_idx)` references rows in the concatenated
 /// trainer-feature space (group 0 rows first, then group 1, etc.).
-/// Penalty per pair = `max(0, pred[hi_idx] - pred[lo_idx])` — Rust
-/// trainer outputs are distance-like (lower = better quality), so a
-/// monotone curve has `pred[lo_q] > pred[hi_q]`. Violations have
-/// `pred[hi_q] > pred[lo_q]`.
+/// `lo_idx` is the worse-quality member and `hi_idx` is the better-quality
+/// member, independently of the codec's parameter orientation. With `s` equal
+/// to the run's [`OutputPolarity::ladder_sign`], the pair penalty is
+/// `max(0, s * (pred[hi_idx] - pred[lo_idx]) + margin)`. Distance runs use
+/// `s = 1`; score runs use `s = -1`. A pair may express a measured local
+/// preference rather than an assumed adjacent-q ordering.
 pub struct TvRegularizer {
     pub pairs: Vec<(usize, usize)>,
     pub features: Vec<Vec<f64>>,
@@ -1931,7 +2018,7 @@ pub struct TvRegularizer {
     /// harder than other bands.
     pub band_weights: Option<[f64; 4]>,
     /// Anti-collapse margin for the within-ladder hinge. The penalty
-    /// becomes `max(0, y_harsher - y_milder + margin)`, forcing a
+    /// uses the run's score/distance polarity (see the struct docs), forcing a
     /// minimum per-step gap of `margin` between adjacent severity
     /// levels instead of merely non-increasing. A pure hinge
     /// (margin=0) is minimized by collapsing every ladder flat, which
@@ -2481,6 +2568,26 @@ pub fn train_mlp_strategy(
     // so push/clear in the hot loop don't realloc.
     let mut parallel_batch_buffer: Vec<(usize, usize, usize)> = Vec::with_capacity(k);
 
+    // Fused K=1 pair-update path: backprop's gw1 row sweep + L2 + the w1
+    // Adam step run as a single pass (`adam_update_w1_fused`) fed by
+    // per-side `dl_dh_pre` vectors from `backprop_grad_head`. Bit-identical
+    // to the unfused sequence; gated on the shape constraints the v3 fused
+    // kernel requires (any other shape takes the unfused path, which is the
+    // oracle). `dh_a`/`dh_b` are the reused head-output scratch buffers —
+    // allocated once instead of per-pair like the old in-kernel vecs.
+    let fuse_w1 =
+        k == 1 && n_hidden > 0 && n_hidden.is_multiple_of(4) && w1.len().is_multiple_of(n_hidden);
+    let mut dh_a = if fuse_w1 {
+        vec![0.0f64; n_hidden]
+    } else {
+        Vec::new()
+    };
+    let mut dh_b = if fuse_w1 {
+        vec![0.0f64; n_hidden]
+    } else {
+        Vec::new()
+    };
+
     // Norm-in-Norm hybrid loss gate (Li et al. 2020). When opted in via
     // `norm_in_norm_weight > 0.0`, the auxiliary loss is computed on
     // each mini-batch's 2K predictions. Batch statistics are unstable
@@ -2745,65 +2852,124 @@ pub fn train_mlp_strategy(
             let dl_dya = dl_dya_rn + dl_dya_mse;
             let dl_dyb = dl_dyb_rn + dl_dyb_mse;
 
-            backprop_step(
-                xa,
-                &ha_pre,
-                &ha,
-                dl_dya,
-                &w1,
-                &mut adam.gw1,
-                &mut adam.gb1,
-                &w2,
-                &mut adam.gw2,
-                &mut adam.gb2,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-            );
-            backprop_step(
-                xb,
-                &hb_pre,
-                &hb,
-                dl_dyb,
-                &w1,
-                &mut adam.gw1,
-                &mut adam.gb1,
-                &w2,
-                &mut adam.gw2,
-                &mut adam.gb2,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-            );
-
-            if hyperparams.l2_lambda > 0.0 {
-                let fmult = l2_feature_mult();
-                add_l2_grad_layer1(
-                    &mut adam.gw1,
-                    &w1,
-                    hyperparams.l2_lambda,
+            if fuse_w1 {
+                // Fused pair update: the two gw1 row sweeps, the L2 term,
+                // and the w1 Adam step run as one pass. The `dl_dh_pre`
+                // vectors and the gw2/gb1/gb2 accumulations come from
+                // `backprop_grad_head`, which is `backprop_step` minus the
+                // gw1 sweep — identical arithmetic, gw1 never round-trips.
+                crate::simd_mlp::backprop_grad_head(
+                    &ha_pre,
+                    &ha,
+                    dl_dya,
+                    &mut dh_a,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
                     n_hidden,
-                    fmult.as_ref().map(|v| v.as_slice()),
+                    hyperparams.leaky_alpha,
                 );
-                for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
-                    *g += hyperparams.l2_lambda * w;
+                crate::simd_mlp::backprop_grad_head(
+                    &hb_pre,
+                    &hb,
+                    dl_dyb,
+                    &mut dh_b,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                if hyperparams.l2_lambda > 0.0 {
+                    for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
+                        *g += hyperparams.l2_lambda * w;
+                    }
                 }
-            }
-
-            // T8.1: K=1 → step every pair (bit-identical to legacy).
-            // K>1 sequential → step once per K accumulated pairs.
-            if k == 1 || steps_since_adam >= k as u64 {
-                adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                let fmult = if hyperparams.l2_lambda > 0.0 {
+                    l2_feature_mult()
+                } else {
+                    None
+                };
+                adam.step_w1_fused(
+                    &mut w1,
+                    &mut b1,
+                    &mut w2,
+                    &mut b2,
+                    lr,
+                    xa,
+                    &dh_a,
+                    xb,
+                    &dh_b,
+                    hyperparams.l2_lambda,
+                    fmult.as_ref().map(|v| v.as_slice()),
+                    n_hidden,
+                );
                 apply_post_adam_penalties(&mut w1, n_hidden, lr);
                 nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 steps_since_adam = 0;
+            } else {
+                backprop_step(
+                    xa,
+                    &ha_pre,
+                    &ha,
+                    dl_dya,
+                    &w1,
+                    &mut adam.gw1,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                backprop_step(
+                    xb,
+                    &hb_pre,
+                    &hb,
+                    dl_dyb,
+                    &w1,
+                    &mut adam.gw1,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+
+                if hyperparams.l2_lambda > 0.0 {
+                    let fmult = l2_feature_mult();
+                    add_l2_grad_layer1(
+                        &mut adam.gw1,
+                        &w1,
+                        hyperparams.l2_lambda,
+                        n_hidden,
+                        fmult.as_ref().map(|v| v.as_slice()),
+                    );
+                    for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
+                        *g += hyperparams.l2_lambda * w;
+                    }
+                }
+
+                // T8.1: K=1 → step every pair (bit-identical to legacy).
+                // K>1 sequential → step once per K accumulated pairs.
+                if k == 1 || steps_since_adam >= k as u64 {
+                    adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                    apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                    nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                    steps_since_adam = 0;
+                }
             }
 
-            // TV regularizer step (per-curve adjacent-q monotonicity).
-            // Apply every `apply_every` pair updates. Penalty per TV pair:
-            // max(0, pred[hi_q] - pred[lo_q]) — Rust trainer output is
-            // distance-like (lower = better), so a monotone curve has
-            // pred[lo_q] > pred[hi_q]; the ReLU penalizes the opposite.
+            // TV regularizer: `lo` is worse quality, `hi` is better quality.
+            // Apply every `apply_every` loss-bearing main pair updates using
+            // the run's polarity (see the actual hinge below). TV pair draws
+            // consume the SAME RNG as the main sampler; enabling TV changes
+            // its subsequent draws and adds Adam updates for active hinges.
             if let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
                 && tv_cfg.weight > 0.0
                 && tv_cfg.apply_every > 0
@@ -6461,6 +6627,79 @@ impl AdamState {
             vb2: vec![0.0; nb2],
             t: 0,
         }
+    }
+
+    /// K=1 fused variant: w1's pair-gradient + optional L2 + Adam run as one
+    /// pass (`adam_simd::adam_update_w1_fused`), taking `dl_dh_pre` vectors
+    /// produced by `simd_mlp::backprop_grad_head` instead of a materialized
+    /// gw1 accumulation. `gw1` is still read as the accumulation's initial
+    /// value and still stored as +0.0 on exit — the post-step invariant the
+    /// unfused paths (TV, pool head, k>1) rely on. b1/w2/b2 use the ordinary
+    /// per-array update with the same `t`/bias-correction as `step`.
+    #[allow(clippy::too_many_arguments)]
+    fn step_w1_fused(
+        &mut self,
+        w1: &mut [f64],
+        b1: &mut [f64],
+        w2: &mut [f64],
+        b2: &mut [f64],
+        lr: f64,
+        xa: &[f64],
+        dha: &[f64],
+        xb: &[f64],
+        dhb: &[f64],
+        l2_scale: f64,
+        l2_mult: Option<&[f64]>,
+        n_hidden: usize,
+    ) {
+        self.t += 1;
+        let beta1: f64 = 0.9;
+        let beta2: f64 = 0.999;
+        let eps: f64 = 1e-8;
+        // For sufficiently large `t`, `beta^t` underflows to 0.0 exactly
+        // and `bc = 1.0`. The scalar path divides by `bc` either way; we
+        // pass it through unchanged so the SIMD result is bit-identical.
+        let bc1 = 1.0 - beta1.powi(self.t as i32);
+        let bc2 = 1.0 - beta2.powi(self.t as i32);
+
+        adam_simd::adam_update_w1_fused(&mut adam_simd::AdamW1FusedArgs {
+            w: w1,
+            g: &mut self.gw1,
+            m: &mut self.mw1,
+            v: &mut self.vw1,
+            xa,
+            dha,
+            xb,
+            dhb,
+            l2_scale,
+            l2_mult,
+            n_hidden,
+            beta1,
+            beta2,
+            eps,
+            bc1,
+            bc2,
+            lr,
+        });
+
+        let step_one = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {
+            let mut args = adam_simd::AdamUpdateArgs {
+                w,
+                g,
+                m,
+                v,
+                beta1,
+                beta2,
+                eps,
+                bc1,
+                bc2,
+                lr,
+            };
+            adam_simd::adam_update(&mut args);
+        };
+        step_one(b1, &mut self.gb1, &mut self.mb1, &mut self.vb1);
+        step_one(w2, &mut self.gw2, &mut self.mw2, &mut self.vw2);
+        step_one(b2, &mut self.gb2, &mut self.mb2, &mut self.vb2);
     }
 
     fn step(&mut self, w1: &mut [f64], b1: &mut [f64], w2: &mut [f64], b2: &mut [f64], lr: f64) {

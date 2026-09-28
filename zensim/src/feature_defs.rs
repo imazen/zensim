@@ -32,6 +32,9 @@
 //!   [720, 924)  append   scale*3*17 + ch*17 + local
 //!   [924, 944)  append2  scale*5 + local     (Y-only: one cell per scale)
 //!   [944, 956)  csfw     scale*3 + local     (Y-only)
+//!   [956, 986)  dvifm    level*6 + local     (flat: one cell, no scale axis —
+//!                                            DVIFM runs its OWN 5-level
+//!                                            pyramid off the scale-0 Y rows)
 //! ```
 //!
 //! ## Why the geometry constants are DERIVED here, not copied
@@ -101,6 +104,14 @@ pub(crate) enum Statistic {
     L4,
     /// `(Σx⁸/n)^⅛`.
     L8,
+    /// `(Σm⁴/n)^¼` pooled over per-BLOCK maxima (the restored `z1max` family).
+    /// Distinct from [`Statistic::L4`] on purpose: it shares v1's `RootForm`
+    /// handling but is NOT attached to the `v1detroot`/F18 registry gates,
+    /// whose pinned counts are measurements over the v1/v2 slots
+    /// (`registered_defects_cover_exactly_the_audited_slots`).
+    BlockL4,
+    /// `(Σm⁸/n)^⅛` over per-block maxima; see [`Statistic::BlockL4`].
+    BlockL8,
     /// Plane maximum.
     Max,
     /// `Σw·v / Σw` — the canonical weighted pooling the masked/IW blocks use.
@@ -122,6 +133,8 @@ impl Statistic {
             Statistic::L2 => "l2",
             Statistic::L4 => "l4",
             Statistic::L8 => "l8",
+            Statistic::BlockL4 => "block_l4",
+            Statistic::BlockL8 => "block_l8",
             Statistic::Max => "max",
             Statistic::WeightedMean => "weighted_mean",
             Statistic::Ratio => "ratio",
@@ -217,8 +230,9 @@ pub(crate) enum Placement {
 /// benchmark doc; as a registry field it is a query.
 ///
 /// [`Form::Undeclared`] is an HONEST state, not a default to fill in later: a
-/// signal whose identity behaviour has not been established reports that,
-/// rather than claiming a form nobody measured. The declared ones are pinned
+/// signal whose identity behaviour has not been established (or, for the
+/// restored-cut slots, depends on the formula revision) reports that, rather
+/// than claiming a form nobody measured. The declared ones are pinned
 /// by [`tests::declared_difference_forms_are_zero_on_an_identity_pair`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Form {
@@ -230,10 +244,13 @@ pub(crate) enum Form {
     ReferenceOnly,
     /// Not yet established. Never treated as any of the above.
     ///
-    /// Reserved for the Phase-2 research engine's provenance output
-    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); no signal in the committed
-    /// registry currently declares it, so nothing constructs it yet.
-    #[allow(dead_code)]
+    /// Declared by the restored-cut families (2026-09-25), the only committed
+    /// uses: the `mapdev` distorted-side deviations (`hfsq_dst_dev`,
+    /// `hfabs_dst_dev`: a property of one image, no reference/distorted
+    /// relation to zero) and the SSIM-derived `z1max` slots (block-locals 0, 1,
+    /// 2, 13, 16), whose identity value depends on the formula revision —
+    /// exactly 0 at Rev3 (direct-error form), nonzero at Rev1 — and which are
+    /// not attached to the F4 defect gate (see [`Statistic::BlockL4`]).
     Undeclared,
 }
 
@@ -300,10 +317,18 @@ pub(crate) enum KernelId {
     Append2,
     /// The CSFW tier-1 kernel.
     Csfw,
+    /// The DVIFM block-visibility pyramid pump (`dvifm.rs`).
+    Dvifm,
     /// The free raw-moment accumulator a v1-only walk finalizes.
     FreeRawMoments,
     /// The free bounded-error (class C) accumulator.
     FreeBoundedErr,
+    /// The Rev4 gridblk boundary-excess pass (C1's own kernel).
+    Gridblk,
+    /// The restored-cut per-band error-map side pass (`feature_v2::restore_cuts`):
+    /// the v1 fused kernel's own per-pixel maps consumed by deviation and
+    /// block-max pooling.
+    RestoreMaps,
 }
 
 impl KernelId {
@@ -318,8 +343,11 @@ impl KernelId {
             KernelId::Append => "append",
             KernelId::Append2 => "append2",
             KernelId::Csfw => "csfw",
+            KernelId::Dvifm => "dvifm",
             KernelId::FreeRawMoments => "free_raw_moments",
             KernelId::FreeBoundedErr => "free_bounded_err",
+            KernelId::Gridblk => "gridblk",
+            KernelId::RestoreMaps => "restore_maps",
         }
     }
 }
@@ -404,6 +432,9 @@ pub enum FormulaRevision {
     /// fixes landing together, so exactly one era boundary exists rather than
     /// one per defect — one recalculation, not three.
     Rev2,
+    /// Revision 2 plus stable f64 pairwise-error moments for v1 SSIM
+    /// basic, peak, masked and IW signals. Requires freshly extracted data.
+    Rev3,
 }
 
 impl FormulaRevision {
@@ -414,6 +445,16 @@ impl FormulaRevision {
         match self {
             Self::Rev1 => &[],
             Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain", "v1detroot", "scorepow"],
+            Self::Rev3 => &[
+                "v1ssimcap",
+                "freecomp",
+                "v1hfgain",
+                "v1detroot",
+                "scorepow",
+                "v1ssimstable",
+                "v2ssimstable",
+                "v1extfused",
+            ],
         }
     }
 
@@ -443,7 +484,7 @@ impl FormulaRevision {
     /// remaining free-vs-append gap into a MEASUREMENT of the append route's
     /// own error (plan R4) rather than an unattributed disagreement.
     pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(self, Self::Rev2)
+        matches!(self, Self::Rev2 | Self::Rev3)
     }
 
     /// Every slot id this revision moves, derived from the signal table's own
@@ -557,6 +598,100 @@ impl FeatureDef {
 
 const NO_REV: &[Revision] = &[];
 
+/// The commit that introduced the Rev4 feature bank — recorded so
+/// `Revision::commit` names a real hash rather than a placeholder (a landed
+/// revision must name the byte-changing commit; the registry test enforces
+/// `!= "-"`). Pinned by the follow-up commit once the landing commit exists.
+const REV4BANK_COMMIT: &str = "adef35be";
+
+/// The Rev4 feature-bank introduction era. Every slot of the four appended
+/// families (f986..1321 at 4 scales) is born carrying it, so
+/// `era_moved_slots("rev4bank", …)` enumerates exactly the appended range —
+/// the same machine-checkable answer the `v1ssimcap`/`v1hfgain` entries give
+/// for their eras.
+const REV4BANK: &[Revision] = &[Revision {
+    era: "rev4bank",
+    commit: REV4BANK_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of the four Rev4 candidate families \
+           (gridblk, ringbasis, tailhist, arttype) at f986..1321. No existing \
+           slot's value moves; disabled families emit nothing and cost \
+           nothing. Spec: docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md; design: \
+           benchmarks/rev4_featbank_impl_2026-09-23.md.",
+}];
+
+/// Pinned to the byte-changing implementation commit in the qualification
+/// follow-up after the local quarantine commit has a stable hash.
+const GMSBANK_COMMIT: &str = "5cdcf70a";
+const GMSBANK: &[Revision] = &[
+    Revision {
+        era: "gmsbank",
+        commit: GMSBANK_COMMIT,
+        status: RevisionStatus::Landed,
+        note: "append-only introduction of the five-constant GMS similarity bank, \
+           loss/gain/population-deviation at f1322..1501. No earlier slot moves. \
+           Design: benchmarks/rev4_gmsbank_design_2026-09-23.md.",
+    },
+    Revision {
+        era: "gmsbank-chroma-2026-09-24",
+        commit: "7b8e8a4f",
+        status: RevisionStatus::Landed,
+        note: "Quarantined implementation revision: native Y gradients, coarse X/Y/B \
+           gradients with per-channel TRAIN stabilisers, and coarse joint X/B \
+           chromaticity mean-loss/Welford deviation. Width 180 at four scales. \
+           No f0..f1321 change; no consumer or promotion. \
+           Preregistration: benchmarks/gmsd-chroma_prereg_2026-09-24.md.",
+    },
+];
+
+/// Restored-cut families (COST_CUTS_AUDIT, 2026-09-24 user ruling: "remember
+/// not to reject things for the cost budget ... we can optimize and make
+/// things optional"). Each is a default-off, append-only family. The commit
+/// is pinned to the byte-changing implementation commit once it exists.
+const RESTORE_COMMIT: &str = "384d15e1";
+const MAPDEV: &[Revision] = &[Revision {
+    era: "mapdev",
+    commit: RESTORE_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of the per-scale, per-channel population \
+           standard deviation (per-row Welford, row-ordered Chan merge) of the \
+           raw squared-error map and the four HF energy/magnitude maps, \
+           f1502..1561. Restores COST_CUTS_AUDIT A1 (gmsd lane A_dev, the part \
+           that is NOT a function of existing mean/L2 columns). No earlier \
+           slot moves.",
+}];
+const Z1MAX: &[Revision] = &[Revision {
+    era: "z1max",
+    commit: RESTORE_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of the 228-slot basic+peaks surface pooled \
+           over the (0,0)-anchored ungated 5x5 block-MAX lattice (partial \
+           border blocks dropped) instead of pixels, f1562..1789. Restores \
+           COST_CUTS_AUDIT B2 (zgeom lane z1max). No earlier slot moves. The \
+           4th/8th-root slots use `Statistic::BlockL4/BlockL8` and go through \
+           the same RootForm as v1's; they are deliberately NOT attached to the \
+           v1detroot/F18 gates (pinned v1/v2 counts) until the family is \
+           promoted from an optional research arm.",
+}];
+const DVIFMGATE: &[Revision] = &[Revision {
+    era: "dvifmgate",
+    commit: RESTORE_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of C7's per-level F1 under the two-state gate \
+           visibility (v = 1 iff contrast <= c0, max-merged across sides), \
+           f1820..1824. F2 is independent of v, so this is the whole gate-form \
+           variant. Restores COST_CUTS_AUDIT B1. No earlier slot moves.",
+}];
+const GMSNATIVE: &[Revision] = &[Revision {
+    era: "gmsnative",
+    commit: RESTORE_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of C8's X and B gradient loss/gain/deviation \
+           bank at NATIVE scale, f1790..1819 (the 30 slots the chroma revision \
+           dropped). Same per-channel stabilisers as the coarse X/B cells. \
+           Restores COST_CUTS_AUDIT Ambiguous 7. No earlier slot moves.",
+}];
+
 /// The v1 option-C revision: v1 stopped pooling mirror-padded phantom
 /// columns, which moves every pooled v1 slot at any non-tight width.
 const REV_OPTION_C: &[Revision] = &[Revision {
@@ -594,6 +729,7 @@ const REV_F4_PROPOSED: &[Revision] = &[
         note: "option C: v1 stopped pooling mirror-padded phantom columns.",
     },
     REV_F4_ENTRY,
+    REV_SSIM_STABLE,
 ];
 
 /// **F18** — the pooled 4th/8th roots make the extractor LIBC-DEPENDENT.
@@ -645,12 +781,78 @@ const REV_F4_AND_DETROOT: &[Revision] = &[
         note: "option C: v1 stopped pooling mirror-padded phantom columns.",
     },
     REV_F4_ENTRY,
+    REV_SSIM_STABLE,
     REV_DETROOT,
 ];
 
 /// [`DEFECT_F18`]'s fix on a v2-era slot (`ssim_dev4`), which option C never
 /// touched.
 const REV_V2_DETROOT: &[Revision] = &[REV_DETROOT];
+
+/// The v2 block's SSIM-derived signals under revision 3. They read the same
+/// `sigma12` plane the v1 signal does, and under revision 3 that plane holds
+/// the direct error moment — so `feature_v2::ssim_d_local` forms the v2
+/// dissimilarity from it directly rather than as `cov = s12 - mu1*mu2`. A
+/// separate era from `v1ssimstable` because it names a different kernel and a
+/// different slot family; both are in revision 3's list.
+const REV_EXT_FUSED: Revision = Revision {
+    era: "v1extfused",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "Rev3 (issue #61 perf campaign): the masked/IW extension is FUSED \
+           into the SSIM V sweep (`fused::ExtPoolsWork`). The activity is \
+           `blur(|src - H(src)|)` exactly as before — the H-only mu plane the \
+           H pass already wrote, H-blurred once, V-blurred inside the sweep \
+           by the same `sum + add - rem` recurrence — and every masked/IW \
+           pool is formed from the same per-pixel values the separate passes \
+           formed. What moves is the ORDER the f64 chunk sums are added in \
+           (column-group-major inside the sweep, row-major in the passes), so \
+           these slots move at the last f64 bits on every image. The masked/\
+           IW SSIM pools are already `v1ssimstable` movers; this era adds \
+           the v1 MASKED/IW `edge_art_4th`, `edge_det_4th` and `mse` slots. STILL PROPOSED: `SHIPPED_REVISION` \
+           is `Rev1`.",
+};
+/// `v1()`'s default list (`v1postc`) plus the fused-extension era: the v1
+/// MASKED/IW `mse` slots.
+const REV_OPTION_C_AND_EXT_FUSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    REV_EXT_FUSED,
+];
+/// `v1()`'s pooled-root list (`v1postc` + F18) plus the fused-extension era:
+/// the v1 MASKED/IW `edge_art_4th` / `edge_det_4th` slots.
+const REV_DETROOT_AND_EXT_FUSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    REV_DETROOT,
+    REV_EXT_FUSED,
+];
+
+const REV_V2_SSIM_STABLE: Revision = Revision {
+    era: "v2ssimstable",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "Rev3 (issue #61): the v2 dense kernel's SSIM dissimilarity \
+           (`ssim_d_local` / `ssim_d_local_v`) reads the fourth moment plane \
+           as the DIRECT error `E[(a-b)^2]` and forms \
+           `(d(b-a) + a*err_var)/(b*d)` instead of recovering the covariance \
+           by subtraction. Same bounded-error contract as `v1ssimstable`. \
+           Registered after the first fused build was caught (by reading, \
+           not by a gate) still computing `cov = s12 - mu1*mu2` on the \
+           redefined plane; `rev3_moves_exactly_the_registered_slots_on_the_944_layout` \
+           now covers the v2 block. Proposed: nothing is trained against it.",
+};
+const REV_V2_SSIM: &[Revision] = &[REV_V2_SSIM_STABLE];
+/// `ssim_dev4` carries F18's pooled-root era AND the v2 SSIM era.
+const REV_V2_SSIM_AND_DETROOT: &[Revision] = &[REV_DETROOT, REV_V2_SSIM_STABLE];
 
 /// The one text of the `v1detroot` era, so the three lists above cannot drift.
 const REV_DETROOT: Revision = Revision {
@@ -682,6 +884,31 @@ const REV_DETROOT: Revision = Revision {
 /// in F4 alone) and [`REV_F4_AND_DETROOT`] (a slot in F4 *and* F18) name this
 /// constant, so the two lists cannot state the same era differently — the
 /// exact drift a second copy of the text would invite.
+const REV_SSIM_STABLE: Revision = Revision {
+    era: "v1ssimstable",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "Rev3 (issue #61), FUSED form: the v1 SSIM dissimilarity is formed \
+           from a DIRECT error moment. `blur::fused_blur_h_ssim` accumulates \
+           `sum (a-b)^2` in the fourth plane in place of `sum a*b` (same two \
+           FMAs), and `fused::fused_vblur_ssim_inner` forms \
+           `loss + (1-loss)*E_err/(var1+var2+C2)` from the same four f32 \
+           planes it always V-blurred — no second traversal. Basic, peak, \
+           masked, IW and the attribution planes all read that one retained \
+           value. BOUNDED, not exact, by user directive 2026-09-09 (\"bounded \
+           error is fine, speed above minor flaws\"): registered on the \
+           locality fixture, peak out-of-support movement <= 2e-5 (measured \
+           4.277e-6; shipped rev 1 measures 4.886e-4), max abs error vs the \
+           exact f64 reference kernel <= 1e-3, all-equal-window residue \
+           <= 1e-5 (measured 3.689e-6). The exact f64 second-pass kernel \
+           `ssim_form::stable_ssim_plane` measured 0 movement but cost \
+           +27..87% of extraction (22% of the walk in perf) and is retained \
+           only as the reference the bounds are measured against. This era \
+           moves every SSIM-derived slot on every image, unlike `v1ssimcap`. \
+           STILL PROPOSED: `ssim_form::SHIPPED_REVISION` is `Rev1`, no table \
+           has been re-extracted and no bake refit against it.",
+};
+
 const REV_F4_ENTRY: Revision = Revision {
     era: "v1ssimcap",
     commit: "-",
@@ -863,11 +1090,13 @@ const REV_F17_PROPOSED: &[Revision] = &[
 /// **F15** — `PJND_FRAGILITY` is nonzero on an identity pair.
 const DEFECT_F15: Defect = Defect {
     id: "F15",
-    note: "A fragility measure of an undistorted pair should be 0. It reads \
-           exactly 1.0 on a v1-only 944 walk (from zeroed accumulators) and \
-           0.395 on the full walk — the same slot, two artifacts. It is one of \
-           the two reasons the 944 identity vector is not the zero vector; the \
-           other 15 nonzero slots are correctly reference-only.",
+    note: "The identity-pair value is NOT a defect: the slot is \
+           1 − saturate(mean grad_src_mag), a property of the reference, and on \
+           the Rev4 bank's 88 identical keys it equals every same-reference \
+           sibling bit for bit (2,376 cells; REVIEW_PARTB 2026-09-25). The earlier \
+           premise that it should read 0 there was wrong. The defect is the other \
+           artifact: a v1-only 944 walk reads exactly 1.0 from zeroed \
+           accumulators, a value emitted without its inputs.",
 };
 
 /// **THE one owner of "does this slot use a pooled 4th/8th root?"** — derived
@@ -920,6 +1149,38 @@ const fn v1(
         } else {
             REV_OPTION_C
         },
+    }
+}
+
+/// [`v1`] with an explicit revision list — for slots whose era membership is
+/// not implied by their statistic (the fused-extension pools). The F18
+/// defect is still derived from the statistic exactly as [`v1`] derives it.
+const fn v1_rev(
+    family: ComputeToken,
+    block_local: u16,
+    name: &'static str,
+    statistic: Statistic,
+    kernel: KernelId,
+    revisions: &'static [Revision],
+) -> SignalDef {
+    SignalDef {
+        family,
+        block_local,
+        name,
+        statistic,
+        cost: CostClass::Cheap,
+        tranche: Tranche::None,
+        placement: Placement::AllCells,
+        form: Form::Difference,
+        direction: Direction::HigherIsWorse,
+        kernel,
+        deprecated: false,
+        defect: if uses_pooled_root(statistic) {
+            Some(DEFECT_F18)
+        } else {
+            None
+        },
+        revisions,
     }
 }
 
@@ -1021,6 +1282,33 @@ const fn v2sig(
     }
 }
 
+/// [`v2sig`] with an explicit `revisions` list, for the v2 signals an era
+/// names by KERNEL rather than by statistic (the SSIM-derived six).
+#[allow(clippy::too_many_arguments)]
+const fn v2sig_rev(
+    block_local: u16,
+    name: &'static str,
+    statistic: Statistic,
+    form: Form,
+    direction: Direction,
+    kernel: KernelId,
+    tranche: Tranche,
+    defect: Option<Defect>,
+    revisions: &'static [Revision],
+) -> SignalDef {
+    let base = v2sig(
+        block_local,
+        name,
+        statistic,
+        form,
+        direction,
+        kernel,
+        tranche,
+        defect,
+    );
+    SignalDef { revisions, ..base }
+}
+
 const fn app(
     block_local: u16,
     name: &'static str,
@@ -1117,9 +1405,9 @@ pub(crate) static MASKED: [SignalDef; 6] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1(F, 3, "edge_art_4th", L4, K),
-        v1(F, 4, "edge_det_4th", L4, K),
-        v1(F, 5, "mse", Mean, K),
+        v1_rev(F, 3, "edge_art_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 4, "edge_det_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 5, "mse", Mean, K, REV_OPTION_C_AND_EXT_FUSED),
     ]
 };
 
@@ -1136,9 +1424,9 @@ pub(crate) static IW: [SignalDef; 6] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1(F, 3, "edge_art_4th", L4, K),
-        v1(F, 4, "edge_det_4th", L4, K),
-        v1(F, 5, "mse", Mean, K),
+        v1_rev(F, 3, "edge_art_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 4, "edge_det_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 5, "mse", Mean, K, REV_OPTION_C_AND_EXT_FUSED),
     ]
 };
 
@@ -1151,7 +1439,7 @@ pub(crate) static V2: [SignalDef; 29] = {
     use Statistic::{L2, L4, Mean, WeightedMean};
     [
         // Bounded-basic block (idx 0..8).
-        v2sig(
+        v2sig_rev(
             0,
             "ssim_mean",
             Mean,
@@ -1160,8 +1448,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
-        v2sig(
+        v2sig_rev(
             1,
             "ssim_dev2",
             L2,
@@ -1170,8 +1459,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
-        v2sig(
+        v2sig_rev(
             2,
             "ssim_dev4",
             L4,
@@ -1180,6 +1470,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM_AND_DETROOT,
         ),
         v2sig(
             3,
@@ -1244,7 +1535,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             None,
         ),
         // Soft-saliency peak block (idx 9..11).
-        v2sig(
+        v2sig_rev(
             9,
             "ssim_soft_peak",
             WeightedMean,
@@ -1253,6 +1544,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
         v2sig(
             10,
@@ -1275,7 +1567,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             None,
         ),
         // Masked block (idx 12..15).
-        v2sig(
+        v2sig_rev(
             12,
             "masked_ssim",
             WeightedMean,
@@ -1284,6 +1576,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
         v2sig(
             13,
@@ -1316,7 +1609,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             None,
         ),
         // IW block (idx 16..19).
-        v2sig(
+        v2sig_rev(
             16,
             "iw_ssim",
             WeightedMean,
@@ -1325,6 +1618,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
         v2sig(
             17,
@@ -1368,9 +1662,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             Tranche::None,
             None,
         ),
-        // F15: nonzero on an identity pair (1.0 on a v1-only walk, 0.395 on
-        // the full one). Declared ReferenceOnly because it IS computed from
-        // the reference — the defect is the VALUE, not the form.
+        // F15: ReferenceOnly, and its nonzero identity-pair value is correct
+        // (it equals the same-reference siblings). The defect is the 1.0 a
+        // v1-only walk reads from zeroed accumulators.
         v2sig(
             21,
             "pjnd_fragility",
@@ -1808,6 +2102,457 @@ pub(crate) static CSFW: [SignalDef; 3] = {
     ]
 };
 
+/// The 30 DVIFM block-visibility signals — F1 plus five F2 bins for each of
+/// the family's OWN five pyramid levels (not the walk's scales; DVIFM is a
+/// [`Replication::Flat`] block fed by the scale-0 Y rows). Index-aligned
+/// with `dvifm::DVIFM_FEATURES`: `level*6 + local` where local 0 is the
+/// parametric visibility-weighted block error and locals 1..6 are the five
+/// triangular log-contrast bins.
+pub(crate) static DVIFM: [SignalDef; 30] = {
+    use ComputeToken::Dvifm as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::Dvifm as K;
+    use Statistic::Mean;
+    const fn dv(block_local: u16, name: &'static str) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic: Mean,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: NO_REV,
+        }
+    }
+    [
+        dv(0, "l0_f1"),
+        dv(1, "l0_f2b0"),
+        dv(2, "l0_f2b1"),
+        dv(3, "l0_f2b2"),
+        dv(4, "l0_f2b3"),
+        dv(5, "l0_f2b4"),
+        dv(6, "l1_f1"),
+        dv(7, "l1_f2b0"),
+        dv(8, "l1_f2b1"),
+        dv(9, "l1_f2b2"),
+        dv(10, "l1_f2b3"),
+        dv(11, "l1_f2b4"),
+        dv(12, "l2_f1"),
+        dv(13, "l2_f2b0"),
+        dv(14, "l2_f2b1"),
+        dv(15, "l2_f2b2"),
+        dv(16, "l2_f2b3"),
+        dv(17, "l2_f2b4"),
+        dv(18, "l3_f1"),
+        dv(19, "l3_f2b0"),
+        dv(20, "l3_f2b1"),
+        dv(21, "l3_f2b2"),
+        dv(22, "l3_f2b3"),
+        dv(23, "l3_f2b4"),
+        dv(24, "l4_f1"),
+        dv(25, "l4_f2b0"),
+        dv(26, "l4_f2b1"),
+        dv(27, "l4_f2b2"),
+        dv(28, "l4_f2b3"),
+        dv(29, "l4_f2b4"),
+    ]
+};
+
+// ============================================================================
+// Rev4 candidate feature bank (f986..1321 at 4 scales)
+// ============================================================================
+//
+// Spec: `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md` §1.1 / §2.4–2.5; pinned
+// geometry: `benchmarks/rev4_featbank_impl_2026-09-23.md`. All four families
+// are difference-form by construction (identity pair → 0.0), carry no
+// tranche (a v1-only walk cannot harvest any of them — they live on the
+// v2-era passes), and declare `Placement::AllCells`: gridblk's `(Y, scale 3)`
+// cell is registered-with-stated-zero (period 1 has no phase contrast), not
+// skipped, so the slot exists and emits 0.0 deliberately.
+
+/// The 8 gridblk signals per (scale, channel) cell — the C1 phase-aligned
+/// blocking family. `mag_bin*` are SIGNED mass bins of the activity-scaled
+/// boundary step excess (`ẽ` may be negative = suppression), so they are
+/// `Unsigned`; `on_mean` is signed for the same reason; `onoff_ratio` is a
+/// magnitude ratio, `HigherIsWorse`.
+pub(crate) static GRIDBLK: [SignalDef; 8] = {
+    use ComputeToken::Gridblk as F;
+    use Form::Difference;
+    use KernelId::Gridblk as K;
+    const fn gb(
+        block_local: u16,
+        name: &'static str,
+        statistic: Statistic,
+        direction: Direction,
+    ) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        gb(0, "mag_bin1", Statistic::Bin, Direction::Unsigned),
+        gb(1, "mag_bin2", Statistic::Bin, Direction::Unsigned),
+        gb(2, "mag_bin3", Statistic::Bin, Direction::Unsigned),
+        gb(3, "mag_bin4", Statistic::Bin, Direction::Unsigned),
+        gb(4, "mag_bin5", Statistic::Bin, Direction::Unsigned),
+        gb(5, "mag_bin6", Statistic::Bin, Direction::Unsigned),
+        gb(6, "on_mean", Statistic::Mean, Direction::Unsigned),
+        gb(7, "onoff_ratio", Statistic::Ratio, Direction::HigherIsWorse),
+    ]
+};
+
+/// The 6 ringbasis signals per (scale, channel) cell — the C2
+/// ringing-magnitude basis. Triangular log-axis bins of the gradient
+/// kernel's own per-pixel ringing term; every bin is a nonnegative pooled
+/// mass, so all are `HigherIsWorse`.
+pub(crate) static RINGBASIS: [SignalDef; 6] = {
+    use ComputeToken::Ringbasis as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Gradient as K;
+    use Statistic::Bin;
+    const fn rb(block_local: u16, name: &'static str) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic: Bin,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        rb(0, "mag_bin1"),
+        rb(1, "mag_bin2"),
+        rb(2, "mag_bin3"),
+        rb(3, "mag_bin4"),
+        rb(4, "mag_bin5"),
+        rb(5, "mag_bin6"),
+    ]
+};
+
+/// The 12 tailhist signals per (scale, channel) cell — the C3 tail profile
+/// of the four existing dense per-pixel maps (`ssim` dissimilarity,
+/// `art`, `det`, `mse`). `p95`/`p99` are read off the family's 32-bin
+/// log-edged histogram (a bin statistic); `max` is the exact map max.
+pub(crate) static TAILHIST: [SignalDef; 12] = {
+    use ComputeToken::Tailhist as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Dense as K;
+    const fn th(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        th(0, "ssim_p95", Statistic::Bin),
+        th(1, "ssim_p99", Statistic::Bin),
+        th(2, "ssim_max", Statistic::Max),
+        th(3, "art_p95", Statistic::Bin),
+        th(4, "art_p99", Statistic::Bin),
+        th(5, "art_max", Statistic::Max),
+        th(6, "det_p95", Statistic::Bin),
+        th(7, "det_p99", Statistic::Bin),
+        th(8, "det_max", Statistic::Max),
+        th(9, "mse_p95", Statistic::Bin),
+        th(10, "mse_p99", Statistic::Bin),
+        th(11, "mse_max", Statistic::Max),
+    ]
+};
+
+/// The 6 arttype signals per SCALE (channel `Scalar`) — the C4 artifact-type
+/// descriptors: blur (EWC × HF_LOSS product at that scale), flat-region HF
+/// noise per channel, and chroma bleed outside the dilated luma-edge mask.
+pub(crate) static ARTTYPE: [SignalDef; 6] = {
+    use ComputeToken::Arttype as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    const fn at(
+        block_local: u16,
+        name: &'static str,
+        statistic: Statistic,
+        kernel: KernelId,
+    ) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        at(0, "blur", Statistic::Global, KernelId::V2Dense),
+        at(1, "noise_x", Statistic::Mean, KernelId::V2Dense),
+        at(2, "noise_y", Statistic::Mean, KernelId::V2Dense),
+        at(3, "noise_b", Statistic::Mean, KernelId::V2Dense),
+        at(4, "bleed_x", Statistic::Ratio, KernelId::V2Gradient),
+        at(5, "bleed_b", Statistic::Ratio, KernelId::V2Gradient),
+    ]
+};
+
+/// C8: sparse native-Y/coarse-chroma gradient and chromaticity signals.
+pub(crate) static GMSBANK_SIGNALS: [SignalDef; 25] = {
+    use ComputeToken::Gmsbank as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Gradient as K;
+    const fn gb(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: GMSBANK,
+        }
+    }
+    [
+        gb(0, "loss0", Statistic::Mean),
+        gb(1, "gain0", Statistic::Mean),
+        gb(2, "dev0", Statistic::Global),
+        gb(3, "loss1", Statistic::Mean),
+        gb(4, "gain1", Statistic::Mean),
+        gb(5, "dev1", Statistic::Global),
+        gb(6, "loss2", Statistic::Mean),
+        gb(7, "gain2", Statistic::Mean),
+        gb(8, "dev2", Statistic::Global),
+        gb(9, "loss3", Statistic::Mean),
+        gb(10, "gain3", Statistic::Mean),
+        gb(11, "dev3", Statistic::Global),
+        gb(12, "loss4", Statistic::Mean),
+        gb(13, "gain4", Statistic::Mean),
+        gb(14, "dev4", Statistic::Global),
+        gb(15, "cs_loss0", Statistic::Mean),
+        gb(16, "cs_dev0", Statistic::Global),
+        gb(17, "cs_loss1", Statistic::Mean),
+        gb(18, "cs_dev1", Statistic::Global),
+        gb(19, "cs_loss2", Statistic::Mean),
+        gb(20, "cs_dev2", Statistic::Global),
+        gb(21, "cs_loss3", Statistic::Mean),
+        gb(22, "cs_dev3", Statistic::Global),
+        gb(23, "cs_loss4", Statistic::Mean),
+        gb(24, "cs_dev4", Statistic::Global),
+    ]
+};
+
+/// A1 (restored): standard deviation of five per-pixel maps of the v1 band
+/// kernel per (scale, channel). `mse_dev` is exactly zero on an identity pair;
+/// the four HF maps are reference/distorted properties, so on an identity
+/// pair `hfsq_src_dev == hfsq_dst_dev` and neither is zero.
+pub(crate) static MAPDEV_SIGNALS: [SignalDef; 5] = {
+    use ComputeToken::Mapdev as F;
+    use Statistic::Global;
+    const fn md(
+        block_local: u16,
+        name: &'static str,
+        form: Form,
+        direction: Direction,
+    ) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic: Global,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form,
+            direction,
+            kernel: KernelId::RestoreMaps,
+            deprecated: false,
+            defect: None,
+            revisions: MAPDEV,
+        }
+    }
+    [
+        md(0, "mse_dev", Form::Difference, Direction::HigherIsWorse),
+        md(1, "hfsq_src_dev", Form::ReferenceOnly, Direction::Unsigned),
+        md(2, "hfsq_dst_dev", Form::Undeclared, Direction::Unsigned),
+        md(3, "hfabs_src_dev", Form::ReferenceOnly, Direction::Unsigned),
+        md(4, "hfabs_dst_dev", Form::Undeclared, Direction::Unsigned),
+    ]
+};
+
+/// B2 (restored): the 13 basic + 6 peak v1 signals pooled over ungated 5x5
+/// block maxima, in `BASIC` then `PEAKS` order.
+pub(crate) static Z1MAX_SIGNALS: [SignalDef; 19] = {
+    use ComputeToken::Z1max as F;
+    use Statistic::{BlockL4 as L4, BlockL8 as L8, L2, Max, Mean, Ratio};
+    const fn zm(
+        block_local: u16,
+        name: &'static str,
+        statistic: Statistic,
+        form: Form,
+    ) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form,
+            direction: Direction::HigherIsWorse,
+            kernel: KernelId::RestoreMaps,
+            deprecated: false,
+            defect: None,
+            revisions: Z1MAX,
+        }
+    }
+    use Form::{Difference as D, Undeclared as U};
+    [
+        zm(0, "ssim_mean", Mean, U),
+        zm(1, "ssim_4th", L4, U),
+        zm(2, "ssim_2nd", L2, U),
+        zm(3, "edge_art_mean", Mean, D),
+        zm(4, "edge_art_4th", L4, D),
+        zm(5, "edge_art_2nd", L2, D),
+        zm(6, "edge_det_mean", Mean, D),
+        zm(7, "edge_det_4th", L4, D),
+        zm(8, "edge_det_2nd", L2, D),
+        zm(9, "mse", Mean, D),
+        zm(10, "var_loss", Ratio, D),
+        zm(11, "tex_loss", Ratio, D),
+        zm(12, "contrast_inc", Ratio, D),
+        zm(13, "ssim_max", Max, U),
+        zm(14, "edge_art_max", Max, D),
+        zm(15, "edge_det_max", Max, D),
+        zm(16, "ssim_l8", L8, U),
+        zm(17, "edge_art_l8", L8, D),
+        zm(18, "edge_det_l8", L8, D),
+    ]
+};
+
+/// Ambiguous 7 (restored): C8's per-channel gradient bank at native scale for
+/// the X and B channels (15 slots each), identical to the coarse X/B cells'
+/// definition.
+pub(crate) static GMSNATIVE_SIGNALS: [SignalDef; 15] = {
+    use ComputeToken::Gmsnative as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Gradient as K;
+    const fn gn(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: GMSNATIVE,
+        }
+    }
+    [
+        gn(0, "loss0", Statistic::Mean),
+        gn(1, "gain0", Statistic::Mean),
+        gn(2, "dev0", Statistic::Global),
+        gn(3, "loss1", Statistic::Mean),
+        gn(4, "gain1", Statistic::Mean),
+        gn(5, "dev1", Statistic::Global),
+        gn(6, "loss2", Statistic::Mean),
+        gn(7, "gain2", Statistic::Mean),
+        gn(8, "dev2", Statistic::Global),
+        gn(9, "loss3", Statistic::Mean),
+        gn(10, "gain3", Statistic::Mean),
+        gn(11, "dev3", Statistic::Global),
+        gn(12, "loss4", Statistic::Mean),
+        gn(13, "gain4", Statistic::Mean),
+        gn(14, "dev4", Statistic::Global),
+    ]
+};
+
+/// B1 (restored): C7's F1 under the two-state gate visibility, one slot per
+/// DVIFM level (the family's own five pyramid levels).
+pub(crate) static DVIFMGATE_SIGNALS: [SignalDef; 5] = {
+    use ComputeToken::Dvifmgate as F;
+    const fn dg(block_local: u16, name: &'static str) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic: Statistic::Mean,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Form::Difference,
+            direction: Direction::HigherIsWorse,
+            kernel: KernelId::Dvifm,
+            deprecated: false,
+            defect: None,
+            revisions: DVIFMGATE,
+        }
+    }
+    [
+        dg(0, "f1gate_l0"),
+        dg(1, "f1gate_l1"),
+        dg(2, "f1gate_l2"),
+        dg(3, "f1gate_l3"),
+        dg(4, "f1gate_l4"),
+    ]
+};
+
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -1819,6 +2564,18 @@ pub(crate) enum Replication {
     PerChannel,
     /// One cell per scale (the Y-only blocks).
     PerScale,
+    /// One cell TOTAL — the signal table is the whole block (DVIFM: the
+    /// family's own pyramid levels are its signal axis, not the walk's
+    /// scales, so there is nothing to replicate). [`def_at`] reports
+    /// `scale = 0, channel = Scalar` for every flat slot, which is also what
+    /// `ComputeSet::at_scale` narrowing needs: a flat family's slots live
+    /// and die with the scale-0 walk rows that feed them.
+    Flat,
+    /// Native Y gradients, then coarse X/Y/B gradients and joint chroma CS.
+    GmsbankChroma,
+    /// Two cells total, at scale 0: X then B (the native-scale chroma cells
+    /// the coarse-only C8 layout omits).
+    NativeXb,
 }
 
 /// A registered block: a signal table plus where it sits in the layout.
@@ -1872,6 +2629,56 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &CSFW,
         replication: Replication::PerScale,
     },
+    BlockDef {
+        family: ComputeToken::Dvifm,
+        signals: &DVIFM,
+        replication: Replication::Flat,
+    },
+    BlockDef {
+        family: ComputeToken::Gridblk,
+        signals: &GRIDBLK,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Ringbasis,
+        signals: &RINGBASIS,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Tailhist,
+        signals: &TAILHIST,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Arttype,
+        signals: &ARTTYPE,
+        replication: Replication::PerScale,
+    },
+    BlockDef {
+        family: ComputeToken::Gmsbank,
+        signals: &GMSBANK_SIGNALS,
+        replication: Replication::GmsbankChroma,
+    },
+    BlockDef {
+        family: ComputeToken::Mapdev,
+        signals: &MAPDEV_SIGNALS,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Z1max,
+        signals: &Z1MAX_SIGNALS,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Gmsnative,
+        signals: &GMSNATIVE_SIGNALS,
+        replication: Replication::NativeXb,
+    },
+    BlockDef {
+        family: ComputeToken::Dvifmgate,
+        signals: &DVIFMGATE_SIGNALS,
+        replication: Replication::Flat,
+    },
 ];
 
 impl BlockDef {
@@ -1880,6 +2687,21 @@ impl BlockDef {
         let cells = match self.replication {
             Replication::PerChannel => n_scales * 3,
             Replication::PerScale => n_scales,
+            Replication::Flat => 1,
+            Replication::NativeXb => {
+                return if n_scales == 0 {
+                    0
+                } else {
+                    2 * self.signals.len()
+                };
+            }
+            Replication::GmsbankChroma => {
+                return if n_scales == 0 {
+                    0
+                } else {
+                    15 + (n_scales - 1) * 55
+                };
+            }
         };
         cells * self.signals.len()
     }
@@ -1912,12 +2734,16 @@ pub(crate) fn block_base(
 /// because guessing would name a different set.
 ///
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
-/// (append-only; 2026-09-06: 372, 720, 924, 944, 956) plus the registry's full
-/// width. `zensim-validate`'s
+/// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
+/// Rev4 feature bank's full width 1322) plus C8's width 1502 and the restored-cut families' widths 1562 (mapdev),
+/// 1790 (z1max), 1820 (gmsnative) and 1825 (dvifmgate).
+/// `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
-pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956];
+pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[
+    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825,
+];
 
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
@@ -1926,7 +2752,9 @@ pub(crate) fn full_width(n_scales: usize) -> usize {
 
 /// The slot id of one signal placement.
 ///
-/// `channel` is ignored for [`Replication::PerScale`] blocks.
+/// `channel` is ignored for [`Replication::PerScale`] and
+/// [`Replication::Flat`] blocks; `Flat` additionally requires `scale == 0`
+/// (it has no scale axis — see the variant's doc).
 pub(crate) fn slot_id(
     family: ComputeToken,
     block_local: usize,
@@ -1935,18 +2763,57 @@ pub(crate) fn slot_id(
     n_scales: usize,
 ) -> Option<usize> {
     let (base, block) = block_base(family, n_scales)?;
-    if scale >= n_scales || block_local >= block.signals.len() {
+    if block_local >= block.signals.len() {
         return None;
     }
     let per = block.signals.len();
     Some(match block.replication {
+        Replication::GmsbankChroma => {
+            if scale >= n_scales {
+                return None;
+            }
+            if scale == 0 {
+                if channel != 1 || block_local >= 15 {
+                    return None;
+                }
+                base + block_local
+            } else if block_local < 15 {
+                if channel >= 3 {
+                    return None;
+                }
+                base + 15 + (scale - 1) * 55 + channel * 15 + block_local
+            } else {
+                base + 15 + (scale - 1) * 55 + 45 + block_local - 15
+            }
+        }
+        Replication::NativeXb => {
+            if scale != 0 || !matches!(channel, 0 | 2) {
+                return None;
+            }
+            base + (channel / 2) * per + block_local
+        }
         Replication::PerChannel => {
-            if channel >= 3 {
+            if scale >= n_scales || channel >= 3 {
                 return None;
             }
             base + (scale * 3 + channel) * per + block_local
         }
-        Replication::PerScale => base + scale * per + block_local,
+        Replication::PerScale => {
+            if scale >= n_scales {
+                return None;
+            }
+            base + scale * per + block_local
+        }
+        // One cell: no (scale, channel) axes. `scale == 0` is required so
+        // this round-trips [`def_at`]'s flat-block reading, and so a
+        // per-scale enumeration of a flat block does not silently answer
+        // the same slot once per scale.
+        Replication::Flat => {
+            if scale != 0 {
+                return None;
+            }
+            base + block_local
+        }
     })
 }
 
@@ -1961,11 +2828,29 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
             let off = id - base;
             let per = block.signals.len();
             let (scale, channel, local) = match block.replication {
+                Replication::GmsbankChroma => {
+                    if off < 15 {
+                        (0, Channel::Y, off)
+                    } else {
+                        let scale = 1 + (off - 15) / 55;
+                        let within = (off - 15) % 55;
+                        if within < 45 {
+                            (scale, Channel::TRIPLE[within / 15], within % 15)
+                        } else {
+                            (scale, Channel::Scalar, 15 + within - 45)
+                        }
+                    }
+                }
+                Replication::NativeXb => {
+                    let cell = off / per;
+                    (0, [Channel::X, Channel::B][cell], off % per)
+                }
                 Replication::PerChannel => {
                     let cell = off / per;
                     (cell / 3, Channel::TRIPLE[cell % 3], off % per)
                 }
                 Replication::PerScale => (off / per, Channel::Scalar, off % per),
+                Replication::Flat => (0, Channel::Scalar, off),
             };
             return Some(FeatureDef {
                 id: u16::try_from(id).ok()?,
@@ -2146,6 +3031,44 @@ mod tests {
         }
     }
 
+    /// **The registry half of G3.1 for revision 3's `v1ssimstable` era.**
+    ///
+    /// Revision 3 changes the PRECISION of the same per-pixel `d` that F4's
+    /// bounded form changes, so it reaches exactly the same slots — asserted
+    /// against `v1ssimcap`'s measured set rather than against a second
+    /// hand-written list.
+    ///
+    /// The two eras are NOT interchangeable despite sharing a slot set:
+    /// `v1ssimcap` is bit-identical to revision 1 wherever `D^2 <= 1`, i.e.
+    /// on all ordinary content, while `v1ssimstable` moves every one of these
+    /// columns on every image. Same blast radius, very different blast.
+    ///
+    /// The MEASURED half — that the extractor really does move this set and
+    /// nothing else — is
+    /// `streaming::tests::rev3_moves_exactly_the_registered_slots`, which
+    /// re-extracts at revision 3 in a child process and diffs.
+    #[test]
+    fn ssim_stable_moves_exactly_the_f4_slots() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        let stable = super::era_moved_slots("v1ssimstable", 372, NUM_SCALES);
+        let f4 = super::era_moved_slots("v1ssimcap", 372, NUM_SCALES);
+        assert_eq!(
+            stable, f4,
+            "v1ssimstable and v1ssimcap read the same per-pixel signal, so they \
+             must declare the same slots"
+        );
+        assert_eq!(stable.len(), 132);
+        // And it is one of revision 3's eras, so a recalculation planned from
+        // the revision (not the era) still sees these columns.
+        assert!(
+            FormulaRevision::Rev3
+                .moved_slots(372, NUM_SCALES)
+                .contains(&241)
+        );
+        assert!(FormulaRevision::Rev3.era_tokens().contains(&"v1ssimstable"));
+    }
+
     /// Revision 1 is the baseline, so it moves nothing by definition.
     #[test]
     fn rev1_moves_no_slots() {
@@ -2301,7 +3224,7 @@ mod tests {
     #[test]
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
-        assert_eq!(w, 956, "full registered width at 4 scales");
+        assert_eq!(w, 1825, "full registered width at 4 scales");
         for id in 0..w {
             let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
             let ch = match d.channel {
@@ -2323,6 +3246,45 @@ mod tests {
         assert!(def_at(w, NS).is_none(), "past the full width");
     }
 
+    #[test]
+    fn gmsbank_sparse_chroma_placement_at_every_scale_count() {
+        for ns in 1..=4 {
+            let (base, block) = block_base(ComputeToken::Gmsbank, ns).unwrap();
+            assert_eq!(block.width(ns), [15, 70, 125, 180][ns - 1]);
+            for local in 0..25 {
+                assert!(slot_id(ComputeToken::Gmsbank, local, 0, 0, ns).is_none());
+                assert!(slot_id(ComputeToken::Gmsbank, local, 0, 2, ns).is_none());
+                assert_eq!(
+                    slot_id(ComputeToken::Gmsbank, local, 0, 1, ns).is_some(),
+                    local < 15
+                );
+            }
+            for id in base..base + block.width(ns) {
+                let d = def_at(id, ns).unwrap();
+                let channel = match d.channel {
+                    Channel::X | Channel::Scalar => 0,
+                    Channel::Y => 1,
+                    Channel::B => 2,
+                };
+                assert_eq!(
+                    slot_id(
+                        ComputeToken::Gmsbank,
+                        usize::from(d.signal.block_local),
+                        usize::from(d.scale),
+                        channel,
+                        ns
+                    ),
+                    Some(id)
+                );
+                assert!(usize::from(d.scale) < ns);
+                if d.signal.block_local >= 15 {
+                    assert!(d.scale > 0);
+                    assert_eq!(d.channel, Channel::Scalar);
+                }
+            }
+        }
+    }
+
     /// The block bases are the numbers every emit site in `feature_v2` writes
     /// out by hand. Pinned here so the registry cannot drift from them.
     #[test]
@@ -2336,6 +3298,16 @@ mod tests {
             (ComputeToken::Append, 720, 204),
             (ComputeToken::Append2, 924, 20),
             (ComputeToken::Csfw, 944, 12),
+            (ComputeToken::Dvifm, 956, 30),
+            (ComputeToken::Gridblk, 986, 96),
+            (ComputeToken::Ringbasis, 1082, 72),
+            (ComputeToken::Tailhist, 1154, 144),
+            (ComputeToken::Arttype, 1298, 24),
+            (ComputeToken::Gmsbank, 1322, 180),
+            (ComputeToken::Mapdev, 1502, 60),
+            (ComputeToken::Z1max, 1562, 228),
+            (ComputeToken::Gmsnative, 1790, 30),
+            (ComputeToken::Dvifmgate, 1820, 5),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -2357,7 +3329,7 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 956);
+        assert_eq!(seen.len(), 1825);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -2770,8 +3742,15 @@ mod owner_gates {
         let width = full_width(NS);
         let off = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
+            full_res_xb: true,
+            coarse_y_only_scales: 0,
+            local_only: false,
+            omit_edges: false,
+            sampling: None,
             v1_basic: false,
             v1_pools: V1PoolsMode::Off,
+            v1_full_scales: ComputeSet::ALL_SCALES,
+            v2_scales: ComputeSet::ALL_SCALES,
             v2_blocks: false,
             gradient: false,
             blockiness: false,
@@ -2781,10 +3760,20 @@ mod owner_gates {
             append2: false,
             append2_dst_activity: false,
             csfw: false,
+            dvifm: false,
+            gridblk: false,
+            ringbasis: false,
+            tailhist: false,
+            arttype: false,
+            gmsbank: false,
+            mapdev: false,
+            z1max: false,
+            gmsnative: false,
+            dvifmgate: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 9] = [
+        let cases: [(T, ComputeSet); 19] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -2821,6 +3810,64 @@ mod owner_gates {
                 },
             ),
             (T::Csfw, ComputeSet { csfw: true, ..off }),
+            (T::Dvifm, ComputeSet { dvifm: true, ..off }),
+            (
+                T::Gridblk,
+                ComputeSet {
+                    gridblk: true,
+                    ..off
+                },
+            ),
+            (
+                T::Ringbasis,
+                ComputeSet {
+                    ringbasis: true,
+                    ..off
+                },
+            ),
+            (
+                T::Tailhist,
+                ComputeSet {
+                    tailhist: true,
+                    ..off
+                },
+            ),
+            (
+                T::Arttype,
+                ComputeSet {
+                    arttype: true,
+                    ..off
+                },
+            ),
+            (
+                T::Gmsbank,
+                ComputeSet {
+                    gmsbank: true,
+                    ..off
+                },
+            ),
+            (
+                T::Mapdev,
+                ComputeSet {
+                    mapdev: true,
+                    ..off
+                },
+            ),
+            (T::Z1max, ComputeSet { z1max: true, ..off }),
+            (
+                T::Gmsnative,
+                ComputeSet {
+                    gmsnative: true,
+                    ..off
+                },
+            ),
+            (
+                T::Dvifmgate,
+                ComputeSet {
+                    dvifmgate: true,
+                    ..off
+                },
+            ),
             // `Peaks` alone is expressible; `Masked`/`Iw` are not (v1's pool
             // modes turn the two on together), so they are checked as the
             // DIFFERENCE between `Full` and `Peaks` below.
@@ -3018,7 +4065,15 @@ mod owner_gates {
             for t in parts.iter() {
                 derived = derived.union(&family_slots(t, NS));
             }
-            let derived = derived.clipped_to(width);
+            let mut derived = derived.clipped_to(width);
+            if let Some(selection) = json_str_field(&obj, "slot_selection") {
+                assert_eq!(selection, "full_y_coarse_xyb", "unknown slot selection");
+                derived = SlotSet::from_slots(
+                    derived
+                        .iter_slots()
+                        .filter(|&id| !crate::feature_v2::ComputeSet::is_full_res_xb(id, NS)),
+                );
+            }
 
             if role == "consumer" {
                 // A read set is a subset of what its producer populates.

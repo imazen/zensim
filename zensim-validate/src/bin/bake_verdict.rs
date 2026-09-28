@@ -295,6 +295,7 @@ fn slot_720(name: &str) -> Option<&'static str> {
         "csiq" => "ext_csiq.parquet",
         "live" => "ext_live.parquet",
         "konjnd" => "ext_konjnd_jpeg_val.parquet",
+        "konfig" => "ext_konfig.parquet",
         "aic3" => "ext_aic3.parquet",
         "aic4" => "ext_aic4.parquet",
         "nonphoto" => "ext_nonphoto_720_nn_full.parquet",
@@ -538,6 +539,17 @@ const CORPORA: &[Corpus] = &[
         // appears to be a per-pair JND threshold in [22, 70]).
         // 10-band-on-[0,1] partitioning doesn't apply; skip.
         enable_per_band: false,
+    },
+    Corpus {
+        name: "konfig",
+        display: "KonFiG-IQA (admitted origins)",
+        // Explicit opt-in instrument, never part of the default corpora. The
+        // caller must supply an admitted origin view. Quality-oriented
+        // human_score = 1 - q_jnd / 3.2; q_jnd remains a separate native axis.
+        // SSIMULACRA2 tuned on this corpus: not a fair-superiority panel.
+        filename: "ext_konfig.parquet",
+        preferred_slots: &[],
+        enable_per_band: true,
     },
     Corpus {
         name: "aic3",
@@ -925,9 +937,9 @@ struct Args {
     corruption_head: Option<PathBuf>,
     /// `--corruption-head-threshold <score>`: the DEPLOY deadband, in the
     /// head bake's own OUTPUT units. The registered composition is
-    /// `final = min(perceptual, gate)` with `gate = 100` unless
-    /// `P(corruption) > T`; a head baked to emit `100*(1-P)` turns that
-    /// into `head_score < 100*(1-T)`, so `T = 0.9` is `10.0` here.
+    /// `head_score < threshold ? min(perceptual, head_score) : perceptual`.
+    /// A head baked to emit `100*(1-P)` maps probability deadband T to
+    /// score threshold `100*(1-T)`, so `T = 0.9` is approximately `10.0` here.
     corruption_head_threshold: f64,
     /// Whether the caller passed `--corruption-head-threshold` explicitly. A
     /// ZCTH head carries its own baked deadband; when the caller did not ask
@@ -1512,7 +1524,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             corruption_grid = PathBuf::from(DEFAULT_CORRUPTION_GRID_720);
         }
     }
-    let mut corpora = corpora.unwrap_or_else(|| CORPORA.iter().collect());
+    let mut corpora =
+        corpora.unwrap_or_else(|| CORPORA.iter().filter(|c| c.name != "konfig").collect());
     if regime_720 {
         let before = corpora.len();
         corpora.retain(|c| slot_720(c.name).is_some());
@@ -1751,23 +1764,41 @@ fn score_rows_surface(
     companion: Option<(&CompanionHead, f64)>,
     rows: &[Vec<f64>],
 ) -> Vec<f64> {
-    let score_range = |src: &[Vec<f64>], dst: &mut [f64]| {
+    score_rows_surface_with_identity(models, weights, companion, rows, None)
+}
+
+fn score_rows_surface_with_identity(
+    models: &[Model],
+    weights: Option<&[f64]>,
+    companion: Option<(&CompanionHead, f64)>,
+    rows: &[Vec<f64>],
+    identities: Option<&[bool]>,
+) -> Vec<f64> {
+    assert!(identities.is_none_or(|v| v.len() == rows.len()));
+    let score_range = |start: usize, src: &[Vec<f64>], dst: &mut [f64]| {
         let mut scorer = candidate_surface(models, weights, companion)
             .unwrap_or_else(|e| panic!("candidate surface refused model: {e}"));
-        for (out, row) in dst.iter_mut().zip(src) {
+        for (i, (out, row)) in dst.iter_mut().zip(src).enumerate() {
             *out = scorer
-                .score_features(row, 0, 0, None)
+                .score_features_with_identity(
+                    row,
+                    0,
+                    0,
+                    None,
+                    identities.is_some_and(|v| v[start + i]),
+                )
                 .unwrap_or_else(|e| panic!("candidate surface refused feature row: {e}"));
         }
     };
     let mut out = vec![0.0; rows.len()];
     if rows.len() < SCORE_PARALLEL_MIN_ROWS || rayon::current_num_threads() <= 1 {
-        score_range(rows, &mut out);
+        score_range(0, rows, &mut out);
     } else {
         zensim_validate::parallel::init();
         out.par_chunks_mut(SCORE_CHUNK_ROWS)
             .zip(rows.par_chunks(SCORE_CHUNK_ROWS))
-            .for_each(|(dst, src)| score_range(src, dst));
+            .enumerate()
+            .for_each(|(i, (dst, src))| score_range(i * SCORE_CHUNK_ROWS, src, dst));
     }
     out
 }
@@ -1853,6 +1884,9 @@ impl Ensemble {
 // ============================================================================
 // Per-corpus pipeline
 // ============================================================================
+
+#[path = "../scatter_json.rs"]
+mod scatter_json;
 
 struct CorpusResult {
     display: &'static str,
@@ -1970,18 +2004,67 @@ fn sign_is_meaningful(name: &str) -> bool {
     !matches!(name, "konjnd")
 }
 
-/// Rendered SROCC cell: the SIGNED value on quality-oriented corpora (with a loud
-/// inversion marker when negative), `|SROCC|` on `konjnd` where the sign carries no
-/// meaning. The JSON keeps both `srocc` and `srocc_signed` unchanged — this is the
-/// human-facing surface only.
+// ── Corpus label ORIENTATION (2026-09-22) ──────────────────────────────────
+// THE OWNER is `EXPECTED_ORIENTATION` in
+// `scripts/canonical_corpus/check_target_orientation.py` (campaign REGISTERED
+// APPENDIX I). Three eval corpora carry DISTORTION-oriented JND-family labels —
+// aic4 and sdr25 store `q_jnd`, a JND distance from the pristine original that
+// RISES with distortion; konjnd stores a PJND threshold — so a correct
+// quality-shaped bake anti-correlates with them by construction.
+//
+// Until 2026-09-22 this binary treated every corpus except konjnd as
+// quality-oriented, so on aic4/sdr25 it pinned the per-reference statistic
+// higher-is-better and printed ⛔INVERTED beside every correctly-ranked bake
+// (the four frozen controls: aic4 per-ref mean −0.91…−0.95, 100% of references
+// "backwards", while the organisers' own CVVDP column is negative within every
+// aic4 reference too). See `benchmarks/board_orientation_fix_2026-09-22.md`.
+//
+// A GATED MIRROR of the Python registry (a bin can't import Python), identical
+// to `freeze_check`'s: `distortion_oriented_mirror_matches_python_registry`
+// parses the owner and fails the test run on any drift. Orientation is always
+// the DECLARED value — never inferred from the data being scored.
+const DISTORTION_ORIENTED: [&str; 3] = ["aic4", "konjnd", "sdr25"];
+
+fn is_distortion_oriented(name: &str) -> bool {
+    DISTORTION_ORIENTED.contains(&name)
+}
+
+/// +1 on a quality-oriented corpus, −1 on a distortion-oriented one: multiplying a
+/// signed SROCC by this gives the rank agreement IN THE DECLARED DIRECTION, so a
+/// negative product is a genuine inversion on every corpus alike.
+fn declared_sign(name: &str) -> f64 {
+    if is_distortion_oriented(name) {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// The per-reference statistic's polarity, pinned from the declaration (never
+/// `Orientation::Auto`, which re-points the stat at a globally inverted bake and
+/// prints "every ladder correct" — 2026-08-04 APPENDIX F).
+fn per_ref_orientation(name: &str) -> Orientation {
+    if is_distortion_oriented(name) {
+        Orientation::LowerIsBetter
+    } else {
+        Orientation::HigherIsBetter
+    }
+}
+
+/// Rendered SROCC cell: the orientation-ALIGNED signed value (`declared_sign ×
+/// signed SROCC`, so the raw value on quality-oriented corpora and its negation on
+/// aic4/sdr25) with a loud inversion marker when it is negative, and `|SROCC|` on
+/// `konjnd` where the sign carries no meaning. The JSON keeps both `srocc` and
+/// `srocc_signed` unchanged — this is the human-facing surface only.
 fn srocc_cell(name: &str, srocc: f64, srocc_signed: f64) -> String {
     if !sign_is_meaningful(name) {
         return format!("{srocc:.4}");
     }
-    if srocc_signed < 0.0 {
-        format!("**{srocc_signed:+.4} ⛔INVERTED**")
+    let aligned = declared_sign(name) * srocc_signed;
+    if aligned < 0.0 {
+        format!("**{aligned:+.4} ⛔INVERTED**")
     } else {
-        format!("{srocc_signed:+.4}")
+        format!("{aligned:+.4}")
     }
 }
 
@@ -2065,10 +2148,11 @@ fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64]) -> (f64, f64) {
 /// (the 2026-07-26 review found two composites that could disagree). Weights
 /// center the product axes (CID22 gold MOS + imazen26 real-codec ssim2 +
 /// non-photo) over held-out human JND; **KADID/TID are excluded** (train==val
-/// memorization). |SROCC| per corpus; a corpus absent from the run drops from
-/// both numerator and denominator. Matched byte-for-byte in `gauntlet.py`'s
-/// fallback only — the primary path reads this value from the JSON.
-fn product_composite(results: &[CorpusResult]) -> f64 {
+/// memorization). Historical partial arithmetic: a corpus absent from the run
+/// drops from both numerator and denominator. This is a diagnostic only;
+/// `product_composite` below requires complete coverage. The board reads the
+/// emitted values and does not reconstruct missing composites.
+fn partial_product_composite(results: &[CorpusResult]) -> f64 {
     let term = |sub: &str, w: f64| -> Option<(f64, f64)> {
         results
             .iter()
@@ -2088,6 +2172,27 @@ fn product_composite(results: &[CorpusResult]) -> f64 {
         .flatten()
         .fold((0.0f64, 0.0f64), |(n, d), (x, y)| (n + x, d + y));
     if den > 0.0 { num / den } else { f64::NAN }
+}
+
+const PRODUCT_COMPOSITE_AXES: &[&str] =
+    &["cid22", "imazen26", "nonphoto", "konjnd", "aic3", "aic4"];
+
+fn missing_composite_axes(results: &[CorpusResult]) -> Vec<&'static str> {
+    PRODUCT_COMPOSITE_AXES
+        .iter()
+        .copied()
+        .filter(|name| !results.iter().any(|r| r.name == *name))
+        .collect()
+}
+
+/// Missing axes cannot turn a six-axis product composite into a single-panel
+/// ranking. Preserve the historical partial arithmetic as a diagnostic only.
+fn product_composite(results: &[CorpusResult]) -> f64 {
+    if missing_composite_axes(results).is_empty() {
+        partial_product_composite(results)
+    } else {
+        f64::NAN
+    }
 }
 
 fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64) {
@@ -2218,6 +2323,54 @@ fn zone_of(q_mid: f64) -> &'static str {
 
 /// The three zone labels in report order.
 const ZONE_LABELS: [&str; 3] = ["q<50", "q50-85", "q>=85"];
+
+/// Markdown for the per-codec SCALE-FREE step counts
+/// (`[strict forward, strict backwards, exact tie]` per codec), plus an `all`
+/// row. The fractions depend only on the ORDER of the scores along each
+/// ladder, so a reference metric in its own units (0..1, JOD, a distance
+/// negated to quality orientation) reads the same as it would on a 0..100
+/// dial. `correct (non-decreasing)` = forward + tie, the convention of the
+/// AIC2026 ladder panel (`scripts/aic2026_agreement.py`).
+fn per_codec_strict_markdown(counts: &std::collections::BTreeMap<String, [usize; 3]>) -> String {
+    let mut s = String::from(
+        "\nPer-codec scale-free steps (order only, \\|Δ\\| > 1e-9; reported, not gated):\n\n\
+         | codec | rung pairs | forward | backwards | tie | strict forward | strict backwards | exact tie | correct (non-decreasing) |\n\
+         |---|--:|--:|--:|--:|--:|--:|--:|--:|\n",
+    );
+    let mut all = [0usize; 3];
+    let row = |name: &str, c: &[usize; 3]| {
+        let n = c[0] + c[1] + c[2];
+        let f = |k: usize| {
+            if n > 0 {
+                c[k] as f64 / n as f64
+            } else {
+                f64::NAN
+            }
+        };
+        format!(
+            "| {name} | {n} | {} | {} | {} | {:.5} | {:.5} | {:.5} | {:.5} |\n",
+            c[0],
+            c[1],
+            c[2],
+            f(0),
+            f(1),
+            f(2),
+            if n > 0 {
+                (c[0] + c[2]) as f64 / n as f64
+            } else {
+                f64::NAN
+            }
+        )
+    };
+    for (codec, c) in counts {
+        for (a, v) in all.iter_mut().zip(c) {
+            *a += v;
+        }
+        s.push_str(&row(codec, c));
+    }
+    s.push_str(&row("all", &all));
+    s
+}
 
 /// Adjacent-rung outcome counts for one (split-key, zone) cell of the ladder
 /// grid. The six buckets are the SAME five mutually-exclusive outcomes the
@@ -2704,6 +2857,13 @@ fn dial_panel(
     let mut tot_subres = 0usize; // 1e-9 < |Δ| ≤ MATERIAL_INV — expected oversampling
     let mut inv_mags: Vec<f64> = Vec::new(); // magnitudes of strict inversions
     let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    // Per-codec SCALE-FREE step counts (2026-09-22, paper gates lane):
+    // [strict forward (Δ > 1e-9), strict backwards (Δ < −1e-9), exact tie].
+    // Every other count here is in the scorer's own units (the 0.5-pt
+    // materiality), which is meaningless for a reference metric on a 0..1 or
+    // JOD scale; these three are not, so peers and dials can be compared on
+    // the same ladders. Reported only; nothing gates on them.
+    let mut per_codec_strict: BTreeMap<String, [usize; 3]> = BTreeMap::new();
     // Ladder-inversion split (2026-08-31): the same five outcomes, bucketed by
     // (codec, zone) and (content class, zone). Nothing above changes — these
     // accumulate alongside so the split ALWAYS reconciles with the pooled gate.
@@ -2799,6 +2959,16 @@ fn dial_panel(
             let delta = s1 - s0;
             let zone = zone_of(0.5 * (q0 + q1));
             let strict = delta < -1e-9;
+            {
+                let sc = per_codec_strict.entry(codec.clone()).or_default();
+                if delta > 1e-9 {
+                    sc[0] += 1;
+                } else if strict {
+                    sc[1] += 1;
+                } else {
+                    sc[2] += 1;
+                }
+            }
             // five mutually-exclusive buckets summing to tot_pairs:
             //   0 forward | 1 material inversion | 2 codec-saturated
             //   3 flat/clamp dead-zone | 4 sub-resolution
@@ -3217,6 +3387,7 @@ fn dial_panel(
          zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
          13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
+    s.push_str(&per_codec_strict_markdown(&per_codec_strict));
     // The bake-independent census, if asked for. Written even when EMPTY: a
     // zero-row file with a header is the honest record that the rule ran and
     // found nothing, which an absent file cannot say.
@@ -3658,7 +3829,16 @@ fn render_corpus(
     // bit-identically). The f32 scratch buffer is reused across rows inside
     // `score_grid_one` to avoid the per-row allocation that would otherwise
     // dominate wall time on the bigger corpora (KADID has 10k rows × 372 f32s).
-    let scores: Vec<f64> = ens.score_rows(&g.feature_rows);
+    let identities = parquet_loader::load_pixel_identities(&path, g.feature_rows.len())?;
+    let scores: Vec<f64> = score_rows_surface_with_identity(
+        &ens.models,
+        ens.weights.as_deref(),
+        ens.corruption_head
+            .as_ref()
+            .map(|h| (h, ens.corruption_threshold)),
+        &g.feature_rows,
+        identities.as_deref(),
+    );
     // Release the feature matrix the instant the forward is done. It is by
     // far the largest allocation in a corpus (11 356 rows × 944 f64 ≈ 86 MB
     // on the biggest one) and NOTHING below reads it — while the stats tail
@@ -3690,18 +3870,19 @@ fn render_corpus(
         // Orientation::Auto infers polarity from the POOLED sign, so on a corpus
         // where the bake is globally inverted it silently re-points the per-ref
         // stat at the inversion and prints "+0.95 / 0% backwards" — which reads as
-        // "every ladder correct" when every ladder is backwards. On a
-        // quality-oriented corpus the truth direction is KNOWN, so pin it: an
-        // inverted bake then shows a negative per-ref mean and a high %bwd, which
-        // is the whole point of the stat. `konjnd` keeps Auto — its validation
-        // target is a PJND threshold whose sign is structurally negative.
-        // (2026-08-04, benchmarks/sota944_campaign_2026-08-03.md APPENDIX F.)
-        let orient = if sign_is_meaningful(corpus.name) {
-            Orientation::HigherIsBetter
-        } else {
-            Orientation::Auto
-        };
-        per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, orient)
+        // "every ladder correct" when every ladder is backwards. The truth
+        // direction of every corpus is DECLARED, so pin it: an inverted bake then
+        // shows a negative per-ref mean and a high %bwd, which is the whole point
+        // of the stat. (2026-08-04, benchmarks/sota944_campaign_2026-08-03.md
+        // APPENDIX F; the distortion-oriented JND corpora were pinned the wrong
+        // way until 2026-09-22 — see `DISTORTION_ORIENTED`.)
+        per_group_srocc(
+            &scores,
+            &humans,
+            r,
+            PER_REF_MIN_ROWS,
+            per_ref_orientation(corpus.name),
+        )
     });
     // Signed SROCC (polarity-preserving) + marginal bootstrap CI. `aggregate_panel`
     // returns `|SROCC|`; a globally-inverted bake would hide behind that abs, so
@@ -4767,6 +4948,7 @@ fn main() -> ExitCode {
                     let expected = match bake_rev {
                         zensim::feature_v2::FormulaRevision::Rev1 => 1,
                         zensim::feature_v2::FormulaRevision::Rev2 => 2,
+                        zensim::feature_v2::FormulaRevision::Rev3 => 3,
                     };
                     if table_rev.is_some_and(|rev| rev != expected)
                         && (!args.cross_regime || args.require_feature_set_match)
@@ -5182,7 +5364,7 @@ fn main() -> ExitCode {
         } else {
             r.display.to_string()
         };
-        if sign_is_meaningful(r.name) && r.srocc_signed < 0.0 {
+        if sign_is_meaningful(r.name) && declared_sign(r.name) * r.srocc_signed < 0.0 {
             disp.push_str(" ⛔INV");
         }
         buf.push_str(&format!(
@@ -5208,10 +5390,13 @@ whose distortion ladder is ranked BACKWARDS. Read them against the pooled SROCC:
 gap means the pooled number is carried by cross-image scale rather than ranking (the \
 AIC-3 0.79-pooled / 0.93-per-ref confound). A high `%bwd` next to a healthy SROCC is the \
 failure §8.39 found and no pooled or per-band stat can see. `—` = corpus carries no ref \
-identity. The SROCC column is **SIGNED** on every quality-oriented corpus and \
-**⛔INVERTED** marks a bake that is ANTI-CORRELATED with that corpus's human labels — a \
-backwards ranker, never a high scorer (`konjnd` alone prints |SROCC|, whose sign is \
-structurally negative on at-PJND pairs). **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
+identity. The SROCC column is **SIGNED and orientation-aligned**: the raw \
+signed value on quality-oriented corpora, its negation on the distortion-oriented JND \
+corpora (aic4, sdr25 — their `q_jnd` target rises with distortion, per the declared \
+`EXPECTED_ORIENTATION` registry), so **⛔INVERTED** marks a bake that is ANTI-CORRELATED \
+with that corpus's human labels in the declared direction — a backwards ranker, never a \
+high scorer (`konjnd` alone prints |SROCC|, whose sign is structurally negative on \
+at-PJND pairs). `per-ref`/`%bwd` use the same declared orientation. **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
 a memorization number — not held-out generalization; do not rank a bake by them._\n",
     );
     // Per-corpus SROCC at a glance (inline-SVG; renders in the HTML report).
@@ -5222,7 +5407,7 @@ a memorization number — not held-out generalization; do not rank a bake by the
             .map(|r| {
                 100.0
                     * if sign_is_meaningful(r.name) {
-                        r.srocc_signed
+                        declared_sign(r.name) * r.srocc_signed
                     } else {
                         r.srocc
                     }
@@ -5230,7 +5415,7 @@ a memorization number — not held-out generalization; do not rank a bake by the
             .collect();
         buf.push('\n');
         buf.push_str(&eval_report::svg_bars(
-            "Per-corpus SIGNED SROCC ×100 (rank agreement with human MOS; negative = INVERTED)",
+            "Per-corpus SIGNED SROCC ×100, orientation-aligned (rank agreement with human labels; negative = INVERTED)",
             &labels,
             &sroccs,
             0.0,
@@ -6319,6 +6504,7 @@ Run the dedicated q-sweep harness for those._\n",
         // under "mos" and render fine — only newly-emitted ones are relabelled.
         let jnd_prefixes = ["aic3", "aic4", "konjnd", "sdr25"];
         let mut per_pair = Map::new();
+        let mut scatter_assessment = Map::new();
         for r in &results {
             let idx = stride(r.rescaled_scores.len(), args.perpair_cap);
             let pred: Vec<f64> = idx.iter().map(|&i| r.rescaled_scores[i]).collect();
@@ -6328,7 +6514,20 @@ Run the dedicated q-sweep harness for those._\n",
             } else {
                 "mos"
             };
-            per_pair.insert(r.name.to_string(), json!({ "pred": pred, key: tgt }));
+            let mut assessment = scatter_json::assess(&r.rescaled_scores, &r.humans);
+            let normalized = assessment
+                .as_object_mut()
+                .unwrap()
+                .remove("normalized_pred");
+            let mapped = normalized.and_then(|v| {
+                v.as_array()
+                    .map(|v| idx.iter().map(|&i| v[i].clone()).collect::<Vec<_>>())
+            });
+            scatter_assessment.insert(r.name.to_string(), json!({key:assessment}));
+            per_pair.insert(
+                r.name.to_string(),
+                json!({ "pred": pred, key: tgt, "normalized_pred":mapped }),
+            );
         }
         // KADIS multi-metric per_pair. Read a bounded window (≤40k rows) then
         // stride to the cap for source diversity.
@@ -6505,6 +6704,13 @@ Run the dedicated q-sweep harness for those._\n",
             // Canonical product-weighted ranking composite (single Rust source;
             // the dashboard READS this, never re-derives it). KADID/TID excluded.
             "composite": product_composite(&results),
+            "composite_partial": partial_product_composite(&results),
+            "composite_coverage": {
+                "required": PRODUCT_COMPOSITE_AXES,
+                "missing": missing_composite_axes(&results),
+                "status": if missing_composite_axes(&results).is_empty() { "COMPLETE" } else { "INCOMPLETE" },
+            },
+            "scatter_assessment":scatter_assessment,
             // CODEC_TARGET_GOALS scorecard values (same numbers as the report's
             // scorecard table; null when the run computed no gates).
             "gates": gates_json.clone().unwrap_or(Value::Null),
@@ -6633,6 +6839,41 @@ mod tests {
     use super::load_peer_dial_scores;
     use zensim_validate::parquet_loader::DialGrid;
 
+    #[test]
+    fn verified_pixel_identity_is_served_without_guessing_from_zero_features() {
+        let recipe = serde_json::json!({
+            "schema_hash":1, "scaler_mean":[0.0], "scaler_scale":[1.0],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"0"}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                "dtype":"f32","weights":[2.0],"biases":[17.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let models = [zenpredict::Model::from_bytes(&bytes).unwrap()];
+        let rows: Vec<_> = (0..2053).map(|i| vec![-((i % 23) as f64)]).collect();
+        let known: Vec<_> = (0..rows.len()).map(|i| i % 3 == 1).collect();
+        for threads in [1, 4] {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let raw = super::score_rows_surface(&models, None, None, &rows);
+                    let served = super::score_rows_surface_with_identity(
+                        &models,
+                        None,
+                        None,
+                        &rows,
+                        Some(&known),
+                    );
+                    assert_eq!(served[0], 17.0); // Zero features without identity proof.
+                    for i in 0..rows.len() {
+                        assert_eq!(served[i], if known[i] { 100.0 } else { raw[i] });
+                    }
+                    assert!(served.iter().any(|&v| v < 0.0));
+                });
+        }
+    }
+
     /// A three-row two-ladder grid, including a fractional q (the JXL
     /// q-equivalent `100 − 4·distance` shape) so the key rounding is exercised.
     fn tiny_grid() -> DialGrid {
@@ -6712,6 +6953,19 @@ mod tests {
         let v = load_peer_dial_scores(&f, &tiny_grid()).expect("join");
         assert_eq!(v, vec![1.5, 2.5, 3.5]);
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// The scale-free per-codec table counts every rung pair exactly once and
+    /// its `correct` column is forward + tie (the AIC2026 panel's convention).
+    #[test]
+    fn per_codec_strict_table_counts_every_pair_once() {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("jpeg".to_string(), [6usize, 2, 2]);
+        m.insert("webp".to_string(), [3usize, 0, 1]);
+        let md = super::per_codec_strict_markdown(&m);
+        assert!(md.contains("| jpeg | 10 | 6 | 2 | 2 | 0.60000 | 0.20000 | 0.20000 | 0.80000 |"));
+        assert!(md.contains("| webp | 4 | 3 | 0 | 1 | 0.75000 | 0.00000 | 0.25000 | 1.00000 |"));
+        assert!(md.contains("| all | 14 | 9 | 2 | 3 | "));
     }
 
     /// Zone edges are a PRODUCT statement (aggressive / ordinary / near-lossless),
@@ -6814,6 +7068,182 @@ mod tests {
         assert!(!sign_is_meaningful("konjnd"));
         assert!(sign_is_meaningful("kadid") && sign_is_meaningful("tid"));
         assert!(sign_is_meaningful("cid22") && sign_is_meaningful("csiq"));
+    }
+
+    /// A correctly-ranking bake must NOT render as inverted on a DISTORTION-oriented
+    /// JND corpus, and a genuinely backwards one must — through both the pooled cell
+    /// and the per-reference statistic.
+    ///
+    /// Regression gate for the 2026-09-22 board fix
+    /// (`benchmarks/board_orientation_fix_2026-09-22.md`): aic4/sdr25 store `q_jnd`,
+    /// which RISES with distortion, but this binary pinned their per-reference stat
+    /// higher-is-better and printed ⛔INVERTED beside every frozen control (aic4
+    /// per-ref −0.91…−0.95, 100% of references "backwards"). The synthetic ladders
+    /// below are shaped like aic4: five references, each a monotone JND ladder, and a
+    /// quality-shaped bake whose score FALLS as the JND distance rises.
+    #[test]
+    fn distortion_oriented_jnd_corpus_is_not_marked_inverted_for_a_correct_bake() {
+        // 5 refs x 6 rungs; target = JND distance (rises), score = quality (falls).
+        let mut refs = Vec::new();
+        let mut jnd = Vec::new();
+        let mut quality = Vec::new();
+        for r in 0..5u32 {
+            for k in 0..6 {
+                refs.push(r);
+                jnd.push(0.3 * k as f64 + 0.05 * r as f64);
+                quality.push(95.0 - 7.0 * k as f64 - r as f64);
+            }
+        }
+        let backwards: Vec<f64> = quality.iter().map(|q| -q).collect();
+
+        // ---- the distortion-oriented corpora: the fix ----
+        for c in ["aic4", "sdr25"] {
+            let pr = per_group_srocc(
+                &quality,
+                &jnd,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(
+                pr.mean > 0.99 && pr.frac_negative == 0.0,
+                "{c}: a correct bake must read per-ref +1 / 0% backwards, got mean {} / {}",
+                pr.mean,
+                pr.frac_negative
+            );
+            // The OLD behaviour (quality pin on every corpus but konjnd) reads the
+            // same ladders as 100% backwards — this is what the test must reject.
+            let old = per_group_srocc(
+                &quality,
+                &jnd,
+                &refs,
+                PER_REF_MIN_ROWS,
+                Orientation::HigherIsBetter,
+            )
+            .expect("five rankable ladders");
+            assert!(old.mean < -0.99 && old.frac_negative == 1.0);
+            assert_ne!(old.mean.signum(), pr.mean.signum());
+
+            let signed = spearman(&quality, &jnd);
+            assert!(signed < 0.0, "a correct bake anti-correlates with q_jnd");
+            let cell = srocc_cell(c, signed.abs(), signed);
+            assert!(
+                !cell.contains("INVERTED"),
+                "{c}: correct bake rendered {cell}"
+            );
+            assert!(
+                cell.starts_with('+'),
+                "{c}: aligned value is positive, got {cell}"
+            );
+
+            // A genuinely backwards bake on the same corpus is still caught.
+            let bs = spearman(&backwards, &jnd);
+            assert!(srocc_cell(c, bs.abs(), bs).contains("INVERTED"));
+            let bpr = per_group_srocc(
+                &backwards,
+                &jnd,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(bpr.mean < -0.99 && bpr.frac_negative == 1.0);
+        }
+
+        // ---- KonJND: declared distortion-oriented; cell keeps |SROCC| ----
+        let kpr = per_group_srocc(
+            &quality,
+            &jnd,
+            &refs,
+            PER_REF_MIN_ROWS,
+            per_ref_orientation("konjnd"),
+        )
+        .expect("five rankable ladders");
+        assert!(kpr.mean > 0.99 && kpr.frac_negative == 0.0);
+        let ks = spearman(&quality, &jnd);
+        assert_eq!(
+            srocc_cell("konjnd", ks.abs(), ks),
+            format!("{:.4}", ks.abs())
+        );
+
+        // ---- a quality-oriented corpus is unchanged: pinned higher-is-better ----
+        let mos = &jnd; // now read as a MOS: the quality-shaped bake must RISE with it
+        for c in ["cid22", "aic3", "kadid"] {
+            assert!(matches!(
+                per_ref_orientation(c),
+                Orientation::HigherIsBetter
+            ));
+            let good = per_group_srocc(
+                &backwards,
+                mos,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(good.mean > 0.99 && good.frac_negative == 0.0);
+            let bad = per_group_srocc(
+                &quality,
+                mos,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(
+                bad.mean < -0.99 && bad.frac_negative == 1.0,
+                "{c}: inversion must stay visible"
+            );
+            let s = spearman(&quality, mos);
+            assert!(srocc_cell(c, s.abs(), s).contains("INVERTED"));
+        }
+    }
+
+    /// `DISTORTION_ORIENTED` is a gated mirror of the Python owner
+    /// (`EXPECTED_ORIENTATION` in `check_target_orientation.py`) — the same gate
+    /// `freeze_check` carries for its own copy.
+    #[test]
+    fn distortion_oriented_mirror_matches_python_registry() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/canonical_corpus/check_target_orientation.py"
+        );
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("owner registry {path} must exist in-repo: {e}"));
+        let start = text
+            .find("EXPECTED_ORIENTATION = {")
+            .expect("EXPECTED_ORIENTATION dict literal not found in the owner file");
+        let block = &text[start..];
+        let block = &block[..block.find('}').expect("registry dict literal never closes")];
+        let mut dist: Vec<String> = Vec::new();
+        let mut n_quality = 0usize;
+        for line in block.lines() {
+            let line = line.split('#').next().unwrap_or("");
+            if let Some((k, val)) = line.split_once(':') {
+                let key = k.trim().trim_matches('"').trim_matches('\'');
+                if key.is_empty() {
+                    continue;
+                }
+                match val.trim().trim_end_matches(',').trim() {
+                    "DISTORTION" => dist.push(key.to_string()),
+                    "QUALITY" => n_quality += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            n_quality >= 5,
+            "parse sanity: parsed {n_quality} QUALITY entries"
+        );
+        dist.sort();
+        let mut mirror: Vec<String> = DISTORTION_ORIENTED.iter().map(|s| s.to_string()).collect();
+        mirror.sort();
+        assert_eq!(
+            mirror, dist,
+            "bake_verdict's DISTORTION_ORIENTED mirror drifted from the Python \
+             EXPECTED_ORIENTATION registry — update the mirror (the registry is the owner)"
+        );
     }
 
     use super::*;
@@ -7545,6 +7975,29 @@ mod tests {
         assert!(era_of(&a.features_root).contains("STORED-ERA 372"));
     }
 
+    #[test]
+    fn konfig_requires_explicit_admitted_corpus_selection() {
+        for regime in ["372", "720", "944"] {
+            let default = parse(&["--bake", "/x/b.bin", "--regime", regime]);
+            assert!(!default.corpora.iter().any(|c| c.name == "konfig"));
+            let explicit = parse(&[
+                "--bake",
+                "/x/b.bin",
+                "--regime",
+                regime,
+                "--features-root",
+                "/explicit/admitted/eval",
+                "--corpora",
+                "konfig",
+            ]);
+            assert_eq!(explicit.corpora.len(), 1);
+            assert_eq!(explicit.corpora[0].name, "konfig");
+            assert!(explicit.corpora[0].enable_per_band);
+        }
+        assert_eq!(slot_720("konfig"), Some("ext_konfig.parquet"));
+        assert!(sign_is_meaningful("konfig"));
+    }
+
     /// `--regime 720` behavior is unchanged by the 944 addition: 720 defaults,
     /// no 944 label, filtered all-corpora default.
     #[test]
@@ -7564,7 +8017,7 @@ mod tests {
         let names: Vec<&str> = a.corpora.iter().map(|c| c.name).collect();
         let expected: Vec<&str> = CORPORA
             .iter()
-            .filter(|c| slot_720(c.name).is_some())
+            .filter(|c| c.name != "konfig" && slot_720(c.name).is_some())
             .map(|c| c.name)
             .collect();
         assert_eq!(names, expected);

@@ -204,3 +204,27 @@ target is retained as a measured `converged=false` result. Scoring samples
 exclude encoding/judges, and recorded VmHWM is cumulative process peak memory.
 Quiet, repeated runs are needed for performance claims. Raw measurements do not
 automatically qualify a model or establish matched-quality RD superiority.
+
+For complete frozen ensembles in the bounds protocol, pass `--compositions
+compositions.json` instead of `--bake`. This explicit list replaces implicit
+named B/D controls; include matched controls in the manifest. Run different
+feature revisions separately. Each entry has this form:
+
+```json
+[{
+  "name": "candidate",
+  "members": [
+    {"path": "/models/seed1.bin", "sha256": "<file SHA256>"},
+    {"path": "/models/seed2.bin", "sha256": "<file SHA256>"}
+  ],
+  "weights": [0.5, 0.5]
+}]
+```
+
+The existing Rust `BakeScorer::ensemble` validates and serves every member.
+Calibration identity includes all member hashes, order, weights and names;
+changed compositions cannot reuse calibration. This mode requires
+`--source-manifest` and retains all bounds, source-separation and budget rules.
+Check later source reservations before reusing an old TRAIN manifest. The
+September 14 run excludes three families from the original twelve-source
+calibration packet under those later reservations.

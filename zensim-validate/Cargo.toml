@@ -70,9 +70,17 @@ sha2 = "0.11.0"
 # npz (zip-of-npy) reading for `bake_dial_refit fit-lasso` — DEFLATE inflate
 # only, via our own pure-Rust DEFLATE crate (no external zip/npy deps).
 zenflate = "0.4.0"
+# Native content-admission mode; the legacy audit remains available for replay.
+zenpng = { workspace = true }
+zenexr = { git = "https://github.com/imazen/zenextras", rev = "109a9ec367278a93751f7701f8536358e5d3f5cd" }
+zenpixels = { workspace = true }
+zenresize = { workspace = true }
+zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false }
+enough = { workspace = true }
 
 [dev-dependencies]
 zenbench = { workspace = true }
+iai-callgrind = "0.16.1"
 
 [[bench]]
 name = "adam_bench"
@@ -82,4 +90,14 @@ harness = false
 [[bench]]
 name = "bench_mlp_kernels"
 path = "benches/bench_mlp_kernels.rs"
+harness = false
+
+[[bench]]
+name = "optmlp_iai"
+path = "benches/optmlp_iai.rs"
+harness = false
+
+[[bench]]
+name = "fusedstep_iai"
+path = "benches/fusedstep_iai.rs"
 harness = false

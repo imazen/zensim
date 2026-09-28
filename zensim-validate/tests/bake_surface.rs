@@ -40,6 +40,49 @@ fn declared_ids_are_gathered_and_short_or_malformed_rows_refuse() {
     }
 }
 
+#[test]
+fn cached_pair_identity_matches_pixels_without_treating_zero_rows_as_proof() {
+    let metadata = json!([{"key":"zentrain.feature_ids","type":"utf8","text":"0 1"}]);
+    let model = linear_bias(metadata.clone(), 80.);
+    let head = linear_bias(metadata, -5.);
+    let mut scorer = BakeScorer::new(&model)
+        .unwrap()
+        .with_linear_corruption_head(&head, 10.)
+        .unwrap();
+    let pixels = vec![[17, 35, 80]; 64];
+    let image = RgbSlice::new(&pixels, 8, 8);
+    let pixel = scorer.compute(&image, &image, None).unwrap();
+    assert_eq!(pixel.score(), 100.);
+    assert_eq!(
+        scorer
+            .score_features_with_identity(pixel.features(), 8, 8, None, true)
+            .unwrap(),
+        pixel.score()
+    );
+    // The same raw zero features without identity proof must still fire the
+    // companion (head score -5 < deadband 10 => min(80, -5)). An inferred
+    // "zero = identity" shortcut would fail this.
+    assert_eq!(scorer.score_features(&[0., 0.], 8, 8, None).unwrap(), -5.);
+    assert_eq!(
+        scorer
+            .score_features_with_identity(&[0., 0.], 8, 8, None, false)
+            .unwrap(),
+        -5.
+    );
+    // Head -155 is below the base's -70: the gate keeps the lower score.
+    assert_eq!(
+        scorer
+            .score_features_with_identity(&[-30., -30.], 8, 8, None, false)
+            .unwrap(),
+        -155.
+    );
+    assert!(
+        scorer
+            .score_features_with_identity(&[], 8, 8, None, false)
+            .is_err()
+    );
+}
+
 fn assert_gradient(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
     for (i, (&got, &want)) in actual.iter().zip(expected).enumerate() {
@@ -94,11 +137,12 @@ fn candidate_sensitivities_include_ensemble_and_corruption_discontinuities() {
         .unwrap()
         .with_linear_corruption_head(&models[0], 20.)
         .unwrap();
+    // Head score 15 < 20 and below the ensemble's 20: the head's slope.
     assert_gradient(
         &gated
             .score_features_fd_gradient(&[4., 4.], 64, 64, None)
             .unwrap(),
-        &[0., 0.],
+        &[2., 3.],
     );
     assert_gradient(
         &gated
@@ -112,8 +156,10 @@ fn candidate_sensitivities_include_ensemble_and_corruption_discontinuities() {
     let crossing = gated
         .score_features_fd_gradient(&[5., 5.], 64, 64, None)
         .unwrap();
-    assert!((crossing[0] - 2501.).abs() < 0.002);
-    assert!((crossing[1] - 2501.5).abs() < 0.002);
+    // Up-probe: head >= 20, inactive, ensemble 25.01; down-probe: head 19.99
+    // active, min(24.99, 19.99). (25.01 - 19.99) / 0.01 = 502, likewise 503.
+    assert!((crossing[0] - 502.).abs() < 0.002);
+    assert!((crossing[1] - 503.).abs() < 0.002);
 }
 
 #[test]
@@ -156,10 +202,12 @@ fn ensemble_and_corruption_composition_are_returned_by_the_surface() {
         .unwrap()
         .with_linear_corruption_head(&models[0], 20.0001)
         .unwrap();
-    assert_eq!(active.score_features(&[5., 5.], 64, 64, None).unwrap(), 0.);
+    // Head 20 < 20.0001 activates: min(perceptual 25, head 20).
+    assert_eq!(active.score_features(&[5., 5.], 64, 64, None).unwrap(), 20.);
+    // Head -10 is below the ensemble's -5, so the lower head score is kept.
     assert_eq!(
         active.score_features(&[-1., -1.], 64, 64, None).unwrap(),
-        -5.
+        -10.
     );
 }
 
@@ -311,10 +359,39 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
     let one = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"1"}]));
     let two = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"2"}]));
     assert!(BakeScorer::ensemble(&[one, two], None).is_err());
-    for bad in ["", "3", "rev0", "second"] {
+    for bad in ["", "4", "rev0", "second"] {
         let model = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":bad}]));
-        assert!(BakeScorer::new(&model).is_err());
+        assert!(BakeScorer::new(&model).is_err(), "{bad:?} must be unknown");
     }
+    // Revision 3 is a KNOWN revision (issue #61): a bake declaring it loads,
+    // and scoring its own feature rows is legitimate in any process. A NARROW
+    // (basic/peak) bake also serves its PIXELS at its declared revision in
+    // any process (CLAUDE.md Known Bugs 2026-09-18; the plan carries the
+    // arithmetic). Only wide-family kernels, which still use the process
+    // default, refuse a mismatch instead of pricing revision-3 coefficients
+    // against revision-1 pixels.
+    let three = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"3"}]));
+    let mut surface = BakeScorer::new(&three).unwrap();
+    assert_eq!(
+        surface.score_features(&[0., 0.], 64, 64, None).unwrap(),
+        -5.
+    );
+    let src: Vec<[u8; 3]> = (0..64 * 64)
+        .map(|i| [(i % 251) as u8, (i % 13) as u8, 7])
+        .collect();
+    let dst: Vec<[u8; 3]> = src.iter().map(|p| [p[0] / 2, p[1], p[2]]).collect();
+    let (r, d) = (RgbSlice::new(&src, 64, 64), RgbSlice::new(&dst, 64, 64));
+    assert!(surface.compute(&r, &d, None).unwrap().score().is_finite());
+    let wide = linear(json!([
+        {"key":"zentrain.formula_revision","type":"utf8","text":"3"},
+        {"key":"zentrain.feature_ids","type":"utf8","text":"1 300"}
+    ]));
+    let mut wide_surface = BakeScorer::new(&wide).unwrap();
+    let err = wide_surface.compute(&r, &d, None).unwrap_err();
+    assert!(
+        matches!(err, zensim::ZensimError::ModelLoadFailed { reason } if reason.contains("formula revision")),
+        "{err}"
+    );
 }
 
 #[test]
@@ -558,9 +635,10 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
             "../../zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
         ),
         include_bytes!("../../zensim/weights/c_sdr_purity944_byid_2026-09-07.bin"),
+        include_bytes!("../../zensim-experimental/weights/f_nonneg32_4004_byid_2026-09-08.bin"),
         include_bytes!("../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"),
     ];
-    // Reuse across candidates and geometries, including C -> basic-only D.
+    // Reuse across candidates and geometries, including C -> peaks F -> basic D.
     let mut session = zensim::Fused944Session::new();
     for (w, h) in [(96, 80), (71, 65), (31, 47), (1, 1)] {
         let (src, dst) = spatial_pair(w, h);
@@ -595,10 +673,29 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                 assert!(!result.has_corruption_gate());
                 if i >= 2 {
                     assert!(
+                        result.unsupported_refinement_feature_ids().is_empty(),
+                        "bake {i}: {:?}",
+                        result.unsupported_refinement_feature_ids()
+                    );
+                }
+                if i == 2 || i == 4 {
+                    assert!(
                         result.unsupported_feature_ids().is_empty(),
                         "bake {i}: {:?}",
                         result.unsupported_feature_ids()
                     );
+                }
+                assert!(
+                    result
+                        .unsupported_feature_ids()
+                        .iter()
+                        .all(|id| { !(156..228).contains(id) || (id - 156) % 6 < 3 })
+                );
+                if i == 3 {
+                    let expected: Vec<usize> = (156..228)
+                        .filter(|id| (id - 156) % 6 < 3 && result.sensitivities()[*id] != 0.0)
+                        .collect();
+                    assert_eq!(result.unsupported_feature_ids(), expected);
                 }
                 assert!(result.attribution().density().iter().all(|x| x.is_finite()));
             }
@@ -607,6 +704,9 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                     let a = full
                         .attribution()
                         .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
+                    let qfull = full.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                    let qbin = binned.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                    assert!((qfull - qbin).abs() <= 1e-5 * a.abs().max(1e-6));
                     let b = binned
                         .attribution()
                         .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
@@ -624,10 +724,20 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                 binned.attribution().density()
             );
             assert_eq!(repeat.sensitivities(), binned.sensitivities());
+            assert_eq!(
+                repeat.refinement_gain(0, 0, w, h),
+                binned.refinement_gain(0, 0, w, h)
+            );
+            assert_eq!(
+                repeat.unsupported_refinement_feature_ids(),
+                binned.unsupported_refinement_feature_ids()
+            );
             let identity = scorer
                 .compute_with_ref_and_attribution(&rs, &pre, &rs, None, &mut session, 8)
                 .unwrap();
             assert_eq!(identity.result().score(), 100.);
+            assert_eq!(identity.refinement_gain(0, 0, w, h), 0.0);
+            assert!(identity.unsupported_refinement_feature_ids().is_empty());
             assert_eq!(identity.result().raw_distance(), 0.);
             assert!(identity.result().features().iter().all(|x| *x == 0.));
             assert!(identity.attribution().density().iter().all(|x| *x == 0.));
@@ -649,6 +759,7 @@ fn candidate_attribution_reports_unsupported_terms_and_complete_gating() {
         .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
         .unwrap();
     assert_eq!(scored.unsupported_feature_ids(), &[156]);
+    assert!(scored.unsupported_refinement_feature_ids().is_empty());
     assert!(scored.result().score() < 0.);
     assert_eq!(
         scored.result().score(),
@@ -674,12 +785,30 @@ fn candidate_attribution_reports_unsupported_terms_and_complete_gating() {
         .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
         .unwrap();
     assert!(scored.has_corruption_gate());
-    assert_eq!(scored.result().score(), 0.);
+    // The head (scored above through its own surface) is below the deadband
+    // 20 and below the ensemble: the gate returns min(perceptual, head).
+    let ensemble_score = BakeScorer::ensemble(&models, Some(&[0.25, 0.75]))
+        .unwrap()
+        .compute(&rs, &ds, None)
+        .unwrap()
+        .score();
+    let head_score = scorer.compute(&rs, &ds, None).unwrap().score();
+    assert!(head_score < 20.);
+    assert_eq!(scored.result().score(), ensemble_score.min(head_score));
     assert_eq!(
         scored.result().score(),
         gated.compute(&rs, &ds, None).unwrap().score()
     );
-    assert!(scored.attribution().density().iter().all(|x| *x == 0.));
+    // The gated score now follows the head (2*f3 + 3*f156 - 5), so the served
+    // sensitivities are the head's slopes on its ids and the spatial density
+    // is no longer identically zero; f156 has no spatial map.
+    // f32 predictor arithmetic on a real (small) feature value: the central
+    // probe's step is ~1e-3 of it, so allow 0.01 rather than the 0.002 used
+    // for the round-number rows above (measured: 2.0027 and 3.0002).
+    assert!((scored.sensitivities()[3] - 2.).abs() < 0.01);
+    assert!((scored.sensitivities()[156] - 3.).abs() < 0.01);
+    assert_eq!(scored.unsupported_feature_ids(), &[156]);
+    assert!(scored.attribution().density().iter().any(|x| *x != 0.));
     assert!(
         gated
             .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 0)
@@ -745,4 +874,25 @@ fn accelerated_candidate_sensitivities_match_sequential_complete_surface() {
     let head = linear(json!([]));
     let mut gated = scorer.with_linear_corruption_head(&head, 20.).unwrap();
     check(&mut gated, &row);
+}
+
+#[test]
+fn a_narrow_base_carries_a_companion_that_reads_later_slots() {
+    // The base reads only f0/f1 (a local-only basic plan); the companion reads
+    // f3 and f156. The extraction must be the union of both plans, not a
+    // refusal because the base plan alone does not populate f156.
+    let base = linear_bias(json!([]), 5.);
+    let head = linear(json!([{"key":"zentrain.feature_ids","type":"utf8","text":"3 156"}]));
+    let mut scorer = BakeScorer::new(&base)
+        .unwrap()
+        .with_linear_corruption_head(&head, 20.)
+        .unwrap();
+    let mut row = vec![0.0; 372];
+    (row[0], row[1]) = (5., 5.);
+    // Head 2*1 + 3*1 - 5 = 0 < 20: active, min(perceptual 30, head 0).
+    (row[3], row[156]) = (1., 1.);
+    assert_eq!(scorer.score_features(&row, 64, 64, None).unwrap(), 0.);
+    // Head 2*10 + 3*10 - 5 = 45 >= 20: inactive, perceptual unchanged.
+    (row[3], row[156]) = (10., 10.);
+    assert_eq!(scorer.score_features(&row, 64, 64, None).unwrap(), 30.);
 }

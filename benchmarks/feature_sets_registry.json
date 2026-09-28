@@ -70,6 +70,11 @@
    "owner": "feature_v2::ComputeSet::csfw",
    "note": "CSFW tier-1, Y-only; default-OFF, no canonical root yet"
   },
+  "dvifm": {
+   "slots": "956-985",
+   "owner": "feature_v2::ComputeSet::dvifm",
+   "note": "DVIFM block-visibility pyramid, Y-only FLAT block (5 own levels x [F1 + 5 F2]); default-OFF, no canonical root yet"
+  },
   "moments": {
    "slots": "733-735,750-752,784-786,801-803,818-820,835-837,852-854,869-871,886-888,903-905,920-922,926,931,936,941",
    "owner": "feature_v2::V1FreeExtras::RawMoments / free_slot_indices",
@@ -168,6 +173,182 @@
    "rev2_era_count_caveat": "Same as v1postc_rev2: AS EXTRACTED this root predates era `v1detroot` (F18), registered on FormulaRevision::Rev2 on 2026-09-06. At 944 that era moves 156 slots -- the 144 v1 L4/L8 pools plus the 12 v2 ssim_dev4 cells -- by up to one ULP each, so a fresh ZENSIM_FORMULA_REV=2 extraction will NOT reproduce these bytes. Use ZENSIM_ROOT_FORM=libm to reproduce them. See benchmarks/libc_determinism_2026-09-06.md.",
    "produced_by": "zenfleet JobKind::Feature, image ghcr.io/imazen/zenfleet-worker:exec-featrev2glibc-88477e38",
    "formula_revision": 2
+  },
+  "v1screen_rev3": {
+   "build_commit": "see per-run binary/source hashes",
+   "root": null,
+   "label": "September 13 Rev3 canonical 372-column feature experiment packet",
+   "formula_revision": 3,
+   "note": "Fresh extract_features_372col canonical streaming extraction; input and decoder hashes recorded per run. No relabelled Rev1 rows. Research speed screen only; see benchmarks/fullres_y_subset_2026-09-12.md."
+  },
+  "sampling_v1_y_triangle_3d2": {
+   "label": "v1:y:triangle:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_triangle_2": {
+   "label": "v1:y:triangle:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_triangle_3": {
+   "label": "v1:y:triangle:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_mitchell_3d2": {
+   "label": "v1:y:mitchell:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_mitchell_2": {
+   "label": "v1:y:mitchell:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_mitchell_3": {
+   "label": "v1:y:mitchell:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_robidouxsharp_3d2": {
+   "label": "v1:y:robidouxsharp:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_robidouxsharp_2": {
+   "label": "v1:y:robidouxsharp:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_robidouxsharp_3": {
+   "label": "v1:y:robidouxsharp:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_triangle_3d2": {
+   "label": "v1:xyb:triangle:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_triangle_2": {
+   "label": "v1:xyb:triangle:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_triangle_3": {
+   "label": "v1:xyb:triangle:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_mitchell_3d2": {
+   "label": "v1:xyb:mitchell:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_mitchell_2": {
+   "label": "v1:xyb:mitchell:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_mitchell_3": {
+   "label": "v1:xyb:mitchell:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_robidouxsharp_3d2": {
+   "label": "v1:xyb:robidouxsharp:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_robidouxsharp_2": {
+   "label": "v1:xyb:robidouxsharp:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_robidouxsharp_3": {
+   "label": "v1:xyb:robidouxsharp:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "ceiling_rev3": {
+   "build_commit": "see per-run binary/source hashes",
+   "root": null,
+   "label": "September 13 representative feature/scale capability study",
+   "formula_revision": 3,
+   "note": "Fresh canonical native-decoded BakeScorer extraction, all 944 IDs requested by diagnostic producer. No Rev1 feature reuse. Experiment only; source and input hashes pinned per run."
+  },
+  "sampling_v2_xyb_triangle_1_2_4_8": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:triangle:1,2,4,8",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_triangle_1_3_5_7": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:triangle:1,3,5,7",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_triangle_1_2_3_5": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:triangle:1,2,3,5",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_mitchell_1_2_4_8": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:mitchell:1,2,4,8",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_mitchell_1_3_5_7": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:mitchell:1,3,5,7",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_mitchell_1_2_3_5": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:mitchell:1,2,3,5",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_robidouxsharp_1_2_4_8": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:robidouxsharp:1,2,4,8",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_robidouxsharp_1_3_5_7": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:robidouxsharp:1,3,5,7",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
+  },
+  "sampling_v2_xyb_robidouxsharp_1_2_3_5": {
+   "build_commit": "per-run source/binary hashes",
+   "formula_revision": 3,
+   "sampling": "v2:xyb:robidouxsharp:1,2,3,5",
+   "note": "Direct original XYB planes; scale_selective_944_2026-09-13.md"
   }
  },
  "sets": {
@@ -437,6 +618,359 @@
    "kind": "set",
    "legacy_name": "944",
    "evidence": "zenfleet Feature run rev2feat944-20260906 over the same 8 staged eval corpora"
+  },
+  "basic+peaks+masked+iw@w372/v1screen_rev3": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "era": "v1screen_rev3",
+   "slots": "0-371",
+   "slots_hash8": "d16a1091",
+   "n_slots": 372,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/fullres_y_subset_2026-09-12.md; scripts/run_full_eval.sh --stage feature-screen"
+  },
+  "basic+peaks@w372/sampling_v1_y_triangle_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_triangle_3d2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_triangle_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_triangle_2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_triangle_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_triangle_3",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_mitchell_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_mitchell_3d2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_mitchell_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_mitchell_2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_mitchell_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_mitchell_3",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_robidouxsharp_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_robidouxsharp_3d2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_robidouxsharp_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_robidouxsharp_2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_robidouxsharp_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_robidouxsharp_3",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_triangle_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_triangle_3d2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_triangle_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_triangle_2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_triangle_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_triangle_3",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_mitchell_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_mitchell_3d2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_mitchell_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_mitchell_2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_mitchell_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_mitchell_3",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_robidouxsharp_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_robidouxsharp_3d2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_robidouxsharp_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_robidouxsharp_2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_robidouxsharp_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_robidouxsharp_3",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "ceiling_rev3",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/feature_ceiling_2026-09-13.md; extract_features_372col --full-944"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#e3db6aab": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "ceiling_rev3",
+   "slots": "0-719,722-753,773-804,807-821,824-855,858-872,875-906,909-926,929-931,934-936,939-941",
+   "slots_hash8": "e3db6aab",
+   "n_slots": 905,
+   "role": "consumer",
+   "kind": "set",
+   "producer_id": "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3",
+   "evidence": "benchmarks/rev4_featbank_extract_2026-09-23.md — the Rev4 existing-family feature bank at /var/tmp/rev4-featbank/bank/ stores exactly the producer's 905 POPULATED slots as f32; the 39 structural-zero ids (720,721,754-772,805,806,822,823,856,857,873,874,907,908,927,928,932,933,937,938,942,943) are recorded per-set _MANIFEST.json and omitted from sidecars",
+   "note": "bank storage form keyed by content-addressed pair_key, not a model read-set; same handle as the producer and a different hash by construction"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_triangle_1_2_4_8": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_triangle_1_2_4_8",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_triangle_1_3_5_7": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_triangle_1_3_5_7",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_triangle_1_2_3_5": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_triangle_1_2_3_5",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_mitchell_1_2_4_8": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_mitchell_1_2_4_8",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_mitchell_1_3_5_7": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_mitchell_1_3_5_7",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_mitchell_1_2_3_5": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_mitchell_1_2_3_5",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_robidouxsharp_1_2_4_8": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_robidouxsharp_1_2_4_8",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_robidouxsharp_1_3_5_7": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_robidouxsharp_1_3_5_7",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_robidouxsharp_1_2_3_5": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "sampling_v2_xyb_robidouxsharp_1_2_3_5",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm@w986/unknown": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm",
+   "layout": 986,
+   "era": "unknown",
+   "slots": "0-985",
+   "slots_hash8": "685eb6ef",
+   "n_slots": 986,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "986",
+   "evidence": "feature_v2::FeatureRegime::Folded720Dvifm \u2014 default-OFF, no canonical root yet"
   }
  },
  "roots": {
@@ -565,6 +1099,12 @@
     "basic+peaks+moments@w944/era2r4#0b476506"
    ],
    "note": "the 156+free reader set minus the four LUMA_MEAN_REF slots \u2014 identity-clean to 4.8e-3, same walk, same W4."
+  },
+  "986": {
+   "ids": [
+    "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm@w986/unknown"
+   ],
+   "note": "no canonical root yet."
   }
  }
 }

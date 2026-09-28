@@ -1,0 +1,73 @@
+model	arm	scope	n_sets	n_gain_ge_0p005_ci_gt0	sets_with_gain	n_control_ci_excludes_zero	sets_where_control_shows_effect
+bvls	a1	d1_nested	7	0		2	kadid_select,kadid_train
+bvls	a1	d2_lodo	7	0		1	aic3
+bvls	a1m	d1_nested	7	0		3	cid22_a25,kadid_select,kadid_train
+bvls	a1m	d2_lodo	7	1	aic3	1	aic3
+bvls	a1w	d1_nested	7	0		2	kadid_select,kadid_train
+bvls	a1w	d2_lodo	7	0		1	aic3
+bvls	all	d1_nested	7	0		3	kadid_select,kadid_train,tid2013
+bvls	all	d2_lodo	7	1	kadid_train	1	kadid_train
+bvls	b1	d1_nested	7	0		2	kadid_train,tid2013
+bvls	b1	d2_lodo	7	1	tid2013	2	kadid_train,tid2013
+bvls	b1s	d1_nested	7	0		2	kadid_train,tid2013
+bvls	b1s	d2_lodo	7	2	tid2013,konfig_val	1	kadid_train
+bvls	b2	d1_nested	7	0		3	cid22_a25,kadid_train,tid2013
+bvls	b2	d2_lodo	7	3	tid2013,konfig_val,konjnd_bpg_val	2	kadid_train,tid2013
+bvls	b2m	d1_nested	7	0		2	konfig_train,tid2013
+bvls	b2m	d2_lodo	7	3	tid2013,konfig_val,konjnd_bpg_val	3	kadid_train,tid2013,kadid_select
+bvls	c1	d1_nested	7	0		3	kadid_select,kadid_train,tid2013
+bvls	c1	d2_lodo	7	0		1	konjnd_bpg_val
+bvls	c2	d1_nested	7	2	konfig_train,konfig_val	2	kadid_select,kadid_train
+bvls	c2	d2_lodo	7	0		4	kadid_train,tid2013,cid22_a25,kadid_select
+bvls	c3	d1_nested	7	0		2	kadid_train,tid2013
+bvls	c3	d2_lodo	7	1	kadid_train	2	kadid_train,tid2013
+bvls	c4	d1_nested	7	0		1	konfig_val
+bvls	c4	d2_lodo	7	0		0	
+bvls	c7	d1_nested	7	0		1	kadid_train
+bvls	c7	d2_lodo	7	2	tid2013,konfig_val	1	kadid_train
+bvls	c8n	d1_nested	7	0		1	kadid_train
+bvls	c8n	d2_lodo	7	1	kadid_train	4	kadid_train,tid2013,cid22_a25,kadid_select
+bvls	csfw	d1_nested	7	2	aic3,konfig_train	0	
+bvls	csfw	d2_lodo	7	0		4	kadid_train,tid2013,cid22_a25,kadid_select
+bvls	p1	d1_nested	7	0		1	kadid_train
+bvls	p1	d2_lodo	7	1	kadid_train	4	kadid_train,tid2013,cid22_a25,kadid_select
+bvls	p3	d1_nested	7	0		1	kadid_train
+bvls	p3	d2_lodo	7	1	kadid_train	4	kadid_train,tid2013,cid22_a25,kadid_select
+bvls	rall	d1_nested	7	0		5	cid22_a25,kadid_select,kadid_train,konfig_train,tid2013
+bvls	rall	d2_lodo	7	1	konfig_val	0	
+linear	a1	d1_nested	7	0		4	cid22_a25,kadid_select,kadid_train,tid2013
+linear	a1	d2_lodo	7	0		1	tid2013
+linear	a1m	d1_nested	7	0		4	cid22_a25,kadid_select,kadid_train,tid2013
+linear	a1m	d2_lodo	7	0		1	tid2013
+linear	a1w	d1_nested	7	0		4	cid22_a25,kadid_select,kadid_train,tid2013
+linear	a1w	d2_lodo	7	0		1	tid2013
+linear	all	d1_nested	7	0		3	kadid_select,kadid_train,tid2013
+linear	all	d2_lodo	7	2	kadid_train,kadid_select	3	tid2013,konfig_val,konjnd_bpg_val
+linear	b1	d1_nested	7	0		2	kadid_train,tid2013
+linear	b1	d2_lodo	7	1	tid2013	0	
+linear	b1s	d1_nested	7	0		2	kadid_train,tid2013
+linear	b1s	d2_lodo	7	1	tid2013	0	
+linear	b2	d1_nested	7	1	cid22_a25	2	cid22_a25,tid2013
+linear	b2	d2_lodo	7	0		1	tid2013
+linear	b2m	d1_nested	7	0		1	tid2013
+linear	b2m	d2_lodo	7	0		1	tid2013
+linear	c1	d1_nested	7	1	tid2013	2	cid22_a25,kadid_select
+linear	c1	d2_lodo	7	0		0	
+linear	c2	d1_nested	7	0		3	cid22_a25,kadid_select,tid2013
+linear	c2	d2_lodo	7	2	tid2013,konfig_val	3	tid2013,konfig_val,konjnd_bpg_val
+linear	c3	d1_nested	7	0		2	cid22_a25,kadid_train
+linear	c3	d2_lodo	7	2	kadid_train,kadid_select	1	tid2013
+linear	c4	d1_nested	7	0		3	cid22_a25,kadid_select,tid2013
+linear	c4	d2_lodo	7	1	tid2013	0	
+linear	c7	d1_nested	7	0		1	tid2013
+linear	c7	d2_lodo	7	1	tid2013	0	
+linear	c8n	d1_nested	7	0		2	cid22_a25,kadid_select
+linear	c8n	d2_lodo	7	0		1	tid2013
+linear	csfw	d1_nested	7	0		0	
+linear	csfw	d2_lodo	7	0		0	
+linear	p1	d1_nested	7	0		3	cid22_a25,kadid_select,tid2013
+linear	p1	d2_lodo	7	0		1	tid2013
+linear	p3	d1_nested	7	0		3	cid22_a25,kadid_select,tid2013
+linear	p3	d2_lodo	7	0		1	tid2013
+linear	rall	d1_nested	7	0		3	cid22_a25,kadid_train,tid2013
+linear	rall	d2_lodo	7	0		1	tid2013

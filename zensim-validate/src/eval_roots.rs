@@ -18,9 +18,13 @@
 //!   per-corpus era and the per-slot drift vs the stored tables. Deliberately reuses the OLD
 //!   file names (`bake_verdict` hardcodes them per corpus), so the ROOT carries the date.
 //!   Eight of the fourteen default corpora are current-extractor reads; six are byte-copies
-//!   whose distorted material is no longer on this box (`aic4` is PRE-FIX and unrefreshable),
-//!   which `benchmarks/eval_annotations.json` records as
-//!   `eval372-current-root-copied-corpora-2026-08-30`.
+//!   of the 2026-05-15 tables, which `benchmarks/eval_annotations.json` records as
+//!   `eval372-current-root-copied-corpora-2026-08-30`. `aic4`'s copy is PRE-FIX, but aic4 is
+//!   NOT unrefreshable (corrected 2026-09-22): its labels are committed in
+//!   `site/data/parquet/aic4_sample.parquet` and all 305 crop + 305 full-resolution PNGs are
+//!   on disk, so `build_fr_corpus_pairs.py aic4` rebuilds its pairs and the extractor can
+//!   re-extract it (`benchmarks/board_orientation_fix_2026-09-22.md` §2). The copy in this
+//!   root stays until a deliberate swap.
 //! * [`STORED_FEATURES_ROOT_2026_05_15`] — the previous default. **Still on disk, still a
 //!   valid STORED-ERA read** — flipping the default rewrites nothing; it only changes what a
 //!   flagless invocation means going forward. Probes and trainers that must keep reading the

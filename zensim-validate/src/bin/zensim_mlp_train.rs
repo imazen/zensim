@@ -138,6 +138,12 @@ struct Args {
     #[arg(long, value_name = "REASON")]
     historical_replay: Option<String>,
 
+    /// Do not launch the sibling bake_verdict after fitting. Development
+    /// screens evaluate explicit T2 inputs through the final BakeScorer and
+    /// must not touch protected holdouts on every experiment iteration.
+    #[arg(long)]
+    no_auto_eval: bool,
+
     /// Number of hidden units in the single hidden layer. Default 128
     /// matches the V0_16 ship recipe. Other tested architectures:
     /// h=32 (V0_4 placeholder, too small), h=64 (V0_5, AIC-4-friendly
@@ -226,6 +232,10 @@ struct Args {
     /// separates "this seed saw a better subset" from "this seed landed in a
     /// better basin" — hold coverage fixed, vary the seed, and any remaining
     /// spread is not subset quality.
+    /// Relative group weights are ignored: group draw shares follow the number
+    /// of eligible strata, and singleton reference/band cells are excluded.
+    /// Use `uniform` when group weights must control the mixture. Its within-ref
+    /// draws can reach singleton-band rows when the reference has other rows.
     ///
     /// It is NOT `--stratified-bands`, which picks a band uniformly and then
     /// a row uniformly inside it: that equalises band representation in
@@ -249,7 +259,8 @@ struct Args {
     #[arg(long, default_value_t = false)]
     no_sample_coverage: bool,
 
-    /// Log every N epochs.
+    /// Evaluate, select checkpoints, and log every N epochs. This changes
+    /// which checkpoints can be selected; it is not only a verbosity setting.
     #[arg(long, default_value_t = 10)]
     log_every: usize,
 
@@ -338,7 +349,8 @@ struct Args {
     /// TV-regularizer pair indices TSV. Two columns: lo_trainer_idx,
     /// hi_trainer_idx. Indices reference rows in the concatenated
     /// trainer-feature space (group 0 first, then group 1, etc.).
-    /// Penalty per pair: `max(0, pred[hi] - pred[lo])`.
+    /// lo is worse quality and hi is better quality, regardless of codec q.
+    /// Penalty: `max(0, polarity.ladder_sign() * (pred[hi] - pred[lo]) + margin)`.
     #[arg(long)]
     tv_pairs_file: Option<PathBuf>,
 
@@ -357,12 +369,12 @@ struct Args {
     tv_batch: usize,
 
     /// Anti-collapse margin for the within-ladder TV hinge. Penalty
-    /// becomes `max(0, y_harsher - y_milder + margin)`, forcing a
+    /// uses the run's score/distance polarity, forcing a
     /// minimum per-step gap between adjacent severity levels. 0.0 =
     /// pure hinge (can collapse the ladder flat under high weight).
     /// A small positive value (raw-output units) spreads the ladder,
-    /// preserving dynamic range + analytic-corpus rank while keeping
-    /// monotonicity. Only affects the --per-sample-alpha-head path.
+    /// encouraging separation. This is not a guarantee of preserved rank.
+    /// Applies to the plain path and the supported auxiliary-head paths.
     #[arg(long, default_value_t = 0.0)]
     tv_margin: f64,
 
@@ -2743,6 +2755,7 @@ fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu:
 }
 
 fn main() {
+    zensim_validate::tier_cap::apply_from_env();
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
     // its recorded fields as DEFAULTS while letting explicit CLI flags
     // win. `value_source(id) == CommandLine` tells us which flags the
@@ -4534,6 +4547,12 @@ fn main() {
     } else {
         bake_bytes
     };
+    let bake_bytes = if let Some(sampling) = table_admission["sampling"].as_str() {
+        zenpredict_bake::append_metadata_utf8(&bake_bytes, "zentrain.sampling", sampling)
+            .expect("sampling metadata")
+    } else {
+        bake_bytes
+    };
     // FEATURE-SET ID (docs/FEATURE_SET_IDS.md §6.1): stamp the bake with the
     // PRODUCER id of the tables it TRAINED on, so a later verdict can say
     // which extractor era its coefficients were fit against instead of
@@ -4828,7 +4847,9 @@ fn main() {
         .as_ref()
         .and_then(|p| p.parent())
         .map(|dir| dir.join("bake_verdict"));
-    if let Some(ref vb) = verdict_bin {
+    if let Some(ref vb) = verdict_bin
+        && !args.no_auto_eval
+    {
         if vb.exists() {
             println!("\n--- bake_verdict (auto-eval) ---");
             let mut cmd = std::process::Command::new(vb);

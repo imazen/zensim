@@ -168,12 +168,34 @@ impl Plan {
         // accumulators — `V2NewFeatureToggles::append2_block` asserts it).
         let append = append || append2;
         let csfw = touches(ComputeToken::Csfw);
+        let dvifm = touches(ComputeToken::Dvifm);
+        let gridblk = touches(ComputeToken::Gridblk);
+        let ringbasis = touches(ComputeToken::Ringbasis);
+        let tailhist = touches(ComputeToken::Tailhist);
+        let arttype = touches(ComputeToken::Arttype);
+        let gmsbank = touches(ComputeToken::Gmsbank);
+        let mapdev = touches(ComputeToken::Mapdev);
+        let z1max = touches(ComputeToken::Z1max);
+        let gmsnative = touches(ComputeToken::Gmsnative);
+        let dvifmgate = touches(ComputeToken::Dvifmgate);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
+        // DVIFM is the same shape (`dvifm_block && v2_blocks`), one block up.
+        // The four Rev4 feature-bank families are `rev4_* && v2_blocks` too.
         let v2_blocks = (touches(ComputeToken::V2) && outside_tranche(ComputeToken::V2))
             || append
             || append2
-            || csfw;
+            || csfw
+            || dvifm
+            || gridblk
+            || ringbasis
+            || tailhist
+            || arttype
+            || gmsbank
+            || mapdev
+            || z1max
+            || gmsnative
+            || dvifmgate;
 
         // Free extras: only meaningful when the owning block is NOT running.
         let free_extras = if touches(ComputeToken::ClassC) && !append {
@@ -190,7 +212,44 @@ impl Plan {
             // `Plan::for_bake`.
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
+            full_res_xb: true,
+            coarse_y_only_scales: 0,
+            local_only: false,
+            omit_edges: false,
+            sampling: None,
             v1_pools,
+            v1_full_scales: if v1_pools == V1PoolsMode::Full {
+                let weighted = crate::feature_defs::family_slots(ComputeToken::Masked, ns)
+                    .union(&crate::feature_defs::family_slots(ComputeToken::Iw, ns));
+                weighted.intersect(&want).iter_slots().fold(0, |mask, id| {
+                    mask | (1
+                        << crate::feature_defs::def_at(id, ns)
+                            .expect("registered pool ID")
+                            .scale)
+                })
+            } else {
+                ComputeSet::ALL_SCALES
+            },
+            v2_scales: want
+                .iter_slots()
+                .filter_map(|id| {
+                    let d = crate::feature_defs::def_at(id, ns)?;
+                    (id >= 372).then_some(d)
+                })
+                .fold(0, |mask, d| {
+                    let bit = 1 << d.scale;
+                    // `edge_width_change` at scale s reads the gradient sums
+                    // of s and s+1 — and arttype's `blur` multiplies that
+                    // same finished slot, so it inherits the dependency.
+                    if d.signal.name == "edge_width_change"
+                        || (d.signal.family == ComputeToken::Arttype && d.signal.name == "blur")
+                    {
+                        let s = usize::from(d.scale).min(ns - 2);
+                        mask | (1 << s) | (1 << (s + 1))
+                    } else {
+                        mask | bit
+                    }
+                }),
             v2_blocks,
             gradient: v2_blocks,
             blockiness: v2_blocks,
@@ -200,8 +259,43 @@ impl Plan {
             append2,
             append2_dst_activity: false,
             csfw,
+            dvifm,
+            gridblk,
+            ringbasis,
+            tailhist,
+            arttype,
+            gmsbank,
+            mapdev,
+            z1max,
+            gmsnative,
+            dvifmgate,
             free_extras,
         };
+        let mut requested = requested;
+        if !requested.v2_blocks {
+            requested.v2_scales = ComputeSet::ALL_SCALES;
+        }
+        requested.full_res_xb = !requested.allows_full_res_y_subset()
+            || want
+                .iter_slots()
+                .any(|id| ComputeSet::is_full_res_xb(id, ns));
+        if want.iter_slots().all(|id| id < 156 && id % 13 < 10) {
+            requested.coarse_y_only_scales = (1..ns).fold(0, |mask, scale| {
+                let reads_xb = want.iter_slots().any(|id| {
+                    crate::feature_defs::def_at(id, ns).is_some_and(|d| {
+                        usize::from(d.scale) == scale
+                            && matches!(
+                                d.channel,
+                                crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                            )
+                    })
+                });
+                mask | if reads_xb { 0 } else { 1 << scale }
+            });
+        }
+        requested.local_only = want.iter_slots().all(|id| id < ns * 3 * 13 && id % 13 < 10);
+        requested.omit_edges =
+            requested.local_only && want.iter_slots().all(|id| matches!(id % 13, 0..=2 | 9));
         let plan = Plan::normalized(requested, layout);
         if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
@@ -234,8 +328,10 @@ impl Plan {
     ///
     /// The fix is a fixed point rather than a second rule: normalize through
     /// the toggles the plan would emit, so
-    /// `compute == ComputeSet::from_toggles(plan.toggles())` **by
-    /// construction** ([`toggle_gates::normalization_is_a_fixed_point`]).
+    /// the family compute agrees with `ComputeSet::from_toggles(plan.toggles())`
+    /// ([`toggle_gates::normalization_is_a_fixed_point`]). The later private
+    /// full-resolution channel and per-scale restrictions are preserved
+    /// separately below; the public toggles continue to describe all scales.
     /// `emit` only ever WIDENS, so no request that planned before stops
     /// planning, and nothing that was served changes.
     ///
@@ -243,7 +339,9 @@ impl Plan {
     /// vector could carry a computed append block beside a zeroed CSFW one —
     /// is REGISTERED, not built: it needs a walk change, and this lane's
     /// scope is dispatch. Today the honest answer is that the walk computes
-    /// every block its declared width reaches, and the plan now says so.
+    /// every block its declared width reaches on each selected v2 scale.
+    /// Declared IDs narrow those scales and retain adjacent gradient inputs;
+    /// within-scale block separation remains conservative.
     fn normalized(requested: ComputeSet, layout: Layout) -> Plan {
         let ns = crate::NUM_SCALES;
         let probe = Plan {
@@ -251,7 +349,23 @@ impl Plan {
             layout: layout.clone(),
             emit: SlotSet::from_slots([]),
         };
-        let compute = ComputeSet::from_toggles(probe.toggles());
+        let mut compute = ComputeSet::from_toggles(probe.toggles());
+        // Channel selection is private plan data, separate from public family
+        // toggles. Normalization preserves it only for supported families.
+        compute.v1_full_scales = requested.v1_full_scales;
+        compute.v2_scales = requested.v2_scales;
+        compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
+        compute.sampling = requested.sampling;
+        compute.coarse_y_only_scales = if !compute.v2_blocks
+            && compute.free_extras == V1FreeExtras::Off
+            && compute.v1_pools != V1PoolsMode::Full
+        {
+            requested.coarse_y_only_scales
+        } else {
+            0
+        };
+        compute.local_only = requested.local_only;
+        compute.omit_edges = requested.omit_edges;
         // `emit` is in ID space and is intersected with what the LAYOUT
         // carries: a dense layout that omits an id the walk computes does not
         // emit it, and saying otherwise would make `covers` lie.
@@ -278,6 +392,18 @@ impl Plan {
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let mut plan = Plan::derive_with_layout(&want, layout)?;
         plan.compute.formula_revision = revision;
+        let sampling =
+            crate::sampling::Sampling::from_model(model).map_err(|_| PlanError::UnreadableBake)?;
+        if let Some(sampling) = sampling {
+            if !sampling.is_direct()
+                && (!plan.compute.allows_full_res_y_subset()
+                    || !matches!(plan.compute.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
+                    || (sampling.keep_y && plan.compute.full_res_xb))
+            {
+                return Err(PlanError::UnreadableBake);
+            }
+            plan.compute.sampling = Some(sampling);
+        }
         // **The SERVING-plan footprint policy, applied to both branches.**
         // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
         // the right answer for a served v1 walk: `Off` and `Peaks` compute the
@@ -317,7 +443,14 @@ impl Plan {
         let compute = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: true,
+            full_res_xb: true,
+            coarse_y_only_scales: 0,
+            local_only: false,
+            omit_edges: false,
+            sampling: None,
             v1_pools: pools,
+            v1_full_scales: ComputeSet::ALL_SCALES,
+            v2_scales: ComputeSet::ALL_SCALES,
             v2_blocks: false,
             gradient: false,
             blockiness: false,
@@ -327,6 +460,16 @@ impl Plan {
             append2: false,
             append2_dst_activity: false,
             csfw: false,
+            dvifm: false,
+            gridblk: false,
+            ringbasis: false,
+            tailhist: false,
+            arttype: false,
+            gmsbank: false,
+            mapdev: false,
+            z1max: false,
+            gmsnative: false,
+            dvifmgate: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -371,15 +514,28 @@ impl Plan {
             transducers_luma_only: c.transducers_luma_only,
             // LAYOUT: a block's flag is on when the declared width reaches
             // it, whether or not its kernel runs. The chain is NESTED, not
-            // three independent tests — `append2_block` asserts `append_block`
-            // and `csfw_block` asserts `append2_block` (each sits above the
-            // previous and reuses its accumulators), so a width that reaches
+            // four independent tests — `append2_block` asserts
+            // `append_block`, `csfw_block` asserts `append2_block`, and
+            // `dvifm_block` asserts `csfw_block` (each sits above the
+            // previous), so a width that reaches
             // one necessarily reaches the ones below it. Written as a chain
-            // rather than three `>` tests so a future non-contiguous width
+            // rather than four `>` tests so a future non-contiguous width
             // cannot violate the assertion.
             append_block: layout.append,
             append2_block: layout.append2,
             csfw_block: layout.csfw,
+            dvifm_block: layout.dvifm,
+            // The Rev4 feature bank extends the nested chain: each family's
+            // layout flag is on when the declared width reaches its base.
+            rev4_gridblk: layout.gridblk,
+            rev4_ringbasis: layout.ringbasis,
+            rev4_tailhist: layout.tailhist,
+            rev4_arttype: layout.arttype,
+            gmsbank: layout.gmsbank,
+            mapdev: layout.mapdev,
+            z1max: layout.z1max,
+            gmsnative: layout.gmsnative,
+            dvifmgate: layout.dvifmgate,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -434,7 +590,19 @@ impl Plan {
             // operation, and both hide the question.
             formula_revision: a.formula_revision,
             v1_basic: a.v1_basic || b.v1_basic,
+            full_res_xb: a.full_res_xb || b.full_res_xb,
+            coarse_y_only_scales: a.coarse_y_only_scales & b.coarse_y_only_scales,
+            local_only: a.local_only && b.local_only,
+            omit_edges: a.omit_edges && b.omit_edges,
+            sampling: a.sampling,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
+            v1_full_scales: if pools_union(a.v1_pools, b.v1_pools) == V1PoolsMode::Full {
+                a.full_pool_scales() | b.full_pool_scales()
+            } else {
+                ComputeSet::ALL_SCALES
+            },
+            v2_scales: (if a.v2_blocks { a.v2_scales } else { 0 })
+                | (if b.v2_blocks { b.v2_scales } else { 0 }),
             v2_blocks: a.v2_blocks || b.v2_blocks,
             gradient: a.gradient || b.gradient,
             blockiness: a.blockiness || b.blockiness,
@@ -446,6 +614,16 @@ impl Plan {
             append2: a.append2 || b.append2,
             append2_dst_activity: a.append2_dst_activity || b.append2_dst_activity,
             csfw: a.csfw || b.csfw,
+            dvifm: a.dvifm || b.dvifm,
+            gridblk: a.gridblk || b.gridblk,
+            ringbasis: a.ringbasis || b.ringbasis,
+            tailhist: a.tailhist || b.tailhist,
+            arttype: a.arttype || b.arttype,
+            gmsbank: a.gmsbank || b.gmsbank,
+            mapdev: a.mapdev || b.mapdev,
+            z1max: a.z1max || b.z1max,
+            gmsnative: a.gmsnative || b.gmsnative,
+            dvifmgate: a.dvifmgate || b.dvifmgate,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -460,11 +638,22 @@ impl Plan {
 /// Which optional blocks a declared layout width reaches.
 ///
 /// The chain is nested by construction: `append2` implies `append`, `csfw`
-/// implies `append2`. The walk asserts exactly these implications.
+/// implies `append2`, `dvifm` implies `csfw`. The walk asserts exactly
+/// these implications.
 struct LayoutBlocks {
     append: bool,
     append2: bool,
     csfw: bool,
+    dvifm: bool,
+    gridblk: bool,
+    ringbasis: bool,
+    tailhist: bool,
+    arttype: bool,
+    gmsbank: bool,
+    mapdev: bool,
+    z1max: bool,
+    gmsnative: bool,
+    dvifmgate: bool,
 }
 
 impl LayoutBlocks {
@@ -472,10 +661,30 @@ impl LayoutBlocks {
         let append = width > base_of(ComputeToken::Append, ns);
         let append2 = append && width > base_of(ComputeToken::Append2, ns);
         let csfw = append2 && width > base_of(ComputeToken::Csfw, ns);
+        let dvifm = csfw && width > base_of(ComputeToken::Dvifm, ns);
+        let gridblk = dvifm && width > base_of(ComputeToken::Gridblk, ns);
+        let ringbasis = gridblk && width > base_of(ComputeToken::Ringbasis, ns);
+        let tailhist = ringbasis && width > base_of(ComputeToken::Tailhist, ns);
+        let arttype = tailhist && width > base_of(ComputeToken::Arttype, ns);
+        let gmsbank = arttype && width > base_of(ComputeToken::Gmsbank, ns);
+        let mapdev = gmsbank && width > base_of(ComputeToken::Mapdev, ns);
+        let z1max = mapdev && width > base_of(ComputeToken::Z1max, ns);
+        let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
+        let dvifmgate = gmsnative && width > base_of(ComputeToken::Dvifmgate, ns);
         Self {
             append,
             append2,
             csfw,
+            dvifm,
+            gridblk,
+            ringbasis,
+            tailhist,
+            arttype,
+            gmsbank,
+            mapdev,
+            z1max,
+            gmsnative,
+            dvifmgate,
         }
     }
 }
@@ -550,6 +759,325 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_only_plan_preserves_reads_and_restores_dependencies() {
+        use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
+        let want = SlotSet::from_slots((0..156).filter(|id| id % 13 < 10));
+        let local = Plan::derive(&want, 372).unwrap();
+        assert!(local.compute.local_only);
+        assert_eq!(local.emit, want);
+        assert_eq!(
+            Plan::widened_to_identity(&local, 944).compute,
+            local.compute
+        );
+        for id in [10, 12, 156, 228, 372] {
+            let other = Plan::derive(&SlotSet::from_slots([id]), 944).unwrap();
+            let union = local.union(&other);
+            assert!(!union.compute.local_only);
+            assert!(union.covers(&want.union(&SlotSet::from_slots([id]))));
+        }
+        let full = Plan::v1(V1PoolsMode::Peaks, 372);
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (96, 96), (127, 97), (129, 257)] {
+            let src: Vec<_> = (0..w * h)
+                .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 11 % 233) as u8])
+                .collect();
+            let dst: Vec<_> = (0..w * h)
+                .map(|i| {
+                    [
+                        (i * 31 % 251) as u8,
+                        (i * 13 % 239) as u8,
+                        (i * 17 % 233) as u8,
+                    ]
+                })
+                .collect();
+            for parallel in [false, true] {
+                let mut run = |p: &Plan| {
+                    compute_folded_v1_372_streaming_impl(
+                        &crate::RgbSlice::new(&src, w, h),
+                        &crate::RgbSlice::new(&dst, w, h),
+                        None,
+                        parallel,
+                        &mut scratch,
+                        Some(p),
+                        #[cfg(feature = "custom-profiles")]
+                        None,
+                    )
+                    .unwrap()
+                    .0
+                };
+                let baseline = run(&full);
+                for (fine_y, omit_edges, coarse_y) in [
+                    (false, false, 0u8),
+                    (true, false, 0),
+                    (false, true, 0),
+                    (true, true, 0),
+                    (true, false, 6),
+                    (true, false, 14),
+                ] {
+                    let ids = SlotSet::from_slots(want.iter_slots().filter(|&id| {
+                        (!fine_y || !ComputeSet::is_full_res_xb(id, 4))
+                            && !crate::feature_defs::def_at(id, 4).is_some_and(|d| {
+                                coarse_y & (1 << d.scale) != 0
+                                    && matches!(
+                                        d.channel,
+                                        crate::feature_defs::Channel::X
+                                            | crate::feature_defs::Channel::B
+                                    )
+                            })
+                            && (!omit_edges || matches!(id % 13, 0..=2 | 9))
+                    }));
+                    let p = Plan::derive(&ids, 372).unwrap();
+                    assert_eq!(p.compute.omit_edges, omit_edges);
+                    let values = run(&p);
+                    for id in (0..228).filter(|id| {
+                        *id >= 156 || id % 13 >= 10 || (omit_edges && (3..9).contains(&(id % 13)))
+                    }) {
+                        assert_eq!(values[id], 0.0, "omitted reduction f{id} still ran");
+                    }
+                    for id in ids.iter_slots() {
+                        assert_eq!(
+                            values[id].to_bits(),
+                            baseline[id].to_bits(),
+                            "{w}x{h} parallel={parallel} f{id}"
+                        );
+                    }
+                    let pre = crate::Zensim::new(crate::ZensimProfile::B)
+                        .with_parallel(parallel)
+                        .precompute_reference(&crate::RgbSlice::new(&src, w, h))
+                        .unwrap();
+                    let wide = Plan::widened_to_identity(&p, 944);
+                    if let Some((cached, _)) =
+                        crate::feature_v2::compute_folded_v1_372_with_ref_impl(
+                            &pre,
+                            &crate::RgbSlice::new(&dst, w, h),
+                            parallel,
+                            &mut V2Scratch::new(),
+                            Some(p.compute.v1_pools),
+                            Some(&wide),
+                        )
+                    {
+                        assert_eq!(cached.len(), 944);
+                        assert_eq!(&cached[..values.len()], &values, "cached {w}x{h}");
+                        assert!(cached[values.len()..].iter().all(|v| *v == 0.0));
+                    } else {
+                        assert!(w != 96 || h != 96, "cache fast path did not run");
+                    }
+                    assert_eq!(Plan::normalized(p.compute, p.layout.clone()), p);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fullres_y_subset_plan_restores_chroma_for_any_consumer() {
+        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
+        let y = Plan::derive(&want, 228).unwrap();
+        assert!(!y.compute.full_res_xb);
+        assert_eq!(y.emit, want);
+        assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
+        assert!(!Plan::widened_to_identity(&y, 372).compute.full_res_xb);
+        for id in [0, 26, 156, 168] {
+            let xb = Plan::derive(&SlotSet::from_slots([id]), 228).unwrap();
+            let union = y.union(&xb);
+            assert!(union.compute.full_res_xb);
+            assert!(union.covers(&want.union(&SlotSet::from_slots([id]))));
+        }
+        // Wider owning families conservatively disable this specialization.
+        for id in [228, 372, 720, 924] {
+            let wider = Plan::derive(&want.union(&SlotSet::from_slots([id])), 944).unwrap();
+            assert!(wider.compute.full_res_xb);
+        }
+    }
+
+    #[test]
+    fn coarse_pool_plan_survives_layout_changes_and_union() {
+        let ids = SlotSet::from_slots(
+            (0..228)
+                .chain(264..300)
+                .chain(336..372)
+                .filter(|&id| !ComputeSet::is_full_res_xb(id, 4)),
+        );
+        let p = Plan::derive(&ids, 372).unwrap();
+        assert_eq!(p.compute.v1_full_scales, 0b1100);
+        assert!(!p.compute.full_res_xb);
+        assert_eq!(p.emit, ids);
+        assert_eq!(Plan::normalized(p.compute, p.layout.clone()), p);
+        assert_eq!(Plan::widened_to_identity(&p, 372).compute, p.compute);
+        let peaks = Plan::v1(V1PoolsMode::Peaks, 372);
+        assert_eq!(p.union(&peaks).compute.v1_full_scales, 0b1100);
+        let fine_y = Plan::derive(&SlotSet::from_slots([234]), 372).unwrap();
+        let union = p.union(&fine_y);
+        assert_eq!(union.compute.v1_full_scales, 0b1101);
+        assert!(!union.compute.full_res_xb);
+        assert!(union.covers(&ids.union(&SlotSet::from_slots([234]))));
+        let fine_x = Plan::derive(&SlotSet::from_slots([228]), 372).unwrap();
+        assert!(p.union(&fine_x).compute.full_res_xb);
+    }
+
+    #[test]
+    fn every_v2_scale_and_weighted_pool_matches_unrestricted_values() {
+        use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
+        let full = Plan::derive(&SlotSet::from_slots(0..944), 944).unwrap();
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (97, 131), (257, 193)] {
+            let src: Vec<_> = (0..w * h)
+                .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 11 % 233) as u8])
+                .collect();
+            let mut dst = src.clone();
+            for (i, p) in dst.iter_mut().enumerate() {
+                if i % 23 == 0 || (i % w) % 8 == 0 {
+                    *p = [17, 220, 99];
+                }
+            }
+            for parallel in [false, true] {
+                let mut run = |plan: &Plan| {
+                    compute_folded_v1_372_streaming_impl(
+                        &crate::RgbSlice::new(&src, w, h),
+                        &crate::RgbSlice::new(&dst, w, h),
+                        None,
+                        parallel,
+                        &mut scratch,
+                        Some(plan),
+                        #[cfg(feature = "custom-profiles")]
+                        None,
+                    )
+                    .unwrap()
+                    .0
+                };
+                let baseline = run(&full);
+                for mask in 1u8..16 {
+                    let want = SlotSet::from_slots((0..944).filter(|&id| {
+                        let d = crate::feature_defs::def_at(id, 4).unwrap();
+                        (id < 228 && !ComputeSet::is_full_res_xb(id, 4))
+                            || (id >= 228 && mask & (1 << d.scale) != 0)
+                    }));
+                    let plan = Plan::derive(&want, 944).unwrap();
+                    let values = run(&plan);
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            values[id].to_bits(),
+                            baseline[id].to_bits(),
+                            "mask={mask:04b} {w}x{h} parallel={parallel} f{id}"
+                        );
+                    }
+                    assert_eq!(Plan::normalized(plan.compute, plan.layout.clone()), plan);
+                }
+            }
+        }
+        let coarse = Plan::derive(&SlotSet::from_slots(546..720), 944).unwrap();
+        assert_eq!(coarse.compute.v2_scales, 0b1100);
+        assert!(!coarse.compute.at_scale(0).v2_blocks);
+        assert!(!coarse.compute.at_scale(1).append);
+        // Finest edge width reads gradients at both levels 0 and 1.
+        let edge = Plan::derive(&SlotSet::from_slots([400]), 944).unwrap();
+        assert_eq!(edge.compute.v2_scales, 0b0011);
+    }
+
+    #[test]
+    fn coarse_channel_union_restores_every_consumers_inputs() {
+        let ids = SlotSet::from_slots((0..156).filter(|id| id / 13 % 3 == 1 && id % 13 < 10));
+        let y = Plan::derive(&ids, 372).unwrap();
+        assert_eq!(y.compute.coarse_y_only_scales, 0b1110);
+        assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
+        for id in [39, 78, 117, 372, 720] {
+            let extra = SlotSet::from_slots([id]);
+            let merged = y.union(&Plan::derive(&extra, 944).unwrap());
+            assert!(merged.covers(&ids.union(&extra)), "missing consumer f{id}");
+            assert_eq!(
+                Plan::normalized(merged.compute, merged.layout.clone()),
+                merged
+            );
+        }
+    }
+
+    #[test]
+    fn fullres_y_subset_retained_features_are_bit_exact() {
+        use crate::RgbSlice;
+        use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
+        for (weighted, coarse_y) in [(0u8, 0u8), (0, 2), (0, 6), (0, 14), (12, 0), (15, 0)] {
+            let want = SlotSet::from_slots((0..372).filter(|&id| {
+                !ComputeSet::is_full_res_xb(id, 4)
+                    && (coarse_y == 0 || (id < 156 && id % 13 < 10))
+                    && !crate::feature_defs::def_at(id, 4).is_some_and(|d| {
+                        coarse_y & (1 << d.scale) != 0
+                            && matches!(
+                                d.channel,
+                                crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                            )
+                    })
+                    && (id < 228
+                        || weighted & (1 << crate::feature_defs::def_at(id, 4).unwrap().scale) != 0)
+            }));
+            let y = Plan::derive(&want, 372).unwrap();
+            let full = Plan::v1(V1PoolsMode::Full, 372);
+            let mut scratch = V2Scratch::new();
+            for (w, h) in [(17, 9), (64, 64), (97, 131), (257, 193)] {
+                let src = vec![[127u8; 3]; w * h];
+                for kind in 0..4 {
+                    let mut dst = src.clone();
+                    match kind {
+                        1 => {
+                            dst[(h / 2) * w + w / 2] = [255; 3];
+                            dst[0] = [0; 3];
+                        }
+                        2 => {
+                            for (i, p) in dst.iter_mut().enumerate() {
+                                *p = if (i % w + i / w) % 2 == 0 {
+                                    [100; 3]
+                                } else {
+                                    [154; 3]
+                                };
+                            }
+                        }
+                        3 => {
+                            for (i, p) in dst.iter_mut().enumerate() {
+                                if (i % w) % 8 == 0 || (i / w) % 8 == 0 {
+                                    *p = [160, 80, 190];
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    for parallel in [false, true] {
+                        let mut run = |plan: &Plan| {
+                            compute_folded_v1_372_streaming_impl(
+                                &RgbSlice::new(&src, w, h),
+                                &RgbSlice::new(&dst, w, h),
+                                None,
+                                parallel,
+                                &mut scratch,
+                                Some(plan),
+                                #[cfg(feature = "custom-profiles")]
+                                None,
+                            )
+                            .unwrap()
+                        };
+                        let (a, ma) = run(&full);
+                        let (b, mb) = run(&y);
+                        assert_eq!(ma, mb, "raw channel means must remain intact");
+                        for id in want.iter_slots() {
+                            assert_eq!(
+                                a[id].to_bits(),
+                                b[id].to_bits(),
+                                "{w}x{h} kind={kind} parallel={parallel} f{id}"
+                            );
+                        }
+                        for id in (0..372).filter(|&id| !want.contains(id)) {
+                            assert_eq!(b[id], 0.0, "uncomputed f{id}");
+                        }
+                        if kind != 0 {
+                            assert!(
+                                (13..26).any(|id| b[id] != 0.0),
+                                "Y must see luma corruption"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     use super::*;
 
     fn slots(r: impl IntoIterator<Item = (usize, usize)>) -> SlotSet {
@@ -589,6 +1117,15 @@ mod tests {
         assert_eq!(p.compute.free_extras, V1FreeExtras::Off);
         assert_eq!(p.layout_width(), 372);
         assert_eq!(p.emit, slots([(0, 372)]));
+    }
+
+    #[test]
+    fn gmsbank_full_width_plan_populates_all_registered_slots() {
+        let want = slots([(0, 1502)]);
+        let plan = Plan::derive(&want, 1502).expect("C8 plan");
+        assert!(plan.compute.gmsbank);
+        assert!(plan.toggles().gmsbank);
+        assert_eq!(plan.emit, want);
     }
 
     /// A basic-only request skips the pool block entirely.
@@ -839,6 +1376,102 @@ mod toggle_gates {
         assert!(!t.csfw_block, "944 does not reach csfw");
         assert_eq!(t.free_extras, V1FreeExtras::RawMoments);
     }
+
+    /// DVIFM (f956..985, the flat block): a request that touches it plans
+    /// the full nested chain — `dvifm` compute on, and through `toggles()`
+    /// every layout flag below it — and the plan emits the slots. Below
+    /// 986 the slots do not exist, so the request clips away and no dvifm
+    /// flag is set (the same serve-by-clipping rule every family obeys).
+    #[test]
+    fn dvifm_plans_the_full_chain_at_986_and_clips_below_it() {
+        let ns = crate::NUM_SCALES;
+        let dvifm = crate::feature_defs::family_slots(ComputeToken::Dvifm, ns);
+        assert_eq!(
+            dvifm,
+            SlotSet::parse("956-985").unwrap(),
+            "the flat block owns exactly f956..985"
+        );
+        // Request the dvifm slots plus a v1 base at the 986 layout.
+        let want = SlotSet::from_ranges([(0, 228)]).union(&dvifm);
+        let p = Plan::derive(&want, 986).expect("plan");
+        assert!(
+            p.compute.dvifm,
+            "a dvifm-slot request must turn the kernel on"
+        );
+        // The nested chain resolved through `toggles()`: the 986 layout
+        // reaches every block below DVIFM, and normalization makes the
+        // compute flags agree with the layout flags.
+        assert!(
+            p.compute.csfw && p.compute.append2 && p.compute.append && p.compute.v2_blocks,
+            "the 986 layout computes every block it reaches"
+        );
+        let t = p.toggles();
+        assert!(
+            t.dvifm_block && t.csfw_block && t.append2_block && t.append_block,
+            "layout flags form the nested chain"
+        );
+        // `v2_scales` is private plan data the toggles do not carry —
+        // the request touched only scale-0 slots (the flat block's
+        // attribution), so the mask is `0b0001` while `from_toggles`
+        // reports ALL. Compare with it set equal, the same substitution
+        // `normalized` performs.
+        let round = ComputeSet::from_toggles(t);
+        assert_eq!(
+            ComputeSet {
+                v2_scales: p.compute.v2_scales,
+                ..round
+            },
+            p.compute,
+            "toggles resolve to the planned compute set"
+        );
+        assert_eq!(
+            p.compute.v2_scales, 1,
+            "the flat block lives on the scale-0 walk rows"
+        );
+        assert!(p.emit.covers(&dvifm), "the plan must emit f956..985");
+
+        // At 956 the family does not exist: the request clips away, the
+        // plan stays dvifm-free, and no flag is set.
+        let p956 = Plan::derive(&want, 956).expect("956 plan");
+        assert!(!p956.compute.dvifm);
+        assert!(!p956.toggles().dvifm_block);
+        assert!(
+            p956.emit.missing_from(&want.clipped_to(956)).is_empty(),
+            "the 956 plan still covers everything inside its layout"
+        );
+    }
+
+    /// `dvifm_block` is a LAYOUT flag: turning it on at the 986 width
+    /// makes `from_toggles` compute the family (gated on `v2_blocks`,
+    /// same shape as `csfw`), and a v1-only request at the same width
+    /// computes nothing — the slots stay structural zeros.
+    #[test]
+    fn dvifm_block_is_layout_on_compute_gated_on_v2() {
+        use crate::feature_v2::V2NewFeatureToggles;
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            ..Default::default()
+        });
+        assert!(cs.dvifm && cs.csfw && cs.append2 && cs.append);
+        let v1only = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            v1_only: true,
+            ..Default::default()
+        });
+        assert!(
+            !v1only.dvifm && !v1only.csfw,
+            "v1_only forces every v2-era block off, dvifm included"
+        );
+        // Default is OFF: the flag defaults false and populates nothing.
+        assert!(!V2NewFeatureToggles::default().dvifm_block);
+        assert!(!ComputeSet::from_toggles(V2NewFeatureToggles::default()).dvifm);
+    }
 }
 
 /// **The SERVABILITY CENSUS** — the hard contract gate.
@@ -902,7 +1535,7 @@ pub(crate) mod servability_census {
         assert!(a.revisions_agree(&b), "same revision must agree");
         a.compute.formula_revision = match a.compute.formula_revision {
             FormulaRevision::Rev1 => FormulaRevision::Rev2,
-            FormulaRevision::Rev2 => FormulaRevision::Rev1,
+            FormulaRevision::Rev2 | FormulaRevision::Rev3 => FormulaRevision::Rev1,
         };
         assert!(
             !a.revisions_agree(&b),
@@ -965,6 +1598,7 @@ pub(crate) mod servability_census {
                     ..Default::default()
                 },
                 &mut V2Scratch::new(),
+                None,
             )
             .unwrap();
             assert_eq!(full.features().len(), 956);
@@ -1019,7 +1653,7 @@ pub(crate) mod servability_census {
     fn every_registered_producer_set_is_plannable() {
         let ns = crate::NUM_SCALES;
         let mut checked = 0usize;
-        for (compute, width, expect) in registered_producer_sets() {
+        for (compute, width, expect, full_y) in registered_producer_sets() {
             let Some(parts) = crate::feature_set_id::ComputeParts::parse(&compute) else {
                 panic!("unparseable compute {compute:?}");
             };
@@ -1027,7 +1661,13 @@ pub(crate) mod servability_census {
             for t in parts.iter() {
                 want = want.union(&crate::feature_defs::family_slots(t, ns));
             }
-            let want = want.clipped_to(width);
+            let mut want = want.clipped_to(width);
+            if full_y {
+                want = SlotSet::from_slots(
+                    want.iter_slots()
+                        .filter(|&id| !ComputeSet::is_full_res_xb(id, ns)),
+                );
+            }
             assert_eq!(want, expect, "{compute}@w{width}: registry slots");
             let plan = Plan::derive(&want, width)
                 .unwrap_or_else(|e| panic!("{compute}@w{width} is not plannable: {e}"));
@@ -1041,7 +1681,7 @@ pub(crate) mod servability_census {
     }
 
     /// The registry's producer entries as `(compute, layout_width, slots)`.
-    fn registered_producer_sets() -> Vec<(String, usize, SlotSet)> {
+    fn registered_producer_sets() -> Vec<(String, usize, SlotSet, bool)> {
         let json = include_str!("../../benchmarks/feature_sets_registry.json");
         let mut out = Vec::new();
         for chunk in json.split("\"compute\":").skip(1) {
@@ -1072,7 +1712,15 @@ pub(crate) mod servability_census {
             else {
                 continue;
             };
-            out.push((compute, width, slots));
+            let full_y = chunk
+                .split("\"slot_selection\":")
+                .nth(1)
+                .and_then(between_quotes)
+                .is_some_and(|s| {
+                    assert_eq!(s, "full_y_coarse_xyb", "unknown slot selection");
+                    true
+                });
+            out.push((compute, width, slots, full_y));
         }
         out
     }

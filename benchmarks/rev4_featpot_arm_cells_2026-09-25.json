@@ -1,0 +1,123 @@
+{
+ "schema": "rev4-featpot-arm-cells-v1",
+ "label": "POTENTIAL \u2014 ceiling, not a model score",
+ "spec_file": "/var/tmp/rev4-featpot/fleet_specs/arm_cells_2026-09-25.jsonl",
+ "spec_sha256": "017529301f380de465ae172181020075f95bd1206055a0a45251616c7dfcee57",
+ "cells": 19800,
+ "d1_cells": 17280,
+ "d2_cells": 2520,
+ "total_weight_H32_1_H128_4": 49500,
+ "arm_order_suggestion": [
+  "p1",
+  "p3",
+  "c7",
+  "csfw",
+  "a1",
+  "a1w",
+  "b2",
+  "a1m",
+  "b2m",
+  "c1",
+  "c2",
+  "c3",
+  "c4",
+  "all",
+  "b1",
+  "b1s",
+  "c8n",
+  "rall"
+ ],
+ "per_arm": {
+  "p1": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "p3": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "c7": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "csfw": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "a1": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "a1w": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "b2": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "a1m": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "b2m": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "c1": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "c2": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "c3": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "c4": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "all": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "b1": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "b1s": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "c8n": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  },
+  "rall": {
+   "d1_cells": 960,
+   "d2_cells": 140,
+   "weight": 2750
+  }
+ },
+ "note": "enumeration only; no cell has been run; smoke first"
+}

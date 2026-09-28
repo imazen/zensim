@@ -1,0 +1,1684 @@
+{
+  "schema": "honest-integrity-train-results-v1",
+  "role": "train-development",
+  "model_qualified": false,
+  "model": "frozen D228 Rev1 + integrity HGB; unchanged strict probability > 0.9",
+  "extractor_source_commit": "2e3b324d7e96325f05d434543331e4f51fd76a51",
+  "attempts": 10771,
+  "unique_pairs": 10763,
+  "identity_pairs": 1619,
+  "distorted_pairs": 9144,
+  "sources": 148,
+  "source_families": 141,
+  "product_content_classes": 19,
+  "observed_activation": 26,
+  "overall_distorted_activation_rate": 0.0028433945756780404,
+  "product_distorted_activation_rate": 0.002927927927927928,
+  "native_unique_activation": {
+    "n": 264,
+    "count": 0
+  },
+  "native_attempt_activation": {
+    "n": 272,
+    "count": 0
+  },
+  "scalar_lowered": 0,
+  "by_codec": {
+    "avif": {
+      "n": 2072,
+      "honest_activation": {
+        "n": 2072,
+        "count": 12,
+        "rate": 0.005791505791505791
+      },
+      "native_activation": {
+        "n": 2072,
+        "count": 12,
+        "rate": 0.005791505791505791
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "jpeg": {
+      "n": 2072,
+      "honest_activation": {
+        "n": 2072,
+        "count": 14,
+        "rate": 0.006756756756756757
+      },
+      "native_activation": {
+        "n": 2072,
+        "count": 14,
+        "rate": 0.006756756756756757
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "jxl": {
+      "n": 2928,
+      "honest_activation": {
+        "n": 2928,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 2928,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "webp": {
+      "n": 2072,
+      "honest_activation": {
+        "n": 2072,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 2072,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    }
+  },
+  "by_train_role": {
+    "calibration": {
+      "n": 923,
+      "honest_activation": {
+        "n": 923,
+        "count": 1,
+        "rate": 0.0010834236186348862
+      },
+      "native_activation": {
+        "n": 780,
+        "count": 1,
+        "rate": 0.001282051282051282
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "development": {
+      "n": 1893,
+      "honest_activation": {
+        "n": 1893,
+        "count": 4,
+        "rate": 0.0021130480718436345
+      },
+      "native_activation": {
+        "n": 1644,
+        "count": 4,
+        "rate": 0.0024330900243309003
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "fit": {
+      "n": 7947,
+      "honest_activation": {
+        "n": 7947,
+        "count": 21,
+        "rate": 0.0026425066062665155
+      },
+      "native_activation": {
+        "n": 6720,
+        "count": 21,
+        "rate": 0.003125
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    }
+  },
+  "by_content": {
+    "1000-lilith-photos-general": {
+      "n": 497,
+      "honest_activation": {
+        "n": 497,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 420,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "1200-lilith-interiors": {
+      "n": 354,
+      "honest_activation": {
+        "n": 354,
+        "count": 1,
+        "rate": 0.002824858757062147
+      },
+      "native_activation": {
+        "n": 300,
+        "count": 1,
+        "rate": 0.0033333333333333335
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "1400-lilith-nature": {
+      "n": 851,
+      "honest_activation": {
+        "n": 851,
+        "count": 5,
+        "rate": 0.005875440658049354
+      },
+      "native_activation": {
+        "n": 720,
+        "count": 5,
+        "rate": 0.006944444444444444
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "1600-lilith-food": {
+      "n": 71,
+      "honest_activation": {
+        "n": 71,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 60,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "2000-unsplash-people": {
+      "n": 213,
+      "honest_activation": {
+        "n": 213,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 180,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "2200-unsplash-renders": {
+      "n": 142,
+      "honest_activation": {
+        "n": 142,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 120,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "3000-art-institute-of-chicago-photos": {
+      "n": 213,
+      "honest_activation": {
+        "n": 213,
+        "count": 2,
+        "rate": 0.009389671361502348
+      },
+      "native_activation": {
+        "n": 180,
+        "count": 2,
+        "rate": 0.011111111111111112
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "3300-met-museum-photos": {
+      "n": 142,
+      "honest_activation": {
+        "n": 142,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 120,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "5000-national-park-service-brochures": {
+      "n": 283,
+      "honest_activation": {
+        "n": 283,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 240,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "5200-epa-climate-impact-2021-report": {
+      "n": 142,
+      "honest_activation": {
+        "n": 142,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 120,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "5300-noaa-hurricane-documents": {
+      "n": 142,
+      "honest_activation": {
+        "n": 142,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 120,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "6000-lilith-scans-public-patents": {
+      "n": 568,
+      "honest_activation": {
+        "n": 568,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 480,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "6600-ia-scans-manuscript-illustrations": {
+      "n": 568,
+      "honest_activation": {
+        "n": 568,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 480,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "7000-lilith-plots": {
+      "n": 1420,
+      "honest_activation": {
+        "n": 1420,
+        "count": 9,
+        "rate": 0.006338028169014085
+      },
+      "native_activation": {
+        "n": 1200,
+        "count": 9,
+        "rate": 0.0075
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "8000-lilith-mobile-screenshots": {
+      "n": 142,
+      "honest_activation": {
+        "n": 142,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 120,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "8100-lilith-web-screenshots": {
+      "n": 775,
+      "honest_activation": {
+        "n": 775,
+        "count": 4,
+        "rate": 0.005161290322580645
+      },
+      "native_activation": {
+        "n": 660,
+        "count": 4,
+        "rate": 0.006060606060606061
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "9000-lilith-ai-clipart": {
+      "n": 71,
+      "honest_activation": {
+        "n": 71,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 60,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "9094-lilith-ai-illustrations": {
+      "n": 781,
+      "honest_activation": {
+        "n": 781,
+        "count": 2,
+        "rate": 0.002560819462227913
+      },
+      "native_activation": {
+        "n": 660,
+        "count": 2,
+        "rate": 0.0030303030303030303
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "9226-lilith-ai-products": {
+      "n": 3124,
+      "honest_activation": {
+        "n": 3124,
+        "count": 3,
+        "rate": 0.0009603072983354673
+      },
+      "native_activation": {
+        "n": 2640,
+        "count": 3,
+        "rate": 0.0011363636363636363
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "document": {
+      "n": 66,
+      "honest_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "graphic": {
+      "n": 66,
+      "honest_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "photo": {
+      "n": 66,
+      "honest_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "screen": {
+      "n": 66,
+      "honest_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 66,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    }
+  },
+  "by_stored_knob": {
+    "avif": {
+      "5.0": {
+        "n": 296,
+        "active": 10
+      },
+      "15.0": {
+        "n": 296,
+        "active": 1
+      },
+      "30.0": {
+        "n": 296,
+        "active": 0
+      },
+      "50.0": {
+        "n": 296,
+        "active": 0
+      },
+      "70.0": {
+        "n": 296,
+        "active": 0
+      },
+      "85.0": {
+        "n": 296,
+        "active": 1
+      },
+      "95.0": {
+        "n": 296,
+        "active": 0
+      }
+    },
+    "jpeg": {
+      "5.0": {
+        "n": 296,
+        "active": 14
+      },
+      "15.0": {
+        "n": 296,
+        "active": 0
+      },
+      "30.0": {
+        "n": 296,
+        "active": 0
+      },
+      "50.0": {
+        "n": 296,
+        "active": 0
+      },
+      "70.0": {
+        "n": 296,
+        "active": 0
+      },
+      "85.0": {
+        "n": 296,
+        "active": 0
+      },
+      "95.0": {
+        "n": 296,
+        "active": 0
+      }
+    },
+    "jxl": {
+      "5.0": {
+        "n": 296,
+        "active": 0
+      },
+      "25.0": {
+        "n": 296,
+        "active": 0
+      },
+      "30.0": {
+        "n": 296,
+        "active": 0
+      },
+      "40.0": {
+        "n": 296,
+        "active": 0
+      },
+      "50.0": {
+        "n": 296,
+        "active": 0
+      },
+      "60.0": {
+        "n": 296,
+        "active": 0
+      },
+      "70.0": {
+        "n": 296,
+        "active": 0
+      },
+      "80.0": {
+        "n": 296,
+        "active": 0
+      },
+      "90.0": {
+        "n": 296,
+        "active": 0
+      }
+    },
+    "webp": {
+      "5.0": {
+        "n": 296,
+        "active": 0
+      },
+      "15.0": {
+        "n": 296,
+        "active": 0
+      },
+      "30.0": {
+        "n": 296,
+        "active": 0
+      },
+      "50.0": {
+        "n": 296,
+        "active": 0
+      },
+      "70.0": {
+        "n": 296,
+        "active": 0
+      },
+      "85.0": {
+        "n": 296,
+        "active": 0
+      },
+      "95.0": {
+        "n": 296,
+        "active": 0
+      }
+    }
+  },
+  "active_rows": [
+    {
+      "index": 540,
+      "origin": "1214",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "1200-lilith-interiors",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9482648936976447,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "2d7c94421ebb0d2c722dab5b704abbac1b36cb2d2e5ea590438b478128b985e5:{\"cell\":\"s8-noqm-420-bd10\",\"fp\":\"ce979df491c59e2b\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 780,
+      "origin": "1420",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "1400-lilith-nature",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "50dd8022b74b0965e995b0529236da965e8b4005221ce78d5ef14b350253dca7:{\"cell\":\"s8-noqm\",\"fp\":\"8657c728f73693f5\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 855,
+      "origin": "1442",
+      "role": "development",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "1400-lilith-nature",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "034cb4be70982a044379908726084591ab04f872499e5b12ac5326711098d51a:{\"cell\":\"moz_tr14.5_small_444\",\"fp\":\"c031fd6e9e8da96c\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 1095,
+      "origin": "1480",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "1400-lilith-nature",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9890534916273198,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "5b6de58e09335913902c6e7b4b857a1e163400a118832883a20e5d619786bc34:{\"cell\":\"moz_tr14.5_small_422\",\"fp\":\"854cff25bda7a299\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 1275,
+      "origin": "1506",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "1400-lilith-nature",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "9be3c07a168831f61ac718e371cd7096291fbe87ad7e0531857d9257401698de:{\"cell\":\"moz_tr14.75+dc_small_420\",\"fp\":\"4e56dd27f3819f0d\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 1334,
+      "origin": "1544",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "1400-lilith-nature",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9961295244773726,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "6ed4e1452b1fba1cea3b19e65c84be36945c148509ce9d92fd5c2cf39d0422eb:{\"cell\":\"moz_tr14.5_small_420\",\"fp\":\"d5aaf62de8f1380a\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 1815,
+      "origin": "3006",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "3000-art-institute-of-chicago-photos",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9997078618195724,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "ccd2bcd4be5d07aa4e2015405627f068ff40f1da3578253dafd3fdbd9f41e673:{\"cell\":\"moz_tr14.75+dc_small_444\",\"fp\":\"63cfd5e73de52dab\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 1861,
+      "origin": "3010",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "3000-art-institute-of-chicago-photos",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9747588573932133,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "24d3a55e756b5b71be7373ae8b0bd817efb1d5574fc5f54edf44eb7399f4d89a:{\"cell\":\"s8-noqm-420\",\"fp\":\"742768c1bd5c9a1c\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 3600,
+      "origin": "7002",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.99667220459756,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "507dbe42f298c601a394d3e5202b1f937aec033431bb4ea6e1e05e5715d44092:{\"cell\":\"s2-noqm-420\",\"fp\":\"040c09b88e42e462\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 3601,
+      "origin": "7002",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9838664788476222,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "64a8447ae20012a7e33fed5fae45d939503fcb99598d7ee6dbe676b24e2d1e50:{\"cell\":\"s6\",\"fp\":\"50869f2766165a88\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 3615,
+      "origin": "7002",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9838664788476222,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "64a8447ae20012a7e33fed5fae45d939503fcb99598d7ee6dbe676b24e2d1e50:{\"cell\":\"moz_tr14.5_small_422\",\"fp\":\"854cff25bda7a299\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 3721,
+      "origin": "7020",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9212962859104138,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "b693bbe8fab6d677db64502a2124407dc84f51ff808c65e829d2e888304a7fcc:{\"cell\":\"s6-bd10\",\"fp\":\"300a7ddd44e0129b\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 3961,
+      "origin": "7042",
+      "role": "development",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.938360057140493,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "a860dfe59ebb1bca4a6abdd0d1754d00e7b0c685f072c2a81d5ade30ce18eeff:{\"cell\":\"s8\",\"fp\":\"5a429201ec709a1e\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 4202,
+      "origin": "7054",
+      "role": "calibration",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 15.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9228909328574854,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "267bd0d6c5a7766dd965c59d40b2e7ffe1d8c6925fdaa2fc6811e46eeb5ed488:{\"cell\":\"s8-rgb\",\"fp\":\"bf5ae0edaf9ffc0b\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 4261,
+      "origin": "7056",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9698289303854492,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "fd6c445e6d4e8060e70c4650978f6b10d52301cf6014f14f6f112047507c9167:{\"cell\":\"s6-noqm\",\"fp\":\"d9c19854f0cc7d0f\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 4321,
+      "origin": "7066",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9721489835884533,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "4cea90c74da2901d56c9fc6b1d4643bd5e26ff3dd3e59702b0f1b4698563b2b1:{\"cell\":\"s8\",\"fp\":\"5a429201ec709a1e\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 4455,
+      "origin": "7080",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9728776933573893,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "ef099d8be52bf5c5869957f47da0616592923428add2474b6c5264206f29b352:{\"cell\":\"moz_t0_small_420\",\"fp\":\"85827e6cd6eeefb1\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 4981,
+      "origin": "8124",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 5.0,
+      "content_class": "8100-lilith-web-screenshots",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "07ab7c33f9bc25ae570016c387ebae75e6859325d2997a361a0ce52a24675a84:{\"cell\":\"s2-noqm-420\",\"fp\":\"040c09b88e42e462\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 5171,
+      "origin": "8184",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 85.0,
+      "content_class": "8100-lilith-web-screenshots",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "eab3931883aee3f284a3b7ba14396f513ec1b6581f29d7908735a2e389bce7c3:{\"cell\":\"s4-420\",\"fp\":\"8254554c8e7a86d5\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ]
+    },
+    {
+      "index": 5474,
+      "origin": "8460",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "8100-lilith-web-screenshots",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "89e27cb2a7c58d0efe5c189a45b8c1945089b8be0219618257eff90de5893cc0:{\"cell\":\"moz_t0_small_420\",\"fp\":\"85827e6cd6eeefb1\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 5475,
+      "origin": "8460",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "8100-lilith-web-screenshots",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "35dbc2bac8baa4f5b4591bcf24f2e53520545c5419205cdfa8c23dad7d6df350:{\"cell\":\"moz_t0_small_420\",\"fp\":\"85827e6cd6eeefb1\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 5774,
+      "origin": "9134",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "9094-lilith-ai-illustrations",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9801843374951582,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "833834cd9af1e3820721067a27d6ebcfd42c7c8528ad7c90589cb095bf0de5cc:{\"cell\":\"moz_tr14.75+dc_small_422\",\"fp\":\"9eb4d4301ecb347e\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 6015,
+      "origin": "9152",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "9094-lilith-ai-illustrations",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9633549725244008,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "c57db12b3f970be221a20e944c82ba51c8827358efe5bc6fb184c4a1a62eb1ed:{\"cell\":\"moz_tr14.5_small_444\",\"fp\":\"c031fd6e9e8da96c\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 6554,
+      "origin": "9352",
+      "role": "development",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "9226-lilith-ai-products",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9770352258156013,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "dbee92d56f5d7fb4afd1a0a502bbb21a8e0ff68facd2486cb16e03c214eed5bf:{\"cell\":\"moz_tr14.75+dc_small_444\",\"fp\":\"63cfd5e73de52dab\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 6734,
+      "origin": "9364",
+      "role": "development",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "9226-lilith-ai-products",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9966544922237283,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "ae1dda32968fec0f33ff7c7ebc231e5c24baf88142ce94d79f1858f16c30b9af:{\"cell\":\"moz_t0_small_422\",\"fp\":\"d5e0757502388522\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    },
+    {
+      "index": 8235,
+      "origin": "9766",
+      "role": "fit",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "9226-lilith-ai-products",
+      "active": true,
+      "lowered": false,
+      "probability": 0.9621520694979518,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "865b89c3636ecf03d4de935f310eee81732a72e205c2f10932ba6b633a90d34a:{\"cell\":\"moz_tr14.5_small_444\",\"fp\":\"c031fd6e9e8da96c\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ]
+    }
+  ],
+  "checks": {
+    "pixel_hashes": 21542,
+    "exact_complete_surface_rows": 10771,
+    "exact_consumed_features": true,
+    "literal_identity_max_delta": 3.627887878110414e-05,
+    "registered_literal_tolerance": 0.0001,
+    "prepared_status": {
+      "REJECTED_INTEGRITY": 26,
+      "ACCEPTED": 272
+    },
+    "unchanged_native_map_queries": 14144,
+    "exact_gallery_pairs": 26,
+    "owner_tests": 5,
+    "lint_scripts": 616,
+    "clippy": "PASS"
+  },
+  "gates": {
+    "overall_honest_activation": "PASS on this TRAIN diagnostic",
+    "native_steering_activation": "PASS on these TRAIN attempts",
+    "corruption_recall": "NOT MEASURED",
+    "rev3_head": "NOT TRAINED",
+    "product_qualification": "INCOMPLETE"
+  },
+  "limitations": [
+    "Frozen model has prior exposure to some TRAIN sources; no held-out claim.",
+    "All 8,880 stored knob contexts are singletons: worst_stored_native is not a matched quality ladder or per-image floor.",
+    "Stored q groups mix image geometry and encoder configurations; group rates are descriptive, not causal.",
+    "Declared honest labels retained conservatively; encoding success does not establish absence of encoder bugs.",
+    "Source aliases for the four native content classes remain distinct from the 19 product class labels.",
+    "Audit throughput under parallel extraction is not single-image production latency."
+  ],
+  "q85_visual_review": {
+    "row": 5171,
+    "origin": "8184",
+    "codec": "avif",
+    "quality": 85,
+    "configuration": "s4-420",
+    "finding": "Pink cast also visible with FFmpeg/libdav1d; possible encoder/metadata failure, not yet diagnosed. Original valid label retained.",
+    "independent_decoder": "FFmpeg 8.0.1-3ubuntu2, libdav1d; default output conversion",
+    "changed_rgb_components": 6798,
+    "rgb_components": 15552,
+    "max_abs_rgb_delta": 35,
+    "note": "Independent output is visual corroboration, not an exact-pixel or color-correctness reference."
+  },
+  "files": {
+    "ADMISSION.json": {
+      "sha256": "de74d3d0934961dc5bc6118e72d58a5877b26f0a1b0c00a10e13c70760e9cd9f",
+      "bytes": 16092382
+    },
+    "PROTOCOL.md": {
+      "sha256": "75defdb66bfe3c4cf78c4b37678a082017d20b33f58edf599c39bedbcf9d324c",
+      "bytes": 2272
+    },
+    "EXECUTION.json": {
+      "sha256": "cb60a0342a096b6314a719429bc2ed8e1ff67bb4cbd8e530ede353ad2f682c9d",
+      "bytes": 910
+    },
+    "PREPARED_PROTOCOL.md": {
+      "sha256": "3e02de1b12263bae96a2d42fa12c807a86d51aa8226da8e4991ffef47f5710a2",
+      "bytes": 599
+    },
+    "VERIFIED.json": {
+      "sha256": "149a914faa610c468473d7cef3beaab8b13c1c78e0888827f3a46f9d78da4869",
+      "bytes": 3785248
+    },
+    "ASSESSMENT.json": {
+      "sha256": "946b01e73dde0d2db8b53e9938ee0e85f7104d0460f0738b0201e3be49804e80",
+      "bytes": 7260433
+    },
+    "audit.jsonl": {
+      "sha256": "78d7cd0e7ce1ed0856546ab9bac936bfb5212dd45c3ccdda5d665a0e25851596",
+      "bytes": 18536363
+    },
+    "prepared-audit.jsonl": {
+      "sha256": "c568d2a61b9a1705070919f22720d9687694c956fec754e1eb56a1f079c386d6",
+      "bytes": 528048
+    },
+    "gallery-audit.jsonl": {
+      "sha256": "80de4a25ac3da72b2b3870bc5a645336ff1287fbeba2a3264e8b2bc3989fab49",
+      "bytes": 46316
+    },
+    "features.csv": {
+      "sha256": "bf0abb5c3cf127dbb51c7b70dc4485df4cf86e95f07ef25d52e2198cc65ef951",
+      "bytes": 71114252
+    },
+    "prepared-features.csv": {
+      "sha256": "c83e94a3d3b8a0ceae92e6b32e1124194b1dc1d2b1ba4512bd45305d09fc98bd",
+      "bytes": 2320506
+    },
+    "gallery-features.csv": {
+      "sha256": "7ce5bfac2f28ed4555c7d40cbd7e3f59c9361209b433c5c85a7ddc9fb9f3d97d",
+      "bytes": 189235
+    },
+    "pairs.tsv": {
+      "sha256": "9d18454c74438ae9e865dad9f7bdba911648e9901ef424e65ecae1be7d7f88a3",
+      "bytes": 2243491
+    },
+    "prepared-pairs.tsv": {
+      "sha256": "5ced03c0a35a521a5bc6899197d5e70addfcbe15416099f957cf7da647c1cd02",
+      "bytes": 56386
+    },
+    "gallery-pairs.tsv": {
+      "sha256": "bbfbe5359b68b660225fd9b5e51cb0ae907d2d125d7786ba2ea8d0a1389696ee",
+      "bytes": 5974
+    },
+    "decode-list.tsv": {
+      "sha256": "5f6ad681a0a55517bc1a560a4bcff7964ed8065cbf3e45fbc7c4d0db9b4a6be7",
+      "bytes": 3646
+    },
+    "admit.py": {
+      "sha256": "3f46c67c27eadbc02dc6b3d0c0c4df8b647a848eaac667f57a48de73908e63cb",
+      "bytes": 6339
+    },
+    "admit-refused.py": {
+      "sha256": "90511d25aa63473db46617cbe6a70679d593975e29c99ef8c3a6b1f86355b8dd",
+      "bytes": 6321
+    },
+    "verify.py": {
+      "sha256": "1ad40ed53e9ca95a56ad584947fb4ecfbeec0ac5828dc2c011c73dbb0b6294fc",
+      "bytes": 4039
+    },
+    "verify-refused-literal-identity.py": {
+      "sha256": "0d2640429a772069cffe440ef636316c3b4f43b86473a346ac849d1b86b92f0e",
+      "bytes": 3645
+    },
+    "VERIFICATION_NOTE.md": {
+      "sha256": "99e61eafb88854422ea9c1cd5b4062d068a0b0e6b7051d2358788959eeebc07b",
+      "bytes": 483
+    },
+    "extract.log": {
+      "sha256": "0bd883dae3b824f0b2094b66151b97777767c82a4130ea13c838fe4d8a4d7172",
+      "bytes": 1757
+    },
+    "prepared.log": {
+      "sha256": "1dbb34d871928794c2fa3f9ebba5e5eb9b6dd14922f33704db93c17b20c9c7c3",
+      "bytes": 1768
+    },
+    "gallery-extract.log": {
+      "sha256": "707a8b5bfc75cef33d018613b6baaba080ed933d5dc6bfc001e598f91b5d6c8a",
+      "bytes": 1864
+    },
+    "decode.log": {
+      "sha256": "f00f9c3d0760adf632427a7abdef3b69ca4c895baaa4ef3aa1a5e98a1794e8a7",
+      "bytes": 596
+    },
+    "decode-build.log": {
+      "sha256": "28995e32e3096bd637eaacd5e8a7d7e0a9378ed3db45897fc2f7fb9c7b2c2673",
+      "bytes": 2278
+    },
+    "build.log": {
+      "sha256": "029f030ffe19b27754820f747cf9c67b7640d5426a65cfe779d4bed8d75a278e",
+      "bytes": 2420
+    },
+    "owner-tests-final.log": {
+      "sha256": "6a9330b20dd47637e71bbe51b40b869e1cb1c50dc23efc2e5f3c9f3865e542d8",
+      "bytes": 706
+    },
+    "lint.log": {
+      "sha256": "1ddf5fd54a7412f7bab2db5973738b848224bf5b78fb22bb4af074affde8b8d3",
+      "bytes": 80
+    },
+    "clippy.log": {
+      "sha256": "3ea22cf437117534aa04f68b2ea3c1db925e2c4cccda86cf7008c503483d43be",
+      "bytes": 339
+    },
+    "q85-independent.log": {
+      "sha256": "5f195c57fa8fef51860ace8a46bb502060b9bb519194d23260714f5a042bb203",
+      "bytes": 372
+    },
+    "q85-metadata.json": {
+      "sha256": "c8baa459369aa4797862186b47badfa006f048f342af8ea944d70686ff9de875",
+      "bytes": 411
+    },
+    "q85-independent-ffmpeg.png": {
+      "sha256": "033b26d7170b4af761f2a056e33b37b71fccf24230d51d74be060ae483337617",
+      "bytes": 6328
+    },
+    "bin/extract": {
+      "sha256": "04835f2ae0c1f5246a21c6f7655a5e31e27f8fa1e2ba4eb09c62fde606ab2472",
+      "bytes": 13587568
+    },
+    "bin/decode": {
+      "sha256": "dff09237c34847de0b998f6ae7bf4d7ca70595e020cc54e6d83903fe05e4c5aa",
+      "bytes": 12742808
+    },
+    "models/base-d.bin": {
+      "sha256": "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6",
+      "bytes": 1420
+    },
+    "models/integrity.zcth": {
+      "sha256": "a8bef39a2def847a083fad733c547d52afe7cf945fe5896d9ff2e831e6ed8fba",
+      "bytes": 182532
+    },
+    "tools/corruption_gate_eval.py": {
+      "sha256": "8dccf1ec423a798e935acc224de0d95d2656e2be89094bc161c66c5572ceca68",
+      "bytes": 26597
+    },
+    "tools/gauntlet_spatial.py": {
+      "sha256": "665d7aeee13e7e10972f78be5b9fe1b76712b9222acbefbdcf82426eba20ac03",
+      "bytes": 21757
+    }
+  }
+}

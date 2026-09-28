@@ -63,6 +63,22 @@ echo "GATE 1 PASS: node --check ($N_BLOCKS script blocks parse)"
 node "$HERE/gauntlet_render_check.js" "$HTML"
 echo "GATE 2 PASS: DOM-shim render harness"
 
+# Sparse eval regression: the historical scoreboard omitted KADID and the full
+# panel opened global CID22, hiding every result of the new KADID-only study.
+python3 - "$HTML" > "$D/sparse-eval.txt" <<'PY'
+import json, re, sys
+payload = re.search(r"const DATA=(\{.*?\});\n", open(sys.argv[1], encoding="utf-8").read(), re.S)
+assert payload, "no DATA payload"
+rows = json.loads(payload.group(1))["bakes"]
+names = [b["name"] for b in rows if b.get("curated") and set(b.get("rank", {})) == {"kadid"}]
+print(",".join(names[:2]))
+PY
+SPARSE_EVAL=$(cat "$D/sparse-eval.txt")
+if [ -n "$SPARSE_EVAL" ]; then
+  node "$HERE/gauntlet_render_check.js" "$HTML" --hash "#compare=$SPARSE_EVAL" --expect-visible "$SPARSE_EVAL" --expect-no-banner
+  echo "GATE 2b PASS: sparse eval values are visible in the scoreboard and full panel"
+fi
+
 # ── gate 4: URL compare sets ───────────────────────────────────────────────────────────
 # The ids come from the board itself (curated first — those cells carry the richest
 # panels), the typos are mutations of real names PROVEN absent from the board (so a case

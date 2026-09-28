@@ -1,0 +1,1011 @@
+{
+  "status": "COMPLETE_DIAGNOSTIC_NOT_QUALIFICATION",
+  "tool_sha256": "355d2a3df7156cdfe28e9c31483949e1837d185216065ad352cb5096d1241141",
+  "source_sha256": "7f260ac6928ace943ad19e8621df249aa373c8c5a4e0a9a3f041f3452938af88",
+  "protocol_sha256": "1d3942ecdd900ab2d00da4caf20e051c7b73f6db679a4060047e3bb9d728a90f",
+  "registration_sha256": "6a4a5cb8ee150b107f2121862e81fdaa18ab1fbf8d22f06f3e1954665046215c",
+  "new_pixel_comparisons": 0,
+  "results": [
+    {
+      "model": "PP914_basic156_h128_plain_ens3",
+      "row_id": 396,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic156_h128_plain_ens3--396.json",
+      "sha256": "6ba0cd0241a73125a1f72aa77ba2df921433120a73dc45c552cce3d5c11c51dd",
+      "prior_fields_exact": true,
+      "m2": 0.9983716891011724,
+      "m3f": 0.9106600086843248,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.5857890582477727,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.683865409242653,
+            "linearization_squared_error_before": 1.651007591324634,
+            "srocc": 0.961029092488059
+          },
+          {
+            "error_fraction_removed": 0.009592301414053872,
+            "family": "edge",
+            "linearization_squared_error_after": 1.6351706288717571,
+            "linearization_squared_error_before": 1.651007591324634,
+            "srocc": 0.9074033868866695
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 1.651007591324634,
+            "linearization_squared_error_before": 1.651007591324634,
+            "srocc": 0.9106600086843248
+          },
+          {
+            "error_fraction_removed": 0.5641277762760084,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.7196283502158595,
+            "linearization_squared_error_before": 1.651007591324634,
+            "srocc": 0.951476335214937
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic156_h128_plain_ens3",
+      "row_id": 2436,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic156_h128_plain_ens3--2436.json",
+      "sha256": "5aceea55cb75785a7de9815a357c62192254d0e23433b3ac8b43bfb699174d2d",
+      "prior_fields_exact": true,
+      "m2": 0.9879866518353724,
+      "m3f": 0.8344827586206894,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.6662294377231494,
+            "family": "ssim",
+            "linearization_squared_error_after": 1.297044208390844,
+            "linearization_squared_error_before": 3.886035363762825,
+            "srocc": 0.8918798665183535
+          },
+          {
+            "error_fraction_removed": -0.3866426424025544,
+            "family": "edge",
+            "linearization_squared_error_after": 5.388542345277855,
+            "linearization_squared_error_before": 3.886035363762825,
+            "srocc": 0.8438264738598441
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 3.886035363762825,
+            "linearization_squared_error_before": 3.886035363762825,
+            "srocc": 0.8344827586206894
+          },
+          {
+            "error_fraction_removed": 0.5552573970256725,
+            "family": "all_roots",
+            "linearization_squared_error_after": 1.7282854829301668,
+            "linearization_squared_error_before": 3.886035363762825,
+            "srocc": 0.8798665183537262
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic156_h128_plain_ens3",
+      "row_id": 4597,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic156_h128_plain_ens3--4597.json",
+      "sha256": "120cff9a798d58a89bb711f2c58933454be08b343f37201628ad45e7ecaeed49",
+      "prior_fields_exact": true,
+      "m2": 0.9833333333333169,
+      "m3f": 0.9999999999999832,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.06329471596419634,
+            "family": "ssim",
+            "linearization_squared_error_after": 6.772048563805777,
+            "linearization_squared_error_before": 7.2296470183538855,
+            "srocc": 0.9999999999999832
+          },
+          {
+            "error_fraction_removed": 0.29979055331530435,
+            "family": "edge",
+            "linearization_squared_error_after": 5.0622671384472335,
+            "linearization_squared_error_before": 7.2296470183538855,
+            "srocc": 0.9833333333333169
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 7.2296470183538855,
+            "linearization_squared_error_before": 7.2296470183538855,
+            "srocc": 0.9999999999999832
+          },
+          {
+            "error_fraction_removed": 0.1346396785138808,
+            "family": "all_roots",
+            "linearization_squared_error_after": 6.256249668033881,
+            "linearization_squared_error_before": 7.2296470183538855,
+            "srocc": 0.9833333333333169
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic156_h128_plain_ens3",
+      "row_id": 5316,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic156_h128_plain_ens3--5316.json",
+      "sha256": "cec87f0d2cd15d46163ee0e0db5c1b9935de74edd75c351a45e9d63652738b25",
+      "prior_fields_exact": true,
+      "m2": 0.9999999999999992,
+      "m3f": 0.7808695652173907,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.3853299343126838,
+            "family": "ssim",
+            "linearization_squared_error_after": 3.161853999786962,
+            "linearization_squared_error_before": 5.143985653915678,
+            "srocc": 0.8582608695652167
+          },
+          {
+            "error_fraction_removed": 0.004089111229482745,
+            "family": "edge",
+            "linearization_squared_error_after": 5.122951324413953,
+            "linearization_squared_error_before": 5.143985653915678,
+            "srocc": 0.7782608695652168
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 5.143985653915678,
+            "linearization_squared_error_before": 5.143985653915678,
+            "srocc": 0.7808695652173907
+          },
+          {
+            "error_fraction_removed": 0.3876176865192962,
+            "family": "all_roots",
+            "linearization_squared_error_after": 3.1500858352564336,
+            "linearization_squared_error_before": 5.143985653915678,
+            "srocc": 0.8539130434782602
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic156_h128_plain_ens3",
+      "row_id": 6577,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic156_h128_plain_ens3--6577.json",
+      "sha256": "2a137fefee27e2644a06d42de8272ebf8da1f67ff54b6a40eeed881dba7f24f4",
+      "prior_fields_exact": true,
+      "m2": 0.9868725868725866,
+      "m3f": 0.9634491634491632,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.04776693877798166,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.056719957111449226,
+            "linearization_squared_error_before": 0.05956520459251798,
+            "srocc": 0.9606177606177604
+          },
+          {
+            "error_fraction_removed": 0.06689752990244002,
+            "family": "edge",
+            "linearization_squared_error_after": 0.05558043953714505,
+            "linearization_squared_error_before": 0.05956520459251798,
+            "srocc": 0.9601029601029599
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 0.05956520459251798,
+            "linearization_squared_error_before": 0.05956520459251798,
+            "srocc": 0.9634491634491632
+          },
+          {
+            "error_fraction_removed": 0.10766021641247514,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.053152401775434135,
+            "linearization_squared_error_before": 0.05956520459251798,
+            "srocc": 0.9570141570141568
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "row_id": 396,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192l8_h128_plain_ens3--396.json",
+      "sha256": "ce1d32c5cc134d6c7964672d89ac479264025fbbd7c5f49de001273036da4378",
+      "prior_fields_exact": true,
+      "m2": 0.9996743378202344,
+      "m3f": 0.7901650021710812,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.10367040685835316,
+            "family": "ssim",
+            "linearization_squared_error_after": 2.7681746603819035,
+            "linearization_squared_error_before": 3.0883446017657583,
+            "srocc": 0.8351063829787234
+          },
+          {
+            "error_fraction_removed": -0.5052193021435474,
+            "family": "edge",
+            "linearization_squared_error_after": 4.648635906248646,
+            "linearization_squared_error_before": 3.0883446017657583,
+            "srocc": 0.7455492835432045
+          },
+          {
+            "error_fraction_removed": 0.6564551740900555,
+            "family": "l8",
+            "linearization_squared_error_after": 1.0609848085635343,
+            "linearization_squared_error_before": 3.0883446017657583,
+            "srocc": 0.9459400781589231
+          },
+          {
+            "error_fraction_removed": 0.8563495915846668,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.4436419633709405,
+            "linearization_squared_error_before": 3.0883446017657583,
+            "srocc": 0.9497394702561875
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "row_id": 2436,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192l8_h128_plain_ens3--2436.json",
+      "sha256": "4e5e723715426bdfac728157c924462e3aea4d456f670686fedeaeb6d5a23e83",
+      "prior_fields_exact": true,
+      "m2": 0.9942157953281422,
+      "m3f": 0.8616240266963291,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.11092673302592448,
+            "family": "ssim",
+            "linearization_squared_error_after": 9.191179985113214,
+            "linearization_squared_error_before": 10.337933133896849,
+            "srocc": 0.8731924360400443
+          },
+          {
+            "error_fraction_removed": -3.24680876727399,
+            "family": "edge",
+            "linearization_squared_error_after": 43.90322506852541,
+            "linearization_squared_error_before": 10.337933133896849,
+            "srocc": 0.8393770856507229
+          },
+          {
+            "error_fraction_removed": -0.02563697863750658,
+            "family": "l8",
+            "linearization_squared_error_after": 10.602966504806533,
+            "linearization_squared_error_before": 10.337933133896849,
+            "srocc": 0.8335928809788652
+          },
+          {
+            "error_fraction_removed": 0.9344236034525879,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.6779244026690501,
+            "linearization_squared_error_before": 10.337933133896849,
+            "srocc": 0.8989988876529476
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "row_id": 4597,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192l8_h128_plain_ens3--4597.json",
+      "sha256": "f3d0baa875122f1db4e24887cad7d326fcaa11008869a27583bb6b0f1d077634",
+      "prior_fields_exact": true,
+      "m2": 0.9166666666666512,
+      "m3f": 0.866666666666652,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": -0.5672268169480048,
+            "family": "ssim",
+            "linearization_squared_error_after": 6.249866006538243,
+            "linearization_squared_error_before": 3.9878503474750024,
+            "srocc": 0.866666666666652
+          },
+          {
+            "error_fraction_removed": -4.866599116130131,
+            "family": "edge",
+            "linearization_squared_error_after": 23.395119323756084,
+            "linearization_squared_error_before": 3.9878503474750024,
+            "srocc": 0.9166666666666512
+          },
+          {
+            "error_fraction_removed": -12.877695061164081,
+            "family": "l8",
+            "linearization_squared_error_after": 55.34217107181531,
+            "linearization_squared_error_before": 3.9878503474750024,
+            "srocc": 0.8166666666666529
+          },
+          {
+            "error_fraction_removed": -0.7233921870176574,
+            "family": "all_roots",
+            "linearization_squared_error_after": 6.872630131834069,
+            "linearization_squared_error_before": 3.9878503474750024,
+            "srocc": 0.866666666666652
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "row_id": 5316,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192l8_h128_plain_ens3--5316.json",
+      "sha256": "26ab85cce79244565396beea2fbf47894adeddd2ceb40b7d1de6de7aa596836e",
+      "prior_fields_exact": true,
+      "m2": 0.9999999999999992,
+      "m3f": 0.750434782608695,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": -0.03401868886068238,
+            "family": "ssim",
+            "linearization_squared_error_after": 5.713590636915904,
+            "linearization_squared_error_before": 5.525616411451264,
+            "srocc": 0.7530434782608689
+          },
+          {
+            "error_fraction_removed": -2.438877002999999,
+            "family": "edge",
+            "linearization_squared_error_after": 19.00191520473913,
+            "linearization_squared_error_before": 5.525616411451264,
+            "srocc": 0.7495652173913038
+          },
+          {
+            "error_fraction_removed": -1.6122507934746317,
+            "family": "l8",
+            "linearization_squared_error_after": 14.43429585525001,
+            "linearization_squared_error_before": 5.525616411451264,
+            "srocc": 0.6365217391304343
+          },
+          {
+            "error_fraction_removed": 0.6039755403849212,
+            "family": "all_roots",
+            "linearization_squared_error_after": 2.1882792533851974,
+            "linearization_squared_error_before": 5.525616411451264,
+            "srocc": 0.8486956521739124
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "row_id": 6577,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192l8_h128_plain_ens3--6577.json",
+      "sha256": "c9d96ed553f24b40e34ecd088ea51b72db4faa0a0e334a0b1e96f5066c913e41",
+      "prior_fields_exact": true,
+      "m2": 0.998198198198198,
+      "m3f": 0.9330759330759328,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.08248870747146897,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.07842183878540746,
+            "linearization_squared_error_before": 0.0854723417837049,
+            "srocc": 0.9330759330759328
+          },
+          {
+            "error_fraction_removed": 0.04098402663847811,
+            "family": "edge",
+            "linearization_squared_error_after": 0.08196934105118843,
+            "linearization_squared_error_before": 0.0854723417837049,
+            "srocc": 0.9289575289575287
+          },
+          {
+            "error_fraction_removed": 0.017247141988001036,
+            "family": "l8",
+            "linearization_squared_error_after": 0.08399818816891438,
+            "linearization_squared_error_before": 0.0854723417837049,
+            "srocc": 0.9778635778635776
+          },
+          {
+            "error_fraction_removed": 0.2632757164143198,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.06296954976699039,
+            "linearization_squared_error_before": 0.0854723417837049,
+            "srocc": 0.9727155727155725
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192max_h128_plain_ens3",
+      "row_id": 396,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192max_h128_plain_ens3--396.json",
+      "sha256": "97bb5e8c6bf863626ab9b033d6ce363b70a32385862f154f452eec9832cc2c41",
+      "prior_fields_exact": true,
+      "m2": 0.9660225792444638,
+      "m3f": 0.8165436387320886,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.11038168735947185,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.3624550888393002,
+            "linearization_squared_error_before": 0.40742763912253116,
+            "srocc": 0.819040382110291
+          },
+          {
+            "error_fraction_removed": 0.22535955594329604,
+            "family": "edge",
+            "linearization_squared_error_after": 0.3156099272908521,
+            "linearization_squared_error_before": 0.40742763912253116,
+            "srocc": 0.8659357359965263
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 0.40742763912253116,
+            "linearization_squared_error_before": 0.40742763912253116,
+            "srocc": 0.8165436387320886
+          },
+          {
+            "error_fraction_removed": 0.3330860001456959,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.2717191964584032,
+            "linearization_squared_error_before": 0.40742763912253116,
+            "srocc": 0.8685410334346505
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192max_h128_plain_ens3",
+      "row_id": 2436,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192max_h128_plain_ens3--2436.json",
+      "sha256": "0514d7c9f56339f73e35d7acca67ee2dfda1ff31f7b1cbbe2dd7013ccde34a53",
+      "prior_fields_exact": true,
+      "m2": 0.8162402669632923,
+      "m3f": 0.9172413793103448,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.04185799811561297,
+            "family": "ssim",
+            "linearization_squared_error_after": 2.3353983516023002,
+            "linearization_squared_error_before": 2.4374240425837193,
+            "srocc": 0.9252502780867629
+          },
+          {
+            "error_fraction_removed": 0.7671096478631405,
+            "family": "edge",
+            "linearization_squared_error_after": 0.5676525435841698,
+            "linearization_squared_error_before": 2.4374240425837193,
+            "srocc": 0.7975528364849832
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 2.4374240425837193,
+            "linearization_squared_error_before": 2.4374240425837193,
+            "srocc": 0.9172413793103447
+          },
+          {
+            "error_fraction_removed": 0.8247199002166095,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.4272319293985096,
+            "linearization_squared_error_before": 2.4374240425837193,
+            "srocc": 0.7979977753058953
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192max_h128_plain_ens3",
+      "row_id": 4597,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192max_h128_plain_ens3--4597.json",
+      "sha256": "99a3d103e86a7be927dbd27bc4d05cf911a37e7d6fa5b6fd06a9744d20c328de",
+      "prior_fields_exact": true,
+      "m2": 0.9833333333333169,
+      "m3f": 0.9999999999999832,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.36956564912005685,
+            "family": "ssim",
+            "linearization_squared_error_after": 60.13867270436179,
+            "linearization_squared_error_before": 95.39244271893158,
+            "srocc": 0.9999999999999832
+          },
+          {
+            "error_fraction_removed": 0.7653873674543432,
+            "family": "edge",
+            "linearization_squared_error_after": 22.380272111249308,
+            "linearization_squared_error_before": 95.39244271893158,
+            "srocc": 0.9999999999999832
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 95.39244271893158,
+            "linearization_squared_error_before": 95.39244271893158,
+            "srocc": 0.9999999999999832
+          },
+          {
+            "error_fraction_removed": 0.921137915242898,
+            "family": "all_roots",
+            "linearization_squared_error_after": 7.522846902887377,
+            "linearization_squared_error_before": 95.39244271893158,
+            "srocc": 0.9999999999999832
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192max_h128_plain_ens3",
+      "row_id": 5316,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192max_h128_plain_ens3--5316.json",
+      "sha256": "c97bd2e716e01715d8eaa56cdb9f1198b97a4dea63b701590956bc4f231b05c9",
+      "prior_fields_exact": true,
+      "m2": 0.985217391304347,
+      "m3f": 0.6652173913043473,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": -0.026914577246457183,
+            "family": "ssim",
+            "linearization_squared_error_after": 6.041124525986032,
+            "linearization_squared_error_before": 5.882791675023788,
+            "srocc": 0.6982608695652168
+          },
+          {
+            "error_fraction_removed": 0.8639621004611139,
+            "family": "edge",
+            "linearization_squared_error_after": 0.8002826228950816,
+            "linearization_squared_error_before": 5.882791675023788,
+            "srocc": 0.8660869565217384
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 5.882791675023788,
+            "linearization_squared_error_before": 5.882791675023788,
+            "srocc": 0.6652173913043473
+          },
+          {
+            "error_fraction_removed": 0.8355982659577486,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.9671411523832318,
+            "linearization_squared_error_before": 5.882791675023788,
+            "srocc": 0.9165217391304341
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic192max_h128_plain_ens3",
+      "row_id": 6577,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic192max_h128_plain_ens3--6577.json",
+      "sha256": "9e2ea2c082453b655862733b89cfb83fbe55e082d590dc5ff807e1628d2e1269",
+      "prior_fields_exact": true,
+      "m2": 0.9951093951093948,
+      "m3f": 0.9564993564993562,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.057408142352210256,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.1611493612782478,
+            "linearization_squared_error_before": 0.17096409222162315,
+            "srocc": 0.9616473616473614
+          },
+          {
+            "error_fraction_removed": -0.059971195375108755,
+            "family": "edge",
+            "linearization_squared_error_after": 0.18121701319837422,
+            "linearization_squared_error_before": 0.17096409222162315,
+            "srocc": 0.957271557271557
+          },
+          {
+            "error_fraction_removed": 0.0,
+            "family": "l8",
+            "linearization_squared_error_after": 0.17096409222162315,
+            "linearization_squared_error_before": 0.17096409222162315,
+            "srocc": 0.9564993564993562
+          },
+          {
+            "error_fraction_removed": -0.0012027205893248016,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.1711697142553733,
+            "linearization_squared_error_before": 0.17096409222162315,
+            "srocc": 0.9613899613899611
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic228_h32_plain_ens3",
+      "row_id": 396,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic228_h32_plain_ens3--396.json",
+      "sha256": "27d4d71a0733b722e1cebf4d10ab25e415497bb3bb6ca2ac39a97f766e47b936",
+      "prior_fields_exact": true,
+      "m2": 0.9973947025618758,
+      "m3f": 0.8246851932262267,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.08080924427385217,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.9549404030127521,
+            "linearization_squared_error_before": 1.0388925226498416,
+            "srocc": 0.8295701259227095
+          },
+          {
+            "error_fraction_removed": 0.10205516134567716,
+            "family": "edge",
+            "linearization_squared_error_after": 0.9328681786299944,
+            "linearization_squared_error_before": 1.0388925226498416,
+            "srocc": 0.8693009118541033
+          },
+          {
+            "error_fraction_removed": 0.7045433200281296,
+            "family": "l8",
+            "linearization_squared_error_after": 0.3069477355897234,
+            "linearization_squared_error_before": 1.0388925226498416,
+            "srocc": 0.9373643074250977
+          },
+          {
+            "error_fraction_removed": 0.7990842009795924,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.20872992128451975,
+            "linearization_squared_error_before": 1.0388925226498416,
+            "srocc": 0.940620929222753
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic228_h32_plain_ens3",
+      "row_id": 2436,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic228_h32_plain_ens3--2436.json",
+      "sha256": "0a6479494d9f5d2a75cd235de9ca7438e8f0f484859d978f709eaa9153efc115",
+      "prior_fields_exact": true,
+      "m2": 0.9986651835372634,
+      "m3f": 0.875417130144605,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.014860506875040813,
+            "family": "ssim",
+            "linearization_squared_error_after": 2.7131155676365646,
+            "linearization_squared_error_before": 2.7540420281297378,
+            "srocc": 0.8634037819799776
+          },
+          {
+            "error_fraction_removed": -0.021180958497002633,
+            "family": "edge",
+            "linearization_squared_error_after": 2.8123752780265545,
+            "linearization_squared_error_before": 2.7540420281297378,
+            "srocc": 0.8522803114571744
+          },
+          {
+            "error_fraction_removed": 0.7553503110950115,
+            "family": "l8",
+            "linearization_squared_error_after": 0.6737755254132038,
+            "linearization_squared_error_before": 2.7540420281297378,
+            "srocc": 0.9341490545050054
+          },
+          {
+            "error_fraction_removed": 0.8646699925102705,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.37270452829382705,
+            "linearization_squared_error_before": 2.7540420281297378,
+            "srocc": 0.9701890989988875
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic228_h32_plain_ens3",
+      "row_id": 4597,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic228_h32_plain_ens3--4597.json",
+      "sha256": "62d2671249f90b333dbcd4c5c1b8d8b67a18c2ae6035ad37dffc7f6edae22ac1",
+      "prior_fields_exact": true,
+      "m2": 0.9999999999999832,
+      "m3f": 0.9166666666666512,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.23860461987185733,
+            "family": "ssim",
+            "linearization_squared_error_after": 78.49831039819077,
+            "linearization_squared_error_before": 103.0979599389998,
+            "srocc": 0.9166666666666512
+          },
+          {
+            "error_fraction_removed": 0.4979533461753536,
+            "family": "edge",
+            "linearization_squared_error_after": 51.7599858035223,
+            "linearization_squared_error_before": 103.0979599389998,
+            "srocc": 0.9833333333333169
+          },
+          {
+            "error_fraction_removed": 0.5595346523686759,
+            "family": "l8",
+            "linearization_squared_error_after": 45.41107876461186,
+            "linearization_squared_error_before": 103.0979599389998,
+            "srocc": 0.9666666666666505
+          },
+          {
+            "error_fraction_removed": 0.9404725016170139,
+            "family": "all_roots",
+            "linearization_squared_error_after": 6.137163643557978,
+            "linearization_squared_error_before": 103.0979599389998,
+            "srocc": 0.9666666666666505
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic228_h32_plain_ens3",
+      "row_id": 5316,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic228_h32_plain_ens3--5316.json",
+      "sha256": "92dcbedd3c52e8768cd867beecfb6b8428f959d8a3c7522e8186fa75753f0669",
+      "prior_fields_exact": true,
+      "m2": 0.9999999999999992,
+      "m3f": 0.6739130434782603,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.025673636091531615,
+            "family": "ssim",
+            "linearization_squared_error_after": 4.245368869916913,
+            "linearization_squared_error_before": 4.357234933977151,
+            "srocc": 0.6608695652173908
+          },
+          {
+            "error_fraction_removed": 0.45639709036327203,
+            "family": "edge",
+            "linearization_squared_error_after": 2.3686055880807757,
+            "linearization_squared_error_before": 4.357234933977151,
+            "srocc": 0.6878260869565211
+          },
+          {
+            "error_fraction_removed": 0.5009475651522817,
+            "family": "l8",
+            "linearization_squared_error_after": 2.1744887030048345,
+            "linearization_squared_error_before": 4.357234933977151,
+            "srocc": 0.7339130434782603
+          },
+          {
+            "error_fraction_removed": 0.7510764633505855,
+            "family": "all_roots",
+            "linearization_squared_error_after": 1.0846183297779706,
+            "linearization_squared_error_before": 4.357234933977151,
+            "srocc": 0.9147826086956514
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    },
+    {
+      "model": "PP914_basic228_h32_plain_ens3",
+      "row_id": 6577,
+      "path": "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/analysis-final/PP914_basic228_h32_plain_ens3--6577.json",
+      "sha256": "6b291511b6a7df5c8041ad5e961ddcc0b02d42dd8a89e8c1f8258330a6a2f9db",
+      "prior_fields_exact": true,
+      "m2": 0.998198198198198,
+      "m3f": 0.9629343629343629,
+      "curvature": {
+        "arms": [
+          {
+            "error_fraction_removed": 0.042935777196553504,
+            "family": "ssim",
+            "linearization_squared_error_after": 0.1559252561254545,
+            "linearization_squared_error_before": 0.16292036878018065,
+            "srocc": 0.964221364221364
+          },
+          {
+            "error_fraction_removed": 0.029033061559969653,
+            "family": "edge",
+            "linearization_squared_error_after": 0.15819029168401272,
+            "linearization_squared_error_before": 0.16292036878018065,
+            "srocc": 0.9649935649935648
+          },
+          {
+            "error_fraction_removed": 0.04628477073359305,
+            "family": "l8",
+            "linearization_squared_error_after": 0.15537963686335757,
+            "linearization_squared_error_before": 0.16292036878018065,
+            "srocc": 0.9817245817245815
+          },
+          {
+            "error_fraction_removed": 0.11509705100381051,
+            "family": "all_roots",
+            "linearization_squared_error_after": 0.14416871478512858,
+            "linearization_squared_error_before": 0.16292036878018065,
+            "srocc": 0.981209781209781
+          }
+        ],
+        "definition": "predicted map + observed finite root contribution - observed first-order moment contribution",
+        "deployable": false,
+        "invalid_cells": [],
+        "new_pixel_comparisons": 0,
+        "status": "COMPLETE_ORACLE_ONLY"
+      }
+    }
+  ],
+  "models": {
+    "PP914_basic156_h128_plain_ens3": {
+      "complete": true,
+      "m3_pass_before": 5,
+      "m3_pass_oracle": 5,
+      "error_before": 17.97024083194954,
+      "error_after": 11.907401738211775,
+      "error_fraction_removed": 0.33738218371334006,
+      "advance_mechanism": true
+    },
+    "PP914_basic192l8_h128_plain_ens3": {
+      "complete": true,
+      "m3_pass_before": 5,
+      "m3_pass_oracle": 5,
+      "error_before": 23.02521683637258,
+      "error_after": 10.245445301026248,
+      "error_fraction_removed": 0.55503371048208,
+      "advance_mechanism": true
+    },
+    "PP914_basic192max_h128_plain_ens3": {
+      "complete": true,
+      "m3_pass_before": 4,
+      "m3_pass_oracle": 5,
+      "error_before": 104.29105016788324,
+      "error_after": 9.360108895382895,
+      "error_fraction_removed": 0.9102501232817639,
+      "advance_mechanism": true
+    },
+    "PP914_basic228_h32_plain_ens3": {
+      "complete": true,
+      "m3_pass_before": 4,
+      "m3_pass_oracle": 5,
+      "error_before": 111.4110497925367,
+      "error_after": 7.947385137699424,
+      "error_fraction_removed": 0.9286660959348414,
+      "advance_mechanism": true
+    }
+  },
+  "controls": {
+    "results": {
+      "inconsistent_delta": {
+        "status": "PASS",
+        "returncode": 101,
+        "command": [
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/diffmap_block_coherence-final",
+          "--refinement-analysis",
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/controls/inconsistent_delta.json",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/controls/inconsistent_delta.result.json"
+        ]
+      },
+      "singular_root": {
+        "status": "PASS",
+        "returncode": 0,
+        "command": [
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/diffmap_block_coherence-final",
+          "--refinement-analysis",
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/controls/singular_root.json",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/controls/singular_root.result.json"
+        ]
+      },
+      "missing_curvature_metadata": {
+        "status": "PASS",
+        "returncode": 0,
+        "command": [
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/diffmap_block_coherence-final",
+          "--refinement-analysis",
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/controls/missing_curvature_metadata.json",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/moment-curvature/controls/missing_curvature_metadata.result.json"
+        ]
+      }
+    },
+    "source_sha256": "f8ac45b2da46f5dab4a221b22f87e2aba470225ded87a69f00f69c2c137f9dd9",
+    "role": "synthetic copies of TRAIN metadata; no new pixel/scoring work"
+  },
+  "new_model_fits": 0,
+  "model_qualified": false,
+  "all_prior_fields_exact": true,
+  "full_result_sha256": "c09062a9fd9688032bbfd2f7e19d086788237c3d08be86f33072f72ba779326c"
+}

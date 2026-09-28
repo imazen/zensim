@@ -538,6 +538,7 @@ fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
                 "formula_revision",
                 "decoder_era",
                 "decoder_revision",
+                "sampling",
             ] {
                 let Some(v) = scope.get(key) else { continue };
                 if let Some(old) = merged.get(key) {
@@ -663,6 +664,21 @@ pub fn registry() -> &'static Registry {
     REG.get_or_init(|| parse_registry(REGISTRY_JSON).expect("the COMMITTED registry must parse"))
 }
 
+/// The arithmetic revisions this validator admits in stored data.
+///
+/// ONE list. The three admission sites below (registry parse, per-table
+/// metadata, root manifest) previously spelled `matches!(n, 1 | 2)` out
+/// separately, which is exactly how a new revision comes to be accepted in
+/// one place and silently rejected in another. Mirrors
+/// `zensim::feature_v2::FormulaRevision`; extend both together.
+pub const ADMITTED_FORMULA_REVISIONS: &[u64] = &[1, 2, 3];
+
+/// Whether a declared `formula_revision` value names a revision this build
+/// knows how to read.
+pub fn is_admitted_formula_revision(n: u64) -> bool {
+    ADMITTED_FORMULA_REVISIONS.contains(&n)
+}
+
 fn parse_registry(txt: &str) -> Result<Registry, String> {
     let v: serde_json::Value =
         serde_json::from_str(txt).map_err(|e| format!("feature_sets_registry.json: {e}"))?;
@@ -675,7 +691,7 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
             value
                 .get("formula_revision")
                 .and_then(|x| x.as_u64())
-                .filter(|n| matches!(n, 1 | 2))
+                .filter(|n| is_admitted_formula_revision(*n))
                 .map(|n| (era.clone(), n as u8))
         })
         .collect();
@@ -1249,7 +1265,7 @@ pub fn admit_training_tables(
                 .map(|v| {
                     v.as_u64()
                         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                        .filter(|n| matches!(n, 1 | 2))
+                        .filter(|n| is_admitted_formula_revision(*n))
                         .map(|n| n as u8)
                         .ok_or_else(|| format!("{}: invalid formula_revision {v}", path.display()))
                 })
@@ -1281,6 +1297,23 @@ pub fn admit_training_tables(
             "requested_ids": requested,
         }));
     }
+    let samplings: std::collections::BTreeSet<_> = tables
+        .iter()
+        .map(|t| {
+            t["stored_declarations"]
+                .get("sampling")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+                .to_string()
+        })
+        .collect();
+    if samplings.len() > 1 {
+        return Err("mixed sampling contracts in training tables".into());
+    }
+    let sampling = tables
+        .first()
+        .and_then(|t| t["stored_declarations"].get("sampling"))
+        .cloned();
     if revisions.len() > 1 {
         issues.push(format!("mixed formula revisions: {revisions:?}"));
     }
@@ -1312,7 +1345,7 @@ pub fn admit_training_tables(
     };
     Ok(
         serde_json::json!({"tables": tables, "issues": issues, "historical_replay": replay,
-        "formula_revision": revision, "qualified_provenance": issues.is_empty() && replay.is_none() && tables.iter().all(|t|
+        "formula_revision": revision, "sampling": sampling, "qualified_provenance": issues.is_empty() && replay.is_none() && tables.iter().all(|t|
             ["decoder_era", "decoder_revision"].iter().any(|key|
                 t["stored_declarations"].get(key).is_some_and(|v| !v.is_null() && v.as_str() != Some(""))))}),
     )
@@ -1321,6 +1354,52 @@ pub fn admit_training_tables(
 #[cfg(test)]
 mod training_admission_tests {
     use super::*;
+    #[test]
+    fn training_sampling_contract_cannot_be_mixed_even_in_replay() {
+        let dir =
+            std::env::temp_dir().join(format!("zensim-admit-sampling-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = vec![dir.join("a.csv"), dir.join("b.csv")];
+        let header = (0..372)
+            .map(|i| format!("f{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let identity = format!(
+            "basic+peaks@w372/sampling_v1_xyb_triangle_2#{:08x}",
+            zensim::feature_set_id::slots_hash8(0..228)
+        );
+        let metadata = serde_json::json!({"feature_set_id": identity, "formula_revision": 3,
+            "decoder_era": "fixture-pinned", "sampling": "v1:xyb:triangle:2"});
+        for path in &paths {
+            std::fs::write(path, format!("{header}\n")).unwrap();
+            std::fs::write(
+                format!("{}.manifest.json", path.display()),
+                metadata.to_string(),
+            )
+            .unwrap();
+        }
+        let admitted = admit_training_tables(&paths, None, Some(&[0, 227]), Some(372)).unwrap();
+        assert_eq!(admitted["sampling"], "v1:xyb:triangle:2");
+        for sampling in [
+            serde_json::json!("v1:xyb:triangle:3"),
+            serde_json::Value::Null,
+        ] {
+            let mut other = metadata.clone();
+            other["sampling"] = sampling;
+            std::fs::write(
+                format!("{}.manifest.json", paths[1].display()),
+                other.to_string(),
+            )
+            .unwrap();
+            for replay in [None, Some("frozen test recipe")] {
+                let err =
+                    admit_training_tables(&paths, replay, Some(&[0, 227]), Some(372)).unwrap_err();
+                assert!(err.contains("mixed sampling"), "{err}");
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn real_headers_and_file_declarations_are_admitted_before_rows() {
         let dir = std::env::temp_dir().join(format!("zensim-admission-{}", std::process::id()));
@@ -1376,6 +1455,53 @@ mod training_admission_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// **The admitted-revision list is ONE list, and it now includes 3.**
+    ///
+    /// Before this, the registry parse, the per-table metadata check and the
+    /// root-manifest read each spelled `matches!(n, 1 | 2)` separately — which
+    /// is exactly how a new revision comes to be accepted in one place and
+    /// silently rejected in another. This pins that all three read the same
+    /// list, and that an unregistered value is still refused rather than
+    /// defaulted (a mislabelled table must fail loudly, not become revision 1).
+    #[test]
+    fn the_admitted_revision_list_covers_every_registered_revision() {
+        assert_eq!(ADMITTED_FORMULA_REVISIONS, &[1, 2, 3]);
+        for n in ADMITTED_FORMULA_REVISIONS {
+            assert!(
+                is_admitted_formula_revision(*n),
+                "revision {n} is registered but not admitted"
+            );
+        }
+        for n in [0u64, 4, 99] {
+            assert!(
+                !is_admitted_formula_revision(n),
+                "revision {n} must not be admitted"
+            );
+        }
+
+        // The root-manifest reader is one of the three sites; check it end to
+        // end rather than trusting that it calls the helper.
+        let dir = std::env::temp_dir().join(format!("zensim-admit-rev-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (value, want_ok) in [("3", true), ("2", true), ("4", false)] {
+            std::fs::write(
+                dir.join("_MANIFEST.json"),
+                format!("{{\"formula_revision\": {value}}}"),
+            )
+            .unwrap();
+            let got = root_formula_revision(&dir);
+            assert_eq!(
+                got.is_ok(),
+                want_ok,
+                "formula_revision {value} admission: {got:?}"
+            );
+            if want_ok {
+                assert_eq!(got.unwrap(), Some(value.parse::<u8>().unwrap()));
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn unknown_and_mixed_eras_require_explicit_replay() {
         let unknown = vec![std::path::PathBuf::from("/not-registered/features.parquet")];
@@ -1412,7 +1538,7 @@ pub fn root_formula_revision(root: &Path) -> Result<Option<u8>, String> {
                 .as_u64()
                 .or_else(|| value.as_str().and_then(|s| s.parse().ok()));
             return match n {
-                Some(1 | 2) => Ok(n.map(|n| n as u8)),
+                Some(v) if is_admitted_formula_revision(v) => Ok(Some(v as u8)),
                 _ => Err(format!(
                     "{}: invalid formula_revision {value}",
                     root.display()

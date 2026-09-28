@@ -342,3 +342,217 @@ fn stream_rejects_nonfinite_and_missing() {
     assert!(err.contains("missing target column"), "got: {err}");
     std::fs::remove_file(&path2).ok();
 }
+
+#[test]
+fn per_reference_grams_sum_to_whole_and_path_spans_registered_range() {
+    use std::process::Command;
+    use zensim_validate::npz::Npz;
+
+    let (rows, ys) = make_rows(43, 0xFEA7);
+    let dir = scratch_dir().join(format!("per-ref-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create output dir");
+    let input = dir.join("input.parquet");
+    let whole_path = dir.join("whole.npz");
+    let refs_dir = dir.join("refs");
+    write_fixture(&input, &rows, &ys, false);
+    let bin = env!("CARGO_BIN_EXE_bake_dial_refit");
+    let output = Command::new(bin)
+        .args([
+            "gram",
+            "--parquet",
+            input.to_str().unwrap(),
+            "--target",
+            "human_score",
+            "--expect-n-feat",
+            "7",
+            "--out",
+            whole_path.to_str().unwrap(),
+            "--per-reference-out-dir",
+            refs_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run gram");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let whole = Npz::open(&whole_path).expect("whole gram");
+    let keys = [
+        "raw__S",
+        "raw__s",
+        "raw__q_human_score",
+        "raw__Y1_human_score",
+        "raw__n",
+    ];
+    for key in keys {
+        let expected = whole.get(key).unwrap();
+        let expected = expected.f64s().unwrap();
+        let mut sum = vec![0.0; expected.len()];
+        for ri in 0..11 {
+            let part = Npz::open(&refs_dir.join(format!("ref_{ri:04}.npz"))).unwrap();
+            let entry = part.get(key).unwrap();
+            for (acc, v) in sum.iter_mut().zip(entry.f64s().unwrap()) {
+                *acc += v;
+            }
+        }
+        for (i, (got, want)) in sum.iter().zip(expected).enumerate() {
+            assert!(
+                (got - want).abs() <= 1e-10 * want.abs().max(1.0),
+                "{key}[{i}] sum={got} whole={want}"
+            );
+        }
+    }
+
+    // A mis-partition still sums to the whole, so also
+    // require each ref_XXXX.npz to equal the direct moments over that reference's rows.
+    // The fixture assigns row r to reference `ref{r/4}` (contiguous 4-row blocks, see
+    // `write_fixture`), and the binary numbers references in first-seen order.
+    for ri in 0..11usize {
+        let lo = ri * 4;
+        let hi = ((ri + 1) * 4).min(rows.len());
+        let (ds, dv, dq, dy1, dn) = direct_moments(&rows[lo..hi], &ys[lo..hi], 1.0, None);
+        let part = Npz::open(&refs_dir.join(format!("ref_{ri:04}.npz"))).unwrap();
+        let expected: [(&str, Vec<f64>); 5] = [
+            ("raw__S", ds),
+            ("raw__s", dv),
+            ("raw__q_human_score", dq),
+            ("raw__Y1_human_score", vec![dy1]),
+            ("raw__n", vec![dn]),
+        ];
+        for (key, want) in expected {
+            let got = part.get(key).unwrap();
+            let got = got.f64s().unwrap();
+            assert_eq!(got.len(), want.len(), "ref_{ri:04} {key} length");
+            for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                assert!(
+                    (g - w).abs() <= 1e-12 * w.abs().max(1.0),
+                    "ref_{ri:04} {key}[{i}] per-reference={g} direct={w}"
+                );
+            }
+        }
+    }
+
+    let path_file = dir.join("path.json");
+    let unused_bake = dir.join("unused.bin");
+    let output = Command::new(bin)
+        .args([
+            "fit-lasso",
+            "--gram",
+            whole_path.to_str().unwrap(),
+            "--space",
+            "raw",
+            "--target",
+            "human_score",
+            "--lam",
+            "0",
+            "--out",
+            unused_bake.to_str().unwrap(),
+            "--path-out",
+            path_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run path");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let path: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path_file).unwrap()).unwrap();
+    let fits = path["fits"].as_array().unwrap();
+    assert_eq!(fits.len(), 50);
+    let first = fits[0]["lambda"].as_f64().unwrap();
+    let last = fits[49]["lambda"].as_f64().unwrap();
+    assert!((last / first - 1e-4).abs() < 1e-12);
+    // last/first == 1e-4 follows from the formula alone, so
+    // also pin what defines lambda_max: the first fit is all zero, the second is not.
+    let w_first: Vec<f64> = fits[0]["w"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_f64().unwrap())
+        .collect();
+    assert!(
+        w_first.iter().all(|w| *w == 0.0),
+        "fit 0 at lambda_max must be all zero: {w_first:?}"
+    );
+    assert!(
+        fits[1]["w"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_f64().unwrap() != 0.0),
+        "fit 1 must have a nonzero coordinate, otherwise lambda_max is too large"
+    );
+
+    let slice = dir.join("keep_4_6.txt");
+    std::fs::write(&slice, "4\n5\n6\n").unwrap();
+    let sliced_path = dir.join("sliced_path.json");
+    let sliced = Command::new(bin)
+        .args([
+            "fit-lasso",
+            "--gram",
+            whole_path.to_str().unwrap(),
+            "--space",
+            "raw",
+            "--target",
+            "human_score",
+            "--lam",
+            "0",
+            "--out",
+            unused_bake.to_str().unwrap(),
+            "--path-out",
+            sliced_path.to_str().unwrap(),
+            "--slice-file",
+            slice.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run sliced path");
+    assert!(
+        sliced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sliced.stderr)
+    );
+    let sliced_json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(sliced_path).unwrap()).unwrap();
+    for fit in sliced_json["fits"].as_array().unwrap() {
+        for w in fit["w"].as_array().unwrap().iter().take(4) {
+            assert_eq!(w.as_f64().unwrap(), 0.0);
+        }
+    }
+
+    let bounds = dir.join("bounds.tsv");
+    std::fs::write(&bounds, "feat_idx\tsign_mask\n0\tpin_geq0\n").unwrap();
+    let diagnostic = dir.join("diagnostic.npz");
+    let bvls = Command::new(bin)
+        .args([
+            "fit-lasso",
+            "--gram",
+            whole_path.to_str().unwrap(),
+            "--space",
+            "raw",
+            "--target",
+            "human_score",
+            "--solver",
+            "bvls",
+            "--lam",
+            "0",
+            "--bounds-tsv",
+            bounds.to_str().unwrap(),
+            "--emit-fit-npz",
+            diagnostic.to_str().unwrap(),
+            "--diagnostic-fit-only",
+            "--out",
+            unused_bake.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run diagnostic bvls");
+    assert!(
+        bvls.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bvls.stderr)
+    );
+    assert!(Npz::open(&diagnostic).unwrap().get("w").is_ok());
+    assert!(!unused_bake.exists(), "diagnostic fit must not emit a bake");
+}

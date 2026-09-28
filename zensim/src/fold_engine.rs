@@ -207,6 +207,7 @@ pub(crate) fn compute_fold_backed_with_ref(
         config.allow_multithreading,
         scratch,
         pool_mode,
+        None,
     )?;
     features.truncate(v1_feature_width(config));
     let (score, raw_distance) =
@@ -328,7 +329,7 @@ pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed
 }
 
 /// **THE per-caller-line structural read predicate.** `caller_line_reads(m)[k]`
-/// is true iff caller line `k` carries a nonzero layer-0 weight.
+/// marks a nonzero layer-0 path, or a nonzero replacement min-max piece.
 ///
 /// Extracted from [`bake_pool_need_from_model`]'s inner closure so that
 /// [`crate::feature_plan::bake_read_slots`] reads the SAME predicate rather
@@ -341,12 +342,35 @@ pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed
 /// pruning's contract: a pruned column was already an exact zero, or a
 /// transform-forced constant folded into the bias.
 ///
-/// `None` when the layer-0 arities do not tile the input width (a malformed
-/// bake), which callers must treat as "assume everything is read".
+/// `None` for unreadable shapes or replacement-head contracts, which skip
+/// callers must treat conservatively and serving admission must refuse.
 pub(crate) fn caller_line_reads(model: &crate::mlp::Model) -> Option<Vec<bool>> {
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
     let spans = caller_col_spans(model, in_dim)?;
+    // This head replaces the network. Layer-zero zeros cannot prove its
+    // inputs dead. Use the same parser as scoring, and require the scalar
+    // head's one-to-one transform contract before making a skip decision.
+    if let Some(entry) = model
+        .metadata()
+        .get(crate::bake_metadata::MINMAX_MONOTONE_HEAD_KEY)
+    {
+        let head = crate::bake_metadata::parse_minmax_head_meta(entry.value)?;
+        if head.n != in_dim
+            || spans.len() != head.n
+            || spans
+                .iter()
+                .enumerate()
+                .any(|(i, &span)| span != (i, i + 1))
+        {
+            return None;
+        }
+        return Some(
+            (0..head.n)
+                .map(|i| head.w.chunks_exact(head.n).any(|piece| piece[i] != 0.0))
+                .collect(),
+        );
+    }
     Some(
         spans
             .iter()
@@ -543,7 +567,11 @@ pub(crate) fn score_plan(
     // Pool skipping is opt-in. Without it the walk computes the whole pool
     // block exactly as it does today, whatever the bakes read.
     if !skip_unread {
+        plan.compute.coarse_y_only_scales = 0;
+        plan.compute.local_only = false;
+        plan.compute.omit_edges = false;
         plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
+        plan.compute.v1_full_scales = crate::feature_v2::ComputeSet::ALL_SCALES;
         plan.emit = plan
             .compute
             .populated_slots(crate::NUM_SCALES, plan.layout_width());

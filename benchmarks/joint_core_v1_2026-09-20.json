@@ -1,0 +1,79 @@
+{
+  "record": "joint-core-v1",
+  "date": "2026-09-20",
+  "role": "TRAIN",
+  "evidence_root": "/mnt/v/output/zensim/joint-core-v1/",
+  "build_commits": ["ab845295", "6f056876", "0516365b"],
+  "dataset": {
+    "pairs_total": 52963,
+    "pairs_dvifm_sdr": 50463,
+    "legs": {"fresh_imazen26": 32928, "cid22": 7500, "human": 5100,
+             "fresh_safesyn": 4608, "hdr": 2500, "konfig": 327},
+    "bands_pct": {"mid": 55.92, "small": 24.42, "tiny": 19.66},
+    "content_pct": {"photo": 81.63, "screen": 5.62, "doc": 5.62,
+                    "lineart": 5.62, "ai": 1.51},
+    "kernels": {"mitchell_s0_srgb8": 37376, "native": 12927,
+                "mitchell_s10_linearPQ": 2500, "passthrough": 160},
+    "feature_era_sdr": "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#b782e349",
+    "feature_era_hdr": "foldapp2hdrpq (PQ, not column-mixed)"
+  },
+  "gates": {
+    "leader_reproduction": {
+      "metric": "best validation geomean3",
+      "r915_frozen": [0.9788, 0.9783, 0.9775, 0.9784, 0.9778],
+      "core": [0.9696, 0.9715, 0.9711, 0.9729, 0.9718],
+      "seeds": [17101, 17103, 17107, 17111, 17113],
+      "gap_mean": -0.0068,
+      "verdict": "measured gap -0.0055..-0.0092; above ~0.003 seed noise, consistent with 3.3x smaller train pool; all seeds healthy"
+    },
+    "convergence": {
+      "val_ep50": [0.9619, 0.9669, 0.9435, 0.9682, 0.9628],
+      "val_ep99": [0.9637, 0.9651, 0.9651, 0.9684, 0.9644],
+      "mean_delta": 0.0047,
+      "note": "ep100 dip is the recipe's LR-restart transient (identical in frozen R915 logs); no sustained decline",
+      "verdict": "PASS"
+    },
+    "permuted_column_control": {
+      "cols": "f64..f93 (30 used columns), row-permuted in train legs and dev copies (dev seed 6620)",
+      "real": [0.9696, 0.9715, 0.9711, 0.9729, 0.9718],
+      "perm30": [0.9701, 0.9705, 0.9687, 0.9700, 0.9670],
+      "cost_per_seed": [-0.0005, 0.0010, 0.0024, 0.0029, 0.0048],
+      "cost_mean": 0.0021,
+      "seed_noise_yardstick": 0.003,
+      "verdict": "FAIL by the plan's rule — cost at noise floor; core too small for feature screening; grow target before any screen"
+    },
+    "coverage": {"verdict": "PASS", "report": "coverage_report.json"}
+  },
+  "dvifm_native3": {
+    "rows": 3154, "row_selection": "seeded uniform subset rng=20260920 (bare stride aliases cell-blocked TSV order)",
+    "init_mse": 530.13733, "final_mse": 335.27841, "var_y": 924.39078,
+    "init_srocc": 0.7296, "srocc": 0.84008, "krocc": 0.65313,
+    "map": {"A": 124.42, "B": -26.61, "lambda": 133.41},
+    "channel_weights": [0.3943, 0.3029],
+    "wall_s": 1448.5,
+    "grid_edges": "beta at ceiling / c0 at floor on most cells; sharpness (+-1 grid step) recorded per cell",
+    "finding": "masking-as-gate / boundary pile-up regime — guards-doc finding, constants not shipped"
+  },
+  "dvifm_equivalence": {
+    "sample_rows": 400, "hist_vs_bin_snapped_max_rel": 4.2e-16,
+    "hist_vs_true_max_rel_by_level": [5.4e-4, 6.0e-4, 1.3e-3, 3.3e-3, 3.1e-3]
+  },
+  "timing_s": {
+    "fresh_generation_1173_renditions": 1260,
+    "feature_extraction_37536_rows": 246.6,
+    "dvifm_cache_per_plane": [196.6, 194.9, 194.2],
+    "mlp_5seed_wall_concurrent": 520,
+    "mlp_per_seed": [493.5, 490.4, 493.5, 487.4, 489.4],
+    "native3_fit_3154rows": 1448.5,
+    "native3_fit_788rows": 206.1
+  },
+  "dvifm_native3_budget": {
+    "rows": 788, "wall_s": 206.1, "srocc": 0.819, "mse": 353.28,
+    "var_y": 918.53, "verdict": "inside the <=10min constants-fit gate"
+  },
+  "dhash_audit": {
+    "corpora": ["CID22-49", "AIC-3", "AIC-4", "AIC2026", "SDR25", "KonJND-val", "KonFiG-test"],
+    "flags": 21, "false_positives": 21,
+    "method": "pixel RMSE + std_ratio + NCC on native-size pairs (imazen decode)"
+  }
+}

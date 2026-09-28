@@ -1,0 +1,814 @@
+{
+  "schema": "zensim-native-robust-train-v1",
+  "role": "train",
+  "qualified": false,
+  "verdict": {
+    "y60": {
+      "registered_numeric_screen": true,
+      "checks": {
+        "conflicts_improve_or_zero": true,
+        "no_new_failing_class": true,
+        "rank_noninferiority": true,
+        "m2_noninferiority": true,
+        "beats_prior_native10": true
+      },
+      "srocc_deltas": {
+        "human": {
+          "matched": -0.003087643165274545,
+          "original": -0.0024892810802733534
+        },
+        "codec": {
+          "matched": -0.0010693110671260442,
+          "original": -0.0005857051187739826
+        }
+      },
+      "selected": false,
+      "qualified": false,
+      "decision": "Numeric screen passes; tail/map tradeoffs remain unresolved, no promotion"
+    },
+    "basic156": {
+      "registered_numeric_screen": false,
+      "checks": {
+        "conflicts_improve_or_zero": true,
+        "no_new_failing_class": true,
+        "rank_noninferiority": false,
+        "m2_noninferiority": true,
+        "beats_prior_native10": true
+      },
+      "srocc_deltas": {
+        "human": {
+          "matched": -0.000917830554391097,
+          "original": -0.01197913453649202
+        },
+        "codec": {
+          "matched": 0.001062569089598675,
+          "original": -0.00012060617732856382
+        }
+      },
+      "selected": false,
+      "qualified": false,
+      "decision": "Fails registered human-rank noninferiority against frozen untreated control"
+    }
+  },
+  "fitting_families": 8,
+  "development_families": 4,
+  "new_encodes": 0,
+  "new_feature_extractions": 0,
+  "total_fits": 24,
+  "primary_fits": 12,
+  "initial_fits_sampling_interpretation": "Initialization variation only; neighboring raw sampling windows overlap",
+  "primary_ensembles": 4,
+  "full_panels": 21584,
+  "undefined_statistic_fields": 19680,
+  "matched_decoder_peer_rows": 812,
+  "development_pixel_cached_parity": 1056,
+  "native_development": [
+    {
+      "scope": "new",
+      "partition": "development",
+      "model": "NRS914_y60_allpairs10_ens3",
+      "families": 4,
+      "cells": 8,
+      "eligible": 79,
+      "conflicts": 0,
+      "per_class": {
+        "photo": {
+          "eligible": 15,
+          "conflicts": 0
+        },
+        "document": {
+          "eligible": 26,
+          "conflicts": 0
+        },
+        "graphic": {
+          "eligible": 19,
+          "conflicts": 0
+        },
+        "screen": {
+          "eligible": 19,
+          "conflicts": 0
+        }
+      },
+      "m2_min": 1.0,
+      "m2_below_099": 0,
+      "mass_median": 0.5367647058823529,
+      "mass_min": 0.16470588235294117,
+      "mass_below_070": 5,
+      "complete_density": true
+    },
+    {
+      "scope": "new",
+      "partition": "development",
+      "model": "NRS914_y60_robust10_ens3",
+      "families": 4,
+      "cells": 8,
+      "eligible": 79,
+      "conflicts": 0,
+      "per_class": {
+        "photo": {
+          "eligible": 15,
+          "conflicts": 0
+        },
+        "document": {
+          "eligible": 26,
+          "conflicts": 0
+        },
+        "graphic": {
+          "eligible": 19,
+          "conflicts": 0
+        },
+        "screen": {
+          "eligible": 19,
+          "conflicts": 0
+        }
+      },
+      "m2_min": 1.0,
+      "m2_below_099": 0,
+      "mass_median": 0.5647058823529412,
+      "mass_min": 0.08235294117647059,
+      "mass_below_070": 5,
+      "complete_density": true
+    },
+    {
+      "scope": "new",
+      "partition": "development",
+      "model": "NRS914_basic156_allpairs10_ens3",
+      "families": 4,
+      "cells": 8,
+      "eligible": 79,
+      "conflicts": 2,
+      "per_class": {
+        "photo": {
+          "eligible": 15,
+          "conflicts": 0
+        },
+        "document": {
+          "eligible": 26,
+          "conflicts": 0
+        },
+        "graphic": {
+          "eligible": 19,
+          "conflicts": 0
+        },
+        "screen": {
+          "eligible": 19,
+          "conflicts": 2
+        }
+      },
+      "m2_min": 0.9937683284457478,
+      "m2_below_099": 0,
+      "mass_median": 0.4485294117647059,
+      "mass_min": -0.5647058823529412,
+      "mass_below_070": 7,
+      "complete_density": true
+    },
+    {
+      "scope": "new",
+      "partition": "development",
+      "model": "NRS914_basic156_robust10_ens3",
+      "families": 4,
+      "cells": 8,
+      "eligible": 79,
+      "conflicts": 1,
+      "per_class": {
+        "photo": {
+          "eligible": 15,
+          "conflicts": 0
+        },
+        "document": {
+          "eligible": 26,
+          "conflicts": 0
+        },
+        "graphic": {
+          "eligible": 19,
+          "conflicts": 0
+        },
+        "screen": {
+          "eligible": 19,
+          "conflicts": 1
+        }
+      },
+      "m2_min": 0.998900293255132,
+      "m2_below_099": 0,
+      "mass_median": 0.43823529411764706,
+      "mass_min": -0.5852941176470589,
+      "mass_below_070": 6,
+      "complete_density": true
+    },
+    {
+      "scope": "D-new",
+      "partition": "development",
+      "model": "D_frozen_revision1",
+      "families": 4,
+      "cells": 8,
+      "eligible": 79,
+      "conflicts": 0,
+      "per_class": {
+        "photo": {
+          "eligible": 15,
+          "conflicts": 0
+        },
+        "document": {
+          "eligible": 26,
+          "conflicts": 0
+        },
+        "graphic": {
+          "eligible": 19,
+          "conflicts": 0
+        },
+        "screen": {
+          "eligible": 19,
+          "conflicts": 0
+        }
+      },
+      "m2_min": 1.0,
+      "m2_below_099": 0,
+      "mass_median": 0.638235294117647,
+      "mass_min": -0.07941176470588235,
+      "mass_below_070": 5,
+      "complete_density": true
+    }
+  ],
+  "scalar": {
+    "NRS914_y60_allpairs10_ens3": {
+      "human": {
+        "srocc": 0.8395352445946094,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.032,
+            "clampLo": 0.001,
+            "clump": 0.08,
+            "cov": 1.0,
+            "mad": 12.602100000000002,
+            "maxd": 0.5761735299101848,
+            "out4": 0.001,
+            "p99d": 0.5083884087442808,
+            "span": 88.51499999999999,
+            "target_clump": 0.083,
+            "target_cov": 1.0
+          },
+          "n": 1000,
+          "raw": {
+            "clump": 0.117,
+            "cov": 0.85,
+            "mad": 24.896389542908828,
+            "max": 4.653310027854515,
+            "p99": 2.482647416245727,
+            "pred_max": 100.0,
+            "pred_min": -137.019650777181,
+            "residual_max": 115.85061911738995,
+            "residual_p99": 61.80895717254973,
+            "slope": 1.3452611030694686
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -137.019650777181,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 371
+        }
+      },
+      "codec": {
+        "srocc": 0.9260344833206122,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.15285451197053407,
+            "clampLo": 0.0006138735420503376,
+            "clump": 0.18047882136279927,
+            "cov": 0.8,
+            "mad": 5.5507943367978525,
+            "maxd": 0.6856126223355705,
+            "out4": 0.08225905463474524,
+            "p99d": 0.459595837454492,
+            "span": 130.83734404786088,
+            "target_clump": 0.18047882136279927,
+            "target_cov": 0.8
+          },
+          "n": 1629,
+          "raw": {
+            "clump": 0.18047882136279927,
+            "cov": 0.75,
+            "mad": 6.854999792905065,
+            "max": 10.844714619087036,
+            "p99": 7.589359638474809,
+            "pred_max": 100.0,
+            "pred_min": -55.67975870768229,
+            "residual_max": 74.34051646795615,
+            "residual_p99": 52.02505875002687,
+            "slope": 0.866994127613539
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -55.67975870768229,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 47
+        }
+      },
+      "native": {
+        "srocc": 0.7586594838549785,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.003787878787878788,
+            "clampLo": 0.003787878787878788,
+            "clump": 0.2878787878787879,
+            "cov": 0.5,
+            "mad": 1.0030688611475274,
+            "maxd": 0.40831943695409384,
+            "out4": 0.24621212121212122,
+            "p99d": 0.37978457727927767,
+            "span": 18.995735851198532,
+            "target_clump": 0.2878787878787879,
+            "target_cov": 0.5
+          },
+          "n": 264,
+          "raw": {
+            "clump": 0.25,
+            "cov": 0.45,
+            "mad": 4.462395233418015,
+            "max": 1.957185158318624,
+            "p99": 1.8126636534090579,
+            "pred_max": 89.85094197591145,
+            "pred_min": 69.04556020100911,
+            "residual_max": 8.73373372139751,
+            "residual_p99": 8.088821646762664,
+            "slope": 1.0672309406938547
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": 69.04556020100911,
+          "max": 89.85094197591145,
+          "above100": 0,
+          "negative": 0
+        }
+      }
+    },
+    "NRS914_y60_robust10_ens3": {
+      "human": {
+        "srocc": 0.8364476014293348,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.032,
+            "clampLo": 0.001,
+            "clump": 0.08,
+            "cov": 1.0,
+            "mad": 12.764259374999973,
+            "maxd": 0.5931198102016608,
+            "out4": 0.001,
+            "p99d": 0.4887307236061686,
+            "span": 88.51499999999999,
+            "target_clump": 0.083,
+            "target_cov": 1.0
+          },
+          "n": 1000,
+          "raw": {
+            "clump": 0.127,
+            "cov": 0.8,
+            "mad": 25.05496646217214,
+            "max": 5.403675472541766,
+            "p99": 2.637431503259802,
+            "pred_max": 100.0,
+            "pred_min": -158.51078033447266,
+            "residual_max": 135.38890773699615,
+            "residual_p99": 66.08075786045059,
+            "slope": 1.3663750406779058
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -158.51078033447266,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 388
+        }
+      },
+      "codec": {
+        "srocc": 0.9249651722534862,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.15285451197053407,
+            "clampLo": 0.0006138735420503376,
+            "clump": 0.18047882136279927,
+            "cov": 0.8,
+            "mad": 5.849323936355375,
+            "maxd": 0.6875224917100449,
+            "out4": 0.07305095150399017,
+            "p99d": 0.460193865085468,
+            "span": 130.83734404786088,
+            "target_clump": 0.18047882136279927,
+            "target_cov": 0.8
+          },
+          "n": 1629,
+          "raw": {
+            "clump": 0.1712707182320442,
+            "cov": 0.75,
+            "mad": 6.677078071160319,
+            "max": 10.739825106812633,
+            "p99": 7.527413776948305,
+            "pred_max": 100.0,
+            "pred_min": -43.49191411336263,
+            "residual_max": 71.71065070879567,
+            "residual_p99": 50.2611294626116,
+            "slope": 0.8397409039252762
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -43.49191411336263,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 39
+        }
+      },
+      "native": {
+        "srocc": 0.7338239993738953,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.003787878787878788,
+            "clampLo": 0.003787878787878788,
+            "clump": 0.2878787878787879,
+            "cov": 0.5,
+            "mad": 1.1552910159899548,
+            "maxd": 0.40831943695409384,
+            "out4": 0.25,
+            "p99d": 0.3827571171512288,
+            "span": 18.995735851198532,
+            "target_clump": 0.2878787878787879,
+            "target_cov": 0.5
+          },
+          "n": 264,
+          "raw": {
+            "clump": 0.22727272727272727,
+            "cov": 0.45,
+            "mad": 3.800848867264938,
+            "max": 2.1317462576480626,
+            "p99": 1.9640988307042948,
+            "pred_max": 89.61528778076172,
+            "pred_min": 70.63651275634766,
+            "residual_max": 8.102445348677909,
+            "residual_p99": 7.465242815878808,
+            "slope": 0.9788652418513974
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": 70.63651275634766,
+          "max": 89.61528778076172,
+          "above100": 0,
+          "negative": 0
+        }
+      }
+    },
+    "NRS914_basic156_allpairs10_ens3": {
+      "human": {
+        "srocc": 0.8727383158884594,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.032,
+            "clampLo": 0.001,
+            "clump": 0.08,
+            "cov": 1.0,
+            "mad": 10.00755,
+            "maxd": 0.669378071513303,
+            "out4": 0.016,
+            "p99d": 0.48022933965994485,
+            "span": 88.51499999999999,
+            "target_clump": 0.083,
+            "target_cov": 1.0
+          },
+          "n": 1000,
+          "raw": {
+            "clump": 0.128,
+            "cov": 0.8,
+            "mad": 21.259530547782706,
+            "max": 6.764778872701428,
+            "p99": 3.167368151443911,
+            "pred_max": 100.0,
+            "pred_min": -168.42941284179688,
+            "residual_max": 143.81602309319106,
+            "residual_p99": 67.33675997169587,
+            "slope": 1.4404110412409392
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -168.42941284179688,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 339
+        }
+      },
+      "codec": {
+        "srocc": 0.9375077745169575,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.15285451197053407,
+            "clampLo": 0.0006138735420503376,
+            "clump": 0.18047882136279927,
+            "cov": 0.8,
+            "mad": 4.810910105020934,
+            "maxd": 0.6190651291382896,
+            "out4": 0.09085328422344997,
+            "p99d": 0.4238531488504041,
+            "span": 130.83734404786088,
+            "target_clump": 0.18047882136279927,
+            "target_cov": 0.8
+          },
+          "n": 1629,
+          "raw": {
+            "clump": 0.1780233271945979,
+            "cov": 0.8,
+            "mad": 6.119217546186942,
+            "max": 10.957204513547621,
+            "p99": 7.79306744059221,
+            "pred_max": 100.0,
+            "pred_min": -48.757555643717446,
+            "residual_max": 67.04951811645935,
+            "residual_p99": 47.68747502109001,
+            "slope": 0.8738030355636367
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -48.757555643717446,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 55
+        }
+      },
+      "native": {
+        "srocc": 0.6225958559698426,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.003787878787878788,
+            "clampLo": 0.003787878787878788,
+            "clump": 0.2878787878787879,
+            "cov": 0.5,
+            "mad": 2.61689960533401,
+            "maxd": 0.40831943695409384,
+            "out4": 0.0,
+            "p99d": 0.39204921734679604,
+            "span": 18.995735851198532,
+            "target_clump": 0.2878787878787879,
+            "target_cov": 0.5
+          },
+          "n": 264,
+          "raw": {
+            "clump": 0.125,
+            "cov": 0.6,
+            "mad": 4.28613801456852,
+            "max": 2.4017394955025804,
+            "p99": 2.3678875294846526,
+            "pred_max": 90.11245981852214,
+            "pred_min": 65.38021341959636,
+            "residual_max": 10.294186952764228,
+            "residual_p99": 10.149092754346906,
+            "slope": 0.8988949431909106
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": 65.38021341959636,
+          "max": 90.11245981852214,
+          "above100": 0,
+          "negative": 0
+        }
+      }
+    },
+    "NRS914_basic156_robust10_ens3": {
+      "human": {
+        "srocc": 0.8718204853340683,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.032,
+            "clampLo": 0.001,
+            "clump": 0.08,
+            "cov": 1.0,
+            "mad": 10.37819999999997,
+            "maxd": 0.669378071513303,
+            "out4": 0.014,
+            "p99d": 0.4887307236061684,
+            "span": 88.51499999999999,
+            "target_clump": 0.083,
+            "target_cov": 1.0
+          },
+          "n": 1000,
+          "raw": {
+            "clump": 0.131,
+            "cov": 0.7,
+            "mad": 21.208019904783885,
+            "max": 7.399352874605253,
+            "p99": 3.2191693194394175,
+            "pred_max": 100.0,
+            "pred_min": -181.1335652669271,
+            "residual_max": 156.92562304714806,
+            "residual_p99": 68.27220700354076,
+            "slope": 1.4524083910815397
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -181.1335652669271,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 348
+        }
+      },
+      "codec": {
+        "srocc": 0.9385703436065562,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.15285451197053407,
+            "clampLo": 0.0006138735420503376,
+            "clump": 0.18047882136279927,
+            "cov": 0.8,
+            "mad": 4.823334888913309,
+            "maxd": 0.6066900594071517,
+            "out4": 0.08839779005524862,
+            "p99d": 0.4315198782008869,
+            "span": 130.83734404786088,
+            "target_clump": 0.18047882136279927,
+            "target_cov": 0.8
+          },
+          "n": 1629,
+          "raw": {
+            "clump": 0.17495395948434622,
+            "cov": 0.75,
+            "mad": 6.992874051428456,
+            "max": 9.406961971620918,
+            "p99": 6.781051527690305,
+            "pred_max": 100.0,
+            "pred_min": -46.02563031514486,
+            "residual_max": 65.78170027412219,
+            "residual_p99": 47.419039269384825,
+            "slope": 0.8674706887834028
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": -46.02563031514486,
+          "max": 100.0,
+          "above100": 0,
+          "negative": 50
+        }
+      },
+      "native": {
+        "srocc": 0.6224354166530793,
+        "scatter": {
+          "geo": {
+            "clampHi": 0.003787878787878788,
+            "clampLo": 0.003787878787878788,
+            "clump": 0.2878787878787879,
+            "cov": 0.5,
+            "mad": 2.6344207213518924,
+            "maxd": 0.40831943695409384,
+            "out4": 0.0,
+            "p99d": 0.39204921734679604,
+            "span": 18.995735851198532,
+            "target_clump": 0.2878787878787879,
+            "target_cov": 0.5
+          },
+          "n": 264,
+          "raw": {
+            "clump": 0.125,
+            "cov": 0.55,
+            "mad": 4.192977966351248,
+            "max": 2.2878422500938367,
+            "p99": 2.2458095236245956,
+            "pred_max": 89.51382954915364,
+            "pred_min": 65.9042485555013,
+            "residual_max": 9.592872145130919,
+            "residual_p99": 9.416629849179722,
+            "slope": 0.8714362194090588
+          },
+          "schema": "scatter-v2",
+          "status": "MEASURED"
+        },
+        "range": {
+          "min": 65.9042485555013,
+          "max": 89.51382954915364,
+          "above100": 0,
+          "negative": 0
+        }
+      }
+    }
+  },
+  "model_artifacts": {
+    "NRS914_y60_allpairs10_ens3": {
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ],
+      "members": [
+        {
+          "file": "NRS914_y60_allpairs10_s7101.bin",
+          "sha256": "1a8528f0af2160770e8d89c0154dd8c9d1631e0ed394d5587e6ea9351d8adf3f"
+        },
+        {
+          "file": "NRS914_y60_allpairs10_s7103.bin",
+          "sha256": "ad141b4eb82bac424c0f27a00980cccfbb4cf4c6c829c3779cc69890089410cd"
+        },
+        {
+          "file": "NRS914_y60_allpairs10_s7107.bin",
+          "sha256": "0c7cac03f219d6de25d90ab421b4dc170a3c7ccdb6fca06daef4e68d011a4cb1"
+        }
+      ]
+    },
+    "NRS914_y60_robust10_ens3": {
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ],
+      "members": [
+        {
+          "file": "NRS914_y60_robust10_s7101.bin",
+          "sha256": "ab6baa1cd08914ec8ef57958225de3adedf582575eaa888b788a24abd1d436fd"
+        },
+        {
+          "file": "NRS914_y60_robust10_s7103.bin",
+          "sha256": "f45adfb1f99f3cd75a9d809ce4a7814ae5214afb38250f187d684ee9157a7a53"
+        },
+        {
+          "file": "NRS914_y60_robust10_s7107.bin",
+          "sha256": "26b593e5ffe6ce58567a784c19b4fe5c1ab32841b3dab3022c9cf3dbc852040c"
+        }
+      ]
+    },
+    "NRS914_basic156_allpairs10_ens3": {
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ],
+      "members": [
+        {
+          "file": "NRS914_basic156_allpairs10_s7101.bin",
+          "sha256": "f284436a195d2f45295e7e1dfd7874d3aef50f5a3c0d9035ec7bd956f6e188b2"
+        },
+        {
+          "file": "NRS914_basic156_allpairs10_s7103.bin",
+          "sha256": "2829c24ce3690e78d99b5b8d98bae3538309d7996fc1d5f7d7206fb6e7a07aeb"
+        },
+        {
+          "file": "NRS914_basic156_allpairs10_s7107.bin",
+          "sha256": "f913c7c4b19b4983994257e27b03aad1b750e0f6c8f058c9e67cb07a49ed57dc"
+        }
+      ]
+    },
+    "NRS914_basic156_robust10_ens3": {
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ],
+      "members": [
+        {
+          "file": "NRS914_basic156_robust10_s7101.bin",
+          "sha256": "a010e1337b2ed49a616d28185dfde178998555d1d0e07dd5d160a8dbbc33f018"
+        },
+        {
+          "file": "NRS914_basic156_robust10_s7103.bin",
+          "sha256": "b5e16ad163be1920a629e32dd37691ffa8063f4090ff09e89425942895d33a4c"
+        },
+        {
+          "file": "NRS914_basic156_robust10_s7107.bin",
+          "sha256": "f12fe63320c6a785bcfcd0d59c7faf3af47f5581637b1e02e8f7fac7e4ea58bc"
+        }
+      ]
+    }
+  },
+  "evidence": {
+    "PROTOCOL.md": "0feadf1b3232195de6d59098da1638058ba3059d35345a2f8bd1e84f435d1291",
+    "SEED_AMENDMENT.md": "fa1ee91624088347e398f3d6b1a5bcd5e5e541205b5ea5eeb3fa11a3c255f0f0",
+    "REPLAY_AMENDMENT.md": "a49489021fb5b6c6751846fb8180e2093c579aa656529b785f75f1db360f7527",
+    "PAIR_PREPARED.json": "400ead11c2aa3b8ca850e8168e55a5374c2c182a13e242d236f1360e3ecd637e",
+    "fits/REGISTRATION.json": "19891323e0d53d84def464698fb3f95f5061208dcc91bab9c11899c367d3ed81",
+    "fits/RESULT.json": "eed37a6ed1e1607bffc4941e5152226ca13675ab9527d1e7ec2d5ad7feadc12f",
+    "fits-separated/REGISTRATION.json": "af12d37d93e46b74be194a9dd20bd0f02f23b145e05eebc7fa48987c49f991d1",
+    "fits-separated/RESULT.json": "8069e02c2e1bf8412e4c1275ec9c9ca7941fbee7de12598c348618f2a7e792cc",
+    "SUMMARY.json": "80c9022fd65a24ac85b0a01ab0632f5c8e0955a8d5c9000d97ead8c76812e433",
+    "assessment-final/RESULT.json": "988f420611be5dc2719a5a9edf1da0fa69cb8c58ed65479e3a0df8ae4222c980",
+    "new-RESULT.json": "66ea57437cc01a2f330cd77361d80b55b089d4280c803455f2167549ea385ee9",
+    "original-RESULT.json": "9090efb4914725c4b59ed5c62fcd8102ae6c78f2f5cf3dc0da4c6abc734bdcae",
+    "D-new-RESULT.json": "cee359e7da0354518b5b0765e2e7a9c953977f3c5bb969efb5a9406cef4dab78",
+    "GALLERY_RESULT.json": "18a32fd624141d7408a55978075fbde5c665678586698e9e6ea1bc6632584593",
+    "SEED_CHECKS.json": "9c2f5a66111dae8caf4d39aa7366bc2c7e9b156d113921cee46057776a3fba1d",
+    "REPLAY_CHECKS.json": "c5998ec9b2e2ed374149ab834bc8b1d12cfd1ddc69ac9925b0bac0eabeeaa768"
+  }
+}

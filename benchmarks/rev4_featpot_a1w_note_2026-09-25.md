@@ -1,0 +1,9 @@
+# A1w implemented — dated note (2026-09-25)
+
+**POTENTIAL — ceiling, not a model score.** Written 2026-09-25T16:46:35Z, before any A1w result was read. Completes the registration in the restore-cuts amendment (`72b35b43439b`) and the Part B arms amendment, which promised a dated note when the per-fold masking existed.
+
+- **What is dropped:** for every fit population, the 60 R0 column ids of the pinned label-free drop list (`rev4_featpot_restore_arms_droplists_2026-09-25.json`, sha256 `5addfec54c3ceaeba89925784cd6ef5f98beb33fb9facc160f3e7368a7026f72`, rule unchanged). Population keys: `D1/<set>/o0..o4` and `D1/<set>/full` for D1, `D2/without_<held-out>` for D2. Inner folds, models and seeds of a population reuse its list.
+- **How:** dropping is a **coordinate slice**, not zeroing: BVLS and lasso pass `--slice-file` (all columns except the drop list, width 944 = 944 − 60 + 60) to `bake_dial_refit fit-lasso` (its documented `w[out-of-slice] = 0` constraint); MLP cells pass the same list as `--keep-features` to `zensim_mlp_train`. Grams and tables are built on the full-width table; the slice removes the dropped inputs from the fit. The permuted control (`a1w_perm`) uses the identical drop and the permuted mapdev columns.
+- **Adapter:** `restore_data.a1w_dropped` / `a1w_slice` (pin-checked drop-list file); hooks in `candidate_linear.py`, `candidate_lodo.py`, `candidate_mlp.py`, `candidate_lodo_mlp.py`, `linear_probe.lasso_path` and `bvls_probe.fit`, active only for arm `a1w`/`a1w_perm`. All other arms are unchanged.
+- **Label-free check:** a1w slice files keep 944 of 1,004 columns for a D1 fold and a D2 fold (60 dropped each).
+- Everything else (identical-pair convention, free sign masks, bootstrap, D5 bar, eras) is as registered. A1w D1/D2 deterministic fits run locally; A1w MLP cells (D1 960 + D2 140) join the fleet cell list.

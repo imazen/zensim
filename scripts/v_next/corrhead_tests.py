@@ -443,8 +443,11 @@ def t6(d):
 
     Reports, per arm: detection vs FP on the same source's honest anchors at
     matched operating points, and the registered gate pass rates -- head alone
-    (`P_corr > P_anchor`) and the DEPLOY composition
+    (`P_corr > P_anchor`) and the HISTORICAL September 6 composition
     `gate_score(perceptual, p, T) = if p > T { min(perceptual, 0) } else { perceptual }`.
+    Frozen replay only: since September 13 the Rust deploy owner takes
+    min(perceptual, head_score) after activation. These historical gate rates
+    cannot qualify that composition or the reviewed catastrophic label policy.
     """
     import numpy as np
     z = np.load(C.GATE_CACHE, allow_pickle=False)

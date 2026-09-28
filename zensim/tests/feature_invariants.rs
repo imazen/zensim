@@ -282,8 +282,9 @@ fn identity_nonzero_slots_are_reference_only_pjnd_or_fp_residue() {
     );
 }
 
-/// **The 372 identity vector is FABRICATED, not computed — and it disagrees
-/// with what the same code computes on the same pixels.**
+/// The product identity shortcut and the unrestricted 372-feature walk have
+/// distinct contracts. Legacy formulas have small computed identity residue;
+/// Rev3's direct error formulation computes exact zeros for this block.
 ///
 /// Both product-facing SDR entries short-circuit `source == distorted` before
 /// any walk: `metric.rs::identical_result` (behind every `Zensim::compute*`)
@@ -294,10 +295,10 @@ fn identity_nonzero_slots_are_reference_only_pjnd_or_fp_residue() {
 /// never been a measurement of the extractor at that width; it is a property
 /// of the short-circuit.
 ///
-/// This gate states both halves so neither can drift silently: the fabricated
-/// payload IS all-zero, and the computed one is NOT.
+/// Check both paths explicitly. Wide reference-conditioned features outside
+/// this block mean matching Rev3 zeros does not make the shortcut redundant.
 #[test]
-fn identity_is_fabricated_by_the_short_circuit_and_differs_from_the_computed_vector() {
+fn identity_short_circuit_and_computed_residue_follow_the_formula_revision() {
     for &(w, h) in &[(200usize, 150usize), (127, 93)] {
         let r = value_noise(w, h, 0xC0FFEE);
 
@@ -319,17 +320,18 @@ fn identity_is_fabricated_by_the_short_circuit_and_differs_from_the_computed_vec
             "{w}x{h}: compute_zensim_with_config's identity payload is no longer all-zero"
         );
 
-        // (iii) the same v1 block, COMPUTED, is not all-zero. If this ever
-        // becomes all-zero the fabrication is redundant and can be deleted;
-        // until then the two disagree and the disagreement is the finding.
+        // (iii) Rev3's direct error formulation removed the legacy identity
+        // residue. This helper uses the unrestricted public walk, not a bake
+        // plan, so its expectation must follow the arithmetic revision.
         let computed = fold944(&r, &r, w, h, V1PoolsMode::Full, V1FreeExtras::Off, true);
         let nonzero = computed[..372].iter().filter(|&&v| v != 0.0).count();
-        assert!(
-            nonzero > 0,
-            "{w}x{h}: the computed v1 identity block is all-zero, so the \
-             fabricated short-circuit payload is now redundant — delete the \
-             fabrication rather than keeping two answers to one question"
-        );
+        if zensim::feature_v2::active_formula_revision()
+            == zensim::feature_v2::FormulaRevision::Rev3
+        {
+            assert_eq!(nonzero, 0, "Rev3 identity errors must be exactly zero");
+        } else {
+            assert!(nonzero > 0, "legacy identity residue unexpectedly vanished");
+        }
         let worst = computed[..372].iter().fold(0.0f64, |a, &v| a.max(v.abs()));
         assert!(
             worst <= 2e-3,

@@ -1,0 +1,947 @@
+{
+ "generated": "2026-09-23",
+ "lane": "datasets",
+ "roots": [
+  "/mnt/v/datasets",
+  "/mnt/v/dataset"
+ ],
+ "protected_caches": "old .features.bin files in /mnt/v/dataset — NOT deleted",
+ "datasets": [
+  {
+   "dataset": "MCL-JCI",
+   "present": true,
+   "locations": [
+    "/var/tmp/datasets/mcl-jci/ (this lane; zip+extracted)",
+    "durable WSL source:/mnt/v/datasets/MCL-JCI.zip (byte-identical sha256)",
+    "Tower: /mnt/tower/input/datasets-migrated-2026-07-22/mcl-jci (unmounted)"
+   ],
+   "label_type": "per-subject JND boundary QFs (30 subjects/source, bisection)",
+   "orientation": "DISTORTION (jnd_dist = mean #JND boundaries >= QF; higher = worse)",
+   "n_refs": 50,
+   "n_dist": 5000,
+   "codecs": "JPEG QF 1..100 (IJG)",
+   "viewing": "65in 3840x2160 TV, 2m viewing distance, side-by-side, controlled env",
+   "license": "unspecified on HF mirror; USC MCL public download, private corpus",
+   "role": "UNREGISTERED — D3 proposal pending (default confirmation-only per 2026-09-23 ruling)",
+   "pairs_table": "/var/tmp/datasets/mcl-jci/pairs_mcljci_src.tsv (5000 rows, built this lane)",
+   "on_board": false,
+   "sha256_status": "zip 3d67a2a8… matches pointer; 5221 extracted files hashed in mcljci_extracted_sha256.txt",
+   "notes": null
+  },
+  {
+   "dataset": "CID22",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/cid22/"
+   ],
+   "label_type": "MCOS (mean opinion), quality scale",
+   "orientation": "QUALITY",
+   "n_refs": "250 (201 train + 49 val; val = A(25)+B(24))",
+   "n_dist": "21,903 main + 4,292 validation",
+   "codecs": "6 codecs (AVIF/JXL/WebP/JPEG/JP2K/HEIC family)",
+   "viewing": "crowdsourced, uncontrolled (Cloudinary)",
+   "license": "Cloudinary CID22 terms (research)",
+   "role": "T0 49-ref gold eval-only + T2 201-ref ssim2-only; A/B split registered; B sealed",
+   "pairs_table": "/mnt/v/dataset/cid22/CID22_validation_set/cid22val_pairs_ab.tsv + rev2-lan cid22_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "KADID-10k",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/kadid10k/ (active)",
+    "/mnt/v/datasets/kadid10k/ (STALE: kadid10k_raw_data.csv only)"
+   ],
+   "label_type": "DMOS crowdscore",
+   "orientation": "QUALITY (target corrected earlier)",
+   "n_refs": 81,
+   "n_dist": 10125,
+   "codecs": "25 distortion types x 5 levels",
+   "viewing": "crowdsourced",
+   "license": "MMSP-KN research license",
+   "role": "T1 train==val (LODO fold set per 2026-09-23 ruling)",
+   "pairs_table": "/mnt/v/dataset/kadid10k/kadid_pairs_ab.tsv + rev2-lan kadid_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "TID2013",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/tid2013/"
+   ],
+   "label_type": "MOS (mos.txt 3000) + mos_std",
+   "orientation": "QUALITY",
+   "n_refs": 25,
+   "n_dist": 3000,
+   "codecs": "24 distortion types x 5 levels",
+   "viewing": "lab + crowd (original study)",
+   "license": "ponomarenko.info research",
+   "role": "TRAIN-only (retired from eval 2026-08-29; LODO fold set)",
+   "pairs_table": "rev2-lan tid_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "CSIQ",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/csiq/"
+   ],
+   "label_type": "DMOS -> stored 1-DMOS",
+   "orientation": "QUALITY (after 1-DMOS conversion)",
+   "n_refs": 30,
+   "n_dist": 866,
+   "codecs": "6 types: JPEG/JP2K/AWGN/blur/contrast/fnoise",
+   "viewing": "lab (linearized raters)",
+   "license": "SMU/eclarson research",
+   "role": "EVAL only (withheld from every LODO fold)",
+   "pairs_table": "/mnt/v/dataset/csiq/csiq_pairs.tsv (866) + rev2-lan csiq_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "LIVE (release2)",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/LIVE/"
+   ],
+   "label_type": "DMOS (dmos.mat, realigned) + sigma",
+   "orientation": "QUALITY (1-dmos_new/100)",
+   "n_refs": 29,
+   "n_dist": 779,
+   "codecs": "jp2k/jpeg/wn/gblur/fastfading",
+   "viewing": "lab",
+   "license": "UT Austin LIVE terms",
+   "role": "withheld (target defect §8.2 — never confirmed)",
+   "pairs_table": "/mnt/v/datasets/LIVE/live_r2_pairs.tsv (779, sigma column) + rev2-lan live_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "KonJND-1k",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/KonJND-1k/"
+   ],
+   "label_type": "per-ref PJND level + subjective_ratings.csv + konjnd_full_scored.csv",
+   "orientation": "DISTORTION (JND family; axis corrected 2026-08-04)",
+   "n_refs": "1,008 (504 JPEG + 504 BPG, disjoint)",
+   "n_dist": "50,400 JPEG (504x100) + 25,704 BPG PNGs (504x51)",
+   "codecs": "JPEG + BPG",
+   "viewing": "crowdsourced PJND",
+   "license": "Konstanz/Saupe research",
+   "role": "JPEG half: EVAL/SELECT/TERMINAL (never trains); BPG half: TRAIN",
+   "pairs_table": "rev2-lan konjnd_pairs_src.tsv + konjnd_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "KonFiG-IQA",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/konfig-iqa/"
+   ],
+   "label_type": "boosted-triplet JND-unit scale (scores.csv 910 rows)",
+   "orientation": "QUALITY (stored 1-q_jnd/3.2; gated +0.5645 vs raw votes)",
+   "n_refs": 10,
+   "n_dist": "1,230 (IMAGES/) ",
+   "codecs": "7 distortion types x 12-30 levels over 3 JND",
+   "viewing": "lab ACR/DCR",
+   "license": "'freely available to the research community' (Men 2021)",
+   "role": "T2 full table + originsplit views; LODO fold set",
+   "pairs_table": "konfig_944.parquet legs (ext_konfig)",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "JPEG-AIC-3 CTC",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/aic3_ctc_epfl/ (10 orig + 600 decoded)",
+    "/mnt/v/datasets/aic3-btc-ptc/ (response CSVs + test-image zips + recovery docs)"
+   ],
+   "label_type": "design-JND scale (BTC/PTC reconstructed)",
+   "orientation": "QUALITY on stored table (see aic3-target-is-design-jnd rule)",
+   "n_refs": 10,
+   "n_dist": 600,
+   "codecs": "JPEG AIC-3 candidate codecs",
+   "viewing": "MTurk BTC/PTC",
+   "license": "JPEG AIC committee terms",
+   "role": "T0 eval-only holdout",
+   "pairs_table": "rev2-lan aic3_pairs_lan.tsv",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "JPEG-AIC-4 sample",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/aic4_sample/"
+   ],
+   "label_type": "q_jnd (same reconstruction family as SDR25)",
+   "orientation": "DISTORTION",
+   "n_refs": 5,
+   "n_dist": 300,
+   "codecs": "6 codecs (incl AVIF) x 10 levels, PTC crops + full-res",
+   "viewing": "MTurk PTC",
+   "license": "JPEG AIC CfP sample terms",
+   "role": "T0 eval-only; withheld from every LODO fold; SDR25 subset of it",
+   "pairs_table": "ext_aic4.parquet leg",
+   "on_board": true,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "JPEG-AI-SDR25",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/jpeg-ai-sdr25/",
+    "official: github.com/jpeg-aic/dataset-JPEG-AI-SDR25 @d5c4d585 (2025-04-24)"
+   ],
+   "label_type": "BTC+PTC triplet responses -> reconstructed q_jnd",
+   "orientation": "DISTORTION (q_jnd; gated -0.9757 signed SROCC)",
+   "n_refs": 5,
+   "n_dist": 50,
+   "codecs": "JPEG-AI x 10 levels (scoreable subset)",
+   "viewing": "MTurk 2024-01-04..10",
+   "license": "repo+Drive terms (JPEG AIC)",
+   "role": "T0 eval-only, seed-selection oracle; withheld every fold",
+   "pairs_table": "sdr25_jnd_reconstructed_2026-07-02.parquet leg",
+   "on_board": true,
+   "sha256_status": "4 CSVs sha256-verified vs official zip cc3f469e…; 165 PNGs present",
+   "notes": "VERIFIED this lane: zero CSV/image discrepancies vs official repo+README"
+  },
+  {
+   "dataset": "AIC2026",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/aic2026/"
+   ],
+   "label_type": "NONE — 71 objective-metric columns only",
+   "orientation": "mixed per column (registered per-column sign table)",
+   "n_refs": 70,
+   "n_dist": 9618,
+   "codecs": "17 codec configs x 20 levels",
+   "viewing": "n/a (objective release)",
+   "license": "CC BY-SA 4.0 (DaRUS 10.18419/DARUS-6156)",
+   "role": "T0-family eval-only, metric-agreement panels only",
+   "pairs_table": "n/a (no human_score permitted)",
+   "on_board": true,
+   "sha256_status": "SHA256SUMS file present in dir",
+   "notes": null
+  },
+  {
+   "dataset": "PIPAL",
+   "present": true,
+   "locations": [
+    "/mnt/v/dataset/pipal/"
+   ],
+   "label_type": "MOS + Elo (Train_Label/*.txt)",
+   "orientation": "QUALITY",
+   "n_refs": 200,
+   "n_dist": 23400,
+   "codecs": "SR/GAN + conventional distortions",
+   "viewing": "crowdsourced pairwise->Elo",
+   "license": "NTIRE PIPAL terms",
+   "role": "registered 'local, unused — not in pipeline (SR/GAN domain)'",
+   "pairs_table": "rev2-lan pipal_pairs_src.tsv + pipal_pairs_lan.tsv + canonical-2026-05-21 pipal_pairs.tsv",
+   "on_board": false,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "UPIQ",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/upiq/ (labels)",
+    "/mnt/v/datasets/upiq_extracted/ (4,250 images)"
+   ],
+   "label_type": "JOD-rescaled consolidated (TID/LIVE-HDR/Korshunov unified)",
+   "orientation": "QUALITY (JOD)",
+   "n_refs": "consolidated multi-corpus",
+   "n_dist": "upiq_subjective_scores.csv rows",
+   "codecs": "mixed HDR+SDR",
+   "viewing": "lab JOD",
+   "license": "Cambridge (Mikhailiuk/Mantiuk) research",
+   "role": "T0-eval for HDR track",
+   "pairs_table": "none found (csvs only)",
+   "on_board": false,
+   "sha256_status": "not whole-set hashed",
+   "notes": null
+  },
+  {
+   "dataset": "KADIS-700k",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/kadis700k/"
+   ],
+   "label_type": "NONE (no human labels; metric targets only)",
+   "orientation": "n/a",
+   "n_refs": 140000,
+   "n_dist": 700000,
+   "codecs": "synthetic dist grid",
+   "viewing": "n/a",
+   "license": "Pixabay content terms",
+   "role": "T2+T3 (modulo rule; cvvdp/10 targets)",
+   "pairs_table": "canonical parquets",
+   "on_board": false,
+   "sha256_status": "canonical parquet .sha256 present",
+   "notes": null
+  },
+  {
+   "dataset": "NNCD-IQA",
+   "present": true,
+   "locations": [
+    "/mnt/v/datasets/nncd-iqa/"
+   ],
+   "label_type": "MOS_scores_sorted.xlsx",
+   "orientation": "QUALITY (MOS)",
+   "n_refs": "kodak originals (zip)",
+   "n_dist": "4 codec sets (JPEG2000, FCNN-LS, AE-Hyp-GMM, AE-Hyp-GM, AE-Factor)",
+   "codecs": "JPEG2000 + learned codecs",
+   "viewing": "crowdsourced",
+   "license": "none in repo (2022-11-16 push)",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": "zips unhashed",
+   "notes": null
+  },
+  {
+   "dataset": "CHUG",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/chug/"
+   ],
+   "label_type": "SUREAL-scaled MOS (chug.csv) + chug-video.txt",
+   "orientation": "QUALITY",
+   "n_refs": "UGC-HDR",
+   "n_dist": "csv rows",
+   "codecs": "UGC HDR10",
+   "viewing": "crowdsourced AMT on own devices",
+   "license": "CC BY-NC-SA 4.0 (repo license.txt authoritative)",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": "labels hashed in pointer",
+   "notes": "videos not on disk"
+  },
+  {
+   "dataset": "ESPL-LIVE-HDR",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/espl-live-hdr/"
+   ],
+   "label_type": "imgNames_MOS_SD.txt + goldStandardImages.txt",
+   "orientation": "QUALITY",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "ESPL/LIVE terms",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "images not on disk"
+  },
+  {
+   "dataset": "HDR-VDC",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/hdr-vdc/"
+   ],
+   "label_type": "HDR_VDC_JOD_Scores.csv (JOD)",
+   "orientation": "QUALITY (JOD)",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "see README",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "video stimuli not on disk"
+  },
+  {
+   "dataset": "SI-HDR",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/si-hdr/"
+   ],
+   "label_type": "experiment_results.csv (pairwise)",
+   "orientation": "pairwise",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "see README",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "experiment_results.zip present; images not on disk"
+  },
+  {
+   "dataset": "Rousselot-HDdtb-4Kdtb",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/rousselot-hdr/"
+   ],
+   "label_type": "4Kdtb_results.xlsx + Resultats_Tests_subj.xlsx",
+   "orientation": "pairwise/JOD per ReadMe pdfs",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "see ReadMe pdf",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "HDR images not on disk"
+  },
+  {
+   "dataset": "AVT-VQDB-UHD-1-HDR",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/avt-vqdb-uhd-1-hdr/"
+   ],
+   "label_type": "subjective_scores/mos_ci.csv",
+   "orientation": "QUALITY",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "GPL-3.0 repo; SJTU/GamingHDRVideoSET terms for videos",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "videos not on disk (download.sh present)"
+  },
+  {
+   "dataset": "live-yt-banding",
+   "present": "labels-only",
+   "locations": [
+    "/mnt/v/datasets/live-yt-banding/"
+   ],
+   "label_type": "LIVE_Banding_metadata.csv + KoNViD-1kinfo.mat",
+   "orientation": "QUALITY",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "UT Austin LIVE",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "SHA256SUMS.videos exists; videos not on disk"
+  },
+  {
+   "dataset": "AIC-HDR2025",
+   "present": "README-only",
+   "locations": [
+    "/mnt/v/datasets/aic-hdr2025/"
+   ],
+   "label_type": "none obtainable",
+   "orientation": "n/a",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "n/a",
+   "role": "UNOBTAINABLE (user ruling 2026-08-05 — never released publicly)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "STOP live-checking per ruling"
+  },
+  {
+   "dataset": "PieAPP",
+   "present": false,
+   "locations": [
+    "/mnt/v/dataset/pieapp/ (EMPTY DIR)",
+    "Tower (migrated, unmounted)"
+   ],
+   "label_type": "pairwise preference (~2.6M pairs)",
+   "orientation": "pairwise",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": "HF chitradrishti/PIEAPP",
+   "role": "UNREGISTERED",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "MISSING — 0 files local; migrated 2026-07-22"
+  },
+  {
+   "dataset": "AGIQA-3k",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS AI-generated",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "AIGCIQA2023",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS AI-generated",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "AVA-aesthetics",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-aesthetic",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "Beyond8Bits",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image >8bit",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "CID2013",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS CID",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "KonIQ-10k",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS authentic",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "KoNViD-1k",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "video-MOS",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LIVE-Challenge",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS authentic",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LIVE-HDR-2022",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS HDR",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LIVE-HDRvsSDR",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS HDR",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LIVE-TMHDR",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS tone-mapped",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LIVE-VQC",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "video-MOS",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LPIPS-BAPPS",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-pairwise",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "LSVQ-PatchVQ",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "video-MOS",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "PaQ-2-PiQ",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS authentic",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "PARA-aesthetics",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-aesthetic",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "SPAQ",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS smartphone",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "TID2008",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-MOS",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "Waterloo-Exploration",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-refpool",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "YouTube-UGC",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "video-MOS",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "Zerman2017-HDR-compressionDB",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "image-HDR",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "HDRSDR-VQA",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "video-MOS HDR/SDR",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  },
+  {
+   "dataset": "ITM-HDR-VQA",
+   "present": false,
+   "locations": [
+    "no dir in /mnt/v/datasets or /mnt/v/dataset"
+   ],
+   "label_type": "video-MOS iTM",
+   "orientation": "—",
+   "n_refs": null,
+   "n_dist": null,
+   "codecs": null,
+   "viewing": null,
+   "license": null,
+   "role": "UNREGISTERED (absent)",
+   "pairs_table": "none",
+   "on_board": false,
+   "sha256_status": null,
+   "notes": "pointer-only; not on disk; not named by the paper's data section"
+  }
+ ],
+ "unique_dataset_count": 48,
+ "unique_present_count": 16,
+ "alias_note": "LIVE-IQA pointer aliases LIVE (release2); not counted twice",
+ "review": {
+  "status": "PROMOTE WITH CORRECTIONS",
+  "source": "REVIEW_DATASETS.md",
+  "preregistration": "missing before labels read; process defect; not backdated",
+  "mcl_jci_full_dssim_panel": {
+   "n": 4950,
+   "srocc_signed": 0.8664,
+   "plcc": 0.9048,
+   "krocc": 0.7144,
+   "pwrc": 0.988
+  },
+  "mcl_jci_pointer": "benchmarks/mcl-jci.pointer.md",
+  "orphan_pdf": "/mnt/v/input/papers/15/15d661f193886f043fc0aeae36463636eb074aeba8b0391855482f8a27777540.pdf"
+ }
+}

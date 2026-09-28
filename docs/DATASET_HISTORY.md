@@ -1,11 +1,483 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 15, frozen recovery and corrected HDR:**
+[Complete results](../benchmarks/recovery_completion_2026-09-15.md). Ten Rust
+TRAIN-only fits, two fixed five-member compositions; complete full-composite,
+scatter, ladder, 27-cell JPEG, bounded scalar/native JXL, native input/HDR and
+strict latency assessment. Published TEST only for frozen evaluation where no
+EVAL exists, historical exposure linked; secret holdouts untouched. All old
+TRAIN reservations preserved. Corrected declared-primary PQ extraction has
+7,425 pairs / 495 reference variants / 33 source families, all live peak
+columns, fresh native CVVDP and PU-SSIM2 labels. Old mislabeled/all-zero-peak
+or 8-bit-shell HDR products are not reusable under this contract. Native UPIQ
+uses zenexr and fails the shared-weight hypothesis against BHdr. Model bytes
+remain fixed after evaluation; neither candidate is promoted.
+
+
+**September 14, complete native JXL ensembles:**
+[Native evidence](../benchmarks/jxl_ensemble_native_2026-09-14.md) retains the
+preceding corrected nine-family TRAIN/eight-family validation admission and all
+frozen model bytes. Seven compositions complete 4,914 target cases; four refuse
+unsupported spatial terms. A TRAIN-discovered discrete quantizer bug is fixed;
+2,646 neutral ladder pairs are byte/pixel/score exact. Two independent judges
+cover all 8,442 output pairs. No human TEST/secret access, model fitting or
+EVAL-adaptive tuning. Native RD remains diagnostic and all previous product
+qualification states remain unchanged.
+
+
+**September 14, scalar targeting:**
+[Complete-composition comparison](../benchmarks/rev3_targeting_2026-09-14.md)
+uses nine TRAIN calibration families and eight original validation families.
+The first attempted twelve-family calibration missed later reservations and
+was stopped during evaluation; it is retained as inadmissible. The corrected
+batch excludes 6068/9066/8462 without replacement, preserving the frozen models,
+policies, target grids and gates. All 9,648 admitted steering cases complete;
+no human TEST or secret holdout is used. Native spatial qualification remains open.
+
+**September 14, clarified public TEST assessment:**
+[Complete frozen comparison](../benchmarks/rev3_public_human_eval_2026-09-14.md)
+adds CID22 gold 4,292, AIC-3 600 and AIC-4 300 under the later user ruling:
+TEST can assess frozen candidates when no EVAL exists; secret holdouts remain
+untouched. Original roles and exposure are recorded. All prior EVAL predictions
+are unchanged. Eleven model rows now have nine panels and 6/6 composite coverage;
+all nine MT913 models fail necessary ranking and dial gates. Fresh 9,593-cell
+ladder features in both revisions and all 297 ensemble JPEG repair cells complete.
+No training or adaptive selection. Native RD/targeting/corruption/HDR remain open.
+
+**September14, native integrity admission:**
+[Evidence](../benchmarks/native_integrity_admission_2026-09-14.md) reuses the
+same214 TRAIN-fit pairs and215 files. The trainer's native scoring command
+verifies explicit color/precision identities and all214 canonical f32 row
+hashes. Its native input era uses Rev3/sqrt and round-trip CSV parsing.
+All earlier feature CSV bytes and score/spatial fields remain unchanged.
+Thirty-three identities are valid;181 nonidentities stay unresolved, with one
+head activation. This diagnostic packet is rejected for fitting before feature
+reads. No new fits, EVAL, protected data access or model promotion.
+
+**September 14, complete canonical-feature audit correction:**
+[Replay](../benchmarks/complete_feature_audit_2026-09-14.md) uses the same
+214 admitted TRAIN-fit pairs /215 files with fresh outputs. The earlier native
+ensemble's zero consumed-feature maximum was not measured; its score and
+scalar/spatial parity were valid. The new complete-read-set audit actually
+checks all80 ensemble IDs, and all228 base/tree IDs, with zero feature deltas.
+All prior audit fields and feature CSVs remain unchanged. New scope/ID fields
+distinguish these receipts. No fitting, EVAL, source relabelling or qualification.
+
+**September 14, native SDR extraction/serving contract:**
+[Results](../benchmarks/native_sdr_contract_2026-09-14.md) retain the preceding
+native-color admission's214 TRAIN-fit pairs /215 files. Native372 base/head and
+native944 ensemble audits complete with exact consumed-feature, cached/f32 and
+spatial parity; legacy before/after CSV/audit bytes are unchanged. Source color
+and native depth now reach the public score surface under opt-in audit-v2.
+The TSV's historical human_score column is a row-ID join key in this diagnostic,
+not a training target. No new fit, EVAL or clean-negative labels are admitted.
+Original P3 encoding semantics and q85 remain unresolved; downstream manifests
+must explicitly bind the new input era. No protected population is accessed.
+
+
+**September 14, native color/depth inspection:**
+[Native admission](../benchmarks/native_color_admission_2026-09-14.md) retains
+the existing product/honest-control TRAIN-fit assignments for214 pairs and215
+distinct files, including the P3 sources and unresolved q85 control. The new
+native decoder report separates file metadata from decoded samples. All215
+legacy RGB8 hashes reproduce after syncing AVIF/JXL decoder updates; no scores,
+labels, training, protected populations or previous receipts change. None of
+180 P3-derived reconstructions retains the source ICC, but original encoder
+conversion remains unproven. Native precision retention is now available;
+the feature-extraction caller still uses its explicit legacy RGB8 contract.
+
+**September 14, Rev3 integrity TRAIN pilot and color correction:**
+[Registration/results](../benchmarks/integrity_rev3_train_2026-09-14.md) preserve
+the product family partitions. Native corruption generation completed35 of36
+requested sources, refusing ICC-tagged mobile content; the alternative mobile
+source refused too. Source1556/8012/8014 have33 Display-P3 renditions affecting
+213 fitting pairs. The current PNG flattening path does not apply that profile.
+Keep these as a documented color limitation of the earlier product packet;
+numerical replay equality does not establish correct sRGB interpretation.
+
+The explicitly incomplete sRGB pilot excludes those213 fitting pairs plus the
+previously unresolved AVIF q85 pair, without changing calibration/development.
+One Rev3 D228/HGB fit on11,472 distinct binary pairs passes its known-label
+numerical gates, but coverage blocks EVAL. Six admission tests and exact public
+Rust parity pass. All25,025 generated catalog attempts and all35,582 scored
+candidate attempts remain retained; ambiguous labels are not binary negatives.
+No protected source segments were accessed or reassigned.
+
+**September 14, broad honest integrity TRAIN audit:**
+[Results](../benchmarks/corruption_honest_train_2026-09-14.md) reuse all10,499
+admitted product pairs and272 original TRAIN-development JXL interventions.
+Frozen Rev1 D/HGB inference, unchanged threshold, fresh hashes and exact public
+surface parity. Product and native source-family roles are preserved; no new
+fit, calibration, encodes or protected data. All26 observed activations retain
+their conservative valid labels; one q85 AVIF color cast needs investigation
+before future clean-negative admission. All26 reject prepared steering despite
+unchanged scalar scores; all272 native attempts remain accepted. All active
+A/Bs are bound to the original pixels. No model qualifies.
+
+**September 14, quarter-resolution chroma TRAIN fit:**
+[Results](../benchmarks/chroma_scale_train_2026-09-14.md) reuse the admitted
+product human/codec fitting and development tables, plus native development
+only. Nine H32 fits compare y60, additional quarter B, and additional quarter
+XB. Explicit fitting-group checkpoint weights and disjoint sampler windows
+preserve separation; one repeat is exact. No native fitting supervision, new
+extraction, sources, encodes, calibration, EVAL or TEST. Both treatments fail
+registered quality continuation despite rank/own-map improvements. Full native
+feature/cache parity passes. All four timing suites retain noisy-round failures.
+
+**September 14, native filter feature comparison:**
+[Results](../benchmarks/native_filter_2026-09-14.md) reuse the native phase
+packet's eight TRAIN-development cells and130 translations with four neutral
+60-feature Rust instruments: cascade box and direct triangle/Mitchell/
+RobidouxSharp at1/2/4/8. No fitting, calibration, new sources, encodes or
+protected populations. Exact box-feature and pixel/peer reproduction passes.
+Direct contracts include binary16 input quantization. Focal L4 span falls,
+mean span rises, and no trained-model quality improvement is established.
+The same f14 period-control failures persist; all focal-pair controls pass.
+
+**September 14, native sampling-phase diagnostic:**
+[Results](../benchmarks/native_phase_2026-09-14.md) reuse the same four TRAIN
+development families and eight native cells, with frozen plain/constrained
+y60/H32 ensembles. Both sides receive a joint RGB translation in a fixed black
+canvas; all original pixels are retained. These are diagnostic transforms,
+not new codec encodes, fitting data or EVAL. Full64-phase coverage is restricted
+to the predeclared screen failure; other cells use six residues plus period
+controls. Original native outputs reproduce exactly. Twelve of48 whole-cell
+period controls fail narrowly at full-resolution Y SSIM-L4, while all focal-pair
+controls pass. Scalar preference and coarse-B contributions vary substantially
+with phase. No new model, calibration, sampling contract, protected population,
+or native RD qualification. The gallery retains original A/Bs and adds bound
+phase figures without replacing their unpadded native evidence.
+
+**September 14, native signed contribution diagnosis:**
+[Results](../benchmarks/native_contributions_2026-09-14.md) reuse exactly the
+preceding eight TRAIN development cells and frozen six-model/D compositions.
+No new admission, fit, calibration, encode, extraction regime, EVAL or TEST.
+The existing native public replay retains baseline sensitivities under its
+diagnostic flag; ordinary results remain byte-identical. All 22 peer conflicts
+are present in local feature linearization. Positive sensitivities dominate
+local120 conflict contributions; a separate y60 failure follows coarse B
+feature changes. Neither observation proves a feature arithmetic bug or a
+retraining/ablation improvement. Existing model verdicts remain unchanged.
+
+**September 14, frozen constrained-model native replay:**
+[Comparison](../benchmarks/native_constraints_2026-09-14.md) reuses six existing
+product TRAIN ensembles, all 812 native-local outputs and 408 earlier diagnostic
+outputs. The same four development families remain the primary comparison;
+fitting-role and earlier diagnostic content are separately labelled. No new
+admission, fitting, calibration, encoding, extraction, EVAL or TEST. All prior
+decoded pixel/peer rows and overlapping plain-model scores/maps reproduce.
+All three constrained profiles fail the registered advancement screen despite
+improved own-score map consistency. Peer-response associations are now visible
+alongside internal consistency in the existing gallery. No model is promoted.
+
+**September 14, explicit robust native-pair comparison:**
+[Results](../benchmarks/native_robust_train_2026-09-14.md) reuse the preceding
+eight TRAIN fit/four TRAIN development families and exact Rev3 features.
+Two-row pair buckets preserve family assignments: 500 all-pairs versus 214
+two-mentor robust pairs, using existing native pixels. No new admission,
+encodes, extraction, calibration, EVAL or TEST. Both SSIM2 and Butteraugli
+select training pairs, so their agreement is mentor consistency evidence.
+Twelve initial fits are retained with an initialization-only interpretation:
+nearby legacy sample seeds overlap. Twelve amended primary fits use recorded
+disjoint sampler windows. All primary members and ensembles receive complete
+canonical TRAIN panels/scatter; basic156 fails original-control rank tolerance,
+y60 retains unresolved tail/map tradeoffs. Neither is promoted.
+
+**September 14, native local TRAIN recipe comparison:**
+[Protocol/results](../benchmarks/native_local_train_2026-09-14.md) admits12existing
+product TRAIN families (8fit/4development), with original family assignments.
+The prior replay's three families and all historical protected families remain
+excluded. Canonical full944 Rev3 extraction on812 new fixed native JXL outputs
+retains516fit/264development local rows after exact pixel deduplication. One
+ICC-bearing source fails; a documented metadata-only replacement uses the next
+eligible fitting-family hash, without color stripping or role reassignment.
+All1,016 encoder attempts including204 from that failure are retained.
+Twelve Rust fits with matched seeds compare unchanged profiles/control recipes
+against10% local ranking supervision. Both treatments fail preregistered
+advancement. No EVAL/TEST, calibration or release qualification. Sparse canonical
+panel statistics are explicitly null where undefined; no fabricated passes.
+
+
+
+**September 14, native local-quantizer replay:**
+[Protocol/results](../benchmarks/native_map_replay_2026-09-14.md) reuses only
+origins2010/7066/8206 from the saved September8 coarse intervention packets.
+Canonical TRAIN family admission excludes document6068 under the later suffix8
+reservation before pixels. Both256/512 renditions and distances1/3 yield408
+retained bitstreams, freshly decoded with the pinned canonical decoder. Old
+pixels and peers are not reused across decoder eras. Six frozen Rev3 ensembles
+plus frozen Rev1 D are measured through public Rust scoring, with fresh native
+same-buffer peers and exact final-source reproduction. This may overlap fitting
+content; it is TRAIN mechanism development, not EVAL or new independent families.
+No fits, new encodes, calibration, TEST/terminal or model promotion. It reveals
+native map and scalar-preference failures; all earlier failed gates remain.
+
+**September 14, newest real TRAIN precision checks:**
+[Protocol/results](../benchmarks/precision_rev3_2026-09-14.md) reuse report,
+screenshot and photo pairs from the existing admitted TRAIN development packet.
+Five selected block probes compare native Rev3 SSIM/basic-edge features with
+independent f64 arithmetic on unchanged XYB pyramids. No fitting, new source
+admission, calibration, EVAL/test access or production arithmetic change.
+Reference contribution changes are small relative to the failed maps, while
+all five real probes exceed the existing synthetic locality tolerance.
+No model qualification changes; original reports remain immutable.
+
+
+**September 14, newest spatial family diagnosis:**
+[Protocol/results](../benchmarks/spatial_diagnosis_2026-09-14.md) retain the
+existing five TRAIN development origins and all frozen model bytes. Sixty-nine
+saved analyses plus six matched family diagnostics separate max response from
+other approximation failures. Three already-trained family subsets then add
+69 wider spatial calls on the same 23 pairs, with no new admission, fitting,
+calibration, EVAL/test access or scalar formula. All pixel/cache witnesses pass;
+these controls still have twelve failed cases. Oracles are not deployable
+models. No shipping or qualification status changes.
+
+
+**September 14, newest spatial coverage:**
+[Protocol/results](../benchmarks/spatial_coverage_2026-09-14.md) reuse existing
+admitted TRAIN development origins and frozen models; no new source admission,
+fit, calibration or EVAL/test access. A preregistered 30-cell content/size/JXL-q
+grid has 23 available pairs and seven explicit gaps. All 69 model/pair checks
+and 4,878 repairs pass native input and scalar parity; twelve spatial gate
+failures remain. Six bin1 diagnostic calls on the two M3f-failing images add
+210 repairs and reproduce all ranks unchanged. The previous five-case spatial
+pass does not generalize for basic228/H32. No model qualification changes.
+
+
+**September 14, newest aligned-bin optimization:**
+[Protocol/results](../benchmarks/aligned_bins_2026-09-14.md) replay the same
+forty admitted TRAIN finite-moment cases exactly (1,176 repairs). No source
+admission, training/calibration, EVAL/test read or feature arithmetic change.
+Complete prepared timing accepts the private aligned-fold optimization;
+quality/steering verdicts are unchanged. An admission-metadata-only dimension
+census identifies existing larger renditions for the next registered spatial
+screen, not new held-out evidence. No model qualifies from this change.
+
+
+**September 14, newest row-fusion replay:**
+[Experiment and profile](../benchmarks/moment_rows_2026-09-14.md) reuse the same
+forty admitted TRAIN finite-moment cases without new training/calibration,
+source admission or EVAL/test access. Every report field matches exactly.
+The optimization is rejected after complete-path timing shows modest enabled
+benefit with slower disabled controls; production attribution stays at the
+preceding implementation. Synthetic hardware profiling locates bin folding,
+max retention and SSIM work as larger costs. No model qualification changes.
+
+
+**September 14, newest base-image finite moments:**
+[Protocol/results](../benchmarks/finite_moments_2026-09-14.md) apply the frozen
+four basic/peak ensembles to the same five admitted TRAIN JXL pairs at bins
+1 and 8 (forty cases, 1,176 repairs). Only original base signals enter the new
+opt-in predictor; repaired images measure outcomes. Scores/features/gradients,
+old density and disabled refinement remain exact. Basic228/H32 passes all five
+spatial cases at both bins; other heads retain M2 failures. Paired runtime
+shows substantial added cost, so the option stays off by default. No training,
+calibration, new source admission or EVAL/test access. Artifact root:
+`~/work/zensim-validation-2026-09-14/finite-moments/`. No model is qualified.
+
+**September 14, newest moment-curvature diagnosis:**
+[Protocol/results](../benchmarks/moment_curvature_2026-09-14.md) reuse twenty
+immutable TRAIN reports from the basic/peak campaign, without new decoding,
+scoring, fitting, calibration or EVAL/test access. The existing Rust analysis
+owner separates finite root curvature from remaining map error. For basic228/H32,
+the curvature-only oracle passes all five M3f cells and removes 92.9% of aggregate
+squared error against observed feature linearization. Repaired-image features
+make this an unavailable-to-runtime oracle; scalar/map verdicts are unchanged.
+All prior fields and the guarded replay are exact, with independent algebra
+tests and discriminating input controls. Artifacts:
+`~/work/zensim-validation-2026-09-14/moment-curvature/`.
+
+**September 14, newest basic/peak decomposition:**
+[Protocol/results](../benchmarks/product_peaks_2026-09-14.md) reuse the same
+admitted native product-TRAIN packet without new extraction, calibration or
+EVAL/test access. Twelve paired fits and four full ensembles separate HF,
+L8, hard-max and head-capacity effects. All 31,548 raw/packed predictions are
+bit-exact, twenty original-bitstream native audits pass, and 588 finite pixel
+repairs locate a remaining non-max approximation failure. All 23 codec
+development sources are distinct source families for descriptive paired
+bootstrap. An old rounded control export was refused; the prior verified
+round-trip export is used instead. Full panels/scatter, source uncertainty,
+failed gates and matched timing are retained. No model qualifies; no inference
+formula changed. Artifacts: `~/work/zensim-validation-2026-09-14/product-peaks/`.
+
+**September 14, later product scale frontier:**
+[Protocol/results](../benchmarks/product_scales_2026-09-14.md) reuse the exact
+preceding product-TRAIN tables and source-family roles. No new source admission,
+feature extraction formula, calibration, EVAL or TEST read. Eighteen fits over
+six declared subsets, three paired seeds and the corrected mixture yield six
+complete served ensembles. All 47,322 raw/packed development predictions match
+bitwise; canonical panels retain every seed and complete composition.
+
+A synthetic supported coarse-IW-MSE model reproduces NaN attribution from
+unrequested zero-count cells. The retained pass now skips zero-sensitivity
+cells before normalization. Ten real TRAIN y346 map calls become finite;
+20 other calls' complete block records remain exactly unchanged. All six
+ensembles have exact consumed-feature/native-score audits on five original
+JXL pairs. All still fail some registered spatial cases. Basic228 gives a
+useful inexpensive scalar control, but its prepared map cost and coherence
+remain inadequate evidence for shipping. Timings and memory receipts cover
+1MP/4MP synthetic inputs; p95 and native encoder RD remain unmeasured.
+Artifacts: `~/work/zensim-validation-2026-09-14/product-scales/`.
+
+**September 14, newest TRAIN product packet and sampler correction:**
+[Protocol/results](../benchmarks/product_train_2026-09-14.md) and
+[hashed summary](../benchmarks/product_train_2026-09-14.results.json).
+Original W-LIN7 TRAIN key/URI metadata admits 10,499 original-bitstream pairs
+across 148 sources and 141 families, after canonical validation/test, historical
+test families, and eval8 reservations are excluded. Original file/pixel hashes,
+Rev3 formula/schema, fresh same-pixel SSIMULACRA2 targets (575 negative), and
+family-separated internal fit/development/calibration are preserved. No decoded
+duplicates or identical reference pixels cross the internal partitions. Native
+human TRAIN development re-extraction matches all 944,000 reused feature cells.
+
+Legacy stratified sampling ignores relative group weights and excludes singleton
+band cells: 194 human / 2,002 codec strata yield only 8.88% human pairs and 86.90%
+row coverage. Eight initial fits are retained as a stopped, mis-specified mix.
+Analytically collision-corrected uniform weights yield 49.881–50.198% usable
+human pairs and full coverage; all three actual training digests match replay.
+All 24 replacement fits and eight complete ensembles have Rust API predictions
+and canonical TRAIN panels. Round-trip output proves 63,096 raw/packed predictions
+bit-exact. Matched B/D are freshly extracted at Rev1 on identical development
+pixels; their unknown historical training exposure remains a limitation.
+Five small TRAIN JXL cases per ensemble expose the scalar/spatial tradeoff;
+full944 has stronger proxy rank but incomplete refinement support. No new EVAL,
+TEST, calibration use, native RD, or shipping qualification. Artifacts are under
+`~/work/zensim-validation-2026-09-14/product-train/`.
+
+**September 14, frozen Rev3 matched evaluation:**
+[Protocol/results](../benchmarks/rev3_qualification_2026-09-14.md) add native
+Rev3 full944 KonJND JPEG SELECT (404 references/pairs) and KonFiG validation
+(436 pairs, four origins) to the existing 3,125-pair KADID SELECT evidence.
+Original admitted view hashes, round-half-up JPEG pairing, KonFiG content
+deduplication, source/file/pixel identities, formula revision, and frozen model
+bytes are retained. No terminal payload or model fit. B/D are re-extracted at
+Rev1 and compared on the same pixels; their absent historical era metadata is
+explicitly unqualified, with complete current native prediction parity.
+All nine candidates trail B/D on KonJND despite higher KADID rank, fail measured
+outlier clauses, and remain unshippable. Selected619 fails 836/840 new spatial
+parity cases. Some wide models exceed identity. Source-cluster intervals,
+complete scatter diagnostics and keyed CPU SSIMULACRA2 comparisons are retained;
+KonFiG's four origins and SSIMULACRA2 tuning exposure limit interpretation.
+Native artifacts: `~/work/zensim-validation-2026-09-14/rev3-qualification/`.
+
+**September 13, later user split ruling:** new work uses train only for all
+fitting/calibration/checkpoint decisions, eval only for gates/evaluation, and
+never opens test/terminal segments. This overrides prior touch-once plans and
+the internal test-role usage described in the dated studies below. Their
+artifacts remain immutable; no test-to-eval relabeling is performed. The active
+feature-screen v2 requires separate admitted manifests, refuses mixed caches,
+and moves prediction/eval out of the training stage. Thirteen synthetic boundary
+checks and a real Rust fixture smoke verify the new path; no scientific corpus
+was read or a competitive model trained by this implementation.
+
+**September 14, newest strict integrity prototype — bounded evidence only:**
+[Protocol/results](../benchmarks/steering_integrity_2026-09-14.md) and
+[hash-bound summary](../benchmarks/steering_integrity_2026-09-14.results.json).
+Original corruption-manifest metadata admits eight fit, two training-calibration
+and eight eval origins; 8462/9066 are excluded because of later test roles.
+Fresh Rust Rev1/libm/f32 D228 extraction reads explicit source/native-codec paths;
+no historical mixed feature tables. New decoded-pixel hashes bind native inputs
+whose original records only pinned bitstreams. Original feature/decoder identity
+and role receipts remain in `TRAIN_ADMISSION_NATIVE.json` and the extraction
+audits; source manifest SHA is
+`1ec469fe694284f029cf769258fe7bd91e231f336825686699ea371be6c5f433`.
+Final training admission SHA:
+`d61262d19865a2abc6464317eb1090a9c6729aca073f189e58f342174b270eae`.
+
+Severity rules and visual layout amendment were frozen before fitting. Inert
+and weak/ambiguous operations are excluded from binary training, not relabelled
+as valid negatives. There are 900 unique fit and 124 calibration pairs. One
+HGB100 head plus a determinism replay (identical predictive bytes) gives zero
+calibration honest activation; frozen eval detects 175/180 admitted severe
+proxies, 109/113 real-bug proxies, with 0/320 honest activation. Full eval scores
+6,024 attempts / 5,679 pixel-unique pairs, retaining 1,086 activations among 5,173
+unlabelled weak/ambiguous pairs as unresolved specificity. A known binary label
+on duplicate pixels supersedes missing labels, with all catalog provenance
+retained; contrary binary labels refuse the report. No eval-tuned threshold,
+no test reads, no product qualification. See results for the five misses,
+prepared-map audit, frozen tools, complete input hashes and measured cost.
+
 **Purpose.** An honest ledger of *what training data and experiments were tried, what
 actually helped, and — where it differs — the **real** reason a thing failed vs the
 reason we thought at the time.* Several "verdicts" in this project were later found to
 rest on a hidden bug, confound, or invalid measurement. This doc exists so we don't
 re-add a dataset a confound already poisoned, re-run a dead-end, or trust a retracted
 claim.
+
+**September 13, later runtime profiles — development evidence:**
+[Runtime study](../benchmarks/runtime_profiles_2026-09-13.md) reuses the exact
+admitted native Rev3 tables below with their input/table/extractor identities;
+no new source, split, feature formula or corruption label is admitted. The
+existing owner verifies hashes before reuse. There are 48 screening MLP fits
+and eight additional human finalist seeds, plus two deterministic linear fits.
+Human and codec-proxy objectives remain separate; no new corruption classifier
+is trained under the old binary labels. Mixtures add no fits. The 96-cell broad
+repair panel is now used to select mixture weights and is not independent
+evidence for those weights. Final weighted compositions are replayed through
+the Rust surface. No terminal human panel or native target/RD qualification
+was run, and retained artifact scores still block product qualification.
+
+**September 13, newest steering-subset study — STANDS within development panels:**
+[Protocol and results](../benchmarks/steerable_subset_2026-09-13.md) retain the
+same 19,958-row/source-family admission and native Rev3 formula era below.
+Fresh extraction and reused tables are hash-bound; no new source or terminal
+data was admitted. There are 195 unique MLP fits (117+60+18), with 27 initial
+fits reused in the 45-fit five-seed finalist directory; nine additional linear
+controls are deterministic. Do not count inherited artifacts as fresh fits.
+The human test split is now feature-selection evidence, not a new terminal
+holdout. Broader spatial work reuses the September 8 max-attribution registration,
+verifies all 24 original image hashes and current train admission, and executes
+four block sizes through the prepared Rust API. The linear local120 control
+passes 96/96 but under-penalizes severe corruption. More accurate uniform MLP
+ensembles fail some spatial cells. No model qualifies, and native RD/targeting
+claims remain unavailable. Local extraction optimizations preserve consumed
+feature arithmetic; corrected HF-gain map derivatives supersede earlier audits.
+All results, failures, model identities and intermediate binaries remain under
+`~/work/zensim-validation-2026-09-13/steerable/`.
+
+**September 13, latest scale-selective944 study — STANDS within these panels:**
+[189-fit results](../benchmarks/scale_selective_944_2026-09-13.md) reuse the exact
+19,958-row admission below, with fresh native and direct Triangle extractions.
+Native feature CSV is byte-identical to the prior producer. New explicitly
+versioned direct sampling eras cover 1/2/4/8, 1/3/5/7 and 1/2/3/5; do not mix
+these feature tables or retag old bakes. Each coarse level comes directly from
+original XYB with zenresize binary16 source rounding, independently verified.
+Legacy/v2 masked+IW additions are tested separately at every scale. Three seeds,
+H128, 32 epochs, every-epoch dev selection. Prime effects are mixed; wide
+features remain useful for corruption. Actual v2 scale dispatch now reduces
+native619 cost by 60% ST/58% MT8 on the bounded benchmark, correcting the earlier
+no-compute-savings limitation. Spatial failures and limited source diversity
+still prevent qualification. No protected data or deployed model changed.
+
+**September 13, later capability study — STANDS within the stated panels:**
+[Protocol/results](../benchmarks/feature_ceiling_2026-09-13.md) and
+[exact read sets](../benchmarks/feature_ceiling_2026-09-13.json).
+Fresh full944 Rev3 extraction through BakeScorer: 11,125 KADID/TID human rows,
+620 codec-proxy rows (30 origins/29 families), 8,213 deduplicated corruption
+rows (12 admitted origins). TID is train-only; KADID terminal/T0 and fixed
+corruption validation origins are untouched. The later source-family manifest
+excludes 8414/8434 and co-locates 7004/7058; digit-only admission was insufficient.
+Old tables provide membership/labels, never feature values. Producer
+`basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#b782e349` includes
+all 944 slots, unlike older wide producers that omitted v1 pooled features.
+Inputs, byte hashes, family/row IDs, tools, bakes and original codec binary are
+retained under `~/work/zensim-validation-2026-09-13/ceiling/final/`; codec commit
+coverage limitations are explicit in `CODEC_PROVENANCE.json`.
+
+162 fits show data dependence, a checkpoint-cadence confound, useful wide
+corruption features, and weak v2 spatial repair prediction. No reduced layout
+passes every family/error bar. Restricting v2 read sets does not yet save their
+extraction cost. This native-box study does not extend the fractional-plane
+training evidence. No release qualification or universal feature ceiling.
+
+**September 13 sampling follow-up (earlier):**
+[20-layout/60-fit screen](../benchmarks/sampling_serving_2026-09-13.md),
+using only the fixed T2 JXL proxy packet and reused training corruption PNGs.
+Explicit sampling contracts are served through Rust BakeScorer. All layouts
+have failed spatial cells; no qualification or protected-data evaluation.
+[Legacy coarse-feature audit](../benchmarks/coarse_legacy_features_2026-09-13.md)
+separates September shipped read sets from August measured contribution tables.
 
 **Status flags** on each verdict:
 - **STANDS** — verified, still correct.
@@ -23,6 +495,23 @@ source" rule). Where the survey and a shipped doc disagree, that conflict is cal
 ---
 
 ## 0. The five recurring "actual why" families — READ THIS FIRST
+
+September 8 later kernel experiment: [padded SSIM rows](../benchmarks/padded_ssim_rows_2026-09-08.md)
+retain every saved feature/score/map byte while reducing measured complete
+scalar cost. Row pitch changes physical storage, not horizontal tile boundaries
+or sum order, and differs from the historical plane-base staggering failure.
+The cache/code-generation mechanisms are not separately identified. Non-trigger
+controls bound a small regression; formal performance and model qualification
+remain incomplete. No dataset, feature era or model changed.
+
+September 8 later measurement: [A/D scalar cost and benchmark repair](../benchmarks/model_blend_speed_2026-09-08.md).
+The first run's four rounds/240 waits came from detecting its own Linux
+lock-heartbeat task as a competing benchmark. An observed failing regression
+and canonical repair enable 40 rounds per geometry. Complete blend costs
+essentially the same as A alone; common extraction/full-pool work determines
+the next optimization. Background activity prevents strict release admission;
+observed latency inequalities are diagnostic. No model or dataset changed,
+and no validation or terminal images were consumed.
 
 The dominant class of dead-end in this project was **never a bad mechanism — it was an
 invalid selection or verdict instrument.** Almost every entry below is an instance of one
@@ -3621,3 +4110,704 @@ Native diffmap qualification remains separate: existing JXL/JPEG/WebP/AVIF
 owners and research branches were found, with stale scorer pins, conditional
 map engagement and different pass accounting. The complete composed-model map
 surface remains work; no native-map gain or product tolerance is established.
+
+## 2026-09-08 — canonical native corruption input packet
+
+**STANDS, generation complete; training admission incomplete.** The September 6
+nonlinear HGB and Rust ZCTH results supersede the September 5 linear-head
+separability/guard proposal. Historical detection does not certify the old
+inspo-tree source split or foreign JPEG anchors.
+
+The existing native fixture owner and Python corpus owner now generate a
+separate canonical JSON-manifest packet. Generator math is pinned to
+codec-corpus `8e10d4d7` (the old local `3e7a8a22` omitted later real bugs), with
+zenpng IO and current zenjpeg q10/q20 4:2:0 anchors. The same canonical 12 train /
+8 validation families yield 8,580 / 5,720 complete 372-feature rows, formula 1,
+libm root form. All source/producer hashes and original pixels are retained.
+
+Inert attempts are noncorrupt labels, with catalog identity preserved. The
+raw tables retain 823 / 345 repeated source/pixel pairs and deliberately remain
+**failed C10**; they are not approved training views. A separate 456 / 304-row
+honest JXL/AVIF scalar-bound supplement re-decodes retained native bitstreams
+with the same extractor. No new classifier fit or terminal-label evaluation.
+
+See [registration](CANONICAL_CORRUPTION_2026-09-08.md) and
+[complete input record](../benchmarks/canonical_corruption_2026-09-08.md) for
+hashes, controls, original/final producer snapshots and remaining deduplication,
+T0 content audit, current surface-feature parity and fit/calibration partition
+work. Artifact root: `/mnt/v/output/zensim/canonical-corruption-2026-09-08/`.
+
+## 2026-09-08 — canonical corruption public-surface parity and frozen-head screen
+
+**STANDS, bounded development screen; no new fit.** All 15,060 canonical and
+native honest rows now have exact complete Rust pixel/cache/stored-f32 score
+agreement and exact original-table f32 feature parity. The first prototype's
+678 identity disagreements exposed omitted cached identity context: pixel100
+was correct, and raw zero features cannot prove identity. The new explicit
+identity-aware cache surface preserves supported pixel and raw-feature behavior.
+
+Deduplicated validation detection is 5,022/5,353, and strict below-q20 ordering
+improves from 1,945 to 5,280/5,353. However eight of 304 honest native codec
+outputs—all near-lossless JXL—are incorrectly lowered from 97.77–98.54 to zero.
+Newer `real_bug` detection is 204/317. The frozen historical D+HGB is therefore
+not shippable; these inputs do not establish independent held-out validation of
+its old training recipe. T0 content admission, approved deduplicated training
+views and exact fit/calibration identities remain incomplete. See the
+[serving record](../benchmarks/canonical_corruption_serving_2026-09-08.md).
+
+## 2026-09-08 — native source admission and canonical fit preparation
+
+**STANDS, preparation only.** Twelve training origins have zero strict dHash
+flags against 182 SDR reference entries, using a named native PNG/resample era;
+all four distance-14..16 matches were reviewed as distinct content. LIVE's 29
+BMP references now decode through the shared native owner with exact RGB/PNG
+reproduction. Thirty UPIQ HDR EXR references remain pending; no exception to
+the native-only rule or full content admission has been assumed.
+
+The explicit fit/calibration/evaluation roles contain 5,504 / 2,709 / 5,679
+source/pixel-unique rows. A single feature plus a binary label is an ambiguous
+duplicate surrogate: the full-feature collision check finds no label conflicts.
+The Parquet owner now supports a registered full-record key contract requiring
+zero duplicates; the old sampled default and raw failures remain intact.
+The trainer's canonical mode evaluates its exact exported single fit through
+Rust and refuses fitting without complete admission. Numeric-fixture export
+parity passes, but **no canonical image-data candidate has been fit**. See the
+[preparation record](../benchmarks/canonical_corruption_refit_2026-09-08.md).
+
+
+## 2026-09-08 — native PNG and coarse JXL intervention evidence
+
+**STANDS, training-family mechanism screen only.** The same four canonical
+training origins and their existing 256/512 variants are used without a fit
+or new corpus split. The JXL instrument now has native PNG IO; all 272 previous
+transform outputs reproduce byte/pixel/q/score/map-exactly. Coarse whole-transform
+unions with ±20% raw-q changes yield expected D direction in 244/256 and 245/256
+probes, but gain-per-byte prediction remains uneven. Area and amplitude change
+together; no matched-RD or qualification claim. Source/PNG hashes, whole-transform
+coverage, complete independent judges, final-code reproduction and negative
+controls are retained in the [screen record](../benchmarks/zensim_coarse_interventions_2026-09-08.md).
+The separate canonical corruption refit remains unfitted pending EXR admission.
+
+
+## 2026-09-08 — actual coarse JXL allocation policy screen
+
+**STANDS, failed training-family policy screen; no fit or qualification.** The
+same four canonical families and existing 256/512 PNG variants feed a fixed
+coarse-density policy. Before its map is applied, every distinct local globally
+rescaled integer raw field in [2/3,3/2] is encoded and scored. This does not
+exhaust other codec controls. All eight 256 cells improve D at budget, but
+Butteraugli/SSIM2 noninferiority fails; 512 engineering coverage has further
+losses. No separate validation or terminal family participates. The 249-encode
+primary and all 498 judge values reproduce; 36 analysis and 11 CLI refusal
+controls pass. [Failed policy record](../benchmarks/zensim_coarse_allocation_2026-09-08.md).
+
+
+## 2026-09-08 — existing HDR PNG development inputs, user correction
+
+The canonical imazen-26 `variant/png-v3` branch has all 76 HDR PNG companions;
+all 76 local payloads match branch LFS SHA-256 OIDs and sizes. The family split
+is 38 train / 20 validation / 18 terminal. The active August 23 15-scale set
+(1,140 files) is also local; it retains June's pixels and membership and inherits
+the current family split. No fitting, scoring or terminal pixel read occurred.
+This is the HDR development source path. UPIQ's separate 30 EXRs serve protected
+holdout-content admission and must not be described as needed to obtain HDR
+training images. [Binding, exact revisions and chronology](TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
+
+
+## 2026-09-08 — EXR ownership correction, after the HDR PNG binding
+
+The user explicitly selected `zenextras/zenexr` wrapping the Rust `exr` crate.
+This resolves the earlier exception question and supersedes the unpushed custom
+zenbitmaps EXR reader, whose verified source checkpoint remains archived.
+The replacement preserves all 124,609,944 f32 samples across 98 saved independent
+fixtures and 30 UPIQ HDR reference outputs. Source windows, chromaticities,
+luminance metadata and associated alpha remain explicit.
+[Decoder contract and parity record](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
+No human scores or distorted holdout images were read, no image-data model was
+fit, and no content-admission decision follows from pixel parity. The remaining
+reference fingerprinting/contextual audit still governs corruption-head fitting.
+
+## 2026-09-08 — reference admission completed; first head fit hits serving guard
+
+The remaining 12-source × 30-UPIQ-HDR screen completes through zenexr with zero
+strict flags. Two looser matches are visually distinct paper/photograph pairs.
+The prior 182-SDR-reference audit reproduces exactly. Full declared coverage
+and its reviews are bound in `CONTENT_ADMISSION.json`; no source is excluded.
+The existing source-family split, crop-blind limitation and protected labels
+remain unchanged. HDR development still uses the existing imazen-26 PNGs.
+
+The registered seed 4101 trains on 5,504 fit rows and calibrates on 2,709
+separate-origin rows. The exported head matches Python in Rust on all 13,892
+prepared rows (including the 5,679 separate evaluation rows), but the full
+pixel audit correctly rejects unsupported companion feature coverage in D's
+fast extraction plan. No pixel scorecard or model qualification is produced;
+the next two seeds are not run. [Evidence and next serving task](../benchmarks/canonical_corruption_refit_2026-09-08.md).
+
+## 2026-09-08 — later D-regime corruption refit and honest-cost screen
+
+The user requests D's existing extraction regime instead of extending it for
+the all-372 head. Canonical source tables and the completed admission receipt
+are unchanged. The trainer explicitly selects f0..227 for the head while
+preserving the full 372-column source contract and original source roles.
+
+Three seeds serve through Rust on all 15,060 original attempts. Array export
+parity and composed pixel/cache/stored-f32 scores pass; one honest row has a
+non-firing confidence difference after f32 rounding. Validation detects all
+tested non-inert RGB swaps and 5,330/5,353 corruptions, but lowers 20/304 honest
+native outputs (22/326 honest rows overall). Strict below-q20 ordering is
+4,877/5,353. The fixed screen fails; no model or default is promoted.
+
+A preregistered follow-up changes honest fit weights by 4/16/64 and evaluates
+only the twelve training origins, including the four separate calibration
+origins. Cost 4 hits a pixel/stored-f32 fire disagreement; costs 16 and 64 fail
+calibration protection/ordering bars across three seeds. No cost arm advances
+to validation. No threshold is retuned or admission rule relaxed.
+[Recipe, chronology, hashes and complete results](../benchmarks/canonical_corruption_d228_2026-09-08.md).
+
+## 2026-09-08 — explicit corruption input precision, after the D228 cost sweep
+
+The existing cost-4 recipe is reproduced once with a new ZCTH v2 contract:
+round declared inputs to f32 before scaler arithmetic. Original source tables,
+admission, roles, head IDs and fitted numeric sections are unchanged. All
+9,036 training pixel comparisons and 8,213 unique array parity rows pass exact
+raw/probability/fire/composed-score comparisons. Legacy v1 remains unchanged.
+Calibration still lowers three honest near-lossless JXL outputs and fails the
+fixed screen. No validation/terminal evaluation or new data admission occurs.
+[Precision evidence and remaining accuracy work](../benchmarks/corruption_input_precision_2026-09-08.md).
+
+## 2026-09-08 — honest native-map supplement and decoder-contract finding
+
+Reuse 608 honest JXL/AVIF non-scalar bound outputs on the eight admitted fit
+origins. Current native decoding/extraction adds 402 unique honest pixel pairs;
+calibration and validation inputs remain unchanged. One fixed v2 cost-4 fit
+passes 8,615-row array and 9,644-attempt pixel audits but lowers two honest
+calibration outputs, still FAIL; no validation/terminal scoring.
+
+All 336 JXL current decoded hashes differ from their old native-bound hashes,
+with D score drift up to 2.425 points. All 272 AVIF decoded hashes agree. Keep
+the two JXL decoder contracts distinct; the current training packet uses only
+the canonical decoder. Source inspection suggests U8 dithering versus f32
+plain rounding, but the decoder packages also differ and a controlled causal
+check remains necessary. [Full record](../benchmarks/corruption_honest_map_2026-09-08.md).
+
+## 2026-09-08 — native JXL delivered-pixel repair, after the honest supplement
+
+The same-decoder on/off control now reproduces all 336 canonical and historical
+hashes. Dithering changes 8,646,810 RGB samples by at most one code; only 178
+samples differ between canonical undithered and historical f32-rounded output.
+Native targeting now uses canonical U8 dithering and rejects older decoder-era
+calibrations. On the unchanged twelve admitted train sources, 756 newly emitted
+bitstreams independently reproduce every decoded hash and f32-reported D score.
+Work: 756 full encodes, 1,512 internal reconstructions/map evaluations/native
+comparisons, and 756 delivered-image comparisons, plus separate audit costs.
+No model fit, validation/terminal scoring, or protected-content admission here.
+The preceding honest-head fit already used canonical pixels; this decoder
+repair does not invalidate or erase its two honest false positives.
+[Controlled measurement and serving contract](../../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).
+
+## 2026-09-08 — base preferences after canonical JXL decoder repair
+
+Reuse 252 canonical scalar JXL outputs and twelve identities on the same
+admitted train origins. Nine packed/declared-ID models have complete Rust
+pixel/cache audits; an additional D audit matches the PNG judge inputs to
+bitstream pixels exactly. SSIM2/Butteraugli resolve 2,471 within-source pairs.
+D has zero wrong directions; generation A/B have three each; three A_plain
+seeds have 170–202 and H_anchorlad seeds 48–69. No network fitting or validation
+occurs. The strict-improvement screen advances no model, and cannot distinguish
+new zero-error candidates from D. Preserve its outcome and the separate spatial
+RD failures. A subsequent A/D blend fit is registered on eight fit origins,
+with four separate training-calibration origins and full Rust serving required.
+[Complete record](../benchmarks/model_preferences_2026-09-08.md).
+
+## 2026-09-08 — fitted A/D composition and actual spatial coverage
+
+The preregistered hundredth-grid fit chooses D weight 0.41 on eight fit origins:
+all 1,647 consensus pairs order correctly. All 824 pairs on the four separate
+training-calibration origins also pass. Rust `BakeScorer::ensemble` reproduces
+the complete calibrated blend exactly, with twelve exact identities and no
+score above 100. No new network, encoding, validation or terminal work occurs.
+
+Actual spatial serving on the same 264 pairs matches scalar scores/features,
+but 252 nonidentity maps omit active pooled-feature terms (169 unique IDs in
+f156..371 across the corpus). The D-only endpoint has complete coverage. The
+scalar screen passes; native steering remains incomplete. Next implement the
+missing v1 pooled integrands in the existing Rust attribution owner, preserving
+feature arithmetic and explicit discontinuity/coverage limits.
+[Model, controls and delivery](../benchmarks/model_blend_2026-09-08.md).
+
+
+## 2026-09-13 — Rev3 feature subset development packet
+
+Fresh canonical extraction of the September 8 model-preference packet:
+264 pairs, twelve previously admitted T2 training origins, canonical decoded
+PNG bytes and SSIMULACRA2 proxy labels pinned by the committed
+`benchmarks/feature_screen_2026-09-13.json`. No new content or protected labels.
+The existing eight fit origins remain fit; prior calibration origins1214/6064
+become checkpoint dev,8462/9066 inner-test. All are still T2, previously
+examined; this is not an unseen evaluation claim. Features are f64 Parquet
+with source IDs, era `v1screen_rev3`, formula3, producer hash d16a1091.
+Per-run manifests bind original/decoded bytes, splits, extractor/decoder,
+trainer/panel binaries, cache tables and baked output hashes. No Rev1 table
+was relabelled. Two H32 proxy models train and pass final Rust pixel/cache
+audits; they do not qualify a competitive or production model.
+
+Artifacts: `~/work/zensim-validation-2026-09-13/feature-screen-final-cold-complete/`
+and `feature-screen-final-warm/`; earlier CSV-withinref and Snappy-format
+attempts fail before training and remain preserved. A subsequent preliminary
+fit exposed the trainer's historical automatic full-verdict launch: it refused
+Rev3 before corpus scoring. The final recipe passes the new `--no-auto-eval`
+flag; neither final run launches that evaluator. [Recipe and results](../benchmarks/fullres_y_subset_2026-09-12.md).
+
+
+## September 14: strict train/eval minimal-wide study
+
+See [registration, methods and results](../benchmarks/minimal_top_2026-09-13.md)
+and its adjacent recipe/results JSON. Original canonical KADID TRAIN (5,000/40
+refs) plus approved train-only TID (3,000/25 refs) train the frozen models.
+Original canonical KADID SELECT (3,125/25 refs), admitted as eval, is re-extracted
+with Rev3; no retired screen/test cache is read or relabeled. Source admissions,
+canonical-view hashes, pixel hashes and row order live under
+`~/work/zensim-validation-2026-09-13/minimal-top/`. All 8,125 KADID rows align
+exactly on 12 unchanged MSE coordinates; a within-reference shifted-row negative
+control rejects every row. Repeated signatures have identical decoded pixels.
+
+The native Rust audit verifies 100 identity pairs in the 3,125-row eval. The
+final identity-bearing view copies the same features/labels and adds verified
+0/1 `pixels_identical` evidence. `ensemble_score_rows` and `bake_verdict` now
+consume it through `BakeScorer::score_features_with_identity`. Earlier raw
+feature-only eval artifacts are retained but superseded by `final-eval/`.
+This correction changes no training input, checkpoint, calibration or model.
+
+## September 14: native codec validation for frozen Rev3 candidates
+
+[Protocol and results](../benchmarks/rev3_codec_eval_2026-09-14.md) admit the
+hash-bound R1b D1 validation keys for imazen26/nonphoto/hfnlproxy, with canonical
+source suffixes {1,3,5}. All 20,655 distinct original bitstream pairs produce
+finite native Rev3 full944 features; 20,812 original slice memberships are
+preserved. No size-dependent row dropping or old944 feature reuse. These are
+overlapping historical SSIMULACRA2 proxy views, not independent human studies.
+Original imazen26 targets are raw SSIMULACRA2; the other two are divided by 100.
+New tables explicitly normalize all three to score/100 and retain original units.
+
+The audit optionally calls existing fast-ssim2 on its exact decoded RGB8 buffers.
+Historical/current teacher drift is recorded separately; high-band membership
+is unchanged. Matched native B/D Rev1 extraction covers every pair and every
+reported baseline prediction matches its image score exactly. Unknown legacy
+bake training-era metadata remains unqualified. Nine frozen candidate verdicts
+run through public BakeScorer on native features. Prior human panels are reused
+only after manifest/hash checks and remain unchanged. All candidates remain
+NO-SHIP, with complete product composite, targeting/RD and performance missing.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/rev3-codec-eval/`, including
+original protocol/binary, admission, per-file/pixel hashes, full row predictions,
+source bootstrap, codec panels and teacher drift. No test/terminal table or
+historical internal test segment was opened or reclassified.
+
+## 2026-09-14: explicit native SDR corruption delivery
+
+[Color resolution](../benchmarks/integrity_color_resolution_2026-09-14.md) restores
+original TRAIN mobile source8014 via full CMS and explicit sRGB clipping/u8
+quantization before existing corruption operators. New manifest era
+`native-corruption-fixtures-v2`; original/source-delivered/generated hashes and
+input receipt are bound. TRAIN source1200 is byte-exact with v1 (718 files).
+Frozen head assessment only: 716 rows, 705 distinct, 30/31 severe proxies,
+0/3 known-valid activations. No fit/calibration/EVAL/public TEST access. Original
+181 native nonidentity quarantines remain; dirty historical producer prevents
+conclusive color admission. Do not mix old and v2 training packets.
+
+## 2026-09-14: complete Rev3 recovery caches and corrected native input audit
+
+Full TRAIN-only legacy-RGB8 Rev3 caches are verified: CID22 17,611 pairs/201
+references; SafeSyn 196,086 pairs/3,218 source paths,944finite features each,
+zero failures. Original oracles remain alongside fresh same-buffer fast-ssim2.
+SafeSyn retains 11,591 negative targets. Parquet SHA256:
+`6044fdc8cf4f646cda6457a9e73e54edd7d9fed57dfd95f1c47e1f4091220c68`.
+Source-family fit/development/calibration partition admission is still pending;
+no fitting, EVAL/TEST access or qualification occurred.
+
+The214-pair native SDR TRAIN audit now supports existing fast-ssim2 on canonical
+linear-float buffers with original and transformed hashes. Existing feature,
+scalar and spatial results remain unchanged. This does not resolve historical
+producer quarantines or make SDR peer scores an HDR oracle.
+
+HDR input correction is `hdr-common-primaries-v2`: declared primaries transform
+to the opsin linear-sRGB basis without SDR clipping; HLG uses source-basis
+luminance. Affected old HDR caches/calibrations are incompatible. The datagen
+extractor requires `hdr-common-primaries-v2-bt2020-pq10000`, preserves native16,
+checks color metadata and refuses partial failures before producing output.
+No corrected HDR training cache is claimed here. See [results](../benchmarks/rev3_native_optimization_2026-09-14.md).
+
+## 2026-09-19: JPEG AIC2026 ingested as a metric-agreement panel (no human labels)
+
+**What it is.** `AIC2026` (DaRUS doi:10.18419/DARUS-6156, v2.0, CC BY-SA 4.0;
+Jenadeleh, Sneyers, Ascenso, Richter, Karabutov, Jia, Alshina, Watanabe,
+Pinheiro, Ebrahimi, Saupe; arXiv:2607.22783) — 70 source images, 17
+codec/configuration arms (5 base codecs on all 70: JPG, J2K, JXL, AVIF, JAI;
+12 extended arms on 11–13 sources each), 20 distortion levels per arm (FTIC has
+6), **9,618 distorted images**. Levels are placed to span roughly 0.2–4.0 JND
+using CVVDP estimates. Ships full-resolution decodes, 840×944 `PTC_` (plain) and
+`BTC_` (boosted/flicker) crops, codec-native bitstreams, and two score tables —
+`metrics_fullres.csv` and `metrics_cropped.csv`, 9,618 rows each, 71 objective
+IQA-method score columns (including `JND_*` calibrations for seven of them).
+Local at `/mnt/v/datasets/aic2026/`.
+
+**Why ingested.** It is the largest public population that holds *one content
+set* against *17 codec arms* at *matched, finely-spaced fidelity* in the
+high-quality range — the exact shape needed to ask whether a single zensim dial
+value means the same thing across codecs, and whether our ladders are monotone
+where a codec's operating points are only ~0.2 JND apart. It also carries peer
+implementations of metrics we ship our own versions of (`SSIMULACRA2`,
+`proposal-Butteraugli`), which makes an implementation-parity check possible
+against a third party's numbers rather than our own.
+
+**What it cannot show.** *It contains no human scores.* The subjective study
+over these stimuli had not been released. Therefore:
+
+- Nothing computed on it is accuracy against human judgment. Every number is
+  **metric-vs-metric agreement** or **ladder behaviour**. Say so wherever it
+  is cited.
+- It must not be given a synthesised `human_score`, and it must not become a
+  `rank.<corpus>` board axis that feeds the composite. If it ever becomes a
+  board axis it is a clearly-labelled non-human agreement axis, excluded from
+  the composite.
+- **CVVDP placed the levels**, so CVVDP is monotone on these ladders by
+  construction and is not a fair contestant on the monotonicity axis. A
+  monotonicity table that ranks CVVDP first is reporting the selection rule.
+- Column orientation is mixed (`JND_*` and the distance metrics rise with
+  distortion; `SSIMULACRA2`/`CVVDP`/`PSNR`/`SSIM` families fall). Sign-normalise
+  per column or every correlation sign is a coin flip.
+- `BTC_*` crops are *boosted* stimuli (2× magnification and amplified
+  artifacts, built for flicker presentation). They are not ordinary images and
+  the shipped score tables do not cover them — `metrics_cropped.csv` is the
+  `PTC_` population.
+
+**Split role.** Registered in [DATA_SPLITS](DATA_SPLITS.md) §3 and §3d as a
+member of `jpeg-aic-family-holdout-2026-09-01`: T0-family, **eval-only, never
+trained on**, membership by content.
+
+**Exposure.** First read by any zensim model on **2026-09-19**. All six models
+scored in that first read (`PreviewV0_2`, `B`, `C`, `D`, and the two frozen
+Rev3 ensembles `R915_y60_h32_ens5` / `R915_basic228_h128_ens5`) were frozen
+before that date, so the first read is an honest out-of-sample observation for
+all of them. Results: `benchmarks/aic2026_agreement_2026-09-19.md`; artifacts +
+manifest pointer `benchmarks/aic2026_2026-09-19.pointer.md`.
+
+## 2026-09-19: CID22 49-ref human set — registered A/B split for DVIFM standalone constants fitting
+
+**User direction (verbatim):** "use the training recipie from prior leading
+models. for optimizing the coefficient and exponents you should consider
+learning from cid22 test as they did, and compare it to other data sets like
+imazen26 crops with ssim2 as oracle" — the DVIFM authors fitted their ~29
+luma parameters on CID22 human data (talk transcript, fit list: CID22,
+TID2013, KADID-10k JPEG/JPEG2000 subsets, NLCD/NNCD, AIC-4 example set);
+this entry is our ledgered equivalent inside the existing holdout rules.
+
+**The split.** The 49 references of `CID22_validation_set.csv`
+(`reference_img` membership only; zero overlap with the 201-ref
+SSIMULACRA2-anchored train population — verified disjoint) sorted by
+basename, Fisher–Yates shuffled with recorded seed **20260919**:
+
+- **CID22-A (25 refs, FIT-ALLOWED for the Phase-2d constants fit only):**
+  `1189261.png`, `1531677.png`, `159550.png`, `1624487.png`,
+  `162520.png`, `164595.png`, `2079234.png`,
+  `21169144185_3f7977cb5a_o.png`, `225228.png`, `2389166.png`,
+  `2936831.png`, `3316926.png`, `3653963.png`, `373965.png`,
+  `3762075.png`, `4215100.png`, `6078297.png`, `6292444.png`,
+  `70497.png`, `7062219.png`, `844297.png`, `pexels-photo-2686358.png`,
+  `pexels-photo-2802032.png`, `pexels-photo-4210863.png`,
+  `ularapi_Semarang_City_Logo.png`
+- **CID22-B (24 refs, SEALED):** `1025469.png`, `1044329.png`,
+  `1279330.png`, `1418519.png`, `1420710.png`, `1475938.png`,
+  `1544947.png`, `2190188.png`, `2253934.png`, `2670327.png`,
+  `2736139.png`, `2775196.png`, `2887497.png`, `297394.png`,
+  `3156482.png`, `3316926_opo25u.png`, `3637739.png`, `382297.png`,
+  `5055743.png`, `5458393.png`, `7552578.png`, `792079.png`,
+  `adriankierman-report-page.png`, `pexels-photo-1933873.png`
+
+**What is fitted on A.** The standalone DVIFM convex head only: per-level
+visibility/block constants `{g, P, C₀, β, ς}` + simplex level/channel
+weights + one scale λ — ≤ ~90 scalars for the 3-plane variant (30 for
+luma-only), plus a per-domain min-max normalisation constant pair. **No
+MLP, no feature selection, no checkpoint selection** — this is the
+throwaway linear-head analogue the dispatch specified, not a zensim model
+fit.
+
+**Consequence.** Any artefact consuming CID22-A-derived constants carries
+CID22-A exposure and may only quote CID22 on subset B, labelled
+`CID22-B(24)`. CID22-B is read exactly once, after all Phase-2d variants
+are frozen, as a single descriptive table (SROCC/KROCC/PLCC per variant +
+comparators; prereg `benchmarks/dvifm_screen2d_prereg_2026-09-19.md` §5.4).
+No iteration after that read. This entry was committed before any MCOS
+value was read for fitting (membership columns only were used to build
+the split).
+
+## 2026-09-23: Rev4 existing-family feature bank — content-addressed f32 sidecars, promoted with corrections
+
+**What was built.** `/var/tmp/rev4-featbank/bank/` — the Rev4 feature bank,
+existing-family Rev3 rows only: 18 sets, 249,227 source stimuli → 248,983
+unique content-addressed `pair_key`s (244 pixel-identical stimuli collapsed,
+features verified bit-identical before collapse), ≈696 MB of
+`zstd-3/BYTE_STREAM_SPLIT` parquets. Feature set
+`basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#b782e349`
+(producer); the bank's populated-905 storage form is registered as consumer
+`…/ceiling_rev3#e3db6aab` in `benchmarks/feature_sets_registry.json`.
+Extractor: pinned `extract-native-admission`, sha256
+`7c7ffbbfa033e8ca1a8f103d472b61ccde061c2394b03d519af2852ee8eeda87`,
+`ZENSIM_FORMULA_REV=3`, `ZENSIM_ROOT_FORM=sqrt`. Report + per-file hashes:
+`benchmarks/rev4_featbank_extract_2026-09-23.{md,json,pointer.md}`.
+
+**The actual why / corrections worth remembering.**
+
+- The ext944 caches were a *different era* (same decode, different formula
+  revision) — proven by bit-compare, not assumed. Only baseline-recovery
+  (cid22_train, safesyn) and the ceiling parquets were true Rev3 caches;
+  everything else was fresh-extracted. Fresh re-extraction of all 11,125
+  ceiling rows is bit-exact vs the ceiling parquets on all 13,872,080 cells.
+- The extractor's `feats.csv` comes out sorted by `ref_basename`, NOT pairs
+  order — positional joins silently corrupt. Every fresh pairs TSV carries a
+  dense `row_id` echoed into audit JSONL and CSV; all joins are keyed.
+- KADID no-op level-1 distortions decode to identical pixels: distinct
+  source stimuli collapse onto shared `pair_key`s (train 5,000→4,880,
+  SELECT 3,125→3,050, TERMINAL 2,000→1,952; CSIQ 866→865). Labels retain
+  every stimulus (`source_row_id`); `keys.n_stimuli` is the multiplicity.
+- `cid22_a25`'s `human_score` is **CID22 human MCOS/100**, not an SSIM2
+  oracle — caught at review; `label_scale` is now a per-set manifest field.
+- Held-out `human_score` replicas in extraction `pairs/`+`raw/` were moved
+  (not deleted/regenerated) under `/var/tmp/rev4-featbank/_sealed/` per
+  review correction 4a; the bank emits no labels for confirmation sets.
+- **No feature here is shown to help.** Nothing was fitted, selected, or
+  claimed; the bank is a storage/provenance artifact. Part B (new-family
+  sidecars C1–C4 + C8 gmsbank) is gated on `featbank-impl` and
+  `codex-gmsbank` reviews plus explicit user go.
+
+
+## 2026-09-24 — quarantined C8 chroma calibration (gmsd-chroma)
+
+C8's unconsumed f1322+ definition is revised in this lane. Width1502 alone
+cannot identify it: native Y plus coarse XYZ/CS replaces the prior all-scale
+XYZ gradient bank. Source prereg9016272c and implementationf38befae, design
+`benchmarks/rev4_gmsbank_design_2026-09-23.md`, calibration
+`benchmarks/gmsd-chroma_calibration_2026-09-24.md`. No f0–f1321 definition changes.
+No human labels entered the pixel calibration or Part B gates.
+
+The 652 previously frozen CID22 TRAIN/SafeSyn TRAIN records yield1520
+native/box-derived pair/geometry records under the committed size/content
+selection and inherited source groups. Original RGB8 decode snapshot
+3306465d56d279a512b02c3a63de701e9b634d6aebda5e12fb164817ba491122;
+this preserves the parent's legacy RGB8 decode era, including its recorded
+AVIF route limitations. Do not mix with a changed decoder era by width.
+Source manifests, exact commands, producer sources and resolved dependency
+locks are retained under `/var/tmp/gmsd-chroma/`; large derivative/XYB planes
+are in `/var/tmp/gmsd-chroma/remote-r5600g/` (14,566 files, 4.4 GB, copied from the former remote tree, which has since been removed) and its mirror on the tower at `output/zensim/gmsd-chroma-2026-09-24/remote-r5600g/` (sha256 spot-checked). Calibration report SHA256
+`a6aecdf036d89b7afef10e9c8aaa6c935836fbc69ed12950e56f41eabcf9c633`.
+
+Author MDSI maps are differential oracles only and enter no dataset/model.
+The potential proposal updates P1 and proposes optional P2b (MDSI peer scalar);
+its admission requires the coordinator's pre-label decision. No potential
+fit, sidecar promotion, registry adoption or push is authorized by this record.
+
+
+## 2026-09-25 — restored-cut sidecars (restore-cuts, quarantined)
+
+Four default-off families appended after C8 (COST_CUTS_AUDIT A1, B2, Ambiguous 7, B1): `mapdev` f1502-1561,
+`z1max` f1562-1789, `gmsnative` f1790-1819, `dvifmgate` f1820-1824 (width 1825). f0-f1501 unchanged (2,000
+SafeSyn pairs: `--full-gmsbank` CSV byte-identical to main, all-on prefix 0/3,004,000 mismatches).
+Sidecars over the 18 promoted bank sets (248,983 keys; pixels only, no label read) at
+`/var/tmp/restore-cuts/bank/`; record `benchmarks/rev4_restore_cuts_2026-09-24.{md,json,pointer.md}`, design
+`benchmarks/rev4_restore_cuts_design_2026-09-24.md`, cost `benchmarks/restore-cuts_cost_2026-09-24.md`. Producer
+`ec5b1821`, Rev3/sqrt, `legacy-rgb8`. Sidecars from this era must not join stored sidecars of another era by
+width. No feature is shown to help; the potential lane decides (arm proposal
+`benchmarks/rev4_restore_cuts_potential_prereg_proposal_2026-09-24.md`).
+
+
+## 2026-09-22: CID22-49 carries one picture under two names — CID22-B(24) corrected to CID22-B(23)
+
+**Finding.** The 49-reference CID22 validation set contains one picture twice:
+`844297.png` (in CID22-A) and `3316926_opo25u.png` (in CID22-B). The existing
+near-duplicate owner (`check_holdout_overlap --native-png`, all 49 references
+against themselves, review band d ≤ 16) returns exactly one cross pair at
+Hamming 0 — this one — and `flag_confirm` adjudicates it as the same picture
+(luma RMSE 0.74 on the 0–255 scale, RMSE/std 0.014, NCC 0.9999; not
+byte-identical). The four other review-band flags (`2887497.png` against
+`373965.png` d=14, `3316926_opo25u.png`, `3653963.png` and `844297.png`
+d=16) are unrelated content (NCC −0.15 to 0.40, RMSE/std ≥ 1.23). The
+similarly named `3316926.png` (in A) is **not** the same picture as
+`3316926_opo25u.png` (NCC −0.007) — the filename is misleading in both
+directions. Record: `benchmarks/dvifmish_cid22_nncd_audit_2026-09-22.md`.
+
+**Consequence for the A/B split.** The 2026-09-19 split was by reference
+filename (25/24, zero shared names) and so leaked this picture: one of B's 24
+references (89 of its 2,100 pairs) duplicates a fitted A reference. Any
+split of CID22-49 by filename leaks it; **splits must be by content hash**.
+
+**Correction of the spent read.** The single registered CID22-B read (verdict
+lane, 2026-09-21) was re-scored on the 23 clean references (2,011 pairs) from
+the per-row scores it already produced. This is a correction of the SAME
+already-spent read — no label was read that had not been read, no model was
+refit — and not a second read. SROCC 24 → 23: `dvifm_gate` 0.7738 → 0.7797,
+`fast-ssim2` 0.9131 → 0.9250, B 0.8899 → 0.9000, D 0.8795 → 0.8831,
+R915_basic228 0.8968 → 0.9115, R915_y60 0.8613 → 0.8737. Every paired
+reference-bootstrap delta (dvifm_gate − peer) stays negative with its 95% CI
+below zero. **No conclusion of the verdict record changes.** Script:
+`research/2026-09-dvifm/dvifmish-eval/cid22b_clean23.py`.
+
+## 2026-09-22: CID22-49 human labels — full-set exposure for the dvifmish author-style DVIFM fits
+
+**User direction (verbatim).** Work order §4: "Train the best configuration on
+full CID22 human data (user direction: \"consider\")" … "fit it on all CID22
+human validation pairs the way the author did, to get the like-for-like with
+their in-sample 0.88289 / 0.69446" (the talk's reported CID22 figures). Variant selection (2026-09-22):
+"Constants — THREE sources, each a preset: full CID22 human, author-style
+(ledger the exposure first, per §4)". This entry is committed before any
+CID22 label is read for these fits.
+
+**What is fitted.** Only standalone DVIFM constants and a small head: per
+(plane, level) visibility knee / slope / sharpness, signed-power exponent g,
+error power p and pooling exponent L as each configuration's structure
+defines them (visibility slope β shared across levels and planes), the
+simplex level and channel weights, and the three-parameter output map
+`a·exp(−λE)+b`. No MLP, no feature selection, no zensim model fit. Fitter:
+the faithful lane's refit-map-MSE fitter generalised to several planes
+(`research/2026-09-dvifm/dvifmish-eval/`). Data: all 4,292 human pairs of the
+49 references (48 distinct pictures).
+
+**Which artefacts.** The dvifmish presets whose name carries `cid22`
+(the "full CID22 human" constants source): the variant screen's
+constants arm, the §4 like-for-like fits of the talk-faithful and of the
+leading configuration, luma-only and three-plane.
+
+**Consequence.** Those presets have **zero held-out CID22 claim**: their
+CID22 numbers are fit-domain only, labelled so wherever they appear, exactly
+like the talk's reported in-sample CID22 figures. For every other model,
+CID22-B(23) remains the held-out CID22 read, and only for models never
+fitted or selected on B.
+
+**Also recorded here: CID22-A as a human selection leg.** The dvifmish
+variant screen ranks configurations fitted on SafeSyn (never on CID22) by
+their SROCC on CID22-A (with KonFiG validation) — the same DVIFM-constants
+purpose CID22-A was released for on 2026-09-19. Models chosen by that screen
+quote CID22 only as CID22-B(23).
+
+## 2026-09-22: NNCD-IQA registered as an EVAL-only corpus (zensim#62)
+
+**What it is.** NNCD-IQA (Khan, Dardouri, Kaaniche, Dauphin, Multimedia Tools
+and Applications 2022, doi:10.1007/s11042-022-13842-8): 16 Kodak reference
+photographs (768×512) × 5 codecs (JPEG 2000 and four learned codecs:
+bmshj2018-factorized, bmshj2018-hyperprior, cheng2020-anchor, FCNN-LS) × 4
+rates = 320 distorted images with MOS (higher = better). Local:
+`/mnt/v/datasets/nncd-iqa/` (zips + `MOS_scores_sorted.csv`, sha256 in
+`SHA256SUMS` and in `zenpapers/datasets/NNCD-IQA.pointer.md`); extracted
+copies for scoring under `/var/tmp/dvifmish/datasets/nncd-iqa/` (deterministic
+unzip of the pinned archives). It is the "NLCD/NCD ~320 images" set in the
+DVIFM talk's list.
+
+**Role.** EVAL-only, never trained on, never used for fitting, calibration or
+selection. Target orientation: quality (MOS rises with quality).
+
+**Audit before first read.** (1) dHash (`check_holdout_overlap --native-png`,
+16 NNCD references against 4,544 training sources: joint-core-v1 references,
+SafeSyn fit and development sources, TID2013 and KADID-10k references,
+CID22 train 201 and validation 49, KonFiG references): 2 strict flags and 3
+more at d ≤ 12, all unrelated content by `flag_confirm` (NCC ≤ 0.43).
+(2) Because dHash is crop-blind, a crop-containment scan
+(`research/2026-09-dvifm/dvifmish-eval/crop_containment.py`): **every one of
+NNCD's 16 references contains, as an unscaled 512×384 crop (NCC 1.0000), one
+of TID2013's references** — 16 of TID2013's 25 references (I03, I04, I06, I07,
+I09–I12, I15–I17, I19–I23) are crops of NNCD's 16 photographs. NNCD is
+therefore **not content-disjoint from TID2013**, which is a training-role
+corpus here: any model fitted on TID2013 rows has seen NNCD's scenes (as
+smaller crops, under different distortions). Scores on NNCD for such models
+must say so.
+
+**Exposure note.** During format inspection on 2026-09-22 the first four data
+rows of `MOS_scores_sorted.csv` (bmshj2018-factorized, image 1) were printed
+to the terminal before this registration. Nothing was fitted or selected with
+them.
+
+**First model read.** Frozen dvifmish presets and the frozen peers
+(fast-ssim2, zensim B and D, R915 Rev3 ensembles) after the dvifmish variant
+screen is closed; recorded in `benchmarks/dvifmish_eval_2026-09-22.md`.
+
+**Addendum (2026-09-23T05:32Z, before any DVIFM preset is scored on NNCD).**
+The frozen peers were read earlier than planned. Their NNCD scores were
+computed at 2026-09-23T03:50:26Z (files written, not examined by this lane).
+Around 05:10Z another session, while auditing the peer-score join, computed
+the peers' NNCD SROCCs (B 0.9325, D 0.9352, R915 basic228 ensemble 0.9299 in
+the bake's own row order) and reported them to this lane, which recomputed
+them at 05:14Z only to verify the corrected join. No DVIFM preset had been
+scored on NNCD. The variant screen's selection legs are CID22-A and KonFiG
+validation; NNCD plays no part in any fit or selection, and the peers are
+frozen external models. The DVIFM first read stays after the screen closes.
+
+**Addendum (2026-09-23T09:50:17Z, first DVIFM read).** The frozen dvifmish
+presets (27, frozen at dvifmish f562c519, 06:55:12Z) were first scored on
+NNCD at 09:50:17Z (to within 5 s), float path first, inside the final
+`repro/run.sh` of the evaluation record. The variant screen had closed at
+06:19:34Z. Nothing was fitted, calibrated or selected on NNCD, and no preset
+changes after this read.
+
+## 2026-09-22: CID22-B(23) read by frozen dvifmish presets (second batch on B)
+
+Work order §5 asks for CID22-B(23) as the held-out CID22 read of every dvifmish
+DVIFM configuration not fitted on CID22-49. Under the September 14 rule this is
+a frozen-model assessment of the published test population: presets are frozen
+(sha256 in the benchmark record) before the read, nothing is fitted, calibrated
+or selected on B, and no preset changes after it. **Prior exposure, disclosed:**
+B was read once before, on 2026-09-21 (verdict lane; its gate model is the
+`serving-gate-ycbcr3` preset, whose B number is that read's, 0.7738 on 24
+references / 0.7797 on 23). This second batch is not a fresh holdout for any
+model already read on B; for the new presets it is their first read. Presets
+fitted on CID22-49 (names containing `cid22`) are scored on all 49 references
+and labelled fit-domain, never on B as held-out. Record:
+`benchmarks/dvifmish_eval_2026-09-22.md`.
+
+## 2026-09-22: AIC-4 public sample read by frozen dvifmish presets (September 14 rule)
+
+**What is read.** The JPEG AIC-4 example dataset (`/mnt/v/dataset/aic4_sample/`,
+T0, eval-only): 5 sources × 60 test images = 300 pairs, as the 620×800 `PTC_`
+crops the subjects saw (zensim's existing pair list
+`/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv`) and, separately,
+as the full-resolution encodes (853×945 to 2592×1946) with the same labels.
+Target: the reconstructed JND `distortion` (distortion-oriented — rises with
+distortion), so every table reports |SROCC| / |KROCC| with the orientation
+stated. The DVIFM talk reports a result on "the AIC-4 example data set (300)";
+this is that public sample, read for comparison with the reported figure.
+
+**Rule.** September 14 clarification: a published test population may assess
+a frozen candidate. Models are frozen before the read (preset JSON sha256 in
+the benchmark record); nothing is fitted, calibrated or selected on AIC-4, and
+no preset is changed after it. Presets read: every dvifmish preset frozen at
+read time (the talk-faithful, serving and faithful-lane presets, the variant
+screen presets and the §4 CID22 presets) and the frozen peers (fast-ssim2,
+zensim B and D, the R915 Rev3 ensemble).
+
+**Prior exposure, disclosed.** AIC-4 has been read by earlier zensim
+assessments (the board's full evaluations), and its 50-row JPEG-AI slice is
+SDR25, zensim's seed-selection oracle. So no zensim bake's AIC-4 number here
+is a fresh holdout read. No DVIFM preset has been fitted, calibrated or
+selected on any AIC-4 or SDR25 row. Record: `benchmarks/dvifmish_eval_2026-09-22.md`.
+
+**Addendum (2026-09-23, before the read).** The same labels are also correlated
+with the anchor-metric scores the organisers publish beside them
+(`JPEG-AIC_metric_scores.csv` in jpeg-aic/JPEG-AIC-4-datasets, commit
+`56723f7`: PSNR-Y, SSIM, MS-SSIM, IW-SSIM, VMAF-neg, SSIMULACRA2, HDR-VDP-2/3,
+CVVDP), to check that this 300-pair set is the one the DVIFM talk ranks
+metrics on. Frozen external metrics, published scores, no fitting or
+selection.
+
+## 2026-09-22: AIC2026 read by frozen dvifmish presets — metric agreement only
+
+AIC2026 (registered 2026-09-19, T0-family, eval-only, **no human labels**) is
+read by frozen dvifmish presets to measure **rank agreement with the
+organisers' own objective columns** `proposal-DVIFM`, `proposal-DVIFM-0.2` and
+`proposal-DVIFM-0.2-use_chroma` (Spearman and Kendall, no fitting, no
+calibration), on the 840×944 `PTC_` crops (`metrics_cropped.csv`) and on the
+full-resolution decodes (`metrics_fullres.csv`). Purpose: which submitted DVIFM
+version the talk-based reconstruction resembles. Nothing is fitted, selected
+or calibrated on AIC2026; every number is metric-vs-metric agreement, never
+accuracy. Presets read: those frozen before this entry
+(`talk-faithful-luma`, `serving-gate-ycbcr3`, `ours-full-luma`) and, later,
+the variant-screen presets once frozen. Images extracted from the pinned
+archives (`SHA256SUMS`/`MD5SUMS.zips` in `/mnt/v/datasets/aic2026/`) to
+`/var/tmp/dvifmish/datasets/aic2026/`. Record:
+`benchmarks/dvifmish_eval_2026-09-22.md`.

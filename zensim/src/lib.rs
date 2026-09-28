@@ -273,6 +273,7 @@ pub mod source;
 /// Internal wire-format views used by the Rust baking and diagnostics tools.
 #[doc(hidden)]
 pub mod bake_metadata;
+mod sampling;
 #[doc(hidden)]
 pub mod score_math;
 pub(crate) mod ssim_form;
@@ -326,6 +327,9 @@ pub mod feature_set_id;
 #[allow(dead_code)]
 pub(crate) mod feature_defs;
 
+#[cfg(feature = "feature-regime-v2")]
+mod gmsbank_constants;
+
 // V2 "bounded" feature extraction — opt-in, strictly additive. See
 // feature_v2.rs's module doc and docs/FEATURE_V2_SPEC_2026-07-18.md.
 #[cfg(feature = "feature-regime-v2")]
@@ -335,6 +339,11 @@ pub mod feature_v2;
 // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
+
+// DVIFM-style block-visibility features (f956..f985, opt-in, off by
+// default). zenpapers/docs/iqa-methods/dvifm-zensim-feature-design.md.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) mod dvifm;
 
 // The extraction PLAN: one derivation from "what a consumer needs" to "what
 // the walk must run and how wide the answer is" — the pair (compute, layout)
@@ -475,6 +484,8 @@ pub mod research;
 /// `Stopper` (any `impl Stop` works).
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::ZensimError;
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub use metric::SteeringSession;
 pub use metric::{
     BakeScorer, FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };
@@ -501,6 +512,15 @@ pub mod __bench_stages {
         box_blur_1pass_into, box_spread_merge_f32, downscale_2x_into, fused_blur_h_ssim,
     };
     pub use crate::color::srgb_to_positive_xyb_planar_into;
+
+    /// Exact native SDR linear input for peer audits. Supports u16 sRGB and
+    /// f32 linear RGBA, declared primaries and the scorer's alpha composite.
+    /// Refuses HDR, preserve-gamut mode, invalid geometry and nonfinite input.
+    pub fn native_sdr_linear_rgb(
+        source: &impl crate::ImageSource,
+    ) -> Result<Vec<[f32; 3]>, crate::ZensimError> {
+        crate::streaming::native_sdr_linear_rgb(source)
+    }
     pub use crate::simd_ops::{abs_diff_sum, mul_into, sq_diff_sum, sq_sum_into};
 }
 /// Classification API — requires `features = ["classification"]`.

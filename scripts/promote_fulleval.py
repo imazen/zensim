@@ -26,8 +26,8 @@ rescores. What it adds per mode:
      per_pair (list: `scripts/v_next/gauntlet.py` CURATED_BOARD — the one owner).
 
   ENSEMBLES (`--members` / `--members-file`):
-  4. **M3 / M3a are NOT COMPUTABLE for an ensemble** (`diffmap_block_coherence --bake`
-     loads one ZNPR; an ensemble has no single ZNPR) — nulls per (2).
+  4. M3 / M3a require an explicit complete-ensemble sweep. The Rust coherence
+     instrument and m3a_sweep accept members and weights; absent results stay null.
   5. **The `model` block describes member 0 only** (`bake_verdict` introspects
      `Ensemble::primary`). This stamps `model.kind="ensemble"` + `model.members=k` + the
      member list, and `gauntlet.py` renders an `ens×k` marker wherever the bake is named.
@@ -81,7 +81,8 @@ from pathlib import Path
 DEFAULT_OUT = Path("/mnt/v/output/zensim/reports/fulleval")
 
 # Blocks that must survive promotion untouched — every statistic on the board.
-CARRIED = ("rank", "dial", "corruption", "corruption_head", "gates", "composite",
+CARRIED = ("scatter_assessment", "rank", "dial", "corruption", "corruption_head", "gates", "composite",
+           "composite_partial", "composite_coverage",
            "per_pair", "n_inputs", "regime", "bake", "bake_sha256", "repro")
 
 # Coherence-instrument fields that may be carried from an existing measured fulleval
@@ -91,6 +92,23 @@ COHERENCE_FIELDS = ("m3_coherence", "m3_n", "m3_dropped_mass_pct", "m3a_coherenc
 
 def _jc(x) -> str:
     return json.dumps(x, sort_keys=True, separators=(",", ":"))
+
+
+def _num_canon(x):
+    """`x` with every exactly-representable int turned into the equal float, so a
+    stored `0` and a fresh `0.0` compare equal. Some board cells were re-serialized
+    by a Python pass that wrote integral floats as ints; the VALUE is identical and
+    an equality gate must not refuse on the spelling. Bools and ints that do not
+    round-trip through float are left untouched (still compared exactly)."""
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, int):
+        return float(x) if int(float(x)) == x else x
+    if isinstance(x, list):
+        return [_num_canon(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _num_canon(v) for k, v in x.items()}
+    return x
 
 
 def read_members_file(path: Path) -> list[str]:
@@ -167,9 +185,8 @@ def promote(verdict: Path, name: str, members: list[str] | None, out_dir: Path,
         model["members"] = len(members)
         model["member_names"] = list(members)
         model["anchor"] = Path(str(src.get("bake", ""))).name or None
-        # An ensemble has no single ZNPR: the coherence instruments are NOT-MEASURED —
-        # a different statement from "measured low". (A carry still applies if a future
-        # ensemble-aware instrument fills them in the source.)
+        # Complete-ensemble coherence is carried when measured; absent values
+        # remain null rather than borrowing the anchor member's measurement.
 
     doc["source_verdict"] = {
         "path": str(verdict),
@@ -345,14 +362,24 @@ def reslice_rank(board: Path, verdict: Path, corpora, dry_run: bool = False,
                               dry_run, f"reslice rank.{{{','.join(changed)}}}")
 
 
+REPAIR_TAG_DEFAULT = "per-ref-orientation-pin-730a386e"
+
+
 def repair_rank_orientation(board: Path, verdict: Path, corpus: str,
-                            dry_run: bool = False) -> bool:
+                            dry_run: bool = False, tag: str = REPAIR_TAG_DEFAULT) -> bool:
     """Replace `rank.<corpus>` with a fresh same-bake verdict's block when the
-    stored block was produced BEFORE the per-ref orientation pin (`730a386e`,
-    2026-08-04 16:49) and the bake's pooled signed SROCC is negative — the
-    Orientation::Auto pooled-sign flip (SOTA-944 appendix O finding: 80 board
-    cells carried `per_ref_mean`/`frac_negative` sign-flipped vs the pinned
-    quality-orientation convention).
+    stored per-reference statistic was computed under a DIFFERENT orientation
+    than the one `bake_verdict` now pins. Two programs have used it:
+
+    * `per-ref-orientation-pin-730a386e` (default): the block was produced BEFORE
+      the per-ref orientation pin (`730a386e`, 2026-08-04 16:49) and the bake's
+      pooled signed SROCC is negative — the Orientation::Auto pooled-sign flip
+      (SOTA-944 appendix O finding: 80 board cells carried
+      `per_ref_mean`/`frac_negative` sign-flipped vs the pinned convention).
+    * `declared-orientation-2026-09-22`: aic4/sdr25 are DISTORTION-oriented
+      (`q_jnd`), but the pin treated them as quality-oriented until 2026-09-22,
+      so every pinned-era block reads a correct bake as 100% backwards
+      (benchmarks/board_orientation_fix_2026-09-22.md).
 
     This is a CORRECTION, not a re-measurement, and the gates enforce that:
     the fresh block must reproduce every orientation-INDEPENDENT field of the
@@ -378,7 +405,7 @@ def repair_rank_orientation(board: Path, verdict: Path, corpus: str,
     for k in set(old) | set(blk):
         if k in ORIENT_DEP:
             continue
-        if _jc(old.get(k)) != _jc(blk.get(k)):
+        if _jc(_num_canon(old.get(k))) != _jc(_num_canon(blk.get(k))):
             raise SystemExit(f"repair-rank: rank.{corpus}.{k} differs between stored and fresh "
                              f"verdict — this is not an orientation-only correction; refusing")
     o, n = old.get("per_ref_mean"), blk.get("per_ref_mean")
@@ -390,7 +417,7 @@ def repair_rank_orientation(board: Path, verdict: Path, corpus: str,
     srcs = dict(doc.get("rank_graft_sources") or {})
     srcs[corpus] = {"path": str(verdict), "sha256": hashlib.sha256(v_bytes).hexdigest(),
                     "name": v.get("name"),
-                    "repair": "per-ref-orientation-pin-730a386e",
+                    "repair": tag,
                     "superseded_per_ref_mean": o,
                     "superseded_frac_negative": old.get("frac_negative")}
     doc["rank_graft_sources"] = srcs
@@ -773,7 +800,8 @@ def registered_ladder_grid_shas(registry: Path | None = None) -> dict:
         return {}
     want = {str(Path(p)) for p in LADDER_GRID_PATHS}
     return {r["dial_grid_sha256"]: r.get("label", "")
-            for r in rows if r.get("path") and str(Path(r["path"])) in want}
+            for r in rows if r.get("path") and
+            (r.get("instrument_kind") == "floor-dense-ladder" or str(Path(r["path"])) in want)}
 
 
 def graft_gaddr_ladder(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
@@ -1130,6 +1158,10 @@ def main(argv=None) -> int:
                          "with --verdict's pinned block (sha-gated; every orientation-independent "
                          "field must be float-identical and per_ref_mean an exact sign flip; "
                          "appendix O per-ref flip repair)")
+    ap.add_argument("--repair-tag", default=REPAIR_TAG_DEFAULT, metavar="TAG",
+                    help="provenance tag stored in rank_graft_sources.<corpus>.repair for "
+                         "--repair-rank-orientation; name the program that motivated the "
+                         f"repair (default: {REPAIR_TAG_DEFAULT})")
     ap.add_argument("--mark-dominated", default=None, type=Path, metavar="BOARD_JSON",
                     help="DOMINANCE mode: board fulleval to receive dominated_by (see --dominated-by)")
     ap.add_argument("--dominated-by", default="",
@@ -1246,7 +1278,8 @@ def main(argv=None) -> int:
             reslice_rank(a.graft_into, a.verdict, a.reslice_rank.split(","), a.dry_run,
                          tag=a.reslice_tag)
         elif a.repair_rank_orientation:
-            repair_rank_orientation(a.graft_into, a.verdict, a.repair_rank_orientation, a.dry_run)
+            repair_rank_orientation(a.graft_into, a.verdict, a.repair_rank_orientation, a.dry_run,
+                                    tag=a.repair_tag)
         elif a.graft_rank:
             graft_rank_corpus(a.graft_into, a.verdict, a.graft_rank, a.dry_run)
         elif a.graft_dial_zones:
