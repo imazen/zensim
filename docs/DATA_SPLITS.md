@@ -996,3 +996,14 @@ Revision R1 (same day, before any v2 cell result): v2 also reads the TRAIN-role 
 of `safesyn` and `cid22_train` from the promoted bank, restricted to R915's recorded fit/dev reference split, as
 training-only legs; never evaluated. Pin: `benchmarks/rev4_featpot_v2_teacher_pin_2026-09-30.json`. Status before
 read: pending; update after read.
+
+## Exposure ledger — 2026-09-30: fleet transport of Instrument v2 inputs (ruling D1)
+
+The v2 wide tables (`/var/tmp/rev4-featpot/v2/wide/{real,p1,p2,p3}`: the five admitted human sources' features +
+targets and the two TRAIN-role teacher legs, per `benchmarks/rev4_featpot_v2_amendment_2026-09-30.md` revision R1)
+are packed into one content-addressed archive (sha256 `97a0c517f88efb34e217403388f36f5804e30c89a93745901ec5899e11cc3551`,
+8,900,170,387 bytes, `zenmetrics scripts/jobsys/pack_fit_data_v2.py`) and uploaded to the LAN object store under
+`s3://zentrain/jobs/<v2 jobset>/inputs/` for zenfleet fit cells (program sha
+`e791fcc310981f2f0661be4a819e7d8d69e1ee800b6d0e44cd67922a8de7121b`, image `ghcr.io/imazen/zenfleet-worker:fit-v2-v1`).
+No new population; the LAN store and workers are operator-controlled machines on the home network. No holdout table
+is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts excluded).
