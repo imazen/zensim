@@ -9,6 +9,7 @@ exports the best epoch by the weighted mean dev geomean3 (R915's --val-policy me
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -59,6 +60,7 @@ def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
 
 
 def main() -> None:
+    os.environ.setdefault("ZEN_PANEL_BIN", str(PANEL))  # the fit-cell executor sets it; local runs may not
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--spec", required=True)
     ap.add_argument("--head", choices=HEADS, required=True)
