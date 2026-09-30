@@ -978,3 +978,16 @@ cid22a, sdr25 and csiq tables to its terminal, including the human-score column 
 - AIC-3 and CID22-A are already potential-exposed under D1 (entries above). For AIC-4 (crop), SDR25 and CSIQ this
   is a 2-row incidental display, recorded here so it is never silent. Their holdout status is unchanged.
 - Disclosure: `~/tmp/zensim-paper/rev4/CVVDP_WGPU_AUDIT_DONE.md`, MISSING item 6.
+
+## Exposure receipt — 2026-09-30: rev4 featpot Instrument v2 (preread reservation)
+
+**POTENTIAL — ceiling, not a model score.** Governing record: `benchmarks/rev4_featpot_v2_amendment_2026-09-30.md`
+(this commit). Populations read by v2 cells: `kadid_train`, `kadid_select`, `tid2013`, `konfig_train`, `konfig_val`,
+`cid22_a25`, `aic3` — the same bank label files the promoted-bank baseline receipt already lists; no new
+population. KonJND-BPG is not read by v2. Forbidden and unchanged: CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID
+TERMINAL, LIVE, MCL-JCI, secret holdouts. Status before read: pending; update after read.
+
+Takeover reads the same day (already reserved populations, registered analyses): P0 / P2 / D2 MLP pooled aggregates
+and compares were computed on 2026-09-30 21:59–22:05Z from the fleet-era cells (`mlp_aggregate/`,
+`p2/mlp_aggregate/`, `p2/mlp_compare/`, `p2/d2_mlp_compare/` under `/var/tmp/rev4-featpot/`). Record:
+`~/tmp/zensim-paper/rev4/FEATPOT_AUDIT_2026-09-30.md`.
