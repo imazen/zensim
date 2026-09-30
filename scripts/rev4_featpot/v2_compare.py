@@ -57,7 +57,7 @@ def ref_draws(source: str, keys) -> list:
 
 def cell_boot(spec: str, head: str, source: str, i: int):
     """(point SROCC, bootstrap SROCC array) for one cell, cached beside its result."""
-    cdir = V2 / "cells" / spec / head / f"without_{source}_s{i}"
+    cdir = V2 / "cells" / f"{spec}__{head}" / f"without_{source}_s{i}"
     res = cdir / "result.json"
     if not res.is_file():
         return None

@@ -18,7 +18,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ROOT = Path("/var/tmp/rev4-featpot")
 V2 = ROOT / "v2"
-BIN_DIR = Path(os.environ.get("REV4_V2_BIN_DIR", "/var/tmp/fleet-fits/bin-v8"))
+# Fleet v8 era binaries locally; inside a fit-cell container the executor links them under target/debug.
+_V8 = Path("/var/tmp/fleet-fits/bin-v8")
+BIN_DIR = Path(os.environ.get("REV4_V2_BIN_DIR", str(_V8 if _V8.is_dir() else ROOT / "target/debug")))
 TRAINER = BIN_DIR / "zensim_mlp_train"
 FITBIN = BIN_DIR / "bake_dial_refit"
 PANEL = BIN_DIR / "panel"

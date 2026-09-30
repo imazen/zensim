@@ -4,6 +4,7 @@ Governing record: benchmarks/rev4_featpot_v2_amendment_2026-09-30.md, revision R
 
   python v2_wide.py pin            # hash every teacher-leg input into TEACHER_PIN (reads no label)
   python v2_wide.py build          # all variants; or --variant real|p1|p2|p3
+  python v2_wide.py keeplists      # spec -> (variant, kept columns), label-free, for the cells
 
 Legs: five human sources (full table for evaluation, plus fit/dev by a label-free reference hash, plus the
 merged human training tables for each held-out source) and two R915 teacher legs (SafeSyn, CID22-train;
@@ -223,11 +224,19 @@ def build_variant(variant: str) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("action", choices=["pin", "build"])
+    ap.add_argument("action", choices=["pin", "build", "keeplists"])
     ap.add_argument("--variant", choices=VARIANTS, action="append")
     args = ap.parse_args()
     if args.action == "pin":
         write_pin()
+        return
+    if args.action == "keeplists":
+        from v2_common import all_specs, arm_columns
+        lists = {spec: dict(zip(("variant", "keep"), arm_columns(spec))) for spec in all_specs()}
+        path = V2 / "wide" / "keep_lists.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"schema": "rev4-featpot-v2-keeplists-v1", "specs": lists}) + "\n")
+        print(json.dumps({"keep_lists": str(path), "sha256": sha(path), "specs": len(lists)}))
         return
     for variant in args.variant or VARIANTS:
         build_variant(variant)
