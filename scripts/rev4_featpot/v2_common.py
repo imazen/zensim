@@ -3,12 +3,14 @@
 Governing record: benchmarks/rev4_featpot_v2_amendment_2026-09-30.md (with its revision R1). POTENTIAL —
 ceiling, not a model score. Every value here is fixed by that amendment; change the amendment first.
 
-Wide-table layout (one table per leg per variant; a cell selects its arm with --keep-features):
-  f0..f943     bank Rev3 944 surface (39 structural zeros filled with 0, as admit_bank does)
-  f944..f1824  Rev4 research vector at its canonical IDs (csfw/DVIFM, C1-C4, gmsbank, restore families)
-  f1825, f1826 reviewed peer columns gmsd, gmsm (arm p3)
-  f1827, f1828 calibration columns oracle_lo, oracle_hi
-Variants: "real" and "p1".."p3" (columns f944..f1828 permuted jointly within reference over pair keys).
+Wide-table layout (revision R1.1): two table families, both WIDTH = 1825 columns, so a kept column's
+first-layer initial weights are identical in every arm of either family (--keep-features keeps full width).
+  main: f0..f943 bank Rev3 944 surface (39 structural zeros filled with 0, as admit_bank does);
+        f944..f1824 the Rev4 research vector at its canonical IDs.
+  aux:  f0..f943 bank; f944 gmsd, f945 gmsm (the reviewed peer pair, packed at registered IDs exactly as the
+        registered P2 arm did); f946 oracle_lo, f947 oracle_hi; f1322..f1501 gmsbank (arm p3); all other
+        columns 0. Every column a bake reads is a registered feature ID, which the product predictor requires.
+Variants: "real" and "p1".."p3" (the family's added columns permuted jointly within reference over pair keys).
 """
 
 import hashlib
@@ -18,9 +20,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ROOT = Path("/var/tmp/rev4-featpot")
 V2 = ROOT / "v2"
-# Fleet v8 era binaries locally; inside a fit-cell container the executor links them under target/debug.
-_V8 = Path("/var/tmp/fleet-fits/bin-v8")
-BIN_DIR = Path(os.environ.get("REV4_V2_BIN_DIR", str(_V8 if _V8.is_dir() else ROOT / "target/debug")))
+# Erratum R1.1 binary set locally (v8 trainer and panel, predictor from main 86fc02bb, admitted by
+# benchmarks/rev4_featpot_v2_predictor_parity_2026-10-01.json); in a fit-cell container the executor links the same
+# three binaries under target/debug.
+_LOCAL = Path("/var/tmp/fitv2/bin-v2")
+BIN_DIR = Path(os.environ.get("REV4_V2_BIN_DIR", str(_LOCAL if _LOCAL.is_dir() else ROOT / "target/debug")))
 TRAINER = BIN_DIR / "zensim_mlp_train"
 FITBIN = BIN_DIR / "bake_dial_refit"
 PANEL = BIN_DIR / "panel"
@@ -53,8 +57,12 @@ CANDIDATES = ("c1", "c2", "c3", "c4", "all", "csfw", "c7", "p1", "p3", "b1", "b1
               "c8n", "rall", "a1", "a1m", "b2", "b2m")
 CALIBRATION = ("oracle_lo", "oracle_hi", "minus_basic")
 ORACLE_SIGMA = {"oracle_lo": 1.5, "oracle_hi": 0.5}
-COL_GMSD, COL_GMSM, COL_ORACLE = 1825, 1826, {"oracle_lo": 1827, "oracle_hi": 1828}
-WIDTH = 1829
+FAMILIES = ("main", "aux")
+WIDTH = 1825
+AUX_PEERS = {"gmsd": 944, "gmsm": 945}
+AUX_ORACLE = {"oracle_lo": 946, "oracle_hi": 947}
+AUX_GMSBANK = tuple(range(1322, 1502))
+AUX_ADDED = tuple(sorted({*AUX_PEERS.values(), *AUX_ORACLE.values(), *AUX_GMSBANK}))
 N_PERMS = 3
 VARIANTS = ("real", *(f"p{k}" for k in range(1, N_PERMS + 1)))
 PERM_SEED_BASE = 20260930
@@ -82,24 +90,27 @@ def all_specs() -> list[str]:
     return specs
 
 
-def arm_columns(spec: str) -> tuple[str, list[int]]:
-    """(table variant, kept wide-column indices) for a spec."""
+def arm_columns(spec: str) -> tuple[str, str, list[int]]:
+    """(table family, variant, kept wide-column indices) for a spec."""
     import restore_data  # registered arm definitions (pinned JSONs)
     base, k = parse_spec(spec)
     variant = f"p{k}" if k else "real"
     bank = list(range(944))
     if base == "r0":
-        return variant, bank
+        return "main", variant, bank
     if base == "minus_basic":
-        return variant, list(range(228, 944))
-    if base in COL_ORACLE:
-        return variant, bank + [COL_ORACLE[base]]
-    added = []
-    for cid in restore_data.arm_ids(base):
-        added.append({-1: COL_GMSD, -2: COL_GMSM}.get(cid, cid))
-    if any(not 944 <= c < WIDTH for c in added) or len(set(added)) != len(added):
-        raise ValueError(f"{spec}: added columns outside the wide layout")
-    return variant, bank + added
+        return "main", variant, list(range(228, 944))
+    if base in AUX_ORACLE:
+        return "aux", variant, bank + [AUX_ORACLE[base]]
+    ids = restore_data.arm_ids(base)
+    if any(c < 0 for c in ids):  # the peer pair: arm p3 lives in the aux family
+        added = [AUX_PEERS["gmsd"] if c == -1 else AUX_PEERS["gmsm"] if c == -2 else c for c in ids]
+        if not set(added) <= set(AUX_ADDED):
+            raise ValueError(f"{spec}: peer arm columns outside the aux family")
+        return "aux", variant, bank + added
+    if any(not 944 <= c < WIDTH for c in ids) or len(set(ids)) != len(ids):
+        raise ValueError(f"{spec}: added columns outside the main layout")
+    return "main", variant, bank + list(ids)
 
 
 def seeds(heldout: str, seed_index: int) -> tuple[int, int]:

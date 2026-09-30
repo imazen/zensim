@@ -31,8 +31,8 @@ SEED_DRAWS = np.random.default_rng(BOOT_SEED + 1).integers(0, N_SEEDS, size=(BOO
 
 
 def keys_for(spec: str, source: str):
-    variant, _ = arm_columns(spec)
-    vdir = V2 / "wide" / variant
+    family, variant, _ = arm_columns(spec)
+    vdir = V2 / "wide" / family / variant
     receipt = json.loads((vdir / "receipt.json").read_text())
     path = vdir / f"{source}.keys.parquet"
     if sha(path) != receipt["legs"][source]["keys_sha256"]:

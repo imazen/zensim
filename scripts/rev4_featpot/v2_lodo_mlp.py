@@ -69,13 +69,15 @@ def main() -> None:
     args = ap.parse_args()
     parse_spec(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
-    if lists["schema"] != "rev4-featpot-v2-keeplists-v1":
+    if lists["schema"] != "rev4-featpot-v2-keeplists-v2":
         raise ValueError("keep-list schema mismatch")
-    variant, keep = lists["specs"][args.spec]["variant"], lists["specs"][args.spec]["keep"]
-    vdir = V2 / "wide" / variant
+    entry = lists["specs"][args.spec]
+    family, variant, keep = entry["family"], entry["variant"], entry["keep"]
+    vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
     receipt = json.loads(receipt_path.read_text())
-    if receipt["variant"] != variant or receipt["width"] != WIDTH:
+    if (receipt["schema"] != "rev4-featpot-v2-wide-v2" or receipt["family"] != family
+            or receipt["variant"] != variant or receipt["width"] != WIDTH):
         raise ValueError("wide receipt identity mismatch")
     # Two-part cell path under v2/cells (the fit-cell executor's destination contract).
     dest = V2 / "cells" / f"{args.spec}__{args.head}" / f"without_{args.heldout}_s{args.seed_index}"
@@ -126,7 +128,8 @@ def main() -> None:
     y = keys.target.to_numpy(dtype=np.float64)
     score = panel_batch([(args.heldout, pred, y)], stats="full")[0]
     out = {"schema": "rev4-featpot-v2-cell-v2", "label": "POTENTIAL — ceiling, not a model score",
-           "recipe": "R915 sampling (amendment revision R1)", "spec": args.spec, "variant": variant,
+           "recipe": "R915 sampling (amendment revision R1, layout R1.1)", "spec": args.spec,
+           "family": family, "variant": variant,
            "kept_features": len(keep), "head": args.head, "heldout": args.heldout,
            "seed_index": args.seed_index, "init_seed": init_seed, "sample_seed": sample_seed,
            "train_weights": weights, "hidden": HIDDEN, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,

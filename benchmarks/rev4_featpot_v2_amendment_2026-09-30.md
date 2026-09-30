@@ -148,3 +148,27 @@ an arm's control is its columns from variant pk. `oracle_hi`'s null is `oracle_l
 2,312 fit + 634 dev references) and `cid22_train` (17,611 pairs; 139 + 43 references), SSIMULACRA2-oracle targets.
 Input pin: `benchmarks/rev4_featpot_v2_teacher_pin_2026-09-30.json` (every file hashed before any label read).
 Scripts: `scripts/rev4_featpot/v2_common.py`, `v2_wide.py`, `v2_lodo_mlp.py`, `v2_compare.py`.
+
+### Erratum R1.1 (2026-10-01, before any v2 cell result was read) — layout and predictor
+
+The first calibration jobset (`fitv2cal-20260930`, retired) failed its first oracle cells: the product predictor
+(`bake_dial_refit predict` → `BakeScorer` → `Plan::for_bake`) refuses a bake that reads a feature ID outside the
+feature registry, and R1 placed the peer pair and the calibration columns at f1825–f1828. A per-spec one-epoch
+train + predict check then showed the fleet v8 predictor (built from zensim `424b8b02`, before restore-cuts landed in
+`384d15e1`) also refuses the restore families f1502–f1824. Two cells (r0 and minus_basic, head N) had finished; their
+results were never scored or read. Fixes, design otherwise unchanged:
+- **Two table families, both 1,825 wide** (so kept columns keep identical first-layer initial weights across arms):
+  `main` = bank f0–f943 + research f944–f1824 at canonical IDs; `aux` = bank + gmsd f944, gmsm f945, oracle_lo f946,
+  oracle_hi f947, gmsbank f1322–f1501, zeros elsewhere (peers packed at registered IDs exactly as the registered P2 arm
+  did). Arms p3, oracle_lo(+perms) and oracle_hi use `aux`; everything else uses `main`. Each family permutes only its
+  own added columns (aux seeds offset by 500).
+- **Predictor from current main** (`bake_dial_refit` built from zensim `86fc02bb`, release profile), paired with the
+  unchanged v8 trainer; admitted only after it reproduces the v8 predictor's predictions bit for bit on bakes both can
+  read.
+
+**Predictor admission (recorded 2026-10-01).** `bake_dial_refit` sha256 `81ec2207…5a1d` (from `86fc02bb`) against the
+v8 predictor `776adb37…49d5`: one-epoch bakes of all 21 base specs × heads N and F, predicted on the real aic3 and
+kadid tables of each spec's family. 52 of 52 outputs from the 26 bakes both predictors read are byte-identical; the
+16 restore-family bakes (a1, a1m, b1, b1s, b2, b2m, c8n, rall) predict on the candidate only; 0 differ, 0 fail.
+Receipt: `benchmarks/rev4_featpot_v2_predictor_parity_2026-10-01.json`. Cells run the v8 trainer and panel with this
+predictor.

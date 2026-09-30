@@ -28,11 +28,11 @@ import restore_data
 from admit_bank import PROMOTED_BANK
 from data import load as load_bank
 from linear_probe import panel_batch
-from v2_common import (COL_GMSD, COL_GMSM, COL_ORACLE, ORACLE_SEED_BASE, ORACLE_SIGMA, PERM_SEED_BASE,
-                       R915_TABLES, SOURCE_ORDER, SOURCES, TEACHER_PIN, TEACHERS, V2, VARIANTS, WIDTH,
-                       human_dev, sha)
+from v2_common import (AUX_ADDED, AUX_GMSBANK, AUX_ORACLE, AUX_PEERS, FAMILIES, ORACLE_SEED_BASE,
+                       ORACLE_SIGMA, PERM_SEED_BASE, R915_TABLES, SOURCE_ORDER, SOURCES, TEACHER_PIN,
+                       TEACHERS, V2, VARIANTS, WIDTH, human_dev, sha)
 
-RESEARCH_IDS = list(range(944, 1825))
+RESEARCH_IDS = list(range(944, WIDTH))
 RESTORE_BANK = Path("/var/tmp/restore-cuts/bank")
 PARTB_FILES = {"csfw_dvifm": "features__csfw_dvifm.parquet", "c1c4": "features__rev4c1c4.parquet",
                "gmsbank": "features__gmsbank.parquet"}
@@ -86,7 +86,6 @@ def human_set(name: str) -> pd.DataFrame:
     frame, _ = load_bank(name)
     side = restore_data.side_join(name, RESEARCH_IDS)          # verifies every registered pin
     peer, _ = restore_data.peer_side(name)
-    peer = peer.rename(columns={"gmsd": f"f{COL_GMSD}", "gmsm": f"f{COL_GMSM}"})
     out = frame.merge(side, on="pair_key", how="left", sort=False, validate="many_to_one", indicator=True)
     if not (out._merge == "both").all():
         raise ValueError(f"{name}: research sidecar coverage mismatch")
@@ -124,9 +123,8 @@ def teacher_set(leg: str) -> pd.DataFrame:
             raise ValueError(f"{leg}: duplicate keys in {key}")
         out = out.merge(side, on="pair_key", how="left", sort=False, validate="many_to_one")  # joinsafety-ok: pair_key-keyed sidecar join, coverage asserted below
     peer = pq.read_table(files["peer"], columns=["pair_key", "gmsd", "gmsm"]).to_pandas().drop_duplicates("pair_key")
-    peer = peer.rename(columns={"gmsd": f"f{COL_GMSD}", "gmsm": f"f{COL_GMSM}"})
     out = out.merge(peer, on="pair_key", how="left", sort=False, validate="many_to_one")  # joinsafety-ok: pair_key-keyed peer join, coverage asserted below
-    need = [f"f{i}" for i in range(1827)]
+    need = [f"f{i}" for i in range(WIDTH)] + ["gmsd", "gmsm"]
     if out[need].isna().any().any() or not np.isfinite(out[need].to_numpy(np.float32)).all():
         raise ValueError(f"{leg}: missing or nonfinite feature after joins")
     out = out.loc[~out.pixels_identical.astype(bool)].copy()
@@ -141,85 +139,115 @@ def teacher_set(leg: str) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------- build
-def add_oracles(out: pd.DataFrame, y01: np.ndarray, leg_index: int) -> dict:
+META = ["pair_key", "source_row_id", "ref_basename", "member_set", "target"]
+
+
+def load_leg(leg: str, leg_index: int) -> tuple[pd.DataFrame, list[float], np.ndarray]:
+    """One leg with bank + research + peer + oracle columns; returns (frame, bounds, y01)."""
+    if leg in SOURCES:
+        frames = [human_set(n) for n in SOURCES[leg]]
+        refsets = [set(f.ref_basename.astype(str)) for f in frames]
+        if len(frames) > 1 and refsets[0] & refsets[1]:
+            raise ValueError(f"{leg}: member sets share references")
+        out = pd.concat(frames, ignore_index=True)
+    else:
+        out = teacher_set(leg)
+    target = out.target.to_numpy(dtype=np.float64)
+    lo, hi = (float(v) for v in np.quantile(target, [0.001, 0.999]))
+    y01 = np.clip((target - lo) / (hi - lo), 0.0, 1.0)
     rng = np.random.default_rng(ORACLE_SEED_BASE + leg_index)
     sd = float(np.std(y01))
-    info = {}
     for name in ("oracle_lo", "oracle_hi"):
-        out[f"f{COL_ORACLE[name]}"] = (y01 + rng.normal(0.0, ORACLE_SIGMA[name] * sd, len(out))).astype(np.float32)
-    return info
+        out[name] = (y01 + rng.normal(0.0, ORACLE_SIGMA[name] * sd, len(out))).astype(np.float32)
+    return out.reset_index(drop=True), [lo, hi], y01
 
 
-def write(frame: pd.DataFrame, path: Path, human_score: np.ndarray, note: str) -> dict:
+def family_view(base: pd.DataFrame, family: str) -> tuple[pd.DataFrame, list[str]]:
+    """Frame with META + f0..f(WIDTH-1) for a table family, and that family's added (permutable) columns."""
+    x = np.zeros((len(base), WIDTH), dtype=np.float32)
+    x[:, :944] = base[FEATURES[:944]].to_numpy(np.float32)
+    if family == "main":
+        x[:, 944:] = base[FEATURES[944:]].to_numpy(np.float32)
+        added = FEATURES[944:]
+    else:
+        for name, col in {**AUX_PEERS, **AUX_ORACLE}.items():
+            x[:, col] = base[name].to_numpy(np.float32)
+        x[:, AUX_GMSBANK[0]:AUX_GMSBANK[-1] + 1] = base[[f"f{i}" for i in AUX_GMSBANK]].to_numpy(np.float32)
+        added = [f"f{i}" for i in AUX_ADDED]
+    view = pd.concat([base[META + (["split"] if "split" in base else [])].reset_index(drop=True),
+                      pd.DataFrame(x, columns=FEATURES)], axis=1)
+    return view, added
+
+
+def write(frame: pd.DataFrame, path: Path, human_score: np.ndarray, family: str, note: str) -> dict:
     view = frame[["ref_basename"] + FEATURES].copy()
     view.insert(1, "human_score", human_score)
     path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pandas(view, preserve_index=False), path, compression="zstd")
+    layout = ("bank f0-f943, Rev4 research f944-f1824 at canonical IDs" if family == "main" else
+              "bank f0-f943, gmsd f944, gmsm f945, oracle_lo f946, oracle_hi f947, gmsbank f1322-f1501, zeros elsewhere")
     Path(f"{path}.manifest.json").write_text(json.dumps({
         "source_bank_feature_set_id": BANK_ID,
-        "composite": "Rev4 POTENTIAL Instrument v2 wide table: bank f0-f943, research f944-f1824, peers "
-                     "f1825-f1826, calibration f1827-f1828; diagnostic only; " + note,
+        "composite": f"Rev4 POTENTIAL Instrument v2 {family} wide table ({layout}); diagnostic only; " + note,
         "formula_revision": 3}) + "\n")
     return {"path": str(path), "sha256": sha(path), "manifest_sha256": sha(Path(f"{path}.manifest.json")),
             "rows": len(view), "references": int(view.ref_basename.nunique())}
 
 
-def build_variant(variant: str) -> None:
-    k = 0 if variant == "real" else int(variant[1:])
-    dest = V2 / "wide" / variant
-    receipt = {"schema": "rev4-featpot-v2-wide-v1", "label": "POTENTIAL — ceiling, not a model score",
-               "variant": variant, "width": WIDTH, "legs": {}}
+def build(variants: list[str]) -> None:
+    receipts = {(f, v): {"schema": "rev4-featpot-v2-wide-v2", "label": "POTENTIAL — ceiling, not a model score",
+                         "family": f, "variant": v, "width": WIDTH, "legs": {}}
+                for f in FAMILIES for v in variants}
+    human_parts = {key: {} for key in receipts}
     legs = list(SOURCE_ORDER) + list(TEACHERS)
-    human_parts = {}
     for leg_index, leg in enumerate(legs):
-        if leg in SOURCES:
-            frames = [human_set(n) for n in SOURCES[leg]]
-            refsets = [set(f.ref_basename.astype(str)) for f in frames]
-            if len(frames) > 1 and refsets[0] & refsets[1]:
-                raise ValueError(f"{leg}: member sets share references")
-            out = pd.concat(frames, ignore_index=True)
-        else:
-            out = teacher_set(leg)
-        target = out.target.to_numpy(dtype=np.float64)
-        lo, hi = (float(v) for v in np.quantile(target, [0.001, 0.999]))
-        y01 = np.clip((target - lo) / (hi - lo), 0.0, 1.0)
-        add_oracles(out, y01, leg_index)
-        if k:
-            rng = np.random.default_rng(PERM_SEED_BASE + k + 1000 * leg_index)
-            restore_data._permute_within_reference(out, FEATURES[944:], np.ones(len(out), dtype=bool), rng)
-        rec = {"bounds": [lo, hi]}
-        if leg in SOURCES:
-            score = 100.0 * y01
-            dev_mask = out.ref_basename.astype(str).map(human_dev).to_numpy(dtype=bool)
-            rec["full"] = write(out, dest / f"{leg}.parquet", score, f"human source {leg} (evaluation)")
-            keys = out[["pair_key", "source_row_id", "ref_basename", "member_set", "target"]]
-            pq.write_table(pa.Table.from_pandas(keys, preserve_index=False), dest / f"{leg}.keys.parquet",
-                           compression="zstd")
-            rec["keys_sha256"] = sha(dest / f"{leg}.keys.parquet")
-            human_parts[leg] = (out, score, dev_mask)
-            if k == 0:
-                rec["oracle_standalone_srocc"] = {
-                    n: panel_batch([(leg, out[f"f{COL_ORACLE[n]}"].to_numpy(np.float64), target)],
-                                   stats="srocc")[0]["srocc"] for n in COL_ORACLE}
-        else:
-            score = target  # raw signed SSIMULACRA2, --target-scale 1
-            for split in ("fit", "dev"):
-                m = (out.split == split).to_numpy()
-                rec[split] = write(out.loc[m], dest / f"{leg}_{split}.parquet", score[m], f"teacher {leg} {split}")
-        receipt["legs"][leg] = rec
-        print(json.dumps({"variant": variant, "leg": leg, "rows": len(out)}), flush=True)
-    for held in SOURCE_ORDER:
-        train = [s for s in SOURCE_ORDER if s != held]
-        rec = {}
-        for split, want_dev in (("fit", False), ("dev", True)):
-            parts = [(o.loc[d == want_dev], s[d == want_dev]) for o, s, d in (human_parts[t] for t in train)]
-            frame = pd.concat([p[0] for p in parts], ignore_index=True)
-            score = np.concatenate([p[1] for p in parts])
-            rec[split] = write(frame, dest / f"human_without_{held}_{split}.parquet", score,
-                               f"human training leg without {held}, {split}")
-        receipt["legs"][f"human_without_{held}"] = rec
-    (dest / "receipt.json").write_text(json.dumps(receipt, indent=1) + "\n")
-    print(json.dumps({"receipt": str(dest / "receipt.json"), "sha256": sha(dest / "receipt.json")}))
+        base, bounds, y01 = load_leg(leg, leg_index)
+        oracle_srocc = None
+        if leg in SOURCES and "real" in variants:
+            oracle_srocc = {n: panel_batch([(leg, base[n].to_numpy(np.float64), base.target.to_numpy(np.float64))],
+                                           stats="srocc")[0]["srocc"] for n in AUX_ORACLE}
+        for family in FAMILIES:
+            for variant in variants:
+                k = 0 if variant == "real" else int(variant[1:])
+                view, added = family_view(base, family)
+                if k:
+                    salt = 0 if family == "main" else 500
+                    rng = np.random.default_rng(PERM_SEED_BASE + salt + k + 1000 * leg_index)
+                    restore_data._permute_within_reference(view, added, np.ones(len(view), dtype=bool), rng)
+                dest = V2 / "wide" / family / variant
+                rec = {"bounds": bounds}
+                if leg in SOURCES:
+                    score = 100.0 * y01
+                    rec["full"] = write(view, dest / f"{leg}.parquet", score, family, f"human source {leg} (evaluation)")
+                    pq.write_table(pa.Table.from_pandas(view[META], preserve_index=False),
+                                   dest / f"{leg}.keys.parquet", compression="zstd")
+                    rec["keys_sha256"] = sha(dest / f"{leg}.keys.parquet")
+                    if oracle_srocc and variant == "real":
+                        rec["oracle_standalone_srocc"] = oracle_srocc
+                    dev = view.ref_basename.astype(str).map(human_dev).to_numpy(dtype=bool)
+                    human_parts[(family, variant)][leg] = (view, score, dev)
+                else:
+                    score = view.target.to_numpy(np.float64)  # raw signed SSIMULACRA2, --target-scale 1
+                    for split in ("fit", "dev"):
+                        m = (view.split == split).to_numpy()
+                        rec[split] = write(view.loc[m], dest / f"{leg}_{split}.parquet", score[m], family,
+                                           f"teacher {leg} {split}")
+                receipts[(family, variant)]["legs"][leg] = rec
+        print(json.dumps({"leg": leg, "rows": len(base), "variants": variants}), flush=True)
+    for (family, variant), parts in human_parts.items():
+        dest = V2 / "wide" / family / variant
+        for held in SOURCE_ORDER:
+            train = [s for s in SOURCE_ORDER if s != held]
+            rec = {}
+            for split, want_dev in (("fit", False), ("dev", True)):
+                chunks = [(o.loc[d == want_dev], sc[d == want_dev]) for o, sc, d in (parts[t] for t in train)]
+                frame = pd.concat([c[0] for c in chunks], ignore_index=True)
+                rec[split] = write(frame, dest / f"human_without_{held}_{split}.parquet",
+                                   np.concatenate([c[1] for c in chunks]), family,
+                                   f"human training leg without {held}, {split}")
+            receipts[(family, variant)]["legs"][f"human_without_{held}"] = rec
+        (dest / "receipt.json").write_text(json.dumps(receipts[(family, variant)], indent=1) + "\n")
+        print(json.dumps({"receipt": str(dest / "receipt.json"), "sha256": sha(dest / "receipt.json")}), flush=True)
 
 
 def main() -> None:
@@ -232,14 +260,13 @@ def main() -> None:
         return
     if args.action == "keeplists":
         from v2_common import all_specs, arm_columns
-        lists = {spec: dict(zip(("variant", "keep"), arm_columns(spec))) for spec in all_specs()}
+        lists = {spec: dict(zip(("family", "variant", "keep"), arm_columns(spec))) for spec in all_specs()}
         path = V2 / "wide" / "keep_lists.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"schema": "rev4-featpot-v2-keeplists-v1", "specs": lists}) + "\n")
+        path.write_text(json.dumps({"schema": "rev4-featpot-v2-keeplists-v2", "specs": lists}) + "\n")
         print(json.dumps({"keep_lists": str(path), "sha256": sha(path), "specs": len(lists)}))
         return
-    for variant in args.variant or VARIANTS:
-        build_variant(variant)
+    build(args.variant or list(VARIANTS))
 
 
 if __name__ == "__main__":
