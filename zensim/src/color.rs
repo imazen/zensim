@@ -2550,7 +2550,7 @@ mod tests {
         };
         let canon = {
             let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
-            srgb_xyb_canon(&px, &mut x, &mut y, &mut b, crate::featcanon::Mode::Canon32);
+            srgb_xyb_canon(&px, &mut x, &mut y, &mut b, crate::featcanon::Mode::Canon64);
             [x, y, b].map(|p| p.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
         };
         let production = conv(None);

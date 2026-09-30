@@ -5,7 +5,8 @@
 //! hits every candidate alike. `bench_featcanon` rewrites the measurement
 //! cells between bench fns; every iter then runs the full Rev4 walk.
 //!
-//! Run (single-threaded, pinned — see benchmarks/featacc_WORKLOG.md):
+//! Run (single-threaded by default; `FEATACC_PARALLEL=1` + `RAYON_NUM_THREADS=8` for the
+//! multi-threaded walk; pinned — see benchmarks/featacc_WORKLOG.md):
 //!   `RAYON_NUM_THREADS=1 taskset -c <cpu> cargo bench --bench \
 //!     featacc_extract_ab -p zensim --features custom-profiles,feature-regime-v2,threads,training,oracle`
 //!
@@ -58,6 +59,9 @@ fn main() {
                 .collect()
         })
         .unwrap_or_else(|_| MODES.iter().collect());
+    // `FEATACC_PARALLEL=1` runs the walk multi-threaded (pair with
+    // `RAYON_NUM_THREADS=8`); default is the single-threaded walk.
+    let parallel = std::env::var("FEATACC_PARALLEL").is_ok_and(|v| v == "1");
     let result = zenbench::run(|suite| {
         for &size in &sizes {
             let src = pixels(size, size, 1);
@@ -80,7 +84,12 @@ fn main() {
                         b.iter(move || {
                             assert!(bench_featcanon(mode, blur));
                             zenbench::black_box(
-                                research::extract(&Request::everything(), &s, &d).expect("extract"),
+                                research::extract(
+                                    &Request::everything().with_parallel(parallel),
+                                    &s,
+                                    &d,
+                                )
+                                .expect("extract"),
                             )
                             .values()
                             .len()

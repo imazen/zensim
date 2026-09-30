@@ -5043,17 +5043,17 @@ fn fused_blur_h_ssim_canon(
 ) {
     let diam = 2 * radius + 1;
     let inv_v = 1.0f32 / diam as f32;
-    #[cfg(feature = "oracle")]
     let inv_v64 = 1.0f64 / diam as f64;
     let r = radius;
-    // featacc: the blur axis owns this kernel's arithmetic entirely — the
-    // window sums ARE its elements. `Rec` is the shipped f32 sliding form;
-    // `Rec64` widens the same recurrence to f64; `Fresh` re-sums every
-    // window in f64. `mode` no longer routes inside (an `exact` run with
-    // `BLUR=rec` measures exactly the shipped blur's contribution).
-    #[cfg(feature = "oracle")]
-    let blur = crate::featcanon::blur_axis();
-    let _ = mode;
+    // rev4canon: the blur axis owns this kernel's arithmetic entirely — the
+    // window sums ARE its elements. `canon_blur_axis(mode)` selects it:
+    // `Rec64` (the f64 sliding form) is THE REV4 CANON — it runs in product
+    // builds; `Rec` is the shipped f32 sliding form, replayed for the `c32`
+    // oracle arm (the superseded canon) and explicit `BLUR=rec` runs;
+    // `Fresh` re-sums every window in f64 (oracle ruler). `mode` routes the
+    // default per mode (an `exact` run with `BLUR=rec` still measures
+    // exactly the shipped blur's contribution).
+    let blur = crate::featcanon::canon_blur_axis(mode);
 
     for y in 0..height {
         let row = y * width;
@@ -5090,7 +5090,8 @@ fn fused_blur_h_ssim_canon(
             continue;
         }
 
-        #[cfg(feature = "oracle")]
+        // rev4canon: `Rec64` is the product arm at Rev4 — the shipped
+        // sliding recurrence widened to f64, same op order.
         if matches!(blur, crate::featcanon::BlurMode::Rec64) {
             let mut sum_s = 0.0f64;
             let mut sum_d = 0.0f64;

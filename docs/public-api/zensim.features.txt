@@ -12,7 +12,7 @@
 #   pub modules                                 2
 #   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                         10
-#   free functions                              8
+#   free functions                              9
 #   inherent methods                           60
 #   struct fields                              50
 #   enum variants                              14
@@ -23,17 +23,18 @@
 # per-module pub lines:
 #   (root)                          135
 #   cvvdp_features                    2
-#   feature_v2                        4
+#   feature_v2                        5
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (163 lines)
+## items (164 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
 pub fn cvvdp_features::extract_cvvdp_features(&[u8], &[u8], usize, usize) -> alloc::vec::Vec<f32>
 pub fn feature_v2::bench_dense_era1(&[f32], &[f32], &[f32], &[f32], &[f32], &[f32], &[f32], usize, usize, bool) -> f64
 pub fn feature_v2::bench_dense_era2(&[f32], &[f32], &[f32], &[f32], &[f32], &[f32], &[f32], usize, usize, bool) -> f64
+pub fn feature_v2::bench_featcanon(&str, core::option::Option<&str>) -> bool
 pub fn feature_v2::harness_active_tier() -> &'static str
 pub fn feature_v2::harness_dense_slots(&[f32], &[f32], &[f32], &[f32], &[f32], &[f32], &[f32], usize, usize, bool, bool) -> [f64; 35]
 pub profile::ZensimProfile::Custom

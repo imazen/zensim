@@ -874,7 +874,7 @@ impl Default for TailAccum {
 }
 
 impl TailAccum {
-    /// One map value into its bin + running max. `v >= 0` by construction.
+    /// One map value into its bin + running max.
     #[inline(always)]
     fn scatter(&mut self, edges: &TailEdges, v: f64, map: usize) {
         self.hist[map][edges.bin(v)] += 1;
@@ -4864,28 +4864,15 @@ fn dense_block_kernel(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
-    // featacc: measurement candidates route the dense block through the
-    // scalar `Pool`-generic mirror (element eval unchanged — magetypes
-    // `*`/`+`/`/` are unfused, so `LanesF32` replays era-2 bitwise). `off`
-    // (or no override) keeps the shipped SIMD body below.
-    #[cfg(feature = "oracle")]
-    if let Some(m) = crate::featcanon::measurement_active() {
-        match m {
-            crate::featcanon::Mode::Canon32 => {
-                return dense_block_kernel_canon::<crate::featcanon::LanesF32>(
-                    src,
-                    dst,
-                    mu1,
-                    mu2,
-                    ssq,
-                    s12,
-                    activity,
-                    width,
-                    height,
-                    transducer_bank,
-                    r4,
-                );
-            }
+    // rev4canon: the computation's own mode selects the scalar
+    // `Pool`-generic canon body — `LanesF64` (c64) at Rev4, the oracle arms
+    // under `ZENSIM_FEATCANON` (`LanesF32` replays era-2 bitwise — the
+    // superseded c32 canon). `compute_mode()` is `mode(comp_rev)` here (see
+    // it for the guarantee); `Off` at every revision < 4 keeps the shipped
+    // era-1/era-2 dispatch byte-for-byte.
+    let mode = crate::featcanon::compute_mode();
+    if mode.active() {
+        match mode {
             crate::featcanon::Mode::Canon64 => {
                 return dense_block_kernel_canon::<crate::featcanon::LanesF64>(
                     src,
@@ -4901,6 +4888,23 @@ fn dense_block_kernel(
                     r4,
                 );
             }
+            #[cfg(feature = "oracle")]
+            crate::featcanon::Mode::Canon32 => {
+                return dense_block_kernel_canon::<crate::featcanon::LanesF32>(
+                    src,
+                    dst,
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    activity,
+                    width,
+                    height,
+                    transducer_bank,
+                    r4,
+                );
+            }
+            #[cfg(feature = "oracle")]
             crate::featcanon::Mode::CanonNeum => {
                 return dense_block_kernel_canon::<crate::featcanon::Neum64>(
                     src,
@@ -4916,6 +4920,7 @@ fn dense_block_kernel(
                     r4,
                 );
             }
+            #[cfg(feature = "oracle")]
             crate::featcanon::Mode::Exact => {
                 return dense_block_kernel_exact(
                     src,
@@ -4931,7 +4936,7 @@ fn dense_block_kernel(
                     r4,
                 );
             }
-            crate::featcanon::Mode::Off => unreachable!("measurement_active filters Off"),
+            crate::featcanon::Mode::Off => unreachable!("active() excludes Off"),
         }
     }
     if era2_dense_enabled() {
@@ -5117,14 +5122,12 @@ fn gmsbank_pixel(cells: &mut [GmsBankCell; 5], mr: f64, md: f64, constants: &[f6
 /// [`WelfordVar`]. Resolves to the production `GmsBankCell` shape at the
 /// strip boundary so `GradientAccum::accumulate`'s plain-f64 fold is
 /// unchanged for every mode.
-#[cfg(feature = "oracle")]
 struct GmsBankCellVar {
     loss: crate::featcanon::SumVar,
     gain: crate::featcanon::SumVar,
     wf: crate::featcanon::WelfordVar,
 }
 
-#[cfg(feature = "oracle")]
 impl GmsBankCellVar {
     #[inline]
     fn for_mode(mode: crate::featcanon::Mode) -> Self {
@@ -5171,7 +5174,6 @@ impl GmsBankCellVar {
 
 /// [`gmsbank_pixel`] for the var cells — identical element math, canonical
 /// lane forwarded.
-#[cfg(feature = "oracle")]
 #[inline(always)]
 fn gmsbank_pixel_var(
     cells: &mut [GmsBankCellVar; 5],
@@ -5826,7 +5828,6 @@ fn gradient_block_kernel_entry_bandvis_dstact_gmsbank(
 /// One gradient pixel's full term vector in f64 — the production
 /// `scalar_pixel` element math verbatim (clamped x-neighbors, so it serves
 /// both the border columns and the exact interior).
-#[cfg(feature = "oracle")]
 struct GradTerms64 {
     gsrc: f64,
     gdst: f64,
@@ -5838,7 +5839,6 @@ struct GradTerms64 {
     bv_loss: f64,
 }
 
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool>(
@@ -5926,23 +5926,19 @@ fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool>(
 }
 
 /// f32 scalar helpers mirroring the `*_v` SIMD ops' exact op order.
-#[cfg(feature = "oracle")]
 #[inline(always)]
 fn sat32(x: f32, c: f32) -> f32 {
     let x = x.max(0.0);
     x / (x + c)
 }
-#[cfg(feature = "oracle")]
 #[inline(always)]
 fn bsim32(a: f32, b: f32, c: f32) -> f32 {
     (2.0f32 * a * b + c) / (a * a + b * b + c)
 }
-#[cfg(feature = "oracle")]
 #[inline(always)]
 fn bex32(a: f32, b: f32, c: f32) -> f32 {
     (a - b).max(0.0) / (a + b + c)
 }
-#[cfg(feature = "oracle")]
 #[inline(always)]
 fn bex_pair32(a: f32, b: f32, c: f32) -> (f32, f32) {
     let d = a + b + c;
@@ -5952,7 +5948,6 @@ fn bex_pair32(a: f32, b: f32, c: f32) -> (f32, f32) {
 /// Shared border-pixel step for the canon/exact bodies: f64 terms folded
 /// straight into `acc` (production's scalar-border shape), plus the bank /
 /// chroma / rev4 side effects at canonical lane `x mod 8`.
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn gradient_border_pixel<const BANDVIS: bool, const BV_DSTACT: bool, const BANK: bool>(
     src_h: &[f32],
@@ -6029,7 +6024,6 @@ fn gradient_border_pixel<const BANDVIS: bool, const BV_DSTACT: bool, const BANK:
 
 /// `Pool`-generic scalar gradient kernel — f32 elements in the SIMD op
 /// order, per-row canonical pools, f64 borders.
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon<
     P: crate::featcanon::Pool,
@@ -6427,12 +6421,19 @@ fn gradient_block_kernel(
     r4: Option<Rev4Grad<'_>>,
     gmsbank: bool,
 ) -> GradientAccum {
-    // featacc: measurement candidates route through the scalar
-    // `Pool`-generic mirror (same halo contract, same borders). `bv_act_dst`
-    // is ignored without `bandvis`, as in the production match below.
-    #[cfg(feature = "oracle")]
-    if let Some(m) = crate::featcanon::measurement_active() {
-        use crate::featcanon::{LanesF32, LanesF64, Mode, Neum64};
+    // rev4canon: the computation's own mode routes through the scalar
+    // `Pool`-generic mirror (same halo contract, same borders) — `LanesF64`
+    // (the Rev4 canon) or the oracle arms under `ZENSIM_FEATCANON`.
+    // `compute_mode()` is `mode(comp_rev)` here (see it for the guarantee);
+    // `Off` below Rev4 keeps the shipped SIMD bodies byte-for-byte.
+    // `bv_act_dst` is ignored without `bandvis`, as in the production match
+    // below.
+    let mode = crate::featcanon::compute_mode();
+    if mode.active() {
+        #[cfg(feature = "oracle")]
+        use crate::featcanon::{LanesF32, Neum64};
+        use crate::featcanon::{LanesF64, Mode};
+        let m = mode;
         macro_rules! go {
             ($p:ty) => {
                 match (bandvis, bv_act_dst, gmsbank) {
@@ -6501,6 +6502,7 @@ fn gradient_block_kernel(
                 }
             };
         }
+        #[cfg(feature = "oracle")]
         macro_rules! go_exact {
             () => {
                 match (bandvis, bv_act_dst, gmsbank) {
@@ -6569,12 +6571,15 @@ fn gradient_block_kernel(
                 }
             };
         }
-        return match m {
-            Mode::Canon32 => go!(LanesF32),
+        return match mode {
             Mode::Canon64 => go!(LanesF64),
+            #[cfg(feature = "oracle")]
+            Mode::Canon32 => go!(LanesF32),
+            #[cfg(feature = "oracle")]
             Mode::CanonNeum => go!(Neum64),
+            #[cfg(feature = "oracle")]
             Mode::Exact => go_exact!(),
-            Mode::Off => unreachable!("measurement_active filters Off"),
+            Mode::Off => unreachable!("active() excludes Off"),
         };
     }
     match (bandvis, bv_act_dst, gmsbank) {
@@ -7095,7 +7100,6 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
 // production tail's forms) into Neumaier pools. Every pixel goes through
 // the pools — the canonical close owns the width tail too.
 
-#[cfg(feature = "oracle")]
 #[inline(always)]
 fn pjnd32(rae: f32, a: f32, k: f32, c: f32) -> f32 {
     rae / (rae + c * (1.0f32 + k * a))
@@ -7103,7 +7107,6 @@ fn pjnd32(rae: f32, a: f32, k: f32, c: f32) -> f32 {
 
 /// One append pixel's full term vector in f32 — `append_block_kernel_generic`'s
 /// SIMD chunk ops verbatim.
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn append_terms32<const CROSS: bool, const HL: bool>(
@@ -7204,7 +7207,6 @@ fn append_terms32<const CROSS: bool, const HL: bool>(
 }
 
 /// `Pool`-generic scalar append kernel — see the module note above.
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn append_block_kernel_canon<P: crate::featcanon::Pool, const CROSS: bool, const HL: bool>(
     src: &[f32],
@@ -7499,10 +7501,15 @@ fn append_block_kernel(
     width: usize,
     height: usize,
 ) -> AppendAccum {
-    // featacc: measurement candidates — the scalar `Pool`-generic mirror.
-    #[cfg(feature = "oracle")]
-    if let Some(m) = crate::featcanon::measurement_active() {
-        use crate::featcanon::{LanesF32, LanesF64, Mode, Neum64};
+    // rev4canon: the computation's own mode selects the scalar
+    // `Pool`-generic mirror — `LanesF64` (the Rev4 canon) or the oracle arms
+    // under `ZENSIM_FEATCANON`. `compute_mode()` is `mode(comp_rev)` here;
+    // `Off` below Rev4 keeps the shipped SIMD bodies byte-for-byte.
+    let mode = crate::featcanon::compute_mode();
+    if mode.active() {
+        #[cfg(feature = "oracle")]
+        use crate::featcanon::{LanesF32, Neum64};
+        use crate::featcanon::{LanesF64, Mode};
         macro_rules! go {
             ($p:ty) => {
                 match (cross, hl) {
@@ -7529,6 +7536,7 @@ fn append_block_kernel(
                 }
             };
         }
+        #[cfg(feature = "oracle")]
         macro_rules! go_exact {
             () => {
                 match (cross, hl) {
@@ -7555,12 +7563,15 @@ fn append_block_kernel(
                 }
             };
         }
-        return match m {
-            Mode::Canon32 => go!(LanesF32),
+        return match mode {
             Mode::Canon64 => go!(LanesF64),
+            #[cfg(feature = "oracle")]
+            Mode::Canon32 => go!(LanesF32),
+            #[cfg(feature = "oracle")]
             Mode::CanonNeum => go!(Neum64),
+            #[cfg(feature = "oracle")]
             Mode::Exact => go_exact!(),
-            Mode::Off => unreachable!("measurement_active filters Off"),
+            Mode::Off => unreachable!("active() excludes Off"),
         };
     }
     match cross {
@@ -7827,12 +7838,12 @@ fn csfw_block_kernel_canon(
             continue;
         }
         match mode {
+            #[cfg(feature = "oracle")]
             Mode::Canon32 => {
                 csfw_row_canon::<crate::featcanon::LanesF32>(
                     &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
                 );
             }
-            #[cfg(feature = "oracle")]
             Mode::Canon64 => {
                 csfw_row_canon::<crate::featcanon::LanesF64>(
                     &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
@@ -8363,9 +8374,14 @@ impl V1BasicSums {
     /// Term-level accumulator fed f32-native block terms (`accumulate_block`
     /// in the z1max side pass) — `c32` takes the f32-lane form.
     fn meas_f32() -> Self {
+        #[allow(unused_mut)] // the per-field overrides exist only under `oracle`
         let mut s = Self::meas_f64();
+        // `c32` alone keeps f32 lanes on the term-level slots; under the c64
+        // canon f64_elems and f32_elems coincide (`L64`), and `meas_f64`
+        // already selected it.
+        #[cfg(feature = "oracle")]
         if matches!(
-            crate::featcanon::measurement_mode(),
+            crate::featcanon::compute_mode(),
             crate::featcanon::Mode::Canon32
         ) {
             s.ssim_d = crate::featcanon::SumVar::f32_elems_meas();
@@ -11349,24 +11365,32 @@ fn gridblk_strip_wide(
     period: usize,
     acc: &mut GridblkAccum,
 ) {
-    // featacc: measurement candidates — the scalar canon/exact bodies.
-    #[cfg(feature = "oracle")]
-    if let Some(m) = crate::featcanon::measurement_active() {
-        use crate::featcanon::{LanesF32, LanesF64, Mode, Neum64};
-        return match m {
-            Mode::Canon32 => gridblk_strip_wide_canon::<LanesF32>(
-                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
-            ),
+    // rev4canon: the computation's own mode selects the scalar canon body —
+    // `LanesF64` at Rev4; the oracle arms under `ZENSIM_FEATCANON`.
+    // `compute_mode()` is `mode(comp_rev)` here (see it for the guarantee);
+    // `Off` below Rev4 runs the shipped SIMD body byte-for-byte.
+    let mode = crate::featcanon::compute_mode();
+    if mode.active() {
+        #[cfg(feature = "oracle")]
+        use crate::featcanon::{LanesF32, Neum64};
+        use crate::featcanon::{LanesF64, Mode};
+        return match mode {
             Mode::Canon64 => gridblk_strip_wide_canon::<LanesF64>(
                 src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
             ),
+            #[cfg(feature = "oracle")]
+            Mode::Canon32 => gridblk_strip_wide_canon::<LanesF32>(
+                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+            ),
+            #[cfg(feature = "oracle")]
             Mode::CanonNeum => gridblk_strip_wide_canon::<Neum64>(
                 src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
             ),
+            #[cfg(feature = "oracle")]
             Mode::Exact => gridblk_strip_wide_exact(
                 src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
             ),
-            Mode::Off => unreachable!("measurement_active filters Off"),
+            Mode::Off => unreachable!("active() excludes Off"),
         };
     }
     incant!(
@@ -11534,7 +11558,6 @@ fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
 // per strip like the production lane-parity fold; H: one pool pair per
 // row, folded per row like production). `exact` evaluates `ẽ` in f64 into
 // the `plane_*64` shadow planes and pools through `Neum64`.
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn gridblk_strip_wide_canon<P: crate::featcanon::Pool>(
     src_wide: &[f32],
@@ -27073,7 +27096,6 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
 
 /// The 13 core + 16 pool terms of one dense pixel, f32 scalar — mirrors
 /// `dense_block_kernel_era2_generic`'s `terms!`/`pools!` op-for-op.
-#[cfg(feature = "oracle")]
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn dense_terms32(
@@ -27193,7 +27215,6 @@ fn dense_terms32(
 }
 
 /// `Pool`-generic scalar dense kernel — see the module note above.
-#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     src: &[f32],

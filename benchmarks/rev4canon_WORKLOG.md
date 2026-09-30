@@ -42,3 +42,51 @@ only bookmark this lane moves.
   `featcanon_rev4_contract`: `test result: ok. 7 passed; 0 failed`;
   `featcanon_tier_parity`: `test result: ok. 3 passed; 0 failed`.
   Log: `/var/tmp/rev4canon/logs/task_a_tests.log`.
+
+## Task B gates — rec64+c64 canon (2026-09-30)
+
+Builds: oracle `tier_audit_features` + product `tier_audit_features` (release, /var/tmp/rev4canon/target{,-prod}).
+Matrix script: /var/tmp/rev4canon/run_matrix.sh (14 configs x 12 TRAIN-role pairs, v3 tier).
+Dumps: /var/tmp/rev4canon/dump{,-tier,-rev3,-prod}/. Logs: logs/matrix1.log, tier_parity_ext.log.
+
+### Tier parity (new canon, all tiers vs v3)
+- 14 pairs (12 review + crop256x256 + mosaic2x2_1024x768) x {v4x,v4,v3,scalar}:
+  0/1825 slots differ on every pair — logs/tier_parity_ext.log.
+  Sizes: 8x8,17x9,64x64,97x63,131x65,256x256,384x512,512x384,640x480,1024x768,2048x1536.
+
+### Rev1-3 bit-identity gate
+- prod.rev3 (ZENSIM_FORMULA_REV=3, no override) vs review's fix-commit binaries
+  (/var/tmp/review-featcanon/rr/vec_review_fix_rev3_{v4x,v4,v3,scalar}):
+  12 shared pairs x 4 tiers, 0 differing slots — logs/compare_refs.log section A + per-tier cmp.
+
+### Product neutrality
+- product-build prod == oracle-build prod bitwise, 12/12 pairs (dump-prod vs dump).
+
+### Oracle-arm stability
+- my c32_v3 == featacc's c32_v3 bitwise, 12/12 pairs (refactor preserved reviewed c32 candidate).
+- my exact_v3 == featacc's exact_v3 bitwise, 12/12 (ruler unchanged).
+- my prod_v3 == my c64_v3 bitwise, 12/12 (prod IS the c64 canon arm).
+- c32-oracle vs old Rev4 canon (featacc prod_v3): differs on 10 families, 8110/21900 slots —
+  canon::<LanesF32> is the reviewed *candidate*, NOT a bitwise replay of the era-2 mix
+  (consistent with FEATACC's prod-vs-c32 nonzero families). See logs/diffcounts.log.
+
+### Accuracy vs exact oracle (worst-of-12 max rel err, floor 1e-9) — family_tables.txt
+new(prod) <= c32 on ALL 18 families; strict improvement on basic/peaks/masked/iw/v2/append/
+csfw/gridblk/mapdev/z1max; ties elsewhere. prod == c64 column exactly.
+
+### Slots changed vs old Rev4 canon — logs/diffcounts.log
+new canon differs from old Rev4 on 18119/21900 slots (12 pairs); per-family table in log.
+
+## Task C1 — XYB body-vs-tail (2026-09-30)
+- Structural state: every production XYB converter entry threads `revision`
+  (`convert_source_to_xyb_into_slices_chunked` -> `*_at_revision`), so Rev4
+  runs `srgb_xyb_canon`/`linear_xyb_canon` — one scalar per-pixel form,
+  position-independent by construction (no SIMD tail path exists at Rev4).
+  The two raw `srgb_to_positive_xyb_planar_into` callers in feature_v2.rs
+  (23486, 25197) are inside `mod tests` derivation-table helpers only.
+- New test `color::tests::rev4_xyb_body_tail_bits_identical_across_tiers`
+  (#[ignore], token-permutation): 3 Rev4 entry points x ~1504 colours x
+  widths {9,13,17,23,29,31,33,37,41} x positions — all bits equal per colour
+  vs its full-chunk reference, on all 10 x86 token permutations.
+  Output: "REV4-XYB-BODY-TAIL permutations=10 all position-identical"
+  (log: logs/xyb_tail_test.log)

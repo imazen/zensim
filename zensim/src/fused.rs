@@ -895,7 +895,8 @@ pub(crate) fn fused_vblur_features_ssim(
     // measure against.
     let direct = free.revision() >= crate::feature_defs::FormulaRevision::Rev3;
     // Canonical arithmetic follows THIS computation's revision (featcanon D1).
-    match crate::featcanon::mode(free.revision()) {
+    let mode = crate::featcanon::mode(free.revision());
+    match mode {
         #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Exact => {
             return fused_vblur_ssim_exact(
@@ -924,6 +925,7 @@ pub(crate) fn fused_vblur_features_ssim(
                 h_act,
             );
         }
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Canon32 => {
             return fused_vblur_ssim_canon::<crate::featcanon::LanesF32>(
                 h_mu1,
@@ -949,9 +951,9 @@ pub(crate) fn fused_vblur_features_ssim(
                 direct,
                 ext,
                 h_act,
+                mode,
             );
         }
-        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Canon64 => {
             return fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
                 h_mu1,
@@ -977,6 +979,7 @@ pub(crate) fn fused_vblur_features_ssim(
                 direct,
                 ext,
                 h_act,
+                mode,
             );
         }
         #[cfg(feature = "oracle")]
@@ -1005,6 +1008,7 @@ pub(crate) fn fused_vblur_features_ssim(
                 direct,
                 ext,
                 h_act,
+                mode,
             );
         }
         crate::featcanon::Mode::Off => {}
@@ -1064,7 +1068,8 @@ pub(crate) fn fused_vblur_features_edge(
     store_mu: bool,
     revision: crate::feature_defs::FormulaRevision,
 ) -> StripChannelAccum {
-    match crate::featcanon::mode(crate::ssim_form::effective_revision(revision)) {
+    let mode = crate::featcanon::mode(crate::ssim_form::effective_revision(revision));
+    match mode {
         #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Exact => {
             return fused_vblur_edge_exact(
@@ -1082,6 +1087,7 @@ pub(crate) fn fused_vblur_features_edge(
                 store_mu,
             );
         }
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Canon32 => {
             return fused_vblur_edge_canon::<crate::featcanon::LanesF32>(
                 h_mu1,
@@ -1096,9 +1102,9 @@ pub(crate) fn fused_vblur_features_edge(
                 mu1_out,
                 mu2_out,
                 store_mu,
+                mode,
             );
         }
-        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Canon64 => {
             return fused_vblur_edge_canon::<crate::featcanon::LanesF64>(
                 h_mu1,
@@ -1113,6 +1119,7 @@ pub(crate) fn fused_vblur_features_edge(
                 mu1_out,
                 mu2_out,
                 store_mu,
+                mode,
             );
         }
         #[cfg(feature = "oracle")]
@@ -1130,6 +1137,7 @@ pub(crate) fn fused_vblur_features_edge(
                 mu1_out,
                 mu2_out,
                 store_mu,
+                mode,
             );
         }
         crate::featcanon::Mode::Off => {}
@@ -4372,7 +4380,6 @@ impl VWinPlanes<'_> {
     fn inv32(&self) -> f32 {
         1.0 / self.diam() as f32
     }
-    #[cfg(feature = "oracle")]
     #[inline(always)]
     fn inv64(&self) -> f64 {
         1.0 / self.diam() as f64
@@ -4402,8 +4409,8 @@ enum VWin {
         s12: Vec<f32>,
         act: Vec<f32>,
     },
-    /// Same sliding recurrence in f64.
-    #[cfg(feature = "oracle")]
+    /// The same sliding recurrence in f64 — THE REV4 CANON's window state
+    /// (rev4canon: `BlurMode::Rec64`).
     F64 {
         m1: Vec<f64>,
         m2: Vec<f64>,
@@ -4456,7 +4463,6 @@ impl VWin {
                     act,
                 }
             }
-            #[cfg(feature = "oracle")]
             crate::featcanon::BlurMode::Rec64 => {
                 let seed64 = |plane: &[f32], out: &mut Vec<f64>| {
                     if plane.is_empty() {
@@ -4524,7 +4530,6 @@ impl VWin {
                 slide32(p.s12, s12, ab, rb);
                 slide32(p.act, act, ab, rb);
             }
-            #[cfg(feature = "oracle")]
             Self::F64 {
                 m1,
                 m2,
@@ -4568,7 +4573,6 @@ impl VWin {
                 let a = if act.is_empty() { 0.0 } else { act[x] * inv };
                 (m1[x] * inv, m2[x] * inv, sq[x] * inv, s12[x] * inv, a)
             }
-            #[cfg(feature = "oracle")]
             Self::F64 {
                 m1,
                 m2,
@@ -4676,12 +4680,16 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     direct: bool,
     ext: ExtPoolsWork,
     h_act: &[f32],
+    // The computation's canonical mode — selects the blur window's own
+    // arithmetic (`canon_blur_axis`): `Rec64` under the c64 canon.
+    mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     let form = free.luma_form();
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    // featacc blur axis: `Rec` is the shipped f32 sliding sums.
+    // rev4canon: the mode's OWN blur axis — `Rec64` under the c64 canon,
+    // `Rec` only for the superseded `c32` oracle reproduction.
     let planes = VWinPlanes {
         m1: h_mu1,
         m2: h_mu2,
@@ -4692,7 +4700,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
         height,
         r,
     };
-    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
+    let mut win = VWin::new(crate::featcanon::canon_blur_axis(mode), &planes);
 
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<P>::zero();
@@ -4933,7 +4941,7 @@ fn fused_vblur_ssim_exact(
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    // featacc blur axis: under `exact` `blur_axis()` defaults to `Fresh`;
+    // featacc blur axis: under `exact` `canon_blur_axis` defaults to `Fresh`;
     // `BLUR=rec` replays the shipped f32 sliding sums (each element then
     // carries the production blur's own drift — the isolation cell).
     let planes = VWinPlanes {
@@ -4946,7 +4954,10 @@ fn fused_vblur_ssim_exact(
         height,
         r,
     };
-    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
+    let mut win = VWin::new(
+        crate::featcanon::canon_blur_axis(crate::featcanon::Mode::Exact),
+        &planes,
+    );
 
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<Neum64>::zero();
@@ -5156,11 +5167,15 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
+    // The computation's canonical mode — selects the blur window's own
+    // arithmetic (`canon_blur_axis`): `Rec64` under the c64 canon.
+    mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    // featacc blur axis over the 2-plane window.
+    // rev4canon: the mode's OWN blur axis — `Rec64` under the c64 canon,
+    // `Rec` only for the superseded `c32` oracle reproduction.
     let planes = VWinPlanes {
         m1: h_mu1,
         m2: h_mu2,
@@ -5171,7 +5186,7 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
         height,
         r,
     };
-    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
+    let mut win = VWin::new(crate::featcanon::canon_blur_axis(mode), &planes);
 
     let mut acc = StripChannelAccum::zero();
     for y in 0..height {
@@ -5279,7 +5294,10 @@ fn fused_vblur_edge_exact(
         height,
         r,
     };
-    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
+    let mut win = VWin::new(
+        crate::featcanon::canon_blur_axis(crate::featcanon::Mode::Exact),
+        &planes,
+    );
 
     let mut acc = StripChannelAccum::zero();
     for y in 0..height {

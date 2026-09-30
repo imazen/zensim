@@ -136,7 +136,7 @@ impl Z1Acc {
             nby: h / Z1_GRID,
             bm: std::array::from_fn(|_| vec![0.0f64; nbx]),
             sums: V1BasicSums::meas_f32(),
-            exact: crate::featcanon::measurement_mode().exact(),
+            exact: crate::featcanon::compute_mode().exact(),
         }
     }
 
@@ -276,9 +276,14 @@ fn run_cell(
     // row merge exactly as shipped. `exact` also re-evaluates the eight
     // maps' element formulas in f64; every other mode keeps the production
     // f32 evaluation (widened losslessly into the f64 rows).
-    let meas = crate::featcanon::measurement_active();
-    let exact = crate::featcanon::measurement_mode().exact();
-    let mut dev_var = meas.map(|m| [crate::featcanon::WelfordVar::for_mode(m); MAPDEV_PER_CELL]);
+    let mode = crate::featcanon::compute_mode();
+    let exact = mode.exact();
+    // rev4canon: `for_mode` maps `Canon64` (the Rev4 canon) to `Lanes`, the
+    // `c32` oracle arm to `Seq`, and `Off` leaves `dev_var` unset so the
+    // shipped row-merge path runs byte-for-byte.
+    let mut dev_var = mode
+        .active()
+        .then(|| [crate::featcanon::WelfordVar::for_mode(mode); MAPDEV_PER_CELL]);
     let mut dev = [Welford::default(); MAPDEV_PER_CELL];
     let mut z1 = work.z1max.then(|| Z1Acc::new(width, height));
 
