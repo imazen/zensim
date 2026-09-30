@@ -423,6 +423,7 @@ pub(crate) struct Revision {
 /// so "which slots does this revision move?" stays a lookup over the signal
 /// table rather than a second list that can drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum FormulaRevision {
     /// Everything shipped through era `v1postc` — the semantics every stored
     /// table and every published verdict was read at.
@@ -443,7 +444,8 @@ pub enum FormulaRevision {
     /// CSFW pass — run ONE source-level body with fused `f32::mul_add`, fixed
     /// 8-virtual-lane pools and a fixed pairwise reduce. Measured, not proven:
     /// `research::extract`'s full 1825-slot SDR vector is bit-identical across
-    /// x86 v4x/v4/v3/scalar and wasm32 simd128/scalar. Leaves outside the era
+    /// x86 v4x/v4/v3/scalar and wasm32 simd128/scalar on the measured pairs
+    /// (wasm32: 6 pairs, 8×8 to 512×384). Leaves outside the era
     /// still call the platform libm (dvifm's `powf`/`ln`/`exp`), so
     /// cross-platform identity rests on libm agreement.
     ///
@@ -454,9 +456,9 @@ pub enum FormulaRevision {
     /// corruption-head entry therefore refuses Rev4, as does a Rev4 request
     /// in a non-Rev4 process or any request in a Rev4 process that is not
     /// Rev4. Requires freshly extracted data: 837 of 1825 slots move vs
-    /// production v3 (union over the lane's 11 audit pairs). Accuracy against
-    /// the f64 exact oracle is established only for the fused-V-blur pools;
-    /// see `benchmarks/featcanon_WORKLOG.md`.
+    /// production v3 (union over the lane's 11 audit pairs). Only for the
+    /// fused-V-blur pools was the accumulation order shown not to matter
+    /// against the f64 exact oracle; see `benchmarks/featcanon_WORKLOG.md`.
     Rev4,
 }
 

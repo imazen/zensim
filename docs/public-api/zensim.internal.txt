@@ -36,6 +36,7 @@
 
 ## items (392 lines)
 
+#[non_exhaustive] pub enum feature_v2::FormulaRevision
 #[non_exhaustive] pub struct research::DvifmFieldMap
 #[non_exhaustive] pub struct research::DvifmLevelField
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
@@ -47,7 +48,6 @@ pub const research::BUILD_COMMIT: core::option::Option<&str>
 pub const score_math::POOL_STD_FLOOR: f64
 pub enum corruption_head::CorruptionHeadError
 pub enum det_math::PowForm
-pub enum feature_v2::FormulaRevision
 pub enum fold_engine::ScoringEngine
 pub enum research::DvifmBand
 pub enum research::DvifmInputPlane

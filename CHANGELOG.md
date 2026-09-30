@@ -473,22 +473,26 @@ formula; these candidate profiles intentionally change pixel scores. Their
 original weights, splines and historical artifacts remain. All legacy and dense
 bakes now use one ID-based extraction planner. No public signature is removed.
 
-### QUEUED BREAKING CHANGES — `FormulaRevision::Rev4` (featcanon, 2026-09-26) — AWAITING USER APPROVAL
+### BREAKING — `FormulaRevision::Rev4` and `#[non_exhaustive]` (featcanon, 2026-09-26; approved 2026-09-30, option 1)
 
-<!-- Queued by featcanon-fix. Not decided: the user must approve the break or
-     pick a non-breaking alternative (listed in
-     ~/tmp/zensim-paper/rev4/FEATCANON_FIX_DONE.md, D10) before this lands. -->
+<!-- Queued by featcanon-fix; the user approved it on 2026-09-30 as option 1 of
+     ~/tmp/zensim-paper/rev4/FEATCANON_FIX_DONE.md §D10: `FormulaRevision`
+     becomes #[non_exhaustive] in the same unpublished 0.3.0 batch, so Rev4
+     and every later revision are additive. `FormulaRevision` is absent from
+     the published 0.2.7, so no published consumer breaks. -->
 
-- `feature_v2::FormulaRevision` (a `#[doc(hidden)]` re-export, but exhaustive
-  and reachable through the supported `V2NewFeatureToggles::formula_revision`
-  field) gains `Rev4`: revision 3 formulas under canonical, SIMD-tier
-  independent arithmetic (the `tiercanon` era). A downstream exhaustive `match`
-  on `FormulaRevision` stops compiling. Selected only by `ZENSIM_FORMULA_REV=4`;
+- `feature_v2::FormulaRevision` (a `#[doc(hidden)]` re-export, reachable
+  through the supported `V2NewFeatureToggles::formula_revision` field) is now
+  `#[non_exhaustive]` and gains `Rev4`: revision 3 formulas under canonical,
+  SIMD-tier independent arithmetic (the `tiercanon` era). A downstream
+  exhaustive `match` on `FormulaRevision` needs a `_` arm. Selected only by
+  `ZENSIM_FORMULA_REV=4`;
   **research-extraction-only** — every `Zensim`, `BakeScorer`, HDR, diffmap,
   attribution and corruption-head entry returns
   `ZensimError::ModelForwardFailed` at revision 4, and a request whose revision
   differs from the process revision is refused whenever either is revision 4.
-  (jj changes: featcanon `kmylspyt`, featcanon-fix `zyxkkvyl`)
+  (jj changes: featcanon `kmylspyt`, featcanon-fix `zyxkkvyl`,
+  rev4canon `xxwsrwzk`/`orqyortv`/`ymszzsxz`)
 - Doc-hidden `feature_v2::bake_formula_revision_public` now returns
   `Result<FormulaRevision, ZensimError>`: a present `zentrain.formula_revision`
   value this build does not know is an error instead of silently reading as
