@@ -1007,3 +1007,16 @@ are packed into one content-addressed archive (sha256 `97a0c517f88efb34e21740338
 `e791fcc310981f2f0661be4a819e7d8d69e1ee800b6d0e44cd67922a8de7121b`, image `ghcr.io/imazen/zenfleet-worker:fit-v2-v1`).
 No new population; the LAN store and workers are operator-controlled machines on the home network. No holdout table
 is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts excluded).
+
+## Exposure ledger — 2026-10-01: fleet transport of Instrument v2 inputs, erratum R1.1 layout (ruling D1)
+
+The jobset that used the 2026-09-30 archive (`97a0c517…`) is retired (erratum R1.1 in
+`benchmarks/rev4_featpot_v2_amendment_2026-09-30.md`). Its replacement packs the two-family tables
+(`/var/tmp/rev4-featpot/v2/wide/{main,aux}/{real,p1,p2,p3}`, same populations, same rows, same splits; only the column
+layout changed) into one content-addressed archive (sha256
+`71e05dd29f7205bc915b531dada88d916f8d23f520ad06fdc4e32a98d858eb13`, 14,725,362,668 bytes, 353 members,
+`zenmetrics scripts/jobsys/pack_fit_data_v2.py`), uploaded to the LAN object store under
+`s3://zentrain/jobs/<v2 jobset>/inputs/` for zenfleet fit cells (program sha
+`4c2b064a68753289095af6ad4fe1a2866abd25dce19cf19ac7a68a8f9dad4a1f`, image `ghcr.io/imazen/zenfleet-worker:fit-v2-v2`).
+No new population; the LAN store and workers are operator-controlled machines on the home network. No holdout table
+is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts excluded).
