@@ -991,3 +991,8 @@ Takeover reads the same day (already reserved populations, registered analyses):
 and compares were computed on 2026-09-30 21:59–22:05Z from the fleet-era cells (`mlp_aggregate/`,
 `p2/mlp_aggregate/`, `p2/mlp_compare/`, `p2/d2_mlp_compare/` under `/var/tmp/rev4-featpot/`). Record:
 `~/tmp/zensim-paper/rev4/FEATPOT_AUDIT_2026-09-30.md`.
+
+Revision R1 (same day, before any v2 cell result): v2 also reads the TRAIN-role teacher labels (SSIMULACRA2 oracle)
+of `safesyn` and `cid22_train` from the promoted bank, restricted to R915's recorded fit/dev reference split, as
+training-only legs; never evaluated. Pin: `benchmarks/rev4_featpot_v2_teacher_pin_2026-09-30.json`. Status before
+read: pending; update after read.

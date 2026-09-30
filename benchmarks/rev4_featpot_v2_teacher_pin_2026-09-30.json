@@ -1,0 +1,141 @@
+{
+ "schema": "rev4-featpot-v2-teacher-pin-v1",
+ "label": "POTENTIAL \u2014 ceiling, not a model score",
+ "note": "hashes only; no label value read when this pin was written",
+ "r915_dedup_manifest_sha256": "8f10f902fbfa63c8f82815213c4f5fa5c1f245a74ae9e8766f9295b9c9e18060",
+ "peer_manifest_sha256": "8d2799c8a9ebaa3f25fa7518b3d7591ee7742b696d7f5592b9ace9974d0d27fc",
+ "legs": {
+  "safesyn": {
+   "bank_set": "safesyn",
+   "r915_leg": "safesyn",
+   "files": {
+    "manifest": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/_MANIFEST.json",
+     "sha256": "99ba56b7713011a1b39a3885c3107a755b9db1a107dda620f0415ad921edbc1d"
+    },
+    "keys": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/keys.parquet",
+     "sha256": "12d48d7fc02afd5026067a348ea20a3896ea6de9a94bd99a25ec2db071c2b28f"
+    },
+    "base": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/features__basic+peaks+masked+iw+v2+append+append2__ceiling_rev3__b782e349.parquet",
+     "sha256": "b2915b4dfb03204f2ba1be72394f05193fedc4e465a360f7eca24edee452cf2c"
+    },
+    "labels": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/labels__ssim2_oracle.parquet",
+     "sha256": "4c56180ce673de063a2aefb67d3edaf9688e637fad185fc4a5d6b0404d14392a"
+    },
+    "partb_csfw_dvifm": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/features__csfw_dvifm.parquet",
+     "sha256": "0341648a88d654bb40c99266c1e9495b645497c0eb677508b0ec70d03bd4c454"
+    },
+    "partb_c1c4": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/features__rev4c1c4.parquet",
+     "sha256": "2d8762eeec3d6c3568ba5bbdef17023046778cddcf234340a97b7ae6148187b0"
+    },
+    "partb_gmsbank": {
+     "path": "/var/tmp/rev4-featbank/bank/safesyn/features__gmsbank.parquet",
+     "sha256": "12363e4bcf2702e55caf2f8ffcf42db70289ae592212d9c0911a32d36fdaf6f6"
+    },
+    "restore_manifest": {
+     "path": "/var/tmp/restore-cuts/bank/safesyn/_MANIFEST_restore.json",
+     "sha256": "8e257ec13c1883e27e949ef965feb6ef5694bf630314424cbec187b664c37c86"
+    },
+    "restore_mapdev": {
+     "path": "/var/tmp/restore-cuts/bank/safesyn/features__restore_mapdev.parquet",
+     "sha256": "b7883a338a53a42a47609b53975ef3629b2a7152f799d910439d9d4c45aac544"
+    },
+    "restore_z1max": {
+     "path": "/var/tmp/restore-cuts/bank/safesyn/features__restore_z1max.parquet",
+     "sha256": "0e81c3e61546ebb50522e83d4175bdf41fa4a3204564448e3bd4ee16a6e55e61"
+    },
+    "restore_gmsnative": {
+     "path": "/var/tmp/restore-cuts/bank/safesyn/features__restore_gmsnative.parquet",
+     "sha256": "5d9f316bcfa7b654edfd71bff1957c5f992141b6864cb663a4a488aa37c1b467"
+    },
+    "restore_dvifmgate": {
+     "path": "/var/tmp/restore-cuts/bank/safesyn/features__restore_dvifmgate.parquet",
+     "sha256": "0726d13cdb86ce6986ba692cfd55217f3ef285621ce919de415eea3308e4cba6"
+    },
+    "peer": {
+     "path": "/var/tmp/gmsbank/peer_gmsd/safesyn.parquet",
+     "sha256": "9b663ee3682a9bf163db73b9308b78e46cb65c4b1260dc392d5e4f3f2b879fe8"
+    },
+    "r915_fit": {
+     "path": "/var/tmp/zensim-validation-2026-09-15/recovery/dedup-tables/safesyn_fit.parquet",
+     "sha256": "dc196c031cece4a5e50f4c9d789d9b5fe4859fd2b64d008da1ed3b309debab1b"
+    },
+    "r915_dev": {
+     "path": "/var/tmp/zensim-validation-2026-09-15/recovery/dedup-tables/safesyn_development.parquet",
+     "sha256": "51459fa13095368a8dee932bf3dea960450ca3de5465c5015486b6b046a84745"
+    }
+   }
+  },
+  "cid22": {
+   "bank_set": "cid22_train",
+   "r915_leg": "cid22",
+   "files": {
+    "manifest": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/_MANIFEST.json",
+     "sha256": "8a51d65c21a84aa880548cbbee3e2fa80f18673bdcf3760300f5102e3ed9e263"
+    },
+    "keys": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/keys.parquet",
+     "sha256": "c99a0887705b17bff05bdbfc55b89f9b4f060bc94a009302543f15d9a0127219"
+    },
+    "base": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/features__basic+peaks+masked+iw+v2+append+append2__ceiling_rev3__b782e349.parquet",
+     "sha256": "7da5bd82542ae6d389b60b1ea2efeae14741cd331f054ba92deb140c23bf3bd1"
+    },
+    "labels": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/labels__ssim2_oracle.parquet",
+     "sha256": "df7a259b0403dfb0e251fa654f3c9c792682005ab3de04f7a777ae691f1ff4fc"
+    },
+    "partb_csfw_dvifm": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/features__csfw_dvifm.parquet",
+     "sha256": "82183df876624735b9cef46ffcd6016f4717b42a4265cfc5698a9d5b9262f399"
+    },
+    "partb_c1c4": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/features__rev4c1c4.parquet",
+     "sha256": "43d40e099a5805d5cdb6824179304a6305705917f067268030cca53595a20cfd"
+    },
+    "partb_gmsbank": {
+     "path": "/var/tmp/rev4-featbank/bank/cid22_train/features__gmsbank.parquet",
+     "sha256": "7313164f5df3d731e27e9c7e6c3718d6dfc1b948aee4483e3f6387042818a652"
+    },
+    "restore_manifest": {
+     "path": "/var/tmp/restore-cuts/bank/cid22_train/_MANIFEST_restore.json",
+     "sha256": "1cbe99f3e5a5da1d3fbb1c037a8f28b56497043b46a5acc2a6e3216ad7b140cf"
+    },
+    "restore_mapdev": {
+     "path": "/var/tmp/restore-cuts/bank/cid22_train/features__restore_mapdev.parquet",
+     "sha256": "68edbc604b422da452f0673be53607005037f93b6b4cdc6ab5051cbaa5f31c99"
+    },
+    "restore_z1max": {
+     "path": "/var/tmp/restore-cuts/bank/cid22_train/features__restore_z1max.parquet",
+     "sha256": "429e22b3a444c162c65b1c6bd70e928094ff34dcfa55d302c16e14aa94186c71"
+    },
+    "restore_gmsnative": {
+     "path": "/var/tmp/restore-cuts/bank/cid22_train/features__restore_gmsnative.parquet",
+     "sha256": "e62250da4cc87754939c259c313a24a82747080a470f1bc09cdc853e5ba37026"
+    },
+    "restore_dvifmgate": {
+     "path": "/var/tmp/restore-cuts/bank/cid22_train/features__restore_dvifmgate.parquet",
+     "sha256": "c815e7590f5ff87eb18216a7b13d9e403f0cc3a20b6e1cca5fb3ae4ab4395e40"
+    },
+    "peer": {
+     "path": "/var/tmp/gmsbank/peer_gmsd/cid22_train.parquet",
+     "sha256": "da4bf4a1bcfdb6ea5bb254a22706d34fda5148118bb9e64c579d9dfa52509cce"
+    },
+    "r915_fit": {
+     "path": "/var/tmp/zensim-validation-2026-09-15/recovery/dedup-tables/cid22_fit.parquet",
+     "sha256": "528ddb2166743b1852dc2fcbde7aaa8cc3d9a75bb1c0f6bc0fc0c1edc65f4528"
+    },
+    "r915_dev": {
+     "path": "/var/tmp/zensim-validation-2026-09-15/recovery/dedup-tables/cid22_development.parquet",
+     "sha256": "4ec102bad012141c58b51051274cb6994066ed9134cd2ed2bbb27c54b7e2931f"
+    }
+   }
+  }
+ }
+}

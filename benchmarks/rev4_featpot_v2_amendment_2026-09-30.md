@@ -106,3 +106,45 @@ This design was written after reading the registered deterministic D1/D2 tables 
 2026-09-26 artifact), their stability results, and the P0 / P2 / D2 MLP aggregates run 2026-09-30 (arms r0,
 minus_basic, p2, p2_perm only). No MLP result for any candidate arm existed or was read. The design choices
 (sources, heads, null, rule) respond to the instrument findings listed above, not to any candidate arm's MLP value.
+
+## Revision R1 (2026-09-30, before any v2 cell result exists) — train with R915's sampling
+
+User question, 2026-09-30: "are you trying with the dataset samplings that produced the best B/D models?". Audit
+of the recipes (`~/tmp/featpot-audit/notes/BD_RECIPES.md`): B and D are linear SafeSyn-dominated Gram fits (D: SafeSyn
+only, zero human rows), not pair-sampled MLPs. The best trained MLP recipe is **R915** (composite 0.876 basic228/H128
+vs 0.838 B, sealed CID22-B 0.897 vs 0.890; failed product qualification, not shipped), whose argv is recorded in
+`/var/tmp/zensim-validation-2026-09-15/recovery/fits/R915_*.raw.bin.spec.json`. The superseded human-only smoke cell
+(stopped mid-run; its first inner-fold curve was seen, no held-out score was produced) showed held-out-source
+validation peaking at epoch 0 (0.907 → ~0.88 while training sources rose), i.e. four small human sets overfit within
+one epoch. **This revision replaces the Design section's training recipe; sources, seeds, arms, controls,
+estimator, V1–V3 and the acceptance gate are unchanged.**
+
+**Training legs per cell** (group spec as R915's argv, `NAME:PATH:TRAIN_W:VAL_W:MODE`):
+
+| leg | rows (source) | label | train weight | dev group, val weight | mode |
+|---|---|---|---|---|---|
+| `safesyn` | bank `safesyn` rows whose reference is in R915's `safesyn_fit` / `safesyn_development` split | raw signed SSIMULACRA2 (bank `ssim2_oracle`) | 1.0 / within-ref acceptance | R915 dev refs, 0.5 | `withinref,both` |
+| `cid22` | bank `cid22_train` rows in R915's `cid22_fit` / `cid22_development` split (CID22 oracle-training references) | raw SSIMULACRA2 | 1.0 / acceptance | R915 dev refs, 2.0 | `withinref,both` |
+| `human` | the four non-held-out human sources; dev = references with sha256(ref) mod 5 = 0 (label-free) | per-source affine → [0, 100] | 0.5 / acceptance | 1.0 | `withinref,rank` |
+
+Acceptance correction as R915: w / mean over references with n ≥ 2 of (1 − 1/n). One fit per cell: 120 epochs ×
+50,000 pairs, `--log-every 1`, `--mse-weight 1`, `--pair-sampling uniform`, `--val-policy mean
+--val-aggregate geomean3 --early-stop-patience 0` (the trainer exports the best epoch), `--target-scale 1`,
+`--out-dtype f32`, L2 and lr at their defaults (1e-5, 1e-3, 50-epoch cosine restarts, as R915). This replaces the
+inner leave-one-source-out selection. Heads N and F, H = 32.
+
+**Deviations from R915, stated:** its modern-codec leg (7,947 imazen-26 + nonphoto rows, weight 0.5) has no bank
+features and is omitted; H = 32 for every arm (R915: H32 on Y60, H128 on basic228), for cost at 944+ inputs; the
+human leg is the four non-held-out v2 sources instead of KADID + TID only; seeds are v2's ten.
+
+**Arm selection by column mask.** One wide table per leg per variant (`real`, `p1`–`p3`): bank f0–f943, the research
+vector f944–f1824 at canonical IDs, peers `gmsd`/`gmsm` at f1825/f1826, `oracle_lo`/`oracle_hi` at f1827/f1828. An arm
+is `--keep-features` (bank 944 + its canonical IDs; `minus_basic` = f228–f943), which zeroes the dropped columns before
+scaling and pins their first-layer rows at zero, so every arm and R0 share identical initial weights on the common
+columns. Permuted variants permute f944–f1828 jointly within reference over pair keys (seed 20260930 + k + 1000·leg);
+an arm's control is its columns from variant pk. `oracle_hi`'s null is `oracle_lo~p1..p3` (same width).
+
+**New populations (TRAIN role, teacher labels, never evaluated):** `safesyn` (bank 196,086 pairs; R915 split keeps
+2,312 fit + 634 dev references) and `cid22_train` (17,611 pairs; 139 + 43 references), SSIMULACRA2-oracle targets.
+Input pin: `benchmarks/rev4_featpot_v2_teacher_pin_2026-09-30.json` (every file hashed before any label read).
+Scripts: `scripts/rev4_featpot/v2_common.py`, `v2_wide.py`, `v2_lodo_mlp.py`, `v2_compare.py`.
