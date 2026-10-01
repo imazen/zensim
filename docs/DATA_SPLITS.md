@@ -1077,3 +1077,20 @@ is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-
 Addendum (2026-10-01 02:45 MT): when the retune sweep completes and the R3 rule selects a weight, the same archive
 (`6e846071…`, unchanged) is copied server-side to the acceptance re-run jobset (`fitv2acc-20261001`, same program and
 image). No new population and no new transport destination.
+
+## Exposure ledger — 2026-10-01 07:12 MT: fleet transport of the v2-canon LODO inputs (amendment R2.3)
+
+The v2-canon root (`/var/tmp/rev4-featpot/v2c`, width 1853 = the Rev4 bank's f0–f1824 plus the 28 SIGNEDFEAT sidecar
+columns f1825–f1852; frozen record `wide/frozen.json`, sha256
+`f432995f31a3de32a17f7defbaccecd3c22114130db107a050bbdd8fdc404040`; all 129 verify gates pass) is packed for the R2.3
+calibration + screen cells with `scripts/rev4_featpot/v2c_pack.py --kind lodo`: one content-addressed archive (sha256
+`6ec0357bccc2b243150e333e1b14b11eb032b21505609cc4753a3d1f37639e83`, 10,103,175,330 bytes, 418 members:
+`wide/{main,aux}/{real,p1,p2,p3}` with the five admitted human sources' tables + keys, the per-held-out
+`human_without_<source>_{fit,dev}` and `human_all_{fit,dev}` legs, the two TRAIN-role teacher legs `safesyn_{fit,dev}`
+and `cid22_{fit,dev}`, receipts, `keep_lists.json` and `extra_arms.json`). Every table was hash-checked against its
+receipt before it was copied. Uploaded to the LAN object store under `s3://zentrain/jobs/fitv2canon-20261001/inputs/`
+for zenfleet fit cells (program sha `9607eada738ede364a46f4b0363b4f0fc90a99afb02af1eaa64f9af659741022`, image
+`ghcr.io/imazen/zenfleet-worker:fit-v2-v8`). No new population; the LAN store and workers are operator-controlled
+machines on the home network. No holdout table is in the archive: the member list was checked for the confirmatory
+sets and none is present (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts
+excluded). The confirmatory archive (`--kind confirm`) is not built yet and gets its own entry when it is.
