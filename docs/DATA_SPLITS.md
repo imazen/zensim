@@ -1094,3 +1094,18 @@ for zenfleet fit cells (program sha `9607eada738ede364a46f4b0363b4f0fc90a99afb02
 machines on the home network. No holdout table is in the archive: the member list was checked for the confirmatory
 sets and none is present (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts
 excluded). The confirmatory archive (`--kind confirm`) is not built yet and gets its own entry when it is.
+
+## Exposure ledger — 2026-10-01 11:25 MT: fleet transport of the v2-canon confirmatory inputs (amendment R2)
+
+For the R2 full-data confirmatory fits (`v2_confirm_fit.py`), `scripts/rev4_featpot/v2c_pack.py --kind confirm` packs from the
+frozen v2-canon root (`f432995f…`) one content-addressed archive (sha256
+`5c5780340de081f939987ee78b63f0f32c811e0db9ae0d439155e9318de9d1c7`, 7,752,615,791 bytes, 283 members): the two TRAIN-role
+teacher legs and `human_all` fit/dev for both families and all four variants, receipts and keep lists, and the
+**features-only** confirmatory tables of CID22-B, AIC-4, KonJND JPEG SELECT, KonJND JPEG TERMINAL, CSIQ and MCL-JCI
+(`wide/confirm/{main,aux}[/p1-p3]`). The confirmatory tables carry no label: `human_score` is written as the constant 0
+by the builder (`v2c_wide.py` confirm: `np.zeros(...)`), their keys hold only `pair_key, row_id, ref_basename,
+member_set`, and the aux oracle columns are zero there (an oracle needs a label). Verified from the code and the
+parquet schemas; no value of these columns was read. Uploaded to the LAN object store under
+`s3://zentrain/jobs/fitv2confirm-20261001/inputs/`. No new population; the LAN store and workers are operator-controlled
+machines on the home network. The labels stay sealed until the single confirmatory read (label pins: CID22-B(23),
+AIC-4, KonJND JPEG SELECT/TERMINAL, CSIQ, MCL-JCI; `~/tmp/zensim-paper/rev4/LABELPIN_specs.json`).
