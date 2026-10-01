@@ -399,3 +399,17 @@ this sense. |mean| < MIN_GAIN is still computed and reported (`perm_null_centred
 10:52 MDT, not read before this revision) and every later calibration read. Under R5 the Rev3-root acceptance re-run
 accepts (V1 5/5, all five intervals contain 0); it is recorded here as a post-hoc reading of an already-read result,
 not as a confirmation. Arm decisions are unaffected: every arm is judged against its own permuted controls.
+
+### Execution note (2026-10-01 11:08 MDT) — canon calibration, R2.3 screen, full arms launched
+
+Canon calibration + screen (`fitv2canon2-20261001`, program v9, 900/900, complete 10:52 MDT) read after R5 was pushed:
+**accepted** under head N (oracle_hi V1 5/5; every null's permutation-mean CI contains 0; KADID's null mean is +0.0050,
+so the pre-R5 |mean| < 0.005 rule would have failed it on noise). Record: `benchmarks/rev4_featpot_effaudit/
+v2c_calibration_h32_2026-10-01.json`. The screen (`v2c_screen.py run`, predictor 56da0529, every unpermuted prediction
+reproduced its cell's SROCC; `benchmarks/rev4_featpot_effaudit/v2c_screen_2026-10-01.json`) selected by the R2.3 rule:
+**b2, b2m, c8n, p3, p1, c3** (top 6 head-N importance) + **csfw** (E4 sign-consistent 7/12); the head-N targeted top 3
+were already among them. Not tested in full: c1, b1s, c2, b1, c7, c4, texgain, satsign, a1, a1m. Screen importance is
+how much an all-columns model leans on a family, not a gain over R0; the gain is what the full arms measure. Full arms:
+`fitv2arms-20261001`, 2,800 cells (7 arms × (arm + p1–p3) × 2 heads × 5 sources × 10 seeds), program v10 (`ad22a0fc`:
+the v9 predictor plus the TRAINEROPT trainer from zensim `538d3549`, which gives byte-identical final weights; v10 gate:
+3 canon cells re-run in the fleet image reproduce their v9 weights and predictions), image `fit-v2-v10`.
