@@ -1020,3 +1020,8 @@ layout changed) into one content-addressed archive (sha256
 `4c2b064a68753289095af6ad4fe1a2866abd25dce19cf19ac7a68a8f9dad4a1f`, image `ghcr.io/imazen/zenfleet-worker:fit-v2-v2`).
 No new population; the LAN store and workers are operator-controlled machines on the home network. No holdout table
 is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts excluded).
+
+Addendum (2026-09-30 18:52 MT / 2026-10-01 00:52 UTC): the jobset using program `4c2b064a…` was stopped and retired (its image carried a start-up race
+in the fit-cell executor's link creation). The same archive (`71e05dd2…`, unchanged) is copied server-side to the
+replacement jobset, run with program `ff2e3ec63c4ecaf07ffd612bb9352ab35d42b89ada43ae354400b3aa96064f09` and image
+`ghcr.io/imazen/zenfleet-worker:fit-v2-v3`. No new population and no new transport destination.
