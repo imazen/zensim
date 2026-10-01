@@ -1061,3 +1061,15 @@ The fix lane's own pixel reads: KADID `I01` and its 125 distortions (SELECT), re
 `kadid64crop` source above; and the review's probe set (`/var/tmp/review-featcanon/probe/pairs.tsv`, KADID `I02`/`I24`
 and 16 even references, TID `I14`/`I01`, KonJND `SRC0510`/`SRC0505`, KonFiG `SRC06`, all TRAIN) for the Rev1–3
 bit-identity and Rev4 tier gates. No AIC-3 file was opened by the fix lane. AIC-3's holdout status is unchanged.
+
+## Exposure ledger — 2026-10-01 02:29 MT: fleet transport of the R3 retune inputs
+
+Amendment revision R3 rebuilt the aux family with distance-oriented oracle columns (same populations, rows, splits,
+keys and every other column, byte-identical to the superseded aux tables). The retune sweep and the acceptance re-run
+read only `main/real` and `aux/{real,p1,p2,p3}`, packed into one content-addressed archive (sha256
+`6e8460713b5b8512f34517b917f5257e7a7dc4a585dde0adab8e64a2c1499b48`, 8,069,171,677 bytes, 221 members,
+`zenmetrics scripts/jobsys/pack_fit_data_v2.py --select`), uploaded to the LAN object store under
+`s3://zentrain/jobs/<v2 R3 jobset>/inputs/` for zenfleet fit cells (program sha
+`ec5273653165092835378c0ed823427ccbd047bf427e3fcf983297fcc1b2b2f2`, image `ghcr.io/imazen/zenfleet-worker:fit-v2-v4`).
+No new population; the LAN store and workers are operator-controlled machines on the home network. No holdout table
+is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts excluded).
