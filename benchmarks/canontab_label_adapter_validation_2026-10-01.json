@@ -1,0 +1,40 @@
+[
+ {
+  "set": "aic3",
+  "spec_path": "/mnt/v/output/zensim/v2-ab-2026-07-19/aic3_pairs_ab.tsv",
+  "spec_sha256": "4976fee28ac4228abdbdc513718faec7b6d3c9ae0c9f9648605e1e8b31768090",
+  "accounting": {
+   "label_rows": 600,
+   "unselected_rows": 0,
+   "matched_by_pixel_hash": 0,
+   "rows_on_identical_keys_or_unmatched_identical": 0,
+   "keys": 600,
+   "identical_keys": 0,
+   "rows_used": 600
+  },
+  "keys_with_labels": 600,
+  "admitted_keys": 600,
+  "per_key_label_multisets_equal": true,
+  "file_order_sequence_equal": true,
+  "exact": true
+ },
+ {
+  "set": "kadid_select",
+  "spec_path": "/home/lilith/work/zensim-validation-2026-09-13/ceiling/final/INPUTS.json",
+  "spec_sha256": "44a574b77538c1971a2a18508ef7b1ccd93f517e8cd9bd0cd72de14d3b056c9c",
+  "accounting": {
+   "label_rows": 3125,
+   "unselected_rows": 16833,
+   "matched_by_pixel_hash": 0,
+   "rows_on_identical_keys_or_unmatched_identical": 100,
+   "keys": 3050,
+   "identical_keys": 25,
+   "rows_used": 3025
+  },
+  "keys_with_labels": 3025,
+  "admitted_keys": 3025,
+  "per_key_label_multisets_equal": true,
+  "file_order_sequence_equal": true,
+  "exact": true
+ }
+]

@@ -38,3 +38,10 @@ and a mutation test (orientation table forced to QUALITY) breaks the planted-eff
   `selected_bake_sha256` differs while predictions do not.
 - `v2_compare.py --calibration` re-run on a symlinked root: `calibration.json` byte-identical to the coordinator's.
 - Coordinator decisions applied: matched null only (no `--eval-variant`), labels named by the pin, R2.1 primary test (short list + Holm).
+
+## 2026-10-01 (round 2) — review fixes
+Applied REVIEW_CONFIRM findings 1–13, 15 (partly); aux built into `/var/tmp/rev4-featpot/v2c`, verify all_ok, NOT frozen (SIGNEDFEAT width 1853 pending).
+Label adapter (`v2c_labels.py`) reproduces AIC-3 (from `aic3_pairs_ab.tsv`) and KADID-SELECT (from the ceiling INPUTS table; `kadid_pairs_ab.tsv`
+carries a different label scale and cannot reproduce the admitted labels) exactly: `benchmarks/canontab_label_adapter_validation_2026-10-01.json`.
+No sealed label file was opened or hashed; no `cid22val` file was touched. Slip recorded: I moved my local `quarantine/claude/canontab` bookmark with
+`--allow-backwards` once (round-1 head e0a3fa58 stays in the op log); `main` was not touched.

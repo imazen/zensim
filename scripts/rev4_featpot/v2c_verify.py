@@ -128,7 +128,7 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
             n, diff = check_cells(bank, keys, x, None, cols)
             peers_ok = True
             for member in SOURCES[source]:
-                rec_peers = json.loads((out / "wide" / "main" / "real" / "receipt.json").read_text())["bank"][member].get("peers")
+                rec_peers = json.loads((aux_dir / "receipt.json").read_text())["bank"][member].get("peers")
                 peer = pq.read_table(rec_peers["path"], columns=["pair_key", "gmsd", "gmsm"]).to_pandas().drop_duplicates("pair_key")
                 sel = (keys.member_set == member).to_numpy()
                 got = peer.set_index("pair_key").reindex(keys.pair_key[sel])[["gmsd", "gmsm"]].to_numpy(np.float64).astype(np.float32)
@@ -212,7 +212,8 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
                     bank_keys = pq.read_table(bank_file(bank, name, "keys.parquet"),
                                               columns=["pair_key", "pixels_identical"]).to_pandas()
                     want = bank_keys.pair_key[~bank_keys.pixels_identical].tolist()
-                    n, diff = check_cells(bank, keys, x) if (family == "main" and variant == "real") else (len(keys), 0)
+                    n, diff = ((check_cells(bank, keys, x) if family == "main" else check_cells(bank, keys, x, None, [*range(944), *AUX_GMSBANK]))
+                               if variant == "real" else (len(keys), 0))
                     gate("confirm", diff == 0 and keys.pair_key.tolist() == want and not score.any()
                          and not {"target", "human_score", "label"} & set(keys.columns)
                          and sha(table_path(table)) == table["sha256"], set=name, family=family, variant=variant,
@@ -231,8 +232,9 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
                     if sha(tp) != part["sha256"] or sha(Path(f"{tp}.manifest.json")) != part["manifest_sha256"]:
                         bad.append(str(tp))
     gate("receipts", not bad, changed=bad)
-    (out / "wide" / "verify.json").write_text(json.dumps({"gates": results, "all_ok": not failed}, indent=1) + "\n")
-    print(json.dumps({"verify": str(out / "wide" / "verify.json"), "all_ok": not failed}))
+    name = "verify.after_freeze.json" if (out / "wide" / "frozen.json").is_file() else "verify.json"  # never rewrite a frozen verify
+    (out / "wide" / name).write_text(json.dumps({"gates": results, "all_ok": not failed}, indent=1) + "\n")
+    print(json.dumps({"verify": str(out / "wide" / name), "all_ok": not failed}))
     return int(failed)
 
 

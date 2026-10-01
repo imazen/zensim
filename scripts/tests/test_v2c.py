@@ -225,110 +225,297 @@ class TrainRecipe(unittest.TestCase):
         self.assertIn("c3~p3@h2__F/full_s9", {c["name"] for c in cells})
 
 
+class PinBuilder(unittest.TestCase):
+    def test_shortlist_rule(self):
+        import v2c_pin
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+
+            def rec(arm, head, excess, v1sources, regress=()):
+                src = {f"s{i}": {"excess": e, "v1_pass": i < v1sources} for i, e in enumerate(excess)}
+                (d / f"{arm}_{head}.json").write_text(json.dumps({"status": "OK", "sources": src, "regressions": list(regress)}))
+            rec("c1", "N", [0.02] * 5, 2)             # eligible, mean 0.02
+            rec("c1", "F", [0.02] * 5, 2)             # ties c1/N: N first
+            rec("c2", "N", [0.05] * 5, 1)             # only 1 V1 source: ineligible
+            rec("c3", "N", [0.09] * 5, 3, ["s0"])     # regression: ineligible
+            rec("c4", "N", [0.03] * 5, 4)             # eligible, largest
+            got, prov = v2c_pin.shortlist(d, ["c1", "c2", "c3", "c4"])
+            self.assertEqual([(e["arm"], e["head"]) for e in got], [("c4", "N"), ("c1", "N"), ("c1", "F")])
+            self.assertEqual(len(prov), 5)
+            many = ["all", "csfw", "c7", "p1", "b1", "b1s", "c8n", "rall"]
+            for k, arm in enumerate(many):            # more than 6 eligible: capped at six
+                rec(arm, "N", [0.001 * k] * 5, 2)
+            self.assertEqual(len(v2c_pin.shortlist(d, [*many, "c1", "c4"])[0]), 6)
+
+
+class Freeze(unittest.TestCase):
+    def test_freeze_pins_receipts_and_blocks_rebuilds(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            wide = root / "wide"
+            for fam in w.FAMILIES:
+                for var in w.VARIANTS:
+                    (wide / fam / var).mkdir(parents=True)
+                    (wide / fam / var / "receipt.json").write_text(json.dumps({"complete": True, "width": 1825, "feature_set_id": "x"}))
+            sets = {n: {"tables": {f: {v: {} for v in w.VARIANTS} for f in w.FAMILIES}} for n in w.CONFIRM_SETS}
+            (wide / "confirm").mkdir()
+            (wide / "confirm" / "receipt.json").write_text(json.dumps({"width": 1825, "sets": sets}))
+            (wide / "keep_lists.json").write_text("{}")
+            (wide / "verify.json").write_text(json.dumps({"all_ok": False}))
+            with self.assertRaises(ValueError):                              # an unclean verify cannot be frozen
+                w.freeze(root)
+            (wide / "verify.json").write_text(json.dumps({"all_ok": True}))
+            with self.assertRaises(ValueError):                              # no frozen.json yet
+                v2_common.load_frozen(root)
+            w.freeze(root)
+            record, digest = v2_common.load_frozen(root)
+            self.assertEqual(len(digest), 64)
+            with self.assertRaises(ValueError):                              # no rebuild into a frozen root
+                w.build_confirm(Path("/nonexistent"), root, ["main"], [], None)
+            (wide / "main" / "p1" / "receipt.json").write_text(json.dumps({"complete": True, "width": 1825, "feature_set_id": "y"}))
+            with self.assertRaises(ValueError):                              # any receipt change after the freeze is caught
+                v2_common.load_frozen(root)
+
+
+class Labels(unittest.TestCase):
+    """The label adapter (v2c_labels): by (ref_path, dist_path), never by row_id; strict accounting."""
+
+    def keys(self, n=5):
+        return pd.DataFrame({"pair_key": [f"k{i}" for i in range(n)], "ref_path": [f"/r/{i // 2}.png" for i in range(n)],
+                             "dist_path": [f"/d/{i}.png" for i in range(n)], "ref_pixels_sha256": [f"r{i // 2}" for i in range(n)],
+                             "dist_pixels_sha256": [f"d{i}" for i in range(n)], "n_stimuli": 1, "pixels_identical": False})
+
+    def rows(self, keys, extra=()):
+        base = pd.DataFrame({"ref_path": keys.ref_path, "dist_path": keys.dist_path, "label": np.arange(len(keys), dtype=float)})
+        base = pd.concat([base, pd.DataFrame(extra, columns=["ref_path", "dist_path", "label"])], ignore_index=True)
+        base["file_row"] = np.arange(len(base))
+        return base
+
+    def test_maps_by_paths_not_row_order(self):
+        import v2c_labels as L
+        keys = self.keys()
+        rows = self.rows(keys).iloc[::-1].reset_index(drop=True)          # source order is not bank order
+        got, acct = L.adapt(rows, keys)
+        self.assertEqual(dict(zip(got.pair_key, got.label)), {f"k{i}": float(i) for i in range(5)})
+        self.assertEqual(acct["rows_used"], 5)
+
+    def test_unmatched_rows_must_be_identical_stimuli(self):
+        import v2c_labels as L
+        keys = self.keys()
+        with self.assertRaises(ValueError):                               # a stray row that is no identical stimulus
+            L.adapt(self.rows(keys, [("/r/9.png", "/d/x.png", 1.0)]), keys)
+        keys.loc[1, "pixels_identical"] = True
+        keys.loc[1, "n_stimuli"] = 3                                      # 2 more stimuli on the identical key, not matched by path
+        got, acct = L.adapt(self.rows(keys, [("/r/0.png", "/d/a.png", 7.0), ("/r/0.png", "/d/b.png", 8.0)]), keys)
+        self.assertEqual(sorted(got.pair_key), ["k0", "k2", "k3", "k4"])
+        self.assertEqual(acct["rows_on_identical_keys_or_unmatched_identical"], 3)
+
+    def test_collapsed_stimuli_need_the_pixel_table(self):
+        import v2c_labels as L
+        keys = self.keys()
+        keys.loc[2, "n_stimuli"] = 2
+        rows = self.rows(keys, [("/r/1.png", "/d/alias.png", 9.0)])
+        with self.assertRaises(ValueError):
+            L.adapt(rows, keys)
+        got, acct = L.adapt(rows, keys, None, {"/r/1.png": "r1", "/d/alias.png": "d2"})
+        self.assertEqual(sorted(got.label[got.pair_key == "k2"]), [2.0, 9.0])
+        self.assertEqual(acct["matched_by_pixel_hash"], 1)
+
+    def test_select_rule_and_via_pairs(self):
+        import v2c_labels as L
+        keys = self.keys()
+        rows = self.rows(keys, [("/r/other.png", "/d/o.png", 5.0)])
+        got, acct = L.adapt(rows, keys, {"ref_path_in": sorted(set(keys.ref_path))})
+        self.assertEqual((len(got), acct["unselected_rows"]), (5, 1))
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            pairs = pd.DataFrame({"ref_path": keys.ref_path, "dist_path": keys.dist_path, "row_id": range(5)})
+            pairs.to_csv(t / "pairs.tsv", sep="\t", index=False)
+            pd.DataFrame({"row_id": range(5), "score": [10, 11, 12, 13, 14]}).to_csv(t / "labels.csv", index=False)
+            spec = {"path": str(t / "labels.csv"), "sha256": v2_common.sha(t / "labels.csv"), "format": "csv", "label_col": "score",
+                    "via_pairs": {"path": str(t / "pairs.tsv"), "sha256": v2_common.sha(t / "pairs.tsv"), "on": [["row_id", "row_id"]]}}
+            got, _ = L.adapt(L.load_label_rows(spec), keys)
+            self.assertEqual(got.label.tolist(), [10.0, 11.0, 12.0, 13.0, 14.0])
+            spec["sha256"] = "0" * 64
+            with self.assertRaises(ValueError):
+                L.load_label_rows(spec)
+
+    def test_open_sets_reproduce_admitted_labels_exactly(self):
+        import v2c_labels as L
+        for name in ("aic3", "kadid_select"):                              # OPEN sets only; never a sealed one
+            self.assertTrue(L.validate(name)["exact"], name)
+        with self.assertRaises(SystemExit):
+            L.validate("cid22_b")
+
+
 class ConfirmRead(unittest.TestCase):
+    PRIMARY = ("cid22_b", "aic4", "csiq", "mcljci")
     SETS = ("cid22_b", "aic4", "konjnd_jpeg_select", "konjnd_jpeg_terminal", "csiq", "mcljci")
+    FILES = {"cid22_b": ("cid22val_pairs_ab.tsv", "human_score"), "aic4": ("aic4_pairs.tsv", "human_score"),
+             "konjnd_jpeg_select": ("konjnd_jpeg_val_pairs.tsv", "human_score"), "konjnd_jpeg_terminal": ("konjnd_jpeg_val_pairs.tsv", "human_score"),
+             "csiq": ("csiq_pairs.tsv", "human_score"), "mcljci": ("mcljci_labels.csv", "jnd_dist")}
+    DISTORTION = ("aic4", "konjnd_jpeg_select", "konjnd_jpeg_terminal", "mcljci")  # label-file orientation, fixed independently
     REFS, PER_REF = 30, 8
     B = 200
 
     @classmethod
     def setUpClass(cls):
         import v2_compare
-        cls.cmp = v2_compare
+        import v2_confirm_read as cr
+        cls.cmp, cls.cr = v2_compare, cr
         cls.saved = (v2_compare.BOOT_B, v2_compare.SEED_DRAWS, dict(v2_compare._ref_draws), dict(v2_compare._rendered))
         v2_compare.BOOT_B = cls.B
         v2_compare.SEED_DRAWS = np.random.default_rng(v2_common.BOOT_SEED + 1).integers(0, 10, size=(cls.B, 10))
         v2_compare._ref_draws.clear()
         v2_compare._rendered.clear()
-        import v2_confirm_read as cr
-        cls.patches = [mock.patch.object(cr, "HEADS", ("N",)), mock.patch.object(v2_compare, "HEADS", ("N",))]
-        for p in cls.patches:
-            p.start()
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.patches:
-            p.stop()
         cmp = cls.cmp
         cmp.BOOT_B, cmp.SEED_DRAWS = cls.saved[0], cls.saved[1]
         cmp._ref_draws.clear(), cmp._ref_draws.update(cls.saved[2])
         cmp._rendered.clear(), cmp._rendered.update(cls.saved[3])
+        cmp.REF_SEEDS.clear()
 
-    def build_tree(self, root: Path, planted: dict):
-        """Synthetic confirm tree: arms r0 + the keys of `planted` (noise sd per arm) + their three permuted controls."""
-        import v2_confirm_read as cr
+    def build_tree(self, root: Path, planted: dict, weight=None, heads=("N",), shortlist=None):
+        """Synthetic canon root + bank + labels + pin. planted: arm -> noise sd, or {set: sd, None: default sd}."""
+        cr = self.cr
         rng = np.random.default_rng(11)
-        (root / "wide" / "confirm" / "main").mkdir(parents=True)
-        (root / "wide" / "keep_lists.json").write_text("{}")
-        receipt = {"schema": "rev4-featpot-v2c-confirm-v1", "width": 1825, "feature_set_id": "x", "sets": {}}
-        labels, truth = {}, {}
+        width = 948
+        for rel in ("wide/confirm", "bank", "labels"):
+            (root / rel).mkdir(parents=True, exist_ok=True)
+        receipt = {"schema": "rev4-featpot-v2c-confirm-v1", "width": width, "feature_set_id": "x", "sets": {}}
+        truth, labels = {}, {}
         for name in self.SETS:
             n = self.REFS * self.PER_REF
             keys = pd.DataFrame({"pair_key": [f"{name}-{i}" for i in range(n)], "row_id": np.arange(n),
-                                 "ref_basename": [f"ref{i // self.PER_REF}" for i in range(n)], "member_set": name})
-            kp = root / "wide" / "confirm" / "main" / f"{name}.keys.parquet"
-            pq.write_table(pa.Table.from_pandas(keys, preserve_index=False), kp)
-            receipt["sets"][name] = {"rows": n, "tables": {"main": {"real": {
-                "rel": str(kp.with_name(f"{name}.parquet").relative_to(root)), "keys_sha256": v2_common.sha(kp)}}}}
-            q = rng.normal(size=n)
+                                 "ref_group": [f"ref{i // self.PER_REF}" for i in range(n)],
+                                 "ref_path": [f"/{name}/ref{i // self.PER_REF}.png" for i in range(n)],
+                                 "dist_path": [f"/{name}/d{i}.png" for i in range(n)],
+                                 "ref_pixels_sha256": ["r"] * n, "dist_pixels_sha256": [f"p{i}" for i in range(n)],
+                                 "n_stimuli": np.ones(n, dtype=np.int32), "pixels_identical": [i == 3 for i in range(n)]})
+            (root / "bank" / name).mkdir()
+            pq.write_table(pa.Table.from_pandas(keys, preserve_index=False), root / "bank" / name / "keys.parquet")
+            nonid = keys.loc[~keys.pixels_identical].reset_index(drop=True)
+            ck = pd.DataFrame({"pair_key": nonid.pair_key, "row_id": nonid.row_id, "ref_basename": nonid.ref_group, "member_set": name})
+            tables = {}
+            for variant in ("real", "p1", "p2", "p3"):
+                d = root / "wide" / "confirm" / "main" / ("" if variant == "real" else variant)
+                d.mkdir(parents=True, exist_ok=True)
+                pq.write_table(pa.Table.from_pandas(ck, preserve_index=False), d / f"{name}.keys.parquet")
+                added = rng.normal(size=(len(ck), width - 944))
+                tab = pd.DataFrame({"ref_basename": ck.ref_basename, "human_score": 0.0,
+                                    **{f"f{i}": added[:, i - 944] if i >= 944 else 0.0 for i in range(width)}})
+                if name == "konjnd_jpeg_select" and variant != "real":
+                    tab = tbl_real                                     # singleton references: the permutation is the identity
+                pq.write_table(pa.Table.from_pandas(tab, preserve_index=False), d / f"{name}.parquet")
+                if variant == "real":
+                    tbl_real = tab
+                tables[variant] = {"rel": str((d / f"{name}.parquet").relative_to(root)), "sha256": v2_common.sha(d / f"{name}.parquet"),
+                                   "manifest_sha256": "m", "keys_sha256": v2_common.sha(d / f"{name}.keys.parquet")}
+            receipt["sets"][name] = {"rows": len(nonid), "tables": {"main": tables}}
+            q = rng.normal(size=len(nonid))
             truth[name] = q
-            # the label file's own orientation, fixed here independently of the module's declaration table
-            sign = -1.0 if name in ("aic4", "konjnd_jpeg_select", "konjnd_jpeg_terminal", "mcljci") else 1.0
-            lab = pd.DataFrame({"pair_key": [*keys.pair_key, "dropped-identical"],
-                                "score": [*(sign * (2.0 * q + 3.0)), 0.5]})
-            lp = root / f"{name}.labels.parquet"
-            pq.write_table(pa.Table.from_pandas(lab, preserve_index=False), lp)
-            labels[name] = {"path": str(lp), "column": "score", "join": "pair_key"}
+            sign = -1.0 if name in self.DISTORTION else 1.0
+            fname, col = self.FILES[name]
+            (root / "labels" / name).mkdir()
+            lab = pd.DataFrame({"ref_path": keys.ref_path, "dist_path": keys.dist_path, col: 0.0})
+            lab.loc[~keys.pixels_identical.to_numpy(), col] = sign * (2.0 * q + 3.0)   # the identical key keeps a dummy label row
+            lp = root / "labels" / name / fname
+            lab.to_csv(lp, sep="," if fname.endswith(".csv") else "\t", index=False)
+            labels[name] = {"path": str(lp), "sha256": v2_common.sha(lp), "format": "csv" if fname.endswith(".csv") else "tsv",
+                            "ref_col": "ref_path", "dist_col": "dist_path", "label_col": col, "select": None}
         (root / "wide" / "confirm" / "receipt.json").write_text(json.dumps(receipt))
-        wide = {f"main/{v}": f"wide-{v}" for v in ("real", "p1", "p2", "p3")}
-        pin = {"schema": cr.PIN_SCHEMA, "reference": "r0", "candidates": sorted(planted), "heads": ["N"],
-               "shortlist": [{"arm": a, "head": "N"} for a in sorted(planted)],
-               "wide_receipts": wide, "confirm_receipt_sha256": v2_common.sha(root / "wide" / "confirm" / "receipt.json"),
-               "keep_lists_sha256": v2_common.sha(root / "wide" / "keep_lists.json"),
-               "binaries": {"zensim_mlp_train": "t", "bake_dial_refit": "b", "panel": "p"}, "local": True}
-        for spec, sd in {"r0": 1.0, **{a: s for a, s in planted.items()},
-                         **{f"{a}~p{k}": 1.0 for a in planted for k in (1, 2, 3)}}.items():
+        (root / "wide" / "keep_lists.json").write_text("{}")
+        wide = {}
+        for v in ("real", "p1", "p2", "p3"):
+            (root / "wide" / "main" / v).mkdir(parents=True, exist_ok=True)
+            (root / "wide" / "main" / v / "receipt.json").write_text(json.dumps({"v": v}))
+            wide[f"main/{v}"] = v2_common.sha(root / "wide" / "main" / v / "receipt.json")
+        frozen = {"schema": v2_common.FROZEN_SCHEMA, "wide_receipts": wide, "extra_arms_sha256": None,
+                  "confirm_receipt_sha256": v2_common.sha(root / "wide" / "confirm" / "receipt.json"),
+                  "keep_lists_sha256": v2_common.sha(root / "wide" / "keep_lists.json")}
+        (root / "wide" / "frozen.json").write_text(json.dumps(frozen))
+        frozen_sha = v2_common.sha(root / "wide" / "frozen.json")
+        panel = os.environ["ZEN_PANEL_BIN"]
+        binaries = {"zensim_mlp_train": "t", "bake_dial_refit": "b", "panel": v2_common.sha(Path(panel))}
+        prog, data = "a" * 64, "b" * 64
+        w = weight
+        specs = {"r0": 1.0}
+        for a, sd in planted.items():
+            specs[a] = sd
+            specs.update({f"{a}~p{k}": 1.0 for k in (1, 2, 3)})
+        for spec, sd in specs.items():
             variant = f"p{spec.partition('~p')[2]}" if "~p" in spec else "real"
-            for head in ("N",):
+            full = self.cr.full_spec(spec, w)
+            for head in heads:
                 for seed in range(10):
-                    preds = {name: {"pred": (truth[name] + rng.normal(0, sd, len(truth[name]))).tolist()}
-                             for name in self.SETS}
-                    d = cr.cell_path(root, spec, head, seed)
+                    preds = {}
+                    for name in self.SETS:
+                        s = sd.get(name, sd.get(None, 1.0)) if isinstance(sd, dict) else sd
+                        preds[name] = {"rows": len(truth[name]), "pred": (truth[name] + rng.normal(0, s, len(truth[name]))).tolist(),
+                                       "table_sha256": receipt["sets"][name]["tables"]["main"][variant]["sha256"],
+                                       "keys_sha256": receipt["sets"][name]["tables"]["main"][variant]["keys_sha256"]}
+                    d = cr.cell_path(root, full, head, seed)
                     d.mkdir(parents=True)
                     (d / "result.json").write_text(json.dumps({
-                        "schema": "rev4-featpot-v2c-confirm-cell-v1", "spec": spec, "head": head, "seed_index": seed,
-                        "family": "main", "variant": variant, "wide_receipt_sha256": wide[f"main/{variant}"],
-                        "confirm_receipt_sha256": pin["confirm_receipt_sha256"], "keep_lists_sha256": pin["keep_lists_sha256"],
-                        "binaries": pin["binaries"], "predictions": preds}))
+                        "schema": "rev4-featpot-v2c-confirm-cell-v1", "spec": full, "head": head, "seed_index": seed,
+                        "family": "main", "variant": variant, "eval_variant": variant, "wide_receipt_sha256": wide[f"main/{variant}"],
+                        "confirm_receipt_sha256": frozen["confirm_receipt_sha256"], "keep_lists_sha256": frozen["keep_lists_sha256"],
+                        "frozen_sha256": frozen_sha, "binaries": binaries, "predictions": preds,
+                        "human_nominal_weight": 0.5 if w is None else w}))
+                    (d / "fleet_receipt.json").write_text(json.dumps({"program_sha": prog, "data_sha": data}))
+        prov = root / "prov.json"
+        prov.write_text("{}")
+        pin = {"schema": cr.PIN_SCHEMA, "reference": "r0", "candidates": sorted(planted), "heads": ["N", "F"],
+               "shortlist": shortlist or [{"arm": a, "head": h} for a in sorted(planted) for h in heads], "human_weight": weight,
+               "frozen_sha256": frozen_sha, "wide_receipts": wide, "confirm_receipt_sha256": frozen["confirm_receipt_sha256"],
+               "keep_lists_sha256": frozen["keep_lists_sha256"], "binaries": binaries, "program_sha": prog, "data_sha": data,
+               "code": {k: v2_common.sha(p) for k, p in cr.CODE_FILES.items()},
+               "shortlist_provenance": {"calibration": {"path": str(prov), "sha256": v2_common.sha(prov)}, "compare": {}},
+               "labels": labels}
         pin_path = root / "pin.json"
-        pin["labels"] = labels
         pin_path.write_text(json.dumps(pin))
-        return pin_path, pin_path
+        return pin_path
 
-    def run_read(self, root: Path, planted: dict, extra=()):
-        import v2_confirm_read as cr
-        pin_path, lj = self.build_tree(root, planted)
-        out = root / "read.json"
-        ledger = root / "ledger.md"
+    def run_read(self, root: Path, planted: dict, **kw):
+        cr = self.cr
+        pin_path = self.build_tree(root, planted, **kw)
+        out, ledger = root / "read.json", root / "ledger.md"
         with mock.patch.object(v2_common, "V2", root), mock.patch.object(cr, "V2", root):
-            cr.main(["--confirmatory-read", "--pin", str(pin_path), "--root", str(root),
-                     "--out", str(out), "--ledger", str(ledger), *[x for a in planted for x in ("--arm", a)], *extra])
+            cr.main(["--confirmatory-read", "--pin", str(pin_path), "--root", str(root), "--bank", str(root / "bank"), "--out", str(out),
+                     "--ledger", str(ledger), *[x for a in planted for x in ("--arm", a)]])
         return json.loads(out.read_text()), ledger
 
-    def test_planted_effect_found_null_not_and_orientation_applied(self):
+    def test_planted_effect_found_null_not_orientation_and_r22_konjnd(self):
         with tempfile.TemporaryDirectory() as t:
             res, ledger = self.run_read(Path(t), {"planted": 0.55, "nullarm": 1.0})
-            hit, miss = res["secondary_v1_v2"]["planted_N"], res["secondary_v1_v2"]["nullarm_N"]
-            self.assertEqual(hit["status"], "OK")
-            self.assertTrue(hit["V1"] and hit["V2"], hit["verdict"])
-            self.assertGreaterEqual(len(hit["v1_sources"]), 4)
-            self.assertNotIn("konjnd_jpeg_terminal", hit["sources"])    # the terminal split never counts
-            for s in hit["sources"].values():
-                self.assertGreater(s["delta"], 0.03)                     # orientation applied: improvement is positive
-                self.assertGreater(s["r0_mean"], 0.5)                    # distortion labels were negated
-            self.assertFalse(miss["V1"], miss["verdict"])
-            self.assertEqual(miss["regressions"], [])
-            self.assertIn("konjnd_jpeg_terminal", res["sanity_guard"]["planted_N"])
+            by = {e["arm"]: e for e in res["primary"]}
+            self.assertTrue(by["planted"]["confirmed"], by["planted"])
+            self.assertEqual(by["planted"]["verdict"], "confirmed; V3 dial gates next")
+            self.assertFalse(by["nullarm"]["confirmed"])
+            self.assertEqual(sorted(by["planted"]["per_set_excess"]), sorted(self.PRIMARY))   # KonJND is not in the mean
+            kon = by["planted"]["konjnd_select"]
+            self.assertGreater(kon["delta"], 0.03)                                          # KonJND reports delta vs R0
+            self.assertFalse(kon["regression"])
+            self.assertGreater(kon["r0_mean"], 0.5)                                         # distortion labels negated: signed SROCC > 0
+            sec = res["secondary_v1_v2"]["planted_N"]
+            self.assertTrue(sec["V1"] and sec["V2"])
+            self.assertNotIn("nullarm_F", res["secondary_v1_v2"])                          # shortlisted entries only
+            self.assertEqual(res["provenance"]["perm_identity_share"]["konjnd_jpeg_select"], [1.0, 1.0, 1.0])
+            self.assertLess(max(res["provenance"]["perm_identity_share"]["cid22_b"]), 0.1)
             self.assertIn("pending, update after read", ledger.read_text())
+            self.assertIn("R2.2", ledger.read_text())
+            self.assertEqual(res["provenance"]["per_set"]["csiq"]["accounting"]["rows_used"], self.REFS * self.PER_REF - 1)
+
+    def test_konjnd_regression_vetoes_an_otherwise_confirmed_entry(self):
+        with tempfile.TemporaryDirectory() as t:
+            res, _ = self.run_read(Path(t), {"vetoed": {None: 0.55, "konjnd_jpeg_select": 3.0}})
+            e = res["primary"][0]
+            self.assertTrue(e["holm_significant"])
+            self.assertTrue(e["konjnd_select"]["regression"])
+            self.assertFalse(e["confirmed"])
+            self.assertIn("regresses", e["verdict"])
 
     def test_primary_holm_keeps_planted_rejects_nulls(self):
         arms = {"planted": 0.6, "nullA": 1.0, "nullB": 1.0, "nullC": 1.0}
@@ -337,69 +524,117 @@ class ConfirmRead(unittest.TestCase):
         by = {e["arm"]: e for e in res["primary"]}
         self.assertTrue(by["planted"]["confirmed"], by["planted"])
         self.assertLess(by["planted"]["p_one_sided"], 0.05 / 4)
-        self.assertGreater(by["planted"]["mean_excess"], 0.05)
         for n in ("nullA", "nullB", "nullC"):
             self.assertFalse(by[n]["confirmed"], by[n])
-            self.assertEqual(by[n]["verdict"], "not confirmed")
+
+    def test_weight_suffixed_cells_and_free_head_labels(self):
+        with tempfile.TemporaryDirectory() as t:
+            res, _ = self.run_read(Path(t), {"planted": 0.55}, weight=2.0, heads=("N", "F"))
+            by = {e["head"]: e for e in res["primary"]}
+            self.assertEqual(by["N"]["verdict"], "confirmed; V3 dial gates next")
+            self.assertEqual(by["F"]["verdict"], "confirmed under the free head (the N entry is also confirmed)")
+        with tempfile.TemporaryDirectory() as t:
+            res, _ = self.run_read(Path(t), {"planted": 0.55}, heads=("N", "F"), shortlist=[{"arm": "planted", "head": "F"}])
+            self.assertEqual(res["primary"][0]["verdict"], "confirmed under the free head only: helps a free head")
+
+    def test_independent_bootstrap_streams_per_set(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.run_read(Path(t), {"planted": 0.55})
+        d = self.cmp._ref_draws
+        self.assertFalse(np.array_equal(d["cid22_b"][0], d["aic4"][0]))           # same sizes, different streams
+        self.assertEqual(self.cmp.REF_SEEDS["aic4"], [v2_common.BOOT_SEED, 1])
 
     def test_holm_step_down(self):
-        import v2_confirm_read as cr
+        cr = self.cr
         self.assertEqual(cr.holm([0.001, 0.03, 0.04, 0.5, 0.6, 0.7]), [True, False, False, False, False, False])
-        # a lone nominally significant entry (p < 0.05) on a list of six is NOT kept: it must beat 0.05 / 6
-        self.assertEqual(cr.holm([0.03, 0.5, 0.6, 0.7, 0.8, 0.9]), [False] * 6)
-        self.assertEqual(cr.holm([0.008, 0.012, 0.9]), [True, True, False])  # 0.008<=.05/3, 0.012<=.05/2, 0.9>.05
-        self.assertEqual(cr.holm([0.02, 0.5]), [True, False])                # m=2: smallest needs <= 0.025
+        self.assertEqual(cr.holm([0.03, 0.5, 0.6, 0.7, 0.8, 0.9]), [False] * 6)     # lone nominally significant entry is rejected
+        self.assertEqual(cr.holm([0.008, 0.012, 0.9]), [True, True, False])
+        self.assertEqual(cr.holm([0.02, 0.5]), [True, False])
         self.assertEqual(cr.holm([0.03, 0.5]), [False, False])
 
-    def test_label_join_expands_stimuli_ignores_dropped_and_refuses_uncovered(self):
-        import v2_confirm_read as cr
-        keys = pd.DataFrame({"pair_key": ["a", "b", "c"], "row_id": [0, 1, 2], "ref_basename": ["r0", "r0", "r1"]})
-        with tempfile.TemporaryDirectory() as t:
-            lp = Path(t) / "l.parquet"
-            lab = pd.DataFrame({"pair_key": ["a", "b", "b", "c", "gone"], "v": [1.0, 2.0, 3.0, 4.0, 9.0]})
-            pq.write_table(pa.Table.from_pandas(lab, preserve_index=False), lp)
-            out = cr.load_labels({"path": str(lp), "column": "v"}, "aic4", keys)      # aic4 is distortion-oriented
-            self.assertEqual(out.pred_row.tolist(), [0, 1, 1, 2])
-            self.assertEqual(out.y_quality.tolist(), [-1.0, -2.0, -3.0, -4.0])
-            self.assertEqual(out.attrs["label_rows_not_predicted"], 1)
-            out = cr.load_labels({"path": str(lp), "column": "v"}, "cid22_b", keys)    # quality-oriented: kept as is
-            self.assertEqual(out.y_quality.tolist(), [1.0, 2.0, 3.0, 4.0])
-            pq.write_table(pa.Table.from_pandas(lab.iloc[:3], preserve_index=False), lp)
-            with self.assertRaises(cr.Refusal):                                       # key "c" has no label
-                cr.load_labels({"path": str(lp), "column": "v"}, "cid22_b", keys)
+    def test_weak_lucky_entry_fails_holm_end_to_end(self):
+        cr = self.cr
+        # p just under 0.05 for an entry on a list of six: nominally significant, not Holm-significant
+        entries = [{"arm": f"a{i}", "head": "N", "status": "OK", "p_one_sided": p, "regressions": [], "konjnd_select": {"regression": False}}
+                   for i, p in enumerate([0.03, 0.4, 0.5, 0.6, 0.7, 0.9])]
+        cr.verdicts(entries)
+        self.assertFalse(any(e["confirmed"] for e in entries))
+        self.assertEqual(entries[0]["verdict"], "not confirmed")
 
-    def test_refusals(self):
-        import v2_confirm_read as cr
+    def exposed(self, ledger: Path) -> bool:
+        return ledger.exists()
+
+    def test_refusals_leave_no_ledger_and_open_no_label(self):
+        cr = self.cr
+        def attempt(tamper):
+            with tempfile.TemporaryDirectory() as t:
+                root = Path(t)
+                pin_path = self.build_tree(root, {"planted": 0.55})
+                tamper(root, pin_path)
+                opened = []
+                real_load = cr.v2c_labels.load_label_rows
+                with mock.patch.object(v2_common, "V2", root), mock.patch.object(cr, "V2", root), \
+                        mock.patch.object(cr.v2c_labels, "load_label_rows", lambda *a, **k: (opened.append(1), real_load(*a, **k))[1]):
+                    with self.assertRaises(cr.Refusal):
+                        cr.main(["--confirmatory-read", "--pin", str(pin_path), "--root", str(root), "--bank", str(root / "bank"),
+                                 "--out", str(root / "o.json"), "--ledger", str(root / "l.md"), "--arm", "planted"])
+                self.assertFalse((root / "l.md").exists())
+                self.assertEqual(opened, [])
+
+        def cell(mutator, spec="r0"):
+            def f(root, pin_path):
+                path = self.cr.cell_path(root, spec, "N", 3) / "result.json"
+                rec = json.loads(path.read_text())
+                mutator(rec)
+                path.write_text(json.dumps(rec))
+            return f
+
+        attempt(cell(lambda r: r["binaries"].update(panel="other")))
+        attempt(cell(lambda r: r.update(variant="real", eval_variant="real"), "planted~p1"))   # control scored on the real tables
+        attempt(cell(lambda r: r["predictions"]["csiq"].update(pred=r["predictions"]["csiq"]["pred"] + [0.0])))   # longer vector
+        attempt(cell(lambda r: r["predictions"]["aic4"].update(table_sha256="0" * 64)))
+        attempt(cell(lambda r: r["predictions"]["aic4"].update(keys_sha256="0" * 64)))
+        attempt(cell(lambda r: r.update(frozen_sha256="0" * 64)))
+        attempt(lambda root, pin: __import__("shutil").rmtree(self.cr.cell_path(root, "planted", "N", 4)))     # missing cell
+        attempt(lambda root, pin: (self.cr.cell_path(root, "r0", "N", 0) / "fleet_receipt.json").unlink())    # fleet receipt mandatory
+        attempt(lambda root, pin: (root / "labels" / "csiq" / "csiq_pairs.tsv").write_text("tampered"))        # label sha256
+
+        def pin_edit(mutator):
+            def f(root, pin_path):
+                pin = json.loads(pin_path.read_text())
+                mutator(pin)
+                pin_path.write_text(json.dumps(pin))
+            return f
+        attempt(pin_edit(lambda p: p.pop("program_sha")))
+        attempt(pin_edit(lambda p: p["code"].update({"rev4_featpot/v2_compare.py": "0" * 64})))
+        attempt(pin_edit(lambda p: p["labels"]["aic4"].update(label_col="other")))             # orientation key unlisted
+        attempt(pin_edit(lambda p: p["labels"]["csiq"].update(path="/x/_sealed/csiq_pairs.tsv")))
+
+    def test_cell_names_must_match_the_weight(self):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t)
-            pin_path, lj = self.build_tree(root, {"planted": 0.55})
-            base = ["--pin", str(pin_path), "--root", str(root), "--out", str(root / "o.json"),
-                    "--ledger", str(root / "l.md"), "--arm", "planted"]
-            with mock.patch.object(v2_common, "V2", root), mock.patch.object(cr, "V2", root):
-                with self.assertRaises(cr.Refusal):                       # no acknowledgement flag
-                    cr.main(base)
-                with self.assertRaises(cr.Refusal):                       # candidate list differs from the pin
-                    cr.main(["--confirmatory-read", *base, "--arm", "extra"])
-                with self.assertRaises(cr.Refusal):                       # labels must name every set
-                    bad = json.loads(pin_path.read_text())
-                    bad["labels"].pop("csiq")
-                    pin_path.write_text(json.dumps(bad))
-                    cr.main(["--confirmatory-read", *base])
-                self.assertFalse((root / "l.md").exists())                # nothing recorded, nothing read
+            pin_path = self.build_tree(root, {"planted": 0.55}, weight=2.0)
+            pin = json.loads(pin_path.read_text())
+            pin["human_weight"] = None                                                     # cells are @h2: a bare read finds none
+            pin_path.write_text(json.dumps(pin))
+            with mock.patch.object(v2_common, "V2", root), mock.patch.object(self.cr, "V2", root):
+                with self.assertRaises(self.cr.Refusal):
+                    self.cr.main(["--confirmatory-read", "--pin", str(pin_path), "--root", str(root), "--bank", str(root / "bank"),
+                                  "--out", str(root / "o.json"), "--ledger", str(root / "l.md"), "--arm", "planted"])
 
-    def test_cell_hash_mismatch_refused(self):
-        import v2_confirm_read as cr
+    def test_panel_must_be_pinned(self):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t)
-            pin_path, lj = self.build_tree(root, {"planted": 0.55})
-            cell = cr.cell_path(root, "r0", "N", 3) / "result.json"
-            rec = json.loads(cell.read_text())
-            rec["binaries"]["panel"] = "other"
-            cell.write_text(json.dumps(rec))
-            with mock.patch.object(v2_common, "V2", root), mock.patch.object(cr, "V2", root):
-                with self.assertRaises(cr.Refusal):
-                    cr.main(["--confirmatory-read", "--pin", str(pin_path), "--root", str(root),
-                             "--out", str(root / "o.json"), "--ledger", str(root / "l.md"), "--arm", "planted"])
+            pin_path = self.build_tree(root, {"planted": 0.55})
+            with mock.patch.object(v2_common, "V2", root), mock.patch.object(self.cr, "V2", root), \
+                    mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("ZEN_PANEL_BIN")
+                try:
+                    with self.assertRaises(self.cr.Refusal):
+                        self.cr.main(["--confirmatory-read", "--pin", str(pin_path), "--root", str(root), "--bank", str(root / "bank"),
+                                      "--out", str(root / "o.json"), "--ledger", str(root / "l.md"), "--arm", "planted"])
+                finally:
+                    os.environ["ZEN_PANEL_BIN"] = "/var/tmp/fitv2/bin-v2/panel"
 
 
 if __name__ == "__main__":

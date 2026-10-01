@@ -9,6 +9,7 @@ formula Rev4, era tiercanon_c3negfold) and writes the same table layout under `-
   python v2c_wide.py confirm  [--family F]      # features-only tables for the sealed confirmatory sets
   python v2c_wide.py keeplists [--extra-arm NAME=ID,ID,...]
   python v2c_wide.py verify                      # the registered gates (cast equality, row/key order, permutations)
+  python v2c_wide.py freeze                      # after a clean verify of the FINAL build: pins every receipt in wide/frozen.json
 
 Layout (same two 1,825+ wide families as R1.1, so kept columns keep identical first-layer initial weights):
   main: f0..f1824 straight from the bank (float64 cast to float32) + appended sidecar families (f1825.. width W)
@@ -416,6 +417,7 @@ def code_identity() -> dict:
 
 def build(bank: Path, out: Path, legs: str, families: list[str], variants: list[str], extras: list[Extra],
           peer_dir: Path | None) -> None:
+    refuse_if_frozen(out)
     width = total_width(extras)
     names = set(legs.split(","))
     if "all" in names:
@@ -505,6 +507,7 @@ def build_confirm(bank: Path, out: Path, families: list[str], extras: list[Extra
     features.parquet + keys.parquet + _MANIFEST.json of the Rev4 bank (bank_file refuses everything else). All variants by
     default: permuted ones are label-free (a within-reference key permutation needs only keys) and are the matched null.
     Layout: confirm/<family>/<set>.parquet (real), confirm/<family>/<variant>/<set>.parquet (permuted)."""
+    refuse_if_frozen(out)
     width = total_width(extras)
     variants = variants or list(VARIANTS)  # matched null: every variant has its own label-free confirmatory table
     path = out / "wide" / "confirm" / "receipt.json"
@@ -553,8 +556,53 @@ def build_confirm(bank: Path, out: Path, families: list[str], extras: list[Extra
 
 
 # ------------------------------------------------------------------ keep lists
+def refuse_if_frozen(out: Path) -> None:
+    if (Path(out) / "wide" / "frozen.json").is_file():
+        raise ValueError(f"{out}: frozen (wide/frozen.json); a changed table needs a new root or an explicit unfreeze by the coordinator")
+
+
+def freeze(out: Path) -> str:
+    """Freeze the canon root: record the hash of every receipt the cells and the read must see, after a clean `verify`."""
+    import v2_common
+    wide = Path(out) / "wide"
+    refuse_if_frozen(out)
+    verify = json.loads((wide / "verify.json").read_text())
+    if not verify.get("all_ok"):
+        raise ValueError("verify.json is not all_ok; fix and re-verify before the freeze")
+    wide_receipts, widths, ids = {}, set(), set()
+    for family in FAMILIES:
+        for variant in VARIANTS:
+            rp = wide / family / variant / "receipt.json"
+            if not rp.is_file():
+                raise ValueError(f"{family}/{variant}: receipt missing (build every family and variant before the freeze)")
+            rec = json.loads(rp.read_text())
+            if not rec.get("complete"):
+                raise ValueError(f"{family}/{variant}: receipt incomplete")
+            wide_receipts[f"{family}/{variant}"] = sha(rp)
+            widths.add(rec["width"]), ids.add(rec["feature_set_id"])
+    confirm = json.loads((wide / "confirm" / "receipt.json").read_text())
+    for name in CONFIRM_SETS:
+        tables = confirm["sets"][name]["tables"]
+        for family in FAMILIES:
+            for variant in VARIANTS:
+                if variant not in tables.get(family, {}):
+                    raise ValueError(f"confirm {name}/{family}/{variant}: table missing")
+    if len(widths) != 1 or len(ids) != 1 or confirm["width"] not in widths:
+        raise ValueError("widths or feature_set_ids disagree across receipts")
+    extra = wide / "extra_arms.json"
+    record = {"schema": v2_common.FROZEN_SCHEMA, "width": widths.pop(), "feature_set_id": ids.pop(), "wide_receipts": wide_receipts,
+              "confirm_receipt_sha256": sha(wide / "confirm" / "receipt.json"), "keep_lists_sha256": sha(wide / "keep_lists.json"),
+              "extra_arms_sha256": sha(extra) if extra.is_file() else None, "verify_sha256": sha(wide / "verify.json"),
+              "frozen_at": __import__("time").strftime("%Y-%m-%d %H:%M %Z"), "table_code": code_identity()}
+    path = wide / "frozen.json"
+    path.write_text(json.dumps(record, indent=1) + "\n")
+    print(json.dumps({"frozen": str(path), "sha256": sha(path), "width": record["width"]}))
+    return sha(path)
+
+
 def write_keeplists(out: Path, extra_arms: dict[str, list[int]], width: int) -> None:
     import v2_common
+    refuse_if_frozen(out)
     if extra_arms:
         path = out / "wide" / "extra_arms.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -569,7 +617,7 @@ def write_keeplists(out: Path, extra_arms: dict[str, list[int]], width: int) -> 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify"])
+    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze"])
     ap.add_argument("--bank", type=Path, default=CANON_BANK)
     ap.add_argument("--out", "--root", dest="out", type=Path, default=OUT_DEFAULT)
     ap.add_argument("--legs", default="all", help="comma list of: human, safesyn, cid22, teachers, all")
@@ -594,6 +642,8 @@ def main() -> None:
             name, _, ids = spec.partition("=")
             arms[name] = [int(i) for i in ids.split(",")]
         write_keeplists(args.out, arms, total_width(extras))
+    elif args.action == "freeze":
+        freeze(args.out)
     else:
         from v2c_verify import verify
         sys.exit(verify(args.bank, args.out, extras, args.sample))

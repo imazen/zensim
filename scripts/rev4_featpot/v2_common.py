@@ -94,6 +94,30 @@ def table_path(record: dict) -> Path:
     return V2 / record["rel"] if "rel" in record else Path(record["path"])
 
 
+FROZEN_SCHEMA = "rev4-featpot-v2c-frozen-v1"
+
+
+def load_frozen(root: Path | None = None) -> tuple[dict, str]:
+    """(record, sha256) of `<root>/wide/frozen.json` after re-hashing every file it pins (confirm receipt, wide receipts,
+    keep lists, extra arms). Raises if the canon tables changed after the freeze or no freeze exists."""
+    root = V2 if root is None else root
+    path = Path(root) / "wide" / "frozen.json"
+    if not path.is_file():
+        raise ValueError(f"{path}: the canon root is not frozen (run `v2c_wide.py freeze`)")
+    record = json.loads(path.read_text())
+    if record.get("schema") != FROZEN_SCHEMA:
+        raise ValueError(f"{path}: unexpected schema")
+    wide = Path(root) / "wide"
+    pins = {**{f"wide/{k}/receipt.json": v for k, v in record["wide_receipts"].items()},
+            "wide/confirm/receipt.json": record["confirm_receipt_sha256"], "wide/keep_lists.json": record["keep_lists_sha256"]}
+    if record.get("extra_arms_sha256"):
+        pins["wide/extra_arms.json"] = record["extra_arms_sha256"]
+    for rel, want in pins.items():
+        if sha(Path(root) / rel) != want:
+            raise ValueError(f"{rel}: changed after the freeze")
+    return record, sha(path)
+
+
 def split_weight(spec: str) -> tuple[str, float | None]:
     """'oracle_hi~p1@h2' -> ('oracle_hi~p1', 2.0): the instrument-retune sweep's human-weight override (design log E2).
     No suffix -> (spec, None), i.e. NOMINAL_WEIGHT['human']."""

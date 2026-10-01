@@ -30,6 +30,8 @@ REGRESSION = -0.005
 SEED_CONSISTENCY = 7
 _keys_cache: dict = {}
 _ref_draws: dict = {}
+REF_SEEDS: dict = {}  # source -> reference-resample seed; default BOOT_SEED for every source (v2). v2_confirm_read sets
+#                       independent per-set streams (R2.2 review item 6); clear _ref_draws/_rendered when changing it.
 _rendered: dict = {}  # source -> the bootstrap jobs' text, rendered once (EFFAUDIT D8)
 SUFFIX = ""  # "@h<w>" under --human-weight (amendment R3)
 SEED_DRAWS = np.random.default_rng(BOOT_SEED + 1).integers(0, N_SEEDS, size=(BOOT_B, N_SEEDS))
@@ -54,7 +56,7 @@ def ref_draws(source: str, keys) -> list:
     if source not in _ref_draws:
         refs = keys.ref_basename.astype(str).to_numpy()
         groups = [np.flatnonzero(refs == r) for r in sorted(set(refs))]
-        rng = np.random.default_rng(BOOT_SEED)
+        rng = np.random.default_rng(REF_SEEDS.get(source, BOOT_SEED))
         _ref_draws[source] = [np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
                               for _ in range(BOOT_B)]
     return _ref_draws[source]
@@ -109,18 +111,19 @@ def seed_mean(boot: np.ndarray) -> np.ndarray:
     return np.take_along_axis(boot.T, SEED_DRAWS, axis=1).mean(axis=1)
 
 
-def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str, model_fn=None, keep_boot: bool = False) -> dict:
+def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str, model_fn=None, keep_boot: bool = False,
+             reference: str = "r0") -> dict:
     """`model_fn(spec, head, source) -> ((point[10], boot[10, B]), missing)`; default: the exploratory cells (`model`).
     v2_confirm_read injects the confirmatory predictions through it; nothing else differs."""
     model_fn = model_fn or model
-    base, miss0 = model_fn("r0", head, source)
+    base, miss0 = model_fn(reference, head, source)
     arm, miss1 = model_fn(arm_spec, head, source)
     perms, missp = [], []
     for p in perm_specs:
         m, miss = model_fn(p, head, source)
         perms.append(m)
         missp += [f"{p}:{i}" for i in miss]
-    missing = [f"r0:{i}" for i in miss0] + [f"{arm_spec}:{i}" for i in miss1] + missp
+    missing = [f"{reference}:{i}" for i in miss0] + [f"{arm_spec}:{i}" for i in miss1] + missp
     if missing:
         return {"status": "INCOMPLETE", "missing": missing}
     (r_pt, r_bt), (a_pt, a_bt) = base, arm
@@ -144,9 +147,9 @@ def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str, model
     return out
 
 
-def family(arm: str, head: str, sources=SOURCE_ORDER, model_fn=None) -> dict:
+def family(arm: str, head: str, sources=SOURCE_ORDER, model_fn=None, reference: str = "r0") -> dict:
     perms = [f"{arm}~p{k}" for k in range(1, N_PERMS + 1)]
-    per = {s: contrast(arm, perms, head, s, model_fn) for s in sources}
+    per = {s: contrast(arm, perms, head, s, model_fn, reference=reference) for s in sources}
     if any(v["status"] != "OK" for v in per.values()):
         return {"arm": arm, "head": head, "status": "INCOMPLETE", "sources": per}
     passing = [s for s, v in per.items() if v["v1_pass"]]

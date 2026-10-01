@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from v2_common import (EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
+from v2_common import (load_frozen, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
 from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, read_curve, refs_of, run, train_command
 
@@ -68,6 +68,9 @@ def main() -> None:
     if (receipt["schema"] != WIDE_SCHEMAS[1] or receipt["family"] != family or receipt["variant"] != variant
             or width < WIDTH or not receipt.get("complete")):
         raise ValueError("wide receipt identity mismatch or incomplete (confirmatory fits need the canon tables, all legs)")
+    frozen, frozen_sha = load_frozen(V2)  # refuses an unfrozen root or any receipt changed since the freeze
+    if frozen["wide_receipts"].get(f"{family}/{variant}") != sha(receipt_path):
+        raise ValueError("wide receipt is not the frozen one")
     confirm_path = V2 / "wide" / "confirm" / "receipt.json"
     confirm = json.loads(confirm_path.read_text())
     if confirm["schema"] != CONFIRM_SCHEMA or confirm["width"] != width or confirm["feature_set_id"] != receipt["feature_set_id"]:
@@ -113,7 +116,7 @@ def main() -> None:
            "variant": variant, "eval_variant": variant, "kept_features": len(keep), "head": args.head,
            "seed_index": args.seed_index, "init_seed": init_seed, "sample_seed": sample_seed, "train_weights": weights,
            "hidden": HIDDEN, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH, "width": width,
-           "wide_receipt_sha256": sha(receipt_path), "confirm_receipt_sha256": sha(confirm_path),
+           "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha, "confirm_receipt_sha256": sha(confirm_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"),
            "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, "best_epoch_by_curve": best_epoch,
