@@ -85,10 +85,12 @@ def rules(rec: dict) -> dict:
     h = {int(k): v for k, v in rec["heldout_srocc"].items()}
     d = {int(k): v for k, v in rec["dev"].items()}
     epochs = sorted(set(h) & set(d))
-    cur = max(epochs, key=lambda e: (d[e]["agg"], -e))
+    # `cur` is the trainer's own pick (full-precision best val epoch, i.e. the registered bake); the log's 4-decimal
+    # val values can tie, so re-deriving it from the log can pick a neighbouring epoch.
+    cur = rec["registered_best_epoch"]
     hdev = max(epochs, key=lambda e: (d[e]["hdev"], -e))
     late = [h[e] for e in epochs if 60 <= e <= 119]
-    return {"cur": h[cur], "hdev": h[hdev], "last": h[max(epochs)], "late": float(np.mean(late)),
+    return {"cur": rec["registered_srocc"], "hdev": h[hdev], "last": h[max(epochs)], "late": float(np.mean(late)),
             "best": max(h[e] for e in epochs), "cur_epoch": cur, "hdev_epoch": hdev}
 
 
