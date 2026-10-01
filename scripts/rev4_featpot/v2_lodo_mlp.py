@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
-from v2_common import (EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, split_weight,
+from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, sha, table_path)
 
@@ -79,6 +80,38 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     return cmd
 
 
+def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
+                     dest: Path) -> tuple[Path, dict[int, float], dict]:
+    """Train one cell and return (selected bake, dev curve, selection record) under EPOCH_RULE.
+
+    best_dev: the trainer's own best-validation bake (refit/best.bin); the recorded epoch is the argmax of the log's
+    4-decimal curve, which can differ from the trainer's full-precision pick on ties (label only; the bake is the
+    trainer's). last: the trainer also dumps the final epoch's weights (--dump-checkpoints-every EPOCHS-1 fires at epoch 0
+    and EPOCHS-1) and that checkpoint is the selected bake (refit/last.bin)."""
+    (dest / "refit").mkdir(exist_ok=True)
+    cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin")
+    ckpt = dest / "ckpt"
+    if EPOCH_RULE == "last":
+        ckpt.mkdir(exist_ok=True)
+        cmd += ["--dump-checkpoints-every", str(EPOCHS - 1), "--dump-checkpoints-dir", str(ckpt)]
+    elif EPOCH_RULE != "best_dev":
+        raise ValueError(f"unknown EPOCH_RULE {EPOCH_RULE!r}")
+    run(cmd, dest / "train.log")
+    curve = read_curve(dest / "train.log")
+    best = max(curve, key=curve.get)
+    if EPOCH_RULE == "last":
+        final = ckpt / f"ckpt_epoch{EPOCHS - 1:03d}.bin"
+        if not final.is_file():
+            raise ValueError(f"{final}: final-epoch checkpoint missing")
+        bake = dest / "refit" / "last.bin"
+        shutil.copyfile(final, bake)
+        shutil.rmtree(ckpt)
+        selected = EPOCHS - 1
+    else:
+        bake, selected = dest / "refit" / "best.bin", best
+    return bake, curve, {"epoch_rule": EPOCH_RULE, "selected_epoch": selected, "best_epoch_by_curve": best}
+
+
 def read_curve(log: Path) -> dict[int, float]:
     curve = {int(e): float(v) for e, v in EPOCH_RE.findall(log.read_text())}
     if sorted(curve) != list(range(EPOCHS)):
@@ -132,14 +165,11 @@ def main() -> None:
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
-    (dest / "refit").mkdir(exist_ok=True)
-    run(train_command(groups, init_seed, sample_seed, width, keep_file, args.head, dest / "refit" / "best.bin"),
-        dest / "train.log")
-    curve = read_curve(dest / "train.log")
-    best_epoch = max(curve, key=curve.get)
+    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest)
+    best_epoch = selection["selected_epoch"]
     heldout = legs[args.heldout]
     table = checked(heldout["full"])
-    pred = predict(dest / "refit" / "best.bin", table, dest / "eval_preds.tsv")
+    pred = predict(bake, table, dest / "eval_preds.tsv")
     keys = pq.read_table(vdir / f"{args.heldout}.keys.parquet").to_pandas()
     if sha(vdir / f"{args.heldout}.keys.parquet") != heldout["keys_sha256"] or len(keys) != len(pred):
         raise ValueError("held-out keys changed or length mismatch")
@@ -154,9 +184,8 @@ def main() -> None:
            "train_weights": weights, "hidden": HIDDEN, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
-           "dev_geomean3_by_epoch": curve, "best_epoch_by_curve": best_epoch,
-           "selected_bake": str(dest / "refit" / "best.bin"),
-           "selected_bake_sha256": sha(dest / "refit" / "best.bin"), "rows": len(y),
+           "dev_geomean3_by_epoch": curve, **selection,
+           "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "rows": len(y),
            "references": int(keys.ref_basename.nunique()), "keys_sha256": heldout["keys_sha256"],
            "prediction": pred.tolist(), "score": score}
     (dest / "result.json").write_text(json.dumps(out) + "\n")

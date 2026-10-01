@@ -23,7 +23,7 @@ import numpy as np
 
 from v2_common import (load_frozen, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
-from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, read_curve, refs_of, run, train_command
+from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, train_and_select
 
 CONFIRM_SCHEMA = "rev4-featpot-v2c-confirm-v1"
 RESULT_SCHEMA = "rev4-featpot-v2c-confirm-cell-v1"
@@ -94,17 +94,14 @@ def main() -> None:
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = confirm_seeds(args.seed_index)
-    (dest / "refit").mkdir(exist_ok=True)
-    run(train_command(groups, init_seed, sample_seed, width, keep_file, args.head, dest / "refit" / "best.bin"),
-        dest / "train.log")
-    curve = read_curve(dest / "train.log")
-    best_epoch = max(curve, key=curve.get)
+    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest)
+    best_epoch = selection["selected_epoch"]
     predictions = {}
     for name, table in tables.items():
         path = table_path(table)
         if sha(path) != table["sha256"] or sha(Path(f"{path}.manifest.json")) != table["manifest_sha256"]:
             raise ValueError(f"{name}: confirmatory table changed after its receipt")
-        pred = predict(dest / "refit" / "best.bin", path, dest / f"preds_{name}.tsv")
+        pred = predict(bake, path, dest / f"preds_{name}.tsv")
         rows = confirm["sets"][name]["rows"]
         if len(pred) != rows:
             raise ValueError(f"{name}: {len(pred)} predictions for {rows} rows")
@@ -119,8 +116,8 @@ def main() -> None:
            "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha, "confirm_receipt_sha256": sha(confirm_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"),
            "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
-           "dev_geomean3_by_epoch": curve, "best_epoch_by_curve": best_epoch,
-           "selected_bake": str(dest / "refit" / "best.bin"), "selected_bake_sha256": sha(dest / "refit" / "best.bin"),
+           "dev_geomean3_by_epoch": curve, **selection,
+           "selected_bake": str(bake), "selected_bake_sha256": sha(bake),
            "predictions": predictions}
     (dest / "result.json").write_text(json.dumps(out) + "\n")
     print(json.dumps({"result": str(dest / "result.json"), "best_epoch": best_epoch,
