@@ -478,3 +478,89 @@ fn research_reports_the_revision_it_computed() {
     );
     println!("{SENTINEL}");
 }
+
+/// The era label a Rev4 producer stamps. The `feature_set_id` token charset
+/// is `[a-z0-9_]`, so the label is `tiercanon_c3negfold` (a hyphen is refused).
+const REV4_ERA_LABEL: &str = "tiercanon_c3negfold";
+
+/// rev4canon D6: the `c3negfold` definition fix is visible to a consumer.
+///
+/// * the manifest names the era in `formula_revision_eras`, and the eight
+///   tailhist `Bin` slots (`*_p95`/`*_p99`: 2 x 4 maps x 4 scales x 3 channels
+///   = 96) carry it in their per-slot `proposed_revision` while `*_max` does
+///   not (`revision` itself reads `tiercanon` on every slot: the arithmetic
+///   era is every slot's era);
+/// * the id's era field is CALLER-SUPPLIED (`Request::with_era_label`), not
+///   derived from the revision's eras, so two labels give two ids and the
+///   default label gives a third. A producer must pass [`REV4_ERA_LABEL`];
+///   auto-deriving it is a follow-up, not done here.
+#[test]
+fn rev4_manifest_carries_c3negfold_and_era_labels_make_distinct_ids() {
+    const SENTINEL: &str = "D6_C3NEGFOLD_OK";
+    if !at_revision(
+        Some("4"),
+        "rev4_manifest_carries_c3negfold_and_era_labels_make_distinct_ids",
+        SENTINEL,
+    ) {
+        return;
+    }
+    assert!(
+        zensim::feature_set_id::is_valid_token(REV4_ERA_LABEL),
+        "{REV4_ERA_LABEL} must be a valid era token"
+    );
+    assert!(
+        !zensim::feature_set_id::is_valid_token("tiercanon-c3negfold"),
+        "the hyphenated spelling is not a token"
+    );
+    let (w, h) = (64, 64);
+    let (src, dst) = pair(w, h);
+    let go = |req: Request| {
+        research::extract(&req, &RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h))
+            .expect("extract")
+    };
+    let x = go(Request::everything().with_era_label(REV4_ERA_LABEL));
+    let manifest = x.manifest_json();
+    assert!(
+        manifest.contains("\"c3negfold\""),
+        "manifest lacks the c3negfold era"
+    );
+    let (mut bin, mut bin_tagged, mut max, mut max_tagged) = (0, 0, 0, 0);
+    for line in manifest
+        .lines()
+        .filter(|l| l.contains("\"family\": \"tailhist\""))
+    {
+        let tagged = line.contains("\"proposed_revision\": \"c3negfold\"");
+        if line.contains("\"statistic\": \"bin\"") {
+            bin += 1;
+            bin_tagged += tagged as usize;
+        } else if line.contains("\"statistic\": \"max\"") {
+            max += 1;
+            max_tagged += tagged as usize;
+        }
+    }
+    assert!(bin > 0 && max > 0, "no tailhist rows found in the manifest");
+    assert_eq!(
+        bin_tagged, bin,
+        "every tailhist Bin slot must name c3negfold"
+    );
+    assert_eq!(max_tagged, 0, "tailhist Max slots must not carry c3negfold");
+    println!("tailhist rows: {bin} Bin (all c3negfold), {max} Max (none)");
+
+    let id_a = x.feature_set_id().expect("id").clone();
+    let id_b = go(Request::everything().with_era_label("tiercanon"))
+        .feature_set_id()
+        .expect("id")
+        .clone();
+    let id_c = go(Request::everything())
+        .feature_set_id()
+        .expect("id")
+        .clone();
+    assert_ne!(id_a, id_b, "two era labels must give two ids");
+    assert_ne!(
+        id_a, id_c,
+        "the default label must differ from the stamped one"
+    );
+    assert_eq!(id_a.era(), REV4_ERA_LABEL);
+    println!("ids: {id_a} | {id_b} | {id_c}");
+    println!("{SENTINEL}");
+}

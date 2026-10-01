@@ -18,6 +18,9 @@
   measurement hook (feature-gated public surface, listed in
   `docs/public-api/zensim.features.txt`) used by `benches/featacc_extract_ab.rs`.
   (featacc 31663923; snapshot regenerated in the rev4canon quarantine commits)
+- Rev4 tailhist `Bin` slots (`*_p95`/`*_p99`) fold sign-bit-set and NaN map values
+  into bin 0 (era `c3negfold`, Proposed); Rev1–Rev3 keep the legacy bins. (rev4canon
+  quarantine commits; hashes pinned at landing)
 
 - `bake_dial_refit` gains three opt-in flags for the Rev4 feature-potential
   run's diagnostic fits (unpublished validation tool; defaults unchanged, so

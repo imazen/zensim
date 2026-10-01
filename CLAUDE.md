@@ -158,6 +158,17 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-09-30 — Rev1–Rev3 research tailhist Bin slots keep the sign-bit top-bin defect. OPEN by decision; fixed only at Rev4 (`c3negfold`).**
+  `TailEdges::bin` (`feature_v2.rs`) binned `f64::to_bits` directly, so a sign-bit-set value (tiny negative
+  `art`/`det` from f32 rounding in `edge_dissim`; NaN) sorted above every positive edge and landed in the TOP bin.
+  Effect: phantom top-edge saturation (REVIEW_PARTB 2026-09-25: 2.01–3.36% of KADID/TID `art`/`det` cells) and an
+  emitted `p99` above the exact `max` (bank row: p99 1.27 with max 0.998). The `tailhist` family is the landed
+  `rev4bank` era and is computed at EVERY formula revision, so the fix is gated on the computation's revision
+  (`TailAccum::fold`, true at `FormulaRevision::Rev4` only): Rev1–Rev3 emit the legacy bins byte for byte, so the
+  existing Rev3 sidecars stay reproducible from code. Consumers of Rev1–Rev3 tailhist `*_p95`/`*_p99` must treat them
+  as defective; `*_max` is exact at every revision. Regression: `rev4_tailhist_bin_folds_sign_bit_values`,
+  `tailhist_fold_is_off_below_rev4`. Measurements: `benchmarks/rev4canon_WORKLOG.md`.
+
 * **2026-09-22 — the 372 roots' `ext_sdr25.parquet` is an unidentified table; 63 board cells read it. OPEN.**
   The 2026-05-15, 2026-08-30 (both 372 roots) and 2026-09-05 post-C roots all carry the same `ext_sdr25.parquet`
   (sha256 `4f567646dcc629a6cb930c03fc9ecf8f79ba0992e6d74741404cfb41785eb96b`): 50 rows = 10 references × 5 rows,

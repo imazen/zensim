@@ -490,6 +490,7 @@ impl FormulaRevision {
                 "v2ssimstable",
                 "v1extfused",
                 "tiercanon",
+                "c3negfold",
             ],
         }
     }
@@ -669,6 +670,37 @@ const REV4BANK: &[Revision] = &[Revision {
            nothing. Spec: docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md; design: \
            benchmarks/rev4_featbank_impl_2026-09-23.md.",
 }];
+
+/// C3 fix: the tailhist histogram's bin lookup read `f64::to_bits` directly,
+/// so any value with the sign bit set (tiny negatives from f32 rounding in
+/// `edge_dissim`, NaN) sorted above every positive edge and landed in the
+/// top bin — REVIEW_PARTB (2026-09-25) measured 2.01-3.36% top-bin cells on
+/// KADID/TID `art`/`det` in the pre-fix bank; on TRAIN data with the fold
+/// the top-edge saturation is <= 0.81% (benchmarks/rev4canon_WORKLOG.md).
+/// The corrected lookup folds non-positive and NaN values into bin 0. The
+/// exact maxima never changed, so the era attaches to the eight `Bin`
+/// (`*_p95`/`*_p99`) signals only.
+///
+/// **Scoped to [`FormulaRevision::Rev4`].** The tailhist family is the
+/// landed `rev4bank` era and is computed at EVERY formula revision, so the
+/// fold is gated on the computation's revision: Rev1-Rev3 research
+/// extractions keep the legacy bins byte for byte (Known Bugs, zensim
+/// `CLAUDE.md`).
+const REV_C3NEGFOLD: Revision = Revision {
+    era: "c3negfold",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "tailhist bins sign-bit-set and NaN values into bin 0 instead of \
+           the top bin, at FormulaRevision::Rev4 only (`TailAccum::fold`); \
+           Rev1-Rev3 keep the legacy bins byte for byte. Moves only the Bin \
+           signals; `*_max` is exact and unchanged. Root cause of the \
+           phantom C3 top-bin saturation measured in REVIEW_PARTB \
+           2026-09-25; record in benchmarks/rev4canon_WORKLOG.md.",
+};
+
+/// The tailhist `Bin` signals carry `rev4bank` plus the C3 binning fix;
+/// `Max` signals keep `REV4BANK` alone (exact maxima are unaffected).
+const TAILHIST_BIN_REVS: &[Revision] = &[REV4BANK[0], REV_C3NEGFOLD];
 
 /// Pinned to the byte-changing implementation commit in the qualification
 /// follow-up after the local quarantine commit has a stable hash.
@@ -2382,7 +2414,12 @@ pub(crate) static TAILHIST: [SignalDef; 12] = {
     use Direction::HigherIsWorse;
     use Form::Difference;
     use KernelId::V2Dense as K;
-    const fn th(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+    const fn th(
+        block_local: u16,
+        name: &'static str,
+        statistic: Statistic,
+        revisions: &'static [Revision],
+    ) -> SignalDef {
         SignalDef {
             family: F,
             block_local,
@@ -2396,22 +2433,22 @@ pub(crate) static TAILHIST: [SignalDef; 12] = {
             kernel: K,
             deprecated: false,
             defect: None,
-            revisions: REV4BANK,
+            revisions,
         }
     }
     [
-        th(0, "ssim_p95", Statistic::Bin),
-        th(1, "ssim_p99", Statistic::Bin),
-        th(2, "ssim_max", Statistic::Max),
-        th(3, "art_p95", Statistic::Bin),
-        th(4, "art_p99", Statistic::Bin),
-        th(5, "art_max", Statistic::Max),
-        th(6, "det_p95", Statistic::Bin),
-        th(7, "det_p99", Statistic::Bin),
-        th(8, "det_max", Statistic::Max),
-        th(9, "mse_p95", Statistic::Bin),
-        th(10, "mse_p99", Statistic::Bin),
-        th(11, "mse_max", Statistic::Max),
+        th(0, "ssim_p95", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(1, "ssim_p99", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(2, "ssim_max", Statistic::Max, REV4BANK),
+        th(3, "art_p95", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(4, "art_p99", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(5, "art_max", Statistic::Max, REV4BANK),
+        th(6, "det_p95", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(7, "det_p99", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(8, "det_max", Statistic::Max, REV4BANK),
+        th(9, "mse_p95", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(10, "mse_p99", Statistic::Bin, TAILHIST_BIN_REVS),
+        th(11, "mse_max", Statistic::Max, REV4BANK),
     ]
 };
 

@@ -774,10 +774,26 @@ impl TailEdges {
         Self { edges, base, inner }
     }
 
+    /// [`bin`](Self::bin) with the `c3negfold` correction: non-positive (and
+    /// NaN) values fold into bin 0. The maps are non-negative by construction
+    /// up to f32 rounding, which produces small negative `art`/`det` values
+    /// (and possibly `-0.0`); the raw `to_bits` compare in `bin` sorts every
+    /// sign-bit-set double above the top edge and silently saturates the top
+    /// bin. Used at [`FormulaRevision::Rev4`] only (see [`TailAccum::fold`]).
+    #[inline(always)]
+    fn bin_folded(&self, v: f64) -> usize {
+        let ub = v.to_bits();
+        if (ub >> 63) != 0 || ub >= (0x7ff8u64 << 48) {
+            return 0;
+        }
+        self.bin(v)
+    }
+
     /// Bin index `#{edges strictly below v}` — the C3 cell convention
     /// (an exact edge hit lands in the cell below it).
-    /// `v >= 0` by construction; values above the last edge enter the
-    /// top cell.
+    /// `v >= 0` is assumed: a sign-bit-set `v` lands in the TOP bin (the
+    /// legacy behaviour every Rev1–Rev3 research extraction keeps, byte for
+    /// byte); values above the last edge enter the top cell.
     #[inline(always)]
     fn bin(&self, v: f64) -> usize {
         let ub = v.to_bits();
@@ -861,6 +877,12 @@ struct TailAccum {
     /// Env-gated fine histogram for the top-edge calibration dump
     /// (`ZENSIM_REV4_DIAG`); `None` in every production/test path.
     diag: Option<Box<[[u32; DIAG_BINS]; 4]>>,
+    /// `c3negfold`: bin through [`TailEdges::bin_folded`]. Set from the
+    /// computation's revision (`Rev4` only); Rev1–Rev3 keep the legacy
+    /// [`TailEdges::bin`] so the landed `rev4bank` Bin slots they emit stay
+    /// byte-identical. The process revision equals the computation's
+    /// (`ssim_form::refuse_rev4_mix`).
+    fold: bool,
 }
 
 impl Default for TailAccum {
@@ -868,6 +890,7 @@ impl Default for TailAccum {
         Self {
             hist: [[0; TAILHIST_BINS]; 4],
             max: [0.0; 4],
+            fold: matches!(crate::ssim_form::active_revision(), FormulaRevision::Rev4),
             diag: rev4_diag_enabled().then(|| Box::new([[0; DIAG_BINS]; 4])),
         }
     }
@@ -877,7 +900,12 @@ impl TailAccum {
     /// One map value into its bin + running max.
     #[inline(always)]
     fn scatter(&mut self, edges: &TailEdges, v: f64, map: usize) {
-        self.hist[map][edges.bin(v)] += 1;
+        let b = if self.fold {
+            edges.bin_folded(v)
+        } else {
+            edges.bin(v)
+        };
+        self.hist[map][b] += 1;
         self.max[map] = self.max[map].max(v);
         if let Some(d) = self.diag.as_deref_mut() {
             d[map][diag_bin01(v)] += 1;
@@ -1350,6 +1378,9 @@ fn finish_tailhist_cell(tail: &TailAccum, n_px: usize, out: &mut [f64; TAILHIST_
     let edges = tail_edges();
     for m in 0..4 {
         let h = &tail.hist[m];
+        // Every scattered value lands in exactly one bin, so the quantile walk
+        // below always reaches its target (the fallthrough is unreachable).
+        debug_assert_eq!(h.iter().map(|&c| c as usize).sum::<usize>(), n_px);
         let p95 = tail_quantile_edge(h, n_px, 0.95, edges);
         let p99 = tail_quantile_edge(h, n_px, 0.99, edges);
         out[m * 3] = p95;
@@ -19112,6 +19143,106 @@ pub(crate) mod tests {
             }
             assert_eq!(h, acc.hist, "counts must be partition-invariant");
         }
+    }
+
+    /// C3 regression (era `c3negfold`): `edge_dissim`'s f32 rounding emits
+    /// tiny NEGATIVE `art`/`det` values, and a raw `to_bits` bin lookup
+    /// sorted every sign-bit-set double above all positive edges — the
+    /// phantom ~2.9% top-bin saturation of REVIEW_PARTB 2026-09-25 was
+    /// those negatives, not real tail mass. Sign-bit-set and NaN values
+    /// must fold into bin 0; only genuine `v >= last edge` mass may reach
+    /// the top bin.
+    #[test]
+    fn rev4_tailhist_bin_folds_sign_bit_values() {
+        let edges = tail_edges();
+        let top = TAILHIST_BINS - 1;
+        // Sign-bit-set values: the bin-0 fold.
+        for (name, v) in [
+            ("neg tiny", -1e-12f64),
+            ("neg below-first-edge", -0.5),
+            ("neg large", -1e300),
+            ("neg zero", -0.0),
+            ("neg inf", f64::NEG_INFINITY),
+            ("NaN", f64::NAN),
+            ("neg NaN", f64::from_bits(0xfff8000000000001)),
+        ] {
+            assert_eq!(
+                edges.bin_folded(v),
+                0,
+                "{name}: bin_folded({v}) must fold to 0"
+            );
+        }
+        // Non-negative values still bin by magnitude.
+        assert_eq!(edges.bin(0.0), 0);
+        assert_eq!(edges.bin(1e-7), 0); // below the first edge
+        let last = f64::from_bits(edges.edges[TAILHIST_BINS - 2]);
+        assert_eq!(edges.bin(last * 2.0), top, "v above last edge -> top bin");
+        assert_eq!(edges.bin(f64::INFINITY), top, "+inf is genuine tail mass");
+        // End to end through `scatter`: a realistic mostly-negative
+        // multiset must leave the top bin empty and keep max exact —
+        // the pre-fix arithmetic put every negative in the top bin.
+        let mut acc = TailAccum {
+            fold: true,
+            ..TailAccum::default()
+        };
+        let mut vals: Vec<f64> = (0..5000).map(|i| -(i as f64) * 1e-9).collect();
+        vals.extend(std::iter::repeat_n(0.004, 8000));
+        vals.extend(std::iter::repeat_n(last * 2.0, 10));
+        for &v in &vals {
+            acc.scatter(edges, v, 1);
+        }
+        assert_eq!(acc.hist[1][top], 10, "only real tail values in the top bin");
+        // Bin 0 holds the folded mass: negatives + positives below the
+        // first edge.
+        let expect0 = vals.iter().filter(|&&v| edges.bin_folded(v) == 0).count() as u32;
+        assert_eq!(acc.hist[1][0], expect0, "bin 0 must hold the folded mass");
+        assert_eq!(acc.max[1].to_bits(), (last * 2.0).to_bits());
+        let total: u64 = acc.hist[1].iter().map(|&c| c as u64).sum();
+        assert_eq!(
+            total,
+            vals.len() as u64,
+            "histogram total == scattered count"
+        );
+    }
+
+    /// Rev1-Rev3 byte-identity guard for `c3negfold`: with `fold == false`
+    /// (what `TailAccum::default()` yields below Rev4) a sign-bit-set value
+    /// still lands in the TOP bin, exactly as before the fix, while the
+    /// folded accumulator puts it in bin 0. Both leave `max` untouched.
+    #[test]
+    fn tailhist_fold_is_off_below_rev4() {
+        let edges = tail_edges();
+        let top = TAILHIST_BINS - 1;
+        let default = TailAccum::default();
+        assert_eq!(
+            default.fold,
+            matches!(crate::ssim_form::active_revision(), FormulaRevision::Rev4),
+            "fold follows the process revision"
+        );
+        let (mut legacy, mut folded) = (
+            TailAccum {
+                fold: false,
+                ..TailAccum::default()
+            },
+            TailAccum {
+                fold: true,
+                ..TailAccum::default()
+            },
+        );
+        for v in [-1e-12f64, -0.0, 0.25] {
+            legacy.scatter(edges, v, 2);
+            folded.scatter(edges, v, 2);
+        }
+        assert_eq!(
+            legacy.hist[2][top], 2,
+            "legacy bins sign-bit-set values to the top"
+        );
+        assert_eq!(folded.hist[2][top], 0);
+        assert_eq!(
+            folded.hist[2][0] + folded.hist[2].iter().skip(1).sum::<u32>(),
+            3
+        );
+        assert_eq!(legacy.max[2].to_bits(), folded.max[2].to_bits());
     }
 
     /// C4 bleed on a mostly flat grey source: a localized equal-RGB
