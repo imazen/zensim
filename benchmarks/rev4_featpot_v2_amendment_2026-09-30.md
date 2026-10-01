@@ -227,3 +227,47 @@ corrected family; only v2-canon, on the re-extracted Rev4 bank, can be.
 
 **Consequences.** v2-Rev3 and v2-canon on the five sources are exploratory. The instrument-acceptance gate stays as an
 instrument check. Erratum R1.3's C3 limitation applies to exploratory reads of the Rev3 bank only.
+
+## Revision R3 (2026-10-01 02:21 MT, after the calibration result was read, before any arm result was read) — instrument retune on design data
+
+**Calibration outcome (jobset fitv2cal3-20261001, 700/700 cells, Rev3 bank): not accepted.** oracle_hi passed V1 on 2 of
+5 sources under head N (excess +0.003 to +0.013 SROCC) and 1 of 5 under head F; oracle_lo on none. With the oracle
+column shuffled within reference, predictions moved 0.29 points on average (prediction sd 13.5): the fitted networks
+barely used a column correlated ρ ≈ 0.9 with the held-out human label.
+
+**Diagnosis.**
+1. *Orientation.* v1 built the oracles as noisy quality (`y01 + noise`). Every bank feature is a distance (0 at the
+   reference, rising with degradation), and head N (`--nonneg-distance`: g(x) ≥ 0, output weights ≤ 0, scale-only
+   standardisation) can only use features of that orientation. A quality-oriented positive control cannot pass under
+   head N whatever its information content.
+2. *Teacher dominance.* On the teacher legs (SafeSyn, CID22 with SSIMULACRA2 targets) the oracle is a noisy copy of a
+   target the bank already fits almost perfectly, so those legs teach the network to ignore it; the human leg, which is
+   the only place the oracle helps, carries nominal weight 0.5 against 1.0 + 1.0. Head F's small gains (one source)
+   show that orientation alone does not explain the result. A real candidate feature is in the same position: it adds
+   little to the teacher fit, and its human-specific signal must be learned through the human leg.
+
+**Changes (design data; permitted by R2).**
+1. Oracles are distance-oriented: `oracle = (1 − y01) + N(0, σ·sd(y01))`, σ unchanged (oracle_hi 0.5, oracle_lo 1.5),
+   same seeds. Only the aux family is rebuilt; its peer and gmsbank columns are unchanged (checked byte-for-byte against
+   the superseded tables before use). Main-family tables are untouched.
+2. The human leg's nominal weight becomes an instrument parameter, written `<spec>@h<w>` (default 0.5 = R1). The
+   acceptance-weight correction, teacher weights, epochs, sampling and epoch selection are unchanged.
+
+**Tuning sweep (registered before any of its cells run).** Specs r0, oracle_hi, oracle_hi~p1 and oracle_lo, each at
+w ∈ {0.5, 2, 8, 32}; heads N and F; held-out folds KADID, KonFiG, AIC-3 (large, medium, small); seeds 0–2. 288 cells.
+TID2013 and CID22-A(25) are not used for tuning, so the acceptance re-run below is less selected on them.
+
+**Selection rule (head N only; head F and oracle_lo are reported, not used).** Per weight w, with per-fold seed means
+of the global SROCC on the held-out source and the mean taken over the three folds:
+- E(w) = mean[oracle_hi − oracle_hi~p1] (detection of the positive control);
+- A(w) = mean[r0] (the instrument's own accuracy);
+- C(w) = mean[oracle_hi~p1 − r0] (null centring).
+
+A weight is admissible when A(w) ≥ max A − 0.01 and |C(w)| ≤ 0.01. The selected weight maximises E(w) among admissible
+weights; a lower weight within 0.002 of the maximum wins the tie. If no weight is admissible, or the best E(w) < 0.02,
+no recipe is selected and the instrument is redesigned before anything else runs (recorded as a further revision).
+
+**Acceptance re-run.** The selected weight replaces 0.5 in the v2 recipe. The full calibration grid (R1, 10 seeds, five
+sources, three permutations) re-runs on the Rev3 bank with the unchanged acceptance gate (oracle_hi V1 on ≥ 4 of 5 under
+head N; centred permutation null). If it passes, the same recipe is used for v2-canon and the confirmatory read. The
+Rev3 arms are not run.

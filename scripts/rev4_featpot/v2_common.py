@@ -72,26 +72,41 @@ BOOT_SEED = 20260930
 REPLAY = "Rev4 POTENTIAL Instrument v2 diagnostic: pinned Rev3 944 plus pinned sidecars; never ship"
 
 
+def split_weight(spec: str) -> tuple[str, float | None]:
+    """'oracle_hi~p1@h2' -> ('oracle_hi~p1', 2.0): the instrument-retune sweep's human-weight override (design log E2).
+    No suffix -> (spec, None), i.e. NOMINAL_WEIGHT['human']."""
+    core, _, w = spec.partition("@h")
+    if not w:
+        return core, None
+    value = float(w)
+    if not 0 < value <= 64:
+        raise ValueError(f"bad human weight in {spec!r}")
+    return core, value
+
+
 def parse_spec(spec: str) -> tuple[str, int]:
-    """'c1' -> ('c1', 0); 'c1~p2' -> ('c1', 2). Permutations only for candidates and oracle_lo."""
-    base, _, perm = spec.partition("~p")
+    """'c1' -> ('c1', 0); 'c1~p2' -> ('c1', 2); an '@h<w>' suffix is accepted and ignored here (split_weight).
+    Permutations exist for candidates, oracle_lo and oracle_hi (the sweep's null)."""
+    core, _ = split_weight(spec)
+    base, _, perm = core.partition("~p")
     k = int(perm) if perm else 0
     if base not in ("r0", *CANDIDATES, *CALIBRATION) or not 0 <= k <= N_PERMS:
         raise ValueError(f"bad v2 arm spec {spec!r}")
-    if k and base not in (*CANDIDATES, "oracle_lo"):
-        raise ValueError(f"{spec!r}: permuted controls exist only for candidates and oracle_lo")
+    if k and base not in (*CANDIDATES, "oracle_lo", "oracle_hi"):
+        raise ValueError(f"{spec!r}: permuted controls exist only for candidates and the oracles")
     return base, k
 
 
 def all_specs() -> list[str]:
-    specs = ["r0", *CALIBRATION, *(f"oracle_lo~p{k}" for k in range(1, N_PERMS + 1))]
+    specs = ["r0", *CALIBRATION, *(f"oracle_lo~p{k}" for k in range(1, N_PERMS + 1)),
+             *(f"oracle_hi~p{k}" for k in range(1, N_PERMS + 1))]
     for arm in CANDIDATES:
         specs += [arm, *(f"{arm}~p{k}" for k in range(1, N_PERMS + 1))]
     return specs
 
 
 def arm_columns(spec: str) -> tuple[str, str, list[int]]:
-    """(table family, variant, kept wide-column indices) for a spec."""
+    """(table family, variant, kept wide-column indices) for a spec (any '@h' suffix ignored)."""
     import restore_data  # registered arm definitions (pinned JSONs)
     base, k = parse_spec(spec)
     variant = f"p{k}" if k else "real"

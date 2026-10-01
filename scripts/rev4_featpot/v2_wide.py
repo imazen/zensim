@@ -158,7 +158,9 @@ def load_leg(leg: str, leg_index: int) -> tuple[pd.DataFrame, list[float], np.nd
     rng = np.random.default_rng(ORACLE_SEED_BASE + leg_index)
     sd = float(np.std(y01))
     for name in ("oracle_lo", "oracle_hi"):
-        out[name] = (y01 + rng.normal(0.0, ORACLE_SIGMA[name] * sd, len(out))).astype(np.float32)
+        # Distance-oriented (design log E2): ~0 at the best quality, rising with degradation, like every bank
+        # feature; the non-negative-distance head can only use features of that orientation.
+        out[name] = ((1.0 - y01) + rng.normal(0.0, ORACLE_SIGMA[name] * sd, len(out))).astype(np.float32)
     return out.reset_index(drop=True), [lo, hi], y01
 
 
@@ -194,10 +196,11 @@ def write(frame: pd.DataFrame, path: Path, human_score: np.ndarray, family: str,
             "rows": len(view), "references": int(view.ref_basename.nunique())}
 
 
-def build(variants: list[str]) -> None:
+def build(variants: list[str], families: list[str] | None = None) -> None:
+    fams = list(families or FAMILIES)
     receipts = {(f, v): {"schema": "rev4-featpot-v2-wide-v2", "label": "POTENTIAL — ceiling, not a model score",
                          "family": f, "variant": v, "width": WIDTH, "legs": {}}
-                for f in FAMILIES for v in variants}
+                for f in fams for v in variants}
     human_parts = {key: {} for key in receipts}
     legs = list(SOURCE_ORDER) + list(TEACHERS)
     for leg_index, leg in enumerate(legs):
@@ -206,7 +209,7 @@ def build(variants: list[str]) -> None:
         if leg in SOURCES and "real" in variants:
             oracle_srocc = {n: panel_batch([(leg, base[n].to_numpy(np.float64), base.target.to_numpy(np.float64))],
                                            stats="srocc")[0]["srocc"] for n in AUX_ORACLE}
-        for family in FAMILIES:
+        for family in fams:
             for variant in variants:
                 k = 0 if variant == "real" else int(variant[1:])
                 view, added = family_view(base, family)
@@ -254,6 +257,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("action", choices=["pin", "build", "keeplists"])
     ap.add_argument("--variant", choices=VARIANTS, action="append")
+    ap.add_argument("--family", choices=FAMILIES, action="append")
     args = ap.parse_args()
     if args.action == "pin":
         write_pin()
@@ -266,7 +270,7 @@ def main() -> None:
         path.write_text(json.dumps({"schema": "rev4-featpot-v2-keeplists-v2", "specs": lists}) + "\n")
         print(json.dumps({"keep_lists": str(path), "sha256": sha(path), "specs": len(lists)}))
         return
-    build(args.variant or list(VARIANTS))
+    build(args.variant or list(VARIANTS), args.family)
 
 
 if __name__ == "__main__":

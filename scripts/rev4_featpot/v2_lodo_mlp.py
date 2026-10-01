@@ -21,7 +21,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
-from v2_common import (EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH,
+from v2_common import (EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, sha)
 
@@ -68,10 +68,11 @@ def main() -> None:
     ap.add_argument("--seed-index", type=int, choices=range(10), required=True)
     args = ap.parse_args()
     parse_spec(args.spec)
+    core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
     if lists["schema"] != "rev4-featpot-v2-keeplists-v2":
         raise ValueError("keep-list schema mismatch")
-    entry = lists["specs"][args.spec]
+    entry = lists["specs"][core_spec]
     family, variant, keep = entry["family"], entry["variant"], entry["keep"]
     vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
@@ -97,7 +98,7 @@ def main() -> None:
                    (f"{leg}_development", dev, 0, val_w, "withinref,both")]
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
     hdev = checked(legs[f"human_without_{args.heldout}"]["dev"])
-    weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"], refs_of(hfit))
+    weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
@@ -129,6 +130,7 @@ def main() -> None:
     score = panel_batch([(args.heldout, pred, y)], stats="full")[0]
     out = {"schema": "rev4-featpot-v2-cell-v2", "label": "POTENTIAL — ceiling, not a model score",
            "recipe": "R915 sampling (amendment revision R1, layout R1.1)", "spec": args.spec,
+           "human_nominal_weight": NOMINAL_WEIGHT["human"] if human_w is None else human_w,
            "family": family, "variant": variant,
            "kept_features": len(keep), "head": args.head, "heldout": args.heldout,
            "seed_index": args.seed_index, "init_seed": init_seed, "sample_seed": sample_seed,
