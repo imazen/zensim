@@ -5,7 +5,8 @@ The bank has no label file for a sealed set. The originals are TSV/CSV files wit
 `path -> pixel sha256` table (built with the pinned decoder; Rev4 keys carry ref/dist pixel hashes). Accounting is strict:
   * every non-identical Rev4 key receives exactly `n_stimuli` label rows (collapsed stimuli need the pixel table),
   * label rows that map to no key must equal the identical stimuli not matched by path (0 where nothing is identical),
-  * rows outside the pinned `select` rule are counted as unselected, never silently used.
+  * rows outside the pinned `select` rule are counted as unselected, never silently used; keys outside it are outside the
+    read (the rule defines the population on both sides; their predictions are never paired with a label).
 Validated ONLY on open sets (`python3 v2c_labels.py validate`): it must reproduce AIC-3's and KADID-SELECT's admitted
 `labels__human.parquet` exactly. This module never opens a sealed label file by itself; the read passes pinned, sha-checked specs.
 
@@ -101,12 +102,17 @@ def adapt(rows: pd.DataFrame, keys: pd.DataFrame, rule: dict | None = None, pixe
     per_key = np.bincount(idx[matched], minlength=len(keys))
     ident = keys.pixels_identical.to_numpy().astype(bool)
     need = keys.n_stimuli.to_numpy()
-    bad = np.flatnonzero(~ident & (per_key != need))
+    # The select rule defines the population on BOTH sides: a key whose reference the rule excludes is outside the read
+    # (e.g. CID22-B(23): the bank holds 24 references, one of them a duplicate of a CID22-A picture; DATA_SPLITS 2026-09-22).
+    in_pop = select_mask(keys, rule)
+    if per_key[~in_pop].any():
+        raise ValueError("a selected label row maps to a key outside the select rule")
+    bad = np.flatnonzero(in_pop & ~ident & (per_key != need))
     if len(bad):
         raise ValueError(f"{len(bad)} non-identical keys do not receive n_stimuli label rows (first: {keys.pair_key[bad[0]]}, "
                          f"{per_key[bad[0]]} vs {need[bad[0]]}); collapsed stimuli need a pinned pixel-hash table")
     unmatched = int((~matched).sum())
-    ident_unmatched = int(need[ident].sum() - per_key[ident].sum())
+    ident_unmatched = int(need[ident & in_pop].sum() - per_key[ident & in_pop].sum())
     if unmatched != ident_unmatched:
         raise ValueError(f"{unmatched} label rows match no Rev4 key but only {ident_unmatched} identical stimuli are unaccounted for")
     keep = matched & ~ident[np.where(matched, idx, 0)]
@@ -114,7 +120,7 @@ def adapt(rows: pd.DataFrame, keys: pd.DataFrame, rule: dict | None = None, pixe
                         "file_row": rows.file_row.to_numpy()[keep]})
     acct = {"label_rows": int(len(rows)), "unselected_rows": unselected, "matched_by_pixel_hash": via_pixels,
             "rows_on_identical_keys_or_unmatched_identical": int(len(rows) - keep.sum()), "keys": int(len(keys)),
-            "identical_keys": int(ident.sum()), "rows_used": int(keep.sum())}
+            "identical_keys": int(ident.sum()), "rows_used": int(keep.sum()), "keys_outside_select": int((~in_pop).sum())}
     return out, acct
 
 

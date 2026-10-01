@@ -413,3 +413,13 @@ how much an all-columns model leans on a family, not a gain over R0; the gain is
 `fitv2arms-20261001`, 2,800 cells (7 arms × (arm + p1–p3) × 2 heads × 5 sources × 10 seeds), program v10 (`ad22a0fc`:
 the v9 predictor plus the TRAINEROPT trainer from zensim `538d3549`, which gives byte-identical final weights; v10 gate:
 3 canon cells re-run in the fleet image reproduce their v9 weights and predictions), image `fit-v2-v10`.
+
+### Execution note (2026-10-01 11:25 MDT, before any sealed label was read) — CID22-B is read as B(23)
+
+The confirmatory read follows the registered 2026-09-22 ruling (`docs/DATA_SPLITS.md`): `844297.png` (CID22-A) and
+`3316926_opo25u.png` (CID22-B) are the same picture, so CID22-B is **B(23), 2,011 pairs**, although the bank and the
+confirmatory tables hold all 24 references (2,100 rows). The label pin's `select` lists the 23 stems, and the adapter
+(`v2c_labels.adapt`) now applies the select rule to the keys as well as the label rows: a key outside the rule is outside
+the read and its prediction is never paired with a label. Unit test `test_select_rule_restricts_keys_too`; the open-set
+validation (AIC-3, KADID-SELECT) still reproduces the admitted labels exactly. KonJND TERMINAL note for the guard result:
+SRC0437's pair names `_058` where `load_konjnd` picks `_059` (per-reference label; joins unchanged).

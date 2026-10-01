@@ -451,6 +451,17 @@ class Labels(unittest.TestCase):
         self.assertEqual(sorted(got.label[got.pair_key == "k2"]), [2.0, 9.0])
         self.assertEqual(acct["matched_by_pixel_hash"], 1)
 
+    def test_select_rule_restricts_keys_too(self):
+        import v2c_labels as L
+        keys = self.keys(6)                                               # refs /r/0, /r/1, /r/2 (two keys each)
+        rows = self.rows(keys)
+        rule = {"ref_stem_in": ["0", "2"]}                                # e.g. CID22-B(23): one bank reference is excluded
+        got, acct = L.adapt(rows, keys, rule)
+        self.assertEqual(sorted(got.pair_key), ["k0", "k1", "k4", "k5"])
+        self.assertEqual((acct["unselected_rows"], acct["keys_outside_select"], acct["rows_used"]), (2, 2, 4))
+        with self.assertRaises(ValueError):                               # a selected key that lacks its row still refuses
+            L.adapt(rows.iloc[1:].reset_index(drop=True), keys, rule)
+
     def test_select_rule_and_via_pairs(self):
         import v2c_labels as L
         keys = self.keys()
