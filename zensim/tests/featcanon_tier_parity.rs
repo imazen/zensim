@@ -4,7 +4,7 @@
 //! Under Rev4 every feature-producing leaf runs the canonical
 //! `featcanon` arithmetic (fixed 8-virtual-lane f32 pools + fixed pairwise
 //! reduce + inherent fused `mul_add`), so `research::extract(everything())`
-//! must emit a BIT-IDENTICAL 1825-slot vector on every dispatch tier —
+//! must emit a BIT-IDENTICAL 1853-slot vector on every dispatch tier —
 //! not just the score, every feature.
 //!
 //! `ZENSIM_FORMULA_REV` is a `OnceLock`, so each revision's assertions own a
@@ -18,7 +18,7 @@ use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zensim::RgbSlice;
 use zensim::research::{self, Request};
 
-const N_SLOTS: usize = 1825;
+const N_SLOTS: usize = 1853;
 
 /// Whether this target has runtime-disableable token slots (else the walk
 /// yields exactly one permutation and cross-tier claims are vacuous).
@@ -81,7 +81,7 @@ fn at_revision(rev: &str, test_path: &str, sentinel: &str) -> bool {
     false
 }
 
-/// The Rev4 gate: every 1825-slot vector, bit-identical under every token
+/// The Rev4 gate: every 1853-slot vector, bit-identical under every token
 /// permutation, including nonzero-remainder geometries (97/63, 131/65 — the
 /// SIMD tail paths the tier-dispatched kernels used to diverge on).
 #[test]

@@ -28,8 +28,8 @@
 //! production materializer's (`build_v2_ref_scales`).
 
 use super::{
-    BLUR_RADIUS, MAPDEV_PER_CELL, V1_BAND_OVERLAP, V1_BAND_ROWS, V1BasicSums, Z1MAX_PER_CELL,
-    prepare_v2_reference_impl,
+    BLUR_RADIUS, C_HF, MAPDEV_PER_CELL, SATSIGN_PER_SCALE, TEXGAIN_PER_CELL, V1_BAND_OVERLAP,
+    V1_BAND_ROWS, V1BasicSums, Z1MAX_PER_CELL, prepare_v2_reference_impl,
 };
 use crate::feature_defs::FormulaRevision;
 use crate::source::ImageSource;
@@ -39,13 +39,30 @@ use crate::source::ImageSource;
 pub(super) struct Work {
     pub(super) mapdev: bool,
     pub(super) z1max: bool,
+    /// SIGNEDFEAT S1: texture-magnitude gain, accumulated in the same band loop.
+    pub(super) texgain: bool,
+    /// SIGNEDFEAT S2: signed chroma-saturation change, a separate (X, B) pass per scale.
+    pub(super) satsign: bool,
 }
 
 impl Work {
     pub(super) fn any(self) -> bool {
-        self.mapdev || self.z1max
+        self.mapdev || self.z1max || self.texgain || self.satsign
+    }
+
+    /// Does any consumer of the per-band map loop run?
+    fn band(self) -> bool {
+        self.mapdev || self.z1max || self.texgain
     }
 }
+
+/// SIGNEDFEAT S2 chroma normalisation (neutral-axis centring, see `satsign_scale`): C8's mid chromaticity stabilisers
+/// (`GMSBANK_CS_C[2]`, frozen from TRAIN pixels by the C8 lane). `m = sqrt(Xc²/cx + Bc²/cb)`.
+const SAT_CX: f64 = crate::gmsbank_constants::GMSBANK_CS_C[2][0];
+const SAT_CB: f64 = crate::gmsbank_constants::GMSBANK_CS_C[2][1];
+/// Stabiliser of the saturation gain/loss form: the unit that `chromaticity_loss` adds to normalised
+/// chroma energy, in the same units as `m`.
+const C_SAT: f64 = 1.0;
 
 /// Running count / mean / sum of squared deviations (Welford), mergeable with
 /// Chan's parallel formula. Same shape as C8's `GmsBankCell` deviation state.
@@ -236,6 +253,7 @@ fn accumulate_block(s: &mut V1BasicSums, m: [f64; 8], lane: usize, exact: bool) 
 struct CellOut {
     dev: [f64; MAPDEV_PER_CELL],
     z: [f64; Z1MAX_PER_CELL],
+    tex: [f64; TEXGAIN_PER_CELL],
 }
 
 /// Run the v1 band loop over one plane pair and feed every inner row's eight
@@ -252,6 +270,7 @@ fn run_cell(
     let mut out = CellOut {
         dev: [0.0; MAPDEV_PER_CELL],
         z: [0.0; Z1MAX_PER_CELL],
+        tex: [0.0; TEXGAIN_PER_CELL],
     };
     if width == 0 || height == 0 {
         return out;
@@ -286,6 +305,8 @@ fn run_cell(
         .then(|| [crate::featcanon::WelfordVar::for_mode(mode); MAPDEV_PER_CELL]);
     let mut dev = [Welford::default(); MAPDEV_PER_CELL];
     let mut z1 = work.z1max.then(|| Z1Acc::new(width, height));
+    // S1: ascending-row f64 sum of the per-row ascending-x f64 sums.
+    let mut tex_sum = 0.0f64;
 
     let mut b0 = 0usize;
     while b0 < height {
@@ -383,6 +404,14 @@ fn run_cell(
                     rows[MAP_HFAD][x] = f64::from(diff2);
                 }
             }
+            if work.texgain {
+                // `bounded_excess(|hf_d|, |hf_s|, C_HF)` on the f32 maps' widened `|s-mu1|`, `|d-mu2|`.
+                let mut row_sum = 0.0f64;
+                for (&a, &b) in rows[MAP_HFAS].iter().zip(&rows[MAP_HFAD]) {
+                    row_sum += (b - a).max(0.0) / (b + a + C_HF);
+                }
+                tex_sum += row_sum;
+            }
             if work.mapdev {
                 if let Some(devv) = dev_var.as_mut() {
                     for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
@@ -427,7 +456,62 @@ fn run_cell(
     if let Some(z) = &z1 {
         z.finalize(revision, &mut out.z);
     }
+    if work.texgain {
+        out.tex[0] = (tex_sum / (width * height) as f64).clamp(0.0, 1.0);
+    }
     out
+}
+
+/// SIGNEDFEAT S2 for one scale: the (X, B) chroma-magnitude gain/loss. `[sat_gain, sat_loss,
+/// gsat_gain, gsat_loss]`. `xs/bs` are the reference X and B planes, `xd/bd` the distorted ones.
+/// All arithmetic is scalar f64 in a fixed order (ascending x within a row, rows ascending), so the
+/// result does not depend on the dispatch tier or the thread count.
+fn satsign_scale(
+    xs: &[f32],
+    bs: &[f32],
+    xd: &[f32],
+    bd: &[f32],
+    width: usize,
+    height: usize,
+) -> [f64; SATSIGN_PER_SCALE] {
+    if width == 0 || height == 0 {
+        return [0.0; SATSIGN_PER_SCALE];
+    }
+    // Neutral-axis centring: on a gray R=G=B the opsin B-plane value is `0.55 - (-cbrt(K_B0))` for every
+    // luminance (the absorbance bias), so subtracting it makes `m = 0` on the neutral axis.
+    let (x0, b0) = (
+        f64::from(0.42_f32),
+        f64::from(0.55_f32) + f64::from(crate::color::K_B0).cbrt(),
+    );
+    let m = |x: f32, b: f32| {
+        let (xc, bc) = (f64::from(x) - x0, f64::from(b) - b0);
+        (xc * xc / SAT_CX + bc * bc / SAT_CB).sqrt()
+    };
+    let (mut gain, mut loss, mut sum_r, mut sum_d) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    for y in 0..height {
+        let (mut rg, mut rl, mut rr, mut rd) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for i in y * width..(y + 1) * width {
+            let (mr, md) = (m(xs[i], bs[i]), m(xd[i], bd[i]));
+            let recip = 1.0 / (md + mr + C_SAT);
+            rg += (md - mr).max(0.0) * recip;
+            rl += (mr - md).max(0.0) * recip;
+            rr += mr;
+            rd += md;
+        }
+        gain += rg;
+        loss += rl;
+        sum_r += rr;
+        sum_d += rd;
+    }
+    let n = (width * height) as f64;
+    let (gr, gd) = (sum_r / n, sum_d / n);
+    let grecip = 1.0 / (gd + gr + C_SAT);
+    [
+        (gain / n).clamp(0.0, 1.0),
+        (loss / n).clamp(0.0, 1.0),
+        ((gd - gr).max(0.0) * grecip).clamp(0.0, 1.0),
+        ((gr - gd).max(0.0) * grecip).clamp(0.0, 1.0),
+    ]
 }
 
 /// Fill the `mapdev` (60) and `z1max` (228) feature slices. Both are laid out
@@ -441,6 +525,8 @@ pub(super) fn run(
     work: Work,
     mapdev_out: &mut [f64],
     z1max_out: &mut [f64],
+    texgain_out: &mut [f64],
+    satsign_out: &mut [f64],
 ) {
     let n_scales = crate::NUM_SCALES;
     let src = prepare_v2_reference_impl(source, None, parallel, false)
@@ -451,7 +537,11 @@ pub(super) fn run(
     let recip: Vec<f64> = (0..=max_w)
         .map(|n| if n == 0 { 0.0 } else { 1.0 / n as f64 })
         .collect();
-    let cells: Vec<(usize, usize)> = (0..n_scales * 3).map(|i| (i / 3, i % 3)).collect();
+    let cells: Vec<(usize, usize)> = if work.band() {
+        (0..n_scales * 3).map(|i| (i / 3, i % 3)).collect()
+    } else {
+        Vec::new()
+    };
     let run_one = |&(scale, ch): &(usize, usize)| {
         let (sp, w, h) = &src.scales[scale];
         let (dp, _, _) = &dst.scales[scale];
@@ -472,6 +562,18 @@ pub(super) fn run(
         }
         if work.z1max {
             z1max_out[i * Z1MAX_PER_CELL..(i + 1) * Z1MAX_PER_CELL].copy_from_slice(&o.z);
+        }
+        if work.texgain {
+            texgain_out[i * TEXGAIN_PER_CELL..(i + 1) * TEXGAIN_PER_CELL].copy_from_slice(&o.tex);
+        }
+    }
+    if work.satsign {
+        for scale in 0..n_scales {
+            let (sp, w, h) = &src.scales[scale];
+            let (dp, _, _) = &dst.scales[scale];
+            let v = satsign_scale(&sp[0], &sp[2], &dp[0], &dp[2], *w, *h);
+            satsign_out[scale * SATSIGN_PER_SCALE..(scale + 1) * SATSIGN_PER_SCALE]
+                .copy_from_slice(&v);
         }
     }
 }
@@ -742,5 +844,145 @@ mod tests {
             crate::feature_defs::block_base(T::Gmsnative, ns).unwrap().0,
             1790
         );
+    }
+}
+
+/// Private qualification instrument for the SIGNEDFEAT NumPy mirror
+/// (`scripts/signedfeat/numpy_mirror.py`): built only with
+/// `RUSTFLAGS='--cfg restore_cuts_instrument'`, run under `ZENSIM_FORMULA_REV=4`. Dumps the XYB pyramid
+/// planes of three synthetic pairs and of the 256² TRAIN pairs named by `SIGNEDFEAT_PARITY_DIR`
+/// (`scripts/signedfeat/prep_parity_pairs.py`), plus the production walk's own `texgain`/`satsign`
+/// values for each.
+#[cfg(restore_cuts_instrument)]
+#[test]
+fn signedfeat_plane_dump() {
+    use std::io::Write;
+    let dir = std::path::PathBuf::from(std::env::var("SIGNEDFEAT_DUMP_DIR").unwrap());
+    std::fs::create_dir(&dir).unwrap();
+    assert_eq!(crate::ssim_form::active_revision(), FormulaRevision::Rev4);
+    let mut index = std::fs::File::create(dir.join("index.tsv")).unwrap();
+    writeln!(index, "case\tside\tscale\tchannel\twidth\theight\tfile").unwrap();
+    let mut csv = std::fs::File::create(dir.join("features.csv")).unwrap();
+    write!(csv, "case").unwrap();
+    for i in 0..12 {
+        write!(csv, ",texgain{i}").unwrap();
+    }
+    for i in 0..16 {
+        write!(csv, ",satsign{i}").unwrap();
+    }
+    writeln!(csv).unwrap();
+    type Case = (String, usize, usize, Vec<[u8; 3]>, Vec<[u8; 3]>);
+    let mut cases: Vec<Case> = Vec::new();
+    for &(w, h) in &[(64usize, 64usize), (97, 73), (200, 150)] {
+        let mut state = 0x9E37_79B9u32 ^ (w as u32 * 31 + h as u32);
+        let mut rnd = move || {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            (state >> 24) as u8
+        };
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let edge = if (x / 23 + y / 17) % 2 == 0 { 40 } else { 0 };
+                let v = ((x * 5 + y * 3) % 200) as u8 / 2 + 30 + edge;
+                [
+                    v,
+                    v.wrapping_add(rnd() % 40),
+                    v.wrapping_mul(2) / 2 + rnd() % 60,
+                ]
+            })
+            .collect();
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let blk = ((i % w) / 8 + (i / w) / 8) as u8 % 3;
+                [
+                    (p[0] & 0xF8).saturating_add(blk),
+                    p[1].saturating_add(rnd() % 30),
+                    p[2] / 2 * 2,
+                ]
+            })
+            .collect();
+        cases.push((format!("syn{w}x{h}"), w, h, src, dst));
+    }
+    let pdir = std::env::var("SIGNEDFEAT_PARITY_DIR").expect("SIGNEDFEAT_PARITY_DIR");
+    for line in std::fs::read_to_string(format!("{pdir}/index.tsv"))
+        .unwrap()
+        .lines()
+        .skip(1)
+    {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f[3] != "256" {
+            continue;
+        }
+        let rd = |suffix: &str| -> Vec<[u8; 3]> {
+            std::fs::read(format!("{pdir}/{}_{suffix}.rgb", f[0]))
+                .unwrap()
+                .as_chunks::<3>()
+                .0
+                .to_vec()
+        };
+        cases.push((f[0].to_string(), 256, 256, rd("ref"), rd("dst")));
+    }
+    for (case, w, h, src, dst) in cases {
+        let (s, d) = (
+            crate::RgbSlice::new(&src, w, h),
+            crate::RgbSlice::new(&dst, w, h),
+        );
+        let (ps, pd) = (
+            prepare_v2_reference_impl(&s, None, false, false).unwrap(),
+            prepare_v2_reference_impl(&d, None, false, false).unwrap(),
+        );
+        for (side, prep) in [(0, &ps), (1, &pd)] {
+            for (scale, (planes, pw, ph)) in prep.scales.iter().enumerate() {
+                for (ch, plane) in planes.iter().enumerate() {
+                    let file = format!("{case}_{side}_{scale}_{ch}.f32");
+                    let mut bytes = Vec::with_capacity(plane.len() * 4);
+                    for v in plane {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                    std::fs::write(dir.join(&file), bytes).unwrap();
+                    writeln!(index, "{case}\t{side}\t{scale}\t{ch}\t{pw}\t{ph}\t{file}").unwrap();
+                }
+            }
+        }
+        // Values under test: the production walk with every family on.
+        let toggles = super::V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            rev4_gridblk: true,
+            rev4_ringbasis: true,
+            rev4_tailhist: true,
+            rev4_arttype: true,
+            gmsbank: true,
+            mapdev: true,
+            z1max: true,
+            gmsnative: true,
+            dvifmgate: true,
+            texgain: true,
+            satsign: true,
+            v1_pools: super::V1PoolsMode::Full,
+            ..Default::default()
+        };
+        let mut scratch = super::V2Scratch::new();
+        let f = super::compute_folded720_streaming_impl(
+            &s,
+            &d,
+            None,
+            false,
+            toggles,
+            &mut scratch,
+            None,
+        )
+        .expect("walk")
+        .into_features();
+        assert_eq!(f.len(), 1853);
+        write!(csv, "{case}").unwrap();
+        for v in &f[1825..] {
+            write!(csv, ",{v:e}").unwrap();
+        }
+        writeln!(csv).unwrap();
     }
 }

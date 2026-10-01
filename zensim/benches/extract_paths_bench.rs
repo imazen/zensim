@@ -327,6 +327,8 @@ fn toggles_restore(upto: usize) -> zensim::feature_v2::V2NewFeatureToggles {
         z1max: upto >= 2,
         gmsnative: upto >= 3,
         dvifmgate: upto >= 4,
+        texgain: upto >= 5,
+        satsign: upto >= 6,
         ..toggles_gmsbank()
     }
 }
@@ -337,6 +339,8 @@ fn restore_arm(name: &str) -> Option<usize> {
         "fold1790_z1max" => Some(2),
         "fold1820_gmsnative" => Some(3),
         "fold1825_dvifmgate" => Some(4),
+        "fold1837_texgain" => Some(5),
+        "fold1853_satsign" => Some(6),
         _ => None,
     }
 }
@@ -1228,6 +1232,8 @@ fn main() {
                     ("fold1790_z1max", toggles_restore(2)),
                     ("fold1820_gmsnative", toggles_restore(3)),
                     ("fold1825_dvifmgate", toggles_restore(4)),
+                    ("fold1837_texgain", toggles_restore(5)),
+                    ("fold1853_satsign", toggles_restore(6)),
                 ] {
                     bench_arm(group, name, move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();

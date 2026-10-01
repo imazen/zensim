@@ -178,6 +178,8 @@ impl Plan {
         let z1max = touches(ComputeToken::Z1max);
         let gmsnative = touches(ComputeToken::Gmsnative);
         let dvifmgate = touches(ComputeToken::Dvifmgate);
+        let texgain = touches(ComputeToken::Texgain);
+        let satsign = touches(ComputeToken::Satsign);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // DVIFM is the same shape (`dvifm_block && v2_blocks`), one block up.
@@ -195,7 +197,9 @@ impl Plan {
             || mapdev
             || z1max
             || gmsnative
-            || dvifmgate;
+            || dvifmgate
+            || texgain
+            || satsign;
 
         // Free extras: only meaningful when the owning block is NOT running.
         let free_extras = if touches(ComputeToken::ClassC) && !append {
@@ -269,6 +273,8 @@ impl Plan {
             z1max,
             gmsnative,
             dvifmgate,
+            texgain,
+            satsign,
             free_extras,
         };
         let mut requested = requested;
@@ -470,6 +476,8 @@ impl Plan {
             z1max: false,
             gmsnative: false,
             dvifmgate: false,
+            texgain: false,
+            satsign: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -536,6 +544,8 @@ impl Plan {
             z1max: layout.z1max,
             gmsnative: layout.gmsnative,
             dvifmgate: layout.dvifmgate,
+            texgain: layout.texgain,
+            satsign: layout.satsign,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -624,6 +634,8 @@ impl Plan {
             z1max: a.z1max || b.z1max,
             gmsnative: a.gmsnative || b.gmsnative,
             dvifmgate: a.dvifmgate || b.dvifmgate,
+            texgain: a.texgain || b.texgain,
+            satsign: a.satsign || b.satsign,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -654,6 +666,8 @@ struct LayoutBlocks {
     z1max: bool,
     gmsnative: bool,
     dvifmgate: bool,
+    texgain: bool,
+    satsign: bool,
 }
 
 impl LayoutBlocks {
@@ -671,6 +685,8 @@ impl LayoutBlocks {
         let z1max = mapdev && width > base_of(ComputeToken::Z1max, ns);
         let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
         let dvifmgate = gmsnative && width > base_of(ComputeToken::Dvifmgate, ns);
+        let texgain = dvifmgate && width > base_of(ComputeToken::Texgain, ns);
+        let satsign = texgain && width > base_of(ComputeToken::Satsign, ns);
         Self {
             append,
             append2,
@@ -685,6 +701,8 @@ impl LayoutBlocks {
             z1max,
             gmsnative,
             dvifmgate,
+            texgain,
+            satsign,
         }
     }
 }

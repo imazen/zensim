@@ -120,9 +120,9 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
 
 /// **G2.1, the COMPLETE half** — the full registered width agrees
 /// bit-exactly with the production walk at the widest registered regime
-/// (1825 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
+/// (1853 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
 /// feature-bank families + C8 `gmsbank` + the four restored cuts `mapdev`,
-/// `z1max`, `gmsnative`, `dvifmgate`; the DVIFM tail is itself
+/// `z1max`, `gmsnative`, `dvifmgate` + SIGNEDFEAT `texgain`, `satsign`; the DVIFM tail is itself
 /// bit-identical to the whole-plane oracle per the dvifm gates). The
 /// production toggles must name every registered block: a block left off
 /// here makes the two widths differ.
@@ -152,6 +152,8 @@ fn research_everything_agrees_with_the_production_walk() {
                     z1max: true,
                     gmsnative: true,
                     dvifmgate: true,
+                    texgain: true,
+                    satsign: true,
                     v1_pools: V1PoolsMode::Full,
                     ..V2NewFeatureToggles::default()
                 },

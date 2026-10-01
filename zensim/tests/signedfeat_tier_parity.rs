@@ -10,10 +10,17 @@
 //! not a skip. `SIGNEDFEAT_PARITY_FAMILIES` (comma list of compute tokens, default `mapdev,z1max`)
 //! selects the slots compared.
 //!
+//! Compiled only with `RUSTFLAGS='--cfg signedfeat_real_pairs'` (the caller's explicit decision; `just signedfeat-tier-parity`
+//! wires it), because the inputs live outside the repository.
+//!
 //! Own test executable (`for_each_token_permutation` mutates process-wide dispatch); the body runs in a
 //! child at `ZENSIM_FORMULA_REV=4`, the same protocol as `featcanon_tier_parity.rs`.
 
-#![cfg(all(feature = "training", feature = "feature-regime-v2"))]
+#![cfg(all(
+    feature = "training",
+    feature = "feature-regime-v2",
+    signedfeat_real_pairs
+))]
 #![allow(deprecated)]
 
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
@@ -49,7 +56,8 @@ fn rev4_family_slots_bit_identical_on_real_pairs() {
         assert!(String::from_utf8_lossy(&out.stdout).contains(SENTINEL));
         return;
     }
-    let dir = std::env::var("SIGNEDFEAT_PARITY_DIR").expect("SIGNEDFEAT_PARITY_DIR must name the prep directory");
+    let dir = std::env::var("SIGNEDFEAT_PARITY_DIR")
+        .expect("SIGNEDFEAT_PARITY_DIR must name the prep directory");
     let index = std::fs::read_to_string(format!("{dir}/index.tsv")).expect("index.tsv");
     let toks = families();
     let want = toks
@@ -66,7 +74,7 @@ fn rev4_family_slots_bit_identical_on_real_pairs() {
         let rd = |suffix: &str| -> Vec<[u8; 3]> {
             let b = std::fs::read(format!("{dir}/{name}_{suffix}.rgb")).expect("rgb");
             assert_eq!(b.len(), n * n * 3);
-            b.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect()
+            b.as_chunks::<3>().0.to_vec()
         };
         let (src, dst) = (rd("ref"), rd("dst"));
         assert_ne!(src, dst, "{name}: identical pair");
@@ -76,7 +84,10 @@ fn rev4_family_slots_bit_identical_on_real_pairs() {
         let _ = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
             let e = research::extract(&req, &s, &d).expect("extract");
             let v = e.values();
-            runs.push((perm.label.clone(), ids.iter().map(|&i| v[i].to_bits()).collect()));
+            runs.push((
+                perm.label.clone(),
+                ids.iter().map(|&i| v[i].to_bits()).collect(),
+            ));
         });
         assert!(runs.len() >= 3, "{name}: only {} permutations", runs.len());
         tiers = tiers.max(runs.len());
@@ -101,7 +112,10 @@ fn rev4_family_slots_bit_identical_on_real_pairs() {
                 format!(" (first f{})", diff_slots.iter().next().unwrap())
             }
         );
-        assert!(diff_slots.is_empty(), "{name}: tier divergence: {diff_slots:?}");
+        assert!(
+            diff_slots.is_empty(),
+            "{name}: tier divergence: {diff_slots:?}"
+        );
     }
     eprintln!("families {toks:?}: {total_cells} cells compared, up to {tiers} permutations");
     println!("{SENTINEL}");

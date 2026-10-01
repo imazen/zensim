@@ -135,6 +135,12 @@ pub enum ComputeToken {
     /// visibility instead of the smooth curve, one slot per level,
     /// `f1790+30..`.
     Dvifmgate,
+    /// SIGNEDFEAT S1: texture-magnitude GAIN, the mirror of the existing
+    /// `hf_mag_loss`, per scale and channel, `f1825..1836`.
+    Texgain,
+    /// SIGNEDFEAT S2: signed chroma-saturation (XYB X/B magnitude) gain and
+    /// loss, per-pixel and whole-plane, per scale, `f1837..1852`.
+    Satsign,
 }
 
 impl ComputeToken {
@@ -159,6 +165,8 @@ impl ComputeToken {
         ComputeToken::Z1max,
         ComputeToken::Gmsnative,
         ComputeToken::Dvifmgate,
+        ComputeToken::Texgain,
+        ComputeToken::Satsign,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -188,6 +196,8 @@ impl ComputeToken {
             ComputeToken::Z1max => "z1max",
             ComputeToken::Gmsnative => "gmsnative",
             ComputeToken::Dvifmgate => "dvifmgate",
+            ComputeToken::Texgain => "texgain",
+            ComputeToken::Satsign => "satsign",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",

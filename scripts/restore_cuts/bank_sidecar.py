@@ -43,6 +43,18 @@ FAMILIES = {
     "dvifmgate": ("features__restore_dvifmgate.parquet", 1820, 5),
 }
 FULL_WIDTH = 1825
+FIRST_ID = 1502
+FORMULA_REV = "3"
+MANIFEST = "_MANIFEST_restore.json"
+# SIGNEDFEAT sidecars (texgain f1825-1836, satsign f1837-1852) are Rev4 (tiercanon) extractions of the
+# same bank keys: SIDECAR_SPEC=signed selects them; the default spec is the restore-cuts one, unchanged.
+if os.environ.get("SIDECAR_SPEC") == "signed":
+    FAMILIES = {
+        "texgain": ("features__signed_texgain.parquet", 1825, 12),
+        "satsign": ("features__signed_satsign.parquet", 1837, 16),
+    }
+    FULL_WIDTH, FIRST_ID, FORMULA_REV, MANIFEST = 1853, 1825, "4", "_MANIFEST_signed.json"
+    ROOT = Path(os.environ.get("RESTORE_ROOT", "/var/tmp/signedfeat/sidecar"))
 # z1max cell-local slots whose registry form is Difference (exactly 0 on an identity pair).
 Z1_DIFF_LOCALS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17, 18]
 
@@ -152,7 +164,7 @@ def bind(name, build_meta_path, binary):
     bin_sha = sha256_file(binary)
     if producer.get("producer_binary_sha256") != bin_sha:
         raise SystemExit("extractor manifest binary hash differs from the build")
-    if producer.get("formula_revision") != "3" or producer.get("layout") != f"w{FULL_WIDTH}":
+    if producer.get("formula_revision") != FORMULA_REV or producer.get("layout") != f"w{FULL_WIDTH}":
         raise SystemExit(f"extractor manifest has wrong formula/layout: {producer}")
     if producer.get("input_contract", INPUT_CONTRACT) != INPUT_CONTRACT:
         raise SystemExit("extractor manifest has wrong input contract")
@@ -221,16 +233,16 @@ def bind(name, build_meta_path, binary):
             "identity_violations": bad, "dtype": "f32", "cast": "f64->f32 round-nearest-even",
         }
     manifest.update({
-        "feature_set_id": producer["feature_set_id"], "formula_revision": "3", "root_form": "sqrt",
+        "feature_set_id": producer["feature_set_id"], "formula_revision": FORMULA_REV, "root_form": "sqrt",
         "input_contract": INPUT_CONTRACT, "build_commit": build_meta["repositories"]["zensim"]["commit"],
         "binary_sha256": bin_sha, "build_meta_sha256": sha256_file(build_meta_path),
-        "env": {"ZENSIM_FORMULA_REV": "3", "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"},
+        "env": {"ZENSIM_FORMULA_REV": FORMULA_REV, "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"},
         "pairs_sha256": sha256_file(pairs_path), "audit_sha256": sha256_file(audit_path),
         "extractor_csv_sha256": sha256_file(csv_path),
         "bank_keys_sha256": sha256_file(BANK / name / "keys.parquet"),
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     })
-    mpath = ROOT / "bank" / name / "_MANIFEST_restore.json"
+    mpath = ROOT / "bank" / name / MANIFEST
     mpath.write_text(json.dumps(manifest, indent=1) + "\n")
     print(f"RESTORE_WRITTEN set={name} rows={n} manifest_sha256={sha256_file(mpath)} "
           f"feature_set_id={producer['feature_set_id']}")
@@ -240,7 +252,7 @@ def verify():
     result = {}
     for name in sets():
         d = ROOT / "bank" / name
-        m = json.loads((d / "_MANIFEST_restore.json").read_text())
+        m = json.loads((d / MANIFEST).read_text())
         keys = pq.read_table(BANK / name / "keys.parquet", columns=["pair_key", "pixels_identical"])
         pks = keys.column("pair_key").to_pylist()
         ident = keys.column("pixels_identical").to_numpy()
@@ -332,7 +344,7 @@ def reextract():
         reader = csv.reader(f)
         hdr = next(reader)
         rid_col = hdr.index("row_id")
-        pos = [hdr.index(f"f{i}") for i in range(1502, FULL_WIDTH)]
+        pos = [hdr.index(f"f{i}") for i in range(FIRST_ID, FULL_WIDTH)]
         for row in reader:
             rid = int(row[rid_col])
             if rid in seen or rid not in want:

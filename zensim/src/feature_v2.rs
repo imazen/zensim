@@ -602,6 +602,10 @@ pub(crate) const Z1MAX_PER_CELL: usize = 19;
 pub(crate) const GMSNATIVE_WIDTH: usize = 30;
 /// dvifmgate slots in total: the gate F1 of each of DVIFM's five levels.
 pub(crate) const DVIFMGATE_WIDTH: usize = 5;
+/// texgain slots per (scale, channel) cell (`feature_defs::TEXGAIN_SIGNALS`).
+pub(crate) const TEXGAIN_PER_CELL: usize = 1;
+/// satsign slots per scale (`feature_defs::SATSIGN_SIGNALS`).
+pub(crate) const SATSIGN_PER_SCALE: usize = 4;
 
 fn gmsbank_width(n_scales: usize) -> usize {
     crate::feature_defs::block_base(crate::feature_set_id::ComputeToken::Gmsbank, n_scales)
@@ -2673,6 +2677,14 @@ pub struct V2NewFeatureToggles {
     /// two-state gate visibility. Default OFF. Requires `gmsnative`'s layout.
     #[doc(hidden)]
     pub dvifmgate: bool,
+    /// SIGNEDFEAT S1 `texgain` f1825..1836: texture-magnitude gain per
+    /// (scale, channel). Default OFF. Requires `dvifmgate`'s layout.
+    #[doc(hidden)]
+    pub texgain: bool,
+    /// SIGNEDFEAT S2 `satsign` f1837..1852: signed chroma-saturation change per
+    /// scale. Default OFF. Requires `texgain`'s layout.
+    #[doc(hidden)]
+    pub satsign: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -2910,6 +2922,8 @@ impl Default for V2NewFeatureToggles {
             z1max: false,
             gmsnative: false,
             dvifmgate: false,
+            texgain: false,
+            satsign: false,
         }
     }
 }
@@ -3088,6 +3102,10 @@ pub(crate) struct ComputeSet {
     pub gmsnative: bool,
     /// Restored cut `dvifmgate`: the DVIFM pump also accumulates the gate F1.
     pub dvifmgate: bool,
+    /// SIGNEDFEAT S1 (`texgain`): the per-band side pass also accumulates texture gain.
+    pub texgain: bool,
+    /// SIGNEDFEAT S2 (`satsign`): the (X, B) chroma-saturation side pass runs.
+    pub satsign: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -3171,6 +3189,8 @@ impl ComputeSet {
             z1max: self.z1max && live,
             gmsnative: self.gmsnative && live,
             dvifmgate: self.dvifmgate && live,
+            texgain: self.texgain && live,
+            satsign: self.satsign && live,
             ..self
         }
     }
@@ -3232,6 +3252,8 @@ impl ComputeSet {
             z1max: t.z1max && v2_blocks,
             gmsnative: t.gmsnative && v2_blocks,
             dvifmgate: t.dvifmgate && v2_blocks,
+            texgain: t.texgain && v2_blocks,
+            satsign: t.satsign && v2_blocks,
             free_extras: t.free_extras,
         }
     }
@@ -3379,6 +3401,12 @@ impl ComputeSet {
         if self.dvifmgate {
             p = p.with(T::Dvifmgate);
         }
+        if self.texgain {
+            p = p.with(T::Texgain);
+        }
+        if self.satsign {
+            p = p.with(T::Satsign);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -3443,6 +3471,8 @@ impl ComputeSet {
         let z1max_end = mapdev_end + n_scales * 3 * Z1MAX_PER_CELL;
         let gmsnative_end = z1max_end + GMSNATIVE_WIDTH;
         let dvifmgate_end = gmsnative_end + DVIFMGATE_WIDTH;
+        let texgain_end = dvifmgate_end + n_scales * 3 * TEXGAIN_PER_CELL;
+        let satsign_end = texgain_end + n_scales * SATSIGN_PER_SCALE;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -3496,6 +3526,12 @@ impl ComputeSet {
         }
         if self.dvifmgate {
             ranges.push((gmsnative_end, dvifmgate_end));
+        }
+        if self.texgain {
+            ranges.push((dvifmgate_end, texgain_end));
+        }
+        if self.satsign {
+            ranges.push((texgain_end, satsign_end));
         }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
@@ -13056,6 +13092,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_z1max = toggles.z1max;
     let layout_gmsnative = toggles.gmsnative;
     let layout_dvifmgate = toggles.dvifmgate;
+    let layout_texgain = toggles.texgain;
+    let layout_satsign = toggles.satsign;
     // Only read below under `threads` (the `fuse_channels` derivation a few
     // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
     // without it, so `--no-default-features --features feature-regime-v2`
@@ -13117,6 +13155,14 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     assert!(
         !layout_dvifmgate || layout_gmsnative,
         "dvifmgate requires the gmsnative layout (f1820 sits after f1819)"
+    );
+    assert!(
+        !layout_texgain || layout_dvifmgate,
+        "texgain requires the dvifmgate layout (f1825 sits after f1824)"
+    );
+    assert!(
+        !layout_satsign || layout_texgain,
+        "satsign requires the texgain layout (f1837 sits after f1836)"
     );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
@@ -13803,6 +13849,16 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     };
     let gmsnative_total = if layout_gmsnative { GMSNATIVE_WIDTH } else { 0 };
     let dvifmgate_total = if layout_dvifmgate { DVIFMGATE_WIDTH } else { 0 };
+    let texgain_total = if layout_texgain {
+        n_scales * 3 * TEXGAIN_PER_CELL
+    } else {
+        0
+    };
+    let satsign_total = if layout_satsign {
+        n_scales * SATSIGN_PER_SCALE
+    } else {
+        0
+    };
     let mut features = vec![
         0.0f64;
         v12_total
@@ -13819,6 +13875,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             + z1max_total
             + gmsnative_total
             + dvifmgate_total
+            + texgain_total
+            + satsign_total
     ];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
@@ -13832,7 +13890,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let (features_gmsbank, features_tail10) = features_tail9.split_at_mut(gmsbank_total);
     let (features_mapdev, features_tail11) = features_tail10.split_at_mut(mapdev_total);
     let (features_z1max, features_tail12) = features_tail11.split_at_mut(z1max_total);
-    let (features_gmsnative, features_dvifmgate) = features_tail12.split_at_mut(gmsnative_total);
+    let (features_gmsnative, features_tail13) = features_tail12.split_at_mut(gmsnative_total);
+    let (features_dvifmgate, features_tail14) = features_tail13.split_at_mut(dvifmgate_total);
+    let (features_texgain, features_satsign) = features_tail14.split_at_mut(texgain_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -14246,11 +14306,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let restore_work = restore_cuts::Work {
         mapdev: layout_mapdev && compute.mapdev,
         z1max: layout_z1max && compute.z1max,
+        texgain: layout_texgain && compute.texgain,
+        satsign: layout_satsign && compute.satsign,
     };
     if restore_work.any() {
         assert!(
             restore_side_ok,
-            "mapdev/z1max need the SDR pair path (no ref-fed, sampled or HDR walk)"
+            "mapdev/z1max/texgain/satsign need the SDR pair path (no ref-fed, sampled or HDR walk)"
         );
         restore_cuts::run(
             source,
@@ -14260,6 +14322,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             restore_work,
             features_mapdev,
             features_z1max,
+            features_texgain,
+            features_satsign,
         );
     }
     ZensimV2Result {
@@ -20072,6 +20136,8 @@ pub(crate) mod tests {
                     z1max: false,
                     gmsnative: false,
                     dvifmgate: false,
+                    texgain: false,
+                    satsign: false,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---
