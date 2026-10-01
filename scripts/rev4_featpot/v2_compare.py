@@ -74,7 +74,7 @@ def cell_boot(spec: str, head: str, source: str, i: int, suffix: str | None = No
     res = cdir / "result.json"
     if not res.is_file():
         return None
-    cache = cdir / f"boot_B{BOOT_B}_seed{BOOT_SEED}.npz"
+    cache = cdir / f"boot_B{BOOT_B}_seed{BOOT_SEED}_signed.npz"
     res_sha = sha(res)
     if cache.is_file():
         z = np.load(cache)
@@ -88,7 +88,8 @@ def cell_boot(spec: str, head: str, source: str, i: int, suffix: str | None = No
         raise ValueError(f"{res}: prediction length mismatch")
     rows = panel_batch_indexed({"p": pred, "y": y}, None, stats="srocc", timeout=7200,
                                rendered_jobs=rendered_jobs(source, keys))
-    by = {r["label"]: r["srocc"] for r in rows}
+    # Signed SROCC: the panel's `srocc` is |rho| (panel.rs), which would hide an inverted model.
+    by = {r["label"]: r["srocc_signed"] for r in rows}
     boot = np.asarray([by[f"B{b}"] for b in range(BOOT_B)], dtype=np.float64)
     point = float(by["POINT"])
     np.savez(cache, point=point, boot=boot, result_sha256=res_sha)

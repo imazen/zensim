@@ -276,3 +276,8 @@ Rev3 arms are not run.
 argv, program and data, hence the same content-addressed job ids) and declares only the rest of the grid. It is read
 with `v2_compare.py --calibration --human-weight <w>`, which writes `compare/calibration_h<w>.json`; arms at that
 weight are read with the same flag and are refused unless that file accepts.
+
+*Execution note (2026-10-01 03:46 MT):* the panel's `srocc` field is |ρ| (`zensim-validate/src/bin/panel.rs`); `v2_compare.py`
+and `v2_tune.py` now read `srocc_signed`, so an inverted model can never score as a good one. On every stored v2 cell the
+signed value is positive, so the R3 rule and the calibration read are unchanged (calibration.json byte-identical after
+the switch).

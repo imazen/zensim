@@ -35,7 +35,7 @@ def srocc(spec: str, w: float, head: str, fold: str, seed: int) -> float | None:
     cell = json.loads(res.read_text())
     if cell.get("human_nominal_weight") != w:
         raise ValueError(f"{res}: human_nominal_weight {cell.get('human_nominal_weight')} != {w}")
-    return float(cell["score"]["srocc"])
+    return float(cell["score"]["srocc_signed"])  # signed: the panel's `srocc` is |rho|
 
 
 def summarise(head: str) -> tuple[dict, list[str]]:
