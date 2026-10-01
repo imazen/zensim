@@ -1,0 +1,83 @@
+{
+ "schema": "rev4-featpot-canon-binary-parity-v1",
+ "recorded": "2026-10-01 03:22 MT",
+ "purpose": "Admit the v2-canon binary set (zensim main after TRAINERMEM) against the fleet v2 set by byte parity.",
+ "new_set": {
+  "zensim_commit": "cafed5ca42ba",
+  "profile": "release (workspace profile), rustc 1.98.1 (48a229cea 2026-09-01)",
+  "sha256": {
+   "zensim_mlp_train": "fd0ed34c7e47ddf6fecf1e416885daa6fbda4628953dc8774bc763e91550b6e7",
+   "bake_dial_refit": "bd147b99cf8c6b98524b192aa152fe5d910327ee9210dc3c46ed1ee01a6681a1",
+   "panel": "f76b85a7e5d647d23b2f10f5c94b498036d8c25b34de5586b0fe144ea64b74ab"
+  }
+ },
+ "old_set": {
+  "note": "fleet v2 set (build_meta_v2.json; trainer/panel v8, bake_dial_refit 86fc02bb)",
+  "sha256": {
+   "zensim_mlp_train": "6b28576f0bf0b315238a063e1a686cda32499fdf37a1799b2820d2286db8a7c9",
+   "bake_dial_refit": "81ec2207f593b5b2c6d6314e9f942f817bba63ff15c65f3908704dd1ceff5a1d",
+   "panel": "c9c610b8bcddd0cb66c411c10de07ecd283e2030dd26a48845878f5eb403ef16"
+  }
+ },
+ "method": {
+  "trainer": "2-epoch runs of the r0 (main/real) and oracle_hi (aux/real, R3 tables) argv from ~/tmp/zensim-paper/rev4/argv.json, ZENSIM_MAX_TIER=v3, RAYON 4; weights by harvest_fit_cells.weights_sha; dev curve = val(geomean3) lines minus wall time and minus the train-only group segments that EFFAUDIT D1 stops evaluating",
+  "predict": "bake_dial_refit predict --score-units on 8 stored calibration bakes over their held-out tables; TSV bytes",
+  "panel": "zen_stats.panel_batch full stats on two synthetic vector pairs; JSON bytes"
+ },
+ "results": [
+  {
+   "check": "trainer r0 weights",
+   "identical": true
+  },
+  {
+   "check": "trainer r0 dev curve",
+   "identical": true
+  },
+  {
+   "check": "trainer oracle_hi weights",
+   "identical": true
+  },
+  {
+   "check": "trainer oracle_hi dev curve",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__F/without_aic3_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__F/without_cid22_a25_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__F/without_kadid_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__F/without_konfig_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__F/without_tid2013_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__N/without_aic3_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__N/without_cid22_a25_s0",
+   "identical": true
+  },
+  {
+   "check": "predict minus_basic__N/without_kadid_s0",
+   "identical": true
+  },
+  {
+   "check": "panel full stats",
+   "identical": true
+  }
+ ],
+ "verdict": "ALL_IDENTICAL",
+ "script": "/var/tmp/fitv2/canon_parity/parity.py (copied to benchmarks/rev4_featpot_effaudit/canon_parity.py)"
+}
