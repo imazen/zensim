@@ -47,6 +47,29 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 /// amortized over 1024 forward-walked values.
 const TRANSPOSE_BLOCK_ROWS: usize = 1024;
 
+/// Append `block_len` `Float32` values of `col` starting at `start` to `out`,
+/// unwidened. Only reached for `Emit::Flat32`, whose dtype is checked up front.
+fn col_block_to_f32(
+    path: &Path,
+    col: &dyn Array,
+    start: usize,
+    block_len: usize,
+    out: &mut Vec<f32>,
+) -> Result<(), String> {
+    let end = start + block_len;
+    if col.null_count() > 0 && (start..end).any(|i| col.is_null(i)) {
+        return Err(format!(
+            "{path:?}: null feature value in rows {start}..{end}"
+        ));
+    }
+    let a = col
+        .as_any()
+        .downcast_ref::<Float32Array>()
+        .ok_or_else(|| format!("{path:?}: compact f32 load met a non-Float32 feature column"))?;
+    out.extend((start..end).map(|i| a.value(i)));
+    Ok(())
+}
+
 /// Append `block_len` values of `col` starting at `start`, widened to f64,
 /// to `out`. Accepts the dtypes zensim feature parquets actually carry:
 /// Float64/Float32 (the common case) plus the integer widths some
@@ -172,13 +195,26 @@ pub struct OwnedLoadedGroupFlat {
 }
 
 /// Feature-matrix destination for [`load_parquet_impl`] — same scan, same
-/// per-block transpose walk, two emission shapes.
+/// per-block transpose walk, three emission shapes.
 enum FeatureStore {
     Rows(Vec<Vec<f64>>),
     Flat(Vec<f64>),
+    /// Compact f32 store over a projected column subset
+    /// (`Emit::Flat32`; see [`load_parquet_flat_f32`]).
+    Flat32(Vec<f32>),
 }
 
-/// Fields shared by both loader shapes (everything except the features).
+/// Emission shape for [`load_parquet_impl`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Emit {
+    Rows,
+    Flat64,
+    /// Compact f32 over the caller's feature-id subset; see
+    /// [`load_parquet_flat_f32`].
+    Flat32,
+}
+
+/// Fields shared by all loader shapes (everything except the features).
 struct LoadedCommon {
     human_scores: Vec<f64>,
     n_features: usize,
@@ -379,10 +415,19 @@ pub fn load_parquet(
     target_column: &str,
     target_scale: f64,
 ) -> Result<OwnedLoadedGroup, String> {
-    let (common, store) = load_parquet_impl(path, name, target_column, target_scale, false)?;
+    let (common, store) = load_parquet_impl(
+        path,
+        name,
+        target_column,
+        target_scale,
+        Emit::Rows,
+        &[],
+        usize::MAX,
+    )?
+    .expect("Emit::Rows never declines");
     let feature_rows = match store {
         FeatureStore::Rows(rows) => rows,
-        FeatureStore::Flat(_) => unreachable!("load_parquet_impl(flat=false) must emit Rows"),
+        _ => unreachable!("load_parquet_impl(Emit::Rows) must emit Rows"),
     };
     Ok(OwnedLoadedGroup {
         name: name.to_string(),
@@ -407,10 +452,19 @@ pub fn load_parquet_flat(
     target_column: &str,
     target_scale: f64,
 ) -> Result<OwnedLoadedGroupFlat, String> {
-    let (common, store) = load_parquet_impl(path, name, target_column, target_scale, true)?;
+    let (common, store) = load_parquet_impl(
+        path,
+        name,
+        target_column,
+        target_scale,
+        Emit::Flat64,
+        &[],
+        usize::MAX,
+    )?
+    .expect("Emit::Flat64 never declines");
     let features_flat = match store {
         FeatureStore::Flat(flat) => flat,
-        FeatureStore::Rows(_) => unreachable!("load_parquet_impl(flat=true) must emit Flat"),
+        _ => unreachable!("load_parquet_impl(Emit::Flat64) must emit Flat"),
     };
     Ok(OwnedLoadedGroupFlat {
         name: name.to_string(),
@@ -424,15 +478,88 @@ pub fn load_parquet_flat(
     })
 }
 
-/// Shared body of [`load_parquet`] / [`load_parquet_flat`]. One scan, one
-/// per-block transpose walk; `flat` selects the emission shape.
+/// [`OwnedLoadedGroupFlat`] restricted to a feature-id subset, stored as
+/// compact **f32**.
+#[derive(Debug)]
+pub struct OwnedLoadedGroupCompact {
+    pub name: String,
+    pub human_scores: Vec<f64>,
+    /// Row-major `n_rows × kept.len()`; column `j` is logical feature
+    /// `kept[j]`. The parquet values verbatim (`f32`, no widening).
+    pub data: Vec<f32>,
+    /// Logical width of the table: `min(parquet feature count, max_width)`.
+    pub n_features: usize,
+    /// Logical feature ids stored, ascending and unique.
+    pub kept: Vec<u32>,
+    /// See [`OwnedLoadedGroup::metric_sigmas`].
+    pub metric_sigmas: Option<Vec<f64>>,
+    /// See [`OwnedLoadedGroup::ref_ids`].
+    pub ref_ids: Option<Vec<u32>>,
+}
+
+/// [`load_parquet_flat`] restricted to the feature ids in `subset`
+/// (ascending, unique), reading only those parquet columns (a
+/// `ProjectionMask`) and keeping the values as **f32** — the memory-shaped
+/// variant for trainers that zero every other column anyway.
+///
+/// Every stored value is the exact parquet `f32`; widening it to `f64` later
+/// is exact, so a consumer that widens at use sees the same numbers as
+/// [`load_parquet_flat`] gives for those columns. The dropped columns are
+/// not read at all (a null or odd dtype in one is not diagnosed).
+///
+/// Returns `Ok(None)` — and reads no row — when the compact shape cannot
+/// represent the table exactly: a subset id at or beyond the logical width
+/// `min(parquet feature count, max_width)`, an unsorted/duplicated subset, or
+/// a selected column that is not Arrow `Float32`. The caller then falls back
+/// to [`load_parquet_flat`]. Otherwise identical conventions to it.
+pub fn load_parquet_flat_f32(
+    path: &PathBuf,
+    name: &str,
+    target_column: &str,
+    target_scale: f64,
+    subset: &[u32],
+    max_width: usize,
+) -> Result<Option<OwnedLoadedGroupCompact>, String> {
+    let Some((common, store)) = load_parquet_impl(
+        path,
+        name,
+        target_column,
+        target_scale,
+        Emit::Flat32,
+        subset,
+        max_width,
+    )?
+    else {
+        return Ok(None);
+    };
+    let data = match store {
+        FeatureStore::Flat32(d) => d,
+        _ => unreachable!("load_parquet_impl(Emit::Flat32) must emit Flat32"),
+    };
+    Ok(Some(OwnedLoadedGroupCompact {
+        name: name.to_string(),
+        human_scores: common.human_scores,
+        data,
+        n_features: common.n_features,
+        kept: subset.to_vec(),
+        metric_sigmas: common.metric_sigmas,
+        ref_ids: common.ref_ids,
+    }))
+}
+
+/// Shared body of [`load_parquet`] / [`load_parquet_flat`] /
+/// [`load_parquet_flat_f32`]. One scan, one per-block transpose walk; `emit`
+/// selects the emission shape. `subset` and `max_width` apply to
+/// `Emit::Flat32` only. `Ok(None)` is the `Flat32` decline.
 fn load_parquet_impl(
     path: &PathBuf,
     name: &str,
     target_column: &str,
     target_scale: f64,
-    flat: bool,
-) -> Result<(LoadedCommon, FeatureStore), String> {
+    emit: Emit,
+    subset: &[u32],
+    max_width: usize,
+) -> Result<Option<(LoadedCommon, FeatureStore)>, String> {
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
@@ -465,8 +592,37 @@ fn load_parquet_impl(
     // (e.g. the post-jxl-fix near-lossless corpus). Both name the same
     // 372-wide with-iw feature space; only the header text differs, so
     // rejecting one of them just forces a rename-copy of the parquet.
-    let (prefix, f0_arrow_idx, n_features) = feature_column_run(path, arrow_fields)?;
+    let (prefix, f0_arrow_idx, file_n_features) = feature_column_run(path, arrow_fields)?;
     let _ = prefix;
+    // Compact f32: the logical width is capped at `max_width` (the trainer's
+    // `--max-features`; its post-load truncate becomes a no-op here) and only
+    // the `subset` ids are read. Everything else reads all columns.
+    let compact = emit == Emit::Flat32;
+    let n_features = if compact {
+        file_n_features.min(max_width)
+    } else {
+        file_n_features
+    };
+    if compact {
+        let ordered = subset.windows(2).all(|w| w[0] < w[1]);
+        let in_range = subset.iter().all(|&d| (d as usize) < n_features);
+        let all_f32 = in_range
+            && subset.iter().all(|&d| {
+                matches!(
+                    arrow_fields[f0_arrow_idx + d as usize].data_type(),
+                    DataType::Float32
+                )
+            });
+        if subset.is_empty() || !ordered || !in_range || !all_f32 {
+            return Ok(None);
+        }
+    }
+    // Logical feature ids this call materializes, ascending.
+    let stored: Vec<usize> = if compact {
+        subset.iter().map(|&d| d as usize).collect()
+    } else {
+        (0..n_features).collect()
+    };
 
     // Optional reference-identity column, for within-ref pair sampling.
     // `ref_basename` is the canonical-corpus convention; `image_path` is
@@ -479,12 +635,12 @@ fn load_parquet_impl(
     // schemas — which zensim feature parquets always are — the
     // arrow-column index maps 1:1 to a parquet leaf index. We use
     // `ProjectionMask::leaves` indexed by these arrow positions.
-    let mut wanted: Vec<usize> = Vec::with_capacity(n_features + 2);
+    let mut wanted: Vec<usize> = Vec::with_capacity(stored.len() + 2);
     wanted.push(score_arrow_idx);
     if let Some(r) = ref_arrow_idx {
         wanted.push(r);
     }
-    for i in 0..n_features {
+    for &i in &stored {
         wanted.push(f0_arrow_idx + i);
     }
     let mask = ProjectionMask::leaves(&parquet_schema, wanted.iter().copied());
@@ -506,8 +662,9 @@ fn load_parquet_impl(
         .iter()
         .position(|&i| i == score_arrow_idx)
         .expect("score idx must be in projection");
-    let proj_feature_indices: Vec<usize> = (0..n_features)
-        .map(|i| {
+    let proj_feature_indices: Vec<usize> = stored
+        .iter()
+        .map(|&i| {
             sorted_wanted
                 .iter()
                 .position(|&p| p == f0_arrow_idx + i)
@@ -528,19 +685,27 @@ fn load_parquet_impl(
     // transiently hold ~1.5× the matrix, which defeats the point of the
     // flat shape. (The count is a hint: if a corrupt footer under-reports,
     // the Vec still grows correctly.)
-    let mut store = if flat {
-        FeatureStore::Flat(Vec::with_capacity(
+    let mut store = match emit {
+        Emit::Flat64 => FeatureStore::Flat(Vec::with_capacity(
             total_rows_meta.saturating_mul(n_features),
-        ))
-    } else {
-        FeatureStore::Rows(Vec::new())
+        )),
+        Emit::Flat32 => FeatureStore::Flat32(Vec::with_capacity(
+            total_rows_meta.saturating_mul(stored.len()),
+        )),
+        Emit::Rows => FeatureStore::Rows(Vec::new()),
     };
     // Dense ref numbering, assigned in first-seen order so the ids are
     // deterministic for a given file.
     let mut ref_ids: Vec<u32> = Vec::new();
     let mut ref_lookup: HashMap<String, u32> = HashMap::new();
     // Column-major staging for one row block; reused across blocks + batches.
-    let mut per_col_scratch: Vec<f64> = Vec::with_capacity(n_features * TRANSPOSE_BLOCK_ROWS);
+    let mut per_col_scratch: Vec<f64> = Vec::new();
+    let mut per_col_scratch32: Vec<f32> = Vec::new();
+    if compact {
+        per_col_scratch32.reserve(stored.len() * TRANSPOSE_BLOCK_ROWS);
+    } else {
+        per_col_scratch.reserve(n_features * TRANSPOSE_BLOCK_ROWS);
+    }
 
     for batch_res in reader {
         let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
@@ -631,8 +796,19 @@ fn load_parquet_impl(
         while block_start < n_rows {
             let block_len = TRANSPOSE_BLOCK_ROWS.min(n_rows - block_start);
             per_col_scratch.clear();
+            per_col_scratch32.clear();
             for &pi in &proj_feature_indices {
                 let col = batch.column(pi);
+                if compact {
+                    col_block_to_f32(
+                        path,
+                        col.as_ref(),
+                        block_start,
+                        block_len,
+                        &mut per_col_scratch32,
+                    )?;
+                    continue;
+                }
                 // Feature columns may be Float64/Float32 (the common case)
                 // OR an integer type (Int32/Int64/UInt32/UInt64). Some
                 // feature extractors emit count-style features (e.g.
@@ -647,6 +823,14 @@ fn load_parquet_impl(
                 )?;
             }
             match &mut store {
+                FeatureStore::Flat32(buf) => {
+                    let k = stored.len();
+                    for r in 0..block_len {
+                        for c in 0..k {
+                            buf.push(per_col_scratch32[c * block_len + r]);
+                        }
+                    }
+                }
                 FeatureStore::Rows(rows) => {
                     for r in 0..block_len {
                         let mut row = Vec::with_capacity(n_features);
@@ -761,16 +945,24 @@ fn load_parquet_impl(
     }
 
     println!(
-        "  {name}: loaded {} pairs × {n_features} features ({prefix}0..{prefix}{}) from {path:?}{}",
+        "  {name}: loaded {} pairs × {n_features} features ({prefix}0..{prefix}{}) from {path:?}{}{}",
         human_scores.len(),
         n_features - 1,
         match ref_lookup.len() {
             0 => String::new(),
             n => format!(" [{n} refs]"),
+        },
+        if compact {
+            format!(
+                " [compact f32: {} of {n_features} columns resident]",
+                stored.len()
+            )
+        } else {
+            String::new()
         }
     );
 
-    Ok((
+    Ok(Some((
         LoadedCommon {
             human_scores,
             n_features,
@@ -782,7 +974,7 @@ fn load_parquet_impl(
             },
         },
         store,
-    ))
+    )))
 }
 
 /// Batch callback for [`stream_parquet_rows`]: `(features_row_major,

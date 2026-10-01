@@ -711,11 +711,24 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
 }
 
 /// Compute the lowercase-hex sha256 of a file's bytes.
+///
+/// Streams the file through a fixed 1 MiB buffer: the digest is the same
+/// function of the same bytes as hashing a whole-file read, but a lane no
+/// longer holds the largest training table (1 GB+ on the wide v2 recipe) in
+/// memory while it hashes it.
 pub fn sha256_file(path: &Path) -> Result<String, ManifestError> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| ManifestError::Io(format!("read {}: {e}", path.display())))?;
+    use std::io::Read;
+    let io_err = |e: std::io::Error| ManifestError::Io(format!("read {}: {e}", path.display()));
+    let mut file = std::fs::File::open(path).map_err(io_err)?;
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf).map_err(io_err)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(hex_lower(&hasher.finalize()))
 }
 
@@ -918,6 +931,25 @@ mod tests {
         let dir = Path::new("/repo");
         let err = resolve_path("{canonical}/x.parquet", dir, None, None).unwrap_err();
         assert!(matches!(err, ManifestError::Schema(_)));
+    }
+
+    #[test]
+    fn sha256_streaming_equals_one_shot_across_buffer_boundaries() {
+        // 2.5 MiB + 7 bytes: crosses two full 1 MiB reads plus a short tail.
+        let mut bytes = Vec::with_capacity((5 << 19) + 7);
+        let mut x = 0x9E37_79B9u32;
+        for _ in 0..(5 << 19) + 7 {
+            x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+            bytes.push((x >> 24) as u8);
+        }
+        let p = write_tmp("multi_chunk.bin", &bytes);
+        let mut one_shot = Sha256::new();
+        one_shot.update(&bytes);
+        assert_eq!(sha256_file(&p).unwrap(), hex_lower(&one_shot.finalize()));
+        assert!(matches!(
+            sha256_file(Path::new("/nonexistent/zensim-sha-test")),
+            Err(ManifestError::Io(_))
+        ));
     }
 
     #[test]

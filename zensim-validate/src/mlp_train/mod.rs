@@ -1417,15 +1417,59 @@ pub enum FeatureRows<'a> {
         n_rows: usize,
         n_features: usize,
     },
+    /// Compact f32 rows over a column subset (see [`CompactRows`]); the
+    /// trainer MAY TAKE the buffer. Every column outside `kept` is exactly
+    /// `+0.0`, so this is the same table as a [`Self::Releasable`] one that
+    /// was zero-masked, at `kept.len() * 4` instead of `n_features * 8`
+    /// bytes per row. The plain head keeps it compact for the whole run and
+    /// standardizes each row at use; the other heads expand it once into the
+    /// ordinary standardized buffer. [`Self::row`] / [`Self::iter`] do not
+    /// exist for it (a full-width `&[f64]` row is never resident).
+    Compact(&'a mut CompactRows),
+}
+
+/// Row-major `f32` feature rows restricted to the ascending, unique column ids
+/// `kept`; every other column of the `n_features`-wide logical table is
+/// `+0.0`. Built by `parquet_loader::load_parquet_flat_f32`.
+#[derive(Debug)]
+pub struct CompactRows {
+    /// `n_rows × kept.len()`; column `j` is logical feature `kept[j]`.
+    pub data: Vec<f32>,
+    pub n_rows: usize,
+    /// Logical (full) width.
+    pub n_features: usize,
+    /// Logical feature ids stored, ascending and unique, all `< n_features`.
+    pub kept: Vec<u32>,
 }
 
 impl<'a> FeatureRows<'a> {
-    /// Number of rows. Cached at construction for [`Self::Releasable`], so
-    /// it stays correct after standardization takes the buffer.
+    /// Number of rows. Cached at construction for [`Self::Releasable`] and
+    /// [`Self::Compact`], so it stays correct after standardization takes the
+    /// buffer.
     pub fn len(&self) -> usize {
         match self {
             Self::Borrowed(r) => r.len(),
             Self::Releasable { n_rows, .. } => *n_rows,
+            Self::Compact(c) => c.n_rows,
+        }
+    }
+
+    /// `true` when every row is `n_features` wide (the shape check the
+    /// trainer heads run before standardizing; never expands a compact row).
+    pub(crate) fn width_is(&self, n_features: usize) -> bool {
+        match self {
+            Self::Borrowed(r) => r.iter().all(|f| f.len() == n_features),
+            Self::Releasable {
+                n_rows,
+                n_features: nf,
+                data,
+            } => *nf == n_features && data.len() == *n_rows * n_features,
+            Self::Compact(c) => {
+                c.n_features == n_features
+                    && c.data.len() == c.n_rows * c.kept.len()
+                    && c.kept.windows(2).all(|w| w[0] < w[1])
+                    && c.kept.last().is_none_or(|&d| (d as usize) < n_features)
+            }
         }
     }
 
@@ -1442,6 +1486,9 @@ impl<'a> FeatureRows<'a> {
             Self::Releasable {
                 data, n_features, ..
             } => &data[i * n_features..(i + 1) * n_features],
+            Self::Compact(_) => {
+                panic!("FeatureRows::row on a Compact table: a full-width row is never resident")
+            }
         }
     }
 
@@ -2198,7 +2245,7 @@ pub fn train_mlp_strategy(
             g.name
         );
         assert!(
-            g.features.iter().all(|f| f.len() == n_features),
+            g.features.width_is(n_features),
             "{}: feature length mismatch",
             g.name
         );
@@ -2330,8 +2377,7 @@ pub fn train_mlp_strategy(
     //    inner loop just slice into a flat f64 buffer per group.
     //    Group g's standardized features live in std_features[g], shape
     //    (n_pairs[g] × n_features).
-    let std_features =
-        standardize_groups_releasing_raw(groups, n_features, &scaler_mean, &scaler_scale);
+    let std_features = StdFeatures::build(groups, n_features, &scaler_mean, &scaler_scale);
 
     // Standardize TV-regularizer features using the same scaler, in
     // their flat (n_rows × n_features) form. The TV pairs reference
@@ -2567,6 +2613,8 @@ pub fn train_mlp_strategy(
     // for the parallel-batch path. Always pre-allocated to capacity K
     // so push/clear in the hot loop don't realloc.
     let mut parallel_batch_buffer: Vec<(usize, usize, usize)> = Vec::with_capacity(k);
+    // Row scratch for the sequential pair path (lazy compact rows expand here).
+    let (mut scratch_a, mut scratch_b): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
 
     // Fused K=1 pair-update path: backprop's gw1 row sweep + L2 + the w1
     // Adam step run as a single pass (`adam_update_w1_fused`) fed by
@@ -2742,9 +2790,8 @@ pub fn train_mlp_strategy(
                 continue;
             }
 
-            let g_feats = &std_features[g_idx];
-            let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
-            let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+            let xa = std_features.row(g_idx, ia, &mut scratch_a);
+            let xb = std_features.row(g_idx, ib, &mut scratch_b);
             let (ya, ha_pre, ha) = forward(
                 xa,
                 &w1,
@@ -3177,10 +3224,9 @@ pub fn train_mlp_strategy(
                 .par_iter()
                 .enumerate()
                 .map(|(gi, g)| {
-                    let preds = predict_group(
-                        &std_features[gi],
+                    let preds = std_features.predict(
+                        gi,
                         g.features.len(),
-                        n_features,
                         &w1,
                         &b1,
                         &w2,
@@ -3383,7 +3429,7 @@ fn train_mlp_pool_head_with_tv(
             g.name
         );
         assert!(
-            g.features.iter().all(|f| f.len() == n_features),
+            g.features.width_is(n_features),
             "{}: feature length mismatch",
             g.name
         );
@@ -4257,7 +4303,7 @@ fn train_mlp_hybrid_head_with_tv(
             g.name
         );
         assert!(
-            g.features.iter().all(|f| f.len() == n_features),
+            g.features.width_is(n_features),
             "{}: feature length mismatch",
             g.name
         );
@@ -5892,7 +5938,19 @@ fn standardize_groups_releasing_raw(
 ) -> Vec<Vec<f64>> {
     groups
         .iter_mut()
-        .map(|g| match &mut g.features {
+        .map(|g| standardize_group_releasing_raw(g, n_features, scaler_mean, scaler_scale))
+        .collect()
+}
+
+/// One group of [`standardize_groups_releasing_raw`].
+fn standardize_group_releasing_raw(
+    g: &mut TrainingGroup<'_>,
+    n_features: usize,
+    scaler_mean: &[f64],
+    scaler_scale: &[f64],
+) -> Vec<f64> {
+    {
+        match &mut g.features {
             FeatureRows::Borrowed(rows) => {
                 let mut buf = vec![0.0f64; rows.len() * n_features];
                 for (i, f) in rows.iter().enumerate() {
@@ -5924,8 +5982,209 @@ fn standardize_groups_releasing_raw(
                 }
                 buf
             }
-        })
-        .collect()
+            FeatureRows::Compact(c) => {
+                // Heads that read a full-width standardized buffer: expand
+                // the compact rows ONCE into it. Same expression as the
+                // arms above on the same values — kept columns widen the
+                // exact f32, every other column is the literal `+0.0` the
+                // zero-masked table holds.
+                assert_eq!(c.n_features, n_features, "Compact width / trainer width");
+                let lazy = LazyStd::new(&c.kept, n_features, scaler_mean, scaler_scale);
+                let mut buf = vec![0.0f64; c.n_rows * n_features];
+                let k = c.kept.len();
+                for i in 0..c.n_rows {
+                    lazy.expand_into(
+                        &c.data[i * k..(i + 1) * k],
+                        &mut buf[i * n_features..(i + 1) * n_features],
+                    );
+                }
+                c.data = Vec::new();
+                buf
+            }
+        }
+    }
+}
+
+/// Standardize-at-use view of compact f32 rows: everything needed to turn one
+/// compact row into the exact full-width `&[f64]` row that
+/// [`standardize_groups_releasing_raw`] would have stored.
+///
+/// Bit-identity argument. Today's buffer element is `(raw − mean[d]) /
+/// scale[d].max(1e-12)` in f64, with `raw` the f32 table value widened
+/// (exact) — or the literal `+0.0` at a dropped column. [`Self::expand_into`]
+/// evaluates the same expression on the same operands: kept columns from the
+/// widened f32, dropped columns from a precomputed `template` row that is that
+/// expression evaluated at `raw = +0.0`. Division and subtraction are single
+/// IEEE operations, so no evaluation order or fusion can change a bit.
+pub(crate) struct LazyStd {
+    kept: Vec<u32>,
+    mean: Vec<f64>,
+    /// `scale[d].max(1e-12)` — the divisor the in-place pass uses.
+    denom: Vec<f64>,
+    /// `(0.0 − mean[d]) / denom[d]` for every `d`: the standardized value of a
+    /// dropped (zeroed) column; kept positions are overwritten per row.
+    template: Vec<f64>,
+}
+
+impl LazyStd {
+    fn new(kept: &[u32], n_features: usize, scaler_mean: &[f64], scaler_scale: &[f64]) -> Self {
+        let denom: Vec<f64> = scaler_scale[..n_features]
+            .iter()
+            .map(|s| s.max(1e-12))
+            .collect();
+        let template: Vec<f64> = (0..n_features)
+            .map(|d| (0.0f64 - scaler_mean[d]) / denom[d])
+            .collect();
+        Self {
+            kept: kept.to_vec(),
+            mean: scaler_mean[..n_features].to_vec(),
+            denom,
+            template,
+        }
+    }
+
+    /// Write the full standardized row for compact row `raw` into `out`
+    /// (`out.len() == n_features`).
+    #[inline]
+    fn expand_into(&self, raw: &[f32], out: &mut [f64]) {
+        out.copy_from_slice(&self.template);
+        for (&v, &d) in raw.iter().zip(self.kept.iter()) {
+            let d = d as usize;
+            out[d] = (v as f64 - self.mean[d]) / self.denom[d];
+        }
+    }
+}
+
+/// Standardized features for the plain head, one entry per group.
+pub(crate) enum StdGroup {
+    /// The full-width standardized buffer (`n_rows × n_features`).
+    Dense(Vec<f64>),
+    /// Compact raw f32 rows (`n_rows × kept.len()`), standardized per row at
+    /// use through the shared [`LazyStd`].
+    Lazy { raw: Vec<f32> },
+}
+
+pub(crate) struct StdFeatures {
+    groups: Vec<StdGroup>,
+    n_features: usize,
+    lazy: Option<LazyStd>,
+}
+
+impl StdFeatures {
+    /// Standardize every group. Compact groups stay compact (that is the
+    /// memory point); all others are standardized into dense buffers exactly
+    /// as [`standardize_groups_releasing_raw`] does.
+    fn build(
+        groups: &mut [TrainingGroup<'_>],
+        n_features: usize,
+        scaler_mean: &[f64],
+        scaler_scale: &[f64],
+    ) -> Self {
+        let mut lazy: Option<LazyStd> = None;
+        let out = groups
+            .iter_mut()
+            .map(|g| {
+                if let FeatureRows::Compact(c) = &mut g.features {
+                    assert_eq!(c.n_features, n_features, "Compact width / trainer width");
+                    match &lazy {
+                        None => {
+                            lazy =
+                                Some(LazyStd::new(&c.kept, n_features, scaler_mean, scaler_scale))
+                        }
+                        Some(l) => assert_eq!(
+                            l.kept, c.kept,
+                            "all Compact groups must share one column subset"
+                        ),
+                    }
+                    return StdGroup::Lazy {
+                        raw: std::mem::take(&mut c.data),
+                    };
+                }
+                StdGroup::Dense(standardize_group_releasing_raw(
+                    g,
+                    n_features,
+                    scaler_mean,
+                    scaler_scale,
+                ))
+            })
+            .collect();
+        Self {
+            groups: out,
+            n_features,
+            lazy,
+        }
+    }
+
+    /// Row `i` of group `g`, standardized. Dense groups borrow their buffer;
+    /// lazy groups expand into `scratch` (resized on first use) and return it.
+    #[inline]
+    pub(crate) fn row<'a>(&'a self, g: usize, i: usize, scratch: &'a mut Vec<f64>) -> &'a [f64] {
+        let nf = self.n_features;
+        match &self.groups[g] {
+            StdGroup::Dense(buf) => &buf[i * nf..(i + 1) * nf],
+            StdGroup::Lazy { raw, .. } => {
+                let lazy = self.lazy.as_ref().expect("Lazy group implies LazyStd");
+                let k = lazy.kept.len();
+                scratch.resize(nf, 0.0);
+                lazy.expand_into(&raw[i * k..(i + 1) * k], scratch);
+                scratch
+            }
+        }
+    }
+
+    /// Row `i` of group `g` as a `Cow`: borrowed for dense groups, an owned
+    /// expansion for lazy ones (for callers that hold rows across a batch).
+    pub(crate) fn row_cow(&self, g: usize, i: usize) -> std::borrow::Cow<'_, [f64]> {
+        let nf = self.n_features;
+        match &self.groups[g] {
+            StdGroup::Dense(buf) => std::borrow::Cow::Borrowed(&buf[i * nf..(i + 1) * nf]),
+            StdGroup::Lazy { .. } => {
+                let mut scratch = Vec::new();
+                self.row(g, i, &mut scratch);
+                std::borrow::Cow::Owned(scratch)
+            }
+        }
+    }
+
+    /// `predict_group` over group `gi`: forward every row. Dense groups call
+    /// [`predict_group`] itself; lazy groups run the same row-independent
+    /// forward (same parallel split), expanding each row first.
+    #[allow(clippy::too_many_arguments)]
+    fn predict(
+        &self,
+        gi: usize,
+        n_pairs: usize,
+        w1: &[f64],
+        b1: &[f64],
+        w2: &[f64],
+        b2: &[f64],
+        n_hidden: usize,
+        alpha: f64,
+    ) -> Vec<f64> {
+        let nf = self.n_features;
+        let StdGroup::Dense(buf) = &self.groups[gi] else {
+            let mut out = vec![0.0f64; n_pairs];
+            const MIN_ROWS: usize = 2048;
+            const CHUNK_ROWS: usize = 512;
+            let run = |base: usize, dst: &mut [f64]| {
+                let mut scratch: Vec<f64> = Vec::new();
+                for (k, o) in dst.iter_mut().enumerate() {
+                    let xi = self.row(gi, base + k, &mut scratch);
+                    let (y, _, _) = forward(xi, w1, b1, w2, b2, nf, n_hidden, alpha);
+                    *o = y;
+                }
+            };
+            if n_pairs < MIN_ROWS {
+                run(0, &mut out);
+            } else {
+                out.par_chunks_mut(CHUNK_ROWS)
+                    .enumerate()
+                    .for_each(|(c, dst)| run(c * CHUNK_ROWS, dst));
+            }
+            return out;
+        };
+        predict_group(buf, n_pairs, nf, w1, b1, w2, b2, n_hidden, alpha)
+    }
 }
 
 fn compute_scaler_from_groups(
@@ -5933,14 +6192,32 @@ fn compute_scaler_from_groups(
     train_indices: &[usize],
     n_features: usize,
 ) -> (Vec<f64>, Vec<f64>) {
+    // A Compact group's dropped columns are exactly `+0.0` in every row, so
+    // each contributes `mean += 0.0` / `var += 0.0` and stays `+0.0`: skipping
+    // them leaves the same bits. Per-column sums are independent across
+    // columns, so visiting only the kept ones does not change a kept column's
+    // accumulation order (rows in group order, groups in `train_indices`).
     let mut count = 0u64;
     let mut mean = vec![0.0f64; n_features];
     for &gi in train_indices {
-        for f in groups[gi].features.iter() {
-            for d in 0..n_features {
-                mean[d] += f[d];
+        match &groups[gi].features {
+            FeatureRows::Compact(c) => {
+                let k = c.kept.len();
+                for row in c.data.chunks_exact(k.max(1)).take(c.n_rows) {
+                    for (&v, &d) in row.iter().zip(c.kept.iter()) {
+                        mean[d as usize] += v as f64;
+                    }
+                    count += 1;
+                }
             }
-            count += 1;
+            other => {
+                for f in other.iter() {
+                    for d in 0..n_features {
+                        mean[d] += f[d];
+                    }
+                    count += 1;
+                }
+            }
         }
     }
     let n = count.max(1) as f64;
@@ -5949,10 +6226,23 @@ fn compute_scaler_from_groups(
     }
     let mut var = vec![0.0f64; n_features];
     for &gi in train_indices {
-        for f in groups[gi].features.iter() {
-            for d in 0..n_features {
-                let dx = f[d] - mean[d];
-                var[d] += dx * dx;
+        match &groups[gi].features {
+            FeatureRows::Compact(c) => {
+                let k = c.kept.len();
+                for row in c.data.chunks_exact(k.max(1)).take(c.n_rows) {
+                    for (&v, &d) in row.iter().zip(c.kept.iter()) {
+                        let dx = v as f64 - mean[d as usize];
+                        var[d as usize] += dx * dx;
+                    }
+                }
+            }
+            other => {
+                for f in other.iter() {
+                    for d in 0..n_features {
+                        let dx = f[d] - mean[d];
+                        var[d] += dx * dx;
+                    }
+                }
             }
         }
     }
@@ -6089,7 +6379,7 @@ impl LocalGrads {
 fn run_parallel_minibatch(
     samples: &[(usize, usize, usize)],
     groups: &[TrainingGroup<'_>],
-    std_features: &[Vec<f64>],
+    std_features: &StdFeatures,
     w1: &[f64],
     b1: &[f64],
     w2: &[f64],
@@ -6155,10 +6445,10 @@ fn run_parallel_minibatch(
             let mut chunk_loss = 0.0f64;
             let mut chunk_steps = 0u64;
             let mut local = LocalGrads::zero(n_features, n_hidden);
+            let (mut scratch_a, mut scratch_b): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
             for &(g_idx, ia, ib) in chunk {
-                let g_feats = &std_features[g_idx];
-                let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
-                let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+                let xa = std_features.row(g_idx, ia, &mut scratch_a);
+                let xb = std_features.row(g_idx, ib, &mut scratch_b);
                 let (ya, ha_pre, ha) = forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
                 let (yb, hb_pre, hb) = forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
 
@@ -6314,7 +6604,7 @@ fn run_parallel_minibatch(
 fn run_minibatch_with_nin(
     samples: &[(usize, usize, usize)],
     groups: &[TrainingGroup<'_>],
-    std_features: &[Vec<f64>],
+    std_features: &StdFeatures,
     w1: &[f64],
     b1: &[f64],
     w2: &[f64],
@@ -6341,8 +6631,8 @@ fn run_minibatch_with_nin(
     // NiN-augmented backward). `Option` because skipped pairs (target
     // = 0 or PWRC drop) contribute nothing.
     struct PairForward<'a> {
-        xa: &'a [f64],
-        xb: &'a [f64],
+        xa: std::borrow::Cow<'a, [f64]>,
+        xb: std::borrow::Cow<'a, [f64]>,
         ya: f64,
         yb: f64,
         ha_pre: Vec<f64>,
@@ -6361,9 +6651,8 @@ fn run_minibatch_with_nin(
     let mut steps_added: u64 = 0;
 
     for &(g_idx, ia, ib) in samples {
-        let g_feats = &std_features[g_idx];
-        let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
-        let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+        let xa = std_features.row_cow(g_idx, ia);
+        let xb = std_features.row_cow(g_idx, ib);
         let mos_a = groups[g_idx].human_scores[ia];
         let mos_b = groups[g_idx].human_scores[ib];
         let target = rank_target_sign * (mos_a - mos_b).signum();
@@ -6383,8 +6672,8 @@ fn run_minibatch_with_nin(
         } else {
             1.0
         };
-        let (ya, ha_pre, ha) = forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
-        let (yb, hb_pre, hb) = forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
+        let (ya, ha_pre, ha) = forward(&xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
+        let (yb, hb_pre, hb) = forward(&xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
         let pred_diff = yb - ya;
         let z = -target * pred_diff;
         let loss_raw = if z > 50.0 {
@@ -6461,12 +6750,12 @@ fn run_minibatch_with_nin(
         if is_b {
             let dl_dy_b = p.dl_dyb_rn + nin_g;
             backprop_into(
-                &mut local, p.xb, &p.hb_pre, &p.hb, dl_dy_b, w2, n_features, n_hidden, alpha,
+                &mut local, &p.xb, &p.hb_pre, &p.hb, dl_dy_b, w2, n_features, n_hidden, alpha,
             );
         } else {
             let dl_dy_a = p.dl_dya_rn + nin_g;
             backprop_into(
-                &mut local, p.xa, &p.ha_pre, &p.ha, dl_dy_a, w2, n_features, n_hidden, alpha,
+                &mut local, &p.xa, &p.ha_pre, &p.ha, dl_dy_a, w2, n_features, n_hidden, alpha,
             );
         }
     }
@@ -6858,7 +7147,7 @@ fn train_mlp_per_sample_alpha_head(
             g.name
         );
         assert!(
-            g.features.iter().all(|f| f.len() == n_features),
+            g.features.width_is(n_features),
             "{}: feature length mismatch",
             g.name
         );
@@ -11992,6 +12281,197 @@ mod tests {
         // matters: inside the trainer the post-standardization epoch loop
         // sampled pairs from this group for 25 epochs — impossible if the
         // cached length had collapsed to 0 with the buffer.
+    }
+
+    /// Compact f32 rows (`FeatureRows::Compact`, standardized at use) MUST
+    /// train to bit-identical bake bytes against the zero-masked dense
+    /// `Releasable` table they stand for, on every plain-head code path that
+    /// reads standardized rows: the sequential pair loop, the parallel
+    /// mini-batch, the NiN mini-batch, and the per-epoch prediction (the
+    /// 2,200-row group crosses `predict_group`'s parallel threshold). A dense
+    /// `Borrowed` group rides along to cover the mixed-group case, and
+    /// `nonneg_distance` covers the scale-only (mean = 0) scaler.
+    #[test]
+    fn compact_rows_train_identically_to_zero_masked_dense() {
+        let n_features = 12;
+        // Dropped columns include one the data would otherwise vary in (3, 7)
+        // and the last column.
+        let kept: Vec<u32> = vec![0, 1, 2, 4, 5, 6, 8, 9, 10];
+        let kept_mask: Vec<bool> = (0..n_features)
+            .map(|d| kept.contains(&(d as u32)))
+            .collect();
+
+        fn mk<'a>(
+            name: &str,
+            scores: &'a [f64],
+            features: FeatureRows<'a>,
+            tw: f64,
+            vw: f64,
+        ) -> TrainingGroup<'a> {
+            TrainingGroup {
+                name: name.to_string(),
+                human_scores: scores,
+                features,
+                metric_sigmas: None,
+                train_weight: tw,
+                validation_weight: vw,
+                ref_ids: None,
+                loss_mode: GroupLossMode::default(),
+            }
+        }
+
+        // (rows, seed) per group; values are exactly representable in f32.
+        let make = |n: usize, seed: u64| -> (Vec<f64>, Vec<f64>) {
+            let (rows, targets) = make_synth_dataset(seed, n, n_features);
+            let mut flat = Vec::with_capacity(n * n_features);
+            for r in &rows {
+                for (d, &v) in r.iter().enumerate() {
+                    flat.push(if kept_mask[d] { (v as f32) as f64 } else { 0.0 });
+                }
+            }
+            (flat, targets)
+        };
+        let (flat_a, targets_a) = make(300, 31);
+        let (flat_b, targets_b) = make(2200, 32);
+        let identity_scores = vec![0.0f64; 3];
+        let identity_flat = vec![0.0f64; 3 * n_features];
+        let identity_refs: Vec<&[f64]> = identity_flat.chunks(n_features).collect();
+
+        let compact_of = |flat: &[f64]| -> CompactRows {
+            let n_rows = flat.len() / n_features;
+            let mut data = Vec::with_capacity(n_rows * kept.len());
+            for r in flat.chunks(n_features) {
+                for &d in &kept {
+                    data.push(r[d as usize] as f32);
+                }
+            }
+            CompactRows {
+                data,
+                n_rows,
+                n_features,
+                kept: kept.clone(),
+            }
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 6,
+            n_epochs: 6,
+            pairs_per_epoch: 400,
+            initial_lr: 0.005,
+            seed: 11,
+            log_every: 1,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            ..Default::default()
+        };
+        let recipes: Vec<(&str, MlpHyperparams)> = vec![
+            ("sequential", base.clone()),
+            (
+                "parallel-minibatch",
+                MlpHyperparams {
+                    minibatch_size: 16,
+                    parallel_batch: true,
+                    ..base.clone()
+                },
+            ),
+            (
+                "nin-minibatch",
+                MlpHyperparams {
+                    minibatch_size: 32,
+                    norm_in_norm_weight: 0.5,
+                    ..base.clone()
+                },
+            ),
+            (
+                "nonneg-distance",
+                MlpHyperparams {
+                    nonneg_distance: true,
+                    ..base.clone()
+                },
+            ),
+        ];
+
+        for (label, hyper) in recipes {
+            let (mut a_dense, mut b_dense) = (flat_a.clone(), flat_b.clone());
+            let mut ca = compact_of(&flat_a);
+            let mut cb = compact_of(&flat_b);
+            let mut log_dense = Vec::new();
+            let bake_dense = train_mlp(
+                &mut [
+                    mk(
+                        "a",
+                        &targets_a,
+                        FeatureRows::Releasable {
+                            data: &mut a_dense,
+                            n_rows: 300,
+                            n_features,
+                        },
+                        1.0,
+                        1.0,
+                    ),
+                    mk(
+                        "b",
+                        &targets_b,
+                        FeatureRows::Releasable {
+                            data: &mut b_dense,
+                            n_rows: 2200,
+                            n_features,
+                        },
+                        0.0,
+                        0.5,
+                    ),
+                    mk(
+                        "identity",
+                        &identity_scores,
+                        FeatureRows::Borrowed(&identity_refs),
+                        0.3,
+                        0.0,
+                    ),
+                ],
+                n_features,
+                &hyper,
+                &mut log_dense,
+            );
+            let mut log_compact = Vec::new();
+            let bake_compact = train_mlp(
+                &mut [
+                    mk("a", &targets_a, FeatureRows::Compact(&mut ca), 1.0, 1.0),
+                    mk("b", &targets_b, FeatureRows::Compact(&mut cb), 0.0, 0.5),
+                    mk(
+                        "identity",
+                        &identity_scores,
+                        FeatureRows::Borrowed(&identity_refs),
+                        0.3,
+                        0.0,
+                    ),
+                ],
+                n_features,
+                &hyper,
+                &mut log_compact,
+            );
+            assert_eq!(
+                bake_dense, bake_compact,
+                "{label}: compact f32 rows standardized at use changed the bake"
+            );
+            // The per-epoch lines (val score, per-group panels) must agree
+            // too, except the wall-clock and the train-only group, which the
+            // compact run evaluates exactly as the dense one does.
+            let strip = |l: &Vec<String>| -> Vec<String> {
+                l.iter()
+                    .filter(|x| x.contains("epoch"))
+                    .map(|x| x.split(" | t=").next().unwrap().to_string())
+                    .collect()
+            };
+            assert_eq!(
+                strip(&log_dense),
+                strip(&log_compact),
+                "{label}: epoch lines"
+            );
+            assert!(
+                ca.data.is_empty() && cb.data.is_empty(),
+                "{label}: compact buffers not taken"
+            );
+        }
     }
 
     /// `--minibatch-size 1` MUST produce bit-identical bake bytes to a

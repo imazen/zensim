@@ -1256,6 +1256,11 @@ struct LoadedGroup {
     /// One large buffer per group frees for real. See
     /// `benchmarks/trainer_mem_release_2026-08-04.md`.
     feature_rows: Vec<f64>,
+    /// Compact f32 rows over the `--keep-features` subset, INSTEAD of
+    /// `feature_rows` (which is then empty). Set only by the parquet loader
+    /// under `--keep-features` on the plain head; see
+    /// `mlp_train::CompactRows` and `compact_subset_wanted`.
+    compact: Option<mlp_train::CompactRows>,
     metric_sigmas: Option<Vec<f64>>,
     n_features: usize,
     /// Dense per-row ref identity from the parquet loader; `None` for
@@ -1311,6 +1316,7 @@ impl From<zensim_validate::parquet_loader::OwnedLoadedGroupFlat> for LoadedGroup
             val_w: o.val_w,
             human_scores: o.human_scores,
             feature_rows: o.features_flat,
+            compact: None,
             metric_sigmas: o.metric_sigmas,
             n_features: o.n_features,
             ref_ids: o.ref_ids,
@@ -1711,6 +1717,7 @@ fn load_group_dispatch(
     name: &str,
     target_column: &str,
     target_scale: f64,
+    compact: Option<(&[u32], usize)>,
 ) -> Result<LoadedGroup, String> {
     let is_parquet = path
         .extension()
@@ -1718,6 +1725,42 @@ fn load_group_dispatch(
         .map(|s| s.eq_ignore_ascii_case("parquet"))
         .unwrap_or(false);
     if is_parquet {
+        // Compact f32 projection (`--keep-features` on the plain head): read
+        // only the kept columns, keep them f32. Declines (None) when the
+        // table cannot be represented exactly — e.g. a non-Float32 kept
+        // column — and the dense f64 loader below runs exactly as before.
+        if let Some((subset, max_width)) = compact
+            && let Some(o) = zensim_validate::parquet_loader::load_parquet_flat_f32(
+                path,
+                name,
+                target_column,
+                target_scale,
+                subset,
+                max_width,
+            )?
+        {
+            let n_rows = o.human_scores.len();
+            return Ok(LoadedGroup {
+                name: o.name,
+                train_w: 0.0,
+                val_w: 0.0,
+                human_scores: o.human_scores,
+                feature_rows: Vec::new(),
+                compact: Some(mlp_train::CompactRows {
+                    data: o.data,
+                    n_rows,
+                    n_features: o.n_features,
+                    kept: o.kept,
+                }),
+                metric_sigmas: o.metric_sigmas,
+                n_features: o.n_features,
+                ref_ids: o.ref_ids,
+                within_ref: false,
+                loss_mode: GroupLossMode::default(),
+                source_path: String::new(),
+                source_sha256: String::new(),
+            });
+        }
         // Flat emission: the loader fills ONE pre-reserved row-major buffer,
         // so the per-row stage (and the rows+flat flatten transient) never
         // exists. `From<OwnedLoadedGroupFlat>` is a field move.
@@ -1982,6 +2025,7 @@ fn load_csv_sequential(
         val_w: 0.0,
         human_scores,
         feature_rows: flatten_rows(feature_rows, n_features),
+        compact: None,
         metric_sigmas: None,
         n_features,
         ref_ids: None,
@@ -2163,6 +2207,7 @@ pub(crate) fn load_csv(
         val_w: 0.0,
         human_scores,
         feature_rows: flatten_rows(feature_rows, n_features),
+        compact: None,
         metric_sigmas: None,
         n_features,
         ref_ids: None,
@@ -3084,6 +3129,25 @@ fn main() {
         std::process::exit(2);
     }
 
+    // Compact f32 resident storage (`--keep-features` on the plain head): only
+    // when nothing between load and train needs full-width f64 rows — no
+    // feature transform / auto-transforms / TV pairs, no GPU lane, no pool /
+    // hybrid / per-sample-α head. Everything else loads dense, as before.
+    let compact_load: Option<(Vec<u32>, usize)> = match selected_ids.as_deref() {
+        Some(ids)
+            if args.feature_transform.is_empty()
+                && args.auto_transforms.is_none()
+                && args.tv_pairs_file.is_none()
+                && !want_gpu
+                && !args.pool_head
+                && !args.hybrid_head
+                && !args.per_sample_alpha_head =>
+        {
+            Some((ids.iter().map(|&i| i as u32).collect(), args.max_features))
+        }
+        _ => None,
+    };
+
     // Load all groups, infer n_features from the first.
     let mut loaded: Vec<LoadedGroup> = Vec::new();
     let mut n_features = 0usize;
@@ -3103,11 +3167,17 @@ fn main() {
             eprintln!("contamination_guard read error on {}: {e}", path.display());
             std::process::exit(1);
         });
-        let mut g = load_group_dispatch(&path, &name, &args.target_column, args.target_scale)
-            .unwrap_or_else(|e| {
-                eprintln!("{e}");
-                std::process::exit(1);
-            });
+        let mut g = load_group_dispatch(
+            &path,
+            &name,
+            &args.target_column,
+            args.target_scale,
+            compact_load.as_ref().map(|(ids, w)| (ids.as_slice(), *w)),
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(1);
+        });
         g.train_w = train_w;
         g.val_w = val_w;
         // MANDATORY reproduction identity: canonical absolute path + content
@@ -3143,7 +3213,7 @@ fn main() {
         g.within_ref = within_ref;
         g.loss_mode = loss_mode;
         let cap = args.max_features;
-        if g.n_features > cap {
+        if g.compact.is_none() && g.n_features > cap {
             // Narrow the flat buffer to the first `cap` features of each
             // row — same kept values as the old per-row `row.truncate(cap)`.
             let old_nf = g.n_features;
@@ -4045,10 +4115,13 @@ fn main() {
         .map(|g| TrainingGroup {
             name: g.name.clone(),
             human_scores: &g.human_scores,
-            features: mlp_train::FeatureRows::Releasable {
-                n_rows: g.human_scores.len(),
-                n_features: g.n_features,
-                data: &mut g.feature_rows,
+            features: match g.compact.as_mut() {
+                Some(c) => mlp_train::FeatureRows::Compact(c),
+                None => mlp_train::FeatureRows::Releasable {
+                    n_rows: g.human_scores.len(),
+                    n_features: g.n_features,
+                    data: &mut g.feature_rows,
+                },
             },
             metric_sigmas: g.metric_sigmas.as_deref(),
             train_weight: g.train_w,
