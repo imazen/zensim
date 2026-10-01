@@ -179,10 +179,14 @@ def calibration() -> dict:
             # whether each source's permutation-mean bootstrap CI contains 0, so a centring failure that is within
             # seed/reference noise can be told apart from a biased null. Such a case is reported, not accepted.
             ci_zero = {s: bool(lo[s]["perm_mean_ci95"][0] <= 0 <= lo[s]["perm_mean_ci95"][1]) for s in SOURCE_ORDER}
-            accept = bool(len(hi_pass) >= 4 and all(centred.values()))
+            # Amendment R5 (user decision 2026-10-01, before any canon calibration result was read): the null is judged
+            # centred when its permutation-mean 95% bootstrap CI contains 0 (a bias test). |mean| < MIN_GAIN stays
+            # reported (`perm_null_centred`) but no longer gates: at 3 permutations x 10 seeds it passes a perfectly
+            # unbiased null on all five sources only ~48% of the time (rev4_featpot_v2_amendment R5).
+            accept = bool(len(hi_pass) >= 4 and all(ci_zero.values()))
             rec.update({"oracle_hi_v1_sources": hi_pass, "perm_null_centred": centred,
                         "perm_null_ci_contains_zero": ci_zero,
-                        "accept": accept if head == "N" else None,
+                        "accept": accept if head == "N" else None, "centring_rule": "R5: perm-mean 95% CI contains 0",
                         "centring_failure_within_noise": (head == "N" and not accept and len(hi_pass) >= 4
                                                           and all(centred[s] or ci_zero[s] for s in SOURCE_ORDER))})
         out[head] = rec

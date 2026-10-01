@@ -377,3 +377,25 @@ The v8 canon jobset was retired before any cell finished; the canon calibration 
 `subset_sim` from main with `--require-disjoint-sampler-windows` over the ten confirm sample seeds at 120 × 50,000: pass,
 pooled row coverage 0.925–0.927 per seed (`benchmarks/rev4_featpot_effaudit/confirm_sampler_preflight_2026-10-01.tsv`).
 The sampler does not read the group loss mode, so `:withinref` replays the fits' draws.
+
+## Revision R5 (2026-10-01 10:59 MDT, user decision, before any canon calibration result was read) — null centring is a bias test
+
+**What was read first (disclosure).** The acceptance re-run on the Rev3 v2 root (`fitv2acc-20261001`: R3 human weight
+32, R4 final epoch, 700/700 cells) was evaluated at 08:34 MDT under the registered gate. Head N: oracle_hi V1 on **5/5**
+sources (the earlier cal3 run had 2/5). The gate still failed, on centring alone: the oracle_lo permutation-null mean
+was −0.0074 on TID2013 and +0.0052 on KonFiG against |mean| < MIN_GAIN = 0.005, with both 95% bootstrap intervals
+containing 0 (TID [−0.0141, 0.0002], KonFiG [−0.0050, 0.0156]; the R1.2 diagnostic `centring_failure_within_noise` = true).
+Head F (reported): V1 4/5, all five nulls centred.
+
+**Why the criterion changes.** At 3 permutations × 10 seeds the null mean's standard error per source is 0.0014–0.0052
+(from the bootstrap intervals). A perfectly unbiased null then passes |mean| < 0.005 with probability 0.87, 0.83, 0.66,
+1.00 and 1.00 on KADID, TID2013, KonFiG, CID22-A25 and AIC-3, i.e. about **0.48 on all five at once**. The criterion
+was a precision test that the design's own noise fails half the time, not a test of bias in the permutation control.
+
+**Change (user decision "Bias test").** The null is judged centred on a source when its permutation-mean 95% bootstrap
+interval contains 0. Acceptance = oracle_hi V1 on ≥ 4 of 5 sources under head N **and** every source's null centred in
+this sense. |mean| < MIN_GAIN is still computed and reported (`perm_null_centred`) but does not gate. Implemented in
+`v2_compare.calibration()` (`centring_rule` field). It applies to the canon calibration (`v2c`, cells complete at
+10:52 MDT, not read before this revision) and every later calibration read. Under R5 the Rev3-root acceptance re-run
+accepts (V1 5/5, all five intervals contain 0); it is recorded here as a post-hoc reading of an already-read result,
+not as a confirmation. Arm decisions are unaffected: every arm is judged against its own permuted controls.
