@@ -172,3 +172,14 @@ kadid tables of each spec's family. 52 of 52 outputs from the 26 bakes both pred
 16 restore-family bakes (a1, a1m, b1, b1s, b2, b2m, c8n, rall) predict on the candidate only; 0 differ, 0 fail.
 Receipt: `benchmarks/rev4_featpot_v2_predictor_parity_2026-10-01.json`. Cells run the v8 trainer and panel with this
 predictor. The candidate's aic3 outputs for all 42 bakes are also byte-identical on the four AVX2 fleet hosts (same receipt).
+
+### Erratum R1.2 (2026-10-01 00:35Z, before any calibration result was read) — a centring diagnostic, not a gate change
+
+A synthetic dry run of `v2_compare.py --calibration` (real keys and targets, invented predictions, permuted controls
+drawn as independent noise) failed acceptance on the centring rule alone: on aic3 (600 rows, 10 references) the mean
+permuted-control Δ was −0.010 with a hierarchical-bootstrap 95% CI of (−0.025, +0.012). The registered rule
+(|mean_k Δ(oracle_lo~pk)| < 0.005 on every source) has no allowance for seed and reference noise on small sources.
+The acceptance rule is **unchanged**. `v2_compare` now also reports, per source, `perm_mean_ci95` (bootstrap CI of the
+permuted-control mean Δ), `perm_null_ci_contains_zero`, and `centring_failure_within_noise` (acceptance failed only on
+centring, and every failing source's CI contains 0). If that flag is set, the instrument is reported as not accepted,
+with that diagnosis, and the decision goes to the user before any arm is read.

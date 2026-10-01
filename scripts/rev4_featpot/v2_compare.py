@@ -115,6 +115,7 @@ def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str) -> di
     if perms:
         p_deltas = [float(np.mean(p[0] - r_pt)) for p in perms]
         p_boot = np.mean([seed_mean(p[1] - r_bt) for p in perms], axis=0)
+        out["perm_mean_ci95"] = np.quantile(p_boot, [0.025, 0.975]).tolist()  # R1.2 diagnostic, not a gate
         e_boot = d_boot - p_boot
         e = delta - float(np.mean(p_deltas))
         lo, hi = np.quantile(e_boot, [0.025, 0.975]).tolist()
@@ -152,8 +153,16 @@ def calibration() -> dict:
         if complete:
             centred = {s: abs(float(np.mean(lo[s]["perm_deltas"]))) < MIN_GAIN for s in SOURCE_ORDER}
             hi_pass = [s for s in SOURCE_ORDER if hi[s]["v1_pass"]]
+            # Erratum R1.2 diagnostic (declared before any calibration result was read; does not change "accept"):
+            # whether each source's permutation-mean bootstrap CI contains 0, so a centring failure that is within
+            # seed/reference noise can be told apart from a biased null. Such a case is reported, not accepted.
+            ci_zero = {s: bool(lo[s]["perm_mean_ci95"][0] <= 0 <= lo[s]["perm_mean_ci95"][1]) for s in SOURCE_ORDER}
+            accept = bool(len(hi_pass) >= 4 and all(centred.values()))
             rec.update({"oracle_hi_v1_sources": hi_pass, "perm_null_centred": centred,
-                        "accept": bool(len(hi_pass) >= 4 and all(centred.values())) if head == "N" else None})
+                        "perm_null_ci_contains_zero": ci_zero,
+                        "accept": accept if head == "N" else None,
+                        "centring_failure_within_noise": (head == "N" and not accept and len(hi_pass) >= 4
+                                                          and all(centred[s] or ci_zero[s] for s in SOURCE_ORDER))})
         out[head] = rec
     out["note"] = ("oracle_hi's permutation null is oracle_lo~p1..p3 (same width, one column); "
                    "acceptance is judged under head N per the amendment")
