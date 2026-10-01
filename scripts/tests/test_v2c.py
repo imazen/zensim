@@ -215,6 +215,21 @@ class TrainRecipe(unittest.TestCase):
         self.assertEqual(cmd, expect)
         self.assertNotIn("--nonneg-distance", lodo.train_command([], 1, 2, 3, Path("k"), "F", Path("o")))
 
+    def test_lodo_grids(self):
+        import v2c_grid
+        cal = v2c_grid.grid_calibration_screen(32.0, "/r")
+        self.assertEqual(len(cal), 900)
+        self.assertEqual(len({c["name"] for c in cal}), 900)
+        names = {c["name"] for c in cal}
+        self.assertIn("screen_main@h32__N/without_aic3_s9", names)
+        self.assertIn("oracle_lo~p3@h32__F/without_kadid_s0", names)
+        self.assertEqual(cal[0]["argv"], ["v2_lodo_mlp.py", "--spec", "r0@h32", "--head", "N", "--heldout", "kadid", "--seed-index", "0",
+                                          "--root", "/r"])
+        arms = v2c_grid.grid_full_arms(["c1", "csfw"], 32.0, "/r")
+        self.assertEqual(len(arms), 800)
+        self.assertIn("csfw~p2@h32__N/without_konfig_s5", {c["name"] for c in arms})
+        self.assertFalse(any(c["name"].startswith("r0") for c in arms))
+
     def test_grid_shape(self):
         import v2c_grid
         cells = v2c_grid.cells(["c1", "c3"], 2.0, "/r")
@@ -223,6 +238,95 @@ class TrainRecipe(unittest.TestCase):
         self.assertEqual(cells[0], {"name": "r0@h2__N/full_s0", "argv": [
             "v2_confirm_fit.py", "--spec", "r0@h2", "--head", "N", "--seed-index", "0", "--root", "/r"]})
         self.assertIn("c3~p3@h2__F/full_s9", {c["name"] for c in cells})
+
+
+class Screen(unittest.TestCase):
+    BANK = Path("/var/tmp/rev4-featbank-r4")
+
+    def test_worst_types_match_filenames_in_the_real_bank(self):
+        import v2c_screen as sc
+        expect = {"kadid": (r"I\d+_(\d+)_\d+\.png$", {"20", "08", "07", "03", "21"}),
+                  "tid2013": (r"I\d+_(\d+)_\d+\.png$", {"17", "18", "14", "12", "23"}),
+                  "konfig": (r"SRC\d+_([a-z]+)_\d+\.png$", {"highsharpen", "multinoise", "colordiffusion"})}
+        import re
+        for source, (rx, types) in expect.items():
+            for member in v2_common.SOURCES[source]:
+                k = pq.read_table(self.BANK / member / "keys.parquet", columns=["pair_key", "dist_path"]).to_pandas()
+                want = np.array([bool(re.search(rx, p, re.I)) and re.search(rx, p, re.I).group(1) in types for p in k.dist_path])
+                got = sc.worst_mask(source, sc.codecs_for(source, k.pair_key.to_numpy(), self.BANK))
+                self.assertTrue(np.array_equal(want, got), (source, member))
+                self.assertGreater(got.sum(), 0, (source, member))
+        k = pq.read_table(self.BANK / "aic3" / "keys.parquet", columns=["pair_key"]).to_pandas()
+        self.assertEqual(sc.worst_mask("aic3", sc.codecs_for("aic3", k.pair_key.to_numpy()[:5], self.BANK)).sum(), 0)  # no worst types
+
+    def test_selection_rule(self):
+        import v2c_screen as sc
+        n = {f"f{i}": 1.0 - 0.1 * i for i in range(10)}                      # f0 .. f9 by head-N importance
+        t = {f: 0.0 for f in n}
+        t.update({"f7": 0.9, "f8": 0.8, "f2": 0.7, "f9": 0.6})               # targeted top 3: f7, f8, f2 (f2 already chosen)
+        fi = {f: 0.0 for f in n}
+        got = sc.select({"N": n, "F": fi}, {"N": t, "F": fi}, {"f9": (6, 12), "f4": (1, 12)})
+        self.assertEqual(got["selected"][:6], [f"f{i}" for i in range(6)])
+        self.assertEqual(got["selected"][6:], ["f7", "f8"])                   # cap 8: the E4 family f9 does not fit
+        self.assertEqual(len(got["selected"]), 8)
+        self.assertIn("f9", got["not_tested_in_full"])
+        t2 = {f: 0.0 for f in n}
+        t2.update({"f1": 0.9, "f2": 0.8, "f3": 0.7})                         # targeted top 3 all already chosen
+        got = sc.select({"N": n, "F": fi}, {"N": t2, "F": fi}, {"f9": (6, 12), "f4": (1, 12)})
+        self.assertEqual(got["selected"][6:], ["f9"])                         # then the >= 50% sign-consistent family
+        self.assertEqual(got["reasons"]["f9"], "design log E4 sign-consistent slots 6/12")
+        tie = {f: 0.5 for f in n}                                             # head-N ties are broken by head-F importance
+        got = sc.select({"N": tie, "F": {f: float(i) for i, f in enumerate(n)}}, {"N": t2, "F": fi}, {})
+        self.assertEqual(got["selected"][:2], ["f9", "f8"])
+
+    def test_importance_drops_by_family_with_chunking_and_targeting(self):
+        import v2c_screen as sc
+        from scipy.stats import spearmanr
+        rng = np.random.default_rng(4)
+        refs = np.repeat([f"r{i}" for i in range(6)], 20)
+        keys = np.array([f"k{i}" for i in range(len(refs))])
+        y = rng.normal(size=len(refs))
+        x = rng.normal(size=(len(refs), 6)).astype(np.float32)
+        x[:, 2] = y + 0.1 * rng.normal(size=len(refs))                       # column 2 carries the signal, inside family A
+        targeted = np.arange(len(refs)) % 2 == 0
+        store = {}
+
+        def writer(path, ref, score, big):
+            store[path] = big
+
+        def predict(bake, path, out):
+            return store[path][:, 2].astype(np.float64) * bake                # a "bake" is a scale on column 2
+
+        def srocc(jobs):
+            return [float(spearmanr(p, t)[0]) for _, p, t in jobs]
+
+        fams = [("A", [2]), ("B", [4])]
+        bakes = {("N", 0): 1.0, ("N", 1): 2.0}
+        out = {}
+        for chunk in (1, 3, 99):
+            with tempfile.TemporaryDirectory() as t:
+                out[chunk] = sc.screen_source(x, refs, keys, y, targeted, fams, bakes, 0, Path(t), writer, predict, srocc, draws=3,
+                                              chunk_blocks=chunk)
+        for chunk in (1, 3):
+            self.assertEqual(out[chunk]["drop"], out[99]["drop"])               # the packing never changes a number
+        res = sc.summarise({"toy": out[99]}, ["N"])
+        self.assertGreater(res["importance"]["N"]["A"], 0.3)
+        self.assertLess(abs(res["importance"]["N"]["B"]), 1e-9)               # an uninformative family drops nothing
+        self.assertGreater(res["targeted_importance"]["N"]["A"], 0.2)
+
+    def test_screen_specs(self):
+        for spec, fam in (("screen_main", "main"), ("screen_aux", "aux")):
+            f, v, cols = v2_common.arm_columns(spec)
+            self.assertEqual((f, v), (fam, "real"))
+            self.assertEqual(cols[:944], list(range(944)))
+        _, _, main = v2_common.arm_columns("screen_main")
+        self.assertEqual(sorted(set(main)), main)
+        self.assertEqual(main[944], 944)
+        _, _, aux = v2_common.arm_columns("screen_aux")
+        self.assertEqual(aux[944:946], [944, 945])
+        self.assertEqual(aux[946:], list(range(1322, 1502)))
+        with self.assertRaises(ValueError):
+            v2_common.parse_spec("screen_main~p1")
 
 
 class PinBuilder(unittest.TestCase):

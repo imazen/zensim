@@ -75,6 +75,9 @@ HEADS = ("N", "F")
 CANDIDATES = ("c1", "c2", "c3", "c4", "all", "csfw", "c7", "p1", "p3", "b1", "b1s",
               "c8n", "rall", "a1", "a1m", "b2", "b2m")
 CALIBRATION = ("oracle_lo", "oracle_hi", "minus_basic")
+# Amendment R2.3: one all-columns model per family table (no permuted controls): screen_main = bank + every main-family candidate
+# column + every appended (extra) column; screen_aux = bank + gmsd + gmsm + gmsbank.
+SCREEN = ("screen_main", "screen_aux")
 ORACLE_SIGMA = {"oracle_lo": 1.5, "oracle_hi": 0.5}
 FAMILIES = ("main", "aux")
 WIDTH = 1825
@@ -153,7 +156,7 @@ def parse_spec(spec: str) -> tuple[str, int]:
     base, _, perm = core.partition("~p")
     k = int(perm) if perm else 0
     extras = extra_arms()["arms"]
-    if base not in ("r0", *CANDIDATES, *CALIBRATION, *extras) or not 0 <= k <= N_PERMS:
+    if base not in ("r0", *CANDIDATES, *CALIBRATION, *SCREEN, *extras) or not 0 <= k <= N_PERMS:
         raise ValueError(f"bad v2 arm spec {spec!r}")
     if k and base not in (*CANDIDATES, *extras, "oracle_lo", "oracle_hi"):
         raise ValueError(f"{spec!r}: permuted controls exist only for candidates and the oracles")
@@ -161,7 +164,7 @@ def parse_spec(spec: str) -> tuple[str, int]:
 
 
 def all_specs() -> list[str]:
-    specs = ["r0", *CALIBRATION, *(f"oracle_lo~p{k}" for k in range(1, N_PERMS + 1)),
+    specs = ["r0", *CALIBRATION, *SCREEN, *(f"oracle_lo~p{k}" for k in range(1, N_PERMS + 1)),
              *(f"oracle_hi~p{k}" for k in range(1, N_PERMS + 1))]
     for arm in (*CANDIDATES, *extra_arms()["arms"]):
         specs += [arm, *(f"{arm}~p{k}" for k in range(1, N_PERMS + 1))]
@@ -181,6 +184,17 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     if base in AUX_ORACLE:
         return "aux", variant, bank + [AUX_ORACLE[base]]
     extras = extra_arms()
+    if base == "screen_aux":
+        return "aux", variant, bank + [AUX_PEERS["gmsd"], AUX_PEERS["gmsm"], *AUX_GMSBANK]
+    if base == "screen_main":
+        cols = set()
+        for arm in CANDIDATES:
+            fam, _, ids_ = arm_columns(arm)
+            if fam == "main":
+                cols |= set(ids_[944:])
+        for ids_ in extras["arms"].values():
+            cols |= set(ids_)
+        return "main", variant, bank + sorted(cols)
     if base in extras["arms"]:  # columns appended after f1824 (v2-canon)
         ids = extras["arms"][base]
         if any(not WIDTH <= c < extras["width"] for c in ids) or len(set(ids)) != len(ids):

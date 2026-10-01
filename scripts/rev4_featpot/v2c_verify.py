@@ -214,6 +214,11 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
                     want = bank_keys.pair_key[~bank_keys.pixels_identical].tolist()
                     n, diff = ((check_cells(bank, keys, x) if family == "main" else check_cells(bank, keys, x, None, [*range(944), *AUX_GMSBANK]))
                                if variant == "real" else (len(keys), 0))
+                    if extras and family == "main" and variant == "real":
+                        for e in extras:
+                            side = pq.read_table(e.path(name), columns=["pair_key", *[f"f{i}" for i in e.ids]]).to_pandas().set_index("pair_key")
+                            want_x = side.reindex(keys.pair_key).to_numpy(np.float64).astype(np.float32)
+                            gate("confirm", same_bits(x[:, e.first:e.first + e.width], want_x), set=name, extra=e.name)
                     gate("confirm", diff == 0 and keys.pair_key.tolist() == want and not score.any()
                          and not {"target", "human_score", "label"} & set(keys.columns)
                          and sha(table_path(table)) == table["sha256"], set=name, family=family, variant=variant,
