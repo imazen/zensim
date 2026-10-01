@@ -185,7 +185,10 @@ def write(frame: pd.DataFrame, path: Path, human_score: np.ndarray, family: str,
     view = frame[["ref_basename"] + FEATURES].copy()
     view.insert(1, "human_score", human_score)
     path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pandas(view, preserve_index=False), path, compression="zstd")
+    # EFFAUDIT D6: byte-stream-split floats, no float dictionary (-35% bytes; decoded values identical; the Rust
+    # predictor and trainer read it with byte-identical outputs, benchmarks/rev4_featpot_effaudit/d6_bss_check.md).
+    pq.write_table(pa.Table.from_pandas(view, preserve_index=False), path, compression="zstd",
+                   use_dictionary=["ref_basename"], use_byte_stream_split=["human_score"] + FEATURES)
     layout = ("bank f0-f943, Rev4 research f944-f1824 at canonical IDs" if family == "main" else
               "bank f0-f943, gmsd f944, gmsm f945, oracle_lo f946, oracle_hi f947, gmsbank f1322-f1501, zeros elsewhere")
     Path(f"{path}.manifest.json").write_text(json.dumps({
