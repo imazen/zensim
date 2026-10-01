@@ -423,3 +423,23 @@ confirmatory tables hold all 24 references (2,100 rows). The label pin's `select
 the read and its prediction is never paired with a label. Unit test `test_select_rule_restricts_keys_too`; the open-set
 validation (AIC-3, KADID-SELECT) still reproduces the admitted labels exactly. KonJND TERMINAL note for the guard result:
 SRC0437's pair names `_058` where `load_konjnd` picks `_059` (per-reference label; joins unchanged).
+
+## Pin (2026-10-01 14:37 MDT, before any sealed label was read) — the R2.1 short list
+
+Full arms (`fitv2arms-20261001`, 2,800/2,800, program v10) compared on the five exploratory sources
+(`v2_compare --arm … --human-weight 32 --root v2c`; records `benchmarks/rev4_featpot_effaudit/v2c_compare_<arm>_<head>_h32_2026-10-01.json`).
+Head N, the registered head: **no arm passes V1 on ≥ 2 sources** (b2, b2m, c8n, p1, c3, csfw: 0 sources; p3: KADID only).
+Head F: c3 passes V1 on TID2013 and KonFiG and V2 ("needs a gate-aware design"); c8n passes V1 on KADID and TID2013 but
+fails V2 (seed consistency); b2 KADID, b2m/p1/p3 TID2013 only; csfw none. No arm shows a regression.
+
+R2.1's eligibility rule (V1 on ≥ 2 sources, no regression; V2 is not part of it) gives exactly two entries, ranked by mean
+permutation excess: **c8n under head F (0.0053, +210 columns)** and **c3 under head F (0.0043, +144 columns)**. Both are
+head-F-only, so a confirmation would read "helps a free head". `scripts/rev4_featpot/v2c_pin.py` derived the list
+mechanically (after a fix to read the weight-tagged compare files, zensim `0d131f2c`); the pin
+(`benchmarks/rev4_featpot_effaudit/v2c_confirm_pin_2026-10-01.json`, sha256
+`1223712b13669edaadc3cac233e636f3892e29e1f252e5a48a7e917999843686`) holds the short list, the frozen canon root
+(`f432995f…`), program v10 `ad22a0fc` with trainer `a5f40576` and predictor `56da0529`, confirm data `cf9b8317`, the code
+hashes of the read, the compare files and calibration it came from, the label specs (CID22-B as B(23); AIC-4; KonJND
+JPEG SELECT and TERMINAL; CSIQ with its pixel-hash table `d53187ce…`; MCL-JCI via a keyed pairs file) and the
+orientation evidence. The confirmatory fits are r0, c8n and c3 with their permuted controls, both heads, 10 seeds (180
+cells, `v2_confirm_fit`), then the single read (`v2_confirm_read`), Holm over the two entries.

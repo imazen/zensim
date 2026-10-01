@@ -1,0 +1,284 @@
+{
+ "schema": "rev4-featpot-v2c-confirm-pin-v2",
+ "reference": "r0",
+ "candidates": [
+  "c3",
+  "c8n"
+ ],
+ "heads": [
+  "N",
+  "F"
+ ],
+ "shortlist": [
+  {
+   "arm": "c8n",
+   "head": "F"
+  },
+  {
+   "arm": "c3",
+   "head": "F"
+  }
+ ],
+ "shortlist_rank": [
+  {
+   "arm": "c8n",
+   "head": "F",
+   "mean_excess": 0.005298600806934874,
+   "added_columns": 210
+  },
+  {
+   "arm": "c3",
+   "head": "F",
+   "mean_excess": 0.004263835247499369,
+   "added_columns": 144
+  }
+ ],
+ "human_weight": 32.0,
+ "frozen_sha256": "f432995f31a3de32a17f7defbaccecd3c22114130db107a050bbdd8fdc404040",
+ "wide_receipts": {
+  "main/real": "1ef7ccde34ce289c9eb2046b9caeab8c37884e89f4f84c4d8b43691e5b3bee2a",
+  "main/p1": "301ae67576c9ac04ec5de96c742a00156b3c1c4629510fb691431b7344db6189",
+  "main/p2": "c3ad6fe22178df453f5c423aeae063b8e6d474e37ee29ce5fc0798f32db02b81",
+  "main/p3": "d48d2c57ffc737948dfd70f8dc16c6adae58c509a2bc9481e2d73e8b69db864b",
+  "aux/real": "9d519997525797d29d89152fb644f500fd73f28072b078f49ddc607a6bae0ff1",
+  "aux/p1": "8b89733460263f3d223d914777bd159dd10529a3252eab7004e966c7392921dc",
+  "aux/p2": "28836fcb3ad820096e6aad120d26342d0d79a0cca7a08af542f1d5c6e661864e",
+  "aux/p3": "182140c2734695f71b0c0bd9ec6cbce554977958054287a06deb45db3578e356"
+ },
+ "confirm_receipt_sha256": "d18b79199c52ba31decd24ea4f28923c8e05b8f30e305a0b14d7c83d24228337",
+ "keep_lists_sha256": "b562ba5cfeb90de7d14efd6f896d6b49b51a5e30361a1919d8175e37ec9fd05f",
+ "binaries": {
+  "panel": "f76b85a7e5d647d23b2f10f5c94b498036d8c25b34de5586b0fe144ea64b74ab",
+  "zensim_mlp_train": "a5f40576214a615448cfbb3060a269cdd461b29fffd0cfc8e37156dca480f54b",
+  "bake_dial_refit": "56da05299af520113304f4e1205d6a6bbad4a10027aa138886b5877abb6d85ec"
+ },
+ "program_sha": "ad22a0fcd0ae54fc4d739f8fa284b33123a41fa17b0202ee0411a0310f8de88e",
+ "data_sha": "cf9b83179376c78471905c8e97e3280b3d45ea008123f9febdbd660f9046f99d",
+ "code": {
+  "rev4_featpot/v2_confirm_read.py": "a5a3853f2edbe4727583036446bff8204a4174f32de4ef528c0c78b47a3fb782",
+  "rev4_featpot/v2_compare.py": "41d784f8b4bea926502b4cb58ca99640b66fc710581d4a17d46dff7b282c3def",
+  "rev4_featpot/v2_common.py": "05b42c958f7e4ac42a99092beb2c1255b46e8b9dce0aa5b1833b99f428870186",
+  "rev4_featpot/v2c_labels.py": "a2467320ba75d9cc7c12fcb264357947c67ca7154096e4f2047ed1276b987dfd",
+  "rev4_featpot/v2c_wide.py": "1a3f7d5b71af0c5bde0b50f44b7a4eec1ce8dc2f7abc4e9e9bf798bd685ab176",
+  "lib/zen_stats.py": "68532bad3b3482bc734508183872d9253893cbacd9d3299d523894fc38158a6a"
+ },
+ "shortlist_provenance": {
+  "calibration": {
+   "path": "/var/tmp/rev4-featpot/v2c/compare/calibration_h32.json",
+   "sha256": "8917301b43fccaacb7928d01940a739c1397e844a50be213e0f0970eaf7f496a"
+  },
+  "compare": {
+   "b2_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/b2_N_h32.json",
+    "sha256": "ebdbacee2ce7e29f8e25adc4197b025563232e3fcc7b5a7ea94a98b015cbf8d2"
+   },
+   "b2_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/b2_F_h32.json",
+    "sha256": "d0f55ecccdec1ef96163e1b8430f919af64040083c50c790ff093c5fb73d443f"
+   },
+   "b2m_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/b2m_N_h32.json",
+    "sha256": "30be91d64afb93c068d224e9f441422fdaa045692f61d25875210ad468e20689"
+   },
+   "b2m_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/b2m_F_h32.json",
+    "sha256": "d6f299c09fd1cdc1d1c338814887b0b2f0bfcd2282e4f264818d4b11b54aa189"
+   },
+   "c8n_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/c8n_N_h32.json",
+    "sha256": "123626bd2df4cdd5f907f95f6bb84355338013874d08c6c11184009276a57582"
+   },
+   "c8n_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/c8n_F_h32.json",
+    "sha256": "ecdab46957bfc64045d433683b261bc8ca792d3378a651582a19a144c03ee9b4"
+   },
+   "p3_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/p3_N_h32.json",
+    "sha256": "e0d96427e52da2bf3ac1901b55ba409c87d9032a37e7bbf147607ab354d8bd51"
+   },
+   "p3_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/p3_F_h32.json",
+    "sha256": "5cac7d26f3a7b2a4c1b1074ef8db6a0f944b8d55b3ef9a4a166a50a180dc216d"
+   },
+   "p1_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/p1_N_h32.json",
+    "sha256": "0cc793c13ca0ccbd96ec10358ba19a44e00e8c1676f6cc9970a2e2f5e8ca4b05"
+   },
+   "p1_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/p1_F_h32.json",
+    "sha256": "fa996d97824652ef8df265d5de4c396d1a88ce008584ed8f597aa37975f070ac"
+   },
+   "c3_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/c3_N_h32.json",
+    "sha256": "e63ad395b46b361bc5e7d1f5ca5fb1717175981c5a4d46780616d0ffabed0cb1"
+   },
+   "c3_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/c3_F_h32.json",
+    "sha256": "6dcdc5e8ff87cdafef3911bda53682a73d4eae1d41d52279065d631338f8f03a"
+   },
+   "csfw_N": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/csfw_N_h32.json",
+    "sha256": "5b87d8a56508fea4e157fc15c531bbdf9c67a4ff33f97b16eb4e01167777831e"
+   },
+   "csfw_F": {
+    "path": "/var/tmp/rev4-featpot/v2c/compare/csfw_F_h32.json",
+    "sha256": "5d85b308dc85375011036693f52f1db6bb60010ca2dc67f0003a7a6b91309a95"
+   }
+  }
+ },
+ "labels": {
+  "cid22_b": {
+   "path": "/mnt/v/dataset/cid22/CID22_validation_set/cid22val_pairs_ab.tsv",
+   "sha256": "3ce0f7438ea02277102217f504a1a680541e2a599be068f83fc49bb8fb1dfa8b",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": {
+    "ref_stem_in": [
+     "1025469",
+     "1044329",
+     "1279330",
+     "1418519",
+     "1420710",
+     "1475938",
+     "1544947",
+     "2190188",
+     "2253934",
+     "2670327",
+     "2736139",
+     "2775196",
+     "2887497",
+     "297394",
+     "3156482",
+     "3637739",
+     "382297",
+     "5055743",
+     "5458393",
+     "7552578",
+     "792079",
+     "adriankierman-report-page",
+     "pexels-photo-1933873"
+    ]
+   },
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "aic4": {
+   "path": "/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv",
+   "sha256": "955a9601e94c0877a00c822dbbbd17ad4ae11544dd6d550b9ed79d1ad9d983ff",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": null,
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "konjnd_jpeg_select": {
+   "path": "/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv",
+   "sha256": "70148a39c90d97d35899a171204d3996034cf0019fbe0c496ac51ae4c4d40856",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": {
+    "ref_number": {
+     "regex": "^SRC(\\d+)$",
+     "modulus": 10,
+     "not_in": [
+      7,
+      9
+     ]
+    }
+   },
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "konjnd_jpeg_terminal": {
+   "path": "/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv",
+   "sha256": "70148a39c90d97d35899a171204d3996034cf0019fbe0c496ac51ae4c4d40856",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": {
+    "ref_number": {
+     "regex": "^SRC(\\d+)$",
+     "modulus": 10,
+     "in": [
+      7,
+      9
+     ]
+    }
+   },
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path",
+   "note": "SRC0437: the pair list (and the bank key) names SRC0437_JPEG_058.jpg while load_konjnd picks _059 (v1_extractor_drift_2026-08-30 4c.6; per-ref mean PJND 58.50). The label is per reference and joins the bank key by path unchanged; TERMINAL is a touch-once sanity guard, never counted (coordinator 2026-10-01)."
+  },
+  "csiq": {
+   "path": "/mnt/v/dataset/csiq/csiq_pairs.tsv",
+   "sha256": "78b1dac5f74e6f02198f9011eb12f655c358c567d6007497aeac9aa7e5f5a288",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": null,
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "mcljci": {
+   "path": "/var/tmp/datasets/mcl-jci/mcljci_labels.csv",
+   "sha256": "36f17dd8bac2d085f718e388fd5db307d887338c9c2b296349bb2ef20f184802",
+   "format": "csv",
+   "label_col": "jnd_dist",
+   "usecols": [
+    "src",
+    "qf",
+    "jnd_dist"
+   ],
+   "select": null,
+   "via_pairs": {
+    "path": "/var/tmp/labelpin/mcljci_pairs_keyed.tsv",
+    "sha256": "a1d763f715958442a404f188b5bea379f0354f633249ee70ee3cf525ce43d043",
+    "on": [
+     [
+      "src",
+      "src"
+     ],
+     [
+      "qf",
+      "qf"
+     ]
+    ]
+   },
+   "ref_col": null,
+   "dist_col": null
+  }
+ },
+ "table_code_note": "wide/confirm receipts record the (rewritten) build commit and a dirty working copy; script hashes are in table_code",
+ "pixel_hashes": {
+  "path": "/var/tmp/labelpin/csiq_pixel_hashes.tsv",
+  "sha256": "d53187ce8cacb852ee830f2836d426bae71599ac6a7d878bbf9752350d96397e"
+ }
+}
