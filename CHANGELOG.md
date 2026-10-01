@@ -13,14 +13,13 @@
 
 - Rev4 canon is now `rec64` + `c64` (f64 blur recurrence + f64 lane pools) on the
   product build; the c32/neum/exact arms stay behind the `oracle` feature. Rev1–Rev3
-  are byte-identical. (rev4canon quarantine commits; hashes pinned at landing)
+  are byte-identical. (20655ddf)
 - `feature_v2::bench_featcanon(&str, Option<&str>) -> bool`: `oracle`-feature-only
   measurement hook (feature-gated public surface, listed in
   `docs/public-api/zensim.features.txt`) used by `benches/featacc_extract_ab.rs`.
-  (featacc 31663923; snapshot regenerated in the rev4canon quarantine commits)
+  (featacc 9120ef36; snapshot regenerated in 20655ddf)
 - Rev4 tailhist `Bin` slots (`*_p95`/`*_p99`) fold sign-bit-set and NaN map values
-  into bin 0 (era `c3negfold`, Proposed); Rev1–Rev3 keep the legacy bins. (rev4canon
-  quarantine commits; hashes pinned at landing)
+  into bin 0 (era `c3negfold`, Proposed); Rev1–Rev3 keep the legacy bins. (b6ce075e)
 
 - `bake_dial_refit` gains three opt-in flags for the Rev4 feature-potential
   run's diagnostic fits (unpublished validation tool; defaults unchanged, so
@@ -502,8 +501,7 @@ bakes now use one ID-based extraction planner. No public signature is removed.
   attribution and corruption-head entry returns
   `ZensimError::ModelForwardFailed` at revision 4, and a request whose revision
   differs from the process revision is refused whenever either is revision 4.
-  (jj changes: featcanon `kmylspyt`, featcanon-fix `zyxkkvyl`,
-  rev4canon `xxwsrwzk`/`orqyortv`/`ymszzsxz`)
+  (3391f524, f0ea3f0b, da4e726a)
 - Doc-hidden `feature_v2::bake_formula_revision_public` now returns
   `Result<FormulaRevision, ZensimError>`: a present `zentrain.formula_revision`
   value this build does not know is an error instead of silently reading as
