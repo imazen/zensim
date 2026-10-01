@@ -443,3 +443,19 @@ hashes of the read, the compare files and calibration it came from, the label sp
 JPEG SELECT and TERMINAL; CSIQ with its pixel-hash table `d53187ce…`; MCL-JCI via a keyed pairs file) and the
 orientation evidence. The confirmatory fits are r0, c8n and c3 with their permuted controls, both heads, 10 seeds (180
 cells, `v2_confirm_fit`), then the single read (`v2_confirm_read`), Holm over the two entries.
+
+## Revision R6 (2026-10-01 ~14:45 MDT, user decision, no sealed label read) — hold the confirmatory read
+
+**User decision:** "Hold the read". The pinned short list (c8n_F, c3_F) is head-F only: under head N, the registered
+head, no family passed V1 on ≥ 2 exploratory sources, so the best a read could return is "helps a free head", and it
+would spend CID22-B(23), AIC-4, CSIQ, MCL-JCI and KonJND-JPEG for good. The sealed sets stay sealed, held for a candidate
+that could change the head-N product (for example a gate-aware design of c3, the one family that passed V1 + V2 under
+the free head). The confirmatory fits (`fitv2confirm-20261001`, 180 cells) are completed and kept on disk; the pin
+(`1223712b…`) stays as the record of what a later read of this list would use, valid only while every hash it holds
+is unchanged. A later read of a different list needs a new pin registered before any sealed label is read.
+
+**Exploratory result, reported (five design sources, canon tables, R4 final epoch, R5 calibration accepted):** no
+candidate family improves the head-N instrument on ≥ 2 sources. Under the free head, c3 (C3 tail histograms) passes
+V1 on TID2013 and KonFiG with seed consistency, and c8n (GMS bank + native gradients) passes V1 on KADID and TID2013
+but not seed consistency. b2 (KADID), b2m, p1 and p3 (TID2013) pass on one source; csfw on none. No arm regressed.
+Families not selected by the screen (c1, b1s, c2, b1, c7, c4, texgain, satsign, a1, a1m) are "not tested in full".
