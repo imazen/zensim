@@ -11,6 +11,15 @@
 
 ### Added
 
+- `zensim_mlp_train` (unpublished validation tool): with `--keep-features` on the plain head,
+  only the kept parquet columns are read (projection) and held as compact f32, standardized at
+  use with the same f64 expression. Bakes, epoch curves and predictions are byte-identical to
+  the dense path on 12 gate cells; r0-arm peak RSS 4.24 -> 1.36 GiB. `train_manifest::sha256_file`
+  now streams. (49b16866)
+- `zensim_mlp_train`: train-only groups (train weight > 0, validation weight 0) are no longer
+  evaluated each epoch under the Mean/Min validation policies; their epoch-line segment reads
+  `not evaluated (train-only)`. Validation score, dev panels, weights and predictions are
+  unchanged (4 cells x 120 epochs, 8 cells x 2). (commit following 49b16866)
 - Rev4 canon is now `rec64` + `c64` (f64 blur recurrence + f64 lane pools) on the
   product build; the c32/neum/exact arms stay behind the `oracle` feature. Rev1–Rev3
   are byte-identical. (20655ddf)

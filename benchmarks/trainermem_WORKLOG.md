@@ -59,3 +59,41 @@ Profiled cell argv: /home/lilith/tmp/zensim-paper/rev4/argv.json (r0, 2 epochs);
   var=0 → scale=max(1e-8)→(0-0)/1e-8=+0.0 (matches today's buffer).
 - Follow-up commit (separate, same gate): EFFAUDIT D1 — skip per-epoch eval of train-only groups
   (val_w==0); epoch line keeps val(geomean3)= and dev-group values identical.
+
+## Takeover by claude-trainermem (2026-10-01) — bookmark quarantine/claude/trainermem
+
+Devin's loader scaffolding (Emit/Cols/store_cols) did not compile; finished and simplified (no `Cols`; subset + max_width
+parameters). Design as approved (D1–D5, coordinator D2 CHANGE): resident = compact raw f32 only, standardize at use.
+
+### Implementation (commit 1)
+- `parquet_loader::load_parquet_flat_f32(path,name,target,scale,subset,max_width) -> Result<Option<OwnedLoadedGroupCompact>>`:
+  ProjectionMask over the kept columns only, f32 verbatim, pre-reserved from the footer. `Ok(None)` (decline, nothing read) when
+  a kept column is not Float32, ids unsorted/duplicated/out of the logical width `min(file width, max_width)`, or empty subset.
+- `mlp_train::FeatureRows::Compact(&mut CompactRows)` (+ `LazyStd`, `StdFeatures`, `StdGroup`). Plain head (`train_mlp_strategy`)
+  keeps Compact groups lazy: `row()` expands into per-call scratch with `copy_from_slice(template)` + kept-column scatter, where
+  `template[d] = (0.0 - mean[d]) / scale[d].max(1e-12)` (the exact value today's zero-masked buffer holds) and kept columns
+  evaluate `(f32 as f64 - mean[d]) / scale[d].max(1e-12)` (the in-place pass's expression). `compute_scaler_from_groups` visits kept
+  columns only (dropped columns stay +0.0 mean / var, std = 1e-8, as before). Other heads: `standardize_group_releasing_raw`
+  expands a Compact table once into the dense buffer.
+- Binary: `compact_load` engages only with `--keep-features` and no feature transforms / auto-transforms / TV pairs / GPU /
+  pool / hybrid / alpha head; otherwise the dense path is untouched. NiN helper holds rows across a batch -> `row_cow`.
+- Behaviour difference (benign): dropped columns are not read, so a null/odd dtype in a dropped column no longer errors.
+
+### Gate, 2 epochs, base = unchanged main binary (bin-base) vs new1, fitbin = base bake_dial_refit for both
+8/8 cells PASS (weights, epoch curve, predictions): r0 N kadid s0; oracle_hi F tid2013 s1; rall N konfig s0; minus_basic F cid22_a25 s1;
+oracle_lo N kadid s1; p3 F tid2013 s0; a1 N cid22_a25 s0; r0 F konfig s1 (cells/{main,new1}, logs/extra_*.log).
+
+### Gates (final, claude-trainermem, 2026-10-01)
+- 2 epochs, 8 cells, base = unchanged main binary: new1 (commit 1) 8/8 and fin (commit 1+2, D1 comparator that ignores the
+  train-only segments) 8/8. oracle_hi/oracle_lo baselines were re-run after the R3 aux rebuild (02:18-02:24 MT; pre-R3 cells
+  kept in cells/main_pre_r3) so every pair reads one table generation.
+- 120 epochs, 4 cells (r0 N kadid s0; oracle_hi F tid2013 s1; rall N konfig s0; p3 F cid22_a25 s1): new1 4/4 and fin 4/4
+  identical weights, curve (dev/val fields) and predictions. Wall (loaded box, not a benchmark): r0 394 -> 343 s, p3 362 -> 314 s.
+- Profile (2-epoch r0/oracle_hi/rall argv; time -v peak RSS / heaptrack peak heap): base r0 4.24 GiB/3.43G, oracle_hi 3.72/3.34G,
+  rall 4.24/3.43G -> final r0 1.36 GiB/1.20G, oracle_hi 1.32 GiB/1.20G, rall 2.14 GiB/1.88G. Attribution after the change:
+  compact f32 matrix (532M of the peak, 791M final for r0), a parquet row-group read buffer ~450M and arrow/other ~120M at the
+  moment of the peak (during the largest group's load). Before the streaming sha fix the peak also held the whole 1.2 GB
+  table read for `sha256_file`.
+- tests: `cargo test --release -p zensim-validate --no-fail-fast`: all pass except pre-existing `bake_surface::
+  formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse` (asserts "4" is an unknown revision; untouched
+  by this diff). CI-exact clippy, fmt scoped to zensim-validate, lint-scripts clean.

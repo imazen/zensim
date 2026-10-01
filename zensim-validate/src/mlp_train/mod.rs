@@ -3220,10 +3220,30 @@ pub fn train_mlp_strategy(
             // the shared immutable weights) and the panel's PWRC is O(n²) on the
             // subsample cap, so the groups run on rayon and are collected in group
             // order — same values, same order, bit-identical.
+            // Train-only groups (train_weight > 0, validation_weight == 0) feed
+            // nothing back into the run when the policy is a weighted mean or
+            // a min over the validation groups: their panels are not in
+            // `val_score`, the best-epoch choice, or any other decision, only
+            // in the log line. Evaluating them was ~77% of per-epoch
+            // evaluation CPU on the Instrument v2 recipe (EFFAUDIT D1), so
+            // they are skipped and logged as such. `Goals` reads every panel,
+            // and with no validation group the score is the mean over all
+            // groups, so neither skips. Prediction and the panel are pure
+            // functions of the weights (no RNG, no state), so skipping cannot
+            // move any other value.
+            let skip_train_only = !val_indices.is_empty()
+                && !matches!(hyperparams.validation_policy, ValidationPolicy::Goals);
+            let skipped: Vec<bool> = groups
+                .iter()
+                .map(|g| skip_train_only && g.train_weight > 0.0 && g.validation_weight <= 0.0)
+                .collect();
             let group_panels: Vec<crate::panel::LightPanel> = groups
                 .par_iter()
                 .enumerate()
                 .map(|(gi, g)| {
+                    if skipped[gi] {
+                        return crate::panel::LightPanel::default();
+                    }
                     let preds = std_features.predict(
                         gi,
                         g.features.len(),
@@ -3272,7 +3292,11 @@ pub fn train_mlp_strategy(
             let per_group = group_panels
                 .iter()
                 .zip(groups.iter())
-                .map(|(p, g)| {
+                .zip(skipped.iter())
+                .map(|((p, g), &skip)| {
+                    if skip {
+                        return format!("{}: not evaluated (train-only)", g.name);
+                    }
                     format!(
                         "{}: srocc={:.4} plcc={:.4} pwrc={:.4}",
                         g.name, p.srocc, p.plcc, p.pwrc
@@ -12471,6 +12495,87 @@ mod tests {
                 ca.data.is_empty() && cb.data.is_empty(),
                 "{label}: compact buffers not taken"
             );
+        }
+    }
+
+    /// EFFAUDIT D1: a train-only group is NOT evaluated per epoch when a
+    /// validation group exists under the Mean policy, and nothing else moves:
+    /// the per-epoch panel of the validation group, and the validation score,
+    /// equal those of a run that evaluates every group (`Goals` policy never
+    /// skips; the training trajectory is policy-independent here — no early
+    /// stop, no checkpoint-driven change of the weights).
+    #[test]
+    fn train_only_groups_are_not_evaluated_and_nothing_else_moves() {
+        let n_features = 8;
+        let (fa, ta) = make_synth_dataset(41, 200, n_features);
+        let (fb, tb) = make_synth_dataset(42, 150, n_features);
+        let ra: Vec<&[f64]> = fa.iter().map(|v| v.as_slice()).collect();
+        let rb: Vec<&[f64]> = fb.iter().map(|v| v.as_slice()).collect();
+        let hyper = MlpHyperparams {
+            n_hidden: 6,
+            n_epochs: 5,
+            pairs_per_epoch: 300,
+            initial_lr: 0.005,
+            seed: 3,
+            log_every: 1,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            ..Default::default()
+        };
+        let run = |hyper: &MlpHyperparams| {
+            let mut log = Vec::new();
+            train_mlp(
+                &mut [
+                    TrainingGroup {
+                        name: "fit".to_string(),
+                        human_scores: &ta,
+                        features: FeatureRows::Borrowed(&ra),
+                        metric_sigmas: None,
+                        train_weight: 1.0,
+                        validation_weight: 0.0,
+                        ref_ids: None,
+                        loss_mode: GroupLossMode::default(),
+                    },
+                    TrainingGroup {
+                        name: "dev".to_string(),
+                        human_scores: &tb,
+                        features: FeatureRows::Borrowed(&rb),
+                        metric_sigmas: None,
+                        train_weight: 0.0,
+                        validation_weight: 1.0,
+                        ref_ids: None,
+                        loss_mode: GroupLossMode::default(),
+                    },
+                ],
+                n_features,
+                hyper,
+                &mut log,
+            );
+            log.into_iter()
+                .filter(|l| l.contains("epoch"))
+                .collect::<Vec<_>>()
+        };
+        let skipped = run(&hyper);
+        let all = run(&MlpHyperparams {
+            validation_policy: ValidationPolicy::Goals,
+            ..hyper.clone()
+        });
+        assert_eq!(skipped.len(), 5);
+        assert_eq!(all.len(), 5);
+        let dev_of = |l: &str| -> String {
+            let at = l.find("dev: srocc=").expect("dev panel present");
+            l[at..].split(" | ").next().unwrap().to_string()
+        };
+        for (s_line, a_line) in skipped.iter().zip(all.iter()) {
+            assert!(
+                s_line.contains("fit: not evaluated (train-only)"),
+                "{s_line}"
+            );
+            assert!(
+                a_line.contains("fit: srocc="),
+                "Goals must evaluate every group: {a_line}"
+            );
+            assert_eq!(dev_of(s_line), dev_of(a_line), "dev panel moved");
         }
     }
 
