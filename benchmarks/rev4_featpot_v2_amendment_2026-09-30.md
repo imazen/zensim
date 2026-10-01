@@ -314,3 +314,26 @@ Change (mechanics only; R2.1's rule otherwise stands): R2.1's primary statistic 
 its seed-paired Δ vs R0 (with bootstrap CI) as a secondary readout, and the regression veto applies to that Δ there
 (Δ upper bound < −0.005 = regression). TERMINAL stays a sanity guard. Holm, α, the short-list rule and the free-head label
 are unchanged.
+
+## Revision R2.3 (2026-10-01 05:35 MDT, user decision, before any canon arm or screen result exists) — screen, then confirm
+
+**User decision:** "Screen, then confirm". The canon run no longer fits every family as a full arm. It runs:
+
+1. **Calibration** on the canon tables, gate unchanged (oracle_hi V1 on ≥ 4 of 5 under head N; centred null). Nothing
+   below is read unless it accepts.
+2. **Screen models:** one all-columns model per family table — `screen_main` = R0 bank + every main-family candidate
+   column + texgain + satsign; `screen_aux` = R0 bank + gmsd + gmsm + gmsbank — at the canon recipe, heads N and F,
+   five held-out sources, 10 seeds (200 cells).
+3. **Screen statistics per candidate family** (exploratory, from the screen models' bakes; no new fits):
+   - *Importance*: on each held-out table, permute the family's columns within reference (3 draws), predict with the
+     cell's bake, and take the drop in signed SROCC; importance = mean drop over seeds, draws and the five sources.
+   - *Targeted importance*: the same drop computed only on rows of R0's ten worst distortion types (design log E1: KADID
+     20, 08, 07, 03, 21; TID 17, 18, 14, 12, 23; KonFiG highsharpen, multinoise, colordiffusion), mean over the sources
+     that have those types.
+4. **Selection for full arms (rule fixed now):** the 6 families with the largest head-N importance; plus up to 2 more —
+   first any family in the top 3 by head-N targeted importance not already chosen, then any family with ≥ 50% sign-
+   consistent slots in design log E4 (csfw) not already chosen; cap 8. Ties broken by head-F importance.
+5. **Full arms** for the selected families: the registered v2 statistics (arm + 3 permuted controls, heads N and F,
+   five sources, 10 seeds) on the canon tables. R2.1's short list (≤ 6) is drawn from these arms by R2.1's rule.
+6. The screen is exploratory. Families not selected are reported with their screen statistics as "not tested in full",
+   never as null results.
