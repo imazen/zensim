@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch_indexed, render_indexed_jobs  # noqa: E402
-from v2_common import (BOOT_B, BOOT_SEED, CANDIDATES, HEADS, N_PERMS, SOURCE_ORDER, V2, arm_columns, sha)
+from v2_common import (BOOT_B, BOOT_SEED, CANDIDATES, HEADS, N_PERMS, SOURCE_ORDER, V2, arm_columns, extra_arms, sha)
 
 N_SEEDS = 10
 MIN_GAIN = 0.005
@@ -204,7 +204,8 @@ def main() -> None:
     global SUFFIX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--calibration", action="store_true")
-    ap.add_argument("--arm", action="append", choices=CANDIDATES, default=[])
+    ap.add_argument("--arm", action="append", choices=(*CANDIDATES, *extra_arms()["arms"]), default=[])
+    ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--human-weight", type=float, default=None)
     ap.add_argument("--jobs", type=int, default=1)
     args = ap.parse_args()

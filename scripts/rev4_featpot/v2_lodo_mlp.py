@@ -25,6 +25,7 @@ from v2_common import (EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, sha)
 
+WIDE_SCHEMAS = ("rev4-featpot-v2-wide-v2", "rev4-featpot-v2c-wide-v1")
 EPOCH_RE = re.compile(r"epoch\s+(\d+)\s+\|.*?val\(geomean3\)=([+-]?\d+\.\d+)")
 
 
@@ -66,6 +67,7 @@ def main() -> None:
     ap.add_argument("--head", choices=HEADS, required=True)
     ap.add_argument("--heldout", choices=SOURCE_ORDER, required=True)
     ap.add_argument("--seed-index", type=int, choices=range(10), required=True)
+    ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     args = ap.parse_args()
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
@@ -77,8 +79,10 @@ def main() -> None:
     vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
     receipt = json.loads(receipt_path.read_text())
-    if (receipt["schema"] != "rev4-featpot-v2-wide-v2" or receipt["family"] != family
-            or receipt["variant"] != variant or receipt["width"] != WIDTH):
+    # v2c (CANONTAB): the canon receipt's width may exceed 1825 when sidecar families are appended after f1824.
+    width = receipt["width"]
+    if (receipt["schema"] not in WIDE_SCHEMAS or receipt["family"] != family or receipt["variant"] != variant
+            or width < WIDTH or (receipt["schema"] == WIDE_SCHEMAS[0] and width != WIDTH)):
         raise ValueError("wide receipt identity mismatch")
     # Two-part cell path under v2/cells (the fit-cell executor's destination contract).
     dest = V2 / "cells" / f"{args.spec}__{args.head}" / f"without_{args.heldout}_s{args.seed_index}"
@@ -108,7 +112,7 @@ def main() -> None:
     cmd += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(HIDDEN),
             "--epochs", str(EPOCHS), "--pairs-per-epoch", str(PAIRS_PER_EPOCH),
             "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),
-            "--pair-sampling", "uniform", "--max-features", str(WIDTH), "--keep-features", str(keep_file),
+            "--pair-sampling", "uniform", "--max-features", str(width), "--keep-features", str(keep_file),
             "--mse-weight", "1", "--early-stop-patience", "0", "--val-policy", "mean",
             "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", "1", "--no-auto-eval",
             "--historical-replay", REPLAY, "--out", str(dest / "refit" / "best.bin")]

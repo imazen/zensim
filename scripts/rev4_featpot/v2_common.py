@@ -14,12 +14,28 @@ Variants: "real" and "p1".."p3" (the family's added columns permuted jointly wit
 """
 
 import hashlib
+import json
 import os
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ROOT = Path("/var/tmp/rev4-featpot")
-V2 = ROOT / "v2"
+
+
+def _root_override(argv: list[str]) -> str | None:
+    """`--root DIR` / `--root=DIR` anywhere in argv, else $REV4_V2_ROOT, else None (CANONTAB: the Rev3 v2 instrument and
+    the v2-canon instrument share these scripts and coexist under different roots; argv carries the root, so the
+    declared cells' argv hashes, hence their job ids, differ)."""
+    for i, arg in enumerate(argv):
+        if arg == "--root" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--root="):
+            return arg.split("=", 1)[1]
+    return os.environ.get("REV4_V2_ROOT")
+
+
+V2 = Path(_root_override(sys.argv) or ROOT / "v2")
 # Erratum R1.1 binary set locally (v8 trainer and panel, predictor from main 86fc02bb, admitted by
 # benchmarks/rev4_featpot_v2_predictor_parity_2026-10-01.json); in a fit-cell container the executor links the same
 # three binaries under target/debug.
@@ -84,15 +100,29 @@ def split_weight(spec: str) -> tuple[str, float | None]:
     return core, value
 
 
+def extra_arms() -> dict:
+    """Arms over columns appended after f1824 (v2-canon only): `<root>/wide/extra_arms.json`
+    {"schema": "rev4-featpot-v2c-extra-arms-v1", "width": W, "arms": {name: [column ids, each 1825 <= id < W]}},
+    written by `v2c_wide.py keeplists --extra-arm`. Absent file -> no extra arms (the Rev3 v2 root has none)."""
+    path = V2 / "wide" / "extra_arms.json"
+    if not path.is_file():
+        return {"width": WIDTH, "arms": {}}
+    record = json.loads(path.read_text())
+    if record.get("schema") != "rev4-featpot-v2c-extra-arms-v1":
+        raise ValueError(f"{path}: unexpected schema")
+    return record
+
+
 def parse_spec(spec: str) -> tuple[str, int]:
     """'c1' -> ('c1', 0); 'c1~p2' -> ('c1', 2); an '@h<w>' suffix is accepted and ignored here (split_weight).
-    Permutations exist for candidates, oracle_lo and oracle_hi (the sweep's null)."""
+    Permutations exist for candidates (and extra arms), oracle_lo and oracle_hi (the sweep's null)."""
     core, _ = split_weight(spec)
     base, _, perm = core.partition("~p")
     k = int(perm) if perm else 0
-    if base not in ("r0", *CANDIDATES, *CALIBRATION) or not 0 <= k <= N_PERMS:
+    extras = extra_arms()["arms"]
+    if base not in ("r0", *CANDIDATES, *CALIBRATION, *extras) or not 0 <= k <= N_PERMS:
         raise ValueError(f"bad v2 arm spec {spec!r}")
-    if k and base not in (*CANDIDATES, "oracle_lo", "oracle_hi"):
+    if k and base not in (*CANDIDATES, *extras, "oracle_lo", "oracle_hi"):
         raise ValueError(f"{spec!r}: permuted controls exist only for candidates and the oracles")
     return base, k
 
@@ -100,7 +130,7 @@ def parse_spec(spec: str) -> tuple[str, int]:
 def all_specs() -> list[str]:
     specs = ["r0", *CALIBRATION, *(f"oracle_lo~p{k}" for k in range(1, N_PERMS + 1)),
              *(f"oracle_hi~p{k}" for k in range(1, N_PERMS + 1))]
-    for arm in CANDIDATES:
+    for arm in (*CANDIDATES, *extra_arms()["arms"]):
         specs += [arm, *(f"{arm}~p{k}" for k in range(1, N_PERMS + 1))]
     return specs
 
@@ -117,6 +147,12 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
         return "main", variant, list(range(228, 944))
     if base in AUX_ORACLE:
         return "aux", variant, bank + [AUX_ORACLE[base]]
+    extras = extra_arms()
+    if base in extras["arms"]:  # columns appended after f1824 (v2-canon)
+        ids = extras["arms"][base]
+        if any(not WIDTH <= c < extras["width"] for c in ids) or len(set(ids)) != len(ids):
+            raise ValueError(f"{spec}: extra-arm columns outside {WIDTH}..{extras['width']}")
+        return "main", variant, bank + list(ids)
     ids = restore_data.arm_ids(base)
     if any(c < 0 for c in ids):  # the peer pair: arm p3 lives in the aux family
         added = [AUX_PEERS["gmsd"] if c == -1 else AUX_PEERS["gmsm"] if c == -2 else c for c in ids]

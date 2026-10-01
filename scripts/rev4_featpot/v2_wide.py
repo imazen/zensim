@@ -261,6 +261,7 @@ def main() -> None:
     ap.add_argument("action", choices=["pin", "build", "keeplists"])
     ap.add_argument("--variant", choices=VARIANTS, action="append")
     ap.add_argument("--family", choices=FAMILIES, action="append")
+    ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     args = ap.parse_args()
     if args.action == "pin":
         write_pin()
