@@ -152,7 +152,7 @@ def identity_violations(family, ident, arr):
     return int(np.count_nonzero(a))
 
 
-def bind(name, build_meta_path, binary):
+def bind(name, build_meta_path, binary, alt_digests=None):
     if not (ROOT / "raw").exists():
         raise SystemExit("run the extraction first")
     keys = keys_of(name)
@@ -170,19 +170,34 @@ def bind(name, build_meta_path, binary):
         raise SystemExit("extractor manifest has wrong input contract")
     build_meta = json.loads(Path(build_meta_path).read_text())
 
+    # --alt-digests: a table (pair_key, ref_sha_new, dist_sha_new, digest_match) of rows whose bank-key pixel digests describe
+    # an older decode (REEXTRACT: SafeSyn AVIF rows after the decoder fix). Such a row binds when the audit's digests equal
+    # the table's new digests for the same bank pair_key; every other row binds on the bank digests as before.
+    alt = {}
+    if alt_digests:
+        import pyarrow.parquet as _pq
+        t = _pq.read_table(alt_digests, columns=["pair_key", "ref_sha_new", "dist_sha_new", "digest_match"]).to_pydict()
+        alt = {k: (r, d) for k, r, d, m in zip(t["pair_key"], t["ref_sha_new"], t["dist_sha_new"], t["digest_match"]) if not m}
+    n_alt = 0
     with audit_path.open() as f:
         for i, line in enumerate(f):
             if i >= n:
                 raise SystemExit(f"{name}: extra audit row")
             a = json.loads(line)
-            if (a["reference"] != keys["ref_path"][i] or a["distorted"] != keys["dist_path"][i]
-                    or a["reference_pixels_sha256"] != keys["ref_pixels_sha256"][i]
-                    or a["distorted_pixels_sha256"] != keys["dist_pixels_sha256"][i]
-                    or pair_key(a["reference_pixels_sha256"], a["distorted_pixels_sha256"])
-                    != keys["pair_key"][i]):
+            paths_ok = a["reference"] == keys["ref_path"][i] and a["distorted"] == keys["dist_path"][i]
+            bank_ok = (a["reference_pixels_sha256"] == keys["ref_pixels_sha256"][i]
+                       and a["distorted_pixels_sha256"] == keys["dist_pixels_sha256"][i]
+                       and pair_key(a["reference_pixels_sha256"], a["distorted_pixels_sha256"]) == keys["pair_key"][i])
+            alt_ok = (not bank_ok and keys["pair_key"][i] in alt
+                      and (a["reference_pixels_sha256"], a["distorted_pixels_sha256"]) == alt[keys["pair_key"][i]])
+            if not paths_ok or not (bank_ok or alt_ok):
                 raise SystemExit(f"{name}: audit/key binding failed at {i}")
+            n_alt += alt_ok
         if i + 1 != n:
             raise SystemExit(f"{name}: audit has {i + 1} of {n} rows")
+    if alt_digests and n_alt != len(alt):
+        raise SystemExit(f"{name}: {n_alt} rows bound on alt digests, the table lists {len(alt)} stale rows")
+    print(f"RESTORE_BIND set={name} rows={n} alt_digest_rows={n_alt}")
 
     total = sum(w for _, _, w in FAMILIES.values())
     first = min(f for _, f, _ in FAMILIES.values())
@@ -365,12 +380,13 @@ if __name__ == "__main__":
     ap.add_argument("--set")
     ap.add_argument("--binary")
     ap.add_argument("--build-meta")
+    ap.add_argument("--alt-digests", help="pair_key/new-digest table for rows whose bank digests are stale (see bind)")
     a = ap.parse_args()
     if a.action == "pairs":
         for nme in sets():
             write_pairs(nme, ROOT / "pairs" / f"{nme}.tsv")
     elif a.action == "bind":
-        bind(a.set, a.build_meta, a.binary)
+        bind(a.set, a.build_meta, a.binary, a.alt_digests)
     elif a.action == "verify":
         verify()
     elif a.action == "draw":
