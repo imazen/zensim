@@ -61,6 +61,12 @@ def receipt_parts(root: Path, rec: dict) -> list[Path]:
 def members_for(root: Path, kind: str, selected: list[tuple[str, str]]) -> dict[str, Path]:
     files: dict[str, Path] = {}
     files["wide/keep_lists.json"] = root / "wide" / "keep_lists.json"
+    # v2_confirm_fit (and anything else calling v2_common.load_frozen) refuses a root without its freeze record, so every
+    # archive carries it; load_frozen re-hashes the receipts / keep lists / extra arms it pins, all of which are packed too.
+    if (root / "wide" / "frozen.json").is_file():
+        files["wide/frozen.json"] = root / "wide" / "frozen.json"
+    elif kind in ("confirm", "all"):
+        raise ValueError(f"{root}: not frozen; the confirmatory fits refuse an unfrozen root (run `v2c_wide.py freeze`)")
     if (root / "wide" / "extra_arms.json").is_file():
         files["wide/extra_arms.json"] = root / "wide" / "extra_arms.json"
     for family, variant in selected:

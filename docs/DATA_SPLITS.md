@@ -1109,3 +1109,9 @@ parquet schemas; no value of these columns was read. Uploaded to the LAN object 
 `s3://zentrain/jobs/fitv2confirm-20261001/inputs/`. No new population; the LAN store and workers are operator-controlled
 machines on the home network. The labels stay sealed until the single confirmatory read (label pins: CID22-B(23),
 AIC-4, KonJND JPEG SELECT/TERMINAL, CSIQ, MCL-JCI; `~/tmp/zensim-paper/rev4/LABELPIN_specs.json`).
+
+Addendum (2026-10-01 11:32 MT): the archive above lacked `wide/frozen.json`, which `v2_confirm_fit` requires
+(`v2_common.load_frozen`); found before any confirmatory cell ran, so no cell ever used it. `v2c_pack.py` now ships the
+freeze record. The replacement archive (sha256 `cf9b83179376c78471905c8e97e3280b3d45ea008123f9febdbd660f9046f99d`,
+7,752,619,775 bytes, 284 members = the same 283 plus `wide/frozen.json`) goes to the same store prefix; same populations,
+no new transport destination, labels still sealed.
