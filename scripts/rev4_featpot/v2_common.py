@@ -88,6 +88,12 @@ BOOT_SEED = 20260930
 REPLAY = "Rev4 POTENTIAL Instrument v2 diagnostic: pinned Rev3 944 plus pinned sidecars; never ship"
 
 
+def table_path(record: dict) -> Path:
+    """A receipt record's table file: the root-relative `rel` of a v2-canon receipt (so the tree can be promoted or packed
+    anywhere), else the absolute `path` of a Rev3 v2 receipt."""
+    return V2 / record["rel"] if "rel" in record else Path(record["path"])
+
+
 def split_weight(spec: str) -> tuple[str, float | None]:
     """'oracle_hi~p1@h2' -> ('oracle_hi~p1', 2.0): the instrument-retune sweep's human-weight override (design log E2).
     No suffix -> (spec, None), i.e. NOMINAL_WEIGHT['human']."""
@@ -167,6 +173,11 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
 def seeds(heldout: str, seed_index: int) -> tuple[int, int]:
     fold = SOURCE_ORDER.index(heldout)
     return INIT_SEEDS[seed_index], SAMPLE_SEEDS[(seed_index + fold) % len(SAMPLE_SEEDS)]
+
+
+def confirm_seeds(seed_index: int) -> tuple[int, int]:
+    """Full-data (confirmatory) fits hold out no source, so there is no fold offset: init[i], sample[i]."""
+    return INIT_SEEDS[seed_index], SAMPLE_SEEDS[seed_index]
 
 
 def human_dev(ref: str) -> bool:

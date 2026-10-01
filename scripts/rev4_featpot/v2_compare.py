@@ -109,12 +109,15 @@ def seed_mean(boot: np.ndarray) -> np.ndarray:
     return np.take_along_axis(boot.T, SEED_DRAWS, axis=1).mean(axis=1)
 
 
-def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str) -> dict:
-    base, miss0 = model("r0", head, source)
-    arm, miss1 = model(arm_spec, head, source)
+def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str, model_fn=None, keep_boot: bool = False) -> dict:
+    """`model_fn(spec, head, source) -> ((point[10], boot[10, B]), missing)`; default: the exploratory cells (`model`).
+    v2_confirm_read injects the confirmatory predictions through it; nothing else differs."""
+    model_fn = model_fn or model
+    base, miss0 = model_fn("r0", head, source)
+    arm, miss1 = model_fn(arm_spec, head, source)
     perms, missp = [], []
     for p in perm_specs:
-        m, miss = model(p, head, source)
+        m, miss = model_fn(p, head, source)
         perms.append(m)
         missp += [f"{p}:{i}" for i in miss]
     missing = [f"r0:{i}" for i in miss0] + [f"{arm_spec}:{i}" for i in miss1] + missp
@@ -136,12 +139,14 @@ def contrast(arm_spec: str, perm_specs: list[str], head: str, source: str) -> di
         out.update({"perm_deltas": p_deltas, "excess": e, "excess_ci95": [lo, hi],
                     "v1_pass": bool(delta >= MIN_GAIN and lo > 0 and delta > max(p_deltas)),
                     "regression": bool(hi < REGRESSION)})
+        if keep_boot:  # R2.1: the multiplicity test needs the per-draw excess; off by default (reports stay byte-identical)
+            out["excess_boot"] = e_boot
     return out
 
 
-def family(arm: str, head: str) -> dict:
+def family(arm: str, head: str, sources=SOURCE_ORDER, model_fn=None) -> dict:
     perms = [f"{arm}~p{k}" for k in range(1, N_PERMS + 1)]
-    per = {s: contrast(arm, perms, head, s) for s in SOURCE_ORDER}
+    per = {s: contrast(arm, perms, head, s, model_fn) for s in sources}
     if any(v["status"] != "OK" for v in per.values()):
         return {"arm": arm, "head": head, "status": "INCOMPLETE", "sources": per}
     passing = [s for s, v in per.items() if v["v1_pass"]]

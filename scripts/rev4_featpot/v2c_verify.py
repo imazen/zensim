@@ -25,7 +25,8 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from v2_common import AUX_GMSBANK, AUX_ORACLE, AUX_PEERS, FAMILIES, SOURCE_ORDER, SOURCES, TEACHERS, VARIANTS, WIDTH, sha
+from v2_common import (AUX_GMSBANK, AUX_ORACLE, AUX_PEERS, FAMILIES, SOURCE_ORDER, SOURCES, TEACHERS, VARIANTS, WIDTH, sha,
+                       table_path)
 
 REV3_V2 = Path("/var/tmp/rev4-featpot/v2")
 
@@ -59,14 +60,17 @@ def same_bits(a: np.ndarray, b: np.ndarray) -> bool:
     return a.shape == b.shape and np.array_equal(a.view(np.uint32), b.view(np.uint32))
 
 
-def check_cells(bank: Path, keys: pd.DataFrame, x: np.ndarray, rows: np.ndarray | None = None) -> tuple[int, int]:
-    """(rows checked, differing cells) over columns f0..f1824 of table x vs the bank, per member set."""
+def check_cells(bank: Path, keys: pd.DataFrame, x: np.ndarray, rows: np.ndarray | None = None,
+                columns: list[int] | None = None) -> tuple[int, int]:
+    """(rows checked, differing cells) over `columns` (default f0..f1824) of table x vs the bank, per member set."""
+    columns = list(range(WIDTH)) if columns is None else columns
     rows = np.arange(len(keys)) if rows is None else rows
     checked = diff = 0
     for member, idx in pd.Series(rows).groupby(keys.member_set.to_numpy()[rows]):
         sel = idx.to_numpy()
         want = bank_f64_rows(bank, str(member), keys.pair_key.to_numpy()[sel])
-        diff += int((x[sel, :WIDTH].view(np.uint32) != want.view(np.uint32)).sum())
+        diff += int((np.ascontiguousarray(x[sel][:, columns]).view(np.uint32)
+                     != np.ascontiguousarray(want[:, columns]).view(np.uint32)).sum())
         checked += len(sel)
     return checked, diff
 
@@ -114,6 +118,24 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
         if old.is_file() and not (out.resolve() == REV3_V2.resolve()):
             ok = pq.read_table(old).to_pandas()
             gate("rev3keys", ok.equals(keys), leg=source, rows=len(keys))
+    # ---- aux family (needs the peer output): bank columns, gmsbank and the peer pair equal their sources
+    aux_dir = out / "wide" / "aux" / "real"
+    if (aux_dir / "receipt.json").is_file():
+        for source in SOURCE_ORDER:
+            keys = pq.read_table(aux_dir / f"{source}.keys.parquet").to_pandas()
+            ref, score, x = read_wide(aux_dir / f"{source}.parquet", width)
+            cols = [*range(944), *AUX_GMSBANK]
+            n, diff = check_cells(bank, keys, x, None, cols)
+            peers_ok = True
+            for member in SOURCES[source]:
+                rec_peers = json.loads((out / "wide" / "main" / "real" / "receipt.json").read_text())["bank"][member].get("peers")
+                peer = pq.read_table(rec_peers["path"], columns=["pair_key", "gmsd", "gmsm"]).to_pandas().drop_duplicates("pair_key")
+                sel = (keys.member_set == member).to_numpy()
+                got = peer.set_index("pair_key").reindex(keys.pair_key[sel])[["gmsd", "gmsm"]].to_numpy(np.float64).astype(np.float32)
+                peers_ok &= same_bits(x[sel][:, [AUX_PEERS["gmsd"], AUX_PEERS["gmsm"]]], np.ascontiguousarray(got))
+            zero = [c for c in range(width) if c not in {*range(944), *AUX_GMSBANK, *AUX_PEERS.values(), *AUX_ORACLE.values()}]
+            gate("aux", diff == 0 and peers_ok and not x[:, zero].any(), leg=source, differing_cells=diff, peers_equal=peers_ok,
+                 other_columns_zero=bool(not x[:, zero].any()))
     # ---- permutations
     for family in FAMILIES:
         real_dir = out / "wide" / family / "real"
@@ -180,19 +202,22 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
         record = json.loads(confirm.read_text())
         for name in CONFIRM_SETS:
             rec = record["sets"][name]
-            for family in FAMILIES:
-                if family not in rec or "skipped" in rec[family]:
-                    continue
-                dest = out / "wide" / "confirm" / family
-                keys = pq.read_table(dest / f"{name}.keys.parquet").to_pandas()
-                ref, score, x = read_wide(dest / f"{name}.parquet", width)
-                bank_keys = pq.read_table(bank_file(bank, name, "keys.parquet"), columns=["pair_key", "pixels_identical"]).to_pandas()
-                want = bank_keys.pair_key[~bank_keys.pixels_identical].tolist()
-                cols = set(keys.columns)
-                n, diff = (check_cells(bank, keys, x) if family == "main" else (len(keys), 0))
-                gate("confirm", diff == 0 and keys.pair_key.tolist() == want and not score.any()
-                     and not {"target", "human_score", "label"} & cols, set=name, family=family, rows=n,
-                     differing_cells=diff, key_order_equal=keys.pair_key.tolist() == want, human_score_all_zero=not score.any())
+            for family, by_variant in rec["tables"].items():
+                for variant, table in by_variant.items():
+                    if variant == "skipped":
+                        continue
+                    dest = table_path(table).parent
+                    keys = pq.read_table(dest / f"{name}.keys.parquet").to_pandas()
+                    ref, score, x = read_wide(dest / f"{name}.parquet", width)
+                    bank_keys = pq.read_table(bank_file(bank, name, "keys.parquet"),
+                                              columns=["pair_key", "pixels_identical"]).to_pandas()
+                    want = bank_keys.pair_key[~bank_keys.pixels_identical].tolist()
+                    n, diff = check_cells(bank, keys, x) if (family == "main" and variant == "real") else (len(keys), 0)
+                    gate("confirm", diff == 0 and keys.pair_key.tolist() == want and not score.any()
+                         and not {"target", "human_score", "label"} & set(keys.columns)
+                         and sha(table_path(table)) == table["sha256"], set=name, family=family, variant=variant,
+                         rows=n, differing_cells=diff, key_order_equal=keys.pair_key.tolist() == want,
+                         human_score_all_zero=not score.any())
     # ---- receipts: file hashes
     bad = []
     for fam in FAMILIES:
@@ -202,8 +227,9 @@ def verify(bank: Path, out: Path, extras, sample: int) -> int:
                 continue
             for lname, rec in json.loads(rp.read_text())["legs"].items():
                 for part in ([rec["full"]] if "full" in rec else []) + [rec[s] for s in ("fit", "dev") if s in rec]:
-                    if sha(Path(part["path"])) != part["sha256"] or sha(Path(part["path"] + ".manifest.json")) != part["manifest_sha256"]:
-                        bad.append(part["path"])
+                    tp = table_path(part)
+                    if sha(tp) != part["sha256"] or sha(Path(f"{tp}.manifest.json")) != part["manifest_sha256"]:
+                        bad.append(str(tp))
     gate("receipts", not bad, changed=bad)
     (out / "wide" / "verify.json").write_text(json.dumps({"gates": results, "all_ok": not failed}, indent=1) + "\n")
     print(json.dumps({"verify": str(out / "wide" / "verify.json"), "all_ok": not failed}))

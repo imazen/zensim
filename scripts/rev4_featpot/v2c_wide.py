@@ -213,6 +213,9 @@ def load_bank_set(bank: Path, name: str, extras: list[Extra], peer_dir: Path | N
         if pp.is_file():
             peers = gather_by_key(pp, ["gmsd", "gmsm"], keys.pair_key.to_numpy(), f"{name}/peers")
             receipt["peers"] = {"path": str(pp), "sha256": sha(pp)}
+            manifest = safe_path(Path(peer_dir) / "_MANIFEST.json")
+            if manifest.is_file():
+                receipt["peers"]["manifest_sha256"] = sha(manifest)
     return BankSet(name, keys, X, peers, receipt)
 
 
@@ -253,7 +256,9 @@ def human_member(name: str, bank: BankSet) -> tuple[pd.DataFrame, np.ndarray, np
     """One member set: stimulus rows (old bank labels by key, as data.load), identical keys dropped, Rev4 features."""
     import restore_data
     from data import load as load_old
-    frame, _ = load_old(name, features=False)  # pair_key, source_row_id, ref_basename, target; one row per stimulus
+    frame, meta = load_old(name, features=False)  # pair_key, source_row_id, ref_basename, target; one row per stimulus
+    bank.receipt["labels"] = {"file": meta["label_file"], "sha256": sha(Path(meta["label_file"])),
+                              "target": meta["target"], "label_scale": meta["label_scale"]}
     flags = restore_data.identical_flags(name)
     old = frame.pair_key.map(flags).astype(bool).to_numpy()
     new = bank.keys.set_index("pair_key").pixels_identical.reindex(frame.pair_key).to_numpy()
@@ -296,6 +301,8 @@ def teacher_leg(leg: str, bank: Path, extras: list[Extra], peer_dir: Path | None
     files = v2_wide.pinned(leg)
     b = load_bank_set(bank, bank_name, extras, peer_dir)
     receipts[bank_name] = b.receipt
+    b.receipt["labels"] = {"teacher_pin": str(v2_wide.TEACHER_PIN), "teacher_pin_sha256": sha(v2_wide.TEACHER_PIN),
+                           **{k: {"file": str(files[k]), "sha256": sha(files[k])} for k in ("labels", "r915_fit", "r915_dev")}}
     old_keys = pq.read_table(files["keys"], columns=["pair_key"]).to_pandas().pair_key.to_numpy()
     if not np.array_equal(old_keys, b.keys.pair_key.to_numpy()):
         raise ValueError(f"{leg}: Rev4 key order differs from the old bank's")
@@ -367,7 +374,8 @@ def variant_matrix(leg: Leg, family: str, variant: str, width: int) -> np.ndarra
     return out
 
 
-def write_table(path: Path, ref: np.ndarray, score: np.ndarray, X: np.ndarray, family: str, note: str, width: int) -> dict:
+def write_table(root: Path, path: Path, ref: np.ndarray, score: np.ndarray, X: np.ndarray, family: str, note: str,
+                width: int) -> dict:
     path = safe_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     names = [f"f{i}" for i in range(width)]
@@ -384,7 +392,7 @@ def write_table(path: Path, ref: np.ndarray, score: np.ndarray, X: np.ndarray, f
         "source_bank_feature_set_id": CANON_FEATURE_SET_ID,
         "composite": f"Rev4 POTENTIAL Instrument v2-canon {family} wide table ({layout}); diagnostic only; " + note,
         "formula_revision": FORMULA_REVISION}) + "\n")
-    return {"path": str(path), "sha256": sha(path), "manifest_sha256": sha(Path(f"{path}.manifest.json")),
+    return {"rel": str(path.relative_to(root)), "sha256": sha(path), "manifest_sha256": sha(Path(f"{path}.manifest.json")),
             "rows": len(ref), "references": int(len(set(ref.astype(str).tolist())))}
 
 
@@ -438,7 +446,7 @@ def build(bank: Path, out: Path, legs: str, families: list[str], variants: list[
                 ref = leg.meta.ref_basename.to_numpy()
                 if leg_name in SOURCES:
                     score = 100.0 * leg.y01
-                    rec["full"] = write_table(dest / f"{leg_name}.parquet", ref, score, x, family,
+                    rec["full"] = write_table(out, dest / f"{leg_name}.parquet", ref, score, x, family,
                                               f"human source {leg_name} (evaluation)", width)
                     rec["keys_sha256"] = write_keys(dest / f"{leg_name}.keys.parquet", leg.meta, META)
                     dev = np.array([human_dev(r) for r in ref.astype(str)])
@@ -447,7 +455,7 @@ def build(bank: Path, out: Path, legs: str, families: list[str], variants: list[
                     score = leg.meta.target.to_numpy(dtype=np.float64)  # raw signed SSIMULACRA2, --target-scale 1
                     for split in ("fit", "dev"):
                         m = (leg.meta.split == split).to_numpy()
-                        rec[split] = write_table(dest / f"{leg_name}_{split}.parquet", ref[m], score[m], x[m], family,
+                        rec[split] = write_table(out, dest / f"{leg_name}_{split}.parquet", ref[m], score[m], x[m], family,
                                                  f"teacher {leg_name} {split}", width)
                         # row-identity sidecar (pair_key per table row) so verify can check every cell against the bank
                         rec[split]["keys_sha256"] = write_keys(dest / f"{leg_name}_{split}.keys.parquet", leg.meta[m], META)
@@ -467,7 +475,7 @@ def build(bank: Path, out: Path, legs: str, families: list[str], variants: list[
                 chunks = [(parts[t][0][parts[t][3] == want_dev], parts[t][1][parts[t][3] == want_dev],
                            parts[t][2][parts[t][3] == want_dev]) for t in members]
                 ref = np.concatenate([c[0].ref_basename.to_numpy() for c in chunks])
-                rec[split] = write_table(dest / f"{gname}_{split}.parquet", ref, np.concatenate([c[2] for c in chunks]),
+                rec[split] = write_table(out, dest / f"{gname}_{split}.parquet", ref, np.concatenate([c[2] for c in chunks]),
                                          np.concatenate([c[1] for c in chunks]), family,
                                          f"human training leg {gname} ({'+'.join(members)}), {split}", width)
             recs.setdefault((family, variant), {})[gname] = rec
@@ -492,35 +500,53 @@ def build(bank: Path, out: Path, legs: str, families: list[str], variants: list[
 
 # ------------------------------------------------------------------ confirmatory tables (features only)
 def build_confirm(bank: Path, out: Path, families: list[str], extras: list[Extra], peer_dir: Path | None,
-                  sets: tuple[str, ...] = CONFIRM_SETS) -> dict:
-    """Real-variant, features-only tables for the sealed sets: `human_score` constant 0, keys without any target. Reads
-    only features.parquet + keys.parquet + _MANIFEST.json of the Rev4 bank (bank_file refuses everything else)."""
+                  variants: list[str] | None = None, sets: tuple[str, ...] = CONFIRM_SETS) -> dict:
+    """Features-only tables for the sealed sets: `human_score` constant 0, keys without any target. Reads only
+    features.parquet + keys.parquet + _MANIFEST.json of the Rev4 bank (bank_file refuses everything else). All variants by
+    default: permuted ones are label-free (a within-reference key permutation needs only keys) and are the matched null.
+    Layout: confirm/<family>/<set>.parquet (real), confirm/<family>/<variant>/<set>.parquet (permuted)."""
     width = total_width(extras)
-    record = {"schema": CONFIRM_SCHEMA, "label": "features only; no label read or written", "width": width,
-              "feature_set_id": CANON_FEATURE_SET_ID, "table_code": code_identity(), "sets": {}}
+    variants = variants or list(VARIANTS)  # matched null: every variant has its own label-free confirmatory table
+    path = out / "wide" / "confirm" / "receipt.json"
+    record = json.loads(path.read_text()) if path.is_file() else {
+        "schema": CONFIRM_SCHEMA, "label": "features only; no label read or written", "width": width,
+        "feature_set_id": CANON_FEATURE_SET_ID, "sets": {}}
+    if record["schema"] != CONFIRM_SCHEMA or record["width"] != width:
+        raise ValueError(f"{path}: existing confirm receipt has another schema or width; build into a clean --out")
+    record["table_code"] = code_identity()
     for name in sets:
         b = load_bank_set(bank, name, extras, peer_dir)
         keep = ~b.keys.pixels_identical.to_numpy().astype(bool)
         keys = b.keys.loc[keep].reset_index(drop=True)
         meta = pd.DataFrame({"pair_key": keys.pair_key, "row_id": keys.row_id, "ref_basename": keys.ref_group,
                              "member_set": name})
-        rec = {"bank": b.receipt, "rows": int(keep.sum()), "identical_rows_dropped": int((~keep).sum()),
-               "dropped_pair_keys_sha256": hashlib.sha256("\n".join(b.keys.pair_key[~keep]).encode()).hexdigest()}
+        rec = record["sets"].setdefault(name, {"tables": {}})
+        rec.update({"bank": b.receipt, "rows": int(keep.sum()), "identical_rows_dropped": int((~keep).sum()),
+                    "dropped_pair_keys_sha256": hashlib.sha256("\n".join(b.keys.pair_key[~keep]).encode()).hexdigest()})
+        leg = Leg(name, meta, b.X[keep], None if b.peers is None else b.peers[keep], [0.0, 1.0], np.zeros(keep.sum()),
+                  {n: np.zeros(keep.sum(), np.float32) for n in AUX_ORACLE})
         for family in families:
             if family == "aux" and b.peers is None:
-                rec[family] = {"skipped": "peer columns missing from the REEXTRACT peer output"}
+                rec["tables"].setdefault(family, {})["skipped"] = "peer columns missing from the REEXTRACT peer output"
                 continue
-            leg = Leg(name, meta, b.X[keep], None if b.peers is None else b.peers[keep], [0.0, 1.0], np.zeros(keep.sum()),
-                      {n: np.zeros(keep.sum(), np.float32) for n in AUX_ORACLE})
-            leg_x, _ = family_matrix(leg, family, width)  # aux oracle columns stay zero: an oracle needs a label
-            dest = out / "wide" / "confirm" / family
-            rec[family] = write_table(dest / f"{name}.parquet", meta.ref_basename.to_numpy(), np.zeros(len(meta)), leg_x,
-                                      family, f"confirmatory set {name} (features only)", width)
-            rec[family]["keys_sha256"] = write_keys(dest / f"{name}.keys.parquet", meta,
-                                                    ["pair_key", "row_id", "ref_basename", "member_set"])
-        record["sets"][name] = rec
-        print(json.dumps({"confirm": name, "rows": rec["rows"]}), flush=True)
-    path = out / "wide" / "confirm" / "receipt.json"
+            x, added = family_matrix(leg, family, width)  # aux oracle columns stay zero: an oracle needs a label
+            for variant in variants:
+                xv = x
+                if variant != "real":
+                    salt = 0 if family == "main" else 500
+                    seed = PERM_SEED_BASE + salt + int(variant[1:]) + 1000 * (len(LEG_ORDER) + CONFIRM_SETS.index(name))
+                    xv = x.copy()
+                    xv[:, added] = permute_within_reference(meta.ref_basename.to_numpy(), meta.pair_key.to_numpy(),
+                                                            x[:, added], np.ones(len(x), dtype=bool),
+                                                            np.random.default_rng(seed))
+                dest = out / "wide" / "confirm" / family / ("" if variant == "real" else variant)
+                table = write_table(out, dest / f"{name}.parquet", meta.ref_basename.to_numpy(), np.zeros(len(meta)), xv,
+                                    family, f"confirmatory set {name} ({variant}, features only)", width)
+                table["keys_sha256"] = write_keys(dest / f"{name}.keys.parquet", meta,
+                                                  ["pair_key", "row_id", "ref_basename", "member_set"])
+                rec["tables"].setdefault(family, {}).pop("skipped", None)
+                rec["tables"][family][variant] = table
+        print(json.dumps({"confirm": name, "rows": rec["rows"], "variants": variants}), flush=True)
     path.write_text(json.dumps(record, indent=1) + "\n")
     print(json.dumps({"receipt": str(path), "sha256": sha(path)}), flush=True)
     return record
@@ -554,12 +580,14 @@ def main() -> None:
     ap.add_argument("--peer-dir", type=Path, default=CANON_PEERS)
     ap.add_argument("--sample", type=int, default=10_000, help="verify: SafeSyn sample rows")
     args = ap.parse_args()
+    import v2_common
+    v2_common.V2 = args.out  # receipts hold root-relative table paths (table_path); the root is --out
     extras = parse_extras(args.extra)
     fams = args.family or list(FAMILIES)
     if args.action == "build":
         build(args.bank, args.out, args.legs, fams, args.variant or list(VARIANTS), extras, args.peer_dir)
     elif args.action == "confirm":
-        build_confirm(args.bank, args.out, fams, extras, args.peer_dir)
+        build_confirm(args.bank, args.out, fams, extras, args.peer_dir, args.variant)
     elif args.action == "keeplists":
         arms = {}
         for spec in args.extra_arm:

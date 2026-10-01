@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
 from v2_common import (EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
-                       parse_spec, seeds, sha)
+                       parse_spec, seeds, sha, table_path)
 
 WIDE_SCHEMAS = ("rev4-featpot-v2-wide-v2", "rev4-featpot-v2c-wide-v1")
 EPOCH_RE = re.compile(r"epoch\s+(\d+)\s+\|.*?val\(geomean3\)=([+-]?\d+\.\d+)")
@@ -37,7 +37,7 @@ def run(cmd: list[str], log: Path) -> None:
 
 
 def checked(record: dict) -> Path:
-    path = Path(record["path"])
+    path = table_path(record)
     if sha(path) != record["sha256"] or sha(Path(f"{path}.manifest.json")) != record["manifest_sha256"]:
         raise ValueError(f"{path}: table changed after its receipt")
     return path
@@ -58,6 +58,32 @@ def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
     if not np.isfinite(pred).all():
         raise ValueError(f"{out}: nonfinite prediction")
     return pred
+
+
+def train_command(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
+                  out: Path) -> list[str]:
+    """The trainer argv of one v2 cell; `groups` = (name, path, train_weight, val_weight, mode). Shared with
+    v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
+    cmd = [str(TRAINER)]
+    for name, path, tw, vw, mode in groups:
+        cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
+    cmd += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(HIDDEN),
+            "--epochs", str(EPOCHS), "--pairs-per-epoch", str(PAIRS_PER_EPOCH),
+            "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),
+            "--pair-sampling", "uniform", "--max-features", str(width), "--keep-features", str(keep_file),
+            "--mse-weight", "1", "--early-stop-patience", "0", "--val-policy", "mean",
+            "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", "1", "--no-auto-eval",
+            "--historical-replay", REPLAY, "--out", str(out)]
+    if head == "N":
+        cmd.append("--nonneg-distance")
+    return cmd
+
+
+def read_curve(log: Path) -> dict[int, float]:
+    curve = {int(e): float(v) for e, v in EPOCH_RE.findall(log.read_text())}
+    if sorted(curve) != list(range(EPOCHS)):
+        raise ValueError(f"validation curve incomplete: {len(curve)} of {EPOCHS} epochs")
+    return curve
 
 
 def main() -> None:
@@ -106,23 +132,10 @@ def main() -> None:
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
-    cmd = [str(TRAINER)]
-    for name, path, tw, vw, mode in groups:
-        cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
-    cmd += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(HIDDEN),
-            "--epochs", str(EPOCHS), "--pairs-per-epoch", str(PAIRS_PER_EPOCH),
-            "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),
-            "--pair-sampling", "uniform", "--max-features", str(width), "--keep-features", str(keep_file),
-            "--mse-weight", "1", "--early-stop-patience", "0", "--val-policy", "mean",
-            "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", "1", "--no-auto-eval",
-            "--historical-replay", REPLAY, "--out", str(dest / "refit" / "best.bin")]
-    if args.head == "N":
-        cmd.append("--nonneg-distance")
     (dest / "refit").mkdir(exist_ok=True)
-    run(cmd, dest / "train.log")
-    curve = {int(e): float(v) for e, v in EPOCH_RE.findall((dest / "train.log").read_text())}
-    if sorted(curve) != list(range(EPOCHS)):
-        raise ValueError(f"validation curve incomplete: {len(curve)} of {EPOCHS} epochs")
+    run(train_command(groups, init_seed, sample_seed, width, keep_file, args.head, dest / "refit" / "best.bin"),
+        dest / "train.log")
+    curve = read_curve(dest / "train.log")
     best_epoch = max(curve, key=curve.get)
     heldout = legs[args.heldout]
     table = checked(heldout["full"])
