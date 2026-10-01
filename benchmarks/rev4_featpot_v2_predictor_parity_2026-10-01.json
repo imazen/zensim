@@ -697,5 +697,14 @@
    "bake_sha256": "ecb7570664178f915befca47b9f833bb383be27e812e20fa6c942f63afc050b6",
    "prediction_sha256": "5d451ae0f081b16959828b42a0b24eefed38e8f95507ec52d8bf598ddb5a5f6b"
   }
- ]
+ ],
+ "cross_host": {
+  "method": "the same 42 bakes predicted by the candidate on each spec family's real aic3 table, outputs compared by sha256 with the dev-box outputs (ZENSIM_MAX_TIER=v3 there; the other hosts have no AVX-512)",
+  "hosts": {
+   "i265": "identical 42/42",
+   "r3500": "identical 42/42",
+   "r3800x": "identical 42/42",
+   "tower (fit-v2-v2 container)": "identical 42/42"
+  }
+ }
 }

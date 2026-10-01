@@ -171,4 +171,4 @@ v8 predictor `776adb37…49d5`: one-epoch bakes of all 21 base specs × heads N 
 kadid tables of each spec's family. 52 of 52 outputs from the 26 bakes both predictors read are byte-identical; the
 16 restore-family bakes (a1, a1m, b1, b1s, b2, b2m, c8n, rall) predict on the candidate only; 0 differ, 0 fail.
 Receipt: `benchmarks/rev4_featpot_v2_predictor_parity_2026-10-01.json`. Cells run the v8 trainer and panel with this
-predictor.
+predictor. The candidate's aic3 outputs for all 42 bakes are also byte-identical on the four AVX2 fleet hosts (same receipt).
