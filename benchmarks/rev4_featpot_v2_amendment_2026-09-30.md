@@ -281,3 +281,22 @@ weight are read with the same flag and are refused unless that file accepts.
 and `v2_tune.py` now read `srocc_signed`, so an inverted model can never score as a good one. On every stored v2 cell the
 signed value is positive, so the R3 rule and the calibration read are unchanged (calibration.json byte-identical after
 the switch).
+
+## Revision R2.1 (2026-10-01 03:46 MDT, user decision, before any canon arm result was read) — multiplicity control for the confirmatory read
+
+**User decision:** "Short list + Holm". It replaces R2 step 4's family verdict as the primary confirmatory test; R2's
+per-set V1/V2 are still computed and reported as secondary.
+
+1. **Frozen short list (≤ 6 entries), chosen from the canon exploratory arms by this rule, fixed now.** An entry is a
+   (family, head) pair. Eligible: pairs whose canon exploratory verdict (v2 statistics on the five exploratory sources,
+   accepted canon instrument) passes V1 on ≥ 2 sources with no regression. If more than 6 are eligible, keep the 6 with
+   the largest mean permutation excess across the five exploratory sources (ties: head N first, then fewer added
+   columns). If none is eligible, no arm is read on the sealed sets. The list, the program and data hashes and the
+   candidate column lists are pinned in a pin amendment before the first sealed label is read.
+2. **Primary test per entry:** the mean of the permutation excess E over the five sealed sets (each set weighted
+   equally; KonJND-JPEG SELECT is the KonJND surface, TERMINAL stays sanity-only), with a one-sided p-value from the
+   same hierarchical bootstrap (seeds × references, B = 2000): the fraction of bootstrap draws of the mean excess ≤ 0.
+   Holm step-down at α = 0.05 over the frozen list. An entry is confirmed when it is Holm-significant and no sealed set
+   shows a regression (E upper bound < −0.005).
+3. Seeds, heads, controls, orientation and exposure are as in R2. Head-F-only confirmations are reported as
+   "helps a free head".
