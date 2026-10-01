@@ -367,7 +367,10 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
     // research-only): the eval surface must load Rev4 research bakes (the V3 dial
     // gate scores them); the served product entries refuse Rev4 separately.
     let four = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"4"}]));
-    assert!(BakeScorer::new(&four).is_ok(), "\"4\" is a known (research) revision");
+    assert!(
+        BakeScorer::new(&four).is_ok(),
+        "\"4\" is a known (research) revision"
+    );
     // Revision 3 is a KNOWN revision (issue #61): a bake declaring it loads,
     // and scoring its own feature rows is legitimate in any process. A NARROW
     // (basic/peak) bake also serves its PIXELS at its declared revision in
