@@ -86,11 +86,11 @@ def human_set(name: str) -> pd.DataFrame:
     frame, _ = load_bank(name)
     side = restore_data.side_join(name, RESEARCH_IDS)          # verifies every registered pin
     peer, _ = restore_data.peer_side(name)
-    out = frame.merge(side, on="pair_key", how="left", sort=False, validate="many_to_one", indicator=True)
+    out = frame.merge(side, on="pair_key", how="left", sort=False, validate="many_to_one", indicator=True)  # joinsafety-ok: pair_key-keyed feature join with validate= and full-coverage asserts, not a metric-table join
     if not (out._merge == "both").all():
         raise ValueError(f"{name}: research sidecar coverage mismatch")
-    out = out.drop(columns="_merge").merge(peer, on="pair_key", how="left", sort=False,
-                                           validate="many_to_one", indicator=True)
+    out = out.drop(columns="_merge")
+    out = out.merge(peer, on="pair_key", how="left", sort=False, validate="many_to_one", indicator=True)  # joinsafety-ok: pair_key-keyed feature join with validate= and full-coverage asserts, not a metric-table join
     if not (out._merge == "both").all():
         raise ValueError(f"{name}: peer coverage mismatch")
     out = out.drop(columns="_merge")
