@@ -1,0 +1,115 @@
+{
+ "P1": [
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/minus_basic@h32__F/without_kadid_s3/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/main/real/kadid.parquet",
+   "identical": true,
+   "sha_v8": "087d70f850526d4c",
+   "sha_v9": "087d70f850526d4c"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo@h32__F/without_konfig_s1/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/real/konfig.parquet",
+   "identical": true,
+   "sha_v8": "bffa629470584a55",
+   "sha_v9": "bffa629470584a55"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo~p3@h32__F/without_konfig_s4/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/p3/konfig.parquet",
+   "identical": true,
+   "sha_v8": "da3d88d3a12e4e4a",
+   "sha_v9": "da3d88d3a12e4e4a"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/r0@h32__N/without_aic3_s8/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/main/real/aic3.parquet",
+   "identical": true,
+   "sha_v8": "18962ea56acffaa4",
+   "sha_v9": "18962ea56acffaa4"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo~p2@h32__F/without_aic3_s6/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/p2/aic3.parquet",
+   "identical": true,
+   "sha_v8": "e75abc5fdeff0454",
+   "sha_v9": "e75abc5fdeff0454"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_hi@h32__F/without_cid22_a25_s4/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/real/cid22_a25.parquet",
+   "identical": true,
+   "sha_v8": "15439922f4ce07fa",
+   "sha_v9": "15439922f4ce07fa"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo~p3@h32__N/without_tid2013_s3/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/p3/tid2013.parquet",
+   "identical": true,
+   "sha_v8": "98d57dbf5222f9e4",
+   "sha_v9": "98d57dbf5222f9e4"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo~p1@h32__N/without_konfig_s2/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/p1/konfig.parquet",
+   "identical": true,
+   "sha_v8": "c3237806f7a7f928",
+   "sha_v9": "c3237806f7a7f928"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_hi@h32__N/without_konfig_s1/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/real/konfig.parquet",
+   "identical": true,
+   "sha_v8": "ab977fa7e91f72f1",
+   "sha_v9": "ab977fa7e91f72f1"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo~p1@h32__F/without_kadid_s9/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/p1/kadid.parquet",
+   "identical": true,
+   "sha_v8": "fa90770654b82d0b",
+   "sha_v9": "fa90770654b82d0b"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/oracle_lo~p2@h32__N/without_cid22_a25_s6/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/aux/p2/cid22_a25.parquet",
+   "identical": true,
+   "sha_v8": "542ad56b2f53b1b4",
+   "sha_v9": "542ad56b2f53b1b4"
+  },
+  {
+   "bake": "/var/tmp/rev4-featpot/v2/cells/minus_basic@h32__N/without_tid2013_s7/refit/last.bin",
+   "table": "/var/tmp/rev4-featpot/v2/wide/main/real/tid2013.parquet",
+   "identical": true,
+   "sha_v8": "451044733ff92c64",
+   "sha_v9": "451044733ff92c64"
+  }
+ ],
+ "P2": [
+  {
+   "group": "safesyn_development",
+   "rows": 38757,
+   "stride": 10,
+   "srocc": 0.9920059986496277,
+   "logged": 0.992,
+   "match": true
+  },
+  {
+   "group": "cid22_development",
+   "rows": 3785,
+   "stride": 1,
+   "srocc": 0.9816478596734097,
+   "logged": 0.9816,
+   "match": true
+  },
+  {
+   "group": "human_development",
+   "rows": 2363,
+   "stride": 1,
+   "srocc": 0.7302476417827043,
+   "logged": 0.7302,
+   "match": true
+  }
+ ],
+ "pass": true
+}

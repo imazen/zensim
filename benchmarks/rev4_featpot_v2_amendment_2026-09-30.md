@@ -356,3 +356,24 @@ Change: every v2 cell keeps the trainer's final-epoch weights (`EPOCH_RULE = "la
 verified on a real cell to reproduce E5's epoch-119 checkpoint score exactly). It applies to the acceptance re-run, the
 canon calibration, the screen, the full arms and the confirmatory fits. Cells made under the previous rule (the R3 sweep)
 are not reused by the acceptance re-run.
+
+### Execution note (2026-10-01 07:30 MDT, before any canon cell result was read) — canon program v9 (predictor only)
+
+The first canon smoke (two `screen_main` cells on program v8, `9607eada`) trained to epoch 119 and then failed at
+held-out prediction: the v8 predictor (`bake_dial_refit` from main `cafed5ca`) refuses a bake that reads f1825–f1852
+("bake reads features unavailable to the extraction plan"), because the SIGNEDFEAT families are registered only on
+`pr/signedfeat` (imazen/zensim#64, unmerged). Every bake that reads texgain or satsign is affected (`screen_main`, the
+texgain/satsign arms); bakes reading only f0–f1824 are not. Program v9 (`93dc93d0`, image `fit-v2-v9`) is v8 with only
+the predictor replaced: `bake_dial_refit` built from a local merge of main `b926258e` and `pr/signedfeat` `a659715e`
+(bookmark `quarantine/claude/v9pred`, sha256 `56da0529…`); trainer, panel and every script are unchanged. Admission
+(`benchmarks/rev4_featpot_effaudit/v9_predictor_gate_2026-10-01.json`): **P1** 12/12 acceptance-run bakes (every
+calibration spec, both heads, all five sources) predict byte-identically to the v8 predictor; **P2** on the smoke's
+`screen_main` head-F bake (KonFiG held out) the v9 predictions reproduce the trainer's own epoch-119 dev SROCC on all
+three dev legs to the logged 4 decimals (SafeSyn 0.9920 at the trainer's 4,096-row stride, CID22 0.9816, human 0.7302).
+The v8 canon jobset was retired before any cell finished; the canon calibration + screen runs as `fitv2canon2-20261001`.
+
+*Review 14 (sampler preflight for the confirmatory fits):* `scripts/rev4_featpot/v2c_sampler_preflight.py` rebuilds
+`v2_confirm_fit`'s train groups on the canon root (SafeSyn, CID22, human_all at weight 32) and runs a release
+`subset_sim` from main with `--require-disjoint-sampler-windows` over the ten confirm sample seeds at 120 × 50,000: pass,
+pooled row coverage 0.925–0.927 per seed (`benchmarks/rev4_featpot_effaudit/confirm_sampler_preflight_2026-10-01.tsv`).
+The sampler does not read the group loss mode, so `:withinref` replays the fits' draws.
