@@ -1339,6 +1339,26 @@ fn zero_masked_w1_rows(w1: &mut [f64], n_hidden: usize, mask: Option<&[bool]>) -
     zeroed
 }
 
+/// Ascending half-open `(start, end)` runs of kept input rows, or `None` when
+/// no input is dropped (the full-width walk is then already minimal). A row
+/// beyond the mask's length counts as kept, matching `zero_masked_w1_rows`.
+fn kept_row_ranges(mask: Option<&[bool]>, n_rows: usize) -> Option<Vec<(u32, u32)>> {
+    let mask = mask?;
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    let mut dropped = false;
+    for k in 0..n_rows {
+        if mask.get(k).copied().unwrap_or(true) {
+            match runs.last_mut() {
+                Some(r) if r.1 as usize == k => r.1 += 1,
+                _ => runs.push((k as u32, k as u32 + 1)),
+            }
+        } else {
+            dropped = true;
+        }
+    }
+    dropped.then_some(runs)
+}
+
 fn record_best_val(v: f64) {
     if let Ok(mut g) = LAST_BEST_VAL.lock() {
         *g = Some(v);
@@ -2635,6 +2655,14 @@ pub fn train_mlp_strategy(
     } else {
         Vec::new()
     };
+    // `--keep-features`: dropped inputs are standardized-zero with pinned-zero
+    // rows (w == m == v == g == 0), which the full Adam update maps to itself
+    // bit-for-bit — so the fused pass visits only the kept row ranges.
+    let active_rows = if fuse_w1 {
+        kept_row_ranges(input_keep_mask().as_deref(), w1.len() / n_hidden)
+    } else {
+        None
+    };
 
     // Norm-in-Norm hybrid loss gate (Li et al. 2020). When opted in via
     // `norm_in_norm_weight > 0.0`, the auxiliary loss is computed on
@@ -2952,6 +2980,7 @@ pub fn train_mlp_strategy(
                     hyperparams.l2_lambda,
                     fmult.as_ref().map(|v| v.as_slice()),
                     n_hidden,
+                    active_rows.as_deref(),
                 );
                 apply_post_adam_penalties(&mut w1, n_hidden, lr);
                 nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
@@ -6964,6 +6993,7 @@ impl AdamState {
         l2_scale: f64,
         l2_mult: Option<&[f64]>,
         n_hidden: usize,
+        active_rows: Option<&[(u32, u32)]>,
     ) {
         self.t += 1;
         let beta1: f64 = 0.9;
@@ -6993,6 +7023,7 @@ impl AdamState {
             bc1,
             bc2,
             lr,
+            active_rows,
         });
 
         let step_one = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {

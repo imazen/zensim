@@ -817,6 +817,15 @@ pub(crate) struct AdamW1FusedArgs<'a> {
     pub bc1: f64,
     pub bc2: f64,
     pub lr: f64,
+    /// Ascending, disjoint, half-open row ranges `(start, end)` the v3/v4
+    /// kernels visit (`None` = every row). Rows outside the ranges are left
+    /// untouched. Exact only when every skipped row has `w == m == v == g ==
+    /// +0.0` and `xa == xb == 0.0` (a `--keep-features` pinned-zero input):
+    /// the full update maps such a row to itself bit-for-bit
+    /// (`m' = 0, v' = 0, w' = 0 - (lr*0)/(0+eps) = +0`). The composition
+    /// fallback ignores the ranges and updates every row, which is the same
+    /// fixed point.
+    pub active_rows: Option<&'a [(u32, u32)]>,
 }
 
 /// Dispatch entry for the fused pair update. Caller contract: `n_hidden > 0`,
@@ -948,57 +957,61 @@ fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1F
     let (dha_chunks, _) = args.dha[..nh].as_chunks::<4>();
     let (dhb_chunks, _) = args.dhb[..nh].as_chunks::<4>();
 
-    for row in 0..n_rows {
-        let base = row * nh;
-        let sa = args.xa[row];
-        let sb = args.xb[row];
-        let sa_v = f64x4::splat(token, sa);
-        let sb_v = f64x4::splat(token, sb);
-        let do_a = sa != 0.0;
-        let do_b = sb != 0.0;
-        let sm_v = f64x4::splat(
-            token,
-            match args.l2_mult {
-                Some(mult) => args.l2_scale * mult[row],
-                None => args.l2_scale,
-            },
-        );
-        let (w_chunks, _) = args.w[base..base + nh].as_chunks_mut::<4>();
-        let (g_chunks, _) = args.g[base..base + nh].as_chunks_mut::<4>();
-        let (m_chunks, _) = args.m[base..base + nh].as_chunks_mut::<4>();
-        let (v_chunks, _) = args.v[base..base + nh].as_chunks_mut::<4>();
-        for (c, (((wc, gc), mc), vc)) in w_chunks
-            .iter_mut()
-            .zip(g_chunks.iter_mut())
-            .zip(m_chunks.iter_mut())
-            .zip(v_chunks.iter_mut())
-            .enumerate()
-        {
-            let mut g = f64x4::load(token, gc);
-            if do_a {
-                g = sa_v.mul_add(f64x4::load(token, &dha_chunks[c]), g);
+    let full = [(0u32, n_rows as u32)];
+    let ranges: &[(u32, u32)] = args.active_rows.unwrap_or(&full);
+    for &(r0, r1) in ranges {
+        for row in r0 as usize..(r1 as usize).min(n_rows) {
+            let base = row * nh;
+            let sa = args.xa[row];
+            let sb = args.xb[row];
+            let sa_v = f64x4::splat(token, sa);
+            let sb_v = f64x4::splat(token, sb);
+            let do_a = sa != 0.0;
+            let do_b = sb != 0.0;
+            let sm_v = f64x4::splat(
+                token,
+                match args.l2_mult {
+                    Some(mult) => args.l2_scale * mult[row],
+                    None => args.l2_scale,
+                },
+            );
+            let (w_chunks, _) = args.w[base..base + nh].as_chunks_mut::<4>();
+            let (g_chunks, _) = args.g[base..base + nh].as_chunks_mut::<4>();
+            let (m_chunks, _) = args.m[base..base + nh].as_chunks_mut::<4>();
+            let (v_chunks, _) = args.v[base..base + nh].as_chunks_mut::<4>();
+            for (c, (((wc, gc), mc), vc)) in w_chunks
+                .iter_mut()
+                .zip(g_chunks.iter_mut())
+                .zip(m_chunks.iter_mut())
+                .zip(v_chunks.iter_mut())
+                .enumerate()
+            {
+                let mut g = f64x4::load(token, gc);
+                if do_a {
+                    g = sa_v.mul_add(f64x4::load(token, &dha_chunks[c]), g);
+                }
+                if do_b {
+                    g = sb_v.mul_add(f64x4::load(token, &dhb_chunks[c]), g);
+                }
+                let w = f64x4::load(token, wc);
+                if l2_on {
+                    // mul+add — two roundings, matching l2_row_avx exactly.
+                    g += sm_v * w;
+                }
+                let m = f64x4::load(token, mc);
+                let v = f64x4::load(token, vc);
+                let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
+                let gg = g * g;
+                let v_new = one_minus_b2_v.mul_add(gg, beta2_v * v);
+                let m_hat = m_new * inv_bc1_v;
+                let v_hat = v_new * inv_bc2_v;
+                let denom = v_hat.sqrt() + eps_v;
+                let w_new = w - (lr_v * m_hat) / denom;
+                m_new.store(mc);
+                v_new.store(vc);
+                w_new.store(wc);
+                zero_v.store(gc);
             }
-            if do_b {
-                g = sb_v.mul_add(f64x4::load(token, &dhb_chunks[c]), g);
-            }
-            let w = f64x4::load(token, wc);
-            if l2_on {
-                // mul+add — two roundings, matching l2_row_avx exactly.
-                g += sm_v * w;
-            }
-            let m = f64x4::load(token, mc);
-            let v = f64x4::load(token, vc);
-            let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
-            let gg = g * g;
-            let v_new = one_minus_b2_v.mul_add(gg, beta2_v * v);
-            let m_hat = m_new * inv_bc1_v;
-            let v_hat = v_new * inv_bc2_v;
-            let denom = v_hat.sqrt() + eps_v;
-            let w_new = w - (lr_v * m_hat) / denom;
-            m_new.store(mc);
-            v_new.store(vc);
-            w_new.store(wc);
-            zero_v.store(gc);
         }
     }
 }
@@ -1524,6 +1537,7 @@ mod tests {
                         bc1: 1.0 - 0.9f64.powi(t as i32),
                         bc2: 1.0 - 0.999f64.powi(t as i32),
                         lr: 0.005,
+                        active_rows: None,
                     });
                     for (name, a, b) in [
                         ("w", &wo, &wf),
@@ -1611,6 +1625,7 @@ mod tests {
                         bc1: 1.0 - 0.9f64.powi(t as i32),
                         bc2: 1.0 - 0.999f64.powi(t as i32),
                         lr: 0.005,
+                        active_rows: None,
                     });
                     for (name, a, b) in [
                         ("w", &wo, &wt),
@@ -1640,6 +1655,97 @@ mod tests {
                 // domain); arm it wherever the host provides AVX-512.
                 if let Some(v4) = v4 {
                     check("v4", &|a| adam_pair_fused_inner_v4(v4, a));
+                }
+            }
+        }
+    }
+
+    /// `active_rows` (the `--keep-features` fast path) is bit-identical to the
+    /// full walk when the skipped rows are pinned-zero (w = m = v = g = 0,
+    /// x = 0): over several steps, with and without L2 / per-row multipliers.
+    #[test]
+    fn fused_w1_active_rows_bit_identical() {
+        let (nf, nh) = (97usize, 32usize);
+        let n = nf * nh;
+        let kept = |r: usize| !(r % 3 == 1 || (40..52).contains(&r) || r == nf - 1);
+        let runs: Vec<(u32, u32)> = {
+            let mut v: Vec<(u32, u32)> = Vec::new();
+            for r in (0..nf).filter(|&r| kept(r)) {
+                match v.last_mut() {
+                    Some(l) if l.1 as usize == r => l.1 += 1,
+                    _ => v.push((r as u32, r as u32 + 1)),
+                }
+            }
+            v
+        };
+        use archmage::SimdToken;
+        let _lock = archmage::testing::lock_token_testing();
+        let v3 =
+            archmage::X64V3Token::summon().expect("this test needs an x86-64-v3 (AVX2+FMA) host");
+        for (l2_scale, has_mult) in [(0.0, false), (1e-5, false), (1e-5, true)] {
+            let (mut w0, mut g0, mut m0, mut v0) = synth_state(n, 0xAC71);
+            let mult: Vec<f64> = (0..nf).map(|r| 0.5 + (r % 5) as f64).collect();
+            let pin = |a: &mut Vec<f64>| {
+                for r in (0..nf).filter(|&r| !kept(r)) {
+                    a[r * nh..(r + 1) * nh].fill(0.0);
+                }
+            };
+            for a in [&mut w0, &mut g0, &mut m0, &mut v0] {
+                pin(a);
+            }
+            // Each step's dropped g rows start at +0.0 (the post-step invariant).
+            let (mut wf, mut gf, mut mf, mut vf) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+            let (mut wa, mut ga, mut ma, mut va) = (w0, g0, m0, v0);
+            for step in 1..=6u64 {
+                let (mut xa, mut xb, dha, dhb) = pair_inputs(nf, nh, 0x77 + step);
+                for r in (0..nf).filter(|&r| !kept(r)) {
+                    xa[r] = 0.0;
+                    xb[r] = 0.0;
+                }
+                let t = std::hint::black_box(step);
+                let (bc1, bc2) = (1.0 - 0.9f64.powi(t as i32), 1.0 - 0.999f64.powi(t as i32));
+                let run = |w: &mut Vec<f64>,
+                           g: &mut Vec<f64>,
+                           m: &mut Vec<f64>,
+                           v: &mut Vec<f64>,
+                           active: Option<&[(u32, u32)]>| {
+                    adam_pair_fused_inner_v3(
+                        v3,
+                        &mut AdamW1FusedArgs {
+                            w,
+                            g,
+                            m,
+                            v,
+                            xa: &xa,
+                            dha: &dha,
+                            xb: &xb,
+                            dhb: &dhb,
+                            l2_scale,
+                            l2_mult: has_mult.then_some(mult.as_slice()),
+                            n_hidden: nh,
+                            beta1: 0.9,
+                            beta2: 0.999,
+                            eps: 1e-8,
+                            bc1,
+                            bc2,
+                            lr: 0.005,
+                            active_rows: active,
+                        },
+                    );
+                };
+                run(&mut wf, &mut gf, &mut mf, &mut vf, None);
+                run(&mut wa, &mut ga, &mut ma, &mut va, Some(&runs));
+                for (name, a, b) in [
+                    ("w", &wf, &wa),
+                    ("g", &gf, &ga),
+                    ("m", &mf, &ma),
+                    ("v", &vf, &va),
+                ] {
+                    assert_eq!(
+                        bits_of(a),
+                        bits_of(b),
+                        "active_rows diverged: {name} step={step} l2={l2_scale} mult={has_mult}"
+                    );
                 }
             }
         }
