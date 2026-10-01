@@ -30,12 +30,13 @@ def mean_excess(rec: dict) -> float:
     return float(np.mean([v["excess"] for v in rec["sources"].values()]))
 
 
-def shortlist(compare_dir: Path, arms: list[str]) -> tuple[list[dict], dict]:
-    """(entries, provenance): eligible entries ranked by the R2.1 rule, capped at 6, with the compare files they came from."""
+def shortlist(compare_dir: Path, arms: list[str], tag: str = "") -> tuple[list[dict], dict]:
+    """(entries, provenance): eligible entries ranked by the R2.1 rule, capped at 6, with the compare files they came from.
+    `tag` is v2_compare's weight suffix (`_h<w>` under amendment R3), so the files read are the ones it wrote."""
     found, prov = [], {}
     for arm in arms:
         for head in HEADS:
-            path = compare_dir / f"{arm}_{head}.json"
+            path = compare_dir / f"{arm}_{head}{tag}.json"
             if not path.is_file():
                 continue
             rec = json.loads(path.read_text())
@@ -50,7 +51,8 @@ def shortlist(compare_dir: Path, arms: list[str]) -> tuple[list[dict], dict]:
 def build(args) -> dict:
     root = Path(args.root)
     frozen, frozen_sha = load_frozen(root)
-    entries, prov = shortlist(Path(args.compare_dir), args.arm)
+    tag = "" if args.human_weight is None else f"_h{args.human_weight:g}"
+    entries, prov = shortlist(Path(args.compare_dir), args.arm, tag)
     if not entries:
         raise SystemExit("no eligible (family, head): no arm is read on the sealed sets (R2.1)")
     panel = os.environ.get("ZEN_PANEL_BIN")

@@ -376,6 +376,11 @@ class PinBuilder(unittest.TestCase):
             for k, arm in enumerate(many):            # more than 6 eligible: capped at six
                 rec(arm, "N", [0.001 * k] * 5, 2)
             self.assertEqual(len(v2c_pin.shortlist(d, [*many, "c1", "c4"])[0]), 6)
+            for f in d.glob("*.json"):                 # v2_compare --human-weight 32 writes <arm>_<head>_h32.json
+                f.rename(f.with_name(f.stem + "_h32.json"))
+            self.assertEqual(v2c_pin.shortlist(d, ["c1", "c2", "c3", "c4"])[0], [])
+            got, prov = v2c_pin.shortlist(d, ["c1", "c2", "c3", "c4"], "_h32")
+            self.assertEqual([(e["arm"], e["head"]) for e in got], [("c4", "N"), ("c1", "N"), ("c1", "F")])
 
 
 class Freeze(unittest.TestCase):
