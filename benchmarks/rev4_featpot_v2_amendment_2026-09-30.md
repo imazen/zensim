@@ -300,3 +300,17 @@ per-set V1/V2 are still computed and reported as secondary.
    shows a regression (E upper bound < −0.005).
 3. Seeds, heads, controls, orientation and exposure are as in R2. Head-F-only confirmations are reported as
    "helps a free head".
+
+## Revision R2.2 (2026-10-01 04:14 MDT, coordinator, before any sealed label was read) — singleton-reference sets in R2.1
+
+The independent review of the confirmatory pipeline (`~/tmp/zensim-paper/rev4/REVIEW_CONFIRM.md`, finding 5) measured that
+KonJND-JPEG SELECT has one pair per reference, so the within-reference permutation that defines every permuted control
+leaves its added columns unchanged (100% of sampled cells; ≈ 5% elsewhere). The v2 null keeps between-reference
+information by design, so the permutation excess measures within-reference ranking value — of which a one-pair-per-
+reference set has none. Its excess is therefore ≈ 0 by construction and would only dilute R2.1's mean.
+
+Change (mechanics only; R2.1's rule otherwise stands): R2.1's primary statistic is the mean permutation excess over the
+**four** sealed sets with multi-pair references (CID22-B, the AIC-4 sample, CSIQ, MCL-JCI). KonJND-JPEG SELECT contributes
+its seed-paired Δ vs R0 (with bootstrap CI) as a secondary readout, and the regression veto applies to that Δ there
+(Δ upper bound < −0.005 = regression). TERMINAL stays a sanity guard. Holm, α, the short-list rule and the free-head label
+are unchanged.
