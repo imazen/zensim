@@ -342,3 +342,17 @@ are unchanged.
 not families. `all` (the C1–C4 union) and `rall` (every research column) contain the other candidates, so they would win
 the importance ranking by construction. They are reported as an upper bound on the research columns' contribution and
 never take a selection slot; the selection runs over the 15 single-family registered arms plus texgain and satsign.
+
+## Revision R4 (2026-10-01 06:34 MDT, by the rule registered in design log E5/E5b, before the acceptance re-run) — keep the final epoch
+
+Design log E5 (seeds 0–3, 72 cells) and the registered re-test E5b (seeds 4–9, 108 cells on the fleet), human weight 8,
+folds KADID/KonFiG/AIC-3; pooled 10 seeds per fold. Head N (the rule's head): oracle detection current rule 0.0222,
+human-dev 0.0234, **final epoch 0.0374**; r0 mean 0.8141 / 0.8118 / **0.8185**; r0 seed sd 0.0067 / 0.0097 / **0.0075**
+(+12%, limit +25%). The registered criterion selects the final epoch. (E5 alone, at 4 seeds, had failed the sd guard; the
+re-test was registered before its cells ran.) Head F, reported: detection 0.0198 / 0.0205 / 0.0217; r0 0.8199 / 0.8190 /
+0.8157; sd 0.0069 / 0.0076 / 0.0088.
+
+Change: every v2 cell keeps the trainer's final-epoch weights (`EPOCH_RULE = "last"`, `v2_lodo_mlp.train_and_select`;
+verified on a real cell to reproduce E5's epoch-119 checkpoint score exactly). It applies to the acceptance re-run, the
+canon calibration, the screen, the full arms and the confirmatory fits. Cells made under the previous rule (the R3 sweep)
+are not reused by the acceptance re-run.
