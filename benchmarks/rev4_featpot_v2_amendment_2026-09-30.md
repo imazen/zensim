@@ -183,3 +183,13 @@ The acceptance rule is **unchanged**. `v2_compare` now also reports, per source,
 permuted-control mean Δ), `perm_null_ci_contains_zero`, and `centring_failure_within_noise` (acceptance failed only on
 centring, and every failing source's CI contains 0). If that flag is set, the instrument is reported as not accepted,
 with that diagnosis, and the decision goes to the user before any arm is read.
+
+### Erratum R1.3 (2026-09-30 21:18 MT, before any arm result was read) — the C3 arm's inputs carry a known binning defect
+
+The REV4CANON lane found that the tailhist (C3, f1154–f1297) histogram lookup sent every sign-bit-set value (tiny
+negatives from f32 rounding in `edge_dissim`) to the top bin, so a cell with more than 1% such pixels emits the top
+edge as its p95/p99 (`p99 = 1.2709 > max` in bank rows; REVIEW_PARTB measured 2.01–3.36% phantom top-edge saturation on
+KADID/TID art/det cells). The fix (`c3negfold`) applies at Rev4 only; the Rev3 sidecars this provisional run reads keep
+the defect, and they must, so the run stays reproducible. Consequence: the provisional (v2-Rev3) result for arm `c3`
+(and any arm containing tailhist Bin slots: `all`) is reported with this limitation and is not evidence about the
+corrected family; only v2-canon, on the re-extracted Rev4 bank, can be.
