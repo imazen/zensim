@@ -2714,6 +2714,128 @@ mod tests {
         });
     }
 
+    /// rev4canon C1: at [`FormulaRevision::Rev4`] every pixel's XYB is
+    /// position-independent — identical bits in a full SIMD chunk and in the
+    /// row tail, on EVERY dispatch tier, at band widths not divisible by the
+    /// lane count. The canonical body ([`srgb_xyb_canon`]/[`linear_xyb_canon`])
+    /// is one scalar per-pixel form, so this holds by construction; the gate
+    /// exists so no later change can route Rev4's opsin leaf back to a
+    /// tier-dispatched kernel whose remainder runs different arithmetic (the
+    /// 2026-09-25 chunk-vs-remainder defect).
+    #[test]
+    fn rev4_xyb_body_tail_bits_identical_across_tiers() {
+        // The permutation disables SIMD tokens PROCESS-WIDE, and the archmage
+        // lock only serialises its own holders, so in this shared lib test
+        // binary it would race every tier-sensitive test. The test therefore
+        // re-executes itself as a child process (the repo's self-re-exec
+        // pattern, e.g. `metric::bake`) and the permutation runs there alone.
+        const CHILD: &str = "ZENSIM_XYB_TIER_CHILD";
+        const SENTINEL: &str = "REV4-XYB-BODY-TAIL permutations=";
+        if std::env::var_os(CHILD).is_none() {
+            let exe = std::env::current_exe().expect("test binary path");
+            let t0 = std::time::Instant::now();
+            let out = std::process::Command::new(exe)
+                .args([
+                    "color::tests::rev4_xyb_body_tail_bits_identical_across_tiers",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .expect("re-exec the test binary");
+            let (so, se) = (
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
+            );
+            assert!(out.status.success(), "child failed\n{so}\n{se}");
+            assert!(so.contains(SENTINEL), "the child never ran its body\n{so}");
+            println!(
+                "rev4 XYB body==tail child: {:.2?}; {}",
+                t0.elapsed(),
+                so.lines().find(|l| l.contains(SENTINEL)).unwrap_or("")
+            );
+            return;
+        }
+        let _tier_lock = archmage::testing::lock_token_testing();
+        use crate::feature_defs::FormulaRevision::Rev4;
+        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
+
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut srgb: Vec<[u8; 3]> = vec![[0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 0, 255]];
+        srgb.extend((0..1500).map(|_| {
+            let v = next();
+            [v as u8, (v >> 8) as u8, (v >> 16) as u8]
+        }));
+        let lin: Vec<[f32; 3]> = (0..1500)
+            .map(|_| {
+                let f = |v: u64| (v & 0xFF_FFFF) as f32 / (1u64 << 24) as f32 * 1.5 - 0.25;
+                let v = next();
+                [f(v), f(v >> 20), f(v.rotate_left(7))]
+            })
+            .collect();
+
+        type Convert<'a, P> = &'a dyn Fn(&[P], &mut [f32], &mut [f32], &mut [f32]);
+        fn check<P: Copy>(what: &str, px: &[P], convert: Convert<'_, P>) {
+            let one = |p: P| {
+                let band = [p; 8];
+                let (mut x, mut y, mut b) = ([0f32; 8], [0f32; 8], [0f32; 8]);
+                convert(&band, &mut x, &mut y, &mut b);
+                for l in 1..8 {
+                    assert_eq!(
+                        (x[0].to_bits(), y[0].to_bits(), b[0].to_bits()),
+                        (x[l].to_bits(), y[l].to_bits(), b[l].to_bits()),
+                        "{what}: lanes of one full chunk disagree"
+                    );
+                }
+                (x[0].to_bits(), y[0].to_bits(), b[0].to_bits())
+            };
+            let reference: Vec<_> = px.iter().map(|&p| one(p)).collect();
+            // widths with a nonempty remainder under both the 8- and 16-wide
+            // chunkings the SIMD kernels used.
+            for n in [9usize, 13, 17, 23, 29, 31, 33, 37, 41] {
+                for start in 0..px.len().saturating_sub(n).min(48) {
+                    let band = &px[start..start + n];
+                    let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
+                    convert(band, &mut x, &mut y, &mut b);
+                    for i in 0..n {
+                        assert_eq!(
+                            (x[i].to_bits(), y[i].to_bits(), b[i].to_bits()),
+                            reference[start + i],
+                            "{what}: n={n} start={start} pos {i}: tail/body bits differ"
+                        );
+                    }
+                }
+            }
+        }
+
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            check("srgb_to_positive_xyb@rev4", &srgb, &|p, x, y, b| {
+                srgb_to_positive_xyb_planar_into_at_revision(p, x, y, b, Rev4)
+            });
+            check("linear_to_positive_xyb@rev4", &lin, &|p, x, y, b| {
+                linear_to_positive_xyb_planar_into(p, x, y, b, Rev4)
+            });
+            check(
+                "linear_to_positive_xyb_unclamped@rev4",
+                &lin,
+                &|p, x, y, b| linear_to_positive_xyb_planar_into_unclamped(p, x, y, b, Rev4),
+            );
+            eprintln!("rev4 XYB body==tail: permutation {} clean", perm.label);
+        });
+        assert!(report.permutations_run >= 1);
+        println!(
+            "REV4-XYB-BODY-TAIL permutations={} all position-identical",
+            report.permutations_run
+        );
+    }
+
     /// The unclamped converter handles out-of-gamut input without NaN/inf:
     /// the opsin mix's `max(0)` keeps the cube-root domain valid.
     #[test]
