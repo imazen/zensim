@@ -259,6 +259,16 @@ class Screen(unittest.TestCase):
         k = pq.read_table(self.BANK / "aic3" / "keys.parquet", columns=["pair_key"]).to_pandas()
         self.assertEqual(sc.worst_mask("aic3", sc.codecs_for("aic3", k.pair_key.to_numpy()[:5], self.BANK)).sum(), 0)  # no worst types
 
+    def test_union_arms_never_take_a_slot(self):
+        import v2c_screen as sc
+        imp = {"N": {"all": 0.20, "rall": 0.19, "csfw": 0.03, "c7": 0.02, "c3": 0.05, "b2": 0.01, "a1": 0.04, "p1": 0.0, "c8n": 0.006},
+               "F": {}}
+        out = sc.select(imp, {"N": {"all": 0.3, "rall": 0.3, "c3": 0.01}})
+        self.assertNotIn("all", out["selected"]); self.assertNotIn("rall", out["selected"])
+        self.assertNotIn("all", out["rank_by_head_N_importance"])
+        self.assertEqual(out["unions_upper_bound"]["all"]["N"], 0.20)
+        self.assertEqual(out["selected"][:3], ["c3", "a1", "csfw"])
+
     def test_selection_rule(self):
         import v2c_screen as sc
         n = {f"f{i}": 1.0 - 0.1 * i for i in range(10)}                      # f0 .. f9 by head-N importance

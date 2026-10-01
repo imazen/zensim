@@ -43,6 +43,9 @@ MIN_TARGETED_ROWS = 20
 # family's arm name; an arm without an E4 entry is not eligible for the sign-consistency pick.
 E4_SIGN_CONSISTENT = {"csfw": (7, 12), "a1": (7, 36), "b2": (12, 228)}
 N_TOP, N_EXTRA_MAX, N_TOP_TARGETED = 6, 2, 3
+# Amendment R2.3 clarification: union arms are not families. `all` (the C1-C4 union) and `rall` (every research column)
+# would win the ranking by construction; they are reported as an upper bound and never take a selection slot.
+UNIONS = ("all", "rall")
 
 
 # ------------------------------------------------------------------ families and types
@@ -172,12 +175,12 @@ def select(importance: dict, targeted: dict, e4: dict = E4_SIGN_CONSISTENT) -> d
     in the top 3 by head-N targeted importance not already chosen (in that order), then any family with >= 50% sign-consistent slots
     in design log E4 not already chosen; cap 8."""
     n_imp, f_imp = importance["N"], importance.get("F", {})
-    fams = [f for f, v in n_imp.items() if v is not None]
+    fams = [f for f, v in n_imp.items() if v is not None and f not in UNIONS]
     rank = sorted(fams, key=lambda f: (-n_imp[f], -(f_imp.get(f) or 0.0), f))
     chosen = rank[:N_TOP]
     reasons = {f: "top-6 head-N importance" for f in chosen}
     extra = []
-    t_rank = sorted([f for f, v in targeted["N"].items() if v is not None], key=lambda f: (-targeted["N"][f], -(f_imp.get(f) or 0.0), f))
+    t_rank = sorted([f for f, v in targeted["N"].items() if v is not None and f not in UNIONS], key=lambda f: (-targeted["N"][f], -(f_imp.get(f) or 0.0), f))
     for f in t_rank[:N_TOP_TARGETED]:
         if f not in chosen and f not in extra:
             extra.append(f)
@@ -190,6 +193,7 @@ def select(importance: dict, targeted: dict, e4: dict = E4_SIGN_CONSISTENT) -> d
     selected = chosen + extra
     return {"selected": selected, "reasons": {f: reasons[f] for f in selected},
             "not_tested_in_full": [f for f in rank if f not in selected], "rank_by_head_N_importance": rank,
+            "unions_upper_bound": {u: {"N": n_imp.get(u), "F": f_imp.get(u)} for u in UNIONS if u in n_imp},
             "note": "exploratory screen; unselected families are 'not tested in full', never null results (R2.3 item 6)"}
 
 

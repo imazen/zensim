@@ -337,3 +337,8 @@ are unchanged.
    five sources, 10 seeds) on the canon tables. R2.1's short list (≤ 6) is drawn from these arms by R2.1's rule.
 6. The screen is exploratory. Families not selected are reported with their screen statistics as "not tested in full",
    never as null results.
+
+*R2.3 clarification (2026-10-01 06:25 MDT, coordinator, before any screen result on the real cells exists):* union arms are
+not families. `all` (the C1–C4 union) and `rall` (every research column) contain the other candidates, so they would win
+the importance ranking by construction. They are reported as an upper bound on the research columns' contribution and
+never take a selection slot; the selection runs over the 15 single-family registered arms plus texgain and satsign.
