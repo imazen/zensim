@@ -193,3 +193,37 @@ KADID/TID art/det cells). The fix (`c3negfold`) applies at Rev4 only; the Rev3 s
 the defect, and they must, so the run stays reproducible. Consequence: the provisional (v2-Rev3) result for arm `c3`
 (and any arm containing tailhist Bin slots: `all`) is reported with this limitation and is not evidence about the
 corrected family; only v2-canon, on the re-extracted Rev4 bank, can be.
+
+## Revision R2 (2026-09-30 22:18 MT, user decision, before any arm result was read) — exploratory design sources, sealed confirmation
+
+**User decision (verbatim choices):** "Also use human labels" for Rev4 feature/math design; confirmatory holdouts
+"AIC-4, CSIQ, KonJND-JPEG / CID22-B, MCL-JCI".
+
+**Roles from now on.**
+- **Exploratory (design) data:** the five v2 sources (KADID = kadid_train ∪ kadid_select, TID2013, KonFiG = train ∪ val,
+  CID22-A(25), AIC-3) and every result computed on them: the registered P0/P2/D2 grids, stability selection, the
+  deterministic arms, Instrument v2 calibration and arms, on any bank revision. Their results may inform Rev4 arithmetic
+  and feature design freely; each design change cites the evidence that motivated it in a design log. Nothing computed on
+  these sources is adoption evidence.
+- **Confirmatory holdouts (sealed until the confirmatory read):** CID22-B (24 refs, 2,100 pairs), the AIC-4 sample
+  (300), KonJND-JPEG SELECT (404 refs; the 100-ref TERMINAL split is reported only as a touch-once sanity guard, never a
+  ranking surface, per the existing ruling), CSIQ (866) and MCL-JCI (5,000). Their pixels are already extracted in the
+  bank; their labels stay sealed under `/var/tmp/rev4-featbank/_sealed/`. KADID TERMINAL, LIVE and every secret holdout
+  stay untouched and are not part of this protocol.
+
+**Confirmatory run (registered now, executed once, after design freezes).**
+1. Inputs: the canonical Rev4 bank and the five confirmatory sets re-extracted with the same frozen binary (REEXTRACT);
+   the candidate arms (column lists) and R0, frozen in a pin amendment before the first confirmatory label read; same
+   trainer, predictor, panel binaries and the v2 recipe (R915 teacher legs + the human leg of all five exploratory
+   sources, heads N and F, 10 seeds, 3 permuted controls per arm).
+2. One full-data fit per (arm, head, seed): no exploratory source is held out; each fit predicts every confirmatory set.
+3. Statistics per confirmatory set as in v2 (seed-paired Δ vs R0, permutation excess E, hierarchical bootstrap over
+   seeds × references, B = 2000), with each set's declared target orientation.
+4. Verdict per family: V1 on ≥ 2 of the 5 confirmatory sets and no regression (E upper bound < −0.005) on any; V2 seed
+   consistency (≥ 7/10) on the passing sets; V3 dial gates for head-N survivors. Families passing only under head F are
+   reported as "helps a free head".
+5. Exposure: each confirmatory set's labels are read once, for the frozen candidates. No design change may follow from
+   them; a later change needs a new holdout. Receipts in `docs/DATA_SPLITS.md`.
+
+**Consequences.** v2-Rev3 and v2-canon on the five sources are exploratory. The instrument-acceptance gate stays as an
+instrument check. Erratum R1.3's C3 limitation applies to exploratory reads of the Rev3 bank only.

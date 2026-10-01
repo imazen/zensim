@@ -1025,3 +1025,11 @@ Addendum (2026-09-30 18:52 MT / 2026-10-01 00:52 UTC): the jobset using program 
 in the fit-cell executor's link creation). The same archive (`71e05dd2…`, unchanged) is copied server-side to the
 replacement jobset, run with program `ff2e3ec63c4ecaf07ffd612bb9352ab35d42b89ada43ae354400b3aa96064f09` and image
 `ghcr.io/imazen/zenfleet-worker:fit-v2-v3`. No new population and no new transport destination.
+
+## Exposure ledger — 2026-09-30 22:18 MT: Rev4 confirmation holdouts designated (user decision)
+
+The user chose to use human labels on the five Instrument v2 sources for Rev4 design and designated CID22-B, the AIC-4
+sample, KonJND-JPEG (SELECT as the confirmatory surface; TERMINAL-100 as a touch-once sanity guard), CSIQ and MCL-JCI as the
+confirmatory holdouts (`benchmarks/rev4_featpot_v2_amendment_2026-09-30.md` revision R2). Their labels stay sealed and
+unread until the single confirmatory read of frozen candidates; no label of these sets was read in making this
+designation. KADID TERMINAL, LIVE and secret holdouts are not part of it and stay untouched.
