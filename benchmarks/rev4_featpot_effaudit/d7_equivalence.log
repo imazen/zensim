@@ -1,0 +1,23 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=2/4 avail=46763MiB :: python3 /var/tmp/rev4-featpot/v2/d7_equivalence.py
+kadid aux all rows=7869 cols=184 identical=True old=0.6s new=0.01s
+kadid aux subset rows=7869 cols=184 identical=True old=0.6s new=0.01s
+tid2013 aux all rows=3000 cols=184 identical=True old=0.2s new=0.01s
+tid2013 aux subset rows=3000 cols=184 identical=True old=0.2s new=0.01s
+tid2013 main all rows=3000 cols=881 identical=True old=0.8s new=0.03s
+tid2013 main subset rows=3000 cols=881 identical=True old=0.8s new=0.03s
+konfig aux all rows=756 cols=184 identical=True old=0.1s new=0.01s
+konfig aux subset rows=756 cols=184 identical=True old=0.1s new=0.01s
+konfig main all rows=756 cols=881 identical=True old=0.5s new=0.03s
+konfig main subset rows=756 cols=881 identical=True old=0.5s new=0.02s
+cid22_a25 aux all rows=2192 cols=184 identical=True old=0.2s new=0.01s
+cid22_a25 aux subset rows=2192 cols=184 identical=True old=0.2s new=0.01s
+aic3 aux all rows=600 cols=184 identical=True old=0.1s new=0.00s
+aic3 aux subset rows=600 cols=184 identical=True old=0.1s new=0.00s
+aic3 main all rows=600 cols=881 identical=True old=0.3s new=0.02s
+aic3 main subset rows=600 cols=881 identical=True old=0.3s new=0.02s
+safesyn aux all rows=179811 cols=184 identical=True old=85.3s new=2.61s
+safesyn aux subset rows=179811 cols=184 identical=True old=80.4s new=2.41s
+cid22 aux all rows=15948 cols=184 identical=True old=1.6s new=0.03s
+cid22 aux subset rows=15948 cols=184 identical=True old=1.6s new=0.03s
+BAD 0
+run-heavy: done rc=0 209s | peak-RSS 7.74GiB | min-avail 31800MiB | peak-load 15.31

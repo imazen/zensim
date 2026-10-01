@@ -226,8 +226,25 @@ def panel_batch(jobs, stats: str = "full", timeout: float = 1800.0) -> list[dict
     return _run_batch("".join(parts), stats, timeout)
 
 
+def render_indexed_jobs(jobs, base_names) -> str:
+    """Render (label, x_name, y_name, indices_or_None) jobs once, for reuse with many base vectors.
+
+    The text is exactly what `panel_batch_indexed` builds for the same jobs; pass it back as `rendered_jobs`
+    when the same index sets are evaluated against different bases (e.g. one bootstrap per model).
+    """
+    parts = []
+    for label, xn, yn, idx in jobs:
+        if "\t" in str(label) or "\n" in str(label):
+            raise ValueError(f"label {label!r} must not contain tab/newline")
+        if xn not in base_names or yn not in base_names:
+            raise ValueError(f"job {label!r}: undefined base {xn!r} or {yn!r}")
+        sel = "*" if idx is None else ",".join(str(int(i)) for i in idx)
+        parts.append(f"{label}\t@{xn}:@{yn}\t{sel}\n")
+    return "".join(parts)
+
+
 def panel_batch_indexed(bases: dict, jobs, stats: str = "full",
-                        timeout: float = 1800.0) -> list[dict]:
+                        timeout: float = 1800.0, rendered_jobs: Optional[str] = None) -> list[dict]:
     """N index-set resamples over shared base vectors -> N stat rows.
 
     The paired-bootstrap shape: declare each base vector ONCE, then each
@@ -236,21 +253,16 @@ def panel_batch_indexed(bases: dict, jobs, stats: str = "full",
 
     Args:
         bases: {name: float sequence}. Names must be tab/colon-free.
-        jobs:  iterable of (label, x_name, y_name, indices_or_None).
+        jobs:  iterable of (label, x_name, y_name, indices_or_None); ignored when `rendered_jobs` is given.
         stats: "full" or "srocc".
+        rendered_jobs: the output of `render_indexed_jobs` for these base names (skips re-rendering).
     """
     parts = []
     for name, v in bases.items():
         if any(c in str(name) for c in "\t\n:@"):
             raise ValueError(f"base name {name!r} must not contain tab/colon/@")
         parts.append(f"#def {name}\t{_fmt_vec(v)}\n")
-    for label, xn, yn, idx in jobs:
-        if "\t" in str(label) or "\n" in str(label):
-            raise ValueError(f"label {label!r} must not contain tab/newline")
-        if xn not in bases or yn not in bases:
-            raise ValueError(f"job {label!r}: undefined base {xn!r} or {yn!r}")
-        sel = "*" if idx is None else ",".join(str(int(i)) for i in idx)
-        parts.append(f"{label}\t@{xn}:@{yn}\t{sel}\n")
+    parts.append(render_indexed_jobs(jobs, bases) if rendered_jobs is None else rendered_jobs)
     return _run_batch("".join(parts), stats, timeout)
 
 

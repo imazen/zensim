@@ -7,9 +7,12 @@ result INCOMPLETE, never a pass.
 
   python v2_compare.py --calibration        # instrument-acceptance gate (read before any arm)
   python v2_compare.py --arm c1 [--arm ...]  # candidate arms (only after acceptance passed)
+  --human-weight W reads the `<spec>@hW` cells (amendment R3) and writes `*_hW.json`; --jobs N bootstraps cells
+  in N processes (each cell's bootstrap is cached beside its result, keyed by the result's sha).
 """
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import json
 import sys
 from pathlib import Path
@@ -18,7 +21,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.zen_stats import panel_batch_indexed  # noqa: E402
+from lib.zen_stats import panel_batch_indexed, render_indexed_jobs  # noqa: E402
 from v2_common import (BOOT_B, BOOT_SEED, CANDIDATES, HEADS, N_PERMS, SOURCE_ORDER, V2, arm_columns, sha)
 
 N_SEEDS = 10
@@ -27,6 +30,8 @@ REGRESSION = -0.005
 SEED_CONSISTENCY = 7
 _keys_cache: dict = {}
 _ref_draws: dict = {}
+_rendered: dict = {}  # source -> the bootstrap jobs' text, rendered once (EFFAUDIT D8)
+SUFFIX = ""  # "@h<w>" under --human-weight (amendment R3)
 SEED_DRAWS = np.random.default_rng(BOOT_SEED + 1).integers(0, N_SEEDS, size=(BOOT_B, N_SEEDS))
 
 
@@ -55,9 +60,17 @@ def ref_draws(source: str, keys) -> list:
     return _ref_draws[source]
 
 
-def cell_boot(spec: str, head: str, source: str, i: int):
+def rendered_jobs(source: str, keys) -> str:
+    if source not in _rendered:
+        jobs = [("POINT", "p", "y", None)] + [(f"B{b}", "p", "y", ii) for b, ii in enumerate(ref_draws(source, keys))]
+        _rendered[source] = render_indexed_jobs(jobs, ("p", "y"))
+    return _rendered[source]
+
+
+def cell_boot(spec: str, head: str, source: str, i: int, suffix: str | None = None):
     """(point SROCC, bootstrap SROCC array) for one cell, cached beside its result."""
-    cdir = V2 / "cells" / f"{spec}__{head}" / f"without_{source}_s{i}"
+    suffix = SUFFIX if suffix is None else suffix
+    cdir = V2 / "cells" / f"{spec}{suffix}__{head}" / f"without_{source}_s{i}"
     res = cdir / "result.json"
     if not res.is_file():
         return None
@@ -73,8 +86,8 @@ def cell_boot(spec: str, head: str, source: str, i: int):
     y = keys.target.to_numpy(dtype=np.float64)
     if len(pred) != len(y):
         raise ValueError(f"{res}: prediction length mismatch")
-    jobs = [("POINT", "p", "y", None)] + [(f"B{b}", "p", "y", ii) for b, ii in enumerate(ref_draws(source, keys))]
-    rows = panel_batch_indexed({"p": pred, "y": y}, jobs, stats="srocc", timeout=7200)
+    rows = panel_batch_indexed({"p": pred, "y": y}, None, stats="srocc", timeout=7200,
+                               rendered_jobs=rendered_jobs(source, keys))
     by = {r["label"]: r["srocc"] for r in rows}
     boot = np.asarray([by[f"B{b}"] for b in range(BOOT_B)], dtype=np.float64)
     point = float(by["POINT"])
@@ -169,27 +182,56 @@ def calibration() -> dict:
     return out
 
 
+def _boot_task(task):
+    spec, head, source, i, suffix = task
+    cell_boot(spec, head, source, i, suffix)
+    return task
+
+
+def warm(specs: list[str], jobs: int) -> None:
+    """Bootstrap every existing cell of `specs` in `jobs` processes, grouped by source so each process renders a
+    source's selectors once; results land in the per-cell caches that the contrasts then read."""
+    tasks = [(spec, head, source, i, SUFFIX) for source in SOURCE_ORDER for spec in specs for head in HEADS
+             for i in range(N_SEEDS)
+             if (V2 / "cells" / f"{spec}{SUFFIX}__{head}" / f"without_{source}_s{i}" / "result.json").is_file()]
+    with ProcessPoolExecutor(max_workers=jobs) as pool:
+        for _ in pool.map(_boot_task, tasks, chunksize=8):
+            pass
+
+
 def main() -> None:
+    global SUFFIX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--calibration", action="store_true")
     ap.add_argument("--arm", action="append", choices=CANDIDATES, default=[])
+    ap.add_argument("--human-weight", type=float, default=None)
+    ap.add_argument("--jobs", type=int, default=1)
     args = ap.parse_args()
+    SUFFIX = "" if args.human_weight is None else f"@h{args.human_weight:g}"
+    tag = SUFFIX.replace("@", "_")
     dest = V2 / "compare"
     dest.mkdir(parents=True, exist_ok=True)
+    if args.jobs > 1:
+        specs = ["r0"]
+        if args.calibration:
+            specs += ["oracle_hi", "oracle_lo", "minus_basic"] + [f"oracle_lo~p{k}" for k in range(1, N_PERMS + 1)]
+        for arm in args.arm:
+            specs += [arm] + [f"{arm}~p{k}" for k in range(1, N_PERMS + 1)]
+        warm(specs, args.jobs)
     if args.calibration:
         rec = calibration()
-        path = dest / "calibration.json"
+        path = dest / f"calibration{tag}.json"
         path.write_text(json.dumps(rec, indent=1) + "\n")
         print(json.dumps({"calibration": str(path), "accept_N": rec["N"].get("accept"),
                           "complete": [rec[h]["complete"] for h in HEADS]}))
     if args.arm:
-        gate = dest / "calibration.json"
+        gate = dest / f"calibration{tag}.json"
         if not gate.is_file() or not json.loads(gate.read_text())["N"].get("accept"):
             raise SystemExit("instrument acceptance has not passed; no candidate arm may be read")
         for arm in args.arm:
             for head in HEADS:
                 rec = family(arm, head)
-                (dest / f"{arm}_{head}.json").write_text(json.dumps(rec, indent=1) + "\n")
+                (dest / f"{arm}_{head}{tag}.json").write_text(json.dumps(rec, indent=1) + "\n")
                 print(json.dumps({"arm": arm, "head": head, "status": rec["status"],
                                   "verdict": rec.get("verdict"), "v1_sources": rec.get("v1_sources")}))
 

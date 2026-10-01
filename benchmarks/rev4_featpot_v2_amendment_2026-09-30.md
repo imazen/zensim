@@ -271,3 +271,8 @@ no recipe is selected and the instrument is redesigned before anything else runs
 sources, three permutations) re-runs on the Rev3 bank with the unchanged acceptance gate (oracle_hi V1 on ≥ 4 of 5 under
 head N; centred permutation null). If it passes, the same recipe is used for v2-canon and the confirmatory read. The
 Rev3 arms are not run.
+
+*Execution note (2026-10-01 02:45 MT):* the acceptance re-run reuses the sweep's cells at the selected weight (same
+argv, program and data, hence the same content-addressed job ids) and declares only the rest of the grid. It is read
+with `v2_compare.py --calibration --human-weight <w>`, which writes `compare/calibration_h<w>.json`; arms at that
+weight are read with the same flag and are refused unless that file accepts.

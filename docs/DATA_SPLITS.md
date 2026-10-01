@@ -1073,3 +1073,7 @@ read only `main/real` and `aux/{real,p1,p2,p3}`, packed into one content-address
 `ec5273653165092835378c0ed823427ccbd047bf427e3fcf983297fcc1b2b2f2`, image `ghcr.io/imazen/zenfleet-worker:fit-v2-v4`).
 No new population; the LAN store and workers are operator-controlled machines on the home network. No holdout table
 is in the archive (CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI and secret holdouts excluded).
+
+Addendum (2026-10-01 02:45 MT): when the retune sweep completes and the R3 rule selects a weight, the same archive
+(`6e846071…`, unchanged) is copied server-side to the acceptance re-run jobset (`fitv2acc-20261001`, same program and
+image). No new population and no new transport destination.

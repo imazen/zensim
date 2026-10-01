@@ -177,13 +177,29 @@ def identical_flags(name: str):
 
 
 def _permute_within_reference(out, extra: list[str], selector, rng) -> None:
+    """Joint key-level permutation of `extra` within each reference, over the selected rows.
+
+    For each reference in sorted order: the selected rows' distinct pair_keys in order of first appearance get the
+    values of the key at `rng.permutation(n)`; every selected row takes its key's new values. Same draws and same
+    result as the original pandas/dict loop (EFFAUDIT D7), as numpy gathers.
+    """
+    if not extra:
+        return
+    refs = out.ref_basename.to_numpy()
+    keys = out.pair_key.to_numpy()
+    selector = np.asarray(selector, dtype=bool)
+    vals = out[extra].to_numpy()
+    new = vals.copy()
     for ref in sorted(out.ref_basename.unique()):
-        sel = (out.ref_basename == ref).to_numpy() & selector
-        subset = out.loc[sel, ["pair_key"] + extra].drop_duplicates("pair_key")
-        keys = subset.pair_key.to_numpy()
-        mapped = dict(zip(keys, subset[extra].to_numpy()[rng.permutation(len(keys))]))
-        positions = out.index[sel]
-        out.loc[positions, extra] = np.stack([mapped[k] for k in out.loc[positions, "pair_key"]])
+        rows = np.flatnonzero((refs == ref) & selector)
+        _, first, inverse = np.unique(keys[rows], return_index=True, return_inverse=True)
+        order = np.argsort(first, kind="stable")  # unique keys in order of first appearance
+        rank = np.empty_like(order)
+        rank[order] = np.arange(len(order))
+        source = rows[first[order]]
+        new[rows] = vals[source[rng.permutation(len(order))]][rank[inverse.reshape(-1)]]
+    for j, column in enumerate(extra):
+        out[column] = new[:, j].astype(out[column].dtype, copy=False)
 
 
 def apply_identical_convention(out, extra: list[str], name: str, permute: bool,
