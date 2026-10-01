@@ -27,6 +27,13 @@ from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIG
                        parse_spec, seeds, sha, table_path)
 
 WIDE_SCHEMAS = ("rev4-featpot-v2-wide-v2", "rev4-featpot-v2c-wide-v1")
+# Under the final-epoch rule no per-epoch dev score selects anything, so the dev panels run every 17th epoch (17 divides
+# EPOCHS - 1 = 119: epoch 0, every 17th, and the final epoch, which is also where --dump-checkpoints-every EPOCHS-1
+# fires). Evaluation is pure (no RNG, no state, LR depends on the epoch index only), so the trajectory and the final
+# weights do not depend on this. best_dev still needs every epoch.
+LOG_EVERY = 17 if EPOCH_RULE == "last" else 1
+if (EPOCHS - 1) % LOG_EVERY:
+    raise ValueError(f"LOG_EVERY={LOG_EVERY} must divide EPOCHS-1={EPOCHS - 1}")
 EPOCH_RE = re.compile(r"epoch\s+(\d+)\s+\|.*?val\(geomean3\)=([+-]?\d+\.\d+)")
 
 
@@ -73,7 +80,7 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
             "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),
             "--pair-sampling", "uniform", "--max-features", str(width), "--keep-features", str(keep_file),
             "--mse-weight", "1", "--early-stop-patience", "0", "--val-policy", "mean",
-            "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", "1", "--no-auto-eval",
+            "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", str(LOG_EVERY), "--no-auto-eval",
             "--historical-replay", REPLAY, "--out", str(out)]
     if head == "N":
         cmd.append("--nonneg-distance")
@@ -114,8 +121,9 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
 
 def read_curve(log: Path) -> dict[int, float]:
     curve = {int(e): float(v) for e, v in EPOCH_RE.findall(log.read_text())}
-    if sorted(curve) != list(range(EPOCHS)):
-        raise ValueError(f"validation curve incomplete: {len(curve)} of {EPOCHS} epochs")
+    expected = sorted(set(range(0, EPOCHS, LOG_EVERY)) | {EPOCHS - 1})
+    if sorted(curve) != expected:
+        raise ValueError(f"validation curve incomplete: {len(curve)} of {len(expected)} evaluated epochs")
     return curve
 
 

@@ -210,10 +210,26 @@ class TrainRecipe(unittest.TestCase):
                   "--pairs-per-epoch", "50000", "--init-seed", "1101", "--sample-seed", "101", "--pair-sampling",
                   "uniform", "--max-features", "1825", "--keep-features", "/k.txt", "--mse-weight", "1",
                   "--early-stop-patience", "0", "--val-policy", "mean", "--val-aggregate", "geomean3", "--out-dtype",
-                  "f32", "--log-every", "1", "--no-auto-eval", "--historical-replay", v2_common.REPLAY,
+                  "f32", "--log-every", str(lodo.LOG_EVERY), "--no-auto-eval", "--historical-replay", v2_common.REPLAY,
                   "--out", "/o/best.bin", "--nonneg-distance"]
         self.assertEqual(cmd, expect)
         self.assertNotIn("--nonneg-distance", lodo.train_command([], 1, 2, 3, Path("k"), "F", Path("o")))
+
+    def test_read_curve_accepts_the_sparse_final_epoch_curve(self):
+        import tempfile
+        import v2_lodo_mlp as lodo
+        self.assertEqual(lodo.LOG_EVERY, 17 if lodo.EPOCH_RULE == "last" else 1)
+        epochs = sorted(set(range(0, lodo.EPOCHS, lodo.LOG_EVERY)) | {lodo.EPOCHS - 1})
+        line = "  epoch {e:>3} | lr=0.00500 | loss=0.1 | val(geomean3)={v:.4f} (best=0.1) | a: srocc=0.1 | t=1.0s\n"
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "train.log"
+            log.write_text("".join(line.format(e=e, v=0.5 + e / 1000) for e in epochs))
+            curve = lodo.read_curve(log)
+            self.assertEqual(sorted(curve), epochs)
+            self.assertEqual(curve[lodo.EPOCHS - 1], 0.5 + (lodo.EPOCHS - 1) / 1000)
+            log.write_text("".join(line.format(e=e, v=0.5) for e in epochs[:-1]))
+            with self.assertRaises(ValueError):
+                lodo.read_curve(log)
 
     def test_lodo_grids(self):
         import v2c_grid
