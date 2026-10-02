@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from v2_common import (load_frozen, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
+from v2_common import (load_frozen, recipe_of, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
 from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, train_and_select
 
@@ -94,7 +94,7 @@ def main() -> None:
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = confirm_seeds(args.seed_index)
-    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest)
+    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe_of(args.spec))
     best_epoch = selection["selected_epoch"]
     predictions = {}
     for name, table in tables.items():

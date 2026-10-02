@@ -130,10 +130,26 @@ def split_weight(spec: str) -> tuple[str, float | None]:
     core, _, w = spec.partition("@h")
     if not w:
         return core, None
-    value = float(w)
+    value = float(w.split(":")[0])  # ":H<n>:gl<x>" recipe tokens follow the weight (recipe_of, design log E8)
     if not 0 < value <= 64:
         raise ValueError(f"bad human weight in {spec!r}")
     return core, value
+
+
+def recipe_of(spec: str) -> dict:
+    """Training-recipe tokens after the human weight (design log E8): 'r0@h32:H128:gl0.0001' -> {'hidden': 128,
+    'group_l1': 0.0001}. No tokens -> {} (the registered recipe: H = HIDDEN, no group lasso), so every existing spec,
+    cell name and trainer argv is unchanged."""
+    _, _, w = spec.partition("@h")
+    out: dict = {}
+    for tok in w.split(":")[1:]:
+        if tok.startswith("H") and tok[1:].isdigit() and 8 <= int(tok[1:]) <= 512 and "hidden" not in out:
+            out["hidden"] = int(tok[1:])
+        elif tok.startswith("gl") and "group_l1" not in out and 0 < float(tok[2:]) <= 1:
+            out["group_l1"] = float(tok[2:])
+        else:
+            raise ValueError(f"bad recipe token {tok!r} in {spec!r}")
+    return out
 
 
 def extra_arms() -> dict:

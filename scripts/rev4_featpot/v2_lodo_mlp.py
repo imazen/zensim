@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
-from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, split_weight,
+from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, recipe_of, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, sha, table_path)
 
@@ -69,26 +69,29 @@ def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
 
 
 def train_command(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
-                  out: Path) -> list[str]:
+                  out: Path, recipe: dict | None = None) -> list[str]:
     """The trainer argv of one v2 cell; `groups` = (name, path, train_weight, val_weight, mode). Shared with
     v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
     cmd = [str(TRAINER)]
     for name, path, tw, vw, mode in groups:
         cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
-    cmd += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(HIDDEN),
+    recipe = recipe or {}
+    cmd += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(recipe.get("hidden", HIDDEN)),
             "--epochs", str(EPOCHS), "--pairs-per-epoch", str(PAIRS_PER_EPOCH),
             "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),
             "--pair-sampling", "uniform", "--max-features", str(width), "--keep-features", str(keep_file),
             "--mse-weight", "1", "--early-stop-patience", "0", "--val-policy", "mean",
             "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", str(LOG_EVERY), "--no-auto-eval",
             "--historical-replay", REPLAY, "--out", str(out)]
+    if "group_l1" in recipe:  # design log E8: proximal group lasso on layer-1 input rows
+        cmd += ["--group-l1", repr(recipe["group_l1"])]
     if head == "N":
         cmd.append("--nonneg-distance")
     return cmd
 
 
 def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
-                     dest: Path) -> tuple[Path, dict[int, float], dict]:
+                     dest: Path, recipe: dict | None = None) -> tuple[Path, dict[int, float], dict]:
     """Train one cell and return (selected bake, dev curve, selection record) under EPOCH_RULE.
 
     best_dev: the trainer's own best-validation bake (refit/best.bin); the recorded epoch is the argmax of the log's
@@ -96,7 +99,7 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
     trainer's). last: the trainer also dumps the final epoch's weights (--dump-checkpoints-every EPOCHS-1 fires at epoch 0
     and EPOCHS-1) and that checkpoint is the selected bake (refit/last.bin)."""
     (dest / "refit").mkdir(exist_ok=True)
-    cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin")
+    cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe)
     ckpt = dest / "ckpt"
     if EPOCH_RULE == "last":
         ckpt.mkdir(exist_ok=True)
@@ -173,7 +176,8 @@ def main() -> None:
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
-    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest)
+    recipe = recipe_of(args.spec)
+    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
     best_epoch = selection["selected_epoch"]
     heldout = legs[args.heldout]
     table = checked(heldout["full"])
@@ -189,7 +193,8 @@ def main() -> None:
            "family": family, "variant": variant,
            "kept_features": len(keep), "head": args.head, "heldout": args.heldout,
            "seed_index": args.seed_index, "init_seed": init_seed, "sample_seed": sample_seed,
-           "train_weights": weights, "hidden": HIDDEN, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+           "train_weights": weights, "hidden": recipe.get("hidden", HIDDEN), "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+           **({"recipe_tokens": recipe} if recipe else {}),
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, **selection,

@@ -215,6 +215,21 @@ class TrainRecipe(unittest.TestCase):
         self.assertEqual(cmd, expect)
         self.assertNotIn("--nonneg-distance", lodo.train_command([], 1, 2, 3, Path("k"), "F", Path("o")))
 
+    def test_recipe_tokens(self):
+        import v2_lodo_mlp as lodo
+        self.assertEqual(v2_common.recipe_of("r0@h32"), {})
+        self.assertEqual(v2_common.recipe_of("r0@h32:H128:gl0.0001"), {"hidden": 128, "group_l1": 0.0001})
+        self.assertEqual(v2_common.split_weight("screen_main@h32:H64"), ("screen_main", 32.0))
+        for bad in ("r0@h32:H4", "r0@h32:x1", "r0@h32:H64:H128", "r0@h32:gl0"):
+            with self.assertRaises(ValueError):
+                v2_common.recipe_of(bad)
+        base = lodo.train_command([], 1, 2, 3, Path("k"), "N", Path("o"))
+        cmd = lodo.train_command([], 1, 2, 3, Path("k"), "N", Path("o"), {"hidden": 128, "group_l1": 0.0001})
+        self.assertEqual(base, lodo.train_command([], 1, 2, 3, Path("k"), "N", Path("o"), {}))   # no tokens: argv unchanged
+        self.assertEqual(cmd[cmd.index("--hidden") + 1], "128")
+        self.assertEqual(cmd[cmd.index("--group-l1") + 1], "0.0001")
+        self.assertEqual([a for a in cmd if a not in ("--group-l1", "0.0001")], [a if a != str(v2_common.HIDDEN) or base[i - 1] != "--hidden" else "128" for i, a in enumerate(base)])
+
     def test_read_curve_accepts_the_sparse_final_epoch_curve(self):
         import tempfile
         import v2_lodo_mlp as lodo
