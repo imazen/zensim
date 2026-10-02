@@ -273,6 +273,21 @@ class TrainRecipe(unittest.TestCase):
             with self.assertRaises(ValueError, msg=(spec, columns)):
                 lodo.resolve_keep(spec, columns, lists)
 
+    def test_e10_reuses_results_under_any_group_order(self):
+        import e10_multistart as e10
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            cell = root / "cells" / "set:v2+basic@h32:H128__N" / "without_kadid_s0"
+            cell.mkdir(parents=True)
+            (cell / "result.json").write_text("{}")
+            (root / "cells" / "set:v2+basic@h32:H128:gl1__N").mkdir(parents=True)  # another recipe: never matched
+            with mock.patch.object(e10, "V2", root):
+                idx = e10.index(":H128")
+                self.assertEqual(idx, {frozenset({"v2", "basic"}): ["set:v2+basic@h32:H128"]})
+                self.assertEqual(e10.find(idx, ["basic", "v2"], ":H128", "kadid", 0), cell / "result.json")
+                self.assertIsNone(e10.find(idx, ["basic", "v2"], ":H128", "kadid", 1))
+                self.assertEqual(e10.canonical(["v2", "basic"], ":H128"), "set:basic+v2@h32:H128")
+
     def test_recipe_tokens(self):
         import v2_lodo_mlp as lodo
         self.assertEqual(v2_common.recipe_of("r0@h32"), {})
