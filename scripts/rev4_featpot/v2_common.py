@@ -211,9 +211,25 @@ def block_spec(core: str) -> bool:
     return False
 
 
+def pinned_arm(arm: str) -> tuple[str, str, list[int]]:
+    """(table family, variant, kept columns) of one registered arm, read from the root's pinned keep lists
+    (`wide/keep_lists.json`: sha-pinned by frozen.json and shipped in the fit-data archive). The fit program does not
+    pack restore_data, so E9 `set:`/`core+` specs resolve their candidate arms here (2026-10-02: E9″ round 1 failed
+    every cell with `No module named 'restore_data'`). A root without keep lists, or an arm they lack, falls back to
+    arm_columns, which needs restore_data and fails loudly where it is absent."""
+    path = V2 / "wide" / "keep_lists.json"
+    if path.is_file():
+        lists = json.loads(path.read_text())
+        if lists.get("schema") != "rev4-featpot-v2-keeplists-v2":
+            raise ValueError(f"{path}: keep-list schema mismatch")
+        entry = lists["specs"].get(arm)
+        if entry is not None:
+            return entry["family"], entry["variant"], list(entry["keep"])
+    return arm_columns(arm)
+
+
 def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     """(table family, variant, kept wide-column indices) for a spec (any '@h' suffix ignored)."""
-    import restore_data  # registered arm definitions (pinned JSONs)
     base, k = parse_spec(spec)
     variant = f"p{k}" if k else "real"
     bank = list(range(944))
@@ -232,7 +248,7 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
             if x in LEGACY_BLOCKS:
                 cols |= set(LEGACY_BLOCKS[x])
                 continue
-            fam, _, ids = arm_columns(x)
+            fam, _, ids = pinned_arm(x)
             fams.add(fam)
             cols |= {c for c in ids if c >= 944}
         if len(fams) > 1:  # the peer pair exists only in the aux table, the main research columns only in main
@@ -259,6 +275,8 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
         if any(not WIDTH <= c < extras["width"] for c in ids) or len(set(ids)) != len(ids):
             raise ValueError(f"{spec}: extra-arm columns outside {WIDTH}..{extras['width']}")
         return "main", variant, bank + list(ids)
+    import restore_data  # registered arm definitions (pinned JSONs); not in the fit program, so only reached here
+
     ids = restore_data.arm_ids(base)
     if any(c < 0 for c in ids):  # the peer pair: arm p3 lives in the aux family
         added = [AUX_PEERS["gmsd"] if c == -1 else AUX_PEERS["gmsm"] if c == -2 else c for c in ids]

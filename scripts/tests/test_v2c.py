@@ -236,6 +236,24 @@ class TrainRecipe(unittest.TestCase):
                 v2_common.parse_spec(bad)
                 v2_common.arm_columns(bad)
 
+    def test_block_specs_resolve_without_restore_data(self):
+        # The fit program packs no restore_data: set:/core+ specs must resolve candidate arms from the pinned keep lists.
+        bank = list(range(944))
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            (root / "wide").mkdir()
+            (root / "wide" / "keep_lists.json").write_text(json.dumps({"schema": "rev4-featpot-v2-keeplists-v2", "specs": {
+                "csfw": {"family": "main", "variant": "real", "keep": bank + list(range(944, 956))},
+                "c3": {"family": "main", "variant": "real", "keep": bank + [1200, 1201]}}}))
+            with mock.patch.object(v2_common, "V2", root), mock.patch.dict(sys.modules, {"restore_data": None}):
+                self.assertEqual(v2_common.arm_columns("set:csfw@h32:H128")[2], list(range(944, 956)))
+                self.assertEqual(v2_common.arm_columns("set:v2+c3@h32:H128"), ("main", "real", list(range(372, 720)) + [1200, 1201]))
+                self.assertEqual(v2_common.arm_columns("core+iw+csfw")[2], list(range(228)) + list(range(300, 372)) + list(range(944, 956)))
+                self.assertEqual(v2_common.arm_columns("set:basic+peaks")[2], list(range(228)))
+                self.assertEqual(v2_common.arm_columns("r0-v2")[2], [c for c in bank if not 372 <= c < 720])
+                with self.assertRaises(ImportError):  # an arm the pinned lists lack still needs the owner, loudly
+                    v2_common.arm_columns("set:c4")
+
     def test_recipe_tokens(self):
         import v2_lodo_mlp as lodo
         self.assertEqual(v2_common.recipe_of("r0@h32"), {})
