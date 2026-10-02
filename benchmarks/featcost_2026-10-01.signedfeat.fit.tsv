@@ -1,0 +1,11 @@
+photo	variant	kind	alpha_ms	beta_ns_per_px	n_sizes	sizes
+nature	alone:satsign	increment	25.7683	643.7282	4	64,256,1024,4096
+nature	alone:texgain	increment	24.4242	638.9612	4	64,256,1024,4096
+nature	alone:texgain+satsign	increment	24.4375	646.5874	4	64,256,1024,4096
+nature	core	absolute	9.1996	141.9045	4	64,256,1024,4096
+nature	ladder:dvifmgate	increment	24.4490	631.9251	4	64,256,1024,4096
+nature	ladder:satsign	increment	37.5263	644.0470	4	64,256,1024,4096
+nature	ladder:texgain	increment	41.7572	635.5653	4	64,256,1024,4096
+nature	step:dvifmgate	increment	24.4490	631.9251	4	64,256,1024,4096
+nature	step:satsign	increment	-4.2309	8.4817	4	64,256,1024,4096
+nature	step:texgain	increment	17.3082	3.6402	4	64,256,1024,4096

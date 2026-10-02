@@ -369,6 +369,13 @@ name = "era2_dense_ab"
 harness = false
 required-features = ["oracle"]
 
+# featcost: per-family extraction cost over the 228-column core (alone /
+# ladder / step), interleaved. benchmarks/featcost_2026-10-01.{tsv,meta}
+[[bench]]
+name = "featcost"
+harness = false
+required-features = ["custom-profiles", "training"]
+
 # featacc: whole-extract cost of each candidate arithmetic, interleaved
 # in-process via bench_featcanon. benchmarks/featacc_WORKLOG.md
 [[bench]]

@@ -1,0 +1,7 @@
+bench: zensim/benches/featcost.rs (zenbench, interleaved/paired, baseline=core); commit: see `jj log` bookmark quarantine/claude/featcost (parent main@origin 30c9ca7d)
+host: dev (AMD Ryzen 9 9950X3D), native Ubuntu; pinned taskset -c 8-15, single thread (RAYON_NUM_THREADS=1), fleet workers on the SMT siblings (24-31) and other cores
+command: ZENBENCH_NO_SAVE=1 [FEATCOST_PHOTOS=nature] ZENSIM_FORMULA_REV=4 ZENSIM_MAX_TIER=v3 RAYON_NUM_THREADS=1 taskset -c 8-15 ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo bench -p zensim --bench featcost --features custom-profiles,training
+runs: run1 (nature+people, contended, peak load 31), run2people (contended, peak load 26), run3nature (QUIET, peak load 8.5 = authoritative), signedfeat (pr/signedfeat a659715e + the same bench with Texgain/Satsign appended, nature, peak load 18.5)
+gmsd: cargo bench --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar --features gmsd-arm (ZEN_S2_SIZES=64,256,1024,4096 ZEN_S2_ARMS=gmsd,zensim_B RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3), peak load 5
+inputs: imazen-26 1407 nature coastline (8160x6120) and 2014 people (6240x4160), centre square crop, Lanczos to size, distorted = zenjpeg q50 round trip
+benchmarks/featcost_2026-10-01.tsv holds run3 + signedfeat + gmsd; per-run raw/fit TSVs are alongside.

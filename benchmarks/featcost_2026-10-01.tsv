@@ -1,0 +1,241 @@
+run	photo	variant	size	mean_ns	inc_over_core_ns	inc_ns_per_px	full_over_core	n_rounds
+run3_quiet	nature	core	64	730863	0	0.0	1.000	63
+run3_quiet	nature	legacy:masked	64	857213	134032	32.7	1.183	63
+run3_quiet	nature	legacy:iw	64	877192	139147	34.0	1.190	63
+run3_quiet	nature	legacy:masked+iw	64	857712	140501	34.3	1.192	63
+run3_quiet	nature	alone:v2	64	1265561	518971	126.7	1.710	63
+run3_quiet	nature	alone:append	64	1374364	652440	159.3	1.893	63
+run3_quiet	nature	alone:append2	64	1408740	672193	164.1	1.920	63
+run3_quiet	nature	alone:csfw	64	1416849	678143	165.6	1.928	63
+run3_quiet	nature	alone:dvifm	64	1630306	886925	216.5	2.214	63
+run3_quiet	nature	alone:gridblk	64	1881194	1126231	275.0	2.541	63
+run3_quiet	nature	alone:ringbasis	64	2098147	1347024	328.9	2.843	63
+run3_quiet	nature	alone:tailhist	64	2443940	1707198	416.8	3.336	63
+run3_quiet	nature	alone:arttype	64	2466977	1718764	419.6	3.352	63
+run3_quiet	nature	alone:gmsbank	64	2701757	1962319	479.1	3.685	63
+run3_quiet	nature	alone:mapdev	64	3407461	2667581	651.3	4.650	63
+run3_quiet	nature	alone:z1max	64	3521152	2748388	671.0	4.760	63
+run3_quiet	nature	alone:gmsnative	64	3201882	2436453	594.8	4.334	63
+run3_quiet	nature	alone:dvifmgate	64	3223510	2449665	598.1	4.352	63
+run3_quiet	nature	alone:dvifm+dvifmgate	64	3195881	2441141	596.0	4.340	63
+run3_quiet	nature	alone:gmsbank+gmsnative	64	3656261	2874389	701.8	4.933	63
+run3_quiet	nature	alone:mapdev+z1max	64	3527681	2759956	673.8	4.776	63
+run3_quiet	nature	ladder:v2	64	1247407	518323	126.5	1.709	63
+run3_quiet	nature	ladder:append	64	1393540	661541	161.5	1.905	63
+run3_quiet	nature	ladder:append2	64	1463153	710222	173.4	1.972	63
+run3_quiet	nature	ladder:csfw	64	1495844	742776	181.3	2.016	63
+run3_quiet	nature	ladder:dvifm	64	1807151	1063218	259.6	2.455	63
+run3_quiet	nature	ladder:gridblk	64	1896940	1152744	281.4	2.577	63
+run3_quiet	nature	ladder:ringbasis	64	2132879	1393599	340.2	2.907	63
+run3_quiet	nature	ladder:tailhist	64	2525374	1751085	427.5	3.396	63
+run3_quiet	nature	ladder:arttype	64	2549586	1798089	439.0	3.460	63
+run3_quiet	nature	ladder:gmsbank	64	2802884	2036712	497.2	3.787	63
+run3_quiet	nature	ladder:mapdev	64	3507342	2711044	661.9	4.709	63
+run3_quiet	nature	ladder:z1max	64	3563884	2779128	678.5	4.803	63
+run3_quiet	nature	ladder:gmsnative	64	3698086	2946737	719.4	5.032	63
+run3_quiet	nature	ladder:dvifmgate	64	3693616	2918399	712.5	4.993	63
+run3_quiet	nature	core	256	9326299	0	0.0	1.000	20
+run3_quiet	nature	legacy:masked	256	11312840	1986541	30.3	1.213	20
+run3_quiet	nature	legacy:iw	256	10942807	1632572	24.9	1.175	20
+run3_quiet	nature	legacy:masked+iw	256	11012519	1854730	28.3	1.199	20
+run3_quiet	nature	alone:v2	256	15996642	6670343	101.8	1.715	20
+run3_quiet	nature	alone:append	256	17331916	8115992	123.8	1.870	20
+run3_quiet	nature	alone:append2	256	17694514	8368215	127.7	1.897	20
+run3_quiet	nature	alone:csfw	256	18336077	9115109	139.1	1.977	20
+run3_quiet	nature	alone:dvifm	256	20986645	11867161	181.1	2.272	20
+run3_quiet	nature	alone:gridblk	256	24373874	15160029	231.3	2.626	20
+run3_quiet	nature	alone:ringbasis	256	27835905	18642506	284.5	2.999	20
+run3_quiet	nature	alone:tailhist	256	32532886	23206587	354.1	3.488	20
+run3_quiet	nature	alone:arttype	256	32898427	23572128	359.7	3.527	20
+run3_quiet	nature	alone:gmsbank	256	35697681	26490308	404.2	3.840	20
+run3_quiet	nature	alone:mapdev	256	46568858	37242559	568.3	4.993	20
+run3_quiet	nature	alone:z1max	256	46872815	37546516	572.9	5.026	20
+run3_quiet	nature	alone:gmsnative	256	42535463	33209165	506.7	4.561	20
+run3_quiet	nature	alone:dvifmgate	256	42659235	33146616	505.8	4.554	20
+run3_quiet	nature	alone:dvifm+dvifmgate	256	42507666	33404849	509.7	4.582	20
+run3_quiet	nature	alone:gmsbank+gmsnative	256	49221621	40127812	612.3	5.303	20
+run3_quiet	nature	alone:mapdev+z1max	256	47157500	37831201	577.3	5.056	20
+run3_quiet	nature	ladder:v2	256	16255290	6937034	105.9	1.744	20
+run3_quiet	nature	ladder:append	256	17322340	8071115	123.2	1.865	20
+run3_quiet	nature	ladder:append2	256	17930561	8604262	131.3	1.923	20
+run3_quiet	nature	ladder:csfw	256	18239047	8912748	136.0	1.956	20
+run3_quiet	nature	ladder:dvifm	256	23374118	14165087	216.1	2.519	20
+run3_quiet	nature	ladder:gridblk	256	24431136	15104838	230.5	2.620	20
+run3_quiet	nature	ladder:ringbasis	256	27644396	18411687	280.9	2.974	20
+run3_quiet	nature	ladder:tailhist	256	32275119	22948821	350.2	3.461	20
+run3_quiet	nature	ladder:arttype	256	33159541	24096384	367.7	3.584	20
+run3_quiet	nature	ladder:gmsbank	256	35772646	26464037	403.8	3.838	20
+run3_quiet	nature	ladder:mapdev	256	46434259	37076682	565.7	4.975	20
+run3_quiet	nature	ladder:z1max	256	47159489	37833190	577.3	5.057	20
+run3_quiet	nature	ladder:gmsnative	256	49219081	39892782	608.7	5.277	20
+run3_quiet	nature	ladder:dvifmgate	256	49119242	39792943	607.2	5.267	20
+run3_quiet	nature	core	1024	145462630	0	0.0	1.000	10
+run3_quiet	nature	legacy:masked	1024	177634967	32172337	30.7	1.221	10
+run3_quiet	nature	legacy:iw	1024	178024884	31002836	29.6	1.213	10
+run3_quiet	nature	legacy:masked+iw	1024	175464675	29478544	28.1	1.203	10
+run3_quiet	nature	alone:v2	1024	263143637	116848365	111.4	1.803	10
+run3_quiet	nature	alone:append	1024	290206743	143467994	136.8	1.986	10
+run3_quiet	nature	alone:append2	1024	299356267	153893638	146.8	2.058	10
+run3_quiet	nature	alone:csfw	1024	301621389	156158760	148.9	2.074	10
+run3_quiet	nature	alone:dvifm	1024	340425521	194962891	185.9	2.340	10
+run3_quiet	nature	alone:gridblk	1024	405601145	260138516	248.1	2.788	10
+run3_quiet	nature	alone:ringbasis	1024	452723878	307261248	293.0	3.112	10
+run3_quiet	nature	alone:tailhist	1024	525758127	380295497	362.7	3.614	10
+run3_quiet	nature	alone:arttype	1024	538055442	391055787	372.9	3.688	10
+run3_quiet	nature	alone:gmsbank	1024	578738307	433275678	413.2	3.979	10
+run3_quiet	nature	alone:mapdev	1024	756908226	611445596	583.1	5.203	10
+run3_quiet	nature	alone:z1max	1024	767573671	620291118	591.6	5.264	10
+run3_quiet	nature	alone:gmsnative	1024	690450210	544987580	519.7	4.747	10
+run3_quiet	nature	alone:dvifmgate	1024	728811808	545020165	519.8	4.747	10
+run3_quiet	nature	alone:dvifm+dvifmgate	1024	693389236	546261172	521.0	4.755	10
+run3_quiet	nature	alone:gmsbank+gmsnative	1024	800621584	652494015	622.3	5.486	10
+run3_quiet	nature	alone:mapdev+z1max	1024	767672116	620867998	592.1	5.268	10
+run3_quiet	nature	ladder:v2	1024	262979954	117517324	112.1	1.808	10
+run3_quiet	nature	ladder:append	1024	289509173	144046543	137.4	1.990	10
+run3_quiet	nature	ladder:append2	1024	295616912	148927981	142.0	2.024	10
+run3_quiet	nature	ladder:csfw	1024	304353175	158890545	151.5	2.092	10
+run3_quiet	nature	ladder:dvifm	1024	380572532	235109902	224.2	2.616	10
+run3_quiet	nature	ladder:gridblk	1024	405122355	259659725	247.6	2.785	10
+run3_quiet	nature	ladder:ringbasis	1024	453486689	308024059	293.8	3.118	10
+run3_quiet	nature	ladder:tailhist	1024	529078388	380346726	362.7	3.615	10
+run3_quiet	nature	ladder:arttype	1024	536021186	389891744	371.8	3.680	10
+run3_quiet	nature	ladder:gmsbank	1024	578103595	432640966	412.6	3.974	10
+run3_quiet	nature	ladder:mapdev	1024	759838922	611233237	582.9	5.202	10
+run3_quiet	nature	ladder:z1max	1024	765204277	619741648	591.0	5.260	10
+run3_quiet	nature	ladder:gmsnative	1024	796355528	650892898	620.7	5.475	10
+run3_quiet	nature	ladder:dvifmgate	1024	831811957	654343433	624.0	5.498	10
+run3_quiet	nature	core	4096	2279277975	0	0.0	1.000	5
+run3_quiet	nature	legacy:masked	4096	2756675919	466469165	27.8	1.205	5
+run3_quiet	nature	legacy:iw	4096	2758235339	463975826	27.7	1.204	5
+run3_quiet	nature	legacy:masked+iw	4096	2765627863	486349888	29.0	1.213	5
+run3_quiet	nature	alone:v2	4096	4158296587	1886647369	112.5	1.828	5
+run3_quiet	nature	alone:append	4096	4568471389	2278566032	135.8	2.000	5
+run3_quiet	nature	alone:append2	4096	4703304496	2424026522	144.5	2.064	5
+run3_quiet	nature	alone:csfw	4096	4811253964	2488766332	148.3	2.092	5
+run3_quiet	nature	alone:dvifm	4096	5316748635	3037470661	181.0	2.333	5
+run3_quiet	nature	alone:gridblk	4096	6294457169	4024197236	239.9	2.766	5
+run3_quiet	nature	alone:ringbasis	4096	7072420457	4771120844	284.4	3.093	5
+run3_quiet	nature	alone:tailhist	4096	8274640259	5904247839	351.9	3.590	5
+run3_quiet	nature	alone:arttype	4096	8352239354	6043576011	360.2	3.652	5
+run3_quiet	nature	alone:gmsbank	4096	8944944333	6664244043	397.2	3.924	5
+run3_quiet	nature	alone:mapdev	4096	11865472416	9504125231	566.5	5.170	5
+run3_quiet	nature	alone:z1max	4096	11947254928	9667976953	576.3	5.242	5
+run3_quiet	nature	alone:gmsnative	4096	10753101610	8473823636	505.1	4.718	5
+run3_quiet	nature	alone:dvifmgate	4096	10817745243	8538467268	508.9	4.746	5
+run3_quiet	nature	alone:dvifm+dvifmgate	4096	10769573332	8427888939	502.3	4.698	5
+run3_quiet	nature	alone:gmsbank+gmsnative	4096	12480638549	10107270266	602.4	5.434	5
+run3_quiet	nature	alone:mapdev+z1max	4096	11964062000	9684784025	577.3	5.249	5
+run3_quiet	nature	ladder:v2	4096	4140731445	1861453471	111.0	1.817	5
+run3_quiet	nature	ladder:append	4096	4596336814	2285268325	136.2	2.003	5
+run3_quiet	nature	ladder:append2	4096	4668889882	2389611907	142.4	2.048	5
+run3_quiet	nature	ladder:csfw	4096	4742578036	2463300062	146.8	2.081	5
+run3_quiet	nature	ladder:dvifm	4096	5950843323	3661934372	218.3	2.607	5
+run3_quiet	nature	ladder:gridblk	4096	6295792777	4016514802	239.4	2.762	5
+run3_quiet	nature	ladder:ringbasis	4096	7083256283	4747583028	283.0	3.083	5
+run3_quiet	nature	ladder:tailhist	4096	8253603469	5892715904	351.2	3.585	5
+run3_quiet	nature	ladder:arttype	4096	8315815729	6037723757	359.9	3.649	5
+run3_quiet	nature	ladder:gmsbank	4096	8968943101	6701777656	399.5	3.940	5
+run3_quiet	nature	ladder:mapdev	4096	11779457909	9510759385	566.9	5.173	5
+run3_quiet	nature	ladder:z1max	4096	11910149644	9630871670	574.0	5.225	5
+run3_quiet	nature	ladder:gmsnative	4096	12499453668	10220175693	609.2	5.484	5
+run3_quiet	nature	ladder:dvifmgate	4096	12387573186	10111703346	602.7	5.436	5
+run3_quiet	nature	step:v2	64	nan	518323	126.5	1.709	
+run3_quiet	nature	step:append	64	nan	143218	35.0	1.196	
+run3_quiet	nature	step:append2	64	nan	48682	11.9	1.067	
+run3_quiet	nature	step:csfw	64	nan	32553	7.9	1.045	
+run3_quiet	nature	step:dvifm	64	nan	320443	78.2	1.438	
+run3_quiet	nature	step:gridblk	64	nan	89526	21.9	1.122	
+run3_quiet	nature	step:ringbasis	64	nan	240855	58.8	1.330	
+run3_quiet	nature	step:tailhist	64	nan	357486	87.3	1.489	
+run3_quiet	nature	step:arttype	64	nan	47004	11.5	1.064	
+run3_quiet	nature	step:gmsbank	64	nan	238623	58.3	1.326	
+run3_quiet	nature	step:mapdev	64	nan	674332	164.6	1.923	
+run3_quiet	nature	step:z1max	64	nan	68084	16.6	1.093	
+run3_quiet	nature	step:gmsnative	64	nan	167608	40.9	1.229	
+run3_quiet	nature	step:dvifmgate	64	nan	-28337	-6.9	0.961	
+run3_quiet	nature	step:v2	256	nan	6937034	105.9	1.744	
+run3_quiet	nature	step:append	256	nan	1134081	17.3	1.122	
+run3_quiet	nature	step:append2	256	nan	533147	8.1	1.057	
+run3_quiet	nature	step:csfw	256	nan	308486	4.7	1.033	
+run3_quiet	nature	step:dvifm	256	nan	5252339	80.1	1.563	
+run3_quiet	nature	step:gridblk	256	nan	939751	14.3	1.101	
+run3_quiet	nature	step:ringbasis	256	nan	3306849	50.5	1.355	
+run3_quiet	nature	step:tailhist	256	nan	4537134	69.2	1.486	
+run3_quiet	nature	step:arttype	256	nan	1147564	17.5	1.123	
+run3_quiet	nature	step:gmsbank	256	nan	2367653	36.1	1.254	
+run3_quiet	nature	step:mapdev	256	nan	10612644	161.9	2.138	
+run3_quiet	nature	step:z1max	256	nan	756508	11.5	1.081	
+run3_quiet	nature	step:gmsnative	256	nan	2059592	31.4	1.221	
+run3_quiet	nature	step:dvifmgate	256	nan	-99839	-1.5	0.989	
+run3_quiet	nature	step:v2	1024	nan	117517324	112.1	1.808	
+run3_quiet	nature	step:append	1024	nan	26529219	25.3	1.182	
+run3_quiet	nature	step:append2	1024	nan	4881438	4.7	1.034	
+run3_quiet	nature	step:csfw	1024	nan	9962564	9.5	1.068	
+run3_quiet	nature	step:dvifm	1024	nan	76219357	72.7	1.524	
+run3_quiet	nature	step:gridblk	1024	nan	24549823	23.4	1.169	
+run3_quiet	nature	step:ringbasis	1024	nan	48364334	46.1	1.332	
+run3_quiet	nature	step:tailhist	1024	nan	72322666	69.0	1.497	
+run3_quiet	nature	step:arttype	1024	nan	9545018	9.1	1.066	
+run3_quiet	nature	step:gmsbank	1024	nan	42749222	40.8	1.294	
+run3_quiet	nature	step:mapdev	1024	nan	178592272	170.3	2.228	
+run3_quiet	nature	step:z1max	1024	nan	8508410	8.1	1.058	
+run3_quiet	nature	step:gmsnative	1024	nan	31151251	29.7	1.214	
+run3_quiet	nature	step:dvifmgate	1024	nan	3450535	3.3	1.024	
+run3_quiet	nature	step:v2	4096	nan	1861453471	111.0	1.817	
+run3_quiet	nature	step:append	4096	nan	423814855	25.3	1.186	
+run3_quiet	nature	step:append2	4096	nan	104343582	6.2	1.046	
+run3_quiet	nature	step:csfw	4096	nan	73688154	4.4	1.032	
+run3_quiet	nature	step:dvifm	4096	nan	1198634310	71.4	1.526	
+run3_quiet	nature	step:gridblk	4096	nan	354580430	21.1	1.156	
+run3_quiet	nature	step:ringbasis	4096	nan	731068226	43.6	1.321	
+run3_quiet	nature	step:tailhist	4096	nan	1145132876	68.3	1.502	
+run3_quiet	nature	step:arttype	4096	nan	145007853	8.6	1.064	
+run3_quiet	nature	step:gmsbank	4096	nan	664053899	39.6	1.291	
+run3_quiet	nature	step:mapdev	4096	nan	2808981729	167.4	2.232	
+run3_quiet	nature	step:z1max	4096	nan	120112285	7.2	1.053	
+run3_quiet	nature	step:gmsnative	4096	nan	589304023	35.1	1.259	
+run3_quiet	nature	step:dvifmgate	4096	nan	-108472347	-6.5	0.952	
+signedfeat_nature	nature	core	64	1242280	0	0.0	1.000	40
+signedfeat_nature	nature	alone:texgain	64	5911715	4669435	1140.0	4.759	40
+signedfeat_nature	nature	alone:satsign	64	5894117	4651838	1135.7	4.745	40
+signedfeat_nature	nature	alone:texgain+satsign	64	5998729	4756449	1161.2	4.829	40
+signedfeat_nature	nature	ladder:dvifmgate	64	5888652	4646372	1134.4	4.740	40
+signedfeat_nature	nature	ladder:texgain	64	6041240	4798960	1171.6	4.863	40
+signedfeat_nature	nature	ladder:satsign	64	6244164	4877975	1190.9	4.927	40
+signedfeat_nature	nature	core	256	15823096	0	0.0	1.000	21
+signedfeat_nature	nature	alone:texgain	256	80640487	64817391	989.0	5.096	21
+signedfeat_nature	nature	alone:satsign	256	79085631	63262535	965.3	4.998	21
+signedfeat_nature	nature	alone:texgain+satsign	256	80238557	64415462	982.9	5.071	21
+signedfeat_nature	nature	ladder:dvifmgate	256	80159224	64336128	981.7	5.066	21
+signedfeat_nature	nature	ladder:texgain	256	80454825	64631730	986.2	5.085	21
+signedfeat_nature	nature	ladder:satsign	256	78714957	62891862	959.7	4.975	21
+signedfeat_nature	nature	core	1024	169946345	0	0.0	1.000	10
+signedfeat_nature	nature	alone:texgain	1024	923944432	719855597	686.5	5.236	10
+signedfeat_nature	nature	alone:satsign	1024	908509759	731083158	697.2	5.302	10
+signedfeat_nature	nature	alone:texgain+satsign	1024	924256710	728792480	695.0	5.288	10
+signedfeat_nature	nature	ladder:dvifmgate	1024	916013355	712570495	679.6	5.193	10
+signedfeat_nature	nature	ladder:texgain	1024	940282323	770335978	734.6	5.533	10
+signedfeat_nature	nature	ladder:satsign	1024	938329908	768383563	732.8	5.521	10
+signedfeat_nature	nature	core	4096	2389226951	0	0.0	1.000	5
+signedfeat_nature	nature	alone:texgain	4096	13132063545	10742836594	640.3	5.496	5
+signedfeat_nature	nature	alone:satsign	4096	13213090914	10823863963	645.2	5.530	5
+signedfeat_nature	nature	alone:texgain+satsign	4096	13259968499	10870741548	647.9	5.550	5
+signedfeat_nature	nature	ladder:dvifmgate	4096	13068447990	10624810403	633.3	5.447	5
+signedfeat_nature	nature	ladder:texgain	4096	13090199735	10700972784	637.8	5.479	5
+signedfeat_nature	nature	ladder:satsign	4096	13228672185	10839445234	646.1	5.537	5
+signedfeat_nature	nature	step:dvifmgate	64	nan	4646372	1134.4	4.740	
+signedfeat_nature	nature	step:texgain	64	nan	152588	37.3	1.123	
+signedfeat_nature	nature	step:satsign	64	nan	79015	19.3	1.064	
+signedfeat_nature	nature	step:dvifmgate	256	nan	64336128	981.7	5.066	
+signedfeat_nature	nature	step:texgain	256	nan	295602	4.5	1.019	
+signedfeat_nature	nature	step:satsign	256	nan	-1739868	-26.5	0.890	
+signedfeat_nature	nature	step:dvifmgate	1024	nan	712570495	679.6	5.193	
+signedfeat_nature	nature	step:texgain	1024	nan	57765483	55.1	1.340	
+signedfeat_nature	nature	step:satsign	1024	nan	-1952415	-1.9	0.989	
+signedfeat_nature	nature	step:dvifmgate	4096	nan	10624810403	633.3	5.447	
+signedfeat_nature	nature	step:texgain	4096	nan	76162381	4.5	1.032	
+signedfeat_nature	nature	step:satsign	4096	nan	138472450	8.3	1.058	
+gmsd_peer	-	gmsd_rgb8(score+map mean; gmsm same call)	64	7280		1.78		
+gmsd_peer	-	gmsd_rgb8(score+map mean; gmsm same call)	256	89790		1.37		
+gmsd_peer	-	gmsd_rgb8(score+map mean; gmsm same call)	1024	922970		0.88		
+gmsd_peer	-	gmsd_rgb8(score+map mean; gmsm same call)	4096	11400000		0.68		
