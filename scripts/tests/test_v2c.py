@@ -241,7 +241,8 @@ class TrainRecipe(unittest.TestCase):
         self.assertEqual(v2_common.recipe_of("r0@h32"), {})
         self.assertEqual(v2_common.recipe_of("r0@h32:H128:gl0.0001"), {"hidden": 128, "group_l1": 0.0001})
         self.assertEqual(v2_common.split_weight("screen_main@h32:H64"), ("screen_main", 32.0))
-        for bad in ("r0@h32:H4", "r0@h32:x1", "r0@h32:H64:H128", "r0@h32:gl0"):
+        self.assertEqual(v2_common.recipe_of("r0@h32:H128:gl2.8"), {"hidden": 128, "group_l1": 2.8})   # calibrated E9′ grid
+        for bad in ("r0@h32:H4", "r0@h32:x1", "r0@h32:H64:H128", "r0@h32:gl0", "r0@h32:gl200"):
             with self.assertRaises(ValueError):
                 v2_common.recipe_of(bad)
         base = lodo.train_command([], 1, 2, 3, Path("k"), "N", Path("o"))

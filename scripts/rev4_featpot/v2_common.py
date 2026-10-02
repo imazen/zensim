@@ -150,7 +150,7 @@ def recipe_of(spec: str) -> dict:
     for tok in w.split(":")[1:]:
         if tok.startswith("H") and tok[1:].isdigit() and 8 <= int(tok[1:]) <= 512 and "hidden" not in out:
             out["hidden"] = int(tok[1:])
-        elif tok.startswith("gl") and "group_l1" not in out and 0 < float(tok[2:]) <= 1:
+        elif tok.startswith("gl") and "group_l1" not in out and 0 < float(tok[2:]) <= 100:
             out["group_l1"] = float(tok[2:])
         else:
             raise ValueError(f"bad recipe token {tok!r} in {spec!r}")
