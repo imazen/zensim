@@ -201,8 +201,9 @@ def block_spec(core: str) -> bool:
     if core.startswith("r0-"):
         return core[3:] in LEGACY_BLOCKS
     if core.startswith("core+"):
-        x = core[5:]
-        return x in LEGACY_BLOCKS or (x in (*CANDIDATES, *extra_arms()["arms"]) and x not in ("all", "rall"))
+        parts = core[5:].split("+")
+        ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")])
+        return len(parts) == len(set(parts)) and all(x in ok for x in parts)
     return False
 
 
@@ -219,14 +220,20 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     if base.startswith("r0-"):
         drop = set(LEGACY_BLOCKS[base[3:]])
         return "main", variant, [c for c in bank if c not in drop]
-    if base.startswith("core+"):
-        x = base[5:]
-        if x in LEGACY_BLOCKS:
-            return "main", variant, sorted(set(CORE) | set(LEGACY_BLOCKS[x]))
-        fam, _, ids = arm_columns(x)
-        if x in ("all", "rall"):
-            raise ValueError(f"{spec}: unions are not lean-base arms")
-        return fam, variant, sorted(set(CORE) | {c for c in ids if c >= 944})
+    if base.startswith("core+"):  # one or more groups (E9′ forward selection: core + S + X)
+        cols, fams = set(CORE), set()
+        for x in base[5:].split("+"):
+            if x in ("all", "rall"):
+                raise ValueError(f"{spec}: unions are not lean-base arms")
+            if x in LEGACY_BLOCKS:
+                cols |= set(LEGACY_BLOCKS[x])
+                continue
+            fam, _, ids = arm_columns(x)
+            fams.add(fam)
+            cols |= {c for c in ids if c >= 944}
+        if len(fams) > 1:  # the peer pair exists only in the aux table, the main research columns only in main
+            raise ValueError(f"{spec}: mixes aux-table and main-table families")
+        return (fams.pop() if fams else "main"), variant, sorted(cols)
     if base == "minus_basic":
         return "main", variant, list(range(228, 944))
     if base in AUX_ORACLE:

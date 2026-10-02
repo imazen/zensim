@@ -222,7 +222,9 @@ class TrainRecipe(unittest.TestCase):
         fam, _, cols = v2_common.arm_columns("core+csfw")
         self.assertEqual((fam, cols), ("main", list(range(228)) + list(range(944, 956))))
         self.assertEqual(sorted(set(v2_common.arm_columns("r0-basic")[2]) & set(v2_common.arm_columns("r0-peaks")[2])), list(range(228, 944)))
-        for bad in ("core+rall", "core+all", "r0-nope", "core+nope", "core+c1~p1"):
+        self.assertEqual(v2_common.arm_columns("core+iw+csfw@h32")[2], list(range(228)) + list(range(300, 372)) + list(range(944, 956)))
+        self.assertEqual(v2_common.arm_columns("core+p3+v2")[0], "aux")
+        for bad in ("core+rall", "core+all", "r0-nope", "core+nope", "core+c1~p1", "core+iw+iw", "core+p3+c3"):
             with self.assertRaises((ValueError, KeyError)):
                 v2_common.parse_spec(bad)
                 v2_common.arm_columns(bad)
