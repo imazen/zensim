@@ -90,8 +90,8 @@ pub fn forward(
 /// identical `h_pre[j] = fma(x[i], w1[i,j], h_pre[j])` chain the single
 /// `forward` runs (ascending i, fused domain `[0, n4)`, mul+add tail), so
 /// the pair outputs are BIT-IDENTICAL to two back-to-back `forward` calls
-/// on the same weights — the same statement `forward_all_tiers_bit_
-/// identical` and `forward_pair_vs_singles_bit_identical` check.
+/// on the same weights — checked by `forward_pair_all_tiers_bit_identical`
+/// (pair vs same-tier singles and across tiers).
 ///
 /// Returns `(ya, ha_pre, ha, yb, hb_pre, hb)` — the two `forward` return
 /// triples concatenated, side A first.
@@ -134,7 +134,7 @@ pub(crate) fn forward_pair(
 /// inside the fused Adam walk — runs the identical finish the matching
 /// `forward` tier would run. `h_pre` is consumed read-only; `h` is
 /// allocated fresh exactly as `forward_*` does.
-#[allow(dead_code)] // consumed by tests now; by the look-ahead walk in task 2
+#[allow(dead_code)] // used by the trainer's look-ahead consume path; bench #[path] includes may not reference it
 #[inline]
 pub(crate) fn forward_finish(
     h_pre: &[f64],

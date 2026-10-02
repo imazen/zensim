@@ -15403,7 +15403,14 @@ mod tests {
     /// gapped/full, across chained steps (so `g_zero_in` re-entry holds).
     #[test]
     fn step_w1_fused_lookahead_bit_identical() {
-        let (nf, nh) = (24usize, 8usize);
+        // Review 2026-10-02: every canonical-domain width, not only multiples of 8.
+        for nh in [8usize, 12, 20] {
+            step_w1_fused_lookahead_bit_identical_at(nh);
+        }
+    }
+
+    fn step_w1_fused_lookahead_bit_identical_at(nh: usize) {
+        let nf = 24usize;
         let n = nf * nh;
         let mut rng = SplitMix64::new(0xBEEF);
         let mut genvec =

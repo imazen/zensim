@@ -965,8 +965,13 @@ fn fwd_accum_row_v3(
     f: &mut FwdAccumW1<'_>,
     row: usize,
     w_row: &[f64],
-    _nh: usize,
+    nh: usize,
 ) {
+    debug_assert_eq!(
+        w_row.len(),
+        nh,
+        "the zip below would silently truncate a short row"
+    );
     let sa = f.xa[row];
     let sb = f.xb[row];
     let do_a = sa != 0.0;
@@ -1114,7 +1119,9 @@ fn adam_pair_fused_fallback(args: &mut AdamW1FusedArgs<'_>) {
     // so the apply visits all rows; the per-side `x == 0` guards reproduce
     // `forward`'s own skip, keeping it bit-identical regardless.
     if let Some(f) = args.fwd.as_mut() {
-        debug_assert_eq!(nh % 4, 0, "look-ahead forward needs canonical fma domain");
+        // A hard check: off the 4-lane canonical domain `forward` uses mul+add tail lanes, so the fma apply
+        // below would diverge silently (unreachable today: `fuse_w1` requires `n_hidden % 4 == 0`).
+        assert_eq!(nh % 4, 0, "look-ahead forward needs canonical fma domain");
         for row in 0..n_rows {
             fwd_accum_row_scalar(f, row, &args.w[row * nh..row * nh + nh], nh);
         }
@@ -2161,11 +2168,18 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn fused_w1_fwd_accum_bit_identical() {
+        // Review 2026-10-02: every canonical-domain width, not only multiples of 8.
+        for nh in [32usize, 12, 20] {
+            fused_w1_fwd_accum_bit_identical_at(nh);
+        }
+    }
+
+    fn fused_w1_fwd_accum_bit_identical_at(nh: usize) {
         use archmage::SimdToken;
         let _lock = archmage::testing::lock_token_testing();
         let v3 =
             archmage::X64V3Token::summon().expect("this test needs an x86-64-v3 (AVX2+FMA) host");
-        let (nf, nh) = (97usize, 32usize);
+        let nf = 97usize;
         let n = nf * nh;
         let kept = |r: usize| !(r % 5 == 2 || (30..38).contains(&r) || r == nf - 1);
         let runs: Vec<(u32, u32)> = {
