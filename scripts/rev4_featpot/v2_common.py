@@ -198,6 +198,10 @@ def block_spec(core: str) -> bool:
     """True for the E9 block specs: 'core', 'r0-<legacy block>', 'core+<legacy block | candidate arm | extra arm>'."""
     if core == "core":
         return True
+    if core.startswith("set:"):  # E9″: any groups, basic and peaks included, nothing exempt
+        parts = core[4:].split("+")
+        ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")])
+        return bool(core[4:]) and len(parts) == len(set(parts)) and all(x in ok for x in parts)
     if core.startswith("r0-"):
         return core[3:] in LEGACY_BLOCKS
     if core.startswith("core+"):
@@ -220,9 +224,9 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     if base.startswith("r0-"):
         drop = set(LEGACY_BLOCKS[base[3:]])
         return "main", variant, [c for c in bank if c not in drop]
-    if base.startswith("core+"):  # one or more groups (E9′ forward selection: core + S + X)
-        cols, fams = set(CORE), set()
-        for x in base[5:].split("+"):
+    if base.startswith("core+") or base.startswith("set:"):  # E9′ core + S + X; E9″ any set of groups, no exempt core
+        cols, fams = (set(CORE), set()) if base.startswith("core+") else (set(), set())
+        for x in base.partition("+")[2].split("+") if base.startswith("core+") else base[4:].split("+"):
             if x in ("all", "rall"):
                 raise ValueError(f"{spec}: unions are not lean-base arms")
             if x in LEGACY_BLOCKS:

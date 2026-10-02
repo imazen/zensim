@@ -1,14 +1,18 @@
-"""Design log E9′ method 1: group-level forward selection from the 228-column core, equal footing for every legacy
-block and every registered arm.
+"""Design log E9″ method 1: bidirectional stepwise group selection from the EMPTY set, equal footing for every group —
+all seven legacy blocks (basic and peaks included: nothing is exempt) and the 17 registered arms (their own columns).
 
-  python3 e9_forward.py grid  --recipe ':H128' --selected '' --out STEP.json      # cells of one step (base + candidates)
-  python3 e9_forward.py score --recipe ':H128' --selected '' --root /var/tmp/rev4-featpot/v2c
+  python3 e9_forward.py grid  --phase add  --recipe ':H128' --selected 'v2,c3' --out ROUND.json   # cells of one move
+  python3 e9_forward.py score --phase add  --recipe ':H128' --selected 'v2,c3' --root ROOT
+  python3 e9_forward.py grid  --phase drop --recipe ':H128' --selected 'v2,c3,iw' --out ROUND.json
+  python3 e9_forward.py score --phase drop --recipe ':H128' --selected 'v2,c3,iw' --root ROOT
 
-Step k evaluates `core+S+X` for every remaining group X against `core+S` (S = groups chosen so far, in order), seeds 0-4,
-the five design folds, head N. gain(X) = mean over sources of the seed-paired signed-SROCC difference. The step's rule
-(registered in E9′): choose the best X if gain >= 0.002 and the difference is > 0 on >= 3 of 5 sources; else stop.
-`score` writes <root>/compare/e9_step<k>.json and prints the decision. Groups whose table family conflicts with S (the
-aux-only peer arm p3 against main-table arms) are skipped and listed.
+Rules (registered in E9″; head N, seeds 0-4, five design folds, signed held-out SROCC):
+  add,  S empty : every group alone; choose the highest mean SROCC over the five sources.
+  add,  S given : for each remaining compatible X, gain = mean seed-paired Δ(S+X − S); choose the best if gain >= 0.002 and
+                  Δ > 0 on >= 3 of 5 sources, else STOP.
+  drop, |S| >= 2: for each g in S, loss = mean seed-paired Δ(S − S∖g); drop the smallest-loss g if loss < 0.001, else KEEP.
+Spec of a set = `set:` + the groups in selection order, so a move's winning spec is the next move's base by name.
+`score` writes <root>/compare/e9_<phase><k>.json and prints the decision.
 """
 
 import argparse
@@ -24,25 +28,30 @@ from v2_common import CANDIDATES, LEGACY_BLOCKS, SOURCE_ORDER, V2, arm_columns, 
 
 SEEDS = range(5)
 HEAD = "N"
-MIN_GAIN, MIN_SOURCES = 0.002, 3
+MIN_GAIN, MIN_SOURCES, MAX_DROP_LOSS = 0.002, 3, 0.001
 
 
 def groups() -> list[str]:
-    arms = [a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")]
-    return [b for b in LEGACY_BLOCKS if b not in ("basic", "peaks")] + arms
+    return [*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")]]
 
 
-def spec_of(selected: list[str], extra: str | None, recipe: str) -> str:
-    parts = [*selected, *([extra] if extra else [])]
-    return ("core+" + "+".join(parts) if parts else "core") + f"@h32{recipe}"
+def spec_of(parts: list[str], recipe: str) -> str:
+    return "set:" + "+".join(parts) + f"@h32{recipe}"
 
 
-def compatible(selected: list[str], x: str) -> bool:
+def compatible(parts: list[str]) -> bool:
     try:
-        arm_columns(spec_of(selected, x, ""))
+        arm_columns(spec_of(parts, ""))
         return True
     except ValueError:
         return False
+
+
+def candidates(phase: str, selected: list[str]) -> dict[str, list[str]]:
+    """{label: group list} the move evaluates (the base set itself is not included)."""
+    if phase == "add":
+        return {x: [*selected, x] for x in groups() if x not in selected and compatible([*selected, x])}
+    return {g: [x for x in selected if x != g] for g in selected}
 
 
 def signed(spec: str, source: str, seed: int) -> float | None:
@@ -55,73 +64,80 @@ def signed(spec: str, source: str, seed: int) -> float | None:
 
 
 def cmd_grid(args, selected: list[str]) -> int:
-    specs = [spec_of(selected, None, args.recipe)] + [spec_of(selected, x, args.recipe) for x in groups()
-                                                       if x not in selected and compatible(selected, x)]
+    specs = [spec_of(parts, args.recipe) for parts in candidates(args.phase, selected).values()]
+    if args.include_base and selected:
+        specs.insert(0, spec_of(selected, args.recipe))
     cells = [{"name": f"{sp}__{HEAD}/without_{s}_s{i}",
-              "argv": ["v2_lodo_mlp.py", "--spec", sp, "--head", HEAD, "--heldout", s, "--seed-index", str(i),
-                       "--root", str(V2)]}
+              "argv": ["v2_lodo_mlp.py", "--spec", sp, "--head", HEAD, "--heldout", s, "--seed-index", str(i), "--root", str(V2)]}
              for sp in specs for s in SOURCE_ORDER for i in SEEDS]
-    if args.skip_base:
-        cells = [c for c in cells if not c["name"].startswith(specs[0] + "__")]
     Path(args.out).write_text(json.dumps({"program_sha": args.program_sha, "data_sha": args.data_sha, "cells": cells}, indent=1))
-    print(json.dumps({"step": len(selected) + 1, "specs": len(specs), "cells": len(cells)}))
+    print(json.dumps({"phase": args.phase, "selected": selected, "specs": len(specs), "cells": len(cells)}))
     return 0
 
 
 def cmd_score(args, selected: list[str]) -> int:
-    base = spec_of(selected, None, args.recipe)
-    rows, skipped, missing = {}, [], 0
-    for x in groups():
-        if x in selected:
-            continue
-        if not compatible(selected, x):
-            skipped.append(x)
-            continue
-        spec = spec_of(selected, x, args.recipe)
+    base = spec_of(selected, args.recipe) if selected else None
+    rows, missing = {}, 0
+    for label, parts in candidates(args.phase, selected).items():
+        spec = spec_of(parts, args.recipe)
         per = {}
         for s in SOURCE_ORDER:
-            d = []
+            vals = []
             for i in SEEDS:
-                a, b = signed(spec, s, i), signed(base, s, i)
+                a = signed(spec, s, i)
+                b = signed(base, s, i) if base else 0.0
                 if a is None or b is None:
                     missing += 1
                     continue
-                d.append(a - b)
-            per[s] = {"delta": float(np.mean(d)) if d else None, "se": float(np.std(d, ddof=1) / np.sqrt(len(d))) if len(d) > 1 else None,
-                      "n": len(d)}
-        deltas = [v["delta"] for v in per.values() if v["delta"] is not None]
-        rows[x] = {"per_source": per, "gain": float(np.mean(deltas)) if len(deltas) == len(SOURCE_ORDER) else None,
-                   "positive_sources": sum(d > 0 for d in deltas), "columns": len(arm_columns(spec)[2])}
-    out = {"schema": "rev4-featpot-e9-forward-v1", "step": len(selected) + 1, "selected_before": selected,
-           "recipe": args.recipe, "base": base, "candidates": rows, "skipped_incompatible": skipped, "missing_cells": missing}
+                # add: Δ = S+X − S (or the absolute SROCC from empty); drop: Δ = S − S∖g, so a positive value is a loss
+                vals.append(a - b if args.phase == "add" else b - a)
+            per[s] = {"value": float(np.mean(vals)) if vals else None,
+                      "se": float(np.std(vals, ddof=1) / np.sqrt(len(vals))) if len(vals) > 1 else None, "n": len(vals)}
+        v = [x["value"] for x in per.values() if x["value"] is not None]
+        rows[label] = {"spec": spec, "per_source": per, "mean": float(np.mean(v)) if len(v) == len(SOURCE_ORDER) else None,
+                       "positive_sources": sum(x > 0 for x in v), "columns": len(arm_columns(spec)[2])}
+    k = len(selected) + (1 if args.phase == "add" else 0)
+    out = {"schema": "rev4-featpot-e9-stepwise-v1", "phase": args.phase, "selected_before": selected, "recipe": args.recipe,
+           "base": base, "candidates": rows, "missing_cells": missing}
     if missing:
         out["decision"] = {"status": "INCOMPLETE"}
-    else:
-        ranked = sorted(rows, key=lambda x: -rows[x]["gain"])
+    elif args.phase == "add":
+        ranked = sorted(rows, key=lambda x: -rows[x]["mean"])
         best = ranked[0]
-        ok = rows[best]["gain"] >= MIN_GAIN and rows[best]["positive_sources"] >= MIN_SOURCES
-        out["ranking"] = [(x, round(rows[x]["gain"], 5), rows[x]["positive_sources"]) for x in ranked]
+        if not selected:
+            ok = True
+        else:
+            ok = rows[best]["mean"] >= MIN_GAIN and rows[best]["positive_sources"] >= MIN_SOURCES
+        out["ranking"] = [(x, rows[x]["mean"], rows[x]["positive_sources"], rows[x]["columns"]) for x in ranked]
         out["decision"] = {"status": "ADD" if ok else "STOP", "group": best if ok else None,
-                           "best_gain": rows[best]["gain"], "best_positive_sources": rows[best]["positive_sources"]}
-    dest = V2 / "compare" / f"e9_step{len(selected) + 1}{args.recipe.replace(':', '_')}.json"
+                           "selected_after": [*selected, best] if ok else selected, "best": rows[best]["mean"]}
+    else:
+        ranked = sorted(rows, key=lambda x: rows[x]["mean"])
+        best = ranked[0]
+        ok = len(selected) >= 2 and rows[best]["mean"] < MAX_DROP_LOSS
+        out["ranking"] = [(x, rows[x]["mean"], rows[x]["positive_sources"], rows[x]["columns"]) for x in ranked]
+        out["decision"] = {"status": "DROP" if ok else "KEEP", "group": best if ok else None,
+                           "selected_after": [x for x in selected if x != best] if ok else selected, "smallest_loss": rows[best]["mean"]}
+    dest = V2 / "compare" / f"e9_{args.phase}{k}_{'-'.join(selected) or 'empty'}{args.recipe.replace(':', '_')}.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(out, indent=1) + "\n")
     print(json.dumps(out["decision"]))
-    for x, g, n in out.get("ranking", [])[:12]:
-        print(f"  {x:10s} gain {g:+.4f}  positive {n}/5  cols {rows[x]['columns']}")
+    for x, m, n, c in out.get("ranking", [])[:10]:
+        print(f"  {x:10s} {'gain' if args.phase == 'add' else 'loss'} {m:+.4f}  positive {n}/5  cols {c}")
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["grid", "score"])
+    ap.add_argument("--phase", choices=["add", "drop"], default="add")
     ap.add_argument("--recipe", default="", help="E8 recipe tokens, e.g. ':H128'")
-    ap.add_argument("--selected", default="", help="comma-separated groups chosen so far, in order")
+    ap.add_argument("--selected", default="", help="comma-separated groups in S, in selection order")
     ap.add_argument("--root", help="instrument root; read by v2_common from argv")
     ap.add_argument("--out")
     ap.add_argument("--program-sha", default="")
     ap.add_argument("--data-sha", default="")
-    ap.add_argument("--skip-base", action="store_true", help="omit the base spec's cells (already run as the previous winner)")
+    ap.add_argument("--include-base", action="store_true", help="also emit the base set's cells (normally run by the previous move)")
     args = ap.parse_args()
     selected = [x for x in args.selected.split(",") if x]
     return cmd_grid(args, selected) if args.cmd == "grid" else cmd_score(args, selected)
