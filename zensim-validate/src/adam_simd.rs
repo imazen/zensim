@@ -826,6 +826,85 @@ pub(crate) struct AdamW1FusedArgs<'a> {
     /// fallback ignores the ranges and updates every row, which is the same
     /// fixed point.
     pub active_rows: Option<&'a [(u32, u32)]>,
+    /// `Some(tau)` applies the group-lasso block soft-threshold
+    /// ([`group_l1_row`]) to each visited row right after that row's Adam
+    /// update, while the row is still in cache. Bit-identical to running
+    /// `apply_group_l1` over all of `w` after the whole step: rows are
+    /// independent, and the row order, the sequential sum of squares and the
+    /// `norm <= tau` / `1 - tau/norm` arithmetic are the same. A skipped
+    /// (`active_rows`) row is exactly zero and the prox maps zero to zero, so
+    /// not visiting it is exact. The composition fallback applies it to every
+    /// row after `adam_update`.
+    pub group_l1_tau: Option<f64>,
+    /// Caller promise that `g` is `+0.0` in every element on entry (the
+    /// post-step invariant: every Adam path stores `g = +0.0`, and the only
+    /// other writer, the TV regularizer, is followed by an unfused step before
+    /// the next fused call). The v3/v4 kernels then start the accumulation
+    /// from zero instead of loading `g`, and skip the `g = 0` store — `g` is
+    /// left untouched, still `+0.0`. Checked row by row under
+    /// `debug_assertions`. The composition fallback ignores it (it reads `g`).
+    pub g_zero_in: bool,
+}
+
+/// Block soft-threshold on one layer-1 input row (`w`'s outgoing weights):
+/// the group-lasso proximal operator with threshold `tau`.
+/// `‖w‖₂ <= tau` zeroes the row; otherwise `w *= 1 - tau/‖w‖₂`. The norm is a
+/// SEQUENTIAL f64 sum of squares in element order — callers rely on the exact
+/// bits, so do not vectorize the reduction. Single owner: `apply_group_l1` and
+/// the fused kernel both call this.
+#[inline(always)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+pub(crate) fn group_l1_row(row: &mut [f64], tau: f64) {
+    let norm = row.iter().map(|&w| w * w).sum::<f64>().sqrt();
+    group_l1_apply(row, norm, tau);
+}
+
+/// The threshold step of [`group_l1_row`] given the row's norm.
+#[inline(always)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn group_l1_apply(row: &mut [f64], norm: f64, tau: f64) {
+    if norm <= tau {
+        for w in row.iter_mut() {
+            *w = 0.0;
+        }
+    } else {
+        let f = 1.0 - tau / norm;
+        for w in row.iter_mut() {
+            *w *= f;
+        }
+    }
+}
+
+/// Rows per [`group_l1_rows`] block (independent sequential norm chains).
+const GROUP_L1_BLOCK: usize = 8;
+
+/// [`group_l1_row`] over `w.len() / nh` consecutive rows, bit-identical to
+/// calling it per row. A full block of [`GROUP_L1_BLOCK`] rows runs its
+/// sum-of-squares chains side by side: each row's sum is still a sequential
+/// f64 accumulation in element order, but the chains are independent, so the
+/// 4-cycle add latency of one row no longer serializes the whole step.
+#[inline(never)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+pub(crate) fn group_l1_rows(w: &mut [f64], nh: usize, tau: f64) {
+    if w.len() == GROUP_L1_BLOCK * nh {
+        let mut sums = [0.0f64; GROUP_L1_BLOCK];
+        {
+            let rows: [&[f64]; GROUP_L1_BLOCK] = core::array::from_fn(|k| &w[k * nh..(k + 1) * nh]);
+            for j in 0..nh {
+                for (s, row) in sums.iter_mut().zip(rows.iter()) {
+                    let x = row[j];
+                    *s += x * x;
+                }
+            }
+        }
+        for (row, s) in w.chunks_exact_mut(nh).zip(sums) {
+            group_l1_apply(row, s.sqrt(), tau);
+        }
+    } else {
+        for row in w.chunks_mut(nh) {
+            group_l1_row(row, tau);
+        }
+    }
 }
 
 /// Dispatch entry for the fused pair update. Caller contract: `n_hidden > 0`,
@@ -914,6 +993,11 @@ fn adam_pair_fused_fallback(args: &mut AdamW1FusedArgs<'_>) {
         bc2: args.bc2,
         lr: args.lr,
     });
+    if let (Some(tau), true) = (args.group_l1_tau, nh > 0) {
+        for blk in args.w.chunks_mut(GROUP_L1_BLOCK * nh) {
+            group_l1_rows(blk, nh, tau);
+        }
+    }
 }
 
 /// `v4` tier variant. Deliberately NOT a native 8-lane kernel: AVX-512 must
@@ -954,64 +1038,86 @@ fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1F
     let n = args.w.len();
     let n_rows = n / nh;
     let l2_on = args.l2_scale > 0.0;
+    let gz = args.g_zero_in;
+    let tau = args.group_l1_tau;
     let (dha_chunks, _) = args.dha[..nh].as_chunks::<4>();
     let (dhb_chunks, _) = args.dhb[..nh].as_chunks::<4>();
 
     let full = [(0u32, n_rows as u32)];
     let ranges: &[(u32, u32)] = args.active_rows.unwrap_or(&full);
     for &(r0, r1) in ranges {
-        for row in r0 as usize..(r1 as usize).min(n_rows) {
-            let base = row * nh;
-            let sa = args.xa[row];
-            let sb = args.xb[row];
-            let sa_v = f64x4::splat(token, sa);
-            let sb_v = f64x4::splat(token, sb);
-            let do_a = sa != 0.0;
-            let do_b = sb != 0.0;
-            let sm_v = f64x4::splat(
-                token,
-                match args.l2_mult {
-                    Some(mult) => args.l2_scale * mult[row],
-                    None => args.l2_scale,
-                },
-            );
-            let (w_chunks, _) = args.w[base..base + nh].as_chunks_mut::<4>();
-            let (g_chunks, _) = args.g[base..base + nh].as_chunks_mut::<4>();
-            let (m_chunks, _) = args.m[base..base + nh].as_chunks_mut::<4>();
-            let (v_chunks, _) = args.v[base..base + nh].as_chunks_mut::<4>();
-            for (c, (((wc, gc), mc), vc)) in w_chunks
-                .iter_mut()
-                .zip(g_chunks.iter_mut())
-                .zip(m_chunks.iter_mut())
-                .zip(v_chunks.iter_mut())
-                .enumerate()
-            {
-                let mut g = f64x4::load(token, gc);
-                if do_a {
-                    g = sa_v.mul_add(f64x4::load(token, &dha_chunks[c]), g);
+        let (r0, r1) = (r0 as usize, (r1 as usize).min(n_rows));
+        let mut blk0 = r0;
+        while blk0 < r1 {
+            let blk1 = if tau.is_some() {
+                (blk0 + GROUP_L1_BLOCK).min(r1)
+            } else {
+                r1
+            };
+            for row in blk0..blk1 {
+                let base = row * nh;
+                let sa = args.xa[row];
+                let sb = args.xb[row];
+                let sa_v = f64x4::splat(token, sa);
+                let sb_v = f64x4::splat(token, sb);
+                let do_a = sa != 0.0;
+                let do_b = sb != 0.0;
+                let sm_v = f64x4::splat(
+                    token,
+                    match args.l2_mult {
+                        Some(mult) => args.l2_scale * mult[row],
+                        None => args.l2_scale,
+                    },
+                );
+                debug_assert!(
+                    !gz || args.g[base..base + nh].iter().all(|g| g.to_bits() == 0),
+                    "g_zero_in promised an all +0.0 gradient row (row {row})"
+                );
+                let (w_chunks, _) = args.w[base..base + nh].as_chunks_mut::<4>();
+                let (g_chunks, _) = args.g[base..base + nh].as_chunks_mut::<4>();
+                let (m_chunks, _) = args.m[base..base + nh].as_chunks_mut::<4>();
+                let (v_chunks, _) = args.v[base..base + nh].as_chunks_mut::<4>();
+                for (c, (((wc, gc), mc), vc)) in w_chunks
+                    .iter_mut()
+                    .zip(g_chunks.iter_mut())
+                    .zip(m_chunks.iter_mut())
+                    .zip(v_chunks.iter_mut())
+                    .enumerate()
+                {
+                    let mut g = if gz { zero_v } else { f64x4::load(token, gc) };
+                    if do_a {
+                        g = sa_v.mul_add(f64x4::load(token, &dha_chunks[c]), g);
+                    }
+                    if do_b {
+                        g = sb_v.mul_add(f64x4::load(token, &dhb_chunks[c]), g);
+                    }
+                    let w = f64x4::load(token, wc);
+                    if l2_on {
+                        // mul+add — two roundings, matching l2_row_avx exactly.
+                        g += sm_v * w;
+                    }
+                    let m = f64x4::load(token, mc);
+                    let v = f64x4::load(token, vc);
+                    let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
+                    let gg = g * g;
+                    let v_new = one_minus_b2_v.mul_add(gg, beta2_v * v);
+                    let m_hat = m_new * inv_bc1_v;
+                    let v_hat = v_new * inv_bc2_v;
+                    let denom = v_hat.sqrt() + eps_v;
+                    let w_new = w - (lr_v * m_hat) / denom;
+                    m_new.store(mc);
+                    v_new.store(vc);
+                    w_new.store(wc);
+                    if !gz {
+                        zero_v.store(gc);
+                    }
                 }
-                if do_b {
-                    g = sb_v.mul_add(f64x4::load(token, &dhb_chunks[c]), g);
-                }
-                let w = f64x4::load(token, wc);
-                if l2_on {
-                    // mul+add — two roundings, matching l2_row_avx exactly.
-                    g += sm_v * w;
-                }
-                let m = f64x4::load(token, mc);
-                let v = f64x4::load(token, vc);
-                let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
-                let gg = g * g;
-                let v_new = one_minus_b2_v.mul_add(gg, beta2_v * v);
-                let m_hat = m_new * inv_bc1_v;
-                let v_hat = v_new * inv_bc2_v;
-                let denom = v_hat.sqrt() + eps_v;
-                let w_new = w - (lr_v * m_hat) / denom;
-                m_new.store(mc);
-                v_new.store(vc);
-                w_new.store(wc);
-                zero_v.store(gc);
             }
+            // The block's rows are still hot in L1: prox them now.
+            if let Some(tau) = tau {
+                group_l1_rows(&mut args.w[blk0 * nh..blk1 * nh], nh, tau);
+            }
+            blk0 = blk1;
         }
     }
 }
@@ -1538,6 +1644,8 @@ mod tests {
                         bc2: 1.0 - 0.999f64.powi(t as i32),
                         lr: 0.005,
                         active_rows: None,
+                        group_l1_tau: None,
+                        g_zero_in: false,
                     });
                     for (name, a, b) in [
                         ("w", &wo, &wf),
@@ -1626,6 +1734,8 @@ mod tests {
                         bc2: 1.0 - 0.999f64.powi(t as i32),
                         lr: 0.005,
                         active_rows: None,
+                        group_l1_tau: None,
+                        g_zero_in: false,
                     });
                     for (name, a, b) in [
                         ("w", &wo, &wt),
@@ -1730,6 +1840,8 @@ mod tests {
                             bc2,
                             lr: 0.005,
                             active_rows: active,
+                            group_l1_tau: None,
+                            g_zero_in: false,
                         },
                     );
                 };
@@ -1748,6 +1860,149 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// Fusing the group-lasso prox into the row loop (`group_l1_tau`) and
+    /// starting from a zero gradient (`g_zero_in`) are bit-identical to the
+    /// separate post-step `apply_group_l1`-style pass over the plain fused
+    /// kernel, on the v3 kernel, the v4 wrapper and the composition fallback,
+    /// with and without `active_rows`, over several steps. `tau` is chosen so
+    /// some rows hit the `norm <= tau` zeroing branch and others the scale
+    /// branch (asserted), and the prox must actually change the weights.
+    #[test]
+    fn fused_w1_group_l1_and_g_zero_bit_identical() {
+        let (nf, nh) = (97usize, 32usize);
+        let n = nf * nh;
+        let kept = |r: usize| !(r % 3 == 1 || (40..52).contains(&r) || r == nf - 1);
+        let runs: Vec<(u32, u32)> = {
+            let mut v: Vec<(u32, u32)> = Vec::new();
+            for r in (0..nf).filter(|&r| kept(r)) {
+                match v.last_mut() {
+                    Some(l) if l.1 as usize == r => l.1 += 1,
+                    _ => v.push((r as u32, r as u32 + 1)),
+                }
+            }
+            v
+        };
+        use archmage::SimdToken;
+        let _lock = archmage::testing::lock_token_testing();
+        let v3 =
+            archmage::X64V3Token::summon().expect("this test needs an x86-64-v3 (AVX2+FMA) host");
+        for (l2_scale, has_mult, use_active) in [
+            (0.0, false, false),
+            (1e-5, false, true),
+            (1e-5, true, false),
+            (1e-3, true, true),
+        ] {
+            let (mut w0, _g, mut m0, mut v0) = synth_state(n, 0x6A11);
+            let mult: Vec<f64> = (0..nf).map(|r| 0.5 + (r % 5) as f64).collect();
+            // Row-scale spread so a single tau straddles the row norms.
+            for r in 0..nf {
+                let k = 0.02 * (1 + r % 11) as f64;
+                w0[r * nh..(r + 1) * nh].iter_mut().for_each(|x| *x *= k);
+            }
+            if use_active {
+                for r in (0..nf).filter(|&r| !kept(r)) {
+                    for a in [&mut w0, &mut m0, &mut v0] {
+                        a[r * nh..(r + 1) * nh].fill(0.0);
+                    }
+                }
+            }
+            let g_start = vec![0.0f64; n];
+            // Oracle: plain fused kernel (g loaded/stored) + separate prox pass.
+            let mut st_o = (w0.clone(), g_start.clone(), m0.clone(), v0.clone());
+            // Candidates: (name, state, runner id).
+            let mut st_v3 = st_o.clone();
+            let mut st_v4w = st_o.clone();
+            let mut st_fb = st_o.clone();
+            let mut st_noprox = st_o.clone();
+            let lr = 0.005;
+            let (mut zeroed_rows, mut scaled_rows) = (0usize, 0usize);
+            for step in 1..=6u64 {
+                let (mut xa, mut xb, dha, dhb) = pair_inputs(nf, nh, 0x91 + step);
+                if use_active {
+                    for r in (0..nf).filter(|&r| !kept(r)) {
+                        xa[r] = 0.0;
+                        xb[r] = 0.0;
+                    }
+                }
+                let t = std::hint::black_box(step);
+                let (bc1, bc2) = (1.0 - 0.9f64.powi(t as i32), 1.0 - 0.999f64.powi(t as i32));
+                let tau = 0.35 * lr / lr; // row-norm scale of the spread above
+                macro_rules! mk {
+                    ($st:expr, $tau:expr, $gz:expr, $active:expr) => {{
+                        let (w, g, m, v) = &mut *$st;
+                        AdamW1FusedArgs {
+                            w,
+                            g,
+                            m,
+                            v,
+                            xa: &xa,
+                            dha: &dha,
+                            xb: &xb,
+                            dhb: &dhb,
+                            l2_scale,
+                            l2_mult: has_mult.then_some(mult.as_slice()),
+                            n_hidden: nh,
+                            beta1: 0.9,
+                            beta2: 0.999,
+                            eps: 1e-8,
+                            bc1,
+                            bc2,
+                            lr,
+                            active_rows: $active,
+                            group_l1_tau: $tau,
+                            g_zero_in: $gz,
+                        }
+                    }};
+                }
+                let act = use_active.then_some(runs.as_slice());
+                // oracle
+                adam_pair_fused_inner_v3(v3, &mut mk!(&mut st_o, None, false, None));
+                for row in st_o.0.chunks_mut(nh) {
+                    let norm = row.iter().map(|&w| w * w).sum::<f64>().sqrt();
+                    if norm <= tau {
+                        row.fill(0.0);
+                        zeroed_rows += 1;
+                    } else {
+                        let f = 1.0 - tau / norm;
+                        row.iter_mut().for_each(|w| *w *= f);
+                        scaled_rows += 1;
+                    }
+                }
+                adam_pair_fused_inner_v3(v3, &mut mk!(&mut st_noprox, None, false, None));
+                adam_pair_fused_inner_v3(v3, &mut mk!(&mut st_v3, Some(tau), true, act));
+                adam_pair_fused_inner_v3(v3, &mut mk!(&mut st_v4w, Some(tau), false, act));
+                adam_pair_fused_fallback(&mut mk!(&mut st_fb, Some(tau), true, None));
+                for (label, cand) in [
+                    ("v3+gz", &st_v3),
+                    ("v3 prox only", &st_v4w),
+                    ("fallback", &st_fb),
+                ] {
+                    for (name, a, b) in [
+                        ("w", &st_o.0, &cand.0),
+                        ("g", &st_o.1, &cand.1),
+                        ("m", &st_o.2, &cand.2),
+                        ("v", &st_o.3, &cand.3),
+                    ] {
+                        assert_eq!(
+                            bits_of(a),
+                            bits_of(b),
+                            "{label} diverged: {name} step={step} l2={l2_scale} mult={has_mult} active={use_active}"
+                        );
+                    }
+                }
+            }
+            assert!(
+                zeroed_rows > 0 && scaled_rows > 0,
+                "tau must straddle: zeroed={zeroed_rows} scaled={scaled_rows}"
+            );
+            assert_ne!(
+                bits_of(&st_o.0),
+                bits_of(&st_noprox.0),
+                "prox must change w"
+            );
         }
     }
 

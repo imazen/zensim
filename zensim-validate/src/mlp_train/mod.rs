@@ -1241,18 +1241,18 @@ fn apply_group_l1(w1: &mut [f64], n_hidden: usize, lr: f64, lambda: f64) {
         return;
     }
     for row in w1.chunks_mut(n_hidden) {
-        let norm = row.iter().map(|&w| w * w).sum::<f64>().sqrt();
-        if norm <= tau {
-            for w in row.iter_mut() {
-                *w = 0.0;
-            }
-        } else {
-            let f = 1.0 - tau / norm;
-            for w in row.iter_mut() {
-                *w *= f;
-            }
-        }
+        adam_simd::group_l1_row(row, tau);
     }
+}
+
+/// The group-lasso threshold `τ = lr · λ` that [`apply_group_l1`] would use
+/// for this step, or `None` when it is a no-op (`λ <= 0`, `τ <= 0`).
+fn group_l1_step_tau(lr: f64, lambda: f64) -> Option<f64> {
+    if lambda <= 0.0 {
+        return None;
+    }
+    let tau = lr * lambda;
+    if tau <= 0.0 { None } else { Some(tau) }
 }
 
 /// Post-Adam decoupled penalties on layer-1 weights, in a fixed order:
@@ -2967,6 +2967,16 @@ pub fn train_mlp_strategy(
                 } else {
                     None
                 };
+                // Group-lasso rides inside the fused row loop (row still in
+                // cache) unless coarse decay is on: decay must run before the
+                // prox over the whole array, so that combination keeps the
+                // separate post-step pass.
+                let coarse_on = coarse_decay_rate() > 0.0;
+                let fused_tau = if coarse_on {
+                    None
+                } else {
+                    group_l1_step_tau(lr, group_l1_lambda())
+                };
                 adam.step_w1_fused(
                     &mut w1,
                     &mut b1,
@@ -2981,8 +2991,11 @@ pub fn train_mlp_strategy(
                     fmult.as_ref().map(|v| v.as_slice()),
                     n_hidden,
                     active_rows.as_deref(),
+                    fused_tau,
                 );
-                apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                if coarse_on {
+                    apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                }
                 nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 steps_since_adam = 0;
             } else {
@@ -6994,6 +7007,7 @@ impl AdamState {
         l2_mult: Option<&[f64]>,
         n_hidden: usize,
         active_rows: Option<&[(u32, u32)]>,
+        group_l1_tau: Option<f64>,
     ) {
         self.t += 1;
         let beta1: f64 = 0.9;
@@ -7024,6 +7038,12 @@ impl AdamState {
             bc2,
             lr,
             active_rows,
+            group_l1_tau,
+            // Every writer of `gw1` (unfused backprop, TV) is followed by an
+            // unfused `step` that stores +0.0 before this fused path runs
+            // again, and `AdamState::new` starts it zeroed — so `gw1` is
+            // +0.0 on entry (checked per row under debug_assertions).
+            g_zero_in: true,
         });
 
         let step_one = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {

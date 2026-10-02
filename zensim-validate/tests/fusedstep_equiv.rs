@@ -244,6 +244,8 @@ fn run_fused(
         bc2: 1.0 - BETA2,
         lr: LR,
         active_rows: None,
+        group_l1_tau: None,
+        g_zero_in: false,
     });
     adam(&mut n.b1, &mut n.gb1, &mut n.mb1, &mut n.vb1);
     adam(&mut n.w2, &mut n.gw2, &mut n.mw2, &mut n.vw2);

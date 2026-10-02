@@ -1,7 +1,7 @@
 """TRAINEROPT gate: run one v2 cell through several `zensim_mlp_train` binaries and compare byte for byte.
 
-For each variant `label=trainer_path[:log_every]` the cell is trained with the v2 recipe (`v2_lodo_mlp.train_command`,
-final-epoch checkpoint dump), then the final-epoch weights (`harvest_fit_cells.weights_sha` semantics: the checkpoint
+For each variant `label=trainer_path[:log_every]` the cell is trained with the v2 recipe (`v2_lodo_mlp.train_command`, including
+the spec's `@h<w>:H<n>:gl<λ>` recipe tokens; final-epoch checkpoint dump), then the final-epoch weights (`harvest_fit_cells.weights_sha` semantics: the checkpoint
 minus its trailing run-metadata JSON) and the held-out predictions (`bake_dial_refit predict`) are hashed. The first
 variant is the reference; every other variant must match it on the weights hash, the prediction hash and the dev
 values at the epochs both logged. Wall time is recorded per variant (pin the process with `taskset`).
@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--epochs", type=int, required=True)
     ap.add_argument("--fitbin", required=True, help="bake_dial_refit used to predict for every variant")
     ap.add_argument("--variant", action="append", required=True, help="label=trainer[:log_every]; first is the reference")
+    ap.add_argument("--group-l1", type=float, default=None,
+                    help="override the recipe's group-lasso strength (recipe_of caps the spec token at 1; the trainer does not)")
     ap.add_argument("--out", required=True)
     return ap.parse_args()
 
@@ -71,6 +73,9 @@ def main() -> None:
     table = lodo.checked(legs[args.heldout]["full"])
     lodo.FITBIN = Path(args.fitbin)
 
+    recipe = lodo.recipe_of(args.spec)
+    if args.group_l1 is not None:
+        recipe["group_l1"] = args.group_l1
     env = {**os.environ, "ZENSIM_MAX_TIER": "v3", "RAYON_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
     results = []
     for spec in args.variant:
@@ -82,7 +87,8 @@ def main() -> None:
         ckpt = d / "ckpt"
         ckpt.mkdir(exist_ok=True)
         lodo.TRAINER = Path(trainer)
-        cmd = lodo.train_command(groups, init_seed, sample_seed, width, keep_file, args.head, d / "best.bin")
+        cmd = lodo.train_command(groups, init_seed, sample_seed, width, keep_file, args.head, d / "best.bin",
+                                 recipe)
         cmd[cmd.index("--log-every") + 1] = str(log_every)
         cmd += ["--dump-checkpoints-every", str(args.epochs - 1), "--dump-checkpoints-dir", str(ckpt)]
         t0 = time.perf_counter()
