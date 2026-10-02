@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
-from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, recipe_of, split_weight,
+from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, arm_columns, block_spec, recipe_of, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, sha, table_path)
 
@@ -144,8 +144,13 @@ def main() -> None:
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
     if lists["schema"] != "rev4-featpot-v2-keeplists-v2":
         raise ValueError("keep-list schema mismatch")
-    entry = lists["specs"][core_spec]
-    family, variant, keep = entry["family"], entry["variant"], entry["keep"]
+    if core_spec in lists["specs"]:
+        entry = lists["specs"][core_spec]
+        family, variant, keep = entry["family"], entry["variant"], entry["keep"]
+    elif block_spec(core_spec):  # design log E9 block specs are derived from the registered block ranges, not the pinned lists
+        family, variant, keep = arm_columns(core_spec)
+    else:
+        raise ValueError(f"{core_spec}: not in the keep lists")
     vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
     receipt = json.loads(receipt_path.read_text())

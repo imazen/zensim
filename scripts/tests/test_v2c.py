@@ -215,6 +215,18 @@ class TrainRecipe(unittest.TestCase):
         self.assertEqual(cmd, expect)
         self.assertNotIn("--nonneg-distance", lodo.train_command([], 1, 2, 3, Path("k"), "F", Path("o")))
 
+    def test_block_specs(self):
+        self.assertEqual(v2_common.arm_columns("core")[2], list(range(228)))
+        self.assertEqual(v2_common.arm_columns("r0-v2@h32")[2], [c for c in range(944) if not 372 <= c < 720])
+        self.assertEqual(v2_common.arm_columns("core+iw@h32:H128")[2], list(range(228)) + list(range(300, 372)))
+        fam, _, cols = v2_common.arm_columns("core+csfw")
+        self.assertEqual((fam, cols), ("main", list(range(228)) + list(range(944, 956))))
+        self.assertEqual(sorted(set(v2_common.arm_columns("r0-basic")[2]) & set(v2_common.arm_columns("r0-peaks")[2])), list(range(228, 944)))
+        for bad in ("core+rall", "core+all", "r0-nope", "core+nope", "core+c1~p1"):
+            with self.assertRaises((ValueError, KeyError)):
+                v2_common.parse_spec(bad)
+                v2_common.arm_columns(bad)
+
     def test_recipe_tokens(self):
         import v2_lodo_mlp as lodo
         self.assertEqual(v2_common.recipe_of("r0@h32"), {})

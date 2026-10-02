@@ -81,6 +81,11 @@ SCREEN = ("screen_main", "screen_aux")
 ORACLE_SIGMA = {"oracle_lo": 1.5, "oracle_hi": 0.5}
 FAMILIES = ("main", "aux")
 WIDTH = 1825
+# Design log E9: the seven legacy blocks of the Rev3 944 bank (FEATURE_SET_IDS.md) and the lean core (basic + peaks,
+# R915's 228-column regime). Block specs: `r0-<block>` (R0 without the block), `core`, `core+<block or arm>`.
+LEGACY_BLOCKS = {"basic": range(0, 156), "peaks": range(156, 228), "masked": range(228, 300), "iw": range(300, 372),
+                 "v2": range(372, 720), "append": range(720, 924), "append2": range(924, 944)}
+CORE = range(0, 228)
 AUX_PEERS = {"gmsd": 944, "gmsm": 945}
 AUX_ORACLE = {"oracle_lo": 946, "oracle_hi": 947}
 AUX_GMSBANK = tuple(range(1322, 1502))
@@ -169,6 +174,8 @@ def parse_spec(spec: str) -> tuple[str, int]:
     """'c1' -> ('c1', 0); 'c1~p2' -> ('c1', 2); an '@h<w>' suffix is accepted and ignored here (split_weight).
     Permutations exist for candidates (and extra arms), oracle_lo and oracle_hi (the sweep's null)."""
     core, _ = split_weight(spec)
+    if block_spec(core):  # design log E9: no permuted controls (a direct Δ against r0 or core)
+        return core, 0
     base, _, perm = core.partition("~p")
     k = int(perm) if perm else 0
     extras = extra_arms()["arms"]
@@ -187,6 +194,18 @@ def all_specs() -> list[str]:
     return specs
 
 
+def block_spec(core: str) -> bool:
+    """True for the E9 block specs: 'core', 'r0-<legacy block>', 'core+<legacy block | candidate arm | extra arm>'."""
+    if core == "core":
+        return True
+    if core.startswith("r0-"):
+        return core[3:] in LEGACY_BLOCKS
+    if core.startswith("core+"):
+        x = core[5:]
+        return x in LEGACY_BLOCKS or (x in (*CANDIDATES, *extra_arms()["arms"]) and x not in ("all", "rall"))
+    return False
+
+
 def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     """(table family, variant, kept wide-column indices) for a spec (any '@h' suffix ignored)."""
     import restore_data  # registered arm definitions (pinned JSONs)
@@ -195,6 +214,19 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     bank = list(range(944))
     if base == "r0":
         return "main", variant, bank
+    if base == "core":
+        return "main", variant, list(CORE)
+    if base.startswith("r0-"):
+        drop = set(LEGACY_BLOCKS[base[3:]])
+        return "main", variant, [c for c in bank if c not in drop]
+    if base.startswith("core+"):
+        x = base[5:]
+        if x in LEGACY_BLOCKS:
+            return "main", variant, sorted(set(CORE) | set(LEGACY_BLOCKS[x]))
+        fam, _, ids = arm_columns(x)
+        if x in ("all", "rall"):
+            raise ValueError(f"{spec}: unions are not lean-base arms")
+        return fam, variant, sorted(set(CORE) | {c for c in ids if c >= 944})
     if base == "minus_basic":
         return "main", variant, list(range(228, 944))
     if base in AUX_ORACLE:
