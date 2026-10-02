@@ -254,6 +254,25 @@ class TrainRecipe(unittest.TestCase):
                 with self.assertRaises(ImportError):  # an arm the pinned lists lack still needs the owner, loudly
                     v2_common.arm_columns("set:c4")
 
+    def test_selection_specs(self):
+        import v2_lodo_mlp as lodo
+        cols = [3, 228, 400, 1500]
+        sid = v2_common.selection_id(cols)
+        self.assertEqual(sid, v2_common.selection_id(list(reversed(cols))))
+        self.assertTrue(v2_common.block_spec(f"sel:{sid}"))
+        self.assertEqual(v2_common.parse_spec(f"sel:{sid}@h32:H128"), (f"sel:{sid}", 0))
+        for bad in ("sel:", "sel:XYZ", f"sel:{sid}0", f"sel:{sid.upper()}"):
+            self.assertFalse(v2_common.block_spec(bad), bad)
+        with self.assertRaises(ValueError):  # the registry cannot name a subset's columns
+            v2_common.arm_columns(f"sel:{sid}")
+        lists = {"specs": {"c3": {"family": "main", "variant": "real", "keep": [1, 2]}}}
+        self.assertEqual(lodo.resolve_keep(f"sel:{sid}", "3,228,400,1500", lists), ("main", "real", cols))
+        self.assertEqual(lodo.resolve_keep("c3", None, lists), ("main", "real", [1, 2]))
+        for spec, columns in ((f"sel:{sid}", None), (f"sel:{sid}", "3,228,400"), (f"sel:{sid}", "228,3,400,1500"),
+                              (f"sel:{sid}", "3,3,228,400,1500"), ("c3", "1,2"), ("nope", None)):
+            with self.assertRaises(ValueError, msg=(spec, columns)):
+                lodo.resolve_keep(spec, columns, lists)
+
     def test_recipe_tokens(self):
         import v2_lodo_mlp as lodo
         self.assertEqual(v2_common.recipe_of("r0@h32"), {})

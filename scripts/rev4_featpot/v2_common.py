@@ -194,10 +194,19 @@ def all_specs() -> list[str]:
     return specs
 
 
+def selection_id(cols) -> str:
+    """Name of a column subset in a `sel:<id>` spec (design log E9′ method 2 refits): the first 12 hex digits of the
+    SHA-256 of the sorted column ids joined by commas. The ids themselves travel in the cell argv (`--columns`)."""
+    return hashlib.sha256(",".join(map(str, sorted(cols))).encode()).hexdigest()[:12]
+
+
 def block_spec(core: str) -> bool:
-    """True for the E9 block specs: 'core', 'r0-<legacy block>', 'core+<legacy block | candidate arm | extra arm>'."""
+    """True for the E9 block specs: 'core', 'r0-<legacy block>', 'core+<legacy block | candidate arm | extra arm>',
+    'set:<groups>', and 'sel:<12 hex>' (a column subset whose ids are passed with --columns)."""
     if core == "core":
         return True
+    if core.startswith("sel:"):
+        return len(core) == 16 and all(c in "0123456789abcdef" for c in core[4:])
     if core.startswith("set:"):  # E9″: any groups, basic and peaks included, nothing exempt
         parts = core[4:].split("+")
         ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")])
@@ -231,6 +240,8 @@ def pinned_arm(arm: str) -> tuple[str, str, list[int]]:
 def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     """(table family, variant, kept wide-column indices) for a spec (any '@h' suffix ignored)."""
     base, k = parse_spec(spec)
+    if base.startswith("sel:"):
+        raise ValueError(f"{spec}: a sel: spec carries its columns in the cell argv (--columns), not in a registry")
     variant = f"p{k}" if k else "real"
     bank = list(range(944))
     if base == "r0":

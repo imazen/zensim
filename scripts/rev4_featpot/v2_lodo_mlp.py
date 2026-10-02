@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
 from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, arm_columns, block_spec, recipe_of, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
-                       parse_spec, seeds, sha, table_path)
+                       parse_spec, seeds, selection_id, sha, table_path)
 
 WIDE_SCHEMAS = ("rev4-featpot-v2-wide-v2", "rev4-featpot-v2c-wide-v1")
 # Under the final-epoch rule no per-epoch dev score selects anything, so the dev panels run every 17th epoch (17 divides
@@ -130,6 +130,26 @@ def read_curve(log: Path) -> dict[int, float]:
     return curve
 
 
+def resolve_keep(core_spec: str, columns: str | None, lists: dict) -> tuple[str, str, list[int]]:
+    """(family, variant, kept wide columns) of a cell. Registered arms come from the pinned keep lists, E9 block specs
+    from the registered block ranges, and a `sel:<id>` subset from --columns, which must hash to <id>."""
+    if core_spec.startswith("sel:"):
+        if not columns:
+            raise ValueError(f"{core_spec}: a sel: spec needs --columns")
+        cols = [int(x) for x in columns.split(",")]
+        if cols != sorted(set(cols)) or selection_id(cols) != core_spec[4:]:
+            raise ValueError(f"{core_spec}: --columns are not the sorted unique subset this spec names")
+        return "main", "real", cols
+    if columns:
+        raise ValueError("--columns is only for sel: specs")
+    if core_spec in lists["specs"]:
+        entry = lists["specs"][core_spec]
+        return entry["family"], entry["variant"], entry["keep"]
+    if block_spec(core_spec):  # design log E9 block specs are derived from the registered block ranges, not the pinned lists
+        return arm_columns(core_spec)
+    raise ValueError(f"{core_spec}: not in the keep lists")
+
+
 def main() -> None:
     os.environ.setdefault("ZEN_PANEL_BIN", str(PANEL))  # the fit-cell executor sets it; local runs may not
     ap = argparse.ArgumentParser(description=__doc__)
@@ -138,19 +158,14 @@ def main() -> None:
     ap.add_argument("--heldout", choices=SOURCE_ORDER, required=True)
     ap.add_argument("--seed-index", type=int, choices=range(10), required=True)
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
+    ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
     args = ap.parse_args()
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
     if lists["schema"] != "rev4-featpot-v2-keeplists-v2":
         raise ValueError("keep-list schema mismatch")
-    if core_spec in lists["specs"]:
-        entry = lists["specs"][core_spec]
-        family, variant, keep = entry["family"], entry["variant"], entry["keep"]
-    elif block_spec(core_spec):  # design log E9 block specs are derived from the registered block ranges, not the pinned lists
-        family, variant, keep = arm_columns(core_spec)
-    else:
-        raise ValueError(f"{core_spec}: not in the keep lists")
+    family, variant, keep = resolve_keep(core_spec, args.columns, lists)
     vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
     receipt = json.loads(receipt_path.read_text())
@@ -159,6 +174,8 @@ def main() -> None:
     if (receipt["schema"] not in WIDE_SCHEMAS or receipt["family"] != family or receipt["variant"] != variant
             or width < WIDTH or (receipt["schema"] == WIDE_SCHEMAS[0] and width != WIDTH)):
         raise ValueError("wide receipt identity mismatch")
+    if any(not 0 <= c < width for c in keep):
+        raise ValueError(f"{core_spec}: kept columns outside 0..{width}")
     # Two-part cell path under v2/cells (the fit-cell executor's destination contract).
     dest = V2 / "cells" / f"{args.spec}__{args.head}" / f"without_{args.heldout}_s{args.seed_index}"
     if (dest / "result.json").is_file():
