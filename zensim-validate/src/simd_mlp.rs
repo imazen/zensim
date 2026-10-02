@@ -83,6 +83,81 @@ pub fn forward(
     forward_scalar(x, w1, b1, w2, b2, n_features, n_hidden, alpha)
 }
 
+/// Runtime feature dispatch for `forward_pair`: the two samples of a
+/// RankNet pair share one ascending feature-row walk — each w1 row is
+/// read once and applied to side A (`xa[i] != 0`) then side B
+/// (`xb[i] != 0`). Per side, per hidden unit, the op sequence is the
+/// identical `h_pre[j] = fma(x[i], w1[i,j], h_pre[j])` chain the single
+/// `forward` runs (ascending i, fused domain `[0, n4)`, mul+add tail), so
+/// the pair outputs are BIT-IDENTICAL to two back-to-back `forward` calls
+/// on the same weights — the same statement `forward_all_tiers_bit_
+/// identical` and `forward_pair_vs_singles_bit_identical` check.
+///
+/// Returns `(ya, ha_pre, ha, yb, hb_pre, hb)` — the two `forward` return
+/// triples concatenated, side A first.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn forward_pair(
+    xa: &[f64],
+    xb: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>, Vec<f64>, f64, Vec<f64>, Vec<f64>) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use archmage::SimdToken;
+        if crate::tier_cap::avx512_allowed() && archmage::X64V4Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
+            return unsafe {
+                forward_pair_avx512(xa, xb, w1, b1, w2, b2, n_features, n_hidden, alpha)
+            };
+        }
+        if archmage::X64V3Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
+            return unsafe {
+                forward_pair_avx2(xa, xb, w1, b1, w2, b2, n_features, n_hidden, alpha)
+            };
+        }
+    }
+    forward_pair_scalar(xa, xb, w1, b1, w2, b2, n_features, n_hidden, alpha)
+}
+
+/// The second half of every `forward*`: LeakyReLU over `h_pre`, then the
+/// canonical y-reduction (4-lane fused accumulator + pairwise tree +
+/// sequential mul+add tail + `b2[0] + lane_sum + tail_sum`). Split out so
+/// the TRAINEROPT3 look-ahead path — whose `h_pre` was already accumulated
+/// inside the fused Adam walk — runs the identical finish the matching
+/// `forward` tier would run. `h_pre` is consumed read-only; `h` is
+/// allocated fresh exactly as `forward_*` does.
+#[allow(dead_code)] // consumed by tests now; by the look-ahead walk in task 2
+#[inline]
+pub(crate) fn forward_finish(
+    h_pre: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use archmage::SimdToken;
+        if crate::tier_cap::avx512_allowed() && archmage::X64V4Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
+            return unsafe { finish_avx512(h_pre, w2, b2, n_hidden, alpha) };
+        }
+        if archmage::X64V3Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
+            return unsafe { finish_avx2(h_pre, w2, b2, n_hidden, alpha) };
+        }
+    }
+    finish_scalar(h_pre, w2, b2, n_hidden, alpha)
+}
+
 /// Runtime feature dispatch for backprop_step.
 ///
 /// Mutates `gw1`, `gb1`, `gw2`, `gb2` in place, matching the scalar
@@ -197,8 +272,19 @@ fn forward_scalar(
     n_hidden: usize,
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
-    let n4 = n_hidden - (n_hidden % 4);
     let mut h_pre = b1.to_vec();
+    walk_rows_scalar(&mut h_pre, x, w1, n_features, n_hidden);
+    let (y, h) = finish_scalar(&h_pre, w2, b2, n_hidden, alpha);
+    (y, h_pre, h)
+}
+
+/// The layer-1 row walk of `forward_scalar`, split out so the pair
+/// kernel and the look-ahead oracle in the tests run the same loop.
+/// Ascending feature order, `x[i] == 0.0` skip, fused mul_add on
+/// `[0, n4)`, mul+add on `[n4, n_hidden)`.
+#[inline]
+fn walk_rows_scalar(h_pre: &mut [f64], x: &[f64], w1: &[f64], n_features: usize, n_hidden: usize) {
+    let n4 = n_hidden - (n_hidden % 4);
     for i in 0..n_features {
         let s = x[i];
         if s == 0.0 {
@@ -214,6 +300,20 @@ fn forward_scalar(
             *acc += s * row[j];
         }
     }
+}
+
+/// Scalar form of the LeakyReLU + y-reduction that ends every `forward*`:
+/// emulates the AVX2 4-lane fused accumulator and its pairwise tree,
+/// then the sequential mul+add tail, then `b2[0] + lane_sum + tail_sum`.
+#[inline]
+fn finish_scalar(
+    h_pre: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>) {
+    let n4 = n_hidden - (n_hidden % 4);
     let h: Vec<f64> = h_pre
         .iter()
         .map(|&v| if v >= 0.0 { v } else { alpha * v })
@@ -231,7 +331,57 @@ fn forward_scalar(
         tail_sum += h[o] * w2[o];
     }
     let y = b2[0] + lane_sum + tail_sum;
-    (y, h_pre, h)
+    (y, h)
+}
+
+/// Scalar twin of `forward_pair`: both samples' hidden preactivations in
+/// one ascending feature-row walk. Per side the op sequence is exactly
+/// `forward_scalar`'s (same skips, same domains); the row slice is formed
+/// once per feature and applied to side A then side B.
+#[inline]
+fn forward_pair_scalar(
+    xa: &[f64],
+    xb: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>, Vec<f64>, f64, Vec<f64>, Vec<f64>) {
+    let mut ha_pre = b1.to_vec();
+    let mut hb_pre = b1.to_vec();
+    for i in 0..n_features {
+        let sa = xa[i];
+        let sb = xb[i];
+        if sa == 0.0 && sb == 0.0 {
+            continue;
+        }
+        let row = &w1[i * n_hidden..(i + 1) * n_hidden];
+        if sa != 0.0 {
+            walk_one_row_scalar(&mut ha_pre, sa, row, n_hidden);
+        }
+        if sb != 0.0 {
+            walk_one_row_scalar(&mut hb_pre, sb, row, n_hidden);
+        }
+    }
+    let (ya, ha) = finish_scalar(&ha_pre, w2, b2, n_hidden, alpha);
+    let (yb, hb) = finish_scalar(&hb_pre, w2, b2, n_hidden, alpha);
+    (ya, ha_pre, ha, yb, hb_pre, hb)
+}
+
+/// One row of `walk_rows_scalar`: fused mul_add on `[0, n4)`, mul+add on
+/// `[n4, n_hidden)` — `forward_scalar`'s per-row ops verbatim.
+#[inline]
+fn walk_one_row_scalar(h_pre: &mut [f64], s: f64, row: &[f64], n_hidden: usize) {
+    let n4 = n_hidden - (n_hidden % 4);
+    for (j, acc) in h_pre.iter_mut().enumerate().take(n4) {
+        *acc = s.mul_add(row[j], *acc);
+    }
+    for (j, acc) in h_pre.iter_mut().enumerate().skip(n4) {
+        *acc += s * row[j];
+    }
 }
 
 /// Scalar form of the gw1-independent backprop head: `gw2`, `gb2`, the
@@ -345,9 +495,8 @@ unsafe fn forward_avx512(
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
     use std::arch::x86_64::{
-        _CMP_GE_OQ, _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd,
-        _mm512_mask_fmadd_pd, _mm512_mask_storeu_pd, _mm512_maskz_loadu_pd, _mm512_mul_pd,
-        _mm512_set1_pd, _mm512_setzero_pd, _mm512_storeu_pd,
+        _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_fmadd_pd, _mm512_mask_storeu_pd,
+        _mm512_maskz_loadu_pd, _mm512_set1_pd, _mm512_storeu_pd,
     };
 
     // h_pre starts as a copy of b1 — matches scalar.
@@ -399,6 +548,33 @@ unsafe fn forward_avx512(
         }
     }
 
+    let (y, h) = unsafe { finish_avx512(&h_pre, w2, b2, n_hidden, alpha) };
+    (y, h_pre, h)
+}
+
+/// AVX-512 form of the LeakyReLU + y-reduction that ends `forward_avx512`
+/// — extracted verbatim so `forward_pair_avx512` and the look-ahead
+/// finish (`forward_finish`) reproduce it bit-for-bit.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn finish_avx512(
+    h_pre: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>) {
+    use std::arch::x86_64::{
+        _CMP_GE_OQ, _mm512_cmp_pd_mask, _mm512_loadu_pd, _mm512_mask_blend_pd,
+        _mm512_mask_fmadd_pd, _mm512_maskz_loadu_pd, _mm512_mul_pd, _mm512_set1_pd,
+        _mm512_setzero_pd, _mm512_storeu_pd,
+    };
+
+    let h_pre_ptr = h_pre.as_ptr();
+    let n_chunks = n_hidden / 8;
+    let tail_start = n_chunks * 8;
+    let n4 = n_hidden - (n_hidden % 4);
+
     // LeakyReLU: h[o] = h_pre[o] >= 0 ? h_pre[o] : alpha * h_pre[o].
     // Elementwise — no accumulation structure, any width is bit-identical.
     let mut h = vec![0.0f64; n_hidden];
@@ -444,7 +620,99 @@ unsafe fn forward_avx512(
     let lane_sum = (acc_arr[0] + acc_arr[1]) + (acc_arr[2] + acc_arr[3]);
     let y = b2[0] + lane_sum + tail_sum;
 
-    (y, h_pre, h)
+    (y, h)
+}
+
+/// AVX-512 twin of `forward_pair` — same loop shape as `forward_avx512`
+/// but both samples' `h_pre` advance inside one ascending row walk, the
+/// row chunk loaded once per (i, c) and applied to whichever sides have
+/// `x[i] != 0` (side A first — each side's own chain is unaffected).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn forward_pair_avx512(
+    xa: &[f64],
+    xb: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>, Vec<f64>, f64, Vec<f64>, Vec<f64>) {
+    use std::arch::x86_64::{
+        _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_fmadd_pd, _mm512_mask_storeu_pd,
+        _mm512_maskz_loadu_pd, _mm512_set1_pd, _mm512_storeu_pd,
+    };
+
+    let mut ha_pre = b1.to_vec();
+    let mut hb_pre = b1.to_vec();
+    debug_assert_eq!(ha_pre.len(), n_hidden);
+
+    let ha_ptr = ha_pre.as_mut_ptr();
+    let hb_ptr = hb_pre.as_mut_ptr();
+    let n_chunks = n_hidden / 8;
+    let tail_start = n_chunks * 8;
+    let n4 = n_hidden - (n_hidden % 4);
+    let mid_fused = tail_start + 4 <= n4;
+
+    for i in 0..n_features {
+        let sa = xa[i];
+        let sb = xb[i];
+        let do_a = sa != 0.0;
+        let do_b = sb != 0.0;
+        if !do_a && !do_b {
+            continue;
+        }
+        let sa_v = unsafe { _mm512_set1_pd(sa) };
+        let sb_v = unsafe { _mm512_set1_pd(sb) };
+        let row_ptr = unsafe { w1.as_ptr().add(i * n_hidden) };
+
+        for c in 0..n_chunks {
+            let off = c * 8;
+            unsafe {
+                let row_v = _mm512_loadu_pd(row_ptr.add(off));
+                if do_a {
+                    let acc = _mm512_loadu_pd(ha_ptr.add(off));
+                    _mm512_storeu_pd(ha_ptr.add(off), _mm512_fmadd_pd(row_v, sa_v, acc));
+                }
+                if do_b {
+                    let acc = _mm512_loadu_pd(hb_ptr.add(off));
+                    _mm512_storeu_pd(hb_ptr.add(off), _mm512_fmadd_pd(row_v, sb_v, acc));
+                }
+            }
+        }
+        if mid_fused {
+            unsafe {
+                let row_v = _mm512_maskz_loadu_pd(LO4, row_ptr.add(tail_start));
+                if do_a {
+                    let acc = _mm512_maskz_loadu_pd(LO4, ha_ptr.add(tail_start));
+                    let new_acc = _mm512_mask_fmadd_pd(row_v, LO4, sa_v, acc);
+                    _mm512_mask_storeu_pd(ha_ptr.add(tail_start), LO4, new_acc);
+                }
+                if do_b {
+                    let acc = _mm512_maskz_loadu_pd(LO4, hb_ptr.add(tail_start));
+                    let new_acc = _mm512_mask_fmadd_pd(row_v, LO4, sb_v, acc);
+                    _mm512_mask_storeu_pd(hb_ptr.add(tail_start), LO4, new_acc);
+                }
+            }
+        }
+        // Mul+add tail [n4, n_hidden) per side — identical two-rounding
+        // arithmetic to the single forward's tail.
+        for j in n4..n_hidden {
+            let w = unsafe { *row_ptr.add(j) };
+            if do_a {
+                ha_pre[j] += sa * w;
+            }
+            if do_b {
+                hb_pre[j] += sb * w;
+            }
+        }
+    }
+
+    let (ya, ha) = unsafe { finish_avx512(&ha_pre, w2, b2, n_hidden, alpha) };
+    let (yb, hb) = unsafe { finish_avx512(&hb_pre, w2, b2, n_hidden, alpha) };
+    (ya, ha_pre, ha, yb, hb_pre, hb)
 }
 
 /// AVX-512 form of the gw1-independent backprop head. Writes `dh_out`
@@ -707,6 +975,173 @@ unsafe fn bwd_gw1_block<const N: usize>(
     }
 }
 
+/// Register-blocked hidden-layer accumulate for `forward_pair_avx2`:
+/// N YMM accumulators PER SIDE (2N registers total) over the union of the
+/// two samples' nonzero-feature sets. `nz` is ascending; each row chunk
+/// is loaded once and fused into side A's accumulators (when `xa[i] != 0`)
+/// then side B's (when `xb[i] != 0`) — per side, per lane, the identical
+/// ascending fma chain `fwd_acc_block` runs. `ha_pre`/`hb_pre` were both
+/// seeded from `b1`, so the first addend of each side is unchanged.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+unsafe fn fwd_acc_pair_block<const N: usize>(
+    ha_pre_ptr: *mut f64,
+    hb_pre_ptr: *mut f64,
+    w1_ptr: *const f64,
+    xa_ptr: *const f64,
+    xb_ptr: *const f64,
+    nz: &[u32],
+    n_hidden: usize,
+    off: usize,
+) {
+    use std::arch::x86_64::{
+        __m256d, _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_setzero_pd,
+        _mm256_storeu_pd,
+    };
+    unsafe {
+        let mut acc_a: [__m256d; N] = [_mm256_setzero_pd(); N];
+        let mut acc_b: [__m256d; N] = [_mm256_setzero_pd(); N];
+        for k in 0..N {
+            acc_a[k] = _mm256_loadu_pd(ha_pre_ptr.add(off + 4 * k));
+            acc_b[k] = _mm256_loadu_pd(hb_pre_ptr.add(off + 4 * k));
+        }
+        for &i in nz {
+            let i = i as usize;
+            let sa = *xa_ptr.add(i);
+            let sb = *xb_ptr.add(i);
+            let do_a = sa != 0.0;
+            let do_b = sb != 0.0;
+            let sa_v = _mm256_set1_pd(sa);
+            let sb_v = _mm256_set1_pd(sb);
+            let row = w1_ptr.add(i * n_hidden + off);
+            for k in 0..N {
+                let row_v = _mm256_loadu_pd(row.add(4 * k));
+                if do_a {
+                    acc_a[k] = _mm256_fmadd_pd(row_v, sa_v, acc_a[k]);
+                }
+                if do_b {
+                    acc_b[k] = _mm256_fmadd_pd(row_v, sb_v, acc_b[k]);
+                }
+            }
+        }
+        for k in 0..N {
+            _mm256_storeu_pd(ha_pre_ptr.add(off + 4 * k), acc_a[k]);
+            _mm256_storeu_pd(hb_pre_ptr.add(off + 4 * k), acc_b[k]);
+        }
+    }
+}
+
+/// AVX2 twin of `forward_pair`: both `h_pre` vectors advance inside one
+/// register-blocked walk over the union nonzero set; the scalar tail
+/// reproduces each side's mul+add chain over ITS OWN nonzero rows only
+/// (guarded — an unguarded `0.0 * w` add could flip a `−0.0` accumulator
+/// to `+0.0`, breaking bit-identity).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn forward_pair_avx2(
+    xa: &[f64],
+    xb: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>, Vec<f64>, f64, Vec<f64>, Vec<f64>) {
+    let mut ha_pre = b1.to_vec();
+    let mut hb_pre = b1.to_vec();
+    debug_assert_eq!(ha_pre.len(), n_hidden);
+
+    // Ascending union of the two nonzero-feature index sets — every row
+    // either side's forward would touch, once.
+    let mut nz: Vec<u32> = Vec::with_capacity(n_features);
+    for i in 0..n_features {
+        if xa[i] != 0.0 || xb[i] != 0.0 {
+            nz.push(i as u32);
+        }
+    }
+
+    let ha_ptr = ha_pre.as_mut_ptr();
+    let hb_ptr = hb_pre.as_mut_ptr();
+    let xa_ptr = xa.as_ptr();
+    let xb_ptr = xb.as_ptr();
+    let w1_ptr = w1.as_ptr();
+    let n_chunks = n_hidden / 4;
+    let tail_start = n_chunks * 4;
+
+    // 2N accumulators per block → half the single-sample block width:
+    // 4/2/1-chunk cascade covers any n_chunks.
+    let mut c0 = 0usize;
+    while c0 + 4 <= n_chunks {
+        unsafe {
+            fwd_acc_pair_block::<4>(
+                ha_ptr,
+                hb_ptr,
+                w1_ptr,
+                xa_ptr,
+                xb_ptr,
+                &nz,
+                n_hidden,
+                c0 * 4,
+            )
+        };
+        c0 += 4;
+    }
+    if n_chunks - c0 >= 2 {
+        unsafe {
+            fwd_acc_pair_block::<2>(
+                ha_ptr,
+                hb_ptr,
+                w1_ptr,
+                xa_ptr,
+                xb_ptr,
+                &nz,
+                n_hidden,
+                c0 * 4,
+            )
+        };
+        c0 += 2;
+    }
+    if n_chunks - c0 >= 1 {
+        unsafe {
+            fwd_acc_pair_block::<1>(
+                ha_ptr,
+                hb_ptr,
+                w1_ptr,
+                xa_ptr,
+                xb_ptr,
+                &nz,
+                n_hidden,
+                c0 * 4,
+            )
+        };
+    }
+    for o in tail_start..n_hidden {
+        let mut acc_a = ha_pre[o];
+        let mut acc_b = hb_pre[o];
+        for &i in &nz {
+            let i = i as usize;
+            let w = unsafe { *w1_ptr.add(i * n_hidden + o) };
+            let sa = unsafe { *xa_ptr.add(i) };
+            if sa != 0.0 {
+                acc_a += sa * w;
+            }
+            let sb = unsafe { *xb_ptr.add(i) };
+            if sb != 0.0 {
+                acc_b += sb * w;
+            }
+        }
+        ha_pre[o] = acc_a;
+        hb_pre[o] = acc_b;
+    }
+
+    let (ya, ha) = unsafe { finish_avx2(&ha_pre, w2, b2, n_hidden, alpha) };
+    let (yb, hb) = unsafe { finish_avx2(&hb_pre, w2, b2, n_hidden, alpha) };
+    (ya, ha_pre, ha, yb, hb_pre, hb)
+}
+
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 unsafe fn forward_avx2(
@@ -719,11 +1154,6 @@ unsafe fn forward_avx2(
     n_hidden: usize,
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
-    use std::arch::x86_64::{
-        _CMP_LT_OQ, _mm256_blendv_pd, _mm256_cmp_pd, _mm256_fmadd_pd, _mm256_loadu_pd,
-        _mm256_mul_pd, _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd,
-    };
-
     let mut h_pre = b1.to_vec();
     debug_assert_eq!(h_pre.len(), n_hidden);
 
@@ -767,6 +1197,31 @@ unsafe fn forward_avx2(
         *h_pre_o = acc;
     }
 
+    let (y, h) = unsafe { finish_avx2(&h_pre, w2, b2, n_hidden, alpha) };
+    (y, h_pre, h)
+}
+
+/// AVX2 form of the LeakyReLU + y-reduction that ends `forward_avx2` —
+/// extracted verbatim so `forward_pair_avx2` and the look-ahead finish
+/// (`forward_finish`) reproduce it bit-for-bit.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn finish_avx2(
+    h_pre: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>) {
+    use std::arch::x86_64::{
+        _CMP_LT_OQ, _mm256_blendv_pd, _mm256_cmp_pd, _mm256_fmadd_pd, _mm256_loadu_pd,
+        _mm256_mul_pd, _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd,
+    };
+
+    let h_pre_ptr = h_pre.as_ptr();
+    let n_chunks = n_hidden / 4;
+    let tail_start = n_chunks * 4;
+
     // LeakyReLU
     let mut h = vec![0.0f64; n_hidden];
     let h_ptr = h.as_mut_ptr();
@@ -808,7 +1263,7 @@ unsafe fn forward_avx2(
     let lane_sum = (acc_arr[0] + acc_arr[1]) + (acc_arr[2] + acc_arr[3]);
     let y = b2[0] + lane_sum + tail_sum;
 
-    (y, h_pre, h)
+    (y, h)
 }
 
 /// AVX2 form of the gw1-independent backprop head. Writes `dh_out`
@@ -1599,5 +2054,160 @@ mod tests {
         });
         eprintln!("permutations run: {}", report.permutations_run);
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Pair parity (TRAINEROPT3 task 1): `forward_pair`'s per-side outputs
+    /// must be bit-identical to two same-tier `forward_*` calls on the same
+    /// weights — each tier's pair kernel vs that tier's singles, and every
+    /// tier's pair output vs the canonical v3 pair output.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn forward_pair_all_tiers_bit_identical() {
+        assert!(
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let has512 = crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f");
+        let alpha = 0.01;
+        let mut failures = Vec::new();
+        for &(nf, nh) in PARITY_SHAPES {
+            for &seed in &[0x51ED_1E55u64, 0xABCD_1234, 0x0000_00FF] {
+                let mut rng = Xs64::new(seed ^ (nf * 31 + nh) as u64);
+                // Different sparsity per side so the union walk covers
+                // A-only, B-only, both, and neither rows.
+                let xa = random_sparse_x(&mut rng, nf, 0.35);
+                let xb = random_sparse_x(&mut rng, nf, 0.55);
+                let w1 = random_buf(&mut rng, nf * nh);
+                let b1 = random_buf(&mut rng, nh);
+                let w2 = random_buf(&mut rng, nh);
+                let b2 = vec![rng.next_f64()];
+
+                // Canonical: two v3 singles on the same weights.
+                let (ya0, hpa0, ha0) =
+                    unsafe { forward_avx2(&xa, &w1, &b1, &w2, &b2, nf, nh, alpha) };
+                let (yb0, hpb0, hb0) =
+                    unsafe { forward_avx2(&xb, &w1, &b1, &w2, &b2, nf, nh, alpha) };
+                let expect = |got: &(f64, Vec<f64>, Vec<f64>),
+                              want_y: f64,
+                              want_p: &[f64],
+                              want_h: &[f64],
+                              tag: &str,
+                              side: &str| {
+                    let mut errs = Vec::new();
+                    if ulp_diff_f64(got.0, want_y) != 0 {
+                        errs.push(format!("{tag} {side} y: {} vs {want_y}", got.0));
+                    }
+                    let (u, i) = max_ulp_slice(&got.1, want_p);
+                    if u != 0 {
+                        errs.push(format!(
+                            "{tag} {side} h_pre[{i}]: ulp={u} ({} vs {})",
+                            got.1[i], want_p[i]
+                        ));
+                    }
+                    let (u, i) = max_ulp_slice(&got.2, want_h);
+                    if u != 0 {
+                        errs.push(format!(
+                            "{tag} {side} h[{i}]: ulp={u} ({} vs {})",
+                            got.2[i], want_h[i]
+                        ));
+                    }
+                    errs
+                };
+                type PairOut = (f64, Vec<f64>, Vec<f64>, f64, Vec<f64>, Vec<f64>);
+                let mut check = |tag: &str, got: &PairOut| {
+                    failures.extend(expect(
+                        &(got.0, got.1.clone(), got.2.clone()),
+                        ya0,
+                        &hpa0,
+                        &ha0,
+                        tag,
+                        "A",
+                    ));
+                    failures.extend(expect(
+                        &(got.3, got.4.clone(), got.5.clone()),
+                        yb0,
+                        &hpb0,
+                        &hb0,
+                        tag,
+                        "B",
+                    ));
+                };
+
+                let s = forward_pair_scalar(&xa, &xb, &w1, &b1, &w2, &b2, nf, nh, alpha);
+                check("pair scalar", &s);
+                let v3 = unsafe { forward_pair_avx2(&xa, &xb, &w1, &b1, &w2, &b2, nf, nh, alpha) };
+                check("pair v3", &v3);
+                if has512 {
+                    let v4 =
+                        unsafe { forward_pair_avx512(&xa, &xb, &w1, &b1, &w2, &b2, nf, nh, alpha) };
+                    check("pair v4", &v4);
+                }
+                let d = forward_pair(&xa, &xb, &w1, &b1, &w2, &b2, nf, nh, alpha);
+                check("pair dispatch", &d);
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// `forward_finish` is literally the tail of each `forward_*` — a
+    /// spot-check that it reproduces the whole function on a caller-built
+    /// `h_pre` (the look-ahead path's usage) at every tier.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn forward_finish_matches_forward_tail() {
+        assert!(
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"),
+            "this test needs an x86-64-v3 (AVX2+FMA) host"
+        );
+        let has512 = crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f");
+        let alpha = 0.01;
+        for &(nf, nh) in PARITY_SHAPES {
+            let mut rng = Xs64::new(0xF1F2_F3F4 ^ (nf * 31 + nh) as u64);
+            let x = random_sparse_x(&mut rng, nf, 0.4);
+            let w1 = random_buf(&mut rng, nf * nh);
+            let b1 = random_buf(&mut rng, nh);
+            let w2 = random_buf(&mut rng, nh);
+            let b2 = vec![rng.next_f64()];
+
+            let (y_ref, h_pre, h_ref) = forward(&x, &w1, &b1, &w2, &b2, nf, nh, alpha);
+            let (y_s, h_s) = finish_scalar(&h_pre, &w2, &b2, nh, alpha);
+            assert_eq!(
+                y_s.to_bits(),
+                y_ref.to_bits(),
+                "finish scalar y [{nf},{nh}]"
+            );
+            assert!(
+                h_s.iter()
+                    .zip(&h_ref)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+            let (y_d, h_d) = forward_finish(&h_pre, &w2, &b2, nh, alpha);
+            assert_eq!(
+                y_d.to_bits(),
+                y_ref.to_bits(),
+                "finish dispatch y [{nf},{nh}]"
+            );
+            assert!(
+                h_d.iter()
+                    .zip(&h_ref)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+            let (y_v3, h_v3) = unsafe { finish_avx2(&h_pre, &w2, &b2, nh, alpha) };
+            assert_eq!(y_v3.to_bits(), y_ref.to_bits(), "finish v3 y [{nf},{nh}]");
+            assert!(
+                h_v3.iter()
+                    .zip(&h_ref)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+            if has512 {
+                let (y_v4, h_v4) = unsafe { finish_avx512(&h_pre, &w2, &b2, nh, alpha) };
+                assert_eq!(y_v4.to_bits(), y_ref.to_bits(), "finish v4 y [{nf},{nh}]");
+                assert!(
+                    h_v4.iter()
+                        .zip(&h_ref)
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+                );
+            }
+        }
     }
 }

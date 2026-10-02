@@ -844,6 +844,48 @@ pub(crate) struct AdamW1FusedArgs<'a> {
     /// left untouched, still `+0.0`. Checked row by row under
     /// `debug_assertions`. The composition fallback ignores it (it reads `g`).
     pub g_zero_in: bool,
+    /// Look-ahead forward accumulation (TRAINEROPT3 task 2): while the fused
+    /// walk streams each row, apply that row's FINAL post-step value (after
+    /// Adam, and after the fused `group_l1_tau` prox of its 8-row block)
+    /// to the next pair's `h_pre` accumulators — one `w1` pass instead of a
+    /// separate re-read by `forward_*`. See [`FwdAccumW1`] for the exactness
+    /// contract the caller must uphold.
+    pub fwd: Option<FwdAccumW1<'a>>,
+}
+
+/// Next-pair forward accumulators consumed by the fused W1 walk
+/// (TRAINEROPT3 task 2).
+///
+/// Exactness contract — every clause is load-bearing for bit-identity with
+/// "unfused step now, `simd_mlp::forward*` next iteration":
+///
+/// - `hpa`/`hpb` were seeded with this step's FINAL `b1` (post-Adam AND
+///   post-`nonneg_project`), the same values the next forward would copy.
+/// - `xa`/`xb` are the next pair's standardized feature rows; on every row
+///   the walk does NOT visit (`active_rows` gaps) both are `+0.0`, matching
+///   the `s == 0.0` skip `forward_*` performs there.
+/// - `n_hidden % 4 == 0` (the fused-path gate): every lane is on the
+///   canonical fused domain, so `fwd[j] = fma(x[i], w[i,j], fwd[j])` is
+///   literally the op `forward_*` runs per visited row — same order
+///   (ascending `i`), same single rounding, same skip-on-zero.
+/// - The walk itself guarantees each visited row is applied exactly once,
+///   after its last write: immediately post-Adam when no prox is pending
+///   (`group_l1_tau == None`), or at the end of the row's 8-row block after
+///   [`group_l1_rows`] when a prox is fused.
+/// - The caller guarantees nothing else touches `w`/`b1` between this walk
+///   and the consuming `forward_finish` (no coarse decay, no TV step, no
+///   epoch boundary) — those gate the fusion off at the call site.
+#[derive(Debug)]
+pub(crate) struct FwdAccumW1<'a> {
+    /// Next pair's side-A standardized row (length ≥ `w.len()/n_hidden`).
+    pub xa: &'a [f64],
+    /// Next pair's side-B standardized row.
+    pub xb: &'a [f64],
+    /// Side-A `h_pre` accumulator — seeded `b1` on entry, finished by
+    /// `simd_mlp::forward_finish` after the step completes.
+    pub hpa: &'a mut [f64],
+    /// Side-B `h_pre` accumulator.
+    pub hpb: &'a mut [f64],
 }
 
 /// Block soft-threshold on one layer-1 input row (`w`'s outgoing weights):
@@ -903,6 +945,75 @@ pub(crate) fn group_l1_rows(w: &mut [f64], nh: usize, tau: f64) {
     } else {
         for row in w.chunks_mut(nh) {
             group_l1_row(row, tau);
+        }
+    }
+}
+
+/// One visited row of the look-ahead forward (TRAINEROPT3 task 2): apply
+/// `fwd[j] = fma(x[i], w[i,j], fwd[j])` per side over 4-lane chunks — the
+/// identical per-lane fma chain `forward_avx2`'s `fwd_acc_block` runs (the
+/// chain the AVX-512 and scalar tiers reproduce on the canonical domain).
+/// `nh % 4 == 0` is a fused-path gate, so there is no mul+add tail domain
+/// to mirror. `sa == 0`/`sb == 0` skip exactly like `forward`'s `s == 0.0`
+/// continue — an unguarded `fma(0, w, acc)` could flip an acc of `−0.0`
+/// to `+0.0`.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn fwd_accum_row_v3(
+    token: archmage::X64V3Token,
+    f: &mut FwdAccumW1<'_>,
+    row: usize,
+    w_row: &[f64],
+    _nh: usize,
+) {
+    let sa = f.xa[row];
+    let sb = f.xb[row];
+    let do_a = sa != 0.0;
+    let do_b = sb != 0.0;
+    if !do_a && !do_b {
+        return;
+    }
+    let sa_v = f64x4::splat(token, sa);
+    let sb_v = f64x4::splat(token, sb);
+    let (w4, _) = w_row.as_chunks::<4>();
+    let (ha4, _) = f.hpa.as_chunks_mut::<4>();
+    let (hb4, _) = f.hpb.as_chunks_mut::<4>();
+    for ((wc, hac), hbc) in w4.iter().zip(ha4.iter_mut()).zip(hb4.iter_mut()) {
+        let wv = f64x4::load(token, wc);
+        if do_a {
+            sa_v.mul_add(wv, f64x4::load(token, hac)).store(hac);
+        }
+        if do_b {
+            sb_v.mul_add(wv, f64x4::load(token, hbc)).store(hbc);
+        }
+    }
+}
+
+/// Scalar twin of [`fwd_accum_row_v3`] for the composition fallback —
+/// `f64::mul_add` is a single-rounding fma, the same op as the canonical
+/// domain. Requires `nh % 4 == 0` (caller's fused-path gate) so no
+/// mul+add tail lanes exist to mirror.
+#[inline]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn fwd_accum_row_scalar(f: &mut FwdAccumW1<'_>, row: usize, w_row: &[f64], nh: usize) {
+    let sa = f.xa[row];
+    let sb = f.xb[row];
+    let do_a = sa != 0.0;
+    let do_b = sb != 0.0;
+    if !do_a && !do_b {
+        return;
+    }
+    for ((ha, hb), &w) in f.hpa[..nh]
+        .iter_mut()
+        .zip(f.hpb[..nh].iter_mut())
+        .zip(w_row.iter())
+    {
+        if do_a {
+            *ha = sa.mul_add(w, *ha);
+        }
+        if do_b {
+            *hb = sb.mul_add(w, *hb);
         }
     }
 }
@@ -998,6 +1109,16 @@ fn adam_pair_fused_fallback(args: &mut AdamW1FusedArgs<'_>) {
             group_l1_rows(blk, nh, tau);
         }
     }
+    // TRAINEROPT3 look-ahead: every row's w is now final — accumulate the
+    // next pair's `h_pre` in one pass. The fallback ignores `active_rows`,
+    // so the apply visits all rows; the per-side `x == 0` guards reproduce
+    // `forward`'s own skip, keeping it bit-identical regardless.
+    if let Some(f) = args.fwd.as_mut() {
+        debug_assert_eq!(nh % 4, 0, "look-ahead forward needs canonical fma domain");
+        for row in 0..n_rows {
+            fwd_accum_row_scalar(f, row, &args.w[row * nh..row * nh + nh], nh);
+        }
+    }
 }
 
 /// `v4` tier variant. Deliberately NOT a native 8-lane kernel: AVX-512 must
@@ -1045,6 +1166,7 @@ fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1F
 
     let full = [(0u32, n_rows as u32)];
     let ranges: &[(u32, u32)] = args.active_rows.unwrap_or(&full);
+    let mut fwd = args.fwd.take();
     for &(r0, r1) in ranges {
         let (r0, r1) = (r0 as usize, (r1 as usize).min(n_rows));
         let mut blk0 = r0;
@@ -1112,10 +1234,26 @@ fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1F
                         zero_v.store(gc);
                     }
                 }
+                // TRAINEROPT3 look-ahead: with no prox pending, `row`'s w
+                // is final the moment its Adam stores land — apply it to
+                // the next pair's `h_pre` accumulators while the row is
+                // still in registers/L1.
+                if tau.is_none()
+                    && let Some(f) = fwd.as_mut()
+                {
+                    fwd_accum_row_v3(token, f, row, &args.w[base..base + nh], nh);
+                }
             }
             // The block's rows are still hot in L1: prox them now.
             if let Some(tau) = tau {
                 group_l1_rows(&mut args.w[blk0 * nh..blk1 * nh], nh, tau);
+                // TRAINEROPT3 look-ahead: rows blk0..blk1 are final only
+                // now — apply post-prox, still ascending.
+                if let Some(f) = fwd.as_mut() {
+                    for row in blk0..blk1 {
+                        fwd_accum_row_v3(token, f, row, &args.w[row * nh..row * nh + nh], nh);
+                    }
+                }
             }
             blk0 = blk1;
         }
@@ -1646,6 +1784,7 @@ mod tests {
                         active_rows: None,
                         group_l1_tau: None,
                         g_zero_in: false,
+                        fwd: None,
                     });
                     for (name, a, b) in [
                         ("w", &wo, &wf),
@@ -1736,6 +1875,7 @@ mod tests {
                         active_rows: None,
                         group_l1_tau: None,
                         g_zero_in: false,
+                        fwd: None,
                     });
                     for (name, a, b) in [
                         ("w", &wo, &wt),
@@ -1842,6 +1982,7 @@ mod tests {
                             active_rows: active,
                             group_l1_tau: None,
                             g_zero_in: false,
+                            fwd: None,
                         },
                     );
                 };
@@ -1954,6 +2095,7 @@ mod tests {
                             active_rows: $active,
                             group_l1_tau: $tau,
                             g_zero_in: $gz,
+                            fwd: None,
                         }
                     }};
                 }
@@ -2003,6 +2145,184 @@ mod tests {
                 bits_of(&st_noprox.0),
                 "prox must change w"
             );
+        }
+    }
+
+    /// TRAINEROPT3 task 2 oracle: arming `fwd` must (a) leave `w/g/m/v`
+    /// bit-identical to the unarmed run and (b) produce `hpa`/`hpb` equal to
+    /// a hand-replayed `forward` walk over the FINAL post-step weights
+    /// (b1-seeded, ascending rows, `x != 0` guard, per-lane `mul_add` — the
+    /// canonical-domain ops `forward_*` runs). Rows outside `active_rows`
+    /// carry `x == 0` per the caller contract, so the kernel's row-gated
+    /// apply and the oracle's all-row replay must agree bit-for-bit. Runs
+    /// the v3 kernel and the composition fallback, prox fused and unfused,
+    /// `active_rows` on and off, several chained steps, plus a `−0.0` input
+    /// (skipped by the `!= 0.0` guard exactly like `forward`'s `s == 0.0`).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn fused_w1_fwd_accum_bit_identical() {
+        use archmage::SimdToken;
+        let _lock = archmage::testing::lock_token_testing();
+        let v3 =
+            archmage::X64V3Token::summon().expect("this test needs an x86-64-v3 (AVX2+FMA) host");
+        let (nf, nh) = (97usize, 32usize);
+        let n = nf * nh;
+        let kept = |r: usize| !(r % 5 == 2 || (30..38).contains(&r) || r == nf - 1);
+        let runs: Vec<(u32, u32)> = {
+            let mut v: Vec<(u32, u32)> = Vec::new();
+            for r in (0..nf).filter(|&r| kept(r)) {
+                match v.last_mut() {
+                    Some(l) if l.1 as usize == r => l.1 += 1,
+                    _ => v.push((r as u32, r as u32 + 1)),
+                }
+            }
+            v
+        };
+        // A spread of b1 values so the seed is meaningful (not all +0).
+        let b1: Vec<f64> = (0..nh).map(|j| (j as f64 - 16.0) * 0.013 - 0.2).collect();
+        for (l2_scale, tau_on, use_active) in [
+            (0.0f64, false, false),
+            (1e-5, false, true),
+            (0.0, true, true),
+            (1e-5, true, false),
+        ] {
+            let (mut w0, _g, mut m0, mut v0) =
+                synth_state(n, 0xF00D ^ l2_scale.to_bits() ^ tau_on as u64);
+            if use_active {
+                for r in (0..nf).filter(|&r| !kept(r)) {
+                    for a in [&mut w0, &mut m0, &mut v0] {
+                        a[r * nh..(r + 1) * nh].fill(0.0);
+                    }
+                }
+            }
+            let tau = tau_on.then_some(0.35f64);
+            let act = use_active.then_some(runs.as_slice());
+            let mut st_unarmed = (w0.clone(), vec![0.0f64; n], m0.clone(), v0.clone());
+            let mut st_armed_v3 = st_unarmed.clone();
+            let mut st_armed_fb = st_unarmed.clone();
+            for step in 1..=4u64 {
+                let (mut xa, mut xb, dha, dhb) = pair_inputs(nf, nh, 0x51 + step);
+                // The NEXT pair's inputs — rows the walk skips must be +0.
+                let (mut xa2, mut xb2, _, _) = pair_inputs(nf, nh, 0xA51 + step);
+                xa2[7] = -0.0; // guard must skip, exactly like `s == 0.0`
+                if use_active {
+                    // Loader invariant: dropped inputs are standardized
+                    // zeros on BOTH the current and the next pair — the
+                    // fallback walks every row, so nonzero x on an unkept
+                    // row would legitimately update it there.
+                    for r in (0..nf).filter(|&r| !kept(r)) {
+                        xa[r] = 0.0;
+                        xb[r] = 0.0;
+                        xa2[r] = 0.0;
+                        xb2[r] = 0.0;
+                    }
+                }
+                let t = step as i32;
+                let (bc1, bc2) = (1.0 - 0.9f64.powi(t), 1.0 - 0.999f64.powi(t));
+                let lr = 0.005;
+                macro_rules! mk {
+                    ($st:expr, $fwd:expr) => {{
+                        let (w, g, m, v) = &mut *$st;
+                        AdamW1FusedArgs {
+                            w,
+                            g,
+                            m,
+                            v,
+                            xa: &xa,
+                            dha: &dha,
+                            xb: &xb,
+                            dhb: &dhb,
+                            l2_scale,
+                            l2_mult: None,
+                            n_hidden: nh,
+                            beta1: 0.9,
+                            beta2: 0.999,
+                            eps: 1e-8,
+                            bc1,
+                            bc2,
+                            lr,
+                            active_rows: act,
+                            group_l1_tau: tau,
+                            g_zero_in: true,
+                            fwd: $fwd,
+                        }
+                    }};
+                }
+                adam_pair_fused_inner_v3(v3, &mut mk!(&mut st_unarmed, None));
+                let (mut hpa_v3, mut hpb_v3) = (b1.clone(), b1.clone());
+                adam_pair_fused_inner_v3(
+                    v3,
+                    &mut mk!(
+                        &mut st_armed_v3,
+                        Some(FwdAccumW1 {
+                            xa: &xa2,
+                            xb: &xb2,
+                            hpa: &mut hpa_v3,
+                            hpb: &mut hpb_v3,
+                        })
+                    ),
+                );
+                let (mut hpa_fb, mut hpb_fb) = (b1.clone(), b1.clone());
+                adam_pair_fused_fallback(&mut mk!(
+                    &mut st_armed_fb,
+                    Some(FwdAccumW1 {
+                        xa: &xa2,
+                        xb: &xb2,
+                        hpa: &mut hpa_fb,
+                        hpb: &mut hpb_fb,
+                    })
+                ));
+                // Oracle: forward walk over the FINAL w — b1 seed, every row
+                // ascending, `x != 0` guard, per-lane mul_add.
+                let (mut hpa_o, mut hpb_o) = (b1.clone(), b1.clone());
+                for i in 0..nf {
+                    let wrow = &st_unarmed.0[i * nh..i * nh + nh];
+                    if xa2[i] != 0.0 {
+                        for j in 0..nh {
+                            hpa_o[j] = xa2[i].mul_add(wrow[j], hpa_o[j]);
+                        }
+                    }
+                    if xb2[i] != 0.0 {
+                        for j in 0..nh {
+                            hpb_o[j] = xb2[i].mul_add(wrow[j], hpb_o[j]);
+                        }
+                    }
+                }
+                for (label, st) in [("v3", &st_armed_v3), ("fb", &st_armed_fb)] {
+                    for (name, a, b) in [
+                        ("w", &st_unarmed.0, &st.0),
+                        ("g", &st_unarmed.1, &st.1),
+                        ("m", &st_unarmed.2, &st.2),
+                        ("v", &st_unarmed.3, &st.3),
+                    ] {
+                        assert_eq!(
+                            bits_of(a),
+                            bits_of(b),
+                            "{label} armed diverged: {name} step={step} l2={l2_scale} tau={tau_on} active={use_active}"
+                        );
+                    }
+                }
+                for (label, got, want) in [
+                    ("v3 hpa", &hpa_v3, &hpa_o),
+                    ("v3 hpb", &hpb_v3, &hpb_o),
+                    ("fb hpa", &hpa_fb, &hpa_o),
+                    ("fb hpb", &hpb_fb, &hpb_o),
+                ] {
+                    assert_eq!(
+                        bits_of(got),
+                        bits_of(want),
+                        "{label}: look-ahead h_pre != forward replay — step={step} l2={l2_scale} tau={tau_on} active={use_active}"
+                    );
+                }
+                // Sensitivity: xa2 has nonzero kept rows every step, so the
+                // armed accumulator must move off its seed — if it didn't,
+                // the fused apply silently never ran.
+                assert_ne!(
+                    bits_of(&hpa_v3),
+                    bits_of(&b1),
+                    "armed hpa stayed at seed — the fused apply never ran (step={step})"
+                );
+            }
         }
     }
 

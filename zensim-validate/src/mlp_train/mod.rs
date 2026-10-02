@@ -1281,12 +1281,28 @@ fn apply_post_adam_penalties(w1: &mut [f64], n_hidden: usize, lr: f64) {
 /// deliberate: Adam carries momentum, so a zeroed gradient still lets a bias
 /// drift for several steps. Assignment cannot.
 fn nonneg_project(w2: &mut [f64], b1: &mut [f64], b2: &mut [f64], pin: Option<f64>) {
-    let Some(pin) = pin else {
+    nonneg_project_b1(b1, pin);
+    nonneg_project_w2b2(w2, b2, pin);
+}
+
+/// The `b1 := 0` third of [`nonneg_project`]. Split out for the
+/// TRAINEROPT3 look-ahead step, which needs b1's FINAL value before the
+/// fused w1 walk — the three loops are elementwise writes on disjoint
+/// arrays, so re-ordering the thirds is bit-identical.
+fn nonneg_project_b1(b1: &mut [f64], pin: Option<f64>) {
+    if pin.is_none() {
         return;
-    };
+    }
     for b in b1.iter_mut() {
         *b = 0.0;
     }
+}
+
+/// The `w2 := min(w2, 0)` / `b2 := pin` thirds of [`nonneg_project`].
+fn nonneg_project_w2b2(w2: &mut [f64], b2: &mut [f64], pin: Option<f64>) {
+    let Some(pin) = pin else {
+        return;
+    };
     for w in w2.iter_mut() {
         if *w > 0.0 {
             *w = 0.0;
@@ -1357,6 +1373,57 @@ fn kept_row_ranges(mask: Option<&[bool]>, n_rows: usize) -> Option<Vec<(u32, u32
         }
     }
     dropped.then_some(runs)
+}
+
+/// TRAINEROPT3 look-ahead contract check: every w1 row the fused walk does
+/// NOT visit must hold `x == 0.0` in BOTH next-pair samples — the
+/// `--keep-features` loader guarantee (dropped columns zeroed before
+/// standardization). Verified per pair, not assumed: a nonzero skipped
+/// row would change the side's `h_pre` vs `forward` only via a possible
+/// `−0.0 → +0.0` flip (`fma(x, +0, −0) = +0`), which bit-identical
+/// output cannot tolerate, so a violation drops the stash to the
+/// unfused `forward_pair` path. `ranges == None` means the walk visits
+/// every row — trivially satisfied.
+fn fwd_skipped_rows_zero(
+    ranges: Option<&[(u32, u32)]>,
+    xa: &[f64],
+    xb: &[f64],
+    n_rows: usize,
+) -> bool {
+    let Some(ranges) = ranges else {
+        return true;
+    };
+    let mut next = 0usize;
+    for &(r0, r1) in ranges {
+        let (r0, r1) = (r0 as usize, (r1 as usize).min(n_rows));
+        for i in next..r0 {
+            if xa[i] != 0.0 || xb[i] != 0.0 {
+                return false;
+            }
+        }
+        next = r1.max(next);
+    }
+    (next..n_rows).all(|i| xa[i] == 0.0 && xb[i] == 0.0)
+}
+
+/// Stashed look-ahead pair for TRAINEROPT3 task 2: drawn early inside
+/// step i's fused w1 walk (at a point whose RNG stream position matches
+/// the top of iteration i+1 whenever arming is allowed — see the
+/// `lookahead_ok` gates) and consumed there.
+struct Lookahead<'a> {
+    drawn: sampling::Draw,
+    /// `Some` iff `drawn` is a `Draw::Pair` AND the walk was armed:
+    /// materialized x rows plus the `h_pre` accumulators the step seeded
+    /// from final b1 and filled in the row loop.
+    fwd: Option<LookaheadFwd<'a>>,
+}
+
+/// The materialized half of an armed [`Lookahead`].
+struct LookaheadFwd<'a> {
+    xa: std::borrow::Cow<'a, [f64]>,
+    xb: std::borrow::Cow<'a, [f64]>,
+    hpa: Vec<f64>,
+    hpb: Vec<f64>,
 }
 
 fn record_best_val(v: f64) {
@@ -2692,6 +2759,25 @@ pub fn train_mlp_strategy(
         );
     }
 
+    // TRAINEROPT3 task 2 — run-constant gate for the look-ahead forward
+    // (next pair's `h_pre` accumulated inside this step's fused w1 walk).
+    // A step may arm it only when EVERYTHING between the walk and the next
+    // forward is provably inert for w1/b1 and the RNG stream:
+    //  - `fuse_w1` itself (the unfused step path never sees the stash);
+    //  - NiN/parallel never reach this code (they `continue` earlier) —
+    //    listed for clarity;
+    //  - TV cannot fire THIS RUN: its pair draw sits after the step and
+    //    consumes the same RNG, so a predrawn pair would swap stream order;
+    //  - coarse decay off (checked per step — `apply_post_adam_penalties`
+    //    writes w1 after the walk when on);
+    //  - not the epoch's last pair (the next draw belongs to the next
+    //    epoch and may never happen under early stop).
+    let tv_can_fire = tv
+        .is_some_and(|c| c.weight > 0.0 && c.apply_every > 0 && !c.pairs.is_empty())
+        && tv_std.is_some();
+    let lookahead_ok = fuse_w1 && !parallel && !nin_on && !tv_can_fire;
+    let mut la_next: Option<Lookahead<'_>> = None;
+
     for epoch in 0..hyperparams.n_epochs {
         // Global draw index, the coordinate `--pair-sampling stratified`'s
         // schedule is a function of. Unused (and unread) by the uniform
@@ -2714,18 +2800,25 @@ pub fn train_mlp_strategy(
             // pair; otherwise uniform.
             // Draw via THE owner (`sampling::draw_pair`) — see that module
             // for why the RNG consumption pattern is a wire contract.
-            let drawn = sampling::draw_pair(
-                &sampling::PairDrawCtx {
-                    cdf: &cdf,
-                    row_counts: &row_counts,
-                    per_row_cdfs: &per_row_cdfs,
-                    ref_buckets: &ref_buckets,
-                    strat_bands: &strat_bands,
-                    plan: pair_plan.as_ref(),
-                    draw_index: draw_index_base + pair_i as u64,
-                },
-                &mut rng,
-            );
+            // TRAINEROPT3: when step i-1 armed the look-ahead, this pair
+            // was already drawn at exactly this stream position — the
+            // stash replays it (and may carry the pre-accumulated h_pre).
+            let la = la_next.take();
+            let drawn = match la.as_ref() {
+                Some(l) => l.drawn,
+                None => sampling::draw_pair(
+                    &sampling::PairDrawCtx {
+                        cdf: &cdf,
+                        row_counts: &row_counts,
+                        per_row_cdfs: &per_row_cdfs,
+                        ref_buckets: &ref_buckets,
+                        strat_bands: &strat_bands,
+                        plan: pair_plan.as_ref(),
+                        draw_index: draw_index_base + pair_i as u64,
+                    },
+                    &mut rng,
+                ),
+            };
             if let Some(d) = sample_digest.as_mut() {
                 d.push(drawn);
             }
@@ -2818,28 +2911,56 @@ pub fn train_mlp_strategy(
                 continue;
             }
 
-            let xa = std_features.row(g_idx, ia, &mut scratch_a);
-            let xb = std_features.row(g_idx, ib, &mut scratch_b);
-            let (ya, ha_pre, ha) = forward(
-                xa,
-                &w1,
-                &b1,
-                &w2,
-                &b2,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-            );
-            let (yb, hb_pre, hb) = forward(
-                xb,
-                &w1,
-                &b1,
-                &w2,
-                &b2,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-            );
+            // TRAINEROPT3: one ascending w1 row walk for both samples —
+            // per side the identical `forward` op sequence, so the outputs
+            // are bit-identical to two `forward` calls (tier parity is
+            // covered by `forward_pair_all_tiers_bit_identical`). When the
+            // look-ahead stash is armed, `h_pre` was already accumulated
+            // inside the previous step's fused w1 walk — `forward_finish`
+            // runs the identical LeakyReLU + output reduction on today's
+            // w2/b2; otherwise `forward_pair` walks fresh.
+            let la_rows: Option<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>)>;
+            let (xa, xb, ya, ha_pre, ha, yb, hb_pre, hb) = if let Some(lf) = la.and_then(|l| l.fwd)
+            {
+                let LookaheadFwd {
+                    xa: cxa,
+                    xb: cxb,
+                    hpa,
+                    hpb,
+                } = lf;
+                let (ya, ha) = crate::simd_mlp::forward_finish(
+                    &hpa,
+                    &w2,
+                    &b2,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                let (yb, hb) = crate::simd_mlp::forward_finish(
+                    &hpb,
+                    &w2,
+                    &b2,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                la_rows = Some((cxa, cxb));
+                let (ra, rb) = la_rows.as_ref().unwrap();
+                (ra.as_ref(), rb.as_ref(), ya, hpa, ha, yb, hpb, hb)
+            } else {
+                let xa = std_features.row(g_idx, ia, &mut scratch_a);
+                let xb = std_features.row(g_idx, ib, &mut scratch_b);
+                let (ya, hpa, ha, yb, hpb, hb) = forward_pair(
+                    xa,
+                    xb,
+                    &w1,
+                    &b1,
+                    &w2,
+                    &b2,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                (xa, xb, ya, hpa, ha, yb, hpb, hb)
+            };
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
@@ -2977,6 +3098,58 @@ pub fn train_mlp_strategy(
                 } else {
                     group_l1_step_tau(lr, group_l1_lambda())
                 };
+                // TRAINEROPT3 task 2 — look-ahead: draw the NEXT pair at a
+                // stream-identical position (nothing between here and next
+                // iteration's top consumes rng when the `lookahead_ok`
+                // gates hold), materialize its rows, and let the fused w1
+                // walk accumulate its h_pre on final post-step values.
+                // Never armed across an epoch boundary: the last pair's
+                // successor is drawn after the eval block (and may never
+                // be drawn at all under early stop).
+                if lookahead_ok && !coarse_on && pair_i + 1 < hyperparams.pairs_per_epoch {
+                    let drawn = sampling::draw_pair(
+                        &sampling::PairDrawCtx {
+                            cdf: &cdf,
+                            row_counts: &row_counts,
+                            per_row_cdfs: &per_row_cdfs,
+                            ref_buckets: &ref_buckets,
+                            strat_bands: &strat_bands,
+                            plan: pair_plan.as_ref(),
+                            draw_index: draw_index_base + pair_i as u64 + 1,
+                        },
+                        &mut rng,
+                    );
+                    let mut stash = Lookahead { drawn, fwd: None };
+                    if let sampling::Draw::Pair { train_pos, ia, ib } = drawn {
+                        let xa2 = std_features.row_cow(train_indices[train_pos], ia);
+                        let xb2 = std_features.row_cow(train_indices[train_pos], ib);
+                        // Contract check (per pair, verified not assumed):
+                        // rows the walk won't visit must be x == 0.
+                        if fwd_skipped_rows_zero(active_rows.as_deref(), &xa2, &xb2, n_features) {
+                            stash.fwd = Some(LookaheadFwd {
+                                xa: xa2,
+                                xb: xb2,
+                                hpa: vec![0.0; n_hidden],
+                                hpb: vec![0.0; n_hidden],
+                            });
+                        }
+                    }
+                    la_next = Some(stash);
+                }
+                // `fwd_arg` borrows through `la_next` (set above), so the
+                // stash travels into the next iteration while the walk
+                // writes its accumulators.
+                let fwd_arg =
+                    la_next
+                        .as_mut()
+                        .and_then(|l| l.fwd.as_mut())
+                        .map(|f| adam_simd::FwdAccumW1 {
+                            xa: &f.xa[..],
+                            xb: &f.xb[..],
+                            hpa: f.hpa.as_mut_slice(),
+                            hpb: f.hpb.as_mut_slice(),
+                        });
+                let armed = fwd_arg.is_some();
                 adam.step_w1_fused(
                     &mut w1,
                     &mut b1,
@@ -2992,11 +3165,20 @@ pub fn train_mlp_strategy(
                     n_hidden,
                     active_rows.as_deref(),
                     fused_tau,
+                    nonneg,
+                    fwd_arg,
                 );
                 if coarse_on {
                     apply_post_adam_penalties(&mut w1, n_hidden, lr);
                 }
-                nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                if armed {
+                    // b1's Adam update + its nonneg_project third already
+                    // ran inside the step (before the walk, to seed the
+                    // look-ahead accumulators from final b1).
+                    nonneg_project_w2b2(&mut w2, &mut b2, nonneg);
+                } else {
+                    nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                }
                 steps_since_adam = 0;
             } else {
                 backprop_step(
@@ -3080,17 +3262,8 @@ pub fn train_mlp_strategy(
                     };
                     let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
                     let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
-                    let (y_lo, h_lo_pre, h_lo) = forward(
+                    let (y_lo, h_lo_pre, h_lo, y_hi, h_hi_pre, h_hi) = forward_pair(
                         xlo,
-                        &w1,
-                        &b1,
-                        &w2,
-                        &b2,
-                        n_features,
-                        n_hidden,
-                        hyperparams.leaky_alpha,
-                    );
-                    let (y_hi, h_hi_pre, h_hi) = forward(
                         xhi,
                         &w1,
                         &b1,
@@ -6341,6 +6514,25 @@ fn forward(
     crate::simd_mlp::forward(x, w1, b1, w2, b2, n_features, n_hidden, alpha)
 }
 
+/// Pair forward: `(xa, xb) → side-A and side-B (y, h_pre, h)` in ONE
+/// ascending w1 row walk. Bit-identical to `forward(xa, …)` then
+/// `forward(xb, …)` on the same weights — see `simd_mlp::forward_pair`
+/// and the `forward_pair_all_tiers_bit_identical` test.
+#[allow(clippy::too_many_arguments)]
+fn forward_pair(
+    xa: &[f64],
+    xb: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) -> (f64, Vec<f64>, Vec<f64>, f64, Vec<f64>, Vec<f64>) {
+    crate::simd_mlp::forward_pair(xa, xb, w1, b1, w2, b2, n_features, n_hidden, alpha)
+}
+
 /// RankNet-style backprop step: accumulates `∂L/∂w1`, `∂L/∂b1`,
 /// `∂L/∂w2`, `∂L/∂b2` from a single `(y, h_pre, h, dl_dy)` quadruple.
 ///
@@ -6515,8 +6707,8 @@ fn run_parallel_minibatch(
             for &(g_idx, ia, ib) in chunk {
                 let xa = std_features.row(g_idx, ia, &mut scratch_a);
                 let xb = std_features.row(g_idx, ib, &mut scratch_b);
-                let (ya, ha_pre, ha) = forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
-                let (yb, hb_pre, hb) = forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
+                let (ya, ha_pre, ha, yb, hb_pre, hb) =
+                    forward_pair(xa, xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
 
                 let mos_a = groups[g_idx].human_scores[ia];
                 let mos_b = groups[g_idx].human_scores[ib];
@@ -6738,8 +6930,8 @@ fn run_minibatch_with_nin(
         } else {
             1.0
         };
-        let (ya, ha_pre, ha) = forward(&xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
-        let (yb, hb_pre, hb) = forward(&xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
+        let (ya, ha_pre, ha, yb, hb_pre, hb) =
+            forward_pair(&xa, &xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
         let pred_diff = yb - ya;
         let z = -target * pred_diff;
         let loss_raw = if z > 50.0 {
@@ -6991,6 +7183,15 @@ impl AdamState {
     /// value and still stored as +0.0 on exit — the post-step invariant the
     /// unfused paths (TV, pool head, k>1) rely on. b1/w2/b2 use the ordinary
     /// per-array update with the same `t`/bias-correction as `step`.
+    ///
+    /// `next_fwd` (TRAINEROPT3 look-ahead): when `Some`, the w1 walk also
+    /// accumulates the NEXT pair's `h_pre` per [`adam_simd::FwdAccumW1`]'s
+    /// contract. The accumulators must be seeded with this step's FINAL b1,
+    /// so b1's Adam update and the b1 third of `nonneg_project` (driven by
+    /// `nonneg_pin`) move BEFORE the w1 walk — bit-identical to the unarmed
+    /// order because the w1 walk never reads b1 (`AdamW1FusedArgs` has no
+    /// b1 input) and b1's update never reads w1. The caller then runs
+    /// `nonneg_project_w2b2` only; the unarmed path is unchanged.
     #[allow(clippy::too_many_arguments)]
     fn step_w1_fused(
         &mut self,
@@ -7008,6 +7209,8 @@ impl AdamState {
         n_hidden: usize,
         active_rows: Option<&[(u32, u32)]>,
         group_l1_tau: Option<f64>,
+        nonneg_pin: Option<f64>,
+        next_fwd: Option<adam_simd::FwdAccumW1<'_>>,
     ) {
         self.t += 1;
         let beta1: f64 = 0.9;
@@ -7018,6 +7221,34 @@ impl AdamState {
         // pass it through unchanged so the SIMD result is bit-identical.
         let bc1 = 1.0 - beta1.powi(self.t as i32);
         let bc2 = 1.0 - beta2.powi(self.t as i32);
+
+        let step_one = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {
+            let mut args = adam_simd::AdamUpdateArgs {
+                w,
+                g,
+                m,
+                v,
+                beta1,
+                beta2,
+                eps,
+                bc1,
+                bc2,
+                lr,
+            };
+            adam_simd::adam_update(&mut args);
+        };
+
+        let lookahead = next_fwd.is_some();
+        let mut next_fwd = next_fwd;
+        if let Some(nf) = next_fwd.as_mut() {
+            // b1's Adam update + projection BEFORE the w1 walk, then seed
+            // the next pair's h_pre from the final b1 — identical inputs,
+            // disjoint arrays vs the walk.
+            step_one(b1, &mut self.gb1, &mut self.mb1, &mut self.vb1);
+            nonneg_project_b1(b1, nonneg_pin);
+            nf.hpa.copy_from_slice(b1);
+            nf.hpb.copy_from_slice(b1);
+        }
 
         adam_simd::adam_update_w1_fused(&mut adam_simd::AdamW1FusedArgs {
             w: w1,
@@ -7044,24 +7275,12 @@ impl AdamState {
             // again, and `AdamState::new` starts it zeroed — so `gw1` is
             // +0.0 on entry (checked per row under debug_assertions).
             g_zero_in: true,
+            fwd: next_fwd,
         });
 
-        let step_one = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {
-            let mut args = adam_simd::AdamUpdateArgs {
-                w,
-                g,
-                m,
-                v,
-                beta1,
-                beta2,
-                eps,
-                bc1,
-                bc2,
-                lr,
-            };
-            adam_simd::adam_update(&mut args);
-        };
-        step_one(b1, &mut self.gb1, &mut self.mb1, &mut self.vb1);
+        if !lookahead {
+            step_one(b1, &mut self.gb1, &mut self.mb1, &mut self.vb1);
+        }
         step_one(w2, &mut self.gw2, &mut self.mw2, &mut self.vw2);
         step_one(b2, &mut self.gb2, &mut self.mb2, &mut self.vb2);
     }
@@ -15117,5 +15336,213 @@ mod tests {
             bake, bake2,
             "IMPL BUG (not strategy): strategy training is not deterministic under a fixed seed"
         );
+    }
+
+    /// TRAINEROPT3: `fwd_skipped_rows_zero` mirrors the keep-mask loader
+    /// contract — every row outside `active_rows` must read `x == 0.0`
+    /// (`−0.0` counts, matching `forward`'s `s == 0.0` skip) on BOTH
+    /// sides, or the fused apply would diverge from a fresh forward.
+    #[test]
+    fn fwd_skipped_rows_zero_contract() {
+        let xa: Vec<f64> = (0..12).map(|i| i as f64 * 0.5).collect();
+        let xb = xa.clone();
+        // Full coverage — trivially true regardless of x.
+        assert!(fwd_skipped_rows_zero(None, &xa, &xb, 12));
+        assert!(fwd_skipped_rows_zero(Some(&[(0, 12)]), &xa, &xb, 12));
+        // Gap 4..8 — nonzero x there must fail.
+        let gapped = [(0u32, 4u32), (8, 12)];
+        assert!(!fwd_skipped_rows_zero(Some(&gapped), &xa, &xb, 12));
+        let mut xa0 = xa.clone();
+        let mut xb0 = xb.clone();
+        for i in 4..8 {
+            xa0[i] = 0.0;
+            xb0[i] = 0.0;
+        }
+        assert!(fwd_skipped_rows_zero(Some(&gapped), &xa0, &xb0, 12));
+        // −0.0 reads as zero (IEEE `!=` semantics), like `forward`.
+        xb0[5] = -0.0;
+        assert!(fwd_skipped_rows_zero(Some(&gapped), &xa0, &xb0, 12));
+        // Nonzero on ONE side only still fails — the guard is per-side.
+        xb0[5] = 0.0;
+        xa0[5] = 1e-9;
+        assert!(!fwd_skipped_rows_zero(Some(&gapped), &xa0, &xb0, 12));
+        // Trailing gap to n_rows — zero → pass, nonzero → fail.
+        xa0[5] = 0.0;
+        xa0[11] = 0.0;
+        xb0[11] = 0.0;
+        assert!(fwd_skipped_rows_zero(
+            Some(&[(0, 4), (8, 11)]),
+            &xa0,
+            &xb0,
+            12
+        ));
+        xa0[11] = 3.0;
+        assert!(!fwd_skipped_rows_zero(
+            Some(&[(0, 4), (8, 11)]),
+            &xa0,
+            &xb0,
+            12
+        ));
+        xa0[11] = 0.0;
+        assert!(fwd_skipped_rows_zero(
+            Some(&[(0, 4), (8, 11)]),
+            &xa0[..11],
+            &xb0[..11],
+            11
+        ));
+    }
+
+    /// TRAINEROPT3 task 2 step-level oracle: `step_w1_fused` armed with a
+    /// `FwdAccumW1` must leave every trainer-visible state buffer
+    /// (`w1/b1/w2/b2` and all of `AdamState`'s `g*/m*/v*`/`t`)
+    /// bit-identical to the unarmed call sequence (walk → `step` b1 →
+    /// `nonneg_project`), while `hpa`/`hpb` equal a hand-replayed forward
+    /// walk over the FINAL `w1` seeded from the FINAL `b1` — i.e. exactly
+    /// what the next iteration's `forward` + `forward_finish` consume.
+    /// Covers nonneg on/off × group-lasso prox on/off × `active_rows`
+    /// gapped/full, across chained steps (so `g_zero_in` re-entry holds).
+    #[test]
+    fn step_w1_fused_lookahead_bit_identical() {
+        let (nf, nh) = (24usize, 8usize);
+        let n = nf * nh;
+        let mut rng = SplitMix64::new(0xBEEF);
+        let mut genvec =
+            |n: usize| -> Vec<f64> { (0..n).map(|_| rng.next_normal() * 0.1).collect() };
+        let kept = |r: usize| !(r % 4 == 3 || (16..20).contains(&r));
+        let runs: Vec<(u32, u32)> = {
+            let mut v: Vec<(u32, u32)> = Vec::new();
+            for r in (0..nf).filter(|&r| kept(r)) {
+                match v.last_mut() {
+                    Some(l) if l.1 as usize == r => l.1 += 1,
+                    _ => v.push((r as u32, r as u32 + 1)),
+                }
+            }
+            v
+        };
+        for pin in [None, Some(0.75)] {
+            for tau in [None, Some(0.15)] {
+                for use_active in [false, true] {
+                    let w1_0 = genvec(n);
+                    let b1_0 = genvec(nh);
+                    let w2_0 = genvec(nh);
+                    let b2_0 = genvec(1);
+                    // Shared initial Adam buffers carrying plausible grads.
+                    let mut ad_unarmed = AdamState::new(n, nh, nh, 1);
+                    ad_unarmed.gb1 = genvec(nh);
+                    ad_unarmed.gw2 = genvec(nh);
+                    ad_unarmed.gb2 = genvec(1);
+                    let mut ad_armed = AdamState::new(n, nh, nh, 1);
+                    ad_armed.gb1.clone_from(&ad_unarmed.gb1);
+                    ad_armed.gw2.clone_from(&ad_unarmed.gw2);
+                    ad_armed.gb2.clone_from(&ad_unarmed.gb2);
+                    let mut w1_u = w1_0.clone();
+                    let mut w1_a = w1_0.clone();
+                    let (mut b1_u, mut b1_a) = (b1_0.clone(), b1_0.clone());
+                    let (mut w2_u, mut w2_a) = (w2_0.clone(), w2_0.clone());
+                    let (mut b2_u, mut b2_a) = (b2_0.clone(), b2_0.clone());
+                    let act = use_active.then_some(runs.as_slice());
+                    for _step in 0..3 {
+                        let mut xa = genvec(nf);
+                        let mut xb = genvec(nf);
+                        let mut xa2 = genvec(nf);
+                        let mut xb2 = genvec(nf);
+                        let dha = genvec(nh);
+                        let dhb = genvec(nh);
+                        if use_active {
+                            for r in (0..nf).filter(|&r| !kept(r)) {
+                                xa[r] = 0.0;
+                                xb[r] = 0.0;
+                                xa2[r] = 0.0;
+                                xb2[r] = 0.0;
+                            }
+                        }
+                        let mut hpa = vec![0.0f64; nh];
+                        let mut hpb = vec![0.0f64; nh];
+                        ad_armed.step_w1_fused(
+                            &mut w1_a,
+                            &mut b1_a,
+                            &mut w2_a,
+                            &mut b2_a,
+                            0.003,
+                            &xa,
+                            &dha,
+                            &xb,
+                            &dhb,
+                            1e-4,
+                            None,
+                            nh,
+                            act,
+                            tau,
+                            pin,
+                            Some(adam_simd::FwdAccumW1 {
+                                xa: &xa2,
+                                xb: &xb2,
+                                hpa: &mut hpa,
+                                hpb: &mut hpb,
+                            }),
+                        );
+                        nonneg_project_w2b2(&mut w2_a, &mut b2_a, pin);
+                        ad_unarmed.step_w1_fused(
+                            &mut w1_u, &mut b1_u, &mut w2_u, &mut b2_u, 0.003, &xa, &dha, &xb,
+                            &dhb, 1e-4, None, nh, act, tau, pin, None,
+                        );
+                        nonneg_project(&mut w2_u, &mut b1_u, &mut b2_u, pin);
+                        let bits = |v: &[f64]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+                        for (name, x, y) in [
+                            ("w1", &w1_u[..], &w1_a[..]),
+                            ("b1", &b1_u[..], &b1_a[..]),
+                            ("w2", &w2_u[..], &w2_a[..]),
+                            ("b2", &b2_u[..], &b2_a[..]),
+                            ("gw1", &ad_unarmed.gw1[..], &ad_armed.gw1[..]),
+                            ("gb1", &ad_unarmed.gb1[..], &ad_armed.gb1[..]),
+                            ("gw2", &ad_unarmed.gw2[..], &ad_armed.gw2[..]),
+                            ("gb2", &ad_unarmed.gb2[..], &ad_armed.gb2[..]),
+                            ("mw1", &ad_unarmed.mw1[..], &ad_armed.mw1[..]),
+                            ("mb1", &ad_unarmed.mb1[..], &ad_armed.mb1[..]),
+                            ("mw2", &ad_unarmed.mw2[..], &ad_armed.mw2[..]),
+                            ("mb2", &ad_unarmed.mb2[..], &ad_armed.mb2[..]),
+                            ("vw1", &ad_unarmed.vw1[..], &ad_armed.vw1[..]),
+                            ("vb1", &ad_unarmed.vb1[..], &ad_armed.vb1[..]),
+                            ("vw2", &ad_unarmed.vw2[..], &ad_armed.vw2[..]),
+                            ("vb2", &ad_unarmed.vb2[..], &ad_armed.vb2[..]),
+                        ] {
+                            assert_eq!(
+                                bits(x),
+                                bits(y),
+                                "armed diverged: {name} pin={pin:?} tau={tau:?} active={use_active}"
+                            );
+                        }
+                        assert_eq!(ad_unarmed.t, ad_armed.t);
+                        // Oracle: b1-final seed + ascending guarded mul_add
+                        // over the armed run's (identical) final w1.
+                        let mut hpa_o = b1_a.clone();
+                        let mut hpb_o = b1_a.clone();
+                        for i in 0..nf {
+                            let wr = &w1_a[i * nh..i * nh + nh];
+                            if xa2[i] != 0.0 {
+                                for j in 0..nh {
+                                    hpa_o[j] = xa2[i].mul_add(wr[j], hpa_o[j]);
+                                }
+                            }
+                            if xb2[i] != 0.0 {
+                                for j in 0..nh {
+                                    hpb_o[j] = xb2[i].mul_add(wr[j], hpb_o[j]);
+                                }
+                            }
+                        }
+                        assert_eq!(bits(&hpa), bits(&hpa_o), "hpa oracle mismatch");
+                        assert_eq!(bits(&hpb), bits(&hpb_o), "hpb oracle mismatch");
+                        // Re-seed the identical gradient buffers for the
+                        // next step (backprop would have refilled them).
+                        ad_unarmed.gb1 = genvec(nh);
+                        ad_unarmed.gw2 = genvec(nh);
+                        ad_unarmed.gb2 = genvec(1);
+                        ad_armed.gb1.clone_from(&ad_unarmed.gb1);
+                        ad_armed.gw2.clone_from(&ad_unarmed.gw2);
+                        ad_armed.gb2.clone_from(&ad_unarmed.gb2);
+                    }
+                }
+            }
+        }
     }
 }

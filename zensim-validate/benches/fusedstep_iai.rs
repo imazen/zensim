@@ -346,6 +346,7 @@ fn fused_body(p: &mut Pair) {
         active_rows: None,
         group_l1_tau: None,
         g_zero_in: false,
+        fwd: None,
     });
 }
 

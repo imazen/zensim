@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--group-l1", type=float, default=None,
                     help="override the recipe's group-lasso strength (recipe_of caps the spec token at 1; the trainer does not)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
     return ap.parse_args()
 
 
@@ -51,8 +52,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     core_spec, human_w = lodo.split_weight(args.spec)
     lists = json.loads((lodo.V2 / "wide" / "keep_lists.json").read_text())
-    entry = lists["specs"][core_spec]
-    family, variant, keep = entry["family"], entry["variant"], entry["keep"]
+    family, variant, keep = lodo.resolve_keep(core_spec, args.columns, lists)
     vdir = lodo.V2 / "wide" / family / variant
     receipt = json.loads((vdir / "receipt.json").read_text())
     width, legs = receipt["width"], receipt["legs"]
@@ -76,7 +76,9 @@ def main() -> None:
     recipe = lodo.recipe_of(args.spec)
     if args.group_l1 is not None:
         recipe["group_l1"] = args.group_l1
-    env = {**os.environ, "ZENSIM_MAX_TIER": "v3", "RAYON_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
+    env = {**os.environ, "RAYON_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
+    if os.environ.get("GATE_MAX_TIER", "v3"):
+        env["ZENSIM_MAX_TIER"] = os.environ.get("GATE_MAX_TIER", "v3")
     results = []
     for spec in args.variant:
         label, _, rest = spec.partition("=")

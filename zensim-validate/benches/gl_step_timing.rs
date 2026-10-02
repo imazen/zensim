@@ -82,6 +82,7 @@ fn step(
         active_rows: None,
         group_l1_tau: tau,
         g_zero_in: gz,
+        fwd: None,
     });
 }
 
