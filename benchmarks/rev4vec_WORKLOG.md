@@ -170,7 +170,7 @@ REV4SERVE permutation gates exercise dispatch-level coverage separately.
 | `cargo test -p zensim --release --features custom-profiles,feature-regime-v2,threads,training` | **PASS** — 571 lib + all integration + doctests, 0 failures |
 | `cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings` | **PASS** |
 | `cargo fmt -p zensim --check` | **PASS** |
-| `just lint-scripts` | **PASS** — 797 scripts (fixed one false positive: `*arr` deref → renamed `chunk`) |
+| `just lint-scripts` | **PASS** — 797 scripts (one scanner false positive fixed by renaming a local to `chunk`) |
 | `just api-doc-check` | **PASS** — no public API change |
 
 ## Benchmarks
