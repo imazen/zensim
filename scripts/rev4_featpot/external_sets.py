@@ -166,10 +166,13 @@ def dense_bake(bake: Path, cache: Path) -> Path:
     return out
 
 
+def reads_unextracted(cell: Path) -> bool:
+    return max(int(x) for x in (cell / "keep_features.txt").read_text().split()) >= UNREAD_FROM
+
+
 def predict(cell: Path, table: Path, cache: Path) -> np.ndarray:
-    keep = [int(x) for x in (cell / "keep_features.txt").read_text().split()]
-    if max(keep) >= UNREAD_FROM:
-        raise ValueError(f"{cell} reads f{max(keep)}; external tables carry f{UNREAD_FROM}+ as NaN")
+    if reads_unextracted(cell):
+        raise ValueError(f"{cell} reads f{UNREAD_FROM}+; external tables carry those columns as NaN")
     bake = Path(json.loads((cell / "result.json").read_text())["selected_bake"])
     dense = dense_bake(bake, cache)
     out = cache / f"{dense.stem}_{table.stem}.tsv"
@@ -191,6 +194,10 @@ def cmd_score(args) -> int:
     sets = [s for s in PAIRS if (V2 / "external" / f"{s}.parquet").is_file()]
     cache = V2 / "external" / "pred"
     cache.mkdir(parents=True, exist_ok=True)
+    refused = [sp for sp in specs if any(reads_unextracted(c.parent) for c in (V2 / "cells" / f"{sp}__N").glob("without_*/result.json"))]
+    if specs[0] in refused:
+        raise ValueError(f"control {specs[0]} reads f{UNREAD_FROM}+, which the external tables do not carry")
+    specs = [sp for sp in specs if sp not in refused]  # reported, never silently dropped
     jobs = []  # warm the prediction cache in parallel; the loop below then reads it
     for sp in specs:
         for fold in SOURCE_ORDER:
@@ -229,7 +236,8 @@ def cmd_score(args) -> int:
                     rows.append(r)
             res[(sp, st)] = rows
     ctl = specs[0]
-    report = {"schema": "rev4-featpot-external-score-v1", "control": ctl, "seeds": list(seeds), "sets": sets, "specs": {}}
+    report = {"schema": "rev4-featpot-external-score-v1", "control": ctl, "seeds": list(seeds), "sets": sets, "specs": {},
+              "refused_reads_unextracted_columns": refused}
     for sp in specs:
         report["specs"][sp] = {}
         for st in sets:
@@ -248,6 +256,8 @@ def cmd_score(args) -> int:
     name = args.out or "external_score"
     (V2 / "compare").mkdir(exist_ok=True)
     (V2 / "compare" / f"{name}.json").write_text(json.dumps(report, indent=1) + "\n")
+    if refused:
+        print(f"REFUSED (read f{UNREAD_FROM}+, not extracted for external sets): {', '.join(refused)}")
     for st in sets:
         print(f"== {st}")
         for sp in specs:

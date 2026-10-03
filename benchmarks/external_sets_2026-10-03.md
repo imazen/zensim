@@ -125,3 +125,30 @@ gain (+0.0094), but D4 is −0.003±0.024. That is a fall of about 0.1 SE, and u
 - Split: `sha256(image_name) % 10 < 8` gives 8,019 train / 2,054 holdout.
 - The 1024×768 zip carries 300 further JPEGs absent from the score file; they are excluded and listed in the manifest.
 - Zip sha256 values are in `/mnt/v/datasets/koniq10k/SHA256SUMS` (1024×768 `ea73b96d…`, scores `d895af94…`, indicators `c037abea…`).
+
+## 6. Every feature-set cell on the external sets (exploratory)
+
+`external_sets.py score --specs <control, R0, by_v2fy, every set: spec> --seeds 0-4 --out external_sets_e9_e10_e12_2026-10-03`
+(`/var/tmp/rev4-featpot/v2c/compare/`). 262 specs requested, 224 scored. The 38 that read texgain/satsign (f1825+, not
+extracted for the external tables) are listed as refused in the JSON. Ranking: `~/tmp/featpot-audit/external_sets_ranking.txt`.
+
+| Spec | NITS (Δ vs v2 + basic) | LIVE (Δ) | LIVE disjoint Δ | MCIQA Δ |
+|---|--:|--:|--:|--:|
+| v2 + basic (E9″ LODO winner, control) | 0.7141 | 0.9205 | — | 0.2690 |
+| R0 944 | +0.0011±0.0022 | −0.0006±0.0152 | −0.0011 | −0.023 |
+| by_v2fy (cost candidate) | −0.0109±0.0028 | +0.0233±0.0105 | +0.0265 | −0.034 |
+| v2 alone | +0.0150±0.0030 | −0.0013±0.0094 | +0.0031 | −0.079 |
+| append + append2 | +0.0151±0.0029 | +0.0301±0.0099 | +0.0397 | +0.054 |
+| append + c4 | +0.0137±0.0036 | +0.0306±0.0104 | +0.0408 | +0.043 |
+| append alone | +0.0064 | +0.0331 | — | — |
+| v2 + csfw (best NITS) | +0.0193±0.0020 | −0.0016±0.0095 | +0.0021 | −0.073 |
+| b2 + c2 (best LIVE) | −0.0241±0.0026 | +0.0469±0.0092 | +0.0593 | −0.095 |
+
+- **The LODO winner is mid-pack on unseen data.** Six sets beat v2 + basic on both NITS and LIVE by more than 2 SE, and every
+  one of them contains the `append` group: append + append2, append + c4, append + csfw, a1 + append, append alone,
+  append + c4 + masked. If the 224 specs were independent, fewer than one would pass both by chance. They are correlated, so the
+  shared `append` group is the likely common cause.
+- NITS favours v2-based sets and LIVE favours the b/c families. The two sets do not agree on a single best set.
+- by_v2fy keeps LIVE (+0.023) but loses NITS (−0.011): it is not "as good" out of sample on NITS.
+- This read is exploratory (open sets, chosen after looking, many comparisons). It does not overturn E9″. A claim that
+  append-based sets generalise better needs a registered read on data no one has looked at; R6 stays held.
