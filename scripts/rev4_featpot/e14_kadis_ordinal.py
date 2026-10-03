@@ -200,16 +200,28 @@ def cmd_score(args) -> int:
     return e13.score_arms([(f"ko{w}", spec(w)) for w in WEIGHTS], "e14_kadis_ordinal", args.monotonicity)
 
 
+def cmd_types(args) -> int:
+    import e13_teacher as e13
+    table = e13.type_table([(f"ko{w}", spec(w)) for w in WEIGHTS])
+    (V2 / "compare" / "e14_kadis_ordinal_types.json").write_text(json.dumps(table, indent=1) + "\n")
+    for label, per in table.items():
+        for src, types in per.items():
+            worst = sorted(types.items(), key=lambda kv: kv[1]["control"])[:6]
+            print(f"  {label:5s} {src:8s} " + "  ".join(f"t{t} {v['control']:.2f}{v['delta']:+.3f}" for t, v in worst))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["select", "extract", "table", "grid", "score"])
+    ap.add_argument("cmd", choices=["select", "extract", "table", "grid", "score", "types"])
     ap.add_argument("--root")
     ap.add_argument("--out")
     ap.add_argument("--program-sha", default="")
     ap.add_argument("--data-sha", default="")
     ap.add_argument("--monotonicity", action="store_true")
     args = ap.parse_args()
-    return {"select": cmd_select, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid, "score": cmd_score}[args.cmd](args)
+    return {"select": cmd_select, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid, "score": cmd_score,
+            "types": cmd_types}[args.cmd](args)
 
 
 if __name__ == "__main__":

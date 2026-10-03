@@ -224,16 +224,51 @@ def score_arms(arms: list, out_name: str, monotonicity: bool) -> int:
     return 0
 
 
+def type_table(arms: list) -> dict:
+    """Per-distortion-type within-type SROCC on KADID/TID, seed-paired Δ of each arm [(label, spec)] vs the control."""
+    out = {}
+    for src in TYPE_SOURCES:
+        meta = heldout_meta(src)
+        y = meta.target.to_numpy(dtype=np.float64)
+        idx = meta.groupby("dtype").indices
+
+        def per_type(path: Path) -> dict:
+            pred = np.asarray(json.loads(path.read_text())["prediction"], dtype=np.float64)
+            sign = 1.0 if spearman(pred, y) >= 0 else -1.0
+            return {t: sign * spearman(pred[g], y[g]) for t, g in idx.items()}
+
+        ctl = {i: per_type(cell_of(BASE, src, i)) for i in SEEDS if cell_of(BASE, src, i).is_file()}
+        for label, sp in arms:
+            got = {i: per_type(cell_of(sp, src, i)) for i in SEEDS if i in ctl and cell_of(sp, src, i).is_file()}
+            if not got:
+                continue
+            out.setdefault(label, {})[src] = {t: {"control": float(np.mean([ctl[i][t] for i in got])),
+                                                  **paired([got[i][t] for i in got], [ctl[i][t] for i in got])}
+                                              for t in idx}
+    return out
+
+
+def cmd_types(args) -> int:
+    arms = [(rule, spec(rule)) for rule in TEACHER_SUBSETS]
+    table = type_table(arms)
+    (V2 / "compare" / "e13_teacher_types.json").write_text(json.dumps(table, indent=1) + "\n")
+    for label, per in table.items():
+        for src, types in per.items():
+            worst = sorted(types.items(), key=lambda kv: kv[1]["control"])[:6]
+            print(f"  ts{label:7s} {src:8s} " + "  ".join(f"t{t} {v['control']:.2f}{v['delta']:+.3f}" for t, v in worst))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["strata", "grid", "score"])
+    ap.add_argument("cmd", choices=["strata", "grid", "score", "types"])
     ap.add_argument("--root")
     ap.add_argument("--out")
     ap.add_argument("--program-sha", default="")
     ap.add_argument("--data-sha", default="")
     ap.add_argument("--monotonicity", action="store_true", help="also W4 dev monotonicity (predicts SafeSyn dev per bake)")
     args = ap.parse_args()
-    return {"strata": cmd_strata, "grid": cmd_grid, "score": cmd_score}[args.cmd](args)
+    return {"strata": cmd_strata, "grid": cmd_grid, "score": cmd_score, "types": cmd_types}[args.cmd](args)
 
 
 if __name__ == "__main__":
