@@ -1921,6 +1921,7 @@ mod tests {
     /// full walk when the skipped rows are pinned-zero (w = m = v = g = 0,
     /// x = 0): over several steps, with and without L2 / per-row multipliers.
     #[test]
+    #[cfg(target_arch = "x86_64")] // the v3 kernel and X64V3Token exist on x86_64 only
     fn fused_w1_active_rows_bit_identical() {
         let (nf, nh) = (97usize, 32usize);
         let n = nf * nh;
@@ -2019,6 +2020,7 @@ mod tests {
     /// some rows hit the `norm <= tau` zeroing branch and others the scale
     /// branch (asserted), and the prox must actually change the weights.
     #[test]
+    #[cfg(target_arch = "x86_64")] // the v3 kernel and X64V3Token exist on x86_64 only
     fn fused_w1_group_l1_and_g_zero_bit_identical() {
         let (nf, nh) = (97usize, 32usize);
         let n = nf * nh;
@@ -2174,6 +2176,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "x86_64")] // the v3 kernel and X64V3Token exist on x86_64 only
     fn fused_w1_fwd_accum_bit_identical_at(nh: usize) {
         use archmage::SimdToken;
         let _lock = archmage::testing::lock_token_testing();
