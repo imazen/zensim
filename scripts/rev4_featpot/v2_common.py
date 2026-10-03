@@ -150,6 +150,10 @@ def split_weight(spec: str) -> tuple[str, float | None]:
 TEACHER_CODECS = {"moz": "mozjpeg-rs-420-e4", "avif": "zenavif-s5-e6", "zj": "zenjpeg-420-e2", "xyb": "zenjpeg-420-xyb-e2",
                   "jxl": "zenjxl-e7", "webp": "zenwebp-default-m4"}
 TEACHER_SUBSETS = ("none", "win", "floor0", "neg", "q20", "mono5", *(f"x{c}" for c in TEACHER_CODECS))
+# Design log E15: the coverage pool's families (KADIS rule-compliant types + our TID-style `lbw`/`cab`); a cell picks families with
+# `cf<hex mask>` (bit i = the i-th family below) and weights the leg with `cv<w>`.
+COVERAGE_FAMILIES = {"blur": (1, 2, 3), "colour": (4, 5, 7), "noise": (11, 12, 13, 14), "light": (16, 17, 18),
+                     "spatial": (19, 20, 21, 23), "contrast": (24, 25), "quantize": (22,), "new": ("lbw", "cab")}
 # Design log E14: `ko<w>` adds the KADIS ordinal ladder leg (v2_teacher.ORDINAL_NAME) at nominal weight w, rank-only within ladders.
 
 
@@ -168,8 +172,15 @@ def recipe_of(spec: str) -> dict:
             out["teacher_subset"] = tok[2:]
         elif tok.startswith("ko") and "kadis_ordinal" not in out and 0 < float(tok[2:]) <= 64:
             out["kadis_ordinal"] = float(tok[2:])
+        elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
+            out["coverage_weight"] = float(tok[2:])
+        elif (tok.startswith("cf") and "coverage_mask" not in out
+              and 0 < int(tok[2:], 16) < 1 << len(COVERAGE_FAMILIES)):
+            out["coverage_mask"] = int(tok[2:], 16)
         else:
             raise ValueError(f"bad recipe token {tok!r} in {spec!r}")
+    if ("coverage_weight" in out) != ("coverage_mask" in out):
+        raise ValueError(f"{spec!r}: cv<w> and cf<mask> go together")
     return out
 
 

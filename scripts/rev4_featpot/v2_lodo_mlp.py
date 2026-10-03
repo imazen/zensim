@@ -188,7 +188,7 @@ def main() -> None:
     recipe = recipe_of(args.spec)
     groups = []  # (name, path, train_weight, val_weight, mode)
     weights = {}
-    curated, teacher_record = None, None
+    curated, teacher_record, curated_extra = None, None, None
     for leg, (_, _, val_w) in TEACHERS.items():
         fit, dev = checked(legs[leg]["fit"]), checked(legs[leg]["dev"])
         subset = recipe.get("teacher_subset") if leg == "safesyn" else None
@@ -213,6 +213,15 @@ def main() -> None:
         opath, ordinal_record = v2_teacher.ordinal_leg()
         weights["kadis_ordinal"] = acceptance_weight(recipe["kadis_ordinal"], refs_of(opath))
         groups.append(("kadis_ordinal", opath, weights["kadis_ordinal"], 0, "withinref,rank"))
+    coverage_record = None
+    if "coverage_weight" in recipe:  # design log E15: chosen families of the ordinal coverage pool, rank-only within ladders
+        import v2_teacher
+        if max(keep) >= v2_teacher.ORDINAL_WIDTH:
+            raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+        cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest))
+        curated_extra = cpath
+        weights["coverage"] = acceptance_weight(recipe["coverage_weight"], refs_of(cpath))
+        groups.append(("coverage", cpath, weights["coverage"], 0, "withinref,rank"))
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
     hdev = checked(legs[f"human_without_{args.heldout}"]["dev"])
     weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
@@ -222,8 +231,9 @@ def main() -> None:
     try:
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
     finally:
-        if curated is not None:
-            curated.unlink(missing_ok=True)
+        for tmp in (curated, curated_extra):
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
     heldout = legs[args.heldout]
     table = checked(heldout["full"])
@@ -243,6 +253,7 @@ def main() -> None:
            **({"recipe_tokens": recipe} if recipe else {}),
            **({"teacher_subset": teacher_record} if teacher_record else {}),
            **({"ordinal_leg": ordinal_record} if ordinal_record else {}),
+           **({"coverage_leg": coverage_record} if coverage_record else {}),
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, **selection,

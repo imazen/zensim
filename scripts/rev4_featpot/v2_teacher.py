@@ -16,7 +16,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from v2_common import REPO, TEACHER_CODECS, TEACHER_SUBSETS, V2
+from v2_common import COVERAGE_FAMILIES, REPO, TEACHER_CODECS, TEACHER_SUBSETS, V2
 
 STRATA_NAME = "data/e13/safesyn_fit_strata.npz"
 # Design log E14: the KADIS ordinal ladder table (e14_kadis_ordinal.py table), pinned by sha.
@@ -122,3 +122,35 @@ def ordinal_leg() -> tuple[Path, dict]:
     if digest != ORDINAL_SHA:
         raise ValueError(f"{path}: not the registered E14 ordinal table ({digest[:12]})")
     return path, {"table_sha256": digest, "rows": pq.ParquetFile(path).metadata.num_rows}
+
+
+# Design log E15: the coverage pool (e15_coverage.py table) and its row keys, pinned by sha; filled when the pool is built.
+POOL_NAME = "data/e15/coverage_pool.parquet"
+POOL_KEYS_NAME = "data/e15/coverage_pool.keys.parquet"
+POOL_SHA = ""
+POOL_KEYS_SHA = ""
+
+
+def _packed_or_root(name: str) -> Path:
+    packed = REPO / name
+    return packed if packed.is_file() else V2 / "e15" / Path(name).name
+
+
+def coverage_leg(mask: int, scratch: Path) -> tuple[Path, dict]:
+    """Rows of the pinned coverage pool whose family bit is set in `mask`, copied to scratch; returns (path, record)."""
+    pool, keys = _packed_or_root(POOL_NAME), _packed_or_root(POOL_KEYS_NAME)
+    for path, want in ((pool, POOL_SHA), (keys, POOL_KEYS_SHA)):
+        got = hashlib.sha256(path.read_bytes()).hexdigest()
+        if got != want:
+            raise ValueError(f"{path}: not the registered E15 coverage pool ({got[:12]})")
+    fams = list(COVERAGE_FAMILIES)
+    chosen = [f for i, f in enumerate(fams) if mask >> i & 1]
+    family = pq.read_table(keys, columns=["family"])["family"].to_numpy(zero_copy_only=False).astype(str)
+    keep = np.isin(family, chosen)
+    if not keep.any():
+        raise ValueError(f"coverage mask {mask:#x} selects no rows")
+    target = pq.read_table(pool, columns=["human_score"])["human_score"].to_numpy().astype(np.float64)
+    dest = scratch / f"coverage_cf{mask:x}_{uuid.uuid4().hex}.parquet"
+    record = write_curated(pool, dest, keep, target)
+    record.update({"mask": mask, "families": chosen, "pool_sha256": POOL_SHA})
+    return dest, record

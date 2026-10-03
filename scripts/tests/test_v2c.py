@@ -959,5 +959,50 @@ class KadisOrdinal(unittest.TestCase):
                     t.ordinal_leg()
 
 
+class CoverageLeg(unittest.TestCase):
+    """Design log E15: `cv<w>:cf<mask>` tokens, the family filter, and our TID-style generators."""
+
+    def test_tokens(self):
+        self.assertEqual(v2_common.recipe_of("set:v2+basic@h32:H128:cv4:cfff"),
+                         {"hidden": 128, "coverage_weight": 4.0, "coverage_mask": 255})
+        for bad in ("set:v2+basic@h32:H128:cv4", "set:v2+basic@h32:H128:cfff", "set:v2+basic@h32:H128:cv4:cf0",
+                    "set:v2+basic@h32:H128:cv4:cf100"):
+            with self.assertRaises(ValueError):
+                v2_common.recipe_of(bad)
+
+    def test_family_filter(self):
+        import v2_teacher as t
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            fams = ["blur", "new", "light", "new", "blur"]
+            pool, keys = d / "coverage_pool.parquet", d / "coverage_pool.keys.parquet"
+            pq.write_table(pa.table({"ref_basename": [f"l{i // 2}" for i in range(5)], "human_score": [-1.0, -2.0, -3.0, -4.0, -5.0],
+                                     "f0": np.arange(5, dtype=np.float32)}), pool)
+            pq.write_table(pa.table({"family": fams}), keys)
+            sha = lambda q: hashlib.sha256(q.read_bytes()).hexdigest()
+            with mock.patch.object(t, "_packed_or_root", lambda name: pool if name == t.POOL_NAME else keys), \
+                    mock.patch.object(t, "POOL_SHA", sha(pool)), mock.patch.object(t, "POOL_KEYS_SHA", sha(keys)):
+                mask = 1 << list(v2_common.COVERAGE_FAMILIES).index("new")
+                path, rec = t.coverage_leg(mask, d)
+                self.assertEqual(pq.read_table(path)["f0"].to_pylist(), [1.0, 3.0])
+                self.assertEqual(rec["families"], ["new"])
+            with mock.patch.object(t, "_packed_or_root", lambda name: pool if name == t.POOL_NAME else keys):
+                with self.assertRaises(ValueError):
+                    t.coverage_leg(1, d)
+
+    def test_generators_are_nested_and_monotone(self):
+        import e15_coverage as e
+        flat = np.full((96, 128, 3), 128, np.uint8)  # every block value differs from 128 (|delta| >= 32), so coverage is visible
+        changed = [e.local_block_wise(flat, lv, 77) != flat for lv in range(1, 6)]
+        for lo, hi in zip(changed, changed[1:]):
+            self.assertTrue((lo <= hi).all())  # every level keeps the lower level's blocks
+        self.assertGreater(changed[4].sum(), changed[0].sum())
+        img = np.random.default_rng(3).integers(0, 256, (96, 128, 3), dtype=np.uint8)
+        self.assertTrue(np.array_equal(e.local_block_wise(img, 3, 77), e.local_block_wise(img, 3, 77)))
+        cab = e.chromatic_aberration(img, 2)
+        self.assertTrue(np.array_equal(cab[:, 2:, 0], img[:, :-2, 0]) and np.array_equal(cab[:, :-2, 2], img[:, 2:, 2]))
+        self.assertTrue(np.array_equal(cab[:, :, 1], img[:, :, 1]))
+
+
 if __name__ == "__main__":
     unittest.main()
