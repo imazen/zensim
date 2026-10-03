@@ -872,5 +872,62 @@ class ConfirmRead(unittest.TestCase):
                     os.environ["ZEN_PANEL_BIN"] = "/var/tmp/fitv2/bin-v2/panel"
 
 
+class TeacherSubsets(unittest.TestCase):
+    """Design log E13: `ts<name>` recipe tokens and the curated SafeSyn fit leg."""
+
+    def test_token_parses_and_refuses(self):
+        self.assertEqual(v2_common.recipe_of("set:v2+basic@h32:H128:tsmono5"), {"hidden": 128, "teacher_subset": "mono5"})
+        self.assertEqual(v2_common.recipe_of("set:v2+basic@h32:H128"), {"hidden": 128})
+        for bad in ("set:v2+basic@h32:H128:tsbogus", "set:v2+basic@h32:H128:tsneg:tsq20"):
+            with self.assertRaises(ValueError):
+                v2_common.recipe_of(bad)
+
+    def test_rules(self):
+        import v2_teacher as t
+        ref = np.array(["a"] * 4 + ["b"] * 4)
+        codec = np.array(["zenwebp-default-m4"] * 4 + ["zenjxl-e7"] * 4)
+        q = np.array([5, 50, 80, 100] * 2)
+        y = np.array([-700.0, 40.0, 30.0, 90.0, -5.0, 50.0, 70.0, 95.0])  # series a falls by 10 from q50 to q80
+        keep, new = t.curate("win", ref, y, codec, q, -60.0)
+        self.assertTrue(keep.all())
+        self.assertEqual(new[0], -60.0)
+        self.assertEqual(int((new != y).sum()), 1)
+        self.assertEqual(t.curate("floor0", ref, y, codec, q, 0)[1].min(), 0.0)
+        self.assertEqual(t.curate("neg", ref, y, codec, q, 0)[0].tolist(), [False, True, True, True, False, True, True, True])
+        self.assertEqual(t.curate("q20", ref, y, codec, q, 0)[0].tolist(), [False, True, True, True] * 2)
+        self.assertEqual(t.curate("mono5", ref, y, codec, q, 0)[0].tolist(), [False] * 4 + [True] * 4)
+        self.assertEqual(t.curate("xwebp", ref, y, codec, q, 0)[0].tolist(), [False] * 4 + [True] * 4)
+        with self.assertRaises(ValueError):
+            t.curate("none", ref, y, codec, q, 0)
+
+    def test_curated_table_and_strata_identity(self):
+        import v2_teacher as t
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            n = 40000  # spans several 16384-row batches
+            rng = np.random.default_rng(1)
+            src = d / "fit.parquet"
+            pq.write_table(pa.table({"ref_basename": [f"r{i // 7}" for i in range(n)],
+                                     "human_score": rng.normal(50, 30, n), "f0": rng.normal(size=n).astype(np.float32)}), src)
+            keep = rng.random(n) < 0.7
+            new = pq.read_table(src)["human_score"].to_numpy().copy()
+            new[::3] = 1.5
+            rec = t.write_curated(src, d / "out.parquet", keep, new)
+            self.assertEqual(rec, {"rows_in": n, "rows_kept": int(keep.sum())})
+            got = pq.read_table(d / "out.parquet").to_pandas()
+            want = pq.read_table(src).to_pandas().assign(human_score=new)[keep].reset_index(drop=True)
+            pd.testing.assert_frame_equal(got, want)
+            strata = d / "strata.npz"
+            np.savez_compressed(strata, schema=np.array(t.STRATA_SCHEMA), keys_sha256=np.array("abc"),
+                                codec_names=np.array(["zenjxl-e7"]), codec_idx=np.zeros(3, np.uint8),
+                                quality=np.array([5, 50, 90], np.uint8))
+            with mock.patch.object(t, "strata_path", lambda: strata):
+                codec, quality, _ = t.load_strata("abc")
+                self.assertEqual(codec.tolist(), ["zenjxl-e7"] * 3)
+                self.assertEqual(quality.tolist(), [5, 50, 90])
+                with self.assertRaises(ValueError):
+                    t.load_strata("other-rows")
+
+
 if __name__ == "__main__":
     unittest.main()

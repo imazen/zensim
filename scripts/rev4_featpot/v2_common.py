@@ -141,10 +141,21 @@ def split_weight(spec: str) -> tuple[str, float | None]:
     return core, value
 
 
+# Design log E13: curated SafeSyn teacher legs, recipe token `ts<name>`. Each rule applies to the SafeSyn fit rows only
+# (the dev leg, the CID22 teacher and the human legs are unchanged); the leg keeps its train weight, so a subset concentrates
+# the same pair budget on fewer rows. Codec/quality come from the per-row strata file (v2_teacher.STRATA_NAME).
+#   none: no SafeSyn fit leg.  win: floor targets at the receipt's lower bound.  floor0: floor targets at 0.
+#   neg: drop targets < 0.  q20: drop q <= 15.  mono5: drop every (reference, codec) series whose SSIM2 falls by > 5 between
+#   consecutive qualities.  x<codec>: drop one codec.
+TEACHER_CODECS = {"moz": "mozjpeg-rs-420-e4", "avif": "zenavif-s5-e6", "zj": "zenjpeg-420-e2", "xyb": "zenjpeg-420-xyb-e2",
+                  "jxl": "zenjxl-e7", "webp": "zenwebp-default-m4"}
+TEACHER_SUBSETS = ("none", "win", "floor0", "neg", "q20", "mono5", *(f"x{c}" for c in TEACHER_CODECS))
+
+
 def recipe_of(spec: str) -> dict:
     """Training-recipe tokens after the human weight (design log E8): 'r0@h32:H128:gl0.0001' -> {'hidden': 128,
-    'group_l1': 0.0001}. No tokens -> {} (the registered recipe: H = HIDDEN, no group lasso), so every existing spec,
-    cell name and trainer argv is unchanged."""
+    'group_l1': 0.0001}; E13 adds 'ts<name>' -> {'teacher_subset': name}. No tokens -> {} (the registered recipe: H = HIDDEN,
+    no group lasso, full teachers), so every existing spec, cell name and trainer argv is unchanged."""
     _, _, w = spec.partition("@h")
     out: dict = {}
     for tok in w.split(":")[1:]:
@@ -152,6 +163,8 @@ def recipe_of(spec: str) -> dict:
             out["hidden"] = int(tok[1:])
         elif tok.startswith("gl") and "group_l1" not in out and 0 < float(tok[2:]) <= 100:
             out["group_l1"] = float(tok[2:])
+        elif tok.startswith("ts") and tok[2:] in TEACHER_SUBSETS and "teacher_subset" not in out:
+            out["teacher_subset"] = tok[2:]
         else:
             raise ValueError(f"bad recipe token {tok!r} in {spec!r}")
     return out

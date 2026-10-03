@@ -185,10 +185,23 @@ def main() -> None:
     keep_file = dest / "keep_features.txt"
     keep_file.write_text("\n".join(map(str, keep)) + "\n")
     legs = receipt["legs"]
+    recipe = recipe_of(args.spec)
     groups = []  # (name, path, train_weight, val_weight, mode)
     weights = {}
+    curated, teacher_record = None, None
     for leg, (_, _, val_w) in TEACHERS.items():
         fit, dev = checked(legs[leg]["fit"]), checked(legs[leg]["dev"])
+        subset = recipe.get("teacher_subset") if leg == "safesyn" else None
+        if subset == "none":  # design log E13: no SafeSyn fit leg (its dev leg still logs)
+            teacher_record = {"rule": "none", "rows_in": len(refs_of(fit)), "rows_kept": 0}
+            groups.append((f"{leg}_development", dev, 0, val_w, "withinref,both"))
+            continue
+        if subset:  # design log E13: curated SafeSyn fit rows (v2_teacher), written to scratch, deleted after training
+            import v2_teacher
+            scratch = Path(os.environ.get("TMPDIR") or dest)
+            fit, teacher_record = v2_teacher.curated_leg(subset, fit, legs[leg]["fit"]["keys_sha256"], legs[leg]["bounds"][0],
+                                                         scratch)
+            curated = fit
         weights[leg] = acceptance_weight(NOMINAL_WEIGHT[leg], refs_of(fit))
         groups += [(leg, fit, weights[leg], 0, "withinref,both"),
                    (f"{leg}_development", dev, 0, val_w, "withinref,both")]
@@ -198,8 +211,11 @@ def main() -> None:
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
-    recipe = recipe_of(args.spec)
-    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
+    try:
+        bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
+    finally:
+        if curated is not None:
+            curated.unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
     heldout = legs[args.heldout]
     table = checked(heldout["full"])
@@ -217,6 +233,7 @@ def main() -> None:
            "seed_index": args.seed_index, "init_seed": init_seed, "sample_seed": sample_seed,
            "train_weights": weights, "hidden": recipe.get("hidden", HIDDEN), "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
            **({"recipe_tokens": recipe} if recipe else {}),
+           **({"teacher_subset": teacher_record} if teacher_record else {}),
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, **selection,
