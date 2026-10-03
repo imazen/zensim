@@ -493,11 +493,8 @@ fn linear_xyb_canon_body<const CLAMP: bool>(
 /// 16-pixel chunk, in the generic magetypes `f32x16` vector. The single
 /// definition every fused tier runs — on v3 and NEON `f32x16` decomposes
 /// into two/four fused-FMA ops per lane, which is per-lane identical to one
-/// fused `mul_add` each. Targets without a fused tier (i686, wasm32) never build one.
-#[cfg_attr(
-    not(any(target_arch = "x86_64", target_arch = "aarch64")),
-    allow(dead_code)
-)]
+/// fused `mul_add` each. Only x86_64 builds one: i686, wasm32 and aarch64 NEON run the scalar canonical body.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 struct CanonChunk<T: F32x16Convert> {
     token: T,
     m: [[GenericF32x16<T>; 3]; 3],
@@ -518,10 +515,7 @@ struct CanonChunk<T: F32x16Convert> {
     pu_x_scale: GenericF32x16<T>,
 }
 
-#[cfg_attr(
-    not(any(target_arch = "x86_64", target_arch = "aarch64")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 impl<T: F32x16Convert> CanonChunk<T> {
     #[inline(always)]
     fn new(token: T) -> Self {
@@ -701,7 +695,7 @@ impl<T: F32x16Convert> CanonChunk<T> {
 /// the `n mod 16` remainder runs the scalar body on every tier.
 /// `-scalar`: `#[magetypes]` would otherwise emit a generic `_scalar`
 /// variant whose `mul_add` is unfused — not canonical.
-#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
 fn srgb_xyb_canon_vec(
     token: Token,
     pixels: &[[u8; 3]],
@@ -765,9 +759,22 @@ fn srgb_xyb_canon_vec_wasm128(
     srgb_xyb_canon_body(pixels, x_out, y_out, b_out);
 }
 
+/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
+/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
+#[cfg(target_arch = "aarch64")]
+fn srgb_xyb_canon_vec_neon(
+    _token: archmage::NeonToken,
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    srgb_xyb_canon_body(pixels, x_out, y_out, b_out);
+}
+
 /// [`linear_xyb_canon`] lane-parallel — as [`srgb_xyb_canon_vec`], with
 /// [`CanonChunk::linear_lanes`] for the input side.
-#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
 fn linear_xyb_canon_vec<const CLAMP: bool>(
     token: Token,
     pixels: &[[f32; 3]],
@@ -811,6 +818,19 @@ fn linear_xyb_canon_vec_scalar<const CLAMP: bool>(
 #[cfg(target_arch = "wasm32")]
 fn linear_xyb_canon_vec_wasm128<const CLAMP: bool>(
     _token: archmage::Wasm128Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    linear_xyb_canon_body::<CLAMP>(pixels, x_out, y_out, b_out);
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
+/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
+#[cfg(target_arch = "aarch64")]
+fn linear_xyb_canon_vec_neon<const CLAMP: bool>(
+    _token: archmage::NeonToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
@@ -2676,7 +2696,7 @@ fn pu_xyb_canon_body(pixels: &[[f32; 3]], x_out: &mut [f32], y_out: &mut [f32], 
 /// canonical opsin mix, canonical PU21, `/ PU_WHITE`, positive shift — for
 /// full 16-pixel chunks; the scalar body covers the remainder.
 /// `-scalar` as for [`srgb_xyb_canon_vec`].
-#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
 fn pu_xyb_canon_vec(
     token: Token,
     pixels: &[[f32; 3]],
@@ -2719,6 +2739,19 @@ fn pu_xyb_canon_vec_scalar(
 #[cfg(target_arch = "wasm32")]
 fn pu_xyb_canon_vec_wasm128(
     _token: archmage::Wasm128Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    pu_xyb_canon_body(pixels, x_out, y_out, b_out);
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
+/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
+#[cfg(target_arch = "aarch64")]
+fn pu_xyb_canon_vec_neon(
+    _token: archmage::NeonToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],

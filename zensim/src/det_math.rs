@@ -1005,9 +1005,10 @@ mod tests {
 ///   **all 2³² bit patterns** per function per tier (the gate's "where
 ///   feasible" bar — ≈10 min under the 8-CPU heavy wrapper).
 ///
-/// Compiled only where a fused tier exists (x86_64 v3/v4/v4x, aarch64 NEON). Other targets (i686, wasm32) run the scalar
+/// Compiled only where a lane-parallel canon tier exists (x86_64 v3/v4/v4x). Other targets — i686, wasm32 and, since
+/// 2026-10-03, aarch64 NEON (its vector max/min propagate NaN where the canon's `f32::max`/`min` drop it) — run the scalar
 /// canonical body for every element, so there is no vector path to compare.
-#[cfg(all(test, any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(all(test, target_arch = "x86_64"))]
 mod rev4vec_midp_gate {
     use super::*;
     use archmage::SimdToken as _;
@@ -1017,7 +1018,7 @@ mod rev4vec_midp_gate {
     /// `midp_x16_vec_{v4x,v4,v3,neon}`; `which` selects the same function
     /// the canonical leaves call (5,6 = `pow_midp` at the two PQ
     /// exponents the canonical row decoder actually feeds it).
-    #[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+    #[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
     fn midp_x16_vec(token: Token, which: u8, arr: [f32; 16]) -> [f32; 16] {
         let v = f32x16::from_array(token, arr);
         match which {
@@ -1075,12 +1076,6 @@ mod rev4vec_midp_gate {
                 if let Some(t) = archmage::X64V4xToken::summon() {
                     tiers.push(("v4x", Box::new(move |w, a| midp_x16_vec_v4x(t, w, a))));
                 }
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            if let Some(t) = archmage::NeonToken::summon() {
-                tiers.push(("neon", Box::new(move |w, a| midp_x16_vec_neon(t, w, a))));
             }
         }
         tiers

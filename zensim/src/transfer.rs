@@ -309,7 +309,7 @@ fn decode_pq_row_canon_body(flat: &mut [f32], dm: DisplayModel) {
 /// (`exp2_midp(log2_midp · n)`), and `mul_add`-free tail ops are plain
 /// IEEE. `-scalar` keeps `#[magetypes]` from emitting a generic `_scalar`
 /// variant (its `mul_add` is unfused — not canonical).
-#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
 fn decode_pq_row_canon_vec(token: Token, flat: &mut [f32], dm: DisplayModel) {
     const L_MAX: f32 = 10000.0;
     const M1: f32 = 0.159_301_75; // 2610 / 16384
@@ -365,6 +365,13 @@ fn decode_pq_row_canon_vec_wasm128(
     flat: &mut [f32],
     dm: DisplayModel,
 ) {
+    decode_pq_row_canon_body(flat, dm);
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
+/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
+#[cfg(target_arch = "aarch64")]
+fn decode_pq_row_canon_vec_neon(_token: archmage::NeonToken, flat: &mut [f32], dm: DisplayModel) {
     decode_pq_row_canon_body(flat, dm);
 }
 
@@ -547,7 +554,7 @@ fn decode_hlg_row_canon_body(
 /// `pow_midp`/`exp_midp` through the generated `f32x16` forms — the same
 /// op sequence as `det_math`'s scalar bodies on a fused tier.
 /// `-scalar` as for [`decode_pq_row_canon_vec`].
-#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
 fn decode_hlg_row_canon_vec(
     token: Token,
     row: &mut [[f32; 3]],
@@ -645,6 +652,20 @@ fn decode_hlg_row_canon_vec_scalar(
 #[cfg(target_arch = "wasm32")]
 fn decode_hlg_row_canon_vec_wasm128(
     _token: archmage::Wasm128Token,
+    row: &mut [[f32; 3]],
+    luma: [f32; 3],
+    gamma: f32,
+    peak_nits: f32,
+    lift: f32,
+) {
+    decode_hlg_row_canon_body(row, luma, gamma, peak_nits, lift);
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): its vector `max`/`min` propagate NaN, while the canon clamps with
+/// `f32::max`/`min`, which drop it, so a lane-parallel NEON chunk differed from the scalar canon on NaN inputs (CI aarch64).
+#[cfg(target_arch = "aarch64")]
+fn decode_hlg_row_canon_vec_neon(
+    _token: archmage::NeonToken,
     row: &mut [[f32; 3]],
     luma: [f32; 3],
     gamma: f32,
