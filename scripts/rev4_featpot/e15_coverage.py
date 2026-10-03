@@ -224,7 +224,12 @@ def arms() -> list:
     out = [("all", full), ("kadis", full & ~(1 << fams.index("new")))]
     out += [(f"only_{f}", 1 << i) for i, f in enumerate(fams)]
     out += [(f"drop_{f}", full & ~(1 << i)) for i, f in enumerate(fams)]
-    return out
+    seen, uniq = set(), []
+    for label, mask in out:  # drop_new is the KADIS-only mask: keep the first label for each mask
+        if mask not in seen:
+            seen.add(mask)
+            uniq.append((label, mask))
+    return uniq
 
 
 def spec(weight: float, mask: int) -> str:
