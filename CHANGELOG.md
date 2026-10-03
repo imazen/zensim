@@ -12,8 +12,9 @@
 ### Changed
 
 - Rev4 serving: the canonical front-end leaves (sRGB/linear/PU-XYB opsin, PQ/HLG row decode) run lane-parallel on the
-  fused-FMA tiers (v4x/v4/v3/NEON); scalar and wasm128 keep the scalar canonical bodies. Bit-identical to the scalar canon on
-  every tier; Rev4 scalar scoring 1380 -> 1209 ms at 1 MP single-thread (2.37x -> 2.00x Rev3). `benchmarks/rev4vec_WORKLOG.md`.
+  x86_64 fused-FMA tiers (v4x/v4/v3); scalar, wasm128 and aarch64 NEON keep the scalar canonical bodies (NEON's vector
+  max/min propagate NaN where the canon drops it). Bit-identical to the scalar canon on every tier; Rev4 scalar scoring
+  1380 -> 1209 ms at 1 MP single-thread on x86_64 (2.37x -> 2.00x Rev3). `benchmarks/rev4vec_WORKLOG.md`.
 
 ### Added
 
