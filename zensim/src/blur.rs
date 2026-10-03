@@ -8563,7 +8563,7 @@ mod tests {
                 )
             });
         }
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
         if let Some(t) = archmage::X64V4Token::summon() {
             check_variant!("v4", move |s: &[f32],
                                        dd: &[f32],

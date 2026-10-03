@@ -6934,7 +6934,7 @@ mod tests {
                 );
                 check_variant!("v3", f);
             }
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4Token::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
@@ -7173,7 +7173,7 @@ mod tests {
                     )
                 });
             }
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4Token::summon() {
                 check_variant!("v4", |m1: &[f32],
                                       m2: &[f32],

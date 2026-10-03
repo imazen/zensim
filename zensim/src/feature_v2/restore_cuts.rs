@@ -1145,7 +1145,7 @@ mod tests {
                 restore_cuts_row_work_v3(t, sp, dp, m1, m2, sd, w, rows, devv, exact)
             });
         }
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
         if let Some(t) = archmage::X64V4Token::summon() {
             check_variant!("v4", move |sp: &[f32],
                                        dp: &[f32],

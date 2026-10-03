@@ -18196,7 +18196,7 @@ pub(crate) mod tests {
                 check_mscn_norm_tier(t, "x86 v3");
                 tiers_run += 1;
             }
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4Token::summon() {
                 check_mscn_norm_tier(t, "x86 v4");
                 tiers_run += 1;
@@ -29404,7 +29404,7 @@ mod featcanon_contract_tests {
                     }
                 );
             }
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4Token::summon() {
                 check_variant!(
                     "v4",
@@ -29686,7 +29686,7 @@ mod featcanon_contract_tests {
                     Mode::Canon64,
                 )
             }
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             fn go_v4<const B: bool, const V: bool, const K: bool>(
                 t: archmage::X64V4Token,
                 s: &[f32],
@@ -29753,7 +29753,7 @@ mod featcanon_contract_tests {
             if let Some(t) = archmage::X64V3Token::summon() {
                 gradient_cases!("v3", go_v3, t, rng, compiled);
             }
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4Token::summon() {
                 gradient_cases!("v4", go_v4, t, rng, compiled);
             }
