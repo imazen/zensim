@@ -279,7 +279,46 @@ impl Plan {
             || want
                 .iter_slots()
                 .any(|id| ComputeSet::is_full_res_xb(id, ns));
-        if want.iter_slots().all(|id| id < 156 && id % 13 < 10) {
+        // v2-bearing requests over basic/peaks/v2 only (channel-local families): skip X/B work at every scale
+        // whose X/B slots are never read. `edge_width_change` at scale s also reads s+1's gradient sums.
+        let peaks_end = ns * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
+        let v2_start = ns * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED
+            + ns * 3 * crate::metric::FEATURES_PER_CHANNEL_IW;
+        let v2_end = v2_start + ns * 3 * crate::feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL;
+        let basic_peaks_v2_only = want
+            .iter_slots()
+            .all(|id| id < peaks_end || (v2_start..v2_end).contains(&id));
+        // With the v2 block running over a request that reads nothing past f719, every class-C slot it touches is the v2
+        // `MSE` slot, which the v2 kernel itself finalizes (the free path writes `MSE` only when `v2_blocks` is off and
+        // the other free slots live in append/append2, which this request does not carry): the free-extras
+        // accumulation would only add v1-kernel work. Turn it off so the channel mask can apply and the walk is cheaper.
+        if requested.v2_blocks && basic_peaks_v2_only && requested.chroma_local_families() {
+            requested.free_extras = V1FreeExtras::Off;
+        }
+        if requested.v2_blocks && basic_peaks_v2_only && requested.chroma_local_families() {
+            let mut chroma = 0u8;
+            for id in want.iter_slots() {
+                if let Some(d) = crate::feature_defs::def_at(id, ns)
+                    && matches!(
+                        d.channel,
+                        crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                    )
+                {
+                    chroma |= 1 << d.scale;
+                    if id >= v2_start && d.signal.name == "edge_width_change" {
+                        chroma |= 1 << (usize::from(d.scale).min(ns - 2) + 1);
+                    }
+                }
+            }
+            requested.full_res_xb = chroma & 1 != 0;
+            requested.coarse_y_only_scales = (1..ns).fold(0u8, |mask, scale| {
+                mask | if chroma & (1 << scale) == 0 {
+                    1 << scale
+                } else {
+                    0
+                }
+            });
+        } else if want.iter_slots().all(|id| id < 156 && id % 13 < 10) {
             requested.coarse_y_only_scales = (1..ns).fold(0, |mask, scale| {
                 let reads_xb = want.iter_slots().any(|id| {
                     crate::feature_defs::def_at(id, ns).is_some_and(|d| {
@@ -356,7 +395,7 @@ impl Plan {
         compute.v2_scales = requested.v2_scales;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
-        compute.coarse_y_only_scales = if !compute.v2_blocks
+        compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
             && compute.free_extras == V1FreeExtras::Off
             && compute.v1_pools != V1PoolsMode::Full
         {

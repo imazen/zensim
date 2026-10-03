@@ -3530,12 +3530,32 @@ impl ComputeSet {
     /// also omit finest X/B. Cross-channel and free-extra families retain
     /// the complete walk until their dependencies have their own plan.
     pub(crate) fn allows_full_res_y_subset(&self) -> bool {
-        (!self.v2_blocks || self.v2_scales & 1 == 0)
+        (!self.v2_blocks || self.v2_scales & 1 == 0 || self.chroma_local_families())
             && self.free_extras == V1FreeExtras::Off
             && matches!(
                 self.v1_pools,
                 V1PoolsMode::Off | V1PoolsMode::Peaks | V1PoolsMode::Full
             )
+    }
+
+    /// True when no family that reads across channels is computed: the v1 blocks and the v2 core are
+    /// channel-local (each channel's slots read only that channel's planes), so X/B work may be skipped
+    /// wherever a plan reads no X/B slot. The append/append2 cross-mask terms, CSFW/DVIFM and the Rev4
+    /// families keep the complete walk until they have their own channel plan.
+    pub(crate) fn chroma_local_families(&self) -> bool {
+        !(self.append
+            || self.append2
+            || self.csfw
+            || self.dvifm
+            || self.gridblk
+            || self.ringbasis
+            || self.tailhist
+            || self.arttype
+            || self.gmsbank
+            || self.mapdev
+            || self.z1max
+            || self.gmsnative
+            || self.dvifmgate)
     }
 
     #[inline]

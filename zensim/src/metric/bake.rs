@@ -1502,6 +1502,136 @@ mod revision_contract_tests {
         zenpredict::Model::from_bytes(&bytes).unwrap()
     }
 
+    /// COSTSET2: v2-bearing plans over basic/peaks/v2 skip X/B work at scales whose chroma slots they never read
+    /// (the channel mask), and every consumed feature stays bit-identical to the unrestricted extraction.
+    /// The mask must engage for the Y-only and coarse-chroma sets (otherwise the saving is not real), must NOT
+    /// engage when an append (cross-channel) block is read, and `edge_width_change` of a chroma channel must
+    /// keep the next scale's chroma gradients alive.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn v2_plans_skip_unread_chroma_work_without_changing_any_feature() {
+        use crate::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
+        let v2 = |s: usize, c: usize, k: usize| 372 + s * 87 + c * 29 + k;
+        // Basic with X/B only at scales >= 1 (fine-Y) and basic Y-only: the chroma slots a plan reads decide the mask.
+        let basic_y: Vec<usize> = (0..156).filter(|id| (id / 13) % 3 == 1).collect();
+        let basic_fine_y: Vec<usize> = (0..156)
+            .filter(|id| id / 39 >= 1 || (id / 13) % 3 == 1)
+            .collect();
+        let v2_y_all: Vec<usize> = (0..4)
+            .flat_map(|s| (0..29).map(move |k| v2(s, 1, k)))
+            .collect();
+        let sets: Vec<(&str, Vec<usize>, bool)> = vec![
+            (
+                "basic Y + v2 Y-only, all scales",
+                basic_y
+                    .iter()
+                    .copied()
+                    .chain(v2_y_all.iter().copied())
+                    .collect(),
+                true,
+            ),
+            (
+                "fine-Y basic + v2 Y at scale 0, all channels at 1-3",
+                basic_fine_y
+                    .iter()
+                    .copied()
+                    .chain((0..4).flat_map(|s| {
+                        (0..3)
+                            .filter(move |&c| s > 0 || c == 1)
+                            .flat_map(move |c| (0..29).map(move |k| v2(s, c, k)))
+                    }))
+                    .collect(),
+                true,
+            ),
+            (
+                "fine-Y basic + peaks + v2 Y-only scales 1-3",
+                basic_fine_y
+                    .iter()
+                    .copied()
+                    .chain((156..228).filter(|id| ((id - 156) / 6) % 3 == 1))
+                    .chain((1..4).flat_map(|s| (0..29).map(move |k| v2(s, 1, k))))
+                    .collect(),
+                true,
+            ),
+            (
+                "v2 only, chroma edge-width at scale 1",
+                v2_y_all.iter().copied().chain([v2(1, 0, 28)]).collect(),
+                true,
+            ),
+            (
+                "full basic + Y-only v2: chroma still read by basic",
+                (0..156).chain(v2_y_all.iter().copied()).collect(),
+                false,
+            ),
+            (
+                "full v2 + basic (no mask possible)",
+                (0..156).chain(372..720).collect(),
+                false,
+            ),
+            (
+                "append read: complete walk",
+                basic_y
+                    .iter()
+                    .copied()
+                    .chain([v2(0, 1, 3), 720 + 17 * 3 + 9])
+                    .collect(),
+                false,
+            ),
+        ];
+        for (w, h) in [(64usize, 64usize), (97, 65), (128, 96)] {
+            let (r, d) = crate::serving::pair(w, h);
+            let (rs, ds) = (RgbSlice::new(&r, w, h), RgbSlice::new(&d, w, h));
+            let full = crate::feature_v2::compute_folded720_streaming_impl(
+                &rs,
+                &ds,
+                None,
+                true,
+                V2NewFeatureToggles {
+                    v1_pools: V1PoolsMode::Full,
+                    append_block: true,
+                    append2_block: true,
+                    csfw_block: true,
+                    ..Default::default()
+                },
+                &mut V2Scratch::new(),
+                None,
+            )
+            .unwrap();
+            for (name, ids, masked) in &sets {
+                let mut ids = ids.clone();
+                ids.sort_unstable();
+                ids.dedup();
+                let model = bake_over(&ids);
+                let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                let compute = scorer.plan().unwrap().compute;
+                assert_eq!(
+                    !compute.full_res_xb || compute.coarse_y_only_scales != 0,
+                    *masked,
+                    "{name}: channel mask engagement"
+                );
+                if name.starts_with("v2 only, chroma edge-width") {
+                    // chroma at scale 1 is read (edge width), so scale 2 keeps its chroma gradients too.
+                    assert!(
+                        compute.channel_active(1, 0) && compute.channel_active(2, 0),
+                        "{name}"
+                    );
+                    assert!(
+                        !compute.channel_active(3, 0) && !compute.channel_active(0, 0),
+                        "{name}"
+                    );
+                }
+                let served = scorer.compute(&rs, &ds, None).unwrap();
+                for &id in &ids {
+                    assert_eq!(
+                        served.features()[id].to_bits(),
+                        full.features()[id].to_bits(),
+                        "{name} {w}x{h} f{id}"
+                    );
+                }
+            }
+        }
+    }
+
     /// `prepare_steering` serves v2 + basic bakes (STEERAPI): the prepared session's score and features equal the
     /// scalar path's bit for bit, and its map equals the older `compute_with_ref_and_attribution` path (they are
     /// the same owner) on fresh and reused sessions, over the whole image grid; also with an ensemble and a
