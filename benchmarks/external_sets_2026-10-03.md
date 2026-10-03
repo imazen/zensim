@@ -104,8 +104,12 @@ gain (+0.0094), but D4 is −0.003±0.024. That is a fall of about 0.1 SE, and u
   repairs it: ko16 +0.228, cv1:cf4 +0.130, cv16:cffd +0.256, cv16:cfbd +0.212 (overall wn). cf98 has no noise family and gains
   only +0.015.
 - **NITS contrast change stays at about 0.1–0.2 under every recipe.** The coverage contrast family does not move it (cv1:cf20
-  +0.001), and the KADIS ordinal leg hurts it (ko16 −0.064). NITS D4 includes contrast increases, which observers need not rank
-  monotonically with level. A family whose targets assume "more change = worse" pushes against that.
+  +0.001), and the KADIS ordinal leg hurts it (ko16 −0.064). Measured cause (DATA_SPLITS §3e): NITS levels 1–2 *lower*
+  contrast (luma std ratio 0.89, 0.95) and levels 3–5 *raise* it (1.06–1.23). Pixel change is symmetric (mean |Δ| 7.9 at levels
+  1 and 4), yet MOS is 0.76 vs 0.31: NITS observers penalise an increase more than an equal decrease. TID2013 type 17 shows
+  the opposite (increase 6.39 vs decrease 4.52). The control follows TID: its mean predictions over NITS levels 1–5 are 45.9 /
+  63.9 / 69.6 / 57.4 / 42.1, an inverted U ranked by magnitude with a mild preference for the increase. This is a direction
+  preference the training sources contradict, not missing coverage.
 - **SafeSyn is valuable on unseen data too.** Dropping it (tsnone) loses on all three sets, which agrees with E13.
 - **MCIQA is a weak signal at 0.27.** Most coverage and teacher arms lower it slightly. It is reported as a colour-sensitivity
   diagnostic, not as accuracy.

@@ -375,6 +375,14 @@ manfishing, monarch, studentsculpture; 267 pairs) — the subset is fixed by the
 no TID2013 reference (max 0.71, runner-up equal). Residual for every set: a crop of a reference inside a larger training image
 other than TID/SafeSyn is not excluded.
 
+**Contrast direction: NITS and TID2013 observers disagree (measured 2026-10-03).** NITS D4 levels 1–2 lower contrast (luma std
+ratio 0.89 / 0.95) and levels 3–5 raise it (1.06 / 1.11 / 1.23), with equal pixel change at levels 1 and 4 (mean |Δ| 7.9) and at
+2 and 3 (4.0). NITS MOS falls monotonically with level (0.76 → 0.13), so its observers rank a contrast **increase below a decrease**
+of the same size (0.31 vs 0.76). TID2013 type 17 shows the opposite: increases MOS 6.39 (n 50) vs decreases 4.52 (n 75) at
+similar magnitude. TID trains 4 of 5 LODO folds and the models follow it (control predictions are an inverted U over NITS levels,
+peaking at level 3), so NITS contrast change (SROCC ≈ 0.18) measures a direction preference that the training sources contradict,
+not a coverage gap. Treat contrast direction like the KADIS signed types (§2b): never a monotone "more change = worse" target.
+
 ### §3b. Derived training corpora (registered builds)
 
 | Build | Rows | Contract |
