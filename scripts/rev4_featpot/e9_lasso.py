@@ -151,7 +151,9 @@ def cmd_score(args) -> int:
                 for base, bspec in BASES.items():
                     vals = []
                     for i in REFIT_SEEDS:
-                        a = signed(f"sel:{sub['id']}@h32{RECIPE}", s, i) if sub["columns"] else None
+                        if not sub["columns"]:  # an empty subset has no refit by design: reported, not missing
+                            continue
+                        a = signed(f"sel:{sub['id']}@h32{RECIPE}", s, i)
                         b = signed(bspec, s, i)
                         if a is None or b is None:
                             missing += 1
