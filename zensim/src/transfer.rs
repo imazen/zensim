@@ -21,6 +21,11 @@
 //! now. They are fully exercised by the reference-parity tests below.
 #![allow(dead_code)]
 
+use archmage::incant;
+use archmage::magetypes;
+use magetypes::simd::backends::F32x16Convert;
+use magetypes::simd::generic::f32x16 as GenericF32x16;
+
 /// IEC 61966-2-1 sRGB EOTF: sRGB-encoded `v ∈ [0, 1]` → relative linear
 /// light `[0, 1]`.
 #[inline]
@@ -109,12 +114,20 @@ pub(crate) fn hlg_inverse_oetf_at_revision(
     v: f32,
     revision: crate::feature_defs::FormulaRevision,
 ) -> f32 {
-    const A: f32 = 0.178_832_77;
-    const B: f32 = 1.0 - 4.0 * A; // 0.28466892
-    const C: f32 = 0.559_910_7;
     if !crate::featcanon::mode(revision).active() {
         return hlg_inverse_oetf(v);
     }
+    hlg_inverse_oetf_canon(v)
+}
+
+/// The Rev4 canonical HLG inverse-OETF — [`hlg_inverse_oetf_at_revision`]'s
+/// active-mode arm — as a per-element scalar body. Shared by the
+/// lane-parallel row decode's remainder and stubs (REV4VEC).
+#[inline(always)]
+fn hlg_inverse_oetf_canon(v: f32) -> f32 {
+    const A: f32 = 0.178_832_77;
+    const B: f32 = 1.0 - 4.0 * A; // 0.28466892
+    const C: f32 = 0.559_910_7;
     if v <= 0.5 {
         (v * v) / 3.0
     } else {
@@ -252,22 +265,107 @@ pub(crate) fn decode_pq_row(row: &mut [[f32; 3]], peak_nits: f32) {
 }
 
 /// [`decode_pq_row`] at an explicit formula revision — the same display
-/// model over [`pq_eotf_at_revision`].
+/// model over [`pq_eotf_at_revision`]. REV4VEC: at Rev4 the per-channel
+/// canonical body (`pq_eotf_canon` + the display clamp/lift) runs
+/// lane-parallel over flat channel chunks on the fused-FMA tiers; the
+/// scalar canonical body covers the remainder and the non-fused tiers.
 pub(crate) fn decode_pq_row_at_revision(
     row: &mut [[f32; 3]],
     peak_nits: f32,
     revision: crate::feature_defs::FormulaRevision,
 ) {
+    if !crate::featcanon::mode(revision).active() {
+        decode_pq_row(row, peak_nits);
+        return;
+    }
     let dm = DisplayModel {
         y_peak: peak_nits,
         y_black: DisplayModel::STANDARD_HDR_PQ_1000.y_black,
         y_refl: DisplayModel::STANDARD_HDR_PQ_1000.y_refl,
     };
-    for px in row.iter_mut() {
-        px[0] = dm.pq_to_luminance_at_revision(px[0], revision);
-        px[1] = dm.pq_to_luminance_at_revision(px[1], revision);
-        px[2] = dm.pq_to_luminance_at_revision(px[2], revision);
+    // The EOTF + display map is elementwise — the channel-major layout of
+    // `[[f32; 3]]` needs no transpose, the flat channel sequence is the
+    // chunk sequence.
+    let flat: &mut [f32] = bytemuck::cast_slice_mut(row);
+    incant!(
+        decode_pq_row_canon_vec(flat, dm),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    );
+}
+
+/// The per-element scalar canonical PQ decode body — what the fused
+/// tiers run for the `n mod 16` remainder and the non-fused tiers run
+/// for every channel (REV4VEC).
+fn decode_pq_row_canon_body(flat: &mut [f32], dm: DisplayModel) {
+    for v in flat.iter_mut() {
+        *v = dm.pq_nits_to_display(pq_eotf_canon(*v));
     }
+}
+
+/// [`pq_eotf_canon`] + [`DisplayModel::pq_nits_to_display`], lane-parallel
+/// over 16 channels per chunk. Bit-identical to
+/// [`decode_pq_row_canon_body`] per element on a fused-FMA tier: the
+/// `f32x16` `pow_midp` is the same op sequence as `pow_midp_f32`
+/// (`exp2_midp(log2_midp · n)`), and `mul_add`-free tail ops are plain
+/// IEEE. `-scalar` keeps `#[magetypes]` from emitting a generic `_scalar`
+/// variant (its `mul_add` is unfused — not canonical).
+#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+fn decode_pq_row_canon_vec(token: Token, flat: &mut [f32], dm: DisplayModel) {
+    const L_MAX: f32 = 10000.0;
+    const M1: f32 = 0.159_301_75; // 2610 / 16384
+    const M2: f32 = 78.843_75; // 2523 / 4096 * 128
+    const C1: f32 = 0.835_937_5; // 3424 / 4096
+    const C2: f32 = 18.851_562; // 2413 / 4096 * 32
+    const C3: f32 = 18.687_5; // 2392 / 4096 * 32
+
+    let c1 = f32x16::splat(token, C1);
+    let c2 = f32x16::splat(token, C2);
+    let c3 = f32x16::splat(token, C3);
+    let l_max = f32x16::splat(token, L_MAX);
+    let zero = f32x16::zero(token);
+    let peak = f32x16::splat(token, dm.y_peak);
+    let black = f32x16::splat(token, dm.y_black);
+    let refl = f32x16::splat(token, dm.y_refl);
+
+    let n = flat.len();
+    let chunks = n / 16;
+    for c in 0..chunks {
+        let base = c * 16;
+        // FIXED-SIZE ARRAY PATTERN: one range check at the boundary.
+        let chunk: &[f32; 16] = flat[base..base + 16]
+            .try_into()
+            .expect("16 channels per chunk");
+        let v = f32x16::from_array(token, *chunk);
+        let im = v.pow_midp(1.0 / M2);
+        let num = (im - c1).max(zero);
+        let den = c2 - c3 * im;
+        let nits = l_max * (num / den).pow_midp(1.0 / M1);
+        let out = nits.min(peak) + black + refl;
+        out.store((&mut flat[base..base + 16]).try_into().unwrap());
+    }
+    for v in flat[chunks * 16..].iter_mut() {
+        *v = dm.pq_nits_to_display(pq_eotf_canon(*v));
+    }
+}
+
+/// The scalar tier's canonical PQ decode: the per-element scalar body —
+/// magetypes' generic `mul_add` is unfused on the scalar backend.
+fn decode_pq_row_canon_vec_scalar(
+    _token: archmage::ScalarToken,
+    flat: &mut [f32],
+    dm: DisplayModel,
+) {
+    decode_pq_row_canon_body(flat, dm);
+}
+
+/// wasm128 has no hardware FMA — same scalar canonical body.
+#[cfg(target_arch = "wasm32")]
+fn decode_pq_row_canon_vec_wasm128(
+    _token: archmage::Wasm128Token,
+    flat: &mut [f32],
+    dm: DisplayModel,
+) {
+    decode_pq_row_canon_body(flat, dm);
 }
 
 /// Native PQ16 uses the exact same normalized f32 codes/EOTF as the float
@@ -375,6 +473,9 @@ pub(crate) fn decode_hlg_row_in_primaries(
 
 /// [`decode_hlg_row_in_primaries`] at an explicit formula revision — the
 /// canonical midp transcendentals at Rev4, the libm bodies below it.
+/// REV4VEC: at Rev4 the per-pixel canonical body runs lane-parallel over
+/// 16-pixel chunks on the fused-FMA tiers; the scalar canonical body
+/// covers the remainder and the non-fused tiers.
 pub(crate) fn decode_hlg_row_in_primaries_at_revision(
     row: &mut [[f32; 3]],
     peak_nits: f32,
@@ -386,7 +487,6 @@ pub(crate) fn decode_hlg_row_in_primaries_at_revision(
         decode_hlg_row_in_primaries(row, peak_nits, ambient_lux, primaries);
         return;
     }
-    use crate::det_math::pow_midp_f32;
     use crate::source::ColorPrimaries;
     let luma = match primaries {
         ColorPrimaries::Srgb => [0.212_639, 0.715_168_7, 0.072_192_32],
@@ -396,17 +496,162 @@ pub(crate) fn decode_hlg_row_in_primaries_at_revision(
     let gamma = hlg_system_gamma_at_revision(peak_nits, ambient_lux, revision);
     let lift =
         DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+    incant!(
+        decode_hlg_row_canon_vec(row, luma, gamma, peak_nits, lift),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    );
+}
+
+/// `f32::clamp(v, 0.0, 1.0)` lane-parallel — `if v < 0 {0} else if v > 1
+/// {1} else {v}`: NaN passes through and `-0.0` keeps its sign, where
+/// `.max(0).min(1)` would give `+0` for both.
+#[inline(always)]
+fn clamp01_canon<T: F32x16Convert>(
+    v: GenericF32x16<T>,
+    zero: GenericF32x16<T>,
+    one: GenericF32x16<T>,
+) -> GenericF32x16<T> {
+    GenericF32x16::blend(
+        v.simd_lt(zero),
+        zero,
+        GenericF32x16::blend(v.simd_gt(one), one, v),
+    )
+}
+
+/// The per-pixel scalar canonical HLG row body — fused tiers' remainder
+/// and the non-fused tiers' whole input (REV4VEC).
+fn decode_hlg_row_canon_body(
+    row: &mut [[f32; 3]],
+    luma: [f32; 3],
+    gamma: f32,
+    peak_nits: f32,
+    lift: f32,
+) {
     for px in row.iter_mut() {
-        let rs = hlg_inverse_oetf_at_revision(px[0].clamp(0.0, 1.0), revision);
-        let gs = hlg_inverse_oetf_at_revision(px[1].clamp(0.0, 1.0), revision);
-        let bs = hlg_inverse_oetf_at_revision(px[2].clamp(0.0, 1.0), revision);
+        let rs = hlg_inverse_oetf_canon(px[0].clamp(0.0, 1.0));
+        let gs = hlg_inverse_oetf_canon(px[1].clamp(0.0, 1.0));
+        let bs = hlg_inverse_oetf_canon(px[2].clamp(0.0, 1.0));
         let ys = luma[0] * rs + luma[1] * gs + luma[2] * bs;
         // Y_s = 0 ⇒ 0^(γ−1) with γ > 1 is 0; the multiply keeps it 0.
-        let scale = peak_nits * pow_midp_f32(ys.max(0.0), gamma - 1.0);
+        let scale = peak_nits * crate::det_math::pow_midp_f32(ys.max(0.0), gamma - 1.0);
         px[0] = scale * rs + lift;
         px[1] = scale * gs + lift;
         px[2] = scale * bs + lift;
     }
+}
+
+/// [`decode_hlg_row_canon_body`] lane-parallel over 16 pixels per chunk.
+/// Every lane computes the scalar body's op sequence: the `clamp(0, 1)`
+/// branch structure as nested `blend`s (NaN/−0.0 semantics preserved),
+/// the `v <= 0.5` select as `blend`, `ys`'s unfused `Σ luma·e`, and
+/// `pow_midp`/`exp_midp` through the generated `f32x16` forms — the same
+/// op sequence as `det_math`'s scalar bodies on a fused tier.
+/// `-scalar` as for [`decode_pq_row_canon_vec`].
+#[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+fn decode_hlg_row_canon_vec(
+    token: Token,
+    row: &mut [[f32; 3]],
+    luma: [f32; 3],
+    gamma: f32,
+    peak_nits: f32,
+    lift: f32,
+) {
+    const A: f32 = 0.178_832_77;
+    const B: f32 = 1.0 - 4.0 * A; // 0.28466892
+    const C: f32 = 0.559_910_7;
+
+    let a = f32x16::splat(token, A);
+    let bb = f32x16::splat(token, B);
+    let cc = f32x16::splat(token, C);
+    let zero = f32x16::zero(token);
+    let one = f32x16::splat(token, 1.0);
+    let half = f32x16::splat(token, 0.5);
+    let three = f32x16::splat(token, 3.0);
+    let twelve = f32x16::splat(token, 12.0);
+    let l0 = f32x16::splat(token, luma[0]);
+    let l1 = f32x16::splat(token, luma[1]);
+    let l2 = f32x16::splat(token, luma[2]);
+    let gm1 = gamma - 1.0;
+    let peak = f32x16::splat(token, peak_nits);
+    let lifts = f32x16::splat(token, lift);
+
+    /// The branch structure of `v <= 0.5 ? (v·v)/3 : (exp_midp((v−C)/A)+B)/12`
+    /// lane-parallel — both arms are evaluated and `blend`ed, like the
+    /// scalar `if` selects.
+    #[inline(always)]
+    fn hlg_e<T: F32x16Convert>(
+        v: GenericF32x16<T>,
+        a: GenericF32x16<T>,
+        bb: GenericF32x16<T>,
+        cc: GenericF32x16<T>,
+        half: GenericF32x16<T>,
+        three: GenericF32x16<T>,
+        twelve: GenericF32x16<T>,
+    ) -> GenericF32x16<T> {
+        let lo = (v * v) / three;
+        let hi = (((v - cc) / a).exp_midp() + bb) / twelve;
+        GenericF32x16::blend(v.simd_le(half), lo, hi)
+    }
+
+    let n = row.len();
+    let chunks = n / 16;
+    for c in 0..chunks {
+        let base = c * 16;
+        // FIXED-SIZE ARRAY PATTERN: one range check at the boundary.
+        let px: &[[f32; 3]; 16] = row[base..base + 16]
+            .try_into()
+            .expect("16 pixels per chunk");
+        let mut r_arr = [0.0f32; 16];
+        let mut g_arr = [0.0f32; 16];
+        let mut b_arr = [0.0f32; 16];
+        for i in 0..16 {
+            let p = px[i];
+            r_arr[i] = p[0];
+            g_arr[i] = p[1];
+            b_arr[i] = p[2];
+        }
+        let r = clamp01_canon(GenericF32x16::from_array(token, r_arr), zero, one);
+        let g = clamp01_canon(GenericF32x16::from_array(token, g_arr), zero, one);
+        let b = clamp01_canon(GenericF32x16::from_array(token, b_arr), zero, one);
+        let rs = hlg_e(r, a, bb, cc, half, three, twelve);
+        let gs = hlg_e(g, a, bb, cc, half, three, twelve);
+        let bs = hlg_e(b, a, bb, cc, half, three, twelve);
+        let ys = l0 * rs + l1 * gs + l2 * bs;
+        let scale = peak * (ys.max(zero)).pow_midp(gm1);
+        let ro = (scale * rs + lifts).to_array();
+        let go = (scale * gs + lifts).to_array();
+        let bo = (scale * bs + lifts).to_array();
+        for i in 0..16 {
+            row[base + i] = [ro[i], go[i], bo[i]];
+        }
+    }
+    decode_hlg_row_canon_body(&mut row[chunks * 16..], luma, gamma, peak_nits, lift);
+}
+
+/// The scalar tier's canonical HLG decode: the per-element scalar body —
+/// magetypes' generic `mul_add` is unfused on the scalar backend.
+fn decode_hlg_row_canon_vec_scalar(
+    _token: archmage::ScalarToken,
+    row: &mut [[f32; 3]],
+    luma: [f32; 3],
+    gamma: f32,
+    peak_nits: f32,
+    lift: f32,
+) {
+    decode_hlg_row_canon_body(row, luma, gamma, peak_nits, lift);
+}
+
+/// wasm128 has no hardware FMA — same scalar canonical body.
+#[cfg(target_arch = "wasm32")]
+fn decode_hlg_row_canon_vec_wasm128(
+    _token: archmage::Wasm128Token,
+    row: &mut [[f32; 3]],
+    luma: [f32; 3],
+    gamma: f32,
+    peak_nits: f32,
+    lift: f32,
+) {
+    decode_hlg_row_canon_body(row, luma, gamma, peak_nits, lift);
 }
 
 #[cfg(test)]
@@ -514,6 +759,216 @@ mod tests {
         assert_eq!(hlg_system_gamma(600.0, 200.0), 1.2);
         // Brighter peak raises the gamma.
         assert!(hlg_system_gamma(4000.0, 200.0) > 1.2);
+    }
+
+    // ── REV4VEC: lane-parallel canon == scalar canon body, per tier ──────
+    //
+    // Variants are invoked directly with their own summoned token — no
+    // global dispatch state, safe under the parallel test harness.
+
+    /// Deterministic xorshift64 — reproducible inputs, no new deps.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            self.0 = x;
+            x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+        fn f32_bits(&mut self) -> f32 {
+            f32::from_bits(self.next() as u32)
+        }
+    }
+
+    fn special_channels() -> Vec<f32> {
+        vec![
+            0.0,
+            -0.0,
+            0.5,
+            0.499_999_9,
+            0.500_000_1,
+            1.0,
+            -1.0,
+            2.0,
+            f32::MIN_POSITIVE,
+            f32::from_bits(1),
+            f32::from_bits(0x007F_FFFF),
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            f32::from_bits(0x7FC0_0001),
+            1e-30,
+            1e30,
+            -1e30,
+            0.04045,
+            0.055,
+        ]
+    }
+
+    /// PQ row canon: the flat-channel EOTF+display body, every compiled
+    /// tier variant vs the scalar body on 10^7 random channels plus every
+    /// special class (n ≡ 15 mod 16 covers the remainder).
+    #[test]
+    fn pq_row_canon_vec_matches_scalar_body_on_every_compiled_tier() {
+        use archmage::SimdToken as _;
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        let mut flat: Vec<f32> = special_channels();
+        let target = flat.len() + 10_000_000;
+        while flat.len() < target {
+            flat.push(rng.f32_bits());
+        }
+        while flat.len() % 16 != 15 {
+            flat.push(rng.f32_bits());
+        }
+        let n = flat.len();
+
+        for peak in [100.0f32, 1000.0, 4000.0, 10000.0] {
+            let dm = DisplayModel {
+                y_peak: peak,
+                y_black: DisplayModel::STANDARD_HDR_PQ_1000.y_black,
+                y_refl: DisplayModel::STANDARD_HDR_PQ_1000.y_refl,
+            };
+            let mut expect = flat.clone();
+            decode_pq_row_canon_body(&mut expect, dm);
+            let run = |name: &str, f: &mut dyn FnMut(&mut [f32])| {
+                let mut got = flat.clone();
+                f(&mut got);
+                for i in 0..n {
+                    assert_eq!(
+                        got[i].to_bits(),
+                        expect[i].to_bits(),
+                        "{name} peak={peak}: differs at channel {i} ({:?})",
+                        flat[i]
+                    );
+                }
+            };
+            run("scalar", &mut |f| {
+                decode_pq_row_canon_vec_scalar(archmage::ScalarToken::summon().unwrap(), f, dm)
+            });
+            #[cfg(target_arch = "x86_64")]
+            {
+                if let Some(t) = archmage::X64V3Token::summon() {
+                    run("v3", &mut |f| decode_pq_row_canon_vec_v3(t, f, dm));
+                }
+                #[cfg(feature = "avx512")]
+                {
+                    if let Some(t) = archmage::X64V4Token::summon() {
+                        run("v4", &mut |f| decode_pq_row_canon_vec_v4(t, f, dm));
+                    }
+                    if let Some(t) = archmage::X64V4xToken::summon() {
+                        run("v4x", &mut |f| decode_pq_row_canon_vec_v4x(t, f, dm));
+                    }
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                if let Some(t) = archmage::NeonToken::summon() {
+                    run("neon", &mut |f| decode_pq_row_canon_vec_neon(t, f, dm));
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(t) = archmage::Wasm128Token::summon() {
+                    run("wasm128", &mut |f| {
+                        decode_pq_row_canon_vec_wasm128(t, f, dm)
+                    });
+                }
+            }
+        }
+    }
+
+    /// HLG row canon: per-pixel select + OOTF chain, every compiled tier
+    /// vs the scalar body. 10^7 random channels hits every special class
+    /// incl. NaN/±0 through the clamp-blend; n ≡ 15 mod 16 for remainder.
+    #[test]
+    fn hlg_row_canon_vec_matches_scalar_body_on_every_compiled_tier() {
+        use archmage::SimdToken as _;
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let spec = special_channels();
+        let mut row: Vec<[f32; 3]> = spec
+            .iter()
+            .enumerate()
+            .map(|(i, &a)| [a, spec[(i + 7) % spec.len()], spec[(i + 13) % spec.len()]])
+            .collect();
+        let target = row.len() + 3_400_000;
+        while row.len() < target {
+            row.push([rng.f32_bits(), rng.f32_bits(), rng.f32_bits()]);
+        }
+        while row.len() % 16 != 15 {
+            row.push([rng.f32_bits(), rng.f32_bits(), rng.f32_bits()]);
+        }
+        let n = row.len();
+
+        // γ > 1 and γ = 1.2 paths; both luminance-basis variants.
+        for (gamma, luma, tag) in [
+            (1.2f32, BT2100_LUMA, "bt2020/γ1.2"),
+            (1.5f32, [0.212_639, 0.715_168_7, 0.072_192_32], "srgb/γ1.5"),
+            (0.999_999_94f32, BT2100_LUMA, "γ~1"),
+        ] {
+            let mut expect = row.clone();
+            decode_hlg_row_canon_body(&mut expect, luma, gamma, 1000.0, 0.40288734);
+            let run = |name: &str, f: &mut dyn FnMut(&mut [[f32; 3]])| {
+                let mut got = row.clone();
+                f(&mut got);
+                for i in 0..n {
+                    assert_eq!(
+                        got[i].map(f32::to_bits),
+                        expect[i].map(f32::to_bits),
+                        "{tag}/{name}: differs at px {i} ({:?})",
+                        row[i]
+                    );
+                }
+            };
+            run("scalar", &mut |r| {
+                decode_hlg_row_canon_vec_scalar(
+                    archmage::ScalarToken::summon().unwrap(),
+                    r,
+                    luma,
+                    gamma,
+                    1000.0,
+                    0.40288734,
+                )
+            });
+            #[cfg(target_arch = "x86_64")]
+            {
+                if let Some(t) = archmage::X64V3Token::summon() {
+                    run("v3", &mut |r| {
+                        decode_hlg_row_canon_vec_v3(t, r, luma, gamma, 1000.0, 0.40288734)
+                    });
+                }
+                #[cfg(feature = "avx512")]
+                {
+                    if let Some(t) = archmage::X64V4Token::summon() {
+                        run("v4", &mut |r| {
+                            decode_hlg_row_canon_vec_v4(t, r, luma, gamma, 1000.0, 0.40288734)
+                        });
+                    }
+                    if let Some(t) = archmage::X64V4xToken::summon() {
+                        run("v4x", &mut |r| {
+                            decode_hlg_row_canon_vec_v4x(t, r, luma, gamma, 1000.0, 0.40288734)
+                        });
+                    }
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                if let Some(t) = archmage::NeonToken::summon() {
+                    run("neon", &mut |r| {
+                        decode_hlg_row_canon_vec_neon(t, r, luma, gamma, 1000.0, 0.40288734)
+                    });
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(t) = archmage::Wasm128Token::summon() {
+                    run("wasm128", &mut |r| {
+                        decode_hlg_row_canon_vec_wasm128(t, r, luma, gamma, 1000.0, 0.40288734)
+                    });
+                }
+            }
+        }
     }
 
     // ── Display model — SDR pixel → nits, zensim `standard_4k` convention ──

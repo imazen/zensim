@@ -993,3 +993,311 @@ mod tests {
         assert_eq!("libm".len(), "pure".len());
     }
 }
+
+/// REV4VEC gate: the `f32x16` midp methods the canonical leaves now call
+/// per lane must be **bit-identical** to the scalar `*_midp_f32` bodies
+/// above. Two levels:
+///
+/// * [`midp_x16_matches_scalar_sampled`] — always-on: ~1.6×10⁷ inputs
+///   spanning every f32 special class (±0, denormals, ±inf, NaN,
+///   clamp bounds) on every compiled fused tier.
+/// * [`midp_x16_matches_scalar_over_all_f32_bits`] — `#[ignore]`d:
+///   **all 2³² bit patterns** per function per tier (the gate's "where
+///   feasible" bar — ≈10 min under the 8-CPU heavy wrapper).
+#[cfg(test)]
+mod rev4vec_midp_gate {
+    use super::*;
+    use archmage::SimdToken as _;
+    use archmage::magetypes;
+
+    /// One generic f32x16 batch — `#[magetypes]` emits
+    /// `midp_x16_vec_{v4x,v4,v3,neon}`; `which` selects the same function
+    /// the canonical leaves call (5,6 = `pow_midp` at the two PQ
+    /// exponents the canonical row decoder actually feeds it).
+    #[magetypes(define(f32x16), v4x, v4, v3, neon, -scalar)]
+    fn midp_x16_vec(token: Token, which: u8, arr: [f32; 16]) -> [f32; 16] {
+        let v = f32x16::from_array(token, arr);
+        match which {
+            0 => v.log2_midp(),
+            1 => v.exp2_midp(),
+            2 => v.exp_midp(),
+            3 => v.log10_midp(),
+            4 => v.cbrt_midp(),
+            5 => v.pow_midp(1.0 / 78.843_75),
+            _ => v.pow_midp(1.0 / 0.159_301_75),
+        }
+        .to_array()
+    }
+
+    fn scalar_fn(which: u8, x: f32) -> f32 {
+        match which {
+            0 => log2_midp_f32(x),
+            1 => exp2_midp_f32(x),
+            2 => exp_midp_f32(x),
+            3 => log10_midp_f32(x),
+            4 => magetypes::nostd_math::cbrt_midp_f32(x),
+            5 => pow_midp_f32(x, 1.0 / 78.843_75),
+            _ => pow_midp_f32(x, 1.0 / 0.159_301_75),
+        }
+    }
+
+    const WHICH_NAMES: [&str; 7] = [
+        "log2_midp",
+        "exp2_midp",
+        "exp_midp",
+        "log10_midp",
+        "cbrt_midp",
+        "pow_midp(1/78.84375)",
+        "pow_midp(1/0.15930175)",
+    ];
+
+    /// One compiled tier variant bound to its summoned token.
+    type TierFn = Box<dyn Fn(u8, [f32; 16]) -> [f32; 16] + Send + Sync>;
+
+    /// The compiled fused-tier variants of [`midp_x16_vec`] available on
+    /// this host — each bound to its own summoned token, so no global
+    /// dispatch state is touched (parallel-test safe).
+    fn compiled_tiers() -> Vec<(&'static str, TierFn)> {
+        let mut tiers: Vec<(&'static str, TierFn)> = Vec::new();
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(t) = archmage::X64V3Token::summon() {
+                tiers.push(("v3", Box::new(move |w, a| midp_x16_vec_v3(t, w, a))));
+            }
+            #[cfg(feature = "avx512")]
+            {
+                if let Some(t) = archmage::X64V4Token::summon() {
+                    tiers.push(("v4", Box::new(move |w, a| midp_x16_vec_v4(t, w, a))));
+                }
+                if let Some(t) = archmage::X64V4xToken::summon() {
+                    tiers.push(("v4x", Box::new(move |w, a| midp_x16_vec_v4x(t, w, a))));
+                }
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            if let Some(t) = archmage::NeonToken::summon() {
+                tiers.push(("neon", Box::new(move |w, a| midp_x16_vec_neon(t, w, a))));
+            }
+        }
+        tiers
+    }
+
+    /// Compare one tier's chunk result against the scalar body, bit for
+    /// bit. Both-NaN outputs compare equal (payload may legitimately
+    /// differ on NaN *inputs* — outside the canonical domain — while a
+    /// NaN-vs-finite or bit-pattern divergence is always a real bug).
+    fn check_chunk(name: &str, which: u8, arr: [f32; 16], got: [f32; 16]) -> u64 {
+        let mut mismatches = 0u64;
+        for (g, x) in got.iter().zip(arr.iter()) {
+            let e = scalar_fn(which, *x);
+            if g.to_bits() != e.to_bits() && !(g.is_nan() && e.is_nan()) {
+                mismatches += 1;
+                if mismatches <= 5 {
+                    eprintln!(
+                        "{name} {}({:#010x}) = {:#010x}, scalar = {:#010x}",
+                        WHICH_NAMES[which as usize],
+                        x.to_bits(),
+                        g.to_bits(),
+                        e.to_bits()
+                    );
+                }
+            }
+        }
+        mismatches
+    }
+
+    /// ~1.6×10⁷ inputs: every special class explicitly, a dense sweep of
+    /// the canonical ranges (opsin/PU domains, transfer heads, ±tiny,
+    /// ±huge), and 2²⁴ raw bit patterns.
+    #[test]
+    fn midp_x16_matches_scalar_sampled() {
+        let tiers = compiled_tiers();
+        assert!(!tiers.is_empty(), "no fused tier compiled on this host");
+
+        let mut bits: Vec<u32> = Vec::new();
+        // Specials + canonical boundary constants.
+        for v in [
+            0.0f32,
+            -0.0,
+            f32::MIN_POSITIVE,
+            f32::EPSILON,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            f32::from_bits(0x7FC0_0001),
+            f32::from_bits(1),           // smallest denormal
+            f32::from_bits(0x007F_FFFF), // largest denormal
+            1.0,
+            -1.0,
+            -126.0,
+            128.0,
+            -127.0,
+            127.0,
+            core::f32::consts::LN_2,
+            1e-30,
+            1e30,
+            -1e30,
+        ] {
+            bits.push(v.to_bits());
+        }
+        // Dense uniform sweep of [-128, 128] (covers every finite exponent
+        // band the midp formulas branch on) and of [0, 1].
+        for i in 0..(1 << 20) {
+            let x = -128.0f32 + 256.0 * (i as f32 / ((1 << 20) - 1) as f32);
+            bits.push(x.to_bits());
+            let u = i as f32 / ((1 << 20) - 1) as f32;
+            bits.push(u.to_bits());
+        }
+        // Raw bit patterns: low 2²⁴ (denormals) + a stride-257 sweep of
+        // the whole exponent/mantissa space.
+        bits.extend(0u32..(1 << 24));
+        for i in 0u32..(1 << 24) {
+            bits.push(i.wrapping_mul(257));
+        }
+        // Round to a chunk multiple.
+        bits.resize(bits.len() + 16 - bits.len() % 16, 0);
+
+        for which in 0u8..7 {
+            for chunk in bits.as_chunks::<16>().0 {
+                let arr = chunk.map(f32::from_bits);
+                for (name, f) in &tiers {
+                    assert_eq!(check_chunk(name, which, arr, f(which, arr)), 0);
+                }
+            }
+        }
+    }
+
+    /// The brief's fallback qualification: ≥10⁸ inputs plus every
+    /// special class. A deterministic stride-37 sweep of the whole u32
+    /// bit space (116 M distinct patterns — every class, denser than
+    /// random) + all 2²⁴ denormals + the specials, scalar body evaluated
+    /// once per element and compared against every compiled tier.
+    /// ~minutes in release.
+    ///
+    /// ```text
+    /// cargo test -p zensim --release midp_x16_matches_scalar_1e8 -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "1.4e8 inputs — explicit qualification run"]
+    fn midp_x16_matches_scalar_1e8_sweep() {
+        let tiers = compiled_tiers();
+        assert!(!tiers.is_empty(), "no fused tier compiled on this host");
+
+        let mut bits: Vec<u32> = Vec::with_capacity(1 << 27);
+        for v in [
+            0.0f32,
+            -0.0,
+            f32::MIN_POSITIVE,
+            f32::EPSILON,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            f32::from_bits(0x7FC0_0001),
+            f32::from_bits(1),
+            f32::from_bits(0x007F_FFFF),
+            1.0,
+            -1.0,
+        ] {
+            bits.push(v.to_bits());
+        }
+        bits.extend(0u32..(1 << 24));
+        // 2^32 / 37 ≈ 116 M stride-37 samples — full exponent/mantissa
+        // coverage, deterministic.
+        let mut b = 0u32;
+        loop {
+            bits.push(b);
+            let (n, ov) = b.overflowing_add(37);
+            if ov {
+                break;
+            }
+            b = n;
+        }
+        bits.resize(bits.len() + 16 - bits.len() % 16, 0);
+
+        for which in 0u8..7 {
+            for chunk in bits.as_chunks::<16>().0 {
+                let arr = chunk.map(f32::from_bits);
+                let expected = arr.map(|x| scalar_fn(which, x));
+                for (name, f) in &tiers {
+                    let got = f(which, arr);
+                    for ((&g, &e), &x) in got.iter().zip(expected.iter()).zip(arr.iter()) {
+                        if g.to_bits() != e.to_bits() && !(g.is_nan() && e.is_nan()) {
+                            panic!(
+                                "{name} {}({:#010x}) = {:#010x}, scalar = {:#010x}",
+                                WHICH_NAMES[which as usize],
+                                x.to_bits(),
+                                g.to_bits(),
+                                e.to_bits()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The exhaustive form: all 2³² f32 bit patterns through every
+    /// compiled tier variant vs the scalar bodies. Threaded over the
+    /// bit-pattern space; hours-scale — run off-peak.
+    ///
+    /// ```text
+    /// cargo test -p zensim --release rev4vec_midp_gate -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "2^32 evals per function per tier — explicit qualification run"]
+    fn midp_x16_matches_scalar_over_all_f32_bits() {
+        let tiers = std::sync::Arc::new(compiled_tiers());
+        assert!(
+            !tiers.is_empty(),
+            "no fused tier compiled on this host — nothing to qualify"
+        );
+        let nthreads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .min(8);
+        // Chunk-aligned span: 2^32 / nthreads rounded up to a 16-multiple.
+        let span = ((1u64 << 32) / nthreads as u64 + 15) & !15;
+        let mut handles = Vec::new();
+        for t in 0..nthreads as u64 {
+            let lo = t * span;
+            if lo > u32::MAX as u64 {
+                break;
+            }
+            let hi = ((t + 1) * span).min(1u64 << 32);
+            let tiers = std::sync::Arc::clone(&tiers);
+            handles.push(std::thread::spawn(move || {
+                let mut checked = 0u64;
+                let mut mismatches = 0u64;
+                for which in 0u8..7 {
+                    let mut base = lo as u32;
+                    loop {
+                        let mut arr = [0f32; 16];
+                        for (l, slot) in arr.iter_mut().enumerate() {
+                            *slot = f32::from_bits(base.wrapping_add(l as u32));
+                        }
+                        for (name, f) in tiers.iter() {
+                            mismatches += check_chunk(name, which, arr, f(which, arr));
+                        }
+                        checked += 16;
+                        let next = base.wrapping_add(16) as u64;
+                        if next >= hi {
+                            break;
+                        }
+                        base = next as u32;
+                    }
+                }
+                (checked, mismatches)
+            }));
+        }
+        let mut total = 0u64;
+        let mut mismatches = 0u64;
+        for h in handles {
+            let (checked, bad) = h.join().expect("tier-parity worker panicked");
+            total += checked;
+            mismatches += bad;
+        }
+        println!("midp_x16 exhaustive: {total} lane evaluations checked, {mismatches} mismatches");
+        assert_eq!(mismatches, 0, "vector midp diverged from scalar canon");
+    }
+}
