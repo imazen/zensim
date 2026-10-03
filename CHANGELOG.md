@@ -11,6 +11,12 @@
 
 ### Changed
 
+- Rev4 serving: the canonical f64 kernels behind the v2 + basic and by_v2fy sets compile their `f64x8` ops inside the
+  caller's target-feature region (the V-blur window slide was an out-of-line trait method calling intrinsic shims) and
+  index through provable-length slices, so the hot loops carry no per-element bounds checks. Bit-identical at every
+  revision and tier (unit parity, `rev4serve_gate`, 432/432 steering panel cases at Rev3 and Rev4); Rev4 scalar scoring
+  1.18-1.22x and prepared steering 1.11-1.14x faster at 1-4 MP single-thread on x86_64 v4x; Rev3 unchanged.
+  `benchmarks/kernopt_WORKLOG.md`.
 - Rev4 serving: the canonical f64 blur/pool kernels (H-blur Rec64 rows, V-blur SSIM and edge paths, dense/gradient block
   kernels, restore-cuts map rows) run lane-parallel on the x86_64 fused-FMA tiers, bit-identical to the scalar canonical
   bodies; other targets keep the scalar bodies. With the front-end leaves, Rev4 is 1.67x Rev3 at 1 MP single-thread (was

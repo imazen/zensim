@@ -254,3 +254,22 @@ vblur canon64 21.5 %, dense canon64 17.6 %, rec64 13.3 %, gradient canon64
 their semantic floors under the bit-exact constraint — next lever would
 need a numeric revision (drop the f64 canonical lanes or reassociate the
 pairwise tree), which is exactly the documented stop condition.
+
+## Coordinator review (Claude session 1d9f6f0b, 2026-10-03 15:30-16:00 MT)
+
+Diff read in full (blur.rs, fused.rs, feature_v2.rs, extract_paths_bench.rs). Per-element op order unchanged
+(`vwin_slide64x8!` keeps `state + add - rem` in vector and tail; narrows and loads unchanged); every new slice bound equals
+a bound the old code already required (last-row tail reads `height*width - 1`; window states are `width` long; the
+strided extent is `(h-1)*stride + width`). Width 0 already panicked before (window pre-roll `(i - r).min(width - 1)`).
+Independent reruns after rebasing onto main@origin 6ec5aea3:
+- `cargo test -p zensim --release --features custom-profiles,feature-regime-v2,threads,training`: 37 result blocks,
+  0 failed (lib 569 passed / 11 ignored); `rev4_served_vectors_bitmatch_research_extract_on_every_tier` and
+  `rev4_maps_are_tier_identical` ran and passed; the new strided-tile geometries ran in the ring tests on this AVX-512 host.
+- `just rev4serve-gate` (real featpot bake): pass. `just clippy`: 0 warnings. `cargo fmt -p zensim --check`: clean.
+- `cargo check --tests` aarch64-unknown-linux-gnu / i686-unknown-linux-gnu / wasm32-unknown-unknown: 0 warnings, 0 errors.
+- Steering panels re-hashed from the lane's before/after outputs: broad 384/384 and owner 48/48 per-case JSONs byte-identical
+  at Rev3 and at Rev4 (only `RESULT.json`'s binary sha differs).
+- Interleaved timing spot-check (CPU 2, 5 rounds, the lane's binaries and bakes): v2basic r4 scalar 1 MP 184.9 -> 154.2 ms
+  (paired median 1.197x, range 1.193-1.221); by_v2fy r4 scalar 4 MP 407.8 -> 347.7 ms (1.174x, 1.168-1.177).
+Accepted the lane's stop-rule decisions as recorded in `KERNOPT_decisions.md` (retention-copy redirect and `attr_pass_b`
+checks declined at < 3 %; Rev3 pre-slices kept as length-contract documentation).
