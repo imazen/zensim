@@ -123,6 +123,22 @@ fn extract_strided(
 }
 
 fn tier(disabled: &[&str]) -> &'static str {
+    // Same convention as `cross_tier.rs::classify_tier`: zensim dispatches NEON or scalar on aarch64 and WASM128 or scalar
+    // on wasm32, so a permutation that keeps the base token is that tier however many extension tokens it disables.
+    if cfg!(target_arch = "aarch64") {
+        return if disabled.contains(&"NEON") {
+            "scalar (aarch64)"
+        } else {
+            "NEON"
+        };
+    }
+    if cfg!(target_arch = "wasm32") {
+        return if disabled.contains(&"WASM128") {
+            "scalar (wasm32)"
+        } else {
+            "WASM128"
+        };
+    }
     let v3 = disabled.contains(&"x86-64-v3");
     let v4 = disabled.contains(&"AVX-512");
     let v2 = disabled.contains(&"x86-64-v2");
@@ -323,7 +339,7 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
             } else {
                 by_tier.insert(t, all.clone());
             }
-            if t == "scalar/SSE2" {
+            if t.starts_with("scalar") {
                 scalar = Some(all);
             }
         });
