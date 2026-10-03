@@ -34,6 +34,11 @@ CANON = KADIS / "canonical" / "kadis700k_canonical_gpu_2026-07-01.parquet"
 CANON_SHA = "c9a6fd56f8f5a73106438c325f77a0cc78dffb25bcfeefe91d8a06c1cdd5e779"
 REFS = KADIS / "refs"
 PER_TYPE = 100
+# Zen workspace rule (third-party imaging software is banned from training data): kadis-distort makes these types with
+# third-party codecs, a palette quantizer or a learned model, so they never enter a coverage leg. 6 color_quantize (Pillow
+# median-cut + dither), 9 compress_jp2k (OpenJPEG), 10 compress_jpeg (libjpeg), 15 denoise_dncnn (KAIR DnCNN). Kept, flagged:
+# 21 pixelate (OpenCV nearest-neighbour resize), 24 sharpen_hi and 12 noise_colorcomp (skimage unsharp mask / colour conversion).
+EXCLUDED_TYPES = frozenset({6, 9, 10, 15})
 # The r4 bank's extractor and arguments (/var/tmp/reextract/assemble_set.py; zensim 259045b0 + era-label lane patch).
 BIN = Path("/var/tmp/reextract/target/release/examples/extract_features_372col")
 BIN_SHA = "8c6f4c03695660fbb4fdce46e05859b40d9080497622cd726a7db75fd8323aa8"
@@ -62,13 +67,14 @@ def cmd_select(args) -> int:
         raise ValueError(f"{CANON}: sha256 differs from the registered canonical")
     t = pq.read_table(CANON, columns=["source_id", "source_filename", "dist_type", "dist_name", "severity_level",
                                       "dist_param", "distorted_url"]).to_pandas()
-    t = t[t.source_id % 10 < 8]
+    t = t[(t.source_id % 10 < 8) & ~t.dist_type.isin(EXCLUDED_TYPES)]
     refs = t.drop_duplicates("source_filename")[["source_filename", "dist_type"]].copy()
     refs["h"] = [hashlib.sha256(s.encode()).hexdigest() for s in refs.source_filename]
     pick = refs.sort_values(["dist_type", "h"]).groupby("dist_type").head(PER_TYPE).source_filename
     sel = t[t.source_filename.isin(set(pick))].sort_values(["dist_type", "source_filename", "severity_level"]).reset_index(drop=True)
-    if len(sel) != 24 * PER_TYPE * 5:
-        raise ValueError(f"selected {len(sel)} rows, expected {24 * PER_TYPE * 5}")
+    n_types = 24 - len(EXCLUDED_TYPES)  # KADIS assigns 24 of its 25 types (8 never); minus the excluded ones
+    if len(sel) != n_types * PER_TYPE * 5:
+        raise ValueError(f"selected {len(sel)} rows, expected {n_types * PER_TYPE * 5}")
     dest = work() / "dist"
     dest.mkdir(parents=True, exist_ok=True)
     sel["dist_path"] = [str(dest / u.rsplit("/", 1)[1]) for u in sel.distorted_url]
@@ -173,6 +179,7 @@ def cmd_table(args) -> int:
            "dropped_single_rung": int((~ident).sum() - keep.sum()), "width": WIDTH, "era": ERA, "formula_revision": 4,
            "extractor_sha256": BIN_SHA, "extract_args": EXTRACT_ARGS, "extract_env": EXTRACT_ENV,
            "canonical_sha256": CANON_SHA, "split": "source_id % 10 < 8", "per_type": PER_TYPE,
+           "excluded_types": sorted(EXCLUDED_TYPES),
            "target": "-|dist_param|, ranked within (reference, type, sign) only",
            "sha256": sha256(out), "keys_sha256": sha256(work() / "kadis_ordinal.keys.parquet")}
     (work() / "kadis_ordinal.manifest.json").write_text(json.dumps(man, indent=1) + "\n")

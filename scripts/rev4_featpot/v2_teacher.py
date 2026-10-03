@@ -22,7 +22,7 @@ STRATA_NAME = "data/e13/safesyn_fit_strata.npz"
 # Design log E14: the KADIS ordinal ladder table (e14_kadis_ordinal.py table), pinned by sha.
 ORDINAL_NAME = "data/e14/kadis_ordinal.parquet"
 ORDINAL_WIDTH = 1825  # extracted columns f0..f1824; the rest of the table's width is NaN
-ORDINAL_SHA = "b41d31519577c0ab64a92fe1fc157fd80fcd844be60c7f84b7b3f2c66334f4e6"
+ORDINAL_SHA = "ffc245a0e39bd85d7527a08fd96bdd93b9fb266ad0334d4401eca06c95812012"
 STRATA_SCHEMA = "rev4-featpot-e13-strata-v1"
 MONO_DROP = 5.0
 
