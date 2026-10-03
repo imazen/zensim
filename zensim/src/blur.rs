@@ -5275,30 +5275,388 @@ fn fused_blur_h_rec64_row(
     }
 }
 
-/// `plane`'s rows `y0..y0 + 8` as eight `width`-long mutable slices — one
-/// `chunks_exact_mut` split, so the `om[l][x]` stores need no per-element
-/// bounds check (each lane slice's length IS `width`, `x` runs `0..width`).
-/// Generic-inlined into the magetypes bodies like every other
-/// backend-trait helper.
-#[inline(always)]
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
-fn rec64_rows8_mut(plane: &mut [f32], y0: usize, width: usize) -> [&mut [f32]; 8] {
-    let mut it = plane[y0 * width..(y0 + 8) * width].chunks_exact_mut(width);
-    std::array::from_fn(|_| it.next().unwrap())
+// Vector types for the Rec64 lane-parallel bodies' signatures — the
+// intrinsic ops themselves come from each `#[rite]` body's
+// `import_intrinsics` scope; the types are re-exports of `core::arch`'s.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+use archmage::intrinsics::x86_64::__m512d;
+#[cfg(target_arch = "x86_64")]
+use archmage::intrinsics::x86_64::{__m256, __m256d};
+
+/// `f64x8` as two `__m256d` halves — the lane layout the AVX2 (v3) body
+/// uses (lanes 0..4 in `.0`, 4..8 in `.1`).
+#[cfg(target_arch = "x86_64")]
+#[derive(Copy, Clone)]
+struct Rec64D8(__m256d, __m256d);
+
+/// 8×8 f32 transpose in registers — the standard 24-op `unpack`/`shuffle`/
+/// `perm2f128` network. Written at v3 level so every fused-FMA tier body
+/// (v3's own and the wider ones, whose feature sets cover v3) can call it.
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_t8x8(m: [__m256; 8]) -> [__m256; 8] {
+    let t0 = _mm256_unpacklo_ps(m[0], m[1]);
+    let t1 = _mm256_unpackhi_ps(m[0], m[1]);
+    let t2 = _mm256_unpacklo_ps(m[2], m[3]);
+    let t3 = _mm256_unpackhi_ps(m[2], m[3]);
+    let t4 = _mm256_unpacklo_ps(m[4], m[5]);
+    let t5 = _mm256_unpackhi_ps(m[4], m[5]);
+    let t6 = _mm256_unpacklo_ps(m[6], m[7]);
+    let t7 = _mm256_unpackhi_ps(m[6], m[7]);
+    let u0 = _mm256_shuffle_ps(t0, t2, 0x44);
+    let u1 = _mm256_shuffle_ps(t0, t2, 0xEE);
+    let u2 = _mm256_shuffle_ps(t1, t3, 0x44);
+    let u3 = _mm256_shuffle_ps(t1, t3, 0xEE);
+    let u4 = _mm256_shuffle_ps(t4, t6, 0x44);
+    let u5 = _mm256_shuffle_ps(t4, t6, 0xEE);
+    let u6 = _mm256_shuffle_ps(t5, t7, 0x44);
+    let u7 = _mm256_shuffle_ps(t5, t7, 0xEE);
+    [
+        _mm256_permute2f128_ps(u0, u4, 0x20),
+        _mm256_permute2f128_ps(u1, u5, 0x20),
+        _mm256_permute2f128_ps(u2, u6, 0x20),
+        _mm256_permute2f128_ps(u3, u7, 0x20),
+        _mm256_permute2f128_ps(u0, u4, 0x31),
+        _mm256_permute2f128_ps(u1, u5, 0x31),
+        _mm256_permute2f128_ps(u2, u6, 0x31),
+        _mm256_permute2f128_ps(u3, u7, 0x31),
+    ]
 }
 
-/// **canon64 vector body** — the Rec64 horizontal window run on eight
-/// independent ROWS at a time through `f64x8`. Every lane is one row's own
-/// scalar recurrence (`fused_blur_h_rec64_row`), so the per-row op sequence
-/// — the `+add −rem` sum slide, the `mul_add`-fused square/product updates
-/// in their exact order — is the scalar body's verbatim; lanes never mix.
-/// Stores are per-row `(sum * inv_v64) as f32` from `to_array()`. `height
-/// % 8` tail rows take the scalar row body. `_scalar`/`_wasm128` keep the
-/// scalar body: their `mul_add` is unfused either way.
-#[magetypes(define(f64x8), v4x, v4, v3, -scalar)]
+/// Load the 8×8 f32 block `rows[*][col .. col + 8]` and return its
+/// transpose: `out[j][lane]` is `rows[lane][col + j]`. The caller
+/// guarantees `col + 8 <= rows[l].len()` (the block-phase x schedule
+/// keeps every column in-range; `try_into` stays as the cheap guard).
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_ld8x8(rows: [&[f32]; 8], col: usize) -> [__m256; 8] {
+    let mut v = [_mm256_setzero_ps(); 8];
+    for l in 0..8 {
+        let c: &[f32; 8] = rows[l][col..col + 8].try_into().unwrap();
+        v[l] = _mm256_loadu_ps(c);
+    }
+    rec64_t8x8(v)
+}
+
+/// Store 8 columns (`cols[j][lane]`) into `out[lane][x0 .. x0 + 8]` —
+/// transpose back, then one vector store per row.
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_store8x8(out: &mut [&mut [f32]; 8], x0: usize, cols: [__m256; 8]) {
+    let t = rec64_t8x8(cols);
+    for l in 0..8 {
+        let c: &mut [f32; 8] = (&mut out[l][x0..x0 + 8]).try_into().unwrap();
+        _mm256_storeu_ps(c, t[l]);
+    }
+}
+
+/// One column `idx` of the eight `rows`, widened to `__m512d` — the
+/// window-init / mirrored-edge feed where the add/remove index is not part
+/// of a contiguous block. Same per-lane `as f64` values as the scalar body.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4, import_intrinsics)]
+fn rec64_gather8_512(rows: [&[f32]; 8], idx: usize) -> __m512d {
+    let a: [f64; 8] = std::array::from_fn(|l| rows[l][idx] as f64);
+    _mm512_loadu_pd(&a)
+}
+
+/// Store `v`'s lanes into `out[lane][x]` — the scalar-path emit for the
+/// head/tail steps: `vcvtpd2ps` is per-lane `(x) as f32` (round-to-nearest).
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4, import_intrinsics)]
+fn rec64_emit8_512(out: &mut [&mut [f32]; 8], x: usize, v: __m512d) {
+    let mut a = [0.0f32; 8];
+    _mm256_storeu_ps(&mut a, _mm512_cvtpd_ps(v));
+    for l in 0..8 {
+        out[l][x] = a[l];
+    }
+}
+
+/// `Rec64D8` counterparts of the AVX-512 helpers — the same values, split
+/// over two `__m256d` halves.
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_gather8_256(rows: [&[f32]; 8], idx: usize) -> Rec64D8 {
+    let a: [f64; 8] = std::array::from_fn(|l| rows[l][idx] as f64);
+    Rec64D8(
+        _mm256_loadu_pd(a[0..4].try_into().unwrap()),
+        _mm256_loadu_pd(a[4..8].try_into().unwrap()),
+    )
+}
+
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_widen8_256(v: __m256) -> Rec64D8 {
+    Rec64D8(
+        _mm256_cvtps_pd(_mm256_castps256_ps128(v)),
+        _mm256_cvtps_pd(_mm256_extractf128_ps(v, 1)),
+    )
+}
+
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_narrow8_256(a: Rec64D8) -> __m256 {
+    _mm256_insertf128_ps(
+        _mm256_castps128_ps256(_mm256_cvtpd_ps(a.0)),
+        _mm256_cvtpd_ps(a.1),
+        1,
+    )
+}
+
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+fn rec64_emit8_256(out: &mut [&mut [f32]; 8], x: usize, v: Rec64D8) {
+    let mut a = [0.0f32; 8];
+    _mm256_storeu_ps(&mut a, rec64_narrow8_256(v));
+    for l in 0..8 {
+        out[l][x] = a[l];
+    }
+}
+
+/// `plane`'s `G` consecutive 8-row groups as `G × 8` mutable row slices.
+#[inline(always)]
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+fn rec64_rows8g_mut<const G: usize>(plane: &mut [f32], width: usize) -> [[&mut [f32]; 8]; G] {
+    let mut it = plane.chunks_exact_mut(width);
+    std::array::from_fn(|_| std::array::from_fn(|_| it.next().unwrap()))
+}
+
+/// **canon64 vector body** — the Rec64 horizontal window run on `G × 8`
+/// independent ROWS at a time (`G` interleaved 8-row groups share the same
+/// x schedule so their recurrence chains overlap). Every lane is one row's
+/// own scalar recurrence (`fused_blur_h_rec64_row`), so the per-row op
+/// sequence — the `+add −rem` sum slide, the `mul_add`-fused
+/// square/product updates in their exact order — is the scalar body's
+/// verbatim; lanes never mix.
+///
+/// The x range splits three ways: the `x < r` head and the tail keep the
+/// scalar-gather body (mirrored add/remove indices); the interior, where
+/// `x0 - r .. x0 + 7 - r` and `x0 + r + 1 .. x0 + r + 8` are all in-range
+/// columns, runs in 8-column blocks — 8 row loads + one 8×8 transpose per
+/// plane per block instead of per-step gathers, and the four
+/// `(sum * inv_v64) as f32` stores likewise go through a staged transpose.
+/// `height % 8` tail rows take the scalar row body. `_scalar`/`_wasm128`
+/// keep the scalar body: their `mul_add` is unfused either way.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4, import_intrinsics)]
 #[allow(clippy::too_many_arguments)]
-fn fused_blur_h_ssim_rec64_rows(
-    token: Token,
+fn rec64_run512<const G: usize>(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    let inv = _mm512_set1_pd(inv_v64);
+    let zero = _mm512_setzero_pd();
+    let neg = _mm512_set1_pd(-0.0);
+    let wm1 = width - 1;
+    let head_end = r.min(width);
+    let n_blocks = if width >= 2 * r + 9 {
+        (width - 2 * r - 9) / 8 + 1
+    } else {
+        0
+    };
+    let srows: [[&[f32]; 8]; G] = std::array::from_fn(|g| {
+        std::array::from_fn(|l| &src[(g * 8 + l) * width..(g * 8 + l + 1) * width])
+    });
+    let drows: [[&[f32]; 8]; G] = std::array::from_fn(|g| {
+        std::array::from_fn(|l| &dst[(g * 8 + l) * width..(g * 8 + l + 1) * width])
+    });
+    let mut om1 = rec64_rows8g_mut::<G>(out_mu1, width);
+    let mut om2 = rec64_rows8g_mut::<G>(out_mu2, width);
+    let mut osq = rec64_rows8g_mut::<G>(out_sigma_sq, width);
+    let mut os12 = rec64_rows8g_mut::<G>(out_sigma12, width);
+    let mut sum_s = [zero; G];
+    let mut sum_d = [zero; G];
+    let mut sum_sq = [zero; G];
+    let mut sum_prod = [zero; G];
+    for i in 0..diam {
+        let idx = if i <= r {
+            (r - i).min(wm1)
+        } else {
+            (i - r).min(wm1)
+        };
+        for g in 0..G {
+            let sa = rec64_gather8_512(srows[g], idx);
+            let da = rec64_gather8_512(drows[g], idx);
+            sum_s[g] = _mm512_add_pd(sum_s[g], sa);
+            sum_d[g] = _mm512_add_pd(sum_d[g], da);
+            sum_sq[g] = _mm512_fmadd_pd(sa, sa, _mm512_fmadd_pd(da, da, sum_sq[g]));
+            sum_prod[g] = if err {
+                let e = _mm512_sub_pd(sa, da);
+                _mm512_fmadd_pd(e, e, sum_prod[g])
+            } else {
+                _mm512_fmadd_pd(sa, da, sum_prod[g])
+            };
+        }
+    }
+    for x in 0..head_end {
+        let add_idx = h_mirror_add_idx(x + r + 1, width).min(wm1);
+        let rem_idx = (r - x).min(wm1);
+        for g in 0..G {
+            let sa = rec64_gather8_512(srows[g], add_idx);
+            let da = rec64_gather8_512(drows[g], add_idx);
+            let sr = rec64_gather8_512(srows[g], rem_idx);
+            let dr = rec64_gather8_512(drows[g], rem_idx);
+            rec64_emit8_512(&mut om1[g], x, _mm512_mul_pd(sum_s[g], inv));
+            rec64_emit8_512(&mut om2[g], x, _mm512_mul_pd(sum_d[g], inv));
+            rec64_emit8_512(&mut osq[g], x, _mm512_mul_pd(sum_sq[g], inv));
+            rec64_emit8_512(&mut os12[g], x, _mm512_mul_pd(sum_prod[g], inv));
+            sum_s[g] = _mm512_sub_pd(_mm512_add_pd(sum_s[g], sa), sr);
+            sum_d[g] = _mm512_sub_pd(_mm512_add_pd(sum_d[g], da), dr);
+            sum_sq[g] = _mm512_fmadd_pd(
+                sa,
+                sa,
+                _mm512_fmadd_pd(
+                    da,
+                    da,
+                    _mm512_fmadd_pd(
+                        _mm512_xor_pd(sr, neg),
+                        sr,
+                        _mm512_fmadd_pd(_mm512_xor_pd(dr, neg), dr, sum_sq[g]),
+                    ),
+                ),
+            );
+            sum_prod[g] = if err {
+                let ea = _mm512_sub_pd(sa, da);
+                let er = _mm512_sub_pd(sr, dr);
+                _mm512_fmadd_pd(
+                    ea,
+                    ea,
+                    _mm512_fmadd_pd(_mm512_xor_pd(er, neg), er, sum_prod[g]),
+                )
+            } else {
+                _mm512_fmadd_pd(
+                    sa,
+                    da,
+                    _mm512_fmadd_pd(_mm512_xor_pd(sr, neg), dr, sum_prod[g]),
+                )
+            };
+        }
+    }
+    // KERNOPT2: an add-column history ring for the remove side was
+    // measured (A/B, Rev4 scalar 1024, 4 rounds interleaved) at < 0.5 %
+    // of the cell — below the 3 % keep bar, so the remove side loads
+    // like the add side.
+    let mut x0 = r;
+    for _ in 0..n_blocks {
+        // `from_fn` builds the block columns in place — a `[zero; 8]`
+        // fill ahead of the loads shows up as dead `vmovdqa64` spills in
+        // the hot loop.
+        let sadd: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(srows[g], x0 + r + 1));
+        let dadd: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(drows[g], x0 + r + 1));
+        let srem: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(srows[g], x0 - r));
+        let drem: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(drows[g], x0 - r));
+        let mut stage = [[[_mm256_setzero_ps(); 8]; 4]; G];
+        for j in 0..8 {
+            for g in 0..G {
+                let sa = _mm512_cvtps_pd(sadd[g][j]);
+                let da = _mm512_cvtps_pd(dadd[g][j]);
+                let sr = _mm512_cvtps_pd(srem[g][j]);
+                let dr = _mm512_cvtps_pd(drem[g][j]);
+                stage[g][0][j] = _mm512_cvtpd_ps(_mm512_mul_pd(sum_s[g], inv));
+                stage[g][1][j] = _mm512_cvtpd_ps(_mm512_mul_pd(sum_d[g], inv));
+                stage[g][2][j] = _mm512_cvtpd_ps(_mm512_mul_pd(sum_sq[g], inv));
+                stage[g][3][j] = _mm512_cvtpd_ps(_mm512_mul_pd(sum_prod[g], inv));
+                sum_s[g] = _mm512_sub_pd(_mm512_add_pd(sum_s[g], sa), sr);
+                sum_d[g] = _mm512_sub_pd(_mm512_add_pd(sum_d[g], da), dr);
+                sum_sq[g] = _mm512_fmadd_pd(
+                    sa,
+                    sa,
+                    _mm512_fmadd_pd(
+                        da,
+                        da,
+                        _mm512_fmadd_pd(
+                            _mm512_xor_pd(sr, neg),
+                            sr,
+                            _mm512_fmadd_pd(_mm512_xor_pd(dr, neg), dr, sum_sq[g]),
+                        ),
+                    ),
+                );
+                sum_prod[g] = if err {
+                    let ea = _mm512_sub_pd(sa, da);
+                    let er = _mm512_sub_pd(sr, dr);
+                    _mm512_fmadd_pd(
+                        ea,
+                        ea,
+                        _mm512_fmadd_pd(_mm512_xor_pd(er, neg), er, sum_prod[g]),
+                    )
+                } else {
+                    _mm512_fmadd_pd(
+                        sa,
+                        da,
+                        _mm512_fmadd_pd(_mm512_xor_pd(sr, neg), dr, sum_prod[g]),
+                    )
+                };
+            }
+        }
+        for g in 0..G {
+            rec64_store8x8(&mut om1[g], x0, stage[g][0]);
+            rec64_store8x8(&mut om2[g], x0, stage[g][1]);
+            rec64_store8x8(&mut osq[g], x0, stage[g][2]);
+            rec64_store8x8(&mut os12[g], x0, stage[g][3]);
+        }
+        x0 += 8;
+    }
+    for x in x0..width {
+        let add_idx = h_mirror_add_idx(x + r + 1, width).min(wm1);
+        let rem_idx = x - r;
+        for g in 0..G {
+            let sa = rec64_gather8_512(srows[g], add_idx);
+            let da = rec64_gather8_512(drows[g], add_idx);
+            let sr = rec64_gather8_512(srows[g], rem_idx);
+            let dr = rec64_gather8_512(drows[g], rem_idx);
+            rec64_emit8_512(&mut om1[g], x, _mm512_mul_pd(sum_s[g], inv));
+            rec64_emit8_512(&mut om2[g], x, _mm512_mul_pd(sum_d[g], inv));
+            rec64_emit8_512(&mut osq[g], x, _mm512_mul_pd(sum_sq[g], inv));
+            rec64_emit8_512(&mut os12[g], x, _mm512_mul_pd(sum_prod[g], inv));
+            sum_s[g] = _mm512_sub_pd(_mm512_add_pd(sum_s[g], sa), sr);
+            sum_d[g] = _mm512_sub_pd(_mm512_add_pd(sum_d[g], da), dr);
+            sum_sq[g] = _mm512_fmadd_pd(
+                sa,
+                sa,
+                _mm512_fmadd_pd(
+                    da,
+                    da,
+                    _mm512_fmadd_pd(
+                        _mm512_xor_pd(sr, neg),
+                        sr,
+                        _mm512_fmadd_pd(_mm512_xor_pd(dr, neg), dr, sum_sq[g]),
+                    ),
+                ),
+            );
+            sum_prod[g] = if err {
+                let ea = _mm512_sub_pd(sa, da);
+                let er = _mm512_sub_pd(sr, dr);
+                _mm512_fmadd_pd(
+                    ea,
+                    ea,
+                    _mm512_fmadd_pd(_mm512_xor_pd(er, neg), er, sum_prod[g]),
+                )
+            } else {
+                _mm512_fmadd_pd(
+                    sa,
+                    da,
+                    _mm512_fmadd_pd(_mm512_xor_pd(sr, neg), dr, sum_prod[g]),
+                )
+            };
+        }
+    }
+}
+
+/// AVX-512 driver for [`rec64_run512`]: 16-row interleaved chunks, an
+/// 8-row chunk for the `height % 16` remainder, scalar rows under 8.
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[archmage::rite(v4)]
+#[allow(clippy::too_many_arguments)]
+fn rec64_rows8x8(
     src: &[f32],
     dst: &[f32],
     out_mu1: &mut [f32],
@@ -5312,91 +5670,40 @@ fn fused_blur_h_ssim_rec64_rows(
     inv_v64: f64,
     err: bool,
 ) {
-    let inv_v = f64x8::splat(token, inv_v64);
-    let groups = height / 8;
-    for g in 0..groups {
-        let y0 = g * 8;
-        // Per-lane row slices of provable length `width`: the mirror index
-        // helpers already produce `.min(width - 1)` indices and `x` runs
-        // `0..width`, so every gather/store below is statically in-bounds
-        // (no per-element `slice_index_fail` sites).
-        let srows: [&[f32]; 8] =
-            std::array::from_fn(|l| &src[(y0 + l) * width..(y0 + l + 1) * width]);
-        let drows: [&[f32]; 8] =
-            std::array::from_fn(|l| &dst[(y0 + l) * width..(y0 + l + 1) * width]);
-        let om1 = rec64_rows8_mut(out_mu1, y0, width);
-        let om2 = rec64_rows8_mut(out_mu2, y0, width);
-        let osq = rec64_rows8_mut(out_sigma_sq, y0, width);
-        let os12 = rec64_rows8_mut(out_sigma12, y0, width);
-        let mut sum_s = f64x8::zero(token);
-        let mut sum_d = f64x8::zero(token);
-        let mut sum_sq = f64x8::zero(token);
-        let mut sum_prod = f64x8::zero(token);
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
-            let sa: [f64; 8] = std::array::from_fn(|l| srows[l][idx] as f64);
-            let da: [f64; 8] = std::array::from_fn(|l| drows[l][idx] as f64);
-            let sav = f64x8::from_array(token, sa);
-            let dav = f64x8::from_array(token, da);
-            sum_s = sum_s + sav;
-            sum_d = sum_d + dav;
-            sum_sq = sav.mul_add(sav, dav.mul_add(dav, sum_sq));
-            sum_prod = if err {
-                let e = sav - dav;
-                e.mul_add(e, sum_prod)
-            } else {
-                sav.mul_add(dav, sum_prod)
-            };
-        }
-        for x in 0..width {
-            let m1 = (sum_s * inv_v).to_array();
-            let m2 = (sum_d * inv_v).to_array();
-            let sq = (sum_sq * inv_v).to_array();
-            let s12 = (sum_prod * inv_v).to_array();
-            for l in 0..8 {
-                om1[l][x] = m1[l] as f32;
-                om2[l][x] = m2[l] as f32;
-                osq[l][x] = sq[l] as f32;
-                os12[l][x] = s12[l] as f32;
-            }
-
-            let add_raw = x + r + 1;
-            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
-            let rem_i = x as isize - r as isize;
-            let rem_idx = (if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            })
-            .min(width - 1);
-            let sa: [f64; 8] = std::array::from_fn(|l| srows[l][add_idx] as f64);
-            let da: [f64; 8] = std::array::from_fn(|l| drows[l][add_idx] as f64);
-            let sr: [f64; 8] = std::array::from_fn(|l| srows[l][rem_idx] as f64);
-            let dr: [f64; 8] = std::array::from_fn(|l| drows[l][rem_idx] as f64);
-            let sav = f64x8::from_array(token, sa);
-            let dav = f64x8::from_array(token, da);
-            let srv = f64x8::from_array(token, sr);
-            let drv = f64x8::from_array(token, dr);
-            sum_s = sum_s + sav - srv;
-            sum_d = sum_d + dav - drv;
-            sum_sq = sav.mul_add(
-                sav,
-                dav.mul_add(dav, (-srv).mul_add(srv, (-drv).mul_add(drv, sum_sq))),
-            );
-            sum_prod = if err {
-                let ea = sav - dav;
-                let er = srv - drv;
-                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
-            } else {
-                sav.mul_add(dav, (-srv).mul_add(drv, sum_prod))
-            };
-        }
+    let mut y0 = 0;
+    while y0 + 16 <= height {
+        rec64_run512::<2>(
+            &src[y0 * width..(y0 + 16) * width],
+            &dst[y0 * width..(y0 + 16) * width],
+            &mut out_mu1[y0 * width..(y0 + 16) * width],
+            &mut out_mu2[y0 * width..(y0 + 16) * width],
+            &mut out_sigma_sq[y0 * width..(y0 + 16) * width],
+            &mut out_sigma12[y0 * width..(y0 + 16) * width],
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+        y0 += 16;
     }
-    for y in groups * 8..height {
+    if y0 + 8 <= height {
+        rec64_run512::<1>(
+            &src[y0 * width..(y0 + 8) * width],
+            &dst[y0 * width..(y0 + 8) * width],
+            &mut out_mu1[y0 * width..(y0 + 8) * width],
+            &mut out_mu2[y0 * width..(y0 + 8) * width],
+            &mut out_sigma_sq[y0 * width..(y0 + 8) * width],
+            &mut out_sigma12[y0 * width..(y0 + 8) * width],
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+        y0 += 8;
+    }
+    for y in y0..height {
         fused_blur_h_rec64_row(
             src,
             dst,
@@ -5412,6 +5719,617 @@ fn fused_blur_h_ssim_rec64_rows(
             err,
         );
     }
+}
+
+/// Without `avx512` the `_v4x`/`_v4` dispatch names can't be reached (the
+/// tokens are unsummonable) but still must exist — `rec64_rows8x8` keeps
+/// the same name as the AVX-512 driver and delegates to the AVX2 body.
+#[cfg(all(target_arch = "x86_64", not(feature = "avx512")))]
+#[archmage::rite(v3)]
+#[allow(clippy::too_many_arguments)]
+fn rec64_rows8x8(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    rec64_rows8x8_avx2(
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        r,
+        diam,
+        inv_v64,
+        err,
+    );
+}
+
+/// The AVX2 (`v3`) lane-parallel body: identical x schedule and op order
+/// to [`rec64_run512`], with `Rec64D8` pairs standing in for `__m512d`.
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3, import_intrinsics)]
+#[allow(clippy::too_many_arguments)]
+fn rec64_run256<const G: usize>(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    let zero = _mm256_setzero_pd();
+    let neg = _mm256_set1_pd(-0.0);
+    let inv = Rec64D8(_mm256_set1_pd(inv_v64), _mm256_set1_pd(inv_v64));
+    let wm1 = width - 1;
+    let head_end = r.min(width);
+    let n_blocks = if width >= 2 * r + 9 {
+        (width - 2 * r - 9) / 8 + 1
+    } else {
+        0
+    };
+    let srows: [[&[f32]; 8]; G] = std::array::from_fn(|g| {
+        std::array::from_fn(|l| &src[(g * 8 + l) * width..(g * 8 + l + 1) * width])
+    });
+    let drows: [[&[f32]; 8]; G] = std::array::from_fn(|g| {
+        std::array::from_fn(|l| &dst[(g * 8 + l) * width..(g * 8 + l + 1) * width])
+    });
+    let mut om1 = rec64_rows8g_mut::<G>(out_mu1, width);
+    let mut om2 = rec64_rows8g_mut::<G>(out_mu2, width);
+    let mut osq = rec64_rows8g_mut::<G>(out_sigma_sq, width);
+    let mut os12 = rec64_rows8g_mut::<G>(out_sigma12, width);
+    let zero8 = Rec64D8(zero, zero);
+    let mut sum_s = [zero8; G];
+    let mut sum_d = [zero8; G];
+    let mut sum_sq = [zero8; G];
+    let mut sum_prod = [zero8; G];
+    for i in 0..diam {
+        let idx = if i <= r {
+            (r - i).min(wm1)
+        } else {
+            (i - r).min(wm1)
+        };
+        for g in 0..G {
+            let sa = rec64_gather8_256(srows[g], idx);
+            let da = rec64_gather8_256(drows[g], idx);
+            sum_s[g] = Rec64D8(
+                _mm256_add_pd(sum_s[g].0, sa.0),
+                _mm256_add_pd(sum_s[g].1, sa.1),
+            );
+            sum_d[g] = Rec64D8(
+                _mm256_add_pd(sum_d[g].0, da.0),
+                _mm256_add_pd(sum_d[g].1, da.1),
+            );
+            sum_sq[g] = Rec64D8(
+                _mm256_fmadd_pd(sa.0, sa.0, _mm256_fmadd_pd(da.0, da.0, sum_sq[g].0)),
+                _mm256_fmadd_pd(sa.1, sa.1, _mm256_fmadd_pd(da.1, da.1, sum_sq[g].1)),
+            );
+            sum_prod[g] = if err {
+                let e = Rec64D8(_mm256_sub_pd(sa.0, da.0), _mm256_sub_pd(sa.1, da.1));
+                Rec64D8(
+                    _mm256_fmadd_pd(e.0, e.0, sum_prod[g].0),
+                    _mm256_fmadd_pd(e.1, e.1, sum_prod[g].1),
+                )
+            } else {
+                Rec64D8(
+                    _mm256_fmadd_pd(sa.0, da.0, sum_prod[g].0),
+                    _mm256_fmadd_pd(sa.1, da.1, sum_prod[g].1),
+                )
+            };
+        }
+    }
+    for x in 0..head_end {
+        let add_idx = h_mirror_add_idx(x + r + 1, width).min(wm1);
+        let rem_idx = (r - x).min(wm1);
+        for g in 0..G {
+            let sa = rec64_gather8_256(srows[g], add_idx);
+            let da = rec64_gather8_256(drows[g], add_idx);
+            let sr = rec64_gather8_256(srows[g], rem_idx);
+            let dr = rec64_gather8_256(drows[g], rem_idx);
+            rec64_emit8_256(
+                &mut om1[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_s[g].0, inv.0),
+                    _mm256_mul_pd(sum_s[g].1, inv.1),
+                ),
+            );
+            rec64_emit8_256(
+                &mut om2[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_d[g].0, inv.0),
+                    _mm256_mul_pd(sum_d[g].1, inv.1),
+                ),
+            );
+            rec64_emit8_256(
+                &mut osq[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_sq[g].0, inv.0),
+                    _mm256_mul_pd(sum_sq[g].1, inv.1),
+                ),
+            );
+            rec64_emit8_256(
+                &mut os12[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_prod[g].0, inv.0),
+                    _mm256_mul_pd(sum_prod[g].1, inv.1),
+                ),
+            );
+            sum_s[g] = Rec64D8(
+                _mm256_sub_pd(_mm256_add_pd(sum_s[g].0, sa.0), sr.0),
+                _mm256_sub_pd(_mm256_add_pd(sum_s[g].1, sa.1), sr.1),
+            );
+            sum_d[g] = Rec64D8(
+                _mm256_sub_pd(_mm256_add_pd(sum_d[g].0, da.0), dr.0),
+                _mm256_sub_pd(_mm256_add_pd(sum_d[g].1, da.1), dr.1),
+            );
+            sum_sq[g] = Rec64D8(
+                _mm256_fmadd_pd(
+                    sa.0,
+                    sa.0,
+                    _mm256_fmadd_pd(
+                        da.0,
+                        da.0,
+                        _mm256_fmadd_pd(
+                            _mm256_xor_pd(sr.0, neg),
+                            sr.0,
+                            _mm256_fmadd_pd(_mm256_xor_pd(dr.0, neg), dr.0, sum_sq[g].0),
+                        ),
+                    ),
+                ),
+                _mm256_fmadd_pd(
+                    sa.1,
+                    sa.1,
+                    _mm256_fmadd_pd(
+                        da.1,
+                        da.1,
+                        _mm256_fmadd_pd(
+                            _mm256_xor_pd(sr.1, neg),
+                            sr.1,
+                            _mm256_fmadd_pd(_mm256_xor_pd(dr.1, neg), dr.1, sum_sq[g].1),
+                        ),
+                    ),
+                ),
+            );
+            sum_prod[g] = if err {
+                let ea = Rec64D8(_mm256_sub_pd(sa.0, da.0), _mm256_sub_pd(sa.1, da.1));
+                let er = Rec64D8(_mm256_sub_pd(sr.0, dr.0), _mm256_sub_pd(sr.1, dr.1));
+                Rec64D8(
+                    _mm256_fmadd_pd(
+                        ea.0,
+                        ea.0,
+                        _mm256_fmadd_pd(_mm256_xor_pd(er.0, neg), er.0, sum_prod[g].0),
+                    ),
+                    _mm256_fmadd_pd(
+                        ea.1,
+                        ea.1,
+                        _mm256_fmadd_pd(_mm256_xor_pd(er.1, neg), er.1, sum_prod[g].1),
+                    ),
+                )
+            } else {
+                Rec64D8(
+                    _mm256_fmadd_pd(
+                        sa.0,
+                        da.0,
+                        _mm256_fmadd_pd(_mm256_xor_pd(sr.0, neg), dr.0, sum_prod[g].0),
+                    ),
+                    _mm256_fmadd_pd(
+                        sa.1,
+                        da.1,
+                        _mm256_fmadd_pd(_mm256_xor_pd(sr.1, neg), dr.1, sum_prod[g].1),
+                    ),
+                )
+            };
+        }
+    }
+    let mut x0 = r;
+    for _ in 0..n_blocks {
+        let sadd: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(srows[g], x0 + r + 1));
+        let dadd: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(drows[g], x0 + r + 1));
+        let srem: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(srows[g], x0 - r));
+        let drem: [[__m256; 8]; G] = std::array::from_fn(|g| rec64_ld8x8(drows[g], x0 - r));
+        let mut stage = [[[_mm256_setzero_ps(); 8]; 4]; G];
+        for j in 0..8 {
+            for g in 0..G {
+                let sa = rec64_widen8_256(sadd[g][j]);
+                let da = rec64_widen8_256(dadd[g][j]);
+                let sr = rec64_widen8_256(srem[g][j]);
+                let dr = rec64_widen8_256(drem[g][j]);
+                stage[g][0][j] = rec64_narrow8_256(Rec64D8(
+                    _mm256_mul_pd(sum_s[g].0, inv.0),
+                    _mm256_mul_pd(sum_s[g].1, inv.1),
+                ));
+                stage[g][1][j] = rec64_narrow8_256(Rec64D8(
+                    _mm256_mul_pd(sum_d[g].0, inv.0),
+                    _mm256_mul_pd(sum_d[g].1, inv.1),
+                ));
+                stage[g][2][j] = rec64_narrow8_256(Rec64D8(
+                    _mm256_mul_pd(sum_sq[g].0, inv.0),
+                    _mm256_mul_pd(sum_sq[g].1, inv.1),
+                ));
+                stage[g][3][j] = rec64_narrow8_256(Rec64D8(
+                    _mm256_mul_pd(sum_prod[g].0, inv.0),
+                    _mm256_mul_pd(sum_prod[g].1, inv.1),
+                ));
+                sum_s[g] = Rec64D8(
+                    _mm256_sub_pd(_mm256_add_pd(sum_s[g].0, sa.0), sr.0),
+                    _mm256_sub_pd(_mm256_add_pd(sum_s[g].1, sa.1), sr.1),
+                );
+                sum_d[g] = Rec64D8(
+                    _mm256_sub_pd(_mm256_add_pd(sum_d[g].0, da.0), dr.0),
+                    _mm256_sub_pd(_mm256_add_pd(sum_d[g].1, da.1), dr.1),
+                );
+                sum_sq[g] = Rec64D8(
+                    _mm256_fmadd_pd(
+                        sa.0,
+                        sa.0,
+                        _mm256_fmadd_pd(
+                            da.0,
+                            da.0,
+                            _mm256_fmadd_pd(
+                                _mm256_xor_pd(sr.0, neg),
+                                sr.0,
+                                _mm256_fmadd_pd(_mm256_xor_pd(dr.0, neg), dr.0, sum_sq[g].0),
+                            ),
+                        ),
+                    ),
+                    _mm256_fmadd_pd(
+                        sa.1,
+                        sa.1,
+                        _mm256_fmadd_pd(
+                            da.1,
+                            da.1,
+                            _mm256_fmadd_pd(
+                                _mm256_xor_pd(sr.1, neg),
+                                sr.1,
+                                _mm256_fmadd_pd(_mm256_xor_pd(dr.1, neg), dr.1, sum_sq[g].1),
+                            ),
+                        ),
+                    ),
+                );
+                sum_prod[g] = if err {
+                    let ea = Rec64D8(_mm256_sub_pd(sa.0, da.0), _mm256_sub_pd(sa.1, da.1));
+                    let er = Rec64D8(_mm256_sub_pd(sr.0, dr.0), _mm256_sub_pd(sr.1, dr.1));
+                    Rec64D8(
+                        _mm256_fmadd_pd(
+                            ea.0,
+                            ea.0,
+                            _mm256_fmadd_pd(_mm256_xor_pd(er.0, neg), er.0, sum_prod[g].0),
+                        ),
+                        _mm256_fmadd_pd(
+                            ea.1,
+                            ea.1,
+                            _mm256_fmadd_pd(_mm256_xor_pd(er.1, neg), er.1, sum_prod[g].1),
+                        ),
+                    )
+                } else {
+                    Rec64D8(
+                        _mm256_fmadd_pd(
+                            sa.0,
+                            da.0,
+                            _mm256_fmadd_pd(_mm256_xor_pd(sr.0, neg), dr.0, sum_prod[g].0),
+                        ),
+                        _mm256_fmadd_pd(
+                            sa.1,
+                            da.1,
+                            _mm256_fmadd_pd(_mm256_xor_pd(sr.1, neg), dr.1, sum_prod[g].1),
+                        ),
+                    )
+                };
+            }
+        }
+        for g in 0..G {
+            rec64_store8x8(&mut om1[g], x0, stage[g][0]);
+            rec64_store8x8(&mut om2[g], x0, stage[g][1]);
+            rec64_store8x8(&mut osq[g], x0, stage[g][2]);
+            rec64_store8x8(&mut os12[g], x0, stage[g][3]);
+        }
+        x0 += 8;
+    }
+    for x in x0..width {
+        let add_idx = h_mirror_add_idx(x + r + 1, width).min(wm1);
+        let rem_idx = x - r;
+        for g in 0..G {
+            let sa = rec64_gather8_256(srows[g], add_idx);
+            let da = rec64_gather8_256(drows[g], add_idx);
+            let sr = rec64_gather8_256(srows[g], rem_idx);
+            let dr = rec64_gather8_256(drows[g], rem_idx);
+            rec64_emit8_256(
+                &mut om1[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_s[g].0, inv.0),
+                    _mm256_mul_pd(sum_s[g].1, inv.1),
+                ),
+            );
+            rec64_emit8_256(
+                &mut om2[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_d[g].0, inv.0),
+                    _mm256_mul_pd(sum_d[g].1, inv.1),
+                ),
+            );
+            rec64_emit8_256(
+                &mut osq[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_sq[g].0, inv.0),
+                    _mm256_mul_pd(sum_sq[g].1, inv.1),
+                ),
+            );
+            rec64_emit8_256(
+                &mut os12[g],
+                x,
+                Rec64D8(
+                    _mm256_mul_pd(sum_prod[g].0, inv.0),
+                    _mm256_mul_pd(sum_prod[g].1, inv.1),
+                ),
+            );
+            sum_s[g] = Rec64D8(
+                _mm256_sub_pd(_mm256_add_pd(sum_s[g].0, sa.0), sr.0),
+                _mm256_sub_pd(_mm256_add_pd(sum_s[g].1, sa.1), sr.1),
+            );
+            sum_d[g] = Rec64D8(
+                _mm256_sub_pd(_mm256_add_pd(sum_d[g].0, da.0), dr.0),
+                _mm256_sub_pd(_mm256_add_pd(sum_d[g].1, da.1), dr.1),
+            );
+            sum_sq[g] = Rec64D8(
+                _mm256_fmadd_pd(
+                    sa.0,
+                    sa.0,
+                    _mm256_fmadd_pd(
+                        da.0,
+                        da.0,
+                        _mm256_fmadd_pd(
+                            _mm256_xor_pd(sr.0, neg),
+                            sr.0,
+                            _mm256_fmadd_pd(_mm256_xor_pd(dr.0, neg), dr.0, sum_sq[g].0),
+                        ),
+                    ),
+                ),
+                _mm256_fmadd_pd(
+                    sa.1,
+                    sa.1,
+                    _mm256_fmadd_pd(
+                        da.1,
+                        da.1,
+                        _mm256_fmadd_pd(
+                            _mm256_xor_pd(sr.1, neg),
+                            sr.1,
+                            _mm256_fmadd_pd(_mm256_xor_pd(dr.1, neg), dr.1, sum_sq[g].1),
+                        ),
+                    ),
+                ),
+            );
+            sum_prod[g] = if err {
+                let ea = Rec64D8(_mm256_sub_pd(sa.0, da.0), _mm256_sub_pd(sa.1, da.1));
+                let er = Rec64D8(_mm256_sub_pd(sr.0, dr.0), _mm256_sub_pd(sr.1, dr.1));
+                Rec64D8(
+                    _mm256_fmadd_pd(
+                        ea.0,
+                        ea.0,
+                        _mm256_fmadd_pd(_mm256_xor_pd(er.0, neg), er.0, sum_prod[g].0),
+                    ),
+                    _mm256_fmadd_pd(
+                        ea.1,
+                        ea.1,
+                        _mm256_fmadd_pd(_mm256_xor_pd(er.1, neg), er.1, sum_prod[g].1),
+                    ),
+                )
+            } else {
+                Rec64D8(
+                    _mm256_fmadd_pd(
+                        sa.0,
+                        da.0,
+                        _mm256_fmadd_pd(_mm256_xor_pd(sr.0, neg), dr.0, sum_prod[g].0),
+                    ),
+                    _mm256_fmadd_pd(
+                        sa.1,
+                        da.1,
+                        _mm256_fmadd_pd(_mm256_xor_pd(sr.1, neg), dr.1, sum_prod[g].1),
+                    ),
+                )
+            };
+        }
+    }
+}
+
+/// AVX2 driver for [`rec64_run256`] — same chunking as [`rec64_rows8x8`].
+#[cfg(target_arch = "x86_64")]
+#[archmage::rite(v3)]
+#[allow(clippy::too_many_arguments)]
+fn rec64_rows8x8_avx2(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    let mut y0 = 0;
+    while y0 + 16 <= height {
+        rec64_run256::<2>(
+            &src[y0 * width..(y0 + 16) * width],
+            &dst[y0 * width..(y0 + 16) * width],
+            &mut out_mu1[y0 * width..(y0 + 16) * width],
+            &mut out_mu2[y0 * width..(y0 + 16) * width],
+            &mut out_sigma_sq[y0 * width..(y0 + 16) * width],
+            &mut out_sigma12[y0 * width..(y0 + 16) * width],
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+        y0 += 16;
+    }
+    if y0 + 8 <= height {
+        rec64_run256::<1>(
+            &src[y0 * width..(y0 + 8) * width],
+            &dst[y0 * width..(y0 + 8) * width],
+            &mut out_mu1[y0 * width..(y0 + 8) * width],
+            &mut out_mu2[y0 * width..(y0 + 8) * width],
+            &mut out_sigma_sq[y0 * width..(y0 + 8) * width],
+            &mut out_sigma12[y0 * width..(y0 + 8) * width],
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+        y0 += 8;
+    }
+    for y in y0..height {
+        fused_blur_h_rec64_row(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            y,
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+    }
+}
+
+/// `#[arcane]` dispatch entry points — the same names the `incant!` site
+/// has always called, now backed by the transposed-block bodies. Like the
+/// other `_v4x`/`_v4` arcanes they exist on every x86_64 build (the token
+/// is unsummonable without `avx512`); `rec64_rows8x8` itself resolves to
+/// the `v4` rite under `avx512` and to a `v3` rite delegating to the AVX2
+/// driver otherwise — the canon is tier-invariant either way.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_rec64_rows_v4x(
+    _token: archmage::X64V4xToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    rec64_rows8x8(
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        r,
+        diam,
+        inv_v64,
+        err,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_rec64_rows_v4(
+    _token: archmage::X64V4Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    rec64_rows8x8(
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        r,
+        diam,
+        inv_v64,
+        err,
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_rec64_rows_v3(
+    _token: archmage::X64V3Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    rec64_rows8x8_avx2(
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        r,
+        diam,
+        inv_v64,
+        err,
+    );
 }
 
 /// Scalar-tier siblings of [`fused_blur_h_ssim_rec64_rows`]: scalar and
@@ -8686,6 +9604,31 @@ mod tests {
             (33, 16, 2, true),
             (5, 24, 11, false),
             (64, 9, 7, true),
+            // KERNOPT2 transposed-block paths: widths around the 8-column
+            // block boundary and the `2r + 9` minimum, heights covering
+            // 16-row / 8-row / scalar-tail remainders, radii on both sides
+            // of the `diam <= 16` add-history ring, and the v4x
+            // strided-tile geometries from KERNOPT.
+            (256, 32, 5, true),
+            (512, 17, 5, false),
+            (256, 40, 5, true),
+            (255, 16, 5, false),
+            (257, 9, 5, true),
+            (24, 15, 5, true),
+            (23, 31, 5, false),
+            (21, 33, 5, true),
+            (20, 8, 5, false),
+            (19, 40, 5, true),
+            (18, 25, 2, false),
+            (248, 17, 5, false),
+            (264, 23, 8, true),
+            (96, 11, 7, true),
+            (97, 40, 9, false),
+            (128, 7, 6, true),
+            (13, 16, 6, false),
+            (41, 24, 3, true),
+            (2, 16, 2, false),
+            (1, 8, 0, true),
         ];
         let mut compiled = 0usize;
         // Each candidate receives every run-time argument — the closure is

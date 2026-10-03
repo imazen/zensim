@@ -1067,6 +1067,39 @@ fn rev4_dense_pixel(
     }
 }
 
+/// One chunk's (8 lanes) worth of [`rev4_dense_pixel`] calls — pulled out
+/// of the SIMD chunk loop so the per-element histogram/pool scatter stays
+/// scalar on every tier. On AVX-512 LLVM otherwise fuses the lane loop's
+/// `pool[lane]` and `hist[bin]` indexed updates into
+/// `vgatherqpd`/`vscatterqpd` (4.3x slower than the scalar form,
+/// measured 2026-10-03); `black_box` on the trip count makes the loop
+/// unvectorizable, and `inline(never)` keeps the mangled shape from being
+/// re-created inside the caller. Bit-exact: the calls are identical.
+#[inline(never)]
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+fn rev4_dense_chunk8(
+    r4: &mut Rev4Dense<'_>,
+    d: &[f32; 8],
+    art: &[f32; 8],
+    det: &[f32; 8],
+    mse: &[f32; 8],
+    hfg: &[f32; 8],
+    act: &[f32; 8],
+) {
+    for l in 0..std::hint::black_box(8usize) {
+        rev4_dense_pixel(
+            r4,
+            d[l] as f64,
+            art[l] as f64,
+            det[l] as f64,
+            mse[l] as f64,
+            hfg[l] as f64,
+            act[l] as f64,
+            l,
+        );
+    }
+}
+
 /// REV4 hook bundle for the gradient kernel — C2's ring bins on every
 /// channel and C4's bleed sums on the chroma channels (`mask` present).
 struct Rev4Grad<'a> {
@@ -4941,7 +4974,7 @@ fn dense_block_kernel(
                         transducer_bank,
                         r4,
                     ),
-                    [v3, neon, wasm128, scalar]
+                    [v4x, v4, v3, neon, wasm128, scalar]
                 );
             }
             #[cfg(feature = "oracle")]
@@ -28630,13 +28663,14 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 /// in the same per-pool order. `rev4_dense_pixel` stays scalar per
 /// element (its `scatter` cannot vectorize). `_scalar`/`_wasm128` keep the
 /// scalar canonical body.
-// No v4/v4x variant: on the AVX-512 targets LLVM auto-vectorizes this body's
-// per-element pool scatter (`rev4_dense_pixel`, the `add(l, v)` lane pools)
-// into `vgatherqps`/`vscatterqpd`, which measured 4.3x slower than the v3
-// build of the same body (perf, v2basic Rev4 scalar 1 MP: 58.9 vs 13.6 ms per
-// call set, 2026-10-03). AVX-512 hardware runs the v3 body; the canon is
-// tier-invariant, so the bits are the same.
-#[magetypes(define(f32x8), v3, -scalar)]
+// The AVX-512 builds keep the per-element pool scatter (`rev4_dense_pixel`,
+// the `add(l, v)` lane pools) scalar — LLVM otherwise fuses the 29 pool
+// updates into `vgatherdps`/`vscatterqpd` (4.3x slower than v3, measured
+// 2026-10-03 on the separate-pool form). The chunk update below goes
+// through `f64x8` repr ops (same `vwin_slide64x8!` pattern as fused.rs):
+// each pool is one vector load/add/store, so there is no scalar per-lane
+// RMW for LLVM to vectorize into gather/scatter.
+#[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec(
     token: Token,
@@ -28673,13 +28707,14 @@ fn dense_block_kernel_canon64_vec(
         let mut band = [0.0f64; 35];
         for y in b0..b1 {
             let row = y * width;
-            let mut r = [LanesF64::zero(); 13];
-            let mut p_mw = LanesF64::zero();
-            let mut p_iw = LanesF64::zero();
-            let mut p_m = [LanesF64::zero(); 4];
-            let mut p_i = [LanesF64::zero(); 4];
-            let mut p_kn = [LanesF64::zero(); 3];
-            let mut p_kd = [LanesF64::zero(); 3];
+            // One flat accumulator row: `[r 0..13 | mw | iw | m 0..4 |
+            // i 0..4 | kn 0..3 | kd 0..3]`. The chunk update goes through
+            // `f64x8` repr ops — one vector load/add/store per pool — so
+            // there is no scalar per-lane RMW for the AVX-512 build to
+            // fuse into `vgatherqpd`/`vscatterqpd` (the 4.3x regression
+            // the former v3-only dispatch worked around). The tail slices
+            // give `dense_elem_canon` the same typed pool refs — zero cost.
+            let mut pools = [LanesF64::zero(); 29];
             let full = width / 8;
             let srow = &src[row..row + full * 8];
             let drow = &dst[row..row + full * 8];
@@ -28709,77 +28744,99 @@ fn dense_block_kernel_canon64_vec(
                     transducer_bank,
                     direct,
                 );
-                for j in 0..13 {
-                    r[j].add_chunk(&t[j].to_array());
-                }
-                p_mw.add_chunk(&m_w.to_array());
-                p_iw.add_chunk(&i_w.to_array());
-                for j in 0..4 {
-                    p_m[j].add_chunk(&mv[j].to_array());
-                    p_i[j].add_chunk(&iv[j].to_array());
-                }
-                for j in 0..3 {
-                    p_kn[j].add_chunk(&kn[j].to_array());
-                    p_kd[j].add_chunk(&kd[j].to_array());
+                let bufs: [[f32; 8]; 29] = [
+                    t[0].to_array(),
+                    t[1].to_array(),
+                    t[2].to_array(),
+                    t[3].to_array(),
+                    t[4].to_array(),
+                    t[5].to_array(),
+                    t[6].to_array(),
+                    t[7].to_array(),
+                    t[8].to_array(),
+                    t[9].to_array(),
+                    t[10].to_array(),
+                    t[11].to_array(),
+                    t[12].to_array(),
+                    m_w.to_array(),
+                    i_w.to_array(),
+                    mv[0].to_array(),
+                    mv[1].to_array(),
+                    mv[2].to_array(),
+                    mv[3].to_array(),
+                    iv[0].to_array(),
+                    iv[1].to_array(),
+                    iv[2].to_array(),
+                    iv[3].to_array(),
+                    kn[0].to_array(),
+                    kn[1].to_array(),
+                    kn[2].to_array(),
+                    kd[0].to_array(),
+                    kd[1].to_array(),
+                    kd[2].to_array(),
+                ];
+                for j in 0..29 {
+                    let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
+                    (f64x8::load(token, &pools[j].0) + f64x8::from_array(token, a))
+                        .store(&mut pools[j].0);
                 }
                 if let Some(r4) = r4.as_mut() {
-                    let da = t[0].to_array();
-                    let aa = art_i.to_array();
-                    let ea = det_i.to_array();
-                    let ma = mse_i.to_array();
-                    let ha = t[7].to_array();
-                    let ca = act_v.to_array();
-                    for l in 0..8 {
-                        rev4_dense_pixel(
-                            r4,
-                            da[l] as f64,
-                            aa[l] as f64,
-                            ea[l] as f64,
-                            ma[l] as f64,
-                            ha[l] as f64,
-                            ca[l] as f64,
-                            l,
-                        );
-                    }
+                    rev4_dense_chunk8(
+                        r4,
+                        &t[0].to_array(),
+                        &art_i.to_array(),
+                        &det_i.to_array(),
+                        &mse_i.to_array(),
+                        &t[7].to_array(),
+                        &act_v.to_array(),
+                    );
                 }
             }
             // Scalar tail — the canonical element step verbatim.
-            for x in full * 8..width {
-                let i = row + x;
-                dense_elem_canon(
-                    src[i],
-                    dst[i],
-                    mu1[i],
-                    mu2[i],
-                    ssq[i],
-                    s12[i],
-                    activity[i],
-                    x,
-                    transducer_bank,
-                    direct,
-                    &mut r4,
-                    &mut r,
-                    &mut p_mw,
-                    &mut p_iw,
-                    &mut p_m,
-                    &mut p_i,
-                    &mut p_kn,
-                    &mut p_kd,
-                );
+            {
+                let (r, rest) = pools.split_at_mut(13);
+                let (mw_iw, rest) = rest.split_at_mut(2);
+                let (p_m, rest) = rest.split_at_mut(4);
+                let (p_i, rest) = rest.split_at_mut(4);
+                let (p_kn, p_kd) = rest.split_at_mut(3);
+                let (mw, iw) = mw_iw.split_at_mut(1);
+                for x in full * 8..width {
+                    let i = row + x;
+                    dense_elem_canon(
+                        src[i],
+                        dst[i],
+                        mu1[i],
+                        mu2[i],
+                        ssq[i],
+                        s12[i],
+                        activity[i],
+                        x,
+                        transducer_bank,
+                        direct,
+                        &mut r4,
+                        r.try_into().unwrap(),
+                        &mut mw[0],
+                        &mut iw[0],
+                        p_m.try_into().unwrap(),
+                        p_i.try_into().unwrap(),
+                        p_kn.try_into().unwrap(),
+                        p_kd.try_into().unwrap(),
+                    );
+                }
             }
             for j in 0..13 {
-                band[j] += r[j].fin();
+                band[j] += pools[j].fin();
             }
             for j in 0..3 {
-                band[13 + j * 2] += p_kn[j].fin();
-                band[14 + j * 2] += p_kd[j].fin();
+                band[13 + j * 2] += pools[23 + j].fin();
+                band[14 + j * 2] += pools[26 + j].fin();
             }
-            let mw_row = p_mw.fin();
-            let iw_row = p_iw.fin();
+            let mw_row = pools[13].fin();
+            let iw_row = pools[14].fin();
             for j in 0..4 {
-                band[19 + j * 2] += p_m[j].fin();
+                band[19 + j * 2] += pools[15 + j].fin();
                 band[20 + j * 2] += mw_row;
-                band[27 + j * 2] += p_i[j].fin();
+                band[27 + j * 2] += pools[19 + j].fin();
                 band[28 + j * 2] += iw_row;
             }
         }
@@ -29428,9 +29485,48 @@ mod featcanon_contract_tests {
                     }
                 );
             }
-            // No v4/v4x arm: AVX-512 hardware dispatches to the v3 body (see the
-            // note on `dense_block_kernel_canon64_vec`); dispatch-level tier
-            // coverage stays in `rev4serve_gate`.
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+            if let Some(t) = archmage::X64V4Token::summon() {
+                check_variant!(
+                    "v4",
+                    move |s: &[f32],
+                          d: &[f32],
+                          m1: &[f32],
+                          m2: &[f32],
+                          q: &[f32],
+                          p: &[f32],
+                          act: &[f32],
+                          w: usize,
+                          h: usize,
+                          bank: bool,
+                          r4: Option<Rev4Dense<'_>>| {
+                        dense_block_kernel_canon64_vec_v4(
+                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
+                        )
+                    }
+                );
+            }
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+            if let Some(t) = archmage::X64V4xToken::summon() {
+                check_variant!(
+                    "v4x",
+                    move |s: &[f32],
+                          d: &[f32],
+                          m1: &[f32],
+                          m2: &[f32],
+                          q: &[f32],
+                          p: &[f32],
+                          act: &[f32],
+                          w: usize,
+                          h: usize,
+                          bank: bool,
+                          r4: Option<Rev4Dense<'_>>| {
+                        dense_block_kernel_canon64_vec_v4x(
+                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
+                        )
+                    }
+                );
+            }
             assert!(compiled >= 1);
         }
 
