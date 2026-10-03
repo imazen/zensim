@@ -257,9 +257,36 @@ def cmd_score(args) -> int:
     return rc
 
 
+# Design log E16 (registered 2026-10-03 10:43 MT): confirm and size the coverage recipe from E15.
+E16_ARMS = [("fd_w1_confirm", 1.0, 0xfd, range(3, 10)),
+            *[(f"fd_w{w:g}", w, 0xfd, range(5)) for w in (4.0, 16.0)],
+            *[(f"bd_w{w:g}", w, 0xbd, range(5)) for w in (1.0, 4.0, 16.0)],
+            *[(f"98_w{w:g}", w, 0x98, range(5)) for w in (4.0, 16.0)]]
+
+
+def cmd_grid16(args) -> int:
+    cells = [{"name": f"{spec(w, m)}__{HEAD}/without_{s}_s{i}",
+              "argv": ["v2_lodo_mlp.py", "--spec", spec(w, m), "--head", HEAD, "--heldout", s, "--seed-index", str(i),
+                       "--root", str(V2)]}
+             for _, w, m, seeds in E16_ARMS for s in SOURCE_ORDER for i in seeds]
+    todo = [c for c in cells if not (V2 / "cells" / c["name"] / "result.json").is_file()]
+    Path(args.out).write_text(json.dumps({"program_sha": args.program_sha, "data_sha": args.data_sha, "cells": todo}, indent=1))
+    print(json.dumps({"cells": len(cells), "to_run": len(todo), "arms": len(E16_ARMS)}))
+    return 0
+
+
+def cmd_score16(args) -> int:
+    import e13_teacher as e13
+    rc = 0
+    for label, w, m, seeds in E16_ARMS:  # each arm against the control at its own seeds
+        e13.SEEDS = seeds
+        rc |= e13.score_arms([(label, spec(w, m))], f"e16_{label}", args.monotonicity)
+    return rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["select", "generate", "extract", "table", "grid", "score"])
+    ap.add_argument("cmd", choices=["select", "generate", "extract", "table", "grid", "score", "grid16", "score16"])
     ap.add_argument("--root")
     ap.add_argument("--out")
     ap.add_argument("--weight", type=float, default=4.0)
@@ -268,7 +295,7 @@ def main() -> int:
     ap.add_argument("--monotonicity", action="store_true")
     args = ap.parse_args()
     return {"select": cmd_select, "generate": cmd_generate, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid,
-            "score": cmd_score}[args.cmd](args)
+            "score": cmd_score, "grid16": cmd_grid16, "score16": cmd_score16}[args.cmd](args)
 
 
 if __name__ == "__main__":
