@@ -5016,6 +5016,270 @@ fn fused_blur_h_ssim_inner(
     }
 }
 
+/// One row's Rec64 horizontal SSIM window — the scalar canonical body,
+/// extracted verbatim so the 8-row vector body and the scalar/wasm stubs
+/// share exactly this op sequence for the `height % 8` tail.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn fused_blur_h_rec64_row(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    y: usize,
+    width: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    let row = y * width;
+    let mut sum_s = 0.0f64;
+    let mut sum_d = 0.0f64;
+    let mut sum_sq = 0.0f64;
+    let mut sum_prod = 0.0f64;
+    for i in 0..diam {
+        let idx = if i <= r {
+            (r - i).min(width - 1)
+        } else {
+            (i - r).min(width - 1)
+        };
+        let s = src[row + idx] as f64;
+        let d = dst[row + idx] as f64;
+        sum_s += s;
+        sum_d += d;
+        sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+        sum_prod = if err {
+            let e = s - d;
+            e.mul_add(e, sum_prod)
+        } else {
+            s.mul_add(d, sum_prod)
+        };
+    }
+    for x in 0..width {
+        out_mu1[row + x] = (sum_s * inv_v64) as f32;
+        out_mu2[row + x] = (sum_d * inv_v64) as f32;
+        out_sigma_sq[row + x] = (sum_sq * inv_v64) as f32;
+        out_sigma12[row + x] = (sum_prod * inv_v64) as f32;
+
+        let add_raw = x + r + 1;
+        let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
+        let rem_i = x as isize - r as isize;
+        let rem_idx = (if rem_i < 0 {
+            rem_i.unsigned_abs()
+        } else {
+            rem_i as usize
+        })
+        .min(width - 1);
+        let sa = src[row + add_idx] as f64;
+        let da = dst[row + add_idx] as f64;
+        let sr = src[row + rem_idx] as f64;
+        let dr = dst[row + rem_idx] as f64;
+        sum_s = sum_s + sa - sr;
+        sum_d = sum_d + da - dr;
+        sum_sq = sa.mul_add(
+            sa,
+            da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
+        );
+        sum_prod = if err {
+            let ea = sa - da;
+            let er = sr - dr;
+            ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+        } else {
+            sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+        };
+    }
+}
+
+/// **canon64 vector body** — the Rec64 horizontal window run on eight
+/// independent ROWS at a time through `f64x8`. Every lane is one row's own
+/// scalar recurrence (`fused_blur_h_rec64_row`), so the per-row op sequence
+/// — the `+add −rem` sum slide, the `mul_add`-fused square/product updates
+/// in their exact order — is the scalar body's verbatim; lanes never mix.
+/// Stores are per-row `(sum * inv_v64) as f32` from `to_array()`. `height
+/// % 8` tail rows take the scalar row body. `_scalar`/`_wasm128` keep the
+/// scalar body: their `mul_add` is unfused either way.
+#[magetypes(define(f64x8), v4x, v4, v3, neon, -scalar)]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_rec64_rows(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    let inv_v = f64x8::splat(token, inv_v64);
+    let groups = height / 8;
+    for g in 0..groups {
+        let y0 = g * 8;
+        let mut sum_s = f64x8::zero(token);
+        let mut sum_d = f64x8::zero(token);
+        let mut sum_sq = f64x8::zero(token);
+        let mut sum_prod = f64x8::zero(token);
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let sa: [f64; 8] = std::array::from_fn(|l| src[(y0 + l) * width + idx] as f64);
+            let da: [f64; 8] = std::array::from_fn(|l| dst[(y0 + l) * width + idx] as f64);
+            let sav = f64x8::from_array(token, sa);
+            let dav = f64x8::from_array(token, da);
+            sum_s = sum_s + sav;
+            sum_d = sum_d + dav;
+            sum_sq = sav.mul_add(sav, dav.mul_add(dav, sum_sq));
+            sum_prod = if err {
+                let e = sav - dav;
+                e.mul_add(e, sum_prod)
+            } else {
+                sav.mul_add(dav, sum_prod)
+            };
+        }
+        for x in 0..width {
+            let m1 = (sum_s * inv_v).to_array();
+            let m2 = (sum_d * inv_v).to_array();
+            let sq = (sum_sq * inv_v).to_array();
+            let s12 = (sum_prod * inv_v).to_array();
+            for l in 0..8 {
+                let i = (y0 + l) * width + x;
+                out_mu1[i] = m1[l] as f32;
+                out_mu2[i] = m2[l] as f32;
+                out_sigma_sq[i] = sq[l] as f32;
+                out_sigma12[i] = s12[l] as f32;
+            }
+
+            let add_raw = x + r + 1;
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = (if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            })
+            .min(width - 1);
+            let sa: [f64; 8] = std::array::from_fn(|l| src[(y0 + l) * width + add_idx] as f64);
+            let da: [f64; 8] = std::array::from_fn(|l| dst[(y0 + l) * width + add_idx] as f64);
+            let sr: [f64; 8] = std::array::from_fn(|l| src[(y0 + l) * width + rem_idx] as f64);
+            let dr: [f64; 8] = std::array::from_fn(|l| dst[(y0 + l) * width + rem_idx] as f64);
+            let sav = f64x8::from_array(token, sa);
+            let dav = f64x8::from_array(token, da);
+            let srv = f64x8::from_array(token, sr);
+            let drv = f64x8::from_array(token, dr);
+            sum_s = sum_s + sav - srv;
+            sum_d = sum_d + dav - drv;
+            sum_sq = sav.mul_add(
+                sav,
+                dav.mul_add(dav, (-srv).mul_add(srv, (-drv).mul_add(drv, sum_sq))),
+            );
+            sum_prod = if err {
+                let ea = sav - dav;
+                let er = srv - drv;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sav.mul_add(dav, (-srv).mul_add(drv, sum_prod))
+            };
+        }
+    }
+    for y in groups * 8..height {
+        fused_blur_h_rec64_row(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            y,
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+    }
+}
+
+/// Scalar-tier siblings of [`fused_blur_h_ssim_rec64_rows`]: scalar and
+/// wasm128 keep the scalar Rec64 row body — their `mul_add` is unfused.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_rec64_rows_scalar(
+    _token: archmage::ScalarToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    for y in 0..height {
+        fused_blur_h_rec64_row(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            y,
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+    }
+}
+
+/// Wasm128 sibling of [`fused_blur_h_ssim_rec64_rows_scalar`].
+#[allow(clippy::too_many_arguments, dead_code)]
+fn fused_blur_h_ssim_rec64_rows_wasm128(
+    _token: archmage::Wasm128Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    for y in 0..height {
+        fused_blur_h_rec64_row(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            y,
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+    }
+}
+
 /// **FEATCANON canonical fused H-blur** — the same sliding-moment arithmetic
 /// as [`fused_blur_h_ssim_inner`] written as one plain-Rust body over inherent
 /// `f32` ops. Every product-sum keeps the vector body's fused chain
@@ -5055,6 +5319,30 @@ fn fused_blur_h_ssim_canon(
     // exactly the shipped blur's contribution).
     let blur = crate::featcanon::canon_blur_axis(mode);
 
+    // rev4vec2: Rec64 → the 8-row f64x8 body on the fused-FMA tiers
+    // (bit-identical per-row op sequence); scalar + wasm128 run the same
+    // code as scalar rows. Other (oracle) axes stay in the loop below.
+    if matches!(blur, crate::featcanon::BlurMode::Rec64) {
+        incant!(
+            fused_blur_h_ssim_rec64_rows(
+                src,
+                dst,
+                out_mu1,
+                out_mu2,
+                out_sigma_sq,
+                out_sigma12,
+                width,
+                height,
+                r,
+                diam,
+                inv_v64,
+                err,
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        );
+        return;
+    }
+
     for y in 0..height {
         let row = y * width;
 
@@ -5086,67 +5374,6 @@ fn fused_blur_h_ssim_canon(
                 out_mu2[row + x] = (sum_d * inv_v64) as f32;
                 out_sigma_sq[row + x] = (sum_sq * inv_v64) as f32;
                 out_sigma12[row + x] = (sum_prod * inv_v64) as f32;
-            }
-            continue;
-        }
-
-        // rev4canon: `Rec64` is the product arm at Rev4 — the shipped
-        // sliding recurrence widened to f64, same op order.
-        if matches!(blur, crate::featcanon::BlurMode::Rec64) {
-            let mut sum_s = 0.0f64;
-            let mut sum_d = 0.0f64;
-            let mut sum_sq = 0.0f64;
-            let mut sum_prod = 0.0f64;
-            for i in 0..diam {
-                let idx = if i <= r {
-                    (r - i).min(width - 1)
-                } else {
-                    (i - r).min(width - 1)
-                };
-                let s = src[row + idx] as f64;
-                let d = dst[row + idx] as f64;
-                sum_s += s;
-                sum_d += d;
-                sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-                sum_prod = if err {
-                    let e = s - d;
-                    e.mul_add(e, sum_prod)
-                } else {
-                    s.mul_add(d, sum_prod)
-                };
-            }
-            for x in 0..width {
-                out_mu1[row + x] = (sum_s * inv_v64) as f32;
-                out_mu2[row + x] = (sum_d * inv_v64) as f32;
-                out_sigma_sq[row + x] = (sum_sq * inv_v64) as f32;
-                out_sigma12[row + x] = (sum_prod * inv_v64) as f32;
-
-                let add_raw = x + r + 1;
-                let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
-                let rem_i = x as isize - r as isize;
-                let rem_idx = (if rem_i < 0 {
-                    rem_i.unsigned_abs()
-                } else {
-                    rem_i as usize
-                })
-                .min(width - 1);
-                let sa = src[row + add_idx] as f64;
-                let da = dst[row + add_idx] as f64;
-                let sr = src[row + rem_idx] as f64;
-                let dr = dst[row + rem_idx] as f64;
-                sum_s = sum_s + sa - sr;
-                sum_d = sum_d + da - dr;
-                sum_sq = sa.mul_add(
-                    sa,
-                    da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
-                );
-                sum_prod = if err {
-                    let ea = sa - da;
-                    let er = sr - dr;
-                    ea.mul_add(ea, (-er).mul_add(er, sum_prod))
-                } else {
-                    sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
-                };
             }
             continue;
         }
@@ -6000,6 +6227,9 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use archmage::SimdToken as _;
+
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn padded_box_rows_preserve_contiguous_bits() {
@@ -8113,5 +8343,225 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// REV4VEC2 bit-exactness gate: the 8-row f64x8 Rec64 body must
+    /// reproduce `fused_blur_h_rec64_row` on every row **bit for bit** —
+    /// each compiled tier variant invoked directly on its summoned token,
+    /// so no global dispatch state is touched. Odd widths/heights, tiny
+    /// images, every radius, `err` both ways, specials-injected planes.
+    #[test]
+    fn rec64_rows_vec_matches_scalar_body_on_every_compiled_tier() {
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                let mut x = self.0;
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                self.0 = x;
+                x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+            }
+            fn f32v(&mut self) -> f32 {
+                // Mostly sane magnitudes, a few raw bit patterns (±0,
+                // denormals, inf, NaN) injected every 257th value.
+                if self.next().is_multiple_of(257) {
+                    f32::from_bits(self.next() as u32)
+                } else {
+                    (self.next() % 4096) as f32 / 128.0 - 16.0
+                }
+            }
+        }
+
+        fn run_scalar(
+            src: &[f32],
+            dst: &[f32],
+            width: usize,
+            height: usize,
+            r: usize,
+            diam: usize,
+            inv_v64: f64,
+            err: bool,
+        ) -> [Vec<f32>; 4] {
+            let mut out = std::array::from_fn(|_| vec![0.0; width * height]);
+            for y in 0..height {
+                let (m1, rest) = out.split_at_mut(1);
+                let (m2, rest) = rest.split_at_mut(1);
+                let (sq, s12) = rest.split_at_mut(1);
+                super::fused_blur_h_rec64_row(
+                    src,
+                    dst,
+                    &mut m1[0],
+                    &mut m2[0],
+                    &mut sq[0],
+                    &mut s12[0],
+                    y,
+                    width,
+                    r,
+                    diam,
+                    inv_v64,
+                    err,
+                );
+            }
+            out
+        }
+
+        fn run_vec(
+            f: impl Fn(&[f32], &[f32], &mut [f32], &mut [f32], &mut [f32], &mut [f32]),
+            src: &[f32],
+            dst: &[f32],
+            len: usize,
+        ) -> [Vec<f32>; 4] {
+            let mut out = std::array::from_fn(|_| vec![0.0; len]);
+            let (m1, rest) = out.split_at_mut(1);
+            let (m2, rest) = rest.split_at_mut(1);
+            let (sq, s12) = rest.split_at_mut(1);
+            f(src, dst, &mut m1[0], &mut m2[0], &mut sq[0], &mut s12[0]);
+            out
+        }
+
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let cases: Vec<(usize, usize, usize, bool)> = vec![
+            (3, 9, 1, true),
+            (8, 8, 2, false),
+            (9, 17, 4, true),
+            (15, 1, 0, false),
+            (16, 33, 5, true),
+            (17, 8, 3, false),
+            (33, 16, 2, true),
+            (5, 24, 11, false),
+            (64, 9, 7, true),
+        ];
+        let mut compiled = 0usize;
+        // Each candidate receives every run-time argument — the closure is
+        // defined once per tier, invoked per case.
+        type RowFn = dyn Fn(
+            &[f32],
+            &[f32],
+            &mut [f32],
+            &mut [f32],
+            &mut [f32],
+            &mut [f32],
+            usize,
+            usize,
+            usize,
+            usize,
+            f64,
+            bool,
+        );
+        macro_rules! check_variant {
+            ($name:literal, $f:expr) => {{
+                compiled += 1;
+                let f: &RowFn = &$f;
+                for &(w, h, r, err) in &cases {
+                    let diam = 2 * r + 1;
+                    let inv = 1.0f64 / diam as f64;
+                    let len = w * h;
+                    let src: Vec<f32> = (0..len).map(|_| rng.f32v()).collect();
+                    let dst: Vec<f32> = (0..len).map(|_| rng.f32v()).collect();
+                    let want = run_scalar(&src, &dst, w, h, r, diam, inv, err);
+                    let got = run_vec(
+                        |s, dd, a, b, c, d| f(s, dd, a, b, c, d, w, h, r, diam, inv, err),
+                        &src,
+                        &dst,
+                        len,
+                    );
+                    for (p, (g, e)) in got.iter().zip(&want).enumerate() {
+                        for i in 0..len {
+                            assert_eq!(
+                                g[i].to_bits(),
+                                e[i].to_bits(),
+                                "{}: plane {} differs at {i} (w={w} h={h} r={r} err={err})",
+                                $name,
+                                p
+                            );
+                        }
+                    }
+                }
+            }};
+        }
+        check_variant!("scalar", |s: &[f32],
+                                  dd: &[f32],
+                                  m1: &mut [f32],
+                                  m2: &mut [f32],
+                                  sq: &mut [f32],
+                                  s12: &mut [f32],
+                                  w: usize,
+                                  h: usize,
+                                  r: usize,
+                                  diam: usize,
+                                  inv: f64,
+                                  err: bool| {
+            super::fused_blur_h_ssim_rec64_rows_scalar(
+                archmage::ScalarToken::summon().expect("infallible"),
+                s,
+                dd,
+                m1,
+                m2,
+                sq,
+                s12,
+                w,
+                h,
+                r,
+                diam,
+                inv,
+                err,
+            )
+        });
+        if let Some(t) = archmage::X64V3Token::summon() {
+            check_variant!("v3", move |s: &[f32],
+                                       dd: &[f32],
+                                       m1: &mut [f32],
+                                       m2: &mut [f32],
+                                       sq: &mut [f32],
+                                       s12: &mut [f32],
+                                       w: usize,
+                                       h: usize,
+                                       r: usize,
+                                       diam: usize,
+                                       inv: f64,
+                                       err: bool| {
+                super::fused_blur_h_ssim_rec64_rows_v3(
+                    t, s, dd, m1, m2, sq, s12, w, h, r, diam, inv, err,
+                )
+            });
+        }
+        if let Some(t) = archmage::X64V4Token::summon() {
+            check_variant!("v4", move |s: &[f32],
+                                       dd: &[f32],
+                                       m1: &mut [f32],
+                                       m2: &mut [f32],
+                                       sq: &mut [f32],
+                                       s12: &mut [f32],
+                                       w: usize,
+                                       h: usize,
+                                       r: usize,
+                                       diam: usize,
+                                       inv: f64,
+                                       err: bool| {
+                super::fused_blur_h_ssim_rec64_rows_v4(
+                    t, s, dd, m1, m2, sq, s12, w, h, r, diam, inv, err,
+                )
+            });
+        }
+        if let Some(t) = archmage::X64V4xToken::summon() {
+            check_variant!("v4x", move |s: &[f32],
+                                        dd: &[f32],
+                                        m1: &mut [f32],
+                                        m2: &mut [f32],
+                                        sq: &mut [f32],
+                                        s12: &mut [f32],
+                                        w: usize,
+                                        h: usize,
+                                        r: usize,
+                                        diam: usize,
+                                        inv: f64,
+                                        err: bool| {
+                super::fused_blur_h_ssim_rec64_rows_v4x(
+                    t, s, dd, m1, m2, sq, s12, w, h, r, diam, inv, err,
+                )
+            });
+        }
+        assert!(compiled >= 1, "no SIMD tier compiled on this host");
     }
 }

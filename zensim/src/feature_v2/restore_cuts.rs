@@ -33,6 +33,8 @@ use super::{
 };
 use crate::feature_defs::FormulaRevision;
 use crate::source::ImageSource;
+use archmage::incant;
+use archmage::magetypes;
 
 /// Which restored-cut side passes to run.
 #[derive(Clone, Copy)]
@@ -238,6 +240,259 @@ struct CellOut {
     z: [f64; Z1MAX_PER_CELL],
 }
 
+/// The scalar per-element map evaluation — shared by the `exact` arm, the
+/// vector body's `width % 8` tail, and the `_scalar`/`_wasm128` stubs.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn restore_cuts_map_elem(
+    sp: &[f32],
+    dp: &[f32],
+    mu1_b: &[f32],
+    mu2_b: &[f32],
+    sd_b: &[f32],
+    brow: usize,
+    prow: usize,
+    x: usize,
+    rows: &mut [Vec<f64>; 8],
+) {
+    let (bi, pi) = (brow + x, prow + x);
+    let (sv, dv) = (sp[pi], dp[pi]);
+    let (mu1, mu2) = (mu1_b[bi], mu2_b[bi]);
+    let sd = sd_b[bi];
+    let diff1 = (sv - mu1).abs();
+    let diff2 = (dv - mu2).abs();
+    let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+    let pd = sv - dv;
+    let vs = sv - mu1;
+    let vd = dv - mu2;
+    rows[MAP_SD][x] = f64::from(sd);
+    rows[MAP_ART][x] = f64::from(ed.max(0.0));
+    rows[MAP_DET][x] = f64::from((-ed).max(0.0));
+    rows[MAP_MSE][x] = f64::from(pd * pd);
+    rows[MAP_HFSS][x] = f64::from(vs * vs);
+    rows[MAP_HFSD][x] = f64::from(vd * vd);
+    rows[MAP_HFAS][x] = f64::from(diff1);
+    rows[MAP_HFAD][x] = f64::from(diff2);
+}
+
+/// The scalar f64 (`exact`) per-element map evaluation — oracle arm.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn restore_cuts_map_elem_exact(
+    sp: &[f32],
+    dp: &[f32],
+    mu1_b: &[f32],
+    mu2_b: &[f32],
+    sd_b: &[f32],
+    brow: usize,
+    prow: usize,
+    x: usize,
+    rows: &mut [Vec<f64>; 8],
+) {
+    let (bi, pi) = (brow + x, prow + x);
+    let (sv, dv) = (sp[pi], dp[pi]);
+    let (mu1, mu2) = (mu1_b[bi], mu2_b[bi]);
+    let sd = sd_b[bi];
+    let (sv, dv) = (f64::from(sv), f64::from(dv));
+    let (mu1, mu2) = (f64::from(mu1), f64::from(mu2));
+    let diff1 = (sv - mu1).abs();
+    let diff2 = (dv - mu2).abs();
+    let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
+    let pd = sv - dv;
+    let vs = sv - mu1;
+    let vd = dv - mu2;
+    rows[MAP_SD][x] = f64::from(sd);
+    rows[MAP_ART][x] = ed.max(0.0);
+    rows[MAP_DET][x] = (-ed).max(0.0);
+    rows[MAP_MSE][x] = pd * pd;
+    rows[MAP_HFSS][x] = vs * vs;
+    rows[MAP_HFSD][x] = vd * vd;
+    rows[MAP_HFAS][x] = diff1;
+    rows[MAP_HFAD][x] = diff2;
+}
+
+/// One row's map evaluation + mapdev pushes, scalar (the whole row on
+/// `_scalar`/`_wasm128`, or the element steps the vector body falls back
+/// to under `exact`).
+#[allow(clippy::too_many_arguments)]
+fn restore_cuts_row_work_plain(
+    sp_row: &[f32],
+    dp_row: &[f32],
+    mu1_row: &[f32],
+    mu2_row: &[f32],
+    sd_row: &[f32],
+    width: usize,
+    rows: &mut [Vec<f64>; 8],
+    devv: Option<&mut [crate::featcanon::WelfordVar; MAPDEV_PER_CELL]>,
+    exact: bool,
+) {
+    for x in 0..width {
+        if exact {
+            restore_cuts_map_elem_exact(sp_row, dp_row, mu1_row, mu2_row, sd_row, 0, 0, x, rows);
+        } else {
+            restore_cuts_map_elem(sp_row, dp_row, mu1_row, mu2_row, sd_row, 0, 0, x, rows);
+        }
+    }
+    if let Some(devv) = devv {
+        for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
+            .into_iter()
+            .enumerate()
+        {
+            for (x, &v) in rows[map].iter().enumerate() {
+                devv[k].push(x, v);
+            }
+        }
+    }
+}
+
+/// **rev4vec2 canon64 row body** — one row's eight map evaluations plus the
+/// `Lanes` mapdev pushes, chunked eight pixels at a time. The map formulas
+/// are elementwise (`abs`, `max`, `/` — no `mul_add` anywhere), so an
+/// `f32x8` lane IS one pixel's scalar formula; every result widens
+/// `f64::from` per element into the same `rows` stores.
+///
+/// `WelfordVar::Lanes` pushes keep per-lane sequential semantics exactly:
+/// an 8-aligned chunk maps lanes `x0..x0+8` onto lanes 0..7, and the
+/// `WelfordCell::push` update (`n += 1`; `mean += change / n`; `m2 +=
+/// change * (x − mean)`) runs as f64x8 lane ops — `change / n` stays a
+/// real division, `change * (x − mean)` an UNFUSED multiply-then-add, so
+/// every lane sees its identical op sequence. Other `WelfordVar` variants
+/// and `exact` keep the sequential/scalar body; `_scalar`/`_wasm128` run
+/// it whole.
+#[magetypes(define(f32x8, f64x8), v4x, v4, v3, neon, -scalar)]
+#[allow(clippy::too_many_arguments)]
+fn restore_cuts_row_work(
+    token: Token,
+    sp_row: &[f32],
+    dp_row: &[f32],
+    mu1_row: &[f32],
+    mu2_row: &[f32],
+    sd_row: &[f32],
+    width: usize,
+    rows: &mut [Vec<f64>; 8],
+    devv: Option<&mut [crate::featcanon::WelfordVar; MAPDEV_PER_CELL]>,
+    exact: bool,
+) {
+    let one = f32x8::splat(token, 1.0);
+    let zero = f32x8::zero(token);
+    let full = width / 8;
+    if !exact {
+        let widen = |v: f32x8| -> [f64; 8] {
+            let a = v.to_array();
+            std::array::from_fn(|i| f64::from(a[i]))
+        };
+        for c in 0..full {
+            let x0 = c * 8;
+            let sv = f32x8::load(token, sp_row[x0..x0 + 8].try_into().unwrap());
+            let dv = f32x8::load(token, dp_row[x0..x0 + 8].try_into().unwrap());
+            let m1v = f32x8::load(token, mu1_row[x0..x0 + 8].try_into().unwrap());
+            let m2v = f32x8::load(token, mu2_row[x0..x0 + 8].try_into().unwrap());
+            let sdv = f32x8::load(token, sd_row[x0..x0 + 8].try_into().unwrap());
+            let diff1 = (sv - m1v).abs();
+            let diff2 = (dv - m2v).abs();
+            let ed = (one + diff2) / (one + diff1) - one;
+            let pd = sv - dv;
+            let vs = sv - m1v;
+            let vd = dv - m2v;
+            rows[MAP_SD][x0..x0 + 8].copy_from_slice(&widen(sdv));
+            rows[MAP_ART][x0..x0 + 8].copy_from_slice(&widen(ed.max(zero)));
+            rows[MAP_DET][x0..x0 + 8].copy_from_slice(&widen((-ed).max(zero)));
+            rows[MAP_MSE][x0..x0 + 8].copy_from_slice(&widen(pd * pd));
+            rows[MAP_HFSS][x0..x0 + 8].copy_from_slice(&widen(vs * vs));
+            rows[MAP_HFSD][x0..x0 + 8].copy_from_slice(&widen(vd * vd));
+            rows[MAP_HFAS][x0..x0 + 8].copy_from_slice(&widen(diff1));
+            rows[MAP_HFAD][x0..x0 + 8].copy_from_slice(&widen(diff2));
+        }
+    }
+    // Scalar tail (and the whole row under `exact`) — the element steps.
+    let tail = if exact { 0 } else { full * 8 };
+    for x in tail..width {
+        if exact {
+            restore_cuts_map_elem_exact(sp_row, dp_row, mu1_row, mu2_row, sd_row, 0, 0, x, rows);
+        } else {
+            restore_cuts_map_elem(sp_row, dp_row, mu1_row, mu2_row, sd_row, 0, 0, x, rows);
+        }
+    }
+    if let Some(devv) = devv {
+        for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
+            .into_iter()
+            .enumerate()
+        {
+            match &mut devv[k] {
+                crate::featcanon::WelfordVar::Lanes(lanes) => {
+                    let row = &rows[map];
+                    let mut n_v =
+                        f64x8::from_array(token, std::array::from_fn(|l| lanes[l].n as f64));
+                    let mut mean_v =
+                        f64x8::from_array(token, std::array::from_fn(|l| lanes[l].mean));
+                    let mut m2_v = f64x8::from_array(token, std::array::from_fn(|l| lanes[l].m2));
+                    let n1 = f64x8::splat(token, 1.0);
+                    for c in 0..full {
+                        let xv = f64x8::load(token, row[c * 8..c * 8 + 8].try_into().unwrap());
+                        n_v += n1;
+                        let change = xv - mean_v;
+                        mean_v += change / n_v;
+                        m2_v += change * (xv - mean_v);
+                    }
+                    let (na, mea, m2a) = (n_v.to_array(), mean_v.to_array(), m2_v.to_array());
+                    for (l, cell) in lanes.iter_mut().enumerate() {
+                        cell.n = na[l] as u64;
+                        cell.mean = mea[l];
+                        cell.m2 = m2a[l];
+                    }
+                    for x in full * 8..width {
+                        lanes[x & 7].push(row[x]);
+                    }
+                }
+                other => {
+                    for (x, &v) in rows[map].iter().enumerate() {
+                        other.push(x, v);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Scalar-tier siblings of [`restore_cuts_row_work`]: scalar and wasm128
+/// keep the scalar row body.
+#[allow(clippy::too_many_arguments)]
+fn restore_cuts_row_work_scalar(
+    _token: archmage::ScalarToken,
+    sp_row: &[f32],
+    dp_row: &[f32],
+    mu1_row: &[f32],
+    mu2_row: &[f32],
+    sd_row: &[f32],
+    width: usize,
+    rows: &mut [Vec<f64>; 8],
+    devv: Option<&mut [crate::featcanon::WelfordVar; MAPDEV_PER_CELL]>,
+    exact: bool,
+) {
+    restore_cuts_row_work_plain(
+        sp_row, dp_row, mu1_row, mu2_row, sd_row, width, rows, devv, exact,
+    );
+}
+
+/// Wasm128 sibling of [`restore_cuts_row_work_scalar`].
+#[allow(clippy::too_many_arguments, dead_code)]
+fn restore_cuts_row_work_wasm128(
+    _token: archmage::Wasm128Token,
+    sp_row: &[f32],
+    dp_row: &[f32],
+    mu1_row: &[f32],
+    mu2_row: &[f32],
+    sd_row: &[f32],
+    width: usize,
+    rows: &mut [Vec<f64>; 8],
+    devv: Option<&mut [crate::featcanon::WelfordVar; MAPDEV_PER_CELL]>,
+    exact: bool,
+) {
+    restore_cuts_row_work_plain(
+        sp_row, dp_row, mu1_row, mu2_row, sd_row, width, rows, devv, exact,
+    );
+}
+
 /// Run the v1 band loop over one plane pair and feed every inner row's eight
 /// maps to the requested consumers, in plane row order.
 fn run_cell(
@@ -338,68 +593,31 @@ fn run_cell(
         for lr in inner_start..inner_start + inner_h {
             let y = top + lr;
             let (brow, prow) = (lr * width, y * width);
-            #[allow(clippy::needless_range_loop)] // x derives offsets across eight distinct arrays
-            for x in 0..width {
-                let (bi, pi) = (brow + x, prow + x);
-                let (sv, dv) = (sp[pi], dp[pi]);
-                let (mu1, mu2) = (mu1_b[bi], mu2_b[bi]);
-                let sd = sd_b[bi];
-                if exact {
-                    // f64 element evaluation of the same map formulas — the
-                    // oracle's element axis (the f32 blur planes stay the
-                    // terms' inputs; their precision is the blur axis's
-                    // separate measurement).
-                    let (sv, dv) = (f64::from(sv), f64::from(dv));
-                    let (mu1, mu2) = (f64::from(mu1), f64::from(mu2));
-                    let diff1 = (sv - mu1).abs();
-                    let diff2 = (dv - mu2).abs();
-                    let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
-                    let pd = sv - dv;
-                    let vs = sv - mu1;
-                    let vd = dv - mu2;
-                    rows[MAP_SD][x] = f64::from(sd);
-                    rows[MAP_ART][x] = ed.max(0.0);
-                    rows[MAP_DET][x] = (-ed).max(0.0);
-                    rows[MAP_MSE][x] = pd * pd;
-                    rows[MAP_HFSS][x] = vs * vs;
-                    rows[MAP_HFSD][x] = vd * vd;
-                    rows[MAP_HFAS][x] = diff1;
-                    rows[MAP_HFAD][x] = diff2;
-                } else {
-                    // Production's f32 element evaluation, widened losslessly.
-                    let diff1 = (sv - mu1).abs();
-                    let diff2 = (dv - mu2).abs();
-                    let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                    let pd = sv - dv;
-                    let vs = sv - mu1;
-                    let vd = dv - mu2;
-                    rows[MAP_SD][x] = f64::from(sd);
-                    rows[MAP_ART][x] = f64::from(ed.max(0.0));
-                    rows[MAP_DET][x] = f64::from((-ed).max(0.0));
-                    rows[MAP_MSE][x] = f64::from(pd * pd);
-                    rows[MAP_HFSS][x] = f64::from(vs * vs);
-                    rows[MAP_HFSD][x] = f64::from(vd * vd);
-                    rows[MAP_HFAS][x] = f64::from(diff1);
-                    rows[MAP_HFAD][x] = f64::from(diff2);
-                }
-            }
-            if work.mapdev {
-                if let Some(devv) = dev_var.as_mut() {
-                    for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        for (x, &v) in rows[map].iter().enumerate() {
-                            devv[k].push(x, v);
-                        }
-                    }
-                } else {
-                    for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        dev[k].merge(&Welford::of_row(&rows[map], recip));
-                    }
+            // rev4vec2: the f32 map eval + `Lanes` mapdev pushes run chunked
+            // eight pixels at a time on the fused-FMA tiers — every lane the
+            // scalar element step, every store the same `f64::from` widen;
+            // `exact`, the other `WelfordVar` variants and scalar/wasm128
+            // keep the sequential body (see `restore_cuts_row_work`).
+            incant!(
+                restore_cuts_row_work(
+                    &sp[prow..prow + width],
+                    &dp[prow..prow + width],
+                    &mu1_b[brow..brow + width],
+                    &mu2_b[brow..brow + width],
+                    &sd_b[brow..brow + width],
+                    width,
+                    &mut rows,
+                    if work.mapdev { dev_var.as_mut() } else { None },
+                    exact,
+                ),
+                [v4x, v4, v3, neon, wasm128, scalar]
+            );
+            if work.mapdev && dev_var.is_none() {
+                for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
+                    .into_iter()
+                    .enumerate()
+                {
+                    dev[k].merge(&Welford::of_row(&rows[map], recip));
                 }
             }
             if let Some(z) = z1.as_mut() {
@@ -604,6 +822,8 @@ fn restore_cuts_plane_dump() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use archmage::SimdToken as _;
 
     fn lcg(seed: &mut u64) -> f32 {
         *seed = seed
@@ -742,5 +962,198 @@ mod tests {
             crate::feature_defs::block_base(T::Gmsnative, ns).unwrap().0,
             1790
         );
+    }
+
+    /// REV4VEC2 bit-exactness gate: `restore_cuts_row_work` must reproduce
+    /// `restore_cuts_row_work_plain` **bit for bit** — all eight map rows
+    /// and every `WelfordVar` lane state — on each compiled tier. Covers
+    /// odd/tail widths, `Lanes`/`Seq` devv variants, `devv: None`, and the
+    /// `exact` arm.
+    #[test]
+    fn row_work_vec_matches_plain_on_every_compiled_tier() {
+        use crate::featcanon::WelfordVar;
+
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                let mut x = self.0;
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                self.0 = x;
+                x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+            }
+            fn f32v(&mut self) -> f32 {
+                if self.next().is_multiple_of(257) {
+                    f32::from_bits(self.next() as u32)
+                } else {
+                    (self.next() % 4096) as f32 / 128.0 - 16.0
+                }
+            }
+        }
+
+        fn dev_bits(d: &[WelfordVar; MAPDEV_PER_CELL]) -> Vec<u64> {
+            let mut v = Vec::new();
+            for w in d {
+                match w {
+                    WelfordVar::Seq(c) => {
+                        v.push(c.n);
+                        v.push(c.mean.to_bits());
+                        v.push(c.m2.to_bits());
+                    }
+                    WelfordVar::Lanes(ls) => {
+                        for c in ls {
+                            v.push(c.n);
+                            v.push(c.mean.to_bits());
+                            v.push(c.m2.to_bits());
+                        }
+                    }
+                    #[cfg(feature = "oracle")]
+                    _ => v.push(u64::MAX),
+                }
+            }
+            v
+        }
+
+        let mut rng = Rng(0xD00D_F00D_1234_5678);
+        let mut compiled = 0usize;
+        type RowFn = dyn Fn(
+            &[f32],
+            &[f32],
+            &[f32],
+            &[f32],
+            &[f32],
+            usize,
+            &mut [Vec<f64>; 8],
+            Option<&mut [WelfordVar; MAPDEV_PER_CELL]>,
+            bool,
+        );
+        macro_rules! check_variant {
+            ($name:literal, $f:expr) => {{
+                compiled += 1;
+                let f: &RowFn = &$f;
+                for w in [1usize, 7, 8, 9, 16, 17, 33] {
+                    for exact in [false, true] {
+                        let sp: Vec<f32> = (0..w).map(|_| rng.f32v()).collect();
+                        let dp: Vec<f32> = (0..w).map(|_| rng.f32v()).collect();
+                        let m1: Vec<f32> = (0..w).map(|_| rng.f32v()).collect();
+                        let m2: Vec<f32> = (0..w).map(|_| rng.f32v()).collect();
+                        let sd: Vec<f32> = (0..w).map(|_| rng.f32v()).collect();
+                        for dev_kind in 0..3 {
+                            let mut want_rows: [Vec<f64>; 8] =
+                                std::array::from_fn(|_| vec![f64::NAN; w]);
+                            let mut want_dev: [WelfordVar; MAPDEV_PER_CELL] =
+                                std::array::from_fn(|_| match dev_kind {
+                                    0 => WelfordVar::Lanes(Default::default()),
+                                    1 => WelfordVar::Seq(Default::default()),
+                                    _ => WelfordVar::Seq(Default::default()),
+                                });
+                            restore_cuts_row_work_plain(
+                                &sp, &dp, &m1, &m2, &sd, w, &mut want_rows,
+                                if dev_kind == 2 { None } else { Some(&mut want_dev) },
+                                exact,
+                            );
+                            let mut got_rows: [Vec<f64>; 8] =
+                                std::array::from_fn(|_| vec![f64::NAN; w]);
+                            let mut got_dev: [WelfordVar; MAPDEV_PER_CELL] =
+                                std::array::from_fn(|_| match dev_kind {
+                                    0 => WelfordVar::Lanes(Default::default()),
+                                    1 => WelfordVar::Seq(Default::default()),
+                                    _ => WelfordVar::Seq(Default::default()),
+                                });
+                            f(&sp, &dp, &m1, &m2, &sd, w, &mut got_rows,
+                                if dev_kind == 2 { None } else { Some(&mut got_dev) },
+                                exact);
+                            for (m, (g, e)) in got_rows.iter().zip(&want_rows).enumerate() {
+                                for x in 0..w {
+                                    assert_eq!(
+                                        g[x].to_bits(),
+                                        e[x].to_bits(),
+                                        "{}: map {} differs at {x} (w={w} exact={exact} dev={dev_kind})",
+                                        $name, m
+                                    );
+                                }
+                            }
+                            assert_eq!(
+                                dev_bits(&got_dev),
+                                dev_bits(&want_dev),
+                                "{}: dev differs (w={w} exact={exact} dev={dev_kind})",
+                                $name
+                            );
+                        }
+                    }
+                }
+            }};
+        }
+        check_variant!("scalar", |sp: &[f32],
+                                  dp: &[f32],
+                                  m1: &[f32],
+                                  m2: &[f32],
+                                  sd: &[f32],
+                                  w: usize,
+                                  rows: &mut [Vec<f64>; 8],
+                                  devv: Option<
+            &mut [WelfordVar; MAPDEV_PER_CELL],
+        >,
+                                  exact: bool| {
+            restore_cuts_row_work_scalar(
+                archmage::ScalarToken::summon().expect("infallible"),
+                sp,
+                dp,
+                m1,
+                m2,
+                sd,
+                w,
+                rows,
+                devv,
+                exact,
+            )
+        });
+        if let Some(t) = archmage::X64V3Token::summon() {
+            check_variant!("v3", move |sp: &[f32],
+                                       dp: &[f32],
+                                       m1: &[f32],
+                                       m2: &[f32],
+                                       sd: &[f32],
+                                       w: usize,
+                                       rows: &mut [Vec<f64>; 8],
+                                       devv: Option<
+                &mut [WelfordVar; MAPDEV_PER_CELL],
+            >,
+                                       exact: bool| {
+                restore_cuts_row_work_v3(t, sp, dp, m1, m2, sd, w, rows, devv, exact)
+            });
+        }
+        if let Some(t) = archmage::X64V4Token::summon() {
+            check_variant!("v4", move |sp: &[f32],
+                                       dp: &[f32],
+                                       m1: &[f32],
+                                       m2: &[f32],
+                                       sd: &[f32],
+                                       w: usize,
+                                       rows: &mut [Vec<f64>; 8],
+                                       devv: Option<
+                &mut [WelfordVar; MAPDEV_PER_CELL],
+            >,
+                                       exact: bool| {
+                restore_cuts_row_work_v4(t, sp, dp, m1, m2, sd, w, rows, devv, exact)
+            });
+        }
+        if let Some(t) = archmage::X64V4xToken::summon() {
+            check_variant!("v4x", move |sp: &[f32],
+                                        dp: &[f32],
+                                        m1: &[f32],
+                                        m2: &[f32],
+                                        sd: &[f32],
+                                        w: usize,
+                                        rows: &mut [Vec<f64>; 8],
+                                        devv: Option<
+                &mut [WelfordVar; MAPDEV_PER_CELL],
+            >,
+                                        exact: bool| {
+                restore_cuts_row_work_v4x(t, sp, dp, m1, m2, sd, w, rows, devv, exact)
+            });
+        }
+        assert!(compiled >= 1);
     }
 }
