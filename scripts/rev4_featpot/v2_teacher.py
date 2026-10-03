@@ -19,6 +19,10 @@ import pyarrow.parquet as pq
 from v2_common import REPO, TEACHER_CODECS, TEACHER_SUBSETS, V2
 
 STRATA_NAME = "data/e13/safesyn_fit_strata.npz"
+# Design log E14: the KADIS ordinal ladder table (e14_kadis_ordinal.py table), pinned by sha.
+ORDINAL_NAME = "data/e14/kadis_ordinal.parquet"
+ORDINAL_WIDTH = 1825  # extracted columns f0..f1824; the rest of the table's width is NaN
+ORDINAL_SHA = "b41d31519577c0ab64a92fe1fc157fd80fcd844be60c7f84b7b3f2c66334f4e6"
 STRATA_SCHEMA = "rev4-featpot-e13-strata-v1"
 MONO_DROP = 5.0
 
@@ -108,3 +112,13 @@ def curated_leg(rule: str, fit_path: Path, keys_sha256: str, floor_lo: float, sc
     record.update({"rule": rule, "strata_sha256": strata_sha, "targets_changed": int((new != target)[keep].sum()),
                    "floor_lo": floor_lo if rule == "win" else None})
     return dest, record
+
+
+def ordinal_leg() -> tuple[Path, dict]:
+    """(path, record) of the pinned KADIS ordinal ladder table: the program's packed copy, else the coordinator's."""
+    packed = REPO / ORDINAL_NAME
+    path = packed if packed.is_file() else V2 / "e14" / Path(ORDINAL_NAME).name
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != ORDINAL_SHA:
+        raise ValueError(f"{path}: not the registered E14 ordinal table ({digest[:12]})")
+    return path, {"table_sha256": digest, "rows": pq.ParquetFile(path).metadata.num_rows}

@@ -929,5 +929,35 @@ class TeacherSubsets(unittest.TestCase):
                     t.load_strata("other-rows")
 
 
+class KadisOrdinal(unittest.TestCase):
+    """Design log E14: `ko<w>` tokens, ladder labels, and the NaN-column refusal."""
+
+    def test_token(self):
+        self.assertEqual(v2_common.recipe_of("set:v2+basic@h32:H128:ko4"), {"hidden": 128, "kadis_ordinal": 4.0})
+        self.assertEqual(v2_common.recipe_of("set:v2+basic@h32:H128:tsfloor0:ko16"),
+                         {"hidden": 128, "teacher_subset": "floor0", "kadis_ordinal": 16.0})
+        for bad in ("set:v2+basic@h32:H128:ko0", "set:v2+basic@h32:H128:ko100", "set:v2+basic@h32:H128:ko1:ko4"):
+            with self.assertRaises(ValueError):
+                v2_common.recipe_of(bad)
+
+    def test_ladders_split_signed_types_by_direction(self):
+        import e14_kadis_ordinal as e
+        sel = pd.DataFrame({"source_filename": ["a.png"] * 5 + ["b.png"] * 5, "dist_type": [25] * 5 + [23] * 5,
+                            "dist_param": [0.3, 0.15, 0.0, -0.4, -0.6, 2.0, 4.0, 6.0, 8.0, 10.0]})
+        key, target = e.ladders(sel)
+        self.assertEqual(key.tolist(), ["kadis:a.png|t25|+"] * 2 + ["kadis:a.png|t25|0"] + ["kadis:a.png|t25|-"] * 2
+                         + ["kadis:b.png|t23|+"] * 5)
+        self.assertEqual(target.tolist(), [-0.3, -0.15, -0.0, -0.4, -0.6, -2.0, -4.0, -6.0, -8.0, -10.0])
+
+    def test_ordinal_table_pin(self):
+        import v2_teacher as t
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "kadis_ordinal.parquet"
+            bad.write_bytes(b"not the table")
+            with mock.patch.object(t, "REPO", Path(d).parent), mock.patch.object(t, "ORDINAL_NAME", str(bad)):
+                with self.assertRaises(ValueError):
+                    t.ordinal_leg()
+
+
 if __name__ == "__main__":
     unittest.main()

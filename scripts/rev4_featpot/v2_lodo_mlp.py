@@ -205,6 +205,14 @@ def main() -> None:
         weights[leg] = acceptance_weight(NOMINAL_WEIGHT[leg], refs_of(fit))
         groups += [(leg, fit, weights[leg], 0, "withinref,both"),
                    (f"{leg}_development", dev, 0, val_w, "withinref,both")]
+    ordinal_record = None
+    if "kadis_ordinal" in recipe:  # design log E14: rank-only KADIS ladders, pairs drawn within a ladder
+        import v2_teacher
+        if max(keep) >= v2_teacher.ORDINAL_WIDTH:
+            raise ValueError(f"{core_spec}: the KADIS ordinal leg has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+        opath, ordinal_record = v2_teacher.ordinal_leg()
+        weights["kadis_ordinal"] = acceptance_weight(recipe["kadis_ordinal"], refs_of(opath))
+        groups.append(("kadis_ordinal", opath, weights["kadis_ordinal"], 0, "withinref,rank"))
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
     hdev = checked(legs[f"human_without_{args.heldout}"]["dev"])
     weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
@@ -234,6 +242,7 @@ def main() -> None:
            "train_weights": weights, "hidden": recipe.get("hidden", HIDDEN), "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
            **({"recipe_tokens": recipe} if recipe else {}),
            **({"teacher_subset": teacher_record} if teacher_record else {}),
+           **({"ordinal_leg": ordinal_record} if ordinal_record else {}),
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, **selection,

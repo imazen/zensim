@@ -42,7 +42,11 @@ def spec(rule: str | None) -> str:
 
 
 def cell(rule: str | None, source: str, seed: int) -> Path:
-    return V2 / "cells" / f"{spec(rule)}__{HEAD}" / f"without_{source}_s{seed}" / "result.json"
+    return cell_of(spec(rule), source, seed)
+
+
+def cell_of(spec_: str, source: str, seed: int) -> Path:
+    return V2 / "cells" / f"{spec_}__{HEAD}" / f"without_{source}_s{seed}" / "result.json"
 
 
 def cmd_strata(args) -> int:
@@ -159,33 +163,38 @@ def paired(a: list, b: list) -> dict:
 
 
 def cmd_score(args) -> int:
+    return score_arms([(rule, spec(rule)) for rule in TEACHER_SUBSETS], "e13_teacher", args.monotonicity)
+
+
+def score_arms(arms: list, out_name: str, monotonicity: bool) -> int:
+    """Seed-paired worst-case scoring of `arms` [(label, spec)] against the uncurated control (BASE); E13 and E14 share it."""
     metas = {s: heldout_meta(s) for s in SOURCE_ORDER}
     cache = V2 / "e13" / "devpred"
     cache.mkdir(parents=True, exist_ok=True)
     stats, missing = {}, 0
-    for rule in (None, *TEACHER_SUBSETS):
+    for label, sp in [(None, BASE), *arms]:
         for s in SOURCE_ORDER:
             for i in SEEDS:
-                p = cell(rule, s, i)
+                p = cell_of(sp, s, i)
                 if not p.is_file():
                     missing += 1
                     continue
                 st = worst_case(p, metas[s])
-                if args.monotonicity:
+                if monotonicity:
                     st["w4_dev_mono"] = dev_monotonicity(Path(json.loads(p.read_text())["selected_bake"]), cache)
-                stats[(rule, s, i)] = st
+                stats[(label, s, i)] = st
     rows = {}
-    for rule in TEACHER_SUBSETS:
-        row = {"spec": spec(rule), "per_source": {}}
+    for label, sp in arms:
+        row = {"spec": sp, "per_source": {}}
         for s in SOURCE_ORDER:
-            seeds = [i for i in SEEDS if (rule, s, i) in stats and (None, s, i) in stats]
+            seeds = [i for i in SEEDS if (label, s, i) in stats and (None, s, i) in stats]
             if not seeds:
                 continue
-            row["per_source"][s] = {m: paired([stats[(rule, s, i)][m] for i in seeds], [stats[(None, s, i)][m] for i in seeds])
-                                    for m in stats[(rule, s, seeds[0])] if stats[(rule, s, seeds[0])][m] is not None}
+            row["per_source"][s] = {m: paired([stats[(label, s, i)][m] for i in seeds], [stats[(None, s, i)][m] for i in seeds])
+                                    for m in stats[(label, s, seeds[0])] if stats[(label, s, seeds[0])][m] is not None}
         ps = row["per_source"]
         if len(ps) == len(SOURCE_ORDER):
-            for m in ("signed", "w1_ref_p10", "w3_z_rmse", "w4_neg_share", *(("w4_dev_mono",) if args.monotonicity else ())):
+            for m in ("signed", "w1_ref_p10", "w3_z_rmse", "w4_neg_share", *(("w4_dev_mono",) if monotonicity else ())):
                 d = [ps[s][m]["delta"] for s in SOURCE_ORDER]
                 row[m] = {"mean": float(np.mean(d)), "worst": float(min(d)) if m in ("signed", "w1_ref_p10") else float(max(d)),
                           "se": math.sqrt(sum(ps[s][m]["se"] ** 2 for s in SOURCE_ORDER)) / len(SOURCE_ORDER)}
@@ -196,19 +205,19 @@ def cmd_score(args) -> int:
             better = any(x["mean"] >= 2 * x["se"] for x in (w1, w2r))
             worse = any(x["mean"] <= -2 * x["se"] for x in (w1, w2r))
             row["adopt"] = bool(sig["mean"] >= MEAN_FLOOR and sig["worst"] >= SOURCE_FLOOR and better and not worse)
-        rows[rule] = row
-    out = {"schema": "rev4-featpot-e13-teacher-v1", "control": spec(None), "seeds": list(SEEDS),
+        rows[label] = row
+    out = {"schema": f"rev4-featpot-{out_name.replace('_', '-')}-v1", "control": BASE, "seeds": list(SEEDS),
            "rule": {"mean_floor": MEAN_FLOOR, "source_floor": SOURCE_FLOOR, "worst_case": "W1 or W2 >= +2 SE, neither <= -2 SE"},
            "rows": rows, "control_stats": {f"{s}_s{i}": stats[(None, s, i)] for s in SOURCE_ORDER for i in SEEDS
                                             if (None, s, i) in stats},
            "missing_cells": missing, "status": "INCOMPLETE" if missing else "complete"}
     (V2 / "compare").mkdir(exist_ok=True)
-    (V2 / "compare" / "e13_teacher.json").write_text(json.dumps(out, indent=1) + "\n")
-    for rule, r in rows.items():
+    (V2 / "compare" / f"{out_name}.json").write_text(json.dumps(out, indent=1) + "\n")
+    for label, r in rows.items():
         if "signed" not in r:
-            print(f"  ts{rule:7s} incomplete")
+            print(f"  {label:9s} incomplete")
             continue
-        print(f"  ts{rule:7s} signed {r['signed']['mean']:+.4f}±{r['signed']['se']:.4f} (worst {r['signed']['worst']:+.4f})  "
+        print(f"  {label:9s} signed {r['signed']['mean']:+.4f}±{r['signed']['se']:.4f} (worst {r['signed']['worst']:+.4f})  "
               f"W1 {r['w1_ref_p10']['mean']:+.4f}±{r['w1_ref_p10']['se']:.4f}  W2 {r['w2_type_worst3']['mean']:+.4f}"
               f"±{r['w2_type_worst3']['se']:.4f}  neg {r['w4_neg_share']['mean']:+.4f}" + ("  ADOPT" if r["adopt"] else ""))
     print(json.dumps({"status": out["status"], "missing_cells": missing}))

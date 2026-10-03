@@ -150,6 +150,7 @@ def split_weight(spec: str) -> tuple[str, float | None]:
 TEACHER_CODECS = {"moz": "mozjpeg-rs-420-e4", "avif": "zenavif-s5-e6", "zj": "zenjpeg-420-e2", "xyb": "zenjpeg-420-xyb-e2",
                   "jxl": "zenjxl-e7", "webp": "zenwebp-default-m4"}
 TEACHER_SUBSETS = ("none", "win", "floor0", "neg", "q20", "mono5", *(f"x{c}" for c in TEACHER_CODECS))
+# Design log E14: `ko<w>` adds the KADIS ordinal ladder leg (v2_teacher.ORDINAL_NAME) at nominal weight w, rank-only within ladders.
 
 
 def recipe_of(spec: str) -> dict:
@@ -165,6 +166,8 @@ def recipe_of(spec: str) -> dict:
             out["group_l1"] = float(tok[2:])
         elif tok.startswith("ts") and tok[2:] in TEACHER_SUBSETS and "teacher_subset" not in out:
             out["teacher_subset"] = tok[2:]
+        elif tok.startswith("ko") and "kadis_ordinal" not in out and 0 < float(tok[2:]) <= 64:
+            out["kadis_ordinal"] = float(tok[2:])
         else:
             raise ValueError(f"bad recipe token {tok!r} in {spec!r}")
     return out
