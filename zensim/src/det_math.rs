@@ -1004,7 +1004,10 @@ mod tests {
 /// * [`midp_x16_matches_scalar_over_all_f32_bits`] — `#[ignore]`d:
 ///   **all 2³² bit patterns** per function per tier (the gate's "where
 ///   feasible" bar — ≈10 min under the 8-CPU heavy wrapper).
-#[cfg(test)]
+///
+/// Compiled only where a fused tier exists (x86_64 v3/v4/v4x, aarch64 NEON). Other targets (i686, wasm32) run the scalar
+/// canonical body for every element, so there is no vector path to compare.
+#[cfg(all(test, any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod rev4vec_midp_gate {
     use super::*;
     use archmage::SimdToken as _;

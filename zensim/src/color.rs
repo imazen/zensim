@@ -493,7 +493,11 @@ fn linear_xyb_canon_body<const CLAMP: bool>(
 /// 16-pixel chunk, in the generic magetypes `f32x16` vector. The single
 /// definition every fused tier runs — on v3 and NEON `f32x16` decomposes
 /// into two/four fused-FMA ops per lane, which is per-lane identical to one
-/// fused `mul_add` each.
+/// fused `mul_add` each. Targets without a fused tier (i686, wasm32) never build one.
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 struct CanonChunk<T: F32x16Convert> {
     token: T,
     m: [[GenericF32x16<T>; 3]; 3],
@@ -514,6 +518,10 @@ struct CanonChunk<T: F32x16Convert> {
     pu_x_scale: GenericF32x16<T>,
 }
 
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 impl<T: F32x16Convert> CanonChunk<T> {
     #[inline(always)]
     fn new(token: T) -> Self {
