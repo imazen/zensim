@@ -18,6 +18,7 @@
 
 ### Added
 
+- Prepared steering session: a v2-bearing plan now runs the v1 attribution walk once and runs the v2 walk with its v1 block off, instead of folding v1 inside the v2 walk and then walking v1 a second time for the basic map. Maps, features and scores are bit-identical (before/after panels and a forced-route unit test); only the duplicated v1 work is gone. Measurements: `benchmarks/costset3_2026-10-03.md`.
 - Planner: a bake whose reads stay inside f0-227 and f372-719 with the v2 block running now skips X/B walk work at every scale whose chroma slots it never reads
   (and no longer accumulates free extras for the v2 MSE slots). Work selection only; no feature value or served score moves. Dense-layout bakes benefit; 944-wide identity bakes still
   compute the blocks their width reaches. `benchmarks/costset2_2026-10-03.md`.

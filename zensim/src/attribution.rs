@@ -3579,6 +3579,9 @@ mod tests {
     #[cfg(feature = "feature-regime-v2")]
     #[test]
     fn blockiness_map_matches_finite_repairs_through_every_pipeline() {
+        // Exact-bit comparison across pipelines: hold the token lock so a permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         use crate::feature_v2::idx;
         const LAYOUT: usize = 29; // FEATURES_PER_CHANNEL_V2_TOTAL
         let (w, h) = (256usize, 192usize);
@@ -3677,6 +3680,9 @@ mod tests {
     #[cfg(feature = "feature-regime-v2")]
     #[test]
     fn blockiness_finite_repair_exactness_serves_at_rev4() {
+        // Exact-bit comparison across pipelines: hold the token lock so a permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         crate::ssim_form::rerun_tests_at_revision("4", "blockiness_map_", 2);
     }
 
@@ -5318,11 +5324,120 @@ pub struct Fused944Session {
     pass_b: crate::feature_v2::PassBScratchF32,
 }
 
+/// Test-only switch back to the pre-COSTSET3 route (folded walk with its own
+/// v1 fold, then a second v1 walk for the basic map): the reference the
+/// bit-identity gate compares against.
+#[cfg(all(test, feature = "feature-regime-v2"))]
+pub(crate) static LEGACY_V2_ROUTE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+/// Test-only count of prepared computes served by the reuse route.
+#[cfg(all(test, feature = "feature-regime-v2"))]
+pub(crate) static REUSE_ROUTE_HITS: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(feature = "feature-regime-v2")]
+fn legacy_v2_route() -> bool {
+    #[cfg(test)]
+    {
+        LEGACY_V2_ROUTE.load(core::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
 #[cfg(feature = "feature-regime-v2")]
 impl Fused944Session {
     /// Empty session — buffers grow on first use.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The v1 attr-planes streaming walk: fills `self.basic` (retained
+    /// planes, `result`) and returns the scored result. Shared by the
+    /// basic-only plans and the v2-bearing plans (whose v1 block it serves).
+    fn run_basic_walk(
+        &mut self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        plan: &crate::feature_plan::Plan,
+        parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> crate::ZensimResult {
+        let mut config = config_from_params(crate::ZensimProfile::B.params(), parallel);
+        config.formula_revision = Some(plan.compute.formula_revision);
+        config.compute_all_features = true;
+        config.extended_features = false;
+        config.compute_iw_features = false;
+        config.local_only = plan.compute.local_only;
+        config.omit_edges = plan.compute.omit_edges;
+        config.attribution_channels = Some(core::array::from_fn(|scale| {
+            core::array::from_fn(|ch| plan.compute.channel_active(scale, ch))
+        }));
+        let supplied_xyb = encoding.map(|encoding| {
+            let (_, w, h) = precomputed.scale(0);
+            let mut planes = core::array::from_fn(|_| vec![0.0; w * h]);
+            let revision = plan.compute.formula_revision;
+            if distorted.width() < 64 || distorted.height() < 64 {
+                let padded = crate::metric::reflect_pad_to_min(distorted);
+                crate::feature_v2_stream::hdr_source_to_xyb(
+                    &padded,
+                    encoding,
+                    &mut planes,
+                    revision,
+                );
+            } else {
+                crate::feature_v2_stream::hdr_source_to_xyb(
+                    distorted,
+                    encoding,
+                    &mut planes,
+                    revision,
+                );
+            }
+            planes
+        });
+        crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes_input(
+            precomputed,
+            distorted,
+            &config,
+            crate::ZensimProfile::B.params().weights,
+            supplied_xyb,
+            |scale, stats, _src, dst, planes, w, h| {
+                let n = w * h;
+                if self.basic.scales.len() <= scale {
+                    self.basic.scales.push(BasicRetainedScale {
+                        stats: stats.clone(),
+                        distorted: core::array::from_fn(|_| Vec::new()),
+                        planes: crate::streaming::AttrScaleRetention::new(0),
+                        width: w,
+                        height: h,
+                    });
+                }
+                let out = &mut self.basic.scales[scale];
+                out.stats.clone_from(stats);
+                out.width = w;
+                out.height = h;
+                for (ch, distorted) in dst.iter().enumerate() {
+                    if !plan.compute.channel_active(scale, ch) {
+                        out.distorted[ch].clear();
+                        out.planes.sd[ch].clear();
+                        out.planes.mu1[ch].clear();
+                        out.planes.mu2[ch].clear();
+                        continue;
+                    }
+                    for (target, source) in [
+                        (&mut out.distorted[ch], *distorted),
+                        (&mut out.planes.sd[ch], &planes.sd[ch][..n]),
+                        (&mut out.planes.mu1[ch], &planes.mu1[ch][..n]),
+                        (&mut out.planes.mu2[ch], &planes.mu2[ch][..n]),
+                    ] {
+                        target.resize(n, 0.0);
+                        target.copy_from_slice(source);
+                    }
+                }
+            },
+        )
     }
 
     pub(crate) fn planned_features(
@@ -5343,79 +5458,7 @@ impl Fused944Session {
                 crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
             )
         {
-            let mut config = config_from_params(crate::ZensimProfile::B.params(), parallel);
-            config.formula_revision = Some(plan.compute.formula_revision);
-            config.compute_all_features = true;
-            config.extended_features = false;
-            config.compute_iw_features = false;
-            config.local_only = plan.compute.local_only;
-            config.omit_edges = plan.compute.omit_edges;
-            config.attribution_channels = Some(core::array::from_fn(|scale| {
-                core::array::from_fn(|ch| plan.compute.channel_active(scale, ch))
-            }));
-            let supplied_xyb = encoding.map(|encoding| {
-                let (_, w, h) = precomputed.scale(0);
-                let mut planes = core::array::from_fn(|_| vec![0.0; w * h]);
-                let revision = plan.compute.formula_revision;
-                if distorted.width() < 64 || distorted.height() < 64 {
-                    let padded = crate::metric::reflect_pad_to_min(distorted);
-                    crate::feature_v2_stream::hdr_source_to_xyb(
-                        &padded,
-                        encoding,
-                        &mut planes,
-                        revision,
-                    );
-                } else {
-                    crate::feature_v2_stream::hdr_source_to_xyb(
-                        distorted,
-                        encoding,
-                        &mut planes,
-                        revision,
-                    );
-                }
-                planes
-            });
-            let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes_input(
-                precomputed,
-                distorted,
-                &config,
-                crate::ZensimProfile::B.params().weights,
-                supplied_xyb,
-                |scale, stats, _src, dst, planes, w, h| {
-                    let n = w * h;
-                    if self.basic.scales.len() <= scale {
-                        self.basic.scales.push(BasicRetainedScale {
-                            stats: stats.clone(),
-                            distorted: core::array::from_fn(|_| Vec::new()),
-                            planes: crate::streaming::AttrScaleRetention::new(0),
-                            width: w,
-                            height: h,
-                        });
-                    }
-                    let out = &mut self.basic.scales[scale];
-                    out.stats.clone_from(stats);
-                    out.width = w;
-                    out.height = h;
-                    for (ch, distorted) in dst.iter().enumerate() {
-                        if !plan.compute.channel_active(scale, ch) {
-                            out.distorted[ch].clear();
-                            out.planes.sd[ch].clear();
-                            out.planes.mu1[ch].clear();
-                            out.planes.mu2[ch].clear();
-                            continue;
-                        }
-                        for (target, source) in [
-                            (&mut out.distorted[ch], *distorted),
-                            (&mut out.planes.sd[ch], &planes.sd[ch][..n]),
-                            (&mut out.planes.mu1[ch], &planes.mu1[ch][..n]),
-                            (&mut out.planes.mu2[ch], &planes.mu2[ch][..n]),
-                        ] {
-                            target.resize(n, 0.0);
-                            target.copy_from_slice(source);
-                        }
-                    }
-                },
-            );
+            let result = self.run_basic_walk(precomputed, distorted, plan, parallel, encoding);
             let mut features = result.features().to_vec();
             // REV4SERVE review F1: the emit claim must already be
             // materialized — a promised slot the walk skipped must error,
@@ -5451,6 +5494,61 @@ impl Fused944Session {
             )
         {
             return Ok(result);
+        }
+        // v2-bearing plans: the v1 walk below owns every basic/peak slot and
+        // retains the planes the basic map reads; the v2 walk then runs with
+        // its v1 block switched off, so no v1 accumulator runs twice. The v2
+        // walk's own accumulation order is unchanged (the v1 fold writes only
+        // `acc.v1` and the v1 slots), and `mean_offset` is the v2 walk's, as
+        // before.
+        if !plan.toggles().v1_only
+            && !legacy_v2_route()
+            && plan.compute.v1_basic
+            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+            && plan.compute.sampling.is_none()
+            && !source.is_hdr()
+            && !distorted.is_hdr()
+            && matches!(
+                plan.compute.v1_pools,
+                crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
+            )
+        {
+            #[cfg(test)]
+            REUSE_ROUTE_HITS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            let n_scales = crate::NUM_SCALES;
+            let basic_result = self.run_basic_walk(precomputed, distorted, plan, parallel, None);
+            let mut v2_plan = plan.clone();
+            v2_plan.compute.v1_basic = false;
+            let (v2_row, mean_offset) = crate::feature_v2::compute_folded_v1_372_streaming_impl(
+                source,
+                distorted,
+                Some(120_000_000),
+                parallel,
+                &mut self.scratch,
+                Some(&v2_plan),
+                Some(&mut self.retention),
+            )?;
+            let v1_total = n_scales * 3 * 31;
+            let peaks_on = plan.compute.v1_pools == crate::feature_v2::V1PoolsMode::Peaks;
+            let basic_row = basic_result.features();
+            let mut features = Vec::with_capacity(v1_total + v2_row.len());
+            features.resize(v1_total, 0.0);
+            for scale in 0..n_scales {
+                for ch in 0..3 {
+                    if !plan.compute.channel_active(scale, ch) {
+                        continue;
+                    }
+                    let b = scale * 39 + ch * 13;
+                    features[b..b + 13].copy_from_slice(&basic_row[b..b + 13]);
+                    if peaks_on {
+                        let p = n_scales * 39 + (scale * 3 + ch) * 6;
+                        features[p..p + 6].copy_from_slice(&basic_row[p..p + 6]);
+                    }
+                }
+            }
+            features.extend_from_slice(&v2_row);
+            self.basic.result = Some(basic_result);
+            return Ok((features, mean_offset));
         }
         // Basic-only maps use the cached v1 owner. Cheap free extras do not
         // populate the v2 retention cells; they are reported as unsupported

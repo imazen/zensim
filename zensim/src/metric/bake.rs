@@ -1502,6 +1502,99 @@ mod revision_contract_tests {
         zenpredict::Model::from_bytes(&bytes).unwrap()
     }
 
+    /// COSTSET3: the prepared session reuses the basic walk and runs the v2 walk with its v1 block off.
+    /// Features, scores and maps must be bit-identical to the legacy route (folded walk with its own v1
+    /// fold, then a second v1 walk), under every forced token permutation, for plans with and without the
+    /// channel mask, peaks, and append reads. Negative control: the flag really selects a different route
+    /// (checked through the retained basic result being present only after the new route's first walk).
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_session_second_v1_walk_removal_is_bit_identical() {
+        use archmage::testing::{
+            CompileTimePolicy, for_each_token_permutation, lock_token_testing,
+        };
+        use core::sync::atomic::Ordering;
+        let _guard = lock_token_testing();
+        let v2 = |s: usize, c: usize, k: usize| 372 + s * 87 + c * 29 + k;
+        let basic_y: Vec<usize> = (0..156).filter(|id| (id / 13) % 3 == 1).collect();
+        let v2_y_all: Vec<usize> = (0..4)
+            .flat_map(|s| (0..29).map(move |k| v2(s, 1, k)))
+            .collect();
+        let sets: Vec<(&str, Vec<usize>)> = vec![
+            ("v2basic", (0..156).chain(372..720).collect()),
+            ("v2basic+append", (0..156).chain(372..944).collect()),
+            ("basic+peaks+v2", (0..228).chain(372..720).collect()),
+            (
+                "basicY+v2Y (mask)",
+                basic_y
+                    .iter()
+                    .copied()
+                    .chain(v2_y_all.iter().copied())
+                    .collect(),
+            ),
+            (
+                "basic228 + v2 scales 1-3",
+                (0..228)
+                    .chain((1..4).flat_map(|s| (0..87).map(move |k| v2(s, 0, 0) + k)))
+                    .collect(),
+            ),
+        ];
+        let _ = for_each_token_permutation(CompileTimePolicy::Warn, |_perm| {
+            for (w, h) in [(64usize, 64usize), (97, 65), (128, 96)] {
+                let (src, dst) = pair(w, h);
+                let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+                for (name, ids) in &sets {
+                    for bin in [1usize, 8] {
+                        let model = bake_over(ids);
+                        let mut scorer =
+                            crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                        let mut run = |legacy: bool| {
+                            crate::attribution::LEGACY_V2_ROUTE.store(legacy, Ordering::Relaxed);
+                            let mut worker = scorer.prepare_steering(&rs, bin).unwrap();
+                            let a = worker.compute(&ds, None).unwrap();
+                            let b = worker.compute(&ds, None).unwrap();
+                            crate::attribution::LEGACY_V2_ROUTE.store(false, Ordering::Relaxed);
+                            (a, b)
+                        };
+                        let hits = || crate::attribution::REUSE_ROUTE_HITS.load(Ordering::Relaxed);
+                        let (old, _) = run(true);
+                        let before = hits();
+                        let (new, again) = run(false);
+                        // Other tests may serve through the same counter concurrently: a lower bound only.
+                        assert!(
+                            hits() >= before + 2,
+                            "{name}: reuse route must serve both computes"
+                        );
+                        for scored in [&new, &again] {
+                            assert_eq!(
+                                scored.result().score().to_bits(),
+                                old.result().score().to_bits(),
+                                "{name} {w}x{h} bin {bin}"
+                            );
+                            let (a, b) = (scored.result().features(), old.result().features());
+                            assert_eq!(a.len(), b.len());
+                            assert!(
+                                a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()),
+                                "{name} {w}x{h} bin {bin}: features differ"
+                            );
+                            for y0 in (0..h).step_by(8) {
+                                for x0 in (0..w).step_by(8) {
+                                    let (x1, y1) = ((x0 + 16).min(w), (y0 + 16).min(h));
+                                    assert_eq!(
+                                        scored.refinement_gain(x0, y0, x1, y1).to_bits(),
+                                        old.refinement_gain(x0, y0, x1, y1).to_bits(),
+                                        "{name} {w}x{h} bin {bin} rect {:?}",
+                                        (x0, y0, x1, y1)
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     /// COSTSET2: v2-bearing plans over basic/peaks/v2 skip X/B work at scales whose chroma slots they never read
     /// (the channel mask), and every consumed feature stays bit-identical to the unrestricted extraction.
     /// The mask must engage for the Y-only and coarse-chroma sets (otherwise the saving is not real), must NOT

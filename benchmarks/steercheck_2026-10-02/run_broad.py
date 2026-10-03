@@ -46,7 +46,7 @@ manifest = {'schema': 'steercheck-broad-v1', 'qualified': False, 'binary_sha256'
             'rows': []}
 # Default: the cached compute_with_ref_and_attribution path the owner's audit also uses (before STEERAPI,
 # prepare_steering refused any model reading IDs >= 228). STEERCHECK_PREPARED=1 serves through prepare_steering.
-env = dict(os.environ, RAYON_NUM_THREADS='1', ZENSIM_FORMULA_REV='3')  # the screen's Rev3 pixels
+env = dict(os.environ, RAYON_NUM_THREADS='1', ZENSIM_FORMULA_REV=os.environ.get('STEERCHECK_REV', '3'))  # the screen's Rev3 pixels unless STEERCHECK_REV pins another
 if os.environ.get('STEERCHECK_PREPARED') == '1':
     # Serve through BakeScorer::prepare_steering (STEERAPI); v2 bakes need it to accept IDs >= 228.
     env['ZENSIM_PREPARED_STEERING'] = '1'
