@@ -11,6 +11,11 @@
 
 ### Added
 
+- `BakeScorer::prepare_steering` (SDR) now serves bakes that read v2 features (f372-f719) together with basic/peak (f0-f227): same score, same map
+  owner as `compute_with_ref_and_attribution`, including the exact BLOCKINESS terms. Masked/IW (f228-f371), append (f720-f923), append2
+  (f924-f943), f944+ and companion reads of those are refused up front, naming the family's ID range; `prepare_steering_hdr` still refuses v2.
+  Behaviour change only, no new public items. `benchmarks/steerapi_2026-10-02.md`.
+
 - `zensim_mlp_train` (unpublished validation tool): with `--keep-features` on the plain head,
   only the kept parquet columns are read (projection) and held as compact f32, standardized at
   use with the same f64 expression. Bakes, epoch curves and predictions are byte-identical to

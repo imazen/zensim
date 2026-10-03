@@ -77,9 +77,13 @@ impl<'a> BakeScorer<'a> {
 
     /// Bind a source, its cache and reusable scratch for repeated SDR steering.
     ///
-    /// The initial contract accepts basic/peak models (IDs below 228). No
-    /// scored term is dropped to make a partial map. Coverage is not a quality
-    /// certification: models still need finite-edit and codec-level validation.
+    /// Accepts bakes that read basic and peak features (f0-f227) and v2 features (f372-f719), SDR only for v2;
+    /// the v2 maps (including exact BLOCKINESS terms for aligned rectangle repairs) come from the same owner
+    /// as [`Self::compute_with_ref_and_attribution`]. Masked/IW (f228-f371), append and append2 (f720-f943),
+    /// f944 and above, and any read without a complete integrand are refused up front, as is a bake whose
+    /// corruption companion reads such an ID; the error names the family's ID range. No scored term is
+    /// dropped to make a partial map. Coverage is not a quality certification: models still need finite-edit
+    /// and codec-level validation.
     /// `bin` is the grid spacing in source pixels; rectangle semantics match
     /// [`Self::compute_with_ref_and_attribution`]. Negative scores are preserved.
     ///
@@ -100,7 +104,7 @@ impl<'a> BakeScorer<'a> {
     /// ```
     ///
     /// # Errors
-    /// Refuses zero bins, invalid sources, unsupported feature families or
+    /// Refuses zero bins, invalid sources, unsupported feature families (see above) or
     /// incompatible arithmetic contracts, or unsupported companion features.
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     pub fn prepare_steering<'s, S: ImageSource>(
@@ -112,7 +116,8 @@ impl<'a> BakeScorer<'a> {
     }
 
     /// Bind native HDR input and viewing parameters for repeated spatial steering.
-    /// Uses the same basic/peak features, inference and map composition as SDR.
+    /// Uses the same basic/peak features, inference and map composition as SDR; bakes reading v2 features are
+    /// refused here (SDR only).
     /// The encoding applies to both images; decoded primaries remain authoritative.
     ///
     /// # Errors
@@ -140,28 +145,10 @@ impl<'a> BakeScorer<'a> {
                 reason: "steering bin must be nonzero",
             });
         }
-        for (i, model) in std::iter::once(self.model)
-            .chain(self.members.iter().map(|m| m.model))
-            .enumerate()
-        {
-            if self
-                .weights
-                .as_ref()
-                .is_some_and(|weights| weights[i] == 0.0)
-            {
-                continue;
-            }
-            let ids = crate::feature_plan::bake_read_slots(model).ok_or(
-                ZensimError::ModelLoadFailed {
-                    reason: "steering session requires readable feature declarations",
-                },
-            )?;
-            if ids.iter_slots().any(|id| id >= 228) {
-                return Err(ZensimError::ModelLoadFailed {
-                    reason: "steering session currently supports basic/peak feature IDs below 228",
-                });
-            }
-        }
+        // The complete served read set (active ensemble members and corruption companions included): a map
+        // that dropped any scored term would be fabricated, so every read must have a complete integrand.
+        let reads = self.consumed_feature_ids()?;
+        steering_support(&reads, encoding.is_some())?;
         let reference = if let Some(encoding) = encoding {
             self.check_pixel_revision()?;
             if self.plan()?.compute.sampling.is_some() {
@@ -1277,6 +1264,61 @@ impl<'a> BakeScorer<'a> {
     }
 }
 
+/// Feature IDs a steering session serves with a complete score and map: basic and peaks (f0-227) and v2
+/// (f372-719; its reference-only PJND_FRAGILITY slots have an exactly-zero integrand). SDR only for v2.
+/// Everything else is refused up front, naming the family's ID range (the error type carries a static string).
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+fn steering_support(reads: &[u16], hdr: bool) -> Result<(), ZensimError> {
+    let mut masked_iw = false;
+    let mut append = false;
+    let mut append2 = false;
+    let mut beyond = false;
+    let mut v2 = false;
+    for &id in reads {
+        match id {
+            0..=227 => {}
+            228..=371 => masked_iw = true,
+            372..=719 => v2 = true,
+            720..=923 => append = true,
+            924..=943 => append2 = true,
+            _ => beyond = true,
+        }
+    }
+    if hdr && v2 {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "HDR steering session supports basic/peak feature IDs f0-f227 only; the bake reads v2 IDs f372-f719",
+        });
+    }
+    const MESSAGES: [&str; 16] = [
+        "",
+        "steering session refuses masked/IW feature IDs f228-f371 (no spatial refinement)",
+        "steering session refuses append feature IDs f720-f923 (not served by the session)",
+        "steering session refuses masked/IW feature IDs f228-f371 and append feature IDs f720-f923",
+        "steering session refuses append2 feature IDs f924-f943 (not served by the session)",
+        "steering session refuses masked/IW feature IDs f228-f371 and append2 feature IDs f924-f943",
+        "steering session refuses append feature IDs f720-f923 and append2 feature IDs f924-f943",
+        "steering session refuses masked/IW f228-f371, append f720-f923 and append2 f924-f943 feature IDs",
+        "steering session refuses feature IDs f944 and above (no integrand)",
+        "steering session refuses masked/IW feature IDs f228-f371 and f944 and above",
+        "steering session refuses append feature IDs f720-f923 and f944 and above",
+        "steering session refuses masked/IW f228-f371, append f720-f923 and f944 and above feature IDs",
+        "steering session refuses append2 feature IDs f924-f943 and f944 and above",
+        "steering session refuses masked/IW f228-f371, append2 f924-f943 and f944 and above feature IDs",
+        "steering session refuses append f720-f923, append2 f924-f943 and f944 and above feature IDs",
+        "steering session refuses masked/IW f228-f371, append f720-f923, append2 f924-f943 and f944 and above feature IDs",
+    ];
+    let mask = usize::from(masked_iw)
+        | usize::from(append) << 1
+        | usize::from(append2) << 2
+        | usize::from(beyond) << 3;
+    if mask != 0 {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: MESSAGES[mask],
+        });
+    }
+    Ok(())
+}
+
 /// A source-bound worker created by [`BakeScorer::prepare_steering`].
 /// Reuse it for reconstructions of that source. Source, scorer and model
 /// borrows keep lifetimes explicit; no image or model is installed globally.
@@ -1386,6 +1428,183 @@ mod revision_contract_tests {
         row[91] = 5.0;
         assert_eq!(scorer.score_features(&row, 96, 96, None).unwrap(), 5.0);
         assert_eq!(scorer.consumed_feature_ids().unwrap(), [13, 91]);
+    }
+
+    /// A bake over the given feature IDs with small deterministic negative weights (declared revision = the
+    /// process default, so the wide-family arithmetic contract matches).
+    #[cfg(feature = "feature-regime-v2")]
+    fn bake_over(ids: &[usize]) -> zenpredict::Model {
+        let weights: Vec<f64> = ids
+            .iter()
+            .map(|&id| -(0.002 + 0.0003 * ((id * 7) % 13) as f64))
+            .collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":vec![0.0;ids.len()],"scaler_scale":vec![1.0;ids.len()],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8",
+                "text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")}],
+            "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":weights,"biases":[100.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        zenpredict::Model::from_bytes(&bytes).unwrap()
+    }
+
+    /// `prepare_steering` serves v2 + basic bakes (STEERAPI): the prepared session's score and features equal the
+    /// scalar path's bit for bit, and its map equals the older `compute_with_ref_and_attribution` path (they are
+    /// the same owner) on fresh and reused sessions, over the whole image grid; also with an ensemble and a
+    /// bin of 1.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_session_serves_v2_plus_basic_bakes() {
+        let (w, h) = (128usize, 96usize);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let ids: Vec<usize> = (0..156).chain(372..720).collect();
+        let model = bake_over(&ids);
+        for bin in [1usize, 8] {
+            let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+            let scalar = scorer.compute(&rs, &ds, None).unwrap();
+            let pre = scorer.precompute_reference(&rs).unwrap();
+            let old = scorer
+                .compute_with_ref_and_attribution(
+                    &rs,
+                    &pre,
+                    &ds,
+                    None,
+                    &mut crate::Fused944Session::new(),
+                    bin,
+                )
+                .unwrap();
+            let mut worker = scorer.prepare_steering(&rs, bin).unwrap();
+            let first = worker.compute(&ds, None).unwrap();
+            let again = worker.compute(&ds, None).unwrap();
+            assert_eq!(scalar.score().to_bits(), first.result().score().to_bits());
+            assert_eq!(scalar.features(), first.result().features());
+            for scored in [&first, &again] {
+                assert_eq!(
+                    scored.result().score().to_bits(),
+                    old.result().score().to_bits()
+                );
+                for (y0, x0) in (0..h)
+                    .step_by(16)
+                    .flat_map(|y| (0..w).step_by(16).map(move |x| (y, x)))
+                {
+                    let (x1, y1) = ((x0 + 32).min(w), (y0 + 32).min(h));
+                    assert_eq!(
+                        scored.refinement_gain(x0, y0, x1, y1).to_bits(),
+                        old.refinement_gain(x0, y0, x1, y1).to_bits(),
+                        "rect {:?} bin {bin}",
+                        (x0, y0, x1, y1)
+                    );
+                }
+            }
+            assert!(first.refinement_gain(0, 0, 64, 64).is_finite());
+            assert!(first.refinement_gain(0, 0, 64, 64) != 0.0);
+        }
+        // An equal-weight ensemble of two v2 + basic members serves too.
+        let other = bake_over(&(0..156).chain(400..700).collect::<Vec<_>>());
+        let models = vec![model, other];
+        let mut ensemble = crate::BakeScorer::ensemble(&models, None)
+            .unwrap()
+            .with_parallel(false);
+        let scalar = ensemble.compute(&rs, &ds, None).unwrap();
+        let scored = ensemble
+            .prepare_steering(&rs, 8)
+            .unwrap()
+            .compute(&ds, None)
+            .unwrap();
+        assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
+    }
+
+    /// Refusals: every family without a complete session integrand is refused up front with an error naming
+    /// its ID range, even when mixed with supported reads; HDR refuses v2.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_session_refuses_unsupported_families_by_name() {
+        let (w, h) = (96usize, 96usize);
+        let (src, _) = pair(w, h);
+        let rs = RgbSlice::new(&src, w, h);
+        let refuse = |ids: &[usize]| -> String {
+            let model = bake_over(ids);
+            let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+            match scorer.prepare_steering(&rs, 8) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("{ids:?} must be refused"),
+            }
+        };
+        assert!(
+            refuse(&[13, 300]).contains("masked/IW") && refuse(&[13, 300]).contains("f228-f371")
+        );
+        assert!(refuse(&[13, 330, 372]).contains("masked/IW"));
+        assert!(refuse(&[13, 372, 800]).contains("append feature IDs f720-f923"));
+        assert!(refuse(&[13, 930]).contains("append2"));
+        assert!(
+            refuse(&[13, 300, 800, 930])
+                .contains("masked/IW f228-f371, append f720-f923 and append2 f924-f943")
+        );
+        // f944 and above: refused whether the plan or the session notices first.
+        let model = bake_over(&[13, 950]);
+        assert!(
+            crate::BakeScorer::new(&model)
+                .map_or(true, |mut s| s.prepare_steering(&rs, 8).is_err())
+        );
+        // The same bake served by a plain (non-steering) compute is unaffected by the session's refusal.
+        let model = bake_over(&[13, 300]);
+        let (s2, d2) = pair(96, 96);
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        assert!(
+            scorer
+                .compute(
+                    &RgbSlice::new(&s2, 96, 96),
+                    &RgbSlice::new(&d2, 96, 96),
+                    None
+                )
+                .is_ok()
+        );
+        // HDR: v2 refused, basic/peak accepted by the contract check (the error is about v2, not the encoding).
+        let model = bake_over(&[13, 400]);
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let err = scorer
+            .prepare_steering_hdr(&rs, crate::feature_v2::HdrEncoding::Linear, 8)
+            .err()
+            .expect("HDR + v2 refused")
+            .to_string();
+        assert!(
+            err.contains("HDR steering") && err.contains("f372-f719"),
+            "{err}"
+        );
+    }
+
+    /// A corruption companion that reads an unsupported ID refuses the session too (its inputs need accurate
+    /// maps like every other read).
+    #[test]
+    #[cfg(all(
+        feature = "custom-profiles",
+        feature = "feature-regime-v2",
+        feature = "corruption-head"
+    ))]
+    fn prepared_session_refuses_a_companion_reading_unsupported_ids() {
+        let (w, h) = (96usize, 96usize);
+        let (src, _) = pair(w, h);
+        let rs = RgbSlice::new(&src, w, h);
+        let base = zenpredict::Model::from_bytes(&bake_declaring(None, 13)).unwrap();
+        let ok = zenpredict::Model::from_bytes(&bake_declaring(None, 91)).unwrap();
+        let bad = zenpredict::Model::from_bytes(&bake_declaring(None, 300)).unwrap();
+        let mut fine = crate::BakeScorer::new(&base)
+            .unwrap()
+            .with_linear_corruption_head(&ok, 10.0)
+            .unwrap();
+        assert!(fine.prepare_steering(&rs, 8).is_ok());
+        let mut refused = crate::BakeScorer::new(&base)
+            .unwrap()
+            .with_linear_corruption_head(&bad, 10.0)
+            .unwrap();
+        let err = refused
+            .prepare_steering(&rs, 8)
+            .err()
+            .expect("companion read refused")
+            .to_string();
+        assert!(err.contains("masked/IW"), "{err}");
     }
 
     #[test]
@@ -2306,11 +2525,19 @@ mod revision_contract_tests {
     fn prepared_worker_refuses_incomplete_contracts_before_use() {
         let (src, _) = pair(96, 96);
         let rs = RgbSlice::new(&src, 96, 96);
-        for id in [228, 300, 400] {
+        // Masked/IW (f228-371), append (f720-923) and append2 (f924-943) have no complete session integrand.
+        for id in [228, 300, 371, 720, 800, 923, 930] {
             let bytes = bake_declaring(None, id);
             let model = zenpredict::Model::from_bytes(&bytes).unwrap();
             let mut scorer = crate::BakeScorer::new(&model).unwrap();
             assert!(scorer.prepare_steering(&rs, 8).is_err(), "f{id}");
+        }
+        // v2 (f372-719) is served since STEERAPI (this test used to refuse f400 with the old 228 limit).
+        for id in [372, 400, 719] {
+            let bytes = bake_declaring(None, id);
+            let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+            let mut scorer = crate::BakeScorer::new(&model).unwrap();
+            assert!(scorer.prepare_steering(&rs, 8).is_ok(), "f{id}");
         }
         let bytes = bake_declaring(None, 5);
         let model = zenpredict::Model::from_bytes(&bytes).unwrap();

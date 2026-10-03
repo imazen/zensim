@@ -44,9 +44,12 @@ manifest = {'schema': 'steercheck-broad-v1', 'qualified': False, 'binary_sha256'
             'models': {n: [{'path': str(p), 'sha256': sha(p)} for p in ps] for n, ps in models.items()},
             'selection': 'uniform three-seed ensembles; TRAIN-role pairs; development diagnostic, not held-out evidence',
             'rows': []}
-# Not ZENSIM_PREPARED_STEERING: prepare_steering refuses any model reading IDs >= 228 (v2 included), so every
-# candidate goes through the cached compute_with_ref_and_attribution path the owner's audit also uses.
+# Default: the cached compute_with_ref_and_attribution path the owner's audit also uses (before STEERAPI,
+# prepare_steering refused any model reading IDs >= 228). STEERCHECK_PREPARED=1 serves through prepare_steering.
 env = dict(os.environ, RAYON_NUM_THREADS='1', ZENSIM_FORMULA_REV='3')  # the screen's Rev3 pixels
+if os.environ.get('STEERCHECK_PREPARED') == '1':
+    # Serve through BakeScorer::prepare_steering (STEERAPI); v2 bakes need it to accept IDs >= 228.
+    env['ZENSIM_PREPARED_STEERING'] = '1'
 
 
 

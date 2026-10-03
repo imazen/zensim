@@ -1,0 +1,90 @@
+[
+ {
+  "mode": "scalar",
+  "group": "sampling_scalar_1024",
+  "arm": "basic228",
+  "n": 30,
+  "mean_ms": 36.64,
+  "median_ms": 36.85,
+  "min_ms": 33.79,
+  "max_ms": 38.31,
+  "mad_ms": 0.57
+ },
+ {
+  "mode": "scalar",
+  "group": "sampling_scalar_1024",
+  "arm": "v2basic",
+  "n": 30,
+  "mean_ms": 94.96,
+  "median_ms": 96.18,
+  "min_ms": 71.23,
+  "max_ms": 97.76,
+  "mad_ms": 1.3
+ },
+ {
+  "mode": "scalar",
+  "group": "sampling_scalar_2048",
+  "arm": "basic228",
+  "n": 25,
+  "mean_ms": 186.55,
+  "median_ms": 184.27,
+  "min_ms": 146.33,
+  "max_ms": 264.35,
+  "mad_ms": 33.9
+ },
+ {
+  "mode": "scalar",
+  "group": "sampling_scalar_2048",
+  "arm": "v2basic",
+  "n": 25,
+  "mean_ms": 416.07,
+  "median_ms": 442.0,
+  "min_ms": 319.63,
+  "max_ms": 527.73,
+  "mad_ms": 31.27
+ },
+ {
+  "mode": "spatial",
+  "group": "sampling_spatial_1024",
+  "arm": "basic228",
+  "n": 30,
+  "mean_ms": 65.0,
+  "median_ms": 62.62,
+  "min_ms": 57.02,
+  "max_ms": 85.3,
+  "mad_ms": 7.01
+ },
+ {
+  "mode": "spatial",
+  "group": "sampling_spatial_1024",
+  "arm": "v2basic",
+  "n": 30,
+  "mean_ms": 180.02,
+  "median_ms": 170.02,
+  "min_ms": 161.87,
+  "max_ms": 230.34,
+  "mad_ms": 5.77
+ },
+ {
+  "mode": "spatial",
+  "group": "sampling_spatial_2048",
+  "arm": "basic228",
+  "n": 25,
+  "mean_ms": 278.11,
+  "median_ms": 283.67,
+  "min_ms": 220.13,
+  "max_ms": 320.71,
+  "mad_ms": 42.78
+ },
+ {
+  "mode": "spatial",
+  "group": "sampling_spatial_2048",
+  "arm": "v2basic",
+  "n": 25,
+  "mean_ms": 829.32,
+  "median_ms": 873.51,
+  "min_ms": 646.53,
+  "max_ms": 965.26,
+  "mad_ms": 135.85
+ }
+]

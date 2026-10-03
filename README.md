@@ -555,7 +555,10 @@ one target score. Model metadata and disposition are model-author settings.
 For rectangle steering, `prepare_steering(&source, bin)` binds SDR input;
 `prepare_steering_hdr(&source, encoding, bin)` binds native PQ, HLG or absolute
 linear HDR input. Both reuse the reference and retain basic/peak signals from
-the scoring extraction for subsequent map assembly. The HDR route preserves
+the scoring extraction for subsequent map assembly. The SDR session also serves
+bakes that read v2 features (f372-f719) with the same score and the same map owner
+as the cached-reference attribution path; masked/IW, append, append2 and f944+
+reads are refused up front. The HDR route preserves
 declared primaries and native precision; it currently refuses fractional
 sampling and unsupported feature families. These are input/implementation
 contracts, not evidence that an SDR-trained model is calibrated for HDR.
