@@ -764,6 +764,26 @@ const DVIFMGATE: &[Revision] = &[Revision {
            f1820..1824. F2 is independent of v, so this is the whole gate-form \
            variant. Restores COST_CUTS_AUDIT B1. No earlier slot moves.",
 }];
+/// SIGNEDFEAT families (coordinator decision 2026-10-01). Default-off, append-only. The commit is pinned
+/// to the byte-changing implementation commit once it exists.
+const SIGNED_COMMIT: &str = "00000000";
+const TEXGAIN: &[Revision] = &[Revision {
+    era: "signedfeat",
+    commit: SIGNED_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of texture-magnitude GAIN, the mirror of v2's \
+           `hf_mag_loss`: per-pixel mean of `max(0,|hf_d|-|hf_s|)/(|hf_d|+|hf_s|+C_HF)` \
+           over the v1 band maps, per scale and channel, f1825..1836. No earlier slot moves.",
+}];
+const SATSIGN: &[Revision] = &[Revision {
+    era: "signedfeat",
+    commit: SIGNED_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of signed chroma-saturation change: the XYB (X, B) \
+           magnitude `m = sqrt(Xc^2/cx + Bc^2/cb)` (C8's centring and GMSBANK_CS_C[2] \
+           normalisation) gain/loss, per-pixel mean and whole-plane, per scale, \
+           f1837..1852. No earlier slot moves.",
+}];
 const GMSNATIVE: &[Revision] = &[Revision {
     era: "gmsnative",
     commit: RESTORE_COMMIT,
@@ -2706,6 +2726,57 @@ pub(crate) static DVIFMGATE_SIGNALS: [SignalDef; 5] = {
     ]
 };
 
+/// SIGNEDFEAT S1: texture-magnitude gain per (scale, channel) cell. The mirror of v2's `hf_mag_loss`
+/// (`bounded_excess(|hf_s|, |hf_d|, C_HF)`): `bounded_excess(|hf_d|, |hf_s|, C_HF)` pooled per pixel.
+/// `Unsigned` direction on purpose: no sign expectation is imposed on a gain slot.
+pub(crate) static TEXGAIN_SIGNALS: [SignalDef; 1] = [SignalDef {
+    family: ComputeToken::Texgain,
+    block_local: 0,
+    name: "hfmag_gain",
+    statistic: Statistic::Mean,
+    cost: CostClass::Expensive,
+    tranche: Tranche::None,
+    placement: Placement::AllCells,
+    form: Form::Difference,
+    direction: Direction::Unsigned,
+    kernel: KernelId::RestoreMaps,
+    deprecated: false,
+    defect: None,
+    revisions: TEXGAIN,
+}];
+
+/// SIGNEDFEAT S2: signed chroma-saturation change per SCALE. Semantics: chroma-MAGNITUDE change in XYB
+/// opponent space (`m = sqrt(Xc²/cx + Bn²/cb)`, `Xc = X-0.42`, `Bn = B-0.55-cbrt(K_B0)` so grays give `m = 0`);
+/// it responds ~0.4x as strongly to a pure luminance change of chromatic pixels as to a chroma change of the
+/// same size class (cube-root opsin) — accepted, no luminance normalisation. `sat_*` pool the per-pixel
+/// `bounded_excess_pair(m_d, m_r, C_SAT)`; `gsat_*` apply the same form to the whole-plane mean of `m`.
+pub(crate) static SATSIGN_SIGNALS: [SignalDef; 4] = {
+    use ComputeToken::Satsign as F;
+    const fn ss(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Form::Difference,
+            direction: Direction::Unsigned,
+            kernel: KernelId::RestoreMaps,
+            deprecated: false,
+            defect: None,
+            revisions: SATSIGN,
+        }
+    }
+    [
+        ss(0, "sat_gain", Statistic::Mean),
+        ss(1, "sat_loss", Statistic::Mean),
+        ss(2, "gsat_gain", Statistic::Global),
+        ss(3, "gsat_loss", Statistic::Global),
+    ]
+};
+
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -2832,6 +2903,16 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &DVIFMGATE_SIGNALS,
         replication: Replication::Flat,
     },
+    BlockDef {
+        family: ComputeToken::Texgain,
+        signals: &TEXGAIN_SIGNALS,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Satsign,
+        signals: &SATSIGN_SIGNALS,
+        replication: Replication::PerScale,
+    },
 ];
 
 impl BlockDef {
@@ -2889,13 +2970,13 @@ pub(crate) fn block_base(
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
 /// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
 /// Rev4 feature bank's full width 1322) plus C8's width 1502 and the restored-cut families' widths 1562 (mapdev),
-/// 1790 (z1max), 1820 (gmsnative) and 1825 (dvifmgate).
+/// 1790 (z1max), 1820 (gmsnative) and 1825 (dvifmgate), plus the SIGNEDFEAT widths 1837 (texgain) and 1853 (satsign).
 /// `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
 pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[
-    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825,
+    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825, 1837, 1853,
 ];
 
 /// Total layout width at `n_scales` with every registered block present.
@@ -3423,7 +3504,7 @@ mod tests {
     #[test]
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
-        assert_eq!(w, 1825, "full registered width at 4 scales");
+        assert_eq!(w, 1853, "full registered width at 4 scales");
         for id in 0..w {
             let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
             let ch = match d.channel {
@@ -3507,6 +3588,8 @@ mod tests {
             (ComputeToken::Z1max, 1562, 228),
             (ComputeToken::Gmsnative, 1790, 30),
             (ComputeToken::Dvifmgate, 1820, 5),
+            (ComputeToken::Texgain, 1825, 12),
+            (ComputeToken::Satsign, 1837, 16),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -3528,7 +3611,7 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 1825);
+        assert_eq!(seen.len(), 1853);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -3969,10 +4052,12 @@ mod owner_gates {
             z1max: false,
             gmsnative: false,
             dvifmgate: false,
+            texgain: false,
+            satsign: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 19] = [
+        let cases: [(T, ComputeSet); 21] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -4064,6 +4149,20 @@ mod owner_gates {
                 T::Dvifmgate,
                 ComputeSet {
                     dvifmgate: true,
+                    ..off
+                },
+            ),
+            (
+                T::Texgain,
+                ComputeSet {
+                    texgain: true,
+                    ..off
+                },
+            ),
+            (
+                T::Satsign,
+                ComputeSet {
+                    satsign: true,
                     ..off
                 },
             ),

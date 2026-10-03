@@ -26,6 +26,12 @@ api-doc:
 api-doc-check:
     ZEN_API_DOC=check ZEN_API_DOC_TOOLCHAIN={{apidoc_toolchain}} cargo test --manifest-path apidoc/Cargo.toml
 
+# SIGNEDFEAT: tier parity of the restore-cuts / signed families on real TRAIN pairs at Rev4, over the 6 pairs x 4 sizes
+# written by prep_parity_pairs.py. FAMILIES is a comma list of compute tokens.
+signedfeat-tier-parity families="mapdev,z1max,texgain,satsign" dir="/var/tmp/signedfeat/parity":
+    python3 scripts/signedfeat/prep_parity_pairs.py {{dir}}
+    RUSTFLAGS='--cfg signedfeat_real_pairs' SIGNEDFEAT_PARITY_FAMILIES={{families}} SIGNEDFEAT_PARITY_DIR={{dir}} cargo test --release -p zensim --features training --test signedfeat_tier_parity -- --nocapture
+
 # Restored-cut families (COST_CUTS_AUDIT): clean-snapshot extractor build. Sibling repos are
 # `git archive`s of their fetched mains under /var/tmp/restore-cuts/src (CODEX_NOTE crates-on-main rule);
 # every output stays under /var/tmp/restore-cuts/.

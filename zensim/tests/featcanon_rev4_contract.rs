@@ -410,7 +410,7 @@ fn served_paths_refuse_rev4() {
         let (s, d) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
         let x = research::extract(&Request::everything(), &s, &d)
             .unwrap_or_else(|e| panic!("{w}x{h}: research::extract must compute Rev4: {e}"));
-        assert_eq!(x.values().len(), 1825);
+        assert_eq!(x.values().len(), 1853);
         let (hs, hd) = (HdrLinear::new(&src, w, h), HdrLinear::new(&dst, w, h));
         assert_refused(
             &format!("{w}x{h} research::extract on a declared-HDR pair"),

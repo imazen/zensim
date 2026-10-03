@@ -43,6 +43,18 @@ FAMILIES = {
     "dvifmgate": ("features__restore_dvifmgate.parquet", 1820, 5),
 }
 FULL_WIDTH = 1825
+FIRST_ID = 1502
+FORMULA_REV = "3"
+MANIFEST = "_MANIFEST_restore.json"
+# SIGNEDFEAT sidecars (texgain f1825-1836, satsign f1837-1852) are Rev4 (tiercanon) extractions of the
+# same bank keys: SIDECAR_SPEC=signed selects them; the default spec is the restore-cuts one, unchanged.
+if os.environ.get("SIDECAR_SPEC") == "signed":
+    FAMILIES = {
+        "texgain": ("features__signed_texgain.parquet", 1825, 12),
+        "satsign": ("features__signed_satsign.parquet", 1837, 16),
+    }
+    FULL_WIDTH, FIRST_ID, FORMULA_REV, MANIFEST = 1853, 1825, "4", "_MANIFEST_signed.json"
+    ROOT = Path(os.environ.get("RESTORE_ROOT", "/var/tmp/signedfeat/sidecar"))
 # z1max cell-local slots whose registry form is Difference (exactly 0 on an identity pair).
 Z1_DIFF_LOCALS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17, 18]
 
@@ -140,7 +152,7 @@ def identity_violations(family, ident, arr):
     return int(np.count_nonzero(a))
 
 
-def bind(name, build_meta_path, binary):
+def bind(name, build_meta_path, binary, alt_digests=None):
     if not (ROOT / "raw").exists():
         raise SystemExit("run the extraction first")
     keys = keys_of(name)
@@ -152,25 +164,40 @@ def bind(name, build_meta_path, binary):
     bin_sha = sha256_file(binary)
     if producer.get("producer_binary_sha256") != bin_sha:
         raise SystemExit("extractor manifest binary hash differs from the build")
-    if producer.get("formula_revision") != "3" or producer.get("layout") != f"w{FULL_WIDTH}":
+    if producer.get("formula_revision") != FORMULA_REV or producer.get("layout") != f"w{FULL_WIDTH}":
         raise SystemExit(f"extractor manifest has wrong formula/layout: {producer}")
     if producer.get("input_contract", INPUT_CONTRACT) != INPUT_CONTRACT:
         raise SystemExit("extractor manifest has wrong input contract")
     build_meta = json.loads(Path(build_meta_path).read_text())
 
+    # --alt-digests: a table (pair_key, ref_sha_new, dist_sha_new, digest_match) of rows whose bank-key pixel digests describe
+    # an older decode (REEXTRACT: SafeSyn AVIF rows after the decoder fix). Such a row binds when the audit's digests equal
+    # the table's new digests for the same bank pair_key; every other row binds on the bank digests as before.
+    alt = {}
+    if alt_digests:
+        import pyarrow.parquet as _pq
+        t = _pq.read_table(alt_digests, columns=["pair_key", "ref_sha_new", "dist_sha_new", "digest_match"]).to_pydict()
+        alt = {k: (r, d) for k, r, d, m in zip(t["pair_key"], t["ref_sha_new"], t["dist_sha_new"], t["digest_match"]) if not m}
+    n_alt = 0
     with audit_path.open() as f:
         for i, line in enumerate(f):
             if i >= n:
                 raise SystemExit(f"{name}: extra audit row")
             a = json.loads(line)
-            if (a["reference"] != keys["ref_path"][i] or a["distorted"] != keys["dist_path"][i]
-                    or a["reference_pixels_sha256"] != keys["ref_pixels_sha256"][i]
-                    or a["distorted_pixels_sha256"] != keys["dist_pixels_sha256"][i]
-                    or pair_key(a["reference_pixels_sha256"], a["distorted_pixels_sha256"])
-                    != keys["pair_key"][i]):
+            paths_ok = a["reference"] == keys["ref_path"][i] and a["distorted"] == keys["dist_path"][i]
+            bank_ok = (a["reference_pixels_sha256"] == keys["ref_pixels_sha256"][i]
+                       and a["distorted_pixels_sha256"] == keys["dist_pixels_sha256"][i]
+                       and pair_key(a["reference_pixels_sha256"], a["distorted_pixels_sha256"]) == keys["pair_key"][i])
+            alt_ok = (not bank_ok and keys["pair_key"][i] in alt
+                      and (a["reference_pixels_sha256"], a["distorted_pixels_sha256"]) == alt[keys["pair_key"][i]])
+            if not paths_ok or not (bank_ok or alt_ok):
                 raise SystemExit(f"{name}: audit/key binding failed at {i}")
+            n_alt += alt_ok
         if i + 1 != n:
             raise SystemExit(f"{name}: audit has {i + 1} of {n} rows")
+    if alt_digests and n_alt != len(alt):
+        raise SystemExit(f"{name}: {n_alt} rows bound on alt digests, the table lists {len(alt)} stale rows")
+    print(f"RESTORE_BIND set={name} rows={n} alt_digest_rows={n_alt}")
 
     total = sum(w for _, _, w in FAMILIES.values())
     first = min(f for _, f, _ in FAMILIES.values())
@@ -221,16 +248,16 @@ def bind(name, build_meta_path, binary):
             "identity_violations": bad, "dtype": "f32", "cast": "f64->f32 round-nearest-even",
         }
     manifest.update({
-        "feature_set_id": producer["feature_set_id"], "formula_revision": "3", "root_form": "sqrt",
+        "feature_set_id": producer["feature_set_id"], "formula_revision": FORMULA_REV, "root_form": "sqrt",
         "input_contract": INPUT_CONTRACT, "build_commit": build_meta["repositories"]["zensim"]["commit"],
         "binary_sha256": bin_sha, "build_meta_sha256": sha256_file(build_meta_path),
-        "env": {"ZENSIM_FORMULA_REV": "3", "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"},
+        "env": {"ZENSIM_FORMULA_REV": FORMULA_REV, "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"},
         "pairs_sha256": sha256_file(pairs_path), "audit_sha256": sha256_file(audit_path),
         "extractor_csv_sha256": sha256_file(csv_path),
         "bank_keys_sha256": sha256_file(BANK / name / "keys.parquet"),
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     })
-    mpath = ROOT / "bank" / name / "_MANIFEST_restore.json"
+    mpath = ROOT / "bank" / name / MANIFEST
     mpath.write_text(json.dumps(manifest, indent=1) + "\n")
     print(f"RESTORE_WRITTEN set={name} rows={n} manifest_sha256={sha256_file(mpath)} "
           f"feature_set_id={producer['feature_set_id']}")
@@ -240,7 +267,7 @@ def verify():
     result = {}
     for name in sets():
         d = ROOT / "bank" / name
-        m = json.loads((d / "_MANIFEST_restore.json").read_text())
+        m = json.loads((d / MANIFEST).read_text())
         keys = pq.read_table(BANK / name / "keys.parquet", columns=["pair_key", "pixels_identical"])
         pks = keys.column("pair_key").to_pylist()
         ident = keys.column("pixels_identical").to_numpy()
@@ -332,7 +359,7 @@ def reextract():
         reader = csv.reader(f)
         hdr = next(reader)
         rid_col = hdr.index("row_id")
-        pos = [hdr.index(f"f{i}") for i in range(1502, FULL_WIDTH)]
+        pos = [hdr.index(f"f{i}") for i in range(FIRST_ID, FULL_WIDTH)]
         for row in reader:
             rid = int(row[rid_col])
             if rid in seen or rid not in want:
@@ -353,12 +380,13 @@ if __name__ == "__main__":
     ap.add_argument("--set")
     ap.add_argument("--binary")
     ap.add_argument("--build-meta")
+    ap.add_argument("--alt-digests", help="pair_key/new-digest table for rows whose bank digests are stale (see bind)")
     a = ap.parse_args()
     if a.action == "pairs":
         for nme in sets():
             write_pairs(nme, ROOT / "pairs" / f"{nme}.tsv")
     elif a.action == "bind":
-        bind(a.set, a.build_meta, a.binary)
+        bind(a.set, a.build_meta, a.binary, a.alt_digests)
     elif a.action == "verify":
         verify()
     elif a.action == "draw":

@@ -25,6 +25,16 @@
   evaluated each epoch under the Mean/Min validation policies; their epoch-line segment reads
   `not evaluated (train-only)`. Validation score, dev panels, weights and predictions are
   unchanged (4 cells x 120 epochs, 8 cells x 2). (commit following 49b16866)
+- SIGNEDFEAT (2026-10-01), two default-off opt-in families appended after the restored cuts (widths
+  1837, 1853; f0–f1824 bit-identical at Rev1–Rev4, `benchmarks/signedfeat_WORKLOG.md`): `texgain`
+  f1825–f1836 (texture-magnitude gain, the mirror of `hf_mag_loss`, per scale and channel) and
+  `satsign` f1837–f1852 (signed chroma-saturation change from the XYB (X, B) magnitude, per scale:
+  per-pixel and whole-plane gain/loss). The exact new public Rust items are the additive
+  `ComputeToken::{Texgain, Satsign}` arms of the existing `#[non_exhaustive]` enum and the doc-hidden
+  `V2NewFeatureToggles::{texgain, satsign}` fields defaulting to false. No other public item is added;
+  the extractor's audit accepts the registered widths 1837 and 1853. `satsign` centres the B plane on the neutral axis (`B - 0.55 - cbrt(K_B0)`), so grays give m = 0; it
+  responds ~0.4x as strongly to a pure luminance change of chromatic pixels as to a chroma change.
+
 - Rev4 canon is now `rec64` + `c64` (f64 blur recurrence + f64 lane pools) on the
   product build; the c32/neum/exact arms stay behind the `oracle` feature. Rev1–Rev3
   are byte-identical. (20655ddf)
