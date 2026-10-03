@@ -5101,7 +5101,7 @@ fn fused_blur_h_rec64_row(
 /// Stores are per-row `(sum * inv_v64) as f32` from `to_array()`. `height
 /// % 8` tail rows take the scalar row body. `_scalar`/`_wasm128` keep the
 /// scalar body: their `mul_add` is unfused either way.
-#[magetypes(define(f64x8), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_blur_h_ssim_rec64_rows(
     token: Token,
@@ -5249,6 +5249,42 @@ fn fused_blur_h_ssim_rec64_rows_scalar(
 #[allow(clippy::too_many_arguments, dead_code)]
 fn fused_blur_h_ssim_rec64_rows_wasm128(
     _token: archmage::Wasm128Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+    diam: usize,
+    inv_v64: f64,
+    err: bool,
+) {
+    for y in 0..height {
+        fused_blur_h_rec64_row(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            y,
+            width,
+            r,
+            diam,
+            inv_v64,
+            err,
+        );
+    }
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
+/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[allow(clippy::too_many_arguments, dead_code)]
+fn fused_blur_h_ssim_rec64_rows_neon(
+    _token: archmage::NeonToken,
     src: &[f32],
     dst: &[f32],
     out_mu1: &mut [f32],
@@ -8508,6 +8544,7 @@ mod tests {
                 err,
             )
         });
+        #[cfg(target_arch = "x86_64")]
         if let Some(t) = archmage::X64V3Token::summon() {
             check_variant!("v3", move |s: &[f32],
                                        dd: &[f32],
@@ -8526,6 +8563,7 @@ mod tests {
                 )
             });
         }
+        #[cfg(target_arch = "x86_64")]
         if let Some(t) = archmage::X64V4Token::summon() {
             check_variant!("v4", move |s: &[f32],
                                        dd: &[f32],
@@ -8544,6 +8582,7 @@ mod tests {
                 )
             });
         }
+        #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
         if let Some(t) = archmage::X64V4xToken::summon() {
             check_variant!("v4x", move |s: &[f32],
                                         dd: &[f32],

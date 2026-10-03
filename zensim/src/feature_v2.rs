@@ -6367,6 +6367,7 @@ fn gradient_block_kernel_canon<
 /// The BANK / REV4 side effects are NOT in here — they stay scalarized
 /// per element in the caller (histogram scatters and Welford pushes
 /// cannot vectorize).
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn gradient_terms32_v<T: F32x8Backend + Copy, const BANDVIS: bool, const BV_DSTACT: bool>(
@@ -6461,7 +6462,7 @@ fn gradient_terms32_v<T: F32x8Backend + Copy, const BANDVIS: bool, const BV_DSTA
 /// production interior already uses. `gmsbank_pixel_var`, the chroma
 /// pushes and `rev4_grad_pixel` stay scalar per element. `_scalar` and
 /// `_wasm128` keep the scalar canonical body.
-#[magetypes(define(f32x8), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec<
     const BANDVIS: bool,
@@ -6757,6 +6758,31 @@ fn gradient_block_kernel_canon64_vec_wasm128<
     const BANK: bool,
 >(
     _token: archmage::Wasm128Token,
+    src_h: &[f32],
+    dst_h: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    height: usize,
+    bv_lo: f32,
+    bv_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
+    mode: crate::featcanon::Mode,
+) -> GradientAccum {
+    gradient_block_kernel_canon::<crate::featcanon::LanesF64, BANDVIS, BV_DSTACT, BANK>(
+        src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
+    )
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
+/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[allow(clippy::too_many_arguments, dead_code)]
+fn gradient_block_kernel_canon64_vec_neon<
+    const BANDVIS: bool,
+    const BV_DSTACT: bool,
+    const BANK: bool,
+>(
+    _token: archmage::NeonToken,
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
@@ -18165,10 +18191,12 @@ pub(crate) mod tests {
         tiers_run += 1;
         #[cfg(target_arch = "x86_64")]
         {
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V3Token::summon() {
                 check_mscn_norm_tier(t, "x86 v3");
                 tiers_run += 1;
             }
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V4Token::summon() {
                 check_mscn_norm_tier(t, "x86 v4");
                 tiers_run += 1;
@@ -28436,6 +28464,7 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
 /// scalar mirror was written to era-2's `terms!`/`pools!`; this calls the
 /// same `*_v` helpers). All plain unfused ops — no `mul_add` anywhere —
 /// so every lane IS one scalar element's rounding.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn dense_terms32_v<T: F32x8Backend + Copy>(
@@ -28601,7 +28630,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 /// in the same per-pool order. `rev4_dense_pixel` stays scalar per
 /// element (its `scatter` cannot vectorize). `_scalar`/`_wasm128` keep the
 /// scalar canonical body.
-#[magetypes(define(f32x8), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec(
     token: Token,
@@ -28801,6 +28830,38 @@ fn dense_block_kernel_canon64_vec_scalar(
 #[allow(clippy::too_many_arguments, dead_code)]
 fn dense_block_kernel_canon64_vec_wasm128(
     _token: archmage::Wasm128Token,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
+) -> DenseAccum {
+    dense_block_kernel_canon::<crate::featcanon::LanesF64>(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+        r4,
+    )
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
+/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[allow(clippy::too_many_arguments, dead_code)]
+fn dense_block_kernel_canon64_vec_neon(
+    _token: archmage::NeonToken,
     src: &[f32],
     dst: &[f32],
     mu1: &[f32],
@@ -29322,6 +29383,7 @@ mod featcanon_contract_tests {
                     )
                 }
             );
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V3Token::summon() {
                 check_variant!(
                     "v3",
@@ -29342,6 +29404,7 @@ mod featcanon_contract_tests {
                     }
                 );
             }
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V4Token::summon() {
                 check_variant!(
                     "v4",
@@ -29362,6 +29425,7 @@ mod featcanon_contract_tests {
                     }
                 );
             }
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4xToken::summon() {
                 check_variant!(
                     "v4x",
@@ -29595,6 +29659,7 @@ mod featcanon_contract_tests {
                     Mode::Canon64,
                 )
             }
+            #[cfg(target_arch = "x86_64")]
             fn go_v3<const B: bool, const V: bool, const K: bool>(
                 t: archmage::X64V3Token,
                 s: &[f32],
@@ -29621,6 +29686,7 @@ mod featcanon_contract_tests {
                     Mode::Canon64,
                 )
             }
+            #[cfg(target_arch = "x86_64")]
             fn go_v4<const B: bool, const V: bool, const K: bool>(
                 t: archmage::X64V4Token,
                 s: &[f32],
@@ -29647,6 +29713,7 @@ mod featcanon_contract_tests {
                     Mode::Canon64,
                 )
             }
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             fn go_v4x<const B: bool, const V: bool, const K: bool>(
                 t: archmage::X64V4xToken,
                 s: &[f32],
@@ -29682,12 +29749,15 @@ mod featcanon_contract_tests {
                 rng,
                 compiled
             );
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V3Token::summon() {
                 gradient_cases!("v3", go_v3, t, rng, compiled);
             }
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V4Token::summon() {
                 gradient_cases!("v4", go_v4, t, rng, compiled);
             }
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4xToken::summon() {
                 gradient_cases!("v4x", go_v4x, t, rng, compiled);
             }

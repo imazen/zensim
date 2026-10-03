@@ -11,6 +11,11 @@
 
 ### Changed
 
+- Rev4 serving: the canonical f64 blur/pool kernels (H-blur Rec64 rows, V-blur SSIM and edge paths, dense/gradient block
+  kernels, restore-cuts map rows) run lane-parallel on the x86_64 fused-FMA tiers, bit-identical to the scalar canonical
+  bodies; other targets keep the scalar bodies. With the front-end leaves, Rev4 is 1.67x Rev3 at 1 MP single-thread (was
+  2.37x). A latent index panic in the scalar canonical edge-only `VWin` path is fixed (missing planes read as 0, as f32 does).
+  `benchmarks/rev4vec2_WORKLOG.md`.
 - Rev4 serving: the canonical front-end leaves (sRGB/linear/PU-XYB opsin, PQ/HLG row decode) run lane-parallel on the
   x86_64 fused-FMA tiers (v4x/v4/v3); scalar, wasm128 and aarch64 NEON keep the scalar canonical bodies (NEON's vector
   max/min propagate NaN where the canon drops it). Bit-identical to the scalar canon on every tier; Rev4 scalar scoring

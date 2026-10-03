@@ -359,7 +359,7 @@ fn restore_cuts_row_work_plain(
 /// every lane sees its identical op sequence. Other `WelfordVar` variants
 /// and `exact` keep the sequential/scalar body; `_scalar`/`_wasm128` run
 /// it whole.
-#[magetypes(define(f32x8, f64x8), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn restore_cuts_row_work(
     token: Token,
@@ -478,6 +478,26 @@ fn restore_cuts_row_work_scalar(
 #[allow(clippy::too_many_arguments, dead_code)]
 fn restore_cuts_row_work_wasm128(
     _token: archmage::Wasm128Token,
+    sp_row: &[f32],
+    dp_row: &[f32],
+    mu1_row: &[f32],
+    mu2_row: &[f32],
+    sd_row: &[f32],
+    width: usize,
+    rows: &mut [Vec<f64>; 8],
+    devv: Option<&mut [crate::featcanon::WelfordVar; MAPDEV_PER_CELL]>,
+    exact: bool,
+) {
+    restore_cuts_row_work_plain(
+        sp_row, dp_row, mu1_row, mu2_row, sd_row, width, rows, devv, exact,
+    );
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
+/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[allow(clippy::too_many_arguments, dead_code)]
+fn restore_cuts_row_work_neon(
+    _token: archmage::NeonToken,
     sp_row: &[f32],
     dp_row: &[f32],
     mu1_row: &[f32],
@@ -1109,6 +1129,7 @@ mod tests {
                 exact,
             )
         });
+        #[cfg(target_arch = "x86_64")]
         if let Some(t) = archmage::X64V3Token::summon() {
             check_variant!("v3", move |sp: &[f32],
                                        dp: &[f32],
@@ -1124,6 +1145,7 @@ mod tests {
                 restore_cuts_row_work_v3(t, sp, dp, m1, m2, sd, w, rows, devv, exact)
             });
         }
+        #[cfg(target_arch = "x86_64")]
         if let Some(t) = archmage::X64V4Token::summon() {
             check_variant!("v4", move |sp: &[f32],
                                        dp: &[f32],
@@ -1139,6 +1161,7 @@ mod tests {
                 restore_cuts_row_work_v4(t, sp, dp, m1, m2, sd, w, rows, devv, exact)
             });
         }
+        #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
         if let Some(t) = archmage::X64V4xToken::summon() {
             check_variant!("v4x", move |sp: &[f32],
                                         dp: &[f32],

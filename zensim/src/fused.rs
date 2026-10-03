@@ -4685,6 +4685,7 @@ impl VWin {
     /// The `F64` variant's five per-column f64 window states — `None` on the
     /// other variants. The canon64 vector bodies are entered only under
     /// `BlurMode::Rec64` (the caller's axis gate), which constructs `F64`.
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
     #[inline(always)]
     fn f64_states(&self) -> Option<[&[f64]; 5]> {
         match self {
@@ -4705,6 +4706,7 @@ impl VWin {
     /// mix), `width % 8` tail scalar. Other variants fall through to
     /// `slide`; the canon64 vector bodies call this only on `F64`.
     #[inline]
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
     fn slide64x8<T: F64x8Backend>(&mut self, token: T, y: usize, p: &VWinPlanes<'_>) {
         let Self::F64 {
             m1,
@@ -5127,7 +5129,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
 /// falls back to the scalar body, which honours the other variants).
 /// `_scalar`/`_wasm128` keep the scalar canonical body: their `mul_add` is
 /// unfused either way, so the scalar body is already their exact form.
-#[magetypes(define(f32x8, f64x8), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon64_vec(
     token: Token,
@@ -5511,6 +5513,64 @@ fn fused_vblur_ssim_canon64_vec_scalar(
 #[allow(clippy::too_many_arguments, dead_code)]
 fn fused_vblur_ssim_canon64_vec_wasm128(
     _token: archmage::Wasm128Token,
+    h_mu1: &[f32],
+    h_mu2: &[f32],
+    h_sigma_sq: &[f32],
+    h_sigma12: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    inner_start: usize,
+    inner_h: usize,
+    radius: usize,
+    mu1_out: &mut [f32],
+    mu2_out: &mut [f32],
+    store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
+    free: FreeExtrasWork,
+    direct: bool,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
+    mode: crate::featcanon::Mode,
+) -> StripChannelAccum {
+    fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
+        h_mu1,
+        h_mu2,
+        h_sigma_sq,
+        h_sigma12,
+        src,
+        dst,
+        width,
+        height,
+        inner_start,
+        inner_h,
+        radius,
+        mu1_out,
+        mu2_out,
+        store_mu,
+        sd_out,
+        store_sd,
+        ssq_out,
+        s12_out,
+        store_sigma,
+        free,
+        direct,
+        ext,
+        h_act,
+        mode,
+    )
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
+/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[allow(clippy::too_many_arguments, dead_code)]
+fn fused_vblur_ssim_canon64_vec_neon(
+    _token: archmage::NeonToken,
     h_mu1: &[f32],
     h_mu2: &[f32],
     h_sigma_sq: &[f32],
@@ -5974,7 +6034,7 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
 /// [`fused_vblur_ssim_canon64_vec`]: eight independent columns per
 /// `f32x8`/`f64x8` op, chunk lanes = canonical lanes, `width % 8` tail on
 /// [`vblur_edge_elem_canon`].
-#[magetypes(define(f32x8, f64x8), v4x, v4, v3, neon, -scalar)]
+#[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_canon64_vec(
     token: Token,
@@ -6134,6 +6194,42 @@ fn fused_vblur_edge_canon64_vec_scalar(
 #[allow(clippy::too_many_arguments, dead_code)]
 fn fused_vblur_edge_canon64_vec_wasm128(
     _token: archmage::Wasm128Token,
+    h_mu1: &[f32],
+    h_mu2: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    inner_start: usize,
+    inner_h: usize,
+    radius: usize,
+    mu1_out: &mut [f32],
+    mu2_out: &mut [f32],
+    store_mu: bool,
+    mode: crate::featcanon::Mode,
+) -> StripChannelAccum {
+    fused_vblur_edge_canon::<crate::featcanon::LanesF64>(
+        h_mu1,
+        h_mu2,
+        src,
+        dst,
+        width,
+        height,
+        inner_start,
+        inner_h,
+        radius,
+        mu1_out,
+        mu2_out,
+        store_mu,
+        mode,
+    )
+}
+
+/// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
+/// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
+#[allow(clippy::too_many_arguments, dead_code)]
+fn fused_vblur_edge_canon64_vec_neon(
+    _token: archmage::NeonToken,
     h_mu1: &[f32],
     h_mu2: &[f32],
     src: &[f32],
@@ -6803,6 +6899,7 @@ mod tests {
                 },
             );
             check_variant!("scalar", scalar_f);
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V3Token::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
@@ -6837,6 +6934,7 @@ mod tests {
                 );
                 check_variant!("v3", f);
             }
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V4Token::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
@@ -6871,6 +6969,7 @@ mod tests {
                 );
                 check_variant!("v4", f);
             }
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4xToken::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
@@ -7047,6 +7146,7 @@ mod tests {
                     )
                 }
             );
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V3Token::summon() {
                 check_variant!("v3", |m1: &[f32],
                                       m2: &[f32],
@@ -7073,6 +7173,7 @@ mod tests {
                     )
                 });
             }
+            #[cfg(target_arch = "x86_64")]
             if let Some(t) = archmage::X64V4Token::summon() {
                 check_variant!("v4", |m1: &[f32],
                                       m2: &[f32],
@@ -7099,6 +7200,7 @@ mod tests {
                     )
                 });
             }
+            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
             if let Some(t) = archmage::X64V4xToken::summon() {
                 check_variant!("v4x", |m1: &[f32],
                                        m2: &[f32],
