@@ -1,9 +1,9 @@
 name: CI
 
+# Manual only (user, 2026-10-03: "disable CI unless you specifically trigger it from the cli").
+# Run with: gh workflow run ci.yml --repo imazen/zensim --ref main
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

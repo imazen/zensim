@@ -8,10 +8,10 @@ name: Join-Safety Gate
 # kadid/tid metric corruption (see benchmarks/DATA_INTEGRITY_root_cause_*.md).
 # Adoption history + new-helper additions: CLAUDE.md "Investigation Notes".
 
+# Manual only (user, 2026-10-03: "disable CI unless you specifically trigger it from the cli").
+# Run with: gh workflow run joinsafety.yml --repo imazen/zensim --ref main
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
