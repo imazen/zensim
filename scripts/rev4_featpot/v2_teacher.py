@@ -127,8 +127,8 @@ def ordinal_leg() -> tuple[Path, dict]:
 # Design log E15: the coverage pool (e15_coverage.py table) and its row keys, pinned by sha; filled when the pool is built.
 POOL_NAME = "data/e15/coverage_pool.parquet"
 POOL_KEYS_NAME = "data/e15/coverage_pool.keys.parquet"
-POOL_SHA = ""
-POOL_KEYS_SHA = ""
+POOL_SHA = "6b00349c8aca6613aeb1591f8411e738e3c70798274c7df9017dfbc8844848b3"
+POOL_KEYS_SHA = "bc225a115ab8505738a5c17ced6d4fc592a9a38ac6d9ec98661f4e8f0898addf"
 
 
 def _packed_or_root(name: str) -> Path:
