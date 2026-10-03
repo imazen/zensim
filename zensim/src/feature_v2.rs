@@ -4941,7 +4941,7 @@ fn dense_block_kernel(
                         transducer_bank,
                         r4,
                     ),
-                    [v4x, v4, v3, neon, wasm128, scalar]
+                    [v3, neon, wasm128, scalar]
                 );
             }
             #[cfg(feature = "oracle")]
@@ -28630,7 +28630,13 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 /// in the same per-pool order. `rev4_dense_pixel` stays scalar per
 /// element (its `scatter` cannot vectorize). `_scalar`/`_wasm128` keep the
 /// scalar canonical body.
-#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+// No v4/v4x variant: on the AVX-512 targets LLVM auto-vectorizes this body's
+// per-element pool scatter (`rev4_dense_pixel`, the `add(l, v)` lane pools)
+// into `vgatherqps`/`vscatterqpd`, which measured 4.3x slower than the v3
+// build of the same body (perf, v2basic Rev4 scalar 1 MP: 58.9 vs 13.6 ms per
+// call set, 2026-10-03). AVX-512 hardware runs the v3 body; the canon is
+// tier-invariant, so the bits are the same.
+#[magetypes(define(f32x8), v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel_canon64_vec(
     token: Token,
@@ -29422,48 +29428,9 @@ mod featcanon_contract_tests {
                     }
                 );
             }
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            if let Some(t) = archmage::X64V4Token::summon() {
-                check_variant!(
-                    "v4",
-                    move |s: &[f32],
-                          d: &[f32],
-                          m1: &[f32],
-                          m2: &[f32],
-                          q: &[f32],
-                          p: &[f32],
-                          act: &[f32],
-                          w: usize,
-                          h: usize,
-                          bank: bool,
-                          r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v4(
-                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
-                        )
-                    }
-                );
-            }
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            if let Some(t) = archmage::X64V4xToken::summon() {
-                check_variant!(
-                    "v4x",
-                    move |s: &[f32],
-                          d: &[f32],
-                          m1: &[f32],
-                          m2: &[f32],
-                          q: &[f32],
-                          p: &[f32],
-                          act: &[f32],
-                          w: usize,
-                          h: usize,
-                          bank: bool,
-                          r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v4x(
-                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
-                        )
-                    }
-                );
-            }
+            // No v4/v4x arm: AVX-512 hardware dispatches to the v3 body (see the
+            // note on `dense_block_kernel_canon64_vec`); dispatch-level tier
+            // coverage stays in `rev4serve_gate`.
             assert!(compiled >= 1);
         }
 

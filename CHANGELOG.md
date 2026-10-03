@@ -11,6 +11,11 @@
 
 ### Changed
 
+- Rev4 serving on AVX-512: the canonical dense block kernel now runs its AVX2 (v3) body on v4/v4x hardware. Built for AVX-512,
+  LLVM auto-vectorized its per-element pool scatter into `vgatherqps`/`vscatterqpd`, which measured 4.3x slower than the AVX2
+  build of the same body (perf, 2026-10-03). Bit-identical (the canon is tier-invariant; every-tier bitmatch gate, 432/432
+  steering panel cases). Rev4 scalar scoring 1.39-1.40x and prepared steering 1.20x faster at 1 MP single-thread on x86_64 v4x
+  (v2 + basic Rev4 155.0 -> 111.1 ms; Rev3 52.0 ms unchanged).
 - Rev4 serving: the canonical f64 kernels behind the v2 + basic and by_v2fy sets compile their `f64x8` ops inside the
   caller's target-feature region (the V-blur window slide was an out-of-line trait method calling intrinsic shims) and
   index through provable-length slices, so the hot loops carry no per-element bounds checks. Bit-identical at every
