@@ -106,6 +106,14 @@ impl Mode {
 /// measurement (`exact`/`c32`/`c64`/`neum`, or `off` to force production even
 /// at Rev4). The override is read once per process; a product build does not
 /// contain it.
+///
+/// REV4SERVE reach note: the `_at_revision` PU-XYB/PU21/transfer decoders
+/// dispatch their canonical bodies on `mode(revision).active()`, so an
+/// oracle build's `ZENSIM_FEATCANON` forces canonical PU/transfer bits at
+/// Rev1–Rev3 where a product run uses the production bodies — the same
+/// convention `srgb_to_positive_xyb_planar_into_at_revision` already had.
+/// Measurement runs under that env get canon bits by design; product
+/// builds are unaffected (`mode() == Off` below Rev4).
 #[inline]
 pub(crate) fn mode(revision: FormulaRevision) -> Mode {
     #[cfg(feature = "oracle")]

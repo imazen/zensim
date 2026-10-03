@@ -571,6 +571,45 @@ impl Plan {
         self.emit.covers(want)
     }
 
+    /// One past the highest id [`Self::emit`] claims to populate — the
+    /// minimum length an identity-laid-out emitted vector must have for
+    /// every promised slot to carry a computed value. `SlotSet` ranges
+    /// are sorted, so this is one range read, not a scan.
+    pub(crate) fn emit_bound(&self) -> usize {
+        self.emit.ranges().last().map_or(0, |&(_, end)| end)
+    }
+
+    /// Is every id [`Self::emit`] claims already inside an emitted vector
+    /// of `emitted_len`? The predicate form of [`Self::check_emit_covered`],
+    /// for the `debug_assert!` the emit→plan boundary sites keep.
+    pub(crate) fn emit_covered(&self, emitted_len: usize) -> bool {
+        self.emit_bound() <= emitted_len
+    }
+
+    /// REV4SERVE review F1 — the emitted vector must cover [`Self::emit`].
+    ///
+    /// `emit` and the walk's emit bound are two expressions of the same
+    /// compute set: `emit` is `populated_slots(compute) ∩ layout.ids()`,
+    /// the walk emits a regime-width prefix of the identity layout. The
+    /// emit→plan boundary sites `resize` emitted vectors up to
+    /// [`Self::walk_width`] with `0.0`, which is correct for slots the
+    /// layout carries but the compute set does not — the extraction
+    /// contract's structural zeros — and WRONG for a slot `emit` claimed
+    /// was populated: zero-filling it hands the score a fabricated
+    /// feature where the pre-`resize` `truncate` left the vector short
+    /// and the read panicked out-of-bounds. A planner/walk disagreement
+    /// must stay loud, so this check runs in release builds too — the
+    /// cost is one range read.
+    pub(crate) fn check_emit_covered(&self, emitted_len: usize) -> Result<(), PlanError> {
+        if self.emit_covered(emitted_len) {
+            return Ok(());
+        }
+        Err(PlanError::Uncomputable {
+            missing: SlotSet::from_slots(self.emit.iter_slots().filter(|&id| id >= emitted_len)),
+            layout_width: self.walk_width(),
+        })
+    }
+
     /// The union of two plans — what one walk must run to serve both.
     ///
     /// A profile can carry up to three scoring bakes and must serve all of
@@ -1229,6 +1268,43 @@ mod tests {
         let u2 = a.union(&wide);
         assert_eq!(u2.layout_width(), 944);
         assert_eq!(u2.compute.free_extras, V1FreeExtras::RawMoments);
+    }
+
+    /// REV4SERVE review F1: the emit→plan boundary `resize(walk_width, 0.0)`
+    /// must never zero-fill a slot `emit` promised was computed. A
+    /// planner/walk disagreement (an emit claim the emitted vector cannot
+    /// reach) surfaces as `Uncomputable` naming the unmaterialized ids —
+    /// not a silent structural zero a read then consumes.
+    #[test]
+    fn emit_coverage_check_refuses_ids_the_walk_did_not_materialize() {
+        let want = SlotSet::from_slots(0..156);
+        let mut plan = Plan::derive(&want, 1853).unwrap();
+        // Disagreement: emit claims v2 ids at 372..800 while the emitted
+        // vector only reaches the 720-wide regime bound.
+        plan.emit = SlotSet::from_slots((0..156).chain(372..800));
+        assert_eq!(plan.emit_bound(), 800);
+        assert!(!plan.emit_covered(720));
+        match plan.check_emit_covered(720) {
+            Err(PlanError::Uncomputable {
+                missing,
+                layout_width,
+            }) => {
+                assert_eq!(missing, SlotSet::from_slots(720..800));
+                assert_eq!(layout_width, 1853);
+            }
+            other => panic!("expected Uncomputable, got {other:?}"),
+        }
+        // The boundary value itself is covered, and a real plan (whose emit
+        // is populated_slots ∩ layout.ids()) never trips the check against
+        // the regime it would emit.
+        assert!(plan.emit_covered(800));
+        assert!(plan.check_emit_covered(800).is_ok());
+        assert!(
+            Plan::derive(&want, 1853)
+                .unwrap()
+                .check_emit_covered(720)
+                .is_ok()
+        );
     }
 }
 

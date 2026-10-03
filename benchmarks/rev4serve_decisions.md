@@ -198,3 +198,30 @@ byte-identical at c1294fd1 and the lint fires there too; fixed because
 the lane requires `just clippy` green, the fix is clippy's own
 suggestion, and it is semantically identical (the borrow is needless).
 Not a Rev4 change; flagged here so it is not mistaken for one.
+
+## D12 — Review-fix commit (2026-10-03): emit coverage + housekeeping
+
+Post-review (`REV4SERVE_REVIEW_DONE.md` → LAND WITH FIXES), rebased onto
+main `07b4cc7f`:
+
+- **D11 is void**: main's `07b4cc7f` carries the identical
+  diffmap-example lint fix, so the drive-by dropped out of this lane's
+  diff on rebase. Nothing to flag.
+- **Emit-coverage is now a checked invariant, not a convention.** D8's
+  `resize(walk_width, 0.0)` is sound only while every id in `plan.emit`
+  is actually materialized by the walk. A planner/walk drift would have
+  been SILENTLY zero-filled. `Plan::{emit_bound, emit_covered,
+  check_emit_covered}` make coverage explicit; all five resize sites
+  debug-assert + release-check (`PlanError::Uncomputable`) before
+  zero-extension. Zero-fill now provably extends only UNPROMISED tail
+  slots — the wide-bake case — and loudly refuses on disagreement.
+- Decisions file moved to `benchmarks/rev4serve_decisions.md` (F2);
+  `just rev4serve-gate` is the documented way to run the corpus gate
+  (F3); featcanon documents the oracle `ZENSIM_FEATCANON` override
+  forcing canonical PU/transfer at Rev1–3 (F4).
+- Re-qualification: fmt/lint-scripts/api-doc/clippy-matrix/release
+  gates re-run post-rebase; only the `custom-profiles` clippy cell
+  fails — 5 attribution lattice dead-code items, error set identical
+  at main (baseline; `custom-profiles` does not imply
+  `feature-regime-v2`, so the lattice callers vanish). Out of lane
+  scope; a fix needs cfg-gating design on shared items.

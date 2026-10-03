@@ -110,7 +110,7 @@ process; not a revision leaf).
 All sit behind `!need_ssim` (or `passes != 1`, refused since Rev3), and
 Rev4 strips admission makes every channel `need_ssim`.
 
-## 2. Plan (recorded detail in `../REV4SERVE_decisions.md`)
+## 2. Plan (recorded detail in `rev4serve_decisions.md`)
 
 - New canon helpers: scalar midp `log2/exp2/exp/log10/pow` replicating
   magetypes' `*_midp_precise` formulas with always-fused `mul_add` and
@@ -279,3 +279,46 @@ Rev4 strips admission makes every channel `need_ssim`.
   Box note: zensim_mlp_train fleet ran throughout (load ~19);
   anchors moved ≤4%, blocks agree within ±3%, so the deltas are
   attributable.
+
+## 2026-10-03 — review fixes (F1–F4) on top of the lane commit
+
+Independent review (`~/tmp/zensim-paper/rev4/REV4SERVE_REVIEW_DONE.md`):
+LAND WITH FIXES. Applied as a new commit on top of `04a85d43`, rebased
+onto main `07b4cc7f` (which brought the tailhist test fix, featcanon
+minimal-build cfg gates, the identical diffmap-example lint fix, and
+the WASM job pin — my drive-by copy of the example fix dropped out of
+the diff on rebase).
+
+- **F1 — emit-coverage checks at every zero-extension site.** The
+  `resize(plan.walk_width(), 0.0)` pattern from D8 could have masked a
+  plan/walk disagreement by zero-filling slots `plan.emit` promised
+  were computed. New `Plan` API: `emit_bound()` (one past the highest
+  promised id), `emit_covered(len)` predicate, `check_emit_covered(len)`
+  release check → `PlanError::Uncomputable`. All five sites
+  (fold_engine emit, bake SDR arm, bake HDR arm, bake sampling arm,
+  steering `compute_attribution_input`) now `debug_assert!(covered)`
+  + release-check before resizing. Unit test
+  `emit_coverage_check_refuses_ids_the_walk_did_not_materialize`
+  (feature_plan.rs:1279): synthetic plan promising ids through 799
+  over a 720-emitted walk → error naming `720..800`; full-width emit
+  passes; the real 1853-layout/720-emit plan passes.
+- **F2** — `REV4SERVE_decisions.md` → `benchmarks/rev4serve_decisions.md`;
+  worklog + report references updated.
+- **F3** — `just rev4serve-gate` recipe runs the corpus-gated
+  `rev4_featpot_bake_served_and_steered` (release,
+  `custom-profiles,feature-regime-v2,training`, `--ignored`);
+  `REV4SERVE_BAKE` override documented in the justfile comment and the
+  `#[ignore]` reason now names the recipe.
+- **F4** — featcanon.rs doc line: oracle builds may force canonical
+  PU/transfer at Rev1–3 via `ZENSIM_FEATCANON` (measurement-only).
+
+Re-qualification after rebase+fixes: `cargo fmt --check` clean;
+`python3 scripts/lint_scripts.py` 797/797; `api-doc-check` green;
+debug lib `rev4_tailhist_quantile_semantics` now PASSES (main's fix);
+CI clippy matrix 26 cells (`--no-default-features [--features X]
+--lib -D warnings`, list from ci.yml): 25 pass; only `custom-profiles`
+fails with 5 attribution.rs lattice dead-code items — identical at
+main (07b4cc7f did not touch attribution.rs; every production caller
+of those items is `feature-regime-v2`-gated and `custom-profiles`
+does not imply it). Pre-existing baseline cell, not a lane
+regression; flagged to the coordinator.

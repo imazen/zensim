@@ -5417,6 +5417,19 @@ impl Fused944Session {
                 },
             );
             let mut features = result.features().to_vec();
+            // REV4SERVE review F1: the emit claim must already be
+            // materialized — a promised slot the walk skipped must error,
+            // not zero-fill a read.
+            debug_assert!(
+                plan.emit_covered(features.len()),
+                "plan emit claims ids past the emitted vector (bound {} > {})",
+                plan.emit_bound(),
+                features.len()
+            );
+            plan.check_emit_covered(features.len())
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "bake plan emits features the streaming walk did not materialize",
+                })?;
             features.resize(plan.walk_width().max(372), 0.0);
             let mean_offset = result.mean_offset();
             self.basic.result = Some(result);

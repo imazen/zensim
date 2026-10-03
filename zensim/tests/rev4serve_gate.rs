@@ -535,7 +535,7 @@ fn aic3_pairs(n: usize) -> Vec<RgbPair> {
 /// `prepare_steering` serves it (scalar score = same features, map = the
 /// attribution path). Runs across forced tiers for the map-identity arm.
 #[test]
-#[ignore = "corpus + bake gate: requires /mnt/v aic3 and /var/tmp/rev4-featpot"]
+#[ignore = "corpus + bake gate: run `just rev4serve-gate` (requires /mnt/v aic3 + /var/tmp/rev4-featpot; REV4SERVE_BAKE overrides the bake path)"]
 fn rev4_featpot_bake_served_and_steered() {
     const SENTINEL: &str = "G_BAKE_OK";
     if !at_revision(Some("4"), "rev4_featpot_bake_served_and_steered", SENTINEL) {

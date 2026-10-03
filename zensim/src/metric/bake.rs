@@ -980,6 +980,19 @@ impl<'a> BakeScorer<'a> {
         .into_features();
         // Same emit-width rule as the SDR arm: an identity-declared bake can
         // be wider than the emitted regime — the uncomputed tail is zeros.
+        // REV4SERVE review F1: every id the plan claims to emit must already
+        // be materialized — a slot it promised but the walk skipped must not
+        // be zero-filled into a read.
+        debug_assert!(
+            plan.emit_covered(features.len()),
+            "plan emit claims ids past the emitted vector (bound {} > {})",
+            plan.emit_bound(),
+            features.len()
+        );
+        plan.check_emit_covered(features.len())
+            .map_err(|_| ZensimError::ModelLoadFailed {
+                reason: "bake plan emits features the HDR fold walk did not materialize",
+            })?;
         features.resize(plan.walk_width(), 0.0);
         self.score_features_with_identity(
             &features,
@@ -1046,6 +1059,19 @@ impl<'a> BakeScorer<'a> {
             // regime; the bake's live reads stop below it, so extend with
             // the same structural zeros `research::extract` reports for
             // unpopulated slots (`truncate` cannot extend).
+            // REV4SERVE review F1: the emit claim must already be
+            // materialized — a promised slot the walk skipped must error,
+            // not zero-fill.
+            debug_assert!(
+                plan.emit_covered(features.len()),
+                "plan emit claims ids past the emitted vector (bound {} > {})",
+                plan.emit_bound(),
+                features.len()
+            );
+            plan.check_emit_covered(features.len())
+                .map_err(|_| ZensimError::ModelLoadFailed {
+                    reason: "bake plan emits features the fold walk did not materialize",
+                })?;
             features.resize(plan.walk_width(), 0.0);
             let (_, raw_distance) =
                 score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
@@ -1241,6 +1267,18 @@ impl<'a> BakeScorer<'a> {
         // REV4SERVE: resize, not truncate — an identity-declared bake can be
         // wider than the plan's emitted regime (1853-input v2+basic cells),
         // and the uncomputed tail slots are provably unread zeros.
+        // REV4SERVE review F1: the emit claim must already be materialized —
+        // a promised slot the walk skipped must error, not zero-fill.
+        debug_assert!(
+            plan.emit_covered(features.len()),
+            "plan emit claims ids past the emitted vector (bound {} > {})",
+            plan.emit_bound(),
+            features.len()
+        );
+        plan.check_emit_covered(features.len())
+            .map_err(|_| ZensimError::ModelLoadFailed {
+                reason: "bake plan emits features the fold walk did not materialize",
+            })?;
         features.resize(
             plan.walk_width()
                 .max(crate::fold_engine::v1_feature_width(&config)),

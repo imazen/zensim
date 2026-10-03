@@ -37,7 +37,12 @@
   process boundary. Wide identity-declared bakes (walk width beyond the
   fold's emitted regime) now serve: the emit is zero-extended to the
   declared layout, matching `research::extract`'s unpopulated-slot zeros.
-  `benchmarks/rev4serve_WORKLOG.md`, `REV4SERVE_decisions.md`.
+  The extension is guarded: `Plan::check_emit_covered` verifies the walk
+  materialized every slot `plan.emit` promises before any zero-fill —
+  a plan/walk disagreement now returns `PlanError::Uncomputable` instead
+  of fabricating zeros (debug-assert plus release check at every emit
+  boundary). `benchmarks/rev4serve_WORKLOG.md`,
+  `benchmarks/rev4serve_decisions.md`.
 
 - `BakeScorer::prepare_steering` (SDR) now serves bakes that read v2 features (f372-f719) together with basic/peak (f0-f227): same score, same map
   owner as `compute_with_ref_and_attribution`, including the exact BLOCKINESS terms. Masked/IW (f228-f371), append (f720-f923), append2

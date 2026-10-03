@@ -83,6 +83,19 @@ rev4-corpus-tests root kadid_inputs expected_unsupported_safesyn:
     cargo test -p zensim --release --all-features --lib rev4_gridblk_zenjpeg_ladder -- --ignored --nocapture
     cargo test -p zensim --release --all-features --test rev4_featbank_parity rev4_corpus_toggle_identity -- --ignored --nocapture
 
+# REV4SERVE's corpus-gated real-bake check: the v2+basic featpot bake
+# (default /var/tmp/rev4-featpot/v2c/cells/set:v2+basic@h32:H128__N/
+# without_aic3_s0/refit/last.bin; REV4SERVE_BAKE overrides the path)
+# scored from pixels == research::extract features, bit-for-bit, plus
+# prepared steering — on >= 20 held-out aic3 original/decoded pairs
+# under /mnt/v/dataset/aic3_ctc_epfl. Opt-in only; absent corpus or bake
+# fails loudly.
+rev4serve-gate:
+    cargo test -p zensim --release \
+        --features custom-profiles,feature-regime-v2,training \
+        --test rev4serve_gate rev4_featpot_bake_served_and_steered \
+        -- --ignored --nocapture
+
 # CI-exact clippy
 clippy:
     cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings

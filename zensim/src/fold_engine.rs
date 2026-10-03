@@ -170,6 +170,33 @@ pub(crate) fn compute_fold_backed(
     // does not read (its live-read mask ends below them); zero is what the
     // extraction emits for unpopulated identity slots, so the score and the
     // visible row both stay honest.
+    //
+    // REV4SERVE review F1: before extending, verify the emitted vector
+    // already covers everything the plan CLAIMS to populate — an emit the
+    // walk did not materialize must surface loudly (debug panic, release
+    // error), never as a zero-filled read slot.
+    if let Some(p) = plan {
+        debug_assert!(
+            p.emit_covered(features.len()),
+            "plan emit claims ids past the emitted vector (bound {} > {})",
+            p.emit_bound(),
+            features.len()
+        );
+        p.check_emit_covered(features.len())
+            .map_err(|_| crate::ZensimError::ModelLoadFailed {
+                reason: "bake plan emits features the fold walk did not materialize",
+            })?;
+    } else {
+        debug_assert!(
+            features.len() >= v1_feature_width(config),
+            "v1 walk emitted fewer features than the config's width"
+        );
+        if features.len() < v1_feature_width(config) {
+            return Err(crate::ZensimError::ModelForwardFailed {
+                reason: "fold walk emitted fewer features than the config's v1 width",
+            });
+        }
+    }
     let keep = plan
         .map_or(0, |p| p.walk_width())
         .max(v1_feature_width(config));
