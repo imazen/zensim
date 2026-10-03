@@ -126,6 +126,10 @@ EXPECTED_ORIENTATION = {
     "hdr_v3mix": QUALITY,
     "hdrgrid372": QUALITY,
     "hdrgrid944": QUALITY,
+    # nits / mciqa (added 2026-10-03, external held-out sets): NITS-IQA stores MOS/100 (raw MOS 0-100, higher = better);
+    # MCIQA-2K stores global naturalness (GN z-score) min-max scaled, higher = more natural.
+    "nits": QUALITY,
+    "mciqa": QUALITY,
 }
 
 # Known eval roots for --all-roots. (root, {corpus: filename})
@@ -355,7 +359,38 @@ def hdr_v3mix_ground_truth_intable(path: str, hs: np.ndarray):
     return gt, note
 
 
-GROUND_TRUTH = {"kadid": kadid_ground_truth, "tid": tid_ground_truth}
+def nits_ground_truth():
+    """Raw NITS-IQA MOS (0-100, quality-oriented) in Score.xlsx row order, which build_nits() preserves."""
+    import sys as _sys
+    import zipfile
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from build_fr_corpus_pairs import _xlsx_rows
+    rows = _xlsx_rows(zipfile.ZipFile("/mnt/v/datasets/NITS-IQA.zip").read("Database/Score.xlsx"))
+    mos = [float(r[2]) for r in rows[1:] if len(r) >= 3 and r[0]]
+    return np.asarray(mos), "raw MOS from the authors' Score.xlsx (162 observers)", len(mos)
+
+
+def live_ground_truth():
+    """Raw LIVE R2 realigned DMOS (distortion-oriented, negated to quality) in build_live() order: readme concat order,
+    reference copies (orgs == 1) skipped, the same 779 rows as live_r2_pairs.tsv."""
+    import scipy.io as sio
+    base = "/mnt/v/datasets/LIVE/databaserelease2"
+    rea = sio.loadmat(f"{base}/dmos_realigned.mat")
+    dmos = np.asarray(rea["dmos_new"]).flatten()
+    orgs = np.asarray(rea["orgs"]).flatten().astype(int)
+    gt = [-float(dmos[i]) for i in range(len(dmos)) if orgs[i] != 1]
+    return np.asarray(gt), "raw realigned DMOS (dmos_new), negated to quality", len(gt)
+
+
+def mciqa_ground_truth():
+    """Raw MCIQA-2K global-naturalness z-scores (quality-oriented) in sorted-key order, which build_mciqa() preserves."""
+    import json
+    d = json.load(open("/mnt/v/datasets/mciqa-2k_extracted/MCIQA_2K/MCIQA_2K_GN_MOS.json"))
+    return np.asarray([d[k] for k in sorted(d)]), "raw GN z-scores from MCIQA_2K_GN_MOS.json", len(d)
+
+
+GROUND_TRUTH = {"kadid": kadid_ground_truth, "tid": tid_ground_truth, "live": live_ground_truth, "nits": nits_ground_truth,
+                "mciqa": mciqa_ground_truth}
 # Corpora whose ground truth must be joined on a key rather than row position.
 KEYED_GROUND_TRUTH = {"sdr25": sdr25_ground_truth_keyed,
                       "konfig": konfig_ground_truth_keyed}

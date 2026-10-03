@@ -12,7 +12,7 @@ human labels before choosing a transform, and gate the output with
 `scripts/canonical_corpus/check_target_orientation.py`.
 Output TSV columns: ref_path, dist_path, human_score  (the tool derives ref_basename).
 
-Usage: python3 scripts/canonical_corpus/build_fr_corpus_pairs.py <csiq|live|tid2008>
+Usage: python3 scripts/canonical_corpus/build_fr_corpus_pairs.py <csiq|live|tid2008|nits|mciqa|...>
 Then:  extract_features_372col --corpus pairs-tsv --path <out.tsv> --out <corpus>_features_372col.csv
        (convert csv→parquet, add a Corpus entry to bake_verdict CORPORA, rebuild)
 """
@@ -495,6 +495,96 @@ def build_cid22_train201():
     print(f"CID22-train-201: {len(out)} pairs -> {OUT}  (skipped {miss} missing)")
 
 
+def _xlsx_rows(xlsx_bytes: bytes) -> list[list[str]]:
+    """Rows of the first worksheet of an .xlsx (cell values as strings), read with the stdlib only."""
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+    x = zipfile.ZipFile(io.BytesIO(xlsx_bytes))
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    shared = []
+    if "xl/sharedStrings.xml" in x.namelist():
+        for si in ET.fromstring(x.read("xl/sharedStrings.xml")).findall("m:si", ns):
+            shared.append("".join(t.text or "" for t in si.iter("{%s}t" % ns["m"])))
+    rows = []
+    for r in ET.fromstring(x.read("xl/worksheets/sheet1.xml")).findall(".//m:sheetData/m:row", ns):
+        vals = []
+        for c in r.findall("m:c", ns):
+            v = c.findtext("m:v", namespaces=ns)
+            vals.append(shared[int(v)] if c.get("t") == "s" and v is not None else (v or ""))
+        rows.append(vals)
+    return rows
+
+
+def build_nits():
+    """NITS-IQA (Ruikar & Chaudhury, Sensors 2023, doi:10.3390/s23042279, CC BY): 9 refs x 9 distortions x 5 levels = 405
+    pairs, 512x512, MOS 0-100 from 162 observers (higher = better, QUALITY-oriented). Distortions D1..D9: Gaussian blur,
+    chromatic Gaussian noise, chromatic uniform noise, contrast change (no brightness change), pixelate mosaic, motion blur,
+    JPEG, JPEG2000, JPEG-XT. The D7 (JPEG) files are JPEG bitstreams named .bmp by the authors — the zen decode sniffs content.
+    Source: the authors' Google Drive release, mirrored as /mnt/v/datasets/NITS-IQA.zip (415 entries) and unpacked unchanged
+    to /mnt/v/datasets/nits-iqa_extracted/Database/. human_score = MOS / 100. Extra columns: distortion (D1..D9), level."""
+    import zipfile
+    BASE = Path("/mnt/v/datasets/nits-iqa_extracted/Database")
+    OUT = "/mnt/v/datasets/nits-iqa_extracted/nits_iqa_pairs.tsv"
+    rows = _xlsx_rows(zipfile.ZipFile("/mnt/v/datasets/NITS-IQA.zip").read("Database/Score.xlsx"))
+    if rows[0][:3] != ["Original Image Name", "Distorted Image Name", "Score"]:
+        raise ValueError(f"NITS Score.xlsx header changed: {rows[0]}")
+    out, missing = [], []
+    for ref, dist, score in (r[:3] for r in rows[1:] if len(r) >= 3 and r[0]):
+        rp, dp = BASE / ref, BASE / dist
+        if not (rp.exists() and dp.exists()):
+            missing.append(dist)
+            continue
+        stem = dist.split(".")[0]  # I{n}D{d}L{l}
+        d, lvl = stem.split("D")[1].split("L")
+        out.append((str(rp), str(dp), float(score) / 100.0, f"D{d}", int(lvl)))
+    _require_all_resolved("NITS-IQA", missing, len(rows) - 1)
+    if len(out) != 405:
+        raise ValueError(f"NITS-IQA: {len(out)} pairs, expected 405")
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score", "distortion", "level"])
+        w.writerows(out)
+    print(f"NITS-IQA: {len(out)} pairs -> {OUT}")
+
+
+def build_mciqa():
+    """MCIQA-2K (arXiv:2609.14495, CC BY 4.0; Kaggle bra1ze/mciqa-2k): 2,000 colorized images (5 colorization models x 400
+    COCO test2017 images) with z-scored MOS on three dimensions: colour smearing (CS), semantic colour misalignment (SCM) and
+    global naturalness (GN). NO-REFERENCE by design — humans rated plausibility, not fidelity to the original — so a
+    full-reference read pairs each colorized image with its COCO test2017 original (fetched to coco_test2017_refs/, same size
+    640-wide JPEGs; size mismatches refused). EXPLORATORY eval only. human_score = GN min-max scaled to [0,1] over the corpus
+    (rank-preserving; GN is quality-oriented: higher = more natural). Extra columns: model, split (official train/test),
+    gn_z, cs_z, scm_z (raw z-scores)."""
+    import json
+    from PIL import Image
+    BASE = Path("/mnt/v/datasets/mciqa-2k_extracted/MCIQA_2K")
+    REFS = Path("/mnt/v/datasets/mciqa-2k_extracted/coco_test2017_refs")
+    OUT = "/mnt/v/datasets/mciqa-2k_extracted/mciqa_2k_pairs.tsv"
+    dims = {k: json.load(open(BASE / f"MCIQA_2K_{k}_MOS.json")) for k in ("GN", "CS", "SCM")}
+    test = set(json.load(open(BASE / "MCIQA_2K_GN_MOS_test.json")))
+    lo, hi = min(dims["GN"].values()), max(dims["GN"].values())
+    out, missing = [], []
+    for key in sorted(dims["GN"]):
+        model, cid = key.split("_", 1)
+        split = "test" if key in test else "train"
+        dp = BASE / f"MCIQA_2K_{split}" / f"{key}.jpg"
+        rp = REFS / f"{cid}.jpg"
+        if not (rp.exists() and dp.exists()):
+            missing.append(key)
+            continue
+        if Image.open(rp).size != Image.open(dp).size:
+            raise ValueError(f"MCIQA-2K {key}: colorized {Image.open(dp).size} != COCO original {Image.open(rp).size}")
+        out.append((str(rp), str(dp), (dims["GN"][key] - lo) / (hi - lo), model, split,
+                    dims["GN"][key], dims["CS"][key], dims["SCM"][key]))
+    _require_all_resolved("MCIQA-2K", missing, len(dims["GN"]))
+    with open(OUT, "w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["ref_path", "dist_path", "human_score", "model", "split", "gn_z", "cs_z", "scm_z"])
+        w.writerows(out)
+    print(f"MCIQA-2K: {len(out)} pairs -> {OUT}")
+
+
 BUILDERS = {
     "csiq": build_csiq,
     "live": build_live,
@@ -507,6 +597,8 @@ BUILDERS = {
     "konjnd_jpeg_val": build_konjnd_jpeg_val,
     "sdr25": build_sdr25,
     "cid22_train201": build_cid22_train201,
+    "nits": build_nits,
+    "mciqa": build_mciqa,
 }
 
 if __name__ == "__main__":
