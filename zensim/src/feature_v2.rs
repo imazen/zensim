@@ -19536,9 +19536,13 @@ pub(crate) mod tests {
         vals.extend(std::iter::repeat_n(0.0, 200));
         vals.extend(std::iter::repeat_n(2.5, 40));
         let n = vals.len();
+        // Every pixel scatters into all four maps in the walk, and `finish_tailhist_cell` asserts each map holds
+        // `n` counts; the same multiset in every map keeps that invariant (the checks below read map 0).
         let mut acc = TailAccum::default();
         for &v in &vals {
-            acc.scatter(edges, v, 0);
+            for m in 0..4 {
+                acc.scatter(edges, v, m);
+            }
         }
         let mut out = [0.0f64; TAILHIST_PER_CELL];
         finish_tailhist_cell(&acc, n, &mut out);
@@ -19577,7 +19581,9 @@ pub(crate) mod tests {
             let mut h = [[0u32; TAILHIST_BINS]; 4];
             for w in split.windows(2) {
                 for &v in &vals[w[0]..w[1]] {
-                    h[0][edges.bin(v)] += 1;
+                    for row in h.iter_mut() {
+                        row[edges.bin(v)] += 1;
+                    }
                 }
             }
             assert_eq!(h, acc.hist, "counts must be partition-invariant");

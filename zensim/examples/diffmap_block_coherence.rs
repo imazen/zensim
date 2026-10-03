@@ -443,7 +443,7 @@ fn analyze_refinement(input: &str, output: &str) {
     let predicted_max = column("max_predicted_gain");
     let moment: Vec<f64> = blocks
         .iter()
-        .map(|b| b.get("finite_moment_gain").map_or(0.0, &number))
+        .map(|b| b.get("finite_moment_gain").map_or(0.0, number))
         .collect();
     for (name, vector) in [("m2", &linear), ("m3a", &density), ("m3f", &refinement)] {
         assert!(
