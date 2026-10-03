@@ -8,7 +8,7 @@ scratch and deleted after training.
 """
 
 import hashlib
-import os
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -102,7 +102,8 @@ def curated_leg(rule: str, fit_path: Path, keys_sha256: str, floor_lo: float, sc
     if len(ref) != len(codec):
         raise ValueError(f"{fit_path}: {len(ref)} rows, strata have {len(codec)}")
     keep, new = curate(rule, ref, target, codec, quality, floor_lo)
-    dest = scratch / f"safesyn_fit_ts{rule}_{os.getpid()}.parquet"
+    # Containers on one host share scratch and reuse small pids, so the name must be unique across processes.
+    dest = scratch / f"safesyn_fit_ts{rule}_{uuid.uuid4().hex}.parquet"
     record = write_curated(fit_path, dest, keep, new)
     record.update({"rule": rule, "strata_sha256": strata_sha, "targets_changed": int((new != target)[keep].sum()),
                    "floor_lo": floor_lo if rule == "win" else None})
