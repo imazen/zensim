@@ -11,6 +11,10 @@
 
 ### Added
 
+- Planner: a bake whose reads stay inside f0-227 and f372-719 with the v2 block running now skips X/B walk work at every scale whose chroma slots it never reads
+  (and no longer accumulates free extras for the v2 MSE slots). Work selection only; no feature value or served score moves. Dense-layout bakes benefit; 944-wide identity bakes still
+  compute the blocks their width reaches. `benchmarks/costset2_2026-10-03.md`.
+
 - **Rev4 is served.** Under `ZENSIM_FORMULA_REV=4` every served entry —
   `Zensim::compute`/`compute_with_ref`, the folded720 streaming feature
   entries, `compute_v2_diffmap`, the HDR/`compute_pu_linear*` front ends,

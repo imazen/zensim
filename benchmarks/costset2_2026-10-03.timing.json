@@ -1,0 +1,92 @@
+{
+ "by_only": {
+  "r3_scalar_1MP": 23.7,
+  "r3_scalar_4MP": 109.3,
+  "r3_spatial_1MP": 40.5,
+  "r3_spatial_4MP": 160.5,
+  "r4_scalar_1MP": 184.0,
+  "r4_scalar_4MP": 735.3,
+  "r4_spatial_1MP": 165.1,
+  "r4_spatial_4MP": 655.4
+ },
+ "basic228": {
+  "r3_scalar_1MP": 38.0,
+  "r3_scalar_4MP": 183.3,
+  "r3_spatial_1MP": 91.3,
+  "r3_spatial_4MP": 349.4,
+  "r4_scalar_1MP": 284.8,
+  "r4_scalar_4MP": 1146.2,
+  "r4_spatial_1MP": 293.2,
+  "r4_spatial_4MP": 1202.0
+ },
+ "by_v2s123": {
+  "r3_scalar_1MP": 35.1,
+  "r3_scalar_4MP": 161.1,
+  "r3_spatial_1MP": 107.7,
+  "r3_spatial_4MP": 430.9,
+  "r4_scalar_1MP": 233.1,
+  "r4_scalar_4MP": 922.2,
+  "r4_spatial_1MP": 429.8,
+  "r4_spatial_4MP": 1723.9
+ },
+ "b156_v2s123_y": {
+  "r3_scalar_1MP": 49.3,
+  "r3_scalar_4MP": 236.3,
+  "r3_spatial_1MP": 159.9,
+  "r3_spatial_4MP": 642.0,
+  "r4_scalar_1MP": 329.1,
+  "r4_scalar_4MP": 1326.0,
+  "r4_spatial_1MP": 634.6,
+  "r4_spatial_4MP": 2577.4
+ },
+ "b228_v2s123": {
+  "r3_scalar_1MP": 49.1,
+  "r3_scalar_4MP": 235.6,
+  "r3_spatial_1MP": 190.0,
+  "r3_spatial_4MP": 743.9,
+  "r4_scalar_1MP": 330.8,
+  "r4_scalar_4MP": 1326.2,
+  "r4_spatial_1MP": 665.7,
+  "r4_spatial_4MP": 2656.1
+ },
+ "v2basic": {
+  "r3_scalar_1MP": 86.5,
+  "r3_scalar_4MP": 390.5,
+  "r3_spatial_1MP": 235.7,
+  "r3_spatial_4MP": 938.9,
+  "r4_scalar_1MP": 466.9,
+  "r4_scalar_4MP": 1891.3,
+  "r4_spatial_1MP": 821.2,
+  "r4_spatial_4MP": 3286.3
+ },
+ "basic228_id944": {
+  "r3_scalar_1MP": 37.9,
+  "r3_scalar_4MP": 185.3,
+  "r3_spatial_1MP": 92.8,
+  "r3_spatial_4MP": 350.9,
+  "r4_scalar_1MP": null,
+  "r4_scalar_4MP": null,
+  "r4_spatial_1MP": null,
+  "r4_spatial_4MP": null
+ },
+ "by_v2s123_id944": {
+  "r3_scalar_1MP": 40.9,
+  "r3_scalar_4MP": 182.9,
+  "r3_spatial_1MP": 115.6,
+  "r3_spatial_4MP": 457.3,
+  "r4_scalar_1MP": null,
+  "r4_scalar_4MP": null,
+  "r4_spatial_1MP": null,
+  "r4_spatial_4MP": null
+ },
+ "v2basic_id944": {
+  "r3_scalar_1MP": 105.1,
+  "r3_scalar_4MP": 459.2,
+  "r3_spatial_1MP": 255.4,
+  "r3_spatial_4MP": 1017.4,
+  "r4_scalar_1MP": null,
+  "r4_scalar_4MP": null,
+  "r4_spatial_1MP": null,
+  "r4_spatial_4MP": null
+ }
+}
