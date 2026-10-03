@@ -160,7 +160,12 @@
   scale) computed the v2 SSIM `d` with the covariance form on a plane that holds the direct error moment, so `d` left [0, 2]
   and the SSIM-deviation coefficients amplified it to 1e26 on near-lossless content. Maps only; no feature value or served
   score moves (full lib suite, 511 passed). v2+basic broad spatial passes 40 -> 63 of 96, worst M3f -0.37 -> +0.39;
-  basic/peak controls bit-identical. `benchmarks/v2spatial_2026-10-02.md` (this change).
+  basic/peak controls bit-identical. `benchmarks/v2spatial_2026-10-02.md` (tail fix).
+
+- Attribution maps: v2 BLOCKINESS is now exact for rectangle repairs. The symmetric 50/50 split of a lattice step between its two pixels
+  is replaced by one-sided shares plus per-step pair terms that `query_rect`/`block_sums`/`refinement_gain` apply for the steps a rectangle
+  edge cuts (pass B f64 and f32, per-pixel and binned sinks; no public API change, no feature value or served score moves). v2+basic broad
+  spatial passes 63 -> 88 of 96, owner 2 -> 10 of 12; basic/peak controls bit-identical. `benchmarks/v2spatial_2026-10-02.md` section 5.
 
 - Bakes and corruption heads stamped `zentrain.formula_revision = 4` now parse
   as `FormulaRevision::Rev4` (and are then refused by every served entry, see

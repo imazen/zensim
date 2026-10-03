@@ -12494,6 +12494,8 @@ pub(crate) struct PassBScratchF32 {
     pub(crate) win_plane: Vec<f32>,
     pub(crate) spread_tmp: Vec<f32>,
     pub(crate) spread_out: Vec<f32>,
+    /// Lattice-step boundary terms of the last pass B (see `crate::attribution::LatticeScale`).
+    pub(crate) lattice: crate::attribution::LatticeSet,
 }
 
 /// The v2/append/append2 attribution density built from walk RETENTION
@@ -12526,7 +12528,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
     orig_w: usize,
     orig_h: usize,
     scratch: &mut PassBScratchF32,
-) -> Vec<f32> {
+) -> (Vec<f32>, Vec<crate::attribution::LatticeScale>) {
     let (w0, h0) = ret.dims[0];
     let n0 = w0 * h0;
     scratch.canvas.clear();
@@ -12541,7 +12543,9 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
         scratch,
         &mut crate::attribution::AttrSinkF32::Canvas(&mut canvas),
         None,
+        (orig_w, orig_h),
     );
+    let lattice = scratch.lattice.finish();
     // Trim the (possibly reflect-padded sub-64) canvas to the original.
     let out = if orig_w == w0 && orig_h == h0 {
         canvas.clone()
@@ -12553,7 +12557,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
         out
     };
     scratch.canvas = canvas;
-    out
+    (out, lattice)
 }
 
 /// Level-2 sibling of
@@ -12572,6 +12576,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
     accum: &mut crate::attribution::BinAccum,
     geometry: Option<&crate::sampling::Geometry>,
 ) {
+    let logical = accum.logical_dimensions();
     retention_pass_b_all_scales(
         ret,
         s_v2,
@@ -12581,7 +12586,9 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
         scratch,
         &mut crate::attribution::AttrSinkF32::Bins(accum),
         geometry,
+        logical,
     );
+    accum.set_lattice(scratch.lattice.finish());
 }
 
 /// Whether this cell has any contribution to the requested attribution.
@@ -12617,7 +12624,11 @@ fn retention_pass_b_all_scales(
     scratch: &mut PassBScratchF32,
     sink: &mut crate::attribution::AttrSinkF32<'_>,
     geometry: Option<&crate::sampling::Geometry>,
+    logical: (usize, usize),
 ) {
+    scratch
+        .lattice
+        .reset(logical.0, logical.1, geometry.is_none());
     let n_scales = ret.dims.len();
     let (w0, h0) = ret.dims[0];
     let want_append = s_append.is_some();
@@ -12662,6 +12673,7 @@ fn retention_pass_b_all_scales(
             &mut scratch.spread_tmp,
             &mut scratch.spread_out,
             geometry,
+            &mut scratch.lattice,
         );
     }
 }
@@ -14599,6 +14611,8 @@ thread_local! {
 /// Output of [`compute_v2_append_attribution`].
 #[cfg(feature = "custom-profiles")]
 pub(crate) struct V2AppendAttribution {
+    /// Lattice-step boundary terms (`crate::attribution::LatticeScale`) belonging to `density`.
+    pub lattice: Vec<crate::attribution::LatticeScale>,
     /// Full-resolution density (f64, `width × height`, trimmed to the
     /// original image), in score units per pixel.
     pub density: Vec<f64>,
@@ -15100,6 +15114,7 @@ fn attr_pass_b_channel(
     parallel: bool,
     id_plane: &mut [f64],
     win_plane: &mut [f64],
+    lattice: Option<(&mut crate::attribution::LatticeScale, usize, usize)>,
 ) {
     // Row-banded parallel main+gradient sweeps (C2b Part 2): each band
     // writes only its own rows of id/win (disjoint), reads shared planes
@@ -15122,14 +15137,14 @@ fn attr_pass_b_channel(
                     src, dst, width, height, planes, cross, ref_y, co, y0, y1, id_rows, win_rows,
                 );
             });
-        attr_pass_b_blockiness(src, dst, width, height, co, id_plane);
+        attr_pass_b_blockiness(src, dst, width, height, co, id_plane, lattice);
         return;
     }
     let _ = parallel;
     attr_pass_b_rows(
         src, dst, width, height, planes, cross, ref_y, co, 0, height, id_plane, win_plane,
     );
-    attr_pass_b_blockiness(src, dst, width, height, co, id_plane);
+    attr_pass_b_blockiness(src, dst, width, height, co, id_plane, lattice);
 }
 
 /// Rows `[y0, y1)` of the main + gradient sweeps; `id_rows`/`win_rows` are
@@ -15402,29 +15417,68 @@ fn attr_pass_b_blockiness(
     height: usize,
     co: &V2AppCoeffs,
     id_plane: &mut [f64],
+    mut lattice: Option<(&mut crate::attribution::LatticeScale, usize, usize)>,
 ) {
-    if co.c_blockiness != 0.0 {
-        for y in 0..height {
-            let row = y * width;
-            let mut x = BLOCK_LATTICE;
-            while x < width {
-                let i = row + x;
-                let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
-                let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
-                let v = co.c_blockiness * bounded_excess(step_dst, step_src, C_BLOCK);
-                id_plane[i] += 0.5 * v;
-                id_plane[i - 1] += 0.5 * v;
-                x += BLOCK_LATTICE;
-            }
-            if y % BLOCK_LATTICE == 0 && y > 0 {
-                for x in 0..width {
-                    let i = row + x;
-                    let i_up = i - width;
-                    let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
-                    let step_src = (src[i] as f64 - src[i_up] as f64).abs();
-                    let v = co.c_blockiness * bounded_excess(step_dst, step_src, C_BLOCK);
+    if co.c_blockiness == 0.0 {
+        return;
+    }
+    let c = co.c_blockiness;
+    // One lattice step between `p` (earlier) and `q`: the density shares and, when the step is fully inside
+    // the logical image, the pair term the rectangle query needs (`LatticeScale`). Outside it the legacy
+    // 50/50 split stays.
+    let step = |ip: usize, iq: usize| -> (f64, f64, f64) {
+        let (dp, dq) = (dst[ip] as f64, dst[iq] as f64);
+        let (sp, sq) = (src[ip] as f64, src[iq] as f64);
+        let step_src = (sq - sp).abs();
+        let e = bounded_excess((dq - dp).abs(), step_src, C_BLOCK);
+        let e_p = bounded_excess((dq - sp).abs(), step_src, C_BLOCK);
+        let e_q = bounded_excess((sq - dp).abs(), step_src, C_BLOCK);
+        (
+            0.5 * c * (e - e_p + e_q),
+            0.5 * c * (e - e_q + e_p),
+            c * (e_p + e_q - e),
+        )
+    };
+    for y in 0..height {
+        let row = y * width;
+        let mut x = BLOCK_LATTICE;
+        while x < width {
+            let i = row + x;
+            match lattice.as_mut() {
+                Some((l, lw, lh)) if x < *lw && y < *lh => {
+                    let (to_p, to_q, pair) = step(i - 1, i);
+                    id_plane[i - 1] += to_p;
+                    id_plane[i] += to_q;
+                    l.add_vertical_step(x, y, pair);
+                }
+                _ => {
+                    let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
+                    let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
+                    let v = c * bounded_excess(step_dst, step_src, C_BLOCK);
                     id_plane[i] += 0.5 * v;
-                    id_plane[i_up] += 0.5 * v;
+                    id_plane[i - 1] += 0.5 * v;
+                }
+            }
+            x += BLOCK_LATTICE;
+        }
+        if y % BLOCK_LATTICE == 0 && y > 0 {
+            for x in 0..width {
+                let i = row + x;
+                let i_up = i - width;
+                match lattice.as_mut() {
+                    Some((l, lw, lh)) if x < *lw && y < *lh => {
+                        let (to_p, to_q, pair) = step(i_up, i);
+                        id_plane[i_up] += to_p;
+                        id_plane[i] += to_q;
+                        l.add_horizontal_step(y, x, pair);
+                    }
+                    _ => {
+                        let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
+                        let step_src = (src[i] as f64 - src[i_up] as f64).abs();
+                        let v = c * bounded_excess(step_dst, step_src, C_BLOCK);
+                        id_plane[i] += 0.5 * v;
+                        id_plane[i_up] += 0.5 * v;
+                    }
                 }
             }
         }
@@ -16315,32 +16369,68 @@ fn attr_pass_b_blockiness_f32(
     height: usize,
     c_blockiness: f32,
     id_plane: &mut [f32],
+    mut lattice: Option<(&mut crate::attribution::LatticeScale, usize, usize)>,
 ) {
     const CB: f32 = C_BLOCK as f32;
-    if c_blockiness != 0.0 {
-        for y in 0..height {
-            let row = y * width;
-            let mut x = BLOCK_LATTICE;
-            while x < width {
-                let i = row + x;
-                let step_dst = (dst[i] - dst[i - 1]).abs();
-                let step_src = (src[i] - src[i - 1]).abs();
-                let v =
-                    c_blockiness * ((step_dst - step_src).max(0.0) / (step_dst + step_src + CB));
-                id_plane[i] += 0.5 * v;
-                id_plane[i - 1] += 0.5 * v;
-                x += BLOCK_LATTICE;
-            }
-            if y % BLOCK_LATTICE == 0 && y > 0 {
-                for x in 0..width {
-                    let i = row + x;
-                    let i_up = i - width;
-                    let step_dst = (dst[i] - dst[i_up]).abs();
-                    let step_src = (src[i] - src[i_up]).abs();
-                    let v = c_blockiness
-                        * ((step_dst - step_src).max(0.0) / (step_dst + step_src + CB));
+    if c_blockiness == 0.0 {
+        return;
+    }
+    let c = c_blockiness;
+    let excess = |a: f32, b: f32| (a - b).max(0.0) / (a + b + CB);
+    // f32 twin of the f64 step above; the pair term is accumulated in f64.
+    let step = |ip: usize, iq: usize| -> (f32, f32, f64) {
+        let (dp, dq) = (dst[ip], dst[iq]);
+        let (sp, sq) = (src[ip], src[iq]);
+        let step_src = (sq - sp).abs();
+        let e = excess((dq - dp).abs(), step_src);
+        let e_p = excess((dq - sp).abs(), step_src);
+        let e_q = excess((sq - dp).abs(), step_src);
+        (
+            0.5 * c * (e - e_p + e_q),
+            0.5 * c * (e - e_q + e_p),
+            f64::from(c) * f64::from(e_p + e_q - e),
+        )
+    };
+    for y in 0..height {
+        let row = y * width;
+        let mut x = BLOCK_LATTICE;
+        while x < width {
+            let i = row + x;
+            match lattice.as_mut() {
+                Some((l, lw, lh)) if x < *lw && y < *lh => {
+                    let (to_p, to_q, pair) = step(i - 1, i);
+                    id_plane[i - 1] += to_p;
+                    id_plane[i] += to_q;
+                    l.add_vertical_step(x, y, pair);
+                }
+                _ => {
+                    let step_dst = (dst[i] - dst[i - 1]).abs();
+                    let step_src = (src[i] - src[i - 1]).abs();
+                    let v = c * excess(step_dst, step_src);
                     id_plane[i] += 0.5 * v;
-                    id_plane[i_up] += 0.5 * v;
+                    id_plane[i - 1] += 0.5 * v;
+                }
+            }
+            x += BLOCK_LATTICE;
+        }
+        if y % BLOCK_LATTICE == 0 && y > 0 {
+            for x in 0..width {
+                let i = row + x;
+                let i_up = i - width;
+                match lattice.as_mut() {
+                    Some((l, lw, lh)) if x < *lw && y < *lh => {
+                        let (to_p, to_q, pair) = step(i_up, i);
+                        id_plane[i_up] += to_p;
+                        id_plane[i] += to_q;
+                        l.add_horizontal_step(y, x, pair);
+                    }
+                    _ => {
+                        let step_dst = (dst[i] - dst[i_up]).abs();
+                        let step_src = (src[i] - src[i_up]).abs();
+                        let v = c * excess(step_dst, step_src);
+                        id_plane[i] += 0.5 * v;
+                        id_plane[i_up] += 0.5 * v;
+                    }
                 }
             }
         }
@@ -16363,6 +16453,7 @@ fn attr_pass_b_channel_f32(
     parallel: bool,
     id_plane: &mut [f32],
     win_plane: &mut [f32],
+    lattice: Option<(&mut crate::attribution::LatticeScale, usize, usize)>,
 ) {
     // Band size for the rayon arm below; `threads`-gated with it.
     #[cfg(feature = "threads")]
@@ -16402,12 +16493,12 @@ fn attr_pass_b_channel_f32(
                 let y1 = (y0 + BAND).min(height);
                 run(y0, y1, id_rows, win_rows);
             });
-        attr_pass_b_blockiness_f32(src, dst, width, height, co.c_blockiness, id_plane);
+        attr_pass_b_blockiness_f32(src, dst, width, height, co.c_blockiness, id_plane, lattice);
         return;
     }
     let _ = parallel;
     run(0, height, id_plane, win_plane);
-    attr_pass_b_blockiness_f32(src, dst, width, height, co.c_blockiness, id_plane);
+    attr_pass_b_blockiness_f32(src, dst, width, height, co.c_blockiness, id_plane, lattice);
 }
 
 /// Edge-width pass-B coefficient for one (scale `u`, `ch`) — a free fn
@@ -16507,12 +16598,15 @@ fn attr_pass_b_for_scale(
     win_plane: &mut [f64],
     sink: &mut crate::attribution::AttrSinkF64<'_>,
     spread_tmp: &mut Vec<f64>,
+    lattice: &mut crate::attribution::LatticeSet,
 ) {
     let tpb = std::time::Instant::now();
     let (ws, hs) = dims[scale];
     let n = ws * hs;
     scale_density[..n].fill(0.0);
     win_plane[..n].fill(0.0);
+    // Exact lattice-step boundary terms (BLOCKINESS) are collected per scale into `lattice`.
+    let mut lat = lattice.take(scale, ws, hs);
     for ch in 0..3 {
         let append_active = append_cell_active(want_append, ch, scale);
         let cross: Option<(&[f32], &[f32])> = if ch == 1 {
@@ -16543,7 +16637,11 @@ fn attr_pass_b_for_scale(
             parallel,
             &mut scale_density[..n],
             &mut win_plane[..n],
+            lat.as_mut().map(|(l, lw, lh)| (l, *lw, *lh)),
         );
+    }
+    if let Some((l, _, _)) = lat {
+        lattice.put(l);
     }
     crate::blur::box_spread_sum_preserving(&mut win_plane[..n], ws, hs, BLUR_RADIUS, spread_tmp);
     for (d, s) in scale_density[..n].iter_mut().zip(win_plane[..n].iter()) {
@@ -16616,12 +16714,20 @@ fn attr_pass_b_for_scale_f32(
     spread_tmp: &mut Vec<f32>,
     spread_out: &mut Vec<f32>,
     geometry: Option<&crate::sampling::Geometry>,
+    lattice: &mut crate::attribution::LatticeSet,
 ) {
     let tpb = std::time::Instant::now();
     let (ws, hs) = dims[scale];
     let n = ws * hs;
     scale_density[..n].fill(0.0);
     win_plane[..n].fill(0.0);
+    // Exact lattice-step boundary terms need plane pixels to map one-to-one onto source footprints, which a
+    // sampling geometry breaks; there the legacy symmetric split stays.
+    let mut lat = if geometry.is_none() {
+        lattice.take(scale, ws, hs)
+    } else {
+        None
+    };
     for ch in 0..3 {
         if !attribution_cell_active(s_v2, s_append, s_append2, scale, ch) {
             continue;
@@ -16656,7 +16762,11 @@ fn attr_pass_b_for_scale_f32(
             parallel,
             &mut scale_density[..n],
             &mut win_plane[..n],
+            lat.as_mut().map(|(l, lw, lh)| (l, *lw, *lh)),
         );
+    }
+    if let Some((l, _, _)) = lat {
+        lattice.put(l);
     }
     // Window spread fused with the window→identity merge (value-exact vs
     // spread-then-add; parallel is bitwise-invariant per its gate).
@@ -16725,10 +16835,11 @@ pub(crate) fn compute_v2_append_attribution(
     max_pixels: Option<usize>,
     parallel: bool,
 ) -> Result<V2AppendAttribution, ZensimError> {
-    let (density, v2_features, append_features) = compute_v2_append_attribution_impl(
+    let (density, v2_features, append_features, lattice) = compute_v2_append_attribution_impl(
         reference, distorted, s_v2, s_append, s_append2, max_pixels, parallel, None,
     )?;
     Ok(V2AppendAttribution {
+        lattice,
         density: density.expect("canvas arm always yields a density"),
         width: reference.width(),
         height: reference.height(),
@@ -16753,7 +16864,7 @@ pub(crate) fn compute_v2_append_attribution_into_bins(
     parallel: bool,
     accum: &mut crate::attribution::BinAccum,
 ) -> Result<(Vec<f64>, Vec<f64>), ZensimError> {
-    let (_, v2_features, append_features) = compute_v2_append_attribution_impl(
+    let (_, v2_features, append_features, _) = compute_v2_append_attribution_impl(
         reference,
         distorted,
         s_v2,
@@ -16780,7 +16891,15 @@ fn compute_v2_append_attribution_impl(
     max_pixels: Option<usize>,
     parallel: bool,
     bins: Option<&mut crate::attribution::BinAccum>,
-) -> Result<(Option<Vec<f64>>, Vec<f64>, Vec<f64>), ZensimError> {
+) -> Result<
+    (
+        Option<Vec<f64>>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<crate::attribution::LatticeScale>,
+    ),
+    ZensimError,
+> {
     // ZENSIM_ATTR_PERF=1: coarse section timing to stderr (perf lever triage).
     let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
     let t0 = std::time::Instant::now();
@@ -16976,6 +17095,8 @@ fn compute_v2_append_attribution_impl(
     //    2026-08-05 (appendix N) so the fused folded-944 retention path
     //    shares them verbatim. Behavior here is unchanged. ──
     let dims: Vec<(usize, usize)> = rprep.scales.iter().map(|s| (s.1, s.2)).collect();
+    let mut lattice = crate::attribution::LatticeSet::default();
+    lattice.reset(reference.width(), reference.height(), true);
     let pass_b_scale = |scale: usize,
                         planes: &[AttrChPlanes; 3],
                         cells: &[[AttrCellSums; 3]],
@@ -16983,7 +17104,8 @@ fn compute_v2_append_attribution_impl(
                         scale_density: &mut Vec<f64>,
                         win_plane: &mut Vec<f64>,
                         sink: &mut crate::attribution::AttrSinkF64<'_>,
-                        spread_tmp: &mut Vec<f64>| {
+                        spread_tmp: &mut Vec<f64>,
+                        lattice: &mut crate::attribution::LatticeSet| {
         let (ref rplanes, _, _) = rprep.scales[scale];
         let dplanes = &dprep.scales[scale].0;
         attr_pass_b_for_scale(
@@ -17006,6 +17128,7 @@ fn compute_v2_append_attribution_impl(
             win_plane,
             sink,
             spread_tmp,
+            lattice,
         );
     };
 
@@ -17061,6 +17184,7 @@ fn compute_v2_append_attribution_impl(
                 &mut win_plane,
                 &mut sink,
                 &mut spread_tmp,
+                &mut lattice,
             );
         }
     }
@@ -17075,7 +17199,14 @@ fn compute_v2_append_attribution_impl(
             &mut win_plane,
             &mut sink,
             &mut spread_tmp,
+            &mut lattice,
         );
+    }
+    // The bin sink takes the boundary terms itself; the canvas arm returns them with its density.
+    let mut lattice_out = Vec::new();
+    match &mut sink {
+        crate::attribution::AttrSinkF64::Bins(accum) => accum.set_lattice(lattice.finish()),
+        crate::attribution::AttrSinkF64::Canvas(_) => lattice_out = lattice.finish(),
     }
     if perf_log {
         eprintln!(
@@ -17108,7 +17239,7 @@ fn compute_v2_append_attribution_impl(
     } else {
         None
     };
-    Ok((density, v2_features, append_features))
+    Ok((density, v2_features, append_features, lattice_out))
 }
 
 // ============================================================================
@@ -17124,6 +17255,105 @@ pub(crate) mod tests {
     // Explicit calibration tool; compiled only by calibration_instrument.sh.
     #[cfg(gmsbank_calibration_instrument)]
     include!("gmsbank_calibration_instrument.rs");
+
+    /// Plane-level exactness of the BLOCKINESS map for rectangle repairs (`crate::attribution::LatticeScale`):
+    /// for every plane-aligned rectangle, at footprint factors 1, 2 and 4, the density mass inside the rectangle
+    /// plus the lattice boundary correction must equal `c * (B(dst) - B(dst with the rectangle replaced by src))`,
+    /// where `B` is the feature's own `blockiness_sparse` sum. The legacy 50/50 split (`lattice = None`) must NOT
+    /// be exact here: that is the negative control.
+    #[cfg(feature = "custom-profiles")]
+    fn blockiness_exactness_fixture() -> (usize, usize, Vec<f32>, Vec<f32>) {
+        let (w, h) = (64usize, 48usize);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let src: Vec<f32> = (0..w * h).map(|_| next()).collect();
+        // Blocky distortion: per 8x8 cell offset plus pixel noise, so lattice steps carry real excess.
+        let cell: Vec<f32> = (0..(w / 8) * (h / 8))
+            .map(|_| (next() - 0.5) * 0.4)
+            .collect();
+        let dst: Vec<f32> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                src[i] + cell[(y / 8) * (w / 8) + x / 8] + (next() - 0.5) * 0.05
+            })
+            .collect();
+        (w, h, src, dst)
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    fn blockiness_rect_error(use_lattice: bool, scale: usize) -> f64 {
+        let (w, h, src, dst) = blockiness_exactness_fixture();
+        let c = -0.37f64;
+        let co = V2AppCoeffs {
+            c_blockiness: c,
+            ..Default::default()
+        };
+        let mut id = vec![0.0f64; w * h];
+        let mut lat = crate::attribution::LatticeScale::new(scale, w, h);
+        attr_pass_b_blockiness(
+            &src,
+            &dst,
+            w,
+            h,
+            &co,
+            &mut id,
+            use_lattice.then_some((&mut lat, w, h)),
+        );
+        lat.finalize();
+        let f = 1usize << scale;
+        let before = blockiness_sparse(&src, &dst, w, h);
+        let mut worst = 0.0f64;
+        let mut state = 0x1234_5678u64;
+        let mut pick = move |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 33) as usize % n
+        };
+        for _ in 0..400 {
+            let (x0, y0) = (pick(w), pick(h));
+            let (x1, y1) = (x0 + 1 + pick(w - x0), y0 + 1 + pick(h - y0));
+            let mut repaired = dst.clone();
+            let mut mass = 0.0;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    repaired[y * w + x] = src[y * w + x];
+                    mass += id[y * w + x];
+                }
+            }
+            let truth = c * (before - blockiness_sparse(&src, &repaired, w, h));
+            let predicted = mass + lat.correction(x0 * f, y0 * f, x1 * f, y1 * f);
+            worst = worst.max((predicted - truth).abs());
+        }
+        worst
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn blockiness_map_is_exact_for_rectangle_repairs() {
+        for scale in 0..3 {
+            let err = blockiness_rect_error(true, scale);
+            assert!(
+                err < 1e-9,
+                "scale {scale}: worst |predicted - finite repair| {err}"
+            );
+        }
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn legacy_blockiness_split_is_not_exact_for_rectangle_repairs() {
+        let err = blockiness_rect_error(false, 0);
+        assert!(
+            err > 1e-3,
+            "the symmetric split should miss one-sided repairs, worst error {err}"
+        );
+    }
 
     /// The pass-B scalar-tail SSIM dissimilarity must follow the vector kernel's two forms. At revision 3 the
     /// `s12` plane is the direct error moment; the covariance form read it as `E[ab]` and returned `d` of 1e2-1e3

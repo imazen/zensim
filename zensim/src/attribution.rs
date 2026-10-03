@@ -113,6 +113,14 @@
 //!    not plain `K`, at boundaries. Synthetic tests establish this distinction;
 //!    finite repair fidelity and native utility remain unproven. See
 //!    `benchmarks/pixel_adjoint_2026-09-14.md` and the historical C2b results.
+//! 2a. **Lattice-step features (v2 BLOCKINESS) are exact for rectangle repairs.** A rectangle repair changes the
+//!    steps it cuts by a one-sided amount, not half of the step's excess, so the density gives each step end its own
+//!    one-sided share and the result keeps the per-step pair terms (`LatticeScale`); `query_rect` and
+//!    `block_sums` add the correction for the steps a rectangle edge cuts. Exact when the edges are aligned to
+//!    the pyramid scale's footprint (`2^s` source pixels) and the scale's planes lie inside the image; unaligned
+//!    edges use the bilinear coverage convention of the density's own upsample. With a sampling geometry, or on a
+//!    sink that does not carry the terms, the symmetric 50/50 split remains. `density()` is the pixel-allocated
+//!    view and does not include the edge terms.
 //! 3. **SIMD-padding columns** (padded width − width) carry feature mass that
 //!    the trimmed map cannot attribute (≤ ~3 % of columns; near-zero signal
 //!    since both planes zero-pad identically).
@@ -220,6 +228,9 @@ pub struct AttributionResult {
     bin: usize,
     grid_w: usize,
     grid_h: usize,
+    /// Exact boundary terms of lattice-step features (BLOCKINESS): the pair interaction of steps cut by a
+    /// rectangle edge. Empty for every result that has none; see [`LatticeScale`].
+    lattice: Vec<LatticeScale>,
 }
 
 impl AttributionResult {
@@ -255,6 +266,7 @@ impl AttributionResult {
             bin: 1,
             grid_w: width,
             grid_h: height,
+            lattice: Vec::new(),
         }
     }
 
@@ -271,6 +283,7 @@ impl AttributionResult {
             bin: 1,
             grid_w: width,
             grid_h: height,
+            lattice: Vec::new(),
         }
     }
 
@@ -332,6 +345,7 @@ impl AttributionResult {
             bin,
             grid_w,
             grid_h,
+            lattice: Vec::new(),
         }
     }
 
@@ -387,16 +401,35 @@ impl AttributionResult {
         let y1 = y1.min(self.height);
         let x0 = x0.min(x1);
         let y0 = y0.min(y1);
+        let edge_terms = self.lattice_correction(x0, y0, x1, y1);
         if self.bin == 1 {
             let w1 = self.grid_w + 1;
             return self.sat[y1 * w1 + x1] - self.sat[y0 * w1 + x1] - self.sat[y1 * w1 + x0]
-                + self.sat[y0 * w1 + x0];
+                + self.sat[y0 * w1 + x0]
+                + edge_terms;
         }
         let u0 = self.grid_coord(x0, self.width, self.grid_w);
         let u1 = self.grid_coord(x1, self.width, self.grid_w);
         let v0 = self.grid_coord(y0, self.height, self.grid_h);
         let v1 = self.grid_coord(y1, self.height, self.grid_h);
-        self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
+        self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0)
+            + self.sat_at(u0, v0)
+            + edge_terms
+    }
+
+    /// Internal: attach finalized lattice-step boundary terms.
+    pub(crate) fn with_lattice(mut self, lattice: Vec<LatticeScale>) -> Self {
+        self.lattice = lattice;
+        self
+    }
+
+    /// Sum of the exact lattice-step boundary terms for the (already clamped) rectangle; `0.0` when the result
+    /// carries none, so every pre-existing result is unchanged bit for bit (`x + 0.0 == x`).
+    fn lattice_correction(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        self.lattice
+            .iter()
+            .map(|l| l.correction(x0, y0, x1, y1))
+            .sum::<f64>()
     }
 
     /// Fractional-edge variant of [`query_rect`](Self::query_rect) — the
@@ -726,6 +759,269 @@ fn merge_acc(a: &mut StripChannelAccum, b: &StripChannelAccum) {
     a.edge_det_max = a.edge_det_max.max(b.edge_det_max);
 }
 
+/// Exact boundary terms for one pyramid scale's lattice-step feature (v2 BLOCKINESS).
+///
+/// The feature is a sum over steps between plane pixels `p`, `q` that are adjacent across an 8-pixel lattice
+/// line, of `E = excess(|d_q - d_p|, |s_q - s_p|)`. A rectangle repair copies reference pixels into the pixels
+/// it covers, so a step with both ends inside loses all of `E`, a step with one end inside changes to
+/// `E_p = excess(|d_q - s_p|, ..)` (p repaired) or `E_q = excess(|s_q - d_p|, ..)` (q repaired), and a step with
+/// both ends outside is unchanged. With `g_p = E - E_p`, `g_q = E - E_q` and the pair term `I = E_p + E_q - E`
+/// (all multiplied by the feature's map coefficient) the repair gain is `g_p`, `g_q`, or `E = g_p + g_q + I`.
+/// The density gives `p` the share `g_p + I/2` and `q` the share `g_q + I/2`, so a rectangle containing both
+/// ends is exact by additivity; a rectangle that cuts the step needs `-I/2` per cut step. This stores `I` per
+/// step as prefix sums along each lattice line so a rectangle's four edges are answered in O(1).
+///
+/// Coverage convention matches the density's own sum-preserving upsample: a plane pixel's mass spreads
+/// uniformly over its `2^s x 2^s` footprint, so a rectangle covers a fraction `a_p`, `a_q` of the two ends and the
+/// correction is `I (a_p a_q - (a_p + a_q)/2)`, which is `-I/2` for a one-sided aligned cut and `0` when
+/// both or neither end is covered.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LatticeScale {
+    scale: usize,
+    /// Plane dimensions (columns, rows) of this scale.
+    ws: usize,
+    hs: usize,
+    /// Prefix sums over rows for each vertical lattice line `X = 8k` (`k >= 1`): `pv[(k-1)*(hs+1) + y]`.
+    pv: Vec<f64>,
+    /// Prefix sums over columns for each horizontal lattice line `Y = 8m`: `ph[(m-1)*(ws+1) + x]`.
+    ph: Vec<f64>,
+    finalized: bool,
+}
+
+impl LatticeScale {
+    pub(crate) fn new(scale: usize, ws: usize, hs: usize) -> Self {
+        Self {
+            scale,
+            ws,
+            hs,
+            ..Self::default()
+        }
+    }
+
+    fn lines_v(&self) -> usize {
+        self.ws.saturating_sub(1) / LATTICE_STEP
+    }
+
+    fn lines_h(&self) -> usize {
+        self.hs.saturating_sub(1) / LATTICE_STEP
+    }
+
+    /// Record `value` (the pair term times the coefficient) for the step between columns `x-1` and `x` of row `y`.
+    pub(crate) fn add_vertical_step(&mut self, x: usize, y: usize, value: f64) {
+        debug_assert!(
+            x.is_multiple_of(LATTICE_STEP)
+                && x >= LATTICE_STEP
+                && x < self.ws
+                && y < self.hs
+                && !self.finalized
+        );
+        if self.pv.is_empty() {
+            self.pv = vec![0.0; self.lines_v() * (self.hs + 1)];
+        }
+        let line = x / LATTICE_STEP - 1;
+        self.pv[line * (self.hs + 1) + y + 1] += value;
+    }
+
+    /// Record `value` for the step between rows `y-1` and `y` of column `x`.
+    pub(crate) fn add_horizontal_step(&mut self, y: usize, x: usize, value: f64) {
+        debug_assert!(
+            y.is_multiple_of(LATTICE_STEP)
+                && y >= LATTICE_STEP
+                && y < self.hs
+                && x < self.ws
+                && !self.finalized
+        );
+        if self.ph.is_empty() {
+            self.ph = vec![0.0; self.lines_h() * (self.ws + 1)];
+        }
+        let line = y / LATTICE_STEP - 1;
+        self.ph[line * (self.ws + 1) + x + 1] += value;
+    }
+
+    /// Turn the per-step values into prefix sums (`p[i]` = sum of steps `0..i`).
+    pub(crate) fn finalize(&mut self) {
+        if self.finalized {
+            return;
+        }
+        for line in self.pv.chunks_mut(self.hs + 1) {
+            for i in 1..line.len() {
+                line[i] += line[i - 1];
+            }
+        }
+        for line in self.ph.chunks_mut(self.ws + 1) {
+            for i in 1..line.len() {
+                line[i] += line[i - 1];
+            }
+        }
+        self.finalized = true;
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pv.is_empty() && self.ph.is_empty()
+    }
+
+    /// Fraction of footprint `[i f, (i+1) f)` covered by `[lo, hi)`.
+    fn coverage(lo: usize, hi: usize, f: usize, i: usize) -> f64 {
+        let a = lo.max(i * f);
+        let b = hi.min((i + 1) * f);
+        b.saturating_sub(a) as f64 / f as f64
+    }
+
+    /// `sum_r I_r (cp cq c_r^2 - c_r (cp + cq)/2)` over the rows/columns `0..len` of a line whose prefix sums
+    /// are `prefix` and whose cross-axis coverage of the rectangle is `[lo, hi)` at footprint factor `f`.
+    fn line_sum(
+        prefix: &[f64],
+        len: usize,
+        lo: usize,
+        hi: usize,
+        f: usize,
+        cp: f64,
+        cq: f64,
+    ) -> f64 {
+        if lo >= hi {
+            return 0.0;
+        }
+        let first = lo / f;
+        let last = ((hi - 1) / f).min(len.saturating_sub(1));
+        if first > last {
+            return 0.0;
+        }
+        let step = |r: usize| prefix[r + 1] - prefix[r];
+        let term = |i_r: f64, c: f64| i_r * (cp * cq * c * c - c * (cp + cq) * 0.5);
+        let mut acc = 0.0;
+        // Rows whose coverage is partial (at most the two end rows) are handled one by one; the rest are 1.0.
+        let mut r = first;
+        while r <= last {
+            let c = Self::coverage(lo, hi, f, r);
+            if c < 1.0 || r == first || r == last {
+                acc += term(step(r), c);
+                r += 1;
+            } else {
+                let run_end = last; // rows r..last are all fully covered here
+                acc += (prefix[run_end] - prefix[r]) * (cp * cq - (cp + cq) * 0.5);
+                r = run_end;
+            }
+        }
+        acc
+    }
+
+    /// The boundary correction for the rectangle `[x0, x1) x [y0, y1)` in source pixels.
+    pub(crate) fn correction(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        if !self.finalized || x0 >= x1 || y0 >= y1 {
+            return 0.0;
+        }
+        let f = 1usize << self.scale;
+        let mut total = 0.0;
+        // Candidate lattice lines are the ones next to a rectangle edge column; everything else has both ends
+        // fully covered or fully uncovered and contributes exactly zero.
+        let candidates = |lo: usize, hi: usize, limit: usize| -> [Option<usize>; 4] {
+            let first = lo / f;
+            let last = (hi - 1) / f;
+            let mut out = [None; 4];
+            for (slot, c) in out.iter_mut().zip([first, first + 1, last, last + 1]) {
+                if c >= LATTICE_STEP && c.is_multiple_of(LATTICE_STEP) && c < limit {
+                    *slot = Some(c);
+                }
+            }
+            if out[2] == out[0] || out[2] == out[1] {
+                out[2] = None;
+            }
+            if out[3] == out[0] || out[3] == out[1] || out[3] == out[2] {
+                out[3] = None;
+            }
+            out
+        };
+        for x in candidates(x0, x1, self.ws).into_iter().flatten() {
+            let (cp, cq) = (
+                Self::coverage(x0, x1, f, x - 1),
+                Self::coverage(x0, x1, f, x),
+            );
+            if (cp == 0.0 && cq == 0.0) || (cp == 1.0 && cq == 1.0) {
+                continue;
+            }
+            let line = x / LATTICE_STEP - 1;
+            if let Some(prefix) = self
+                .pv
+                .get(line * (self.hs + 1)..(line + 1) * (self.hs + 1))
+            {
+                total += Self::line_sum(prefix, self.hs, y0, y1, f, cp, cq);
+            }
+        }
+        for y in candidates(y0, y1, self.hs).into_iter().flatten() {
+            let (cp, cq) = (
+                Self::coverage(y0, y1, f, y - 1),
+                Self::coverage(y0, y1, f, y),
+            );
+            if (cp == 0.0 && cq == 0.0) || (cp == 1.0 && cq == 1.0) {
+                continue;
+            }
+            let line = y / LATTICE_STEP - 1;
+            if let Some(prefix) = self
+                .ph
+                .get(line * (self.ws + 1)..(line + 1) * (self.ws + 1))
+            {
+                total += Self::line_sum(prefix, self.ws, x0, x1, f, cp, cq);
+            }
+        }
+        total
+    }
+}
+
+/// Per-computation collector of [`LatticeScale`] buffers, one per pyramid scale, owned by the pass-B caller.
+/// `logical` is the image the result will be queried against: only steps whose two plane pixels have their whole
+/// source footprint inside it are recorded (the others keep the legacy symmetric split).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LatticeSet {
+    logical: (usize, usize),
+    enabled: bool,
+    scales: Vec<LatticeScale>,
+}
+
+impl LatticeSet {
+    pub(crate) fn reset(&mut self, logical_w: usize, logical_h: usize, enabled: bool) {
+        self.logical = (logical_w, logical_h);
+        self.enabled = enabled;
+        self.scales.clear();
+    }
+
+    /// The buffer and usable plane columns/rows for `scale`, or `None` when exact terms are not available
+    /// (disabled, e.g. by a sampling geometry). Give it back with [`Self::put`].
+    pub(crate) fn take(
+        &mut self,
+        scale: usize,
+        ws: usize,
+        hs: usize,
+    ) -> Option<(LatticeScale, usize, usize)> {
+        if !self.enabled {
+            return None;
+        }
+        let f = 1usize << scale;
+        let limits = (ws.min(self.logical.0 / f), hs.min(self.logical.1 / f));
+        let buffer = match self.scales.iter().position(|l| l.scale == scale) {
+            Some(i) => self.scales.swap_remove(i),
+            None => LatticeScale::new(scale, ws, hs),
+        };
+        Some((buffer, limits.0, limits.1))
+    }
+
+    pub(crate) fn put(&mut self, buffer: LatticeScale) {
+        if !buffer.is_empty() {
+            self.scales.push(buffer);
+        }
+    }
+
+    pub(crate) fn finish(&mut self) -> Vec<LatticeScale> {
+        let mut out = std::mem::take(&mut self.scales);
+        for l in &mut out {
+            l.finalize();
+        }
+        out
+    }
+}
+
+/// Spacing of the BLOCKINESS lattice in plane pixels (`feature_v2::BLOCK_LATTICE`).
+const LATTICE_STEP: usize = 8;
+
 /// Level-2 bin accumulator: the `bin × bin` grid the per-scale attribution
 /// mass folds into DIRECTLY, so the full-resolution canvas (and its trim
 /// copy) never exists for `bin > 1`. Bins are defined over the LOGICAL image
@@ -743,6 +1039,8 @@ pub(crate) struct BinAccum {
     gw: usize,
     width: usize,
     height: usize,
+    /// Lattice-step boundary terms collected by pass B (see [`LatticeScale`]).
+    lattice: Vec<LatticeScale>,
 }
 
 impl BinAccum {
@@ -756,7 +1054,18 @@ impl BinAccum {
             gw,
             width,
             height,
+            lattice: Vec::new(),
         }
+    }
+
+    /// The logical image size queries are made against.
+    pub(crate) fn logical_dimensions(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
+
+    /// Attach the lattice-step boundary terms pass B collected for this accumulation.
+    pub(crate) fn set_lattice(&mut self, lattice: Vec<LatticeScale>) {
+        self.lattice = lattice;
     }
 
     /// Fold one scale plane (coarse dims `sw × sh`, sum-preserving upsample
@@ -868,7 +1177,14 @@ impl BinAccum {
     }
 
     fn into_result(self) -> AttributionResult {
-        AttributionResult::from_bin_sums(self.bins, self.width, self.height, self.bin)
+        let mut lattice = self.lattice;
+        for l in &mut lattice {
+            l.finalize();
+        }
+        let mut result =
+            AttributionResult::from_bin_sums(self.bins, self.width, self.height, self.bin);
+        result.lattice = lattice;
+        result
     }
 }
 
@@ -1446,6 +1762,7 @@ impl crate::metric::Zensim {
         if bin == 1 {
             let (mut canvas, width, height) =
                 self.basic_canvas_trimmed(&precomputed, distorted, s)?;
+            let mut lattice = Vec::new();
             if want_v2 {
                 let v2a = crate::feature_v2::compute_v2_append_attribution(
                     source,
@@ -1460,8 +1777,11 @@ impl crate::metric::Zensim {
                 for (c, v) in canvas.iter_mut().zip(v2a.density.iter()) {
                     *c += *v;
                 }
+                lattice = v2a.lattice;
             }
-            return Ok(AttributionResult::from_f64_canvas(canvas, width, height));
+            return Ok(
+                AttributionResult::from_f64_canvas(canvas, width, height).with_lattice(lattice)
+            );
         }
 
         // Level-2: one BinAccum receives BOTH blocks' per-scale mass — no
@@ -2734,7 +3054,10 @@ mod tests {
                     *c += *v;
                 }
                 drop(f);
+                // The L1 reference carries the same exact lattice-step boundary terms as the entry under
+                // test (they are part of the map's rectangle semantics, not of its pixel density).
                 AttributionResult::from_f64_canvas_binned(canvas, cw, chh, bin)
+                    .with_lattice(v2a.lattice)
             };
             let l2f = z
                 .compute_attribution_density_full_binned(&rs, &ds, &s944, bin)
@@ -3126,6 +3449,91 @@ mod tests {
                 "pixel {i}: full {got} vs basic+v2app {expect}"
             );
         }
+    }
+
+    /// BLOCKINESS maps are exact for rectangle repairs through every pipeline (the 2026-10-02 v2spatial fix).
+    ///
+    /// For plane-aligned rectangles on an image whose scales all fit (256x192: scale-3 plane 32x24), the
+    /// predicted map mass of each BLOCKINESS slot (unit sensitivity on that one slot) must equal the slot's
+    /// actual feature change under the finite repair "copy the reference into the rectangle", through the f64
+    /// per-pixel entry, the f64 binned entry, the f32 fused per-pixel entry and the f32 fused binned entry.
+    /// The symmetric 50/50 step split these entries used before misses one-sided repairs by a large fraction of
+    /// the effect, so this test fails on that code.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn blockiness_map_matches_finite_repairs_through_every_pipeline() {
+        use crate::feature_v2::idx;
+        const LAYOUT: usize = 29; // FEATURES_PER_CHANNEL_V2_TOTAL
+        let (w, h) = (256usize, 192usize);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim();
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let base = z.compute_v2_features(&rs, &ds).unwrap();
+        let pre = z.precompute_reference(&rs).unwrap();
+        let rects = [
+            (32usize, 32usize, 96usize, 128usize),
+            (0, 0, 64, 64),
+            (128, 96, 256, 192),
+            (64, 0, 192, 32),
+        ];
+        let mut checked = 0usize;
+        let mut max_obs = 0.0f64;
+        for (x0, y0, x1, y1) in rects {
+            let mut repaired = dst.clone();
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    repaired[y * w + x] = src[y * w + x];
+                }
+            }
+            let rrs = RgbSlice::new(&repaired, w, h);
+            let after = z.compute_v2_features(&rs, &rrs).unwrap();
+            for scale in 0..4 {
+                for ch in 0..3 {
+                    let local = scale * 3 * LAYOUT + ch * LAYOUT + idx::BLOCKINESS;
+                    let k = BLOCK_END_V1_POOLS + local;
+                    let observed = -(after.features()[local] - base.features()[local]);
+                    let mut s = vec![0.0f64; BLOCK_END_APPEND2];
+                    s[k] = -1.0;
+                    let per_pixel = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
+                    let binned = z
+                        .compute_attribution_density_full_binned(&rs, &ds, &s, 8)
+                        .unwrap();
+                    let mut sess = Fused944Session::new();
+                    let fused = z
+                        .compute_folded944_score_and_attribution(&rs, &pre, &ds, &s, &mut sess)
+                        .unwrap()
+                        .2;
+                    let mut sess = Fused944Session::new();
+                    let fused_binned = z
+                        .compute_folded944_score_and_attribution_binned(
+                            &rs, &pre, &ds, &s, &mut sess, 8,
+                        )
+                        .unwrap()
+                        .2;
+                    for (name, result, tol) in [
+                        ("f64 per-pixel", &per_pixel, 1e-9),
+                        ("f64 binned", &binned, 1e-9),
+                        ("f32 fused per-pixel", &fused, 2e-6),
+                        ("f32 fused binned", &fused_binned, 2e-6),
+                    ] {
+                        let predicted = result.query_rect(x0, y0, x1, y1);
+                        assert!(
+                            (predicted - observed).abs() <= tol * observed.abs().max(1.0),
+                            "{name}: scale {scale} ch {ch} rect {:?}: predicted {predicted} vs finite repair {observed}",
+                            (x0, y0, x1, y1)
+                        );
+                    }
+                    checked += 1;
+                    max_obs = max_obs.max(observed.abs());
+                }
+            }
+        }
+        assert_eq!(checked, 48);
+        assert!(
+            max_obs > 1e-4,
+            "fixture has no BLOCKINESS effect to test (max {max_obs})"
+        );
     }
 
     /// ANTI-RECURRENCE GUARD (campaign appendix E.2): the full-coverage
@@ -5974,8 +6382,9 @@ impl crate::metric::Zensim {
         // at the SAT build (`from_density`, the C3a entry's own shape).
         let t2 = std::time::Instant::now();
         let mut canvas: Vec<f32> = fb.trim_to(width, height);
+        let mut lattice = Vec::new();
         if !s_v2.is_empty() || s_append.is_some() || s_append2.is_some() {
-            let v2a = crate::feature_v2::compute_v2_append_attribution_from_retention(
+            let (v2a, v2_lattice) = crate::feature_v2::compute_v2_append_attribution_from_retention(
                 &session.retention,
                 s_v2,
                 s_append,
@@ -5989,10 +6398,11 @@ impl crate::metric::Zensim {
             for (c, v) in canvas.iter_mut().zip(v2a.iter()) {
                 *c += *v;
             }
+            lattice = v2_lattice;
         }
         let t_pass_b = t2.elapsed();
         let t3 = std::time::Instant::now();
-        let out = AttributionResult::from_density(canvas, width, height);
+        let out = AttributionResult::from_density(canvas, width, height).with_lattice(lattice);
         if perf_log {
             eprintln!(
                 "ATTRPERF fused944: extraction+retention {:.1} ms | v1 walk+basic {:.1} ms | pass-B f32 {:.1} ms | trim+SAT {:.1} ms",
