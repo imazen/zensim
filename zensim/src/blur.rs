@@ -181,6 +181,19 @@ fn box_blur_v_copy_inner_v4(
     let r = radius;
     let col_groups = width / 16;
 
+    // One slice construction per plane: every access below is
+    // `idx * width + col_base` with `idx <= height - 1` (all index helpers
+    // clamp with `.min(height - 1)`) and `col_base <= width - LANES` —
+    // statically `< height * width`, so the per-load/store range checks
+    // fold away. Same values, same order.
+    let n_px = height * width;
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px {
+        &mut dst[..n_px]
+    } else {
+        dst
+    };
+
     for cg in 0..col_groups {
         let col_base = cg * 16;
 
@@ -337,6 +350,19 @@ fn box_blur_v_copy_inner_v4x(
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
+
+    // One slice construction per plane: every access below is
+    // `idx * width + col_base` with `idx <= height - 1` (all index helpers
+    // clamp with `.min(height - 1)`) and `col_base <= width - LANES` —
+    // statically `< height * width`, so the per-load/store range checks
+    // fold away. Same values, same order.
+    let n_px = height * width;
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px {
+        &mut dst[..n_px]
+    } else {
+        dst
+    };
 
     for cg in 0..col_groups {
         let col_base = cg * 16;
@@ -497,6 +523,19 @@ fn box_blur_v_copy_inner_v3(
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
+
+    // One slice construction per plane: every access below is
+    // `idx * width + col_base` with `idx <= height - 1` (all index helpers
+    // clamp with `.min(height - 1)`) and `col_base <= width - LANES` —
+    // statically `< height * width`, so the per-load/store range checks
+    // fold away. Same values, same order.
+    let n_px = height * width;
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px {
+        &mut dst[..n_px]
+    } else {
+        dst
+    };
 
     for cg in 0..col_groups {
         let col_base = cg * 8;
@@ -819,6 +858,23 @@ fn box_blur_h_inner_v4(
     let r = radius;
     let row_groups = height / 16;
 
+    // One slice construction per plane: every gather/store below is
+    // `(row_base + ro) * width + idx` with `ro < LANES`,
+    // `row_base + LANES <= height`, and every column index clamped by
+    // `.min(width - 1)` — statically `< height * width`, so the per-element
+    // range checks fold away. Same values, same order.
+    let n_px = height * width;
+    let input = if input.len() >= n_px {
+        &input[..n_px]
+    } else {
+        input
+    };
+    let output = if output.len() >= n_px {
+        &mut output[..n_px]
+    } else {
+        output
+    };
+
     let mut ring = [[0.0f32; 16]; H_RING_CAP];
     let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
@@ -1071,6 +1127,24 @@ fn box_blur_h_v4x_strided(
     let r = radius;
     let row_groups = height / 16;
 
+    // One slice construction per plane: every gather/store below is
+    // `(row_base + ro) * stride + idx` with `ro < LANES`,
+    // `row_base + LANES <= height`, and every column index clamped by
+    // `.min(width - 1)` — statically `< (height - 1) * stride + width`
+    // (stride >= width at every call site), so the per-element range
+    // checks fold away. Same values, same order.
+    let n_px = height.saturating_sub(1) * stride + width;
+    let input = if input.len() >= n_px {
+        &input[..n_px]
+    } else {
+        input
+    };
+    let output = if output.len() >= n_px {
+        &mut output[..n_px]
+    } else {
+        output
+    };
+
     let mut ring = [[0.0f32; 16]; H_RING_CAP];
     let use_ring = diam <= H_RING_CAP;
     for rg in 0..row_groups {
@@ -1256,6 +1330,23 @@ fn box_blur_h_inner_v3(
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
+
+    // One slice construction per plane: every gather/store below is
+    // `(row_base + ro) * width + idx` with `ro < LANES`,
+    // `row_base + LANES <= height`, and every column index clamped by
+    // `.min(width - 1)` — statically `< height * width`, so the per-element
+    // range checks fold away. Same values, same order.
+    let n_px = height * width;
+    let input = if input.len() >= n_px {
+        &input[..n_px]
+    } else {
+        input
+    };
+    let output = if output.len() >= n_px {
+        &mut output[..n_px]
+    } else {
+        output
+    };
 
     let mut ring = [[0.0f32; 8]; H_RING_CAP];
     let use_ring = diam <= H_RING_CAP;
@@ -3677,6 +3768,36 @@ fn fused_blur_h_ssim_inner_v4(
     let r = radius;
     let row_groups = height / 16;
 
+    // One slice construction per plane: every access below is
+    // `(row_base + ro) * width + col` or `row_base * width + idx` with
+    // `ro < LANES`, `row_base + LANES <= height`, and every column index
+    // clamped by `.min(width - 1)` — so each index is statically `<
+    // height * width` and the per-gather/per-store range checks fold away.
+    // Same values, same order; this only moves where the bound is proven.
+    let n_px = height * width;
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px { &dst[..n_px] } else { dst };
+    let out_mu1 = if out_mu1.len() >= n_px {
+        &mut out_mu1[..n_px]
+    } else {
+        out_mu1
+    };
+    let out_mu2 = if out_mu2.len() >= n_px {
+        &mut out_mu2[..n_px]
+    } else {
+        out_mu2
+    };
+    let out_sigma_sq = if out_sigma_sq.len() >= n_px {
+        &mut out_sigma_sq[..n_px]
+    } else {
+        out_sigma_sq
+    };
+    let out_sigma12 = if out_sigma12.len() >= n_px {
+        &mut out_sigma12[..n_px]
+    } else {
+        out_sigma12
+    };
+
     let mut ring_s = [[0.0f32; 16]; H_RING_CAP];
     let mut ring_d = [[0.0f32; 16]; H_RING_CAP];
     let use_ring = diam <= H_RING_CAP;
@@ -4235,6 +4356,37 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
     let r = radius;
     let row_groups = height / 16;
 
+    // One slice construction per plane: every access below is
+    // `(row_base + ro) * stride + col` or `row_base * stride + idx` with
+    // `ro < LANES`, `row_base + LANES <= height`, and every column index
+    // clamped by `.min(width - 1)` — so each index is statically `<
+    // (height - 1) * stride + width` (stride >= width at every call site)
+    // and the per-gather/per-store range checks fold away.
+    // Same values, same order; this only moves where the bound is proven.
+    let n_px = height.saturating_sub(1) * stride + width;
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px { &dst[..n_px] } else { dst };
+    let out_mu1 = if out_mu1.len() >= n_px {
+        &mut out_mu1[..n_px]
+    } else {
+        out_mu1
+    };
+    let out_mu2 = if out_mu2.len() >= n_px {
+        &mut out_mu2[..n_px]
+    } else {
+        out_mu2
+    };
+    let out_sigma_sq = if out_sigma_sq.len() >= n_px {
+        &mut out_sigma_sq[..n_px]
+    } else {
+        out_sigma_sq
+    };
+    let out_sigma12 = if out_sigma12.len() >= n_px {
+        &mut out_sigma12[..n_px]
+    } else {
+        out_sigma12
+    };
+
     let mut ring_s = [[0.0f32; 16]; H_RING_CAP];
     let mut ring_d = [[0.0f32; 16]; H_RING_CAP];
     let use_ring = diam <= H_RING_CAP;
@@ -4647,6 +4799,36 @@ fn fused_blur_h_ssim_inner_v3(
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
+
+    // One slice construction per plane: every access below is
+    // `(row_base + ro) * width + col` or `row_base * width + idx` with
+    // `ro < LANES`, `row_base + LANES <= height`, and every column index
+    // clamped by `.min(width - 1)` — so each index is statically `<
+    // height * width` and the per-gather/per-store range checks fold away.
+    // Same values, same order; this only moves where the bound is proven.
+    let n_px = height * width;
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px { &dst[..n_px] } else { dst };
+    let out_mu1 = if out_mu1.len() >= n_px {
+        &mut out_mu1[..n_px]
+    } else {
+        out_mu1
+    };
+    let out_mu2 = if out_mu2.len() >= n_px {
+        &mut out_mu2[..n_px]
+    } else {
+        out_mu2
+    };
+    let out_sigma_sq = if out_sigma_sq.len() >= n_px {
+        &mut out_sigma_sq[..n_px]
+    } else {
+        out_sigma_sq
+    };
+    let out_sigma12 = if out_sigma12.len() >= n_px {
+        &mut out_sigma12[..n_px]
+    } else {
+        out_sigma12
+    };
 
     let mut ring_s = [[0.0f32; 8]; H_RING_CAP];
     let mut ring_d = [[0.0f32; 8]; H_RING_CAP];
@@ -5093,6 +5275,18 @@ fn fused_blur_h_rec64_row(
     }
 }
 
+/// `plane`'s rows `y0..y0 + 8` as eight `width`-long mutable slices — one
+/// `chunks_exact_mut` split, so the `om[l][x]` stores need no per-element
+/// bounds check (each lane slice's length IS `width`, `x` runs `0..width`).
+/// Generic-inlined into the magetypes bodies like every other
+/// backend-trait helper.
+#[inline(always)]
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
+fn rec64_rows8_mut(plane: &mut [f32], y0: usize, width: usize) -> [&mut [f32]; 8] {
+    let mut it = plane[y0 * width..(y0 + 8) * width].chunks_exact_mut(width);
+    std::array::from_fn(|_| it.next().unwrap())
+}
+
 /// **canon64 vector body** — the Rec64 horizontal window run on eight
 /// independent ROWS at a time through `f64x8`. Every lane is one row's own
 /// scalar recurrence (`fused_blur_h_rec64_row`), so the per-row op sequence
@@ -5122,6 +5316,18 @@ fn fused_blur_h_ssim_rec64_rows(
     let groups = height / 8;
     for g in 0..groups {
         let y0 = g * 8;
+        // Per-lane row slices of provable length `width`: the mirror index
+        // helpers already produce `.min(width - 1)` indices and `x` runs
+        // `0..width`, so every gather/store below is statically in-bounds
+        // (no per-element `slice_index_fail` sites).
+        let srows: [&[f32]; 8] =
+            std::array::from_fn(|l| &src[(y0 + l) * width..(y0 + l + 1) * width]);
+        let drows: [&[f32]; 8] =
+            std::array::from_fn(|l| &dst[(y0 + l) * width..(y0 + l + 1) * width]);
+        let om1 = rec64_rows8_mut(out_mu1, y0, width);
+        let om2 = rec64_rows8_mut(out_mu2, y0, width);
+        let osq = rec64_rows8_mut(out_sigma_sq, y0, width);
+        let os12 = rec64_rows8_mut(out_sigma12, y0, width);
         let mut sum_s = f64x8::zero(token);
         let mut sum_d = f64x8::zero(token);
         let mut sum_sq = f64x8::zero(token);
@@ -5132,8 +5338,8 @@ fn fused_blur_h_ssim_rec64_rows(
             } else {
                 (i - r).min(width - 1)
             };
-            let sa: [f64; 8] = std::array::from_fn(|l| src[(y0 + l) * width + idx] as f64);
-            let da: [f64; 8] = std::array::from_fn(|l| dst[(y0 + l) * width + idx] as f64);
+            let sa: [f64; 8] = std::array::from_fn(|l| srows[l][idx] as f64);
+            let da: [f64; 8] = std::array::from_fn(|l| drows[l][idx] as f64);
             let sav = f64x8::from_array(token, sa);
             let dav = f64x8::from_array(token, da);
             sum_s = sum_s + sav;
@@ -5152,11 +5358,10 @@ fn fused_blur_h_ssim_rec64_rows(
             let sq = (sum_sq * inv_v).to_array();
             let s12 = (sum_prod * inv_v).to_array();
             for l in 0..8 {
-                let i = (y0 + l) * width + x;
-                out_mu1[i] = m1[l] as f32;
-                out_mu2[i] = m2[l] as f32;
-                out_sigma_sq[i] = sq[l] as f32;
-                out_sigma12[i] = s12[l] as f32;
+                om1[l][x] = m1[l] as f32;
+                om2[l][x] = m2[l] as f32;
+                osq[l][x] = sq[l] as f32;
+                os12[l][x] = s12[l] as f32;
             }
 
             let add_raw = x + r + 1;
@@ -5168,10 +5373,10 @@ fn fused_blur_h_ssim_rec64_rows(
                 rem_i as usize
             })
             .min(width - 1);
-            let sa: [f64; 8] = std::array::from_fn(|l| src[(y0 + l) * width + add_idx] as f64);
-            let da: [f64; 8] = std::array::from_fn(|l| dst[(y0 + l) * width + add_idx] as f64);
-            let sr: [f64; 8] = std::array::from_fn(|l| src[(y0 + l) * width + rem_idx] as f64);
-            let dr: [f64; 8] = std::array::from_fn(|l| dst[(y0 + l) * width + rem_idx] as f64);
+            let sa: [f64; 8] = std::array::from_fn(|l| srows[l][add_idx] as f64);
+            let da: [f64; 8] = std::array::from_fn(|l| drows[l][add_idx] as f64);
+            let sr: [f64; 8] = std::array::from_fn(|l| srows[l][rem_idx] as f64);
+            let dr: [f64; 8] = std::array::from_fn(|l| drows[l][rem_idx] as f64);
             let sav = f64x8::from_array(token, sa);
             let dav = f64x8::from_array(token, da);
             let srv = f64x8::from_array(token, sr);
@@ -7892,6 +8097,13 @@ mod tests {
         (127, 8),
         (208, 26),
         (592, 33),
+        // v4x strided-tile path: `width % 256 == 0 && height >= 16` stages
+        // the blur through `stride = width + 16` tiles — the plane slices
+        // inside `box_blur_h_v4x_strided` must use the strided extent, not
+        // `height * width`.
+        (256, 32),
+        (512, 17),
+        (256, 40),
     ];
 
     fn ring_plane(w: usize, h: usize, salt: usize) -> Vec<f32> {
@@ -8017,6 +8229,13 @@ mod tests {
             (127, 8),
             (208, 24),
             (592, 32),
+            // v4x strided-tile path: `width % 256 == 0 && height >= 16`
+            // stages the blur through `stride = width + 16` tiles — the
+            // plane slices inside `fused_blur_h_ssim_v4x_strided` must use
+            // the strided extent, not `height * width`.
+            (256, 32),
+            (512, 17),
+            (256, 40),
         ];
         for &(w, h) in FUSED_GEOM {
             let src = ring_plane(w, h, 0);

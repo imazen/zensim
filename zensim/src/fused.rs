@@ -19,15 +19,14 @@ use crate::ssim_form::{
 use archmage::arcane;
 use archmage::incant;
 use archmage::magetypes;
+use magetypes::simd::backends::F32x8Backend;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::backends::F32x16Backend;
-use magetypes::simd::backends::{F32x8Backend, F64x8Backend};
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
 use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
-use magetypes::simd::generic::f64x8 as GenericF64x8;
 
 // ============================================================
 // Free raw-moments accumulation — shared across every SIMD tier
@@ -1306,6 +1305,66 @@ fn fused_vblur_ssim_inner_v4(
     let r = radius;
     let col_groups = width / 16;
 
+    // One slice construction per plane: every row access below is
+    // `row_base + col_base` with `row_base = idx * width`, `idx <= height - 1`
+    // (all index helpers clamp with `.min(height - 1)`), `col_base <= width - 16`
+    // — so `base + 16 <= height * width` is statically provable and the
+    // `[base..][..16]` / `[base..base + 16]` accesses compile without the
+    // panic-edge recheck per load/store. Same trick as the canon64 bodies.
+    let n_px = height * width;
+    let h_mu1 = if h_mu1.len() >= n_px {
+        &h_mu1[..n_px]
+    } else {
+        h_mu1
+    };
+    let h_mu2 = if h_mu2.len() >= n_px {
+        &h_mu2[..n_px]
+    } else {
+        h_mu2
+    };
+    let h_sigma_sq = if h_sigma_sq.len() >= n_px {
+        &h_sigma_sq[..n_px]
+    } else {
+        h_sigma_sq
+    };
+    let h_sigma12 = if h_sigma12.len() >= n_px {
+        &h_sigma12[..n_px]
+    } else {
+        h_sigma12
+    };
+    let h_act = if h_act.len() >= n_px {
+        &h_act[..n_px]
+    } else {
+        h_act
+    };
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px { &dst[..n_px] } else { dst };
+    let mu1_out = if mu1_out.len() >= n_px {
+        &mut mu1_out[..n_px]
+    } else {
+        mu1_out
+    };
+    let mu2_out = if mu2_out.len() >= n_px {
+        &mut mu2_out[..n_px]
+    } else {
+        mu2_out
+    };
+    let sd_out = if sd_out.len() >= n_px {
+        &mut sd_out[..n_px]
+    } else {
+        sd_out
+    };
+    let ssq_out = if ssq_out.len() >= n_px {
+        &mut ssq_out[..n_px]
+    } else {
+        ssq_out
+    };
+    let s12_out = if s12_out.len() >= n_px {
+        &mut s12_out[..n_px]
+    } else {
+        s12_out
+    };
+
     // SSIM constants
     let one = f32x16::splat(token, 1.0);
     let zero = f32x16::zero(token);
@@ -1958,6 +2017,66 @@ fn fused_vblur_ssim_inner_v4x(
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
+
+    // One slice construction per plane: every row access below is
+    // `row_base + col_base` with `row_base = idx * width`, `idx <= height - 1`
+    // (all index helpers clamp with `.min(height - 1)`), `col_base <= width - 16`
+    // — so `base + 16 <= height * width` is statically provable and the
+    // `[base..][..16]` / `[base..base + 16]` accesses compile without the
+    // panic-edge recheck per load/store. Same trick as the canon64 bodies.
+    let n_px = height * width;
+    let h_mu1 = if h_mu1.len() >= n_px {
+        &h_mu1[..n_px]
+    } else {
+        h_mu1
+    };
+    let h_mu2 = if h_mu2.len() >= n_px {
+        &h_mu2[..n_px]
+    } else {
+        h_mu2
+    };
+    let h_sigma_sq = if h_sigma_sq.len() >= n_px {
+        &h_sigma_sq[..n_px]
+    } else {
+        h_sigma_sq
+    };
+    let h_sigma12 = if h_sigma12.len() >= n_px {
+        &h_sigma12[..n_px]
+    } else {
+        h_sigma12
+    };
+    let h_act = if h_act.len() >= n_px {
+        &h_act[..n_px]
+    } else {
+        h_act
+    };
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px { &dst[..n_px] } else { dst };
+    let mu1_out = if mu1_out.len() >= n_px {
+        &mut mu1_out[..n_px]
+    } else {
+        mu1_out
+    };
+    let mu2_out = if mu2_out.len() >= n_px {
+        &mut mu2_out[..n_px]
+    } else {
+        mu2_out
+    };
+    let sd_out = if sd_out.len() >= n_px {
+        &mut sd_out[..n_px]
+    } else {
+        sd_out
+    };
+    let ssq_out = if ssq_out.len() >= n_px {
+        &mut ssq_out[..n_px]
+    } else {
+        ssq_out
+    };
+    let s12_out = if s12_out.len() >= n_px {
+        &mut s12_out[..n_px]
+    } else {
+        s12_out
+    };
 
     // SSIM constants
     let one = f32x16::splat(token, 1.0);
@@ -2616,6 +2735,65 @@ fn fused_vblur_ssim_inner_v3(
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
+    // One slice construction per plane: every row access below is
+    // `row_base + col_base` with `row_base = idx * width`, `idx <= height - 1`
+    // (all index helpers clamp with `.min(height - 1)`), `col_base <= width - 8`
+    // — so `base + 8 <= height * width` is statically provable and the
+    // `[base..][..8]` / `[base..base + 8]` accesses compile without the
+    // panic-edge recheck per load/store. Same trick as the canon64 bodies.
+    let n_px = height * width;
+    let h_mu1 = if h_mu1.len() >= n_px {
+        &h_mu1[..n_px]
+    } else {
+        h_mu1
+    };
+    let h_mu2 = if h_mu2.len() >= n_px {
+        &h_mu2[..n_px]
+    } else {
+        h_mu2
+    };
+    let h_sigma_sq = if h_sigma_sq.len() >= n_px {
+        &h_sigma_sq[..n_px]
+    } else {
+        h_sigma_sq
+    };
+    let h_sigma12 = if h_sigma12.len() >= n_px {
+        &h_sigma12[..n_px]
+    } else {
+        h_sigma12
+    };
+    let h_act = if h_act.len() >= n_px {
+        &h_act[..n_px]
+    } else {
+        h_act
+    };
+    let src = if src.len() >= n_px { &src[..n_px] } else { src };
+    let dst = if dst.len() >= n_px { &dst[..n_px] } else { dst };
+    let mu1_out = if mu1_out.len() >= n_px {
+        &mut mu1_out[..n_px]
+    } else {
+        mu1_out
+    };
+    let mu2_out = if mu2_out.len() >= n_px {
+        &mut mu2_out[..n_px]
+    } else {
+        mu2_out
+    };
+    let sd_out = if sd_out.len() >= n_px {
+        &mut sd_out[..n_px]
+    } else {
+        sd_out
+    };
+    let ssq_out = if ssq_out.len() >= n_px {
+        &mut ssq_out[..n_px]
+    } else {
+        ssq_out
+    };
+    let s12_out = if s12_out.len() >= n_px {
+        &mut s12_out[..n_px]
+    } else {
+        s12_out
+    };
 
     let one = f32x8::splat(token, 1.0);
     let zero = f32x8::zero(token);
@@ -4699,52 +4877,78 @@ impl VWin {
             _ => None,
         }
     }
+} // impl VWin
 
-    /// [`VWin::slide`]'s `F64` arm with each column's `state + add − rem`
-    /// evaluated eight columns at a time through `f64x8` — per-column op
-    /// sequence identical (the recurrence is per-column; SIMD lanes never
-    /// mix), `width % 8` tail scalar. Other variants fall through to
-    /// `slide`; the canon64 vector bodies call this only on `F64`.
-    #[inline]
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))] // only the x86_64 lane-parallel canon bodies call it
-    fn slide64x8<T: F64x8Backend>(&mut self, token: T, y: usize, p: &VWinPlanes<'_>) {
-        let Self::F64 {
-            m1,
-            m2,
-            sq,
-            s12,
-            act,
-        } = self
-        else {
-            self.slide(y, p);
-            return;
-        };
-        let ab = vblur_add_idx(y, p.r, p.height) * p.width;
-        let rb = vblur_rem_idx(y, p.r, p.height) * p.width;
-        let slide_one = |out: &mut [f64], plane: &[f32]| {
-            if plane.is_empty() {
-                return;
+/// [`VWin::slide`]'s `F64` arm with each column's `state + add − rem`
+/// evaluated eight columns at a time through `f64x8` — per-column op
+/// sequence identical (the recurrence is per-column; SIMD lanes never
+/// mix), `width % 8` tail scalar. Other variants fall through to `slide`;
+/// the canon64 vector bodies invoke this only on `F64`.
+///
+/// This is a macro, not a method: the `f64x8` ops must compile INSIDE each
+/// caller's `#[target_feature]` region — a trait-generic helper left
+/// out-of-line compiles each op into a call to a `core::arch` shim that
+/// cannot inline back (the measured dominant single-kernel cost of the Rev4
+/// bake; see the note above `raw_moments_accumulate16`). `#[inline(always)]`
+/// on the equivalent method was still emitted as an out-of-line call, so the
+/// body expands at each call site instead. `f64x8` resolves to each
+/// `#[magetypes]` caller's per-tier alias. The `chunks_exact` iterators keep
+/// every load/store bounds-check-free without unsafe.
+#[cfg(target_arch = "x86_64")] // only the x86_64 canon64 bodies invoke it
+macro_rules! vwin_slide64x8 {
+    ($win:expr, $token:expr, $y:expr, $p:expr) => {{
+        match &mut $win {
+            VWin::F64 {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let ab = vblur_add_idx($y, $p.r, $p.height) * $p.width;
+                let rb = vblur_rem_idx($y, $p.r, $p.height) * $p.width;
+                // One slice construction per row per plane; the chunk/tail
+                // iterators then carry the bounds so no index is re-checked.
+                for (out, plane) in [
+                    (m1, $p.m1),
+                    (m2, $p.m2),
+                    (sq, $p.sq),
+                    (s12, $p.s12),
+                    (act, $p.act),
+                ] {
+                    if plane.is_empty() {
+                        continue;
+                    }
+                    let add = &plane[ab..ab + $p.width];
+                    let rem = &plane[rb..rb + $p.width];
+                    let mut oc = out[..$p.width].chunks_exact_mut(8);
+                    let mut ac = add.chunks_exact(8);
+                    let mut rc = rem.chunks_exact(8);
+                    for (o, (a8, r8)) in (&mut oc).zip((&mut ac).zip(&mut rc)) {
+                        let a8: &[f32; 8] = a8.try_into().unwrap();
+                        let r8: &[f32; 8] = r8.try_into().unwrap();
+                        let cur = f64x8::load($token, (&*o).try_into().unwrap());
+                        let a: [f64; 8] = std::array::from_fn(|i| a8[i] as f64);
+                        let r: [f64; 8] = std::array::from_fn(|i| r8[i] as f64);
+                        (cur + f64x8::from_array($token, a) - f64x8::from_array($token, r))
+                            .store(o.try_into().unwrap());
+                    }
+                    for ((o, &a), &r) in oc
+                        .into_remainder()
+                        .iter_mut()
+                        .zip(ac.remainder())
+                        .zip(rc.remainder())
+                    {
+                        *o = *o + a as f64 - r as f64;
+                    }
+                }
             }
-            let full = p.width / 8;
-            for c in 0..full {
-                let x = c * 8;
-                let cur = GenericF64x8::load(token, out[x..x + 8].try_into().unwrap());
-                let a: [f64; 8] = std::array::from_fn(|i| plane[ab + x + i] as f64);
-                let r: [f64; 8] = std::array::from_fn(|i| plane[rb + x + i] as f64);
-                (cur + GenericF64x8::from_array(token, a) - GenericF64x8::from_array(token, r))
-                    .store((&mut out[x..x + 8]).try_into().unwrap());
-            }
-            for x in full * 8..p.width {
-                out[x] = out[x] + plane[ab + x] as f64 - plane[rb + x] as f64;
-            }
-        };
-        slide_one(m1, p.m1);
-        slide_one(m2, p.m2);
-        slide_one(sq, p.sq);
-        slide_one(s12, p.s12);
-        slide_one(act, p.act);
-    }
+            _ => $win.slide($y, $p),
+        }
+    }};
+}
 
+impl VWin {
     /// f64 sibling of [`VWin::at32`] for the exact bodies. `Rec` widens the
     /// f32 production product (the plane value IS the f32 store); `F64` and
     /// `Fresh` keep the unrounded f64.
@@ -5113,7 +5317,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
 ///
 /// **Why this is bit-identical to the `LanesF64` scalar body.** Every
 /// column is an independent computation: the Rec64 window slides per
-/// column (`state + add − rem`, elementwise — [`VWin::slide64x8`]), `at32`
+/// column (`state + add − rem`, elementwise — `vwin_slide64x8!`), `at32`
 /// is a per-element `* inv64` + single f64→f32 narrow, every element
 /// formula is elementwise across columns, and pool adds are lane-local.
 /// Column `x` maps to canonical lane `x & 7`, so an 8-aligned chunk's
@@ -5188,6 +5392,12 @@ fn fused_vblur_ssim_canon64_vec(
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<LanesF64>::zero();
     let full = width / 8;
+    // One slice construction per plane: every `base + x` / `x0 + 8` index
+    // below is then statically `< height * width` or `<= full * 8`, so the
+    // chunk loop and the scalar tail compile with no per-access bounds
+    // checks (the tail still runs `vblur_ssim_elem_canon` verbatim).
+    let src = &src[..height * width];
+    let dst = &dst[..height * width];
     // `at32`'s F64 arm, one 8-column chunk: `(state[x] * inv64) as f32`
     // per lane — the narrow stays per-element inside the chunk.
     let narrow = |w: &[f64], x0: usize| -> f32x8 {
@@ -5200,6 +5410,20 @@ fn fused_vblur_ssim_canon64_vec(
             let base = y * width;
             let mut row = VblurPools::<LanesF64>::zero();
             let [wm1, wm2, wsq, ws12, wact] = win.f64_states().expect("Rec64");
+            // Provable-length slices: `x0 + 8 <= full * 8` is then literal,
+            // so `narrow`'s window reads and the plane loads compile with
+            // no `slice_index_fail` path. (`wact` stays conditionally read.)
+            let wm1 = &wm1[..full * 8];
+            let wm2 = &wm2[..full * 8];
+            let wsq = &wsq[..full * 8];
+            let ws12 = &ws12[..full * 8];
+            let wact = if wact.is_empty() {
+                wact
+            } else {
+                &wact[..full * 8]
+            };
+            let srow = &src[base..base + full * 8];
+            let drow = &dst[base..base + full * 8];
 
             for c in 0..full {
                 let x0 = c * 8;
@@ -5212,8 +5436,8 @@ fn fused_vblur_ssim_canon64_vec(
                 } else {
                     narrow(wact, x0)
                 };
-                let sv = f32x8::load(token, src[base + x0..base + x0 + 8].try_into().unwrap());
-                let dv = f32x8::load(token, dst[base + x0..base + x0 + 8].try_into().unwrap());
+                let sv = f32x8::load(token, srow[x0..x0 + 8].try_into().unwrap());
+                let dv = f32x8::load(token, drow[x0..x0 + 8].try_into().unwrap());
 
                 let sd = if direct {
                     splats.direct(m1v, m2v, ssqv, s12v)
@@ -5444,7 +5668,7 @@ fn fused_vblur_ssim_canon64_vec(
 
         // Slide V-blur window — same per-column recurrence, eight columns
         // per f64x8 op.
-        win.slide64x8(token, y, &planes);
+        vwin_slide64x8!(win, token, y, &planes);
     }
 
     acc
@@ -6075,6 +6299,10 @@ fn fused_vblur_edge_canon64_vec(
     let zero = f32x8::zero(token);
     let mut acc = StripChannelAccum::zero();
     let full = width / 8;
+    // Same pre-slicing as `fused_vblur_ssim_canon64_vec`: provable lengths,
+    // no per-access `slice_index_fail` path in the chunk loop or tail.
+    let src = &src[..height * width];
+    let dst = &dst[..height * width];
     let narrow = |w: &[f64], x0: usize| -> f32x8 {
         let a = (f64x8::load(token, w[x0..x0 + 8].try_into().unwrap()) * inv_v).to_array();
         f32x8::from_array(token, std::array::from_fn(|i| a[i] as f32))
@@ -6085,6 +6313,10 @@ fn fused_vblur_edge_canon64_vec(
             let base = y * width;
             let mut row = EdgeRowPools::<LanesF64>::zero();
             let [wm1, wm2, _, _, _] = win.f64_states().expect("Rec64");
+            let wm1 = &wm1[..full * 8];
+            let wm2 = &wm2[..full * 8];
+            let srow = &src[base..base + full * 8];
+            let drow = &dst[base..base + full * 8];
             for c in 0..full {
                 let x0 = c * 8;
                 let m1v = narrow(wm1, x0);
@@ -6093,8 +6325,8 @@ fn fused_vblur_edge_canon64_vec(
                     mu1_out[base + x0..base + x0 + 8].copy_from_slice(&m1v.to_array());
                     mu2_out[base + x0..base + x0 + 8].copy_from_slice(&m2v.to_array());
                 }
-                let sv = f32x8::load(token, src[base + x0..base + x0 + 8].try_into().unwrap());
-                let dv = f32x8::load(token, dst[base + x0..base + x0 + 8].try_into().unwrap());
+                let sv = f32x8::load(token, srow[x0..x0 + 8].try_into().unwrap());
+                let dv = f32x8::load(token, drow[x0..x0 + 8].try_into().unwrap());
                 let diff1 = (sv - m1v).abs();
                 let diff2 = (dv - m2v).abs();
                 let ed = (one + diff2) / (one + diff1) - one;
@@ -6149,7 +6381,7 @@ fn fused_vblur_edge_canon64_vec(
             acc.hf_abs_dst += row.hf_abs_dst.fin();
             acc.mse += row.mse.fin();
         }
-        win.slide64x8(token, y, &planes);
+        vwin_slide64x8!(win, token, y, &planes);
     }
     acc
 }

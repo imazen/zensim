@@ -28650,6 +28650,17 @@ fn dense_block_kernel_canon64_vec(
     let mut r4 = r4;
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let mut acc = DenseAccum::default();
+    // Provable-length plane slices: the chunk loop reads `i + 8 <= row +
+    // full * 8` and the tail reads `row + x < height * width` — both literal
+    // once the planes are cut to their exact spans, so no per-element
+    // `slice_index_fail` path remains.
+    let src = &src[..height * width];
+    let dst = &dst[..height * width];
+    let mu1 = &mu1[..height * width];
+    let mu2 = &mu2[..height * width];
+    let ssq = &ssq[..height * width];
+    let s12 = &s12[..height * width];
+    let activity = &activity[..height * width];
     let mut b0 = 0usize;
     while b0 < height {
         let b1 = (b0 + ERA2_BAND_ROWS).min(height);
@@ -28664,15 +28675,22 @@ fn dense_block_kernel_canon64_vec(
             let mut p_kn = [LanesF64::zero(); 3];
             let mut p_kd = [LanesF64::zero(); 3];
             let full = width / 8;
+            let srow = &src[row..row + full * 8];
+            let drow = &dst[row..row + full * 8];
+            let m1row = &mu1[row..row + full * 8];
+            let m2row = &mu2[row..row + full * 8];
+            let qrow = &ssq[row..row + full * 8];
+            let prow = &s12[row..row + full * 8];
+            let arow = &activity[row..row + full * 8];
             for c in 0..full {
-                let i = row + c * 8;
-                let sv = f32x8::load(token, src[i..i + 8].try_into().unwrap());
-                let dv = f32x8::load(token, dst[i..i + 8].try_into().unwrap());
-                let m1v = f32x8::load(token, mu1[i..i + 8].try_into().unwrap());
-                let m2v = f32x8::load(token, mu2[i..i + 8].try_into().unwrap());
-                let qv = f32x8::load(token, ssq[i..i + 8].try_into().unwrap());
-                let pv = f32x8::load(token, s12[i..i + 8].try_into().unwrap());
-                let actv = f32x8::load(token, activity[i..i + 8].try_into().unwrap());
+                let i = c * 8;
+                let sv = f32x8::load(token, srow[i..i + 8].try_into().unwrap());
+                let dv = f32x8::load(token, drow[i..i + 8].try_into().unwrap());
+                let m1v = f32x8::load(token, m1row[i..i + 8].try_into().unwrap());
+                let m2v = f32x8::load(token, m2row[i..i + 8].try_into().unwrap());
+                let qv = f32x8::load(token, qrow[i..i + 8].try_into().unwrap());
+                let pv = f32x8::load(token, prow[i..i + 8].try_into().unwrap());
+                let actv = f32x8::load(token, arow[i..i + 8].try_into().unwrap());
                 let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd, act_v) = dense_terms32_v(
                     token,
                     sv,

@@ -1055,7 +1055,25 @@ fn resize_filter_bench(sizes: &[usize]) {
     }
 }
 
+/// `ZENSIM_MAX_TIER=v3` disables the AVX-512 tokens for this process — the
+/// callgrind profiling tier (valgrind cannot execute AVX-512). Mirror of
+/// `featcost::apply_tier_cap`, optional here so the same binary still benches
+/// at the native tier when the variable is unset.
+fn apply_tier_cap_from_env() {
+    match std::env::var("ZENSIM_MAX_TIER").as_deref() {
+        Err(_) => {}
+        Ok("v3") => {
+            use archmage::{X64V4Token, X64V4xToken};
+            X64V4xToken::dangerously_disable_token_process_wide(true).expect("cap v4x");
+            X64V4Token::dangerously_disable_token_process_wide(true).expect("cap v4");
+            eprintln!("tier cap: AVX-512 tokens disabled (ZENSIM_MAX_TIER=v3)");
+        }
+        Ok(o) => panic!("ZENSIM_MAX_TIER={o:?}: only v3"),
+    }
+}
+
 fn main() {
+    apply_tier_cap_from_env();
     if let Ok(arm) = std::env::var("ZEN_XP_RSS") {
         rss_mode(&arm);
         return;
