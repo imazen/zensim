@@ -15590,6 +15590,23 @@ fn v2app_coeffs_fold_f32(co: &V2AppCoeffs, cross_on: bool) -> V2AppCoeffsF32 {
 /// by the SIMD kernel's row tail and the sub-8-wide fallback, so there is
 /// exactly ONE formula source. Returns `(id_add, win_add)` (`id` carries
 /// the pixel + residual classes, `win` the window class).
+/// Scalar-tail twin of [`ssim_d_local_v`]'s two forms. At revision 3 the `s12` plane carries the direct error
+/// moment `E[(a-b)²]`, not `E[ab]`, so the covariance form is wrong there (it read the error moment as a product
+/// moment and returned `d` far outside `[0, 2]`, which the dev-pool coefficients then amplified to 1e26 on tail
+/// columns; `benchmarks/v2spatial_2026-10-02.md`).
+#[cfg(feature = "custom-profiles")]
+#[inline(always)]
+fn ssim_d_px(na: f32, nb: f32, nd: f32, m1: f32, m2: f32, s12v: f32, direct: bool) -> f32 {
+    if direct {
+        let mu_diff = m1 - m2;
+        let err_var = (s12v - mu_diff * mu_diff).max(0.0);
+        ((nd * (nb - na) + na * err_var) / (nb * nd)).max(0.0)
+    } else {
+        let nc = 2.0 * (s12v - m1 * m2) + C2_V2 as f32;
+        (1.0 - (na * nc) / (nb * nd)).max(0.0)
+    }
+}
+
 #[cfg(feature = "custom-profiles")]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -15606,6 +15623,7 @@ fn attr_pass_b_main_px(
     abv: f32,
     ry: f32,
     co: &V2AppCoeffsF32,
+    direct: bool,
 ) -> (f32, f32) {
     const C1: f32 = C1_V2 as f32;
     const C2: f32 = C2_V2 as f32;
@@ -15637,10 +15655,8 @@ fn attr_pass_b_main_px(
     // Dense family.
     let na = 2.0 * m1 * m2 + C1;
     let nb = m1 * m1 + m2 * m2 + C1;
-    let cov = s12v - m1 * m2;
-    let nc = 2.0 * cov + C2;
     let nd = sq - m1 * m1 - m2 * m2 + C2;
-    let d = (1.0 - (na * nc) / (nb * nd)).max(0.0);
+    let d = ssim_d_px(na, nb, nd, m1, m2, s12v, direct);
     let diff_src = (s - m1).abs();
     let diff_dst = (dd - m2).abs();
     let edge_dissim =
@@ -15904,7 +15920,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             let i = row + x;
             let (id_add, win_add) = attr_pass_b_main_px(
                 src[i], dst[i], mu1[i], mu2[i], ssq[i], s12[i], act_p[i], bs2[i], ax[i], ab[i],
-                ref_y[i], co,
+                ref_y[i], co, direct,
             );
             id_plane[orow + x] += id_add;
             win_plane[orow + x] += win_add;
@@ -17108,6 +17124,49 @@ pub(crate) mod tests {
     // Explicit calibration tool; compiled only by calibration_instrument.sh.
     #[cfg(gmsbank_calibration_instrument)]
     include!("gmsbank_calibration_instrument.rs");
+
+    /// The pass-B scalar-tail SSIM dissimilarity must follow the vector kernel's two forms. At revision 3 the
+    /// `s12` plane is the direct error moment; the covariance form read it as `E[ab]` and returned `d` of 1e2-1e3
+    /// (dark flat window: `a*nc/(b*nd)` strongly negative), which the dev4 coefficients amplified to 1e26.
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn pass_b_tail_ssim_d_follows_the_direct_error_moment_form() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..4000 {
+            let (m1, m2) = (next() * 0.9, next() * 0.9);
+            let var1 = next() * 0.02 * next();
+            let var2 = next() * 0.02 * next();
+            let ssq = m1 * m1 + m2 * m2 + var1 + var2;
+            let md = m1 - m2;
+            // direct plane: E[(a-b)^2] = (m1-m2)^2 + var1 + var2 - 2cov, cov in [-sqrt(v1 v2), sqrt(v1 v2)]
+            let cov = (next() * 2.0 - 1.0) * (var1 * var2).sqrt();
+            let s12_direct = md * md + var1 + var2 - 2.0 * cov;
+            let s12_prod = m1 * m2 + cov;
+            let na = (2.0 * m1 * m2 + C1_V2) as f32;
+            let nb = (m1 * m1 + m2 * m2 + C1_V2) as f32;
+            let nd = (ssq - m1 * m1 - m2 * m2 + C2_V2) as f32;
+            for (direct, s12) in [(true, s12_direct), (false, s12_prod)] {
+                let want = ssim_d_local(m1, m2, s12, ssq, direct);
+                let got = f64::from(ssim_d_px(
+                    na, nb, nd, m1 as f32, m2 as f32, s12 as f32, direct,
+                ));
+                assert!(
+                    (0.0..=2.0 + 1e-3).contains(&got),
+                    "d out of range: {got} (direct {direct})"
+                );
+                assert!(
+                    (got - want).abs() < 2e-3,
+                    "px {got} vs f64 {want} (direct {direct})"
+                );
+            }
+        }
+    }
 
     /// imazen/zensim#56 regression gate: the MSCN divisive normalizer must
     /// be the CORRECTLY-ROUNDED IEEE `resid / sqrt(var + c)` on every SIMD

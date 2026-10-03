@@ -1174,6 +1174,11 @@ fn run_bake_mode(
     let mut refinement_block = vec![0.0; nblocks];
     let mut max_lin = vec![0.0; nblocks];
     let mut block_records = Vec::new();
+    // ZENSIM_V2_DIAG=<path>: per-feature-ID block diagnostic for the candidate (the v2 spatial study,
+    // benchmarks/v2spatial_2026-10-02.md). Observed = s_k * (feature change under the reference-block repair);
+    // predicted = the candidate density of that one ID alone through the same attribution owner.
+    let v2_diag_path = std::env::var("ZENSIM_V2_DIAG").ok();
+    let mut obs_all: Vec<Vec<f64>> = Vec::new();
     for by_i in 0..by {
         for bx_i in 0..bx {
             let b = by_i * bx + bx_i;
@@ -1190,6 +1195,13 @@ fn run_bake_mode(
             let rfeats = refined.features();
             delta_s[b] = refined.score() - base_score;
             lin_pred[b] = (0..n_in).map(|k| s[k] * (rfeats[k] - base_feats[k])).sum();
+            if v2_diag_path.is_some() {
+                obs_all.push(
+                    (0..n_in)
+                        .map(|k| s[k] * (rfeats[k] - base_feats[k]))
+                        .collect(),
+                );
+            }
             max_lin[b] = (156..n_in.min(228))
                 .filter(|k| (k - 156) % 6 < 3)
                 .map(|k| s[k] * (rfeats[k] - base_feats[k]))
@@ -1275,6 +1287,64 @@ fn run_bake_mode(
         }
     }
 
+    #[cfg(feature = "feature-regime-v2")]
+    if let Some(path) = &v2_diag_path {
+        let params: &'static zensim::profile::ProfileParams = Box::leak(Box::new(
+            zensim::profile::ProfileParams::builder()
+                .extended_features(true)
+                .build(),
+        ));
+        let zx = Zensim::new(ZensimProfile::Custom {
+            params,
+            name: "v2diag",
+        });
+        let mut ids = Vec::new();
+        let mut pred: Vec<Vec<f64>> = Vec::new();
+        let mut pred_fused: Vec<Vec<f64>> = Vec::new();
+        let pre_x = zx.precompute_reference(&rs).expect("v2 diag reference");
+        let mut sess_x = zensim::Fused944Session::new();
+        let full_fused = zx
+            .compute_folded944_score_and_attribution(&rs, &pre_x, &dist_slice, &s, &mut sess_x)
+            .expect("v2 diag fused total")
+            .2
+            .block_sums(block);
+        for k in 0..n_in {
+            if s[k] == 0.0 {
+                continue;
+            }
+            let mut only = vec![0.0f64; n_in];
+            only[k] = s[k];
+            let sums = zx
+                .compute_attribution_density_full(&rs, &dist_slice, &only)
+                .expect("v2 diag density")
+                .block_sums(block);
+            let fsums = zx
+                .compute_folded944_score_and_attribution(
+                    &rs,
+                    &pre_x,
+                    &dist_slice,
+                    &only,
+                    &mut sess_x,
+                )
+                .expect("v2 diag fused density")
+                .2
+                .block_sums(block);
+            ids.push(k);
+            pred.push(sums);
+            pred_fused.push(fsums);
+        }
+        let obs: Vec<Vec<f64>> = ids
+            .iter()
+            .map(|&k| (0..nblocks).map(|b| obs_all[b][k]).collect())
+            .collect();
+        let additivity_max_abs = (0..nblocks)
+            .map(|b| (pred.iter().map(|p| p[b]).sum::<f64>() - refinement_block[b]).abs())
+            .fold(0.0f64, f64::max);
+        let doc = serde_json::json!({"ids":ids,"predicted":pred,"predicted_fused":pred_fused,"fused_total":full_fused,"observed":obs,"score_delta":delta_s,
+            "refinement_gain":refinement_block,"density_gain":attr_block,"linearized_gain":lin_pred,
+            "block":block,"bx":bx,"by":by,"additivity_max_abs_vs_refinement":additivity_max_abs});
+        std::fs::write(path, serde_json::to_vec(&doc).unwrap()).expect("write v2 diag");
+    }
     let m1 = spearman(&dmap_block, &delta_s);
     let m1b = spearman(&dmap_all_block, &delta_s);
     let m3 = spearman(&dmap_model_block, &delta_s);

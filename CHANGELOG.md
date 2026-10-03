@@ -156,6 +156,12 @@
 
 ### Fixed
 
+- Attribution maps at revision 3+: the fused pass-B scalar tail (columns past the last full 8-lane group at each pyramid
+  scale) computed the v2 SSIM `d` with the covariance form on a plane that holds the direct error moment, so `d` left [0, 2]
+  and the SSIM-deviation coefficients amplified it to 1e26 on near-lossless content. Maps only; no feature value or served
+  score moves (full lib suite, 511 passed). v2+basic broad spatial passes 40 -> 63 of 96, worst M3f -0.37 -> +0.39;
+  basic/peak controls bit-identical. `benchmarks/v2spatial_2026-10-02.md` (this change).
+
 - Bakes and corruption heads stamped `zentrain.formula_revision = 4` now parse
   as `FormulaRevision::Rev4` (and are then refused by every served entry, see
   the queued Rev4 item) instead of being refused by `Plan::for_bake` while
