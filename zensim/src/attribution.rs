@@ -3586,7 +3586,23 @@ mod tests {
         let z = test_zensim();
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
-        let base = z.compute_v2_features(&rs, &ds).unwrap();
+        // REV4SERVE: at Rev4 the V2Bounded walk refuses (its v1 moments are a
+        // different summation tree than the canonical fold — named refusal in
+        // `feature_v2`); the folded append2 entry emits the same v2 block
+        // canonically, offset by the v1 prefix.
+        let rev4 = matches!(
+            crate::ssim_form::active_revision(),
+            crate::feature_defs::FormulaRevision::Rev4
+        );
+        let v2_off = if rev4 { BLOCK_END_V1_POOLS } else { 0 };
+        let v2_of = |z: &Zensim, s: &RgbSlice, d: &RgbSlice| {
+            if rev4 {
+                z.compute_folded720_append2_features(s, d).unwrap()
+            } else {
+                z.compute_v2_features(s, d).unwrap()
+            }
+        };
+        let base = v2_of(&z, &rs, &ds);
         let pre = z.precompute_reference(&rs).unwrap();
         let rects = [
             (32usize, 32usize, 96usize, 128usize),
@@ -3604,12 +3620,13 @@ mod tests {
                 }
             }
             let rrs = RgbSlice::new(&repaired, w, h);
-            let after = z.compute_v2_features(&rs, &rrs).unwrap();
+            let after = v2_of(&z, &rs, &rrs);
             for scale in 0..4 {
                 for ch in 0..3 {
                     let local = scale * 3 * LAYOUT + ch * LAYOUT + idx::BLOCKINESS;
                     let k = BLOCK_END_V1_POOLS + local;
-                    let observed = -(after.features()[local] - base.features()[local]);
+                    let observed =
+                        -(after.features()[v2_off + local] - base.features()[v2_off + local]);
                     let mut s = vec![0.0f64; BLOCK_END_APPEND2];
                     s[k] = -1.0;
                     let per_pixel = z.compute_attribution_density_full(&rs, &ds, &s).unwrap();
@@ -3651,6 +3668,16 @@ mod tests {
             max_obs > 1e-4,
             "fixture has no BLOCKINESS effect to test (max {max_obs})"
         );
+    }
+
+    /// REV4SERVE gate: the finite-repair exactness contract must also hold
+    /// in a Rev4 process, where the v2 features come from the canonical
+    /// folded entry (the V2Bounded walk refuses at Rev4 by name) and every
+    /// attribution pipeline entry serves the canonical arithmetic.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn blockiness_finite_repair_exactness_serves_at_rev4() {
+        crate::ssim_form::rerun_tests_at_revision("4", "blockiness_map_", 2);
     }
 
     /// ANTI-RECURRENCE GUARD (campaign appendix E.2): the full-coverage
@@ -5329,11 +5356,22 @@ impl Fused944Session {
             let supplied_xyb = encoding.map(|encoding| {
                 let (_, w, h) = precomputed.scale(0);
                 let mut planes = core::array::from_fn(|_| vec![0.0; w * h]);
+                let revision = plan.compute.formula_revision;
                 if distorted.width() < 64 || distorted.height() < 64 {
                     let padded = crate::metric::reflect_pad_to_min(distorted);
-                    crate::feature_v2_stream::hdr_source_to_xyb(&padded, encoding, &mut planes);
+                    crate::feature_v2_stream::hdr_source_to_xyb(
+                        &padded,
+                        encoding,
+                        &mut planes,
+                        revision,
+                    );
                 } else {
-                    crate::feature_v2_stream::hdr_source_to_xyb(distorted, encoding, &mut planes);
+                    crate::feature_v2_stream::hdr_source_to_xyb(
+                        distorted,
+                        encoding,
+                        &mut planes,
+                        revision,
+                    );
                 }
                 planes
             });
@@ -6444,9 +6482,8 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
-        // featcanon D2: Rev4 is research-extraction-only (`attr_pass_b_*` and
-        // the edge-only H blur are tier-dispatched).
-        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
+        // REV4SERVE: this entry follows the process revision — at Rev4 the
+        // retention walk and `attr_pass_b_*` are all per-pixel canonical.
         session.basic.result = None;
         validate_pair(source, distorted)?;
         // ZENSIM_ATTR_PERF=1: coarse section timing (perf lever triage).
@@ -6565,7 +6602,6 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
-        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         validate_ref_match(precomputed, distorted)?;
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {

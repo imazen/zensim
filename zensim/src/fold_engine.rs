@@ -162,10 +162,18 @@ pub(crate) fn compute_fold_backed(
     // packed width, which would truncate the walk before the gather could
     // reach the ids above it). Without a plan this is exactly today's
     // `truncate(v1_feature_width)`.
+    //
+    // REV4SERVE: `resize`, not `truncate` — a bake can declare an identity
+    // input width beyond the plan's emitted regime width (the v2+basic
+    // featpot cells are 1853-input rows whose live reads stop at f719).
+    // Positions past the emit bound are uncomputed slots the bake provably
+    // does not read (its live-read mask ends below them); zero is what the
+    // extraction emits for unpopulated identity slots, so the score and the
+    // visible row both stay honest.
     let keep = plan
         .map_or(0, |p| p.walk_width())
         .max(v1_feature_width(config));
-    features.truncate(keep);
+    features.resize(keep, 0.0);
 
     let (score, raw_distance) =
         crate::metric::score_v1_layout_features(&mut features, weights, config, config.num_scales);

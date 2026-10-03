@@ -10571,6 +10571,20 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
+    // REV4SERVE: the V2Bounded walk is NOT the canonical Rev4 owner — its
+    // v1 moments come from this walk's own H-blurred planes (parity-gated
+    // against the frozen v1 path, never byte-frozen; measured divergent
+    // from `research::extract` at Rev4). The canonical equivalents are the
+    // folded entries (`Zensim::compute_folded720_features_streaming`). A
+    // Rev4 request refuses rather than serve tier-dispatched arithmetic.
+    // Below Rev4 nothing changes.
+    if crate::ssim_form::effective_revision(toggles.formula_revision)
+        >= crate::feature_defs::FormulaRevision::Rev4
+    {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "the V2Bounded buffered walk is not canonical at formula revision 4: use the folded entries (compute_folded720_features_streaming) for Rev4 extraction",
+        });
+    }
     compute_v2_features_with_ref_impl_inner(
         prepared, distorted, max_pixels, parallel, toggles, scratch, None,
     )
@@ -12316,10 +12330,11 @@ pub(crate) fn compute_folded720_hdr_streaming_extras(
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
-    // featcanon D2: the PU front end (`color::linear_to_pu_xyb_planar_into`)
-    // is still tier-dispatched, so an HDR walk cannot compute Rev4 — this
-    // includes `research::extract` on a declared-HDR pair.
-    crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
+    // REV4SERVE: the PU front end is canonical at Rev4
+    // (`color::pu_xyb_canon` + the `_at_revision` transfer decoders), so the
+    // HDR walk computes Rev4 in a Rev4 process — `refuse_rev4_mix` keeps
+    // the cross-boundary cases out.
+    crate::ssim_form::refuse_rev4_mix(toggles.formula_revision)?;
     validate_hdr_pair(source, distorted, encoding, max_pixels)?;
     let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
     if source.width() < crate::metric::MIN_PYRAMID_DIM

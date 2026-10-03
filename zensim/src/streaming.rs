@@ -727,6 +727,13 @@ fn active_channels(
     //     0-2: ssim_max, art_max, det_max
     //     3-5: ssim_p95, art_p95, det_p95
     let basic_total = n_scales * basic_fpc * 3;
+    // REV4SERVE: at Rev4 every active channel takes the fused SSIM route —
+    // the edge-only `blur::fused_blur_h_mu` chain and the MSE-only
+    // `sq_diff_sum` leaf are tier-dispatched and have no canonical body, so
+    // the canonical definition IS the SSIM route's pools (which is also what
+    // `research::extract` computes for every channel).
+    let canon =
+        crate::featcanon::mode(crate::ssim_form::effective_revision(config.revision())).active();
     let mut active: ScaleActive = [None; 3];
     let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
     for (c, slot) in active.iter_mut().enumerate() {
@@ -753,6 +760,9 @@ fn active_channels(
             }
             if has_weight(peak_base + 1, 2) || has_weight(peak_base + 4, 2) {
                 need_edge = true; // art_max/det_max or art_p95/det_p95
+            }
+            if canon && (need_ssim || need_edge || need_mse) {
+                need_ssim = true;
             }
             if need_ssim || need_edge || need_mse {
                 *slot = Some((c, need_ssim, need_edge));
@@ -973,23 +983,26 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let padded_width = pyramid_plane_stride(width);
     let n = padded_width * height;
+    let revision = config.revision();
     let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
-    convert_linear_planar_to_pu_xyb_into(
+    convert_linear_planar_to_pu_xyb_into_at_revision(
         ref_planes,
         width,
         height,
         stride,
         padded_width,
         &mut src_planes,
+        revision,
     );
-    convert_linear_planar_to_pu_xyb_into(
+    convert_linear_planar_to_pu_xyb_into_at_revision(
         dist_planes,
         width,
         height,
         stride,
         padded_width,
         &mut dst_planes,
+        revision,
     );
     multiscale_stats_over_pu_xyb(
         src_planes,
@@ -1019,23 +1032,26 @@ pub(crate) fn compute_multiscale_stats_pu_linear_interleaved(
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let padded_width = pyramid_plane_stride(width);
     let n = padded_width * height;
+    let revision = config.revision();
     let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
-    convert_linear_interleaved_to_pu_xyb_into(
+    convert_linear_interleaved_to_pu_xyb_into_at_revision(
         ref_rgb,
         width,
         height,
         ref_stride,
         padded_width,
         &mut src_planes,
+        revision,
     );
-    convert_linear_interleaved_to_pu_xyb_into(
+    convert_linear_interleaved_to_pu_xyb_into_at_revision(
         dist_rgb,
         width,
         height,
         dist_stride,
         padded_width,
         &mut dst_planes,
+        revision,
     );
     multiscale_stats_over_pu_xyb(
         src_planes,
@@ -3364,7 +3380,7 @@ impl PrecomputedReference {
     ) -> Self {
         Self::build_from_dims(4, source.width(), source.height(), parallel, |planes| {
             if let Some(encoding) = encoding {
-                crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes);
+                crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes, revision);
             } else {
                 convert_source_to_xyb_into(source, planes, source.width(), parallel, revision);
             }
@@ -3733,17 +3749,20 @@ pub(crate) fn convert_linear_planar_to_xyb_into(
 /// HDR sibling of [`convert_linear_planar_to_xyb_into`]: **absolute-luminance**
 /// linear RGB planes (cd/m²) → PU-encoded XYB planes. Unlike the SDR path it
 /// does NOT clamp to `[0,1]` (HDR luminance exceeds 1) and applies PU21 via
-/// [`crate::color::linear_to_pu_xyb_planar_into`] instead of the cube root.
-/// See `docs/HDR_PLAN.md` §2b.
-pub(crate) fn convert_linear_planar_to_pu_xyb_into(
+/// [`crate::color::linear_to_pu_xyb_planar_into_at_revision`] instead of the
+/// cube root — the canonical PU body at Rev4, the tier-dispatched body below
+/// it (as `convert_source_to_xyb_into` already does for SDR). See
+/// `docs/HDR_PLAN.md` §2b.
+pub(crate) fn convert_linear_planar_to_pu_xyb_into_at_revision(
     planes: [&[f32]; 3],
     width: usize,
     height: usize,
     stride: usize,
     padded_width: usize,
     out: &mut [Vec<f32>; 3],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
-    use crate::color::linear_to_pu_xyb_planar_into;
+    use crate::color::linear_to_pu_xyb_planar_into_at_revision;
 
     let mut rgb_row: Vec<[f32; 3]> = vec![[0.0; 3]; width];
     let [ref mut o0, ref mut o1, ref mut o2] = *out;
@@ -3751,8 +3770,6 @@ pub(crate) fn convert_linear_planar_to_pu_xyb_into(
     for y in 0..height {
         let row_off = y * stride;
         for x in 0..width {
-            // No [0,1] clamp: HDR absolute luminance is unbounded above. The
-            // PU conversion clamps to PU21's valid luminance domain instead.
             rgb_row[x] = [
                 planes[0][row_off + x],
                 planes[1][row_off + x],
@@ -3760,40 +3777,43 @@ pub(crate) fn convert_linear_planar_to_pu_xyb_into(
             ];
         }
         let out_off = y * padded_width;
-        linear_to_pu_xyb_planar_into(
+        linear_to_pu_xyb_planar_into_at_revision(
             &rgb_row[..width],
             &mut o0[out_off..out_off + width],
             &mut o1[out_off..out_off + width],
             &mut o2[out_off..out_off + width],
+            revision,
         );
     }
 }
 
-/// Interleaved-input sibling of [`convert_linear_planar_to_pu_xyb_into`]:
-/// each row is `width` `[R, G, B]` f32 triples starting at `y * stride`
-/// elements. The row slice reinterprets directly as `&[[f32; 3]]` — no
-/// per-pixel gather, which makes interleaved the cheaper input layout here.
-pub(crate) fn convert_linear_interleaved_to_pu_xyb_into(
+/// Interleaved-input sibling of
+/// [`convert_linear_planar_to_pu_xyb_into_at_revision`]: each row is
+/// `width` `[R, G, B]` f32 triples starting at `y * stride` elements —
+/// the row slice reinterprets directly as `&[[f32; 3]]` (no per-pixel
+/// gather). The canonical PU body at Rev4.
+pub(crate) fn convert_linear_interleaved_to_pu_xyb_into_at_revision(
     rgb: &[f32],
     width: usize,
     height: usize,
     stride: usize,
     padded_width: usize,
     out: &mut [Vec<f32>; 3],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
-    use crate::color::linear_to_pu_xyb_planar_into;
+    use crate::color::linear_to_pu_xyb_planar_into_at_revision;
 
     let [ref mut o0, ref mut o1, ref mut o2] = *out;
     for y in 0..height {
         let row_off = y * stride;
-        // No [0,1] clamp here either — see the planar sibling.
         let row: &[[f32; 3]] = bytemuck::cast_slice(&rgb[row_off..row_off + 3 * width]);
         let out_off = y * padded_width;
-        linear_to_pu_xyb_planar_into(
+        linear_to_pu_xyb_planar_into_at_revision(
             row,
             &mut o0[out_off..out_off + width],
             &mut o1[out_off..out_off + width],
             &mut o2[out_off..out_off + width],
+            revision,
         );
     }
 }

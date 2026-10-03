@@ -437,28 +437,32 @@ pub enum FormulaRevision {
     /// basic, peak, masked and IW signals. Requires freshly extracted data.
     Rev3,
     /// Revision 3 formulas under **canonical arithmetic** (the `tiercanon`
-    /// era), **for research extraction only**.
+    /// era), served and steered in a Rev4 process (REV4SERVE).
     ///
     /// The canonical leaves — opsin XYB, the fused H/V SSIM blurs and pools,
-    /// the free raw-moment / bounded-error / luma-bin accumulators and the
-    /// CSFW pass — run ONE source-level body with fused `f32::mul_add`, fixed
-    /// 8-virtual-lane pools and a fixed pairwise reduce. Measured, not proven:
-    /// `research::extract`'s full 1825-slot SDR vector is bit-identical across
-    /// x86 v4x/v4/v3/scalar and wasm32 simd128/scalar on the measured pairs
-    /// (wasm32: 6 pairs, 8×8 to 512×384). Leaves outside the era
-    /// still call the platform libm (dvifm's `powf`/`ln`/`exp`), so
-    /// cross-platform identity rests on libm agreement.
+    /// the free raw-moment / bounded-error / luma-bin accumulators, the CSFW
+    /// pass, and the PU front end (`color::pu_xyb_canon` over the
+    /// `_at_revision` transfer decoders) — run ONE source-level body with
+    /// fused `f32::mul_add`, fixed 8-virtual-lane pools and a fixed pairwise
+    /// reduce. Measured, not proven: `research::extract`'s full 1825-slot
+    /// SDR vector is bit-identical across x86 v4x/v4/v3/scalar and wasm32
+    /// simd128/scalar on the measured pairs (wasm32: 6 pairs, 8×8 to
+    /// 512×384). Leaves outside the era still call the platform libm
+    /// (dvifm's `powf`/`ln`/`exp`), so cross-platform identity rests on libm
+    /// agreement.
     ///
-    /// NOT every feature-producing leaf is canonical: the PU front end
-    /// (`color::linear_to_pu_xyb_planar_into`), the edge-only
-    /// `blur::fused_blur_h_mu` route and `attribution::attr_pass_b_*` still
-    /// dispatch per tier. Every served, HDR, diffmap, attribution and
-    /// corruption-head entry therefore refuses Rev4, as does a Rev4 request
-    /// in a non-Rev4 process or any request in a Rev4 process that is not
-    /// Rev4. Requires freshly extracted data: 837 of 1825 slots move vs
-    /// production v3 (union over the lane's 11 audit pairs). Only for the
-    /// fused-V-blur pools was the accumulation order shown not to matter
-    /// against the f64 exact oracle; see `benchmarks/featcanon_WORKLOG.md`.
+    /// A Rev4 computation must run in a Rev4 process (and vice versa):
+    /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix because
+    /// the process-global gates (`compute_mode`, `RootForm`, `PowForm`,
+    /// `HfGainForm`, the luma form) still read `ZENSIM_FORMULA_REV`.
+    /// `streaming::active_channels` routes every active channel through the
+    /// fused SSIM kernels at Rev4, so the tier-dispatched edge-only
+    /// (`blur::fused_blur_h_mu`) and MSE-only (`sq_diff_sum`) routes are
+    /// never reached. Requires freshly extracted data: 837 of 1825 slots
+    /// move vs production v3 (union over the lane's 11 audit pairs). Only
+    /// for the fused-V-blur pools was the accumulation order shown not to
+    /// matter against the f64 exact oracle; see
+    /// `benchmarks/featcanon_WORKLOG.md`.
     Rev4,
 }
 
@@ -1157,11 +1161,13 @@ const REV_TIERCANON: Revision = Revision {
            measurement, not by construction, since leaves outside this era \
            still call the platform libm (e.g. dvifm's powf/ln/exp). Moves \
            837 of 1825 slots vs production v3 on the audit pairs (union), so \
-           it is registered as moving every live slot. STILL PROPOSED and \
-           RESEARCH-EXTRACTION-ONLY: the served, HDR and attribution paths \
-           keep tier-dispatched leaves (`color::linear_to_pu_xyb_planar_into`, \
-           the edge-only `blur::fused_blur_h_mu` route, \
-           `attribution::attr_pass_b_*`) and refuse Rev4.",
+           it is registered as moving every live slot. REV4SERVE made the \
+           served, HDR, diffmap and attribution leaves canonical at Rev4 \
+           (`color::pu_xyb_canon` + `_at_revision` transfer decoders; \
+           `streaming::active_channels` routes every active channel through \
+           the fused SSIM kernels); served paths accept Rev4 in a Rev4 \
+           process and refuse only a cross-boundary mix \
+           (`ssim_form::refuse_rev4_mix`). STILL PROPOSED.",
 };
 
 /// The registered eras that change the ARITHMETIC of every canonical leaf

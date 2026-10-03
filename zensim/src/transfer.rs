@@ -53,6 +53,36 @@ pub(crate) fn pq_eotf(v: f32) -> f32 {
     L_MAX * (num / den).powf(1.0 / M1)
 }
 
+/// Canonical (Rev4) [`pq_eotf`]: identical structure, every transcendental
+/// replaced by [`crate::det_math`]'s midp replication — tier- and
+/// libc-independent bits.
+#[inline]
+fn pq_eotf_canon(v: f32) -> f32 {
+    use crate::det_math::pow_midp_f32;
+    const L_MAX: f32 = 10000.0;
+    const M1: f32 = 0.159_301_75; // 2610 / 16384
+    const M2: f32 = 78.843_75; // 2523 / 4096 * 128
+    const C1: f32 = 0.835_937_5; // 3424 / 4096
+    const C2: f32 = 18.851_562; // 2413 / 4096 * 32
+    const C3: f32 = 18.687_5; // 2392 / 4096 * 32
+
+    let im = pow_midp_f32(v, 1.0 / M2);
+    let num = (im - C1).max(0.0);
+    let den = C2 - C3 * im;
+    L_MAX * pow_midp_f32(num / den, 1.0 / M1)
+}
+
+/// [`pq_eotf`] at an explicit formula revision: the libm body through
+/// Rev3, the canonical midp body at Rev4 (featcanon D1).
+#[inline]
+pub(crate) fn pq_eotf_at_revision(v: f32, revision: crate::feature_defs::FormulaRevision) -> f32 {
+    if crate::featcanon::mode(revision).active() {
+        pq_eotf_canon(v)
+    } else {
+        pq_eotf(v)
+    }
+}
+
 /// ITU-R BT.2100 HLG inverse-OETF: HLG-encoded `v ∈ [0, 1]` → scene-relative
 /// linear `[0, 12]` **per channel**.
 ///
@@ -72,6 +102,26 @@ pub(crate) fn hlg_inverse_oetf(v: f32) -> f32 {
     }
 }
 
+/// [`hlg_inverse_oetf`] at an explicit formula revision: libm `exp` through
+/// Rev3, the canonical midp `exp` at Rev4.
+#[inline]
+pub(crate) fn hlg_inverse_oetf_at_revision(
+    v: f32,
+    revision: crate::feature_defs::FormulaRevision,
+) -> f32 {
+    const A: f32 = 0.178_832_77;
+    const B: f32 = 1.0 - 4.0 * A; // 0.28466892
+    const C: f32 = 0.559_910_7;
+    if !crate::featcanon::mode(revision).active() {
+        return hlg_inverse_oetf(v);
+    }
+    if v <= 0.5 {
+        (v * v) / 3.0
+    } else {
+        (crate::det_math::exp_midp_f32((v - C) / A) + B) / 12.0
+    }
+}
+
 /// HLG system gamma (ITU-R BT.2100 / BBC WHP 369): `1.2` at a 1000 cd/m² peak,
 /// with a luminance term and an ambient-light correction above that.
 #[inline]
@@ -86,6 +136,26 @@ pub(crate) fn hlg_system_gamma(y_peak: f32, e_ambient_lux: f32) -> f32 {
         };
         1.2 + 0.42 * (y_peak / 1000.0).log10() - 0.076_23 * (amb / 5.0).log10()
     }
+}
+
+/// [`hlg_system_gamma`] at an explicit formula revision: libm `log10`
+/// through Rev3, the canonical midp `log10` at Rev4.
+#[inline]
+pub(crate) fn hlg_system_gamma_at_revision(
+    y_peak: f32,
+    e_ambient_lux: f32,
+    revision: crate::feature_defs::FormulaRevision,
+) -> f32 {
+    if !crate::featcanon::mode(revision).active() || y_peak <= 1000.0 {
+        return hlg_system_gamma(y_peak, e_ambient_lux);
+    }
+    let amb = if e_ambient_lux > 0.0 {
+        e_ambient_lux
+    } else {
+        5.0
+    };
+    1.2 + 0.42 * crate::det_math::log10_midp_f32(y_peak / 1000.0)
+        - 0.076_23 * crate::det_math::log10_midp_f32(amb / 5.0)
 }
 
 /// The physical display the metric assumes the image is shown on: peak and
@@ -139,6 +209,17 @@ impl DisplayModel {
         self.pq_nits_to_display(pq_eotf(v))
     }
 
+    /// [`pq_to_luminance`](Self::pq_to_luminance) at an explicit formula
+    /// revision — [`pq_eotf_at_revision`] underneath.
+    #[inline]
+    pub(crate) fn pq_to_luminance_at_revision(
+        &self,
+        v: f32,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> f32 {
+        self.pq_nits_to_display(pq_eotf_at_revision(v, revision))
+    }
+
     #[inline]
     fn pq_nits_to_display(&self, nits: f32) -> f32 {
         nits.min(self.y_peak) + self.y_black + self.y_refl
@@ -170,6 +251,25 @@ pub(crate) fn decode_pq_row(row: &mut [[f32; 3]], peak_nits: f32) {
     }
 }
 
+/// [`decode_pq_row`] at an explicit formula revision — the same display
+/// model over [`pq_eotf_at_revision`].
+pub(crate) fn decode_pq_row_at_revision(
+    row: &mut [[f32; 3]],
+    peak_nits: f32,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let dm = DisplayModel {
+        y_peak: peak_nits,
+        y_black: DisplayModel::STANDARD_HDR_PQ_1000.y_black,
+        y_refl: DisplayModel::STANDARD_HDR_PQ_1000.y_refl,
+    };
+    for px in row.iter_mut() {
+        px[0] = dm.pq_to_luminance_at_revision(px[0], revision);
+        px[1] = dm.pq_to_luminance_at_revision(px[1], revision);
+        px[2] = dm.pq_to_luminance_at_revision(px[2], revision);
+    }
+}
+
 /// Native PQ16 uses the exact same normalized f32 codes/EOTF as the float
 /// route. Cache only the display-independent EOTF, so peak/black/reflection
 /// remain per comparison. The shared table is 256 KiB, initialized once.
@@ -179,6 +279,39 @@ pub(crate) fn decode_pq_u16_rgba_row(row: &[u8], out: &mut [[f32; 3]], peak_nits
     let lut = LUT.get_or_init(|| {
         (0..=u16::MAX)
             .map(|code| pq_eotf(f32::from(code) * (1.0 / 65535.0)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    });
+    let dm = DisplayModel {
+        y_peak: peak_nits,
+        ..DisplayModel::STANDARD_HDR_PQ_1000
+    };
+    for (px, source) in out.iter_mut().zip(row.as_chunks::<8>().0) {
+        for c in 0..3 {
+            let code = u16::from_ne_bytes([source[c * 2], source[c * 2 + 1]]);
+            px[c] = dm.pq_nits_to_display(lut[usize::from(code)]);
+        }
+    }
+}
+
+/// [`decode_pq_u16_rgba_row`] at an explicit formula revision. The Rev4
+/// table is a second cache: the canonical EOTF differs in bits from the
+/// libm one, and a Rev4 consumer must not read production-table values
+/// (nor poison the shared production table).
+pub(crate) fn decode_pq_u16_rgba_row_at_revision(
+    row: &[u8],
+    out: &mut [[f32; 3]],
+    peak_nits: f32,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    if !crate::featcanon::mode(revision).active() {
+        decode_pq_u16_rgba_row(row, out, peak_nits);
+        return;
+    }
+    static LUT_CANON: std::sync::OnceLock<Box<[f32]>> = std::sync::OnceLock::new();
+    let lut = LUT_CANON.get_or_init(|| {
+        (0..=u16::MAX)
+            .map(|code| pq_eotf_canon(f32::from(code) * (1.0 / 65535.0)))
             .collect::<Vec<_>>()
             .into_boxed_slice()
     });
@@ -234,6 +367,42 @@ pub(crate) fn decode_hlg_row_in_primaries(
         let ys = luma[0] * rs + luma[1] * gs + luma[2] * bs;
         // Y_s = 0 ⇒ 0^(γ−1) with γ > 1 is 0; the multiply keeps it 0.
         let scale = peak_nits * ys.max(0.0).powf(gamma - 1.0);
+        px[0] = scale * rs + lift;
+        px[1] = scale * gs + lift;
+        px[2] = scale * bs + lift;
+    }
+}
+
+/// [`decode_hlg_row_in_primaries`] at an explicit formula revision — the
+/// canonical midp transcendentals at Rev4, the libm bodies below it.
+pub(crate) fn decode_hlg_row_in_primaries_at_revision(
+    row: &mut [[f32; 3]],
+    peak_nits: f32,
+    ambient_lux: f32,
+    primaries: crate::source::ColorPrimaries,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    if !crate::featcanon::mode(revision).active() {
+        decode_hlg_row_in_primaries(row, peak_nits, ambient_lux, primaries);
+        return;
+    }
+    use crate::det_math::pow_midp_f32;
+    use crate::source::ColorPrimaries;
+    let luma = match primaries {
+        ColorPrimaries::Srgb => [0.212_639, 0.715_168_7, 0.072_192_32],
+        ColorPrimaries::DisplayP3 => [0.228_974_57, 0.691_738_55, 0.079_286_91],
+        ColorPrimaries::Bt2020 => BT2100_LUMA,
+    };
+    let gamma = hlg_system_gamma_at_revision(peak_nits, ambient_lux, revision);
+    let lift =
+        DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
+    for px in row.iter_mut() {
+        let rs = hlg_inverse_oetf_at_revision(px[0].clamp(0.0, 1.0), revision);
+        let gs = hlg_inverse_oetf_at_revision(px[1].clamp(0.0, 1.0), revision);
+        let bs = hlg_inverse_oetf_at_revision(px[2].clamp(0.0, 1.0), revision);
+        let ys = luma[0] * rs + luma[1] * gs + luma[2] * bs;
+        // Y_s = 0 ⇒ 0^(γ−1) with γ > 1 is 0; the multiply keeps it 0.
+        let scale = peak_nits * pow_midp_f32(ys.max(0.0), gamma - 1.0);
         px[0] = scale * rs + lift;
         px[1] = scale * gs + lift;
         px[2] = scale * bs + lift;

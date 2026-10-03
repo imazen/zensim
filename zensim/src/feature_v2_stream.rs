@@ -787,15 +787,28 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                         let y = hi0 + k;
                         let row_off = k * width;
                         if si == 0 {
-                            hdr_source_row_to_nits(self.source, y, encoding, &mut self.hdr_row);
+                            hdr_source_row_to_nits(
+                                self.source,
+                                y,
+                                encoding,
+                                &mut self.hdr_row,
+                                self.revision,
+                            );
                         } else {
-                            hdr_source_row_to_nits(self.distorted, y, encoding, &mut self.hdr_row);
+                            hdr_source_row_to_nits(
+                                self.distorted,
+                                y,
+                                encoding,
+                                &mut self.hdr_row,
+                                self.revision,
+                            );
                         }
-                        crate::color::linear_to_pu_xyb_planar_into(
+                        crate::color::linear_to_pu_xyb_planar_into_at_revision(
                             &self.hdr_row[..width],
                             &mut p0[row_off..row_off + width],
                             &mut p1[row_off..row_off + width],
                             &mut p2[row_off..row_off + width],
+                            self.revision,
                         );
                     }
                 }
@@ -1010,18 +1023,20 @@ pub(crate) fn hdr_source_to_xyb(
     source: &impl ImageSource,
     encoding: HdrEncoding,
     out: &mut [Vec<f32>; 3],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     let width = source.width();
     let mut row = vec![[0.0; 3]; width];
     let [x, y, b] = out;
     for r in 0..source.height() {
-        hdr_source_row_to_nits(source, r, encoding, &mut row);
+        hdr_source_row_to_nits(source, r, encoding, &mut row, revision);
         let range = r * width..(r + 1) * width;
-        crate::color::linear_to_pu_xyb_planar_into(
+        crate::color::linear_to_pu_xyb_planar_into_at_revision(
             &row,
             &mut x[range.clone()],
             &mut y[range.clone()],
             &mut b[range],
+            revision,
         );
     }
 }
@@ -1031,6 +1046,7 @@ fn hdr_source_row_to_nits(
     y: usize,
     encoding: HdrEncoding,
     out: &mut [[f32; 3]],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     let width = src.width();
     let row_bytes = src.row_bytes(y);
@@ -1044,7 +1060,12 @@ fn hdr_source_row_to_nits(
         }
         PixelFormat::Srgb16Rgba => {
             if let HdrEncoding::Pq { peak_nits } = encoding {
-                crate::transfer::decode_pq_u16_rgba_row(row_bytes, &mut out[..width], peak_nits);
+                crate::transfer::decode_pq_u16_rgba_row_at_revision(
+                    row_bytes,
+                    &mut out[..width],
+                    peak_nits,
+                    revision,
+                );
                 already_nits = true;
             } else {
                 const INV: f32 = 1.0 / 65535.0;
@@ -1065,16 +1086,17 @@ fn hdr_source_row_to_nits(
         match encoding {
             HdrEncoding::Linear => {}
             HdrEncoding::Pq { peak_nits } => {
-                crate::transfer::decode_pq_row(&mut out[..width], peak_nits)
+                crate::transfer::decode_pq_row_at_revision(&mut out[..width], peak_nits, revision)
             }
             HdrEncoding::Hlg {
                 peak_nits,
                 ambient_lux,
-            } => crate::transfer::decode_hlg_row_in_primaries(
+            } => crate::transfer::decode_hlg_row_in_primaries_at_revision(
                 &mut out[..width],
                 peak_nits,
                 ambient_lux,
                 src.color_primaries(),
+                revision,
             ),
         }
     }

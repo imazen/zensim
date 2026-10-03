@@ -22,12 +22,15 @@
 //! [`crate::ssim_form::refuse_rev4_mix`]), because other formula gates still
 //! read the process switch.
 //!
-//! **Rev4 is research-extraction-only.** The served and HDR paths still run
-//! tier-dispatched leaves (`color::linear_to_pu_xyb_planar_into`, the
-//! edge-only `blur::fused_blur_h_mu` route, `attribution::attr_pass_b_*`), so
-//! every `Zensim`, `BakeScorer`, HDR and diffmap entry refuses Rev4
-//! ([`crate::ssim_form::refuse_rev4_served`]). Only `research::extract` (and
-//! the crate-internal walks it drives) computes Rev4.
+//! **Served at Rev4 (REV4SERVE).** The served leaves are canonical too:
+//! the PU front end runs `color::pu_xyb_canon` over the `_at_revision`
+//! transfer decoders, `streaming::active_channels` routes every active
+//! channel through the fused SSIM kernels at Rev4 (the edge-only
+//! `blur::fused_blur_h_mu` chain and the MSE-only `sq_diff_sum` leaf never
+//! run), and the fold walk's block kernels already select their canon arms.
+//! Rev1–Rev3 bytes are unchanged; a Rev4 process serves Rev4 computations
+//! bit-identically across tiers, and [`crate::ssim_form::refuse_rev4_mix`]
+//! keeps every cross-boundary mix refused.
 //!
 //! **Measurement modes are not in a product build.** `ZENSIM_FEATCANON`
 //! (`exact`/`c32`/`c64`/`neum`/`off`) and the f64 exact-oracle bodies exist

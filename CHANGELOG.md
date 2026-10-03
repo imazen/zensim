@@ -11,6 +11,34 @@
 
 ### Added
 
+- **Rev4 is served.** Under `ZENSIM_FORMULA_REV=4` every served entry —
+  `Zensim::compute`/`compute_with_ref`, the folded720 streaming feature
+  entries, `compute_v2_diffmap`, the HDR/`compute_pu_linear*` front ends,
+  `precompute_reference*`, `compute_attribution_*`, `BakeScorer::{compute,
+  compute_hdr,prepare_steering}` and `SteeringSession::compute` — now
+  computes on the canonical Rev4 arithmetic instead of refusing.
+  Scalar canonical mid-precision transcendentals (`det_math` midp
+  replication of the `*_midp_precise` kernels), a canonical PU21/PU-XYB
+  front end, and revision-aware PQ/HLG decode bring the HDR paths onto
+  the same canon; served feature rows, scores, diffmaps and attribution
+  densities are bit-identical to `research::extract` on every SIMD tier
+  (8 geometries × 10 dispatch permutations, `to_bits`-equal).
+  Two engine families whose summation trees cannot reach bit-parity
+  REFUSE at Rev4 with named errors rather than serve divergent bits:
+  the V2Bounded buffered feature walk (`compute_v2_features{,_with_toggles,
+  _with_ref}`) and the 256-row strips walkers (`compute_streaming_strips`,
+  `compute_with_ref_streaming_strips` — epsilon-equivalent below 4 MP by
+  their own contract, measurably reassociative at 2048²). The folded and
+  buffered engines are their canonical equivalents. Below the pyramid
+  threshold the strips entries delegate to `compute` before the walk
+  runs, so small images still serve. Rev1–Rev3 output is byte-identical
+  (120-pair × 5-entry capture per revision, base vs this tree), and
+  `refuse_rev4_mix` still rejects any request that crosses the Rev4
+  process boundary. Wide identity-declared bakes (walk width beyond the
+  fold's emitted regime) now serve: the emit is zero-extended to the
+  declared layout, matching `research::extract`'s unpopulated-slot zeros.
+  `benchmarks/rev4serve_WORKLOG.md`, `REV4SERVE_decisions.md`.
+
 - `BakeScorer::prepare_steering` (SDR) now serves bakes that read v2 features (f372-f719) together with basic/peak (f0-f227): same score, same map
   owner as `compute_with_ref_and_attribution`, including the exact BLOCKINESS terms. Masked/IW (f228-f371), append (f720-f923), append2
   (f924-f943), f944+ and companion reads of those are refused up front, naming the family's ID range; `prepare_steering_hdr` still refuses v2.

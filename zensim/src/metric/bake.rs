@@ -869,13 +869,14 @@ impl<'a> BakeScorer<'a> {
                 reason: "ensemble has no active member",
             })?;
         let revision = crate::feature_layout::formula_revision(model)?;
-        // featcanon D1 + D2, before any exemption: no bake is served in a
-        // Rev4 process (its basic/peak kernels would run the process's
-        // canonical Rev4 arithmetic under the bake's declared revision —
-        // measured: the D bake, declared Rev1, scored 12/12 pairs with Rev4
-        // features), and no Rev4-declared bake is served anywhere (the served
-        // leaves are not canonical yet). No diagnostic bypass.
-        crate::ssim_form::refuse_rev4_served(revision)?;
+        // featcanon D1, before any exemption: no bake crosses the Rev4
+        // boundary (a Rev1–Rev3 bake in a Rev4 process would run the
+        // process's canonical Rev4 arithmetic under the bake's declared
+        // revision — measured: the D bake, declared Rev1, scored 12/12
+        // pairs with Rev4 features; the reverse mix is equally mislabelled).
+        // REV4SERVE: a Rev4 bake IS served in a pure Rev4 process — the
+        // served leaves are canonical there. No diagnostic bypass.
+        crate::ssim_form::refuse_rev4_mix(revision)?;
         // Basic/peak plans carry their arithmetic explicitly through both
         // SIMD passes and the cached spatial owner. Wide-family kernels still
         // use process defaults and must retain the mismatch refusal below.
@@ -899,6 +900,26 @@ impl<'a> BakeScorer<'a> {
                         crate::ssim_form::active_revision(),
                     )
             {
+                return Ok(());
+            }
+            // REV4SERVE: the process is pinned Rev4 (the mix guard above
+            // already refused every cross-boundary case), so every feature
+            // the plan computes runs the fold walk's canonical arithmetic.
+            // Two things remain outside that envelope: the SAMPLING front
+            // end (a different, unproven subset walk — the bake keeps its
+            // refusal) and a CORRUPTION COMPANION, whose reads are not part
+            // of the bake's declared-id plan coverage.
+            if revision >= crate::feature_defs::FormulaRevision::Rev4 {
+                if plan.compute.sampling.is_some() {
+                    return Err(ZensimError::ModelLoadFailed {
+                        reason: "formula revision 4 does not serve sampled bake plans: the subset-extraction front end is not proven tier-canonical",
+                    });
+                }
+                if !no_companion {
+                    return Err(ZensimError::ModelLoadFailed {
+                        reason: "formula revision 4 does not serve bakes with a corruption companion: companion read coverage is not part of the canonical fold plan",
+                    });
+                }
                 return Ok(());
             }
         }
@@ -946,7 +967,7 @@ impl<'a> BakeScorer<'a> {
                 reason: "sampling v1 is SDR only; HDR needs a separately validated PU sampling contract",
             });
         }
-        let features = crate::feature_v2::compute_folded720_hdr_streaming_impl(
+        let mut features = crate::feature_v2::compute_folded720_hdr_streaming_impl(
             source,
             distorted,
             encoding,
@@ -955,9 +976,13 @@ impl<'a> BakeScorer<'a> {
             plan.toggles(),
             &mut self.pixel_scratch,
             Some(plan.compute),
-        )?;
+        )?
+        .into_features();
+        // Same emit-width rule as the SDR arm: an identity-declared bake can
+        // be wider than the emitted regime — the uncomputed tail is zeros.
+        features.resize(plan.walk_width(), 0.0);
         self.score_features_with_identity(
-            features.features(),
+            &features,
             source.width() as u32,
             source.height() as u32,
             codec_hint,
@@ -1017,7 +1042,11 @@ impl<'a> BakeScorer<'a> {
                     #[cfg(feature = "custom-profiles")]
                     None,
                 )?;
-            features.truncate(plan.walk_width());
+            // Wide identity plans declare inputs past the fold's emitted
+            // regime; the bake's live reads stop below it, so extend with
+            // the same structural zeros `research::extract` reports for
+            // unpopulated slots (`truncate` cannot extend).
+            features.resize(plan.walk_width(), 0.0);
             let (_, raw_distance) =
                 score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
             let score = self.score_features(
@@ -1209,9 +1238,13 @@ impl<'a> BakeScorer<'a> {
             self.parallel,
             encoding,
         )?;
-        features.truncate(
+        // REV4SERVE: resize, not truncate — an identity-declared bake can be
+        // wider than the plan's emitted regime (1853-input v2+basic cells),
+        // and the uncomputed tail slots are provably unread zeros.
+        features.resize(
             plan.walk_width()
                 .max(crate::fold_engine::v1_feature_width(&config)),
+            0.0,
         );
         let (_, raw_distance) =
             score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);

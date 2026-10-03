@@ -48,6 +48,27 @@ pub(crate) fn pu21_encode(y: f32) -> f32 {
     (P[6] * (inner.powf(P[4]) - P[5])).max(0.0)
 }
 
+/// Canonical (Rev4) [`pu21_encode`]: the same banding_glare formula with
+/// the same structure as the production SIMD closure in
+/// `color::pu_xyb_rows_inner`, but every transcendental is the canonical
+/// mid-precision replication from [`crate::det_math`] — fused `mul_add`
+/// semantics on every tier — instead of platform `powf` (the scalar tail)
+/// or the per-tier midp vectors (whose `mul_add` fuses on v3+/neon and not
+/// on scalar/wasm128). Bit-identical output for every input on every tier.
+///
+/// `V = max( p7·( ((p1 + p2·Y^p4)/(1 + p3·Y^p4))^p5 − p6 ), 0 )` with
+/// `x^n` evaluated as `exp2_midp(n · log2_midp(x))`, the production
+/// kernel's own formula.
+#[inline]
+#[allow(clippy::manual_clamp)] // NaN semantics must match the SIMD .max().min() lanes
+pub(crate) fn pu21_encode_canon(y: f32) -> f32 {
+    use crate::det_math::{exp2_midp_f32, log2_midp_f32};
+    let y = y.max(PU21_L_MIN).min(PU21_L_MAX);
+    let yp = exp2_midp_f32(P[3] * log2_midp_f32(y));
+    let inner = (P[0] + P[1] * yp) / (1.0 + P[2] * yp);
+    (P[6] * (exp2_midp_f32(P[4] * log2_midp_f32(inner)) - P[5])).max(0.0)
+}
+
 /// Inverse of [`pu21_encode`]: PU21 value `v` → absolute luminance (cd/m²).
 #[inline]
 #[allow(dead_code)] // used by tests; kept for symmetry with the encoder

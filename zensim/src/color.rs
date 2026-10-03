@@ -2176,6 +2176,136 @@ fn pu_xyb_pixel(p: [f32; 3]) -> (f32, f32, f32) {
     (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
 }
 
+/// Canonical per-pixel PU-XYB (REV4SERVE): [`pu_xyb_pixel`]'s structure with
+/// the PU21 encode replaced by [`crate::pu21::pu21_encode_canon`] — the
+/// production SIMD `pu` closure's midp formula chain replicated scalar-side
+/// with always-fused `mul_add`. One body, every pixel, every tier.
+#[inline(always)]
+fn pu_xyb_pixel_canon(p: [f32; 3]) -> (f32, f32, f32) {
+    let mixed0 = K_M00
+        .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
+        .max(0.0);
+    let mixed1 = K_M10
+        .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
+        .max(0.0);
+    let mixed2 = K_M20
+        .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
+        .max(0.0);
+    let c0 = crate::pu21::pu21_encode_canon(mixed0) / PU_WHITE;
+    let c1 = crate::pu21::pu21_encode_canon(mixed1) / PU_WHITE;
+    let c2 = crate::pu21::pu21_encode_canon(mixed2) / PU_WHITE;
+    let x = 0.5 * (c0 - c1);
+    let y = 0.5 * (c0 + c1);
+    (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
+}
+
+/// Exact-mode sibling of [`pu_xyb_pixel_canon`]: the banding_glare formula
+/// in f64 (real `f64::powf`), rounding once at the f32 store — the
+/// featcanon "exact" oracle's convention, as [`opsin_px_exact`].
+#[cfg(feature = "oracle")]
+#[inline(always)]
+#[allow(clippy::manual_clamp)] // NaN semantics must match the SIMD .max().min() lanes
+fn pu_xyb_px_exact(p: [f32; 3]) -> (f64, f64, f64) {
+    let pu = |v: f64| -> f64 {
+        let y = v
+            .max(crate::pu21::PU21_L_MIN as f64)
+            .min(crate::pu21::PU21_L_MAX as f64);
+        let yp = y.powf(crate::pu21::P[3] as f64);
+        let inner = ((crate::pu21::P[0] as f64) + (crate::pu21::P[1] as f64) * yp)
+            / (1.0 + (crate::pu21::P[2] as f64) * yp);
+        ((crate::pu21::P[6] as f64)
+            * (inner.powf(crate::pu21::P[4] as f64) - (crate::pu21::P[5] as f64)))
+            .max(0.0)
+    };
+    let m0 = (K_M00 as f64)
+        .mul_add(
+            p[0] as f64,
+            (K_M01 as f64).mul_add(
+                p[1] as f64,
+                (K_M02 as f64).mul_add(p[2] as f64, K_B0 as f64),
+            ),
+        )
+        .max(0.0);
+    let m1 = (K_M10 as f64)
+        .mul_add(
+            p[0] as f64,
+            (K_M11 as f64).mul_add(
+                p[1] as f64,
+                (K_M12 as f64).mul_add(p[2] as f64, K_B0 as f64),
+            ),
+        )
+        .max(0.0);
+    let m2 = (K_M20 as f64)
+        .mul_add(
+            p[0] as f64,
+            (K_M21 as f64).mul_add(
+                p[1] as f64,
+                (K_M22 as f64).mul_add(p[2] as f64, K_B0 as f64),
+            ),
+        )
+        .max(0.0);
+    let c0 = pu(m0) / (PU_WHITE as f64);
+    let c1 = pu(m1) / (PU_WHITE as f64);
+    let c2 = pu(m2) / (PU_WHITE as f64);
+    let x = 0.5 * (c0 - c1);
+    let y = 0.5 * (c0 + c1);
+    (
+        x.mul_add(PU_X_SCALE as f64, 0.42),
+        y + 0.01,
+        (c2 - y) + 0.55,
+    )
+}
+
+/// Canonical linear-absolute-nits → PU-XYB driver; `mode` as for
+/// [`srgb_xyb_canon`]. One body — every pixel goes through
+/// [`pu_xyb_pixel_canon`], so `n mod 8` and the SIMD tier pick no
+/// different arithmetic.
+pub(crate) fn pu_xyb_canon(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+    mode: crate::featcanon::Mode,
+) {
+    #[cfg(feature = "oracle")]
+    if mode.exact() {
+        for i in 0..pixels.len() {
+            let (x, y, bb) = pu_xyb_px_exact(pixels[i]);
+            x_out[i] = x as f32;
+            y_out[i] = y as f32;
+            b_out[i] = bb as f32;
+        }
+        return;
+    }
+    #[cfg(not(feature = "oracle"))]
+    let _ = mode;
+    for (i, p) in pixels.iter().enumerate() {
+        let (x, y, bb) = pu_xyb_pixel_canon(*p);
+        x_out[i] = x;
+        y_out[i] = y;
+        b_out[i] = bb;
+    }
+}
+
+/// [`linear_to_pu_xyb_planar_into`] at an explicit formula revision:
+/// the tier-dispatched production kernel through Rev3, the canonical body
+/// ([`pu_xyb_canon`]) at Rev4 — the same convention
+/// [`srgb_to_positive_xyb_planar_into_at_revision`] uses.
+pub(crate) fn linear_to_pu_xyb_planar_into_at_revision(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
+        pu_xyb_canon(pixels, x_out, y_out, b_out, mode);
+        return;
+    }
+    linear_to_pu_xyb_planar_into(pixels, x_out, y_out, b_out);
+}
+
 /// Absolute-luminance linear RGB → positive PU-XYB planes, SIMD-dispatched
 /// (8 px/iter via the generic magetypes tiers; `x^p = exp2_midp_precise(p·log2_midp_precise(x))`
 /// — the midp_precise transcendentals hold the scalar↔SIMD divergence to

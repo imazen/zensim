@@ -1,16 +1,22 @@
 //! The Rev4 CONTRACT, as opposed to its arithmetic (`featcanon_tier_parity.rs`
-//! owns the arithmetic): featcanon-fix D1 and D2, 2026-09-26.
+//! owns the arithmetic): featcanon-fix D1 (2026-09-26) and the REV4SERVE
+//! revision of D2 (2026-10-02).
 //!
 //! * **D1 — no silent mixing.** A Rev1 bake served in a `ZENSIM_FORMULA_REV=4`
 //!   process used to be accepted and scored with Rev4 features (measured by
 //!   the featcanon review: the D bake, 12/12 pairs). A Rev4 request in a
 //!   non-Rev4 process used to be accepted and computed as Rev3. Both must now
 //!   be errors.
-//! * **D2 — Rev4 is research-extraction-only.** Every served entry
-//!   (`Zensim::*`, `BakeScorer`, the HDR/PU entries, precompute) refuses at
-//!   Rev4; `research::extract` on an SDR pair is the one route that computes
-//!   it, and on a declared-HDR pair it refuses too (the PU front end is not
-//!   canonical).
+//! * **D2 — Rev4 is served.** REV4SERVE made every leaf a Rev4 served
+//!   computation reaches canonical (`det_math` mid-precision transcendentals,
+//!   `pu21_encode_canon`, `pu_xyb_canon`, revision-aware HDR transfer decode,
+//!   and the all-SSIM admission that keeps Rev4 off the tier-dispatched
+//!   edge-only/MSE-only strips routes). A `ZENSIM_FORMULA_REV=4` process
+//!   therefore serves every entry that resolves to Rev4 — `Zensim::*`,
+//!   the HDR/PU entries, precompute, diffmap, and `research::extract` on
+//!   declared-HDR pairs too — while a bake or request that names another
+//!   revision still refuses at the Rev4 boundary (D1), and a Rev4 bake that
+//!   needs a wide, unproven family refuses by name.
 //!
 //! Each assertion block also runs below Rev4 and must SUCCEED there, so a
 //! refusal can never pass because the fixture itself is broken.
@@ -42,10 +48,10 @@ const BAKES: &[(&str, &[u8])] = &[
     ("BHdr", BHDR_BAKE),
 ];
 
-/// What `ssim_form::refuse_rev4_served` says. (`ssim_form::refuse_rev4_mix`,
-/// the crate-internal walk's own guard, is covered by the lib tests: every
-/// public entry refuses a Rev4 request before reaching it.)
-const SERVED_REASON: &str = "research-extraction-only";
+/// What `ssim_form::refuse_rev4_mix` says — the D1 boundary every public
+/// entry still enforces. (`ssim_form::REV4_MIX` is `pub(crate)`; this is a
+/// substring of it.)
+const MIX_REASON: &str = "cannot be mixed";
 
 /// Run the calling test's body in a process whose `ZENSIM_FORMULA_REV` is
 /// `rev` (`None` = unset). Returns `true` in that process; otherwise
@@ -226,7 +232,7 @@ fn rev1_bake_errors_in_a_rev4_process() {
         assert_refused(
             &format!("bake {name} in a Rev4 process"),
             score_bake(bytes, &s, &d),
-            SERVED_REASON,
+            MIX_REASON,
         );
     }
     println!("{SENTINEL}");
@@ -274,7 +280,7 @@ fn rev4_request_refused_here() {
         z.compute_v2_features_with_toggles(&s, &d, v1_only(FormulaRevision::Rev4))
             .map(|r| r.features().len())
             .map_err(|e| format!("{e:?}")),
-        SERVED_REASON,
+        MIX_REASON,
     );
     let ok = z
         .compute_v2_features_with_toggles(&s, &d, v1_only(FormulaRevision::Rev3))
@@ -343,6 +349,10 @@ fn served_calls(w: usize, h: usize) -> Vec<(String, Result<String, String>)> {
         }
     }
     let z = Zensim::new(ZensimProfile::B);
+    // REV4SERVE: the V2Bounded buffered walk is not the canonical owner —
+    // at Rev4 it refuses by name (the folded entries are the canonical
+    // equivalents). Below Rev4 it serves unchanged, and the caller maps
+    // that difference: this entry is checked against both contracts.
     out.push((
         "compute_v2_features".into(),
         z.compute_v2_features(&s, &d)
@@ -388,12 +398,17 @@ fn served_calls(w: usize, h: usize) -> Vec<(String, Result<String, String>)> {
     out
 }
 
-/// D2 — the served-path test: at Rev4 every served entry refuses, with the
-/// Rev4 reason; `research::extract` serves SDR and refuses a declared-HDR pair.
+/// D2 (REV4SERVE) — the served-path test: in a Rev4 process every served
+/// entry whose request resolves to Rev4 COMPUTES — the profiles, the HDR/PU
+/// entries, precompute, the folded/v2 feature walks including declared-HDR,
+/// the diffmap, and `research::extract` on both SDR and HDR pairs. The one
+/// refusal left is D1's: a bake that declares another revision (all four
+/// shipped bakes declare Rev1) must not score Rev4 features under its own
+/// label.
 #[test]
-fn served_paths_refuse_rev4() {
-    const SENTINEL: &str = "D2_SERVED_REFUSED_OK";
-    if !at_revision(Some("4"), "served_paths_refuse_rev4", SENTINEL) {
+fn served_paths_serve_rev4() {
+    const SENTINEL: &str = "D2_SERVED_COMPUTES_OK";
+    if !at_revision(Some("4"), "served_paths_serve_rev4", SENTINEL) {
         return;
     }
     for &(w, h) in &[(64usize, 64usize), (97, 63)] {
@@ -404,28 +419,43 @@ fn served_paths_refuse_rev4() {
             calls.len()
         );
         for (what, r) in calls {
-            assert_refused(&format!("{w}x{h} {what}"), r, SERVED_REASON);
+            if what.starts_with("BakeScorer(") {
+                // The shipped bakes declare Rev1 — the D1 boundary.
+                assert_refused(&format!("{w}x{h} {what}"), r, MIX_REASON);
+            } else if what == "compute_v2_features" {
+                // The V2Bounded buffered walk is not the canonical Rev4
+                // owner; it refuses by name (the folded entries cover the
+                // same slots canonically).
+                assert_refused(&format!("{w}x{h} {what}"), r, "V2Bounded");
+            } else {
+                r.unwrap_or_else(|e| panic!("{w}x{h} {what} must compute at Rev4: {e}"));
+            }
         }
         let (src, dst) = pair(w, h);
         let (s, d) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
         let x = research::extract(&Request::everything(), &s, &d)
             .unwrap_or_else(|e| panic!("{w}x{h}: research::extract must compute Rev4: {e}"));
         assert_eq!(x.values().len(), 1825);
+        // The canonical PU front end serves declared-HDR extraction at Rev4.
         let (hs, hd) = (HdrLinear::new(&src, w, h), HdrLinear::new(&dst, w, h));
-        assert_refused(
-            &format!("{w}x{h} research::extract on a declared-HDR pair"),
-            research::extract(&hdr_request(), &hs, &hd)
-                .map(|x| x.values().len())
-                .map_err(|e| format!("{e:?}")),
-            SERVED_REASON,
-        );
+        let x = research::extract(&hdr_request(), &hs, &hd)
+            .unwrap_or_else(|e| panic!("{w}x{h}: research HDR must compute at Rev4: {e}"));
+        assert!(!x.values().is_empty());
+        // The diffmap serves at Rev4: `s_v2` is a per-scale/channel/local
+        // weighting (any nonzero weights exercise the walk), sized for more
+        // scales than these small images produce.
+        let z = Zensim::new(ZensimProfile::B);
+        let s_v2 = vec![0.5f64; 8 * 3 * zensim::feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL];
+        z.compute_v2_diffmap(&s, &d, &s_v2)
+            .unwrap_or_else(|e| panic!("{w}x{h}: diffmap must compute at Rev4: {e:?}"));
     }
     println!("{SENTINEL}");
 }
 
-/// Non-vacuity of [`served_paths_refuse_rev4`]: at the shipped revision the
-/// same calls serve. (Shipped rather than Rev3 because the bakes declare
-/// revision 1 and wide bakes rightly refuse a Rev3 process.)
+/// Non-vacuity of [`served_paths_serve_rev4`]: at the shipped revision the
+/// same calls serve — including the bakes, whose Rev1 declaration matches
+/// the unpinned process. (Shipped rather than Rev3 because wide bakes
+/// rightly refuse a Rev3 process.)
 #[test]
 fn served_paths_serve_at_the_shipped_revision() {
     const SENTINEL: &str = "D2_SERVED_SHIPPED_OK";

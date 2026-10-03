@@ -409,6 +409,114 @@ impl DetPow for f64 {
     }
 }
 
+// ============================================================================
+// Canonical f32 mid-precision transcendentals (REV4SERVE)
+// ============================================================================
+//
+// Scalar replications of magetypes' generated `*_midp` formulas
+// (`simd/generic/generated/transcendentals_f32x8.rs`, magetypes 0.9.28) —
+// the SAME polynomials and IEEE bit manipulation the production SIMD path
+// evaluates lane-wise, written in inherent `f32` ops so every tier produces
+// identical bits by construction. This is the Rev4 canonical arithmetic for
+// the PU/HDR front-end (`transfer` decode + `color`'s PU-XYB conversion):
+// the production code reaches these transcendentals through per-tier SIMD
+// vectors whose `mul_add` fuses on v3+/neon but NOT on scalar/wasm128, and
+// through platform libm (`powf`, `exp`, `log10`) which is not even
+// libc-stable — both defects this module exists to remove.
+//
+// Replication discipline, exactly as `color::opsin_px_canon` sets it for the
+// cube-root path: every polynomial step is a fused `f32::mul_add` (the
+// fused-tier semantics is the canonical one), `round()`/`to_i32_round()`
+// are ties-to-even (`f32::round_ties_even`, matching `_mm256_round_ps
+// (NEAREST)` and magetypes' scalar `roundevenf`/`convert_f32_to_i32_round`),
+// and min/max/blend keep the generated code's operand order. Non-finite
+// inputs follow the generated code's blend order so even NaN produces the
+// same deterministic (garbage) bits on every tier.
+
+/// Canonical `log2_midp`: (a−1)/(a+1) transform with odd polynomial,
+/// edge blends in the generated order (0 → −inf, <0 → NaN, +inf → +inf).
+#[inline]
+pub(crate) fn log2_midp_f32(x: f32) -> f32 {
+    const SQRT2_OVER_2: u32 = 0x3f35_04f3;
+    const ONE_BITS: u32 = 0x3f80_0000;
+    const MANTISSA_MASK: i32 = 0x007f_ffff;
+    const C0: f32 = 2.885_39;
+    const C1: f32 = 0.961_800_76;
+    const C2: f32 = 0.576_974_45;
+    const C3: f32 = 0.434_411_97;
+
+    let x_bits = x.to_bits() as i32;
+    let adjusted = x_bits.wrapping_add((ONE_BITS - SQRT2_OVER_2) as i32);
+    let n = ((adjusted >> 23) - 127) as f32;
+    let a = f32::from_bits(((adjusted & MANTISSA_MASK) as u32).wrapping_add(SQRT2_OVER_2));
+    let y = (a - 1.0) / (a + 1.0);
+    let y2 = y * y;
+    let poly = C3.mul_add(y2, C2).mul_add(y2, C1).mul_add(y2, C0);
+    let mut r = poly.mul_add(y, n);
+    if x == 0.0 {
+        r = f32::NEG_INFINITY;
+    }
+    if x < 0.0 {
+        r = f32::NAN;
+    }
+    if x == f32::INFINITY {
+        r = f32::INFINITY;
+    }
+    r
+}
+
+/// Canonical `exp2_midp`: ties-even split (|frac| ≤ 0.5), degree-6
+/// Horner, exponent-bit reconstruction; edge blends in the generated
+/// order (< −126 → 0, ≥ 128 → +inf).
+#[inline]
+#[allow(clippy::manual_clamp)] // NaN semantics must match the SIMD .max().min() lanes
+pub(crate) fn exp2_midp_f32(x: f32) -> f32 {
+    const C1: f32 = core::f32::consts::LN_2;
+    const C2: f32 = 0.240_226_46;
+    const C3: f32 = 0.055_504_545;
+    const C4: f32 = 0.009_618_055;
+    const C5: f32 = 0.001_333_37;
+    const C6: f32 = 0.000_154_47;
+
+    let clamped = x.max(-126.0).min(128.0);
+    let xi = clamped.round_ties_even().min(127.0);
+    let xf = clamped - xi;
+    let poly = C6
+        .mul_add(xf, C5)
+        .mul_add(xf, C4)
+        .mul_add(xf, C3)
+        .mul_add(xf, C2)
+        .mul_add(xf, C1)
+        .mul_add(xf, 1.0);
+    let scale = f32::from_bits(((xi as i32).wrapping_add(127) << 23) as u32);
+    let mut r = poly * scale;
+    if x < -126.0 {
+        r = 0.0;
+    }
+    if x >= 128.0 {
+        r = f32::INFINITY;
+    }
+    r
+}
+
+/// Canonical `exp_midp`: `(x · LOG2_E).exp2_midp`.
+#[inline]
+pub(crate) fn exp_midp_f32(x: f32) -> f32 {
+    exp2_midp_f32(x * core::f32::consts::LOG2_E)
+}
+
+/// Canonical `log10_midp`: `log2_midp · (LN_2 / LN_10)`.
+#[inline]
+pub(crate) fn log10_midp_f32(x: f32) -> f32 {
+    log2_midp_f32(x) * (core::f32::consts::LN_2 / core::f32::consts::LN_10)
+}
+
+/// Canonical `pow_midp`: `(log2_midp(x) · n).exp2_midp`.
+#[inline]
+pub(crate) fn pow_midp_f32(x: f32, n: f32) -> f32 {
+    exp2_midp_f32(log2_midp_f32(x) * n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
