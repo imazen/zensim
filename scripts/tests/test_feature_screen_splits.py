@@ -156,6 +156,14 @@ class SplitBoundaries(unittest.TestCase):
         data["refinement_unsupported_ids"] = [228]
         self.assertEqual(screen.spatial_status(data, .99, .70)[0], "UNSUPPORTED")
 
+    def test_source_diff_uses_the_vcs_present(self):
+        with patch.object(screen.subprocess, "check_output", return_value=b"d") as run:
+            self.assertEqual(screen.source_diff(self.root), b"d")
+            self.assertEqual(run.call_args.args[0][0], "jj")
+            (self.root / ".git").mkdir()
+            screen.source_diff(self.root)
+            self.assertEqual(run.call_args.args[0][:3], ["git", "diff", "HEAD"])
+
 
 if __name__ == "__main__":
     unittest.main()

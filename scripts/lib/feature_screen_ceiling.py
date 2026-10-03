@@ -321,6 +321,13 @@ def spatial_status(data, min_m2, min_m3f):
     return status, bad_blocks
 
 
+def source_diff(repo):
+    """Uncommitted source changes: `git diff HEAD`, or `jj diff --git` in a jj workspace without .git."""
+    if (Path(repo) / ".git").exists():
+        return subprocess.check_output(["git", "diff", "HEAD"], cwd=repo)
+    return subprocess.check_output(["jj", "diff", "--git", "--ignore-working-copy"], cwd=repo)
+
+
 def execute(args, recipe):
     validate_recipe(recipe)
     if args.cache or args.ceiling_stage == "checkpoints":
@@ -358,7 +365,7 @@ def execute(args, recipe):
         out.mkdir(parents=True, exist_ok=False)
         result = {"schema": "zensim-feature-ceiling-result-v2", "status": "PREPARING",
                   "model_qualified": False, "identity": identity, "stages": [], "arms": {},
-                  "source_diff_sha256": hashlib.sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=repo)).hexdigest()}
+                  "source_diff_sha256": hashlib.sha256(source_diff(repo)).hexdigest()}
     else:
         result = json.loads((out / "RESULT.json").read_text())
         if result["identity"] != identity:

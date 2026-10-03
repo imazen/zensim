@@ -1,0 +1,240 @@
+{
+ "basic156": {
+  "features": 156,
+  "mae": [
+   8.641,
+   8.619,
+   8.965
+  ],
+  "mae_med": 8.640907543359999,
+  "srocc_med": 0.9257770615579569,
+  "srocc_min": 0.9249628021512551,
+  "srocc_max": 0.9289247168501825,
+  "owner_spatial": {
+   "PASS": 12
+  },
+  "owner_spatial_worst_m2": 0.9926598963815796,
+  "owner_spatial_worst_m3f": 0.9234038873667363,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ },
+ "basic228": {
+  "features": 228,
+  "mae": [
+   9.585,
+   8.818,
+   8.993
+  ],
+  "mae_med": 8.993156480960018,
+  "srocc_med": 0.9253811572910886,
+  "srocc_min": 0.9165205027722099,
+  "srocc_max": 0.9272856416986,
+  "owner_spatial": {
+   "PASS": 11,
+   "FAIL": 1
+  },
+  "owner_spatial_worst_m2": 0.9656871388655291,
+  "owner_spatial_worst_m3f": 0.8781976507609256,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ },
+ "v2basic": {
+  "features": 504,
+  "mae": [
+   8.201,
+   8.134,
+   8.517
+  ],
+  "mae_med": 8.20123240736,
+  "srocc_med": 0.9314078837943659,
+  "srocc_min": 0.930074830769739,
+  "srocc_max": 0.934000018401276,
+  "owner_spatial": {
+   "FAIL": 10,
+   "PASS": 2
+  },
+  "owner_spatial_worst_m2": 0.9857072131948024,
+  "owner_spatial_worst_m3f": 0.46174009169085534,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ },
+ "v2only": {
+  "features": 348,
+  "mae": [
+   8.262,
+   8.029,
+   8.276
+  ],
+  "mae_med": 8.26200389856,
+  "srocc_med": 0.9324477335380562,
+  "srocc_min": 0.9291820957467471,
+  "srocc_max": 0.9343975227627651,
+  "owner_spatial": {
+   "FAIL": 8,
+   "PASS": 4
+  },
+  "owner_spatial_worst_m2": 0.9598801643924803,
+  "owner_spatial_worst_m3f": 0.5011003580826303,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ },
+ "basic_masked": {
+  "features": 228,
+  "mae": [
+   9.107,
+   8.813,
+   9.397
+  ],
+  "mae_med": 9.10709566815997,
+  "srocc_med": 0.924193148274802,
+  "srocc_min": 0.9228647788474457,
+  "srocc_max": 0.9250200087781837,
+  "owner_spatial": {
+   "UNSUPPORTED": 12
+  },
+  "owner_spatial_worst_m2": 0.9691357187423704,
+  "owner_spatial_worst_m3f": 0.7029965683747932,
+  "owner_unsupported_ids": [
+   228,
+   229,
+   230,
+   231,
+   232
+  ],
+  "owner_n": 12
+ },
+ "full944": {
+  "features": 944,
+  "mae": [
+   8.132,
+   8.272,
+   8.823
+  ],
+  "mae_med": 8.271895628799982,
+  "srocc_med": 0.9265818771031773,
+  "srocc_min": 0.9231681979204953,
+  "srocc_max": 0.9337085060534605,
+  "owner_spatial": {
+   "UNSUPPORTED": 12
+  },
+  "owner_spatial_worst_m2": 0.9717310428695647,
+  "owner_spatial_worst_m3f": 0.4239294821365597,
+  "owner_unsupported_ids": [
+   228,
+   229,
+   230,
+   231,
+   232
+  ],
+  "owner_n": 12
+ },
+ "basic_iw": {
+  "features": 228,
+  "mae": [
+   9.217,
+   8.891,
+   9.21
+  ],
+  "mae_med": 9.210382334080021,
+  "srocc_med": 0.9217787778368965,
+  "srocc_min": 0.9217637098532063,
+  "srocc_max": 0.9219395963908208,
+  "owner_spatial": {
+   "UNSUPPORTED": 12
+  },
+  "owner_spatial_worst_m2": 0.9780254667729473,
+  "owner_spatial_worst_m3f": 0.7449647787775584,
+  "owner_unsupported_ids": [
+   300,
+   301,
+   302,
+   303,
+   304
+  ],
+  "owner_n": 12
+ },
+ "local120": {
+  "features": 120,
+  "mae": [
+   9.037,
+   9.104,
+   9.276
+  ],
+  "mae_med": 9.10396118943999,
+  "srocc_med": 0.9214293511202665,
+  "srocc_min": 0.9181705497203068,
+  "srocc_max": 0.9239124666485299,
+  "owner_spatial": {
+   "PASS": 11,
+   "FAIL": 1
+  },
+  "owner_spatial_worst_m2": 0.9870364593223557,
+  "owner_spatial_worst_m3f": 0.912833885278802,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ },
+ "v2basic_masked": {
+  "features": 576,
+  "mae": [
+   8.07,
+   8.223,
+   8.499
+  ],
+  "mae_med": 8.223045231999984,
+  "srocc_med": 0.9301357079012611,
+  "srocc_min": 0.9301037767852164,
+  "srocc_max": 0.9355542478375849,
+  "owner_spatial": {
+   "UNSUPPORTED": 12
+  },
+  "owner_spatial_worst_m2": 0.9858360686867591,
+  "owner_spatial_worst_m3f": 0.4240973333695033,
+  "owner_unsupported_ids": [
+   228,
+   229,
+   230,
+   231,
+   232
+  ],
+  "owner_n": 12
+ },
+ "v2basic_nobandfrag": {
+  "features": 480,
+  "mae": [
+   8.308,
+   8.591,
+   8.476
+  ],
+  "mae_med": 8.476003201920005,
+  "srocc_med": 0.9290081838651019,
+  "srocc_min": 0.9270057983551026,
+  "srocc_max": 0.9310883880763572,
+  "owner_spatial": {
+   "PASS": 3,
+   "FAIL": 9
+  },
+  "owner_spatial_worst_m2": 0.9597614817025202,
+  "owner_spatial_worst_m3f": 0.37803319046198086,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ },
+ "y60": {
+  "features": 60,
+  "mae": [
+   8.944,
+   9.124,
+   9.135
+  ],
+  "mae_med": 9.12441034752001,
+  "srocc_med": 0.9237469852481979,
+  "srocc_min": 0.9201774718393954,
+  "srocc_max": 0.9257533386437566,
+  "owner_spatial": {
+   "PASS": 12
+  },
+  "owner_spatial_worst_m2": 0.9958817106583837,
+  "owner_spatial_worst_m3f": 0.8831263733282695,
+  "owner_unsupported_ids": [],
+  "owner_n": 12
+ }
+}
