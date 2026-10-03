@@ -74,6 +74,24 @@ def main() -> int:
         e = np.mean(list(ens[n].values()))
         d = np.mean([ens[n][s] - ens["v2+basic"][s] for s in SOURCE_ORDER])
         print(f"  {n:8s} ensemble {e:.4f}  single {single:.4f}  gain {e - single:+.4f}  vs v2+basic ensemble {d:+.4f}")
+    print("== seed consistency: Kendall's W across sets within a fold; per-seed-mean Spearman across folds ==")
+    for s in SOURCE_ORDER:
+        r = np.array([np.argsort(np.argsort([-H[n, s, i] for i in SEEDS])) + 1 for n in names], dtype=float)
+        m, k = r.shape
+        w = 12 * ((r.sum(0) - r.sum(0).mean()) ** 2).sum() / (m ** 2 * (k ** 3 - k))
+        print(f"  {s:10s} W {w:.2f}")
+    means = {s: np.array([np.mean([H[n, s, i] for n in names]) for i in SEEDS]) for s in SOURCE_ORDER}
+    pairs = [(a, b) for j, a in enumerate(SOURCE_ORDER) for b in SOURCE_ORDER[j + 1:]]
+    print(f"  across folds by seed index: mean rho {np.mean([spearmanr(means[a], means[b])[0] for a, b in pairs]):+.2f}")
+    print("== ensembles of the top-k seeds by training-dev (gain over the mean single seed) ==")
+    for k in (1, 2, 3, 5, 10):
+        g = []
+        for n in names:
+            for s in SOURCE_ORDER:
+                order = sorted(SEEDS, key=lambda i: -D[n, s, i])[:k]
+                single = np.mean([H[n, s, i] for i in SEEDS])
+                g.append(float(spearmanr(np.mean([P[n, s, i] for i in order], axis=0), y[s])[0]) - single)
+        print(f"  top-{k:2d} {np.mean(g):+.4f}")
     return 0
 
 
