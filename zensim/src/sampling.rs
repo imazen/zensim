@@ -399,6 +399,9 @@ mod tests {
     #[cfg(feature = "threads")]
     #[test]
     fn parallel_pyramids_match_serial_bits() {
+        // Serial vs parallel is a two-computation comparison: a forced-tier permutation test in this
+        // binary can switch SIMD tokens between the two calls and make them run different tiers.
+        let _tokens = archmage::testing::lock_token_testing();
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(8)
             .build()
