@@ -117,8 +117,8 @@
 //!    steps it cuts by a one-sided amount, not half of the step's excess, so the density gives each step end its own
 //!    one-sided share and the result keeps the per-step pair terms (`LatticeScale`); `query_rect` and
 //!    `block_sums` add the correction for the steps a rectangle edge cuts. Exact when the edges are aligned to
-//!    the pyramid scale's footprint (`2^s` source pixels) and the scale's planes lie inside the image; unaligned
-//!    edges use the bilinear coverage convention of the density's own upsample. With a sampling geometry, or on a
+//!    the pyramid scale's footprint (`2^s` source pixels) and the scale's planes lie inside the image; other
+//!    edges use the convention `-(I/2)|a_p - a_q|` on the covered fractions of the two step ends. With a sampling geometry, or on a
 //!    sink that does not carry the terms, the symmetric 50/50 split remains. `density()` is the pixel-allocated
 //!    view and does not include the edge terms.
 //! 3. **SIMD-padding columns** (padded width − width) carry feature mass that
@@ -436,7 +436,8 @@ impl AttributionResult {
     /// integral of the stored density over `[x0, x1) × [y0, y1)` with the
     /// rectangle edges allowed to cut cells. Each cell's mass counts with
     /// the fraction of its area the rectangle covers (the uniform-within-
-    /// cell reading); integer edges reproduce `query_rect` exactly. This
+    /// cell reading); integer edges reproduce `query_rect` exactly, including the
+    /// lattice-step boundary terms a result may carry. This
     /// is the stated cut-block rule for the DVIFM steering field's
     /// rectangle queries — a rect clipped mid-block receives that block's
     /// `ε_b` weighted by covered area.
@@ -452,6 +453,56 @@ impl AttributionResult {
         any(test, all(feature = "training", feature = "custom-profiles"))
     ))]
     pub(crate) fn query_rect_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+        let cells = self.query_rect_frac_cells(x0, y0, x1, y1);
+        if self.lattice.is_empty() {
+            return cells;
+        }
+        cells + self.lattice_correction_frac(x0, y0, x1, y1)
+    }
+
+    /// Lattice-step boundary terms for a fractional rectangle: exact for integer edges, and for fractional edges
+    /// the multilinear blend of the corrections at the surrounding integer edges (the same uniform-within-cell
+    /// reading the cell integral uses).
+    #[cfg(all(
+        feature = "feature-regime-v2",
+        any(test, all(feature = "training", feature = "custom-profiles"))
+    ))]
+    fn lattice_correction_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+        let (x0, x1) = (
+            x0.clamp(0.0, self.width as f64),
+            x1.clamp(0.0, self.width as f64),
+        );
+        let (y0, y1) = (
+            y0.clamp(0.0, self.height as f64),
+            y1.clamp(0.0, self.height as f64),
+        );
+        if x0 >= x1 || y0 >= y1 {
+            return 0.0;
+        }
+        // (floor, ceil, weight of ceil) per edge.
+        let edge = |v: f64| (v.floor() as usize, v.ceil() as usize, v - v.floor());
+        let edges = [edge(x0), edge(y0), edge(x1), edge(y1)];
+        let mut total = 0.0;
+        for mask in 0..16u32 {
+            let mut weight = 1.0;
+            let mut at = [0usize; 4];
+            for (i, &(lo, hi, frac)) in edges.iter().enumerate() {
+                let up = mask >> i & 1 == 1;
+                weight *= if up { frac } else { 1.0 - frac };
+                at[i] = if up { hi } else { lo };
+            }
+            if weight != 0.0 {
+                total += weight * self.lattice_correction(at[0], at[1], at[2], at[3]);
+            }
+        }
+        total
+    }
+
+    #[cfg(all(
+        feature = "feature-regime-v2",
+        any(test, all(feature = "training", feature = "custom-profiles"))
+    ))]
+    fn query_rect_frac_cells(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
         let (x0, x1) = (
             x0.clamp(0.0, self.width as f64),
             x1.clamp(0.0, self.width as f64),
@@ -773,8 +824,9 @@ fn merge_acc(a: &mut StripChannelAccum, b: &StripChannelAccum) {
 ///
 /// Coverage convention matches the density's own sum-preserving upsample: a plane pixel's mass spreads
 /// uniformly over its `2^s x 2^s` footprint, so a rectangle covers a fraction `a_p`, `a_q` of the two ends and the
-/// correction is `I (a_p a_q - (a_p + a_q)/2)`, which is `-I/2` for a one-sided aligned cut and `0` when
-/// both or neither end is covered.
+/// correction is `-(I/2) |a_p - a_q|`: `-I/2` for a one-sided aligned cut, `0` when both or neither end is covered
+/// (also when both are covered equally but partially, where the density's own area weighting already applies).
+/// For footprint-aligned edges (`a` in {0, 1}) this is exact; for other edges it is the stated convention.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LatticeScale {
     scale: usize,
@@ -867,8 +919,9 @@ impl LatticeScale {
         b.saturating_sub(a) as f64 / f as f64
     }
 
-    /// `sum_r I_r (cp cq c_r^2 - c_r (cp + cq)/2)` over the rows/columns `0..len` of a line whose prefix sums
-    /// are `prefix` and whose cross-axis coverage of the rectangle is `[lo, hi)` at footprint factor `f`.
+    /// `-(|cp - cq| / 2) * sum_r I_r c_r` over the rows/columns `0..len` of one lattice line whose prefix sums
+    /// are `prefix`, where `c_r` is the rectangle's cross-axis coverage of row/column `r` (footprint factor `f`)
+    /// and `cp`, `cq` are the coverages of the line's two sides. Only the (at most two) end rows are partial.
     fn line_sum(
         prefix: &[f64],
         len: usize,
@@ -887,22 +940,18 @@ impl LatticeScale {
             return 0.0;
         }
         let step = |r: usize| prefix[r + 1] - prefix[r];
-        let term = |i_r: f64, c: f64| i_r * (cp * cq * c * c - c * (cp + cq) * 0.5);
-        let mut acc = 0.0;
-        // Rows whose coverage is partial (at most the two end rows) are handled one by one; the rest are 1.0.
-        let mut r = first;
-        while r <= last {
-            let c = Self::coverage(lo, hi, f, r);
-            if c < 1.0 || r == first || r == last {
-                acc += term(step(r), c);
-                r += 1;
-            } else {
-                let run_end = last; // rows r..last are all fully covered here
-                acc += (prefix[run_end] - prefix[r]) * (cp * cq - (cp + cq) * 0.5);
-                r = run_end;
+        let mut covered = 0.0;
+        for r in [first, last] {
+            covered += step(r) * Self::coverage(lo, hi, f, r);
+            if first == last {
+                break;
             }
         }
-        acc
+        // Rows strictly between the end rows are fully covered.
+        if last > first + 1 {
+            covered += prefix[last] - prefix[first + 1];
+        }
+        -0.5 * (cp - cq).abs() * covered
     }
 
     /// The boundary correction for the rectangle `[x0, x1) x [y0, y1)` in source pixels.
@@ -936,7 +985,7 @@ impl LatticeScale {
                 Self::coverage(x0, x1, f, x - 1),
                 Self::coverage(x0, x1, f, x),
             );
-            if (cp == 0.0 && cq == 0.0) || (cp == 1.0 && cq == 1.0) {
+            if cp == cq {
                 continue;
             }
             let line = x / LATTICE_STEP - 1;
@@ -952,7 +1001,7 @@ impl LatticeScale {
                 Self::coverage(y0, y1, f, y - 1),
                 Self::coverage(y0, y1, f, y),
             );
-            if (cp == 0.0 && cq == 0.0) || (cp == 1.0 && cq == 1.0) {
+            if cp == cq {
                 continue;
             }
             let line = y / LATTICE_STEP - 1;
@@ -997,11 +1046,9 @@ impl LatticeSet {
         }
         let f = 1usize << scale;
         let limits = (ws.min(self.logical.0 / f), hs.min(self.logical.1 / f));
-        let buffer = match self.scales.iter().position(|l| l.scale == scale) {
-            Some(i) => self.scales.swap_remove(i),
-            None => LatticeScale::new(scale, ws, hs),
-        };
-        Some((buffer, limits.0, limits.1))
+        // Always a fresh buffer: every `put` buffer already holds recorded steps, and results sum their buffers,
+        // so a second `take` for the same scale would stay additive instead of double counting.
+        Some((LatticeScale::new(scale, ws, hs), limits.0, limits.1))
     }
 
     pub(crate) fn put(&mut self, buffer: LatticeScale) {
@@ -1702,9 +1749,9 @@ impl crate::metric::Zensim {
     /// guard that fails if the covered slot set ever drifts.
     ///
     /// Remaining documented approximations: first-order integrands
-    /// throughout, blur bleed unmodeled, finalize clamps treated as inert,
-    /// blockiness steps split 50/50 across their pixel pair, reference-only
-    /// slots (fragility, grad-src-mean, append2 luma-mean-ref) exactly zero,
+    /// throughout, blur bleed unmodeled, finalize clamps treated as inert
+    /// (BLOCKINESS lattice steps are exact for footprint-aligned rectangle
+    /// repairs, see the module docs, item 2a), reference-only slots (fragility, grad-src-mean, append2 luma-mean-ref) exactly zero,
     /// and the append2 HDR highlight bins structurally zero on this SDR
     /// route. See the module docs here and the `feature_v2` attribution
     /// section.
@@ -3449,6 +3496,70 @@ mod tests {
                 "pixel {i}: full {got} vs basic+v2app {expect}"
             );
         }
+    }
+
+    /// `LatticeSet`: a disabled set (the sampling-geometry path) hands out nothing and finishes empty; a repeated
+    /// `take` for one scale yields independent buffers whose corrections add (no reuse of recorded steps).
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn lattice_set_disabled_and_repeated_take() {
+        let mut set = LatticeSet::default();
+        set.reset(64, 48, false);
+        assert!(set.take(0, 64, 48).is_none());
+        assert!(set.finish().is_empty());
+        set.reset(64, 48, true);
+        let (mut a, lw, lh) = set.take(0, 64, 48).unwrap();
+        assert_eq!((lw, lh), (64, 48));
+        a.add_vertical_step(8, 3, 0.5);
+        set.put(a);
+        let (mut b, _, _) = set.take(0, 64, 48).unwrap();
+        assert!(
+            b.is_empty(),
+            "a second take must start empty, not reuse recorded steps"
+        );
+        b.add_vertical_step(8, 3, 0.25);
+        set.put(b);
+        let terms = set.finish();
+        assert_eq!(terms.len(), 2);
+        let sum: f64 = terms.iter().map(|l| l.correction(8, 0, 16, 8)).sum();
+        // One-sided cut at x = 8 through row 3: -I/2 per buffer.
+        assert!((sum - (-0.5 * (0.5 + 0.25))).abs() < 1e-15, "{sum}");
+        // Scale 1 with a 70-pixel logical image: plane limit is 35 columns.
+        set.reset(70, 50, true);
+        let (_, lw, lh) = set.take(1, 64, 48).unwrap();
+        assert_eq!((lw, lh), (35, 25));
+    }
+
+    /// `query_rect_frac` carries the lattice terms: integer edges reproduce `query_rect` exactly, and a
+    /// fractional edge is the linear blend of the two surrounding integer rectangles.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn query_rect_frac_includes_lattice_terms() {
+        let (w, h) = (64usize, 48usize);
+        let mut buffer = LatticeScale::new(0, w, h);
+        for y in 0..h {
+            buffer.add_vertical_step(16, y, 0.01 * (y as f64 + 1.0));
+        }
+        buffer.finalize();
+        let r =
+            AttributionResult::from_density(vec![0.001f32; w * h], w, h).with_lattice(vec![buffer]);
+        for (x0, y0, x1, y1) in [
+            (16usize, 0usize, 40usize, 20usize),
+            (0, 4, 16, 30),
+            (8, 8, 48, 40),
+        ] {
+            let a = r.query_rect(x0, y0, x1, y1);
+            let b = r.query_rect_frac(x0 as f64, y0 as f64, x1 as f64, y1 as f64);
+            assert!((a - b).abs() < 1e-9, "{a} vs {b}");
+        }
+        assert_ne!(
+            r.query_rect(16, 0, 40, 20),
+            r.query_rect(16, 0, 40, 20) - r.lattice_correction(16, 0, 40, 20)
+        );
+        let lo = r.query_rect_frac(16.0, 0.0, 40.0, 20.0);
+        let hi = r.query_rect_frac(16.0, 0.0, 41.0, 20.0);
+        let mid = r.query_rect_frac(16.0, 0.0, 40.5, 20.0);
+        assert!((mid - 0.5 * (lo + hi)).abs() < 1e-9);
     }
 
     /// BLOCKINESS maps are exact for rectangle repairs through every pipeline (the 2026-10-02 v2spatial fix).

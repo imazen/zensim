@@ -166,6 +166,7 @@
   is replaced by one-sided shares plus per-step pair terms that `query_rect`/`block_sums`/`refinement_gain` apply for the steps a rectangle
   edge cuts (pass B f64 and f32, per-pixel and binned sinks; no public API change, no feature value or served score moves). v2+basic broad
   spatial passes 63 -> 88 of 96, owner 2 -> 10 of 12; basic/peak controls bit-identical. `benchmarks/v2spatial_2026-10-02.md` section 5.
+  `AttributionResult` fractional-rectangle queries (crate-internal) carry the same terms; review fixes in section 6.
 
 - Bakes and corruption heads stamped `zentrain.formula_revision = 4` now parse
   as `FormulaRevision::Rev4` (and are then refused by every served entry, see

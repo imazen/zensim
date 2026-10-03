@@ -14577,7 +14577,9 @@ fn compute_v2_features_with_ref_impl_inner(
 //    the deviation). DEV2: (δf)_i = (2μv−v²)/(2f·N); DEV4 via raw moments.
 //  - global slots (append GLOBAL_DMEAN/CGAIN/CLOSS): exact chain rule on
 //    whole-plane means/variances, SIGNED.
-//  - blockiness: lattice-step terms, split 50/50 across the step pair.
+//  - blockiness: lattice-step terms with one-sided shares per step end plus a per-step pair term
+//    applied by rectangle queries at cut steps (exact for footprint-aligned rectangle repairs; the
+//    sampling-geometry path keeps the symmetric 50/50 split).
 //  - EDGE_WIDTH_CHANGE: exact two-scale chain rule on the adjacent-scale
 //    mean-gradient ratios (incl. the last-scale copy's weight).
 //  - reference-only (PJND_FRAGILITY, GRAD_SRC_MEAN): (δf)_i = 0 exactly.
@@ -15405,10 +15407,12 @@ fn attr_pass_b_rows(
     }
 }
 
-/// Blockiness lattice terms: split 50/50 across the step pair (a step
-/// dies only when BOTH pixels are refined; halving allocates the mass
-/// consistently when a partition boundary splits the pair). Serial — the
-/// horizontal family writes the row above.
+/// Blockiness lattice terms. A step between plane pixels `p` and `q` loses all of its excess `E` when both are
+/// refined, and keeps `E_p = excess(|d_q - s_p|, |s_q - s_p|)` when only `p` is refined (`E_q` likewise for `q`). Each end gets the one-sided share `g + I/2` (`g_p = E - E_p`,
+/// `I = E_p + E_q - E`) and the pair term `I` is recorded in the [`crate::attribution::LatticeScale`] for steps
+/// whose both ends lie inside the logical image, so rectangle queries are exact for footprint-aligned repairs.
+/// Steps outside it (or when no lattice is passed, as on the sampling-geometry path) keep the symmetric 50/50
+/// split. Serial — the horizontal family writes the row above.
 #[cfg(feature = "custom-profiles")]
 fn attr_pass_b_blockiness(
     src: &[f32],
@@ -17353,6 +17357,152 @@ pub(crate) mod tests {
             err > 1e-3,
             "the symmetric split should miss one-sided repairs, worst error {err}"
         );
+    }
+
+    /// Independent per-step pair terms of the fixture (same definitions as the production routine, recomputed here
+    /// from the planes so the tests below do not read production recordings back).
+    #[cfg(feature = "custom-profiles")]
+    fn fixture_pair_terms(c: f64) -> Vec<(bool, usize, usize, f64)> {
+        let (w, h, src, dst) = blockiness_exactness_fixture();
+        let ex = |a: f64, b: f64| bounded_excess(a, b, C_BLOCK);
+        let at = |v: &[f32], i: usize| f64::from(v[i]);
+        let pair = |ip: usize, iq: usize| {
+            let ss = (at(&src, iq) - at(&src, ip)).abs();
+            let e = ex((at(&dst, iq) - at(&dst, ip)).abs(), ss);
+            let e_p = ex((at(&dst, iq) - at(&src, ip)).abs(), ss);
+            let e_q = ex((at(&src, iq) - at(&dst, ip)).abs(), ss);
+            c * (e_p + e_q - e)
+        };
+        let mut out = Vec::new();
+        for y in 0..h {
+            for x in (BLOCK_LATTICE..w).step_by(BLOCK_LATTICE) {
+                out.push((true, x, y, pair(y * w + x - 1, y * w + x)));
+            }
+            if y % BLOCK_LATTICE == 0 && y > 0 {
+                for x in 0..w {
+                    out.push((false, x, y, pair((y - 1) * w + x, y * w + x)));
+                }
+            }
+        }
+        out
+    }
+
+    /// Non-aligned rectangle edges follow the documented coverage convention: each step end covers the fraction
+    /// of its `2^s` footprint the rectangle overlaps per axis and the correction is `-(I/2) |a_p - a_q|`.
+    /// The expectation is summed step by step here, independently of the prefix-sum implementation (this is
+    /// what exercises its partial-coverage branch).
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn blockiness_fractional_edges_follow_the_coverage_convention() {
+        let (w, h, src, dst) = blockiness_exactness_fixture();
+        let c = -0.37f64;
+        let terms = fixture_pair_terms(c);
+        let co = V2AppCoeffs {
+            c_blockiness: c,
+            ..Default::default()
+        };
+        for scale in 0..3usize {
+            let f = 1usize << scale;
+            let mut id = vec![0.0f64; w * h];
+            let mut lat = crate::attribution::LatticeScale::new(scale, w, h);
+            attr_pass_b_blockiness(&src, &dst, w, h, &co, &mut id, Some((&mut lat, w, h)));
+            lat.finalize();
+            let cover = |lo: usize, hi: usize, i: usize| {
+                let a = lo.max(i * f);
+                let b = hi.min((i + 1) * f);
+                b.saturating_sub(a) as f64 / f as f64
+            };
+            let mut state = 0xface_feedu64 + scale as u64;
+            let mut pick = move |n: usize| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 33) as usize % n
+            };
+            let (full_w, full_h) = (w * f, h * f);
+            let mut partial_cases = 0;
+            for _ in 0..300 {
+                let (x0, y0) = (pick(full_w), pick(full_h));
+                let (x1, y1) = (x0 + 1 + pick(full_w - x0), y0 + 1 + pick(full_h - y0));
+                let mut want = 0.0;
+                for &(vertical, x, y, i) in &terms {
+                    let (ap, aq) = if vertical {
+                        let cy = cover(y0, y1, y);
+                        (cover(x0, x1, x - 1) * cy, cover(x0, x1, x) * cy)
+                    } else {
+                        let cx = cover(x0, x1, x);
+                        (cover(y0, y1, y - 1) * cx, cover(y0, y1, y) * cx)
+                    };
+                    want += -0.5 * i * (ap - aq).abs();
+                }
+                let got = lat.correction(x0, y0, x1, y1);
+                assert!(
+                    (got - want).abs() < 1e-9,
+                    "scale {scale} rect {:?}: correction {got} vs step-by-step {want}",
+                    (x0, y0, x1, y1)
+                );
+                partial_cases +=
+                    usize::from(x0 % f != 0 || y0 % f != 0 || x1 % f != 0 || y1 % f != 0);
+            }
+            if f > 1 {
+                assert!(
+                    partial_cases > 100,
+                    "scale {scale}: only {partial_cases} partial-coverage rectangles"
+                );
+            }
+        }
+    }
+
+    /// Steps whose plane pixels are not both inside the logical image (limits below the plane size) record no
+    /// terms and keep the symmetric split: columns at or beyond the limit are bit-identical to the legacy
+    /// routine, and a rectangle cutting a line beyond the limit gets no correction.
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn blockiness_steps_outside_the_logical_image_keep_the_legacy_split() {
+        let (w, h, src, dst) = blockiness_exactness_fixture();
+        let co = V2AppCoeffs {
+            c_blockiness: -0.37,
+            ..Default::default()
+        };
+        let (lw, lh) = (40usize, 32usize);
+        let mut limited = vec![0.0f64; w * h];
+        let mut lat = crate::attribution::LatticeScale::new(0, w, h);
+        attr_pass_b_blockiness(
+            &src,
+            &dst,
+            w,
+            h,
+            &co,
+            &mut limited,
+            Some((&mut lat, lw, lh)),
+        );
+        lat.finalize();
+        let mut legacy = vec![0.0f64; w * h];
+        attr_pass_b_blockiness(&src, &dst, w, h, &co, &mut legacy, None);
+        for y in 0..h {
+            for x in lw..w {
+                assert_eq!(
+                    limited[y * w + x].to_bits(),
+                    legacy[y * w + x].to_bits(),
+                    "pixel ({x},{y})"
+                );
+            }
+        }
+        // Rows at or beyond the limit: horizontal steps in rows >= lh are legacy at every column.
+        for y in lh..h {
+            for x in 0..w {
+                assert_eq!(
+                    limited[y * w + x].to_bits(),
+                    legacy[y * w + x].to_bits(),
+                    "pixel ({x},{y})"
+                );
+            }
+        }
+        // Lines beyond the limits cut by a rectangle edge: no correction. (x = 48 and y = 40 are lattice lines.)
+        assert_eq!(lat.correction(48, 0, 64, 32), 0.0);
+        assert_eq!(lat.correction(0, 40, 40, 48), 0.0);
+        // A line inside the limits is cut and does correct.
+        assert_ne!(lat.correction(16, 0, 40, 32), 0.0);
     }
 
     /// The pass-B scalar-tail SSIM dissimilarity must follow the vector kernel's two forms. At revision 3 the
