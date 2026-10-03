@@ -5524,6 +5524,9 @@ mod tests {
     /// length-invariant since 2026-09-25, and there no height may move a byte.
     #[test]
     fn convert_chunk_rows_is_semantics_not_a_knob() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         // This gate is about PRODUCTION arithmetic (Rev1–3; the converter is
         // identical across them): the process revision, capped at Rev3, so a
         // Rev4 process still tests production. The canonical (Rev4) converter
@@ -5618,6 +5621,9 @@ mod tests {
     /// produces a score within 1% of `compute` on a 256×256 image.
     #[test]
     fn compute_streaming_strips_score_matches_full() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         use crate::{Zensim, ZensimProfile};
         let w = 256;
         let h = 256;
@@ -5677,6 +5683,9 @@ mod tests {
     /// across strips).
     #[test]
     fn strip_aggregator_matches_full_image() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 256;
         let h = 256;
         let n = w * h;
@@ -5783,6 +5792,9 @@ mod tests {
     /// strip path and the full-image path.
     #[test]
     fn strip_aggregator_byte_exact_single_pair() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 256;
         let h = 1024; // 4 strips at strip_inner=256.
         let n = w * h;
@@ -6053,6 +6065,9 @@ mod tests {
     /// (`compute_multiscale_stats_streaming_strips`).
     #[test]
     fn buffered_ref_strip_matches_strip_per_strip() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 256;
         let h = 1024;
         let n = w * h;
@@ -6151,6 +6166,9 @@ mod tests {
     /// branch keeps the f32 accumulator history matched.
     #[test]
     fn strip_aggregator_byte_exact_safesyn_99() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         // Image geometry: 256×1024 at all 99 pairs.
         // strip_inner=256, strip_margin=128 → 4 strips per image.
         let w = 256;
@@ -6562,6 +6580,9 @@ mod tests {
     /// match within 5%, (3) all features match within absolute tolerance 1e-3.
     #[test]
     fn streaming_matches_full_image() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 256;
         let h = 256;
         let n = w * h;
@@ -6706,6 +6727,9 @@ mod tests {
     /// in the sRGB u8 path vs direct float values in the linear path).
     #[test]
     fn linear_f32_matches_srgb_u8() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 256;
         let h = 256;
         let n = w * h;
@@ -6819,6 +6843,9 @@ mod tests {
     /// Verify that BGRA u8 input produces equivalent results to RGB u8 (opaque).
     #[test]
     fn bgra_u8_matches_rgb_u8_opaque() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 128;
         let h = 128;
         let n = w * h;
@@ -6894,6 +6921,9 @@ mod tests {
     /// Verify precomputed reference produces bit-identical results to the streaming path.
     #[test]
     fn precomputed_ref_matches_streaming() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 256;
         let h = 256;
         let n = w * h;
@@ -6954,6 +6984,9 @@ mod tests {
     /// numerical noise. We verify the score is ≥ 99.5.
     #[test]
     fn identical_p3_images_high_score() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 64;
         let h = 64;
         let n = w * h;
@@ -7018,6 +7051,9 @@ mod tests {
     /// because gamut conversion changes the XYB values.
     #[test]
     fn p3_vs_srgb_same_pixels_differ() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let w = 64;
         let h = 64;
         let n = w * h;
@@ -7259,6 +7295,9 @@ mod tests {
     #[test]
     #[ignore = "needs a dir of reference images; set ZENSIM_IW_REF_DIR and run with --ignored"]
     fn shipped_iw_mean_w_spread_across_references() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let dir = std::env::var("ZENSIM_IW_REF_DIR")
             .expect("set ZENSIM_IW_REF_DIR to a directory of reference images");
         let mut paths: Vec<_> = std::fs::read_dir(&dir)
@@ -7374,6 +7413,9 @@ mod tests {
     #[test]
     #[ignore = "needs specific images; set ZENSIM_DUMP_IMG (comma-separated) and run --ignored"]
     fn dump_ssim_moment_explosion() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         if let Ok(path) = std::env::var("ZENSIM_SSIM_KERNEL_PERF") {
             dump_stable_ssim_kernel_perf(&path);
             return;
@@ -7775,6 +7817,9 @@ mod tests {
     #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn locality_fixture_reproduces_out_of_support_movement_on_the_shipped_revision() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         if crate::ssim_form::active_revision() != crate::feature_defs::FormulaRevision::Rev1 {
             // Deliberately not an assertion about the environment: this test
             // states a property OF Rev1 and only Rev1 can state it.
@@ -7798,6 +7843,9 @@ mod tests {
     #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn rev3_retained_signal_is_local_under_a_reference_replacement() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_retained_signal_is_local_under_a_reference_replacement",
@@ -7839,6 +7887,9 @@ mod tests {
     /// a revision-3 process instead of copying it.
     #[test]
     fn cached_and_uncached_agree_at_revision_three() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         crate::ssim_form::rerun_tests_at_revision(
             "3",
             "streaming::tests::precomputed_ref_matches_streaming",
@@ -7875,6 +7926,9 @@ mod tests {
     /// away. So the bound is asserted, and the residue is reported.
     #[test]
     fn rev3_identity_windows_are_exactly_zero() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_identity_windows_are_exactly_zero",
@@ -7957,6 +8011,9 @@ mod tests {
     /// bit-for-bit, and that the shipped configuration is local.
     #[test]
     fn precision_ablation_separates_f64_from_the_direct_error_form() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let (w, h) = LOCALITY_DIMS;
         let (src, dst) = locality_fixture(w, h);
         let (x0, y0, x1, y1) = LOCALITY_RECT;
@@ -8143,6 +8200,9 @@ mod tests {
     /// missing from the measured set.
     #[test]
     fn rev3_moves_exactly_the_registered_slots() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         const SENTINEL: &str = "REV3-VECTOR ";
         let path = "streaming::tests::rev3_moves_exactly_the_registered_slots";
         let (w, h) = (192usize, 160usize);
@@ -8276,6 +8336,9 @@ mod tests {
     #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn rev3_moves_exactly_the_registered_slots_on_the_944_layout() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         const SENTINEL: &str = "REV3-VECTOR944 ";
         let path = "streaming::tests::rev3_moves_exactly_the_registered_slots_on_the_944_layout";
         let (w, h) = (192usize, 160usize);
@@ -8388,6 +8451,9 @@ mod tests {
     #[test]
     #[cfg(feature = "custom-profiles")]
     fn rev3_refuses_multi_pass_blur_profiles_through_the_public_entry() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_refuses_multi_pass_blur_profiles_through_the_public_entry",
@@ -8446,6 +8512,9 @@ mod tests {
     #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn rev3_retained_planes_are_the_canonical_stable_signal() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_retained_planes_are_the_canonical_stable_signal",
@@ -8951,6 +9020,9 @@ mod tests {
     #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn ycbcr_converter_srgb8_is_exact_gamma_domain() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let (w, h) = (9usize, 5usize);
         let px: Vec<[u8; 3]> = (0..w * h)
             .map(|i| {
@@ -9032,6 +9104,9 @@ mod tests {
     #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn ycbcr_converter_mirror_pads_columns() {
+        // Compares results across code paths: hold the token lock so a forced-tier permutation test in this binary
+        // cannot switch the SIMD tier between the two sides.
+        let _tokens = archmage::testing::lock_token_testing();
         let (w, h, padded_w) = (5usize, 3usize, 9usize);
         let px: Vec<[u8; 3]> = (0..w * h)
             .map(|i| {
