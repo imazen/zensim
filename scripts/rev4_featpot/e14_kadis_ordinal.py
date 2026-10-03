@@ -1,4 +1,4 @@
-"""Design log E14 (registered 2026-10-03 04:55 MT, before any E14 data or cell): a teacher-free ordinal coverage leg built from
+"""Design log E14 (registered 2026-10-03 04:03 MT, before any E14 data or cell): a teacher-free ordinal coverage leg built from
 KADIS-700k distortion ladders.
 
   python3 e14_kadis_ordinal.py select  --root ROOT        # subset + fetch persisted distortions (R2) -> <root>/e14/
