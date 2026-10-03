@@ -556,8 +556,8 @@ For rectangle steering, `prepare_steering(&source, bin)` binds SDR input;
 `prepare_steering_hdr(&source, encoding, bin)` binds native PQ, HLG or absolute
 linear HDR input. Both reuse the reference and retain basic/peak signals from
 the scoring extraction for subsequent map assembly. The SDR session also serves
-bakes that read v2 features (f372-f719) with the same score and the same map owner
-as the cached-reference attribution path; masked/IW, append, append2 and f944+
+bakes that read v2 (f372-f719) and append/append2 (f720-f943) features with the same score and the same map owner
+as the cached-reference attribution path; masked/IW (f228-f371) and f944+
 reads are refused up front. The HDR route preserves
 declared primaries and native precision; it currently refuses fractional
 sampling and unsupported feature families. These are input/implementation

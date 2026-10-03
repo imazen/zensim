@@ -77,10 +77,10 @@ impl<'a> BakeScorer<'a> {
 
     /// Bind a source, its cache and reusable scratch for repeated SDR steering.
     ///
-    /// Accepts bakes that read basic and peak features (f0-f227) and v2 features (f372-f719), SDR only for v2;
-    /// the v2 maps (including exact BLOCKINESS terms for aligned rectangle repairs) come from the same owner
-    /// as [`Self::compute_with_ref_and_attribution`]. Masked/IW (f228-f371), append and append2 (f720-f943),
-    /// f944 and above, and any read without a complete integrand are refused up front, as is a bake whose
+    /// Accepts bakes that read basic and peak features (f0-f227), v2 features (f372-f719) and append/append2
+    /// features (f720-f943), SDR only beyond f227; the maps (including exact BLOCKINESS terms for aligned
+    /// rectangle repairs) come from the same owner as [`Self::compute_with_ref_and_attribution`]. Masked/IW
+    /// (f228-f371), f944 and above, and any read without a complete integrand are refused up front, as is a bake whose
     /// corruption companion reads such an ID; the error names the family's ID range. No scored term is
     /// dropped to make a partial map. Coverage is not a quality certification: models still need finite-edit
     /// and codec-level validation.
@@ -1335,59 +1335,41 @@ impl<'a> BakeScorer<'a> {
     }
 }
 
-/// Feature IDs a steering session serves with a complete score and map: basic and peaks (f0-227) and v2
-/// (f372-719; its reference-only PJND_FRAGILITY slots have an exactly-zero integrand). SDR only for v2.
-/// Everything else is refused up front, naming the family's ID range (the error type carries a static string).
+/// Feature IDs a steering session serves with a complete score and map: basic and peaks (f0-227), v2
+/// (f372-719; its reference-only PJND_FRAGILITY slots have an exactly-zero integrand), and append/append2
+/// (f720-943; reference-only and SDR-structural-zero slots are exact zeros). v2 and later families are SDR
+/// only. Everything else is refused up front, naming the family's ID range (the error type carries a static
+/// string): masked/IW (f228-371) and f944 and above have no session integrand yet.
 #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
 fn steering_support(reads: &[u16], hdr: bool) -> Result<(), ZensimError> {
     let mut masked_iw = false;
-    let mut append = false;
-    let mut append2 = false;
     let mut beyond = false;
-    let mut v2 = false;
+    let mut wide = false;
     for &id in reads {
         match id {
             0..=227 => {}
             228..=371 => masked_iw = true,
-            372..=719 => v2 = true,
-            720..=923 => append = true,
-            924..=943 => append2 = true,
+            372..=943 => wide = true,
             _ => beyond = true,
         }
     }
-    if hdr && v2 {
+    if hdr && wide {
         return Err(ZensimError::ModelLoadFailed {
-            reason: "HDR steering session supports basic/peak feature IDs f0-f227 only; the bake reads v2 IDs f372-f719",
+            reason: "HDR steering session supports basic/peak feature IDs f0-f227 only; the bake reads v2/append IDs f372-f943",
         });
     }
-    const MESSAGES: [&str; 16] = [
-        "",
-        "steering session refuses masked/IW feature IDs f228-f371 (no spatial refinement)",
-        "steering session refuses append feature IDs f720-f923 (not served by the session)",
-        "steering session refuses masked/IW feature IDs f228-f371 and append feature IDs f720-f923",
-        "steering session refuses append2 feature IDs f924-f943 (not served by the session)",
-        "steering session refuses masked/IW feature IDs f228-f371 and append2 feature IDs f924-f943",
-        "steering session refuses append feature IDs f720-f923 and append2 feature IDs f924-f943",
-        "steering session refuses masked/IW f228-f371, append f720-f923 and append2 f924-f943 feature IDs",
-        "steering session refuses feature IDs f944 and above (no integrand)",
-        "steering session refuses masked/IW feature IDs f228-f371 and f944 and above",
-        "steering session refuses append feature IDs f720-f923 and f944 and above",
-        "steering session refuses masked/IW f228-f371, append f720-f923 and f944 and above feature IDs",
-        "steering session refuses append2 feature IDs f924-f943 and f944 and above",
-        "steering session refuses masked/IW f228-f371, append2 f924-f943 and f944 and above feature IDs",
-        "steering session refuses append f720-f923, append2 f924-f943 and f944 and above feature IDs",
-        "steering session refuses masked/IW f228-f371, append f720-f923, append2 f924-f943 and f944 and above feature IDs",
-    ];
-    let mask = usize::from(masked_iw)
-        | usize::from(append) << 1
-        | usize::from(append2) << 2
-        | usize::from(beyond) << 3;
-    if mask != 0 {
-        return Err(ZensimError::ModelLoadFailed {
-            reason: MESSAGES[mask],
-        });
+    match (masked_iw, beyond) {
+        (false, false) => Ok(()),
+        (true, false) => Err(ZensimError::ModelLoadFailed {
+            reason: "steering session refuses masked/IW feature IDs f228-f371 (no spatial refinement)",
+        }),
+        (false, true) => Err(ZensimError::ModelLoadFailed {
+            reason: "steering session refuses feature IDs f944 and above (no integrand)",
+        }),
+        (true, true) => Err(ZensimError::ModelLoadFailed {
+            reason: "steering session refuses masked/IW feature IDs f228-f371 and feature IDs f944 and above",
+        }),
     }
-    Ok(())
 }
 
 /// A source-bound worker created by [`BakeScorer::prepare_steering`].
@@ -1530,9 +1512,13 @@ mod revision_contract_tests {
         let (w, h) = (128usize, 96usize);
         let (src, dst) = pair(w, h);
         let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
-        let ids: Vec<usize> = (0..156).chain(372..720).collect();
-        let model = bake_over(&ids);
-        for bin in [1usize, 8] {
+        let sets: [Vec<usize>; 2] = [
+            (0..156).chain(372..720).collect(),
+            (0..156).chain(372..944).collect(),
+        ];
+        let model = bake_over(&sets[0]);
+        for (ids, bin) in sets.iter().flat_map(|s| [(s, 1usize), (s, 8)]) {
+            let model = bake_over(ids);
             let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
             let scalar = scorer.compute(&rs, &ds, None).unwrap();
             let pre = scorer.precompute_reference(&rs).unwrap();
@@ -1607,12 +1593,8 @@ mod revision_contract_tests {
             refuse(&[13, 300]).contains("masked/IW") && refuse(&[13, 300]).contains("f228-f371")
         );
         assert!(refuse(&[13, 330, 372]).contains("masked/IW"));
-        assert!(refuse(&[13, 372, 800]).contains("append feature IDs f720-f923"));
-        assert!(refuse(&[13, 930]).contains("append2"));
-        assert!(
-            refuse(&[13, 300, 800, 930])
-                .contains("masked/IW f228-f371, append f720-f923 and append2 f924-f943")
-        );
+        // Mixed with supported append/append2 reads, the masked/IW refusal still names its family.
+        assert!(refuse(&[13, 300, 800, 930]).contains("masked/IW feature IDs f228-f371"));
         // f944 and above: refused whether the plan or the session notices first.
         let model = bake_over(&[13, 950]);
         assert!(
@@ -1641,7 +1623,7 @@ mod revision_contract_tests {
             .expect("HDR + v2 refused")
             .to_string();
         assert!(
-            err.contains("HDR steering") && err.contains("f372-f719"),
+            err.contains("HDR steering") && err.contains("f372-f943"),
             "{err}"
         );
     }
@@ -2596,15 +2578,16 @@ mod revision_contract_tests {
     fn prepared_worker_refuses_incomplete_contracts_before_use() {
         let (src, _) = pair(96, 96);
         let rs = RgbSlice::new(&src, 96, 96);
-        // Masked/IW (f228-371), append (f720-923) and append2 (f924-943) have no complete session integrand.
-        for id in [228, 300, 371, 720, 800, 923, 930] {
+        // Masked/IW (f228-371) have no complete session integrand.
+        for id in [228, 300, 371] {
             let bytes = bake_declaring(None, id);
             let model = zenpredict::Model::from_bytes(&bytes).unwrap();
             let mut scorer = crate::BakeScorer::new(&model).unwrap();
             assert!(scorer.prepare_steering(&rs, 8).is_err(), "f{id}");
         }
-        // v2 (f372-719) is served since STEERAPI (this test used to refuse f400 with the old 228 limit).
-        for id in [372, 400, 719] {
+        // v2 (f372-719) and append/append2 (f720-943) are served since STEERAPI (this test used to refuse f400
+        // with the old 228 limit).
+        for id in [372, 400, 719, 720, 800, 923, 930, 943] {
             let bytes = bake_declaring(None, id);
             let model = zenpredict::Model::from_bytes(&bytes).unwrap();
             let mut scorer = crate::BakeScorer::new(&model).unwrap();
