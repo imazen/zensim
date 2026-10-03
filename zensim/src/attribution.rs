@@ -418,6 +418,7 @@ impl AttributionResult {
     }
 
     /// Internal: attach finalized lattice-step boundary terms.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
     pub(crate) fn with_lattice(mut self, lattice: Vec<LatticeScale>) -> Self {
         self.lattice = lattice;
         self
@@ -840,6 +841,7 @@ pub(crate) struct LatticeScale {
     finalized: bool,
 }
 
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
 impl LatticeScale {
     pub(crate) fn new(scale: usize, ws: usize, hs: usize) -> Self {
         Self {
@@ -1020,12 +1022,14 @@ impl LatticeScale {
 /// `logical` is the image the result will be queried against: only steps whose two plane pixels have their whole
 /// source footprint inside it are recorded (the others keep the legacy symmetric split).
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
 pub(crate) struct LatticeSet {
     logical: (usize, usize),
     enabled: bool,
     scales: Vec<LatticeScale>,
 }
 
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
 impl LatticeSet {
     pub(crate) fn reset(&mut self, logical_w: usize, logical_h: usize, enabled: bool) {
         self.logical = (logical_w, logical_h);
@@ -1106,11 +1110,13 @@ impl BinAccum {
     }
 
     /// The logical image size queries are made against.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
     pub(crate) fn logical_dimensions(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
     /// Attach the lattice-step boundary terms pass B collected for this accumulation.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // BLOCKINESS lattice terms are produced by the v2 walk
     pub(crate) fn set_lattice(&mut self, lattice: Vec<LatticeScale>) {
         self.lattice = lattice;
     }
