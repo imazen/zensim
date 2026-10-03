@@ -29,6 +29,19 @@
 mod common;
 
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
+
+/// Fewest dispatch permutations a host must run for the tier-parity checks to mean anything: x86_64 has at least
+/// scalar plus two SIMD tiers, aarch64 scalar plus NEON, every other target (i686, wasm32, …) only its single tier.
+/// Every permutation that runs is still checked bit for bit; this only guards against a vacuous pass.
+fn min_tier_permutations() -> usize {
+    if cfg!(target_arch = "x86_64") {
+        3
+    } else if cfg!(target_arch = "aarch64") {
+        2
+    } else {
+        1
+    }
+}
 use zensim::feature_v2::{V2NewFeatureToggles, V2Scratch};
 use zensim::fold_engine::ScoringEngine;
 use zensim::research::{self, Request};
@@ -401,7 +414,11 @@ fn rev4_served_vectors_bitmatch_research_extract_on_every_tier() {
             "{w}x{h}: {} permutations served==research bit-for-bit",
             report.permutations_run
         );
-        assert!(report.permutations_run >= 3, "tier coverage too thin");
+        assert!(
+            report.permutations_run >= min_tier_permutations(),
+            "tier coverage too thin: {} permutations",
+            report.permutations_run
+        );
     }
     println!("{SENTINEL}");
 }
@@ -468,7 +485,11 @@ fn rev4_maps_are_tier_identical() {
         "{} permutations, maps tier-identical",
         report.permutations_run
     );
-    assert!(report.permutations_run >= 3, "tier coverage too thin");
+    assert!(
+        report.permutations_run >= min_tier_permutations(),
+        "tier coverage too thin: {} permutations",
+        report.permutations_run
+    );
     println!("{SENTINEL}");
 }
 
