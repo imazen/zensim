@@ -264,15 +264,19 @@ E16_ARMS = [("fd_w1_confirm", 1.0, 0xfd, range(3, 10)),
             *[(f"98_w{w:g}", w, 0x98, range(5)) for w in (4.0, 16.0)]]
 
 
-def cmd_grid16(args) -> int:
+def _grid_arms(arm_list, args) -> int:
     cells = [{"name": f"{spec(w, m)}__{HEAD}/without_{s}_s{i}",
               "argv": ["v2_lodo_mlp.py", "--spec", spec(w, m), "--head", HEAD, "--heldout", s, "--seed-index", str(i),
                        "--root", str(V2)]}
-             for _, w, m, seeds in E16_ARMS for s in SOURCE_ORDER for i in seeds]
+             for _, w, m, seeds in arm_list for s in SOURCE_ORDER for i in seeds]
     todo = [c for c in cells if not (V2 / "cells" / c["name"] / "result.json").is_file()]
     Path(args.out).write_text(json.dumps({"program_sha": args.program_sha, "data_sha": args.data_sha, "cells": todo}, indent=1))
-    print(json.dumps({"cells": len(cells), "to_run": len(todo), "arms": len(E16_ARMS)}))
+    print(json.dumps({"cells": len(cells), "to_run": len(todo), "arms": len(arm_list)}))
     return 0
+
+
+def cmd_grid16(args) -> int:
+    return _grid_arms(E16_ARMS, args)
 
 
 def cmd_score16(args) -> int:
@@ -284,9 +288,45 @@ def cmd_score16(args) -> int:
     return rc
 
 
+# Design log E18 (registered 2026-10-03 14:01 MT): does the noise family belong in spatial + light + new? cf9c = cf98 + noise.
+E18_ARMS = [(f"9c_w{w:g}", w, 0x9c, range(5)) for w in (4.0, 16.0)]
+
+
+def cmd_grid18(args) -> int:
+    return _grid_arms(E18_ARMS, args)
+
+
+def cmd_score18(args) -> int:
+    """Primary: LODO vs control (E17's rule). Secondary: external sets vs cf98 at the same weight (LIVE wn > 0 by 2 SE, NITS
+    overall >= -0.002). Prints one verdict per arm."""
+    import e13_teacher as e13
+    e13.SEEDS = range(5)
+    rc, verdicts = 0, {}
+    for label, w, m, seeds in E18_ARMS:
+        rc |= e13.score_arms([(label, spec(w, m))], f"e18_{label}", args.monotonicity)
+        row = json.loads((V2 / "compare" / f"e18_{label}.json").read_text())["rows"][label]
+        sig, w2 = row["signed"], row["w2_type_worst3"]
+        primary = bool(sig["mean"] >= 0 and sig["worst"] >= -0.003 and w2["mean"] > -2 * w2["se"])
+        ext_name = f"e18_external_{label}"
+        subprocess.run([sys.executable, str(Path(__file__).with_name("external_sets.py")), "score", "--root", str(V2), "--specs",
+                        f"{spec(w, 0x98)},{spec(w, m)}", "--seeds", "0-4", "--out", ext_name], check=True, capture_output=True)
+        ext = json.loads((V2 / "compare" / f"{ext_name}.json").read_text())["specs"][spec(w, m)]
+        wn, nits = ext["live"]["distortion:wn"], ext["nits"]["all"]
+        secondary = bool(wn["delta"] > 2 * wn["se"] and nits["delta"] >= -0.002)
+        verdicts[label] = {"primary": primary, "signed_mean": sig["mean"], "signed_worst": sig["worst"], "w2": w2["mean"],
+                           "w2_se": w2["se"], "secondary": secondary, "live_wn_vs_cf98": wn["delta"], "live_wn_se": wn["se"],
+                           "nits_vs_cf98": nits["delta"],
+                           "decision": "replaces cf98 pending confirmation" if primary and secondary else
+                                       "LODO-neutral, not shown to help out of sample" if primary else "noise costs LODO"}
+    (V2 / "compare" / "e18_decision.json").write_text(json.dumps(verdicts, indent=1) + "\n")
+    print(json.dumps(verdicts))
+    return rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["select", "generate", "extract", "table", "grid", "score", "grid16", "score16"])
+    ap.add_argument("cmd", choices=["select", "generate", "extract", "table", "grid", "score", "grid16", "score16", "grid18",
+                                    "score18"])
     ap.add_argument("--root")
     ap.add_argument("--out")
     ap.add_argument("--weight", type=float, default=4.0)
@@ -295,7 +335,8 @@ def main() -> int:
     ap.add_argument("--monotonicity", action="store_true")
     args = ap.parse_args()
     return {"select": cmd_select, "generate": cmd_generate, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid,
-            "score": cmd_score, "grid16": cmd_grid16, "score16": cmd_score16}[args.cmd](args)
+            "score": cmd_score, "grid16": cmd_grid16, "score16": cmd_score16, "grid18": cmd_grid18,
+            "score18": cmd_score18}[args.cmd](args)
 
 
 if __name__ == "__main__":
