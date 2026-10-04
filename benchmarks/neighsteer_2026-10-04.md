@@ -6,6 +6,15 @@ nothing here qualifies a product change. Instruments: `diffmap_block_coherence` 
 `ZENSIM_REPAIR_SOURCE` options, zensim dfd24c3f) on the COSTSET strict-route bakes, densified and stamped Rev4
 (`/var/tmp/steercheck/gate3/rev4dense`), prepared steering, `ZENSIM_FORMULA_REV=4`, single thread.
 
+> **Correction (2026-10-04 02:40 MT) — read before §4 and §6.** §1–§6 below were measured with the COSTSET strict-route bakes
+> (H128 trained on 8,000 human pairs only, no SafeSyn/CID22/coverage legs). Their scores are NOT monotone under per-block JPEG
+> quality upgrades: 36–51 % of single-block upgrade |ΔS| is loss, and upgrading the whole image q30→60 gains only +2.7 while
+> ssimulacra2 gains +11.6 — a defect of those bakes, not of zensim's adopted recipe (Rev3-consistent reruns give the same numbers,
+> so it is not the Rev3-weights-on-Rev4-features stamping). §7 repeats the JPEG work with an adopted-recipe model (featpot by_v2fy
+> at cv16:cf98): 5–9 % loss share, near-additive gains, whole-image gains in line with ssimulacra2, and the map within 2–7 % of a
+> perfect single-block ranking for top-quarter allocation. The coarse-scale diagnosis (§2) holds for both models. The "17–48 %
+> allocation prize" in §6 is a COSTSET-bake artefact and is withdrawn.
+
 ## 1. What fails
 
 At KADID JPEG level 05, block 8, both sets pass 2–3 of 12 cases: M3f (rank of the map's `refinement_gain` against the true score
@@ -115,3 +124,32 @@ Phase 1 (lane NEIGHSTEER, `~/tmp/zensim-paper/rev4/NEIGHSTEER_brief.md`): the v2
 golden test against full recomputation, an env-gated integration into prepared steering's `refinement_gain` (default off and
 byte-identical), and the measured M3f / cost on this file's panels. No public API change without the user's decision; the candidate-pixel
 and group-query surfaces are proposed separately once Phase 1 is measured.
+
+## 7. The same JPEG work with an adopted-recipe model
+
+Bake: the featpot cell `sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s0` (by_v2fy, cv16:cf98, KADID held out, so the KADID
+references used here were not in its training), densified (identity gate BIT-IDENTICAL) and stamped Rev4 (it was trained on Rev4 v2c
+features). Same 8 images and quality pairs, by_v2fy only, one seed. Medians.
+
+| swap | base score | whole-image upgrade ΔS | Σ single 8×8 ΔS | loss share of single-block |ΔS| | map M3f | M2 |
+|---|---:|---:|---:|---:|---:|---:|
+| q10→30 | 17.6 | +34.72 | +30.11 | 5 % | 0.80 | 1.000 |
+| q30→60 | 52.2 | +13.26 | +11.08 | 9 % | 0.75 | 1.000 |
+| q60→85 | 65.7 | +13.96 | +9.67 | 5 % | 0.86 | 1.000 |
+
+Allocation (25 % of 8×8 blocks, rankings from this bake's own map and single-block ΔS; zensim with this bake, and ssimulacra2 via
+fast-ssim2-cli as an independent judge; `--block 1024` whole-image ΔS):
+
+| swap | all (zensim / ssim2) | oracle 25 % | map 25 % | random 25 % | lowest-map 25 % |
+|---|---|---|---|---|---|
+| q10→30 | +34.72 / +29.56 | +18.14 / +10.67 | **+17.84 / +10.27** | +7.65 / +5.21 | +1.52 / +2.18 |
+| q30→60 | +13.26 / +11.64 | +8.58 / +5.55 | **+7.98 / +5.54** | +2.87 / +2.07 | +0.08 / +0.56 |
+| q60→85 | +13.96 / +12.55 | +7.37 / +5.30 | **+7.21 / +5.19** | +2.50 / +2.02 | +0.17 / +0.37 |
+
+* The map's top quarter captures 51–60 % of the whole-image gain (zensim) at 25 % of the blocks, 2.3–2.9× random, and both judges
+  agree; it is within 2–7 % of the perfect single-block ranking for this allocation.
+* Per-feature oracle on six swap cases with this bake: map 0.73–0.88 → exact v2 at scales 1–3 0.948–0.985 → exact v2 + v1 at scales
+  1–3 0.979–0.996 (M2 ≈ 1.000). The coarse-scale engine still buys per-block accuracy (target control, small budgets, sign), but its
+  allocation upside for top-quarter selection is small with an adopted-recipe model.
+* Steering studies should use adopted-recipe models, not the COSTSET human-only bakes, for any score-level conclusion. Bits are not
+  equalised; an RD-correct test needs per-block byte costs from zenjpeg.
