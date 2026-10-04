@@ -1254,6 +1254,7 @@ impl<'a> BakeScorer<'a> {
                 moment_removals: Vec::new(),
                 unsupported_refinement_feature_ids: Vec::new(),
                 has_corruption_gate,
+                neighbour_exact: None,
             });
         }
         let (mut features, mean_offset) = session.planned_features(
@@ -1298,8 +1299,36 @@ impl<'a> BakeScorer<'a> {
             source.height() as u32,
             codec_hint,
         )?;
-        let (spatial, unsupported_feature_ids) =
+        let (mut spatial, unsupported_feature_ids) =
             crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
+        // NEIGHSTEER (`ZENSIM_NEIGHBOUR_EXACT=1`, SDR v2 sessions only):
+        // retain the coarse-scale walk state the local-refinement engine
+        // needs, and zero the frozen density it replaces — the v2 pooled
+        // features at scales 1–3 (f459..f719) are added back as exact
+        // finite deltas inside `ScoredAttribution::refinement_gain`.
+        // The switch is EXACTLY `"1"`: presence alone (`=0`, empty) is
+        // off, matching the other `ZENSIM_*` gates in this module.
+        // Capture refuses (and the density stays whole) for sampling
+        // plans, v2-off plans, reflect-padded pairs and foreign dims.
+        let neighbour_exact = if std::env::var("ZENSIM_NEIGHBOUR_EXACT").as_deref() == Ok("1")
+            && encoding.is_none()
+        {
+            let snap = crate::local_refine::LocalRefineSnapshot::capture(
+                session.retention(),
+                &plan,
+                (source.width(), source.height()),
+                source,
+                distorted,
+            );
+            if snap.is_some() {
+                let lo = (372 + 87).min(spatial.len());
+                let hi = (372 + 348).min(spatial.len());
+                spatial[lo..hi].fill(0.0);
+            }
+            snap.map(Box::new)
+        } else {
+            None
+        };
         let mut max_removals = Vec::new();
         let mut moment_removals = Vec::new();
         let (_, attribution) = Zensim::new(ZensimProfile::B)
@@ -1331,6 +1360,7 @@ impl<'a> BakeScorer<'a> {
             sensitivities,
             unsupported_feature_ids,
             has_corruption_gate,
+            neighbour_exact,
         })
     }
 }

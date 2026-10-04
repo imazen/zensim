@@ -4389,6 +4389,126 @@ mod tests {
             );
         }
     }
+
+    /// NEIGHSTEER env gate end-to-end: `ZENSIM_NEIGHBOUR_EXACT` must
+    /// capture the local-refinement snapshot ONLY on exactly `"1"` — a
+    /// child process owns each env value, so there is no process-global
+    /// `set_var` race — and with the gate on, `refinement_gain` must equal
+    /// the remaining frozen density plus the SUMMED TRUE v2 deltas at
+    /// scales 1–3 for a real reference-repair intervention.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn neighbour_exact_env_gate_and_gain() {
+        const PATH: &str = "attribution::tests::neighbour_exact_env_gate_and_gain";
+        if std::env::var("ZENSIM_NEIGHSTEER_GATE_CHILD").as_deref() != Ok("1") {
+            let exe = std::env::current_exe().expect("test binary path");
+            for val in ["0", "", "yes", "1"] {
+                let out = std::process::Command::new(&exe)
+                    .args([PATH, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_NEIGHBOUR_EXACT", val)
+                    .env("ZENSIM_NEIGHSTEER_GATE_CHILD", "1")
+                    .output()
+                    .expect("re-exec the test binary");
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                assert!(
+                    out.status.success(),
+                    "{PATH} failed for ZENSIM_NEIGHBOUR_EXACT={val:?}\n{stdout}\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let want = if val == "1" {
+                    "NEIGHSTEER-GATE-ON"
+                } else {
+                    "NEIGHSTEER-GATE-OFF"
+                };
+                assert!(
+                    stdout.contains(want),
+                    "expected {want} for ZENSIM_NEIGHBOUR_EXACT={val:?}\n{stdout}"
+                );
+            }
+            return;
+        }
+        let _token = archmage::testing::lock_token_testing();
+        let on = std::env::var("ZENSIM_NEIGHBOUR_EXACT").as_deref() == Ok("1");
+        let (w, h) = (137usize, 101usize);
+        let (src, dst) = test_pair(w, h);
+        // The v2basic-shaped linear bake the lane's panels use.
+        let ids: Vec<usize> = (0..156).chain(372..720).collect();
+        let weights: Vec<f64> = ids
+            .iter()
+            .map(|&id| -(0.002 + 0.0003 * ((id * 7) % 13) as f64))
+            .collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":vec![0.0;ids.len()],"scaler_scale":vec![1.0;ids.len()],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8",
+                "text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")}],
+            "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":weights,"biases":[100.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+        let scored = worker.compute(&ds, None).unwrap();
+        assert_eq!(
+            scored.neighbour_exact.is_some(),
+            on,
+            "snapshot presence must track the exact-'1' gate"
+        );
+        println!(
+            "{}",
+            if on {
+                "NEIGHSTEER-GATE-ON"
+            } else {
+                "NEIGHSTEER-GATE-OFF"
+            }
+        );
+        let Some(snap) = scored.neighbour_exact.as_ref() else {
+            return;
+        };
+        let s = scored.sensitivities();
+        let base_f = scored.result().features();
+        for &(x0, y0, x1, y1) in &[(8usize, 8usize, 16usize, 16usize), (3, 5, 26, 22)] {
+            let mut intervened = dst.clone();
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    intervened[y * w + x] = src[y * w + x];
+                }
+            }
+            let full = scorer
+                .compute(&rs, &RgbSlice::new(&intervened, w, h), None)
+                .unwrap();
+            let deltas = snap
+                .deltas((x0, y0, x1, y1), &crate::local_refine::Candidate::Reference)
+                .unwrap();
+            let sum_true: f64 = deltas
+                .iter()
+                .map(|(id, _)| s[*id] * (full.features()[*id] - base_f[*id]))
+                .sum();
+            let sum_engine: f64 = deltas.iter().map(|(id, d)| s[*id] * d).sum();
+            assert!(
+                (sum_engine - sum_true).abs() <= 1e-4 * (1.0 + sum_true.abs()),
+                "rect ({x0},{y0},{x1},{y1}): Σs·Δ engine {sum_engine:e} vs true {sum_true:e}"
+            );
+            // refinement_gain = frozen density (the v2 coarse mass was
+            // zeroed at capture) + the engine's exact deltas, i.e.
+            // density + Σs·Δ_true.
+            let mut density = scored.attribution().query_rect(x0, y0, x1, y1);
+            for m in &scored.max_removals {
+                density -= m.sensitivity * m.feature_drop(x0, y0, x1, y1);
+            }
+            for m in &scored.moment_removals {
+                density += m.correction(x0, y0, x1, y1);
+            }
+            let gain = scored.refinement_gain(x0, y0, x1, y1);
+            assert!(
+                (gain - (density + sum_true)).abs() <= 1e-4 * (1.0 + sum_true.abs()),
+                "rect ({x0},{y0},{x1},{y1}): refinement_gain {gain:e} vs \
+                 density {density:e} + Σs·Δ_true {sum_true:e}"
+            );
+        }
+    }
 }
 
 // ============================================================================
@@ -5354,6 +5474,12 @@ impl Fused944Session {
         Self::default()
     }
 
+    /// The walk's retention — populated by the v2-aware compare paths; the
+    /// `ZENSIM_NEIGHBOUR_EXACT` local-refinement snapshot reads it.
+    pub(crate) fn retention(&self) -> &crate::feature_v2::FoldRetention {
+        &self.retention
+    }
+
     /// The v1 attr-planes streaming walk: fills `self.basic` (retained
     /// planes, `result`) and returns the scored result. Shared by the
     /// basic-only plans and the v2-bearing plans (whose v1 block it serves).
@@ -5584,6 +5710,16 @@ pub struct ScoredAttribution {
     pub(crate) max_removals: Vec<MaxRemoval>,
     pub(crate) moment_removals: Vec<MomentRemoval>,
     pub(crate) unsupported_refinement_feature_ids: Vec<usize>,
+    /// `ZENSIM_NEIGHBOUR_EXACT=1` (the switch is exactly `"1"`, read in
+    /// `compute_attribution_input`): the coarse-retention snapshot the
+    /// local refinement engine queries in [`Self::refinement_gain`].
+    /// `None` when the variable is unset or the snapshot refused
+    /// (sampling plan, v2 off, reflect-padded input, foreign dims —
+    /// never silently degraded). Boxed so `ScoredAttribution` does not
+    /// grow inline by the snapshot's array fields when off.
+    /// Gated with the module's only builder (`compute_attribution_input`).
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    pub(crate) neighbour_exact: Option<Box<crate::local_refine::LocalRefineSnapshot>>,
 }
 
 #[cfg(feature = "feature-regime-v2")]
@@ -5645,6 +5781,22 @@ impl ScoredAttribution {
         }
         for map in &self.moment_removals {
             gain += map.correction(x0, y0, x1, y1);
+        }
+        // `ZENSIM_NEIGHBOUR_EXACT`: the exact finite v2 deltas at scales
+        // 1–3, whose frozen-density mass was zeroed at build time. A
+        // captured snapshot always produces a value — every refusal case
+        // is decided at capture — so `None` can only come from an
+        // out-of-range scale request, which the fixed 1..=3 range never
+        // is; it adds nothing rather than fabricating a value.
+        #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+        if let Some(snap) = &self.neighbour_exact
+            && let Some(g) = snap.weighted_gain(
+                &self.sensitivities,
+                (x0, y0, x1, y1),
+                &crate::local_refine::Candidate::Reference,
+            )
+        {
+            gain += g;
         }
         gain
     }

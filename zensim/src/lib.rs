@@ -341,6 +341,18 @@ pub mod feature_v2;
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
 
+// NEIGHSTEER (lane 2026-10-04): exact local refinement of the coarse-scale
+// v2 pooled features for prepared steering — crate-private, opt-in via
+// `ZENSIM_NEIGHBOUR_EXACT=1` (the switch is EXACTLY the string "1":
+// presence alone — `=0`, empty — leaves the frozen density whole).
+// benchmarks/neighsteer_2026-10-04.md
+// The module is gated on `custom-profiles` too: its only caller is
+// `BakeScorer::compute_attribution_input` (`all(custom-profiles,
+// feature-regime-v2)`), so building it under v2 without custom-profiles
+// (e.g. `candidate-profiles` alone) would be dead code end to end.
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub(crate) mod local_refine;
+
 // DVIFM-style block-visibility features (f956..f985, opt-in, off by
 // default). zenpapers/docs/iqa-methods/dvifm-zensim-feature-design.md.
 #[cfg(feature = "feature-regime-v2")]

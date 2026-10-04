@@ -1578,7 +1578,7 @@ fn finish_rev4_scale(
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
 pub(crate) const BLUR_RADIUS: usize = 5;
 /// Oriented-blockiness lattice period (JPEG's 8x8 MCU grid).
-const BLOCK_LATTICE: usize = 8;
+pub(crate) const BLOCK_LATTICE: usize = 8;
 
 // ============================================================================
 // Phase-5 (§A.15): strip-tiled pipeline constants + halo-boundary helper.
@@ -1740,7 +1740,7 @@ pub(crate) fn bounded_sim(a: f64, b: f64, c: f64) -> f64 {
 /// Bounded, SIGNED normalized-difference form: `max(0, a-b) / (a+b+c)`.
 /// Bounded `[0, 1)`. Requires `a, b >= 0`.
 #[inline]
-fn bounded_excess(a: f64, b: f64, c: f64) -> f64 {
+pub(crate) fn bounded_excess(a: f64, b: f64, c: f64) -> f64 {
     (a - b).max(0.0) / (a + b + c)
 }
 
@@ -2045,9 +2045,9 @@ impl OnlineMoments {
 /// IDENTICAL formula (`Σw·v/Σw`) online, O(1) space. The equivalence is
 /// pinned by `tests::weighted_sum_matches_weighted_pool_mean_exactly`.
 #[derive(Default, Clone, Copy)]
-struct WeightedSum {
-    num: f64,
-    den: f64,
+pub(crate) struct WeightedSum {
+    pub(crate) num: f64,
+    pub(crate) den: f64,
 }
 impl WeightedSum {
     #[inline]
@@ -2952,7 +2952,7 @@ impl Default for V2NewFeatureToggles {
 /// deprecate-by-mask: the slots keep their positions, emitted as 0. `ch==1`
 /// is the Y (luma) channel — left untouched. No-op when the toggle is off.
 #[inline]
-fn apply_transducer_luma_gate(out: &mut [f64], ch: usize, toggles: V2NewFeatureToggles) {
+pub(crate) fn apply_transducer_luma_gate(out: &mut [f64], ch: usize, toggles: V2NewFeatureToggles) {
     if toggles.transducers_luma_only && ch != 1 {
         out[idx::PJND_TRANSDUCER] = 0.0;
         out[idx::PJND_FRAGILITY] = 0.0;
@@ -4291,31 +4291,31 @@ fn run_blur_pass_inner(
 
 /// Per-row-reduced f64 accumulator for the dense (always-on) block.
 #[derive(Default, Clone, Copy)]
-struct DenseAccum {
-    sum_d: f64,
-    sum_d2: f64,
-    sum_d3: f64,
-    sum_d4: f64,
-    sum_art: f64,
-    sum_det: f64,
-    sum_mse: f64,
-    sum_hf_gain: f64,
-    sum_hf_loss: f64,
-    sum_hf_mag_loss: f64,
-    sum_pjnd: f64,
-    sum_pjnd_lo: f64,
-    sum_pjnd_hi: f64,
-    ws_peak_ssim: WeightedSum,
-    ws_peak_art: WeightedSum,
-    ws_peak_det: WeightedSum,
-    ws_mask_ssim: WeightedSum,
-    ws_mask_art: WeightedSum,
-    ws_mask_det: WeightedSum,
-    ws_mask_mse: WeightedSum,
-    ws_iw_ssim: WeightedSum,
-    ws_iw_art: WeightedSum,
-    ws_iw_det: WeightedSum,
-    ws_iw_mse: WeightedSum,
+pub(crate) struct DenseAccum {
+    pub(crate) sum_d: f64,
+    pub(crate) sum_d2: f64,
+    pub(crate) sum_d3: f64,
+    pub(crate) sum_d4: f64,
+    pub(crate) sum_art: f64,
+    pub(crate) sum_det: f64,
+    pub(crate) sum_mse: f64,
+    pub(crate) sum_hf_gain: f64,
+    pub(crate) sum_hf_loss: f64,
+    pub(crate) sum_hf_mag_loss: f64,
+    pub(crate) sum_pjnd: f64,
+    pub(crate) sum_pjnd_lo: f64,
+    pub(crate) sum_pjnd_hi: f64,
+    pub(crate) ws_peak_ssim: WeightedSum,
+    pub(crate) ws_peak_art: WeightedSum,
+    pub(crate) ws_peak_det: WeightedSum,
+    pub(crate) ws_mask_ssim: WeightedSum,
+    pub(crate) ws_mask_art: WeightedSum,
+    pub(crate) ws_mask_det: WeightedSum,
+    pub(crate) ws_mask_mse: WeightedSum,
+    pub(crate) ws_iw_ssim: WeightedSum,
+    pub(crate) ws_iw_art: WeightedSum,
+    pub(crate) ws_iw_det: WeightedSum,
+    pub(crate) ws_iw_mse: WeightedSum,
 }
 
 impl DenseAccum {
@@ -4327,7 +4327,7 @@ impl DenseAccum {
     /// grouping (associativity-level float reassociation only, same class
     /// already tolerated for the phase-4 SIMD-lane-then-row reduction).
     #[inline]
-    fn accumulate(&mut self, other: &DenseAccum) {
+    pub(crate) fn accumulate(&mut self, other: &DenseAccum) {
         self.sum_d += other.sum_d;
         self.sum_d2 += other.sum_d2;
         self.sum_d3 += other.sum_d3;
@@ -5281,8 +5281,8 @@ fn gmsbank_pixel_var(
 
 /// Per-row-reduced f64 accumulator for the gradient block.
 #[derive(Default, Clone, Copy)]
-struct GradientAccum {
-    sum_gms: f64,
+pub(crate) struct GradientAccum {
+    pub(crate) sum_gms: f64,
     /// Σ gms² — second raw moment of the SAME per-pixel gms values, for
     /// the append block's GMSD-style deviation pooling
     /// ([`idx_append::GMS_DEV2`]). Accumulated unconditionally (the
@@ -5290,11 +5290,11 @@ struct GradientAccum {
     /// registers); only consumed when the append block is on. Adding it
     /// does not perturb `sum_gms` — the shared `g` is computed by the
     /// identical operations in the identical order.
-    sum_gms2: f64,
-    sum_ringing: f64,
-    sum_banding: f64,
-    sum_grad_src: f64,
-    sum_grad_dst: f64,
+    pub(crate) sum_gms2: f64,
+    pub(crate) sum_ringing: f64,
+    pub(crate) sum_banding: f64,
+    pub(crate) sum_grad_src: f64,
+    pub(crate) sum_grad_dst: f64,
     /// append2 BANDVIS sums — accumulated ONLY by the `BANDVIS = true`
     /// kernel instantiation (Y channel with `append2_block` on); zero and
     /// untouched everywhere else, so the existing lanes' operations are
@@ -5309,7 +5309,7 @@ impl GradientAccum {
     /// Phase-5 (§A.15): fold one strip's `GradientAccum` into the running
     /// whole-image total — same reasoning as `DenseAccum::accumulate`.
     #[inline]
-    fn accumulate(&mut self, other: &GradientAccum) {
+    pub(crate) fn accumulate(&mut self, other: &GradientAccum) {
         self.sum_gms += other.sum_gms;
         self.sum_gms2 += other.sum_gms2;
         self.sum_ringing += other.sum_ringing;
@@ -5917,20 +5917,20 @@ fn gradient_block_kernel_entry_bandvis_dstact_gmsbank(
 /// One gradient pixel's full term vector in f64 — the production
 /// `scalar_pixel` element math verbatim (clamped x-neighbors, so it serves
 /// both the border columns and the exact interior).
-struct GradTerms64 {
-    gsrc: f64,
-    gdst: f64,
-    g: f64,
-    g2: f64,
-    ring: f64,
-    band: f64,
-    bv_gain: f64,
-    bv_loss: f64,
+pub(crate) struct GradTerms64 {
+    pub(crate) gsrc: f64,
+    pub(crate) gdst: f64,
+    pub(crate) g: f64,
+    pub(crate) g2: f64,
+    pub(crate) ring: f64,
+    pub(crate) band: f64,
+    pub(crate) bv_gain: f64,
+    pub(crate) bv_loss: f64,
 }
 
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool>(
+pub(crate) fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool>(
     src_h: &[f32],
     dst_h: &[f32],
     activity: &[f32],
@@ -10366,7 +10366,7 @@ fn compute_channel_scale_v2_whole(
 /// (the no-duplication policy's concern — see CLAUDE.md "NO DUPLICATE
 /// IMPLEMENTATIONS").
 #[inline]
-fn finish_channel_scale(
+pub(crate) fn finish_channel_scale(
     dense: &DenseAccum,
     grad: &GradientAccum,
     sum_blockiness: f64,
@@ -11359,17 +11359,17 @@ fn append_cell_active(append_on: bool, ch: usize, scale: usize) -> bool {
 /// (~42 MB at 576²) — the same class the standalone attribution's
 /// materialized pyramids + plane sets pay.
 pub(crate) struct FoldRetention {
-    dims: Vec<(usize, usize)>,
+    pub(crate) dims: Vec<(usize, usize)>,
     /// `[scale][ch]` source-side pyramid planes (core rows).
-    pyr_src: Vec<[Vec<f32>; 3]>,
+    pub(crate) pyr_src: Vec<[Vec<f32>; 3]>,
     /// `[scale][ch]` distorted-side pyramid planes (core rows).
-    pyr_dst: Vec<[Vec<f32>; 3]>,
+    pub(crate) pyr_dst: Vec<[Vec<f32>; 3]>,
     /// `[scale][ch]` phase-A V-blur planes (mu1/mu2/ssq/s12/act/bs2).
-    planes: Vec<[AttrChPlanes; 3]>,
+    pub(crate) planes: Vec<[AttrChPlanes; 3]>,
     /// `[scale][ch]` exact pooled cells (walk accumulators + blockiness).
-    cells: Vec<[AttrCellSums; 3]>,
+    pub(crate) cells: Vec<[AttrCellSums; 3]>,
     /// `[scale][ch]` (mean grad src, mean grad dst) from finalize.
-    mg: Vec<[(f64, f64); 3]>,
+    pub(crate) mg: Vec<[(f64, f64); 3]>,
 }
 
 impl Default for FoldRetention {
@@ -15238,22 +15238,22 @@ pub(crate) struct V2AppendAttribution {
 /// the targeted dead-code allowance.
 #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
 #[derive(Default, Clone, Copy)]
-struct AttrCellSums {
-    dense: DenseAccum,
-    grad: GradientAccum,
+pub(crate) struct AttrCellSums {
+    pub(crate) dense: DenseAccum,
+    pub(crate) grad: GradientAccum,
     app: AppendAccum,
-    blockiness: f64,
-    n: usize,
+    pub(crate) blockiness: f64,
+    pub(crate) n: usize,
 }
 
 /// Per-scale per-channel cached planes (scale-plane sized slices of
 /// scale-0-sized buffers).
-struct AttrChPlanes {
-    mu1: Vec<f32>,
-    mu2: Vec<f32>,
-    ssq: Vec<f32>,
-    s12: Vec<f32>,
-    act: Vec<f32>,
+pub(crate) struct AttrChPlanes {
+    pub(crate) mu1: Vec<f32>,
+    pub(crate) mu2: Vec<f32>,
+    pub(crate) ssq: Vec<f32>,
+    pub(crate) s12: Vec<f32>,
+    pub(crate) act: Vec<f32>,
     bs2: Vec<f32>,
 }
 
@@ -28273,7 +28273,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
 /// `dense_block_kernel_era2_generic`'s `terms!`/`pools!` op-for-op.
 #[inline(always)]
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-fn dense_terms32(
+pub(crate) fn dense_terms32(
     s: f32,
     dd: f32,
     m1: f32,
