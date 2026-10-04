@@ -5001,6 +5001,23 @@ fn dense_block_kernel(
     // it for the guarantee); `Off` at every revision < 4 keeps the shipped
     // era-1/era-2 dispatch byte-for-byte.
     let mode = crate::featcanon::compute_mode();
+    if crate::ssim_form::active_revision() >= FormulaRevision::Rev5
+        && matches!(mode, crate::featcanon::Mode::Canon64)
+    {
+        return dense_block_kernel_canon::<crate::featcanon::Lanes16F64>(
+            src,
+            dst,
+            mu1,
+            mu2,
+            ssq,
+            s12,
+            activity,
+            width,
+            height,
+            transducer_bank,
+            r4,
+        );
+    }
     if mode.active() {
         match mode {
             crate::featcanon::Mode::Canon64 => {
@@ -6193,7 +6210,7 @@ fn gradient_interior_elem_canon<
     r_bv_gain: &mut P,
     r_bv_loss: &mut P,
 ) {
-    let lane = x & 7;
+    let lane = x & (P::LANES - 1);
     let sxl = src_h[row + x - 1];
     let sxr = src_h[row + x + 1];
     let syu = src_h[row_u + x];
@@ -7073,7 +7090,6 @@ fn gradient_block_kernel(
         #[cfg(feature = "oracle")]
         use crate::featcanon::{LanesF32, Neum64};
         let m = mode;
-        #[cfg(feature = "oracle")]
         macro_rules! go {
             ($p:ty) => {
                 match (bandvis, bv_act_dst, gmsbank) {
@@ -7222,6 +7238,11 @@ fn gradient_block_kernel(
                     }
                 }
             };
+        }
+        if crate::ssim_form::active_revision() >= FormulaRevision::Rev5
+            && matches!(mode, Mode::Canon64)
+        {
+            return go!(crate::featcanon::Lanes16F64);
         }
         return match mode {
             Mode::Canon64 => match (bandvis, bv_act_dst, gmsbank) {
@@ -28673,7 +28694,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
     p_kn: &mut [P; 3],
     p_kd: &mut [P; 3],
 ) {
-    let lane = x & 7;
+    let lane = x & (P::LANES - 1);
     let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd) =
         dense_terms32(s, dd, m1, m2, q, p, act, transducer_bank, direct);
     for j in 0..13 {

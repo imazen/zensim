@@ -326,7 +326,18 @@ fn main() {
             }
             apply_tier(tier);
             let t0 = std::time::Instant::now();
-            let e = research::extract(&Request::everything(), &rs, &rd)
+            let request = if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok("5") {
+                use zensim::feature_set_id::ComputeToken;
+                Request::for_slots(
+                    research::family_slots(ComputeToken::Basic)
+                        .union(&research::family_slots(ComputeToken::Peaks))
+                        .union(&research::family_slots(ComputeToken::V2)),
+                    research::full_width(),
+                )
+            } else {
+                Request::everything()
+            };
+            let e = research::extract(&request, &rs, &rd)
                 .unwrap_or_else(|e| panic!("{label} tier {}: {e}", tier.label));
             let secs = t0.elapsed().as_secs_f64();
             if let Some(dir) = &dump_dir {

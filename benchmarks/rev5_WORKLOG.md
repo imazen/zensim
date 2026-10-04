@@ -92,3 +92,13 @@ f64 window error bounded by 8 f32 eps relative. Perturbation test proves
 unchanged outputs outside the five-pixel support. Full-vector tier test
 covers 64x64, 97x63, 131x65, 255x129. Rev5 differs from Rev4 on the fixture.
 No speed claim yet: inherited local kernels are scalar.
+
+## 2026-10-04 — Step 3 A2/A3 initial arithmetic
+
+Rev5 basic fused pools, v2 dense and gradient pools use sixteen virtual f64
+lanes with one adjacent-pair tree. Earlier revisions retain eight lanes.
+Existing fused expressions remain; no speculative FMA reassociation is made.
+Initial f64 choice preserves the Rev4 per-element error floor; FEATACC
+measurement and SIMD speed work remain pending. Extended the existing
+`tier_audit_features` owner to request only Rev5's supported families.
+Gate: `featcanon_rev5_parity`, release, 3/3 tests pass (0.29 s; a2.log).

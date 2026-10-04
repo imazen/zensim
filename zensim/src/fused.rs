@@ -962,7 +962,7 @@ pub(crate) fn fused_vblur_features_ssim(
             // keeps the scalar body, which honours it.
             let blur_axis = crate::featcanon::canon_blur_axis_for(mode, free.revision());
             if matches!(blur_axis, crate::featcanon::BlurMode::Local) {
-                return fused_vblur_ssim_local::<crate::featcanon::LanesF64>(
+                return fused_vblur_ssim_local::<crate::featcanon::Lanes16F64>(
                     h_mu1,
                     h_mu2,
                     h_sigma_sq,
@@ -5104,7 +5104,7 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     band: &mut BandPools<P>,
     acc: &mut StripChannelAccum,
 ) {
-    let lane = x & 7;
+    let lane = x & (P::LANES - 1);
     let sd = if direct {
         ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
     } else {

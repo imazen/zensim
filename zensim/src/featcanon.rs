@@ -485,6 +485,37 @@ impl LanesF64 {
     }
 }
 
+/// Rev5's sixteen virtual f64 lanes, independent of the hardware width.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Lanes16F64(pub [f64; 16]);
+
+impl Pool for Lanes16F64 {
+    const LANES: usize = 16;
+    #[inline(always)]
+    fn zero() -> Self {
+        Self([0.0; 16])
+    }
+    #[inline(always)]
+    fn add(&mut self, lane: usize, v: f32) {
+        self.0[lane & 15] += v as f64;
+    }
+    #[cfg(feature = "oracle")]
+    #[inline(always)]
+    fn add64(&mut self, lane: usize, v: f64) {
+        self.0[lane & 15] += v;
+    }
+    #[inline(always)]
+    fn fin(self) -> f64 {
+        let mut a = self.0;
+        for width in [8, 4, 2, 1] {
+            for i in 0..width {
+                a[i] = a[2 * i] + a[2 * i + 1];
+            }
+        }
+        a[0]
+    }
+}
+
 /// Candidate (f): Neumaier-compensated f64 running sum — the compensated form
 /// already proven in `feature_v2::oracle` (`Neumaier`), reused so the lane's
 /// compensation semantics have exactly one definition. Measurement only (the
@@ -533,6 +564,7 @@ impl Neum64 {
 /// candidates: (d) f32 virtual lanes + fixed pairwise tree, (e) f64 virtual
 /// lanes + the same tree, (f) sequential Neumaier compensation.
 pub(crate) trait Pool: Copy {
+    const LANES: usize = 8;
     fn zero() -> Self;
     fn add(&mut self, lane: usize, v: f32);
     /// f64 term form — used when the term was itself computed in f64
