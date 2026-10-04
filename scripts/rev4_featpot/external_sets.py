@@ -2,7 +2,7 @@
 
   python3 external_sets.py extract --root ROOT --set nits|live|mciqa   # Rev4 canon f0-f1824 + decoded-pixel audit
   python3 external_sets.py table   --root ROOT --set ...               # -> <root>/external/<set>.parquet (+ keys, manifests)
-  python3 external_sets.py score   --root ROOT --specs SPEC[,SPEC...] [--seeds 0-4] [--out NAME]
+  python3 external_sets.py score   --root ROOT --specs SPEC[,SPEC...] [--seeds 0-4] [--out NAME] [--control-root ROOT]
 
 Sets are OPEN external reads (never training inputs; T0 eval-only like LIVE): NITS-IQA (405 pairs, 9 distortion types incl.
 contrast change and pixelate), LIVE release 2 (779 pairs, 5 types) and MCIQA-2K (2,000 colorized vs their COCO originals;
@@ -178,9 +178,26 @@ def cmd_score(args) -> int:
     lo, hi = (int(x) for x in args.seeds.split("-"))
     seeds = range(lo, hi + 1)
     sets = [s for s in PAIRS if (V2 / "external" / f"{s}.parquet").is_file()]
-    cache = V2 / "external" / "pred"
-    cache.mkdir(parents=True, exist_ok=True)
-    refused = [sp for sp in specs if any(reads_unextracted(c.parent) for c in (V2 / "cells" / f"{sp}__N").glob("without_*/result.json"))]
+    # --control-root: the control spec's cells, tables and prediction cache come from another root (a cross-revision
+    # comparison, e.g. Rev5 arms vs the Rev4 control); every other spec reads --root. Each model is scored on its own
+    # revision's table, and the two roots must list the same pairs in the same order (checked per set below).
+    croot = Path(args.control_root) if args.control_root else V2
+    # Entries are keyed by label: the control's label gets "@control-root" so the same spec can be compared across roots.
+    labels = [specs[0] + ("@control-root" if args.control_root else "")] + specs[1:]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"duplicate spec labels: {labels}")
+    spec_of = dict(zip(labels, specs))
+    root_of = {lab: (croot if i == 0 else V2) for i, lab in enumerate(labels)}
+    specs = labels
+    if args.control_root:
+        for st in sets:
+            ka, kb = (pd.read_parquet(r / "external" / f"{st}.keys.parquet") for r in (V2, croot))
+            cols = ["ref_path", "dist_path", "human_score"]
+            if not ka[cols].equals(kb[cols]):
+                raise ValueError(f"{st}: --root and --control-root external tables list different pairs or labels")
+    for r in {V2, croot}:
+        (r / "external" / "pred").mkdir(parents=True, exist_ok=True)
+    refused = [sp for sp in specs if any(reads_unextracted(c.parent) for c in (root_of[sp] / "cells" / f"{spec_of[sp]}__N").glob("without_*/result.json"))]
     if specs[0] in refused:
         raise ValueError(f"control {specs[0]} reads f{UNREAD_FROM}+, which the external tables do not carry")
     specs = [sp for sp in specs if sp not in refused]  # reported, never silently dropped
@@ -188,22 +205,23 @@ def cmd_score(args) -> int:
     for sp in specs:
         for fold in SOURCE_ORDER:
             for i in seeds:
-                cell = V2 / "cells" / f"{sp}__N" / f"without_{fold}_s{i}"
+                cell = root_of[sp] / "cells" / f"{spec_of[sp]}__N" / f"without_{fold}_s{i}"
                 if (cell / "result.json").is_file():
-                    jobs += [(cell, V2 / "external" / f"{st}.parquet") for st in sets]
+                    jobs += [(cell, root_of[sp] / "external" / f"{st}.parquet", root_of[sp] / "external" / "pred") for st in sets]
     with ThreadPoolExecutor(args.jobs) as ex:
-        list(ex.map(lambda j: predict(j[0], j[1], cache), jobs))
+        list(ex.map(lambda j: predict(*j), jobs))
     res = {}  # (spec, set) -> list over (fold, seed) of {"all": r, groups...}
     for sp in specs:
         for st in sets:
-            table = V2 / "external" / f"{st}.parquet"
-            keys = pd.read_parquet(V2 / "external" / f"{st}.keys.parquet")
+            R = root_of[sp]
+            table, cache = R / "external" / f"{st}.parquet", R / "external" / "pred"
+            keys = pd.read_parquet(R / "external" / f"{st}.keys.parquet")
             y = keys.human_score.to_numpy(np.float64)
             gcol = GROUPS[st][0]
             rows = []
             for fold in SOURCE_ORDER:
                 for i in seeds:
-                    cell = V2 / "cells" / f"{sp}__N" / f"without_{fold}_s{i}"
+                    cell = R / "cells" / f"{spec_of[sp]}__N" / f"without_{fold}_s{i}"
                     if not (cell / "result.json").is_file():
                         continue
                     p = predict(cell, table, cache)
@@ -223,6 +241,7 @@ def cmd_score(args) -> int:
             res[(sp, st)] = rows
     ctl = specs[0]
     report = {"schema": "rev4-featpot-external-score-v1", "control": ctl, "seeds": list(seeds), "sets": sets, "specs": {},
+              "root": str(V2), "control_root": str(croot),
               "refused_reads_unextracted_columns": refused}
     for sp in specs:
         report["specs"][sp] = {}
@@ -262,6 +281,7 @@ def main() -> int:
     ap.add_argument("--specs")
     ap.add_argument("--seeds", default="0-4")
     ap.add_argument("--out")
+    ap.add_argument("--control-root", help="score: read the first (control) spec from this root (cross-revision pairing)")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--revision", type=int, choices=[4, 5], default=4, help="extract/table: extractor contract (e14.extractor)")
     args = ap.parse_args()
