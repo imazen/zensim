@@ -323,10 +323,59 @@ def cmd_score18(args) -> int:
     return rc
 
 
+# Design log E19 (registered 2026-10-03 18:17 MT): confirm cf9c (cf98 + noise) at w16 on seeds 5-9, then decide cf9c vs cf98.
+E19_ARMS = [("9c_w16_s59", 16.0, 0x9c, range(5, 10))]
+
+
+def cmd_grid19(args) -> int:
+    return _grid_arms(E19_ARMS, args)
+
+
+def cmd_score19(args) -> int:
+    """Step 1: E17's rule on seeds 5-9 vs control. Step 2 (if confirmed): cf9c - cf98, seed-paired over seeds 0-9, LODO
+    (the scorer's reference arm temporarily set to cf98) and external sets. Writes compare/e19_decision.json."""
+    import e13_teacher as e13
+    label, w, m, seeds = E19_ARMS[0]
+    e13.SEEDS = seeds
+    rc = e13.score_arms([(label, spec(w, m))], "e19_confirm", args.monotonicity)
+    row = json.loads((V2 / "compare" / "e19_confirm.json").read_text())["rows"][label]
+    sig, w2 = row["signed"], row["w2_type_worst3"]
+    confirmed = bool(sig["mean"] >= 0 and sig["worst"] >= -0.003 and w2["mean"] > -2 * w2["se"])
+    out = {"step1": {"confirmed": confirmed, "signed_mean": sig["mean"], "signed_worst": sig["worst"], "w2": w2["mean"],
+                     "w2_se": w2["se"]}}
+    if confirmed:
+        ref = spec(w, 0x98)
+        saved = e13.BASE
+        e13.BASE, e13.SEEDS = ref, range(10)
+        try:
+            rc |= e13.score_arms([("9c_vs_98_w16", spec(w, m))], "e19_vs_cf98", args.monotonicity)
+        finally:
+            e13.BASE = saved
+        pair = json.loads((V2 / "compare" / "e19_vs_cf98.json").read_text())["rows"]["9c_vs_98_w16"]
+        subprocess.run([sys.executable, str(Path(__file__).with_name("external_sets.py")), "score", "--root", str(V2),
+                        "--specs", f"{ref},{spec(w, m)}", "--seeds", "0-9", "--out", "e19_external_vs_cf98"],
+                       check=True, capture_output=True)
+        ext = json.loads((V2 / "compare" / "e19_external_vs_cf98.json").read_text())["specs"][spec(w, m)]
+        live, nits, mciqa = ext["live"]["all"], ext["nits"]["all"], ext["mciqa"]["all"]
+        lodo_ok = bool(pair["signed"]["mean"] >= -0.001
+                       and pair["w2_type_worst3"]["mean"] > -2 * pair["w2_type_worst3"]["se"])
+        ext_ok = bool(live["delta"] > 2 * live["se"] and nits["delta"] >= -0.003)
+        out["step2"] = {"lodo_signed_delta": pair["signed"]["mean"], "lodo_signed_se": pair["signed"]["se"],
+                        "lodo_w2_delta": pair["w2_type_worst3"]["mean"], "lodo_w2_se": pair["w2_type_worst3"]["se"],
+                        "live_delta": live["delta"], "live_se": live["se"], "nits_delta": nits["delta"],
+                        "mciqa_delta": mciqa["delta"], "lodo_ok": lodo_ok, "external_ok": ext_ok}
+        out["decision"] = "cf9c replaces cf98" if lodo_ok and ext_ok else "cf98 stays the recipe"
+    else:
+        out["decision"] = "cf9c not confirmed on seeds 5-9; cf98 stays the recipe"
+    (V2 / "compare" / "e19_decision.json").write_text(json.dumps(out, indent=1) + "\n")
+    print(json.dumps(out))
+    return rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["select", "generate", "extract", "table", "grid", "score", "grid16", "score16", "grid18",
-                                    "score18"])
+                                    "score18", "grid19", "score19"])
     ap.add_argument("--root")
     ap.add_argument("--out")
     ap.add_argument("--weight", type=float, default=4.0)
@@ -336,7 +385,7 @@ def main() -> int:
     args = ap.parse_args()
     return {"select": cmd_select, "generate": cmd_generate, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid,
             "score": cmd_score, "grid16": cmd_grid16, "score16": cmd_score16, "grid18": cmd_grid18,
-            "score18": cmd_score18}[args.cmd](args)
+            "score18": cmd_score18, "grid19": cmd_grid19, "score19": cmd_score19}[args.cmd](args)
 
 
 if __name__ == "__main__":
