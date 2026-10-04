@@ -3,6 +3,23 @@
 Measured 2026-10-03 23:45 – 2026-10-04 00:05 MT. Development diagnostic, not a qualification. Data:
 `jpegsteer_2026-10-04.tsv` (96 rows); raw per-block JSONs on tower `output/zensim/jpegsteer-2026-10-04/`.
 
+> **Correction (2026-10-04 03:00 MT).** The bakes below are the COSTSET strict-route human-only bakes, later found to be
+> non-monotone under per-block JPEG upgrades (`neighsteer_2026-10-04.md`, correction banner and §7). Rerun with adopted-recipe
+> bakes — featpot cells `sel:59f0bbc2f290@h32:H128:cv16:cf98` (by_v2fy) and `set:v2+basic@h32:H128:cv16:cf98`, fold without_kadid,
+> seeds 0/1/2 (labelled 5101/5103/5107), densified + stamped Rev4 — on the same pairs (`jpegsteer_cf98_2026-10-04.tsv`):
+>
+> | set (cf98) | panel | pass | M3f median (min) | M2 min |
+> |---|---|---:|---|---:|
+> | by_v2fy | KADID JPEG level 03, block 8 | 12/12 | 0.91 (0.91) | 0.999 |
+> | by_v2fy | KADID JPEG level 05, block 8 | **10/12** | 0.84 (0.55) | 1.000 |
+> | v2 + basic | KADID JPEG level 03, block 8 | 12/12 | 0.93 (0.89) | 0.999 |
+> | v2 + basic | KADID JPEG level 05, block 8 | **9/12** | 0.81 (0.64) | 1.000 |
+> | by_v2fy | owner (level 03, block 32) | 12/12 | 0.97 (0.96) | 0.999 |
+> | v2 + basic | owner (level 03, block 32) | 12/12 | 0.98 (0.94) | 0.999 |
+>
+> The heavy-JPEG failure reported below (3/12, 2/12) is mostly a property of the COSTSET bakes; with adopted-recipe models both
+> sets steer 8×8 blocks at KADID's heaviest JPEG level in 9–10 of 12 cases.
+
 ## Setup
 
 * Tool: `diffmap_block_coherence` (prepared steering, `ZENSIM_PREPARED_STEERING=1`), binary sha256 prefix `6a165c4ab20a291e`
