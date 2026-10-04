@@ -2380,6 +2380,27 @@ mod revision_contract_tests {
                 second.attribution().density()
             );
             assert!(first.attribution().density().iter().any(|&x| x != 0.0));
+            let _guard = archmage::testing::lock_token_testing();
+            let _ = archmage::testing::for_each_token_permutation(
+                archmage::testing::CompileTimePolicy::Warn,
+                |perm| {
+                    let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                    let mut session = owner.prepare_steering(&rs, 8).unwrap();
+                    let map = session.compute(&ds, None).unwrap();
+                    assert_eq!(
+                        scalar.features(),
+                        map.result().features(),
+                        "{} features",
+                        perm.label
+                    );
+                    assert_eq!(
+                        first.attribution().density(),
+                        map.attribution().density(),
+                        "{} map",
+                        perm.label
+                    );
+                },
+            );
         }
         // Same computed vector as research, including the nonzero reference-only slot.
         let model = zenpredict::Model::from_bytes(&bake_declaring(Some("5"), 393)).unwrap();

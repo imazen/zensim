@@ -270,3 +270,23 @@ persistent isolated revision workers so rounds interleave without changing
 the process-wide formula switch. Parent timings include the pipe round-trip;
 setup and warmup are untimed. Fixed/per-pixel fits must disclose this fixed
 IPC overhead rather than presenting the intercept as pure extraction cost.
+
+The widened AVX-512 local H/V windows keep the same tree and pass the seven
+Rev5 library tests. In 30 interleaved rounds, 1/4 MP single-thread score
+changes 26.59/101.23 ms → 24.55/91.76 ms; maps change
+54.16/213.72 ms → 52.01/200.55 ms. This is provisional (every round marked
+noisy), but the change is retained. An explicit vector update of basic f64
+pool lanes regresses v4x 4 MP score by 6.80%; reverted. A two-vector unroll
+of plain V blur regresses v4x 4 MP score by 11.34%; reverted. Correct v3
+cap is `ZENSIM_MAX_TIER=v3`; the first pool trial's v3-labelled rows had no
+cap and are native repeats. `/var/tmp/rev5/trials/poolvec-v3/` is the actual
+v3 rerun. Unchanged v3 code in the AVX-512-only unroll trial still varies
+by as much as 3.59% in one map comparison, illustrating the noise limit.
+
+Prepared-map profiling (`perf-wide-map.data`, 3,000 samples) identifies
+13.05% self time in retention and another 7.80% in fmaf, chiefly retention.
+The retained basic SD plane now uses the existing vector SSIM expression,
+with correctly rounded scalar tails. The complete production-scope bake
+test compares features and map densities across every token permutation,
+and passes. Thirty-round provisional v4x maps improve 50.07/192.99 ms →
+41.48/163.29 ms (17.17%/15.39% at 1/4 MP); score is effectively unchanged.

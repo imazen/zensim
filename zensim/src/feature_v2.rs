@@ -11813,17 +11813,16 @@ impl FoldRetention {
         p.act[out..out + n].copy_from_slice(&scr.activity[off..off + n]);
         if self.retain_basic {
             let sd = &mut self.basic_sd[scale][ch][out..out + n];
-            for (i, value) in sd.iter_mut().enumerate() {
-                let j = out + i;
-                *value = crate::ssim_form::ssim_direct_raw_scalar(
-                    crate::ssim_form::SsimLumaForm::Clamp,
-                    p.mu1[j],
-                    p.mu2[j],
-                    p.ssq[j],
-                    p.s12[j],
-                )
-                .max(0.0);
-            }
+            incant!(
+                retain_basic_sd(
+                    &p.mu1[out..out + n],
+                    &p.mu2[out..out + n],
+                    &p.ssq[out..out + n],
+                    &p.s12[out..out + n],
+                    sd
+                ),
+                [v4x, v4, v3, scalar]
+            );
         }
         if want_bs2 {
             p.bs2[out..out + n].copy_from_slice(&scr.bs2[off..off + n]);
@@ -11834,6 +11833,61 @@ impl FoldRetention {
             p.bs2[out..out + n].fill(0.0);
         }
     }
+}
+
+// Retain the basic direct-error plane with the same fused expression as its
+// fold owner. Setup and correctly rounded scalar tails remain outside SIMD.
+fn retain_basic_sd_scalar(
+    _token: archmage::ScalarToken,
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    err: &[f32],
+    sd: &mut [f32],
+) {
+    for (i, value) in sd.iter_mut().enumerate() {
+        *value = crate::ssim_form::ssim_direct_raw_scalar(
+            crate::ssim_form::SsimLumaForm::Clamp,
+            mu1[i],
+            mu2[i],
+            ssq[i],
+            err[i],
+        )
+        .max(0.0);
+    }
+}
+#[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
+fn retain_basic_sd(
+    token: Token,
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    err: &[f32],
+    sd: &mut [f32],
+) {
+    let form = crate::ssim_form::SsimLumaForm::Clamp;
+    let splats = crate::ssim_form::SsimSplats8::new(token, form);
+    let zero = f32x8::zero(token);
+    let mut i = 0;
+    while i + 8 <= sd.len() {
+        let m1 = f32x8::load(token, mu1[i..i + 8].try_into().unwrap());
+        let m2 = f32x8::load(token, mu2[i..i + 8].try_into().unwrap());
+        let sq = f32x8::load(token, ssq[i..i + 8].try_into().unwrap());
+        let er = f32x8::load(token, err[i..i + 8].try_into().unwrap());
+        splats
+            .direct(m1, m2, sq, er)
+            .max(zero)
+            .store((&mut sd[i..i + 8]).try_into().unwrap());
+        i += 8;
+    }
+    retain_basic_sd_scalar(
+        archmage::ScalarToken,
+        &mu1[i..],
+        &mu2[i..],
+        &ssq[i..],
+        &err[i..],
+        &mut sd[i..],
+    );
 }
 
 /// One (strip, channel)'s wide input windows: zero-copy slices of the
