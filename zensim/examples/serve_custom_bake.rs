@@ -36,6 +36,16 @@
 //!
 //! A REFUSED row is the contract failing, not the tool: every bake whose read
 //! set is registered feature ids at a supported revision must serve.
+//!
+//! ## Pairs mode — score a table of pairs with several bakes
+//!
+//! ```sh
+//! cargo run --release --example serve_custom_bake \
+//!   --features custom-profiles,candidate-profiles \
+//!   -- --pairs <pairs.tsv> [--shard i/n] <bake.bin>...
+//! ```
+//!
+//! Same `BakeScorer::compute` entry; one output row per `(ref_path, dist_path)`.
 
 use zensim::{BakeScorer, RgbSlice};
 
@@ -210,10 +220,82 @@ fn census(args: &[String]) {
     }
 }
 
+/// `--pairs <pairs.tsv> [--shard i/n] <bake>...`: score every `(ref_path, dist_path)` row of a TSV
+/// (header names both columns; extra columns are ignored, so a `zenmetrics sweep --pairs-tsv` file
+/// works once its paths resolve on this host) with each bake through `BakeScorer::compute`. Prints
+/// one TSV row per pair: `ref_path dist_path <score per bake>`; a refusal is a hard error. `--shard
+/// i/n` keeps rows with `index % n == i` so several processes can split one table.
+fn pairs(args: &[String]) {
+    let table = args.first().expect("--pairs <pairs.tsv> [--shard i/n] <bake>...");
+    let mut rest = &args[1..];
+    let (shard, nshards) = if rest.first().map(String::as_str) == Some("--shard") {
+        let (i, n) = rest[1].split_once('/').expect("--shard i/n");
+        rest = &rest[2..];
+        (i.parse::<usize>().expect("shard index"), n.parse::<usize>().expect("shard count"))
+    } else {
+        (0, 1)
+    };
+    assert!(shard < nshards && !rest.is_empty(), "need a valid shard and at least one bake");
+    let models: Vec<zenpredict::Model> = rest
+        .iter()
+        .map(|p| {
+            let bytes = std::fs::read(p).unwrap_or_else(|e| panic!("read {p}: {e}"));
+            // The model borrows its bytes for the life of the process.
+            zenpredict::Model::from_bytes(Box::leak(bytes.into_boxed_slice()))
+                .unwrap_or_else(|e| panic!("parse {p}: {e:?}"))
+        })
+        .collect();
+    let mut scorers: Vec<BakeScorer> = models
+        .iter()
+        .zip(rest)
+        .map(|(m, p)| BakeScorer::new(m).unwrap_or_else(|e| panic!("bake {p}: {e}")))
+        .collect();
+    let text = std::fs::read_to_string(table).unwrap_or_else(|e| panic!("read {table}: {e}"));
+    let mut lines = text.lines();
+    let header: Vec<&str> = lines.next().expect("empty pairs table").split('\t').collect();
+    let col = |name: &str| {
+        header
+            .iter()
+            .position(|h| *h == name)
+            .unwrap_or_else(|| panic!("pairs table has no {name} column"))
+    };
+    let (rc, dc) = (col("ref_path"), col("dist_path"));
+    println!("ref_path\tdist_path\t{}", rest.join("\t"));
+    let mut cached: Option<(String, Vec<[u8; 3]>, u32, u32)> = None;
+    for (i, line) in lines.enumerate() {
+        if i % nshards != shard || line.is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split('\t').collect();
+        let (rp, dp) = (f[rc], f[dc]);
+        if cached.as_ref().is_none_or(|c| c.0 != rp) {
+            let (r, w, h) = load_rgb(rp);
+            cached = Some((rp.to_string(), r, w, h));
+        }
+        let (_, r, w, h) = cached.as_ref().expect("reference loaded");
+        let (d, dw, dh) = load_rgb(dp);
+        assert_eq!((*w, *h), (dw, dh), "ref and dist must share dimensions: {rp} {dp}");
+        let rs = RgbSlice::new(r, *w as usize, *h as usize);
+        let ds = RgbSlice::new(&d, *w as usize, *h as usize);
+        let scores: Vec<String> = scorers
+            .iter_mut()
+            .map(|z| match z.compute(&rs, &ds, None) {
+                Ok(res) => format!("{:.9}", res.score()),
+                Err(e) => panic!("REFUSED {rp} {dp}: {e:?}"),
+            })
+            .collect();
+        println!("{rp}\t{dp}\t{}", scores.join("\t"));
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--census") {
         census(&args[1..]);
+        return;
+    }
+    if args.first().map(String::as_str) == Some("--pairs") {
+        pairs(&args[1..]);
         return;
     }
     let mut a = args.into_iter();
