@@ -5094,6 +5094,48 @@ fn audit_rev5_moments(
     );
 }
 
+/// Production dense evaluator for exact local-refinement strip replacement.
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn refinement_dense_strip(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+) -> DenseAccum {
+    dense_block_kernel(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+        None,
+    )
+}
+
+/// Production gradient evaluator with its one-row halo contract.
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub(crate) fn refinement_gradient_strip(
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+) -> GradientAccum {
+    gradient_block_kernel(src, dst, activity, width, height, None, None, None, false)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel(
     src: &[f32],
@@ -11473,6 +11515,57 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
+    // Rev5 serves the bounded-layout API through the canonical fold owner;
+    // preserve its 348-slot layout rather than running the historical materialized kernels.
+    if crate::ssim_form::effective_revision(toggles.formula_revision) >= FormulaRevision::Rev5 {
+        validate_wide_revision(toggles)?;
+        crate::metric::reject_hdr_input(distorted)?;
+        crate::metric::check_within_max_pixels(distorted.width(), distorted.height(), max_pixels)?;
+        if (distorted.width(), distorted.height()) != (prepared.orig_width, prepared.orig_height) {
+            return Err(ZensimError::DimensionMismatch);
+        }
+        let run = |image: &_, scratch: &mut V2Scratch| {
+            foldapp_streaming_walk(
+                image,
+                image,
+                parallel,
+                toggles,
+                crate::feature_v2_stream::FrontEnd::Sdr,
+                scratch,
+                FoldWalkExtras {
+                    ref_planes: Some(&prepared.scales),
+                    ..Default::default()
+                },
+            )
+        };
+        // The two image types differ on the padded branch, so invoke the
+        // generic owner directly there.
+        let folded = if distorted.width() < crate::metric::MIN_PYRAMID_DIM
+            || distorted.height() < crate::metric::MIN_PYRAMID_DIM
+        {
+            let image = crate::metric::reflect_pad_to_min(distorted);
+            foldapp_streaming_walk(
+                &image,
+                &image,
+                parallel,
+                toggles,
+                crate::feature_v2_stream::FrontEnd::Sdr,
+                scratch,
+                FoldWalkExtras {
+                    ref_planes: Some(&prepared.scales),
+                    ..Default::default()
+                },
+            )
+        } else {
+            run(distorted, scratch)
+        };
+        return Ok(ZensimV2Result {
+            features: folded.features()[372..720].to_vec(),
+            n_scales: crate::NUM_SCALES,
+            v1_pools: V1PoolsMode::Off,
+            regime: FeatureRegime::V2Bounded,
+        });
+    }
     // REV4SERVE: the V2Bounded walk is NOT the canonical Rev4 owner — its
     // v1 moments come from this walk's own H-blurred planes (parity-gated
     // against the frozen v1 path, never byte-frozen; measured divergent
@@ -13268,7 +13361,10 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     plan: Option<&crate::feature_plan::Plan>,
 ) -> Option<(Vec<f64>, [f64; 3])> {
     if precomputed.sampling.is_some()
-        || plan.is_some_and(|p| p.compute.sampling.is_some() || p.compute.v2_blocks)
+        || plan.is_some_and(|p| {
+            p.compute.sampling.is_some()
+                || (p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
+        })
         || distorted.is_hdr()
     {
         return None;

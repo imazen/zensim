@@ -578,3 +578,18 @@ and [evaluation contract](docs/FULL_EVAL.md). The `serve_custom_bake` example
 loads models without leaked bytes or a static loader. Formula revision is
 validated; candidate pixel scoring refuses if the process's SSIM luminance
 form differs from the bake's revision (`ZENSIM_FORMULA_REV`).
+
+`ZENSIM_FORMULA_REV=5` selects the `localwin` revision for bakes and research
+requests reading only basic (f0–155), peaks (f156–227), and v2 (f372–719).
+Requests for other families are refused. Rev5 uses local f32 blur windows,
+sixteen fixed accumulator lanes, fused expressions, and stable central moments.
+Identical inputs retain computed reference-only features while difference and
+similarity slots have exact identities. Prepared SDR and HDR steering support Rev5.
+`ZENSIM_NEIGHBOUR_EXACT=1` enables exact coarse-scale v2 refinement through local
+window replay and ordered stable-moment merges. Sampled SDR bakes use canonical
+resize reductions; the strip and bounded-v2 entries route through the canonical
+owner. See the
+[Rev5 contract](benchmarks/rev5_spec_2026-10-04.md) and
+[implementation gates](benchmarks/rev5_WORKLOG.md) and
+[entry/refinement panel](benchmarks/rev5_entries_2026-10-04.md). Rev5 model retraining and
+quiet-box performance qualification remain separate follow-up work.

@@ -1625,6 +1625,13 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
             plan.n_inputs_after
         ));
     }
+    // Pruning speaks caller positions; a dense input already maps those
+    // positions to canonical feature IDs. Preserve that map on repeated densify.
+    let input_ids = zensim::declared_feature_ids(&model)
+        .map(|ids| ids.into_iter().map(usize::from).collect::<Vec<_>>())
+        .unwrap_or_else(|| (0..model.caller_input_width()).collect());
+    let kept_ids: Vec<usize> = kept.iter().map(|&pos| input_ids[pos]).collect();
+    let probe_width = identity_row_width(&model);
     let caller_before = model.caller_input_width();
     let drops_before = model
         .feature_transforms()
@@ -1641,8 +1648,8 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
         layers[0].in_dim,
         plan.n_inputs_after,
         kept.len(),
-        kept.first().copied().unwrap_or(0),
-        kept.last().copied().unwrap_or(0),
+        kept_ids.first().copied().unwrap_or(0),
+        kept_ids.last().copied().unwrap_or(0),
     );
     if kept.is_empty() {
         return Err("densify: the bake reads NO input — refusing to emit".into());
@@ -1667,7 +1674,12 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     set_meta_utf8(
         &mut md,
         zensim::ZENTRAIN_FEATURE_IDS_KEY,
-        prune::feature_ids_metadata(&plan).into_bytes(),
+        kept_ids
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .into_bytes(),
     );
 
     let out_bytes = emit_packed(
@@ -1693,7 +1705,7 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     // semantics as of increment B-2: the densified bake declares its ids and
     // `bake_runtime::CallerGather` gathers them out of the caller's
     // identity-laid-out vector, so pre-gathering here would double-gather.
-    let probes = densify_probe_rows(caller_before, a.gate_rows);
+    let probes = densify_probe_rows(probe_width, a.gate_rows);
     let before = forward_scored_raw(&bytes, &probes)?;
     // ...EXCEPT when the kept ids are a CONTIGUOUS PREFIX `0..K-1`. Then the
     // densified bake's declared layout is the IDENTITY layout,
@@ -1710,7 +1722,7 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     let after_probes: Vec<Vec<f64>> = if dense_is_identity_layout {
         probes
             .iter()
-            .map(|row| kept.iter().map(|&i| row[i]).collect())
+            .map(|row| kept_ids.iter().map(|&i| row[i]).collect())
             .collect()
     } else {
         probes.clone()
@@ -1724,8 +1736,8 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     // This isolates "the columns are dead" from "the probe happened to avoid
     // the difference", which a same-input comparison alone cannot do.
     let keep_mask = {
-        let mut m = vec![false; caller_before];
-        for &i in &kept {
+        let mut m = vec![false; probe_width];
+        for &i in &kept_ids {
             m[i] = true;
         }
         m
@@ -5366,6 +5378,31 @@ mod tests {
             );
             assert_eq!(m.n_inputs(), live.len(), "{label}: densified n_inputs");
         }
+    }
+
+    #[test]
+    fn densify_preserves_an_existing_dense_feature_id_map() {
+        let dir = std::env::temp_dir().join(format!("rev5-dense-map-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = zenpredict_bake::append_metadata_utf8(
+            &prefix_bake(4, &[0, 2]),
+            zensim::ZENTRAIN_FEATURE_IDS_KEY,
+            "13 459 460 700",
+        )
+        .unwrap();
+        let input = dir.join("input.bin");
+        let output = dir.join("output.bin");
+        std::fs::write(&input, bytes).unwrap();
+        cmd_densify(&DensifyArgs {
+            input,
+            out: Some(output.clone()),
+            dry_run: false,
+            gate_rows: 64,
+        })
+        .unwrap();
+        let dense = Model::from_bytes(&std::fs::read(output).unwrap()).unwrap();
+        assert_eq!(zensim::declared_feature_ids(&dense), Some(vec![13, 460]));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn assert_strictly_monotone(xs: &[f64], ys: &[f64]) {

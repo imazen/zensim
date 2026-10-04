@@ -833,13 +833,31 @@ impl crate::metric::Zensim {
         // metric. Two paths scoring the same pair differently is a bug per the
         // parity contract; no-op for linear-weight legacy profiles
         // (`mlp_bytes: None` early-returns).
-        crate::metric::apply_mlp_scoring_with_codec(
-            &mut result,
-            params,
-            width as u32,
-            height as u32,
-            None,
-        )?;
+        #[cfg(feature = "feature-regime-v2")]
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks)
+        {
+            // The legacy weighted map still has its documented basic-plane
+            // meaning; the complete candidate score and vector come from its
+            // canonical reference-fed fold, including every v2 read.
+            result = self.compute_with_ref(precomputed, distorted)?;
+        }
+        #[cfg(feature = "feature-regime-v2")]
+        let already_scored = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks);
+        #[cfg(not(feature = "feature-regime-v2"))]
+        let already_scored = false;
+        if !already_scored {
+            crate::metric::apply_mlp_scoring_with_codec(
+                &mut result,
+                params,
+                width as u32,
+                height as u32,
+                None,
+            )?;
+        }
 
         // `precomputed.scales[0]` is `(padded_width, comp_h)`. For a ≥64px
         // distorted `comp_h == height` (original flow: trim to logical width,
@@ -1014,13 +1032,50 @@ impl crate::metric::Zensim {
         let mut result = result.with_profile(self.profile());
         // Same real-scoring fix as `compute_with_ref_and_diffmap` (2026-07-18):
         // apply the profile's bake forward + spline; no-op for legacy profiles.
-        crate::metric::apply_mlp_scoring_with_codec(
-            &mut result,
-            params,
-            width as u32,
-            height as u32,
-            None,
-        )?;
+        #[cfg(feature = "feature-regime-v2")]
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks)
+        {
+            // This legacy planar entry has no ImageSource view. Preserve its
+            // explicit linear-sRGB/opaque semantics for the canonical owner.
+            let pixels: Vec<[f32; 4]> = (0..height)
+                .flat_map(|y| {
+                    (0..width).map(move |x| {
+                        [
+                            planes[0][y * stride + x],
+                            planes[1][y * stride + x],
+                            planes[2][y * stride + x],
+                            1.0,
+                        ]
+                    })
+                })
+                .collect();
+            let image = crate::source::StridedBytes::with_alpha_mode(
+                bytemuck::cast_slice(&pixels),
+                width,
+                height,
+                width * 16,
+                crate::source::PixelFormat::LinearF32Rgba,
+                crate::source::AlphaMode::Opaque,
+            );
+            result = self.compute_with_ref(precomputed, &image)?;
+        }
+        #[cfg(feature = "feature-regime-v2")]
+        let already_scored = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::score_plan(params, &config, true)
+                .is_some_and(|p| p.compute.v2_blocks);
+        #[cfg(not(feature = "feature-regime-v2"))]
+        let already_scored = false;
+        if !already_scored {
+            crate::metric::apply_mlp_scoring_with_codec(
+                &mut result,
+                params,
+                width as u32,
+                height as u32,
+                None,
+            )?;
+        }
 
         // Mask + sqrt at the compute dims, then trim to the original (same
         // padded-vs-original branch as the RGB `compute_with_ref_and_diffmap`).

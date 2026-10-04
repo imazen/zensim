@@ -1,5 +1,21 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**October 4, Rev5 entry/refinement engineering audit:**
+[Serving report](../benchmarks/rev5_entries_2026-10-04.md) records the owner-directed
+48-case KADID local-refinement panel: I01/I21/I41/I61, JPEG distortion 10 at
+levels 03/05, seeds 5101/5103/5107, by_v2fy and v2basic. These are repeated
+engineering diagnostics against frozen model weights; the six prior-revision
+bakes are explicitly restamped for Rev5 timing/serving experiments. They are
+not newly trained Rev5 models, quality qualification, or training labels.
+Corpus files remain read-only under `/mnt/v/dataset/kadid10k/images`.
+The CLI smoke fixture is twelve independently audited Rev5 feature vectors
+with synthetic ordered targets and engineering row names, generated under
+`/var/tmp/rev5/owner-tool-tests2`. It is never admitted for fitting or human
+quality assessment; its Parquet uses Zstd and preserves the basic/peaks/v2
+canonical IDs during densification. Source paths, formulas, binary/model/input
+hashes, exact environment, and raw result locations are retained in the report.
+No old feature table is relabeled, merged, or overwritten.
+
 **September 15, frozen recovery and corrected HDR:**
 [Complete results](../benchmarks/recovery_completion_2026-09-15.md). Ten Rust
 TRAIN-only fits, two fixed five-member compositions; complete full-composite,

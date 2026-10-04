@@ -130,7 +130,47 @@ impl Sampling {
         w: usize,
         h: usize,
         parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> XybPyramidLevel {
+        if revision >= crate::feature_defs::FormulaRevision::Rev5 {
+            // Keep the established zenresize coefficients, but give Rev5 one
+            // tier-independent ordered f64 reduction per output, rounded to f32
+            // after each separable axis. Historical SIMD resize is unchanged.
+            let details = InterpolationDetails::create(self.filter());
+            let x = F32WeightTable::new(previous.1 as u32, w as u32, &details);
+            let y = F32WeightTable::new(previous.2 as u32, h as u32, &details);
+            let planes = core::array::from_fn(|ch| {
+                let mut horizontal = vec![0.0f32; w * previous.2];
+                for row in 0..previous.2 {
+                    for col in 0..w {
+                        let mut sum = 0.0f64;
+                        for (j, &weight) in x.weights(col).iter().enumerate() {
+                            if weight != 0.0 {
+                                sum += f64::from(
+                                    previous.0[ch][row * previous.1 + x.left[col] as usize + j],
+                                ) * f64::from(weight);
+                            }
+                        }
+                        horizontal[row * w + col] = sum as f32;
+                    }
+                }
+                let mut out = vec![0.0f32; w * h];
+                for row in 0..h {
+                    for col in 0..w {
+                        let mut sum = 0.0f64;
+                        for (j, &weight) in y.weights(row).iter().enumerate() {
+                            if weight != 0.0 {
+                                sum += f64::from(horizontal[(y.left[row] as usize + j) * w + col])
+                                    * f64::from(weight);
+                            }
+                        }
+                        out[row * w + col] = sum as f32;
+                    }
+                }
+                out
+            });
+            return (planes, w, h);
+        }
         let config =
             ResizeConfig::builder(previous.1 as u32, previous.2 as u32, w as u32, h as u32)
                 .format(PixelDescriptor::GRAYF32_LINEAR)
@@ -178,7 +218,7 @@ impl Sampling {
         if self.is_direct() {
             let mut levels: Vec<_> = dims[1..]
                 .iter()
-                .map(|&(w, h)| self.resize(&original, w, h, parallel))
+                .map(|&(w, h)| self.resize(&original, w, h, parallel, revision))
                 .collect();
             levels.insert(0, original);
             return levels;
@@ -186,11 +226,11 @@ impl Sampling {
         let first = if self.keep_y {
             original
         } else {
-            self.resize(&original, dims[0].0, dims[0].1, parallel)
+            self.resize(&original, dims[0].0, dims[0].1, parallel, revision)
         };
         let mut levels = vec![first];
         for &(w, h) in &dims[1..] {
-            levels.push(self.resize(levels.last().unwrap(), w, h, parallel));
+            levels.push(self.resize(levels.last().unwrap(), w, h, parallel, revision));
         }
         levels
     }

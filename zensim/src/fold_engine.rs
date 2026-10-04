@@ -41,9 +41,9 @@
 //!   different pyramid. At 4, `min_pyramid_dim_for_scales(4) ==
 //!   MIN_PYRAMID_DIM == 64`, so the two paths' reflect-pad decisions coincide
 //!   exactly.
-//! * **Declared-HDR / PU-linear input.** `compute_pu_linear*` runs the PU
-//!   front-end; the fold has a PU front-end too, but its mean-offset path is
-//!   not wired, so those entries keep buffered.
+//! * **Historical declared-HDR / PU-linear input.** Revisions 1–4 keep
+//!   buffered. Rev5 `compute_pu_linear*` uses the PU fold with the declared
+//!   bake plan and the revision's zero mean-offset metadata.
 //! * **Non-default blur config.** The fold implements `blur_radius = 5`,
 //!   `blur_passes = 1` — every shipped profile's values. Anything else falls
 //!   back.
@@ -236,15 +236,40 @@ pub(crate) fn compute_fold_backed_with_ref(
     scratch: &mut V2Scratch,
     pool_mode: Option<crate::feature_v2::V1PoolsMode>,
 ) -> Option<ZensimResult> {
+    compute_fold_backed_with_ref_plan(
+        precomputed,
+        distorted,
+        config,
+        weights,
+        scratch,
+        pool_mode,
+        None,
+    )
+}
+
+pub(crate) fn compute_fold_backed_with_ref_plan(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    scratch: &mut V2Scratch,
+    pool_mode: Option<crate::feature_v2::V1PoolsMode>,
+    plan: Option<&crate::feature_plan::Plan>,
+) -> Option<ZensimResult> {
     let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_with_ref_impl(
         precomputed,
         distorted,
         config.allow_multithreading,
         scratch,
         pool_mode,
-        None,
+        plan,
     )?;
-    features.truncate(v1_feature_width(config));
+    if let Some(plan) = plan {
+        plan.check_emit_covered(features.len()).ok()?;
+        features.resize(plan.walk_width().max(v1_feature_width(config)), 0.0);
+    } else {
+        features.truncate(v1_feature_width(config));
+    }
     let (score, raw_distance) =
         crate::metric::score_v1_layout_features(&mut features, weights, config, config.num_scales);
     Some(ZensimResult::new(

@@ -321,3 +321,132 @@ three-attempt stop rule is provisional, not quiet-box certified. Raw rounds
 and flags are under `/var/tmp/rev5/trials/`; score profiling before the last
 trials is `/var/tmp/rev5/perf-tapstream-score.data` (2,000 samples: dense
 34.59%, V 13.95%, XYB 12.50%, fused H 9.88%, basic 7.72%, gradients 7.05%).
+
+### Final correctness and build gates (2026-10-04)
+
+After the retained H-pair rewrite, the exact required release suite passes
+(329.10 s), and all-features library passes 635 tests / 13 ignored
+(92.59 s including build). CI-exact `just clippy` passes (3.98 s).
+All 27 permutation entries / 26 unique feature sets pass both library
+clippy and tests: 54 successful checks (358.09 s). `cargo fmt --all --check`,
+`just lint-scripts` (810 scripts), `just rev4serve-gate` (real mounted
+corpus/bake, 37.27 s), and `just api-doc-check` (4.24 s) all pass.
+Machine-readable checks: `/var/tmp/rev5/final-gates/results.json` and
+`permutation-summary.json`; command logs are in that directory.
+
+Final cross-target vector comparison and F2 identity pass on i686, WASM
+SIMD128 and reachable NEON. Initial WASM runner lacked environment
+forwarding, and the broad NEON filter selected the native self-reexec
+comparison test; those invocations failed for runner setup, then exact
+parity/identity tests passed with explicit runners/test names. WASM uses
+1.98.1 and a `/var/tmp/rev5` preopen. NEON identity exercises all twelve
+geometries and token permutations under QEMU (106.25 s); full-vector NEON
+parity takes 12.80 s. Logs: `/var/tmp/rev5/final-{i686-gates,wasm-parity-correct,
+wasm-identity-correct,aarch64-parity-correct,aarch64-identity-correct}.log`.
+
+The final native auditor has 48 full vectors per revision on the twelve
+registered pairs. Rev1–Rev4 have zero differences against the frozen
+compatible audit (192 vectors, transitively identical to the independent
+historical baselines described above). Rev5 has zero tier differences and
+zero differences against its previous twelve-pair accuracy capture. All
+264 independent two-pass moment checks pass again, maximum relative
+8.665432e-14. `/var/tmp/rev5/final-audits/{results.json,moments.log}`.
+
+The final by_v2fy census passes every combination of v4x/v3, one/eight
+threads, 1/4 MP, score/prepared map (16 configurations, two post-warmup
+passes each). At 1 MP: 29 cells, 145 V planes, 29 activity chains. At 4 MP:
+58 cells, 290 V planes, 58 activity chains. In every warm call peaks,
+scale-0 X/B consumers/stored rows and overwritten-scratch clear elements
+are zero. `/var/tmp/rev5/final-census/results.json`.
+
+All nine preserved implementation snapshots compiled with the current
+benchmark harness in the existing checkout (258 s); source was restored
+before the final gates. No other repository or worktree was modified.
+Intermediate Rev5 states are an engineering ladder, not trained-quality
+comparisons. Final speed matrix and ladder follow without overlapping this
+lane's builds/tests; the unrelated exhaustive job remains running.
+
+
+## 2026-10-04 — Owner directive: complete Rev5 serving and exact refinement
+
+The 17:40 UTC owner directive supersedes the allowed blanket refusal. Rev5
+local replay now evaluates the finite output rectangle + five-pixel blur
+halo, with an additional input halo, true image reflect-101, and production
+pair-tree H/V kernels. No running-sum residue or full-width H blur is needed.
+Affected production strip partials are replaced and merged in their original
+order to preserve sixteen-lane pools and stable central moments; the gradient
+halo and cross-scale edge-width chain stay complete. Strips outside the cone
+are reused. Candidate values are spliced only within the changed rectangle,
+not gathered pixel-by-pixel over untouched strip rows. Unretained coarse
+planes are rebuilt with the canonical downscale; unretained HDR channels use
+the PU converter. Revisions 1–4 retain historical recurrence/delta arithmetic.
+
+New native Rev5 goldens cover textured and JPEG cases, multiple strips,
+unaligned and image-edge rectangles, explicit non-reference candidates,
+exact-zero no-op deltas, coarse-Y-only and scale-0 channel reconstruction.
+The Rev5 feature-delta bar is 1e-10 + |full delta|*1e-6. The focused suite
+proved the local/HDR/sampling routes; failures in custom-profile cached,
+extended, and training entries identified real missing-v2 paths and were fixed.
+Custom profiles now select their canonical complete Rev5 plan regardless of
+the legacy Buffered flag. Rev5 identity is computed before score=100 is
+marked. Raw interleaved/planar/extended PU APIs adapt absolute linear-sRGB nits
+to the typed HDR fold; legacy raw entries materialize RGBA, while typed HDR
+BakeScorer entries remain row streamed. The planar stride guard prevents
+out-of-bounds indexing. Rev5 strip geometry uses the fixed canonical 128-row
+fold tree. Generic basic-weight diffmaps retain their map semantics and use
+the complete fold for their score/vector.
+
+Sampling SDR uses existing F32WeightTable coefficients with ordered f64 H/V
+reductions and f32 rounding between axes, with four contracts tested across
+every native token permutation. Supported corruption companions keep the
+complete serving plan during temporary head detachment (reference-only f393
+was previously lost). Validation manifests now accept revisions 1–5. The CLI
+entry tests caught a densifier bug that remapped already-dense canonical IDs
+as positional IDs; the existing dense map is now preserved through pruning.
+Six CLI tests pass, including exact verdict-row equality before/after
+bake densification and unchanged retained Parquet columns.
+
+Query diagnostic, same 1MP fixture and pinned CPU 8, snapshot heap held:
+Rev3/Rev4 54,067,200 bytes, Rev5 54,083,664 bytes. Rev3: full walk 131.2 ms,
+8x8 6646.7 us, 32x32 8362.7 us. Rev4: 137.8 ms, 2278.9 us, 2583.8 us.
+Rev5: 75.1 ms, 2023.8 us, 2228.7 us. Earlier untightened Rev5 replay measured
+6624.3/8742.1 us; finite XY gathers and bounded candidate splicing removed
+that cost. Logs `/var/tmp/rev5/owner-query-cost`; these diagnostics overlap
+other gates and the unrelated exhaustive f32 job, so they are not certified
+quiet-box speed claims.
+
+
+### Final owner correctness gates
+
+Fresh full release passes: 629 library tests, 13 ignored, all integration/doc
+targets green. Latest all-features library passes 645, 13 ignored, including
+new Linear/PQ/HLG and wide-layout entry tests. CI-exact Clippy passes; all 27
+feature permutations pass both Clippy and tests (54 checks). Fmt, script lint,
+rev4serve, API snapshot, auditor/example/benchmark builds all pass. Logs:
+`/var/tmp/rev5/owner-final-gates2`, `owner-final-extra`, `owner-permutations2`.
+
+WASM SIMD128, i686 scalar, AArch64/QEMU each pass seven checks (21 total):
+full-vector comparison against the frozen native file, identity, custom cached/
+strip/diffmap, raw PU HDR, sampling, bounded/prepared/streaming-v2, and exact
+local goldens. Logs `/var/tmp/rev5/owner-cross`. Frozen native reference file
+was not overwritten. Native audit rerun: 48 files/revision, Rev1–4 all 192
+unchanged, Rev5 unchanged versus final arithmetic and tier-identical. 264
+independent two-pass moment checks max relative 8.665431753e-14. Historical
+Rev3/Rev4 owner/broad steering comparisons both repeat with zero numerical
+JSON differences. Logs `owner-final-audits`, `owner-historical-steering`.
+
+The final halo-tightened 48-case env-on panel repeats exactly every score,
+M2, M3a, M3f and coverage result. by_v2fy median M3f 0.9829268514320555
+(level 03), 0.9654331256288375 (05); v2basic 0.9317379232845737/0.900805409411156.
+All cases have complete refinement and 3072 queries. Complete 48-row table,
+source/model/binary hashes, entry matrix and limitations are recorded in
+`benchmarks/rev5_entries_2026-10-04.md`. This is frozen/restamped-weight
+engineering serving evidence, not Rev5 training or quality qualification.
+
+Final executable work census repeats all 16 configurations green. All six
+CLI entries repeat green with final binaries; every per-row verdict byte is
+unchanged after densifying an already-dense bake. Root fixture/table hashes
+and synthetic-label provenance are recorded in the entry report. Initial
+harness command named a nonexistent densify_feature_tables binary and stopped;
+corrected rescore_parquet build and tests pass (`owner-evidence-rest`). The
+pre-fix failed logs remain; they are not green gate evidence.

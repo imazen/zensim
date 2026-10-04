@@ -5634,8 +5634,29 @@ impl Fused944Session {
             self.basic.result = Some(result);
             return Ok((features, mean_offset));
         }
-        if encoding.is_some() {
-            return Err(ZensimError::HdrInputRequiresPuPath);
+        if let Some(encoding) = encoding {
+            let mut mean = crate::feature_v2::MeanOffsetRows::new(
+                precomputed.scale(0).1,
+                precomputed.scale(0).2,
+            );
+            let result = crate::feature_v2::compute_folded720_hdr_streaming_extras(
+                source,
+                distorted,
+                encoding,
+                Some(120_000_000),
+                parallel,
+                plan.toggles(),
+                &mut self.scratch,
+                crate::feature_v2::FoldWalkExtras {
+                    compute: Some(plan.compute),
+                    retention: Some(&mut self.retention),
+                    mean_offset: Some(&mut mean),
+                    ref_planes: Some(&precomputed.scales),
+                    #[cfg(feature = "training")]
+                    dvifm: None,
+                },
+            )?;
+            return Ok((result.into_features(), mean.finish()));
         }
         if plan.toggles().v1_only
             && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off

@@ -116,8 +116,8 @@ impl<'a> BakeScorer<'a> {
     }
 
     /// Bind native HDR input and viewing parameters for repeated spatial steering.
-    /// Uses the same basic/peak features, inference and map composition as SDR; bakes reading v2 features are
-    /// refused here (SDR only).
+    /// Rev5 supports basic/peak/v2 features through the same canonical PU fold
+    /// used by `compute_hdr`; earlier revisions support basic/peak reads only.
     /// The encoding applies to both images; decoded primaries remain authoritative.
     ///
     /// # Errors
@@ -148,7 +148,12 @@ impl<'a> BakeScorer<'a> {
         // The complete served read set (active ensemble members and corruption companions included): a map
         // that dropped any scored term would be fabricated, so every read must have a complete integrand.
         let reads = self.consumed_feature_ids()?;
-        steering_support(&reads, encoding.is_some())?;
+        steering_support(
+            &reads,
+            encoding.is_some()
+                && self.plan()?.compute.formula_revision
+                    < crate::feature_defs::FormulaRevision::Rev5,
+        )?;
         let reference = if let Some(encoding) = encoding {
             self.check_pixel_revision()?;
             if self.plan()?.compute.sampling.is_some() {
@@ -910,12 +915,14 @@ impl<'a> BakeScorer<'a> {
             // refusal) and a CORRUPTION COMPANION, whose reads are not part
             // of the bake's declared-id plan coverage.
             if revision >= crate::feature_defs::FormulaRevision::Rev4 {
-                if plan.compute.sampling.is_some() {
+                if revision == crate::feature_defs::FormulaRevision::Rev4
+                    && plan.compute.sampling.is_some()
+                {
                     return Err(ZensimError::ModelLoadFailed {
                         reason: "formula revisions 4 and later do not serve sampled bake plans: the subset-extraction front end is not proven tier-canonical",
                     });
                 }
-                if !no_companion {
+                if revision == crate::feature_defs::FormulaRevision::Rev4 && !no_companion {
                     return Err(ZensimError::ModelLoadFailed {
                         reason: "formula revisions 4 and later do not serve bakes with a corruption companion: companion read coverage is not part of the canonical fold plan",
                     });
@@ -1222,6 +1229,7 @@ impl<'a> BakeScorer<'a> {
             session,
             bin,
             None,
+            None,
         )
     }
 
@@ -1236,6 +1244,7 @@ impl<'a> BakeScorer<'a> {
         session: &mut crate::Fused944Session,
         bin: usize,
         encoding: Option<crate::feature_v2::HdrEncoding>,
+        serving_plan: Option<crate::feature_plan::Plan>,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
         if bin == 0 {
             return Err(ZensimError::ModelForwardFailed {
@@ -1250,7 +1259,10 @@ impl<'a> BakeScorer<'a> {
         }
         validate_ref_dimensions(precomputed, distorted)?;
         check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
-        let plan = self.plan()?;
+        let plan = match serving_plan {
+            Some(plan) => plan,
+            None => self.plan()?,
+        };
         if precomputed.sampling != plan.compute.sampling {
             return Err(ZensimError::ModelLoadFailed {
                 reason: "reference cache sampling contract differs from model",
@@ -1262,7 +1274,9 @@ impl<'a> BakeScorer<'a> {
         let has_corruption_gate = self.corruption.is_some();
         #[cfg(not(feature = "corruption-head"))]
         let has_corruption_gate = false;
-        if images_byte_identical(source, distorted) {
+        if plan.compute.formula_revision < crate::feature_defs::FormulaRevision::Rev5
+            && images_byte_identical(source, distorted)
+        {
             let result = identical_result_at(&config, plan.walk_width());
             return Ok(crate::ScoredAttribution {
                 sensitivities: vec![0.0; result.features().len()],
@@ -1310,12 +1324,32 @@ impl<'a> BakeScorer<'a> {
         );
         let (_, raw_distance) =
             score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
-        let score = self.score_features(
+        let score = self.score_features_with_identity(
             &features,
             source.width() as u32,
             source.height() as u32,
             codec_hint,
+            images_byte_identical(source, distorted),
         )?;
+        if images_byte_identical(source, distorted) {
+            let result = ZensimResult::new(100.0, 0.0, features, ZensimProfile::B, mean_offset)
+                .mark_identical();
+            return Ok(crate::ScoredAttribution {
+                sensitivities: vec![0.0; result.features().len()],
+                result,
+                attribution: crate::attribution::zero_attribution(
+                    source.width(),
+                    source.height(),
+                    bin,
+                ),
+                unsupported_feature_ids: Vec::new(),
+                max_removals: Vec::new(),
+                moment_removals: Vec::new(),
+                unsupported_refinement_feature_ids: Vec::new(),
+                has_corruption_gate,
+                neighbour_exact: None,
+            });
+        }
         let sensitivities = self.score_features_fd_gradient(
             &features,
             source.width() as u32,
@@ -1329,19 +1363,22 @@ impl<'a> BakeScorer<'a> {
         // needs, and zero the frozen density it replaces — the v2 pooled
         // features at scales 1–3 (f459..f719) are added back as exact
         // finite deltas inside `ScoredAttribution::refinement_gain`.
+        // Rev5 also captures HDR with the canonical PU conversion.
         // The switch is EXACTLY `"1"`: presence alone (`=0`, empty) is
         // off, matching the other `ZENSIM_*` gates in this module.
         // Capture refuses (and the density stays whole) for sampling
         // plans, v2-off plans, reflect-padded pairs and foreign dims.
         let neighbour_exact = if std::env::var("ZENSIM_NEIGHBOUR_EXACT").as_deref() == Ok("1")
-            && encoding.is_none()
+            && (encoding.is_none()
+                || plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5)
         {
-            let snap = crate::local_refine::LocalRefineSnapshot::capture(
+            let snap = crate::local_refine::LocalRefineSnapshot::capture_with_encoding(
                 session.retention(),
                 &plan,
                 (source.width(), source.height()),
                 source,
                 distorted,
+                encoding,
             );
             if snap.is_some() {
                 let lo = (372 + 87).min(spatial.len());
@@ -1390,8 +1427,8 @@ impl<'a> BakeScorer<'a> {
 
 /// Feature IDs a steering session serves with a complete score and map: basic and peaks (f0-227), v2
 /// (f372-719; its reference-only PJND_FRAGILITY slots have an exactly-zero integrand), and append/append2
-/// (f720-943; reference-only and SDR-structural-zero slots are exact zeros). v2 and later families are SDR
-/// only. Everything else is refused up front, naming the family's ID range (the error type carries a static
+/// (f720-943; reference-only and SDR-structural-zero slots are exact zeros). Rev5 HDR supports
+/// basic/peaks/v2 through the PU fold; older HDR sessions serve basic/peaks only. Everything else is refused up front, naming the family's ID range (the error type carries a static
 /// string): masked/IW (f228-371) and f944 and above have no session integrand yet.
 #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
 fn steering_support(reads: &[u16], hdr: bool) -> Result<(), ZensimError> {
@@ -1453,6 +1490,12 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         distorted: &impl ImageSource,
         codec_hint: Option<&str>,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
+        // Keep the complete Rev5 read footprint while finite-difference probes
+        // evaluate the perceptual branch with the threshold head detached.
+        let plan = self.scorer.plan()?;
+        let serving_plan = (plan.compute.formula_revision
+            >= crate::feature_defs::FormulaRevision::Rev5)
+            .then_some(plan);
         // The head is evaluated on the exact extracted row, once per actual
         // reconstruction. Local probes must never differentiate its threshold.
         #[cfg(feature = "corruption-head")]
@@ -1465,6 +1508,7 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
             &mut self.scratch,
             self.bin,
             self.encoding,
+            serving_plan,
         );
         #[cfg(feature = "corruption-head")]
         {
@@ -1540,20 +1584,735 @@ mod revision_contract_tests {
     /// process default, so the wide-family arithmetic contract matches).
     #[cfg(feature = "feature-regime-v2")]
     fn bake_over(ids: &[usize]) -> zenpredict::Model {
+        bake_over_sampling(ids, None)
+    }
+
+    #[cfg(feature = "feature-regime-v2")]
+    fn bake_over_sampling(ids: &[usize], sampling: Option<&str>) -> zenpredict::Model {
+        zenpredict::Model::from_bytes(&bake_bytes_over_sampling(ids, sampling)).unwrap()
+    }
+
+    #[cfg(feature = "feature-regime-v2")]
+    fn bake_bytes_over_sampling(ids: &[usize], sampling: Option<&str>) -> Vec<u8> {
+        let mut metadata = vec![
+            serde_json::json!({"key":"zentrain.feature_ids","type":"utf8",
+                "text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")}),
+            serde_json::json!({"key":"zentrain.formula_revision","type":"utf8",
+                "text":(crate::ssim_form::active_revision() as u8 + 1).to_string()}),
+        ];
+        if let Some(sampling) = sampling {
+            metadata
+                .push(serde_json::json!({"key":"zentrain.sampling","type":"utf8","text":sampling}));
+        }
         let weights: Vec<f64> = ids
             .iter()
             .map(|&id| -(0.002 + 0.0003 * ((id * 7) % 13) as f64))
             .collect();
         let recipe = serde_json::json!({
             "schema_hash":1,"scaler_mean":vec![0.0;ids.len()],"scaler_scale":vec![1.0;ids.len()],
-            "metadata":[{"key":"zentrain.feature_ids","type":"utf8",
-                "text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
-                {"key":"zentrain.formula_revision","type":"utf8","text":(crate::ssim_form::active_revision() as u8 + 1).to_string()}],
+            "metadata":metadata,
             "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity","dtype":"f32",
                 "weights":weights,"biases":[100.0]}]
         });
-        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
-        zenpredict::Model::from_bytes(&bytes).unwrap()
+        zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap()
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_by_model() -> zenpredict::Model {
+        bake_over(
+            &(13..26)
+                .chain(39..156)
+                .chain(401..430)
+                .chain(459..720)
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_by_profile() -> crate::Zensim {
+        fn bytes() -> &'static [u8] {
+            static BY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+            BY.get_or_init(|| {
+                bake_bytes_over_sampling(
+                    &(13..26)
+                        .chain(39..156)
+                        .chain(401..430)
+                        .chain(459..720)
+                        .collect::<Vec<_>>(),
+                    None,
+                )
+            })
+        }
+        let params = Box::leak(Box::new(
+            crate::profile::ProfileParams::builder()
+                .mlp(bytes)
+                .skip_score_mapping(true)
+                .extrapolate_score(true)
+                .build(),
+        ));
+        crate::Zensim::new(crate::ZensimProfile::Custom {
+            name: "Rev5-by-v2fy",
+            params,
+        })
+        .with_parallel(false)
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_compute_identity_and_cached_attribution() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_compute_identity_and_cached_attribution";
+        if !run_at_revision("5", name, "REV5_COMPUTE_ENTRY_OK") {
+            return;
+        }
+        let (w, h) = (137, 301);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let model = rev5_by_model();
+        let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let scalar = owner.compute(&rs, &ds, None).unwrap();
+        let reference = owner.precompute_reference(&rs).unwrap();
+        let mut scratch = crate::Fused944Session::new();
+        let map = owner
+            .compute_with_ref_and_attribution(&rs, &reference, &ds, None, &mut scratch, 8)
+            .unwrap();
+        assert_eq!(scalar.features(), map.result().features());
+        assert_eq!(scalar.score(), map.result().score());
+        let identity = owner.compute(&rs, &rs, None).unwrap();
+        let mut session = owner.prepare_steering(&rs, 8).unwrap();
+        let scored = session.compute(&rs, None).unwrap();
+        assert_eq!(identity.features(), scored.result().features());
+        assert_eq!(scored.result().score(), 100.0);
+        assert!(scored.attribution().density().iter().all(|&x| x == 0.0));
+        assert_eq!(scored.refinement_gain(3, 5, 26, 22), 0.0);
+        println!("REV5_COMPUTE_ENTRY_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_steering_env_on_and_off() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_steering_env_on_and_off";
+        if std::env::var("REV5_STEERING_CHILD").is_err() {
+            for enabled in ["0", "1"] {
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([name, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_FORMULA_REV", "5")
+                    .env("REV5_STEERING_CHILD", enabled)
+                    .env("ZENSIM_NEIGHBOUR_EXACT", enabled)
+                    .output()
+                    .unwrap();
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                assert!(String::from_utf8_lossy(&out.stdout).contains("REV5_STEERING_ENTRY_OK"));
+            }
+            return;
+        }
+        let (w, h) = (137, 301);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let model = rev5_by_model();
+        let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let scalar = owner.compute(&rs, &ds, None).unwrap();
+        let mut session = owner.prepare_steering(&rs, 8).unwrap();
+        let map = session.compute(&ds, None).unwrap();
+        assert_eq!(scalar.features(), map.result().features());
+        let enabled = std::env::var("REV5_STEERING_CHILD").unwrap() == "1";
+        assert_eq!(map.neighbour_exact.is_some(), enabled);
+        for rect in [(3, 5, 26, 22), (0, 240, 16, 280), (128, 292, 137, 301)] {
+            let g = map.refinement_gain(rect.0, rect.1, rect.2, rect.3);
+            assert!(g.is_finite());
+            if let Some(snap) = &map.neighbour_exact {
+                let local = snap
+                    .weighted_gain(
+                        &map.sensitivities,
+                        rect,
+                        &crate::local_refine::Candidate::Reference,
+                    )
+                    .unwrap();
+                assert!(local.is_finite());
+                assert_ne!(local, 0.0);
+            }
+        }
+        println!("REV5_STEERING_ENTRY_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_hdr_score_and_steering() {
+        use crate::source::{AlphaMode, PixelFormat, StridedBytes};
+        let name = "metric::bake::revision_contract_tests::rev5_entry_hdr_score_and_steering";
+        if std::env::var("REV5_HDR_CHILD").is_err() {
+            for enabled in ["0", "1"] {
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([name, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_FORMULA_REV", "5")
+                    .env("REV5_HDR_CHILD", enabled)
+                    .env("ZENSIM_NEIGHBOUR_EXACT", enabled)
+                    .output()
+                    .unwrap();
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                assert!(String::from_utf8_lossy(&out.stdout).contains("REV5_HDR_ENTRY_OK"));
+            }
+            return;
+        }
+        let (w, h) = (97, 83);
+        let (src, dst) = pair(w, h);
+        let hdr = |p: &[[u8; 3]]| {
+            p.iter()
+                .map(|p| {
+                    [
+                        p[0] as f32 * 4.0 + 1.0,
+                        p[1] as f32 * 4.0 + 1.0,
+                        p[2] as f32 * 4.0 + 1.0,
+                        1.0,
+                    ]
+                })
+                .collect::<Vec<_>>()
+        };
+        let (s, d) = (hdr(&src), hdr(&dst));
+        let image = |p| {
+            StridedBytes::with_alpha_mode(
+                p,
+                w,
+                h,
+                w * 16,
+                PixelFormat::LinearF32Rgba,
+                AlphaMode::Opaque,
+            )
+        };
+        let (rs, ds) = (
+            image(bytemuck::cast_slice(&s)),
+            image(bytemuck::cast_slice(&d)),
+        );
+        let model = rev5_by_model();
+        let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let scalar = owner
+            .compute_hdr(&rs, &ds, crate::feature_v2::HdrEncoding::Linear, None)
+            .unwrap();
+        assert_eq!(
+            owner
+                .compute_hdr(&rs, &rs, crate::feature_v2::HdrEncoding::Linear, None)
+                .unwrap(),
+            100.0
+        );
+        let plan = owner.plan().unwrap();
+        let mut session = owner
+            .prepare_steering_hdr(&rs, crate::feature_v2::HdrEncoding::Linear, 8)
+            .unwrap();
+        let scored = session.compute(&ds, None).unwrap();
+        assert_eq!(scalar, scored.result().score());
+        assert!(scored.attribution().density().iter().all(|x| x.is_finite()));
+        assert!(scored.refinement_gain(3, 5, 26, 22).is_finite());
+        let id = session.compute(&rs, None).unwrap();
+        assert_eq!(id.result().score(), 100.0);
+        assert!(id.result().is_identical());
+        assert_eq!(
+            scored.neighbour_exact.is_some(),
+            std::env::var("REV5_HDR_CHILD").unwrap() == "1"
+        );
+        if let Some(snapshot) = &scored.neighbour_exact {
+            let rect = (3, 5, 26, 22);
+            let mut repaired = d.clone();
+            for y in rect.1..rect.3 {
+                for x in rect.0..rect.2 {
+                    repaired[y * w + x] = s[y * w + x];
+                }
+            }
+            let candidate = image(bytemuck::cast_slice(&repaired));
+            let mut scratch = crate::feature_v2::V2Scratch::new();
+            let full = crate::feature_v2::compute_folded720_hdr_streaming_impl(
+                &rs,
+                &candidate,
+                crate::feature_v2::HdrEncoding::Linear,
+                None,
+                false,
+                plan.toggles(),
+                &mut scratch,
+                Some(plan.compute),
+            )
+            .unwrap();
+            for (id, delta) in snapshot
+                .deltas(rect, &crate::local_refine::Candidate::Reference)
+                .unwrap()
+            {
+                let expected = full.features()[id] - scored.result().features()[id];
+                assert!(
+                    (delta - expected).abs() < 1e-10 + expected.abs() * 1e-6,
+                    "HDR f{id}: {delta} vs {expected}"
+                );
+            }
+        }
+        println!("REV5_HDR_ENTRY_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_ensemble() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_ensemble";
+        if !run_at_revision("5", name, "REV5_ENSEMBLE_ENTRY_OK") {
+            return;
+        }
+        let (w, h) = (97, 83);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let a = rev5_by_model();
+        let b = bake_over(&(0..228).chain(372..720).collect::<Vec<_>>());
+        let members = [a, b];
+        let mut ensemble = crate::BakeScorer::ensemble(&members, Some(&[0.7, 0.3]))
+            .unwrap()
+            .with_parallel(false);
+        let scalar = ensemble.compute(&rs, &ds, None).unwrap();
+        let mut session = ensemble.prepare_steering(&rs, 8).unwrap();
+        let scored = session.compute(&ds, None).unwrap();
+        assert_eq!(scalar.features(), scored.result().features());
+        assert_eq!(scalar.score(), scored.result().score());
+        assert!(scored.refinement_gain(3, 5, 26, 22).is_finite());
+        println!("REV5_ENSEMBLE_ENTRY_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_diffmaps_and_strip_variants() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_diffmaps_and_strip_variants";
+        if !run_at_revision("5", name, "REV5_STRIP_ENTRIES_OK") {
+            return;
+        }
+        let (w, h) = (137, 301);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let z = rev5_by_profile();
+
+        let scalar = z.compute(&rs, &ds).unwrap();
+        let model = rev5_by_model();
+        let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let id = z.compute(&rs, &rs).unwrap();
+        assert_eq!(
+            id.features(),
+            owner.compute(&rs, &rs, None).unwrap().features()
+        );
+        assert!(id.is_identical());
+        assert_eq!(id.score(), 100.0);
+        assert_eq!(
+            scalar.features(),
+            z.compute_extended_features(&rs, &ds).unwrap().features()
+        );
+        assert_eq!(
+            scalar.score(),
+            z.compute_with_codec_hint(&rs, &ds, Some("jpeg"))
+                .unwrap()
+                .score()
+        );
+        #[cfg(feature = "training")]
+        {
+            assert_eq!(
+                scalar.features(),
+                z.compute_all_features(&rs, &ds).unwrap().features()
+            );
+            assert_eq!(
+                scalar.features(),
+                crate::Zensim::compute_with_params(z.profile().params(), &rs, &ds)
+                    .unwrap()
+                    .features()
+            );
+        }
+        #[cfg(feature = "classification")]
+        assert_eq!(scalar.score(), z.classify(&rs, &ds).unwrap().result.score());
+        let reference = z.precompute_reference(&rs).unwrap();
+        let cached = z.compute_with_ref(&reference, &ds).unwrap();
+        let mut reusable = crate::streaming::ZensimScratch::new();
+        let reused = z
+            .compute_with_ref_into(&reference, &ds, &mut reusable)
+            .unwrap();
+        assert_eq!(cached.features(), reused.features());
+        let strip = z.compute_streaming_strips(&rs, &ds, 256, 64).unwrap();
+        let cached_strip = z
+            .compute_with_ref_streaming_strips(&reference, &ds, 256, 64)
+            .unwrap();
+        let default_strip = z.compute_streaming_strips_default(&rs, &ds).unwrap();
+        let default_cached_strip = z
+            .compute_with_ref_streaming_strips_default(&reference, &ds)
+            .unwrap();
+        for result in [
+            &cached,
+            &strip,
+            &cached_strip,
+            &default_strip,
+            &default_cached_strip,
+        ] {
+            assert_eq!(scalar.features(), result.features());
+            assert_eq!(scalar.score(), result.score());
+        }
+        let map = z
+            .compute_with_diffmap(&rs, &ds, crate::DiffmapWeighting::default())
+            .unwrap();
+        let ref_map = z
+            .compute_with_ref_and_diffmap(&reference, &ds, crate::DiffmapWeighting::default())
+            .unwrap();
+        assert_eq!(map.result().score(), ref_map.result().score());
+        assert_eq!(map.result().score(), scalar.score());
+        let linear: [Vec<f32>; 3] =
+            core::array::from_fn(|ch| dst.iter().map(|p| p[ch] as f32 / 255.0).collect());
+        let planar = z
+            .compute_with_ref_and_diffmap_linear_planar(
+                &reference,
+                [&linear[0], &linear[1], &linear[2]],
+                w,
+                h,
+                w,
+                crate::DiffmapWeighting::default(),
+            )
+            .unwrap();
+        assert!(planar.score().is_finite());
+        assert!(planar.result().features().len() >= 720);
+        println!("REV5_STRIP_ENTRIES_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_raw_hdr_profiles() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_raw_hdr_profiles";
+        if !run_at_revision("5", name, "REV5_RAW_HDR_ENTRIES_OK") {
+            return;
+        }
+        use crate::source::{AlphaMode, ImageSource, PixelFormat, StridedBytes};
+        let (w, h, stride) = (97, 83, 101);
+        let (src, dst) = pair(w, h);
+        let planes = |p: &[[u8; 3]]| -> [Vec<f32>; 3] {
+            core::array::from_fn(|ch| {
+                let mut v = vec![1234.0; stride * h];
+                for y in 0..h {
+                    for x in 0..w {
+                        v[y * stride + x] = p[y * w + x][ch] as f32 * 4.0 + 1.0;
+                    }
+                }
+                v
+            })
+        };
+        let (r, d) = (planes(&src), planes(&dst));
+        let interleave = |p: &[Vec<f32>; 3]| {
+            let mut v = vec![4321.0; stride * 3 * h];
+            for y in 0..h {
+                for x in 0..w {
+                    for ch in 0..3 {
+                        v[y * stride * 3 + x * 3 + ch] = p[ch][y * stride + x];
+                    }
+                }
+            }
+            v
+        };
+        let (ri, di) = (interleave(&r), interleave(&d));
+        let z = rev5_by_profile();
+        let scalar = z
+            .compute_pu_linear(&ri, &di, w, h, stride * 3, stride * 3)
+            .unwrap();
+        let extended = z
+            .compute_pu_linear_extended_features(&ri, &di, w, h, stride * 3, stride * 3)
+            .unwrap();
+        let planar = z
+            .compute_pu_linear_planar([&r[0], &r[1], &r[2]], [&d[0], &d[1], &d[2]], w, h, stride)
+            .unwrap();
+        assert_eq!(scalar.features(), extended.features());
+        assert_eq!(scalar.features(), planar.features());
+        assert_eq!(scalar.score(), extended.score());
+        assert_eq!(scalar.score(), planar.score());
+        let rgba = |p: &[Vec<f32>; 3]| -> Vec<[f32; 4]> {
+            (0..w * h)
+                .map(|i| {
+                    let j = i / w * stride + i % w;
+                    [p[0][j], p[1][j], p[2][j], 1.0]
+                })
+                .collect()
+        };
+        let (rr, dd) = (rgba(&r), rgba(&d));
+        let image = |p| {
+            StridedBytes::with_alpha_mode(
+                p,
+                w,
+                h,
+                w * 16,
+                PixelFormat::LinearF32Rgba,
+                AlphaMode::Opaque,
+            )
+        };
+        let (rs, ds) = (
+            image(bytemuck::cast_slice(&rr)),
+            image(bytemuck::cast_slice(&dd)),
+        );
+        let model = rev5_by_model();
+        let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        assert_eq!(
+            scalar.score(),
+            owner
+                .compute_hdr(&rs, &ds, crate::feature_v2::HdrEncoding::Linear, None)
+                .unwrap()
+        );
+        struct DeclaredHdr<T>(T);
+        impl<T: ImageSource> ImageSource for DeclaredHdr<T> {
+            fn width(&self) -> usize {
+                self.0.width()
+            }
+            fn height(&self) -> usize {
+                self.0.height()
+            }
+            fn pixel_format(&self) -> PixelFormat {
+                self.0.pixel_format()
+            }
+            fn alpha_mode(&self) -> AlphaMode {
+                AlphaMode::Opaque
+            }
+            fn row_bytes(&self, y: usize) -> &[u8] {
+                self.0.row_bytes(y)
+            }
+            fn is_hdr(&self) -> bool {
+                true
+            }
+        }
+        let (rh, dh) = (DeclaredHdr(rs), DeclaredHdr(ds));
+        assert_eq!(scalar.features(), z.compute(&rh, &dh).unwrap().features());
+        assert_eq!(
+            scalar.features(),
+            z.compute_extended_features(&rh, &dh).unwrap().features()
+        );
+        let id = z
+            .compute_pu_linear(&ri, &ri, w, h, stride * 3, stride * 3)
+            .unwrap();
+        let id_ext = z
+            .compute_pu_linear_extended_features(&ri, &ri, w, h, stride * 3, stride * 3)
+            .unwrap();
+        let id_planar = z
+            .compute_pu_linear_planar([&r[0], &r[1], &r[2]], [&r[0], &r[1], &r[2]], w, h, stride)
+            .unwrap();
+        for result in [&id, &id_ext, &id_planar] {
+            assert_eq!(result.score(), 100.0);
+            assert!(result.is_identical());
+            assert_eq!(result.features(), id.features());
+            assert!(result.features().len() >= 720);
+        }
+        println!("REV5_RAW_HDR_ENTRIES_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_sampling_plans() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_sampling_plans";
+        if !run_at_revision("5", name, "REV5_SAMPLING_ENTRY_OK") {
+            return;
+        }
+        let (w, h) = (137, 301);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let ids = (13..26)
+            .chain(39..156)
+            .chain(401..430)
+            .chain(459..720)
+            .collect::<Vec<_>>();
+        for sampling in [
+            "v1:y:triangle:3/2",
+            "v1:xyb:mitchell:2",
+            "v2:xyb:triangle:1,2,4,8",
+            "v2:xyb:robidouxsharp:1,3,5,7",
+        ] {
+            let model = bake_over_sampling(&ids, Some(sampling));
+            let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+            assert!(owner.plan().unwrap().compute.sampling.is_some());
+            let scalar = owner.compute(&rs, &ds, None).unwrap();
+            let _guard = archmage::testing::lock_token_testing();
+            let _ = archmage::testing::for_each_token_permutation(
+                archmage::testing::CompileTimePolicy::Warn,
+                |perm| {
+                    let mut check = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                    let result = check.compute(&rs, &ds, None).unwrap();
+                    assert_eq!(
+                        scalar.features(),
+                        result.features(),
+                        "{sampling} {}",
+                        perm.label
+                    );
+                },
+            );
+            let mut session = owner.prepare_steering(&rs, 8).unwrap();
+            let scored = session.compute(&ds, None).unwrap();
+            assert_eq!(scalar.features(), scored.result().features(), "{sampling}");
+            assert_eq!(scalar.score(), scored.result().score(), "{sampling}");
+            assert!(scored.refinement_gain(3, 5, 26, 22).is_finite());
+        }
+        println!("REV5_SAMPLING_ENTRY_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_v2_pair_cached_and_streaming_extraction() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_v2_pair_cached_and_streaming_extraction";
+        if !run_at_revision("5", name, "REV5_V2_ENTRIES_OK") {
+            return;
+        }
+        let (w, h) = (97, 83);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let z = crate::Zensim::new(crate::ZensimProfile::B).with_parallel(false);
+        let folded = z.compute_folded720_features(&rs, &ds).unwrap();
+        let toggles = crate::feature_v2::V2NewFeatureToggles::default();
+        let mut scratch = crate::feature_v2::V2Scratch::new();
+        let streamed = z
+            .compute_folded720_features_streaming(&rs, &ds, toggles, &mut scratch)
+            .unwrap();
+        assert_eq!(folded.features(), streamed.features());
+        let bounded = z.compute_v2_features(&rs, &ds).unwrap();
+        assert_eq!(bounded.features(), &folded.features()[372..720]);
+        let explicit = z
+            .compute_v2_features_with_toggles(&rs, &ds, toggles)
+            .unwrap();
+        assert_eq!(bounded.features(), explicit.features());
+        for reference in [
+            z.prepare_v2_reference(&rs).unwrap(),
+            z.prepare_v2_reference_with_moments(&rs).unwrap(),
+        ] {
+            let cached = z.compute_v2_features_with_ref(&reference, &ds).unwrap();
+            let reused = z
+                .compute_v2_features_with_ref_and_scratch(&reference, &ds, toggles, &mut scratch)
+                .unwrap();
+            assert_eq!(bounded.features(), cached.features());
+            assert_eq!(bounded.features(), reused.features());
+        }
+        println!("REV5_V2_ENTRIES_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_entry_hdr_encodings_and_wide_layout_prefixes() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_hdr_encodings_and_wide_layout_prefixes";
+        if !run_at_revision("5", name, "REV5_WIDE_HDR_ENTRIES_OK") {
+            return;
+        }
+        use crate::feature_v2::{HdrEncoding, V2NewFeatureToggles, V2Scratch};
+        use crate::source::{AlphaMode, PixelFormat, StridedBytes};
+        let (w, h) = (97, 83);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let z = rev5_by_profile();
+        let toggles = V2NewFeatureToggles::default();
+        let mut scratch = V2Scratch::new();
+        let base = z.compute_folded720_features(&rs, &ds).unwrap();
+        for wide in [
+            z.compute_folded720_append_features(&rs, &ds).unwrap(),
+            z.compute_folded720_append_features_streaming(&rs, &ds, toggles, &mut scratch)
+                .unwrap(),
+            z.compute_folded720_append2_features(&rs, &ds).unwrap(),
+            z.compute_folded720_csfw_features(&rs, &ds).unwrap(),
+        ] {
+            assert_eq!(base.features(), &wide.features()[..720]);
+            assert!(wide.features()[720..].iter().all(|&f| f == 0.0));
+        }
+        let model = rev5_by_model();
+        let ids = (13..26)
+            .chain(39..156)
+            .chain(401..430)
+            .chain(459..720)
+            .collect::<Vec<_>>();
+        for encoding in [
+            HdrEncoding::Linear,
+            HdrEncoding::Pq { peak_nits: 1000.0 },
+            HdrEncoding::Hlg {
+                peak_nits: 1000.0,
+                ambient_lux: 5.0,
+            },
+        ] {
+            let pixels = |p: &[[u8; 3]]| -> Vec<[f32; 4]> {
+                let scale = if matches!(encoding, HdrEncoding::Linear) {
+                    1000.0
+                } else {
+                    1.0
+                };
+                p.iter()
+                    .map(|p| {
+                        [
+                            p[0] as f32 / 255.0 * scale,
+                            p[1] as f32 / 255.0 * scale,
+                            p[2] as f32 / 255.0 * scale,
+                            1.0,
+                        ]
+                    })
+                    .collect()
+            };
+            let (r, d) = (pixels(&src), pixels(&dst));
+            let image = |p| {
+                StridedBytes::with_alpha_mode(
+                    p,
+                    w,
+                    h,
+                    w * 16,
+                    PixelFormat::LinearF32Rgba,
+                    AlphaMode::Opaque,
+                )
+            };
+            let (r, d) = (
+                image(bytemuck::cast_slice(&r)),
+                image(bytemuck::cast_slice(&d)),
+            );
+            let base = z
+                .compute_folded720_features_hdr(&r, &d, encoding, toggles, &mut scratch)
+                .unwrap();
+            for wide in [
+                z.compute_folded720_append_features_hdr(&r, &d, encoding, toggles, &mut scratch)
+                    .unwrap(),
+                z.compute_folded720_append2_features_hdr(&r, &d, encoding, toggles, &mut scratch)
+                    .unwrap(),
+                z.compute_folded720_csfw_features_hdr(&r, &d, encoding, toggles, &mut scratch)
+                    .unwrap(),
+            ] {
+                assert_eq!(base.features(), &wide.features()[..720]);
+                assert!(wide.features()[720..].iter().all(|&f| f == 0.0));
+            }
+            let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+            let scalar = owner.compute_hdr(&r, &d, encoding, None).unwrap();
+            let mut session = owner.prepare_steering_hdr(&r, encoding, 8).unwrap();
+            let scored = session.compute(&d, None).unwrap();
+            assert_eq!(scalar, scored.result().score());
+            for &id in &ids {
+                assert_eq!(
+                    base.features()[id],
+                    scored.result().features()[id],
+                    "{encoding:?} f{id}"
+                );
+            }
+            assert!(scored.refinement_gain(3, 5, 26, 22).is_finite());
+        }
+        println!("REV5_WIDE_HDR_ENTRIES_OK");
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "custom-profiles",
+        feature = "feature-regime-v2",
+        feature = "corruption-head"
+    ))]
+    fn rev5_entry_corruption_companion() {
+        let name = "metric::bake::revision_contract_tests::rev5_entry_corruption_companion";
+        if !run_at_revision("5", name, "REV5_COMPANION_ENTRY_OK") {
+            return;
+        }
+        let (w, h) = (97, 83);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let base = rev5_by_model();
+        let companion = bake_over(&[13, 393]);
+        let mut scorer = crate::BakeScorer::new(&base)
+            .unwrap()
+            .with_linear_corruption_head(&companion, 10.0)
+            .unwrap()
+            .with_parallel(false);
+        let scalar = scorer.compute(&rs, &ds, None).unwrap();
+        let mut session = scorer.prepare_steering(&rs, 8).unwrap();
+        let scored = session.compute(&ds, None).unwrap();
+        assert_eq!(scalar.features(), scored.result().features());
+        assert_eq!(scalar.score(), scored.result().score());
+        println!("REV5_COMPANION_ENTRY_OK");
     }
 
     /// COSTSET3: the prepared session reuses the basic walk and runs the v2 walk with its v1 block off.

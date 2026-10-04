@@ -16,6 +16,13 @@
 //! pools, edge-width cross-scale chain, transducer luma gate) on both
 //! sides.
 //!
+//! Rev5 uses a finite `[C - radius, C + radius)` window halo instead of
+//! the historical recurrence's residue cone. It retains production strip
+//! partials, replaces touched partials, and merges them in the original order;
+//! stable central moments and sixteen-lane pools are never approximated by raw
+//! power subtraction. Gradient halos and the cross-scale edge-width chain are
+//! replayed too. HDR snapshots use the same PU conversion as the scored walk.
+//!
 //! # Precision contract
 //!
 //! - **Pyramid** — pinned 2×2 box cascade ([`crate::blur::downscale_2x_into`],
@@ -147,6 +154,8 @@ pub(crate) struct LocalRefineSnapshot {
     toggles: V2NewFeatureToggles,
     /// The computation's formula revision (blur arithmetic + `direct`).
     revision: FormulaRevision,
+    /// Rev5 ordered production strip partials; central moments are replaced, never subtracted.
+    strips: [[Vec<(DenseAccum, GradientAccum)>; 3]; LOCAL_SCALES],
 }
 
 /// Scale-0 distorted values for the queried rectangle — the intervention
@@ -210,8 +219,8 @@ impl LocalRefineSnapshot {
     /// index the retained scale-0 pyramid — refused. Also refused: sampling
     /// plans (`compute.sampling`), plans with v2 off (`compute.v2_blocks`),
     /// and foreign/empty retentions (`ret.dims.len() != NUM_SCALES`).
-    /// HDR is refused at the call site (`prepare_steering_hdr` serves only
-    /// basic/peak reads; the snapshot is never built for it).
+    /// SDR convenience form. Rev5 HDR steering calls `capture_with_encoding`
+    /// so missing channels are rebuilt in the scored PU domain.
     ///
     /// `source`/`distorted` are the session's pixel inputs. Retention only
     /// copies a channel's pyramid rows where `channel_active` holds, so a
@@ -221,6 +230,7 @@ impl LocalRefineSnapshot {
     /// [`crate::streaming::convert_source_to_xyb_into_slices`], which is
     /// what the producer's `convert_side_scale0` calls — bit-identical
     /// values, computed once per session rather than per query.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn capture(
         ret: &FoldRetention,
         plan: &crate::feature_plan::Plan,
@@ -228,11 +238,19 @@ impl LocalRefineSnapshot {
         source: &impl crate::source::ImageSource,
         distorted: &impl crate::source::ImageSource,
     ) -> Option<Self> {
+        Self::capture_with_encoding(ret, plan, src_dims, source, distorted, None)
+    }
+
+    pub(crate) fn capture_with_encoding(
+        ret: &FoldRetention,
+        plan: &crate::feature_plan::Plan,
+        src_dims: (usize, usize),
+        source: &impl crate::source::ImageSource,
+        distorted: &impl crate::source::ImageSource,
+        encoding: Option<feature_v2::HdrEncoding>,
+    ) -> Option<Self> {
         let c = &plan.compute;
-        // Rev5 uses stable central moments and sixteen-lane pools. The
-        // legacy delta replay carries raw moments, so explicitly refuse it.
-        if c.formula_revision >= FormulaRevision::Rev5
-            || c.sampling.is_some()
+        if c.sampling.is_some()
             || !c.v2_blocks
             || ret.dims.len() != crate::NUM_SCALES
             || ret.dims[0] != src_dims
@@ -245,28 +263,43 @@ impl LocalRefineSnapshot {
         if (0..3).any(|ch| !c.channel_active(0, ch)) {
             let mut s: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w0 * h0]);
             let mut d: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w0 * h0]);
-            let [s0, s1, s2] = &mut s;
-            crate::streaming::convert_source_to_xyb_into_slices(
-                source,
-                s0,
-                s1,
-                s2,
-                w0,
-                false,
-                0,
-                c.formula_revision,
-            );
-            let [d0, d1, d2] = &mut d;
-            crate::streaming::convert_source_to_xyb_into_slices(
-                distorted,
-                d0,
-                d1,
-                d2,
-                w0,
-                false,
-                0,
-                c.formula_revision,
-            );
+            if let Some(encoding) = encoding {
+                crate::feature_v2_stream::hdr_source_to_xyb(
+                    source,
+                    encoding,
+                    &mut s,
+                    c.formula_revision,
+                );
+                crate::feature_v2_stream::hdr_source_to_xyb(
+                    distorted,
+                    encoding,
+                    &mut d,
+                    c.formula_revision,
+                );
+            } else {
+                let [s0, s1, s2] = &mut s;
+                crate::streaming::convert_source_to_xyb_into_slices(
+                    source,
+                    s0,
+                    s1,
+                    s2,
+                    w0,
+                    false,
+                    0,
+                    c.formula_revision,
+                );
+                let [d0, d1, d2] = &mut d;
+                crate::streaming::convert_source_to_xyb_into_slices(
+                    distorted,
+                    d0,
+                    d1,
+                    d2,
+                    w0,
+                    false,
+                    0,
+                    c.formula_revision,
+                );
+            }
             for ch in 0..3 {
                 if !c.channel_active(0, ch) {
                     pyr_src0[ch] = core::mem::take(&mut s[ch]);
@@ -311,11 +344,93 @@ impl LocalRefineSnapshot {
             blockiness_on,
             toggles: plan.toggles(),
             revision: c.formula_revision,
+            strips: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
         };
         if !this.rebuild_unretained_coarse(c) {
             return None;
         }
+        if this.revision >= FormulaRevision::Rev5 {
+            for si in 0..LOCAL_SCALES {
+                for ch in 0..3 {
+                    if this.served[si][ch] {
+                        let (_, h) = this.dims[si];
+                        this.strips[si][ch] = (0..h.div_ceil(feature_v2::STRIP_ROWS))
+                            .map(|strip| this.strip_accumulators(si, ch, strip, None))
+                            .collect();
+                    }
+                }
+            }
+        }
         Some(this)
+    }
+
+    /// Replay a production strip with retained reference planes and optional
+    /// candidate values. The caller replaces only strips meeting the dependency cone.
+    fn strip_accumulators(
+        &self,
+        si: usize,
+        ch: usize,
+        strip: usize,
+        query: Option<(&Query<'_>, &Planes)>,
+    ) -> (DenseAccum, GradientAccum) {
+        let (w, h) = self.dims[si];
+        let y0 = strip * feature_v2::STRIP_ROWS;
+        let sh = feature_v2::STRIP_ROWS.min(h - y0);
+        let base = y0 * w;
+        let n = sh * w;
+        let p = &self.planes[si][ch];
+        let src = &self.pyr_src[si][ch];
+        let mut dst = self.pyr_dst[si][ch][base..base + n].to_vec();
+        let mut mu2 = p.mu2[base..base + n].to_vec();
+        let mut ssq = p.ssq[base..base + n].to_vec();
+        let mut s12 = p.s12[base..base + n].to_vec();
+        if let Some((q, planes)) = query {
+            let changed = q.changed[si].expect("a replay strip has a changed coarse rectangle");
+            for y in y0.max(changed.y0)..(y0 + sh).min(changed.y1) {
+                for x in changed.x0..changed.x1 {
+                    dst[(y - y0) * w + x] = q.dst_at(si + 1, ch, y, x);
+                }
+            }
+            for y in y0.max(planes.ry0)..(y0 + sh).min(planes.ry0 + planes.rh) {
+                let i = (y - y0) * w + planes.rx0;
+                let j = (y - planes.ry0) * planes.rw;
+                mu2[i..i + planes.rw].copy_from_slice(&planes.mu2[j..j + planes.rw]);
+                ssq[i..i + planes.rw].copy_from_slice(&planes.ssq[j..j + planes.rw]);
+                s12[i..i + planes.rw].copy_from_slice(&planes.s12[j..j + planes.rw]);
+            }
+        }
+        let dense = feature_v2::refinement_dense_strip(
+            &src[base..base + n],
+            &dst,
+            &p.mu1[base..base + n],
+            &mu2,
+            &ssq,
+            &s12,
+            &p.act[base..base + n],
+            w,
+            sh,
+            self.toggles.transducer_bank,
+        );
+        let mut grad = GradientAccum::default();
+        if self.gradient_on[si] {
+            let mut sg = vec![0.0; (sh + 2) * w];
+            let mut dg = vec![0.0; (sh + 2) * w];
+            for j in 0..sh + 2 {
+                let y = feature_v2::reflect_101(y0 as isize + j as isize - 1, h);
+                sg[j * w..(j + 1) * w].copy_from_slice(&src[y * w..(y + 1) * w]);
+                dg[j * w..(j + 1) * w].copy_from_slice(&self.pyr_dst[si][ch][y * w..(y + 1) * w]);
+                if let Some((q, _)) = query {
+                    let c = q.changed[si].expect("a replay strip has a changed coarse rectangle");
+                    if y >= c.y0 && y < c.y1 {
+                        for x in c.x0..c.x1 {
+                            dg[j * w + x] = q.dst_at(si + 1, ch, y, x);
+                        }
+                    }
+                }
+            }
+            grad = feature_v2::refinement_gradient_strip(&sg, &dg, &p.act[base..base + n], w, sh);
+        }
+        (dense, grad)
     }
 
     /// Rebuild every coarse plane the engine reads that the walk did not
@@ -361,6 +476,7 @@ impl LocalRefineSnapshot {
                         let (head, tail) = planes.split_at_mut(s - 1);
                         (head[s - 2][ch].as_slice(), &mut tail[0][ch])
                     };
+                    child.resize(cw * chh, 0.0);
                     crate::blur::downscale_2x_into(parent, pw, child, cw, chh);
                 }
                 self.mg[s - 1][ch] = (0.0, 0.0);
@@ -381,6 +497,7 @@ impl LocalRefineSnapshot {
             n += p3(&self.pyr_src[s]) + p3(&self.pyr_dst[s]);
             for ch in 0..3 {
                 let p = &self.planes[s][ch];
+                n += self.strips[s][ch].len() * core::mem::size_of::<(DenseAccum, GradientAccum)>();
                 n += 4 * (p.mu1.len() + p.mu2.len() + p.ssq.len() + p.s12.len() + p.act.len());
             }
         }
@@ -483,23 +600,42 @@ impl LocalRefineSnapshot {
                     &mut outs_base[si][ch],
                 );
                 feature_v2::apply_transducer_luma_gate(&mut outs_base[si][ch], ch, self.toggles);
-                let mut dacc = DenseAccum::default();
-                let mut gacc = GradientAccum::default();
+                let mut dense_n = cell.dense;
+                let mut grad_n = cell.grad;
                 let mut dblock = 0.0f64;
                 if let Some(c) = q.changed[si] {
                     let planes = q.recompute_planes(si, ch, &c);
-                    q.dense_delta(si, ch, &planes, &c, &mut dacc);
-                    if self.gradient_on[si] {
-                        q.grad_delta(si, ch, &c, &mut gacc);
+                    if self.revision >= FormulaRevision::Rev5 {
+                        dense_n = DenseAccum::default();
+                        grad_n = GradientAccum::default();
+                        for (strip, &(d, g)) in self.strips[si][ch].iter().enumerate() {
+                            let sy = strip * feature_v2::STRIP_ROWS;
+                            let end = (sy + feature_v2::STRIP_ROWS).min(self.dims[si].1);
+                            let touches_dense = sy < planes.ry0 + planes.rh && end > planes.ry0;
+                            let touches_grad = sy < (c.y1 + 1).min(self.dims[si].1)
+                                && end > c.y0.saturating_sub(1);
+                            let (d, g) = if touches_dense || touches_grad {
+                                self.strip_accumulators(si, ch, strip, Some((&q, &planes)))
+                            } else {
+                                (d, g)
+                            };
+                            dense_n.accumulate(&d);
+                            grad_n.accumulate(&g);
+                        }
+                    } else {
+                        let mut dacc = DenseAccum::default();
+                        let mut gacc = GradientAccum::default();
+                        q.dense_delta(si, ch, &planes, &c, &mut dacc);
+                        if self.gradient_on[si] {
+                            q.grad_delta(si, ch, &c, &mut gacc);
+                        }
+                        dense_n.accumulate(&dacc);
+                        grad_n.accumulate(&gacc);
                     }
                     if self.blockiness_on[si] {
                         dblock = q.blockiness_delta(si, ch, &c);
                     }
                 }
-                let mut dense_n = cell.dense;
-                dense_n.accumulate(&dacc);
-                let mut grad_n = cell.grad;
-                grad_n.accumulate(&gacc);
                 mg_new[si][ch] = feature_v2::finish_channel_scale(
                     &dense_n,
                     &grad_n,
@@ -706,6 +842,9 @@ impl<'a> Query<'a> {
     /// cone's column slice `[rx0, w)`: V-blur columns are independent,
     /// so the slice is bit-identical to the full-width pass's.
     fn recompute_planes(&self, si: usize, ch: usize, c: &Chg) -> Planes {
+        if self.snap.revision >= FormulaRevision::Rev5 {
+            return self.recompute_local_planes(si, ch, c);
+        }
         let (w, h) = self.snap.dims[si];
         let rx0 = c.x0.saturating_sub(BLUR_RADIUS);
         let strips: Vec<(usize, usize)> = (0..h.div_ceil(feature_v2::STRIP_ROWS))
@@ -736,7 +875,23 @@ impl<'a> Query<'a> {
         };
         let ry0 = strips[first].0;
         let ry1 = strips[last].0 + strips[last].1;
-        let rw = w - rx0;
+        let local = self.snap.revision >= FormulaRevision::Rev5;
+        let rx1 = if local {
+            (c.x1 + BLUR_RADIUS).min(w)
+        } else {
+            w
+        };
+        let ry0 = if local {
+            c.y0.saturating_sub(BLUR_RADIUS)
+        } else {
+            ry0
+        };
+        let ry1 = if local {
+            (c.y1 + BLUR_RADIUS).min(h)
+        } else {
+            ry1
+        };
+        let rw = rx1 - rx0;
         let rh = ry1 - ry0;
         let old = &self.snap.planes[si][ch];
         let src_plane = &self.snap.pyr_src[si][ch];
@@ -755,7 +910,7 @@ impl<'a> Query<'a> {
                 // A strip inside the span whose halo misses the changed
                 // rows: every output is retained-identical — copy the
                 // retained rows so region indexing stays uniform.
-                for y in strip_y0..strip_y0 + strip_h {
+                for y in strip_y0.max(ry0)..(strip_y0 + strip_h).min(ry1) {
                     let o = (y - ry0) * rw;
                     let i = y * w + rx0;
                     planes.mu2[o..o + rw].copy_from_slice(&old.mu2[i..i + rw]);
@@ -768,25 +923,36 @@ impl<'a> Query<'a> {
             // gather production's `fill_wide` runs, with the candidate
             // cascade spliced into the dst rows.
             let wide_h = strip_h + 2 * feature_v2::HALO_P;
-            let mut src_wide = vec![0.0f32; wide_h * w];
-            let mut dst_wide = vec![0.0f32; wide_h * w];
+            // Local windows need only the cone columns and their H halo.
+            // Gather true image reflection explicitly; the production H pass
+            // reads interior windows at offset radius and cannot see this
+            // temporary buffer's boundaries.
+            let hw = if local { rw + 2 * BLUR_RADIUS } else { w };
+            let hoff = if local { BLUR_RADIUS } else { rx0 };
+            let mut src_wide = vec![0.0f32; wide_h * hw];
+            let mut dst_wide = vec![0.0f32; wide_h * hw];
             for j in 0..wide_h {
                 let gy = feature_v2::reflect_101(
                     strip_y0 as isize - feature_v2::HALO_P as isize + j as isize,
                     h,
                 );
-                src_wide[j * w..j * w + w].copy_from_slice(&src_plane[gy * w..gy * w + w]);
-                for x in 0..w {
-                    dst_wide[j * w + x] = self.dst_at(si + 1, ch, gy, x);
+                for x in 0..hw {
+                    let gx = if local {
+                        feature_v2::reflect_101(rx0 as isize - BLUR_RADIUS as isize + x as isize, w)
+                    } else {
+                        x
+                    };
+                    src_wide[j * hw + x] = src_plane[gy * w + gx];
+                    dst_wide[j * hw + x] = self.dst_at(si + 1, ch, gy, gx);
                 }
             }
             // H over the full strip rows — the whole width, because the
             // running-sum init and the column tile are part of the
             // semantics (mu1 is emitted but src-only; retained instead).
-            let mut h_mu1 = vec![0.0f32; wide_h * w];
-            let mut h_mu2 = vec![0.0f32; wide_h * w];
-            let mut h_ssq = vec![0.0f32; wide_h * w];
-            let mut h_s12 = vec![0.0f32; wide_h * w];
+            let mut h_mu1 = vec![0.0f32; wide_h * hw];
+            let mut h_mu2 = vec![0.0f32; wide_h * hw];
+            let mut h_ssq = vec![0.0f32; wide_h * hw];
+            let mut h_s12 = vec![0.0f32; wide_h * hw];
             crate::blur::fused_blur_h_ssim_at_revision(
                 &src_wide,
                 &dst_wide,
@@ -794,7 +960,7 @@ impl<'a> Query<'a> {
                 &mut h_mu2,
                 &mut h_ssq,
                 &mut h_s12,
-                w,
+                hw,
                 wide_h,
                 BLUR_RADIUS,
                 self.snap.revision,
@@ -811,16 +977,17 @@ impl<'a> Query<'a> {
                 (&h_s12, &mut planes.s12),
             ] {
                 for j in 0..wide_h {
-                    v_in[j * rw..(j + 1) * rw].copy_from_slice(&h_plane[j * w + rx0..j * w + w]);
+                    v_in[j * rw..(j + 1) * rw]
+                        .copy_from_slice(&h_plane[j * hw + hoff..j * hw + hoff + rw]);
                 }
                 crate::blur::box_blur_v_from_copy(&v_in, &mut v_out, rw, wide_h, BLUR_RADIUS);
-                for y in strip_y0..strip_y0 + strip_h {
+                for y in strip_y0.max(ry0)..(strip_y0 + strip_h).min(ry1) {
                     let j = y - strip_y0 + feature_v2::HALO_P;
                     let o = (y - ry0) * rw;
                     out_plane[o..o + rw].copy_from_slice(&v_out[j * rw..(j + 1) * rw]);
                 }
             }
-            for y in strip_y0..strip_y0 + strip_h {
+            for y in strip_y0.max(ry0)..(strip_y0 + strip_h).min(ry1) {
                 let o = (y - ry0) * rw;
                 for col in 0..rw {
                     let j = o + col;
@@ -832,6 +999,80 @@ impl<'a> Query<'a> {
             }
         }
         planes
+    }
+
+    /// A Rev5 window has no strip-phase dependence: gather exactly the
+    /// finite output cone plus one H/V halo, reflecting against the image.
+    /// Core outputs never read temporary-buffer boundaries. Production
+    /// pair-tree kernels therefore reproduce the full fold bit for bit.
+    fn recompute_local_planes(&self, si: usize, ch: usize, c: &Chg) -> Planes {
+        let (w, h) = self.snap.dims[si];
+        let r = BLUR_RADIUS;
+        let (rx0, ry0) = (c.x0.saturating_sub(r), c.y0.saturating_sub(r));
+        let (rw, rh) = ((c.x1 + r).min(w) - rx0, (c.y1 + r).min(h) - ry0);
+        let (hw, hh) = (rw + 2 * r, rh + 2 * r);
+        let mut src = vec![0.0f32; hw * hh];
+        let mut dst = vec![0.0f32; hw * hh];
+        for y in 0..hh {
+            let gy = feature_v2::reflect_101(ry0 as isize + y as isize - r as isize, h);
+            for x in 0..hw {
+                let gx = feature_v2::reflect_101(rx0 as isize + x as isize - r as isize, w);
+                src[y * hw + x] = self.snap.pyr_src[si][ch][gy * w + gx];
+                dst[y * hw + x] = self.dst_at(si + 1, ch, gy, gx);
+            }
+        }
+        let mut hm1 = vec![0.0f32; hw * hh];
+        let mut hm2 = vec![0.0f32; hw * hh];
+        let mut hssq = vec![0.0f32; hw * hh];
+        let mut hs12 = vec![0.0f32; hw * hh];
+        crate::blur::fused_blur_h_ssim_at_revision(
+            &src,
+            &dst,
+            &mut hm1,
+            &mut hm2,
+            &mut hssq,
+            &mut hs12,
+            hw,
+            hh,
+            r,
+            self.snap.revision,
+        );
+        let mut result = Planes {
+            mu2: vec![0.0; rw * rh],
+            ssq: vec![0.0; rw * rh],
+            s12: vec![0.0; rw * rh],
+            diff: vec![0; rw * rh],
+            rx0,
+            ry0,
+            rw,
+            rh,
+        };
+        let mut vin = vec![0.0f32; rw * hh];
+        let mut vout = vec![0.0f32; rw * hh];
+        for (hp, out) in [
+            (&hm2, &mut result.mu2),
+            (&hssq, &mut result.ssq),
+            (&hs12, &mut result.s12),
+        ] {
+            for y in 0..hh {
+                vin[y * rw..(y + 1) * rw].copy_from_slice(&hp[y * hw + r..y * hw + r + rw]);
+            }
+            crate::blur::box_blur_v_from_copy(&vin, &mut vout, rw, hh, r);
+            for y in 0..rh {
+                out[y * rw..(y + 1) * rw].copy_from_slice(&vout[(y + r) * rw..(y + r + 1) * rw]);
+            }
+        }
+        let old = &self.snap.planes[si][ch];
+        for y in 0..rh {
+            for x in 0..rw {
+                let o = y * rw + x;
+                let i = (ry0 + y) * w + rx0 + x;
+                result.diff[o] = (result.mu2[o] != old.mu2[i]
+                    || result.ssq[o] != old.ssq[i]
+                    || result.s12[o] != old.s12[i]) as u8;
+            }
+        }
+        result
     }
 
     /// Fold the per-pixel dense-term differences over the residue cone
@@ -1059,32 +1300,23 @@ mod tests {
     use crate::source::RgbSlice;
 
     #[test]
-    fn rev5_neighbour_refinement_refuses() {
+    fn rev5_exact_refinement_goldens() {
         if !crate::ssim_form::run_at_revision(
             "5",
-            "local_refine::tests::rev5_neighbour_refinement_refuses",
-            "REV5_REFUSE_OK",
+            "local_refine::tests::rev5_exact_refinement_goldens",
+            "REV5_LOCAL_EXACT_OK",
         ) {
             return;
         }
-        let plan = crate::feature_plan::Plan::derive(
-            &crate::feature_set_id::SlotSet::from_slots([13, 459]),
-            720,
-        )
-        .unwrap();
-        let pixels = textured(64, 64, 1);
-        let image = RgbSlice::new(&pixels, 64, 64);
-        assert!(
-            LocalRefineSnapshot::capture(
-                &FoldRetention::default(),
-                &plan,
-                (64, 64),
-                &image,
-                &image
-            )
-            .is_none()
-        );
-        println!("REV5_REFUSE_OK");
+        golden_body();
+        {
+            let _token = archmage::testing::lock_token_testing();
+            cone_body();
+        }
+        noop_candidate_yields_exact_zero_deltas();
+        coarse_y_only_plan_coarse_channels_rebuilt();
+        sparse_retention_scale0_channels_rebuilt();
+        println!("REV5_LOCAL_EXACT_OK");
     }
 
     /// `feature_v2::tests::textured_image`'s fixture family, duplicated
@@ -1194,8 +1426,12 @@ mod tests {
 
     /// The full-944 plan every snapshot in this module is captured against.
     fn full_plan() -> crate::feature_plan::Plan {
-        crate::feature_plan::Plan::derive(&crate::feature_set_id::SlotSet::from_slots(0..944), 944)
-            .expect("full plan derives")
+        let ids = if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+            crate::feature_set_id::SlotSet::from_slots((0..228).chain(372..720))
+        } else {
+            crate::feature_set_id::SlotSet::from_slots(0..944)
+        };
+        crate::feature_plan::Plan::derive(&ids, 944).expect("full plan derives")
     }
 
     /// Golden tolerance, per feature id: relative `1e-6` on the delta
@@ -1289,7 +1525,11 @@ mod tests {
             let mut bad = 0usize;
             for (id, d) in &deltas {
                 let full_d = full.features()[*id] - base.features()[*id];
-                let tol = delta_tol(base.features()[*id], full.features()[*id], full_d);
+                let tol = if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+                    1e-10 + full_d.abs() * 1e-6
+                } else {
+                    delta_tol(base.features()[*id], full.features()[*id], full_d)
+                };
                 let err = (d - full_d).abs();
                 if err > tol {
                     bad += 1;
@@ -1619,8 +1859,10 @@ mod tests {
                 for y in 0..sh {
                     for x in 0..sw {
                         let i = y * sw + x;
-                        let in_cone =
-                            x >= planes.rx0 && y >= planes.ry0 && y < planes.ry0 + planes.rh;
+                        let in_cone = x >= planes.rx0
+                            && x < planes.rx0 + planes.rw
+                            && y >= planes.ry0
+                            && y < planes.ry0 + planes.rh;
                         for (a, b, maskable) in [
                             (
                                 ret.planes[si + 1][ch].mu2[i],
@@ -1913,10 +2155,14 @@ mod tests {
         .expect("plan'd walk computes");
         // The defect's precondition: stale foreign data really is sitting
         // in the unretained channels when capture runs.
-        assert!(
-            ret.pyr_dst[1][0].iter().any(|&v| v != 0.0),
-            "stale scale-1 X must be present in retention for this test to mean anything"
-        );
+        if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+            assert!(ret.pyr_dst[1][0].is_empty(), "Rev5 omits inactive storage");
+        } else {
+            assert!(
+                ret.pyr_dst[1][0].iter().any(|&v| v != 0.0),
+                "stale scale-1 X must be present in retention for this test to mean anything"
+            );
+        }
         let snap = LocalRefineSnapshot::capture(&ret, &plan, (w, h), &source, &distorted)
             .expect("capture accepts the coarse-y-only plan");
         // Ground truth: an ALL_CHANNELS walk's retained planes.

@@ -671,7 +671,7 @@ pub fn registry() -> &'static Registry {
 /// separately, which is exactly how a new revision comes to be accepted in
 /// one place and silently rejected in another. Mirrors
 /// `zensim::feature_v2::FormulaRevision`; extend both together.
-pub const ADMITTED_FORMULA_REVISIONS: &[u64] = &[1, 2, 3];
+pub const ADMITTED_FORMULA_REVISIONS: &[u64] = &[1, 2, 3, 4, 5];
 
 /// Whether a declared `formula_revision` value names a revision this build
 /// knows how to read.
@@ -1455,7 +1455,7 @@ mod training_admission_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// **The admitted-revision list is ONE list, and it now includes 3.**
+    /// **The admitted-revision list is ONE list and covers all five registered revisions.**
     ///
     /// Before this, the registry parse, the per-table metadata check and the
     /// root-manifest read each spelled `matches!(n, 1 | 2)` separately — which
@@ -1465,14 +1465,14 @@ mod training_admission_tests {
     /// defaulted (a mislabelled table must fail loudly, not become revision 1).
     #[test]
     fn the_admitted_revision_list_covers_every_registered_revision() {
-        assert_eq!(ADMITTED_FORMULA_REVISIONS, &[1, 2, 3]);
+        assert_eq!(ADMITTED_FORMULA_REVISIONS, &[1, 2, 3, 4, 5]);
         for n in ADMITTED_FORMULA_REVISIONS {
             assert!(
                 is_admitted_formula_revision(*n),
                 "revision {n} is registered but not admitted"
             );
         }
-        for n in [0u64, 4, 99] {
+        for n in [0u64, 6, 99] {
             assert!(
                 !is_admitted_formula_revision(n),
                 "revision {n} must not be admitted"
@@ -1483,7 +1483,13 @@ mod training_admission_tests {
         // end rather than trusting that it calls the helper.
         let dir = std::env::temp_dir().join(format!("zensim-admit-rev-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        for (value, want_ok) in [("3", true), ("2", true), ("4", false)] {
+        for (value, want_ok) in [
+            ("3", true),
+            ("2", true),
+            ("4", true),
+            ("5", true),
+            ("6", false),
+        ] {
             std::fs::write(
                 dir.join("_MANIFEST.json"),
                 format!("{{\"formula_revision\": {value}}}"),

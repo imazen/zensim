@@ -49,6 +49,19 @@
   no longer smuggle the append/Rev4-bank blocks into a `basic+peaks+v2` request's compute set or feature-set id
   (`ComputeSet::rev5_scope`, applied by `ComputeSet::from_toggles` and at the walk's own entry). The Rev5 process
   boundary is Rev4's: `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix.
+  Identical pairs return exact Difference/Similarity identities while ReferenceOnly slots retain computed values;
+  `BakeScorer::compute` returns that same computed vector with score 100. Rev5 shares vertical/activity planes and
+  retained basic/v2 map data, reuses scratch, skips unread peaks and scale-0 X/B storage, and defines the XYB mean
+  offset as zero. Prepared SDR/HDR steering serves supported Rev5 bakes, including computed identity vectors.
+  `ZENSIM_NEIGHBOUR_EXACT=1` supports exact local coarse-scale v2 refinement at Rev5 with finite window
+  halos and ordered replacement of stable-moment strip partials. Sampled SDR bakes use the established resize
+  weights with tier-independent f64 reductions; bounded-v2 and strip entries use the canonical fold owner.
+  Supported Rev5 corruption companions keep their complete extraction plan during spatial probes.
+  Custom-profile cached-reference, diffmap, strip, training and PU-linear entries serve the complete Rev5 plan;
+  identity vectors are computed. Validation manifests admit all five registered revisions, and bake densification
+  preserves canonical IDs when pruning an already dense bake.
+  Historical Rev1–Rev4 feature bytes are preserved. Gates and provisional speed measurements are recorded in
+  `benchmarks/rev5_WORKLOG.md`; quiet-box performance qualification is still outstanding.
 - Prepared steering session: a v2-bearing plan now runs the v1 attribution walk once and runs the v2 walk with its v1 block off, instead of folding v1 inside the v2 walk and then walking v1 a second time for the basic map. Maps, features and scores are bit-identical (before/after panels and a forced-route unit test); only the duplicated v1 work is gone. Measurements: `benchmarks/costset3_2026-10-03.md`.
 - Planner: a bake whose reads stay inside f0-227 and f372-719 with the v2 block running now skips X/B walk work at every scale whose chroma slots it never reads
   (and no longer accumulates free extras for the v2 MSE slots). Work selection only; no feature value or served score moves. Dense-layout bakes benefit; 944-wide identity bakes still
