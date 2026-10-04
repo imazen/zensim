@@ -456,6 +456,8 @@ pub(crate) struct FreeExtrasWork {
     pub revision: Option<crate::feature_defs::FormulaRevision>,
     /// Skip peak and whole-plane HF reductions when no declared input reads them.
     pub local_only: bool,
+    /// Rev5 plans may need HF ratios while omitting every peak.
+    pub omit_peaks: bool,
     /// SSIM and MSE subset: omit artifact/detail reductions as well.
     pub omit_edges: bool,
     /// Σs, Σd, Σs², Σd² — the `V1FreeExtras::RawMoments` set.
@@ -5115,7 +5117,7 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
     row.ssim_d.add(lane, sd);
     row.ssim_d4.add(lane, sd4);
     row.ssim_d2.add(lane, sd2);
-    if !free.local_only {
+    if !free.local_only && !free.omit_peaks {
         row.ssim_d8.add(lane, sd4 * sd4);
         acc.ssim_max = acc.ssim_max.max(sd);
     }
@@ -5148,10 +5150,12 @@ fn vblur_ssim_elem_canon<P: crate::featcanon::Pool>(
         row.edge_det.add(lane, detail_lost);
         row.edge_det4.add(lane, dl4);
         row.edge_det2.add(lane, dl2);
-        row.edge_art8.add(lane, a4 * a4);
-        row.edge_det8.add(lane, dl4 * dl4);
-        acc.edge_art_max = acc.edge_art_max.max(artifact);
-        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+        if !free.omit_peaks {
+            row.edge_art8.add(lane, a4 * a4);
+            row.edge_det8.add(lane, dl4 * dl4);
+            acc.edge_art_max = acc.edge_art_max.max(artifact);
+            acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+        }
     }
 
     // Variance / texture
@@ -5424,6 +5428,8 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     // already resolved to `Local` by the caller.
     _mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
+    if radius>0 { crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane,4); }
+    if !free.local_only && !free.omit_peaks { crate::fold_timing::work(crate::fold_timing::Work::PeakBand,1); }
     let form = free.luma_form();
     let r = radius;
     let inner_end = inner_start + inner_h;
@@ -7087,6 +7093,7 @@ mod tests {
             let free_all = FreeExtrasWork {
                 revision: None,
                 local_only: false,
+                omit_peaks: false,
                 omit_edges: false,
                 raw_moments: true,
                 bounded_err: true,
@@ -7095,6 +7102,7 @@ mod tests {
             let free_none = FreeExtrasWork {
                 revision: None,
                 local_only: true,
+                omit_peaks: false,
                 omit_edges: true,
                 raw_moments: false,
                 bounded_err: false,
@@ -7103,6 +7111,7 @@ mod tests {
             let free_mix = FreeExtrasWork {
                 revision: None,
                 local_only: false,
+                omit_peaks: false,
                 omit_edges: false,
                 raw_moments: false,
                 bounded_err: true,

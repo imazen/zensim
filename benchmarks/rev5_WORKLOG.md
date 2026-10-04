@@ -137,3 +137,26 @@ identity still scores 100, but returns computed features. Release bake test
 passes equality with research extraction, including nonzero f393. This also
 removes the scorer's fresh per-call V2Scratch allocation (W3). Earlier revision
 scorer routing is unchanged. Logs `/var/tmp/rev5/f2.log`.
+
+## 2026-10-04 — Step 6 work removal
+
+W1: Rev5 basic bands read the v2 vertical planes through a radius-zero
+canonical fold; each moment plane is blurred only in phase A. W6: serving
+no longer promotes Off to Peaks at Rev5, and the canonical basic element
+skips peak powers/maxima independently from needed HF ratios. Identity and
+tier tests pass after these changes (`a5.log`). Diagnostic 1MP score timings:
+by_v2fy 259.5 -> 180.7 ms, v2basic 520.8 -> 353.8 ms. These are NOT qualified
+speedups: zenbench marked noisy/resource-gated runs (5/10 rounds).
+
+W5: unread full-resolution X/B now uses two transient rows, downscaled
+immediately into scale one; full Y remains. A direct gate compares all read
+planes against full conversion under all token permutations, including odd
+97x63 and multi-strip 257x289: PASS (`producer-test2.log`). Cached-reference
+producer still requires extending this optimization.
+
+W7: Rev5 global XYB mean-offset metadata is defined as [0,0,0]; supported
+feature slots do not consume it. No global mean pass or row scratch remains
+on this path. Feature accuracy is unchanged by definition; historical
+metadata is unchanged. W3 scorer scratch reuse landed with F2. Work counters
+are added to existing fold_timing for actual V-plane calls, activity chains,
+peak bands, scale-0 X/B consumers, scratch initialization, and stored X/B rows.

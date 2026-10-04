@@ -3396,10 +3396,16 @@ impl ComputeSet {
     /// which is a register carry ONLY on the channel whose `src` IS the
     /// reference luma ([`APPEND2_CHANNEL`]). Their owning block is the
     /// append kernel, so they are also skipped whenever it runs.
-    pub(crate) fn free_work(&self, ch: usize) -> crate::fused::FreeExtrasWork {
+    pub(crate) fn free_work(&self, ch: usize, scale: usize) -> crate::fused::FreeExtrasWork {
+        if self.formula_revision >= FormulaRevision::Rev5 && scale==0 && ch!=1 {
+            // Count actual scale-zero chroma consumers, regardless of plan intent.
+            crate::fold_timing::work(crate::fold_timing::Work::Scale0XbCell,1);
+        }
         let bounded_err = self.bounded_err();
         crate::fused::FreeExtrasWork {
             revision: Some(self.formula_revision),
+            omit_peaks: self.formula_revision >= FormulaRevision::Rev5
+                && self.v1_pools == V1PoolsMode::Off,
             local_only: self.local_only,
             omit_edges: self.omit_edges,
             raw_moments: self.raw_moments(),
@@ -3822,6 +3828,7 @@ impl ScratchV2Strip {
     fn new_for(max_n: usize, needs: StripPlaneNeeds) -> Self {
         let hn = if needs.h { max_n } else { 0 };
         let vn = if needs.v2 { max_n } else { 0 };
+        crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements, 2*max_n+4*hn+8*vn);
         Self {
             src_wide: vec![0.0f32; max_n],
             dst_wide: vec![0.0f32; max_n],
@@ -4329,6 +4336,7 @@ fn run_blur_pass_inner(
     let s12 = &mut s12[..n];
     crate::blur::box_blur_v_from_copy(s12_h, s12, width, height_local, BLUR_RADIUS);
 
+    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain,1);
     let abs_src = &mut abs_src[..n];
     crate::simd_ops::abs_diff_into(src, mu1, abs_src);
     let activity = &mut activity[..n];
@@ -9535,6 +9543,8 @@ impl FoldPoolScratch {
 /// at the same offsets. `fold_self_blur_matches_precomputed_h` is the gate.
 #[derive(Clone, Copy)]
 enum FoldHSource<'a> {
+    /// Rev5 consumers share the already V-blurred planes.
+    Vertical([&'a [f32]; 4]),
     /// The four planes, over the strip's whole wide window (row 0 of each
     /// plane is wide-window row 0).
     Precomputed([&'a [f32]; 4]),
@@ -9585,6 +9595,36 @@ fn fold_v1_one_band(
     let mut empty_mu1: [f32; 0] = [];
     let mut empty_mu2: [f32; 0] = [];
     let mut empty_sd: [f32; 0] = [];
+    if let FoldHSource::Vertical([a, b, c, d]) = h_src {
+        debug_assert!(free.revision() >= FormulaRevision::Rev5);
+        // Radius zero selects the same canonical per-element/pool owner,
+        // reading the shared vertical values without another blur sweep.
+        sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+            &a[span.clone()],
+            &b[span.clone()],
+            &c[span.clone()],
+            &d[span.clone()],
+            &src[span.clone()],
+            &dst[span],
+            width,
+            h_local,
+            inner_start,
+            inner_h,
+            0,
+            &mut [],
+            &mut [],
+            false,
+            &mut [],
+            false,
+            &mut [],
+            &mut [],
+            false,
+            free,
+            crate::fused::ExtPoolsWork::default(),
+            &[],
+        ));
+        return b1;
+    }
     if let Some((ps, work)) = pools.as_mut().map(|(p, f)| (&mut **p, *f)) {
         let band_n = h_local * width;
         // Size to the WIDEST band this plane can ever hold, not to this band's
@@ -9715,6 +9755,7 @@ fn fold_v1_one_band(
             );
         }
         let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = match h_src {
+            FoldHSource::Vertical(_) => unreachable!("shared vertical planes handled above"),
             FoldHSource::Precomputed([a, b, c, d]) => (a, b, c, d, span.clone()),
             FoldHSource::SelfBlur => (
                 &h0[..band_n],
@@ -11925,7 +11966,14 @@ fn stream_phase_b(
             y0,
             HALO_P,
             info.plane_h,
-            if self_blur {
+            if free.revision() >= FormulaRevision::Rev5 && v2_blocks {
+                FoldHSource::Vertical([
+                    &scr.mu1[..n_wide],
+                    &scr.mu2[..n_wide],
+                    &scr.ssq[..n_wide],
+                    &scr.s12[..n_wide],
+                ])
+            } else if self_blur {
                 FoldHSource::SelfBlur
             } else {
                 FoldHSource::Precomputed([
@@ -13554,6 +13602,13 @@ pub(crate) struct MeanOffsetRows {
 
 impl MeanOffsetRows {
     pub(crate) fn new(width: usize, height: usize) -> Self {
+        // Rev5 exposes no global XYB offset: the supported model inputs do
+        // not consume it. Keep a zero metadata value without an image pass.
+        let height = if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+            0
+        } else {
+            height
+        };
         Self {
             rows: vec![[0.0f64; 3]; height],
             width,
@@ -13625,6 +13680,9 @@ impl MeanOffsetRows {
     /// divide by `width · height`. Reproduced loop-for-loop on purpose — this
     /// is the function whose *shape* is the guarantee.
     pub(crate) fn finish(&self) -> [f64; 3] {
+        if self.height == 0 {
+            return [0.0; 3];
+        }
         let n = (self.width * self.height) as f64;
         let chunk_rows = 64usize;
         let mut chunks: Vec<[f64; 3]> = Vec::with_capacity(self.height.div_ceil(chunk_rows));
@@ -13963,6 +14021,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         ref_planes,
         compute.sampling,
         toggles.formula_revision,
+        !compute.full_res_xb,
     );
 
     let __t_walk = crate::fold_timing::start();
@@ -13995,6 +14054,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // strip layout — the walk's toggles never change which strips the
         // producer emits, only what is computed from them.
         if scale == 0
+            && compute.formula_revision < FormulaRevision::Rev5
             && let Some(mo) = mean_offset.as_deref_mut()
         {
             let __t_mo = crate::fold_timing::start();
@@ -14250,7 +14310,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         None,
                         append2,
                         csfw,
-                        local.free_work(ch),
+                        local.free_work(ch, scale),
                         local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                         acc,
                     );
@@ -14345,7 +14405,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     cross,
                     append2,
                     csfw,
-                    local.free_work(ch),
+                    local.free_work(ch, scale),
                     local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     acc,
                 );
@@ -14421,7 +14481,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     None,
                     append2,
                     csfw,
-                    local.free_work(ch),
+                    local.free_work(ch, scale),
                     local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     &mut accums[ch],
                 );
@@ -14465,7 +14525,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     cross,
                     append2,
                     csfw,
-                    local.free_work(1),
+                    local.free_work(1, scale),
                     local.rev4_work(scale, 1, bleed_mask, chroma_strip),
                     &mut accums[1],
                 );

@@ -517,7 +517,10 @@ impl Plan {
         // footprint regression the policy exists to prevent, with the score
         // unmoved either way. Promoting here restores byte-identical
         // behaviour and puts the policy back in one place.
-        let plan = if plan.compute.v1_basic && plan.compute.v1_pools == V1PoolsMode::Off {
+        let plan = if revision < crate::feature_defs::FormulaRevision::Rev5
+            && plan.compute.v1_basic
+            && plan.compute.v1_pools == V1PoolsMode::Off
+        {
             let mut promoted = plan.compute;
             promoted.v1_pools = V1PoolsMode::Peaks;
             Plan::normalized(promoted, plan.layout)

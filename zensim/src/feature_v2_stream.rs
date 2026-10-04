@@ -200,6 +200,7 @@ impl RollingPlane {
             //
             // Strictly more deterministic, too: this always yields zeros,
             // where `resize` left a prefix of the previous walk's pixels.
+            crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements,need);
             buf = vec![0.0; need];
         }
         Self {
@@ -305,6 +306,7 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     source: &'a S,
     distorted: &'a D,
     sampled: Option<[Vec<crate::streaming::XybPyramidLevel>; 2]>,
+    omit_scale0_xb: bool,
     /// `[side][channel][scale]` rolling planes; side 0 = source.
     planes: [[Vec<RollingPlane>; 3]; 2],
     scales: Vec<ScaleState>,
@@ -381,6 +383,49 @@ fn convert_side_scale0(
     );
 }
 
+/// Rev5 unread X/B scale zero: retain two rows only, immediately downscale.
+/// Canonical color conversion is pointwise, including its partial vector tail.
+fn convert_side_y_and_downscale(
+    source: &impl ImageSource,
+    planes: &mut [Vec<RollingPlane>; 3],
+    hi0: usize,
+    n_new: usize,
+    width: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let [x, y, b] = planes;
+    for row in (hi0..hi0 + n_new).step_by(2) {
+        let rows = (hi0 + n_new - row).min(2);
+        let n = width * rows;
+        let sub = SubsetView::new(source, row, rows);
+        crate::streaming::convert_source_to_xyb_into_slices(
+            &sub,
+            &mut x[0].buf[..n],
+            y[0].append_rows(rows),
+            &mut b[0].buf[..n],
+            width,
+            false,
+            row,
+            revision,
+        );
+        if rows == 2 {
+            for ch in [&mut *x, &mut *b] {
+                let (head, tail) = ch.split_at_mut(1);
+                crate::blur::downscale_2x_into(
+                    &head[0].buf[..n],
+                    width,
+                    tail[0].append_rows(1),
+                    width / 2,
+                    1,
+                );
+            }
+        }
+    }
+    // The cursor participates in readiness/retirement; its pixels are never read.
+    x[0].hi = hi0 + n_new;
+    b[0].hi = hi0 + n_new;
+}
+
 /// Ref-cached-feed twin of [`convert_side_scale0`]: copy the source side's
 /// scale-0 rows out of the caller's already-built XYB pyramid.
 #[cfg(feature = "threads")]
@@ -445,6 +490,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             None,
             None,
             crate::ssim_form::active_revision(),
+            false,
         )
     }
 
@@ -461,6 +507,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
         sampling: Option<crate::sampling::Sampling>,
         revision: crate::feature_defs::FormulaRevision,
+        omit_scale0_xb: bool,
     ) -> Self {
         if let Some(sampling) = sampling {
             assert!(matches!(front_end, FrontEnd::Sdr));
@@ -497,6 +544,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 source,
                 distorted,
                 sampled: Some(sampled),
+                omit_scale0_xb: false,
                 planes: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
                 scales,
                 parallel,
@@ -509,7 +557,15 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             };
         }
         Self::new_inner(
-            source, distorted, parallel, pool, front_end, ref_planes, None, revision,
+            source,
+            distorted,
+            parallel,
+            pool,
+            front_end,
+            ref_planes,
+            None,
+            revision,
+            omit_scale0_xb,
         )
     }
 
@@ -533,6 +589,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             None,
             Some(advance_rows),
             crate::ssim_form::active_revision(),
+            false,
         )
     }
 
@@ -546,7 +603,12 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
         advance_override: Option<usize>,
         revision: crate::feature_defs::FormulaRevision,
+        omit_scale0_xb: bool,
     ) -> Self {
+        let omit_scale0_xb = omit_scale0_xb
+            && revision >= crate::feature_defs::FormulaRevision::Rev5
+            && matches!(front_end, FrontEnd::Sdr)
+            && ref_planes.is_none();
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
         debug_assert_eq!(h0, distorted.height());
@@ -571,7 +633,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
              {CONVERT_CHUNK_ROWS}-row lattice (chunk HEIGHT is semantics)"
         );
         let planes = std::array::from_fn(|_| {
-            std::array::from_fn(|_| {
+            std::array::from_fn(|ch| {
                 scales
                     .iter()
                     .enumerate()
@@ -579,7 +641,11 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                         RollingPlane::from_pooled(
                             pool.pop().unwrap_or_default(),
                             st.plane_w,
-                            scale_capacity_rows(s, st.plane_h, advance_rows),
+                            if omit_scale0_xb && s == 0 && ch != 1 {
+                                2
+                            } else {
+                                scale_capacity_rows(s, st.plane_h, advance_rows)
+                            },
                         )
                     })
                     .collect::<Vec<_>>()
@@ -590,6 +656,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             source,
             distorted,
             sampled: None,
+            omit_scale0_xb,
             planes,
             scales,
             parallel,
@@ -691,6 +758,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         }
         let n_new = self.advance_rows.min(h0 - hi0);
 
+        if !self.omit_scale0_xb { crate::fold_timing::work(crate::fold_timing::Work::Scale0XbStoredRows,4*n_new); }
         // --- Scale-0 conversion, both sides. ---
         //
         // MT (fold-MT lane): the two sides write DISJOINT plane sets and read
@@ -703,118 +771,153 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         // The HDR route keeps the serial loop — it shares one `hdr_row`
         // scratch, and a second buffer is not this lane's measurement.
         let __t_conv = crate::fold_timing::start();
-        let front_end = self.front_end;
-        #[cfg(feature = "threads")]
-        let sides_parallel = self.parallel && matches!(front_end, FrontEnd::Sdr);
-        #[cfg(not(feature = "threads"))]
-        let sides_parallel = false;
-        #[cfg(feature = "threads")]
-        if sides_parallel {
+        if self.omit_scale0_xb {
             let width = self.scales[0].plane_w;
-            let source = self.source;
-            let distorted = self.distorted;
-            let ref_planes = self.ref_planes;
-            let inner_parallel = self.parallel;
-            let revision = self.revision;
-            let (h, t) = self.planes.split_at_mut(1);
-            let (sp, dp) = (&mut h[0], &mut t[0]);
-            rayon::join(
-                || match ref_planes {
-                    Some(rp) => copy_cached_scale0(rp, sp, hi0, n_new, width),
-                    None => {
-                        convert_side_scale0(source, sp, hi0, n_new, width, inner_parallel, revision)
-                    }
-                },
-                || convert_side_scale0(distorted, dp, hi0, n_new, width, inner_parallel, revision),
+            convert_side_y_and_downscale(
+                self.source,
+                &mut self.planes[0],
+                hi0,
+                n_new,
+                width,
+                self.revision,
             );
-        }
-        for si in (0..2).take(if sides_parallel { 0 } else { 2 }) {
-            let width = self.scales[0].plane_w;
-            // REF-CACHED FEED: the source side's scale-0 rows already exist
-            // in the caller's pyramid — copy them instead of decoding and
-            // converting. Bytes are identical by construction (see the
-            // `ref_planes` field doc); the distorted side never takes this
-            // branch.
-            if si == 0
-                && let Some(rp) = self.ref_planes
-            {
-                let (planes, cw, _) = &rp[0];
-                debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
-                let [c0, c1, c2] = &mut self.planes[0];
-                for (ch, plane) in [c0, c1, c2].into_iter().enumerate() {
-                    let dst = plane[0].append_rows(n_new);
-                    dst.copy_from_slice(&planes[ch][hi0 * width..(hi0 + n_new) * width]);
-                }
-                continue;
+            convert_side_y_and_downscale(
+                self.distorted,
+                &mut self.planes[1],
+                hi0,
+                n_new,
+                width,
+                self.revision,
+            );
+        } else {
+            let front_end = self.front_end;
+            #[cfg(feature = "threads")]
+            let sides_parallel = self.parallel && matches!(front_end, FrontEnd::Sdr);
+            #[cfg(not(feature = "threads"))]
+            let sides_parallel = false;
+            #[cfg(feature = "threads")]
+            if sides_parallel {
+                let width = self.scales[0].plane_w;
+                let source = self.source;
+                let distorted = self.distorted;
+                let ref_planes = self.ref_planes;
+                let inner_parallel = self.parallel;
+                let revision = self.revision;
+                let (h, t) = self.planes.split_at_mut(1);
+                let (sp, dp) = (&mut h[0], &mut t[0]);
+                rayon::join(
+                    || match ref_planes {
+                        Some(rp) => copy_cached_scale0(rp, sp, hi0, n_new, width),
+                        None => convert_side_scale0(
+                            source,
+                            sp,
+                            hi0,
+                            n_new,
+                            width,
+                            inner_parallel,
+                            revision,
+                        ),
+                    },
+                    || {
+                        convert_side_scale0(
+                            distorted,
+                            dp,
+                            hi0,
+                            n_new,
+                            width,
+                            inner_parallel,
+                            revision,
+                        )
+                    },
+                );
             }
-            let [c0, c1, c2] = &mut self.planes[si];
-            let (p0, p1, p2) = (
-                c0[0].append_rows(n_new),
-                c1[0].append_rows(n_new),
-                c2[0].append_rows(n_new),
-            );
-            match front_end {
-                FrontEnd::Sdr => match si {
-                    0 => {
-                        let sub = SubsetView::new(self.source, hi0, n_new);
-                        crate::streaming::convert_source_to_xyb_into_slices(
-                            &sub,
-                            p0,
-                            p1,
-                            p2,
-                            width,
-                            self.parallel,
-                            hi0,
-                            self.revision,
-                        );
+            for si in (0..2).take(if sides_parallel { 0 } else { 2 }) {
+                let width = self.scales[0].plane_w;
+                // REF-CACHED FEED: the source side's scale-0 rows already exist
+                // in the caller's pyramid — copy them instead of decoding and
+                // converting. Bytes are identical by construction (see the
+                // `ref_planes` field doc); the distorted side never takes this
+                // branch.
+                if si == 0
+                    && let Some(rp) = self.ref_planes
+                {
+                    let (planes, cw, _) = &rp[0];
+                    debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
+                    let [c0, c1, c2] = &mut self.planes[0];
+                    for (ch, plane) in [c0, c1, c2].into_iter().enumerate() {
+                        let dst = plane[0].append_rows(n_new);
+                        dst.copy_from_slice(&planes[ch][hi0 * width..(hi0 + n_new) * width]);
                     }
-                    _ => {
-                        let sub = SubsetView::new(self.distorted, hi0, n_new);
-                        crate::streaming::convert_source_to_xyb_into_slices(
-                            &sub,
-                            p0,
-                            p1,
-                            p2,
-                            width,
-                            self.parallel,
-                            hi0,
-                            self.revision,
-                        );
-                    }
-                },
-                FrontEnd::Hdr(encoding) => {
-                    for k in 0..n_new {
-                        let y = hi0 + k;
-                        let row_off = k * width;
-                        if si == 0 {
-                            hdr_source_row_to_nits(
-                                self.source,
-                                y,
-                                encoding,
-                                &mut self.hdr_row,
-                                self.revision,
-                            );
-                        } else {
-                            hdr_source_row_to_nits(
-                                self.distorted,
-                                y,
-                                encoding,
-                                &mut self.hdr_row,
+                    continue;
+                }
+                let [c0, c1, c2] = &mut self.planes[si];
+                let (p0, p1, p2) = (
+                    c0[0].append_rows(n_new),
+                    c1[0].append_rows(n_new),
+                    c2[0].append_rows(n_new),
+                );
+                match front_end {
+                    FrontEnd::Sdr => match si {
+                        0 => {
+                            let sub = SubsetView::new(self.source, hi0, n_new);
+                            crate::streaming::convert_source_to_xyb_into_slices(
+                                &sub,
+                                p0,
+                                p1,
+                                p2,
+                                width,
+                                self.parallel,
+                                hi0,
                                 self.revision,
                             );
                         }
-                        crate::color::linear_to_pu_xyb_planar_into_at_revision(
-                            &self.hdr_row[..width],
-                            &mut p0[row_off..row_off + width],
-                            &mut p1[row_off..row_off + width],
-                            &mut p2[row_off..row_off + width],
-                            self.revision,
-                        );
+                        _ => {
+                            let sub = SubsetView::new(self.distorted, hi0, n_new);
+                            crate::streaming::convert_source_to_xyb_into_slices(
+                                &sub,
+                                p0,
+                                p1,
+                                p2,
+                                width,
+                                self.parallel,
+                                hi0,
+                                self.revision,
+                            );
+                        }
+                    },
+                    FrontEnd::Hdr(encoding) => {
+                        for k in 0..n_new {
+                            let y = hi0 + k;
+                            let row_off = k * width;
+                            if si == 0 {
+                                hdr_source_row_to_nits(
+                                    self.source,
+                                    y,
+                                    encoding,
+                                    &mut self.hdr_row,
+                                    self.revision,
+                                );
+                            } else {
+                                hdr_source_row_to_nits(
+                                    self.distorted,
+                                    y,
+                                    encoding,
+                                    &mut self.hdr_row,
+                                    self.revision,
+                                );
+                            }
+                            crate::color::linear_to_pu_xyb_planar_into_at_revision(
+                                &self.hdr_row[..width],
+                                &mut p0[row_off..row_off + width],
+                                &mut p1[row_off..row_off + width],
+                                &mut p2[row_off..row_off + width],
+                                self.revision,
+                            );
+                        }
                     }
                 }
             }
         }
-
         crate::fold_timing::stop(__t_conv, crate::fold_timing::Phase::ProdConvert, 0);
 
         // --- Cascade downscales: fill each deeper scale from complete
@@ -1119,6 +1222,63 @@ fn hdr_source_row_to_nits(
 mod tests {
     use super::*;
     use crate::source::RgbSlice;
+
+    #[test]
+    fn rev5_downscaled_chroma_matches_full_conversion() {
+        use crate::feature_defs::FormulaRevision;
+        let _guard = archmage::testing::lock_token_testing();
+        let _ = archmage::testing::for_each_token_permutation(
+            archmage::testing::CompileTimePolicy::Warn,
+            |_| {
+                for (w, h) in [(64, 64), (97, 63), (257, 289)] {
+                    let pixels = textured_image(w, h, 71);
+                    let image = RgbSlice::new(&pixels, w, h);
+                    let (mut pool_a, mut pool_b) = (Vec::new(), Vec::new());
+                    let mut a = StripPlaneProducer::new_with_ref_feed(
+                        &image,
+                        &image,
+                        false,
+                        &mut pool_a,
+                        FrontEnd::Sdr,
+                        None,
+                        None,
+                        FormulaRevision::Rev5,
+                        false,
+                    );
+                    let mut b = StripPlaneProducer::new_with_ref_feed(
+                        &image,
+                        &image,
+                        false,
+                        &mut pool_b,
+                        FrontEnd::Sdr,
+                        None,
+                        None,
+                        FormulaRevision::Rev5,
+                        true,
+                    );
+                    while let Some(ia) = a.next_strip() {
+                        let ib = b.next_strip().unwrap();
+                        assert_eq!((ia.scale, ia.y0, ia.strip_h), (ib.scale, ib.y0, ib.strip_h));
+                        for ch in 0..3 {
+                            if ia.scale == 0 && ch != 1 {
+                                continue;
+                            }
+                            for side in [Side::Source, Side::Distorted] {
+                                assert_eq!(
+                                    a.rows(side, ch, ia.scale, ia.y0, ia.y0 + ia.strip_h),
+                                    b.rows(side, ch, ib.scale, ib.y0, ib.y0 + ib.strip_h),
+                                    "{w}x{h} scale={} ch={ch}",
+                                    ia.scale
+                                );
+                            }
+                        }
+                    }
+                    assert!(b.next_strip().is_none());
+                    assert_eq!(b.planes[0][0][0].buf.len(), 2 * w);
+                }
+            },
+        );
+    }
 
     /// Deterministic textured content (same family as feature_v2's tests).
     fn textured_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
