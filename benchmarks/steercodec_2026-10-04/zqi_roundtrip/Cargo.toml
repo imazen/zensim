@@ -1,0 +1,12 @@
+# Standalone helper for the steercodec benchmark (not a zensim workspace member): zqi lossy encode + decode of an 8-bit RGB PNG.
+[package]
+name = "zqi_roundtrip"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zqi = { path = "/var/tmp/steercodec/zqi/zqi" }
+png = "0.18.1"
