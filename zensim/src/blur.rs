@@ -10428,40 +10428,25 @@ fn fused_blur_h_local11_wide(
         let mut x = 0;
         while x < width {
             if x >= 5 && x + 16 + 5 <= width {
-                let mut a = [f32x16::zero(token); 11];
-                let mut b = a;
-                let mut q = a;
-                let mut p = a;
-                for k in 0..11 {
+                let tap = |k: usize| {
                     let i = row + x + k - 5;
-                    a[k] = f32x16::load(token, src[i..i + 16].try_into().unwrap());
-                    b[k] = f32x16::load(token, dst[i..i + 16].try_into().unwrap());
-                    q[k] = a[k].mul_add(a[k], b[k] * b[k]);
-                    p[k] = if err {
-                        let e = a[k] - b[k];
-                        e * e
-                    } else {
-                        a[k] * b[k]
-                    };
-                }
-                let tree = |t: [f32x16; 11]| {
-                    ((((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
-                        + (t[8] + t[9])
-                        + t[10])
-                        * inv
+                    let a = f32x16::load(token, src[i..i + 16].try_into().unwrap());
+                    let b = f32x16::load(token, dst[i..i + 16].try_into().unwrap());
+                    let q = a.mul_add(a, b * b);
+                    let p = if err { let e = a - b; e * e } else { a * b };
+                    (a, b, q, p)
                 };
-                tree(a).store((&mut out_mu1[row + x..row + x + 16]).try_into().unwrap());
-                tree(b).store((&mut out_mu2[row + x..row + x + 16]).try_into().unwrap());
-                tree(q).store(
-                    (&mut out_sigma_sq[row + x..row + x + 16])
-                        .try_into()
-                        .unwrap(),
-                );
-                tree(p).store(
-                    (&mut out_sigma12[row + x..row + x + 16])
-                        .try_into()
-                        .unwrap(),
-                );
+                let add = |a: (f32x16, f32x16, f32x16, f32x16), b: (f32x16, f32x16, f32x16, f32x16)| {
+                    (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
+                };
+                let pair = |k| add(tap(k), tap(k + 1));
+                let s01 = add(pair(0), pair(2));
+                let s45 = add(pair(4), pair(6));
+                let sum = add(add(add(s01, s45), pair(8)), tap(10));
+                (sum.0 * inv).store((&mut out_mu1[row + x..row + x + 16]).try_into().unwrap());
+                (sum.1 * inv).store((&mut out_mu2[row + x..row + x + 16]).try_into().unwrap());
+                (sum.2 * inv).store((&mut out_sigma_sq[row + x..row + x + 16]).try_into().unwrap());
+                (sum.3 * inv).store((&mut out_sigma12[row + x..row + x + 16]).try_into().unwrap());
                 x += 16;
             } else {
                 let mut a = [0.0; 11];

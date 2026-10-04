@@ -290,3 +290,15 @@ with correctly rounded scalar tails. The complete production-scope bake
 test compares features and map densities across every token permutation,
 and passes. Thirty-round provisional v4x maps improve 50.07/192.99 ms →
 41.48/163.29 ms (17.17%/15.39% at 1/4 MP); score is effectively unchanged.
+
+The vector map-SD path also improves v3 maps 57.56/220.39 ms →
+46.51/183.45 ms (19.19%/16.76%). It is retained. The next score profile
+puts dense v2 at 26.51%, fused H at 18.54%, V at 14.98%, XYB at 10.63%,
+basic fold at 8.10%, and gradients at 7.71% (3,000 samples).
+Computing paired H tap groups before advancing to the next group reduces
+live intermediate vectors while preserving every leaf and tree operation.
+Provisional v4x scores improve 23.55/91.57 ms → 22.71/82.99 ms;
+maps improve 41.60/160.63 ms → 38.34/153.21 ms. v3 is unchanged in source.
+Full-vector parity remains byte-identical to the frozen native capture,
+and F2 identity passes on every native token permutation
+(`/var/tmp/rev5/tapstream-parity.log`, 14 s).
