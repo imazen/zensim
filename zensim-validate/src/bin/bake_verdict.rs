@@ -4956,6 +4956,7 @@ fn main() -> ExitCode {
                         zensim::feature_v2::FormulaRevision::Rev2 => 2,
                         zensim::feature_v2::FormulaRevision::Rev3 => 3,
                         zensim::feature_v2::FormulaRevision::Rev4 => 4,
+                        zensim::feature_v2::FormulaRevision::Rev5 => 5,
                         _ => {
                             eprintln!(
                                 "bake_verdict: REFUSING — {} declares a formula revision this build cannot map to a table revision",

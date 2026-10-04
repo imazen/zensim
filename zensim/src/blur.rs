@@ -82,6 +82,15 @@ pub fn box_blur_v_from_copy(
     height: usize,
     radius: usize,
 ) {
+    let revision = crate::ssim_form::active_revision();
+    if matches!(
+        crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
+        crate::featcanon::BlurMode::Local
+    ) {
+        box_blur_v_local(src, dst, width, height, radius);
+        return;
+    }
+
     // featacc blur axis: measurement-only re-evaluations of the window.
     // `blur_axis()` is a constant `Rec` in a product build, so this folds to
     // the incant dispatch unconditionally there.
@@ -749,6 +758,15 @@ pub(crate) fn box_blur_h(
     height: usize,
     radius: usize,
 ) {
+    let revision = crate::ssim_form::active_revision();
+    if matches!(
+        crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
+        crate::featcanon::BlurMode::Local
+    ) {
+        box_blur_h_local(input, output, width, height, radius);
+        return;
+    }
+
     // featacc blur axis (measurement only — constant-folds in product).
     #[cfg(feature = "oracle")]
     if !matches!(
@@ -1583,6 +1601,18 @@ pub(crate) fn box_blur_h_into_abs_diff(
     height: usize,
     radius: usize,
 ) {
+    let revision = crate::ssim_form::active_revision();
+    if matches!(
+        crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
+        crate::featcanon::BlurMode::Local
+    ) {
+        box_blur_h_local(src, out_activity, width, height, radius);
+        for (v, &s) in out_activity.iter_mut().zip(src) {
+            *v = (s - *v).abs();
+        }
+        return;
+    }
+
     // featacc blur axis (measurement only — constant-folds in product):
     // `blur` narrows to f32 at the same boundary as the unfused form
     // (`box_blur_h` store + `abs_diff`), then the |src − blur| element stays
@@ -3540,6 +3570,7 @@ pub(crate) fn fused_blur_h_ssim_at_revision(
             radius,
             err,
             mode,
+            revision,
         );
         return;
     }
@@ -3657,6 +3688,7 @@ pub fn fused_blur_h_ssim3(
             radius,
             err,
             mode,
+            revision,
         );
         return;
     }
@@ -6439,6 +6471,176 @@ fn fused_blur_h_ssim_rec64_rows_neon(
     }
 }
 
+// ============================================================================
+// Rev5 `localwin` — per-output f32 pair-tree windows (THE REV5 CANON blur)
+// ============================================================================
+
+/// The `localwin` window reduce — the Rev5 spec's fixed pair tree over `t`'s
+/// taps. The largest power-of-two prefix reduces as a balanced pairwise tree;
+/// the remainder chunks fold on left-to-right. For the production 11-tap
+/// window this is exactly the spec's `s2 = x[i]+x[i+1]; s4 = s2[i]+s2[i+2];
+/// s8 = s4[i]+s4[i+4]; w = s8 + s2[8] + x[10]` — `(s8 + s89) + x10`. Every
+/// `localwin` kernel funnels through this one function so SIMD bodies can
+/// only diverge by lane, never by order.
+#[inline(always)]
+pub(crate) fn local_sum_taps(t: &[f32]) -> f32 {
+    if t.len() == 11 {
+        let s8 = ((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7]));
+        return s8 + (t[8] + t[9]) + t[10];
+    }
+    let mut rest = t;
+    let mut acc = 0.0f32;
+    let mut first = true;
+    while !rest.is_empty() {
+        // Largest power of two ≤ `rest.len()` — for 11 taps this yields the
+        // 8 + 2 + 1 chunking the spec tree writes out.
+        let sz = 1usize << (usize::BITS - 1 - rest.len().leading_zeros());
+        let c = match sz {
+            1 => rest[0],
+            2 => rest[0] + rest[1],
+            4 => (rest[0] + rest[1]) + (rest[2] + rest[3]),
+            8 => {
+                ((rest[0] + rest[1]) + (rest[2] + rest[3]))
+                    + ((rest[4] + rest[5]) + (rest[6] + rest[7]))
+            }
+            _ => {
+                // Chunks ≥ 16 taps never occur at `BLUR_RADIUS = 5`; keep a
+                // fixed left fold of pairwise leaves for larger windows.
+                let mut s = rest[0] + rest[1];
+                let mut i = 2;
+                while i + 1 < sz {
+                    s += rest[i] + rest[i + 1];
+                    i += 2;
+                }
+                if i < sz {
+                    s += rest[i];
+                }
+                s
+            }
+        };
+        acc = if first { c } else { acc + c };
+        first = false;
+        rest = &rest[sz..];
+    }
+    acc
+}
+
+/// **Rev5 `localwin` fused H-blur** — [`fused_blur_h_ssim_canon`]'s Rev5 arm:
+/// each output's 11-tap window is evaluated independently in f32 through
+/// [`local_sum_taps`] — no sliding recurrence, so no rounding can travel
+/// along a row. `tap_mirror` padding, identical to every other axis; the
+/// per-tap leaves are the same products the Rec64 body feeds its chain
+/// (`s·s + d·d` fused, `(s−d)²` or `s·d`). Tier-identical by construction:
+/// one op sequence, every tier.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_local(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    err: bool,
+) {
+    let r = radius;
+    let diam = 2 * r + 1;
+    let inv = 1.0f32 / diam as f32;
+    let mut t = vec![0.0f32; 4 * diam];
+    let (ts, rest) = t.split_at_mut(diam);
+    let (td, rest) = rest.split_at_mut(diam);
+    let (tq, tp) = rest.split_at_mut(diam);
+    for y in 0..height {
+        let row = y * width;
+        for x in 0..width {
+            for k in 0..diam {
+                let idx = crate::featcanon::tap_mirror(x as isize + k as isize - r as isize, width);
+                let s = src[row + idx];
+                let d = dst[row + idx];
+                ts[k] = s;
+                td[k] = d;
+                tq[k] = s.mul_add(s, d * d);
+                tp[k] = if err {
+                    let e = s - d;
+                    e * e
+                } else {
+                    s * d
+                };
+            }
+            out_mu1[row + x] = local_sum_taps(ts) * inv;
+            out_mu2[row + x] = local_sum_taps(td) * inv;
+            out_sigma_sq[row + x] = local_sum_taps(tq) * inv;
+            out_sigma12[row + x] = local_sum_taps(tp) * inv;
+        }
+    }
+}
+
+/// Rev5 `localwin` H blur — [`box_blur_h`]'s Rev5 arithmetic: per-output
+/// pair tree, `tap_mirror` padding. Bit-identical to the `mu1`/`mu2` plane a
+/// [`fused_blur_h_ssim_local`] feed of `(input, input)` writes, the parity
+/// every activity-chain consumer relies on.
+pub(crate) fn box_blur_h_local(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let r = radius;
+    let diam = 2 * r + 1;
+    let inv = 1.0f32 / diam as f32;
+    let mut t = vec![0.0f32; diam];
+    for y in 0..height {
+        let row = y * width;
+        for x in 0..width {
+            for k in 0..diam {
+                t[k] = input[row
+                    + crate::featcanon::tap_mirror(x as isize + k as isize - r as isize, width)];
+            }
+            output[row + x] = local_sum_taps(&t) * inv;
+        }
+    }
+}
+
+/// Rev5 `localwin` V blur — [`box_blur_v_from_copy`]'s Rev5 arithmetic:
+/// per-output pair tree over the `tap_mirror` row set. Only inner rows need
+/// evaluating (no recurrence to feed), but this entry — like the shipped
+/// copy — writes every row.
+pub(crate) fn box_blur_v_local(
+    src: &[f32],
+    dst: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let r = radius;
+    let diam = 2 * r + 1;
+    let inv = 1.0f32 / diam as f32;
+    let mut t = vec![0.0f32; diam];
+    let mut rb = vec![0usize; diam];
+    for y in 0..height {
+        for k in 0..diam {
+            rb[k] =
+                crate::featcanon::tap_mirror(y as isize + k as isize - r as isize, height) * width;
+        }
+        let base = y * width;
+        for x in 0..width {
+            for k in 0..diam {
+                t[k] = src[rb[k] + x];
+            }
+            dst[base + x] = local_sum_taps(&t) * inv;
+        }
+    }
+}
+
 /// **FEATCANON canonical fused H-blur** — the same sliding-moment arithmetic
 /// as [`fused_blur_h_ssim_inner`] written as one plain-Rust body over inherent
 /// `f32` ops. Every product-sum keeps the vector body's fused chain
@@ -6463,20 +6665,42 @@ fn fused_blur_h_ssim_canon(
     radius: usize,
     err: bool,
     mode: crate::featcanon::Mode,
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = 1.0f32 / diam as f32;
     let inv_v64 = 1.0f64 / diam as f64;
     let r = radius;
     // rev4canon: the blur axis owns this kernel's arithmetic entirely — the
-    // window sums ARE its elements. `canon_blur_axis(mode)` selects it:
-    // `Rec64` (the f64 sliding form) is THE REV4 CANON — it runs in product
-    // builds; `Rec` is the shipped f32 sliding form, replayed for the `c32`
-    // oracle arm (the superseded canon) and explicit `BLUR=rec` runs;
+    // window sums ARE its elements. `canon_blur_axis_for(mode, revision)`
+    // selects it: `Local` (the per-output f32 pair tree) is THE REV5 CANON —
+    // it runs in product builds at Rev5; `Rec64` (the f64 sliding form) is
+    // THE REV4 CANON; `Rec` is the shipped f32 sliding form, replayed for the
+    // `c32` oracle arm (the superseded canon) and explicit `BLUR=rec` runs;
     // `Fresh` re-sums every window in f64 (oracle ruler). `mode` routes the
     // default per mode (an `exact` run with `BLUR=rec` still measures
     // exactly the shipped blur's contribution).
-    let blur = crate::featcanon::canon_blur_axis(mode);
+    let blur = crate::featcanon::canon_blur_axis_for(mode, revision);
+
+    // Rev5 `localwin`: the per-output f32 pair tree — no recurrence at all.
+    // Scalar on purpose for now; every tier runs this same body so the planes
+    // are tier-identical by construction (the vector body arrives with the
+    // speed loop and must match it bit-for-bit).
+    if matches!(blur, crate::featcanon::BlurMode::Local) {
+        fused_blur_h_ssim_local(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            err,
+        );
+        return;
+    }
 
     // rev4vec2: Rec64 → the 8-row f64x8 body on the fused-FMA tiers
     // (bit-identical per-row op sequence); scalar + wasm128 run the same
@@ -7386,6 +7610,88 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rev5_local_windows_match_f64_and_have_local_support() {
+        use super::*;
+        for (w, h) in [(1, 1), (3, 2), (17, 9), (97, 63)] {
+            let src: Vec<f32> = (0..w * h)
+                .map(|i| ((i * 137 + 19) % 1009) as f32 / 1009.0)
+                .collect();
+            let dst: Vec<f32> = src.iter().map(|v| 0.9 * v + 0.02).collect();
+            let mut outputs = [
+                vec![0.0; w * h],
+                vec![0.0; w * h],
+                vec![0.0; w * h],
+                vec![0.0; w * h],
+            ];
+            let [a, b, c, d] = &mut outputs;
+            fused_blur_h_ssim_local(&src, &dst, a, b, c, d, w, h, 5, true);
+            for y in 0..h {
+                for x in 0..w {
+                    let mut exact = [0.0f64; 4];
+                    for k in -5..=5 {
+                        let i = y * w + crate::featcanon::tap_mirror(x as isize + k, w);
+                        let (s, d) = (src[i], dst[i]);
+                        for (sum, v) in
+                            exact
+                                .iter_mut()
+                                .zip([s, d, s.mul_add(s, d * d), (s - d) * (s - d)])
+                        {
+                            *sum += v as f64;
+                        }
+                    }
+                    for j in 0..4 {
+                        let e = exact[j] / 11.0;
+                        assert!(
+                            (outputs[j][y * w + x] as f64 - e).abs()
+                                <= 8.0 * f32::EPSILON as f64 * e.abs().max(1e-30),
+                            "plane {j} {w}x{h} {x},{y}"
+                        );
+                    }
+                }
+            }
+            let mut plain = vec![0.0; w * h];
+            box_blur_h_local(&src, &mut plain, w, h, 5);
+            assert_eq!(plain, outputs[0]);
+            box_blur_v_local(&src, &mut plain, w, h, 5);
+            for y in 0..h {
+                for x in 0..w {
+                    let e = (-5..=5)
+                        .map(|k| {
+                            src[crate::featcanon::tap_mirror(y as isize + k, h) * w + x] as f64
+                        })
+                        .sum::<f64>()
+                        / 11.0;
+                    assert!(
+                        (plain[y * w + x] as f64 - e).abs()
+                            <= 8.0 * f32::EPSILON as f64 * e.abs().max(1e-30)
+                    );
+                }
+            }
+            if w > 11 && h > 11 {
+                let mut changed = src.clone();
+                changed[20 * w + 20] += 1.0;
+                let mut other = vec![0.0; w * h];
+                box_blur_v_local(&changed, &mut other, w, h, 5);
+                for y in 0..h {
+                    for x in 0..w {
+                        if x != 20 || y.abs_diff(20) > 5 {
+                            assert_eq!(plain[y * w + x].to_bits(), other[y * w + x].to_bits());
+                        }
+                    }
+                }
+                box_blur_h_local(&changed, &mut other, w, h, 5);
+                for y in 0..h {
+                    for x in 0..w {
+                        if y != 20 || x.abs_diff(20) > 5 {
+                            assert_eq!(outputs[0][y * w + x].to_bits(), other[y * w + x].to_bits());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[allow(unused_imports)]
     use archmage::SimdToken as _;
 

@@ -76,3 +76,19 @@ Checks: `cargo check` clean; the three new tests pass; the 78 tests in the
 touched modules pass; `cargo fmt` applied; `just api-doc` regenerated the
 snapshots (`Rev5` added to the public-enum list — the brief's single
 approved public item); CHANGELOG entry written.
+
+## 2026-10-04 — Codex takeover; Step 2 A1
+
+Reviewed inherited `pskvvvlo` including the stamping edits and parity test.
+The inherited local plain blur bodies were uncalled: corrected H/V and
+activity dispatch to select local windows at Rev5 while preserving earlier
+product dispatch. Removed the unused duplicate one-pass wrapper. Added the
+required token-testing lock to the permutation test.
+
+Gate: release `cargo test -p zensim --features custom-profiles,feature-regime-v2,threads,training rev5 -- --nocapture`
+passes (log `/var/tmp/rev5/a1.log`, wrapper elapsed 103 s). Direct window
+checks cover 1x1, 3x2, 17x9, 97x63, four fused H planes and plain H/V;
+f64 window error bounded by 8 f32 eps relative. Perturbation test proves
+unchanged outputs outside the five-pixel support. Full-vector tier test
+covers 64x64, 97x63, 131x65, 255x129. Rev5 differs from Rev4 on the fixture.
+No speed claim yet: inherited local kernels are scalar.

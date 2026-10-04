@@ -179,6 +179,7 @@ fn blur_cell() -> &'static std::sync::RwLock<Option<BlurMode>> {
         RwLock::new(match std::env::var("ZENSIM_FEATCANON_BLUR").as_deref() {
             Ok("rec") => Some(BlurMode::Rec),
             Ok("rec64") => Some(BlurMode::Rec64),
+            Ok("local") => Some(BlurMode::Local),
             Ok("fresh") => Some(BlurMode::Fresh),
             _ => None,
         })
@@ -225,7 +226,7 @@ pub(crate) fn measurement_mode() -> Mode {
 // `ZENSIM_FEATCANON_BLUR` isolates it for measurement:
 
 /// How the blur windows evaluate their sums. `Rec` is the shipped form for
-/// Rev1–Rev3; `Rec64` is the Rev4 canon.
+/// Rev1–Rev3; `Rec64` is the Rev4 canon; `Local` is the Rev5 canon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlurMode {
     /// Production: per-column (V) / per-row (H) sliding f32 sums
@@ -235,6 +236,12 @@ pub(crate) enum BlurMode {
     /// (rev4canon). Under `oracle` it is also a measurement arm measuring
     /// the f32 storage of the running sums, not the recurrence's existence.
     Rec64,
+    /// THE REV5 CANON's blur axis (`localwin`): each output's 11-tap window
+    /// is summed independently in f32 over the spec's fixed pair tree —
+    /// `s2 = x[i]+x[i+1]; s4 = s2[i]+s2[i+2]; s8 = s4[i]+s4[i+4];
+    /// w = s8 + s2[8] + x[10]` — with [`tap_mirror`] padding. No recurrence,
+    /// so rounding cannot travel along a row or strip.
+    Local,
     /// Per-position window re-summation in f64 — the strongest reference:
     /// no drift term at all.
     #[cfg(feature = "oracle")]
@@ -296,14 +303,52 @@ pub(crate) const fn canon_blur_axis(_mode: Mode) -> BlurMode {
     BlurMode::Rec64
 }
 
+/// The blur axis a canonical body computes at `revision` — [`canon_blur_axis`]
+/// owns the mode's default; this adds the era split: a Rev5 computation runs
+/// `Local` windows (the `localwin` era) wherever Rev4 ran `Rec64`. The exact
+/// arm still re-sums (`Fresh`); an explicit `ZENSIM_FEATCANON_BLUR` still
+/// overrides under `oracle`.
+#[cfg(feature = "oracle")]
+#[inline]
+pub(crate) fn canon_blur_axis_for(
+    mode: Mode,
+    revision: crate::feature_defs::FormulaRevision,
+) -> BlurMode {
+    blur_cell()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or(match mode {
+            Mode::Exact => BlurMode::Fresh,
+            _ if revision >= crate::feature_defs::FormulaRevision::Rev5 => BlurMode::Local,
+            Mode::Canon64 => BlurMode::Rec64,
+            _ => BlurMode::Rec,
+        })
+}
+
+/// Non-oracle sibling: `Local` at Rev5+, `Rec64` below (canonical bodies only
+/// run under an active canon mode, i.e. Rev4+).
+#[cfg(not(feature = "oracle"))]
+#[inline(always)]
+pub(crate) fn canon_blur_axis_for(
+    _mode: Mode,
+    revision: crate::feature_defs::FormulaRevision,
+) -> BlurMode {
+    if revision >= crate::feature_defs::FormulaRevision::Rev5 {
+        BlurMode::Local
+    } else {
+        BlurMode::Rec64
+    }
+}
+
 /// The boundary map the blur recurrences implement, for the `Fresh` arm's
 /// per-position window: reflect once toward the image, clamp if still out
 /// (the kernels' `mirror_idx`/`vblur_add_idx`/`vblur_rem_idx` all reduce to
 /// this: `j < 0 → -j`, `j ≥ n → 2(n−1) − j`, both clamped into `[0, n−1]`).
 /// NOT the crate's periodic [`crate::feature_v2::reflect_101`] — the sliding
 /// kernels' convention is what `fresh` must replay exactly, so a `rec` vs
-/// `fresh` diff measures recurrence drift, not a boundary convention.
-#[cfg(feature = "oracle")]
+/// `fresh` diff measures recurrence drift, not a boundary convention. Rev5's
+/// `Local` windows pad with the same map, so a `local` vs `fresh` diff also
+/// measures the f32 pair tree alone, not a boundary convention.
 #[inline(always)]
 pub(crate) fn tap_mirror(j: isize, n: usize) -> usize {
     let n1 = n - 1;

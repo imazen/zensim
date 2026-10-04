@@ -957,12 +957,39 @@ pub(crate) fn fused_vblur_features_ssim(
         crate::featcanon::Mode::Canon64 => {
             // rev4vec2: the Rec64 axis runs the chunked `f32x8`/`f64x8` body on
             // the fused-FMA tiers — bit-identical to the `LanesF64` scalar
-            // canonical body. Any OTHER blur axis (an oracle `BLUR` override)
+            // canonical body. Rev5's `localwin` axis runs the per-output pair
+            // tree body. Any OTHER blur axis (an oracle `BLUR` override)
             // keeps the scalar body, which honours it.
-            if matches!(
-                crate::featcanon::canon_blur_axis(mode),
-                crate::featcanon::BlurMode::Rec64
-            ) {
+            let blur_axis = crate::featcanon::canon_blur_axis_for(mode, free.revision());
+            if matches!(blur_axis, crate::featcanon::BlurMode::Local) {
+                return fused_vblur_ssim_local::<crate::featcanon::LanesF64>(
+                    h_mu1,
+                    h_mu2,
+                    h_sigma_sq,
+                    h_sigma12,
+                    src,
+                    dst,
+                    width,
+                    height,
+                    inner_start,
+                    inner_h,
+                    radius,
+                    mu1_out,
+                    mu2_out,
+                    store_mu,
+                    sd_out,
+                    store_sd,
+                    ssq_out,
+                    s12_out,
+                    store_sigma,
+                    free,
+                    direct,
+                    ext,
+                    h_act,
+                    mode,
+                );
+            }
+            if matches!(blur_axis, crate::featcanon::BlurMode::Rec64) {
                 return incant!(
                     fused_vblur_ssim_canon64_vec(
                         h_mu1,
@@ -4660,6 +4687,10 @@ enum VWin {
         s12: Vec<f64>,
         act: Vec<f64>,
     },
+    /// No state — per-position f32 `localwin` pair tree — THE REV5 CANON's
+    /// window (`BlurMode::Local`). Also the measurement arm for an explicit
+    /// `ZENSIM_FEATCANON_BLUR=local`.
+    Local,
     /// No state — per-position f64 re-summation.
     #[cfg(feature = "oracle")]
     Fresh,
@@ -4740,6 +4771,7 @@ impl VWin {
                     act,
                 }
             }
+            crate::featcanon::BlurMode::Local => Self::Local,
             #[cfg(feature = "oracle")]
             crate::featcanon::BlurMode::Fresh => Self::Fresh,
         }
@@ -4799,6 +4831,7 @@ impl VWin {
                 slide64(p.s12, s12);
                 slide64(p.act, act);
             }
+            Self::Local => {}
             #[cfg(feature = "oracle")]
             Self::Fresh => {}
         }
@@ -4848,6 +4881,28 @@ impl VWin {
                     g(s12),
                     g(act),
                 )
+            }
+            Self::Local => {
+                // Rev5 `localwin`: the row's own 11-tap f32 pair tree — no
+                // recurrence, nothing carried between rows.
+                let inv = p.inv32();
+                let diam = p.diam();
+                let g = |plane: &[f32]| -> f32 {
+                    if plane.is_empty() {
+                        return 0.0;
+                    }
+                    let mut t = [0.0f32; 33];
+                    debug_assert!(diam <= 33);
+                    for (k, t) in t.iter_mut().enumerate().take(diam) {
+                        *t = plane[crate::featcanon::tap_mirror(
+                            y as isize + k as isize - p.r as isize,
+                            p.height,
+                        ) * p.width
+                            + x];
+                    }
+                    crate::blur::local_sum_taps(&t[..diam]) * inv
+                };
+                (g(p.m1), g(p.m2), g(p.sq), g(p.s12), g(p.act))
             }
             #[cfg(feature = "oracle")]
             Self::Fresh => (
@@ -4984,6 +5039,26 @@ impl VWin {
                 let inv = p.inv64();
                 let a = if act.is_empty() { 0.0 } else { act[x] * inv };
                 (m1[x] * inv, m2[x] * inv, sq[x] * inv, s12[x] * inv, a)
+            }
+            Self::Local => {
+                // The f32 pair-tree window value, widened (it IS the f32 store).
+                let inv = p.inv32();
+                let diam = p.diam();
+                let g = |plane: &[f32]| -> f64 {
+                    if plane.is_empty() {
+                        return 0.0;
+                    }
+                    let mut t = [0.0f32; 33];
+                    for (k, t) in t.iter_mut().enumerate().take(diam) {
+                        *t = plane[crate::featcanon::tap_mirror(
+                            y as isize + k as isize - p.r as isize,
+                            p.height,
+                        ) * p.width
+                            + x];
+                    }
+                    (crate::blur::local_sum_taps(&t[..diam]) * inv) as f64
+                };
+                (g(p.m1), g(p.m2), g(p.sq), g(p.s12), g(p.act))
             }
             Self::Fresh => (
                 p.fresh(p.m1, x, y),
@@ -5191,7 +5266,8 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     let inner_end = inner_start + inner_h;
 
     // rev4canon: the mode's OWN blur axis — `Rec64` under the c64 canon,
-    // `Rec` only for the superseded `c32` oracle reproduction.
+    // `Local` under this computation's Rev5 era, `Rec` only for the
+    // superseded `c32` oracle reproduction.
     let planes = VWinPlanes {
         m1: h_mu1,
         m2: h_mu2,
@@ -5202,7 +5278,10 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
         height,
         r,
     };
-    let mut win = VWin::new(crate::featcanon::canon_blur_axis(mode), &planes);
+    let mut win = VWin::new(
+        crate::featcanon::canon_blur_axis_for(mode, free.revision()),
+        &planes,
+    );
 
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<P>::zero();
@@ -5304,6 +5383,180 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
 
         // Slide V-blur window — same per-column recurrence as production.
         win.slide(y, &planes);
+    }
+
+    acc
+}
+
+/// **Rev5 `localwin` fused V-blur** — [`fused_vblur_ssim_canon`]'s Rev5 arm:
+/// the V-blurred plane values at each inner row come from that row's own
+/// 11-tap window through [`crate::blur::local_sum_taps`] — there is no `VWin`
+/// state, so non-inner rows are skipped entirely (a recurrence would have to
+/// visit them; a local window does not) and no rounding can travel between
+/// rows. Elements and pools run the identical [`vblur_ssim_elem_canon`] step
+/// the other canonical bodies run.
+#[allow(clippy::too_many_arguments)]
+fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
+    h_mu1: &[f32],
+    h_mu2: &[f32],
+    h_sigma_sq: &[f32],
+    h_sigma12: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    inner_start: usize,
+    inner_h: usize,
+    radius: usize,
+    mu1_out: &mut [f32],
+    mu2_out: &mut [f32],
+    store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
+    ssq_out: &mut [f32],
+    s12_out: &mut [f32],
+    store_sigma: bool,
+    free: FreeExtrasWork,
+    direct: bool,
+    ext: ExtPoolsWork,
+    h_act: &[f32],
+    // Kept for signature parity with `fused_vblur_ssim_canon`; the axis was
+    // already resolved to `Local` by the caller.
+    _mode: crate::featcanon::Mode,
+) -> StripChannelAccum {
+    let form = free.luma_form();
+    let r = radius;
+    let inner_end = inner_start + inner_h;
+    let planes = VWinPlanes {
+        m1: h_mu1,
+        m2: h_mu2,
+        sq: h_sigma_sq,
+        s12: h_sigma12,
+        act: if ext.on { h_act } else { &[] },
+        width,
+        height,
+        r,
+    };
+    let diam = planes.diam();
+    let inv = planes.inv32();
+    let has_act = !planes.act.is_empty();
+
+    let mut acc = StripChannelAccum::zero();
+    let mut band = BandPools::<P>::zero();
+    let mut t = vec![0.0f32; diam];
+    let mut rb = vec![0usize; diam];
+
+    // `localwin` rows: only the inner range produces outputs — nothing below
+    // or above feeds a recurrence, so those rows are never visited.
+    for y in inner_start..inner_end {
+        for k in 0..diam {
+            rb[k] =
+                crate::featcanon::tap_mirror(y as isize + k as isize - r as isize, height) * width;
+        }
+        let base = y * width;
+        let mut row = VblurPools::<P>::zero();
+        for x in 0..width {
+            let mut win_at = |plane: &[f32]| -> f32 {
+                if plane.is_empty() {
+                    return 0.0;
+                }
+                for (k, t) in t.iter_mut().enumerate() {
+                    *t = plane[rb[k] + x];
+                }
+                crate::blur::local_sum_taps(&t) * inv
+            };
+            let mu1 = win_at(planes.m1);
+            let mu2 = win_at(planes.m2);
+            let ssq = win_at(planes.sq);
+            let s12 = win_at(planes.s12);
+            let act = if has_act { win_at(planes.act) } else { 0.0 };
+            let s = src[base + x];
+            let d = dst[base + x];
+            vblur_ssim_elem_canon(
+                mu1,
+                mu2,
+                ssq,
+                s12,
+                act,
+                s,
+                d,
+                x,
+                base,
+                form,
+                direct,
+                free,
+                ext,
+                store_mu,
+                store_sd,
+                store_sigma,
+                mu1_out,
+                mu2_out,
+                sd_out,
+                ssq_out,
+                s12_out,
+                &mut row,
+                &mut band,
+                &mut acc,
+            );
+        }
+        // One fixed-order finish per row per pool.
+        acc.ssim_d += row.ssim_d.fin();
+        acc.ssim_d4 += row.ssim_d4.fin();
+        acc.ssim_d2 += row.ssim_d2.fin();
+        acc.edge_art += row.edge_art.fin();
+        acc.edge_art4 += row.edge_art4.fin();
+        acc.edge_art2 += row.edge_art2.fin();
+        acc.edge_det += row.edge_det.fin();
+        acc.edge_det4 += row.edge_det4.fin();
+        acc.edge_det2 += row.edge_det2.fin();
+        acc.mse += row.mse.fin();
+        if !free.local_only {
+            acc.ssim_d8 += row.ssim_d8.fin();
+            acc.edge_art8 += row.edge_art8.fin();
+            acc.edge_det8 += row.edge_det8.fin();
+            acc.hf_sq_src += row.hf_sq_src.fin();
+            acc.hf_sq_dst += row.hf_sq_dst.fin();
+            acc.hf_abs_src += row.hf_abs_src.fin();
+            acc.hf_abs_dst += row.hf_abs_dst.fin();
+        }
+        if ext.on {
+            acc.act_sum += row.act_sum.fin();
+            if ext.mask {
+                acc.masked_ssim_d += row.masked_ssim_d.fin();
+                acc.masked_ssim_d4 += row.masked_ssim_d4.fin();
+                acc.masked_ssim_d2 += row.masked_ssim_d2.fin();
+                acc.masked_art4 += row.masked_art4.fin();
+                acc.masked_det4 += row.masked_det4.fin();
+                acc.masked_mse += row.masked_mse.fin();
+            }
+            if ext.iw {
+                acc.iw_ssim_d += row.iw_ssim_d.fin();
+                acc.iw_ssim_d4 += row.iw_ssim_d4.fin();
+                acc.iw_ssim_d2 += row.iw_ssim_d2.fin();
+                acc.iw_art4 += row.iw_art4.fin();
+                acc.iw_det4 += row.iw_det4.fin();
+                acc.iw_mse += row.iw_mse.fin();
+            }
+        }
+        if y + 1 == inner_end {
+            if free.raw_moments {
+                acc.sum_s += band.fm_s.fin();
+                acc.sum_d += band.fm_d.fin();
+                acc.sum_s2 += band.fm_s2.fin();
+                acc.sum_d2 += band.fm_d2.fin();
+                acc.sum_dd += band.fm_dd.fin();
+                acc.sum_ds += band.fm_ds.fin();
+            }
+            if free.bounded_err {
+                acc.sum_msat += band.be_m.fin();
+                if free.lum_bins {
+                    acc.lum_wd_num += band.wd_num.fin();
+                    acc.lum_wd_den += band.wd_den.fin();
+                    acc.lum_wb_num += band.wb_num.fin();
+                    acc.lum_wb_den += band.wb_den.fin();
+                }
+            }
+        }
     }
 
     acc
