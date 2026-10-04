@@ -4948,3 +4948,16 @@ reject/3360 unchanged base-map queries), identity180 and cross-revision2 pass.
 Full row, score and probability parity errors are zero. This remains TRAIN
 research. Artifacts/pointers: `benchmarks/r5integ3_ARTIFACTS.json`;
 `~/tmp/zensim-paper/rev4/R5INTEG3_assets/summary.json` owns detailed results.
+
+
+## 2026-10-04 HDRTEACH — native HDR-VDP-3 metric teacher labels (completed 2026-10-05)
+
+Corrected TRAIN 7425 pairs/495 references/33 origins and registered hdr_v3mix VAL 3900/300/20 retain exact original row IDs and roles. New schema 1 tables under `/mnt/v/output/zensim/hdrteach-2026-10-04/` add raw HDR-VDP-3.0.7 q_jod targets, original second-teacher JOD, actual producing host, binary/source/view/input provenance, within-reference averaged midranks and preregistered agree (absolute rank difference <=1 position). TRAIN second teacher is fresh 2026-09-15native CVVDP; VAL second teacher is historic registered JOD, with original mixed target separately renamed historic_cvvdp_mix. No feature columns copied or mixed, no training/bake/selection/default change, no UPIQ data or T0 opened.
+
+Fixed ppd 60, quality, absolute BT.709 nits from native PQ/common-primary ingress, led-lcd-srgb/none/age 24/reference quality options, no added ambient reflection. zenmetrics348bde5bf96d635383965d80d9adb8f9c195fd14, binary1278c6935ad4ebbb624e6213c56ad672602b05433b288ea1f9274dbf02dee721. Input manifestSHA83f6efe96a6db66b1eff72cbcdbdd03d07a3144764140305a1cc92a90e26cca8 pins 12120 original files. Exact encoder source commits remain unknown; producer epochs/TSVs and native bytes are retained, never inferred from filenames. Full 3975-shard/11325-key admission and independent audit PASS. Signed pooled SROCC 0.8283190441/0.8211975658; within-reference mean 0.9988197386/0.9820512821; agree 7390/7425 and 3696/3900. All 795 reference correlations defined. This is metric agreement, not human accuracy.
+
+HDR-VDP-3 paper sections 3 and 5 state UPIQ quality calibration/recalibration (>4000 SDR/HDR images). Consequently UPIQ cannot be an independent human test for any student trained on these targets. Publication text only read. Future fit/filter is separately registered and TRAIN-only; VAL remains validation-only. Original HDRCORR outputs/report unchanged. Report `zensim--hdrcorr/benchmarks/hdrteach_2026-10-04.md`; full provenance/input/view/manifest/audit and retained fleet stop/migration evidence are in HDRTEACH_assets.
+
+- `hdrteach_train.parquet` SHA256 `deb70e775b043a578c77e0c3ff27960ebfa936e9d901497f9d74389e6ce9fbce`
+- `hdrteach_val.parquet` SHA256 `4b0f39dea0255659232f248070c8683dd7edf5916c63621cbb099b4afb6c9057`
+- `agreement.json` SHA256 `607ac4090a74c5f5537d096e1ed491b70b31f8ccc1b47c03752adaef305cb9db`

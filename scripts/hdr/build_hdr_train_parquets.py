@@ -18,12 +18,152 @@ Validates with validate_parquet (contracts declared inline) and prints the
 sha256s for manifest pinning.
 
   usage: build_hdr_train_parquets.py [--datagen DIR] [--out-prefix P] [--mix-target]
+
+Metric-only HDRTEACH uses pinned, recovered row identities without feature reads:
+  build_hdr_train_parquets.py --teacher-manifest MANIFEST.json --teacher-output-dir DIR
 """
-import argparse, hashlib, os, subprocess, sys
+import argparse, collections, hashlib, json, os, subprocess, sys
+from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
+
+
+def _build_teacher_table(manifest_path, output_dir):
+    """HDRTEACH: strict keyed metric-only join; preserve admitted TRAIN/VAL roles.
+
+    This does not load old features, deduplicate admitted rows, infer new splits,
+    scale targets, or fit a model. The manifest pins all inputs and raw scores.
+    """
+    from scipy.stats import rankdata
+
+    def pinned(item):
+        path = Path(item["path"])
+        with path.open("rb") as f:
+            actual = hashlib.file_digest(f, "sha256").hexdigest()
+        if actual != item["sha256"]:
+            raise ValueError(f"hash mismatch: {path}")
+        return path
+
+    manifest = json.loads(Path(manifest_path).read_text())
+    if manifest["study"] != "HDRTEACH-2026-10-04" or set(manifest["sets"]) != {"train", "val"}:
+        raise ValueError("HDRTEACH requires the registered TRAIN and VAL sets")
+    prereg = json.loads(pinned(manifest["preregistration"]).read_text())
+    provenance = json.loads(pinned(manifest["provenance"]).read_text())
+    hashes = json.loads(pinned(manifest["input_hashes"]).read_text())
+    rule = prereg["agree_rule"]
+    if (rule["tolerance_positions"] != 1.0 or rule["minimum_group_rows"] != 2
+            or not rule["frozen_before_hdrvdp3_labels"]):
+        raise ValueError("unexpected preregistered agreement rule")
+    scores = {}
+    for shard in manifest["shards"]:
+        if shard["binary_sha256"] != provenance["zenmetrics_binary_sha256"]:
+            raise ValueError("mixed scorer binaries")
+        for row in pq.read_table(pinned(shard)).to_pylist():
+            key = row["image_path"]
+            if key in scores:
+                raise ValueError(f"duplicate scorer key: {key}")
+            value = row[manifest["score_column"]]
+            if not np.isfinite(value) or value > 10.0:
+                raise ValueError(f"invalid q_jod: {key}: {value}")
+            scores[key] = (row, shard["host"])
+
+    aligned, expected = {}, set()
+    for role, spec in manifest["sets"].items():
+        metadata = json.loads(pinned(spec["metadata"]).read_text())
+        if len(metadata) != spec["rows"] or len({x["row_id"] for x in metadata}) != len(metadata):
+            raise ValueError(f"invalid admitted {role} row ids/count")
+        # Admission pins the original authority; no feature columns are read.
+        pinned(spec["authority"])
+        truth = None
+        if role == "train":
+            cv = pq.read_table(pinned(spec["cvvdp"]))
+            truth = {x["row_id"]: x for x in cv.to_pylist()}
+            if len(truth) != cv.num_rows or set(truth) != {x["row_id"] for x in metadata}:
+                raise ValueError("CVVDP TRAIN coverage mismatch")
+        out = []
+        for row in metadata:
+            if row.get("role", role) != role:
+                raise ValueError("admitted role mismatch")
+            key = f"hdrteach://{role}/{row['row_id']}"
+            expected.add(key)
+            score, host = scores[key]
+            if (score["codec"] != "zenjxl" or float(score["q"]) != float(row["q"])
+                    or score["knob_tuple_json"] != row.get("knob_tuple_json", "{}")):
+                raise ValueError(f"scorer identity mismatch: {key}")
+            if truth is not None:
+                cvrow = truth[row["row_id"]]
+                if (any(str(cvrow[k]) != str(row[k]) for k in ["image_path", "codec", "knob_tuple_json"])
+                        or float(cvrow["q"]) != float(row["q"])):
+                    raise ValueError(f"fresh teacher identity mismatch: {key}")
+                cvvalue = cvrow[spec["cvvdp_column"]]
+            else:
+                cvvalue = row["cvvdp"]
+            if not np.isfinite(cvvalue):
+                raise ValueError(f"nonfinite second teacher: {key}")
+            new = dict(row)
+            # VAL's original target is the historic mixed judge, not HDR-VDP-3.
+            if "target" in new:
+                new["historic_cvvdp_mix"] = new.pop("target")
+            if "cvvdp" in new:
+                del new["cvvdp"]
+            new.update(role=role, scorer_key=key, codec=score["codec"],
+                       knob_tuple_json=score["knob_tuple_json"],
+                       hdrvdp3_q_jod=float(score[manifest["score_column"]]),
+                       cvvdp_jod=float(cvvalue), cvvdp_label_era=spec["cvvdp_label_era"],
+                       hdrvdp3_binary_sha256=provenance["zenmetrics_binary_sha256"],
+                       hdrvdp3_source_commit=provenance["zenmetrics_commit"],
+                       hdrvdp3_viewing_parameters_json=json.dumps(prereg, sort_keys=True),
+                       hdr_input_contract=prereg["input_contract"], scorer_cpu_host=host,
+                       scorer_backend="cpu", raw_owner_runtime=score["runtime"],
+                       authority_path=spec["authority"]["path"], authority_sha256=spec["authority"]["sha256"],
+                       ref_sha256=hashes[row["ref_path"]], dist_sha256=hashes[row["dist_path"]])
+            out.append(new)
+        groups = collections.defaultdict(list)
+        for i, row in enumerate(out):
+            groups[row["ref_path"]].append(i)
+        hv = np.asarray([x["hdrvdp3_q_jod"] for x in out])
+        cv = np.asarray([x["cvvdp_jod"] for x in out])
+        if np.ptp(hv) < 0.01:
+            raise ValueError(f"constant/near-constant {role} output")
+        pooled_h, pooled_c = rankdata(hv, method="average"), rankdata(cv, method="average")
+        for i, row in enumerate(out):
+            row["rank_residual_pooled_normalized"] = float((pooled_h[i] - pooled_c[i]) / max(len(out)-1, 1))
+        for indices in groups.values():
+            hr = rankdata(hv[indices], method="average")
+            cr = rankdata(cv[indices], method="average")
+            for i, h, c in zip(indices, hr, cr):
+                residual = float(h-c)
+                out[i].update(reference_pair_count=len(indices), rank_hdrvdp3_within_ref=float(h),
+                              rank_cvvdp_within_ref=float(c), rank_residual_positions=residual,
+                              rank_residual_normalized=residual / max(len(indices)-1, 1),
+                              agree=bool(len(indices) >= 2 and abs(residual) <= 1.0))
+        aligned[role] = out
+    if expected != set(scores):
+        raise ValueError("raw scores have extra or missing row identities")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if any((output_dir / f"hdrteach_{role}.parquet").exists() for role in aligned):
+        raise FileExistsError("refusing to overwrite a teacher table")
+    footer = {b"zensim.hdrteach.schema": b"1", b"zensim.hdrteach.study": manifest["study"].encode(),
+              b"zensim.hdrteach.provenance": json.dumps(provenance, sort_keys=True).encode(),
+              b"zenmetrics.hdr_input_contract": prereg["input_contract"].encode(),
+              b"zensim.hdrteach.preregistration_sha256": manifest["preregistration"]["sha256"].encode()}
+    for role, rows in aligned.items():
+        table = pa.Table.from_pylist(rows).replace_schema_metadata({**footer, b"zensim.hdrteach.role": role.encode()})
+        path = output_dir / f"hdrteach_{role}.parquet"
+        pq.write_table(table, path, compression="zstd")
+        print(role, table.num_rows, path, flush=True)
+
+
+if "--teacher-manifest" in sys.argv:
+    teacher_ap = argparse.ArgumentParser(description="Build pinned HDRTEACH metric-only tables")
+    teacher_ap.add_argument("--teacher-manifest", required=True)
+    teacher_ap.add_argument("--teacher-output-dir", required=True)
+    teacher_args = teacher_ap.parse_args()
+    _build_teacher_table(teacher_args.teacher_manifest, teacher_args.teacher_output_dir)
+    raise SystemExit(0)
 
 sys.path.insert(0, os.path.expanduser("~/work/zen/zenmetrics/scripts/picker"))
 from origin_split import split_of  # noqa: E402

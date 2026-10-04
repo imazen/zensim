@@ -1,0 +1,255 @@
+{
+  "study": "HDRTEACH-2026-10-04",
+  "full_numerical_record": "/mnt/v/output/zensim/hdrteach-2026-10-04/agreement.json",
+  "roles": {
+    "train": {
+      "rows": 7425,
+      "references": 495,
+      "source_families": 33,
+      "cvvdp_label_era": "fresh-native-common-primary-2026-09-15",
+      "pooled_srocc_signed": 0.8283190440865288,
+      "within_reference": {
+        "defined": 495,
+        "undefined": 0,
+        "mean": 0.9988197386046849,
+        "median": 1.0,
+        "min": 0.9605734767025089,
+        "max": 1.0,
+        "negative": 0
+      },
+      "agree_count": 7390,
+      "agree_fraction": 0.9952861952861953,
+      "hdrvdp3_range": {
+        "min": 7.853718501290521,
+        "max": 9.99170577163005,
+        "negative": 0,
+        "exactly10": 0
+      },
+      "cvvdp_range": {
+        "min": 8.664137840270996,
+        "max": 9.996261596679688
+      },
+      "mean_abs_rank_residual_normalized": 0.0022510822510822506,
+      "worst_rows": [
+        {
+          "row_id": 5646,
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1508_nature_ice-cave-interior_hornafjordur-iceland_ip13pro_iso1000-f1p8_img-0474_4032x3024.scale128x96.hdr.png",
+          "dist_path": "/mnt/v/output/zenmetrics/datagen-2026-07-03-hdr-hq/enc/zenjxl/1508_nature_ice-cave-interior_hornafjordur-iceland_ip13pro_iso1000-f1p8_img-0474_4032x3024.scale128x96.hdr_fa1fa8ed682d9f8c_zenjxl_q96_5477a4babbc26733.jxl",
+          "source_family": "1508",
+          "q": "96",
+          "hdrvdp3_q_jod": 9.915837228912803,
+          "cvvdp_jod": 9.95678424835205,
+          "rank_residual_positions": -4.0,
+          "agree": false
+        },
+        {
+          "row_id": 5544,
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1504_nature_cloudy-sky-over-field_colorado_ip13pro_iso50-f1p5_img-0374_4032x3024.scale160x120.hdr.png",
+          "dist_path": "/mnt/v/output/zenmetrics/datagen-2026-07-03-hdr-hq/enc/zenjxl/1504_nature_cloudy-sky-over-field_colorado_ip13pro_iso50-f1p5_img-0374_4032x3024.scale160x120.hdr_2232f5411b5a64ad_zenjxl_q97_5477a4babbc26733.jxl",
+          "source_family": "1504",
+          "q": "97",
+          "hdrvdp3_q_jod": 9.970987566318785,
+          "cvvdp_jod": 9.975639343261719,
+          "rank_residual_positions": -3.0,
+          "agree": false
+        },
+        {
+          "row_id": 6702,
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1534_nature_red-flowers-closeup_ketchikan-alaska_ip16pro_iso125-f1p8_img-6286_3024x4032.scale96x128.hdr.png",
+          "dist_path": "/mnt/v/output/zenmetrics/datagen-2026-07-03-hdr-hq/enc/zenjxl/1534_nature_red-flowers-closeup_ketchikan-alaska_ip16pro_iso125-f1p8_img-6286_3024x4032.scale96x128.hdr_589e26240f465f4b_zenjxl_q97_5477a4babbc26733.jxl",
+          "source_family": "1534",
+          "q": "97",
+          "hdrvdp3_q_jod": 9.970760590397358,
+          "cvvdp_jod": 9.925826072692871,
+          "rank_residual_positions": -3.0,
+          "agree": false
+        }
+      ],
+      "worst_references": [
+        {
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1504_nature_cloudy-sky-over-field_colorado_ip13pro_iso50-f1p5_img-0374_4032x3024.scale160x120.hdr.png",
+          "source_family": "1504",
+          "rows": 15,
+          "srocc_signed": 0.96415770609319,
+          "mean_abs_rank_residual_normalized": 0.04761904761904762,
+          "max_abs_rank_residual_normalized": 0.21428571428571427,
+          "agree_count": 12
+        },
+        {
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1230_interiors_empty-tiled-pool_casa-batllo-barcelona_zfold7_iso640-f1p7_20260315-210432_3000x4000.scale96x128.hdr.png",
+          "source_family": "1230",
+          "rows": 15,
+          "srocc_signed": 0.967741935483871,
+          "mean_abs_rank_residual_normalized": 0.04761904761904761,
+          "max_abs_rank_residual_normalized": 0.14285714285714285,
+          "agree_count": 11
+        },
+        {
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1534_nature_red-flowers-closeup_ketchikan-alaska_ip16pro_iso125-f1p8_img-6286_3024x4032.scale96x128.hdr.png",
+          "source_family": "1534",
+          "rows": 15,
+          "srocc_signed": 0.96415770609319,
+          "mean_abs_rank_residual_normalized": 0.04761904761904761,
+          "max_abs_rank_residual_normalized": 0.21428571428571427,
+          "agree_count": 12
+        }
+      ],
+      "worst_families": [
+        {
+          "source_family": "1230",
+          "rows": 225,
+          "references": 15,
+          "within_reference_srocc_mean": 0.9956989247311827,
+          "mean_abs_rank_residual_normalized": 0.007619047619047617,
+          "max_abs_rank_residual_normalized": 0.14285714285714285,
+          "agree_count": 219
+        },
+        {
+          "source_family": "1070",
+          "rows": 225,
+          "references": 15,
+          "within_reference_srocc_mean": 0.997610513739546,
+          "mean_abs_rank_residual_normalized": 0.005714285714285713,
+          "max_abs_rank_residual_normalized": 0.14285714285714285,
+          "agree_count": 224
+        },
+        {
+          "source_family": "1508",
+          "rows": 225,
+          "references": 15,
+          "within_reference_srocc_mean": 0.9959378733572282,
+          "mean_abs_rank_residual_normalized": 0.005714285714285713,
+          "max_abs_rank_residual_normalized": 0.2857142857142857,
+          "agree_count": 222
+        }
+      ]
+    },
+    "val": {
+      "rows": 3900,
+      "references": 300,
+      "source_families": 20,
+      "cvvdp_label_era": "historic-hdr_v3mix-2026-08-03",
+      "pooled_srocc_signed": 0.8211975657571554,
+      "within_reference": {
+        "defined": 300,
+        "undefined": 0,
+        "mean": 0.982051282051282,
+        "median": 0.9835164835164835,
+        "min": 0.8956043956043956,
+        "max": 1.0,
+        "negative": 0
+      },
+      "agree_count": 3696,
+      "agree_fraction": 0.9476923076923077,
+      "hdrvdp3_range": {
+        "min": 7.729783158431834,
+        "max": 9.989795784041986,
+        "negative": 0,
+        "exactly10": 0
+      },
+      "cvvdp_range": {
+        "min": 8.535099983215332,
+        "max": 9.998673439025879
+      },
+      "mean_abs_rank_residual_normalized": 0.025598290598290593,
+      "worst_rows": [
+        {
+          "row_id": 2765,
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1495_nature_lighthouse-on-island_york-maine_ip13pro_iso50-f1p5_fullsizerender-1_3855x2891.scale128x96.hdr.png",
+          "dist_path": "/mnt/v/output/zenmetrics/datagen-2026-07-03-hdr-hq/enc/zenjxl/1495_nature_lighthouse-on-island_york-maine_ip13pro_iso50-f1p5_fullsizerender-1_3855x2891.scale128x96.hdr_f3fea4b7363a3570_zenjxl_q98_5477a4babbc26733.jxl",
+          "source_family": "1495",
+          "q": "98",
+          "hdrvdp3_q_jod": 9.974285367213813,
+          "cvvdp_jod": 9.95450210571289,
+          "rank_residual_positions": 4.0,
+          "agree": false
+        },
+        {
+          "row_id": 8,
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1065_general_cathedral-model-workshop_sagrada-familia-barcelona_zfold7_iso64-f1p7_20260317-165822_3000x4000.scale120x160.hdr.png",
+          "dist_path": "/mnt/v/output/zenmetrics/datagen-2026-06-23-hdr/enc/zenjxl/1065_general_cathedral-model-workshop_sagrada-familia-barcelona_zfold7_iso64-f1p7_20260317-165822_3000x4000.scale120x160.hdr_3a0fcf72815669ae_zenjxl_q95_5477a4babbc26733.jxl",
+          "source_family": "1065",
+          "q": "95",
+          "hdrvdp3_q_jod": 9.964538947613534,
+          "cvvdp_jod": 9.93915843963623,
+          "rank_residual_positions": 3.0,
+          "agree": false
+        },
+        {
+          "row_id": 40,
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1065_general_cathedral-model-workshop_sagrada-familia-barcelona_zfold7_iso64-f1p7_20260317-165822_3000x4000.scale2304x3072.hdr.png",
+          "dist_path": "/mnt/v/output/zenmetrics/datagen-2026-06-23-hdr/enc/zenjxl/1065_general_cathedral-model-workshop_sagrada-familia-barcelona_zfold7_iso64-f1p7_20260317-165822_3000x4000.scale2304x3072.hdr_26d5a2b69524a5c4_zenjxl_q95_5477a4babbc26733.jxl",
+          "source_family": "1065",
+          "q": "95",
+          "hdrvdp3_q_jod": 9.86484376527183,
+          "cvvdp_jod": 9.980828285217285,
+          "rank_residual_positions": 3.0,
+          "agree": false
+        }
+      ],
+      "worst_references": [
+        {
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1495_nature_lighthouse-on-island_york-maine_ip13pro_iso50-f1p5_fullsizerender-1_3855x2891.scale128x96.hdr.png",
+          "source_family": "1495",
+          "rows": 13,
+          "srocc_signed": 0.8956043956043956,
+          "mean_abs_rank_residual_normalized": 0.10256410256410256,
+          "max_abs_rank_residual_normalized": 0.3333333333333333,
+          "agree_count": 7
+        },
+        {
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1545_nature_stalactite-cave-lake_playa-del-carmen-mexico_ip13pro_iso1600-f1p5_img-9591_4032x3024.scale2560x1920.hdr.png",
+          "source_family": "1545",
+          "rows": 13,
+          "srocc_signed": 0.9340659340659341,
+          "mean_abs_rank_residual_normalized": 0.07692307692307693,
+          "max_abs_rank_residual_normalized": 0.25,
+          "agree_count": 11
+        },
+        {
+          "ref_path": "/mnt/v/output/imazen-26-hdr-grid-2026-06-14/1545_nature_stalactite-cave-lake_playa-del-carmen-mexico_ip13pro_iso1600-f1p5_img-9591_4032x3024.scale3072x2304.hdr.png",
+          "source_family": "1545",
+          "rows": 13,
+          "srocc_signed": 0.9340659340659341,
+          "mean_abs_rank_residual_normalized": 0.07692307692307693,
+          "max_abs_rank_residual_normalized": 0.25,
+          "agree_count": 11
+        }
+      ],
+      "worst_families": [
+        {
+          "source_family": "1545",
+          "rows": 195,
+          "references": 15,
+          "within_reference_srocc_mean": 0.9622710622710623,
+          "mean_abs_rank_residual_normalized": 0.046153846153846156,
+          "max_abs_rank_residual_normalized": 0.25,
+          "agree_count": 176
+        },
+        {
+          "source_family": "1241",
+          "rows": 195,
+          "references": 15,
+          "within_reference_srocc_mean": 0.9681318681318681,
+          "mean_abs_rank_residual_normalized": 0.039316239316239315,
+          "max_abs_rank_residual_normalized": 0.25,
+          "agree_count": 180
+        },
+        {
+          "source_family": "1491",
+          "rows": 195,
+          "references": 15,
+          "within_reference_srocc_mean": 0.9681318681318681,
+          "mean_abs_rank_residual_normalized": 0.037606837606837605,
+          "max_abs_rank_residual_normalized": 0.25,
+          "agree_count": 180
+        }
+      ],
+      "historic_mix_auxiliary": {
+        "pooled_srocc_signed": 0.8629385528660355,
+        "within_reference_mean": 0.9554761904761904,
+        "defined": 300
+      }
+    }
+  }
+}

@@ -1221,3 +1221,26 @@ feature/checkpoint selection or threshold tuning. Frozen by_v2fy and v2+basic fu
 
 Evidence: [HDRCORR worklog](../benchmarks/hdrcorr_WORKLOG.md). These are descriptive
 transfer/catalog diagnostics; no model is qualified or promoted.
+
+## Exposure ledger — 2026-10-04: HDRTEACH native teacher labels
+
+Explicit follow-on `~/tmp/zensim-paper/rev4/HDRTEACH_brief.md` authorizes labeling the
+same corrected TRAIN (7,425 rows / 495 reference variants / 33 origins) and registered
+hdr_v3mix VAL (3,900 / 300 / 20) admitted by HDRCORR. Their original roles and row IDs
+remain fixed; no digit-based re-splitting, feature joins, deduplication or model fitting.
+
+HDR-VDP-3.0.7 q_jod is produced by the zenmetrics owner at one preregistered condition:
+ppd60, absolute BT.709 RGB nits via declared-PQ common-primary ingress,
+led-lcd-srgb emission, surround none, age24, reference quality options. All native
+file hashes are verified against HDRCORR. TRAIN's second teacher is its fresh native
+CVVDP JOD; VAL's is carried historic CVVDP JOD, with historic cvvdp-mix auxiliary.
+The per-row `agree` flag uses exact-reference averaged tied midranks, absolute rank
+difference <=1 position, minimum two finite rows. Fixed before new scores; it is not
+human validation, fit selection or an adaptive threshold. VAL flags remain VAL-only.
+
+Only the HDR-VDP-3 publication text in zenpapers was read concerning UPIQ. It explicitly
+states quality calibration on UPIQ; consequently a student trained on these labels
+cannot treat UPIQ as an independent human test. No UPIQ label/image or secret holdout
+is opened by this task. No model is trained, qualified, promoted or pushed.
+Evidence and final artifact admission: [worklog](../benchmarks/hdrcorr_WORKLOG.md),
+[teacher report](../benchmarks/hdrteach_2026-10-04.md).

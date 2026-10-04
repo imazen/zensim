@@ -636,6 +636,15 @@
       "report_url": "/zensim/reports/hdrcorr-2026-10-04/",
       "bakes": [],
       "note": "No HDR training. Native HDR TRAIN / registered VAL complete for 3 seeds each plus B/BHdr controls. by_v2fy VAL historic-mix SROCC 0.87437\u20130.88110 vs v2+basic 0.89481\u20130.91071; within-ref ~0.955. Catalog corruption AUC 0.60036\u20130.62292, only 27.50\u201331.39% below same-source q20. Both existing integrity companions refuse Rev4. Human HDR read and compatible companion missing; no qualification or default change. Record: benchmarks/hdrcorr_2026-10-04.md."
+    },
+    {
+      "id": "2026-10-04-hdrteach",
+      "date": "2026-10-04",
+      "role": "train-development",
+      "label": "2026-10-04 \u00b7 HDRTEACH: complete native HDR-VDP-3 teacher labels; no fit",
+      "report_url": "/zensim/reports/hdrteach-2026-10-04/",
+      "bakes": [],
+      "note": "All 7,425 TRAIN / 3,900 VAL pairs, fixed ppd 60 native PQ and absolute BT.709. Signed pooled SROCC vs CVVDP 0.828319 / 0.821198; within-reference means 0.998820 / 0.982051; preregistered agree 7,390/7,425 and 3,696/3,900. Full identity, native target and viewing audit PASS. No model fit or human qualification. HDR-VDP-3 quality calibration used UPIQ, so UPIQ is not an independent future student test. Record benchmarks/hdrteach_2026-10-04.md."
     }
   ],
   "incumbent_notes": [
