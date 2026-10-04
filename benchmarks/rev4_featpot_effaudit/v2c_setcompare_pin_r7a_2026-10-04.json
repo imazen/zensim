@@ -1,0 +1,233 @@
+{
+ "schema": "rev4-featpot-v2c-setcompare-pin-v2",
+ "entries": {
+  "A": "set:v2+basic@h32:H128:cv16:cf98",
+  "B": "sel:59f0bbc2f290@h32:H128:cv16:cf98",
+  "C": "set:v2+basic@h32:H128",
+  "D": "r0@h32:H128"
+ },
+ "head": "N",
+ "superiority": [
+  {
+   "arm": "A",
+   "reference": "C",
+   "question": "Q1: the adopted coverage recipe out of sample"
+  },
+  {
+   "arm": "A",
+   "reference": "D",
+   "question": "Q2: the selected set vs the R0 bank"
+  }
+ ],
+ "noninferiority": [
+  {
+   "arm": "B",
+   "reference": "A",
+   "question": "Q3: by_v2fy as an equal-quality substitute"
+  }
+ ],
+ "ensemble_pairs": [
+  {
+   "arm": "B",
+   "reference": "A"
+  },
+  {
+   "arm": "A",
+   "reference": "C"
+  }
+ ],
+ "frozen_sha256": "f432995f31a3de32a17f7defbaccecd3c22114130db107a050bbdd8fdc404040",
+ "wide_receipts": {
+  "main/real": "1ef7ccde34ce289c9eb2046b9caeab8c37884e89f4f84c4d8b43691e5b3bee2a",
+  "main/p1": "301ae67576c9ac04ec5de96c742a00156b3c1c4629510fb691431b7344db6189",
+  "main/p2": "c3ad6fe22178df453f5c423aeae063b8e6d474e37ee29ce5fc0798f32db02b81",
+  "main/p3": "d48d2c57ffc737948dfd70f8dc16c6adae58c509a2bc9481e2d73e8b69db864b",
+  "aux/real": "9d519997525797d29d89152fb644f500fd73f28072b078f49ddc607a6bae0ff1",
+  "aux/p1": "8b89733460263f3d223d914777bd159dd10529a3252eab7004e966c7392921dc",
+  "aux/p2": "28836fcb3ad820096e6aad120d26342d0d79a0cca7a08af542f1d5c6e661864e",
+  "aux/p3": "182140c2734695f71b0c0bd9ec6cbce554977958054287a06deb45db3578e356"
+ },
+ "confirm_receipt_sha256": "d18b79199c52ba31decd24ea4f28923c8e05b8f30e305a0b14d7c83d24228337",
+ "keep_lists_sha256": "b562ba5cfeb90de7d14efd6f896d6b49b51a5e30361a1919d8175e37ec9fd05f",
+ "binaries": {
+  "zensim_mlp_train": "605d20e0ecebb1586779e2cf586818e24d12db88feca0f225ecc09d3636d1033",
+  "bake_dial_refit": "56da05299af520113304f4e1205d6a6bbad4a10027aa138886b5877abb6d85ec",
+  "panel": "f76b85a7e5d647d23b2f10f5c94b498036d8c25b34de5586b0fe144ea64b74ab"
+ },
+ "program_sha": "dfffd0912699541e3dc0735d2f97393e23f98bc3f3f2f29a3f259494a6eb447b",
+ "data_sha": "cf9b83179376c78471905c8e97e3280b3d45ea008123f9febdbd660f9046f99d",
+ "code": {
+  "rev4_featpot/v2_confirm_read.py": "2475bec46f2363a2d6d96005d913eddced5820628eff20919eb8421e9da8b498",
+  "rev4_featpot/v2_compare.py": "41d784f8b4bea926502b4cb58ca99640b66fc710581d4a17d46dff7b282c3def",
+  "rev4_featpot/v2_common.py": "bbb5f6826253e08d03501eb704f6d20e1e30c442bb7f7c76199dee500e30ec44",
+  "rev4_featpot/v2c_labels.py": "a2467320ba75d9cc7c12fcb264357947c67ca7154096e4f2047ed1276b987dfd",
+  "rev4_featpot/v2c_wide.py": "1a3f7d5b71af0c5bde0b50f44b7a4eec1ce8dc2f7abc4e9e9bf798bd685ab176",
+  "lib/zen_stats.py": "68532bad3b3482bc734508183872d9253893cbacd9d3299d523894fc38158a6a"
+ },
+ "labels": {
+  "cid22_b": {
+   "path": "/mnt/v/dataset/cid22/CID22_validation_set/cid22val_pairs_ab.tsv",
+   "sha256": "3ce0f7438ea02277102217f504a1a680541e2a599be068f83fc49bb8fb1dfa8b",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": {
+    "ref_stem_in": [
+     "1025469",
+     "1044329",
+     "1279330",
+     "1418519",
+     "1420710",
+     "1475938",
+     "1544947",
+     "2190188",
+     "2253934",
+     "2670327",
+     "2736139",
+     "2775196",
+     "2887497",
+     "297394",
+     "3156482",
+     "3637739",
+     "382297",
+     "5055743",
+     "5458393",
+     "7552578",
+     "792079",
+     "adriankierman-report-page",
+     "pexels-photo-1933873"
+    ]
+   },
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "aic4": {
+   "path": "/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv",
+   "sha256": "955a9601e94c0877a00c822dbbbd17ad4ae11544dd6d550b9ed79d1ad9d983ff",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": null,
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "konjnd_jpeg_select": {
+   "path": "/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv",
+   "sha256": "70148a39c90d97d35899a171204d3996034cf0019fbe0c496ac51ae4c4d40856",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": {
+    "ref_number": {
+     "regex": "^SRC(\\d+)$",
+     "modulus": 10,
+     "not_in": [
+      7,
+      9
+     ]
+    }
+   },
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "konjnd_jpeg_terminal": {
+   "path": "/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv",
+   "sha256": "70148a39c90d97d35899a171204d3996034cf0019fbe0c496ac51ae4c4d40856",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": {
+    "ref_number": {
+     "regex": "^SRC(\\d+)$",
+     "modulus": 10,
+     "in": [
+      7,
+      9
+     ]
+    }
+   },
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path",
+   "note": "SRC0437: the pair list (and the bank key) names SRC0437_JPEG_058.jpg while load_konjnd picks _059 (v1_extractor_drift_2026-08-30 4c.6; per-ref mean PJND 58.50). The label is per reference and joins the bank key by path unchanged; TERMINAL is a touch-once sanity guard, never counted (coordinator 2026-10-01)."
+  },
+  "csiq": {
+   "path": "/mnt/v/dataset/csiq/csiq_pairs.tsv",
+   "sha256": "78b1dac5f74e6f02198f9011eb12f655c358c567d6007497aeac9aa7e5f5a288",
+   "format": "tsv",
+   "label_col": "human_score",
+   "usecols": [
+    "ref_path",
+    "dist_path",
+    "human_score"
+   ],
+   "select": null,
+   "via_pairs": null,
+   "ref_col": "ref_path",
+   "dist_col": "dist_path"
+  },
+  "mcljci": {
+   "path": "/var/tmp/datasets/mcl-jci/mcljci_labels.csv",
+   "sha256": "36f17dd8bac2d085f718e388fd5db307d887338c9c2b296349bb2ef20f184802",
+   "format": "csv",
+   "label_col": "jnd_dist",
+   "usecols": [
+    "src",
+    "qf",
+    "jnd_dist"
+   ],
+   "select": null,
+   "via_pairs": {
+    "path": "/var/tmp/labelpin/mcljci_pairs_keyed.tsv",
+    "sha256": "a1d763f715958442a404f188b5bea379f0354f633249ee70ee3cf525ce43d043",
+    "on": [
+     [
+      "src",
+      "src"
+     ],
+     [
+      "qf",
+      "qf"
+     ]
+    ]
+   },
+   "ref_col": null,
+   "dist_col": null
+  }
+ },
+ "pixel_hashes": {
+  "path": "/var/tmp/labelpin/csiq_pixel_hashes.tsv",
+  "sha256": "d53187ce8cacb852ee830f2836d426bae71599ac6a7d878bbf9752350d96397e"
+ },
+ "labels_from_pin": {
+  "path": "/home/lilith/work/zen/zensim--featbank-potential/benchmarks/rev4_featpot_effaudit/v2c_confirm_pin_2026-10-01.json",
+  "sha256": "1223712b13669edaadc3cac233e636f3892e29e1f252e5a48a7e917999843686"
+ },
+ "registration": {
+  "path": "/home/lilith/work/zen/zensim--featbank-potential/benchmarks/rev4_featpot_R7_registration_2026-10-04.md",
+  "sha256": "a5ffed0e056a711bffee1dbbd0c6189030d770b5ce0cd5576543eb14c4323921"
+ },
+ "amendment_r7a": {
+  "path": "/home/lilith/work/zen/zensim--featbank-potential/benchmarks/rev4_featpot_R7a_registration_2026-10-04.md",
+  "sha256": "87fefb6b62891a3441c8ea762c48554dc2b5b9c6196643c929aa25a247e1e9f2"
+ }
+}

@@ -613,7 +613,11 @@ class ConfirmRead(unittest.TestCase):
              "csiq": ("csiq_pairs.tsv", "human_score"), "mcljci": ("mcljci_labels.csv", "jnd_dist")}
     DISTORTION = ("aic4", "konjnd_jpeg_select", "konjnd_jpeg_terminal", "mcljci")  # label-file orientation, fixed independently
     REFS, PER_REF = 30, 8
+    REFS_OF: dict = {}
     B = 200
+
+    def ref_name(self, name: str, j: int) -> str:
+        return f"ref{j}"
 
     @classmethod
     def setUpClass(cls):
@@ -644,10 +648,10 @@ class ConfirmRead(unittest.TestCase):
         receipt = {"schema": "rev4-featpot-v2c-confirm-v1", "width": width, "feature_set_id": "x", "sets": {}}
         truth, labels = {}, {}
         for name in self.SETS:
-            n = self.REFS * self.PER_REF
+            n = self.REFS_OF.get(name, self.REFS) * self.PER_REF
             keys = pd.DataFrame({"pair_key": [f"{name}-{i}" for i in range(n)], "row_id": np.arange(n),
-                                 "ref_group": [f"ref{i // self.PER_REF}" for i in range(n)],
-                                 "ref_path": [f"/{name}/ref{i // self.PER_REF}.png" for i in range(n)],
+                                 "ref_group": [self.ref_name(name, i // self.PER_REF) for i in range(n)],
+                                 "ref_path": [f"/{name}/{self.ref_name(name, i // self.PER_REF)}.png" for i in range(n)],
                                  "dist_path": [f"/{name}/d{i}.png" for i in range(n)],
                                  "ref_pixels_sha256": ["r"] * n, "dist_pixels_sha256": [f"p{i}" for i in range(n)],
                                  "n_stimuli": np.ones(n, dtype=np.int32), "pixels_identical": [i == 3 for i in range(n)]})
@@ -896,16 +900,23 @@ class ConfirmRead(unittest.TestCase):
 
 class SetCompareRead(ConfirmRead):
     """Amendment R7: the set-compare read on synthetic labels (planted better set, equal set, worse set, null, refusals)."""
+    REFS_OF = {"mcljci": 50}   # R7a needs MCL-JCI's 50 numbered sources
+
+    def ref_name(self, name: str, j: int) -> str:
+        return f"imagejnd_src{j + 1:02d}" if name == "mcljci" else f"ref{j}"
 
     def sc_pin(self, root: Path, pin_path: Path, entries: dict, superiority, noninferiority) -> Path:
         base = json.loads(pin_path.read_text())
         reg = root / "R7.md"
         reg.write_text("registration")
+        r7a = root / "R7a.md"
+        r7a.write_text("amendment r7a")
         pin = {k: base[k] for k in ("frozen_sha256", "wide_receipts", "confirm_receipt_sha256", "keep_lists_sha256", "binaries",
                                     "program_sha", "data_sha", "code", "labels")}
         pin.update({"schema": self.cr.SC_PIN_SCHEMA, "entries": entries, "head": "N", "superiority": superiority,
                     "noninferiority": noninferiority, "ensemble_pairs": [{"arm": "B", "reference": "A"}],
-                    "registration": {"path": str(reg), "sha256": v2_common.sha(reg)}})
+                    "registration": {"path": str(reg), "sha256": v2_common.sha(reg)},
+                    "amendment_r7a": {"path": str(r7a), "sha256": v2_common.sha(r7a)}})
         out = root / "scpin.json"
         out.write_text(json.dumps(pin))
         return out
@@ -934,7 +945,15 @@ class SetCompareRead(ConfirmRead):
             self.assertTrue(sup[("A", "C")]["confirmed"], sup[("A", "C")])
             self.assertTrue(sup[("A", "D")]["confirmed"])
             self.assertGreater(sup[("A", "C")]["mean_delta"], 0.02)
-            self.assertEqual(sorted(sup[("A", "C")]["per_set"]), sorted((*self.PRIMARY, "konjnd_jpeg_select", "konjnd_jpeg_terminal")))
+            self.assertEqual(sorted(sup[("A", "C")]["per_set"]),
+                             sorted((*self.PRIMARY, "konjnd_jpeg_select", "konjnd_jpeg_terminal", "mcljci_k40")))
+            # R7a: the clean primary swaps MCL-JCI for its 40 non-KonFiG sources; both primaries must agree for a verdict.
+            self.assertEqual(sup[("A", "C")]["clean"]["sets"], ["cid22_b", "aic4", "csiq", "mcljci_k40"])
+            self.assertTrue(sup[("A", "C")]["confirmed_registered"] and sup[("A", "C")]["confirmed_clean"])
+            self.assertEqual(sup[("A", "C")]["verdict"], "confirmed")
+            self.assertTrue(ni["as_good_registered"] if (ni := res["noninferiority"][0]) else False)
+            self.assertEqual(res["provenance"]["per_set"]["mcljci_k40"]["references"], 40)
+            self.assertEqual(res["provenance"]["per_set"]["mcljci"]["references"], 50)
             ni = res["noninferiority"][0]
             self.assertTrue(ni["as_good"], ni)
             self.assertGreater(res["entry_mean_signed_srocc"]["A"]["aic4"], 0.5)    # distortion labels negated: signed SROCC > 0
@@ -970,9 +989,30 @@ class SetCompareRead(ConfirmRead):
                 pin_path.write_text(json.dumps(pin))
             return f
         attempt(lambda root, pin: (root / "R7.md").write_text("edited after the pin"))          # registration changed
+        attempt(lambda root, pin: (root / "R7a.md").write_text("edited after the pin"))         # R7a amendment changed
         attempt(pin_edit(lambda p: p["superiority"].append({"arm": "A", "reference": "Z"})))    # unknown entry
         attempt(pin_edit(lambda p: p["entries"].update(B="setA")))                                # duplicate spec
         attempt(lambda root, pin: __import__("shutil").rmtree(self.cr.cell_path(root, "setB", "N", 2)))   # missing cell
+
+
+class R7aGuard(unittest.TestCase):
+    """R7a: the clean-primary derivation and the agreement rule, without labels."""
+
+    def test_mcljci_clean_and_guarded(self):
+        import v2_confirm_read as cr
+        lab = pd.DataFrame({"pred_row": np.arange(100), "ref_basename": [f"imagejnd_src{i // 2 + 1:02d}" for i in range(100)]})
+        out = cr.mcljci_clean(lab)
+        self.assertEqual(out.ref_basename.nunique(), 40)
+        self.assertFalse(out.ref_basename.isin(["imagejnd_src01", "imagejnd_src45", "imagejnd_src50"]).any())
+        self.assertEqual(len(out), 80)
+        with self.assertRaises(cr.Refusal):
+            cr.mcljci_clean(lab.iloc[:98])                 # 49 sources
+        with self.assertRaises(cr.Refusal):
+            cr.mcljci_clean(lab.assign(ref_basename="ref0"))
+        self.assertEqual(cr.guarded(True, True, "confirmed", "not confirmed"), "confirmed")
+        self.assertEqual(cr.guarded(False, False, "confirmed", "not confirmed"), "not confirmed")
+        self.assertEqual(cr.guarded(True, False, "confirmed", "no"), "contamination-sensitive (registered primary only: confirmed)")
+        self.assertEqual(cr.guarded(False, True, "as good", "no"), "contamination-sensitive (clean primary only: as good)")
 
 
 class TeacherSubsets(unittest.TestCase):

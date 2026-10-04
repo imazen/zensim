@@ -1148,3 +1148,15 @@ Addendum (2026-10-01 11:32 MT): the archive above lacked `wide/frozen.json`, whi
 freeze record. The replacement archive (sha256 `cf9b83179376c78471905c8e97e3280b3d45ea008123f9febdbd660f9046f99d`,
 7,752,619,775 bytes, 284 members = the same 283 plus `wide/frozen.json`) goes to the same store prefix; same populations,
 no new transport destination, labels still sealed.
+
+## Finding — 2026-10-04: KonFiG-IQA's ten references are crops of MCL-JCI sources (open, owner decision)
+
+KonFiG-IQA (T2, ingested 2026-07-02; a training source of the Rev4 feature-potential fits, including all four R7 entries) takes its
+ten references from MCL-JCI, a confirmation-only holdout: KonFiG `SRC01/03/06/07/09/17/28/31/45/50` are zoomed crops (384×512) of
+MCL-JCI `ImageJND_SRC##` with the same numbers. Source: the KonFiG paper ("ten source images from the MCL-JCI dataset"); three of ten
+pairs (SRC01, SRC03, SRC45) checked by eye in the chromatic-studies survey (`~/tmp/zensim-paper/rev4/CHROMA_STUDIES_survey.md`
+item 5). The KonFiG row's dHash audit did not include MCL-JCI and is crop-blind, so its "CLEAN PASS" does not cover this overlap.
+No label was read for this finding. Interim handling: amendment R7a (`benchmarks/rev4_featpot_v2_amendment_2026-09-30.md`) requires
+every R7 verdict to hold also with MCL-JCI restricted to its 40 other sources. Open for the owner: whether KonFiG stays in training,
+and whether MCL-JCI (or its 40-source subset) stays a holdout for KonFiG-trained models. A crop-aware duplicate check (feature or
+template matching) of every training reference against every holdout source is not yet run.

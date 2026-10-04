@@ -4,7 +4,7 @@
 
 Entries (head N, full-data `v2_confirm_fit` cells under <root>/confirm/cells; R7 in benchmarks/rev4_featpot_v2_amendment_2026-09-30.md):
 A = v2 + basic at cv16:cf98, B = by_v2fy at cv16:cf98, C = v2 + basic uncurated, D = R0 at H128. The fits read no label.
-The read itself is `v2_confirm_read.py --set-compare` against the R7 pin.
+The read itself is `v2_confirm_read.py --set-compare` against the R7a pin (R7 plus the KonFiG/MCL-JCI clean primary).
 """
 
 import argparse
@@ -49,6 +49,7 @@ PROGRAM_V24 = "dfffd0912699541e3dc0735d2f97393e23f98bc3f3f2f29a3f259494a6eb447b"
 CONFIRM_DATA = "cf9b83179376c78471905c8e97e3280b3d45ea008123f9febdbd660f9046f99d"
 OLD_PIN = REPO / "benchmarks/rev4_featpot_effaudit/v2c_confirm_pin_2026-10-01.json"
 REGISTRATION = REPO / "benchmarks/rev4_featpot_R7_registration_2026-10-04.md"
+AMENDMENT_R7A = REPO / "benchmarks/rev4_featpot_R7a_registration_2026-10-04.md"  # KonFiG/MCL-JCI contamination guard
 BIN_DIR = Path("/var/tmp/fitv2/bin-v7")  # program v21-v24 binaries (trainer 605d20e0, predictor 56da0529, panel f76b85a7)
 
 
@@ -72,7 +73,8 @@ def cmd_pin(args) -> int:
            "code": {rel: sha(path) for rel, path in cr.CODE_FILES.items()},
            "labels": old["labels"], "pixel_hashes": old["pixel_hashes"],
            "labels_from_pin": {"path": str(OLD_PIN), "sha256": sha(OLD_PIN)},
-           "registration": {"path": str(REGISTRATION), "sha256": sha(REGISTRATION)}}
+           "registration": {"path": str(REGISTRATION), "sha256": sha(REGISTRATION)},
+           "amendment_r7a": {"path": str(AMENDMENT_R7A), "sha256": sha(AMENDMENT_R7A)}}
     Path(args.out).write_text(json.dumps(pin, indent=1) + "\n")
     print(json.dumps({"pin": args.out, "frozen": frozen_sha[:12], "binaries": {k: v[:8] for k, v in pin["binaries"].items()}}))
     return 0

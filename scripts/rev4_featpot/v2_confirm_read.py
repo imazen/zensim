@@ -28,9 +28,11 @@ no KonJND regression. Reference resamples are INDEPENDENT per set (seed [BOOT_SE
 predicts every set). R2's per-set V1/V2 are SECONDARY output, for the shortlisted entries only.
 
 SET-COMPARE MODE (amendment R7, 2026-10-04): `--confirmatory-read --set-compare --pin PIN.json --root ROOT --out OUT.json`
-with a `rev4-featpot-v2c-setcompare-pin-v1` pin: named complete feature-set entries (full specs, one head), superiority comparisons
+with a `rev4-featpot-v2c-setcompare-pin-v2` pin: named complete feature-set entries (full specs, one head), superiority comparisons
 (seed-paired Δ of the 4-set mean, one-sided bootstrap p, Holm) and non-inferiority comparisons (mean ≥ −0.002 and 5th percentile ≥
 −0.005), both with the per-set and KonJND regression vetoes. Same label adapter, orientation table, bootstrap and exposure ledger.
+Amendment R7a: each verdict is also computed on the clean primary (MCL-JCI without the ten KonFiG-IQA sources) and stands only when
+both primaries agree; otherwise it reads "contamination-sensitive".
 
 ORIENTATION is keyed by (set, label file name, label column) and taken from documents (the table below); an unlisted combination
 refuses. A label is negated to quality orientation (higher = better, like the model output) when DISTORTION, and the SIGNED SROCC is used.
@@ -331,7 +333,8 @@ def make_model_fn(pin: dict, cells: dict, labels: dict[str, pd.DataFrame]):
                 cache[key] = None
             else:
                 lab = labels[source]
-                pred = np.asarray(cell["predictions"][source]["pred"], dtype=np.float64)[lab.pred_row.to_numpy()]
+                pred = np.asarray(cell["predictions"][PRED_SOURCE.get(source, source)]["pred"],
+                                  dtype=np.float64)[lab.pred_row.to_numpy()]
                 rows = panel_batch_indexed({"p": pred, "y": lab.y_quality.to_numpy()}, None, stats="srocc", timeout=7200,
                                            rendered_jobs=v2_compare.rendered_jobs(source, lab))
                 # SIGNED SROCC against the quality-oriented label: the panel's `srocc` is a magnitude and would score a wrongly
@@ -426,10 +429,34 @@ def confirm_read(pin: dict, cells: dict, labels: dict[str, pd.DataFrame]) -> dic
 
 
 # ------------------------------------------------------------------ set-compare mode (amendment R7)
-SC_PIN_SCHEMA = "rev4-featpot-v2c-setcompare-pin-v1"
+SC_PIN_SCHEMA = "rev4-featpot-v2c-setcompare-pin-v2"
 SC_REQUIRED = ("entries", "head", "superiority", "noninferiority", "ensemble_pairs", "frozen_sha256", "wide_receipts",
-               "confirm_receipt_sha256", "keep_lists_sha256", "binaries", "program_sha", "data_sha", "code", "labels", "registration")
+               "confirm_receipt_sha256", "keep_lists_sha256", "binaries", "program_sha", "data_sha", "code", "labels", "registration",
+               "amendment_r7a")
 NI_MEAN, NI_LOWER = -0.002, -0.005   # R7 Q3: point mean and the 5th percentile of the bootstrap 4-set mean
+# R7a (2026-10-04, before any sealed label was read): KonFiG-IQA, a training source of every entry, takes its ten references from
+# these MCL-JCI sources (crops; CHROMA_STUDIES survey item 5). Every R7 verdict must also hold on the clean primary, where MCL-JCI
+# keeps only its other 40 sources; a verdict that holds on one primary and not the other is reported as contamination-sensitive.
+KONFIG_MCLJCI_SRC = (1, 3, 6, 7, 9, 17, 28, 31, 45, 50)
+MCLJCI_CLEAN = "mcljci_k40"
+CLEAN_PRIMARY = ("cid22_b", "aic4", "csiq", MCLJCI_CLEAN)
+PRED_SOURCE = {MCLJCI_CLEAN: "mcljci"}   # derived set -> the set whose prediction rows it reads
+SC_SETS = (*ALL_SETS, MCLJCI_CLEAN)
+
+
+def mcljci_clean(lab: pd.DataFrame) -> pd.DataFrame:
+    """MCL-JCI label rows without the ten KonFiG sources; refuses unless exactly 50 sources split 10 / 40."""
+    src = lab.ref_basename.astype(str).str.extract(r"(?i)src(\d+)$")[0]
+    if src.isna().any():
+        refuse("mcljci: a reference name carries no SRC number")
+    num = src.astype(int)
+    found = set(num)
+    if len(found) != 50 or not set(KONFIG_MCLJCI_SRC) <= found:
+        refuse(f"mcljci: expected 50 sources including the ten KonFiG ones, got {len(found)}")
+    out = lab.loc[~num.isin(KONFIG_MCLJCI_SRC).to_numpy()].reset_index(drop=True)
+    out.attrs["accounting"] = {"derived_from": "mcljci", "excluded_src": list(KONFIG_MCLJCI_SRC),
+                               "references": int(out.ref_basename.nunique())}
+    return out
 
 
 def load_sc_pin(path: Path) -> dict:
@@ -457,9 +484,10 @@ def load_sc_pin(path: Path) -> dict:
 def preflight_sc(root: Path, pin: dict) -> dict:
     """R7: every label-free check before exposure. Cells are full-data confirm fits of complete feature sets (real tables)."""
     _, frozen_sha, panel_env = preflight_code_panel_frozen(root, pin)
-    reg = pin["registration"]
-    if sha(Path(reg["path"])) != reg["sha256"]:
-        refuse("the registration document changed after the pin")
+    for field in ("registration", "amendment_r7a"):
+        reg = pin[field]
+        if sha(Path(reg["path"])) != reg["sha256"]:
+            refuse(f"the {field} document changed after the pin")
     label_report = preflight_labels(pin)
     receipt = json.loads((root / "wide" / "confirm" / "receipt.json").read_text())
     cells, problems, head = {}, [], pin["head"]
@@ -496,30 +524,46 @@ def pair_contrast(arm_spec: str, ref_spec: str, head: str, source: str, model_fn
             "per_seed_delta": (a_pt - r_pt).tolist(), "_boot": d_boot}
 
 
+def primary_stats(per: dict, sets: tuple) -> dict:
+    """The R7 statistic over one primary: equal-weight mean Δ, its per-draw bootstrap, and the per-set regression veto."""
+    boot = np.mean([per[s]["_boot"] for s in sets], axis=0)  # equal weights, per draw
+    return {"sets": list(sets), "mean_delta": float(np.mean([per[s]["delta"] for s in sets])),
+            "mean_delta_ci95": np.quantile(boot, [0.025, 0.975]).tolist(), "mean_delta_p05": float(np.quantile(boot, 0.05)),
+            "p_one_sided": float(np.mean(boot <= 0.0)), "boot_draws": int(len(boot)),
+            "regressions": [s for s in sets if per[s]["delta_ci95"][1] < v2_compare.REGRESSION]}
+
+
 def sc_comparison(c: dict, pin: dict, model_fn) -> dict:
     ents, head = pin["entries"], pin["head"]
-    per = {s: pair_contrast(ents[c["arm"]], ents[c["reference"]], head, s, model_fn) for s in (*SEALED, *GUARD)}
+    per = {s: pair_contrast(ents[c["arm"]], ents[c["reference"]], head, s, model_fn) for s in SC_SETS}
     bad = {s: v for s, v in per.items() if v["status"] != "OK"}
     out = {"arm": c["arm"], "reference": c["reference"], "question": c.get("question", "")}
     if bad:
         return {**out, "status": "INCOMPLETE", "sets": bad}
-    boot = np.mean([per[s]["_boot"] for s in PRIMARY_SETS], axis=0)  # equal weights, per draw
-    regress = [s for s in PRIMARY_SETS if per[s]["delta_ci95"][1] < v2_compare.REGRESSION]
+    reg = primary_stats(per, PRIMARY_SETS)
     kon = per[KONJND]
-    out.update({"status": "OK", "mean_delta": float(np.mean([per[s]["delta"] for s in PRIMARY_SETS])),
-                "mean_delta_ci95": np.quantile(boot, [0.025, 0.975]).tolist(), "mean_delta_p05": float(np.quantile(boot, 0.05)),
-                "p_one_sided": float(np.mean(boot <= 0.0)), "boot_draws": int(len(boot)), "regressions": regress,
+    out.update({"status": "OK", **{k: v for k, v in reg.items() if k != "sets"},
+                "clean": primary_stats(per, CLEAN_PRIMARY),
                 "konjnd_select": {k: kon[k] for k in ("delta", "delta_ci95", "arm_mean", "ref_mean")},
                 "konjnd_regression": bool(kon["delta_ci95"][1] < v2_compare.REGRESSION),
-                "per_set": {s: {k: v for k, v in per[s].items() if k != "_boot"} for s in (*SEALED, *GUARD)}})
+                "per_set": {s: {k: v for k, v in per[s].items() if k != "_boot"} for s in SC_SETS}})
     return out
+
+
+def guarded(registered: bool, clean: bool, yes: str, no: str) -> str:
+    """R7a: a verdict stands only when the registered and the clean primary agree."""
+    if registered and clean:
+        return yes
+    if registered or clean:
+        return f"contamination-sensitive ({'registered' if registered else 'clean'} primary only: {yes})"
+    return no
 
 
 def ensemble_point(pin: dict, cells: dict, labels: dict, spec: str, source: str, seeds) -> float:
     """Signed SROCC of the mean of the seed models' predictions (descriptive product-form readout)."""
     lab = labels[source]
-    pred = np.mean([np.asarray(cells[(spec, pin["head"], i)]["predictions"][source]["pred"], dtype=np.float64) for i in seeds],
-                   axis=0)[lab.pred_row.to_numpy()]
+    pred = np.mean([np.asarray(cells[(spec, pin["head"], i)]["predictions"][PRED_SOURCE.get(source, source)]["pred"],
+                               dtype=np.float64) for i in seeds], axis=0)[lab.pred_row.to_numpy()]
     rows = panel_batch_indexed({"p": pred, "y": lab.y_quality.to_numpy()}, None, stats="srocc", timeout=600,
                                rendered_jobs=render_indexed_jobs([("POINT", "p", "y", None)], ("p", "y")))
     return float(rows[0]["srocc_signed"])
@@ -528,38 +572,51 @@ def ensemble_point(pin: dict, cells: dict, labels: dict, spec: str, source: str,
 def set_compare_read(pin: dict, cells: dict, labels: dict[str, pd.DataFrame]) -> dict:
     model_fn = make_model_fn(pin, cells, labels)
     v2_compare.REF_SEEDS.clear()
-    v2_compare.REF_SEEDS.update({s: [BOOT_SEED, i] for i, s in enumerate(ALL_SETS)})
+    v2_compare.REF_SEEDS.update({s: [BOOT_SEED, i] for i, s in enumerate(SC_SETS)})
     v2_compare._ref_draws.clear()
     v2_compare._rendered.clear()
     sup = [sc_comparison(c, pin, model_fn) for c in pin["superiority"]]
-    for e, rej in zip(sup, holm([e["p_one_sided"] if e["status"] == "OK" else 1.0 for e in sup])):
-        e["holm_significant"] = bool(rej and e["status"] == "OK")
-        e["confirmed"] = bool(e["holm_significant"] and not e.get("regressions") and not e.get("konjnd_regression"))
-        e["verdict"] = ("INCOMPLETE" if e["status"] != "OK" else "confirmed" if e["confirmed"]
-                        else "Holm-significant but a set regresses" if e["holm_significant"] else "not confirmed")
+    ok = [e["status"] == "OK" for e in sup]
+    holm_reg = holm([e["p_one_sided"] if o else 1.0 for e, o in zip(sup, ok)])
+    holm_clean = holm([e["clean"]["p_one_sided"] if o else 1.0 for e, o in zip(sup, ok)])
+    for e, o, rej, rej_c in zip(sup, ok, holm_reg, holm_clean):
+        if not o:
+            e.update({"holm_significant": False, "confirmed": False, "verdict": "INCOMPLETE"})
+            continue
+        e["holm_significant"] = bool(rej)
+        e["confirmed_registered"] = bool(rej and not e["regressions"] and not e["konjnd_regression"])
+        e["clean"]["holm_significant"] = bool(rej_c)
+        e["confirmed_clean"] = bool(rej_c and not e["clean"]["regressions"] and not e["konjnd_regression"])
+        e["confirmed"] = e["confirmed_registered"] and e["confirmed_clean"]
+        no = "Holm-significant but a set regresses" if (rej and rej_c) else "not confirmed"
+        e["verdict"] = guarded(e["confirmed_registered"], e["confirmed_clean"], "confirmed", no)
     ni = [sc_comparison(c, pin, model_fn) for c in pin["noninferiority"]]
     for e in ni:
         if e["status"] != "OK":
             e["as_good"], e["verdict"] = False, "INCOMPLETE"
             continue
-        e["as_good"] = bool(e["mean_delta"] >= NI_MEAN and e["mean_delta_p05"] >= NI_LOWER and not e["regressions"]
-                            and not e["konjnd_regression"])
-        e["verdict"] = "as good (non-inferior)" if e["as_good"] else "not shown non-inferior"
+        def ni_pass(st: dict) -> bool:
+            return bool(st["mean_delta"] >= NI_MEAN and st["mean_delta_p05"] >= NI_LOWER and not st["regressions"]
+                        and not e["konjnd_regression"])
+        e["as_good_registered"], e["as_good_clean"] = ni_pass(e), ni_pass(e["clean"])
+        e["as_good"] = e["as_good_registered"] and e["as_good_clean"]
+        e["verdict"] = guarded(e["as_good_registered"], e["as_good_clean"], "as good (non-inferior)", "not shown non-inferior")
     names = sorted(pin["entries"])
     secondary = {f"{a}-{b}": sc_comparison({"arm": a, "reference": b}, pin, model_fn) for a in names for b in names if a != b}
     for v in secondary.values():
         for k in ("p_one_sided", "boot_draws"):
             v.pop(k, None)
-    absolute = {lab: {s: float(model_fn(spec, pin["head"], s)[0][0].mean()) for s in (*SEALED, *GUARD)}
+    absolute = {lab: {s: float(model_fn(spec, pin["head"], s)[0][0].mean()) for s in SC_SETS}
                 for lab, spec in pin["entries"].items()}
     ens = {}
     for c in pin["ensemble_pairs"]:
         a, r = pin["entries"][c["arm"]], pin["entries"][c["reference"]]
         ens[f"{c['arm']}-{c['reference']}"] = {
             s: [ensemble_point(pin, cells, labels, a, s, g) - ensemble_point(pin, cells, labels, r, s, g)
-                for g in (range(0, 5), range(5, 10))] for s in (*SEALED, *GUARD)}
-    return {"schema": "rev4-featpot-v2c-setcompare-read-v1", "label": "POTENTIAL — ceiling, not a model score", "alpha": ALPHA,
+                for g in (range(0, 5), range(5, 10))] for s in SC_SETS}
+    return {"schema": "rev4-featpot-v2c-setcompare-read-v2", "label": "POTENTIAL — ceiling, not a model score", "alpha": ALPHA,
             "entries": pin["entries"], "head": pin["head"], "primary_sets": PRIMARY_SETS, "konjnd_set": KONJND, "guard_sets": GUARD,
+            "clean_primary_sets": CLEAN_PRIMARY, "konfig_mcljci_src_excluded": list(KONFIG_MCLJCI_SRC),
             "orientation": {s: ORIENTATION[(s, Path(pin["labels"][s]["path"]).name, pin["labels"][s]["label_col"])] for s in ALL_SETS},
             "superiority": sup, "noninferiority": ni, "secondary_pairs": secondary, "entry_mean_signed_srocc": absolute,
             "ensemble_delta_groups_0_4_and_5_9": ens}
@@ -647,13 +704,16 @@ def main_set_compare(args) -> int:
     if pin.get("pixel_hashes"):
         pixel_sha = dict(line.split("\t", 1) for line in Path(pin["pixel_hashes"]["path"]).read_text().splitlines() if line)
     labels = {name: load_labels(pin, name, pre["keys"][name], args.bank, pixel_sha) for name in ALL_SETS}
+    labels[MCLJCI_CLEAN] = mcljci_clean(labels["mcljci"])
     result = set_compare_read(pin, pre["cells"], labels)
     result["provenance"] = {
         "pin_sha256": sha(args.pin), "frozen_sha256": pre["frozen_sha256"], "panel_sha256": pre["panel_sha256"],
         "code_sha256": pin["code"], "labels": pre["labels"], "registration": pin["registration"],
-        "per_set": {s: {"rows": int(pre["receipt"]["sets"][s]["rows"]), "references": int(labels[s].ref_basename.nunique()),
-                        "label_rows_used": int(len(labels[s])), "accounting": labels[s].attrs["accounting"]} for s in ALL_SETS},
-        "ref_seeds": {s: [BOOT_SEED, i] for i, s in enumerate(ALL_SETS)}, "boot_b": v2_compare.BOOT_B}
+        "amendment_r7a": pin["amendment_r7a"],
+        "per_set": {s: {"rows": int(pre["receipt"]["sets"][PRED_SOURCE.get(s, s)]["rows"]),
+                        "references": int(labels[s].ref_basename.nunique()),
+                        "label_rows_used": int(len(labels[s])), "accounting": labels[s].attrs["accounting"]} for s in SC_SETS},
+        "ref_seeds": {s: [BOOT_SEED, i] for i, s in enumerate(SC_SETS)}, "boot_b": v2_compare.BOOT_B}
     args.out.write_text(json.dumps(result, indent=1) + "\n")
     print(json.dumps({"set_compare_read": str(args.out),
                       "superiority": {f"{e['arm']}>{e['reference']}": e["verdict"] for e in result["superiority"]},
