@@ -1,0 +1,41 @@
+{
+  "schema": "r5integ2-artifacts-v1",
+  "scope": "TRAIN development; no production qualification",
+  "model_qualified": false,
+  "heads": {
+    "4": {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG2_assets/head-rev4-basic-v2-576-w720.zcth",
+      "bytes": 209374,
+      "sha256": "3368dd75296e09fa556debb1ed9ba7b7d65117a0c88d9fc45b2840edd4a37a47"
+    },
+    "5": {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG2_assets/head-rev5-basic-v2-576-w720.zcth",
+      "bytes": 209310,
+      "sha256": "ae789b5f2e8a598f4152caa2666be663e736561a5653a91e6a1b6a31c475c32b"
+    }
+  },
+  "summary": {
+    "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG2_assets/summary.json",
+    "bytes": 157769,
+    "sha256": "5c48b8a22aa227765ad2db55395875eff2eb5943bceed3cfd1547ae0189e2284"
+  },
+  "full_evidence_directory": "/var/tmp/r5integ/r5integ2",
+  "full_bakes": "all six R5CONFIRM bakes; twelve Rev5 head/bake combinations",
+  "prepared_rows": 110,
+  "original_summary_pointer": {
+    "path": "/home/lilith/work/zen/zensim--r5integ/benchmarks/r5integ_2026-10-04.summary.json",
+    "bytes": 406,
+    "sha256": "d541f7bc7455651f56c2fa4ca46cea8fac860c4284635185fc9cb9a19a88401c"
+  },
+  "archive": {
+    "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ2/evidence.tar.zst",
+    "bytes": 2824846489,
+    "sha256": "8c6595fe75b33884a38c6e8dbfd9ce19a48215cda49207f150ea36790ff180c0"
+  },
+  "handoff": {
+    "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG2_assets/HANDOFF.json",
+    "bytes": 2062,
+    "sha256": "ba1c3e2b681aec503dc4eafa879719a0f3066ee5518ddd5e7cfe5cd5aa372e3e"
+  },
+  "verified_evidence_files": 838
+}

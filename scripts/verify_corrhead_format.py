@@ -60,9 +60,9 @@ def main():
         after = emit(new, 'current-' + precision, input_precision=precision)
         assert before.read_bytes() == after.read_bytes(), 'legacy exporter changed bytes'
         cases.append(after)
-    for revision in [1, 2, 3]:
+    for revision in [1, 2, 3, 4, 5]:
         cases.append(emit(new, f'revision-{revision}', input_precision='f32', formula_revision=revision))
-    for revision, precision in [(0, 'f32'), (4, 'f32'), (3, 'native')]:
+    for revision, precision in [(0, 'f32'), (6, 'f32'), (5, 'native')]:
         try:
             emit(new, 'refused', input_precision=precision, formula_revision=revision)
         except ValueError:
@@ -87,7 +87,7 @@ def main():
                   baseline_exporter_sha256=sha(args.baseline_exporter),
                   parity_binary_sha256=sha(args.parity_bin), script_sha256=sha(__file__))
     (args.out_dir / 'RESULT.json').write_text(json.dumps(report, indent=2) + '\n')
-    print('PASS: five Rust parity cases; legacy bytes unchanged; three invalid contracts refused')
+    print('PASS: seven Rust parity cases; legacy bytes unchanged; three invalid contracts refused')
 
 
 if __name__ == '__main__':

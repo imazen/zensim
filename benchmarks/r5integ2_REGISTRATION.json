@@ -1,0 +1,97 @@
+{
+  "schema": "canonical-corruption-basic-v2-registration-v1",
+  "regime": "basic-v2-576",
+  "registered_at_utc": "2026-10-04T22:39:46.631993+00:00",
+  "scope": "TRAIN development; no production qualification",
+  "source_parent": "7a9dbacbbc17b169a84b4269ea645508a7f038e9",
+  "formula_revisions": [
+    4,
+    5
+  ],
+  "head_feature_ranges": [
+    [
+      0,
+      228
+    ],
+    [
+      372,
+      720
+    ]
+  ],
+  "head_feature_count": 576,
+  "caller_input_width": 1825,
+  "input_precision": "f32",
+  "root_form": "sqrt",
+  "fit_origins": [
+    "2010",
+    "1054",
+    "6068",
+    "6610",
+    "7066",
+    "9380",
+    "8206",
+    "8384"
+  ],
+  "calibrate_origins": [
+    "1214",
+    "6064",
+    "9066",
+    "8462"
+  ],
+  "evaluate_origins": [],
+  "recipe": {
+    "seed": 4101,
+    "negative_fit_weight": 1,
+    "clip": 8,
+    "deadband": 0.9,
+    "max_iter": 100,
+    "max_leaf_nodes": 31,
+    "early_stopping": false,
+    "scaler": "fit-only weighted StandardScaler",
+    "class_weight": "balanced",
+    "probability_calibration": "calibration-only weighted isotonic",
+    "source_weights": "equal per-origin mass"
+  },
+  "input_manifests": [
+    {
+      "path": "/var/tmp/r5integ/rev4-MANIFEST.json",
+      "sha256": "341c52dd96c7621be062858883198eaa0725c2005bb35df3392b64a4254fc28d"
+    },
+    {
+      "path": "/var/tmp/r5integ/rev5-MANIFEST.json",
+      "sha256": "4282f258f5b1b9b3e28485325f06d2b3edeebcb8ca23bf4e280ed1a6e270af37"
+    }
+  ],
+  "population": {
+    "raw_attempts": 9036,
+    "nonidentity_attempts": 8510,
+    "unique_pairs": 8205,
+    "fit_pairs": 5499,
+    "calibration_pairs": 2706,
+    "identity_policy": "exclude-short-circuit-pairs-v1"
+  },
+  "gates": [
+    "zero_native_codec_activation",
+    "honest_activation_le_1pct",
+    "zero_native_codec_lowering",
+    "honest_lowering_le_1pct",
+    "detection_ge_95pct",
+    "real_bug_detection_ge_90pct",
+    "below_q20_ge_99pct"
+  ],
+  "compositions": {
+    "rev4": [
+      "byv2fy-full-s0",
+      "byv2fy-full-s1",
+      "byv2fy-full-s2",
+      "v2basic-full-s0",
+      "v2basic-full-s1",
+      "v2basic-full-s2"
+    ],
+    "rev5": "same families/seeds from R5CONFIRM if present; otherwise clearly labelled stamped smoke only",
+    "controls": "retained immutable Rev1 B/D and prior R5INTEG heads"
+  },
+  "prepared_probe": "same declared four TRAIN pairs from prior probe; accept unchanged base maps for inactive and typed REJECTED_INTEGRITY for active, at both revisions",
+  "selection": "none: retain both fixed fits and failed gates; no seed/threshold/label tuning",
+  "independent_judges": "6064 raw native files and exact retained delivery pixels; SSIMULACRA2 and Butteraugli in pinned requested image; diagnostic only, no relabel"
+}

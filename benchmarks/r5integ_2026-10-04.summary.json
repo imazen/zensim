@@ -1,0 +1,8 @@
+{
+  "schema": "r5integ-measured-summary-pointer-v1",
+  "bytes": 64362,
+  "sha256": "310f18bc1a541cd8c6df7752f4daba3db9b0432a6da6fd36d0da5474e10799c4",
+  "local_path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ_2026-10-04.summary.json",
+  "secondary_local_path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG_assets/summary.json",
+  "qualification": "FAIL: honest activation guards; no promotion"
+}

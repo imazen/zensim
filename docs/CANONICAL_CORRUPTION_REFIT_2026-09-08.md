@@ -203,3 +203,16 @@ sRGB and cICP metadata, never to EXR or tagged/contradictory color metadata.
 The default still refuses unknown transfer; retain that refusal control. This
 declares the existing source interpretation rather than silently overriding a
 profile or changing the fingerprint threshold after outcomes.
+
+## 2026-10-04 TRAIN-only basic plus v2 registration
+
+The existing trainer admits the registered576-feature gapped set f0..227 plus
+f372..719 at Rev4/5, with exact semantic-ID gathering from matching research
+payloads. A pinned regime_registration is required. Caller width720 additionally
+requires the pinned layout_registration; width1825 remains replayable. No
+masked/IW features enter this head. The canonical fixed recipe, TRAIN origin
+split and existing seven gates remain unchanged. serving_extractor can pin a
+corrected runtime separately from the immutable extraction producer; all pins
+are checked before fitting. This is TRAIN development, never qualification.
+The result and measured plan/steering evidence are indexed by
+benchmarks/r5integ2_ARTIFACTS.json and benchmarks/r5integ_WORKLOG.md.

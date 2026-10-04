@@ -11,6 +11,12 @@
 
 ### Changed
 
+- Compatible Rev4 corruption companions now score pixels through the existing
+  revision-checked union plan. Cross-revision heads and unsupported families
+  still refuse. The research refit/export tools support revision-bound v3
+  heads at Rev4/Rev5; measured activation failures remain explicit in
+  `benchmarks/r5integ_WORKLOG.md`, with no profile or threshold change.
+
 - Rev5 review fixes: raw requests for unsupported families now fail explicitly
   on SDR, streaming, cached and HDR extraction routes; masked/IW configuration
   and extended extraction requests also refuse. `compute_all_features` emits

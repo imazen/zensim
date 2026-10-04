@@ -809,7 +809,7 @@ const HIST_LN_LO: f64 = -16.11809565095832;
 const HIST_LN_HI: f64 = 2.772588722239781;
 
 fn hist_bin(v: f64) -> usize {
-    if !(v > 0.0) {
+    if v.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return 0;
     }
     let t = (v.ln() - HIST_LN_LO) / (HIST_LN_HI - HIST_LN_LO);
@@ -933,11 +933,7 @@ impl DvifmSink {
         // `nby*nbx*REC_W` f32 (v2 = 20 with Weber means; v1 = 18).
         let recw = |l: usize| {
             let nb = (stats.grid[l].0 * stats.grid[l].1) as usize;
-            if nb == 0 {
-                20
-            } else {
-                stats.records[l].len() / nb
-            }
+            stats.records[l].len().checked_div(nb).unwrap_or(20)
         };
         // Histogram pass over the FULL record set (before any cap) — the
         // pooled (C̃, m) census is the exact statistic the C₀×β grid reads.
@@ -952,7 +948,7 @@ impl DvifmSink {
                     let m = rec[0] as f64;
                     lh.counts[hist_bin(ctilde) * HIST_BINS + hist_bin(m)] += 1;
                     lh.n_blocks += 1;
-                    if !(ctilde > 0.0) {
+                    if ctilde.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                         lh.n_c_nonpos += 1;
                     }
                 }
@@ -1107,6 +1103,7 @@ fn sha256_hex_of(path: &Path) -> String {
 /// the diagnostic producer's manifest: records the producer surface, the
 /// feature-set identity, the formula revision, and (when present) the
 /// DVIFM spec identity + block-record cache.
+#[allow(clippy::too_many_arguments)] // Independent producer/provenance fields.
 fn write_research_manifest(
     out: &Path,
     contract: InputContract,

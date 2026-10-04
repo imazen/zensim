@@ -91,7 +91,7 @@ for _tvar in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
               "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "BLIS_NUM_THREADS"):
     os.environ[_tvar] = "1"
 
-import argparse, json, subprocess, struct, sys
+import argparse, json, subprocess, struct, sys, hashlib
 import numpy as np, pyarrow.parquet as pq
 import threadpoolctl
 from sklearn.linear_model import LogisticRegression
@@ -202,8 +202,8 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
         d += _s.pack("<H", int(i))
     d += _s.pack("<I", n_knots)
     if version == 3:
-        if formula_revision not in (1, 2, 3):
-            raise ValueError("ZCTH v3 requires formula revision 1, 2 or 3")
+        if formula_revision not in (1, 2, 3, 4, 5):
+            raise ValueError("ZCTH v3 requires formula revision 1 through 5")
         d += _s.pack("<I", formula_revision)
     elif formula_revision is not None:
         raise ValueError("explicit formula revision requires ZCTH v3")
@@ -241,8 +241,8 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
         raise SystemExit(f"unsupported ZCTH input precision: {input_precision}")
     version = 2 if input_precision == "f32" else ZCTH_VERSION
     if formula_revision is not None:
-        if formula_revision not in (1, 2, 3) or input_precision != "f32":
-            raise ValueError("ZCTH v3 requires f32 inputs and formula revision 1, 2 or 3")
+        if formula_revision not in (1, 2, 3, 4, 5) or input_precision != "f32":
+            raise ValueError("ZCTH v3 requires f32 inputs and formula revision 1 through 5")
         version = 3
 
     if getattr(clf, "n_trees_per_iteration_", 1) != 1:
@@ -654,6 +654,19 @@ def strict_train_main(argv):
     print(json.dumps(dict(gates=gates,calibration=c,advance_to_eval=all(gates.values()))),flush=True)
 
 
+
+def _canonical_screen_gates(summary):
+    """The registered canonical activation/lowering/ordering bars."""
+    return dict(
+        zero_native_codec_activation=all(v["head_fp"]["count"] == 0 for v in summary["by_codec"].values()),
+        honest_activation_le_1pct=summary["head_fp"]["rate"] <= .01,
+        zero_native_codec_lowering=all(v["honest_score_lowered"]["count"] == 0 for v in summary["by_codec"].values()),
+        honest_lowering_le_1pct=summary["honest_score_lowered"]["rate"] <= .01,
+        detection_ge_95pct=summary["detection"]["rate"] >= .95,
+        real_bug_detection_ge_90pct=summary["by_family"]["real_bug"]["detection"]["rate"] >= .90,
+        below_q20_ge_99pct=summary["composed_below_q20"]["rate"] >= .99)
+
+
 def canonical_main(argv):
     """Source-owned canonical fit; report the exact exported Rust composition."""
     from pathlib import Path
@@ -673,13 +686,64 @@ def canonical_main(argv):
         require(_sha256(spec["path"]) == spec["sha256"], "changed input: " + spec["path"])
         return Path(spec["path"])
     m = json.loads(a.canonical_manifest.read_text())
-    require(m["schema"] == "canonical-corruption-fit-v1", "canonical manifest schema")
-    require(m["feature_ids"] == list(range(372)) and m["formula_revision"] == 1
-            and m["root_form"] == "libm", "canonical feature contract")
+    require(m["schema"] in ("canonical-corruption-fit-v1", "canonical-corruption-refit-train-v2"), "canonical manifest schema")
+    revision_refit = m["schema"] == "canonical-corruption-refit-train-v2"
+    revision = m["formula_revision"]
+    basic_v2_ids = list(range(228)) + list(range(372, 720))
+    caller_width = 1825 if revision_refit else 372
+    if revision_refit:
+        require(a.training_screen_only, "revision refit is TRAIN-only")
+        require(m["origins"]["evaluate"] == [], "revision refit forbids evaluation origins")
+        require(revision in (4, 5) and m["root_form"] == "sqrt"
+                and m["input_precision"] == "f32", "revision refit arithmetic contract")
+        require(m["feature_ids"] in (list(range(372 if revision == 4 else 228)), basic_v2_ids),
+                "revision refit feature regime")
+        require(m["head_feature_ids"] in ([list(range(228)), list(range(372)), basic_v2_ids]
+                                            if revision == 4 else [list(range(228)), basic_v2_ids])
+                and m.get("negative_fit_weight", 1) == 1
+                and m["identity_policy"] == "exclude-short-circuit-pairs-v1",
+                "registered revision refit recipe")
+        require(set(m["origins"]["fit"]) == {"2010", "1054", "6068", "6610", "7066", "9380", "8206", "8384"}
+                and set(m["origins"]["calibrate"]) == {"1214", "6064", "9066", "8462"},
+                "canonical TRAIN inner split required")
+        if m["head_feature_ids"] == basic_v2_ids:
+            require(m["feature_ids"] == basic_v2_ids, "basic/v2 input IDs must match head reads")
+            registration = json.loads(pinned(m["regime_registration"]).read_text())
+            require(registration["schema"] == "canonical-corruption-basic-v2-registration-v1"
+                    and registration["regime"] == "basic-v2-576"
+                    and registration["head_feature_ranges"] == [[0, 228], [372, 720]]
+                    and registration["head_feature_count"] == 576
+                    and registration["formula_revisions"] == [4, 5]
+                    and registration["scope"] == "TRAIN development; no production qualification",
+                    "basic/v2 preregistration required")
+            caller_width = m.get("head_caller_input_width", 1825)
+            require(caller_width in (720, 1825), "basic/v2 caller width")
+            if caller_width == 720:
+                layout = json.loads(pinned(m["layout_registration"]).read_text())
+                require(layout["schema"] == "canonical-corruption-basic-v2-layout-registration-v1"
+                        and layout["caller_input_width"] == 720
+                        and layout["head_feature_ranges"] == [[0, 228], [372, 720]]
+                        and layout["head_feature_count"] == 576
+                        and layout["numerical_recipe_changed"] is False
+                        and layout["feature_read_set_changed"] is False,
+                        "basic/v2 layout correction registration required")
+        else:
+            require(m["feature_ids"] == list(range(372 if revision == 4 else 228)),
+                    "legacy revision-refit input IDs required")
+        extraction = json.loads(pinned(m["extraction_manifest"]).read_text())
+        require(extraction["formula_revision"] == str(revision)
+                and extraction["feature_set_id"] == m["feature_set_id"]
+                and extraction["producer_binary_sha256"] == m["extractor"]["sha256"]
+                and set(m["feature_ids"]) <= set(extraction["populated_feature_ids"]),
+                "fresh matching research extraction required")
+    else:
+        require(m["feature_ids"] == list(range(372)) and revision == 1
+                and m["root_form"] == "libm", "canonical feature contract")
     # Keep the original all-372 experiment reproducible. The D companion is
     # an explicit new declaration, never inferred from the source table width.
     head_ids = m.get("head_feature_ids", m["feature_ids"])
-    require(head_ids in (list(range(228)), list(range(372)))
+    require((head_ids in (list(range(228)), list(range(372)))
+             or (revision_refit and head_ids == basic_v2_ids))
             and all(type(i) is int for i in head_ids), "unregistered head feature regime")
     negative_fit_weight = m.get("negative_fit_weight", 1)
     require(type(negative_fit_weight) is int and negative_fit_weight in (1, 4, 16, 64),
@@ -688,9 +752,19 @@ def canonical_main(argv):
     require(not a.out_dir.exists(), "canonical output directory must be fresh")
     ip = pinned(m["serving_inputs"]); audit_path = pinned(m["serving_audit"])
     base = pinned(m["base_bake"]); extractor = pinned(m["extractor"])
+    # Keep the extraction producer bound to its immutable research receipt.
+    # A separately pinned serving binary may exercise a corrected runtime
+    # handoff without rewriting that producer or re-extracting fit columns.
+    if "serving_extractor" in m:
+        require(revision_refit, "separate serving extractor is revision-refit only")
+        extractor = pinned(m["serving_extractor"])
     parity_bin = pinned(m["parity_binary"])
     inputs = json.loads(ip.read_text())
     require(inputs["schema"] == "canonical-corruption-serving-inputs-v1", "serving input schema")
+    if revision_refit:
+        allowed_origins = set(m["origins"]["fit"] + m["origins"]["calibrate"])
+        require(inputs["records"] and all(r["role"] == "train" and r["origin"] in allowed_origins
+                for r in inputs["records"]), "refit input must contain only canonical TRAIN origins")
     for path, digest in inputs["files_sha256"].items():
         require(_sha256(path) == digest, "changed feature/source input: " + path)
     require(m["pairs_tsv"] in inputs["files_sha256"], "unbound scoring pairs")
@@ -698,7 +772,8 @@ def canonical_main(argv):
     require(set(roles) == {"fit", "calibrate", "evaluate"}, "explicit three-role split required")
     owner = {}
     for role, origins in roles.items():
-        require(origins and len(origins) == len(set(origins)), "empty/duplicate origins")
+        require((origins or (revision_refit and role == "evaluate"))
+                and len(origins) == len(set(origins)), "empty/duplicate origins")
         for origin in origins:
             require(origin not in owner, "origin appears in multiple roles")
             owner[origin] = role
@@ -709,7 +784,7 @@ def canonical_main(argv):
             require(key not in audit and key == int(key), "audit key")
             audit[int(key)] = r
     require(set(audit) == {r["index"] for r in inputs["records"]}, "audit coverage")
-    cols = [f"f{i}" for i in range(372)]
+    cols = [f"f{i}" for i in m["feature_ids"]]
     tables = {p: pd.read_parquet(p).set_index("row_id") for p in {r["source_table"] for r in inputs["records"]}}
     require(all(t.index.is_unique for t in tables.values()), "ambiguous feature table keys")
     rows, vectors, unique, families = [], [], {}, {}
@@ -721,6 +796,16 @@ def canonical_main(argv):
         family = meta["source_family"]
         require(families.setdefault(family, role) == role, "source family crosses roles")
         v = audit[meta["index"]]
+        if revision_refit:
+            require(not v["pixels_identical"], "identity shortcut pairs excluded from refitting")
+            require(v["formula_revision"] == f"Rev{revision}"
+                    and v["root_form_override"] == "sqrt"
+                    and v["canonical_feature_count"] == 1825,
+                    "refit audit arithmetic mismatch")
+            complete = tables[meta["source_table"]].loc[meta["source_row_id"],
+                        [f"f{i}" for i in range(1825)]].to_numpy(dtype="<f4")
+            require(hashlib.sha256(complete.tobytes()).hexdigest()
+                    == v["canonical_features_f32_le_sha256"], "refit feature payload mismatch")
         require(v["reference"] == meta["reference"] and v["distorted"] == meta["distorted"], "audit path join")
         require(not meta["label"] or not v["pixels_identical"], "positive identity label")
         key = (origin, v["width"], v["height"], v["reference_pixels_sha256"], v["distorted_pixels_sha256"])
@@ -742,6 +827,9 @@ def canonical_main(argv):
     require(np.isfinite(X).all() and set(y) == {0, 1}, "finite binary training data")
     masks = {role: np.array([r["fit_role"] == role for r in rows]) for role in roles}
     for role, mask in masks.items():
+        if revision_refit and role == "evaluate":
+            require(not mask.any(), "revision refit forbids evaluation rows")
+            continue
         require(set(y[mask]) == {0, 1}, "both classes required in " + role)
     admission = None
     if not a.prepare_only:
@@ -767,9 +855,11 @@ def canonical_main(argv):
         filename = role + ".parquet"
         views[mask].to_parquet(a.out_dir/filename, index=False)
         contracts[filename] = dict(duplicate_key_columns=["origin","width","height","reference_pixels_sha256","distorted_pixels_sha256"])
+        if revision_refit and head_ids == basic_v2_ids:
+            contracts[filename]["feature_ids"] = m["feature_ids"]
     (a.out_dir/"contracts.json").write_text(json.dumps(contracts, indent=2)+"\n")
     subprocess.run([sys.executable,str(Path(__file__).with_name("validate_parquet.py")),
-                    *[str(a.out_dir/(r+".parquet")) for r in masks],"--kind","train",
+                    *[str(a.out_dir/(r+".parquet")) for r in masks if masks[r].any()],"--kind","train",
                     "--contracts",str(a.out_dir/"contracts.json")],check=True)
     preparation = dict(schema="canonical-corruption-preparation-v1", raw_rows=len(inputs["records"]),
                        unique_rows=len(rows), removed_duplicates=len(inputs["records"])-len(rows),
@@ -785,7 +875,9 @@ def canonical_main(argv):
         idx = np.array([r["origin"] == origin for r in rows])
         weights[idx] = 1.0 / idx.sum()
     fit, cal = masks["fit"], masks["calibrate"]
-    head_X = X[:, head_ids]
+    # Feature IDs are semantic slots, not positions in a gapped TRAIN projection.
+    positions = {feature_id: pos for pos, feature_id in enumerate(m["feature_ids"])}
+    head_X = X[:, [positions[feature_id] for feature_id in head_ids]]
     scaler = StandardScaler().fit(head_X[fit], sample_weight=weights[fit])
     Z = np.clip(scaler.transform(head_X), -8, 8)
     fit_weights = weights.copy()
@@ -822,10 +914,11 @@ def canonical_main(argv):
         head = run/"head.zcth"
         provenance = dict(manifest_sha256=_sha256(a.canonical_manifest), seed=seed,
                           sklearn=_sklearn_version(), trainer_sha256=_sha256(__file__),
-                          feature_ids=head_ids, formula_revision=1, root_form="libm",
+                          feature_ids=head_ids, formula_revision=revision, root_form=m["root_form"],
                           negative_fit_weight=negative_fit_weight, input_precision=input_precision)
-        emit_zcth(str(head),372,head_ids,scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance,
-                  input_precision=input_precision)
+        emit_zcth(str(head),caller_width,head_ids,scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance,
+                  input_precision=input_precision,
+                  **({"formula_revision": revision} if revision_refit else {}))
         # Export and evaluate THIS fitted estimator, never a CV ensemble.
         prob = iso.predict(clf.predict_proba(Z[parity_rows])[:,1])
         # The parity owner's matrix is in declared-ID order; Rust scatters
@@ -837,7 +930,10 @@ def canonical_main(argv):
                            stdout=log,stderr=subprocess.STDOUT,check=True)
         command = [str(extractor),"--corpus","pairs","--path",str(scoring_pairs),"--out",str(run/"features.csv"),
                    "--audit-jsonl",str(run/"audit.jsonl"),"--audit-bake",str(base),"--audit-corruption-head",str(head)]
-        env = dict(os.environ, ZENSIM_FORMULA_REV="1", ZENSIM_ROOT_FORM="libm", RAYON_NUM_THREADS="8")
+        if revision_refit:
+            command += ["--restore-cuts", "basic,peaks,masked,iw,v2"
+                        if revision == 4 and head_ids != basic_v2_ids else "basic,peaks,v2"]
+        env = dict(os.environ, ZENSIM_FORMULA_REV=str(revision), ZENSIM_ROOT_FORM=m["root_form"], RAYON_NUM_THREADS="4" if revision_refit else "8")
         with (run/"surface.log").open("w") as log:
             subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
         subprocess.run([sys.executable,str(Path(__file__).with_name("corruption_gate_eval.py")),"--audit-jsonl",str(run/"audit.jsonl"),
@@ -846,14 +942,7 @@ def canonical_main(argv):
         report = json.loads((run/"report.json").read_text())
         summary = report["fit_roles"]["calibrate"] if a.training_screen_only else report["splits"]["validate"]
         require(set(summary["by_codec"]) == {"jxl", "avif"}, "native codec screen coverage")
-        gates = dict(
-            zero_native_codec_activation=all(v["head_fp"]["count"] == 0 for v in summary["by_codec"].values()),
-            honest_activation_le_1pct=summary["head_fp"]["rate"] <= .01,
-            zero_native_codec_lowering=all(v["honest_score_lowered"]["count"] == 0 for v in summary["by_codec"].values()),
-            honest_lowering_le_1pct=summary["honest_score_lowered"]["rate"] <= .01,
-            detection_ge_95pct=summary["detection"]["rate"] >= .95,
-            real_bug_detection_ge_90pct=summary["by_family"]["real_bug"]["detection"]["rate"] >= .90,
-            below_q20_ge_99pct=summary["composed_below_q20"]["rate"] >= .99)
+        gates = _canonical_screen_gates(summary)
         scope = "training calibration screen only" if a.training_screen_only else "registered companion development screen only"
         (run/"SCREEN.json").write_text(json.dumps(dict(scope=scope,
                     gates=gates, selection_pass=all(gates.values()), model_qualified=False),indent=2)+"\n")

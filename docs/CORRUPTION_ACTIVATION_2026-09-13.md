@@ -97,3 +97,20 @@ and diff checks pass. The public signature snapshots are unchanged.
 `scripts/serving_matrix.sh` passes native and portable configurations, including
 builds without v2. Logs: `~/tmp/zensim-corruption-threshold-2026-09-13-serving/`.
 No extractor arithmetic, model bytes or prepared-steering behavior changed.
+
+## October 4: revision-compatible integrity companions
+
+R5INTEG extends the existing canonical refit owner with an explicit TRAIN-only
+Rev4/Rev5 research contract. ZCTH v3 export accepts arithmetic revisions1–5;
+legacy v1/v2 bytes remain unchanged. A compatible Rev4 head now scores pixels
+through the already revision-checked union plan, including slots absent from
+its perceptual base. Cross-revision heads still refuse. Rev5 heads may read only
+the supported basic/peak/v2 families. No feature arithmetic or threshold changes.
+
+These are artifact/serving results, not promotion. The fixed canonical calibration
+screen retains its activation and lowering gates; honest failures are preserved
+without threshold tuning. Historical binary catalog recall is not catastrophic
+recall, and identity shortcuts are reported separately. Actual measurements,
+feature/pixel/cache/f32 parity, low-quality anchors, limitations and artifact
+hashes are in [the lane worklog](../benchmarks/r5integ_WORKLOG.md). Prepared steering
+still refuses masked/IW read sets at its existing capability boundary.

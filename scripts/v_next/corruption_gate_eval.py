@@ -267,12 +267,36 @@ def audit_report(argv):
         with open(path, "rb") as f:
             return hashlib.file_digest(f, "sha256").hexdigest()
     require(not Path(a.out_json).exists(), "report output must be fresh")
+    manifest, roles, owner = None, None, {}
+    if a.fit_manifest:
+        manifest = json.loads(Path(a.fit_manifest).read_text())
+        require(manifest["schema"] in ("canonical-corruption-fit-v1", "canonical-corruption-refit-train-v2"), "fit manifest schema")
+        roles = manifest["origins"]
+        require(set(roles) == {"fit", "calibrate", "evaluate"}, "fit role schema")
+        if manifest["schema"] == "canonical-corruption-refit-train-v2":
+            require(roles["evaluate"] == [], "revision refit forbids evaluation origins")
+            require(set(roles["fit"]) == {"2010", "1054", "6068", "6610", "7066", "9380", "8206", "8384"}
+                    and set(roles["calibrate"]) == {"1214", "6064", "9066", "8462"},
+                    "canonical TRAIN inner split required")
+        for role, origins in roles.items():
+            for origin in origins:
+                require(origin not in owner, "overlapping fit roles")
+                owner[origin] = role
     inputs = json.loads(Path(a.inputs_json).read_text())
     require(inputs["schema"] == "canonical-corruption-serving-inputs-v1", "input schema")
-    for path, expected in inputs["files_sha256"].items():
-        require(sha(path) == expected, f"changed input: {path}")
     expected = {r["index"]: r for r in inputs["records"]}
     require(len(expected) == len(inputs["records"]) and bool(expected), "duplicate/empty input keys")
+    if manifest is not None:
+        for meta in expected.values():
+            if manifest["schema"] == "canonical-corruption-refit-train-v2":
+                require(meta["role"] == "train" and meta["origin"] in owner,
+                        "refit input must contain only canonical TRAIN origins")
+            require(meta["origin"] in owner, "unknown fit origin")
+            require((owner[meta["origin"]] == "evaluate") == (meta["role"] == "validate"), "fit role mismatch")
+    # Admission uses metadata only. No payload hash, channel Parquet or audit
+    # read is allowed until the complete origin/role contract has passed.
+    for path, digest in inputs["files_sha256"].items():
+        require(sha(path) == digest, f"changed input: {path}")
     # Operation metadata lives in the original keyed generator tables, not
     # encoded filenames. These tables are already part of the input SHA set.
     import pyarrow.parquet as pq
@@ -342,6 +366,7 @@ def audit_report(argv):
         m = r["meta"]
         if m["kind"] == "honest_anchor":
             quality = Path(m["distorted"]).stem
+            m["anchor_quality"] = quality
             require(quality in ("anchor-q10", "anchor-q20"), "unknown anchor")
             key = (m["role"], m["origin"], quality)
             require(key not in anchors, "duplicate anchor")
@@ -385,24 +410,16 @@ def audit_report(argv):
     for role in sorted({r["meta"]["role"] for r in rows}):
         group = [r for r in rows if r["meta"]["role"] == role]
         summary = summarize(group)
-        for field in ("origin", "content_class", "family", "kind", "codec", "channel_operation", "channel_case"):
+        for field in ("origin", "content_class", "family", "kind", "codec", "knob", "anchor_quality", "channel_operation", "channel_case"):
             keys = sorted({r["meta"].get(field) for r in group if r["meta"].get(field) is not None})
             summary[f"by_{field}"] = {key: summarize([r for r in group if r["meta"].get(field) == key]) for key in keys}
+        for codec, native_summary in summary["by_codec"].items():
+            codec_rows = [r for r in group if r["meta"].get("codec") == codec]
+            knobs = sorted({r["meta"]["knob"] for r in codec_rows})
+            native_summary["by_knob"] = {knob: summarize([r for r in codec_rows if r["meta"]["knob"] == knob])
+                                          for knob in knobs}
         result["splits"][role] = summary
     if a.fit_manifest:
-        manifest = json.loads(Path(a.fit_manifest).read_text())
-        require(manifest["schema"] == "canonical-corruption-fit-v1", "fit manifest schema")
-        roles = manifest["origins"]
-        require(set(roles) == {"fit", "calibrate", "evaluate"}, "fit role schema")
-        owner = {}
-        for role, origins in roles.items():
-            for origin in origins:
-                require(origin not in owner, "overlapping fit roles")
-                owner[origin] = role
-        for r in rows:
-            meta = r["meta"]
-            require(meta["origin"] in owner, "unknown fit origin")
-            require((owner[meta["origin"]] == "evaluate") == (meta["role"] == "validate"), "fit role mismatch")
         result["fit_manifest_sha256"] = sha(a.fit_manifest)
         result["fit_roles"] = {}
         for role in roles:
@@ -411,9 +428,14 @@ def audit_report(argv):
                 continue
             require({r["meta"]["origin"] for r in group} == set(roles[role]), "incomplete fit origin coverage")
             summary = summarize(group)
-            for field in ("origin", "family", "codec", "channel_operation"):
+            for field in ("origin", "family", "kind", "codec", "knob", "anchor_quality", "channel_operation"):
                 keys = sorted({r["meta"].get(field) for r in group if r["meta"].get(field) is not None})
                 summary[f"by_{field}"] = {key: summarize([r for r in group if r["meta"].get(field) == key]) for key in keys}
+            for codec, native_summary in summary["by_codec"].items():
+                codec_rows = [r for r in group if r["meta"].get("codec") == codec]
+                knobs = sorted({r["meta"]["knob"] for r in codec_rows})
+                native_summary["by_knob"] = {knob: summarize([r for r in codec_rows if r["meta"]["knob"] == knob])
+                                              for knob in knobs}
             result["fit_roles"][role] = summary
     Path(a.out_json).write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
     print(f"complete: {len(rows)} rows; identity={result['identity_rows']}; model remains unqualified")

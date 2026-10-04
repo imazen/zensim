@@ -74,3 +74,19 @@ round canonical features through f32, score with the same verified identity
 context, require the same `1e-4` pixel-score tolerance and exact head fire set.
 Retain the unrounded comparison and measured probability delta. The corpus
 tables store f32, so testing only fresh f64 rows would miss a deployment edge.
+
+## 2026-10-04 R5INTEG2 prepared admission correction
+
+Prepared steering retains the complete attached companion plan at every
+supported revision (Rev1–5), including caller width and companion-only reads.
+The companion remains detached during perceptual finite-difference probes.
+Supported peak reads can therefore reject an activated companion just as
+scalar scoring does. Masked/IW steering capability refusals remain in force.
+The direct regression covers f13 base/f159 head at widths372 and1825 for each
+revision, both activation branches, repeated calls and inactive map parity.
+The Rev5 handoff and all feature kernels retain their prior arithmetic.
+
+The canonical TRAIN-only refit evaluator admits the manifest and input
+origins/roles before any payload hash or table/audit read, requires empty
+evaluate and the canonical TRAIN fit/calibration split. Historical fit-v1
+keeps its declared evaluation role. No fit labels were revised.

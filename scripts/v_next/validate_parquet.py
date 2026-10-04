@@ -12,7 +12,7 @@ Usage:
 
 Checks (any FAIL → exit 1, loud):
   C1  footer/magic valid (readable metadata)          — catches partial writes
-  C2  feature columns complete + contiguous           — f0..fN or feat_0..feat_N
+  C2  registered width or exact declared feature IDs  — explicit gapped contracts
   C3  no nulls in features/target                     — trainer NaN-cascades
   C4  no NaN/Inf values (sampled batches)             — same
   C5  target column present + within declared range   — catches unclamped/neg
@@ -59,8 +59,15 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
     # 924, folded+append2 944 (SOTA-944), +CSFW 956, +DVIFM 986 (w986,
     # registered 2026-09-19). (C2 predated the v2
     # regimes and silently failed every >372 leg — widened 2026-08-03.)
-    check(len(fcols) in (228, 300, 372, 504, 720, 924, 944, 956, 986) or (kind == "grid" and len(fcols) > 0),
-          "C2", f"{len(fcols)} feature cols ({fcols[0] if fcols else '-'}..{fcols[-1] if fcols else '-'}), contiguous={fidx == list(range(len(fidx)))}")
+    declared_ids = contract.get("feature_ids") if contract else None
+    if declared_ids is not None:
+        check(isinstance(declared_ids, list) and bool(declared_ids)
+              and all(type(i) is int and i >= 0 for i in declared_ids)
+              and declared_ids == sorted(set(declared_ids)) and fidx == declared_ids,
+              "C2", f"{len(fcols)} feature cols match explicit declared IDs={fidx == declared_ids}")
+    else:
+        check(len(fcols) in (228, 300, 372, 504, 720, 924, 944, 956, 986) or (kind == "grid" and len(fcols) > 0),
+              "C2", f"{len(fcols)} feature cols ({fcols[0] if fcols else '-'}..{fcols[-1] if fcols else '-'}), contiguous={fidx == list(range(len(fidx)))}")
     has_target = target_col in names
     if kind in ("train", "eval"):
         check(has_target, "C5a", f"target column '{target_col}' present")

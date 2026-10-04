@@ -11,9 +11,124 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'v_next'))
 import train_corruption_head as trainer
 import corruption_gate_eval as evaluator
+import validate_parquet as validator
 
 
 class Admission(unittest.TestCase):
+    @staticmethod
+    def audit_fixture(root):
+        """The reviewer's synthetic 3311/q10/q20/positive case; no real data."""
+        import hashlib
+        payload = root / "synthetic-evaluation-payload.bin"
+        payload.write_bytes(b"synthetic forbidden evaluation payload")
+        sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+        models = []
+        for name in ("base.bin", "head.zcth"):
+            p = root / name
+            p.write_bytes(b"synthetic model hash binding")
+            models.append([str(p), sha(p)])
+        records, audits = [], []
+        for index, kind, filename, label in [(1, "honest_anchor", "anchor-q10.png", 0),
+                                            (2, "honest_anchor", "anchor-q20.png", 0),
+                                            (3, "catalog", "corrupt.png", 1)]:
+            ref, dist = str(root / "ref.png"), str(root / filename)
+            records.append(dict(index=index, role="validate", origin="3311", reference=ref,
+                                distorted=dist, family="real_bug" if label else "anchor", kind=kind,
+                                label=label, expected_distorted_file_sha256="filehash", content_class="synthetic"))
+            score = 0. if label else float(10 * index)
+            audits.append(dict(schema="canonical-feature-audit-v1", human_score=index, reference=ref,
+                               distorted=dist, distorted_file_sha256="filehash", reference_pixels_sha256="refhash",
+                               distorted_pixels_sha256=f"disthash{index}", pixels_identical=False, base_score=score,
+                               pixel_composed_score=score, cached_composed_score=score, literal_feature_composed_score=score,
+                               head_probability=1. if label else 0., head_threshold=.9,
+                               max_consumed_feature_abs_delta=0., model_inputs=models))
+        inputs = dict(schema="canonical-corruption-serving-inputs-v1", records=records,
+                      files_sha256={str(payload): sha(payload)})
+        manifest = dict(schema="canonical-corruption-refit-train-v2", origins=dict(
+            fit=["2010", "1054", "6068", "6610", "7066", "9380", "8206", "8384"],
+            calibrate=["1214", "6064", "9066", "8462"], evaluate=[]))
+        ip, ap, mp, out = [root / name for name in ("INPUTS.json", "audit.jsonl", "manifest.json", "report.json")]
+        ap.write_text("".join(json.dumps(a) + "\n" for a in audits))
+        args = ["--audit-jsonl", str(ap), "--inputs-json", str(ip), "--out-json", str(out),
+                "--fit-manifest", str(mp), "--model-context", "canonical-fit"]
+        return inputs, manifest, ip, mp, out, args
+
+    def test_audit_report_admission_precedes_all_payload_and_audit_reads(self):
+        for change, error in [("evaluate", "evaluation origins"),
+                              ("undeclared", "only canonical TRAIN"),
+                              ("wrong-role", "only canonical TRAIN"),
+                              ("bad-fit", "canonical TRAIN inner split"),
+                              ("duplicate", "overlapping fit roles"),
+                              ("bad-schema", "fit manifest schema")]:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                inputs, manifest, ip, mp, out, args = self.audit_fixture(Path(tmp))
+                if change == "evaluate": manifest["origins"]["evaluate"] = ["3311"]
+                if change == "wrong-role": inputs["records"][0]["origin"] = "2010"
+                if change == "bad-fit": manifest["origins"]["fit"][0] = "3311"
+                if change == "duplicate": manifest["origins"]["fit"].append("2010")
+                if change == "bad-schema": manifest["schema"] = "unknown"
+                ip.write_text(json.dumps(inputs)); mp.write_text(json.dumps(manifest))
+                with patch("builtins.open", side_effect=AssertionError("payload or audit opened")), \
+                     patch("pyarrow.parquet.read_table", side_effect=AssertionError("Parquet opened")), \
+                     self.assertRaisesRegex(ValueError, error):
+                    evaluator.audit_report(args)
+                self.assertFalse(out.exists())
+
+    def test_audit_report_historical_evaluation_still_admitted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inputs, manifest, ip, mp, out, args = self.audit_fixture(Path(tmp))
+            manifest["schema"] = "canonical-corruption-fit-v1"
+            manifest["origins"]["evaluate"] = ["3311"]
+            ip.write_text(json.dumps(inputs)); mp.write_text(json.dumps(manifest))
+            evaluator.audit_report(args)
+            result = json.loads(out.read_text())
+            self.assertEqual(result["complete_rows"], 3)
+            self.assertEqual(result["fit_roles"]["evaluate"]["positives"], 1)
+            self.assertEqual(result["fit_roles"]["evaluate"]["negatives"], 2)
+
+    def test_gapped_parquet_requires_exact_declared_feature_ids(self):
+        import pandas as pd
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"gapped.parquet"
+            pd.DataFrame(dict(f0=[0.1, 0.2, 0.3, 0.4], f372=[1., 2., 3., 4.],
+                              human_score=[0., 1., 0., 1.])).to_parquet(path, index=False)
+            for ids, accepted in [([0, 372], True), ([0, 373], False), (None, False)]:
+                validator.FAIL.clear()
+                validator.validate(path, contract=None if ids is None else dict(feature_ids=ids))
+                with self.subTest(ids=ids):
+                    self.assertEqual("C2" not in validator.FAIL, accepted)
+            validator.FAIL.clear()
+
+    def test_revision_refit_rejects_eval_and_unsupported_regimes_before_payloads(self):
+        origins = dict(fit=["2010", "1054", "6068", "6610", "7066", "9380", "8206", "8384"],
+                       calibrate=["1214", "6064", "9066", "8462"], evaluate=[])
+        manifest = dict(schema="canonical-corruption-refit-train-v2", formula_revision=5,
+                        root_form="sqrt", input_precision="f32", feature_ids=list(range(228)),
+                        head_feature_ids=list(range(228)), origins=origins,
+                        identity_policy="exclude-short-circuit-pairs-v1")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"manifest.json"
+            for change, error in [("no-train-flag", "TRAIN-only"),
+                                  ("eval-origin", "evaluation origins"),
+                                  ("masked", "feature regime"),
+                                  ("gapped-masked", "feature regime"),
+                                  ("gapped-without-registration", "regime_registration"),
+                                  ("header-only", "arithmetic contract")]:
+                m = copy.deepcopy(manifest)
+                if change == "eval-origin": m["origins"]["evaluate"] = ["3311"]
+                if change == "masked": m["feature_ids"] = list(range(372))
+                if change.startswith("gapped"):
+                    m["feature_ids"] = list(range(228)) + list(range(372, 720))
+                    m["head_feature_ids"] = m["feature_ids"]
+                    if change == "gapped-masked": m["feature_ids"][228] = 228
+                if change == "header-only": m["input_precision"] = "native"
+                path.write_text(json.dumps(m))
+                argv = ["--canonical-manifest", str(path), "--out-dir", str(Path(tmp)/"out")]
+                if change != "no-train-flag": argv.append("--training-screen-only")
+                with self.subTest(change=change), self.assertRaisesRegex((ValueError, KeyError), error), \
+                        patch("pandas.read_parquet", side_effect=AssertionError("payload opened")):
+                    trainer.canonical_main(argv)
+
     @staticmethod
     def native_pair(index=1):
         import hashlib

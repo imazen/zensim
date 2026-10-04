@@ -4839,3 +4839,85 @@ the variant-screen presets once frozen. Images extracted from the pinned
 archives (`SHA256SUMS`/`MD5SUMS.zips` in `/mnt/v/datasets/aic2026/`) to
 `/var/tmp/dvifmish/datasets/aic2026/`. Record:
 `benchmarks/dvifmish_eval_2026-09-22.md`.
+
+## 2026-10-04 — R5INTEG canonical TRAIN revision refits
+
+The explicit R5INTEG brief authorizes the historical canonical packet's12 TRAIN
+origins and original8-fit/4-calibration split. Re-extract all9,036 attempts from
+unchanged catalog PNG/native bitstreams through production research extraction
+at Rev4 and Rev5. Pin original source bytes, order, two lockfiles, extractor SHA,
+explicit populated IDs and producer feature-set ID in `/var/tmp/r5integ`.
+Rev4 requests f0..719 and fits the existing all-372 regime; Rev5 requests
+f0..227/f372..719 and fits the existing D228 regime. Wide storage columns beyond
+the requested IDs are declared structural zeros, never computed families.
+
+526 verified identity attempts/eight distinct identity pairs are retained in raw
+extraction and excluded before fitting/weighting because public identity bypasses
+model inference. The8,510 remaining attempts deduplicate to8,205 pairs:
+5,499 fit/2,706 calibration,7,725 historical corruption positives/480 honest
+nonidentity controls (456 native JXL/AVIF and24 q10/q20 anchors). No canonical
+validation pair is decoded or scored, and no protected label or sealed data is
+read. The existing admission owner does hash-only verification of protected
+reference bytes; the worklog and ADMISSION_REHASH_SCOPE.json disclose those
+reads. No label, threshold or seed is selected.
+
+Use the existing canonical HGB/isotonic recipe, honest multiplier1, seed4101,
+f32 input precision, fixed P>0.9. Export revision-bound ZCTH v3 through the
+existing writer, evaluate the exact exported head through public Rust, and retain
+failed activation gates. A predeclared Rev4 D228 diagnostic isolates the144-slot
+masked/IW removal; it is not a selection arm. The retained c95bd5 Rev1 control is
+the earlier September6 theory fit, not a same-training reproduction.
+
+Calibration honest activations are1/160 (Rev4 all-372) and3/160 (Rev4 D228 and
+Rev5 D228). The all-372 head fails zero-native activation; D228 also fails the
+calibration <=1% activation limit. Historical catalog labels do not qualify
+catastrophic recall. No profile/default is promoted. Full per-bake controls,
+parity, low-quality strata, hashes and local artifacts are recorded in
+[the worklog](../benchmarks/r5integ_WORKLOG.md).
+
+## 2026-10-04 — R5INTEG2 registered basic plus v2 TRAIN development
+
+Coordinator-authorized head reads are f0..227 and f372..719 (576 features),
+registered before fitting in benchmarks/r5integ2_REGISTRATION.json. Reuse the
+immutable R5INTEG Rev4/Rev5 research payloads at matching sqrt revisions,
+with the same eight fit/four calibration TRAIN origins, no evaluation rows,
+seed4101 and unchanged fixed HGB/weighted-isotonic/deadband recipe. Labels,
+identities and duplicate handling are unchanged:8510 nonidentity attempts,
+8205 unique pairs,5499 fit/2706 calibration,7725 positives/480 honest.
+No extra extraction was used to prepare fit columns.
+
+Width1825 exports unnecessarily enabled unrelated Rev4 runtime families;
+benchmarks/r5integ2_LAYOUT_REGISTRATION.json registered bounded caller width720
+before rerunning the same fits. Both8205-row NPZ feature, raw and probability
+arrays are bit-identical to the first576 fits. The separate serving-extractor
+pin keeps the immutable feature-producer receipt intact. The research audit
+projects exactly the bounded prefix for head evaluation, preserving the full
+consumed-ID coverage checks and original tolerances. Final Rev4/5 head hashes:
+3368dd75296e09fa556debb1ed9ba7b7d65117a0c88d9fc45b2840edd4a37a47 /
+ae789b5f2e8a598f4152caa2666be663e736561a5653a91e6a1b6a31c475c32b.
+
+Both primary TRAIN calibration screens pass all seven existing gates:
+2536/2546 positives detected,0/160 honest activations/lowering, real_bug
+149/155 at Rev4 and150/155 at Rev5,2537/2546 below q20. This is TRAIN
+development, not held-out or production qualification; no default is promoted.
+The full six R5CONFIRM Rev5 bakes arrived during the follow-up and replace the
+separate stamped smoke evidence in the final attach matrix. Their source
+provenance is pinned from ~/tmp/rev5bakes/provenance.json; no fit data or
+confirmation labels from that lane were opened here.
+
+Origin6064 independent CPU zenmetrics score-pairs (requested exec-cvvdp Docker
+image, pinned binary/image digest) judges retained honest pairs unchanged.
+Native/delivered JXL d0.01 scores: SSIMULACRA2=96.65016051457665,
+Butteraugli maximum=0.11993369460105896; RGB8 difference maximum1. AVIF160/176:
+SSIMULACRA2=74.61134204762597/67.22642850810986, Butteraugli maximum=
+4.041477203369141/4.670391082763672. Full precision is in external JUDGES.json.
+Reference is196x256 RGB8, no alpha/profile/transfer chunks; legacy scoring
+assumes sRGB. Source/native/delivered pixel hashes and CICP/ICC inspection
+receipts are retained; no label or threshold changes follow from these checks.
+
+The prepared handoff defect affected Rev1–4 (replayed against frozen7a9dbacb);
+P1 now retains the complete union while detaching companion finite-difference
+probes. P2 admits manifest roles and every origin before any audit/table/payload
+read; historical evaluation behavior stays intact. Both fixes have direct
+regressions. Scalar/steering correctness and measured additional X/B/peak work
+are distinct from scientific specificity and qualification.

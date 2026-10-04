@@ -1221,6 +1221,190 @@ mod tests {
         zenpredict::Model::from_bytes(&bytes).unwrap()
     }
 
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn companion_only_prepared_at_revision(revision: u32) {
+        let src: Vec<_> = (0..96 * 96)
+            .map(|i| [(i % 251) as u8, (i % 199) as u8, (i % 127) as u8])
+            .collect();
+        let dst: Vec<_> = src.iter().map(|p| p.map(|v| v / 2)).collect();
+        let rs = crate::RgbSlice::new(&src, 96, 96);
+        let ds = crate::RgbSlice::new(&dst, 96, 96);
+        let model = |id: usize, weight: f64, bias: f64| {
+            let recipe = serde_json::json!({
+                "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+                "metadata":[
+                    {"key":"zentrain.feature_ids","type":"utf8","text":id.to_string()},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":revision.to_string()}],
+                "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                    "dtype":"f32","weights":[weight],"biases":[bias]}]
+            });
+            zenpredict::Model::from_bytes(
+                &zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap(),
+            )
+            .unwrap()
+        };
+        let base = model(13, -0.1, 80.0);
+        let mut plain = crate::BakeScorer::new(&base).unwrap().with_parallel(false);
+        let expected = plain
+            .prepare_steering(&rs, 8)
+            .unwrap()
+            .compute(&ds, None)
+            .unwrap();
+        assert!(expected.result().score() > 10.0);
+        for width in [372, 1825] {
+            for active in [false, true] {
+                // Only the companion reads peak f159. Inactive control keeps
+                // the same read set and checks the detached map probes.
+                let mut fixture =
+                    Builder::single_stump(159, 0.075, -100.0, if active { 100.0 } else { -100.0 });
+                fixture.caller_input_width = width;
+                fixture.revision_field = revision;
+                let head =
+                    CorruptionHead::from_bytes(&fixture.build_version(REVISION_INPUT_VERSION))
+                        .unwrap();
+                let mut scorer = crate::BakeScorer::new(&base)
+                    .unwrap()
+                    .with_corruption_head(&head, None)
+                    .unwrap()
+                    .with_parallel(false);
+                let scalar = scorer.compute(&rs, &ds, None).unwrap();
+                assert_eq!(scalar.features().len(), width as usize);
+                assert!(scalar.features()[159] > 0.075);
+                assert_eq!(
+                    head.probability_f64(scalar.features()).unwrap() > 0.9,
+                    active
+                );
+                assert_eq!(
+                    scalar.score(),
+                    if active {
+                        0.0
+                    } else {
+                        expected.result().score()
+                    }
+                );
+                println!(
+                    "Rev{revision} caller={width} active={active} f159={}",
+                    scalar.features()[159]
+                );
+                let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+                // Repeated admission verifies restoration after an error.
+                for _ in 0..2 {
+                    match worker.compute(&ds, None) {
+                        Err(crate::ZensimError::CorruptionDetected) => assert!(active),
+                        Ok(actual) => {
+                            assert!(
+                                !active,
+                                "active companion accepted at Rev{revision}, width{width}"
+                            );
+                            assert_eq!(actual.result().features().len(), width as usize);
+                            assert_eq!(actual.result().features()[159], scalar.features()[159]);
+                            assert_eq!(actual.result().score(), scalar.score());
+                            for y in [0, 32, 64] {
+                                for x in [0, 32, 64] {
+                                    assert_eq!(
+                                        actual.refinement_gain(x, y, 32, 32),
+                                        expected.refinement_gain(x, y, 32, 32)
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            panic!("unexpected prepared error at Rev{revision}, width{width}: {e}")
+                        }
+                    }
+                }
+            }
+        }
+        // The same missing read affected the historical linear companion.
+        let request = crate::research::Request::for_slots(
+            crate::feature_set_id::SlotSet::from_slots([13, 159]),
+            372,
+        );
+        let canonical = crate::research::extract(&request, &rs, &ds).unwrap();
+        let catcher = model(159, -20.0 / canonical.values()[159], 20.0);
+        let mut scorer = crate::BakeScorer::new(&base)
+            .unwrap()
+            .with_linear_corruption_head(&catcher, 10.0)
+            .unwrap()
+            .with_parallel(false);
+        assert!(scorer.compute(&rs, &ds, None).unwrap().score() < 10.0);
+        let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+        assert!(matches!(
+            worker.compute(&ds, None),
+            Err(crate::ZensimError::CorruptionDetected)
+        ));
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn companion_only_prepared_rev1() {
+        if !crate::ssim_form::run_at_revision(
+            "1",
+            "corruption_head::tests::companion_only_prepared_rev1",
+            "COMPANION-ONLY-REV1-RAN",
+        ) {
+            return;
+        }
+        companion_only_prepared_at_revision(1);
+        println!("COMPANION-ONLY-REV1-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn companion_only_prepared_rev2() {
+        if !crate::ssim_form::run_at_revision(
+            "2",
+            "corruption_head::tests::companion_only_prepared_rev2",
+            "COMPANION-ONLY-REV2-RAN",
+        ) {
+            return;
+        }
+        companion_only_prepared_at_revision(2);
+        println!("COMPANION-ONLY-REV2-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn companion_only_prepared_rev3() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "corruption_head::tests::companion_only_prepared_rev3",
+            "COMPANION-ONLY-REV3-RAN",
+        ) {
+            return;
+        }
+        companion_only_prepared_at_revision(3);
+        println!("COMPANION-ONLY-REV3-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn companion_only_prepared_rev4() {
+        if !crate::ssim_form::run_at_revision(
+            "4",
+            "corruption_head::tests::companion_only_prepared_rev4",
+            "COMPANION-ONLY-REV4-RAN",
+        ) {
+            return;
+        }
+        companion_only_prepared_at_revision(4);
+        println!("COMPANION-ONLY-REV4-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn companion_only_prepared_rev5() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "corruption_head::tests::companion_only_prepared_rev5",
+            "COMPANION-ONLY-REV5-RAN",
+        ) {
+            return;
+        }
+        companion_only_prepared_at_revision(5);
+        println!("COMPANION-ONLY-REV5-RAN");
+    }
+
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn explicit_tree_rev1_composition() {
@@ -1263,6 +1447,65 @@ mod tests {
         println!("TREE-REV3-COMPOSITION-RAN");
     }
 
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn explicit_tree_rev4_composition() {
+        if !crate::ssim_form::run_at_revision(
+            "4",
+            "corruption_head::tests::explicit_tree_rev4_composition",
+            "TREE-REV4-COMPOSITION-RAN",
+        ) {
+            return;
+        }
+        tree_composition_at_revision(4);
+        // A masked slot absent from the base must be extracted for its tree.
+        let src: Vec<_> = (0..96 * 96)
+            .map(|i| [(i % 251) as u8, (i % 199) as u8, (i % 127) as u8])
+            .collect();
+        let dst: Vec<_> = src.iter().map(|p| p.map(|v| v / 2)).collect();
+        let rs = crate::RgbSlice::new(&src, 96, 96);
+        let ds = crate::RgbSlice::new(&dst, 96, 96);
+        let base = base_at_revision(4);
+        let mut b = Builder::single_stump(300, 0.25, -100.0, -100.0);
+        b.caller_input_width = 1825;
+        b.revision_field = 4;
+        let head = CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).unwrap();
+        let mut candidate = crate::BakeScorer::new(&base)
+            .unwrap()
+            .with_corruption_head(&head, None)
+            .unwrap()
+            .with_parallel(false);
+        let actual = candidate.compute(&rs, &ds, None).unwrap();
+        let req = crate::research::Request::for_slots(
+            crate::feature_set_id::SlotSet::from_slots([13, 300]),
+            1825,
+        );
+        let canonical = crate::research::extract(&req, &rs, &ds).unwrap();
+        assert_ne!(canonical.values()[300], 0.0);
+        assert_eq!(actual.features()[300], canonical.values()[300]);
+        assert_eq!(
+            actual.score(),
+            candidate
+                .score_features(canonical.values(), 96, 96, None)
+                .unwrap()
+        );
+        println!("TREE-REV4-COMPOSITION-RAN");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn explicit_tree_rev5_composition() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "corruption_head::tests::explicit_tree_rev5_composition",
+            "TREE-REV5-COMPOSITION-RAN",
+        ) {
+            return;
+        }
+        tree_composition_at_revision(5);
+        println!("TREE-REV5-COMPOSITION-RAN");
+    }
+
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn tree_composition_at_revision(revision: u32) {
         let src: Vec<_> = (0..96 * 96)
@@ -1280,7 +1523,7 @@ mod tests {
             .unwrap()
             .compute(&ds, None)
             .unwrap();
-        for head_revision in [1, 2, 3] {
+        for head_revision in [1, 2, 3, 4, 5] {
             for (value, active) in [(-100.0, false), (100.0, true)] {
                 let mut b = Builder::single_stump(13, 0.25, value, value);
                 b.caller_input_width = 372;

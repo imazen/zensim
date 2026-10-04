@@ -1,0 +1,15 @@
+{
+  "schema": "r5integ2-runtime-probe-registration-v1",
+  "registered_at_utc": "2026-10-04T23:07:02.754993+00:00",
+  "scope": "TRAIN development runtime checks; no fitting or selection",
+  "original_indices": [
+    0,
+    8685,
+    8927,
+    8928
+  ],
+  "supplemental_index": 2,
+  "supplemental_rule": "lowest metadata index with positive TRAIN label; exercise active rejection; no head probability used for selection",
+  "pairs_sha256": "d6a01d205adddfe5033bacee12ffbc7cb0b8847d80f23c107d5549d1198c7904",
+  "checks": "prepared/scalar features and score parity; active CorruptionDetected; inactive base-map bit equality; two original D228 head controls after P1"
+}

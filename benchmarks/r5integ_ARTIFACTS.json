@@ -1,0 +1,32 @@
+{
+  "schema": "r5integ-artifacts-v1",
+  "artifacts": [
+    {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG_assets/head-rev4-372.zcth",
+      "bytes": 204746,
+      "sha256": "87ea42bb51f109f6e7a1370a0bdfb68d9b8fdc9c201860e8041940db5f440dd1",
+      "version": 3,
+      "formula_revision": 4
+    },
+    {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG_assets/head-rev4-228-diagnostic.zcth",
+      "bytes": 201498,
+      "sha256": "d2d20102ec162620ef2b4db3b235064e4b44902c797b1d9a9447d5cdb99025f8",
+      "version": 3,
+      "formula_revision": 4
+    },
+    {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG_assets/head-rev5-228.zcth",
+      "bytes": 201530,
+      "sha256": "8ea0764fffb8fd88990e543308a8946e1dd5bec2e1705b2131b9a6773cf4b6e9",
+      "version": 3,
+      "formula_revision": 5
+    }
+  ],
+  "summary": {
+    "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG_assets/summary.json",
+    "sha256": "310f18bc1a541cd8c6df7752f4daba3db9b0432a6da6fd36d0da5474e10799c4"
+  },
+  "qualification": "FAIL: honest activation guards; no promotion",
+  "full_evidence_directory": "/var/tmp/r5integ"
+}

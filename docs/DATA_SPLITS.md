@@ -73,6 +73,20 @@ rows from eight KADID TRAIN sources selected by source hash order. No previous
 test segment is renamed or admitted. Original authorities, row assignments,
 source/pixel hashes and model results are pinned in the linked record.
 
+October 4 R5INTEG derived TRAIN entry: the explicit lane brief reuses the
+September8 canonical packet's eight fit and four calibration origins, including
+1214/6064/9066/8462 as historical inner calibration. This does not migrate the
+later product packet or its reservations. No canonical validation pair is
+decoded or scored; no protected label or sealed data is read. Existing admission
+provenance checks rehash protected reference bytes, as disclosed in the worklog.
+All9,036 TRAIN attempts are re-extracted at Rev4/Rev5;526 verified identity
+attempts (eight unique pairs) are separately retained and excluded from head
+fitting because the public identity shortcut bypasses model inference. The
+remaining8,510 attempts deduplicate to8,205 nonidentity pairs. Recipe, feature
+regimes, source hashes and activation failures are recorded in
+[the lane worklog](../benchmarks/r5integ_WORKLOG.md). Historical catalog positives
+are not reviewed catastrophic labels; no threshold, seed or cost is selected.
+
 September 8 derived-input entry: the [canonical corruption packet](CANONICAL_CORRUPTION_2026-09-08.md)
 inherits the existing native-targeting 12 training / 8 validation origin and
 family assignments, including all corruption attempts, anchors and honest

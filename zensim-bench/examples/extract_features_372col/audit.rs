@@ -41,6 +41,20 @@ fn file_sha(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+// The research extractor emits its full layout even for restricted families.
+// Project only the registered bounded head's prefix; all consumed feature
+// coverage/tolerance checks still compare the complete research row.
+fn canonical_head_view(width: usize, row: &[f64]) -> Result<&[f64], String> {
+    if row.len() == width || (width == 720 && row.len() == 1825) {
+        Ok(&row[..width])
+    } else {
+        Err(format!(
+            "corruption audit expects {width} canonical columns, requested {}",
+            row.len()
+        ))
+    }
+}
+
 fn compare_consumed_features(
     ids: &[u16],
     canonical: &[f64],
@@ -65,6 +79,19 @@ fn compare_consumed_features(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_head_projection_keeps_semantic_slots_and_legacy_width_checks() {
+        let row: Vec<_> = (0..1825).map(f64::from).collect();
+        let view = canonical_head_view(720, &row).unwrap();
+        assert_eq!(view.len(), 720);
+        assert_eq!(view[372], row[372]);
+        assert_eq!(view[719], row[719]);
+        for (width, length) in [(720, 719), (720, 721), (372, 1825), (1825, 720)] {
+            assert!(canonical_head_view(width, &row[..length]).is_err());
+        }
+        assert_eq!(canonical_head_view(372, &row[..372]).unwrap(), &row[..372]);
+    }
 
     #[test]
     fn feature_audit_rejects_errors_hidden_by_score_cancellation() {
@@ -235,8 +262,10 @@ impl Config {
             .map(|p| {
                 let bytes = fs::read(&p).map_err(|e| e.to_string())?;
                 let head = CorruptionHead::from_bytes(&bytes).map_err(|e| e.to_string())?;
-                if head.caller_input_width() != 372 {
-                    return Err("audit requires a canonical w372 companion".into());
+                if !matches!(head.caller_input_width(), 372 | 720 | 1825) {
+                    return Err(
+                        "audit requires a canonical w372, w720 or research w1825 companion".into(),
+                    );
                 }
                 inputs.push((p, sha(&bytes)));
                 Ok::<_, String>(head)
@@ -278,6 +307,7 @@ impl Config {
     pub(super) fn validate_feature_width(&self, width: usize) -> Result<(), String> {
         if let Some(head) = &self.head
             && head.caller_input_width() != width
+            && !(head.caller_input_width() == 720 && width == 1825)
         {
             return Err(format!(
                 "corruption audit expects {} canonical columns, requested {width}",
@@ -319,33 +349,33 @@ impl Config {
             "reference_pixels_sha256":sha(src.bytes()),"distorted_pixels_sha256":sha(dst.bytes()),
             "pixels_identical":identical,
             "canonical_extractions":1,"audit_decodes":2,"model_inputs":self.inputs});
+        let canonical_f32: Vec<u8> = features
+            .iter()
+            .flat_map(|&v| (v as f32).to_le_bytes())
+            .collect();
+        record["canonical_feature_count"] = json!(features.len());
+        record["root_form_override"] = json!(std::env::var("ZENSIM_ROOT_FORM").ok());
+        record["canonical_features_f32_le_sha256"] = json!(sha(&canonical_f32));
+        record["formula_revision"] = json!(format!(
+            "{:?}",
+            zensim::feature_v2::active_formula_revision()
+        ));
+        record["candidate_formula_revisions"] = json!(
+            self.models
+                .iter()
+                .map(
+                    |model| match zensim::feature_v2::bake_formula_revision_public(model) {
+                        Ok(rev) => format!("{rev:?}"),
+                        Err(e) => format!("unknown ({e})"),
+                    }
+                )
+                .collect::<Vec<_>>()
+        );
         if contract != InputContract::LegacyRgb8 {
             record["schema"] = json!("canonical-feature-audit-v2");
             record["input_contract"] = json!("sdr-native-clip-v1");
             record["reference_color"] = src.receipt.clone().unwrap();
             record["distorted_color"] = dst.receipt.clone().unwrap();
-            let canonical_f32: Vec<u8> = features
-                .iter()
-                .flat_map(|&v| (v as f32).to_le_bytes())
-                .collect();
-            record["canonical_feature_count"] = json!(features.len());
-            record["root_form_override"] = json!(std::env::var("ZENSIM_ROOT_FORM").ok());
-            record["canonical_features_f32_le_sha256"] = json!(sha(&canonical_f32));
-            record["formula_revision"] = json!(format!(
-                "{:?}",
-                zensim::feature_v2::active_formula_revision()
-            ));
-            record["candidate_formula_revisions"] = json!(
-                self.models
-                    .iter()
-                    .map(
-                        |model| match zensim::feature_v2::bake_formula_revision_public(model) {
-                            Ok(rev) => format!("{rev:?}"),
-                            Err(e) => format!("unknown ({e})"),
-                        }
-                    )
-                    .collect::<Vec<_>>()
-            );
         }
         if self.ssim2 {
             let (score, peer_input) = if contract == InputContract::LegacyRgb8 {
@@ -515,6 +545,8 @@ impl Config {
             record["feature_audit_scope"] = json!("complete-structural-read-set-v1");
             record["consumed_feature_ids"] = json!(consumed);
             if let Some(head) = &self.head {
+                let head_features = canonical_head_view(head.caller_input_width(), features)?;
+                let stored_head_features = canonical_head_view(head.caller_input_width(), &stored)?;
                 let mut pixel_features = vec![0.0; head.caller_input_width()];
                 for &id in head.declared_feature_ids() {
                     let id = usize::from(id);
@@ -524,10 +556,14 @@ impl Config {
                         .ok_or("missing served feature")?;
                     pixel_features[id] = actual;
                 }
-                record["head_probability"] =
-                    json!(head.probability_f64(features).map_err(|e| e.to_string())?);
+                record["head_probability"] = json!(
+                    head.probability_f64(head_features)
+                        .map_err(|e| e.to_string())?
+                );
                 record["head_threshold"] = json!(head.deadband());
-                let stored_p = head.probability_f64(&stored).map_err(|e| e.to_string())?;
+                let stored_p = head
+                    .probability_f64(stored_head_features)
+                    .map_err(|e| e.to_string())?;
                 let pixel_p = head
                     .probability_f64(&pixel_features)
                     .map_err(|e| e.to_string())?;
@@ -543,11 +579,13 @@ impl Config {
                 record["stored_f32_head_probability"] = json!(stored_p);
                 record["served_pixel_head_probability"] = json!(pixel_p);
                 record["canonical_head_raw"] = json!(
-                    head.decision_function(features)
+                    head.decision_function(head_features)
                         .map_err(|e| e.to_string())?
                 );
-                record["stored_f32_head_raw"] =
-                    json!(head.decision_function(&stored).map_err(|e| e.to_string())?);
+                record["stored_f32_head_raw"] = json!(
+                    head.decision_function(stored_head_features)
+                        .map_err(|e| e.to_string())?
+                );
                 record["served_pixel_head_raw"] = json!(
                     head.decision_function(&pixel_features)
                         .map_err(|e| e.to_string())?
@@ -560,8 +598,12 @@ impl Config {
                     .ok_or("prepared integrity audit requires a head")?;
                 let rs = src.source();
                 let ds = dst.source();
+                let head_features = canonical_head_view(head.caller_input_width(), features)?;
                 let expected_active = !identical
-                    && head.probability_f64(features).map_err(|e| e.to_string())? > head.deadband();
+                    && head
+                        .probability_f64(head_features)
+                        .map_err(|e| e.to_string())?
+                        > head.deadband();
                 let actual = scorer
                     .prepare_steering(&rs, 8)
                     .map_err(|e| e.to_string())?

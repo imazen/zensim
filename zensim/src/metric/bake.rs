@@ -910,21 +910,15 @@ impl<'a> BakeScorer<'a> {
             // REV4SERVE: the process is pinned Rev4 (the mix guard above
             // already refused every cross-boundary case), so every feature
             // the plan computes runs the fold walk's canonical arithmetic.
-            // Two things remain outside that envelope: the SAMPLING front
-            // end (a different, unproven subset walk — the bake keeps its
-            // refusal) and a CORRUPTION COMPANION, whose reads are not part
-            // of the bake's declared-id plan coverage.
+            // The sampling front end remains outside that envelope. Companion
+            // reads are included by plan()'s revision-checked union, so they
+            // use the same canonical fold and its emit-coverage checks.
             if revision >= crate::feature_defs::FormulaRevision::Rev4 {
                 if revision == crate::feature_defs::FormulaRevision::Rev4
                     && plan.compute.sampling.is_some()
                 {
                     return Err(ZensimError::ModelLoadFailed {
                         reason: "formula revisions 4 and later do not serve sampled bake plans: the subset-extraction front end is not proven tier-canonical",
-                    });
-                }
-                if revision == crate::feature_defs::FormulaRevision::Rev4 && !no_companion {
-                    return Err(ZensimError::ModelLoadFailed {
-                        reason: "formula revisions 4 and later do not serve bakes with a corruption companion: companion read coverage is not part of the canonical fold plan",
                     });
                 }
                 return Ok(());
@@ -1490,12 +1484,10 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         distorted: &impl ImageSource,
         codec_hint: Option<&str>,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
-        // Keep the complete Rev5 read footprint while finite-difference probes
-        // evaluate the perceptual branch with the threshold head detached.
-        let plan = self.scorer.plan()?;
-        let serving_plan = (plan.compute.formula_revision
-            >= crate::feature_defs::FormulaRevision::Rev5)
-            .then_some(plan);
+        // Preserve every companion read and its caller width at every revision.
+        // Finite-difference probes still evaluate only the detached perceptual
+        // branch; the companion evaluates this complete extracted row afterward.
+        let serving_plan = Some(self.scorer.plan()?);
         // The head is evaluated on the exact extracted row, once per actual
         // reconstruction. Local probes must never differentiate its threshold.
         #[cfg(feature = "corruption-head")]
@@ -1558,6 +1550,83 @@ mod revision_contract_tests {
     use crate::ssim_form::run_at_revision;
     #[cfg(feature = "feature-regime-v2")]
     use crate::{RgbSlice, ZensimError};
+
+    #[test]
+    #[ignore = "requires explicit RGB8 reference and pinned bake artifacts"]
+    #[cfg(all(feature = "feature-regime-v2", feature = "corruption-head"))]
+    fn external_reference_identity_forward_diagnostic() {
+        // Separate the literal learned forward from the public byte-identity
+        // shortcut. The caller supplies tightly packed RGB8, width and height.
+        let width: usize = std::env::var("ZENSIM_IDENTITY_RGB8_WIDTH")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let height: usize = std::env::var("ZENSIM_IDENTITY_RGB8_HEIGHT")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let data = std::fs::read(std::env::var("ZENSIM_IDENTITY_RGB8_PATH").unwrap()).unwrap();
+        assert_eq!(data.len(), width * height * 3);
+        let pixels = data.as_chunks::<3>().0;
+        let source = crate::RgbSlice::new(pixels, width, height);
+        let path = std::env::var("ZENSIM_IDENTITY_BAKE").unwrap();
+        let model = zenpredict::Model::from_bytes(&std::fs::read(&path).unwrap()).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let ids = scorer.consumed_feature_ids().unwrap();
+        let request = crate::research::Request::for_slots(
+            crate::feature_set_id::SlotSet::from_slots(ids.into_iter().map(usize::from)),
+            1825,
+        );
+        let canonical = crate::research::extract(&request, &source, &source).unwrap();
+        let literal = scorer
+            .score_features(canonical.values(), width as u32, height as u32, None)
+            .unwrap();
+        let public = scorer.compute(&source, &source, None).unwrap().score();
+        assert!(literal.is_finite());
+        assert_eq!(public, 100.0);
+        println!(
+            "R5INTEG2_IDENTITY_FORWARD bake={path} literal={literal} public_identity={public}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the registered R5INTEG2 head and full bake artifacts"]
+    #[cfg(all(feature = "feature-regime-v2", feature = "corruption-head"))]
+    fn external_basic_v2_companion_compute_plan_audit() {
+        // The private plan owner can establish extra kernel work precisely;
+        // feature-count or wall-time comparisons cannot establish this claim.
+        let head_path = std::env::var("ZENSIM_PLAN_AUDIT_HEAD").expect("head path");
+        let head =
+            crate::corruption_head::CorruptionHead::from_bytes(&std::fs::read(head_path).unwrap())
+                .unwrap();
+        let expected: Vec<u16> = (0..228).chain(372..720).collect();
+        assert_eq!(head.declared_feature_ids(), expected);
+        assert_eq!(head.caller_input_width(), 720);
+        let paths = std::env::var("ZENSIM_PLAN_AUDIT_BAKES").expect("colon-separated bake paths");
+        assert!(!paths.is_empty());
+        for path in paths.split(':') {
+            let model = zenpredict::Model::from_bytes(&std::fs::read(path).unwrap()).unwrap();
+            let base = crate::BakeScorer::new(&model).unwrap();
+            let base_compute = base.plan().unwrap().compute;
+            let composed = base.with_corruption_head(&head, None).unwrap();
+            let head_compute = composed.plan().unwrap().compute;
+            let same = base_compute == head_compute;
+            println!(
+                "R5INTEG2_PLAN {path} same_compute={same} base={base_compute:?} composed={head_compute:?}"
+            );
+            // Complete basic/peak reads may add scale-0 X/B moments and
+            // peak reductions omitted by a base. No unrelated family is allowed.
+            assert!(head_compute.full_res_xb);
+            assert_eq!(head_compute.v1_pools, crate::feature_v2::V1PoolsMode::Peaks);
+            let mut admitted = base_compute;
+            admitted.full_res_xb = head_compute.full_res_xb;
+            admitted.v1_pools = head_compute.v1_pools;
+            assert_eq!(
+                admitted, head_compute,
+                "companion added another kernel to {path}"
+            );
+        }
+    }
 
     #[test]
     #[cfg(all(feature = "feature-regime-v2", feature = "corruption-head"))]

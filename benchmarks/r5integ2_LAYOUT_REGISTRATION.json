@@ -1,0 +1,27 @@
+{
+  "schema": "canonical-corruption-basic-v2-layout-registration-v1",
+  "registered_at_utc": "2026-10-04T22:54:05.778040+00:00",
+  "scope": "TRAIN development; no production qualification",
+  "caller_input_width": 720,
+  "head_feature_ranges": [
+    [
+      0,
+      228
+    ],
+    [
+      372,
+      720
+    ]
+  ],
+  "head_feature_count": 576,
+  "prior_registration": {
+    "path": "/home/lilith/work/zen/zensim--r5integ/benchmarks/r5integ2_REGISTRATION.json",
+    "sha256": "2133c72cb5a7f3ede0d4e2a62aadc40517eaf71ee9b8577e02acecd9527f1c9b"
+  },
+  "reason": "Actual plan audit showed caller width1825 enables unrelated Rev4 families through layout normalization; bound the exported layout to highest read ID plus one",
+  "numerical_recipe_changed": false,
+  "feature_read_set_changed": false,
+  "labels_changed": false,
+  "expected_work": "no new family; all basic/peak reads can add full-resolution X/B moments omitted by base plans",
+  "checks": "Both fixed-seed refits must have exact same NPZ feature/raw/probability arrays as first fits; measure actual compute-plan delta and prepared maps; no promotion"
+}

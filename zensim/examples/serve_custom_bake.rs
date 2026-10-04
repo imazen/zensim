@@ -37,6 +37,10 @@
 //! A REFUSED row is the contract failing, not the tool: every bake whose read
 //! set is registered feature ids at a supported revision must serve.
 //!
+//! With `corruption-head`, `--corruption-head HEAD` before an explicit
+//! bake/ref/dist triple checks the complete composition and identity shortcut.
+//! A refusal or nonfinite score exits nonzero.
+//!
 //! ## Pairs mode — score a table of pairs with several bakes
 //!
 //! ```sh
@@ -305,7 +309,30 @@ fn pairs(args: &[String]) {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    #[allow(unused_mut)]
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(feature = "corruption-head")]
+    let head = if args.first().map(String::as_str) == Some("--corruption-head") {
+        args.remove(0);
+        let path = args.remove(0);
+        Some(
+            zensim::corruption_head::CorruptionHead::from_bytes(
+                &std::fs::read(&path).expect("read corruption head"),
+            )
+            .expect("parse corruption head"),
+        )
+    } else {
+        None
+    };
+    #[cfg(feature = "corruption-head")]
+    assert!(
+        head.is_none()
+            || !matches!(
+                args.first().map(String::as_str),
+                Some("--pairs" | "--census")
+            ),
+        "--corruption-head takes an explicit bake/ref/dist triple"
+    );
     if args.first().map(String::as_str) == Some("--census") {
         census(&args[1..]);
         return;
@@ -333,6 +360,13 @@ fn main() {
     }
     let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
     let mut z = BakeScorer::new(&model).expect("invalid score metadata");
+    #[cfg(feature = "corruption-head")]
+    if let Some(head) = &head {
+        z = z.with_corruption_head(head, None).unwrap_or_else(|error| {
+            eprintln!("REFUSED companion: {error}");
+            std::process::exit(1);
+        });
+    }
 
     let (r, w, h) = load_rgb(&ref_path);
     let (d, dw, dh) = load_rgb(&dist_path);
@@ -341,17 +375,33 @@ fn main() {
     let rs = RgbSlice::new(&r, w as usize, h as usize);
     let ds = RgbSlice::new(&d, w as usize, h as usize);
     // The whole point: this is the PRODUCTION entry point, not a training one.
+    let mut refused = false;
     match z.compute(&rs, &ds, None) {
-        Ok(res) => println!(
-            "SERVED  score={:.6}  raw_distance={:.6}  emitted={}",
-            res.score(),
-            res.raw_distance(),
-            res.features().len()
-        ),
-        Err(e) => println!("REFUSED by Zensim::compute: {e:?}"),
+        Ok(res) => {
+            refused |= !res.score().is_finite();
+            println!(
+                "SERVED  score={:.6}  raw_distance={:.6}  emitted={}",
+                res.score(),
+                res.raw_distance(),
+                res.features().len()
+            );
+        }
+        Err(e) => {
+            refused = true;
+            println!("REFUSED by Zensim::compute: {e:?}");
+        }
     }
     match z.compute(&rs, &rs, None) {
-        Ok(res) => println!("IDENTITY (ref vs ref) score={:.6}", res.score()),
-        Err(e) => println!("IDENTITY REFUSED: {e:?}"),
+        Ok(res) => {
+            refused |= res.score() != 100.0;
+            println!("IDENTITY (ref vs ref) score={:.6}", res.score());
+        }
+        Err(e) => {
+            refused = true;
+            println!("IDENTITY REFUSED: {e:?}");
+        }
+    }
+    if refused {
+        std::process::exit(1);
     }
 }
