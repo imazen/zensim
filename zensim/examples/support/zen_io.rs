@@ -154,9 +154,29 @@ pub fn resize_rgb8(
 /// since chroma-subsampling artifacts at hard chroma edges are exactly the
 /// D1/masked/IW pathology this tooling probes for).
 pub fn encode_jpeg_q(pixels: &[[u8; 3]], w: usize, h: usize, quality: u8) -> Vec<u8> {
-    use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig, PixelLayout};
+    encode_jpeg_q_subsampled(
+        pixels,
+        w,
+        h,
+        quality,
+        zenjpeg::encoder::ChromaSubsampling::Quarter,
+    )
+}
+
+/// [`encode_jpeg_q`] with an explicit chroma subsampling. 4:4:4 (`None`) makes every decoded 8x8 block a
+/// function of its own coefficients only, so swapping blocks between two encodes is an exact per-block
+/// quality change (the neighbour-aware steering study's JPEG intervention).
+#[allow(dead_code)]
+pub fn encode_jpeg_q_subsampled(
+    pixels: &[[u8; 3]],
+    w: usize,
+    h: usize,
+    quality: u8,
+    subsampling: zenjpeg::encoder::ChromaSubsampling,
+) -> Vec<u8> {
+    use zenjpeg::encoder::{EncoderConfig, PixelLayout};
     let flat: Vec<u8> = pixels.iter().flat_map(|p| p.iter().copied()).collect();
-    let config = EncoderConfig::ycbcr(quality, ChromaSubsampling::Quarter);
+    let config = EncoderConfig::ycbcr(quality, subsampling);
     let mut enc = config
         .encode_from_bytes(w as u32, h as u32, PixelLayout::Rgb8Srgb)
         .expect("zenjpeg encoder init");

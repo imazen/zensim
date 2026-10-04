@@ -1179,6 +1179,31 @@ fn run_bake_mode(
     // predicted = the candidate density of that one ID alone through the same attribution owner.
     let v2_diag_path = std::env::var("ZENSIM_V2_DIAG").ok();
     let mut obs_all: Vec<Vec<f64>> = Vec::new();
+    // ZENSIM_REPAIR_ALPHA=<a in (0,1]> (neighbour-aware steering study, 2026-10-04): a PARTIAL repair,
+    // dist + a*(ref - dist) rounded per channel, instead of the full reference copy. Unset = the full copy,
+    // byte-identical to the historical intervention. The map's prediction is unchanged (it answers the full
+    // repair); rank statistics compare it with the partial ΔS.
+    let repair_alpha: Option<f64> = std::env::var("ZENSIM_REPAIR_ALPHA").ok().map(|v| {
+        let a: f64 = v.parse().expect("ZENSIM_REPAIR_ALPHA");
+        assert!(a > 0.0 && a <= 1.0, "ZENSIM_REPAIR_ALPHA must be in (0, 1]");
+        a
+    });
+    // ZENSIM_REPAIR_SOURCE=<png> (same study): take the block's new pixels from another image of the same size
+    // — e.g. a higher-quality 4:4:4 JPEG decode, which makes the intervention an exact per-block quality change —
+    // instead of the reference. Composes with ZENSIM_REPAIR_ALPHA (blend toward that image).
+    let repair_source: Option<Vec<[u8; 3]>> =
+        std::env::var("ZENSIM_REPAIR_SOURCE").ok().map(|path| {
+            let img = image::open(&path)
+                .expect("open ZENSIM_REPAIR_SOURCE")
+                .to_rgb8();
+            assert_eq!(
+                (img.width() as usize, img.height() as usize),
+                (w, h),
+                "repair source size"
+            );
+            img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect()
+        });
+    let target: &[[u8; 3]] = repair_source.as_deref().unwrap_or(rpx);
     for by_i in 0..by {
         for bx_i in 0..bx {
             let b = by_i * bx + bx_i;
@@ -1186,7 +1211,17 @@ fn run_bake_mode(
             let (x1, y1) = ((x0 + block).min(w), (y0 + block).min(h));
             for y in y0..y1 {
                 for x in x0..x1 {
-                    scratch[y * w + x] = rpx[y * w + x];
+                    scratch[y * w + x] = match repair_alpha {
+                        None => target[y * w + x],
+                        Some(a) => {
+                            let (r, d) = (target[y * w + x], dpx[y * w + x]);
+                            std::array::from_fn(|c| {
+                                (d[c] as f64 + a * (r[c] as f64 - d[c] as f64))
+                                    .round()
+                                    .clamp(0.0, 255.0) as u8
+                            })
+                        }
+                    };
                 }
             }
             // Re-run the served pixel path, including its identity override.
@@ -1571,7 +1606,7 @@ fn run_bake_mode(
         let mut result = serde_json::json!({"schema":"zensim-finite-rectangle-coherence-v1",
             "models":bake_paths.iter().zip(&model_bytes).map(|(p,b)| serde_json::json!({"path":p,"sha256":sha(b)})).collect::<Vec<_>>(),
             "weights":weights,"width":w,"height":h,"block_size":block,"base_score":base_score,
-            "finite_moment_refinement":std::env::var_os("ZENSIM_FINITE_MOMENTS").is_some(),
+            "finite_moment_refinement":std::env::var_os("ZENSIM_FINITE_MOMENTS").is_some(),"repair_alpha":std::env::var("ZENSIM_REPAIR_ALPHA").ok(),"repair_source":std::env::var("ZENSIM_REPAIR_SOURCE").ok(),
             "attribution_bin":std::env::var("ZENSIM_STEERING_BIN").map_or(1, |v| v.parse::<usize>().expect("map bin")),
             "reference_pixels_sha256":sha(&pixel_bytes(rpx)),"distorted_pixels_sha256":sha(&pixel_bytes(dpx)),
             "pixel_interventions":nblocks,"candidate_pixel_comparisons":nblocks+1,"candidate_maps":1,"rectangle_queries":nblocks,

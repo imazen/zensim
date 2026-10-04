@@ -8,8 +8,10 @@
 //! ```sh
 //! cargo run --release -p zensim --features feature-regime-v2 \
 //!   --example gen_jpeg_distortion -- <in.png> <quality 0-100> <out.jpg> \
-//!   [--max-dim N] [--ref-out <ref.png>]
+//!   [--max-dim N] [--ref-out <ref.png>] [--subsampling 420|444] [--decoded-out <dec.png>]
 //! ```
+//!
+//! `--subsampling` defaults to 420 (unchanged); `--decoded-out` writes zenjpeg's decode of the output as PNG.
 //!
 //! `--max-dim N` Lanczos-downscales the source so `max(w, h) <= N` BEFORE
 //! encoding, and `--ref-out` writes that downscaled source back out as a PNG.
@@ -30,6 +32,8 @@ fn main() {
     let mut positional: Vec<String> = Vec::new();
     let mut max_dim: Option<usize> = None;
     let mut ref_out: Option<String> = None;
+    let mut subsampling = zenjpeg::encoder::ChromaSubsampling::Quarter;
+    let mut decoded_out: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -48,6 +52,22 @@ fn main() {
                     argv.get(i)
                         .cloned()
                         .unwrap_or_else(|| usage("--ref-out needs a path")),
+                );
+            }
+            "--subsampling" => {
+                i += 1;
+                subsampling = match argv.get(i).map(String::as_str) {
+                    Some("420") => zenjpeg::encoder::ChromaSubsampling::Quarter,
+                    Some("444") => zenjpeg::encoder::ChromaSubsampling::None,
+                    _ => usage("--subsampling needs 420 or 444"),
+                };
+            }
+            "--decoded-out" => {
+                i += 1;
+                decoded_out = Some(
+                    argv.get(i)
+                        .cloned()
+                        .unwrap_or_else(|| usage("--decoded-out needs a path")),
                 );
             }
             other if other.starts_with("--") => usage(other),
@@ -78,8 +98,15 @@ fn main() {
     if let Some(path) = &ref_out {
         std::fs::write(path, zen_io::encode_png_rgb8(&px, w, h)).expect("write reference png");
     }
-    let jpeg = zen_io::encode_jpeg_q(&px, w, h, quality);
+    let jpeg = zen_io::encode_jpeg_q_subsampled(&px, w, h, quality, subsampling);
     std::fs::write(&out_path, &jpeg).expect("write jpeg");
+    if let Some(path) = &decoded_out {
+        // zenjpeg's own decode of the bytes just written, stored losslessly so PNG-only consumers see
+        // exactly the pixels a zen decoder produces.
+        let (dpx, dw, dh) = zen_io::decode_rgb8(std::path::Path::new(&out_path));
+        assert_eq!((dw, dh), (w, h), "decoded size");
+        std::fs::write(path, zen_io::encode_png_rgb8(&dpx, dw, dh)).expect("write decoded png");
+    }
     println!(
         "{in_path} ({w}x{h}) -> {out_path} q={quality} ({} bytes)",
         jpeg.len()
@@ -90,7 +117,7 @@ fn usage(what: &str) -> ! {
     eprintln!("bad argument: {what}");
     eprintln!(
         "usage: gen_jpeg_distortion <in.png> <quality> <out.jpg> \
-         [--max-dim N] [--ref-out <ref.png>]"
+         [--max-dim N] [--ref-out <ref.png>] [--subsampling 420|444] [--decoded-out <dec.png>]"
     );
     std::process::exit(2);
 }
