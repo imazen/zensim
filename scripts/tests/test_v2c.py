@@ -894,6 +894,87 @@ class ConfirmRead(unittest.TestCase):
                     os.environ["ZEN_PANEL_BIN"] = "/var/tmp/fitv2/bin-v2/panel"
 
 
+class SetCompareRead(ConfirmRead):
+    """Amendment R7: the set-compare read on synthetic labels (planted better set, equal set, worse set, null, refusals)."""
+
+    def sc_pin(self, root: Path, pin_path: Path, entries: dict, superiority, noninferiority) -> Path:
+        base = json.loads(pin_path.read_text())
+        reg = root / "R7.md"
+        reg.write_text("registration")
+        pin = {k: base[k] for k in ("frozen_sha256", "wide_receipts", "confirm_receipt_sha256", "keep_lists_sha256", "binaries",
+                                    "program_sha", "data_sha", "code", "labels")}
+        pin.update({"schema": self.cr.SC_PIN_SCHEMA, "entries": entries, "head": "N", "superiority": superiority,
+                    "noninferiority": noninferiority, "ensemble_pairs": [{"arm": "B", "reference": "A"}],
+                    "registration": {"path": str(reg), "sha256": v2_common.sha(reg)}})
+        out = root / "scpin.json"
+        out.write_text(json.dumps(pin))
+        return out
+
+    def run_sc(self, root: Path, planted: dict, entries: dict, superiority, noninferiority, tamper=None):
+        cr = self.cr
+        pin_path = self.sc_pin(root, self.build_tree(root, planted), entries, superiority, noninferiority)
+        if tamper:
+            tamper(root, pin_path)
+        out, ledger = root / "sc.json", root / "ledger.md"
+        with mock.patch.object(v2_common, "V2", root), mock.patch.object(cr, "V2", root):
+            cr.main(["--confirmatory-read", "--set-compare", "--pin", str(pin_path), "--root", str(root), "--bank", str(root / "bank"),
+                     "--out", str(out), "--ledger", str(ledger)])
+        return json.loads(out.read_text()), ledger
+
+    ENTRIES = {"A": "setA", "B": "setB", "C": "setC", "D": "r0"}
+    SUP = [{"arm": "A", "reference": "C"}, {"arm": "A", "reference": "D"}]
+    NI = [{"arm": "B", "reference": "A"}]
+
+    def test_planted_superiority_and_noninferiority(self):
+        with tempfile.TemporaryDirectory() as t:
+            # B planted slightly better than A: 240 synthetic pairs per set cannot resolve a ±0.005 margin for EQUAL sets
+            # (bootstrap 5th percentile ≈ −0.012 there); this exercises the acceptance branch with margin.
+            res, ledger = self.run_sc(Path(t), {"setA": 0.55, "setB": 0.40, "setC": 1.0}, self.ENTRIES, self.SUP, self.NI)
+            sup = {(e["arm"], e["reference"]): e for e in res["superiority"]}
+            self.assertTrue(sup[("A", "C")]["confirmed"], sup[("A", "C")])
+            self.assertTrue(sup[("A", "D")]["confirmed"])
+            self.assertGreater(sup[("A", "C")]["mean_delta"], 0.02)
+            self.assertEqual(sorted(sup[("A", "C")]["per_set"]), sorted((*self.PRIMARY, "konjnd_jpeg_select", "konjnd_jpeg_terminal")))
+            ni = res["noninferiority"][0]
+            self.assertTrue(ni["as_good"], ni)
+            self.assertGreater(res["entry_mean_signed_srocc"]["A"]["aic4"], 0.5)    # distortion labels negated: signed SROCC > 0
+            self.assertEqual(len(res["ensemble_delta_groups_0_4_and_5_9"]["B-A"]["csiq"]), 2)
+            self.assertIn("A-C", res["secondary_pairs"])
+            self.assertIn("pending, update after read", ledger.read_text())
+            self.assertIn("R7", ledger.read_text())
+
+    def test_worse_set_not_noninferior_and_null_not_confirmed(self):
+        with tempfile.TemporaryDirectory() as t:
+            res, _ = self.run_sc(Path(t), {"setA": 1.0, "setB": 1.8, "setC": 1.0}, self.ENTRIES, self.SUP, self.NI)
+            sup = {(e["arm"], e["reference"]): e for e in res["superiority"]}
+            self.assertFalse(sup[("A", "C")]["confirmed"])
+            self.assertFalse(sup[("A", "D")]["confirmed"])
+            self.assertFalse(res["noninferiority"][0]["as_good"])
+
+    def test_set_compare_refusals_leave_no_ledger_and_open_no_label(self):
+        cr = self.cr
+        def attempt(tamper):
+            with tempfile.TemporaryDirectory() as t:
+                root = Path(t)
+                opened = []
+                real_load = cr.v2c_labels.load_label_rows
+                with mock.patch.object(cr.v2c_labels, "load_label_rows", lambda *a, **k: (opened.append(1), real_load(*a, **k))[1]):
+                    with self.assertRaises(cr.Refusal):
+                        self.run_sc(root, {"setA": 0.55, "setB": 0.55, "setC": 1.0}, self.ENTRIES, self.SUP, self.NI, tamper=tamper)
+                self.assertFalse((root / "ledger.md").exists())
+                self.assertEqual(opened, [])
+        def pin_edit(mutator):
+            def f(root, pin_path):
+                pin = json.loads(pin_path.read_text())
+                mutator(pin)
+                pin_path.write_text(json.dumps(pin))
+            return f
+        attempt(lambda root, pin: (root / "R7.md").write_text("edited after the pin"))          # registration changed
+        attempt(pin_edit(lambda p: p["superiority"].append({"arm": "A", "reference": "Z"})))    # unknown entry
+        attempt(pin_edit(lambda p: p["entries"].update(B="setA")))                                # duplicate spec
+        attempt(lambda root, pin: __import__("shutil").rmtree(self.cr.cell_path(root, "setB", "N", 2)))   # missing cell
+
+
 class TeacherSubsets(unittest.TestCase):
     """Design log E13: `ts<name>` recipe tokens and the curated SafeSyn fit leg."""
 
