@@ -761,6 +761,18 @@ pub fn precompute_reference_with_scales(
     ))
 }
 
+#[cfg(any(feature = "training", test))]
+fn refuse_rev5_masked_config(config: &ZensimConfig) -> Result<(), ZensimError> {
+    if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
+        && (config.extended_features || config.compute_iw_features)
+    {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "formula revision 5 supports only basic + peaks + v2; raw configuration requests masked or IW features",
+        });
+    }
+    Ok(())
+}
+
 /// Compute zensim with a precomputed reference and custom configuration.
 ///
 /// **Research / feature-extraction API; not stable.** The
@@ -783,6 +795,7 @@ pub fn compute_zensim_with_ref_and_config(
     // be repeated here or a `blur_passes != 1` config would reach the strip
     // walk under an arithmetic revision that does not serve it.
     crate::ssim_form::check_route(&config)?;
+    refuse_rev5_masked_config(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
@@ -1766,6 +1779,8 @@ impl Zensim {
     /// # Errors
     ///
     /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    /// Rev5 refuses this masked-family request; use `compute_all_features`
+    /// (with `training`) or a supported research slot request instead.
     pub fn compute_extended_features(
         &self,
         source: &impl ImageSource,
@@ -1786,12 +1801,11 @@ impl Zensim {
         let mut config = config_from_params(params, self.parallel);
         crate::ssim_form::check_route(&config)?;
         config.extended_features = true;
-        #[cfg(feature = "feature-regime-v2")]
-        let serving_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
-            self.scoring_plan(params, &config)
-        } else {
-            None
-        };
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            return Err(ZensimError::ModelLoadFailed {
+                reason: "formula revision 5 supports only basic + peaks + v2; extended extraction requests masked features",
+            });
+        }
         let result = compute_with_config_inner(
             source,
             distorted,
@@ -1799,10 +1813,8 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
-            // Historical extraction keeps all v1 pools. Rev5 resolves the
-            // declared bake's supported read set, including its v2 slots.
             #[cfg(feature = "feature-regime-v2")]
-            serving_plan.as_ref(),
+            None,
         );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
@@ -2068,7 +2080,9 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Same as [`Self::compute_v2_features`].
+    /// Same as [`Self::compute_v2_features`]. Rev5 explicitly refuses append
+    /// and every other family outside basic + peaks + v2, on SDR and HDR
+    /// raw extraction entries.
     #[cfg(feature = "feature-regime-v2")]
     pub fn compute_folded720_append_features(
         &self,
@@ -2955,6 +2969,7 @@ impl Zensim {
     /// layout/width as the sRGB extraction under the same profile params
     /// (372 in the `with-iw` regime). This is the transfer-invariant HDR
     /// feature path: no u8 shell, no display-peak anchor at the input.
+    /// Rev5 refuses this explicit masked-family extraction request.
     pub fn compute_pu_linear_extended_features(
         &self,
         ref_rgb: &[f32],
@@ -2985,6 +3000,11 @@ impl Zensim {
         let mut config = config_from_params(params, self.parallel);
         crate::ssim_form::check_route(&config)?;
         config.extended_features = true;
+        if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            return Err(ZensimError::ModelLoadFailed {
+                reason: "formula revision 5 supports only basic + peaks + v2; extended extraction requests masked features",
+            });
+        }
         #[cfg(feature = "feature-regime-v2")]
         if crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(&config)
@@ -3163,6 +3183,8 @@ impl Zensim {
 
     /// Like `compute`, but always computes all features regardless of
     /// zero weights (forces every channel active). For training/research.
+    /// At Rev5 this emits all supported basic, peak and v2 slots in the
+    /// 720 layout; masked/IW slots remain outside the supported scope.
     #[cfg(feature = "training")]
     pub fn compute_all_features(
         &self,
@@ -3175,8 +3197,17 @@ impl Zensim {
         crate::ssim_form::check_route(&config)?;
         config.compute_all_features = true;
         #[cfg(feature = "feature-regime-v2")]
-        let serving_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
-            self.scoring_plan(params, &config)
+        let extraction_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
+            use crate::feature_defs::family_slots;
+            use crate::feature_set_id::ComputeToken;
+            let want = family_slots(ComputeToken::Basic, config.num_scales)
+                .union(&family_slots(ComputeToken::Peaks, config.num_scales))
+                .union(&family_slots(ComputeToken::V2, config.num_scales));
+            Some(crate::feature_plan::Plan::derive(&want, 720).map_err(|_| {
+                ZensimError::ModelLoadFailed {
+                    reason: "cannot derive the full supported Rev5 extraction plan",
+                }
+            })?)
         } else {
             None
         };
@@ -3187,9 +3218,10 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
-            // Extraction entry — see `compute_extended_features`.
+            // Research extraction requests every supported slot, independently
+            // of the profile's serving read set.
             #[cfg(feature = "feature-regime-v2")]
-            serving_plan.as_ref(),
+            extraction_plan.as_ref(),
         );
         self.check_stop()?;
         Ok(result.with_profile(self.profile))
@@ -5291,6 +5323,7 @@ pub fn compute_zensim_with_config(
     // and would otherwise carry a `blur_passes != 1` config into the strip
     // walk under an arithmetic revision that does not serve it.
     crate::ssim_form::check_route(&config)?;
+    refuse_rev5_masked_config(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }

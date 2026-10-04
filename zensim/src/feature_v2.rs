@@ -3333,8 +3333,10 @@ impl ComputeSet {
     /// layout turns on every block flag the width reaches, and without
     /// this the walk would compute families nobody asked for) still
     /// computes only them. [`Self::from_toggles`] applies it under the
-    /// Rev5 revision; the request-level refusal for ASKED-FOR unsupported
-    /// slots lives in `feature_plan` (`PlanError::UnsupportedAtRev5`).
+    /// Rev5 revision. Explicit unsupported requests are rejected first by
+    /// `feature_plan` (`PlanError::UnsupportedAtRev5`) or, at raw extraction
+    /// boundaries, `validate_raw_rev5_request`. Only validated plans may use
+    /// unsupported layout flags without requesting those families.
     ///
     /// Sub-toggles of the supported families (`gradient`, `blockiness`,
     /// `transducer_bank`, `transducers_luma_only`, `v1_only` via
@@ -11486,6 +11488,10 @@ pub(crate) fn compute_v2_features_impl_with_toggles(
     parallel: bool,
     toggles: V2NewFeatureToggles,
 ) -> Result<ZensimV2Result, ZensimError> {
+    if toggles.formula_revision >= FormulaRevision::Rev5 {
+        validate_wide_revision(toggles)?;
+        validate_raw_rev5_request(toggles)?;
+    }
     crate::metric::validate_pair(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     let prepared = prepare_v2_reference_impl(source, max_pixels, parallel, false)?;
@@ -11519,6 +11525,7 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     // preserve its 348-slot layout rather than running the historical materialized kernels.
     if crate::ssim_form::effective_revision(toggles.formula_revision) >= FormulaRevision::Rev5 {
         validate_wide_revision(toggles)?;
+        validate_raw_rev5_request(toggles)?;
         crate::metric::reject_hdr_input(distorted)?;
         crate::metric::check_within_max_pixels(distorted.width(), distorted.height(), max_pixels)?;
         if (distorted.width(), distorted.height()) != (prepared.orig_width, prepared.orig_height) {
@@ -13077,6 +13084,34 @@ fn validate_wide_revision(toggles: V2NewFeatureToggles) -> Result<(), ZensimErro
     Ok(())
 }
 
+/// Raw toggles request computation, unlike the layout flags of a validated
+/// plan. Refuse unsupported families before `rev5_scope` can narrow work.
+fn validate_raw_rev5_request(t: V2NewFeatureToggles) -> Result<(), ZensimError> {
+    if t.formula_revision >= FormulaRevision::Rev5
+        && (matches!(t.v1_pools, V1PoolsMode::Full | V1PoolsMode::Carriers)
+            || t.append_block
+            || t.append2_block
+            || t.append2_dst_activity
+            || t.csfw_block
+            || t.dvifm_block
+            || t.rev4_gridblk
+            || t.rev4_ringbasis
+            || t.rev4_tailhist
+            || t.rev4_arttype
+            || t.gmsbank
+            || t.mapdev
+            || t.z1max
+            || t.gmsnative
+            || t.dvifmgate
+            || t.free_extras != V1FreeExtras::Off)
+    {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "formula revision 5 supports only basic + peaks + v2; raw extraction requested an unsupported family",
+        });
+    }
+    Ok(())
+}
+
 /// Streaming folded-720[+append] pair entry: validation + sub-64
 /// reflect-pad exactly like the materialized pair entry
 /// ([`compute_folded720_impl_with_toggles`] → prepare → with-ref inner),
@@ -13119,6 +13154,9 @@ pub(crate) fn compute_folded720_streaming_extras(
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
+    if extras.compute.is_none() {
+        validate_raw_rev5_request(toggles)?;
+    }
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     // HDR routing (HDR_PLAN chunk 2) in the exact position the
@@ -13461,6 +13499,9 @@ pub(crate) fn compute_folded720_hdr_streaming_extras(
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
+    if extras.compute.is_none() {
+        validate_raw_rev5_request(toggles)?;
+    }
     // REV4SERVE: the PU front end is canonical at Rev4
     // (`color::pu_xyb_canon` + the `_at_revision` transfer decoders), so the
     // HDR walk computes Rev4 in a Rev4 process — `refuse_rev4_mix` keeps
@@ -13593,6 +13634,7 @@ pub(crate) fn compute_folded944_streaming_with_retention(
         append2_block: true,
         ..V2NewFeatureToggles::default()
     };
+    validate_raw_rev5_request(toggles)?;
     if source.width() < crate::metric::MIN_PYRAMID_DIM
         || source.height() < crate::metric::MIN_PYRAMID_DIM
     {

@@ -13,10 +13,14 @@ Each row names a real behavior test; all use a revision-5 child or explicit proc
 | BakeScorer::compute, identity, persistent scratch, cached attribution | rev5_entry_compute_identity_and_cached_attribution |
 | prepare_steering + refinement_gain, env off/on | rev5_entry_steering_env_on_and_off |
 | local_refine production replay: JPEG/textured, multi-strip, edge/unaligned, non-reference candidate, no-op, missing coarse planes | rev5_exact_refinement_goldens |
-| Zensim Custom by_v2fy: scalar, codec hint, extended/training params, classification, reference, reference scratch, all four strip wrappers, generic diffmap, cached diffmap, linear-planar diffmap | rev5_entry_diffmaps_and_strip_variants |
+| Zensim Custom by_v2fy: scalar, codec hint, training params, classification, reference, reference scratch, all four strip wrappers, generic diffmap, cached diffmap, linear-planar diffmap | rev5_entry_diffmaps_and_strip_variants |
 | Declared HDR BakeScorer score/identity/steering + exact PU channel rebuild, env off/on | rev5_entry_hdr_score_and_steering |
-| PU-linear interleaved, extended, planar with row padding, descriptor auto-dispatch and computed identity | rev5_entry_raw_hdr_profiles |
-| Folded/append/append2/CSFW layout prefixes, including streaming append; Linear/PQ/HLG folded HDR APIs and bake/session parity | rev5_entry_hdr_encodings_and_wide_layout_prefixes |
+| PU-linear interleaved, planar with row padding, descriptor auto-dispatch and computed identity | rev5_entry_raw_hdr_profiles |
+| Folded supported extraction and explicit append/append2/CSFW/DVIFM refusal, including streaming append; Linear/PQ/HLG HDR bake/session parity | rev5_entry_hdr_encodings_and_wide_layout_prefixes |
+| Full 576-slot extraction regardless of the bake's 420-slot serving subset; parity with independent research extraction | rev5_all_features_is_complete_independently_of_bake_reads |
+| Explicit unsupported raw family selectors, v1_only on/off, SDR/PU, pair/cache/streaming, masked/IW config and retained 944 | rev5_raw_family_toggles_refuse_before_narrowing |
+| Basic-only f22/basic/basic+peaks steering: zero metadata with scalar feature/score parity | rev5_basic_steering_uses_zero_mean_offset |
+| Rev5 mean-offset path does not read any pixels | streaming::rev5_retained_mean_offset_does_not_read_pixels |
 | SDR sampled by_v2fy: v1 Y triangle 3/2, v1 XYB Mitchell 2, v2 XYB triangle 1/2/4/8, v2 XYB RobidouxSharp 1/3/5/7; scalar/session/tier parity | rev5_entry_sampling_plans |
 | Bounded-v2 pair/toggles/cache/cache-moments/scratch and folded-720 pair/streaming | rev5_entry_v2_pair_cached_and_streaming_extraction |
 | Ensembles: complete scalar/steering score and vector | rev5_entry_ensemble |
@@ -27,6 +31,19 @@ Each row names a real behavior test; all use a revision-5 child or explicit proc
 | Manifest/revision admission for Rev4/5, refusal of unknown 6 | feature_set revision admission tests |
 
 Generic weighted diffmaps still mean basic-weight spatial error; their score/vector now come from the full Rev5 bake plan. Use the prepared BakeScorer session for the complete bake sensitivity map. Rev5 strips delegate to the canonical fixed 128-row tree. Raw planar/interleaved PU inputs materialize an opaque RGBA adapter while preserving absolute linear-sRGB nits and row strides; typed BakeScorer HDR stays row streamed.
+
+The independent review found three errors in the original entry receipts.
+The fix round rejects explicit unsupported extraction requests instead of
+accepting zero-filled families, computes all 576 supported features for
+`compute_all_features`, and removes the global mean-offset pass from
+basic-only steering. SDR/PU `compute_extended_features` requests masked
+features and therefore refuses at Rev5, even for a supported bake; use full
+supported extraction or an explicit supported research request. This is
+separate from a wider storage layout with only supported requested slots,
+which remains valid. The original zero-tail assertions and scoring-subset
+comparison are superseded by the rejection/completeness tests above.
+Fresh fix-round gate receipts are recorded below; older measurements
+retain their original binary hashes and qualification limits.
 
 ## KADID env-on 48-case panel
 
@@ -132,7 +149,7 @@ The CLI fixture uses independently audited Rev5 vectors with synthetic engineeri
 | I61_10_03.png | `8b08328518958fafa37bea5baf248580e664b52dc4d713419dfc59fe5914da5c` |
 | I61_10_05.png | `e73f0b586740dcdc1bd829a1c0c585581a7b5530964d231880cb3e829c8ec1a2` |
 
-## Final correctness and provenance gates
+## Preserved pre-review correctness and provenance receipts
 
 Full release suite passes (629 library tests, plus every release integration/doc target; 13 ignored diagnostic tests). The latest all-features library suite passes 645 tests, 13 ignored. CI-exact Clippy, formatting, script lint, rev4serve and public API checks pass. All 27 feature cells pass both Clippy and tests (54 checks). The API delta is only the authorized FormulaRevision::Rev5 variant.
 
@@ -151,3 +168,52 @@ Raw gate locations: `/var/tmp/rev5/owner-final-gates2`, `owner-final-extra`, `ow
 | after.tsv | `7d09fd10cd143fd3f28e51dd0647f39324eb722d87a23cbc2d3f3248ac2ab29f` |
 
 The final post-directive [speed matrix](rev5_speed_final_2026-10-04.md) contains all 192 measurements and 48 fixed/per-pixel fits. Every run remains strict-gate unreliable; it does not certify the stop rule. The earlier [engineering ladder](rev5_ladder_2026-10-04.md) is preserved with stage/binary identities.
+
+
+## Independent review fix round — final receipts
+
+| Gate | Fresh fix-round result |
+|---|---|
+| Full release suite | 634 library passes, 13 ignored; all integration/doc targets pass |
+| All-features library | 649 passes, 13 ignored |
+| CI-exact Clippy, fmt, script lint, Rev4 serving, API snapshot | All pass |
+| Feature permutations | 27 cells, 54 Clippy/test passes |
+| Foreign checks | 33 passes: 11 each on WASM SIMD128, i686 scalar, AArch64/QEMU |
+| Historical vectors | 192 Rev1–Rev4 files unchanged; 48 per revision |
+| Rev5 vectors/tier parity | 48 audit files match; frozen native reference preserved |
+| Independent moments | 264 checks, max relative error 8.665431753e-14 |
+| Local-refine goldens | Native and all three foreign targets pass; original 1e-10 + 1e-6 relative delta bar retained |
+| Historical steering | Rev3/Rev4 each: 48 owner cases and 384 broad rows, zero differing results |
+| Work census | All 16 configurations, 32 warm assertions, pass |
+| Validation CLI entries | All six pass; verdict rows and retained table columns unchanged |
+
+Fresh receipts are under `/var/tmp/rev5/fix-native-gates`,
+`fix-permutations`, `fix-cross-gates`, `fix-vector-audits`,
+`fix-historical-steering`, `fix-work-census`, `fix-tool-entries`, and
+`fix-rest-gates`. The driver sources are `/var/tmp/rev5/fix-*.py`. Heavy
+commands use run-heavy 16 GiB / 8 jobs and private targets; native runs pin
+CPUs 16–23 and foreign runs CPUs 24–31. The foreign runners/toolchains and
+frozen native parity file are unchanged. Original and failed receipts remain
+preserved. Historical steering PASS here means numerical identity with the
+frozen baseline; pre-existing individual quality FAIL cases remain unchanged.
+
+All three findings were reproduced with the retained reviewer executable
+before edits (`fix-reproduction/reviewer-probe-before.log`). Its 97×83 probe
+returned a zero-filled 204-slot append family, omitted nonzero f0 from
+all-features extraction, and reported different scalar/steering offsets.
+The new tests reject all explicit unsupported selectors on the raw routes,
+compare all 576 supported slots against an independent research request, and
+check f22/basic/basic+peaks metadata and score parity across tiny, odd and
+multi-strip inputs. The empty-plane mean-offset regression verifies that no
+global image read occurs. Wider supported requests still compute through a
+validated plan, including the 944-layout refinement goldens and full-width
+research request. Unsupported raw extended extraction is an explicit error.
+
+Fresh census binary SHA-256: `e0aea8cd9b840a987ea3f0f2552665543aeabc2d8d5ccae30bd4cf48ec3a2dfc`.
+The fresh engineering fixture is `/var/tmp/rev5/fix-tool-entries`; its source
+and dense Parquet bytes, before/after verdict TSVs, stamped bake and dense
+bake are identical to the preserved fixture above. Manifest SHA-256
+`5b50065cbefe4cfce2a23c21a8ef6d2de8f3a1ae681de39889740a69055e1ab2` records the new audit paths.
+The preserved 48-case panel and latency matrices use their original
+pre-review binaries; they are not final-fix performance measurements.
+Quiet-box qualification remains missing. No model was fitted or promoted.

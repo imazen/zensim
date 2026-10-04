@@ -1412,15 +1412,34 @@ mod tests {
         let distorted = RgbSlice::new(dst, w, h);
         let mut scratch = V2Scratch::new();
         let mut retention = FoldRetention::default();
-        let res = crate::feature_v2::compute_folded944_streaming_with_retention(
-            &source,
-            &distorted,
-            None,
-            false,
-            &mut scratch,
-            &mut retention,
-        )
-        .expect("fold walk computes");
+        let res = if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+            // Wider storage is valid when a plan explicitly requests only
+            // the supported 576 slots. The raw 944 request must refuse.
+            let plan = full_plan();
+            crate::feature_v2::compute_folded720_streaming_extras(
+                &source,
+                &distorted,
+                None,
+                false,
+                plan.toggles(),
+                &mut scratch,
+                crate::feature_v2::FoldWalkExtras {
+                    compute: Some(plan.compute),
+                    retention: Some(&mut retention),
+                    ..Default::default()
+                },
+            )
+        } else {
+            crate::feature_v2::compute_folded944_streaming_with_retention(
+                &source,
+                &distorted,
+                None,
+                false,
+                &mut scratch,
+                &mut retention,
+            )
+        }
+        .expect("fold walk computes the requested supported slots");
         (res, retention)
     }
 

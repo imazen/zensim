@@ -4750,6 +4750,40 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
     )
 }
 
+#[test]
+fn rev5_retained_mean_offset_does_not_read_pixels() {
+    // Empty planes with nonempty geometry would panic if the historical
+    // whole-image pass were executed; Rev5 metadata requires no pixel reads.
+    assert_eq!(
+        compute_xyb_mean_offset_at_revision(
+            crate::feature_defs::FormulaRevision::Rev5,
+            [&[]; 3],
+            [&[]; 3],
+            97,
+            83,
+            97,
+        ),
+        [0.0; 3],
+    );
+}
+
+// Rev5 removed the global XYB offset pass. Retained basic attribution must
+// expose the same zero metadata as the fold, including PU and sampled input.
+fn compute_xyb_mean_offset_at_revision(
+    revision: crate::feature_defs::FormulaRevision,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+) -> [f64; 3] {
+    if revision >= crate::feature_defs::FormulaRevision::Rev5 {
+        [0.0; 3]
+    } else {
+        compute_xyb_mean_offset(src, dst, width, height, stride)
+    }
+}
+
 pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
@@ -4780,7 +4814,8 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
         }
         let mut stats = Vec::with_capacity(4);
         let first = &levels[0];
-        let mean_offset = compute_xyb_mean_offset(
+        let mean_offset = compute_xyb_mean_offset_at_revision(
+            config.revision(),
             precomputed.scale(0).0,
             [&first.0[0], &first.0[1], &first.0[2]],
             first.1,
@@ -4846,8 +4881,14 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
 
     let (src_planes_s0, _, _) = precomputed.scale(0);
     let dst_view_s0: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
-    let mean_offset =
-        compute_xyb_mean_offset(src_planes_s0, dst_view_s0, width, height, padded_width);
+    let mean_offset = compute_xyb_mean_offset_at_revision(
+        config.revision(),
+        src_planes_s0,
+        dst_view_s0,
+        width,
+        height,
+        padded_width,
+    );
 
     let mut stats = Vec::with_capacity(num_scales);
     let mut retention = AttrScaleRetention::new(padded_width * height);

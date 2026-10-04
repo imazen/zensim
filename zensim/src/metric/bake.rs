@@ -1657,6 +1657,284 @@ mod revision_contract_tests {
         .with_parallel(false)
     }
 
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn assert_rev5_family_refused<T>(result: Result<T, crate::ZensimError>) {
+        let err = result
+            .err()
+            .expect("unsupported Rev5 extraction must refuse");
+        assert!(
+            matches!(err, crate::ZensimError::ModelLoadFailed { reason }
+            if reason.contains("basic + peaks + v2")),
+            "{err}"
+        );
+    }
+
+    #[cfg(all(
+        feature = "custom-profiles",
+        feature = "feature-regime-v2",
+        feature = "training"
+    ))]
+    fn assert_full_rev5_extraction(
+        z: &crate::Zensim,
+        r: &impl crate::ImageSource,
+        d: &impl crate::ImageSource,
+    ) {
+        use crate::feature_set_id::ComputeToken;
+        use crate::research::{Request, family_slots};
+        let want = family_slots(ComputeToken::Basic)
+            .union(&family_slots(ComputeToken::Peaks))
+            .union(&family_slots(ComputeToken::V2));
+        let independent =
+            crate::research::extract(&Request::for_slots(want.clone(), 720), r, d).unwrap();
+        let all = z.compute_all_features(r, d).unwrap();
+        assert_eq!(want.len(), 576);
+        for id in want.iter_slots() {
+            assert_eq!(
+                all.features()[id],
+                independent.values()[id],
+                "full extraction f{id}"
+            );
+        }
+        let raw = z.compute_folded720_features(r, d).unwrap();
+        assert!(
+            raw.features()[0] > 0.0,
+            "fixture must expose the skipped X cell"
+        );
+        assert_eq!(all.features()[0], raw.features()[0]);
+        assert_eq!(all.mean_offset(), [0.0; 3]);
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn review_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let r: Vec<_> = (0..w * h)
+            .map(|i| {
+                [
+                    ((37 * i) % 256) as u8,
+                    ((61 * i) % 256) as u8,
+                    ((17 * i) % 256) as u8,
+                ]
+            })
+            .collect();
+        let d = r
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                [
+                    p[0] / 8 * 8,
+                    (p[1] / 16 * 16).saturating_add((i % 3) as u8),
+                    p[2] / 4 * 4,
+                ]
+            })
+            .collect();
+        (r, d)
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "custom-profiles",
+        feature = "feature-regime-v2",
+        feature = "training"
+    ))]
+    fn rev5_all_features_is_complete_independently_of_bake_reads() {
+        let name = "metric::bake::revision_contract_tests::rev5_all_features_is_complete_independently_of_bake_reads";
+        if !run_at_revision("5", name, "REV5_FULL_EXTRACTION_OK") {
+            return;
+        }
+        let z = rev5_by_profile();
+        for (w, h) in [(7, 9), (97, 83), (137, 301)] {
+            let (r, d) = review_pair(w, h);
+            assert_full_rev5_extraction(&z, &RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h));
+        }
+        println!("REV5_FULL_EXTRACTION_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_basic_steering_uses_zero_mean_offset() {
+        let name =
+            "metric::bake::revision_contract_tests::rev5_basic_steering_uses_zero_mean_offset";
+        if !run_at_revision("5", name, "REV5_BASIC_OFFSET_OK") {
+            return;
+        }
+        for (w, h) in [(7, 9), (97, 83), (137, 301)] {
+            let (r, d) = review_pair(w, h);
+            let (r, d) = (RgbSlice::new(&r, w, h), RgbSlice::new(&d, w, h));
+            for ids in [vec![22], (0..156).collect(), (0..228).collect()] {
+                let model = bake_over(&ids);
+                let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                let scalar = owner.compute(&r, &d, None).unwrap();
+                let mut session = owner.prepare_steering(&r, 8).unwrap();
+                let scored = session.compute(&d, None).unwrap();
+                assert_eq!(scalar.mean_offset(), [0.0; 3]);
+                assert_eq!(scalar.mean_offset(), scored.result().mean_offset());
+                for &id in &ids {
+                    assert_eq!(scalar.features()[id], scored.result().features()[id]);
+                }
+                assert_eq!(scalar.score(), scored.result().score());
+            }
+        }
+        println!("REV5_BASIC_OFFSET_OK");
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_raw_family_toggles_refuse_before_narrowing() {
+        let name = "metric::bake::revision_contract_tests::rev5_raw_family_toggles_refuse_before_narrowing";
+        if !run_at_revision("5", name, "REV5_RAW_REFUSAL_OK") {
+            return;
+        }
+        use crate::feature_v2::{
+            HdrEncoding, V1FreeExtras, V1PoolsMode, V2NewFeatureToggles, V2Scratch,
+        };
+        let (w, h) = (97, 83);
+        let (r, d) = review_pair(w, h);
+        let (r, d) = (RgbSlice::new(&r, w, h), RgbSlice::new(&d, w, h));
+        let z = rev5_by_profile();
+        let reference = z.prepare_v2_reference(&r).unwrap();
+        let mut scratch = V2Scratch::new();
+        let base = V2NewFeatureToggles::default();
+        let requests = [
+            V2NewFeatureToggles {
+                v1_pools: V1PoolsMode::Full,
+                ..base
+            },
+            V2NewFeatureToggles {
+                v1_pools: V1PoolsMode::Carriers,
+                ..base
+            },
+            V2NewFeatureToggles {
+                append_block: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                append2_block: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                append2_dst_activity: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                csfw_block: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                dvifm_block: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                rev4_gridblk: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                rev4_ringbasis: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                rev4_tailhist: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                rev4_arttype: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                gmsbank: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                mapdev: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                z1max: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                gmsnative: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                dvifmgate: true,
+                ..base
+            },
+            V2NewFeatureToggles {
+                free_extras: V1FreeExtras::RawMoments,
+                ..base
+            },
+            V2NewFeatureToggles {
+                free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+                ..base
+            },
+        ];
+        for request in requests {
+            for request in [
+                request,
+                V2NewFeatureToggles {
+                    v1_only: true,
+                    ..request
+                },
+            ] {
+                assert_rev5_family_refused(z.compute_folded720_features_streaming(
+                    &r,
+                    &d,
+                    request,
+                    &mut scratch,
+                ));
+                assert_rev5_family_refused(z.compute_v2_features_with_toggles(&r, &d, request));
+                assert_rev5_family_refused(z.compute_v2_features_with_ref_and_scratch(
+                    &reference,
+                    &d,
+                    request,
+                    &mut scratch,
+                ));
+                // Admission must reject the unsupported request before even
+                // considering the SDR container's HDR validity.
+                assert_rev5_family_refused(z.compute_folded720_features_hdr(
+                    &r,
+                    &d,
+                    HdrEncoding::Linear,
+                    request,
+                    &mut scratch,
+                ));
+            }
+        }
+        #[cfg(feature = "training")]
+        {
+            let (rp, dp) = review_pair(w, h);
+            let reference = z.precompute_reference(&r).unwrap();
+            for config in [
+                crate::metric::ZensimConfig {
+                    extended_features: true,
+                    ..Default::default()
+                },
+                crate::metric::ZensimConfig {
+                    compute_iw_features: true,
+                    ..Default::default()
+                },
+            ] {
+                assert_rev5_family_refused(crate::metric::compute_zensim_with_config(
+                    &rp, &dp, w, h, config,
+                ));
+                assert_rev5_family_refused(crate::metric::compute_zensim_with_ref_and_config(
+                    &reference, &dp, w, h, config,
+                ));
+            }
+        }
+        let mut retention = crate::feature_v2::FoldRetention::default();
+        assert_rev5_family_refused(
+            crate::feature_v2::compute_folded944_streaming_with_retention(
+                &r,
+                &d,
+                None,
+                false,
+                &mut scratch,
+                &mut retention,
+            ),
+        );
+        println!("REV5_RAW_REFUSAL_OK");
+    }
+
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn rev5_entry_compute_identity_and_cached_attribution() {
@@ -1898,10 +2176,7 @@ mod revision_contract_tests {
         );
         assert!(id.is_identical());
         assert_eq!(id.score(), 100.0);
-        assert_eq!(
-            scalar.features(),
-            z.compute_extended_features(&rs, &ds).unwrap().features()
-        );
+        assert_rev5_family_refused(z.compute_extended_features(&rs, &ds));
         assert_eq!(
             scalar.score(),
             z.compute_with_codec_hint(&rs, &ds, Some("jpeg"))
@@ -1910,10 +2185,7 @@ mod revision_contract_tests {
         );
         #[cfg(feature = "training")]
         {
-            assert_eq!(
-                scalar.features(),
-                z.compute_all_features(&rs, &ds).unwrap().features()
-            );
+            assert_full_rev5_extraction(&z, &rs, &ds);
             assert_eq!(
                 scalar.features(),
                 crate::Zensim::compute_with_params(z.profile().params(), &rs, &ds)
@@ -2011,15 +2283,18 @@ mod revision_contract_tests {
         let scalar = z
             .compute_pu_linear(&ri, &di, w, h, stride * 3, stride * 3)
             .unwrap();
-        let extended = z
-            .compute_pu_linear_extended_features(&ri, &di, w, h, stride * 3, stride * 3)
-            .unwrap();
+        assert_rev5_family_refused(z.compute_pu_linear_extended_features(
+            &ri,
+            &di,
+            w,
+            h,
+            stride * 3,
+            stride * 3,
+        ));
         let planar = z
             .compute_pu_linear_planar([&r[0], &r[1], &r[2]], [&d[0], &d[1], &d[2]], w, h, stride)
             .unwrap();
-        assert_eq!(scalar.features(), extended.features());
         assert_eq!(scalar.features(), planar.features());
-        assert_eq!(scalar.score(), extended.score());
         assert_eq!(scalar.score(), planar.score());
         let rgba = |p: &[Vec<f32>; 3]| -> Vec<[f32; 4]> {
             (0..w * h)
@@ -2075,20 +2350,22 @@ mod revision_contract_tests {
         }
         let (rh, dh) = (DeclaredHdr(rs), DeclaredHdr(ds));
         assert_eq!(scalar.features(), z.compute(&rh, &dh).unwrap().features());
-        assert_eq!(
-            scalar.features(),
-            z.compute_extended_features(&rh, &dh).unwrap().features()
-        );
+        assert_rev5_family_refused(z.compute_extended_features(&rh, &dh));
         let id = z
             .compute_pu_linear(&ri, &ri, w, h, stride * 3, stride * 3)
             .unwrap();
-        let id_ext = z
-            .compute_pu_linear_extended_features(&ri, &ri, w, h, stride * 3, stride * 3)
-            .unwrap();
+        assert_rev5_family_refused(z.compute_pu_linear_extended_features(
+            &ri,
+            &ri,
+            w,
+            h,
+            stride * 3,
+            stride * 3,
+        ));
         let id_planar = z
             .compute_pu_linear_planar([&r[0], &r[1], &r[2]], [&r[0], &r[1], &r[2]], w, h, stride)
             .unwrap();
-        for result in [&id, &id_ext, &id_planar] {
+        for result in [&id, &id_planar] {
             assert_eq!(result.score(), 100.0);
             assert!(result.is_identical());
             assert_eq!(result.features(), id.features());
@@ -2198,16 +2475,14 @@ mod revision_contract_tests {
         let z = rev5_by_profile();
         let toggles = V2NewFeatureToggles::default();
         let mut scratch = V2Scratch::new();
-        let base = z.compute_folded720_features(&rs, &ds).unwrap();
-        for wide in [
-            z.compute_folded720_append_features(&rs, &ds).unwrap(),
-            z.compute_folded720_append_features_streaming(&rs, &ds, toggles, &mut scratch)
-                .unwrap(),
-            z.compute_folded720_append2_features(&rs, &ds).unwrap(),
-            z.compute_folded720_csfw_features(&rs, &ds).unwrap(),
+        for refused in [
+            z.compute_folded720_append_features(&rs, &ds),
+            z.compute_folded720_append_features_streaming(&rs, &ds, toggles, &mut scratch),
+            z.compute_folded720_append2_features(&rs, &ds),
+            z.compute_folded720_csfw_features(&rs, &ds),
+            crate::feature_v2::compute_folded720_dvifm_impl(&rs, &ds, None, false, toggles),
         ] {
-            assert_eq!(base.features(), &wide.features()[..720]);
-            assert!(wide.features()[720..].iter().all(|&f| f == 0.0));
+            assert_rev5_family_refused(refused);
         }
         let model = rev5_by_model();
         let ids = (13..26)
@@ -2258,16 +2533,21 @@ mod revision_contract_tests {
             let base = z
                 .compute_folded720_features_hdr(&r, &d, encoding, toggles, &mut scratch)
                 .unwrap();
-            for wide in [
-                z.compute_folded720_append_features_hdr(&r, &d, encoding, toggles, &mut scratch)
-                    .unwrap(),
-                z.compute_folded720_append2_features_hdr(&r, &d, encoding, toggles, &mut scratch)
-                    .unwrap(),
-                z.compute_folded720_csfw_features_hdr(&r, &d, encoding, toggles, &mut scratch)
-                    .unwrap(),
+            for refused in [
+                z.compute_folded720_append_features_hdr(&r, &d, encoding, toggles, &mut scratch),
+                z.compute_folded720_append2_features_hdr(&r, &d, encoding, toggles, &mut scratch),
+                z.compute_folded720_csfw_features_hdr(&r, &d, encoding, toggles, &mut scratch),
+                crate::feature_v2::compute_folded720_dvifm_hdr_streaming_impl(
+                    &r,
+                    &d,
+                    encoding,
+                    None,
+                    false,
+                    toggles,
+                    &mut scratch,
+                ),
             ] {
-                assert_eq!(base.features(), &wide.features()[..720]);
-                assert!(wide.features()[720..].iter().all(|&f| f == 0.0));
+                assert_rev5_family_refused(refused);
             }
             let mut owner = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
             let scalar = owner.compute_hdr(&r, &d, encoding, None).unwrap();

@@ -581,7 +581,12 @@ form differs from the bake's revision (`ZENSIM_FORMULA_REV`).
 
 `ZENSIM_FORMULA_REV=5` selects the `localwin` revision for bakes and research
 requests reading only basic (f0–155), peaks (f156–227), and v2 (f372–719).
-Requests for other families are refused. Rev5 uses local f32 blur windows,
+Explicit raw extraction requests for other families are refused, including
+masked/IW and SDR/PU extended-feature requests. With `training`,
+`compute_all_features` computes all 576 supported slots independently of
+the bake's serving subset. Rev5 mean-offset metadata is zero on scalar and
+basic-only prepared steering paths. Requests for supported slots can retain
+a wider storage layout. Rev5 uses local f32 blur windows,
 sixteen fixed accumulator lanes, fused expressions, and stable central moments.
 Identical inputs retain computed reference-only features while difference and
 similarity slots have exact identities. Prepared SDR and HDR steering support Rev5.

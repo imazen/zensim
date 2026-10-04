@@ -11,6 +11,14 @@
 
 ### Changed
 
+- Rev5 review fixes: raw requests for unsupported families now fail explicitly
+  on SDR, streaming, cached and HDR extraction routes; masked/IW configuration
+  and extended extraction requests also refuse. `compute_all_features` emits
+  all 576 supported basic/peak/v2 features rather than the bake's serving
+  subset. Basic-only prepared steering returns zero mean-offset metadata
+  without the removed global image pass. Valid wider storage layouts keep
+  serving supported declared reads; Rev1–Rev4 arithmetic is unchanged.
+
 - Rev4 serving on AVX-512 (KERNOPT2): the Rec64 horizontal SSIM window runs as 8x8 transposed blocks (f32 loads widened once,
   two row groups interleaved; AVX-512 and AVX2 bodies), and the canonical dense block kernel accumulates its pools with whole
   f64x8 loads/adds/stores, so its AVX-512 build no longer emits gathers/scatters and runs on v4/v4x again. Bit-identical

@@ -16,6 +16,18 @@ canonical IDs during densification. Source paths, formulas, binary/model/input
 hashes, exact environment, and raw result locations are retained in the report.
 No old feature table is relabeled, merged, or overwritten.
 
+**October 4, Rev5 review fix receipts:**
+The same twelve engineering audit vectors were regenerated under
+`/var/tmp/rev5/fix-vector-audits`; supported Rev5 values are unchanged, as are
+all 192 Rev1–Rev4 archived vectors. The synthetic CLI fixture is now also
+retained at `/var/tmp/rev5/fix-tool-entries`. Its source/dense Parquet bytes,
+verdict rows and bake bytes match the earlier engineering fixture exactly;
+only the manifest's source paths change (SHA-256
+`5b50065cbefe4cfce2a23c21a8ef6d2de8f3a1ae681de39889740a69055e1ab2`). Labels remain synthetic,
+with no fitting, data admission or new human/secret-holdout exposure. The
+serving report records fresh native/foreign, identity, refinement, historical
+steering, CLI and work-census receipts. No existing data was relabeled.
+
 **September 15, frozen recovery and corrected HDR:**
 [Complete results](../benchmarks/recovery_completion_2026-09-15.md). Ten Rust
 TRAIN-only fits, two fixed five-member compositions; complete full-composite,

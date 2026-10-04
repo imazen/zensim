@@ -482,3 +482,110 @@ met. The unrelated PID 760429 was still at 100% CPU at the final refresh.
 No model was retrained or promoted, no corpus modified, and no push made.
 The only remaining qualification/domain limits are listed in the owner
 decisions file; the standard unsampled by_v2fy bake is served.
+
+
+## Independent review fix round — 2026-10-04
+
+The retained reviewer probe was run unchanged before editing:
+`ZENSIM_FORMULA_REV=5 /home/lilith/tmp/rev5-review-target/review_probe`, under
+run-heavy (16 GiB / 8 jobs), log
+`/var/tmp/rev5/fix-reproduction/reviewer-probe-before.log`. It reproduces all
+three findings, including 97×83: append returns 924 slots with all 204 tail
+slots zero; all-features f0 is zero versus full extraction
+0.0009245345161889044; basic-only steering offset is
+[-0.00382392677575546, 0.015410205078871262, -0.0061400926212334] versus scalar
+[0,0,0]. The same failures occur on tiny/odd/multi-strip inputs. No review
+artifact or historical receipt was overwritten.
+
+Raw SDR/PU extraction now validates the actual requested families before
+scope narrowing. Append/append2/CSFW/DVIFM, all research banks, masked/IW or
+carrier pools, free extras and destination activity refuse explicitly at
+Rev5, including bounded-v2 pair/cache APIs and unplanned retained 944.
+Explicit masked/IW configuration APIs and SDR/PU extended extraction also
+refuse, rather than silently emitting missing measurements. Wider storage
+layouts remain valid for supported requested slots through a validated plan.
+Full training extraction now requests all 576 basic/peaks/v2 slots in a
+720 layout independently of the bake's read set. The retained basic walker
+uses the zero Rev5 mean-offset convention and skips the global pass.
+
+Tests replace the accepted zero-tail contract with behavioural refusal;
+exercise each family selector with v1_only on/off and each raw boundary;
+compare every supported all-features slot with research extraction on the
+review fixture; and compare f22/basic/basic+peak scalar vs prepared metadata,
+features and scores on tiny/odd/multi-strip images. An empty-plane/nonempty
+geometry regression proves the Rev5 offset helper does not read pixels.
+The local-refine golden helper now explicitly asks for the supported 576
+slots in its 944 storage layout, replacing its old implicit raw append
+request. Its delta tolerance and golden geometries remain unchanged.
+
+Two initial regression builds failed on private imports, corrected before
+execution; the first executed run had 20 passes and one correct refusal in
+that outdated golden fixture. Failed logs remain in fix-reproduction. Fresh
+native and 33-check foreign runs are underway in fix-native-gates and
+fix-cross-gates; final results will be recorded below. No speed qualification
+is inferred from these correctness fixes.
+
+### Fix-round final receipts — 2026-10-04T20:36:04.779595+00:00
+
+| Gate | Fresh fix-round result |
+|---|---|
+| Full release suite | 634 library passes, 13 ignored; all integration/doc targets pass |
+| All-features library | 649 passes, 13 ignored |
+| CI-exact Clippy, fmt, script lint, Rev4 serving, API snapshot | All pass |
+| Feature permutations | 27 cells, 54 Clippy/test passes |
+| Foreign checks | 33 passes: 11 each on WASM SIMD128, i686 scalar, AArch64/QEMU |
+| Historical vectors | 192 Rev1–Rev4 files unchanged; 48 per revision |
+| Rev5 vectors/tier parity | 48 audit files match; frozen native reference preserved |
+| Independent moments | 264 checks, max relative error 8.665431753e-14 |
+| Local-refine goldens | Native and all three foreign targets pass; original 1e-10 + 1e-6 relative delta bar retained |
+| Historical steering | Rev3/Rev4 each: 48 owner cases and 384 broad rows, zero differing results |
+| Work census | All 16 configurations, 32 warm assertions, pass |
+| Validation CLI entries | All six pass; verdict rows and retained table columns unchanged |
+
+Fresh receipts are under `/var/tmp/rev5/fix-native-gates`,
+`fix-permutations`, `fix-cross-gates`, `fix-vector-audits`,
+`fix-historical-steering`, `fix-work-census`, `fix-tool-entries`, and
+`fix-rest-gates`. The driver sources are `/var/tmp/rev5/fix-*.py`. Heavy
+commands use run-heavy 16 GiB / 8 jobs and private targets; native runs pin
+CPUs 16–23 and foreign runs CPUs 24–31. The foreign runners/toolchains and
+frozen native parity file are unchanged. Original and failed receipts remain
+preserved. Historical steering PASS here means numerical identity with the
+frozen baseline; pre-existing individual quality FAIL cases remain unchanged.
+
+Native driver results (all rc=0):
+
+| Check | Seconds |
+|---|---:|
+| release | 354.685 |
+| allfeatures-lib | 101.936 |
+| validate-revisions | 42.844 |
+| densify-regressions | 23.950 |
+| clippy | 4.111 |
+| permutations | 412.195 |
+| fmt | 1.376 |
+| lint-scripts | 10.389 |
+| rev4serve | 73.974 |
+| api | 4.358 |
+| panel-build | 31.979 |
+| auditor-build | 33.660 |
+| bench-build | 17.294 |
+
+Final census executable `/var/tmp/rev5/xp_fix_final`, SHA-256
+`e0aea8cd9b840a987ea3f0f2552665543aeabc2d8d5ccae30bd4cf48ec3a2dfc`. Warm 1MP counters are 145 vertical
+planes and 29 activity chains; 4MP is 290/58. Every warm row has zero peaks,
+scale-0 X/B cells/stored rows, and scratch zero elements. The twelve-vector
+CLI fixture and dense table are byte-identical to the pre-review artifacts;
+verdict bytes, stamped bake and dense bake are also identical. The new
+manifest identifies the fresh audit paths: `5b50065cbefe4cfce2a23c21a8ef6d2de8f3a1ae681de39889740a69055e1ab2`.
+Synthetic targets remain engineering-only; no training or quality use.
+
+The unchanged reviewer probe SHA-256 is
+`12828009b1376a3935e16c23b7cd72854e3b21446c8f21734fc5014626107ea0`;
+its pre-edit log SHA-256 is
+`52e5e80dd8bd1ae50e437fa418fe1233ed5d87cb7e42eb62082f0d843a267149`.
+All three review findings are addressed; the old zero-tail acceptance and
+pruned all-features assertions are removed. The 48-case Rev5 panel and speed
+matrices retain their pre-review binaries and were not rerun for this fix
+round. No new timing qualification is claimed. PID 760429 remains at 100%
+CPU; quiet-box qualification and the certified speed-loop stop are still
+MISSING. The fix is recorded in local jj change `kowmsswu`; no push is made.
