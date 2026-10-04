@@ -54,5 +54,29 @@ M2 ≥ 0.9987 in every case.
   allocation it is not an improvement; its value is per-block accuracy (target control, small budgets, sign).
 * by_v2fy steers as well as v2 + basic on all three codecs.
 
-Not measured: Rev5 (rerun when it lands), budgets other than 25 %, block sizes other than 8×8, byte-equalised allocation, and any
+## Results (Rev5, 2026-10-04 23:50 UTC)
+
+Same images, decodes, swaps and harness with the Rev5 full-data bakes, seed 0 (`byv2fy5` = `~/tmp/rev5bakes/byv2fy-full-s0.bin`
+sha256 `690b2709…`, `v2basic5` `51c724a8…`; R5CONFIRM, zensim 2206946f), `ZENSIM_FORMULA_REV=5`, tools rebuilt at zensim 70a5066e
+(`diffmap_block_coherence` `28e22ee2…`, `serve_custom_bake` `0243f071…`). The SSIMULACRA2 and butteraugli sidecars were recomputed
+over all 1,608 pairs (Rev4 and Rev5 composites). Summary `steercodec_2026-10-04/summary_rev5.json`; rows (sha256 `51a0bc44…`),
+per-block JSONs and scores on tower `output/zensim/steercodec-2026-10-04/` (`summary_rev5_full.json`, `swap/`, `score-rev5/`).
+
+by_v2fy, Rev4 → Rev5, share of the full upgrade's gain at 25 % of blocks, map / oracle (independent judges):
+
+| codec | swap | x | M3f | SSIMULACRA2 | butteraugli |
+|---|---|---|---|---|---|
+| zenjpeg | 30→60 | 0 | 0.772 → 0.764 | 0.43/0.43 → 0.44/0.42 | 0.34/0.38 → 0.34/0.38 |
+| zenjpeg | 60→85 | 0 | 0.783 → 0.789 | 0.39/0.35 → 0.39/0.35 | 0.32/0.28 → 0.31/0.29 |
+| zenjpeg | 60→85 | 1 | 0.886 → 0.885 | 0.33/0.35 → 0.34/0.35 | 0.26/0.28 → 0.29/0.29 |
+| JPEG XL | 30→60 | 0 | 0.740 → 0.737 | 0.63/0.62 → 0.65/0.63 | 0.68/0.64 → 0.69/0.64 |
+| JPEG XL | 60→85 | 0 | 0.827 → 0.818 | 0.55/0.55 → 0.56/0.55 | 0.47/0.45 → 0.48/0.45 |
+| zqi | 30→60 | 0 | 0.824 → 0.827 | 0.38/0.36 → 0.38/0.37 | 0.32/0.29 → 0.32/0.30 |
+| zqi | 60→85 | 0 | 0.879 → 0.885 | 0.34/0.35 → 0.35/0.35 | 0.28/0.27 → 0.28/0.28 |
+
+Rev5 steers like Rev4 on all three codecs: every independent-judge share moves by at most 0.03 (largest: zenjpeg 60→85 x1
+butteraugli +0.03), M3f by at most 0.01, M2 ≥ 0.9968. The Rev4 neighbour-exact loss on zenjpeg 60→85 (zensim share 0.57 → 0.50)
+is absent at Rev5 (0.55 → 0.55). Random and anti shares are unchanged (0.15–0.21 and ≤ 0.11).
+
+Not measured: budgets other than 25 %, block sizes other than 8×8, byte-equalised allocation, and any
 real encoder integration (zenjpeg AQ, zqi `aq_gamma`, JXL's adaptive quantization field).
