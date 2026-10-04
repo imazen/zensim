@@ -18,6 +18,9 @@
 //! HDR route (PU21 chunk-2 lineage) at 944 — a NEW-REGIME leg. The v3-era
 //! `compute_pu_linear_extended_features` 372 front-end is superseded; the
 //! legacy targets require separate admission and are never copied by this tool.
+//! Repeated `--score-bake PATH` instead emits native `BakeScorer::compute_hdr` scores
+//! for each final bake. Refusals remain keyed in a sidecar with NaN TSV cells and
+//! a nonzero exit; extraction/audit mode retains its original output contract.
 //! Optional `--audit-composition JSON` audits a hash-bound Rust ensemble against
 //! canonical features, native scalar scoring and prepared HDR maps.
 
@@ -197,6 +200,7 @@ fn main() {
     let mut n_threads = 8usize;
     let mut input_contract = None;
     let mut audit_composition: Option<PathBuf> = None;
+    let mut score_bakes: Vec<PathBuf> = Vec::new();
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -223,6 +227,10 @@ fn main() {
             }
             "--threads" => {
                 n_threads = args[i + 1].parse().expect("threads");
+                i += 2;
+            }
+            "--score-bake" => {
+                score_bakes.push(PathBuf::from(&args[i + 1]));
                 i += 2;
             }
             "--audit-composition" => {
@@ -280,6 +288,15 @@ fn main() {
         n_threads
     );
 
+    assert!(
+        score_bakes.is_empty() || audit_composition.is_none(),
+        "scoring and audit modes are separate"
+    );
+    let score_bytes: Vec<Vec<u8>> = score_bakes
+        .iter()
+        .map(|p| std::fs::read(p).expect("score bake"))
+        .collect();
+    let refusals = std::sync::Mutex::new(Vec::<serde_json::Value>::new());
     let composition: Option<serde_json::Value> = audit_composition.as_ref().map(|path| {
         serde_json::from_slice(&std::fs::read(path).expect("composition"))
             .expect("composition JSON")
@@ -326,6 +343,8 @@ fn main() {
             s.spawn(|| {
                 let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
                 let mut scratch = V2Scratch::new();
+                let score_models: Vec<_> = score_bytes.iter().map(|b| zenpredict::Model::from_bytes(b).expect("score model")).collect();
+                let mut score_scorers: Vec<_> = score_models.iter().map(|m| zensim::BakeScorer::new(m).map(|z| z.with_parallel(false))).collect();
                 let models: Vec<_> = model_bytes.iter().map(|b| zenpredict::Model::from_bytes(b).expect("model")).collect();
                 let mut scorer = (!models.is_empty()).then(|| zensim::BakeScorer::ensemble(&models, weights.as_deref()).expect("servable composition").with_parallel(false).with_finite_moment_refinement(true));
                 loop {
@@ -347,6 +366,24 @@ fn main() {
                         let source = Pq16Image::from_rgb16(&r16, rw, rh, primaries);
                         let distorted = Pq16Image::from_rgb16(&d16, dw, dh, dist_primaries);
                         let encoding = HdrEncoding::Pq { peak_nits: 10_000.0 };
+                        if !score_scorers.is_empty() {
+                            let mut line = format!("{}\t{}", c.ref_file.display(), c.dist_file.display());
+                            for (j, scorer) in score_scorers.iter_mut().enumerate() {
+                                let score = match scorer {
+                                    Ok(scorer) => scorer.compute_hdr(&source, &distorted, encoding, None).map_err(|e| e.to_string()),
+                                    Err(e) => Err(e.to_string()),
+                                };
+                                match score {
+                                    Ok(score) if score.is_finite() => line.push_str(&format!("\t{score:.17e}")),
+                                    other => {
+                                        let reason = match other { Ok(_) => "nonfinite score".to_owned(), Err(e) => e };
+                                        refusals.lock().unwrap().push(serde_json::json!({"row_id":i,"bake":score_bakes[j],"ref_path":c.ref_file,"dist_path":c.dist_file,"reason":reason}));
+                                        line.push_str("\tNaN");
+                                    }
+                                }
+                            }
+                            return Ok(line);
+                        }
                         let r = z
                             .compute_folded720_append2_features_hdr(
                                 &source,
@@ -410,10 +447,13 @@ fn main() {
         rows.iter().all(Option::is_some),
         "failed HDR rows: refusing partial output"
     );
+    let refused_count = refusals.lock().unwrap().len();
     let manifest = serde_json::json!({
         "input_contract":input_contract,
         "formula_revision":format!("{:?}",zensim::feature_v2::active_formula_revision()),
-        "rows":cells.len(), "feature_count":944,
+        "rows":cells.len(), "feature_count":if score_bakes.is_empty() { Some(944) } else { None },
+        "score_bakes":score_bakes,
+        "refused_scores":refused_count,
         "reference_primaries":if declared_cicp { "per-image cICP" } else { "BT.2020" },
         "v1_pools":"full", "distorted_primaries":"per-image codestream cICP",
         "transfer":"PQ", "display_peak_nits":10000,
@@ -445,9 +485,26 @@ fn main() {
         .open(&out_path)
         .expect("fresh out");
     let mut w = BufWriter::new(f);
-    let mut header = String::from("dist_basename\tq");
-    for i in 0..944 {
-        header.push_str(&format!("\tf{i}"));
+    let mut header = if score_bakes.is_empty() {
+        String::from("dist_basename\tq")
+    } else {
+        String::from("ref_path\tdist_path")
+    };
+    if score_bakes.is_empty() {
+        for i in 0..944 {
+            header.push_str(&format!("\tf{i}"));
+        }
+    } else {
+        for p in &score_bakes {
+            header.push('\t');
+            header.push_str(&p.display().to_string());
+        }
+        let f = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(out_path.with_extension("refusals.json"))
+            .expect("fresh refusals");
+        serde_json::to_writer_pretty(f, &serde_json::json!({"bakes":score_bakes,"refusals":refusals.into_inner().unwrap(),"rows":cells.len(),"entry":"BakeScorer::compute_hdr"})).unwrap();
     }
     writeln!(w, "{header}").unwrap();
     let mut n_ok = 0usize;
@@ -459,6 +516,11 @@ fn main() {
         "hdr944_extract: wrote {n_ok}/{} rows -> {out_path:?}",
         cells.len()
     );
+    w.flush().expect("flush complete output");
+    if refused_count != 0 {
+        eprintln!("REFUSED {refused_count} native HDR scores; retained keyed failure output");
+        std::process::exit(1);
+    }
     assert_eq!(
         n_ok,
         cells.len(),

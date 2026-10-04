@@ -464,7 +464,132 @@ def score(bake, ref, dist):
         return None
 
 
+def score_table_report(argv):
+    """Descriptive canonical TRAIN ordering from complete production-scored tables.
+
+    Catalog positives remain distinct from honest low-quality encodes and inert
+    attempts. This never fits a threshold or upgrades historical catalog labels
+    into reviewed catastrophic labels.
+    """
+    import argparse
+    import csv
+    import json
+    import math
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--metadata", required=True)
+    parser.add_argument("--scores", action="append", required=True)
+    parser.add_argument("--out-json", required=True)
+    args = parser.parse_args(argv)
+    with open(args.metadata) as f:
+        records = json.load(f)
+    if not records or any(r["split"] != "train" for r in records):
+        raise ValueError("score-table report admits canonical TRAIN only")
+    expected = {(r["ref_path"], r["dist_path"]) for r in records}
+    scores = {}
+    model_names = None
+    for path in args.scores:
+        with open(path) as f:
+            reader = csv.DictReader(f, delimiter="\t")
+            names = reader.fieldnames[2:]
+            if model_names is None:
+                model_names = names
+            if names != model_names:
+                raise ValueError("different scored models across shards")
+            for row in reader:
+                key = (row["ref_path"], row["dist_path"])
+                value = {name: float(row[name]) for name in names}
+                if not all(math.isfinite(v) for v in value.values()):
+                    raise ValueError("missing/refused/nonfinite production score")
+                if key in scores and value != scores[key]:
+                    raise ValueError("duplicate pair has different production scores")
+                scores[key] = value
+    if set(scores) != expected:
+        raise ValueError("incomplete/orphan scored pair coverage")
+    unique = {}
+    for record in records:
+        key = (record["ref_id"], record["pixels_sha256"])
+        row = dict(record, scores=scores[(record["ref_path"], record["dist_path"])])
+        if key in unique:
+            old = unique[key]
+            if old["is_corruption"] != row["is_corruption"] or old["scores"] != row["scores"]:
+                raise ValueError("same source/pixels have conflicting labels/scores")
+            old["catalog_families"].add(row["family"])
+            old["catalog_kinds"].add(row["kind"])
+        else:
+            row["catalog_families"] = {row["family"]}
+            row["catalog_kinds"] = {row["kind"]}
+            unique[key] = row
+    rows = list(unique.values())
+    positives = [r for r in rows if r["is_corruption"]]
+    negatives = [r for r in rows if r["kind"] in ("honest_anchor", "honest_native")]
+    origins = sorted({r["ref_id"] for r in rows})
+    cohorts = {
+        "honest_all": negatives,
+        "native_all": [r for r in negatives if "honest_native" in r["catalog_kinds"]],
+        "anchor_q10": [r for r in negatives if r["kind"] == "honest_anchor" and str(r["severity"]) == "10"],
+        "anchor_q20": [r for r in negatives if r["kind"] == "honest_anchor" and str(r["severity"]) == "20"],
+    }
+
+    def separation(pos, neg, model):
+        if not pos or not neg:
+            return {"status": "MISSING", "positives": len(pos), "honest": len(neg)}
+        auc = roc_auc_score([1] * len(pos) + [0] * len(neg),
+                            [-r["scores"][model] for r in pos + neg])
+        per_origin = {}
+        strict = ties = pairs = 0
+        for origin in origins:
+            pp = [r["scores"][model] for r in pos if r["ref_id"] == origin]
+            nn = [r["scores"][model] for r in neg if r["ref_id"] == origin]
+            if not pp or not nn:
+                continue
+            p, n = np.asarray(pp)[:, None], np.asarray(nn)[None, :]
+            below, tied = int((p < n).sum()), int((p == n).sum())
+            count = p.size * n.size
+            per_origin[origin] = dict(positives=len(pp), honest=len(nn),
+                                      strict_below=below / count,
+                                      auc=(below + .5 * tied) / count)
+            strict += below
+            ties += tied
+            pairs += count
+        return dict(positives=len(pos), honest=len(neg), pooled_auc=float(auc),
+                    within_reference_auc=(strict + .5 * ties) / pairs,
+                    strict_below_fraction=strict / pairs, compared_pairs=pairs,
+                    tied_pairs=ties,
+                    macro_reference_auc=float(np.mean([x["auc"] for x in per_origin.values()])),
+                    per_reference=per_origin)
+
+    models = {}
+    for model in model_names:
+        by_family = {}
+        for family in sorted({f for r in positives for f in r["catalog_families"]}):
+            by_family[family] = separation([r for r in positives if family in r["catalog_families"]],
+                                           cohorts["anchor_q20"], model)
+        models[model] = dict(cohorts={name: separation(positives, neg, model)
+                                     for name, neg in cohorts.items()},
+                             catalog_family_vs_q20=by_family,
+                             range=dict(min=min(r["scores"][model] for r in rows),
+                                        max=max(r["scores"][model] for r in rows)))
+    report = dict(status="COMPLETE_TRAIN_CATALOG_DIAGNOSTIC", raw_rows=len(records),
+                  unique_pixel_pairs=len(rows), duplicates_removed=len(records) - len(rows),
+                  positive_unique=len(positives), honest_unique=len(negatives), origins=origins,
+                  inert_attempts=sum(bool(r.get("inert")) for r in records),
+                  model_qualified=False,
+                  labels="historical catalog positives; not reviewed catastrophic dispositions",
+                  auc_orientation="lower served score predicts corruption; ties count one half",
+                  native_decoding="retained native SDR bitstreams decoded to canonical RGB8 PNG delivery",
+                  models=models)
+    with open(args.out_json, "x") as f:
+        json.dump(report, f, indent=2, allow_nan=False)
+        f.write("\n")
+    print(f"TRAIN catalog: {len(rows)} unique pairs; {len(positives)} positives; {len(negatives)} honest")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--score-table-report":
+        return score_table_report(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "--integrity-admission":
         return integrity_report(sys.argv[1:])
     if len(sys.argv) > 1 and sys.argv[1] == "--audit-jsonl":

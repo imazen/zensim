@@ -1197,3 +1197,27 @@ SHA-256 `1707879d64581d60450e2d6978988f2d77007fc0814e1b513ac6a1076cfe35c1`, 3899
 `s3://zentrain/jobs/fitv2r5confirm-20261004/inputs/`. Program v25b carries the Rev5 E15 coverage pool.
 Six R7 A/B recipe cells, head N, seeds 0–2; no confirmation read and no Rev5-vs-Rev4 decision.
 Provenance and final serving evidence are owned by `benchmarks/r5confirm_WORKLOG.md`; E24 owns selection.
+
+## Exposure ledger — 2026-10-04: HDRCORR frozen Rev4 transfer and corruption read
+
+Explicit evaluation-lane brief `~/tmp/zensim-paper/rev4/HDRCORR_brief.md`; no fit, calibration,
+feature/checkpoint selection or threshold tuning. Frozen by_v2fy and v2+basic full-data seeds
+0/1/2 at cv16:cf98 plus shipped B/BHdr; hashes in `/var/tmp/hdrcorr/FROZEN.json`.
+
+- HDR TRAIN: September15 corrected 7,425 native-PQ pairs, 495 variants / 33 source families;
+  fresh native CVVDP/PU-SSIM2 truth retained by that packet. Candidate scores freshly computed
+  through `BakeScorer::compute_hdr` at Rev4; shipped controls at their own Rev1 in a separate process.
+- HDR VAL: registered hdr_v3mix 3,900 rows / 300 reference variants / 20 origins, explicitly
+  authorized by this brief, preserving its historical VAL role (including odd terminal digits).
+  Original stored features used only to recover row identity against the retained producer TSV;
+  every alias checked for bitstream-byte identity. New scores use native PQ16/codestream cICP.
+  Carried historical cvvdp-mix targets are not fresh common-primary judge outputs.
+- Corruption: canonical September8 TRAIN only, 8,580 catalog attempts plus 456 retained
+  honest native JXL/AVIF outputs on the 12 TRAIN origins. Deduplicate source/pixel identity;
+  inert controls, honest low-quality anchors and historical catalog positives remain distinct.
+  No canonical corruption validation rows used.
+- No UPIQ label/distorted image, secret holdout, or other T0 label read. UPIQ request and
+  missing Rev4-compatible integrity companion recorded in `HDRCORR_decisions.md`.
+
+Evidence: [HDRCORR worklog](../benchmarks/hdrcorr_WORKLOG.md). These are descriptive
+transfer/catalog diagnostics; no model is qualified or promoted.

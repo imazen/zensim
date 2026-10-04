@@ -627,6 +627,15 @@
       "report_url": "/zensim/reports/joint-core-v1-2026-09-20/",
       "bakes": [],
       "note": "Coverage PASS (mid 55.9%/small 24.4%/tiny 19.7%, photo 81.6%, guards >=5.6%, AI 1.5%, kernel provenance per leg). Leader reproduction: core basic228/h128 best-val 0.9696-0.9729 vs frozen R915 0.9775-0.9788, mean gap -0.0068 (smaller train pool). Convergence: flat-to-rising ep50->ep99 (mean +0.0047); the ep-100 dip is the recipe's LR-restart transient, present in frozen R915 too. Permuted-column control: 30-col row-permutation cost +0.0021 mean best-val SROCC vs ~0.003 seed noise -> indistinguishable; per the plan's own rule the core is TOO SMALL for feature screening — grow before any feature screen. DVIFM native3 constants fit measured with full provenance; dHash audit 21 flags all adjudicated false-positive. Evidence: /mnt/v/output/zensim/joint-core-v1/."
+    },
+    {
+      "id": "2026-10-04-hdrcorr-rev4",
+      "date": "2026-10-04",
+      "role": "train-development",
+      "label": "2026-10-04 \u00b7 Frozen Rev4 by_v2fy: native HDR transfer / canonical corruption TRAIN",
+      "report_url": "/zensim/reports/hdrcorr-2026-10-04/",
+      "bakes": [],
+      "note": "No HDR training. Native HDR TRAIN / registered VAL complete for 3 seeds each plus B/BHdr controls. by_v2fy VAL historic-mix SROCC 0.87437\u20130.88110 vs v2+basic 0.89481\u20130.91071; within-ref ~0.955. Catalog corruption AUC 0.60036\u20130.62292, only 27.50\u201331.39% below same-source q20. Both existing integrity companions refuse Rev4. Human HDR read and compatible companion missing; no qualification or default change. Record: benchmarks/hdrcorr_2026-10-04.md."
     }
   ],
   "incumbent_notes": [

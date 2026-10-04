@@ -462,5 +462,53 @@ class Admission(unittest.TestCase):
                     trainer.strict_train_main(['--strict-train-manifest',str(manifest),'--out-dir',str(root/'out')])
 
 
+
+class ScoreTableReport(unittest.TestCase):
+    def test_source_pixel_dedup_ties_orientation_and_missing_coverage(self):
+        import csv
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            meta, scores, output = root / 'meta.json', root / 'scores.tsv', root / 'out.json'
+            records = []
+            # Four unique pixel pairs: positives 10/50, honest q20/q10 50/90.
+            # Three strict correct comparisons, one tie: tie-aware AUC = 3.5/4.
+            for i, (value, positive) in enumerate([(10., 1), (50., 1), (50., 0), (90., 0), (10., 1)]):
+                records.append(dict(ref_path='ref', dist_path=str(i), ref_id='origin', split='train',
+                                    pixels_sha256=str(0 if i == 4 else i), is_corruption=positive,
+                                    kind='corruption' if positive else 'honest_anchor',
+                                    family='bug' if positive else 'honest_anchor',
+                                    severity='20' if i == 2 else '10', value=value))
+            meta.write_text(json.dumps(records))
+            def write_rows(rows):
+                with scores.open('w') as f:
+                    writer = csv.writer(f, delimiter='\t')
+                    writer.writerow(['ref_path', 'dist_path', 'model'])
+                    writer.writerows([['ref', r['dist_path'], r['value']] for r in rows])
+            argv = ['--metadata', str(meta), '--scores', str(scores), '--out-json', str(output)]
+            write_rows(records)
+            evaluator.score_table_report(argv)
+            result = json.loads(output.read_text())
+            self.assertEqual(result['duplicates_removed'], 1)
+            self.assertEqual(result['positive_unique'], 2)
+            self.assertEqual(result['honest_unique'], 2)
+            all_honest = result['models']['model']['cohorts']['honest_all']
+            self.assertEqual(all_honest['pooled_auc'], .875)
+            self.assertEqual(all_honest['within_reference_auc'], .875)
+            self.assertEqual(all_honest['strict_below_fraction'], .75)
+            output.unlink()
+            write_rows(records[:-1])
+            with self.assertRaisesRegex(ValueError, 'coverage'):
+                evaluator.score_table_report(argv)
+            write_rows(records)
+            records[-1]['is_corruption'] = 0
+            meta.write_text(json.dumps(records))
+            with self.assertRaisesRegex(ValueError, 'conflicting labels'):
+                evaluator.score_table_report(argv)
+            records[-1]['split'] = 'validate'
+            meta.write_text(json.dumps(records))
+            with self.assertRaisesRegex(ValueError, 'TRAIN only'):
+                evaluator.score_table_report(argv)
+
+
 if __name__ == '__main__':
     unittest.main()

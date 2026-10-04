@@ -41,6 +41,9 @@
 //! bake/ref/dist triple checks the complete composition and identity shortcut.
 //! A refusal or nonfinite score exits nonzero.
 //!
+//! With `corruption-head`, `--head-probe <head.zcth> <bake>...` records each
+//! production companion attachment acceptance/refusal without changing model bytes.
+//!
 //! ## Pairs mode — score a table of pairs with several bakes
 //!
 //! ```sh
@@ -308,9 +311,32 @@ fn pairs(args: &[String]) {
     }
 }
 
+/// Probe existing integrity companions without changing their arithmetic contract.
+#[cfg(feature = "corruption-head")]
+fn head_probe(args: &[String]) {
+    let head_path = args.first().expect("--head-probe <head.zcth> <bake>...");
+    let bytes = std::fs::read(head_path).expect("head bytes");
+    let head = zensim::corruption_head::CorruptionHead::from_bytes(&bytes).expect("head");
+    println!("bake\thead\toutcome\tdetail");
+    for p in &args[1..] {
+        let b = std::fs::read(p).expect("bake bytes");
+        let m = zenpredict::Model::from_bytes(&b).expect("model");
+        let result = BakeScorer::new(&m).and_then(|z| z.with_corruption_head(&head, None));
+        match result {
+            Ok(_) => println!("{p}\t{head_path}\tACCEPTED\tattachment accepted"),
+            Err(e) => println!("{p}\t{head_path}\tREFUSED\t{e}"),
+        }
+    }
+}
+
 fn main() {
     #[allow(unused_mut)]
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(feature = "corruption-head")]
+    if args.first().map(String::as_str) == Some("--head-probe") {
+        head_probe(&args[1..]);
+        return;
+    }
     #[cfg(feature = "corruption-head")]
     let head = if args.first().map(String::as_str) == Some("--corruption-head") {
         args.remove(0);

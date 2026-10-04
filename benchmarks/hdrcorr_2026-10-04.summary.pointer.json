@@ -1,0 +1,8 @@
+{
+  "schema": "zensim-external-record-pointer-v1",
+  "tower_relative_path": "output/zensim/hdrcorr-2026-10-04/hdrcorr_2026-10-04.summary.json",
+  "sha256": "0875932dadaddf361f24458c3cc9a1217e9c2a21ed471167931bf45fcf0b97b7",
+  "bytes": 414301,
+  "study": "HDRCORR-2026-10-04",
+  "note": "Immutable full summary externalized for landing; original HDRCORR asset packet retained."
+}
