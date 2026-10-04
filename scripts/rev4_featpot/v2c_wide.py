@@ -58,6 +58,42 @@ HUMAN_SETS = tuple(n for names in SOURCES.values() for n in names)
 CONFIRM_SETS = ("cid22_b", "aic4", "konjnd_jpeg_select", "konjnd_jpeg_terminal", "csiq", "mcljci")
 BANK_FILES = ("features.parquet", "keys.parquet", "_MANIFEST.json")
 LEG_ORDER = (*SOURCE_ORDER, *TEACHERS)  # leg index drives the permutation and oracle seeds, as v2_wide
+
+
+@dataclass(frozen=True)
+class BankProfile:
+    """What a bank must be. Rev4: every slot measured and the canon pins above. Rev5 (spec rev5_spec_2026-10-04.md): only
+    the requested basic + peaks + v2 slots are measured, every other slot is NaN (absent), the pins are passed on the command
+    line once the Rev5 extractor exists, Rev4 sidecar extras and the aux family are refused (they would mix revisions), and
+    tables are NaN-padded to `pad_to` so kept columns get the same first-layer initial weights as the Rev4 tables."""
+    revision: int
+    schema: str
+    era: str
+    feature_set_id: str
+    binary: str
+    build: str
+    eras_tail: str | None
+    requested: tuple | None
+    pad_to: int | None = None
+
+
+REV4_PROFILE = BankProfile(4, "rev4-featbank-r4-v1", CANON_ERA, CANON_FEATURE_SET_ID, CANON_BINARY, CANON_BUILD, CANON_ERAS_TAIL,
+                           None)
+PROFILE = REV4_PROFILE
+
+
+def rev5_profile(era: str, fsid: str, binary: str, build: str, pad_to: int | None) -> BankProfile:
+    from rev5_bank import SCHEMA as REV5_SCHEMA, SLOT_RANGES
+    if not (era and fsid and binary and build):
+        raise ValueError("--revision 5 needs --expect-era, --expect-fsid, --expect-binary and --expect-build")
+    return BankProfile(5, REV5_SCHEMA, era, fsid, binary, build, None, tuple(tuple(r) for r in SLOT_RANGES), pad_to)
+
+
+def requested_mask(width: int) -> np.ndarray:
+    mask = np.zeros(width, dtype=bool)
+    for lo, hi in PROFILE.requested or ((0, width),):
+        mask[lo:hi] = True
+    return mask
 META = ["pair_key", "source_row_id", "ref_basename", "member_set", "target"]
 KEY_COLUMNS = ["pair_key", "row_id", "ref_group", "pixels_identical"]
 
@@ -112,7 +148,10 @@ def parse_extras(specs: list[str]) -> list[Extra]:
 
 
 def total_width(extras: list[Extra]) -> int:
-    return WIDTH + sum(e.width for e in extras)
+    if PROFILE.revision != 4 and extras:
+        raise ValueError("sidecar extras are Rev4 extractions; refusing to append them to a Rev5 bank")
+    base = WIDTH + sum(e.width for e in extras)
+    return max(base, PROFILE.pad_to or 0)
 
 
 # ------------------------------------------------------------------ bank reading
@@ -127,15 +166,18 @@ class BankSet:
 
 def check_manifest(manifest: dict, name: str) -> None:
     """Refuse a sidecar whose era/feature-set identity differs from the pinned canon (REEXTRACT consumer rule)."""
-    want = {"set": name, "schema": "rev4-featbank-r4-v1", "feature_width": WIDTH, "formula_revision": "Rev4",
-            "era_label": CANON_ERA, "feature_set_id": CANON_FEATURE_SET_ID, "binary_sha256": CANON_BINARY,
-            "build_commit": CANON_BUILD, "dtype": "float64"}
+    P = PROFILE
+    want = {"set": name, "schema": P.schema, "feature_width": WIDTH, "formula_revision": f"Rev{P.revision}",
+            "era_label": P.era, "feature_set_id": P.feature_set_id, "binary_sha256": P.binary,
+            "build_commit": P.build, "dtype": "float64"}
+    if P.requested is not None:
+        want["requested_slot_ranges"] = [list(r) for r in P.requested]
     for key, value in want.items():
         if manifest.get(key) != value:
             raise ValueError(f"{name}: manifest {key}={manifest.get(key)!r} differs from the pinned canon {value!r}")
     eras = manifest.get("formula_revision_eras") or []
-    if not eras or eras[-1] != CANON_ERAS_TAIL:
-        raise ValueError(f"{name}: formula_revision_eras does not end in {CANON_ERAS_TAIL}")
+    if P.eras_tail is not None and (not eras or eras[-1] != P.eras_tail):
+        raise ValueError(f"{name}: formula_revision_eras does not end in {P.eras_tail}")
 
 
 def read_matrix(path: Path, ids: list[int], n_rows: int) -> tuple[np.ndarray, np.ndarray]:
@@ -194,8 +236,11 @@ def load_bank_set(bank: Path, name: str, extras: list[Extra], peer_dir: Path | N
     X, feat_keys = read_matrix(feats_path, list(range(WIDTH)), len(keys))
     if not np.array_equal(feat_keys, keys.pair_key.to_numpy()):
         raise ValueError(f"{name}: features.parquet and keys.parquet rows are not the same keys in the same order")
-    if not np.isfinite(X).all():
+    mask = requested_mask(WIDTH)
+    if not np.isfinite(X[:, mask]).all():
         raise ValueError(f"{name}: non-finite feature cell")
+    if not np.isnan(X[:, ~mask]).all():
+        raise ValueError(f"{name}: a slot outside the requested ranges carries a value (absent slots must be NaN)")
     receipt = {"rows": len(keys), "manifest_sha256": sha(manifest_path), "keys_sha256": keys_sha,
                "features_sha256": feats_sha, "feature_set_id": manifest["feature_set_id"],
                "extractor_build_commit": manifest["build_commit"], "extractor_binary_sha256": manifest["binary_sha256"],
@@ -208,6 +253,9 @@ def load_bank_set(bank: Path, name: str, extras: list[Extra], peer_dir: Path | N
             X[:, e.first:e.first + e.width] = gather_by_key(path, cols, keys.pair_key.to_numpy(), f"{name}/{e.name}")
             receipt.setdefault("extras", {})[e.name] = {"path": str(path), "sha256": sha(path),
                                                          "first": e.first, "width": e.width}
+    if PROFILE.pad_to and X.shape[1] < PROFILE.pad_to:
+        X = np.concatenate([X, np.full((len(keys), PROFILE.pad_to - X.shape[1]), np.nan, np.float32)], axis=1)
+        receipt["nan_padded_to"] = PROFILE.pad_to
     peers = None
     if peer_dir is not None:
         pp = safe_path(Path(peer_dir) / f"{name}.parquet")
@@ -350,6 +398,8 @@ def aux_columns(width: int) -> list[int]:
 
 def family_matrix(leg: Leg, family: str, width: int) -> tuple[np.ndarray, list[int]]:
     """(n, width) float32 matrix for a family and the permutable (added) column indices of that family."""
+    if family != "main" and PROFILE.revision != 4:
+        raise ValueError(f"family {family!r} is built from the Rev4 bank layout; refusing it at Rev{PROFILE.revision}")
     if family == "main":
         return leg.X, list(range(944, width))
     x = np.zeros((len(leg.X), width), dtype=np.float32)
@@ -386,13 +436,15 @@ def write_table(root: Path, path: Path, ref: np.ndarray, score: np.ndarray, X: n
     # byte-stream-split floats, as v2_wide.write since d029bebc (decoded values identical; EFFAUDIT D6)
     pq.write_table(table, path, compression="zstd", use_dictionary=["ref_basename"],
                    use_byte_stream_split=["human_score", *names])
-    layout = (f"Rev4 bank f0-f1824 (formula Rev4, era {CANON_ERA})" + (f" + appended families to f{width - 1}" if width > WIDTH else "")
+    layout = ((f"Rev4 bank f0-f1824 (formula Rev4, era {CANON_ERA})" + (f" + appended families to f{width - 1}" if width > WIDTH else "")
+               if PROFILE.revision == 4 else
+               f"Rev5 bank (era {PROFILE.era}): basic+peaks+v2 measured at f0-f227 and f372-f719, every other slot NaN, width {width}")
               if family == "main" else
               "bank f0-f943, gmsd f944, gmsm f945, oracle_lo f946, oracle_hi f947, gmsbank f1322-f1501, zeros elsewhere")
     Path(f"{path}.manifest.json").write_text(json.dumps({
-        "source_bank_feature_set_id": CANON_FEATURE_SET_ID,
-        "composite": f"Rev4 POTENTIAL Instrument v2-canon {family} wide table ({layout}); diagnostic only; " + note,
-        "formula_revision": FORMULA_REVISION}) + "\n")
+        "source_bank_feature_set_id": PROFILE.feature_set_id,
+        "composite": f"Rev{PROFILE.revision} POTENTIAL Instrument v2-canon {family} wide table ({layout}); diagnostic only; " + note,
+        "formula_revision": PROFILE.revision}) + "\n")
     return {"rel": str(path.relative_to(root)), "sha256": sha(path), "manifest_sha256": sha(Path(f"{path}.manifest.json")),
             "rows": len(ref), "references": int(len(set(ref.astype(str).tolist())))}
 
@@ -489,8 +541,8 @@ def build(bank: Path, out: Path, legs: str, families: list[str], variants: list[
         old["legs"].update(legs_rec)
         old["bank"].update(all_receipts)
         old.update({"schema": SCHEMA, "label": "POTENTIAL — ceiling, not a model score", "family": family,
-                    "variant": variant, "width": width, "feature_set_id": CANON_FEATURE_SET_ID, "era": CANON_ERA,
-                    "formula_revision": FORMULA_REVISION, "table_code": identity,
+                    "variant": variant, "width": width, "feature_set_id": PROFILE.feature_set_id, "era": PROFILE.era,
+                    "formula_revision": PROFILE.revision, "table_code": identity,
                     "extras": [{"name": e.name, "first": e.first, "width": e.width, "template": e.template} for e in extras],
                     "required_legs": [*SOURCE_ORDER, *(f"human_without_{h}" for h in SOURCE_ORDER), "human_all", *TEACHERS]})
         old["complete"] = all(leg in old["legs"] for leg in old["required_legs"])
@@ -513,7 +565,7 @@ def build_confirm(bank: Path, out: Path, families: list[str], extras: list[Extra
     path = out / "wide" / "confirm" / "receipt.json"
     record = json.loads(path.read_text()) if path.is_file() else {
         "schema": CONFIRM_SCHEMA, "label": "features only; no label read or written", "width": width,
-        "feature_set_id": CANON_FEATURE_SET_ID, "sets": {}}
+        "feature_set_id": PROFILE.feature_set_id, "sets": {}}
     if record["schema"] != CONFIRM_SCHEMA or record["width"] != width:
         raise ValueError(f"{path}: existing confirm receipt has another schema or width; build into a clean --out")
     record["table_code"] = code_identity()
@@ -627,7 +679,18 @@ def main() -> None:
     ap.add_argument("--extra-arm", action="append", default=[], help="NAME=ID,ID,... (keeplists)")
     ap.add_argument("--peer-dir", type=Path, default=CANON_PEERS)
     ap.add_argument("--sample", type=int, default=10_000, help="verify: SafeSyn sample rows")
+    ap.add_argument("--revision", type=int, choices=[4, 5], default=4, help="bank profile (Rev5: rev5_bank.py output)")
+    ap.add_argument("--expect-era", default="")
+    ap.add_argument("--expect-fsid", default="")
+    ap.add_argument("--expect-binary", default="")
+    ap.add_argument("--expect-build", default="")
+    ap.add_argument("--pad-to", type=int, default=0, help="Rev5: NaN-pad tables to this width (the Rev4 tables' width)")
     args = ap.parse_args()
+    global PROFILE
+    if args.revision == 5:
+        if args.bank == CANON_BANK:
+            ap.error("--revision 5 needs an explicit --bank (the Rev5 bank)")
+        PROFILE = rev5_profile(args.expect_era, args.expect_fsid, args.expect_binary, args.expect_build, args.pad_to or None)
     import v2_common
     v2_common.V2 = args.out  # receipts hold root-relative table paths (table_path); the root is --out
     extras = parse_extras(args.extra)

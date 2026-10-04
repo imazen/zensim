@@ -17,3 +17,17 @@ NaN. So requesting the Rev5 subset does not change its values at Rev4.
 Finding for the lane (addendum appended to its brief): the same request's `feature_set_id` at Rev4 is
 `basic+peaks+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype+gmsbank+mapdev+z1max+gmsnative+dvifmgate…#f30d13cf`
 — the research plan computes families nobody asked for. At Rev5 that request has to compute and declare only basic + peaks + v2.
+
+## 2026-10-04 11:40 — instrument tables and fitter accept Rev5 banks
+
+* `v2c_wide.py --revision 5 --bank <rev5 bank> --expect-era/--expect-fsid/--expect-binary/--expect-build --pad-to 1853`:
+  a `BankProfile` replaces the hard-wired Rev4 pins. At Rev5 the requested slots (f0..227, f372..719) must be finite and every
+  other slot NaN (both refused otherwise); Rev4 sidecar extras and the aux family are refused (they would mix revisions);
+  tables are NaN-padded to the Rev4 tables' width so kept columns get the same first-layer initial weights. Rev4 behaviour is
+  unchanged (`REV4_PROFILE` carries the old pins).
+* Fitter (`v2_lodo_mlp.py`, `v2_confirm_fit.py`): `refuse_nonfinite_kept` refuses any keep list that reads a non-finite
+  column in any training or validation table; `predict` densifies the bake (`bake_dial_refit densify`, bit-identical by its
+  gate) when the table declares formula revision ≥ 5, because an identity-width bake multiplies NaN absent slots by zero
+  weights and scores NaN. The densify helper moved from `external_sets.py`'s copy into `v2_common.dense_bake`.
+* Tests: `Rev5Tables` (load + pad + bit-exact requested columns, five refusals, fitter guard, revision probe); full
+  `test_v2c` 69 tests OK.

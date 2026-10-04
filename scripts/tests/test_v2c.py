@@ -76,6 +76,87 @@ class Seeds(unittest.TestCase):
                 v2_common.seeds("kadid", bad)
 
 
+def rev5_bank_set(bank: Path, name: str, rows: int, seed: int, poke=None):
+    """A synthetic Rev5 bank set: requested slots (f0..227, f372..719) finite, every other slot NaN; `poke(values)` may break it."""
+    import rev5_bank
+    values = f64_bank_set(bank, name, rows, seed, identical=())
+    mask = np.zeros(w.WIDTH, dtype=bool)
+    for lo, hi in rev5_bank.SLOT_RANGES:
+        mask[lo:hi] = True
+    values[:, ~mask] = np.nan
+    if poke:
+        poke(values)
+    d = bank / name
+    keys = pq.read_table(d / "keys.parquet").to_pandas()
+    feats = {"pair_key": keys.pair_key, "row_id": keys.row_id, **{f"f{i}": values[:, i] for i in range(w.WIDTH)}}
+    pq.write_table(pa.Table.from_pandas(pd.DataFrame(feats), preserve_index=False), d / "features.parquet")
+    man = json.loads((d / "_MANIFEST.json").read_text())
+    man.update({"schema": rev5_bank.SCHEMA, "formula_revision": "Rev5", "era_label": "rev5test", "feature_set_id": "fsid5",
+                "binary_sha256": "bin5", "build_commit": "build5", "formula_revision_eras": ["rev5"],
+                "requested_slot_ranges": [list(r) for r in rev5_bank.SLOT_RANGES],
+                "features_parquet_sha256": w.sha(d / "features.parquet")})
+    (d / "_MANIFEST.json").write_text(json.dumps(man))
+    return values, mask
+
+
+class Rev5Tables(unittest.TestCase):
+    """Spec rev5_spec_2026-10-04.md §6: a Rev5 bank's absent slots are NaN, never a value; tables keep the Rev4 width."""
+
+    def setUp(self):
+        self.saved = w.PROFILE
+        w.PROFILE = w.rev5_profile("rev5test", "fsid5", "bin5", "build5", 1853)
+
+    def tearDown(self):
+        w.PROFILE = self.saved
+
+    def test_loads_pads_and_keeps_requested_bits(self):
+        with tempfile.TemporaryDirectory() as t:
+            values, mask = rev5_bank_set(Path(t), "aic4", 6, 3)
+            b = w.load_bank_set(Path(t), "aic4", [])
+            self.assertEqual(b.X.shape, (6, 1853))
+            self.assertTrue(np.array_equal(b.X[:, :w.WIDTH][:, mask], values[:, mask].astype(np.float32)))
+            self.assertTrue(np.isnan(b.X[:, :w.WIDTH][:, ~mask]).all() and np.isnan(b.X[:, w.WIDTH:]).all())
+            self.assertEqual(w.total_width([]), 1853)
+
+    def test_refusals(self):
+        def value_in_absent(v):
+            v[0, 900] = 1.0
+        def nan_in_requested(v):
+            v[1, 400] = np.nan
+        for poke in (value_in_absent, nan_in_requested):
+            with tempfile.TemporaryDirectory() as t:
+                rev5_bank_set(Path(t), "aic4", 6, 3, poke)
+                with self.assertRaises(ValueError):
+                    w.load_bank_set(Path(t), "aic4", [])
+        with tempfile.TemporaryDirectory() as t:
+            rev5_bank_set(Path(t), "aic4", 6, 3)
+            w.PROFILE = w.REV4_PROFILE                       # a Rev4 build refuses a Rev5 bank
+            with self.assertRaises(ValueError):
+                w.load_bank_set(Path(t), "aic4", [])
+        w.PROFILE = w.rev5_profile("rev5test", "fsid5", "bin5", "build5", 1853)
+        with self.assertRaises(ValueError):                  # Rev4 sidecars would mix revisions
+            w.total_width(w.parse_extras(["texgain=1825:3:/x/{set}/t.parquet"]))
+        leg = w.Leg("kadid", pd.DataFrame({"ref_basename": ["a"], "pair_key": ["k"]}), np.zeros((1, 1853), np.float32),
+                    None, [0.0, 1.0], np.zeros(1), {})
+        with self.assertRaises(ValueError):                  # the aux family is a Rev4 layout
+            w.family_matrix(leg, "aux", 1853)
+        with self.assertRaises(ValueError):
+            w.rev5_profile("", "fsid5", "bin5", "build5", None)
+
+    def test_fitter_guard_and_revision_probe(self):
+        with tempfile.TemporaryDirectory() as t:
+            path = Path(t) / "leg.parquet"
+            x = np.ones((4, 6), np.float32)
+            x[:, 4] = np.nan
+            pq.write_table(pa.table({f"f{i}": x[:, i] for i in range(6)}), path)
+            v2_common.refuse_nonfinite_kept([path], [0, 1, 5])              # NaN outside the keep list is fine
+            with self.assertRaises(ValueError):
+                v2_common.refuse_nonfinite_kept([path], [1, 4])
+            self.assertEqual(v2_common.table_revision(path), 4)              # no manifest: a Rev4-era table
+            Path(f"{path}.manifest.json").write_text(json.dumps({"formula_revision": 5}))
+            self.assertEqual(v2_common.table_revision(path), 5)
+
+
 class Guard(unittest.TestCase):
     def test_sealed_paths_refused(self):
         for bad in ("/var/tmp/rev4-featbank/_sealed", "/x/_sealed/y/labels.parquet", "_sealed_extra/z"):

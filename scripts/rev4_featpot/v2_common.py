@@ -364,3 +364,41 @@ def sha(path: Path) -> str:
         for block in iter(lambda: stream.read(8 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+# ------------------------------------------------------------------ Rev5 tables: absent slots are NaN (spec rev5_spec_2026-10-04.md §6)
+def table_revision(table: Path) -> int:
+    """Formula revision a wide table declares in its sidecar manifest (Rev4 tables predate the field's use: 4)."""
+    man = Path(f"{table}.manifest.json")
+    return int(json.loads(man.read_text()).get("formula_revision", 4)) if man.is_file() else 4
+
+
+def refuse_nonfinite_kept(paths, keep) -> None:
+    """Every kept column must be finite in every table a cell trains or validates on. A Rev5 table marks absent slots NaN;
+    a keep list that reads one is refused here, before the trainer runs."""
+    import numpy as np
+    import pyarrow.parquet as pq
+    cols = [f"f{i}" for i in keep]
+    for path in paths:
+        for batch in pq.ParquetFile(path).iter_batches(batch_size=65536, columns=cols):
+            for j in range(batch.num_columns):
+                if not np.isfinite(batch.column(j).to_numpy(zero_copy_only=False)).all():
+                    raise ValueError(f"{path}: kept column {cols[j]} is not finite (an absent slot?); refusing this keep list")
+
+
+def dense_bake(bake: Path, cache: Path) -> Path:
+    """The bake rewritten to the dense contract by the owner (`bake_dial_refit densify`, identity gate: predictions
+    bit-identical on its probe rows). Cell bakes are identity-width, so a zero-weight input still multiplies its NaN; on a
+    table with NaN absent slots only the dense bake (exactly the inputs it reads) scores finite."""
+    import subprocess
+    import threading
+    out = Path(cache) / "dense" / f"{hashlib.sha256(Path(bake).read_bytes()).hexdigest()[:16]}.bin"
+    if not out.is_file():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        r = subprocess.run([str(FITBIN), "densify", "--in", str(bake), "--out", str(tmp)], check=True, capture_output=True,
+                           text=True)
+        if "BIT-IDENTICAL" not in r.stdout + r.stderr:
+            raise ValueError(f"densify identity gate did not report bit-identical predictions for {bake}")
+        tmp.rename(out)
+    return out

@@ -56,6 +56,9 @@ def refs_of(path: Path) -> list[str]:
 
 
 def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
+    from v2_common import dense_bake, table_revision
+    if table_revision(table) >= 5:  # Rev5 tables carry NaN absent slots: score with the dense bake (bit-identical by gate)
+        bake = dense_bake(bake, out.parent)
     run([str(FITBIN), "predict", "--bake", str(bake), "--corpus", str(table), "--score-units",
          "--out", str(out)], out.with_suffix(".log"))
     result = pd.read_csv(out, sep="\t")
@@ -229,6 +232,8 @@ def main() -> None:
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
     try:
+        from v2_common import refuse_nonfinite_kept
+        refuse_nonfinite_kept([g[1] for g in groups], keep)  # Rev5 tables mark absent slots NaN; a kept one is refused here
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
     finally:
         for tmp in (curated, curated_extra):

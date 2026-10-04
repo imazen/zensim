@@ -109,6 +109,8 @@ def main() -> None:
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = confirm_seeds(args.seed_index)
     try:
+        from v2_common import refuse_nonfinite_kept
+        refuse_nonfinite_kept([g[1] for g in groups], keep)  # Rev5 tables mark absent slots NaN
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
     finally:
         if curated_extra is not None:
