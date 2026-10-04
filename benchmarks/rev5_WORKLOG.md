@@ -160,3 +160,113 @@ on this path. Feature accuracy is unchanged by definition; historical
 metadata is unchanged. W3 scorer scratch reuse landed with F2. Work counters
 are added to existing fold_timing for actual V-plane calls, activity chains,
 peak bands, scale-0 X/B consumers, scratch initialization, and stored X/B rows.
+
+## 2026-10-04 — gpt-6.1-sol continuation review
+
+Verified jj history and reviewed inherited arithmetic changes. Inherited full
+release suite passes: 589 library tests, all integration binaries and doc tests
+(log `/var/tmp/rev5/full-release.log`, wrapper 310 s). Targeted Rev5 gates pass
+with vector H/V blur (103 s), vector dense/gradient pools (105 s), and vector
+basic fused pools (110 s); logs `vector-gates.log`, `pools-gates.log`,
+`basic-gates.log`. These preserve the sixteen-lane tree and local-window values.
+
+Native perf after vector H/V + dense/gradient, before vector basic (1 MP,
+20 calls, 5,468 samples): basic fused owner 27.95%, its scalar window closure
+24.20%, dense 10.39%, V blur 8.69%, H blur 8.55%. Data
+`/var/tmp/rev5/perf-vector-pools.data`. This identifies the radius-zero basic
+consumer as the next bottleneck; extended the existing vector owner with
+sixteen-lane storage and direct shared-plane reads, without recurrence scratch.
+
+W3: producer buffers now recycle in reverse construction order, making each
+next pop match its prior geometry. Previous LIFO order repeatedly paired small
+coarse buffers with full-resolution planes. H/V production taps and scalar
+fallback taps now use stack buffers. W5 cached-reference walks also skip copying
+scale-zero X/B, feeding cached coarse chroma directly. No historical arithmetic
+expressions changed; historical byte/panel gates remain required.
+
+### 2026-10-04 — sol continuation: vector kernels, shared map walk, gates
+
+The inherited scalar local-window and pool implementations were functionally
+correct but scalarized hot x86 loops. Radius-five H/V windows now evaluate the
+same f32 tree in vector bodies, dense/gradient/basic canon64 kernels use sixteen
+virtual f64 lanes at Rev5, and Rev1–Rev4 retain their eight-lane arithmetic.
+The first 1 MP single-thread profile (5,468 samples) attributed 27.95% to the
+basic fold and 24.20% to its scalar local-window closure, motivating the basic
+vector body. The subsequent 3,000-sample score profile attributed 22.65% to
+plain local V blur, 22.06% to dense v2, 20.48% to fused H blur, 8.54% to XYB,
+7.09% to basic fold, and 6.43% to gradients. Raw profiles are under
+`/var/tmp/rev5/perf-{vector-pools,external-base-score}.data`.
+
+Rev5 prepared maps now retain the basic SD/mu planes and basic/HF reductions
+from the v2 fold, and consume them without a second basic blur/activity walk.
+Retention allocates only requested channel-scales, omits unused bs2, and the
+map pass skips append arithmetic when bs2 is absent. Scratch recycling visits
+strips in reverse release order so the same geometry reuses the same buffers.
+The no-scale-0-X/B producer also handles cached reference feeds; a behavioral
+comparison against full XYB conversion passes on 64², 97×63 and 257×289 pairs.
+
+The actual work census caught the original duplicate prepared-map walk
+(609 V-plane visits and 116 peak bands at 1 MP), then caught an unused bs2
+read after selective retention. Both were fixed. The corrected score/map
+walks visit 29 strip/channel-scale cells, 145 V planes, 29 activity chains,
+zero peak bands, zero scale-0 X/B cells, and zero stored scale-0 X/B rows.
+Prepared-map runs at one and eight threads both show zero overwritten-scratch
+clears after warmup. Logs: `/var/tmp/rev5/census-map-v2-{1,8}.log` and
+`census-score.log`. Cold map allocation clears 7,939,072 elements at one
+thread and 8,700,928 at eight threads; cold allocation is not a reuse claim.
+
+Accuracy on the twelve registered FEATACC pairs, production v3 versus exact:
+
+| family | Rev3 maximum relative / absolute | Rev5 maximum relative / absolute |
+|---|---:|---:|
+| basic | 7.951577e-4 / 5.862508e-5 | 2.804724e-4 / 2.074988e-5 |
+| peaks | 1.154929e-3 / 7.483363e-4 | 2.558571e-4 / 1.893044e-4 |
+| v2 | 3.061749e-1 / 2.413061e-4 | 1.094758e-3 / 2.989946e-5 |
+
+All three families improve. The 17×9 crop f664 changes from Rev3 production
+0.00049146652924 (exact 0.000376263943186) to Rev5 production
+0.0003762477981094654 (exact 0.00037626394189433005). Element/blur error is
+separate from the central-moment algorithm gate: the oracle-only two-pass
+checker reconstructs the SAME f32 leaves, tests all 264 strip moment pairs
+across the registered panel, and has maximum relative error 8.665432e-14,
+passing the 1e-6 bar. Logs: `/var/tmp/rev5/vector-accuracy/` and
+`moment-accuracy-complete.log`. The first moment-auditor invocation failed to
+write because its dump directory was absent; the complete rerun passed.
+
+Native full-vector parity passes on 64², 97×63, 131×65 and 255×129 pairs;
+WASM SIMD128, i686 scalar, and reachable aarch64/NEON produce the identical
+serialized native vectors. WASM uses Rust 1.98.1 (the CI pin); stable 1.99.0
+fails in upstream zenflate. i686 uses the native multilib kernel with an env
+runner because configured qemu-i386-static is absent. aarch64 uses clang's
+cross target and `qemu-aarch64 -L /usr/aarch64-linux-gnu`. Logs:
+`/var/tmp/rev5/{native-parity,wasm-rev5-rerun,i686-rev5-rerun,aarch64-rev5}.log`.
+
+Historical bytes: Rev1/2/3 compare all four x86 tiers × twelve registered
+pairs against the compatible preexisting review probe: 144 vectors, zero
+differences. That probe predates canonical Rev4, so its Rev4 comparison is
+not the correct baseline. Using `/var/tmp/rev4canon/target-prod/release/tier_audit_features`
+for Rev4 gives 48 more vectors, zero differences. Owner steering identity
+has 48 cases per revision and broad identity has 384 rows per revision,
+both Rev3 and Rev4: every comparison against saved NEIGHSTEER outputs is
+clean. `just rev4serve-gate` passes its real held-out bake/corpus test.
+Artifacts: `/var/tmp/rev5/historical-{tiers,steering,r4-canon}/`.
+
+Full release suite passes after shared/selective map retention
+(`/var/tmp/rev5/final-full-release.log`, 324 s). All-features library passed
+635 tests, 13 ignored before that change; CI-exact clippy, 810 lint-script
+checks, and API snapshot check passed. The 27 CI entries contain 26 unique
+feature permutations. Initial permutation failures exposed missing cfg
+on census calls and feature-specific dead-code annotations; corrected
+cells pass except the strengthened bake test initially stamped the enum's
+zero-based discriminant. That helper is corrected to discriminant + 1;
+final feature/gate reruns follow optimization completion.
+
+Performance qualification caveat: another owner's ignored exhaustive f32
+SIMD test (PID 760429) has continuously used one CPU throughout the lane.
+It is not this lane's process and has not been interrupted. Strict zenbench
+resource-gate flags will be retained; a quiet-box certification cannot be
+claimed while this interference exists. Revision comparisons now use
+persistent isolated revision workers so rounds interleave without changing
+the process-wide formula switch. Parent timings include the pipe round-trip;
+setup and warmup are untimed. Fixed/per-pixel fits must disclose this fixed
+IPC overhead rather than presenting the intercept as pure extraction cost.

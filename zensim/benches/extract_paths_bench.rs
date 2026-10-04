@@ -469,13 +469,13 @@ fn rss_mode(arm: &str) {
         }
         if std::env::var_os("ZEN_XP_SPATIAL").is_some() {
             let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
-            for _ in 0..iters {
+            run_profile_calls(iters, || {
                 zenbench::black_box(worker.compute(&ds, None).unwrap());
-            }
+            });
         } else {
-            for _ in 0..iters {
+            run_profile_calls(iters, || {
                 zenbench::black_box(scorer.compute(&rs, &ds, None).unwrap());
-            }
+            });
         }
         return;
     }
@@ -918,6 +918,128 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
     }
 }
 
+// Persistent isolated revision owners let zenbench interleave Rev3/4/5
+// without mutating a process-wide formula gate. Setup and warmup are untimed;
+// the parent measures a call plus pipe round-trip (reported explicitly).
+fn run_profile_calls(count: usize, mut action: impl FnMut()) {
+    if std::env::var_os("ZEN_XP_ROUND_WORKER").is_none() {
+        for _ in 0..count {
+            action();
+        }
+        return;
+    }
+    use std::io::{BufRead, Write};
+    for _ in 0..3 {
+        action();
+    }
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "READY").unwrap();
+    out.flush().unwrap();
+    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+        if line == "quit" {
+            break;
+        }
+        let start = std::time::Instant::now();
+        action();
+        writeln!(out, "{}", start.elapsed().as_nanos()).unwrap();
+        out.flush().unwrap();
+    }
+}
+
+struct RevisionWorker {
+    process: std::process::Child,
+    input: std::process::ChildStdin,
+    output: std::io::BufReader<std::process::ChildStdout>,
+}
+impl RevisionWorker {
+    fn new(binary: &str, revision: &str, bake: &str, size: usize, spatial: bool) -> Self {
+        use std::io::BufRead;
+        let mut command = std::process::Command::new(binary);
+        command
+            .env("ZEN_XP_RSS", "bake")
+            .env("ZEN_XP_ROUND_WORKER", "1")
+            .env("ZEN_XP_BAKE", bake)
+            .env("ZEN_XP_SIZE", size.to_string())
+            .env("ZENSIM_FORMULA_REV", revision)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+        if spatial {
+            command.env("ZEN_XP_SPATIAL", "1");
+        } else {
+            command.env_remove("ZEN_XP_SPATIAL");
+        }
+        let mut process = command.spawn().unwrap();
+        let input = process.stdin.take().unwrap();
+        let mut output = std::io::BufReader::new(process.stdout.take().unwrap());
+        let mut ready = String::new();
+        output.read_line(&mut ready).unwrap();
+        assert_eq!(ready.trim(), "READY");
+        Self {
+            process,
+            input,
+            output,
+        }
+    }
+    fn call(&mut self) -> u128 {
+        use std::io::{BufRead, Write};
+        writeln!(self.input, "call").unwrap();
+        self.input.flush().unwrap();
+        let mut response = String::new();
+        self.output.read_line(&mut response).unwrap();
+        response.trim().parse().unwrap()
+    }
+}
+impl Drop for RevisionWorker {
+    fn drop(&mut self) {
+        use std::io::Write;
+        let _ = writeln!(self.input, "quit");
+        let _ = self.input.flush();
+        let _ = self.process.wait();
+    }
+}
+
+fn revision_models_bench(sizes: &[usize], manifest: &str) {
+    let entries: Vec<Vec<String>> = std::fs::read_to_string(manifest)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+        .map(|line| line.split('\t').map(str::to_string).collect())
+        .collect();
+    assert!(
+        entries.iter().all(|row| row.len() == 4),
+        "name, binary, revision, bake TSV"
+    );
+    let path = std::env::var("ZENBENCH_RESULT_PATH").expect("retain interleaved rounds");
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "refusing to overwrite timing evidence"
+    );
+    let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
+    let result = zenbench::run_gated(zenbench::GateConfig::strict(), |suite| {
+        for &size in sizes {
+            suite.compare(
+                format!("revisions_{}_{size}", if spatial { "map" } else { "score" }),
+                |group| {
+                    let (rounds, min_rounds, wall) = bench_budget();
+                    group
+                        .config()
+                        .max_rounds(rounds)
+                        .min_rounds(min_rounds)
+                        .max_wall_time(std::time::Duration::from_secs(wall));
+                    group.config().min_iterations = 1;
+                    group.config().max_iterations = 1;
+                    for row in &entries {
+                        let mut worker =
+                            RevisionWorker::new(&row[1], &row[2], &row[3], size, spatial);
+                        bench_arm(group, row[0].clone(), move |b| b.iter(|| worker.call()));
+                    }
+                },
+            );
+        }
+    });
+    result.save(path).unwrap();
+}
+
 /// Kernel study uses upstream zenresize's own coefficient tables and float
 /// resizer. No copied filters, RGB transfer, quantization, or model scoring.
 fn resize_filter_bench(sizes: &[usize]) {
@@ -1082,6 +1204,10 @@ fn main() {
         .ok()
         .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![576, 1152, 2304]);
+    if let Ok(manifest) = std::env::var("ZEN_XP_EXTERNAL_MODELS") {
+        revision_models_bench(&sizes, &manifest);
+        return;
+    }
     if let Ok(manifest) = std::env::var("ZEN_XP_MODELS") {
         sampling_models_bench(&sizes, &manifest);
         return;

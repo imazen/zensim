@@ -4300,6 +4300,10 @@ fn run_blur_pass_inner(
     t_scale: usize,
     revision: FormulaRevision,
 ) {
+    if revision >= FormulaRevision::Rev5 && want_v2 {
+        crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
+    }
+
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
     let mu2_h = &mut mu2_h[..n];
@@ -5045,6 +5049,51 @@ fn era2_dense_enabled() -> bool {
 /// `r4`: REV4's C3 tail-histogram / C4 flat-HF-gain hook bundle — `None`
 /// on every non-rev4 call (one loop-invariant Option check per chunk,
 /// the `transducer_bank` shape).
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn audit_rev5_moments(
+    acc: &DenseAccum,
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    act: &[f32],
+    n: usize,
+    bank: bool,
+) {
+    if std::env::var("ZENSIM_FEATCANON_MOMENT_CHECK").as_deref() != Ok("1") {
+        return;
+    }
+    // Independent two-pass f64 ruler over the SAME f32 signal leaves.
+    // The exact arithmetic axis separately measures leaf error against f64.
+    let values: Vec<f64> = (0..n)
+        .map(|i| {
+            dense_terms32(
+                src[i], dst[i], mu1[i], mu2[i], ssq[i], s12[i], act[i], bank, true,
+            )
+            .0[0] as f64
+        })
+        .collect();
+    let mean = values.iter().sum::<f64>() / n as f64;
+    let m2 = values.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+    let m4 = values.iter().map(|x| (x - mean).powi(4)).sum::<f64>();
+    let mut max_relative = 0.0_f64;
+    for (got, reference) in [(acc.central.m2, m2), (acc.central.m4, m4)] {
+        let relative = (got - reference).abs() / reference.abs().max(1e-30);
+        assert!(
+            relative <= 1e-6,
+            "Rev5 moment {n} samples: {got} vs {reference}, relative={relative}"
+        );
+        max_relative = max_relative.max(relative);
+    }
+    eprintln!(
+        "REV5_MOMENT_GATE pixels={n} max_relative={max_relative:.9e} dev4={:.12e}",
+        (m4 / n as f64).sqrt().sqrt()
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel(
     src: &[f32],
@@ -5069,7 +5118,25 @@ fn dense_block_kernel(
     if crate::ssim_form::active_revision() >= FormulaRevision::Rev5
         && matches!(mode, crate::featcanon::Mode::Canon64)
     {
-        return dense_block_kernel_canon::<crate::featcanon::Lanes16F64>(
+        let acc = incant!(
+            dense_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64>(
+                src,
+                dst,
+                mu1,
+                mu2,
+                ssq,
+                s12,
+                activity,
+                width,
+                height,
+                transducer_bank,
+                r4,
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        );
+        #[cfg(feature = "oracle")]
+        audit_rev5_moments(
+            &acc,
             src,
             dst,
             mu1,
@@ -5077,11 +5144,10 @@ fn dense_block_kernel(
             ssq,
             s12,
             activity,
-            width,
-            height,
+            width * height,
             transducer_bank,
-            r4,
         );
+        return acc;
     }
     if mode.active() {
         match mode {
@@ -5089,7 +5155,7 @@ fn dense_block_kernel(
                 // canon64: the `LanesF64` canonical arm — tier-dispatched;
                 // scalar/wasm128 keep the generic scalar body.
                 return incant!(
-                    dense_block_kernel_canon64_vec(
+                    dense_block_kernel_canon64_vec::<crate::featcanon::LanesF64>(
                         src,
                         dst,
                         mu1,
@@ -6626,6 +6692,7 @@ fn gradient_terms32_v<T: F32x8Backend + Copy, const BANDVIS: bool, const BV_DSTA
 #[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec<
+    P: crate::featcanon::Pool64,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
     const BANK: bool,
@@ -6642,7 +6709,6 @@ fn gradient_block_kernel_canon64_vec<
     r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
-    use crate::featcanon::{LanesF64, Pool as _};
     let mut r4 = r4;
     let mut acc = GradientAccum::default();
     let bank = r4
@@ -6679,20 +6745,20 @@ fn gradient_block_kernel_canon64_vec<
         );
         if width > 2 {
             let interior_end = width - 1;
-            let mut r_gms = LanesF64::zero();
-            let mut r_gms2 = LanesF64::zero();
-            let mut r_ring = LanesF64::zero();
-            let mut r_band = LanesF64::zero();
-            let mut r_gsrc = LanesF64::zero();
-            let mut r_gdst = LanesF64::zero();
-            let mut r_bv_gain = LanesF64::zero();
-            let mut r_bv_loss = LanesF64::zero();
+            let mut r_gms = P::zero();
+            let mut r_gms2 = P::zero();
+            let mut r_ring = P::zero();
+            let mut r_band = P::zero();
+            let mut r_gsrc = P::zero();
+            let mut r_gdst = P::zero();
+            let mut r_bv_gain = P::zero();
+            let mut r_bv_loss = P::zero();
             // Lane-aligned head: x = 1..8 scalar (interior starts one
             // pixel in — the canonical lanes land on chunk lanes only for
             // x ≡ 0 (mod 8) chunk starts).
             let head_end = interior_end.min(8);
             for x in 1..head_end {
-                gradient_interior_elem_canon::<LanesF64, BANDVIS, BV_DSTACT, BANK>(
+                gradient_interior_elem_canon::<P, BANDVIS, BV_DSTACT, BANK>(
                     src_h,
                     dst_h,
                     activity,
@@ -6783,11 +6849,41 @@ fn gradient_block_kernel_canon64_vec<
                     }
                 }
 
-                r_gsrc.add_chunk(&gsrc.to_array());
-                r_gdst.add_chunk(&gdst.to_array());
-                r_gms.add_chunk(&g.to_array());
-                r_gms2.add_chunk(&g2.to_array());
-                r_ring.add_chunk(&ring_i.to_array());
+                {
+                    let a = gsrc.to_array();
+                    let lanes = r_gsrc.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += a[l] as f64;
+                    }
+                }
+                {
+                    let a = gdst.to_array();
+                    let lanes = r_gdst.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += a[l] as f64;
+                    }
+                }
+                {
+                    let a = g.to_array();
+                    let lanes = r_gms.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += a[l] as f64;
+                    }
+                }
+                {
+                    let a = g2.to_array();
+                    let lanes = r_gms2.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += a[l] as f64;
+                    }
+                }
+                {
+                    let a = ring_i.to_array();
+                    let lanes = r_ring.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += a[l] as f64;
+                    }
+                }
                 if let Some(r4) = r4.as_mut() {
                     let ra = ring_i.to_array();
                     let gs = gsrc.to_array();
@@ -6804,16 +6900,34 @@ fn gradient_block_kernel_canon64_vec<
                         );
                     }
                 }
-                r_band.add_chunk(&band.to_array());
+                {
+                    let a = band.to_array();
+                    let lanes = r_band.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += a[l] as f64;
+                    }
+                }
                 if BANDVIS {
-                    r_bv_gain.add_chunk(&bv_gain.to_array());
-                    r_bv_loss.add_chunk(&bv_loss.to_array());
+                    {
+                        let a = bv_gain.to_array();
+                        let lanes = r_bv_gain.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += a[l] as f64;
+                        }
+                    }
+                    {
+                        let a = bv_loss.to_array();
+                        let lanes = r_bv_loss.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += a[l] as f64;
+                        }
+                    }
                 }
                 x0 += 8;
             }
             // Scalar tail — the canonical element step verbatim.
             for x in x0..interior_end {
-                gradient_interior_elem_canon::<LanesF64, BANDVIS, BV_DSTACT, BANK>(
+                gradient_interior_elem_canon::<P, BANDVIS, BV_DSTACT, BANK>(
                     src_h,
                     dst_h,
                     activity,
@@ -6890,6 +7004,7 @@ fn gradient_block_kernel_canon64_vec<
 /// Scalar-tier sibling of [`gradient_block_kernel_canon64_vec`].
 #[allow(clippy::too_many_arguments)]
 fn gradient_block_kernel_canon64_vec_scalar<
+    P: crate::featcanon::Pool64,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
     const BANK: bool,
@@ -6906,7 +7021,7 @@ fn gradient_block_kernel_canon64_vec_scalar<
     r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
-    gradient_block_kernel_canon::<crate::featcanon::LanesF64, BANDVIS, BV_DSTACT, BANK>(
+    gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK>(
         src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
     )
 }
@@ -6914,6 +7029,7 @@ fn gradient_block_kernel_canon64_vec_scalar<
 /// Wasm128 sibling of [`gradient_block_kernel_canon64_vec_scalar`].
 #[allow(clippy::too_many_arguments, dead_code)]
 fn gradient_block_kernel_canon64_vec_wasm128<
+    P: crate::featcanon::Pool64,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
     const BANK: bool,
@@ -6930,7 +7046,7 @@ fn gradient_block_kernel_canon64_vec_wasm128<
     r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
-    gradient_block_kernel_canon::<crate::featcanon::LanesF64, BANDVIS, BV_DSTACT, BANK>(
+    gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK>(
         src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
     )
 }
@@ -6939,6 +7055,7 @@ fn gradient_block_kernel_canon64_vec_wasm128<
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
 #[allow(clippy::too_many_arguments, dead_code)]
 fn gradient_block_kernel_canon64_vec_neon<
+    P: crate::featcanon::Pool64,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
     const BANK: bool,
@@ -6955,7 +7072,7 @@ fn gradient_block_kernel_canon64_vec_neon<
     r4: Option<Rev4Grad<'_>>,
     mode: crate::featcanon::Mode,
 ) -> GradientAccum {
-    gradient_block_kernel_canon::<crate::featcanon::LanesF64, BANDVIS, BV_DSTACT, BANK>(
+    gradient_block_kernel_canon::<P, BANDVIS, BV_DSTACT, BANK>(
         src_h, dst_h, activity, act_dst, width, height, bv_lo, bv_hi, r4, mode,
     )
 }
@@ -7155,6 +7272,7 @@ fn gradient_block_kernel(
         #[cfg(feature = "oracle")]
         use crate::featcanon::{LanesF32, Neum64};
         let m = mode;
+        #[cfg(feature = "oracle")]
         macro_rules! go {
             ($p:ty) => {
                 match (bandvis, bv_act_dst, gmsbank) {
@@ -7227,12 +7345,23 @@ fn gradient_block_kernel(
         // keep the generic scalar canonical body.
         macro_rules! go64 {
             ($b:literal, $v:literal, $k:literal, $act_dst:expr, $lo:expr, $hi:expr) => {
+                if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
                 incant!(
-                    gradient_block_kernel_canon64_vec::<$b, $v, $k>(
+                    gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k>(
                         src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,
                     ),
                     [v4x, v4, v3, neon, wasm128, scalar]
                 )
+
+                } else {
+                incant!(
+                    gradient_block_kernel_canon64_vec::<crate::featcanon::LanesF64, $b, $v, $k>(
+                        src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,
+                    ),
+                    [v4x, v4, v3, neon, wasm128, scalar]
+                )
+
+                }
             };
         }
         #[cfg(feature = "oracle")]
@@ -7303,11 +7432,6 @@ fn gradient_block_kernel(
                     }
                 }
             };
-        }
-        if crate::ssim_form::active_revision() >= FormulaRevision::Rev5
-            && matches!(mode, Mode::Canon64)
-        {
-            return go!(crate::featcanon::Lanes16F64);
         }
         return match mode {
             Mode::Canon64 => match (bandvis, bv_act_dst, gmsbank) {
@@ -9066,6 +9190,31 @@ struct V1BasicSums {
 }
 
 impl V1BasicSums {
+    fn basic_raw(&self) -> crate::fused::StripChannelAccum {
+        let mut out = crate::fused::StripChannelAccum::zero();
+        out.ssim_d = self.ssim_d.fin();
+        out.ssim_d4 = self.ssim_d4.fin();
+        out.ssim_d2 = self.ssim_d2.fin();
+        out.edge_art = self.edge_art.fin();
+        out.edge_art4 = self.edge_art4.fin();
+        out.edge_art2 = self.edge_art2.fin();
+        out.edge_det = self.edge_det.fin();
+        out.edge_det4 = self.edge_det4.fin();
+        out.edge_det2 = self.edge_det2.fin();
+        out.mse = self.mse.fin();
+        out.hf_sq_src = self.hf_sq_src.fin();
+        out.hf_sq_dst = self.hf_sq_dst.fin();
+        out.hf_abs_src = self.hf_abs_src.fin();
+        out.hf_abs_dst = self.hf_abs_dst.fin();
+        out.ssim_d8 = self.ssim_d8.fin();
+        out.edge_art8 = self.edge_art8.fin();
+        out.edge_det8 = self.edge_det8.fin();
+        out.ssim_max = self.ssim_max as f32;
+        out.edge_art_max = self.edge_art_max as f32;
+        out.edge_det_max = self.edge_det_max as f32;
+        out
+    }
+
     /// Merge-level accumulator fed by `accumulate` (f64 strip partials).
     fn meas_f64() -> Self {
         use crate::featcanon::SumVar;
@@ -11541,6 +11690,12 @@ pub(crate) struct FoldRetention {
     pub(crate) cells: Vec<[AttrCellSums; 3]>,
     /// `[scale][ch]` (mean grad src, mean grad dst) from finalize.
     pub(crate) mg: Vec<[(f64, f64); 3]>,
+    pub(crate) basic_stats: Vec<crate::metric::ScaleStats>,
+    pub(crate) basic_hf: Vec<[(f64, f64); 3]>,
+    pub(crate) basic_sd: Vec<[Vec<f32>; 3]>,
+    retain_basic: bool,
+    rev5: bool,
+    channels: [[bool; 3]; crate::NUM_SCALES],
 }
 
 impl Default for FoldRetention {
@@ -11558,25 +11713,77 @@ impl FoldRetention {
             planes: Vec::new(),
             cells: Vec::new(),
             mg: Vec::new(),
+            basic_stats: Vec::new(),
+            basic_hf: Vec::new(),
+            basic_sd: Vec::new(),
+            retain_basic: false,
+            rev5: false,
+            channels: [[false; 3]; crate::NUM_SCALES],
         }
     }
 
     /// Size every buffer for the walk's scale dims (no-op when unchanged;
     /// cells/mg/planes are fully rewritten by each retaining walk).
-    fn ensure(&mut self, dims: &[(usize, usize)]) {
-        if self.dims.as_slice() == dims {
+    fn ensure(&mut self, dims: &[(usize, usize)], compute: &ComputeSet, retain_basic: bool) {
+        let rev5 = compute.formula_revision >= FormulaRevision::Rev5;
+        let channels = core::array::from_fn(|scale| {
+            core::array::from_fn(|ch| {
+                scale < dims.len() && (!rev5 || compute.channel_active(scale, ch))
+            })
+        });
+        if self.dims.as_slice() == dims
+            && self.retain_basic == retain_basic
+            && self.channels == channels
+            && self.rev5 == rev5
+        {
             return;
         }
         self.dims = dims.to_vec();
-        let mk = |n: usize| -> [Vec<f32>; 3] { std::array::from_fn(|_| vec![0.0f32; n]) };
-        self.pyr_src = dims.iter().map(|&(w, h)| mk(w * h)).collect();
-        self.pyr_dst = dims.iter().map(|&(w, h)| mk(w * h)).collect();
+        let mk = |scale: usize, n: usize| -> [Vec<f32>; 3] {
+            core::array::from_fn(|ch| vec![0.0; if channels[scale][ch] { n } else { 0 }])
+        };
+        self.pyr_src = dims
+            .iter()
+            .enumerate()
+            .map(|(scale, &(w, h))| mk(scale, w * h))
+            .collect();
+        self.pyr_dst = dims
+            .iter()
+            .enumerate()
+            .map(|(scale, &(w, h))| mk(scale, w * h))
+            .collect();
         self.planes = dims
             .iter()
-            .map(|&(w, h)| std::array::from_fn(|_| AttrChPlanes::new(w * h)))
+            .enumerate()
+            .map(|(scale, &(w, h))| {
+                core::array::from_fn(|ch| {
+                    AttrChPlanes::new_for(if channels[scale][ch] { w * h } else { 0 }, !rev5)
+                })
+            })
             .collect();
         self.cells = vec![[AttrCellSums::default(); 3]; dims.len()];
         self.mg = vec![[(0.0, 0.0); 3]; dims.len()];
+        self.retain_basic = retain_basic;
+        self.rev5 = rev5;
+        self.basic_stats = if retain_basic {
+            vec![crate::metric::ScaleStats::default(); dims.len()]
+        } else {
+            Vec::new()
+        };
+        self.basic_hf = if retain_basic {
+            vec![[(0.0, 0.0); 3]; dims.len()]
+        } else {
+            Vec::new()
+        };
+        self.basic_sd = if retain_basic {
+            dims.iter()
+                .enumerate()
+                .map(|(scale, &(w, h))| mk(scale, w * h))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.channels = channels;
     }
 
     /// Copy one (strip, channel)'s core rows out of the walk: pyramid
@@ -11604,9 +11811,23 @@ impl FoldRetention {
         p.ssq[out..out + n].copy_from_slice(&scr.ssq[off..off + n]);
         p.s12[out..out + n].copy_from_slice(&scr.s12[off..off + n]);
         p.act[out..out + n].copy_from_slice(&scr.activity[off..off + n]);
+        if self.retain_basic {
+            let sd = &mut self.basic_sd[scale][ch][out..out + n];
+            for (i, value) in sd.iter_mut().enumerate() {
+                let j = out + i;
+                *value = crate::ssim_form::ssim_direct_raw_scalar(
+                    crate::ssim_form::SsimLumaForm::Clamp,
+                    p.mu1[j],
+                    p.mu2[j],
+                    p.ssq[j],
+                    p.s12[j],
+                )
+                .max(0.0);
+            }
+        }
         if want_bs2 {
             p.bs2[out..out + n].copy_from_slice(&scr.bs2[off..off + n]);
-        } else {
+        } else if !self.rev5 {
             // Never computed for this cell (`APPEND_SKIP_B_SCALE0`) — its
             // pass-B terms carry zero coefficients, but zero the plane so
             // reuse across pairs is deterministic.
@@ -14003,7 +14224,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         .arttype
         .then(|| BleedMaskWork::sized(dims[0].0, STRIP_ROWS));
     if let Some(ret) = retention.as_deref_mut() {
-        ret.ensure(&dims);
+        ret.ensure(
+            &dims,
+            &compute,
+            compute.formula_revision >= FormulaRevision::Rev5 && fold_v1,
+        );
     }
     // BANDVIS dst self-mask live: phase A additionally produces the Y
     // channel's dst-activity plane (and ONLY the Y channel's — the block
@@ -14712,6 +14937,25 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             }
         }
 
+        if let Some(ret) = retention.as_deref_mut()
+            && ret.retain_basic
+        {
+            let channels = core::array::from_fn(|ch| {
+                if ALL_CHANNELS || compute.channel_active(scale, ch) {
+                    accums[ch].v1[scale].basic_raw()
+                } else {
+                    crate::fused::StripChannelAccum::zero()
+                }
+            });
+            ret.basic_hf[scale] = channels
+                .each_ref()
+                .map(|value| (value.hf_sq_src, value.hf_abs_src));
+            ret.basic_stats[scale] = crate::streaming::ScaleAccumulators::from_basic(
+                channels,
+                n,
+                compute.formula_revision,
+            );
+        }
         if fold_v1 {
             for (ch, acc) in accums.iter().enumerate() {
                 if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
@@ -15452,14 +15696,18 @@ pub(crate) struct AttrChPlanes {
 }
 
 impl AttrChPlanes {
+    #[cfg(feature = "custom-profiles")]
     fn new(n: usize) -> Self {
+        Self::new_for(n, true)
+    }
+    fn new_for(n: usize, want_bs2: bool) -> Self {
         Self {
             mu1: vec![0.0; n],
             mu2: vec![0.0; n],
             ssq: vec![0.0; n],
             s12: vec![0.0; n],
             act: vec![0.0; n],
-            bs2: vec![0.0; n],
+            bs2: vec![0.0; if want_bs2 { n } else { 0 }],
         }
     }
 }
@@ -16478,6 +16726,7 @@ fn attr_pass_b_main_px(
     ry: f32,
     co: &V2AppCoeffsF32,
     direct: bool,
+    append: bool,
 ) -> (f32, f32) {
     const C1: f32 = C1_V2 as f32;
     const C2: f32 = C2_V2 as f32;
@@ -16563,41 +16812,44 @@ fn attr_pass_b_main_px(
     // Dev polynomial: pd1·d + pd2·d² + pd3·d³ + pd4·d⁴.
     let dsq = d * d;
     a_win += (co.pd1 + co.pd3 * dsq) * d + (co.pd2 + co.pd4 * dsq) * dsq;
-    // Append block.
-    let var1 = (b2v - m1 * m1).max(0.0);
-    let var2 = ((sq - b2v) - m2 * m2).max(0.0);
-    let n1 = (s - m1) / (var1 + CMV).sqrt();
-    let n2 = (dd - m2) / (var2 + CMV).sqrt();
-    let dn = n1 - n2;
-    a_res += co.c_mscn * sat(dn.abs(), CMA);
-    a_res += co.c_mscn2 * sat(dn * dn, CMS);
-    let (cg, cl) = {
-        let r = 1.0 / (var2 + var1 + CC);
-        ((var2 - var1).max(0.0) * r, (var1 - var2).max(0.0) * r)
-    };
-    a_win += co.c_cgain * cg + co.c_closs * cl;
-    a_win += co.c_tex * (1.0 - (2.0 * var1 * var2 + CC) / (var1 * var1 + var2 * var2 + CC));
-    // Luminance transducer + cross-mask (coefficients zero off-Y).
-    let t = sat(ry, CLT);
-    if co.c_lumt != 0.0 {
-        a_id += co.c_lumt * pjnd(raw_abs_err, act + t * KLA_OVER_KP, KP);
+    // Rev5 retains no appendix plane: its coefficients cannot read this block.
+    if append {
+        // Append block.
+        let var1 = (b2v - m1 * m1).max(0.0);
+        let var2 = ((sq - b2v) - m2 * m2).max(0.0);
+        let n1 = (s - m1) / (var1 + CMV).sqrt();
+        let n2 = (dd - m2) / (var2 + CMV).sqrt();
+        let dn = n1 - n2;
+        a_res += co.c_mscn * sat(dn.abs(), CMA);
+        a_res += co.c_mscn2 * sat(dn * dn, CMS);
+        let (cg, cl) = {
+            let r = 1.0 / (var2 + var1 + CC);
+            ((var2 - var1).max(0.0) * r, (var1 - var2).max(0.0) * r)
+        };
+        a_win += co.c_cgain * cg + co.c_closs * cl;
+        a_win += co.c_tex * (1.0 - (2.0 * var1 * var2 + CC) / (var1 * var1 + var2 * var2 + CC));
+        // Luminance transducer + cross-mask (coefficients zero off-Y).
+        let t = sat(ry, CLT);
+        if co.c_lumt != 0.0 {
+            a_id += co.c_lumt * pjnd(raw_abs_err, act + t * KLA_OVER_KP, KP);
+        }
+        if co.c_xmask != 0.0 {
+            let act_c = axv + abv;
+            a_id += co.c_xmask * pjnd(raw_abs_err, act + act_c * KX_OVER_KP, KP);
+        }
+        // Luminance bins.
+        let one_mt = 1.0 - t;
+        let wd = one_mt * one_mt;
+        let wb = t * t;
+        let wm = 1.0 - wd - wb;
+        a_id += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
+        // gdp pools (art/det).
+        a_res += (co.ga_lin + co.ga_quad * art_i) * art_i;
+        a_res += (co.gd_lin + co.gd_quad * det_i) * det_i;
+        // Globals (factored g_var form).
+        a_id += co.g_dmean * raw_diff;
+        a_id += co.g_var * raw_diff * ((s + dd) - 2.0 * co.gmean_d);
     }
-    if co.c_xmask != 0.0 {
-        let act_c = axv + abv;
-        a_id += co.c_xmask * pjnd(raw_abs_err, act + act_c * KX_OVER_KP, KP);
-    }
-    // Luminance bins.
-    let one_mt = 1.0 - t;
-    let wd = one_mt * one_mt;
-    let wb = t * t;
-    let wm = 1.0 - wd - wb;
-    a_id += (co.c_dark * wd + co.c_mid * wm + co.c_bright * wb) * mse_i;
-    // gdp pools (art/det).
-    a_res += (co.ga_lin + co.ga_quad * art_i) * art_i;
-    a_res += (co.gd_lin + co.gd_quad * det_i) * det_i;
-    // Globals (factored g_var form).
-    a_id += co.g_dmean * raw_diff;
-    a_id += co.g_var * raw_diff * ((s + dd) - 2.0 * co.gmean_d);
     (a_id + a_res, a_win)
 }
 
@@ -16661,6 +16913,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
         let x = x.max(zero);
         x / (x + c)
     };
+    let append = !bs2.is_empty();
     let has_lumt = co.c_lumt != 0.0;
     let has_xmask = co.c_xmask != 0.0;
     let out_off = y0 * width;
@@ -16724,42 +16977,50 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             // Dev polynomial.
             let dsq = d * d;
             a_win += (sp(co.pd1) + sp(co.pd3) * dsq) * d + (sp(co.pd2) + sp(co.pd4) * dsq) * dsq;
-            // Append block.
-            let b2v = ld!(bs2);
-            let var1 = (b2v - m1 * m1).max(zero);
-            let var2 = ((sq - b2v) - m2 * m2).max(zero);
-            let n1 = (s - m1) / (var1 + c_mscn_var).sqrt();
-            let n2 = (dd - m2) / (var2 + c_mscn_var).sqrt();
-            let dn = n1 - n2;
-            a_res += sp(co.c_mscn) * sat_v(dn.abs(), c_mscn_abs);
-            a_res += sp(co.c_mscn2) * sat_v(dn * dn, c_mscn_sq);
-            let (cg, cl) = bounded_excess_pair_v(token, var2, var1, c_contrast);
-            a_win += sp(co.c_cgain) * cg + sp(co.c_closs) * cl;
-            a_win += sp(co.c_tex) * (one - bounded_sim_v(token, var1, var2, c_contrast));
-            // Luminance transducer + cross-mask (Y only; uniform branches).
-            let ry = ld!(ref_y);
-            let t = sat_v(ry, c_lum_t);
-            if has_lumt {
-                a_id += sp(co.c_lumt)
-                    * pjnd_transducer_v(token, raw_abs_err, act + t * kla, k_mid, c_pjnd_clamp);
+            if append {
+                // Append block.
+                let b2v = ld!(bs2);
+                let var1 = (b2v - m1 * m1).max(zero);
+                let var2 = ((sq - b2v) - m2 * m2).max(zero);
+                let n1 = (s - m1) / (var1 + c_mscn_var).sqrt();
+                let n2 = (dd - m2) / (var2 + c_mscn_var).sqrt();
+                let dn = n1 - n2;
+                a_res += sp(co.c_mscn) * sat_v(dn.abs(), c_mscn_abs);
+                a_res += sp(co.c_mscn2) * sat_v(dn * dn, c_mscn_sq);
+                let (cg, cl) = bounded_excess_pair_v(token, var2, var1, c_contrast);
+                a_win += sp(co.c_cgain) * cg + sp(co.c_closs) * cl;
+                a_win += sp(co.c_tex) * (one - bounded_sim_v(token, var1, var2, c_contrast));
+                // Luminance transducer + cross-mask (Y only; uniform branches).
+                let ry = ld!(ref_y);
+                let t = sat_v(ry, c_lum_t);
+                if has_lumt {
+                    a_id += sp(co.c_lumt)
+                        * pjnd_transducer_v(token, raw_abs_err, act + t * kla, k_mid, c_pjnd_clamp);
+                }
+                if has_xmask {
+                    let act_c = ld!(ax) + ld!(ab);
+                    a_id += sp(co.c_xmask)
+                        * pjnd_transducer_v(
+                            token,
+                            raw_abs_err,
+                            act + act_c * kx,
+                            k_mid,
+                            c_pjnd_clamp,
+                        );
+                }
+                // Luminance bins.
+                let one_mt = one - t;
+                let wd = one_mt * one_mt;
+                let wb = t * t;
+                let wm = one - wd - wb;
+                a_id += (sp(co.c_dark) * wd + sp(co.c_mid) * wm + sp(co.c_bright) * wb) * mse_i;
+                // gdp pools.
+                a_res += (sp(co.ga_lin) + sp(co.ga_quad) * art_i) * art_i;
+                a_res += (sp(co.gd_lin) + sp(co.gd_quad) * det_i) * det_i;
+                // Globals (factored g_var form).
+                a_id += sp(co.g_dmean) * raw_diff;
+                a_id += sp(co.g_var) * raw_diff * ((s + dd) - sp(2.0 * co.gmean_d));
             }
-            if has_xmask {
-                let act_c = ld!(ax) + ld!(ab);
-                a_id += sp(co.c_xmask)
-                    * pjnd_transducer_v(token, raw_abs_err, act + act_c * kx, k_mid, c_pjnd_clamp);
-            }
-            // Luminance bins.
-            let one_mt = one - t;
-            let wd = one_mt * one_mt;
-            let wb = t * t;
-            let wm = one - wd - wb;
-            a_id += (sp(co.c_dark) * wd + sp(co.c_mid) * wm + sp(co.c_bright) * wb) * mse_i;
-            // gdp pools.
-            a_res += (sp(co.ga_lin) + sp(co.ga_quad) * art_i) * art_i;
-            a_res += (sp(co.gd_lin) + sp(co.gd_quad) * det_i) * det_i;
-            // Globals (factored g_var form).
-            a_id += sp(co.g_dmean) * raw_diff;
-            a_id += sp(co.g_var) * raw_diff * ((s + dd) - sp(2.0 * co.gmean_d));
             let o = orow + x;
             let id_new =
                 V8::<T>::from_array(token, id_plane[o..o + 8].try_into().unwrap()) + a_id + a_res;
@@ -16773,8 +17034,20 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
         for x in width8..width {
             let i = row + x;
             let (id_add, win_add) = attr_pass_b_main_px(
-                src[i], dst[i], mu1[i], mu2[i], ssq[i], s12[i], act_p[i], bs2[i], ax[i], ab[i],
-                ref_y[i], co, direct,
+                src[i],
+                dst[i],
+                mu1[i],
+                mu2[i],
+                ssq[i],
+                s12[i],
+                act_p[i],
+                if append { bs2[i] } else { 0.0 },
+                ax[i],
+                ab[i],
+                ref_y[i],
+                co,
+                direct,
+                append,
             );
             id_plane[orow + x] += id_add;
             win_plane[orow + x] += win_add;
@@ -17533,11 +17806,12 @@ fn attr_pass_b_for_scale_f32(
             continue;
         }
         let append_active = append_cell_active(want_append, ch, scale);
-        let cross: Option<(&[f32], &[f32])> = if ch == 1 {
-            Some((&planes[0].act, &planes[2].act))
-        } else {
-            None
-        };
+        let cross: Option<(&[f32], &[f32])> =
+            if ch == 1 && planes[0].act.len() >= n && planes[2].act.len() >= n {
+                Some((&planes[0].act, &planes[2].act))
+            } else {
+                None
+            };
         let co = derive_v2app_coeffs(
             s_v2,
             s_append,
@@ -22009,7 +22283,7 @@ pub(crate) mod tests {
     ///    from measured magnitudes rather than guessed.
     ///
     /// Geometries deliberately straddle the classes that matter to the era-2
-    /// reshape: tight vs non-tight width, `width % 8 == 0` vs not (the scalar
+    /// reshape: tight vs non-tight width, `width.is_multiple_of(8)` vs not (the scalar
     /// tail), and heights that do and do not divide the band size.
     ///
     /// A deviation above its bound is a BUG — in the kernel or in the analysis
@@ -28911,7 +29185,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
 // RMW for LLVM to vectorize into gather/scatter.
 #[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_canon64_vec(
+fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
     token: Token,
     src: &[f32],
     dst: &[f32],
@@ -28925,9 +29199,9 @@ fn dense_block_kernel_canon64_vec(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
-    use crate::featcanon::{LanesF64, Pool as _};
     let mut r4 = r4;
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let stable = P::LANES == 16;
     let mut acc = DenseAccum::default();
     // Provable-length plane slices: the chunk loop reads `i + 8 <= row +
     // full * 8` and the tail reads `row + x < height * width` — both literal
@@ -28953,7 +29227,8 @@ fn dense_block_kernel_canon64_vec(
             // fuse into `vgatherqpd`/`vscatterqpd` (the 4.3x regression
             // the former v3-only dispatch worked around). The tail slices
             // give `dense_elem_canon` the same typed pool refs — zero cost.
-            let mut pools = [LanesF64::zero(); 29];
+            let mut pools = [P::zero(); 29];
+            let mut local = [0.0f64; 16];
             let full = width / 8;
             let srow = &src[row..row + full * 8];
             let drow = &dst[row..row + full * 8];
@@ -29016,8 +29291,17 @@ fn dense_block_kernel_canon64_vec(
                 ];
                 for j in 0..29 {
                     let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
-                    (f64x8::load(token, &pools[j].0) + f64x8::from_array(token, a))
-                        .store(&mut pools[j].0);
+                    let lanes = pools[j].chunk8(i & (P::LANES - 1));
+                    (f64x8::load(token, lanes) + f64x8::from_array(token, a)).store(lanes);
+                }
+                if stable {
+                    let off = i & 15;
+                    for l in 0..8 {
+                        local[off + l] = bufs[0][l] as f64;
+                    }
+                    if off == 8 || c + 1 == full && width.is_multiple_of(8) {
+                        acc.central.merge(OnlineMoments::block(&local[..off + 8]));
+                    }
                 }
                 if let Some(r4) = r4.as_mut() {
                     rev4_dense_chunk8(
@@ -29041,7 +29325,7 @@ fn dense_block_kernel_canon64_vec(
                 let (mw, iw) = mw_iw.split_at_mut(1);
                 for x in full * 8..width {
                     let i = row + x;
-                    dense_elem_canon(
+                    let d = dense_elem_canon(
                         src[i],
                         dst[i],
                         mu1[i],
@@ -29061,6 +29345,13 @@ fn dense_block_kernel_canon64_vec(
                         p_kn.try_into().unwrap(),
                         p_kd.try_into().unwrap(),
                     );
+                    if stable {
+                        local[x & 15] = d as f64;
+                        if x & 15 == 15 || x + 1 == width {
+                            acc.central
+                                .merge(OnlineMoments::block(&local[..(x & 15) + 1]));
+                        }
+                    }
                 }
             }
             for j in 0..13 {
@@ -29117,7 +29408,7 @@ fn dense_block_kernel_canon64_vec(
 /// Scalar-tier siblings of [`dense_block_kernel_canon64_vec`]: scalar and
 /// wasm128 keep the `LanesF64` canonical body.
 #[allow(clippy::too_many_arguments)]
-fn dense_block_kernel_canon64_vec_scalar(
+fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64>(
     _token: archmage::ScalarToken,
     src: &[f32],
     dst: &[f32],
@@ -29131,7 +29422,7 @@ fn dense_block_kernel_canon64_vec_scalar(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
-    dense_block_kernel_canon::<crate::featcanon::LanesF64>(
+    dense_block_kernel_canon::<P>(
         src,
         dst,
         mu1,
@@ -29148,7 +29439,7 @@ fn dense_block_kernel_canon64_vec_scalar(
 
 /// Wasm128 sibling of [`dense_block_kernel_canon64_vec_scalar`].
 #[allow(clippy::too_many_arguments, dead_code)]
-fn dense_block_kernel_canon64_vec_wasm128(
+fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     _token: archmage::Wasm128Token,
     src: &[f32],
     dst: &[f32],
@@ -29162,7 +29453,7 @@ fn dense_block_kernel_canon64_vec_wasm128(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
-    dense_block_kernel_canon::<crate::featcanon::LanesF64>(
+    dense_block_kernel_canon::<P>(
         src,
         dst,
         mu1,
@@ -29180,7 +29471,7 @@ fn dense_block_kernel_canon64_vec_wasm128(
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
 #[allow(clippy::too_many_arguments, dead_code)]
-fn dense_block_kernel_canon64_vec_neon(
+fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64>(
     _token: archmage::NeonToken,
     src: &[f32],
     dst: &[f32],
@@ -29194,7 +29485,7 @@ fn dense_block_kernel_canon64_vec_neon(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
-    dense_block_kernel_canon::<crate::featcanon::LanesF64>(
+    dense_block_kernel_canon::<P>(
         src,
         dst,
         mu1,
@@ -29696,7 +29987,7 @@ mod featcanon_contract_tests {
                  h: usize,
                  bank: bool,
                  r4: Option<Rev4Dense<'_>>| {
-                    dense_block_kernel_canon64_vec_scalar(
+                    dense_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64>(
                         archmage::ScalarToken::summon().expect("infallible"),
                         s,
                         d,
@@ -29727,7 +30018,7 @@ mod featcanon_contract_tests {
                           h: usize,
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v3(
+                        dense_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64>(
                             t, s, d, m1, m2, q, p, act, w, h, bank, r4,
                         )
                     }
@@ -29748,7 +30039,7 @@ mod featcanon_contract_tests {
                           h: usize,
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v4(
+                        dense_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64>(
                             t, s, d, m1, m2, q, p, act, w, h, bank, r4,
                         )
                     }
@@ -29769,7 +30060,7 @@ mod featcanon_contract_tests {
                           h: usize,
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
-                        dense_block_kernel_canon64_vec_v4x(
+                        dense_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64>(
                             t, s, d, m1, m2, q, p, act, w, h, bank, r4,
                         )
                     }
@@ -29974,7 +30265,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_scalar::<B, V, K>(
+                gradient_block_kernel_canon64_vec_scalar::<crate::featcanon::LanesF64, B, V, K>(
                     _t,
                     s,
                     d,
@@ -30001,7 +30292,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v3::<B, V, K>(
+                gradient_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64, B, V, K>(
                     t,
                     s,
                     d,
@@ -30028,7 +30319,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4::<B, V, K>(
+                gradient_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64, B, V, K>(
                     t,
                     s,
                     d,
@@ -30055,7 +30346,7 @@ mod featcanon_contract_tests {
                 hi: f32,
                 r4: Option<Rev4Grad<'_>>,
             ) -> GradientAccum {
-                gradient_block_kernel_canon64_vec_v4x::<B, V, K>(
+                gradient_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64, B, V, K>(
                     t,
                     s,
                     d,

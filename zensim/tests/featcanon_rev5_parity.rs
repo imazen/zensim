@@ -82,6 +82,7 @@ fn rev5_vector_bit_identical_under_token_permutations() {
         return;
     }
     let _guard = archmage::testing::lock_token_testing();
+    let mut cross_target = Vec::new();
     for &(w, h) in &[(64usize, 64usize), (97, 63), (131, 65), (255, 129)] {
         let (src, dst) = test_images(w, h);
         let s = RgbSlice::new(&src, w, h);
@@ -94,6 +95,7 @@ fn rev5_vector_bit_identical_under_token_permutations() {
             assert!(report.permutations_run >= 2);
         }
         let base = &vectors[0].1;
+        cross_target.extend(base.iter().flat_map(|v| v.to_le_bytes()));
         assert!(base.iter().any(|&b| b != 0), "vacuous: all-zero vector");
         for (label, v) in &vectors[1..] {
             let diffs: Vec<usize> = base
@@ -112,6 +114,25 @@ fn rev5_vector_bit_identical_under_token_permutations() {
             );
         }
         eprintln!("rev5 {w}x{h}: {} permutations bit-identical", vectors.len());
+    }
+    // Optional cross-target gate, exercised by the native/scalar/WASI runs.
+    // Capture is explicit and refuses to replace existing evidence.
+    if let Some(path) = std::env::var_os("REV5_PARITY_CAPTURE") {
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap()
+            .write_all(&cross_target)
+            .unwrap();
+    }
+    if let Some(path) = std::env::var_os("REV5_PARITY_EXPECT") {
+        assert_eq!(
+            cross_target,
+            std::fs::read(path).unwrap(),
+            "cross-target full-vector bytes"
+        );
     }
     println!("{SENTINEL}");
 }

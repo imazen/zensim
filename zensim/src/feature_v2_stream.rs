@@ -607,8 +607,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     ) -> Self {
         let omit_scale0_xb = omit_scale0_xb
             && revision >= crate::feature_defs::FormulaRevision::Rev5
-            && matches!(front_end, FrontEnd::Sdr)
-            && ref_planes.is_none();
+            && matches!(front_end, FrontEnd::Sdr);
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
         debug_assert_eq!(h0, distorted.height());
@@ -775,14 +774,25 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         let __t_conv = crate::fold_timing::start();
         if self.omit_scale0_xb {
             let width = self.scales[0].plane_w;
-            convert_side_y_and_downscale(
-                self.source,
-                &mut self.planes[0],
-                hi0,
-                n_new,
-                width,
-                self.revision,
-            );
+            if let Some(rp) = self.ref_planes {
+                // Scale-zero chroma is unread. Feed the cached coarse planes
+                // directly rather than copying full-resolution X/B first.
+                self.planes[0][1][0]
+                    .append_rows(n_new)
+                    .copy_from_slice(&rp[0].0[1][hi0 * width..(hi0 + n_new) * width]);
+                for ch in [0, 2] {
+                    self.planes[0][ch][0].hi = hi0 + n_new;
+                }
+            } else {
+                convert_side_y_and_downscale(
+                    self.source,
+                    &mut self.planes[0],
+                    hi0,
+                    n_new,
+                    width,
+                    self.revision,
+                );
+            }
             convert_side_y_and_downscale(
                 self.distorted,
                 &mut self.planes[1],
@@ -1099,9 +1109,9 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 
     /// Return every rolling-plane buffer to `pool` for the next pair.
     pub(crate) fn recycle(self, pool: &mut Vec<Vec<f32>>) {
-        for side in self.planes {
-            for ch in side {
-                for plane in ch {
+        for side in self.planes.into_iter().rev() {
+            for ch in side.into_iter().rev() {
+                for plane in ch.into_iter().rev() {
                     pool.push(plane.buf);
                 }
             }
@@ -1227,6 +1237,27 @@ mod tests {
 
     #[test]
     fn rev5_downscaled_chroma_matches_full_conversion() {
+        // Tier switches affect the whole process. Isolate them from the
+        // ordinary parallel suite, whose two-pass parity tests need a fixed tier.
+        if std::env::var("REV5_CHROMA_CHILD").as_deref() != Ok("1") {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "feature_v2_stream::tests::rev5_downscaled_chroma_matches_full_conversion",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env("REV5_CHROMA_CHILD", "1")
+                .env("ZENSIM_FORMULA_REV", "5")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(String::from_utf8_lossy(&out.stdout).contains("REV5-CHROMA-PASS"));
+            return;
+        }
         use crate::feature_defs::FormulaRevision;
         let _guard = archmage::testing::lock_token_testing();
         let _ = archmage::testing::for_each_token_permutation(
@@ -1235,51 +1266,59 @@ mod tests {
                 for (w, h) in [(64, 64), (97, 63), (257, 289)] {
                     let pixels = textured_image(w, h, 71);
                     let image = RgbSlice::new(&pixels, w, h);
-                    let (mut pool_a, mut pool_b) = (Vec::new(), Vec::new());
-                    let mut a = StripPlaneProducer::new_with_ref_feed(
-                        &image,
-                        &image,
-                        false,
-                        &mut pool_a,
-                        FrontEnd::Sdr,
-                        None,
-                        None,
-                        FormulaRevision::Rev5,
-                        false,
-                    );
-                    let mut b = StripPlaneProducer::new_with_ref_feed(
-                        &image,
-                        &image,
-                        false,
-                        &mut pool_b,
-                        FrontEnd::Sdr,
-                        None,
-                        None,
-                        FormulaRevision::Rev5,
-                        true,
-                    );
-                    while let Some(ia) = a.next_strip() {
-                        let ib = b.next_strip().unwrap();
-                        assert_eq!((ia.scale, ia.y0, ia.strip_h), (ib.scale, ib.y0, ib.strip_h));
-                        for ch in 0..3 {
-                            if ia.scale == 0 && ch != 1 {
-                                continue;
-                            }
-                            for side in [Side::Source, Side::Distorted] {
-                                assert_eq!(
-                                    a.rows(side, ch, ia.scale, ia.y0, ia.y0 + ia.strip_h),
-                                    b.rows(side, ch, ib.scale, ib.y0, ib.y0 + ib.strip_h),
-                                    "{w}x{h} scale={} ch={ch}",
-                                    ia.scale
-                                );
+                    let cached_planes = materialize(&image);
+                    for cached in [false, true] {
+                        let feed = cached.then_some(cached_planes.as_slice());
+                        let (mut pool_a, mut pool_b) = (Vec::new(), Vec::new());
+                        let mut a = StripPlaneProducer::new_with_ref_feed(
+                            &image,
+                            &image,
+                            false,
+                            &mut pool_a,
+                            FrontEnd::Sdr,
+                            feed,
+                            None,
+                            FormulaRevision::Rev5,
+                            false,
+                        );
+                        let mut b = StripPlaneProducer::new_with_ref_feed(
+                            &image,
+                            &image,
+                            false,
+                            &mut pool_b,
+                            FrontEnd::Sdr,
+                            feed,
+                            None,
+                            FormulaRevision::Rev5,
+                            true,
+                        );
+                        while let Some(ia) = a.next_strip() {
+                            let ib = b.next_strip().unwrap();
+                            assert_eq!(
+                                (ia.scale, ia.y0, ia.strip_h),
+                                (ib.scale, ib.y0, ib.strip_h)
+                            );
+                            for ch in 0..3 {
+                                if ia.scale == 0 && ch != 1 {
+                                    continue;
+                                }
+                                for side in [Side::Source, Side::Distorted] {
+                                    assert_eq!(
+                                        a.rows(side, ch, ia.scale, ia.y0, ia.y0 + ia.strip_h),
+                                        b.rows(side, ch, ib.scale, ib.y0, ib.y0 + ib.strip_h),
+                                        "{w}x{h} scale={} ch={ch}",
+                                        ia.scale
+                                    );
+                                }
                             }
                         }
+                        assert!(b.next_strip().is_none());
+                        assert_eq!(b.planes[0][0][0].buf.len(), 2 * w);
                     }
-                    assert!(b.next_strip().is_none());
-                    assert_eq!(b.planes[0][0][0].buf.len(), 2 * w);
                 }
             },
         );
+        println!("REV5-CHROMA-PASS");
     }
 
     /// Deterministic textured content (same family as feature_v2's tests).

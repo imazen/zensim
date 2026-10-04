@@ -2160,7 +2160,7 @@ mod tests {
                             sh,
                             src.each_ref().map(Vec::as_slice),
                             dst.each_ref().map(Vec::as_slice),
-                            &ret,
+                            &BasicPlaneView::from(&ret),
                             pre.sampling_geometry.as_ref(),
                         );
                         assert_eq!(maps.len(), expected);
@@ -2472,6 +2472,7 @@ mod tests {
                             revision,
                             None,
                             8,
+                            None,
                             None,
                         )
                         .unwrap();
@@ -4746,7 +4747,7 @@ fn retain_moment_removals(
     sh: usize,
     src: [&[f32]; 3],
     dst: [&[f32]; 3],
-    ret: &crate::streaming::AttrScaleRetention,
+    ret: &BasicPlaneView<'_>,
     sampling: Option<&crate::sampling::Geometry>,
     bin: usize,
     radius: usize,
@@ -4932,7 +4933,7 @@ fn retain_max_removals(
     sh: usize,
     src: [&[f32]; 3],
     dst: [&[f32]; 3],
-    ret: &crate::streaming::AttrScaleRetention,
+    ret: &BasicPlaneView<'_>,
     sampling: Option<&crate::sampling::Geometry>,
 ) {
     #[cfg(test)]
@@ -5073,7 +5074,7 @@ fn retain_max_removals_reference(
     sh: usize,
     src: [&[f32]; 3],
     dst: [&[f32]; 3],
-    ret: &crate::streaming::AttrScaleRetention,
+    ret: &BasicPlaneView<'_>,
     sampling: Option<&crate::sampling::Geometry>,
 ) {
     if !(0..3).any(|c| {
@@ -5404,6 +5405,36 @@ impl FusedBasicCanvas {
     }
 }
 
+// Borrowed planes let Rev5 map consumers read the shared folded retention
+// without allocating or copying a second set of basic moments.
+struct BasicPlaneView<'a> {
+    sd: [&'a [f32]; 3],
+    mu1: [&'a [f32]; 3],
+    mu2: [&'a [f32]; 3],
+}
+impl<'a> From<&'a crate::streaming::AttrScaleRetention> for BasicPlaneView<'a> {
+    fn from(p: &'a crate::streaming::AttrScaleRetention) -> Self {
+        Self {
+            sd: p.sd.each_ref().map(Vec::as_slice),
+            mu1: p.mu1.each_ref().map(Vec::as_slice),
+            mu2: p.mu2.each_ref().map(Vec::as_slice),
+        }
+    }
+}
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+enum BasicMapRetention<'a> {
+    Basic(&'a BasicRetention),
+    #[cfg(feature = "feature-regime-v2")]
+    Fold(&'a crate::feature_v2::FoldRetention),
+}
+#[derive(Default)]
+struct BasicMapScratch {
+    id: Vec<f32>,
+    win: Vec<f32>,
+    spread_tmp: Vec<f32>,
+    spread_out: Vec<f32>,
+}
+
 // Basic/peak signals retained by the scoring walk until model sensitivities
 // are available. Reference planes remain in the caller's existing cache.
 #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
@@ -5434,6 +5465,7 @@ struct BasicRetainedScale {
 #[derive(Default)]
 pub struct Fused944Session {
     basic: BasicRetention,
+    basic_map: BasicMapScratch,
     scratch: crate::feature_v2::V2Scratch,
     retention: crate::feature_v2::FoldRetention,
     /// f32 pass-B scratch (appendix P lever 1) — plane-sized buffers
@@ -5626,6 +5658,7 @@ impl Fused944Session {
         // `acc.v1` and the v1 slots), and `mean_offset` is the v2 walk's, as
         // before.
         if !plan.toggles().v1_only
+            && plan.compute.formula_revision < crate::feature_defs::FormulaRevision::Rev5
             && !legacy_v2_route()
             && plan.compute.v1_basic
             && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
@@ -6046,6 +6079,7 @@ impl crate::metric::Zensim {
             None,
             1,
             None,
+            None,
         )
     }
 
@@ -6061,7 +6095,8 @@ impl crate::metric::Zensim {
         revision: Option<crate::feature_defs::FormulaRevision>,
         mut moment_removals: Option<&mut Vec<MomentRemoval>>,
         moment_bin: usize,
-        retained: Option<&BasicRetention>,
+        retained: Option<BasicMapRetention<'_>>,
+        map_scratch: Option<&mut BasicMapScratch>,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
@@ -6118,18 +6153,29 @@ impl crate::metric::Zensim {
 
         let t_all = std::time::Instant::now();
         let combine_ms = std::cell::Cell::new(0.0f64);
-        let mut id_plane = vec![0.0f32; comp_pw * comp_h];
-        let mut win_plane = vec![0.0f32; comp_pw * comp_h];
-        let mut spread_tmp: Vec<f32> = Vec::new();
-        let mut spread_out: Vec<f32> = Vec::new();
+        let mut local_scratch = BasicMapScratch::default();
+        let work = map_scratch.unwrap_or(&mut local_scratch);
+        let BasicMapScratch {
+            id: id_plane,
+            win: win_plane,
+            spread_tmp,
+            spread_out,
+        } = work;
+        if id_plane.len() < comp_pw * comp_h {
+            id_plane.resize(comp_pw * comp_h, 0.0);
+        }
+        if win_plane.len() < comp_pw * comp_h {
+            win_plane.resize(comp_pw * comp_h, 0.0);
+        }
 
         let mut on_scale = |scale: usize,
                             stats: &crate::metric::ScaleStats,
                             src_planes: [&[f32]; 3],
                             dst_planes: [&[f32]; 3],
-                            ret: &crate::streaming::AttrScaleRetention,
+                            ret: &BasicPlaneView<'_>,
                             sw: usize,
-                            sh: usize| {
+                            sh: usize,
+                            retained_hf: Option<[(f64, f64); 3]>| {
             let t_c = std::time::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
@@ -6150,13 +6196,17 @@ impl crate::metric::Zensim {
             }
             id_plane[..n].fill(0.0);
             win_plane[..n].fill(0.0);
-            let hf: [(f64, f64); 3] = core::array::from_fn(|c| {
-                let base = (scale * 3 + c) * FPC;
-                if prime.is_some() || (10..13).any(|k| s.get(base + k).is_some_and(|v| *v != 0.0)) {
-                    hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n])
-                } else {
-                    (0.0, 0.0)
-                }
+            let hf: [(f64, f64); 3] = retained_hf.unwrap_or_else(|| {
+                core::array::from_fn(|c| {
+                    let base = (scale * 3 + c) * FPC;
+                    if prime.is_some()
+                        || (10..13).any(|k| s.get(base + k).is_some_and(|v| *v != 0.0))
+                    {
+                        hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n])
+                    } else {
+                        (0.0, 0.0)
+                    }
+                })
             });
             let co32: [[f32; 12]; 3] = core::array::from_fn(|c| {
                 let base_k = scale * FPC * 3 + c * FPC;
@@ -6252,8 +6302,8 @@ impl crate::metric::Zensim {
                             sw,
                             sh,
                             config.blur_radius,
-                            &mut spread_tmp,
-                            &mut spread_out,
+                            spread_tmp,
+                            spread_out,
                             config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                         );
                     } else {
@@ -6263,8 +6313,8 @@ impl crate::metric::Zensim {
                             sw,
                             sh,
                             config.blur_radius,
-                            &mut spread_tmp,
-                            &mut spread_out,
+                            spread_tmp,
+                            spread_out,
                             config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                         );
                         upsample_add_sum_preserving_f32(
@@ -6285,8 +6335,8 @@ impl crate::metric::Zensim {
                         sw,
                         sh,
                         config.blur_radius,
-                        &mut spread_tmp,
-                        &mut spread_out,
+                        spread_tmp,
+                        spread_out,
                         config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                     );
                     if let Some(geometry) = &precomputed.sampling_geometry {
@@ -6319,16 +6369,17 @@ impl crate::metric::Zensim {
             }
         };
 
-        let result = if let Some(retained) = retained {
+        let result = if let Some(BasicMapRetention::Basic(retained)) = retained {
             for (scale, cell) in retained.scales.iter().enumerate() {
                 on_scale(
                     scale,
                     &cell.stats,
                     precomputed.scale(scale).0,
                     cell.distorted.each_ref().map(Vec::as_slice),
-                    &cell.planes,
+                    &BasicPlaneView::from(&cell.planes),
                     cell.width,
                     cell.height,
+                    None,
                 );
             }
             retained
@@ -6337,12 +6388,49 @@ impl crate::metric::Zensim {
                 .expect("successful retained extraction")
                 .clone()
         } else {
+            #[cfg(feature = "feature-regime-v2")]
+            if let Some(BasicMapRetention::Fold(retained)) = retained {
+                for (scale, &(w, h)) in retained.dims.iter().enumerate() {
+                    let view = BasicPlaneView {
+                        sd: retained.basic_sd[scale].each_ref().map(Vec::as_slice),
+                        mu1: core::array::from_fn(|c| retained.planes[scale][c].mu1.as_slice()),
+                        mu2: core::array::from_fn(|c| retained.planes[scale][c].mu2.as_slice()),
+                    };
+                    on_scale(
+                        scale,
+                        &retained.basic_stats[scale],
+                        retained.pyr_src[scale].each_ref().map(Vec::as_slice),
+                        retained.pyr_dst[scale].each_ref().map(Vec::as_slice),
+                        &view,
+                        w,
+                        h,
+                        Some(retained.basic_hf[scale]),
+                    );
+                }
+                // The complete candidate result is supplied by the caller.
+                return Ok((
+                    crate::ZensimResult::new(0.0, 0.0, Vec::new(), self.profile(), [0.0; 3]),
+                    t_all.elapsed().as_secs_f64() * 1e3,
+                    combine_ms.get(),
+                ));
+            }
             crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
                 precomputed,
                 distorted,
                 &config,
                 params.weights,
-                on_scale,
+                |scale, stats, src, dst, ret, w, h| {
+                    on_scale(
+                        scale,
+                        stats,
+                        src,
+                        dst,
+                        &BasicPlaneView::from(ret),
+                        w,
+                        h,
+                        None,
+                    )
+                },
             )
         };
         let mut result = result.with_profile(self.profile());
@@ -6936,7 +7024,18 @@ impl crate::metric::Zensim {
             revision,
             moment_removals,
             bin,
-            session.basic.result.as_ref().map(|_| &session.basic),
+            if revision.is_some_and(|r| r >= crate::feature_defs::FormulaRevision::Rev5)
+                && !session.retention.basic_stats.is_empty()
+            {
+                Some(BasicMapRetention::Fold(&session.retention))
+            } else {
+                session
+                    .basic
+                    .result
+                    .as_ref()
+                    .map(|_| BasicMapRetention::Basic(&session.basic))
+            },
+            Some(&mut session.basic_map),
         )?;
         let block = |start: usize, end: usize| -> Option<&[f64]> {
             (s.len() > start).then(|| &s[start..s.len().min(end)])

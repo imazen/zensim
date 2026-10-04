@@ -450,6 +450,39 @@ pub(crate) struct ScaleAccumulators {
 }
 
 impl ScaleAccumulators {
+    #[cfg(feature = "feature-regime-v2")]
+    pub(crate) fn from_basic(
+        channels: [crate::fused::StripChannelAccum; 3],
+        n: usize,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> ScaleStats {
+        let mut out = Self::new();
+        out.n = n;
+        for (c, value) in channels.iter().enumerate() {
+            out.ssim_d[c] = value.ssim_d;
+            out.ssim_d4[c] = value.ssim_d4;
+            out.ssim_d2[c] = value.ssim_d2;
+            out.edge_art[c] = value.edge_art;
+            out.edge_art4[c] = value.edge_art4;
+            out.edge_art2[c] = value.edge_art2;
+            out.edge_det[c] = value.edge_det;
+            out.edge_det4[c] = value.edge_det4;
+            out.edge_det2[c] = value.edge_det2;
+            out.mse[c] = value.mse;
+            out.hf_sq_src[c] = value.hf_sq_src;
+            out.hf_sq_dst[c] = value.hf_sq_dst;
+            out.hf_abs_src[c] = value.hf_abs_src;
+            out.hf_abs_dst[c] = value.hf_abs_dst;
+            out.ssim_d8[c] = value.ssim_d8;
+            out.edge_art8[c] = value.edge_art8;
+            out.edge_det8[c] = value.edge_det8;
+            out.ssim_max[c] = value.ssim_max;
+            out.edge_art_max[c] = value.edge_art_max;
+            out.edge_det_max[c] = value.edge_det_max;
+        }
+        out.finalize(4.0, Some(revision))
+    }
+
     fn new() -> Self {
         Self {
             ssim_d: [0.0; 3],

@@ -45,8 +45,9 @@ pub(crate) enum Work {
     Scale0XbCell,
     ScratchZeroElements,
     Scale0XbStoredRows,
+    V2Cell,
 }
-static WORK: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+static WORK: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
 #[inline]
 pub(crate) fn work(kind: Work, amount: usize) {
     if on() {
@@ -219,11 +220,36 @@ fn threads() -> f64 {
 }
 
 fn dump(walks: u64) {
-    let counts: [u64; 6] = std::array::from_fn(|i| WORK[i].swap(0, Ordering::Relaxed));
+    let counts: [u64; 7] = std::array::from_fn(|i| WORK[i].swap(0, Ordering::Relaxed));
     eprintln!(
-        "WORK_CENSUS vertical_planes={} activity_chains={} peak_bands={} scale0_xb_cells={} scratch_zero_elements={} scale0_xb_stored_rows={}",
-        counts[0], counts[1], counts[2], counts[3], counts[4], counts[5]
+        "WORK_CENSUS vertical_planes={} activity_chains={} peak_bands={} scale0_xb_cells={} scratch_zero_elements={} scale0_xb_stored_rows={} v2_cells={}",
+        counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6]
     );
+
+    if std::env::var_os("ZENSIM_FOLD_CENSUS_ASSERT").is_some() {
+        assert!(counts[6] > 0, "census must visit actual v2 cells");
+        assert_eq!(
+            counts[0],
+            5 * counts[6],
+            "four moment planes + one activity plane per cell"
+        );
+        assert_eq!(counts[1], counts[6], "one activity chain per cell");
+        assert_eq!(
+            (counts[2], counts[3], counts[5]),
+            (0, 0, 0),
+            "unread peaks or scale-zero chroma"
+        );
+        if walks > 1 {
+            assert_eq!(
+                counts[4], 0,
+                "overwritten scratch must be reused after warmup"
+            );
+        }
+        eprintln!(
+            "WORK_CENSUS_GATE {}",
+            if walks > 1 { "PASS" } else { "WARMUP" }
+        );
+    }
 
     let thr = threads();
     let (walk, _) = sum(Phase::Walk);

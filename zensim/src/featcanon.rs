@@ -516,6 +516,23 @@ impl Pool for Lanes16F64 {
     }
 }
 
+/// Fixed f64 lane storage used by the existing vector kernels.
+pub(crate) trait Pool64: Pool {
+    fn chunk8(&mut self, offset: usize) -> &mut [f64; 8];
+}
+impl Pool64 for LanesF64 {
+    #[inline(always)]
+    fn chunk8(&mut self, _offset: usize) -> &mut [f64; 8] {
+        &mut self.0
+    }
+}
+impl Pool64 for Lanes16F64 {
+    #[inline(always)]
+    fn chunk8(&mut self, offset: usize) -> &mut [f64; 8] {
+        (&mut self.0[offset..offset + 8]).try_into().unwrap()
+    }
+}
+
 /// Candidate (f): Neumaier-compensated f64 running sum — the compensated form
 /// already proven in `feature_v2::oracle` (`Neumaier`), reused so the lane's
 /// compensation semantics have exactly one definition. Measurement only (the

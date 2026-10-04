@@ -1547,7 +1547,8 @@ mod revision_contract_tests {
         let recipe = serde_json::json!({
             "schema_hash":1,"scaler_mean":vec![0.0;ids.len()],"scaler_scale":vec![1.0;ids.len()],
             "metadata":[{"key":"zentrain.feature_ids","type":"utf8",
-                "text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")}],
+                "text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+                {"key":"zentrain.formula_revision","type":"utf8","text":(crate::ssim_form::active_revision() as u8 + 1).to_string()}],
             "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity","dtype":"f32",
                 "weights":weights,"biases":[100.0]}]
         });
@@ -2355,6 +2356,30 @@ mod revision_contract_tests {
                 spatial.result().score().to_bits(),
                 "f{id} score/map parity"
             );
+        }
+        // Complete production-sized scopes exercise the shared v1+v2 map,
+        // selective scale-0 chroma and session reuse rather than single readers.
+        for ids in [
+            (0..156).chain(372..720).collect::<Vec<_>>(),
+            (13..26)
+                .chain(39..156)
+                .chain(401..430)
+                .chain(459..720)
+                .collect(),
+        ] {
+            let model = bake_over(&ids);
+            let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+            let scalar = scorer.compute(&rs, &ds, None).unwrap();
+            let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+            let first = worker.compute(&ds, None).unwrap();
+            let second = worker.compute(&ds, None).unwrap();
+            assert_eq!(scalar.features(), first.result().features());
+            assert_eq!(scalar.score().to_bits(), first.result().score().to_bits());
+            assert_eq!(
+                first.attribution().density(),
+                second.attribution().density()
+            );
+            assert!(first.attribution().density().iter().any(|&x| x != 0.0));
         }
         // Same computed vector as research, including the nonzero reference-only slot.
         let model = zenpredict::Model::from_bytes(&bake_declaring(Some("5"), 393)).unwrap();

@@ -964,36 +964,39 @@ pub(crate) fn fused_vblur_features_ssim(
             // keeps the scalar body, which honours it.
             let blur_axis = crate::featcanon::canon_blur_axis_for(mode, free.revision());
             if matches!(blur_axis, crate::featcanon::BlurMode::Local) {
-                return fused_vblur_ssim_local::<crate::featcanon::Lanes16F64>(
-                    h_mu1,
-                    h_mu2,
-                    h_sigma_sq,
-                    h_sigma12,
-                    src,
-                    dst,
-                    width,
-                    height,
-                    inner_start,
-                    inner_h,
-                    radius,
-                    mu1_out,
-                    mu2_out,
-                    store_mu,
-                    sd_out,
-                    store_sd,
-                    ssq_out,
-                    s12_out,
-                    store_sigma,
-                    free,
-                    direct,
-                    ext,
-                    h_act,
-                    mode,
+                return incant!(
+                    fused_vblur_ssim_canon64_vec::<crate::featcanon::Lanes16F64>(
+                        h_mu1,
+                        h_mu2,
+                        h_sigma_sq,
+                        h_sigma12,
+                        src,
+                        dst,
+                        width,
+                        height,
+                        inner_start,
+                        inner_h,
+                        radius,
+                        mu1_out,
+                        mu2_out,
+                        store_mu,
+                        sd_out,
+                        store_sd,
+                        ssq_out,
+                        s12_out,
+                        store_sigma,
+                        free,
+                        direct,
+                        ext,
+                        h_act,
+                        mode,
+                    ),
+                    [v4x, v4, v3, neon, wasm128, scalar]
                 );
             }
             if matches!(blur_axis, crate::featcanon::BlurMode::Rec64) {
                 return incant!(
-                    fused_vblur_ssim_canon64_vec(
+                    fused_vblur_ssim_canon64_vec::<crate::featcanon::LanesF64>(
                         h_mu1,
                         h_mu2,
                         h_sigma_sq,
@@ -5429,9 +5432,11 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     _mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
     if radius > 0 {
+        #[cfg(feature = "feature-regime-v2")]
         crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
     }
     if !free.local_only && !free.omit_peaks {
+        #[cfg(feature = "feature-regime-v2")]
         crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
     }
     let form = free.luma_form();
@@ -5453,8 +5458,22 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
 
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<P>::zero();
-    let mut t = vec![0.0f32; diam];
-    let mut rb = vec![0usize; diam];
+    let mut t_stack = [0.0f32; 33];
+    let mut t_heap;
+    let t = if diam <= 33 {
+        &mut t_stack[..diam]
+    } else {
+        t_heap = vec![0.0; diam];
+        &mut t_heap[..]
+    };
+    let mut rb_stack = [0usize; 33];
+    let mut rb_heap;
+    let rb = if diam <= 33 {
+        &mut rb_stack[..diam]
+    } else {
+        rb_heap = vec![0; diam];
+        &mut rb_heap[..]
+    };
 
     // `localwin` rows: only the inner range produces outputs — nothing below
     // or above feeds a recurrence, so those rows are never visited.
@@ -5473,7 +5492,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 for (k, t) in t.iter_mut().enumerate() {
                     *t = plane[rb[k] + x];
                 }
-                crate::blur::local_sum_taps(&t) * inv
+                crate::blur::local_sum_taps(t) * inv
             };
             let mu1 = win_at(planes.m1);
             let mu2 = win_at(planes.m2);
@@ -5598,7 +5617,7 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
 /// unfused either way, so the scalar body is already their exact form.
 #[magetypes(define(f32x8, f64x8), v4x, v4, v3, -scalar)]
 #[allow(clippy::too_many_arguments)]
-fn fused_vblur_ssim_canon64_vec(
+fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     token: Token,
     h_mu1: &[f32],
     h_mu2: &[f32],
@@ -5625,7 +5644,6 @@ fn fused_vblur_ssim_canon64_vec(
     h_act: &[f32],
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
-    use crate::featcanon::{LanesF64, Pool as _};
     let form = free.luma_form();
     let r = radius;
     let inner_end = inner_start + inner_h;
@@ -5639,9 +5657,24 @@ fn fused_vblur_ssim_canon64_vec(
         height,
         r,
     };
-    let mut win = VWin::new(crate::featcanon::canon_blur_axis(mode), &planes);
+    let local = P::LANES == 16;
+    if local {
+        if radius > 0 {
+            #[cfg(feature = "feature-regime-v2")]
+            crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
+        }
+        if !free.local_only && !free.omit_peaks {
+            #[cfg(feature = "feature-regime-v2")]
+            crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
+        }
+    }
+    let mut win = if local {
+        VWin::Local
+    } else {
+        VWin::new(crate::featcanon::canon_blur_axis(mode), &planes)
+    };
     debug_assert!(
-        matches!(win, VWin::F64 { .. }),
+        local || matches!(win, VWin::F64 { .. }),
         "canon64 vector body is entered only under the Rec64 axis"
     );
     let inv_v = f64x8::splat(token, planes.inv64());
@@ -5653,7 +5686,7 @@ fn fused_vblur_ssim_canon64_vec(
     let km = f32x8::splat(token, ext.k_mask);
     let kiw = f32x8::splat(token, ext.k_iw);
     let mut acc = StripChannelAccum::zero();
-    let mut band = BandPools::<LanesF64>::zero();
+    let mut band = BandPools::<P>::zero();
     let full = width / 8;
     // One slice construction per plane: every `base + x` / `x0 + 8` index
     // below is then statically `< height * width` or `<= full * 8`, so the
@@ -5668,18 +5701,22 @@ fn fused_vblur_ssim_canon64_vec(
         f32x8::from_array(token, std::array::from_fn(|i| a[i] as f32))
     };
 
-    for y in 0..height {
+    for y in if local {
+        inner_start..inner_end
+    } else {
+        0..height
+    } {
         if y >= inner_start && y < inner_end {
             let base = y * width;
-            let mut row = VblurPools::<LanesF64>::zero();
-            let [wm1, wm2, wsq, ws12, wact] = win.f64_states().expect("Rec64");
+            let mut row = VblurPools::<P>::zero();
+            let [wm1, wm2, wsq, ws12, wact] = win.f64_states().unwrap_or([&[]; 5]);
             // Provable-length slices: `x0 + 8 <= full * 8` is then literal,
             // so `narrow`'s window reads and the plane loads compile with
             // no `slice_index_fail` path. (`wact` stays conditionally read.)
-            let wm1 = &wm1[..full * 8];
-            let wm2 = &wm2[..full * 8];
-            let wsq = &wsq[..full * 8];
-            let ws12 = &ws12[..full * 8];
+            let wm1 = if local { wm1 } else { &wm1[..full * 8] };
+            let wm2 = if local { wm2 } else { &wm2[..full * 8] };
+            let wsq = if local { wsq } else { &wsq[..full * 8] };
+            let ws12 = if local { ws12 } else { &ws12[..full * 8] };
             let wact = if wact.is_empty() {
                 wact
             } else {
@@ -5688,16 +5725,34 @@ fn fused_vblur_ssim_canon64_vec(
             let srow = &src[base..base + full * 8];
             let drow = &dst[base..base + full * 8];
 
+            let window = |plane: &[f32], state: &[f64], x0: usize| -> f32x8 {
+                if !local {
+                    return narrow(state, x0);
+                }
+                if radius == 0 {
+                    return f32x8::load(token, plane[base + x0..base + x0 + 8].try_into().unwrap());
+                }
+                debug_assert_eq!(radius, 5);
+                let t: [f32x8; 11] = std::array::from_fn(|k| {
+                    let rb =
+                        crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width;
+                    f32x8::load(token, plane[rb + x0..rb + x0 + 8].try_into().unwrap())
+                });
+                ((((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
+                    + (t[8] + t[9])
+                    + t[10])
+                    * f32x8::splat(token, 1.0 / 11.0)
+            };
             for c in 0..full {
                 let x0 = c * 8;
-                let m1v = narrow(wm1, x0);
-                let m2v = narrow(wm2, x0);
-                let ssqv = narrow(wsq, x0);
-                let s12v = narrow(ws12, x0);
-                let actv = if wact.is_empty() {
+                let m1v = window(planes.m1, wm1, x0);
+                let m2v = window(planes.m2, wm2, x0);
+                let ssqv = window(planes.sq, wsq, x0);
+                let s12v = window(planes.s12, ws12, x0);
+                let actv = if planes.act.is_empty() {
                     zero
                 } else {
-                    narrow(wact, x0)
+                    window(planes.act, wact, x0)
                 };
                 let sv = f32x8::load(token, srow[x0..x0 + 8].try_into().unwrap());
                 let dv = f32x8::load(token, drow[x0..x0 + 8].try_into().unwrap());
@@ -5710,11 +5765,35 @@ fn fused_vblur_ssim_canon64_vec(
                 .max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
-                row.ssim_d.add_chunk(&sd.to_array());
-                row.ssim_d4.add_chunk(&sd4.to_array());
-                row.ssim_d2.add_chunk(&sd2.to_array());
-                if !free.local_only {
-                    row.ssim_d8.add_chunk(&(sd4 * sd4).to_array());
+                {
+                    let values = sd.to_array();
+                    let lanes = row.ssim_d.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += values[l] as f64;
+                    }
+                }
+                {
+                    let values = sd4.to_array();
+                    let lanes = row.ssim_d4.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += values[l] as f64;
+                    }
+                }
+                {
+                    let values = sd2.to_array();
+                    let lanes = row.ssim_d2.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += values[l] as f64;
+                    }
+                }
+                if !free.local_only && !free.omit_peaks {
+                    {
+                        let values = (sd4 * sd4).to_array();
+                        let lanes = row.ssim_d8.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
                     for v in sd.to_array() {
                         acc.ssim_max = acc.ssim_max.max(v);
                     }
@@ -5742,19 +5821,69 @@ fn fused_vblur_ssim_canon64_vec(
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
                 if !free.omit_edges {
-                    row.edge_art.add_chunk(&artifact.to_array());
-                    row.edge_art4.add_chunk(&a4.to_array());
-                    row.edge_art2.add_chunk(&a2.to_array());
-                    row.edge_det.add_chunk(&detail_lost.to_array());
-                    row.edge_det4.add_chunk(&dl4.to_array());
-                    row.edge_det2.add_chunk(&dl2.to_array());
-                    row.edge_art8.add_chunk(&(a4 * a4).to_array());
-                    row.edge_det8.add_chunk(&(dl4 * dl4).to_array());
-                    for v in artifact.to_array() {
-                        acc.edge_art_max = acc.edge_art_max.max(v);
+                    {
+                        let values = artifact.to_array();
+                        let lanes = row.edge_art.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
                     }
-                    for v in detail_lost.to_array() {
-                        acc.edge_det_max = acc.edge_det_max.max(v);
+                    {
+                        let values = a4.to_array();
+                        let lanes = row.edge_art4.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = a2.to_array();
+                        let lanes = row.edge_art2.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = detail_lost.to_array();
+                        let lanes = row.edge_det.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = dl4.to_array();
+                        let lanes = row.edge_det4.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = dl2.to_array();
+                        let lanes = row.edge_det2.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    if !free.omit_peaks {
+                        {
+                            let values = (a4 * a4).to_array();
+                            let lanes = row.edge_art8.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (dl4 * dl4).to_array();
+                            let lanes = row.edge_det8.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        for v in artifact.to_array() {
+                            acc.edge_art_max = acc.edge_art_max.max(v);
+                        }
+                        for v in detail_lost.to_array() {
+                            acc.edge_det_max = acc.edge_det_max.max(v);
+                        }
                     }
                 }
 
@@ -5762,77 +5891,251 @@ fn fused_vblur_ssim_canon64_vec(
                 let vs = sv - m1v;
                 let vd = dv - m2v;
                 if !free.local_only {
-                    row.hf_sq_src.add_chunk(&(vs * vs).to_array());
-                    row.hf_sq_dst.add_chunk(&(vd * vd).to_array());
-                    row.hf_abs_src.add_chunk(&diff1.to_array());
-                    row.hf_abs_dst.add_chunk(&diff2.to_array());
+                    {
+                        let values = (vs * vs).to_array();
+                        let lanes = row.hf_sq_src.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = (vd * vd).to_array();
+                        let lanes = row.hf_sq_dst.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = diff1.to_array();
+                        let lanes = row.hf_abs_src.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = diff2.to_array();
+                        let lanes = row.hf_abs_dst.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
                 }
 
                 // MSE + ext pools
                 let pd = sv - dv;
                 let d2 = pd * pd;
-                row.mse.add_chunk(&d2.to_array());
+                {
+                    let values = d2.to_array();
+                    let lanes = row.mse.chunk8(x0 & (P::LANES - 1));
+                    for l in 0..8 {
+                        lanes[l] += values[l] as f64;
+                    }
+                }
                 if ext.on {
-                    row.act_sum.add_chunk(&actv.to_array());
+                    {
+                        let values = actv.to_array();
+                        let lanes = row.act_sum.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
                     if ext.mask {
                         let w = one / km.mul_add(actv, one);
                         let da = (sd * w).max(zero);
                         let d2a = da * da;
-                        row.masked_ssim_d.add_chunk(&da.to_array());
-                        row.masked_ssim_d2.add_chunk(&d2a.to_array());
-                        row.masked_ssim_d4.add_chunk(&(d2a * d2a).to_array());
+                        {
+                            let values = da.to_array();
+                            let lanes = row.masked_ssim_d.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = d2a.to_array();
+                            let lanes = row.masked_ssim_d2.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (d2a * d2a).to_array();
+                            let lanes = row.masked_ssim_d4.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
                         let e = ed * w;
                         let ep = e.max(zero);
                         let en = (-e).max(zero);
                         let a2m = ep * ep;
                         let dl2m = en * en;
-                        row.masked_art4.add_chunk(&(a2m * a2m).to_array());
-                        row.masked_det4.add_chunk(&(dl2m * dl2m).to_array());
-                        row.masked_mse.add_chunk(&(d2 * w).to_array());
+                        {
+                            let values = (a2m * a2m).to_array();
+                            let lanes = row.masked_art4.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (dl2m * dl2m).to_array();
+                            let lanes = row.masked_det4.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (d2 * w).to_array();
+                            let lanes = row.masked_mse.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
                     }
                     if ext.iw {
                         let w = kiw.mul_add(actv, one);
                         let db = (sd * w).max(zero);
                         let d2b = db * db;
-                        row.iw_ssim_d.add_chunk(&db.to_array());
-                        row.iw_ssim_d2.add_chunk(&d2b.to_array());
-                        row.iw_ssim_d4.add_chunk(&(d2b * d2b).to_array());
+                        {
+                            let values = db.to_array();
+                            let lanes = row.iw_ssim_d.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = d2b.to_array();
+                            let lanes = row.iw_ssim_d2.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (d2b * d2b).to_array();
+                            let lanes = row.iw_ssim_d4.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
                         let e = ed * w;
                         let ep = e.max(zero);
                         let en = (-e).max(zero);
                         let a2i = ep * ep;
                         let dl2i = en * en;
-                        row.iw_art4.add_chunk(&(a2i * a2i).to_array());
-                        row.iw_det4.add_chunk(&(dl2i * dl2i).to_array());
-                        row.iw_mse.add_chunk(&(d2 * w).to_array());
+                        {
+                            let values = (a2i * a2i).to_array();
+                            let lanes = row.iw_art4.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (dl2i * dl2i).to_array();
+                            let lanes = row.iw_det4.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (d2 * w).to_array();
+                            let lanes = row.iw_mse.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
                     }
                 }
 
                 // Free raw moments — band-lifetime canonical lanes.
                 if free.raw_moments {
-                    band.fm_s.add_chunk(&sv.to_array());
-                    band.fm_d.add_chunk(&dv.to_array());
-                    band.fm_s2.add_chunk(&(sv * sv).to_array());
-                    band.fm_d2.add_chunk(&(dv * dv).to_array());
+                    {
+                        let values = sv.to_array();
+                        let lanes = band.fm_s.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = dv.to_array();
+                        let lanes = band.fm_d.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = (sv * sv).to_array();
+                        let lanes = band.fm_s2.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = (dv * dv).to_array();
+                        let lanes = band.fm_d2.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
                     let df = dv - sv;
-                    band.fm_dd.add_chunk(&(df * (dv + sv)).to_array());
-                    band.fm_ds.add_chunk(&df.to_array());
+                    {
+                        let values = (df * (dv + sv)).to_array();
+                        let lanes = band.fm_dd.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
+                    {
+                        let values = df.to_array();
+                        let lanes = band.fm_ds.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
                 }
                 // Free bounded error + luminance bins.
                 if free.bounded_err {
                     let sqm = (pd * pd).max(zero);
                     let be_i = sqm / (sqm + c_mse);
-                    band.be_m.add_chunk(&be_i.to_array());
+                    {
+                        let values = be_i.to_array();
+                        let lanes = band.be_m.chunk8(x0 & (P::LANES - 1));
+                        for l in 0..8 {
+                            lanes[l] += values[l] as f64;
+                        }
+                    }
                     if free.lum_bins {
                         let ry = sv.max(zero);
                         let t = ry / (ry + c_lumt);
                         let omt = one - t;
                         let wd = omt * omt;
                         let wb = t * t;
-                        band.wd_num.add_chunk(&(wd * be_i).to_array());
-                        band.wd_den.add_chunk(&wd.to_array());
-                        band.wb_num.add_chunk(&(wb * be_i).to_array());
-                        band.wb_den.add_chunk(&wb.to_array());
+                        {
+                            let values = (wd * be_i).to_array();
+                            let lanes = band.wd_num.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = wd.to_array();
+                            let lanes = band.wd_den.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = (wb * be_i).to_array();
+                            let lanes = band.wb_num.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
+                        {
+                            let values = wb.to_array();
+                            let lanes = band.wb_den.chunk8(x0 & (P::LANES - 1));
+                            for l in 0..8 {
+                                lanes[l] += values[l] as f64;
+                            }
+                        }
                     }
                 }
             }
@@ -5931,7 +6234,9 @@ fn fused_vblur_ssim_canon64_vec(
 
         // Slide V-blur window — same per-column recurrence, eight columns
         // per f64x8 op.
-        vwin_slide64x8!(win, token, y, &planes);
+        if !local {
+            vwin_slide64x8!(win, token, y, &planes);
+        }
     }
 
     acc
@@ -5941,7 +6246,7 @@ fn fused_vblur_ssim_canon64_vec(
 /// wasm128 keep the `LanesF64` canonical body — their `mul_add` is unfused,
 /// so the scalar body is already their exact element arithmetic.
 #[allow(clippy::too_many_arguments)]
-fn fused_vblur_ssim_canon64_vec_scalar(
+fn fused_vblur_ssim_canon64_vec_scalar<P: crate::featcanon::Pool64>(
     _token: archmage::ScalarToken,
     h_mu1: &[f32],
     h_mu2: &[f32],
@@ -5968,7 +6273,35 @@ fn fused_vblur_ssim_canon64_vec_scalar(
     h_act: &[f32],
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
-    fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
+    if P::LANES == 16 {
+        return fused_vblur_ssim_local::<P>(
+            h_mu1,
+            h_mu2,
+            h_sigma_sq,
+            h_sigma12,
+            src,
+            dst,
+            width,
+            height,
+            inner_start,
+            inner_h,
+            radius,
+            mu1_out,
+            mu2_out,
+            store_mu,
+            sd_out,
+            store_sd,
+            ssq_out,
+            s12_out,
+            store_sigma,
+            free,
+            direct,
+            ext,
+            h_act,
+            mode,
+        );
+    }
+    fused_vblur_ssim_canon::<P>(
         h_mu1,
         h_mu2,
         h_sigma_sq,
@@ -5998,7 +6331,7 @@ fn fused_vblur_ssim_canon64_vec_scalar(
 
 /// Wasm128 sibling of [`fused_vblur_ssim_canon64_vec_scalar`].
 #[allow(clippy::too_many_arguments, dead_code)]
-fn fused_vblur_ssim_canon64_vec_wasm128(
+fn fused_vblur_ssim_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     _token: archmage::Wasm128Token,
     h_mu1: &[f32],
     h_mu2: &[f32],
@@ -6025,7 +6358,35 @@ fn fused_vblur_ssim_canon64_vec_wasm128(
     h_act: &[f32],
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
-    fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
+    if P::LANES == 16 {
+        return fused_vblur_ssim_local::<P>(
+            h_mu1,
+            h_mu2,
+            h_sigma_sq,
+            h_sigma12,
+            src,
+            dst,
+            width,
+            height,
+            inner_start,
+            inner_h,
+            radius,
+            mu1_out,
+            mu2_out,
+            store_mu,
+            sd_out,
+            store_sd,
+            ssq_out,
+            s12_out,
+            store_sigma,
+            free,
+            direct,
+            ext,
+            h_act,
+            mode,
+        );
+    }
+    fused_vblur_ssim_canon::<P>(
         h_mu1,
         h_mu2,
         h_sigma_sq,
@@ -6056,7 +6417,7 @@ fn fused_vblur_ssim_canon64_vec_wasm128(
 /// NEON runs the scalar canonical body (2026-10-03): NEON vector `max`/`min` propagate NaN where the canon's `f32::max`/
 /// `f64::max` drop it (the REV4VEC CI aarch64 failure), so only the x86_64 fused tiers run a lane-parallel body.
 #[allow(clippy::too_many_arguments, dead_code)]
-fn fused_vblur_ssim_canon64_vec_neon(
+fn fused_vblur_ssim_canon64_vec_neon<P: crate::featcanon::Pool64>(
     _token: archmage::NeonToken,
     h_mu1: &[f32],
     h_mu2: &[f32],
@@ -6083,7 +6444,35 @@ fn fused_vblur_ssim_canon64_vec_neon(
     h_act: &[f32],
     mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
-    fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
+    if P::LANES == 16 {
+        return fused_vblur_ssim_local::<P>(
+            h_mu1,
+            h_mu2,
+            h_sigma_sq,
+            h_sigma12,
+            src,
+            dst,
+            width,
+            height,
+            inner_start,
+            inner_h,
+            radius,
+            mu1_out,
+            mu2_out,
+            store_mu,
+            sd_out,
+            store_sd,
+            ssq_out,
+            s12_out,
+            store_sigma,
+            free,
+            direct,
+            ext,
+            h_act,
+            mode,
+        );
+    }
+    fused_vblur_ssim_canon::<P>(
         h_mu1,
         h_mu2,
         h_sigma_sq,
@@ -6184,7 +6573,7 @@ fn fused_vblur_ssim_exact(
                 row.ssim_d.add64(x, sd);
                 row.ssim_d4.add64(x, sd4);
                 row.ssim_d2.add64(x, sd2);
-                if !free.local_only {
+                if !free.local_only && !free.omit_peaks {
                     row.ssim_d8.add64(x, sd4 * sd4);
                     acc.ssim_max = acc.ssim_max.max(sd as f32);
                 }
@@ -7367,7 +7756,7 @@ mod tests {
             let scalar_t = archmage::ScalarToken::summon().expect("infallible");
             let scalar_f: Box<SsimFn> = Box::new(
                 move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
-                    fused_vblur_ssim_canon64_vec_scalar(
+                    fused_vblur_ssim_canon64_vec_scalar::<crate::featcanon::LanesF64>(
                         scalar_t,
                         m1,
                         m2,
@@ -7401,7 +7790,7 @@ mod tests {
             if let Some(t) = archmage::X64V3Token::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
-                        fused_vblur_ssim_canon64_vec_v3(
+                        fused_vblur_ssim_canon64_vec_v3::<crate::featcanon::LanesF64>(
                             t,
                             m1,
                             m2,
@@ -7436,7 +7825,7 @@ mod tests {
             if let Some(t) = archmage::X64V4Token::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
-                        fused_vblur_ssim_canon64_vec_v4(
+                        fused_vblur_ssim_canon64_vec_v4::<crate::featcanon::LanesF64>(
                             t,
                             m1,
                             m2,
@@ -7471,7 +7860,7 @@ mod tests {
             if let Some(t) = archmage::X64V4xToken::summon() {
                 let f: Box<SsimFn> = Box::new(
                     move |m1, m2, sq, s12, src, dst, mo1, mo2, so, sqo, s12o, c: &SsimCase| {
-                        fused_vblur_ssim_canon64_vec_v4x(
+                        fused_vblur_ssim_canon64_vec_v4x::<crate::featcanon::LanesF64>(
                             t,
                             m1,
                             m2,
