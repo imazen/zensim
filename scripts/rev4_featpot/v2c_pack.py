@@ -114,9 +114,16 @@ def main() -> None:
     if any(c not in every for c in chosen) or len(set(chosen)) != len(chosen):
         raise SystemExit(f"--select: unknown or repeated variant directories {chosen}")
     selected = [c for c in every if c in chosen and (args.root / "wide" / c[0] / c[1] / "receipt.json").is_file()]
+    if not selected:
+        raise SystemExit("no selected variant receipts exist")
+    revisions = {int(json.loads((args.root / "wide" / f / v / "receipt.json").read_text()).get("formula_revision", 4))
+                 for f, v in selected}
+    if len(revisions) != 1:
+        raise SystemExit(f"mixed formula revisions in selected receipts: {revisions}")
+    revision = revisions.pop()
     members = {f"rev4-featpot/{args.name}/{k}": v for k, v in members_for(args.root, args.kind, selected).items()}
     inventory = {"schema": "zenfleet-fit-data-v1", "label": "POTENTIAL — ceiling, not a model score",
-                 "program": f"Rev4 potential Instrument v2-canon ({args.kind})", "variant_dirs": [f"{f}/{v}" for f, v in selected],
+                 "program": f"Rev{revision} potential Instrument v2-canon ({args.kind})", "variant_dirs": [f"{f}/{v}" for f, v in selected],
                  "files": {name: sha(path) for name, path in sorted(members.items())}}
     inv = json.dumps(inventory, sort_keys=True, indent=2).encode() + b"\n"
     args.out.parent.mkdir(parents=True, exist_ok=True)

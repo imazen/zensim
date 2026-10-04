@@ -34,7 +34,9 @@ def entries() -> dict:
 def cmd_grid(args) -> int:
     cells = []
     for label, (spec, cols) in entries().items():
-        for i in SEEDS:
+        if args.entries and label not in args.entries.split(","):
+            continue
+        for i in range(args.seeds):
             argv = ["v2_confirm_fit.py", "--spec", spec, "--head", HEAD, "--seed-index", str(i), "--root", str(V2)]
             if cols:
                 argv += ["--columns", ",".join(map(str, cols))]
@@ -87,7 +89,11 @@ def main() -> int:
     ap.add_argument("--out")
     ap.add_argument("--program-sha", default="")
     ap.add_argument("--data-sha", default="")
+    ap.add_argument("--entries", help="comma-separated R7 entries to fit (default: A,B,C,D)")
+    ap.add_argument("--seeds", type=int, choices=range(1, 11), default=len(SEEDS))
     args = ap.parse_args()
+    if args.entries and not set(args.entries.split(",")) <= set(entries()):
+        ap.error("--entries must name R7 entries A,B,C,D")
     return {"grid": cmd_grid, "pin": cmd_pin}[args.cmd](args)
 
 

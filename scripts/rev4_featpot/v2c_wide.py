@@ -622,12 +622,16 @@ def freeze(out: Path) -> str:
     if not verify.get("all_ok"):
         raise ValueError("verify.json is not all_ok; fix and re-verify before the freeze")
     wide_receipts, widths, ids = {}, set(), set()
-    for family in FAMILIES:
-        for variant in VARIANTS:
+    families = ("main",) if PROFILE.revision == 5 else FAMILIES
+    variants = ("real",) if PROFILE.revision == 5 else VARIANTS
+    for family in families:
+        for variant in variants:
             rp = wide / family / variant / "receipt.json"
             if not rp.is_file():
                 raise ValueError(f"{family}/{variant}: receipt missing (build every family and variant before the freeze)")
             rec = json.loads(rp.read_text())
+            if int(rec.get("formula_revision", 4)) != PROFILE.revision:
+                raise ValueError(f"{family}/{variant}: formula revision disagrees with freeze profile")
             if not rec.get("complete"):
                 raise ValueError(f"{family}/{variant}: receipt incomplete")
             wide_receipts[f"{family}/{variant}"] = sha(rp)
@@ -635,11 +639,12 @@ def freeze(out: Path) -> str:
     confirm = json.loads((wide / "confirm" / "receipt.json").read_text())
     for name in CONFIRM_SETS:
         tables = confirm["sets"][name]["tables"]
-        for family in FAMILIES:
-            for variant in VARIANTS:
+        for family in families:
+            for variant in variants:
                 if variant not in tables.get(family, {}):
                     raise ValueError(f"confirm {name}/{family}/{variant}: table missing")
-    if len(widths) != 1 or len(ids) != 1 or confirm["width"] not in widths:
+    if (len(widths) != 1 or len(ids) != 1 or confirm["width"] not in widths
+            or confirm["feature_set_id"] not in ids):
         raise ValueError("widths or feature_set_ids disagree across receipts")
     extra = wide / "extra_arms.json"
     record = {"schema": v2_common.FROZEN_SCHEMA, "width": widths.pop(), "feature_set_id": ids.pop(), "wide_receipts": wide_receipts,
@@ -713,4 +718,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # The verifier imports this owner for its profile-aware width and bank
+    # checks. Keep the CLI's selected profile rather than creating a second
+    # module instance with the default Rev4 profile.
+    sys.modules["v2c_wide"] = sys.modules[__name__]
     main()

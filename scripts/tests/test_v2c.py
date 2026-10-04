@@ -614,7 +614,7 @@ class Freeze(unittest.TestCase):
                     (wide / fam / var / "receipt.json").write_text(json.dumps({"complete": True, "width": 1825, "feature_set_id": "x"}))
             sets = {n: {"tables": {f: {v: {} for v in w.VARIANTS} for f in w.FAMILIES}} for n in w.CONFIRM_SETS}
             (wide / "confirm").mkdir()
-            (wide / "confirm" / "receipt.json").write_text(json.dumps({"width": 1825, "sets": sets}))
+            (wide / "confirm" / "receipt.json").write_text(json.dumps({"width": 1825, "feature_set_id": "x", "sets": sets}))
             (wide / "keep_lists.json").write_text("{}")
             (wide / "verify.json").write_text(json.dumps({"all_ok": False}))
             with self.assertRaises(ValueError):                              # an unclean verify cannot be frozen
@@ -630,6 +630,40 @@ class Freeze(unittest.TestCase):
             (wide / "main" / "p1" / "receipt.json").write_text(json.dumps({"complete": True, "width": 1825, "feature_set_id": "y"}))
             with self.assertRaises(ValueError):                              # any receipt change after the freeze is caught
                 v2_common.load_frozen(root)
+
+    def test_rev5_freeze_main_real_and_refuse_mixed_confirm_identity(self):
+        old_profile = w.PROFILE
+        try:
+            w.PROFILE = w.rev5_profile("rev5test", "fsid5", "bin5", "build5", 1853)
+            with tempfile.TemporaryDirectory() as t:
+                root = Path(t)
+                wide = root / "wide"
+                (wide / "main" / "real").mkdir(parents=True)
+                receipt = {"complete": True, "width": 1853, "feature_set_id": "fsid5", "formula_revision": 5}
+                rp = wide / "main" / "real" / "receipt.json"
+                rp.write_text(json.dumps(receipt))
+                (wide / "confirm").mkdir()
+                cp = wide / "confirm" / "receipt.json"
+                confirm = {"width": 1853, "feature_set_id": "wrong",
+                           "sets": {n: {"tables": {"main": {"real": {}}}} for n in w.CONFIRM_SETS}}
+                cp.write_text(json.dumps(confirm))
+                (wide / "keep_lists.json").write_text("{}")
+                (wide / "verify.json").write_text(json.dumps({"all_ok": True}))
+                with self.assertRaises(ValueError):
+                    w.freeze(root)
+                confirm["feature_set_id"] = "fsid5"
+                cp.write_text(json.dumps(confirm))
+                receipt["formula_revision"] = 4
+                rp.write_text(json.dumps(receipt))
+                with self.assertRaises(ValueError):
+                    w.freeze(root)
+                receipt["formula_revision"] = 5
+                rp.write_text(json.dumps(receipt))
+                w.freeze(root)
+                frozen, _ = v2_common.load_frozen(root)
+                self.assertEqual(set(frozen["wide_receipts"]), {"main/real"})
+        finally:
+            w.PROFILE = old_profile
 
 
 class Labels(unittest.TestCase):

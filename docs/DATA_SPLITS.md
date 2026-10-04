@@ -1166,3 +1166,20 @@ template matching) of every training reference against every holdout source is n
 Status: **read 2026-10-04 03:31–03:32 MDT, once** (pin `v2c_setcompare_pin_r7a_2026-10-04.json`, R7 + R7a; full output `/var/tmp/rev4-featpot/v2c/compare/r7a_setcompare_read.json` sha256 `3f0b7f9f699ad1d3…`, tower `output/zensim/featpot-r7a-read-2026-10-04/`; summary `benchmarks/rev4_featpot_effaudit/r7a_setcompare_read_2026-10-04.summary.json`). Outcome: Q1 A vs C **not confirmed** (4-set mean Δ +0.0001, p 0.46); Q2 A vs D **not confirmed** (+0.0022, p 0.18); Q3 B vs A **as good (non-inferior)** (+0.0010, 5th percentile −0.0006; KonJND-JPEG SELECT Δ −0.0171, CI upper −0.004, 0/10 seeds above — no veto, 0.001 inside the margin). Every verdict is the same on the R7a clean primary (MCL-JCI without the ten KonFiG sources). These sets' labels are now exposed for the four entries; no design change may follow, and a later change needs a new holdout. `v2_confirm_read.py --set-compare` read the sealed labels of: cid22_b (`/mnt/v/dataset/cid22/CID22_validation_set/cid22val_pairs_ab.tsv`, sha256 `3ce0f7438ea0…`), aic4 (`/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv`, sha256 `955a9601e94c…`), csiq (`/mnt/v/dataset/csiq/csiq_pairs.tsv`, sha256 `78b1dac5f74e…`), mcljci (`/var/tmp/datasets/mcl-jci/mcljci_labels.csv`, sha256 `36f17dd8bac2…`), konjnd_jpeg_select (`/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv`, sha256 `70148a39c90d…`), konjnd_jpeg_terminal (`/mnt/v/output/zensim/v2-backfill-2026-07-20/konjnd_jpeg_val_pairs.tsv`, sha256 `70148a39c90d…`).
 Frozen entries: A = `set:v2+basic@h32:H128:cv16:cf98`; B = `sel:59f0bbc2f290@h32:H128:cv16:cf98`; C = `set:v2+basic@h32:H128`; D = `r0@h32:H128` (head N); pin `../../benchmarks/rev4_featpot_effaudit/v2c_setcompare_pin_r7a_2026-10-04.json` sha256 `701964b7014f8d6b33854f2db253574a83db9f3046c4630746c6d0cd74c422f8`; frozen root `f432995f31a3…`.
 Primary: superiority A vs C, A vs D (Holm at 0.05); non-inferiority B vs A. No design change may follow from this read; a later change needs a new holdout.
+
+## Exposure ledger — 2026-10-04: R5CONFIRM pixels-only extraction and fleet transport
+
+Authorized artifact production by `R5CONFIRM_brief.md`; no held-out label or `_sealed` directory was opened.
+The existing `rev5_bank.py` owner extracted the six R7 confirmatory populations from old-bank keys/pixels
+with binary `c649e810…` (build `1a9d5a8a`, descendant of frozen arithmetic `60174678`), requested basic+peaks+v2,
+feature identity `basic+peaks+v2@w1825/rev5_localwin#36c3f3af`, absent slots NaN. Confirmatory tables
+contain constant-zero `human_score`; keys contain no label/target. Rows: CID22-B 2100, AIC-4 300,
+KonJND JPEG SELECT/TERMINAL 404/100, CSIQ 865, MCL-JCI 5000. The original scientific roles are unchanged.
+
+`v2c_pack.py --kind confirm --select main/real --name v2c5` packed admitted TRAIN teacher legs and
+full exploratory `human_all` fit/dev plus these features-only tables, receipts/keys/manifests/keep list/freeze.
+SHA-256 `1707879d64581d60450e2d6978988f2d77007fc0814e1b513ac6a1076cfe35c1`, 389904514 bytes,
+38 members plus inventory, transported to the existing operator-controlled fleet store at
+`s3://zentrain/jobs/fitv2r5confirm-20261004/inputs/`. Program v25b carries the Rev5 E15 coverage pool.
+Six R7 A/B recipe cells, head N, seeds 0–2; no confirmation read and no Rev5-vs-Rev4 decision.
+Provenance and final serving evidence are owned by `benchmarks/r5confirm_WORKLOG.md`; E24 owns selection.
