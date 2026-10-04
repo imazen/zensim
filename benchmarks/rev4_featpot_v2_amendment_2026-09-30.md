@@ -520,3 +520,31 @@ launched (02:55) and before any sealed read.
 **Mechanics.** `v2_confirm_read.py --set-compare` with pin schema `rev4-featpot-v2c-setcompare-pin-v2`, which adds `amendment_r7a`
 (path and sha256 of the immutable copy `rev4_featpot_R7a_registration_2026-10-04.md`). The R7 pin
 `v2c_setcompare_pin_2026-10-04.json` is superseded before any read; the new pin is `v2c_setcompare_pin_r7a_2026-10-04.json`.
+
+## R7 / R7a result (read once, 2026-10-04 03:31–03:32 MDT)
+
+Pin `v2c_setcompare_pin_r7a_2026-10-04.json` (sha256 `701964b7…`), 40 full-data confirm fits (program v24, fleet job
+`fitv2setcmp-20261004`), preflight passed on all 40 cells. Summary: `rev4_featpot_effaudit/r7a_setcompare_read_2026-10-04.summary.json`;
+full output sha256 `3f0b7f9f…` (tower `output/zensim/featpot-r7a-read-2026-10-04/`). Signed SROCC, seed-paired Δ, B = 2000.
+
+| question | verdict | 4-set mean Δ [95 % CI] | p (one-sided) / 5th pct | clean primary (MCL-JCI 40) | KonJND-JPEG SELECT Δ [CI] |
+|---|---|---|---|---|---|
+| Q1 A vs C (adopted recipe vs uncurated) | **not confirmed** | +0.0001 [−0.0016, +0.0021] | p 0.46 | +0.0001, p 0.48 | +0.0094 [−0.0039, +0.0234] |
+| Q2 A vs D (v2 + basic vs R0 bank) | **not confirmed** | +0.0022 [−0.0019, +0.0064] | p 0.18 | +0.0024, p 0.16 | +0.0211 [−0.0016, +0.0455] |
+| Q3 B vs A (by_v2fy vs v2 + basic) | **as good (non-inferior)** | +0.0010 [−0.0009, +0.0030] | 5th pct −0.0006 | +0.0009, 5th pct −0.0007 | **−0.0171 [−0.0310, −0.0040]** |
+
+Per-set Δ, B − A: CID22-B +0.0001, AIC-4 +0.0011, CSIQ +0.0019, MCL-JCI +0.0008 (MCL-JCI 40 +0.0004); TERMINAL −0.0243
+(n.s.). A − D: CSIQ −0.0072 [−0.0124, −0.0016] (R0 better; inside the −0.005 veto rule because the CI upper bound is −0.0016),
+CID22-B +0.0062, AIC-4 +0.0092. Absolute mean signed SROCC (A / B / C / D): CID22-B 0.9165 / 0.9165 / 0.9146 / 0.9102;
+AIC-4 0.9106 / 0.9117 / 0.9121 / 0.9014; CSIQ 0.9551 / 0.9571 / 0.9549 / 0.9623; MCL-JCI 0.8893 / 0.8901 / 0.8895 / 0.8886;
+KonJND-JPEG SELECT 0.5656 / 0.5485 / 0.5562 / 0.5445.
+
+Reading:
+* **by_v2fy passes Q3 as registered**, on both primaries, at 0.53× the Rev4 scoring cost. It is weaker on near-threshold JPEG:
+  KonJND-JPEG SELECT is lower in all 10 seeds (Δ −0.0171); the CI upper bound (−0.0040) misses the −0.005 veto by 0.001. The
+  5-seed ensembles show the same sign (−0.0037, −0.0243). Treat by_v2fy as primary-set equivalent with a JPEG-JND caveat, not as a
+  free substitute.
+* **The adopted coverage recipe (cv16:cf98) shows no out-of-sample gain** on the sealed sets (Q1 Δ ≈ 0); it does no harm either.
+* **v2 + basic does not beat the R0 944 bank** on the sealed primary (Q2 n.s.); R0 is better on CSIQ.
+* R7a: the KonFiG/MCL-JCI overlap changes no verdict (registered and clean primaries agree on all three questions).
+* These labels are now exposed for A–D. No design change may follow from this read.
