@@ -226,16 +226,24 @@ fn census(args: &[String]) {
 /// one TSV row per pair: `ref_path dist_path <score per bake>`; a refusal is a hard error. `--shard
 /// i/n` keeps rows with `index % n == i` so several processes can split one table.
 fn pairs(args: &[String]) {
-    let table = args.first().expect("--pairs <pairs.tsv> [--shard i/n] <bake>...");
+    let table = args
+        .first()
+        .expect("--pairs <pairs.tsv> [--shard i/n] <bake>...");
     let mut rest = &args[1..];
     let (shard, nshards) = if rest.first().map(String::as_str) == Some("--shard") {
         let (i, n) = rest[1].split_once('/').expect("--shard i/n");
         rest = &rest[2..];
-        (i.parse::<usize>().expect("shard index"), n.parse::<usize>().expect("shard count"))
+        (
+            i.parse::<usize>().expect("shard index"),
+            n.parse::<usize>().expect("shard count"),
+        )
     } else {
         (0, 1)
     };
-    assert!(shard < nshards && !rest.is_empty(), "need a valid shard and at least one bake");
+    assert!(
+        shard < nshards && !rest.is_empty(),
+        "need a valid shard and at least one bake"
+    );
     let models: Vec<zenpredict::Model> = rest
         .iter()
         .map(|p| {
@@ -252,7 +260,11 @@ fn pairs(args: &[String]) {
         .collect();
     let text = std::fs::read_to_string(table).unwrap_or_else(|e| panic!("read {table}: {e}"));
     let mut lines = text.lines();
-    let header: Vec<&str> = lines.next().expect("empty pairs table").split('\t').collect();
+    let header: Vec<&str> = lines
+        .next()
+        .expect("empty pairs table")
+        .split('\t')
+        .collect();
     let col = |name: &str| {
         header
             .iter()
@@ -274,7 +286,11 @@ fn pairs(args: &[String]) {
         }
         let (_, r, w, h) = cached.as_ref().expect("reference loaded");
         let (d, dw, dh) = load_rgb(dp);
-        assert_eq!((*w, *h), (dw, dh), "ref and dist must share dimensions: {rp} {dp}");
+        assert_eq!(
+            (*w, *h),
+            (dw, dh),
+            "ref and dist must share dimensions: {rp} {dp}"
+        );
         let rs = RgbSlice::new(r, *w as usize, *h as usize);
         let ds = RgbSlice::new(&d, *w as usize, *h as usize);
         let scores: Vec<String> = scorers
