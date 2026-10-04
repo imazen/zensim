@@ -1663,8 +1663,8 @@ pub(crate) static IW: [SignalDef; 6] = {
 /// The 29 v2 signals per (scale, channel), index-aligned with
 /// `feature_v2::idx`.
 pub(crate) static V2: [SignalDef; 29] = {
-    use Direction::{HigherIsBetter, HigherIsWorse, Unsigned};
-    use Form::{Difference, ReferenceOnly, Similarity};
+    use Direction::{HigherIsWorse, Unsigned};
+    use Form::{Difference, ReferenceOnly};
     use KernelId::{V2Dense, V2Gradient};
     use Statistic::{L2, L4, Mean, WeightedMean};
     [
@@ -1673,8 +1673,8 @@ pub(crate) static V2: [SignalDef; 29] = {
             0,
             "ssim_mean",
             Mean,
-            Similarity,
-            HigherIsBetter,
+            Difference,
+            HigherIsWorse,
             V2Dense,
             Tranche::None,
             None,

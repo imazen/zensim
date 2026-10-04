@@ -1028,6 +1028,29 @@ impl<'a> BakeScorer<'a> {
         let config = config_from_params(params, self.parallel);
         #[cfg(feature = "feature-regime-v2")]
         let plan = self.plan()?;
+        #[cfg(feature = "feature-regime-v2")]
+        if plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5 {
+            let mut result = crate::fold_engine::compute_fold_backed(
+                source,
+                distorted,
+                &config,
+                params.weights,
+                &mut self.pixel_scratch,
+                Some(&plan),
+            )?;
+            if images_byte_identical(source, distorted) {
+                result.score = 100.0;
+                result.raw_distance = 0.0;
+                return Ok(result.mark_identical());
+            }
+            result.score = self.score_features(
+                result.features(),
+                source.width() as u32,
+                source.height() as u32,
+                codec_hint,
+            )?;
+            return Ok(result);
+        }
         #[cfg(not(feature = "feature-regime-v2"))]
         if self.layout.walk_width() > 372 {
             return Err(ZensimError::ModelLoadFailed {
@@ -2325,6 +2348,17 @@ mod revision_contract_tests {
                 .compute(&rs, &ds, None)
                 .unwrap_or_else(|e| panic!("a Rev5 bake reading f{id} must serve, got {e:?}"));
         }
+        // Same computed vector as research, including the nonzero reference-only slot.
+        let model = zenpredict::Model::from_bytes(&bake_declaring(Some("5"), 393)).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap();
+        let result = scorer.compute(&rs, &rs, None).unwrap();
+        let plan = scorer.plan().unwrap();
+        let req = crate::research::Request::for_slots(plan.emit.clone(), plan.walk_width());
+        let expected = crate::research::extract(&req, &rs, &rs).unwrap();
+        assert_eq!(result.score(), 100.0);
+        assert!(result.is_identical());
+        assert_eq!(result.features(), expected.values());
+        assert!(result.features()[393] > 0.0);
         // masked, iw, append, append2, csfw and a Rev4 bank slot: Rev5 does
         // not compute them, so the plan — and the serve — refuses. The
         // refusal lands wherever the plan is first demanded (`new`'s

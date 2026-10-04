@@ -122,3 +122,18 @@ them. Historical revisions keep the original raw-power arithmetic. The exact
 Rev5 ruler also uses stable moments. Release constant-plus-small-noise and
 constant tests pass at relative 1e-6 (bases 0, .5, 1, 10000; n 1,16,153,1025),
 and Rev5 tier parity passes 3/3. Log `/var/tmp/rev5/f1.log`.
+
+## 2026-10-04 — Step 5 F2/F4
+
+Rev5 zero-residue identity invariant passes all 12 existing geometries under
+all available token permutations (2.64 s). Computed formulas already cancel
+exactly after A1; the initial failure was a registry label: v2 `ssim_mean`
+emits mean dissimilarity, so corrected Similarity/HigherIsBetter to
+Difference/HigherIsWorse without changing numbers. F15's contradictory
+"should be 0" prose removed; PJND_FRAGILITY is reference-only.
+
+Rev5 BakeScorer now calls the same fold with its persistent pixel_scratch;
+identity still scores 100, but returns computed features. Release bake test
+passes equality with research extraction, including nonzero f393. This also
+removes the scorer's fresh per-call V2Scratch allocation (W3). Earlier revision
+scorer routing is unchanged. Logs `/var/tmp/rev5/f2.log`.

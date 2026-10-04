@@ -222,10 +222,10 @@ fn append2_local(slot: usize) -> Option<usize> {
 /// 1. **REFERENCE-ONLY** — `GRAD_SRC_MEAN` (append local 16) and
 ///    `LUMA_MEAN_REF` (append2 local 2) are functions of the reference alone,
 ///    so `∂f/∂dist ≡ 0` and a non-zero value on `ref == dist` is CORRECT.
-/// 2. **`PJND_FRAGILITY`** (v2 local 21) — a known formula artifact on an
+/// 2. **`PJND_FRAGILITY`** (v2 local 21) — a reference-only quantity on an
 ///    undistorted pair (`benchmarks/free_features_classC_2026-09-04.md` §6.3;
 ///    DATASET_HISTORY §3.33 point 3, which measured the constant `1.0` a
-///    v1-only walk produces). Registered, not fixed.
+///    v1-only walk produces). Its nonzero computed identity value is correct.
 /// 3. **floating-point residue** — everything else, bounded here at 2e-3.
 ///
 /// The bar that matters is (3): a NEW large residue at identity means a
@@ -747,4 +747,61 @@ fn free_extras_are_silently_inert_without_the_append_block_declaration() {
         above_mom > 0,
         "RawMoments populated nothing above f720 even with append declared"
     );
+}
+
+/// Rev5 has one computed identity convention, including reference-only slots.
+#[test]
+fn rev5_identity_exact_on_every_tier() {
+    const SENTINEL: &str = "REV5_IDENTITY_OK";
+    if std::env::var("ZENSIM_FORMULA_REV").as_deref() != Ok("5") {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "rev5_identity_exact_on_every_tier",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("ZENSIM_FORMULA_REV", "5")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(String::from_utf8_lossy(&out.stdout).contains(SENTINEL));
+        return;
+    }
+    use zensim::feature_set_id::ComputeToken;
+    use zensim::research::{self, Request};
+    let _guard = archmage::testing::lock_token_testing();
+    let req = Request::for_slots(
+        research::family_slots(ComputeToken::Basic)
+            .union(&research::family_slots(ComputeToken::Peaks))
+            .union(&research::family_slots(ComputeToken::V2)),
+        research::full_width(),
+    );
+    let _ = archmage::testing::for_each_token_permutation(
+        archmage::testing::CompileTimePolicy::Warn,
+        |perm| {
+            for &(w, h) in GEOMS {
+                let pixels = value_noise(w, h, 0xC0FFEE);
+                let image = RgbSlice::new(&pixels, w, h);
+                let e = research::extract(&req, &image, &image).unwrap();
+                for (i, (&v, p)) in e.values().iter().zip(e.provenance()).enumerate() {
+                    if !e.emitted().contains(i) {
+                        continue;
+                    }
+                    let expected = match p.form {
+                        "difference" => 0.0,
+                        "similarity" => 1.0,
+                        "reference_only" => continue,
+                        other => panic!("undeclared {other} f{i}"),
+                    };
+                    assert_eq!(v, expected, "{} {w}x{h} f{i} {}", perm.label, p.name);
+                }
+            }
+        },
+    );
+    println!("{SENTINEL}");
 }

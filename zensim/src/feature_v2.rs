@@ -10510,8 +10510,11 @@ pub(crate) fn finish_channel_scale(
         let raw2 = dense.sum_d2 / n_f;
         let raw3 = dense.sum_d3 / n_f;
         let raw4 = dense.sum_d4 / n_f;
-        ((raw2 - mean_d * mean_d).max(0.0),
-         (raw4 - 4.0 * mean_d * raw3 + 6.0 * mean_d * mean_d * raw2 - 3.0 * mean_d.powi(4)).max(0.0))
+        (
+            (raw2 - mean_d * mean_d).max(0.0),
+            (raw4 - 4.0 * mean_d * raw3 + 6.0 * mean_d * mean_d * raw2 - 3.0 * mean_d.powi(4))
+                .max(0.0),
+        )
     };
     let dev2 = m2.sqrt();
     let dev4 = m4.quarter_root(crate::det_math::active_root_form());
