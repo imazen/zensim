@@ -163,14 +163,19 @@ def load_scores() -> dict:
             rd = csv.reader(fh, delimiter="\t")
             next(rd)
             out[f"zensim:{f.stem[7:]}"] = {r[1]: float(r[2]) for r in rd}
-    for metric, col, sign in (("ssim2", None, 1.0), ("butteraugli", "pnorm3", -1.0)):
+    with (ROOT / "score" / "pairs.tsv").open() as fh:
+        rd = csv.reader(fh, delimiter="\t")
+        next(rd)
+        pairs = [(r[0], r[1]) for r in rd]
+    for metric, col, sign in (("ssim2", "ssim2", 1.0), ("butteraugli", "butteraugli_pnorm3", -1.0)):
         p = ROOT / "score" / f"{metric}.parquet"
         if not p.is_file():
             continue
         t = pq.read_table(p).to_pandas()
-        dcol = next(c for c in t.columns if "dist" in c)
-        scol = next(c for c in t.columns if (col and col in c) or (not col and c.startswith("score")))
-        out[metric] = dict(zip(t[dcol], sign * t[scol].astype(float)))
+        # score-pairs rows follow the pairs file order and carry the reference path only: join by row, check the reference
+        if len(t) != len(pairs) or list(t.image_path) != [r for r, _ in pairs]:
+            raise ValueError(f"{p}: rows do not follow pairs.tsv")
+        out[metric] = {d: sign * float(v) for (_, d), v in zip(pairs, t[col])}
     return out
 
 
