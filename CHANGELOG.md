@@ -11,6 +11,12 @@
 
 ### Changed
 
+- Rev4 serving on AVX-512 (KERNOPT2): the Rec64 horizontal SSIM window runs as 8x8 transposed blocks (f32 loads widened once,
+  two row groups interleaved; AVX-512 and AVX2 bodies), and the canonical dense block kernel accumulates its pools with whole
+  f64x8 loads/adds/stores, so its AVX-512 build no longer emits gathers/scatters and runs on v4/v4x again. Bit-identical
+  (per-kernel parity on every tier, every-tier bitmatch, 432/432 steering cases at Rev3 and Rev4). Rev4 scalar scoring
+  1.45-1.83x and prepared steering 1.48x faster single-thread on x86_64 v4x; Rev4 is now 1.29x Rev3 (v2 + basic, 1 MP), was
+  2.97x before 63838a2b. `benchmarks/kernopt2_WORKLOG.md`.
 - Rev4 serving on AVX-512: the canonical dense block kernel now runs its AVX2 (v3) body on v4/v4x hardware. Built for AVX-512,
   LLVM auto-vectorized its per-element pool scatter into `vgatherqps`/`vscatterqpd`, which measured 4.3x slower than the AVX2
   build of the same body (perf, 2026-10-03). Bit-identical (the canon is tier-invariant; every-tier bitmatch gate, 432/432
