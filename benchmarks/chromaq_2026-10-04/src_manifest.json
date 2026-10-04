@@ -1,0 +1,418 @@
+[
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/097cb426910ba8ce2525dd8bb7fb1777.png",
+  "sha256": "7995fc6c3653a0cfa9cfa6ee207983532f2c52d430262243cc917fd214ae186c",
+  "size": [
+   1507,
+   2048
+  ],
+  "crop": [
+   1506,
+   2048
+  ],
+  "out": "src/097cb426910ba8ce2525dd8bb7fb1777.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/0c49a5cce349020bbba2f97ae41e90ba.png",
+  "sha256": "2d74383267345922b4afb34f04d6249ca9a39869d9954008e24a7794263b9415",
+  "size": [
+   2048,
+   1358
+  ],
+  "crop": [
+   2048,
+   1358
+  ],
+  "out": "src/0c49a5cce349020bbba2f97ae41e90ba.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/100a02c269c5948392f283b2aa3bb4da.png",
+  "sha256": "795e45f030aee7e90bdee9e58084f4acf96c19885b4d114f6e94ed17748aa344",
+  "size": [
+   2048,
+   1365
+  ],
+  "crop": [
+   2048,
+   1364
+  ],
+  "out": "src/100a02c269c5948392f283b2aa3bb4da.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/100f17892cf7bb12beb12479641fcc4c.png",
+  "sha256": "bf6434e040a17ac238ba072766d25369d38fb5a8a5378530f8191c35d4142ef7",
+  "size": [
+   1365,
+   2048
+  ],
+  "crop": [
+   1364,
+   2048
+  ],
+  "out": "src/100f17892cf7bb12beb12479641fcc4c.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/11f2b039b293758398b1a7a8afa64bb2.png",
+  "sha256": "814f8f52ae8a0d1a4e704dc8d0c4c30604beae2ceb478a7516e8dd0ac4a222c9",
+  "size": [
+   1638,
+   2048
+  ],
+  "crop": [
+   1638,
+   2048
+  ],
+  "out": "src/11f2b039b293758398b1a7a8afa64bb2.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/14ab4af28901fbeb1356b06d2d08ae06.png",
+  "sha256": "7c0bb96b178f4b4ec0979db4d0ba9d9750fe53fe776ffefe22f53d59fc1a1a6e",
+  "size": [
+   1391,
+   2048
+  ],
+  "crop": [
+   1390,
+   2048
+  ],
+  "out": "src/14ab4af28901fbeb1356b06d2d08ae06.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/1e2f9d41529197f10d32bfa68a1e0bcc.png",
+  "sha256": "8682f74e87a47b7fa556a2c64d964aa6b29d18ccdbcd29488dd439b6a3afbabe",
+  "size": [
+   2048,
+   1365
+  ],
+  "crop": [
+   2048,
+   1364
+  ],
+  "out": "src/1e2f9d41529197f10d32bfa68a1e0bcc.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/22ea12c903e41583b7c469cb86040157.png",
+  "sha256": "a75f24a3c59c18c3518267bd1c6cff412a51b01327ca8115e4bdf81ccd154fa1",
+  "size": [
+   1638,
+   2048
+  ],
+  "crop": [
+   1638,
+   2048
+  ],
+  "out": "src/22ea12c903e41583b7c469cb86040157.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/28d24b9c83de066597ff96a68769884f.png",
+  "sha256": "2c3bee67c5454f971564178f15bf81150306bfc6c664c41e94b41702e0cd816e",
+  "size": [
+   2048,
+   1332
+  ],
+  "crop": [
+   2048,
+   1332
+  ],
+  "out": "src/28d24b9c83de066597ff96a68769884f.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/2a2420f929cd47122eae364a2bc27710.png",
+  "sha256": "3a4c7f92332d8e203aa345460e00fcf67bc39b185822a9c5f65d04d7fffb5897",
+  "size": [
+   2048,
+   1365
+  ],
+  "crop": [
+   2048,
+   1364
+  ],
+  "out": "src/2a2420f929cd47122eae364a2bc27710.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/2c1f84548ef99faec2b4f9bf12227c83.png",
+  "sha256": "f56acfb691d528bed106fdc62754df4ce4a600bdab80478a7c70d4fc1926c4ac",
+  "size": [
+   1365,
+   2048
+  ],
+  "crop": [
+   1364,
+   2048
+  ],
+  "out": "src/2c1f84548ef99faec2b4f9bf12227c83.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/3140d643a1f57e80ff265507984d95a0.png",
+  "sha256": "b9271dd5a4c637e203fb922afc23497939829491553d833126bdaccdd90e640b",
+  "size": [
+   2048,
+   1152
+  ],
+  "crop": [
+   2048,
+   1152
+  ],
+  "out": "src/3140d643a1f57e80ff265507984d95a0.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/4a18abf66d65ad1a95ce455c8b6cd8de.png",
+  "sha256": "fc04a8a45908c4a013b3e1a25c08efcb315d79538b8fde913d66d05787de11ae",
+  "size": [
+   1463,
+   2048
+  ],
+  "crop": [
+   1462,
+   2048
+  ],
+  "out": "src/4a18abf66d65ad1a95ce455c8b6cd8de.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/4cd6910a0b7b39365fda5df87618d091.png",
+  "sha256": "931587f5a4eb431afa989f663f0963568ef27076ff119aad74f8891f960a7ffe",
+  "size": [
+   2048,
+   1022
+  ],
+  "crop": [
+   2048,
+   1022
+  ],
+  "out": "src/4cd6910a0b7b39365fda5df87618d091.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/5dbdb989cf026f7ab3dd7167d7fc0fe2.png",
+  "sha256": "6866cd5068686b4f4920de8cc77d9790f87db7894b5727bf015dc10f59265875",
+  "size": [
+   1365,
+   2048
+  ],
+  "crop": [
+   1364,
+   2048
+  ],
+  "out": "src/5dbdb989cf026f7ab3dd7167d7fc0fe2.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/5e5ce43575fa67fdc0dd37146d7f479e.png",
+  "sha256": "c2c298f4a889ba1026ae0786b2a39c15071eb8a0548c7e444455cf0e0b2a48ea",
+  "size": [
+   2048,
+   1641
+  ],
+  "crop": [
+   2048,
+   1640
+  ],
+  "out": "src/5e5ce43575fa67fdc0dd37146d7f479e.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/60430844748882ff66b9a5598ef06dd6.png",
+  "sha256": "3f14ec46d7e5b41f1792aac72f7eae58863e3d13330baf220bd0925f057fe772",
+  "size": [
+   1446,
+   2048
+  ],
+  "crop": [
+   1446,
+   2048
+  ],
+  "out": "src/60430844748882ff66b9a5598ef06dd6.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/7e499613c3e376ea93afb3649719abeb.png",
+  "sha256": "2f3d5b9b639bbf5b382f47af437f57f86e1a3c4299f982ea81cc55fb396f9666",
+  "size": [
+   1535,
+   2048
+  ],
+  "crop": [
+   1534,
+   2048
+  ],
+  "out": "src/7e499613c3e376ea93afb3649719abeb.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/870516c65d81fb9267de6865964083a9.png",
+  "sha256": "a014381971063f2f328a7cad12ccde2ad5addf6306e45415046b8f9dcddacb74",
+  "size": [
+   2048,
+   1360
+  ],
+  "crop": [
+   2048,
+   1360
+  ],
+  "out": "src/870516c65d81fb9267de6865964083a9.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/8bb119b8ca17492392e1e3ea4b811b32.png",
+  "sha256": "0da74d8b94ff3c89f3578296ea87305ce1623d890f0c5cb8e54b907428675f15",
+  "size": [
+   1365,
+   2048
+  ],
+  "crop": [
+   1364,
+   2048
+  ],
+  "out": "src/8bb119b8ca17492392e1e3ea4b811b32.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/9466a908d088d32ee73f04116c40e48c.png",
+  "sha256": "d1efd29b73510f56f89e3a4ff0c4cea4a41963cd26679ee56d68b047525b5887",
+  "size": [
+   1371,
+   2048
+  ],
+  "crop": [
+   1370,
+   2048
+  ],
+  "out": "src/9466a908d088d32ee73f04116c40e48c.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/a10ae819a2d24873079c93346200cab3.png",
+  "sha256": "f8448219bace859f6698aadf873ce4a37ab0f155fc39ca5a00afd8d841a0c956",
+  "size": [
+   1366,
+   2048
+  ],
+  "crop": [
+   1366,
+   2048
+  ],
+  "out": "src/a10ae819a2d24873079c93346200cab3.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/a36713f1943dac6bc74dea50cadaee6f.png",
+  "sha256": "dbeb7c1320e7f3873096b57437c2cb63a10caf28e92cc0b0c48902f5c6b69668",
+  "size": [
+   1365,
+   2048
+  ],
+  "crop": [
+   1364,
+   2048
+  ],
+  "out": "src/a36713f1943dac6bc74dea50cadaee6f.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/aed95e005df28e790519eefb6eb1e565.png",
+  "sha256": "818b1471d0ba515833ed6a6c4537aef3ea0134c1447e3f10368bacb605fc9b9c",
+  "size": [
+   2048,
+   1367
+  ],
+  "crop": [
+   2048,
+   1366
+  ],
+  "out": "src/aed95e005df28e790519eefb6eb1e565.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/afe3676bbfcf7183d697ff7b5d5bd45b.png",
+  "sha256": "71207b7aacd1c73d26ed151475b9272fd03b224e23615a1d1700eb0291c838f9",
+  "size": [
+   2048,
+   1365
+  ],
+  "crop": [
+   2048,
+   1364
+  ],
+  "out": "src/afe3676bbfcf7183d697ff7b5d5bd45b.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/b51d5fb537246482ef7a7ab63f093cab.png",
+  "sha256": "1fbc6c8d02b88a4107ff7043ff74d0b5f1852c9d3a8cec21da6de569c50b41ed",
+  "size": [
+   2048,
+   1117
+  ],
+  "crop": [
+   2048,
+   1116
+  ],
+  "out": "src/b51d5fb537246482ef7a7ab63f093cab.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/b939ac34faa94b5d0e753d570edc7048.png",
+  "sha256": "9431b004738a092ab3c846b28b2659fbe9c035d46a4283faf64bd16ba340bbf4",
+  "size": [
+   2048,
+   972
+  ],
+  "crop": [
+   2048,
+   972
+  ],
+  "out": "src/b939ac34faa94b5d0e753d570edc7048.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/c80999cd5533e448167cd9b3ccfa2a37.png",
+  "sha256": "d40eb4f49c146e0bac5b4d43af71c2a8fddfd4964e4a92ca592e02468ee33a3e",
+  "size": [
+   2048,
+   878
+  ],
+  "crop": [
+   2048,
+   878
+  ],
+  "out": "src/c80999cd5533e448167cd9b3ccfa2a37.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/d1a9be98d1936065967adac50a6fb750.png",
+  "sha256": "680003ddef09a61e8604c6f681e27482892f6f1edf3f86c62a03c22e200c534a",
+  "size": [
+   2048,
+   1270
+  ],
+  "crop": [
+   2048,
+   1270
+  ],
+  "out": "src/d1a9be98d1936065967adac50a6fb750.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/d79d465ac77c36518e0f0d626bf97ec4.png",
+  "sha256": "280665498758e01701bccc1b91833bda3f5860fc9d5eadc4d3b691c011c575ed",
+  "size": [
+   1638,
+   2048
+  ],
+  "crop": [
+   1638,
+   2048
+  ],
+  "out": "src/d79d465ac77c36518e0f0d626bf97ec4.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/ddcd24d99f48eaa369207882a6f37831.png",
+  "sha256": "fac0c52f88921b2a87a04c8b143e7639379fb234db1a2cc601ddecc30c92bc8c",
+  "size": [
+   2048,
+   1365
+  ],
+  "crop": [
+   2048,
+   1364
+  ],
+  "out": "src/ddcd24d99f48eaa369207882a6f37831.png"
+ },
+ {
+  "src": "/home/lilith/work/codec-corpus/clic2025/training/ef576c4ed599d75d72145a8f34b58ccb.png",
+  "sha256": "e06867ac5e4e4113b3ea2a6d76d87699c7adc0a2dcb4935d8b3c251e552fb85e",
+  "size": [
+   2048,
+   1152
+  ],
+  "crop": [
+   2048,
+   1152
+  ],
+  "out": "src/ef576c4ed599d75d72145a8f34b58ccb.png"
+ }
+]
