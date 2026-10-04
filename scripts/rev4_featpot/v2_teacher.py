@@ -8,6 +8,7 @@ scratch and deleted after training.
 """
 
 import hashlib
+import json
 import uuid
 from pathlib import Path
 
@@ -129,6 +130,9 @@ POOL_NAME = "data/e15/coverage_pool.parquet"
 POOL_KEYS_NAME = "data/e15/coverage_pool.keys.parquet"
 POOL_SHA = "6b00349c8aca6613aeb1591f8411e738e3c70798274c7df9017dfbc8844848b3"
 POOL_KEYS_SHA = "bc225a115ab8505738a5c17ced6d4fc592a9a38ac6d9ec98661f4e8f0898addf"
+# Rev5 (spec rev5_spec_2026-10-04.md §6): the same 42,021 rungs and keys extracted at Rev5 (basic+peaks+v2, other slots NaN).
+# The pool's own sidecar manifest declares its formula revision, which selects the pin; keys are revision-independent.
+POOL_SHA_REV5 = "6bf584ac70579bdf9a0242b7ccfd688ff0182cb5c75e35085ba71967207f8f5e"
 
 
 def _packed_or_root(name: str) -> Path:
@@ -139,7 +143,12 @@ def _packed_or_root(name: str) -> Path:
 def coverage_leg(mask: int, scratch: Path) -> tuple[Path, dict]:
     """Rows of the pinned coverage pool whose family bit is set in `mask`, copied to scratch; returns (path, record)."""
     pool, keys = _packed_or_root(POOL_NAME), _packed_or_root(POOL_KEYS_NAME)
-    for path, want in ((pool, POOL_SHA), (keys, POOL_KEYS_SHA)):
+    man = Path(f"{pool}.manifest.json")
+    revision = int(json.loads(man.read_text()).get("formula_revision", 4)) if man.is_file() else 4
+    pool_sha = {4: POOL_SHA, 5: POOL_SHA_REV5}.get(revision)
+    if pool_sha is None:
+        raise ValueError(f"{pool}: no registered E15 coverage pool for formula revision {revision}")
+    for path, want in ((pool, pool_sha), (keys, POOL_KEYS_SHA)):
         got = hashlib.sha256(path.read_bytes()).hexdigest()
         if got != want:
             raise ValueError(f"{path}: not the registered E15 coverage pool ({got[:12]})")
@@ -152,5 +161,5 @@ def coverage_leg(mask: int, scratch: Path) -> tuple[Path, dict]:
     target = pq.read_table(pool, columns=["human_score"])["human_score"].to_numpy().astype(np.float64)
     dest = scratch / f"coverage_cf{mask:x}_{uuid.uuid4().hex}.parquet"
     record = write_curated(pool, dest, keep, target)
-    record.update({"mask": mask, "families": chosen, "pool_sha256": POOL_SHA})
+    record.update({"mask": mask, "families": chosen, "pool_sha256": pool_sha, "pool_formula_revision": revision})
     return dest, record

@@ -1241,6 +1241,15 @@ class CoverageLeg(unittest.TestCase):
             with mock.patch.object(t, "_packed_or_root", lambda name: pool if name == t.POOL_NAME else keys):
                 with self.assertRaises(ValueError):
                     t.coverage_leg(1, d)
+            # Rev5: the pool's manifest declares revision 5, which selects the Rev5 pin (and refuses the Rev4 one).
+            Path(f"{pool}.manifest.json").write_text(json.dumps({"formula_revision": 5}))
+            with mock.patch.object(t, "_packed_or_root", lambda name: pool if name == t.POOL_NAME else keys), \
+                    mock.patch.object(t, "POOL_SHA", sha(pool)), mock.patch.object(t, "POOL_KEYS_SHA", sha(keys)):
+                with self.assertRaises(ValueError):
+                    t.coverage_leg(mask, d)
+                with mock.patch.object(t, "POOL_SHA_REV5", sha(pool)):
+                    path, rec = t.coverage_leg(mask, d)
+                    self.assertEqual(rec["pool_formula_revision"], 5)
 
     def test_generators_are_nested_and_monotone(self):
         import e15_coverage as e
