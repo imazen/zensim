@@ -46,6 +46,41 @@ ERA, WIDTH = "tiercanon_c3negfold", 1825
 EXTRACT_ARGS = ["--restore-cuts", "prefix,mapdev,z1max,gmsnative,dvifmgate", "--input-contract", "legacy-rgb8",
                 "--era-label", ERA, "--force-tier", "native"]
 EXTRACT_ENV = {"ZENSIM_FORMULA_REV": "4", "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"}
+# Rev5 (spec rev5_spec_2026-10-04.md §6): the Rev5 extractor's build record, written when it is built; only basic + peaks + v2.
+REV5_META = Path("/var/tmp/rev5-extract/build_meta.json")
+
+
+def extractor(revision: int = 4) -> dict:
+    """The extractor contract of one formula revision: binary + sha256, era, arguments, environment, layout width and the
+    requested slot ranges (None = every slot measured). One owner for E14, E15 and the external sets."""
+    if revision == 4:
+        return {"revision": 4, "bin": BIN, "sha": BIN_SHA, "era": ERA, "width": WIDTH, "args": EXTRACT_ARGS,
+                "env": EXTRACT_ENV, "requested": None, "build": "259045b0acc7045cb3d4804217b81a9bfa1cbbad"}
+    if revision != 5:
+        raise ValueError(f"no extractor contract for revision {revision}")
+    from rev5_bank import SLOT_RANGES, TOKENS
+    meta = json.loads(REV5_META.read_text())
+    return {"revision": 5, "bin": Path(meta["binary"]), "sha": meta["binary_sha256"], "era": meta["era"], "width": WIDTH,
+            "args": ["--restore-cuts", TOKENS, "--input-contract", "legacy-rgb8", "--era-label", meta["era"],
+                     "--force-tier", "native"],
+            "env": {"ZENSIM_FORMULA_REV": "5", "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"},
+            "requested": SLOT_RANGES, "build": meta["build_commit"]}
+
+
+def apply_contract(feats: np.ndarray, x: dict) -> np.ndarray:
+    """Requested slots must be finite; at Rev5 every other slot (a structural zero from the extractor) becomes NaN."""
+    if x["requested"] is None:
+        if not np.isfinite(feats).all():
+            raise ValueError("nonfinite features")
+        return feats
+    mask = np.zeros(feats.shape[1], dtype=bool)
+    for lo, hi in x["requested"]:
+        mask[lo:hi] = True
+    if not np.isfinite(feats[:, mask]).all():
+        raise ValueError("nonfinite features in a requested slot")
+    out = feats.copy()
+    out[:, ~mask] = np.nan
+    return out
 WEIGHTS = (1, 4, 16)
 SEEDS, HEAD, BASE = range(5), "N", "set:v2+basic@h32:H128"
 

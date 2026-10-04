@@ -144,8 +144,9 @@ def cmd_generate(args) -> int:
 
 
 def cmd_extract(args) -> int:
-    if e14.sha256(e14.BIN) != e14.BIN_SHA:
-        raise ValueError("not the r4 bank's extractor")
+    X = e14.extractor(args.revision)
+    if e14.sha256(X["bin"]) != X["sha"]:
+        raise ValueError(f"{X['bin']}: not the Rev{X['revision']} extractor")
     sel = pd.read_parquet(work() / "selection.parquet")
     run = work() / "extract"
     run.mkdir(exist_ok=True)
@@ -156,12 +157,12 @@ def cmd_extract(args) -> int:
             f.write(f"{r}\t{d}\t0\t{i}\n")
     t0 = time.time()
     with (run / "extract.log").open("w") as log:
-        rc = subprocess.run([str(e14.BIN), "--corpus", "pairs-tsv", "--path", str(tsv), "--out", str(csv), *e14.EXTRACT_ARGS],
-                            env={**os.environ, **e14.EXTRACT_ENV}, stdout=log, stderr=subprocess.STDOUT).returncode
+        rc = subprocess.run([str(X["bin"]), "--corpus", "pairs-tsv", "--path", str(tsv), "--out", str(csv), *X["args"]],
+                            env={**os.environ, **X["env"]}, stdout=log, stderr=subprocess.STDOUT).returncode
     if rc:
         raise RuntimeError(f"extractor rc={rc}; see {run / 'extract.log'}")
     man = json.loads(Path(f"{csv}.manifest.json").read_text())
-    if man["era_label"] != e14.ERA or man["formula_revision"] != "4":
+    if man["era_label"] != X["era"] or man["formula_revision"] != str(X["revision"]):
         raise ValueError("extractor manifest: wrong era or revision")
     print(json.dumps({"rows": len(sel), "extract_wall_s": round(time.time() - t0, 1), "feature_set_id": man["feature_set_id"]}))
     return 0
@@ -170,7 +171,9 @@ def cmd_extract(args) -> int:
 def cmd_table(args) -> int:
     import pyarrow.csv as pacsv
     sel = pd.read_parquet(work() / "selection.parquet")
-    W = e14.WIDTH
+    X = e14.extractor(args.revision)
+    W = X["width"]
+    fsid = json.loads((work() / "extract" / "features.csv.manifest.json").read_text())["feature_set_id"]
     names = ["row_id"] + [f"f{i}" for i in range(W)]
     conv = pacsv.ConvertOptions(column_types={"row_id": pa.int64(), **{f"f{i}": pa.float64() for i in range(W)}},
                                 include_columns=names)
@@ -179,9 +182,7 @@ def cmd_table(args) -> int:
     order = np.argsort(rid, kind="stable")
     if not (rid[order] == np.arange(len(sel))).all():
         raise ValueError("row_id join failed")
-    feats = np.stack([tab.column(f"f{i}").to_numpy()[order] for i in range(W)], axis=1)
-    if not np.isfinite(feats).all():
-        raise ValueError("nonfinite features")
+    feats = e14.apply_contract(np.stack([tab.column(f"f{i}").to_numpy()[order] for i in range(W)], axis=1), X)
     ident = np.array([e14.pixels_identical(r, d) for r, d in zip(sel.ref_path, sel.dist_path)])
     sign = sel["sign"].to_numpy()
     key = np.array([f"{'kadis' if t.isdigit() else 'gen'}:{s}|t{t}|{'+' if g > 0 else '-' if g < 0 else '0'}"
@@ -198,10 +199,11 @@ def cmd_table(args) -> int:
     out = work() / "coverage_pool.parquet"
     pq.write_table(pa.table(cols), out, compression="zstd", use_byte_stream_split=[f"f{i}" for i in range(wide)])
     Path(f"{out}.manifest.json").write_text(json.dumps({
-        "source_bank_feature_set_id": "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype"
-                                      "+gmsbank+mapdev+z1max+gmsnative+dvifmgate@w1825/tiercanon_c3negfold#d57e9571",
-        "composite": f"Rev4 POTENTIAL E15 coverage pool (ordinal ladders; f0-f1824 Rev4 bank arithmetic; f1825-f{wide - 1} NaN, "
-                     "not extracted); diagnostic only", "formula_revision": 4}, indent=1) + "\n")
+        "source_bank_feature_set_id": fsid,
+        "composite": (f"Rev4 POTENTIAL E15 coverage pool (ordinal ladders; f0-f1824 Rev4 bank arithmetic; f1825-f{wide - 1} NaN, "
+                      "not extracted); diagnostic only" if X["revision"] == 4 else
+                      f"Rev5 POTENTIAL E15 coverage pool (ordinal ladders; basic+peaks+v2 at f0-f227, f372-f719, Rev5 arithmetic; "
+                      f"every other slot to f{wide - 1} NaN); diagnostic only"), "formula_revision": X["revision"]}, indent=1) + "\n")
     keys = sel.loc[keep, ["source_filename", "type", "family", "severity_level", "severity", "sign"]].copy()
     keys.insert(0, "ladder", key[keep])
     keys.to_parquet(work() / "coverage_pool.keys.parquet")
@@ -210,7 +212,8 @@ def cmd_table(args) -> int:
            "dropped_single_rung": int((~ident).sum() - keep.sum()), "width": W, "nan_columns": f"f{W}-f{wide - 1}",
            "per_type": PER_TYPE, "excluded_kadis_types": sorted(e14.EXCLUDED_TYPES), "new_types": list(NEW_TYPES),
            "families": {k: list(map(str, v)) for k, v in COVERAGE_FAMILIES.items()},
-           "rows_by_family": keys.family.value_counts().to_dict(), "extractor_sha256": e14.BIN_SHA, "era": e14.ERA,
+           "rows_by_family": keys.family.value_counts().to_dict(), "extractor_sha256": X["sha"], "era": X["era"],
+           "formula_revision": X["revision"],
            "sha256": e14.sha256(out), "keys_sha256": e14.sha256(work() / "coverage_pool.keys.parquet")}
     (work() / "coverage_pool.manifest.json").write_text(json.dumps(man, indent=1) + "\n")
     print(json.dumps({k: man[k] for k in ("rows", "ladders", "dropped_identical", "dropped_single_rung", "rows_by_family", "sha256")}))
@@ -382,6 +385,7 @@ def main() -> int:
     ap.add_argument("--program-sha", default="")
     ap.add_argument("--data-sha", default="")
     ap.add_argument("--monotonicity", action="store_true")
+    ap.add_argument("--revision", type=int, choices=[4, 5], default=4, help="extract/table: extractor contract (e14.extractor)")
     args = ap.parse_args()
     return {"select": cmd_select, "generate": cmd_generate, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid,
             "score": cmd_score, "grid16": cmd_grid16, "score16": cmd_score16, "grid18": cmd_grid18,

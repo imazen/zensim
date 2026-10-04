@@ -157,6 +157,34 @@ class Rev5Tables(unittest.TestCase):
             self.assertEqual(v2_common.table_revision(path), 5)
 
 
+class ExtractorContract(unittest.TestCase):
+    """e14.extractor: one owner for the Rev4 and Rev5 extractor contracts used by E14, E15 and the external sets."""
+
+    def test_rev4_unchanged_and_rev5_from_build_record(self):
+        import e14_kadis_ordinal as e14
+        x4 = e14.extractor(4)
+        self.assertEqual((x4["bin"], x4["sha"], x4["era"], x4["args"], x4["env"]), (e14.BIN, e14.BIN_SHA, e14.ERA,
+                                                                                   e14.EXTRACT_ARGS, e14.EXTRACT_ENV))
+        feats = np.arange(12.0).reshape(2, 6)
+        self.assertIs(e14.apply_contract(feats, x4), feats)
+        with tempfile.TemporaryDirectory() as t:
+            meta = Path(t) / "build_meta.json"
+            meta.write_text(json.dumps({"binary": "/x/extract", "binary_sha256": "s5", "era": "rev5era", "build_commit": "b5"}))
+            with mock.patch.object(e14, "REV5_META", meta):
+                x5 = e14.extractor(5)
+            self.assertEqual(x5["env"]["ZENSIM_FORMULA_REV"], "5")
+            self.assertIn("basic,peaks,v2", x5["args"])
+            wide = np.ones((2, 800))
+            out = e14.apply_contract(wide, x5)
+            self.assertTrue(np.isnan(out[:, 228:372]).all() and np.isnan(out[:, 720:]).all())
+            self.assertTrue((out[:, :228] == 1).all() and (out[:, 372:720] == 1).all())
+            wide[0, 400] = np.inf
+            with self.assertRaises(ValueError):
+                e14.apply_contract(wide, x5)
+        with self.assertRaises(ValueError):
+            e14.extractor(3)
+
+
 class Guard(unittest.TestCase):
     def test_sealed_paths_refused(self):
         for bad in ("/var/tmp/rev4-featbank/_sealed", "/x/_sealed/y/labels.parquet", "_sealed_extra/z"):

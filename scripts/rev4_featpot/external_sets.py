@@ -66,8 +66,9 @@ def load_pairs(name: str) -> pd.DataFrame:
 
 
 def cmd_extract(args) -> int:
-    if e14.sha256(e14.BIN) != e14.BIN_SHA:
-        raise ValueError("not the r4 bank's extractor")
+    X = e14.extractor(args.revision)
+    if e14.sha256(X["bin"]) != X["sha"]:
+        raise ValueError(f"{X['bin']}: not the Rev{X['revision']} extractor")
     df = load_pairs(args.set)
     d = work(args.set)
     d.mkdir(parents=True, exist_ok=True)
@@ -78,13 +79,13 @@ def cmd_extract(args) -> int:
             f.write(f"{r}\t{p}\t0\t{i}\n")
     t0 = time.time()
     with (d / "extract.log").open("w") as log:
-        rc = subprocess.run([str(e14.BIN), "--corpus", "pairs-tsv", "--path", str(tsv), "--out", str(csv), *e14.EXTRACT_ARGS,
-                             "--audit-jsonl", str(d / "audit.jsonl")], env={**os.environ, **e14.EXTRACT_ENV},
+        rc = subprocess.run([str(X["bin"]), "--corpus", "pairs-tsv", "--path", str(tsv), "--out", str(csv), *X["args"],
+                             "--audit-jsonl", str(d / "audit.jsonl")], env={**os.environ, **X["env"]},
                             stdout=log, stderr=subprocess.STDOUT).returncode
     if rc:
         raise RuntimeError(f"extractor rc={rc}; see {d / 'extract.log'}")
     man = json.loads(Path(f"{csv}.manifest.json").read_text())
-    if man["era_label"] != e14.ERA or man["formula_revision"] != "4":
+    if man["era_label"] != X["era"] or man["formula_revision"] != str(X["revision"]):
         raise ValueError("extractor manifest: wrong era or revision")
     print(json.dumps({"set": args.set, "rows": len(df), "wall_s": round(time.time() - t0, 1), "feature_set_id": man["feature_set_id"]}))
     return 0
@@ -93,7 +94,9 @@ def cmd_extract(args) -> int:
 def cmd_table(args) -> int:
     df = load_pairs(args.set)
     d = work(args.set)
-    W = e14.WIDTH
+    X = e14.extractor(args.revision)
+    W = X["width"]
+    fsid = json.loads((d / "features.csv.manifest.json").read_text())["feature_set_id"]
     names = ["row_id"] + [f"f{i}" for i in range(W)]
     conv = pacsv.ConvertOptions(column_types={"row_id": pa.int64(), **{f"f{i}": pa.float64() for i in range(W)}}, include_columns=names)
     tab = pacsv.read_csv(d / "features.csv", convert_options=conv)
@@ -101,9 +104,7 @@ def cmd_table(args) -> int:
     order = np.argsort(rid, kind="stable")
     if not (rid[order] == np.arange(len(df))).all():
         raise ValueError("row_id join failed")
-    feats = np.stack([tab.column(f"f{i}").to_numpy()[order] for i in range(W)], axis=1)
-    if not np.isfinite(feats).all():
-        raise ValueError("nonfinite features")
+    feats = e14.apply_contract(np.stack([tab.column(f"f{i}").to_numpy()[order] for i in range(W)], axis=1), X)
     audit = [json.loads(ln) for ln in (d / "audit.jsonl").read_text().splitlines() if ln.strip()]
     if len(audit) != len(df) or any(a["distorted"] != p for a, p in zip(audit, df.dist_path)):
         raise ValueError("audit rows do not match the pairs in order")
@@ -123,17 +124,18 @@ def cmd_table(args) -> int:
     out = d.parent / f"{args.set}.parquet"
     pq.write_table(pa.table(cols), out, compression="zstd", use_byte_stream_split=[f"f{i}" for i in range(wide)])
     Path(f"{out}.manifest.json").write_text(json.dumps({
-        "source_bank_feature_set_id": "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype"
-                                      "+gmsbank+mapdev+z1max+gmsnative+dvifmgate@w1825/tiercanon_c3negfold#d57e9571",
-        "composite": f"Rev4 POTENTIAL external held-out set {args.set} (f0-f1824 Rev4 bank arithmetic; f1825-f{wide - 1} NaN); "
-                     "evaluation only", "formula_revision": 4}, indent=1) + "\n")
+        "source_bank_feature_set_id": fsid,
+        "composite": (f"Rev4 POTENTIAL external held-out set {args.set} (f0-f1824 Rev4 bank arithmetic; f1825-f{wide - 1} NaN); "
+                      "evaluation only" if X["revision"] == 4 else
+                      f"Rev5 POTENTIAL external held-out set {args.set} (basic+peaks+v2 at f0-f227, f372-f719, Rev5 arithmetic; "
+                      f"every other slot to f{wide - 1} NaN); evaluation only"), "formula_revision": X["revision"]}, indent=1) + "\n")
     keys.to_parquet(d.parent / f"{args.set}.keys.parquet")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "canonical_corpus"))
     import check_target_orientation as cto
     gate = cto.check(str(out), corpus=args.set) if args.set in ("nits", "mciqa") else cto.check(str(out), corpus="live")
     man = {"schema": "rev4-featpot-external-v1", "label": "POTENTIAL — external held-out evaluation, never a training input",
            "set": args.set, "rows": len(df), "pairs_source": str(PAIRS[args.set]), "pairs_sha256": e14.sha256(PAIRS[args.set]),
-           "extractor_sha256": e14.BIN_SHA, "extract_args": e14.EXTRACT_ARGS, "era": e14.ERA, "formula_revision": 4,
+           "extractor_sha256": X["sha"], "extract_args": X["args"], "era": X["era"], "formula_revision": X["revision"],
            "target_orientation": gate, "sha256": e14.sha256(out), "keys_sha256": e14.sha256(d.parent / f"{args.set}.keys.parquet")}
     (d.parent / f"{args.set}.manifest.json").write_text(json.dumps(man, indent=1, default=str) + "\n")
     print(json.dumps({"set": args.set, "rows": len(df), "orientation": gate.get("verdict"), "signed_srocc": gate.get("signed_srocc")}))
@@ -261,6 +263,7 @@ def main() -> int:
     ap.add_argument("--seeds", default="0-4")
     ap.add_argument("--out")
     ap.add_argument("--jobs", type=int, default=8)
+    ap.add_argument("--revision", type=int, choices=[4, 5], default=4, help="extract/table: extractor contract (e14.extractor)")
     args = ap.parse_args()
     return {"extract": cmd_extract, "table": cmd_table, "score": cmd_score}[args.cmd](args)
 

@@ -31,3 +31,13 @@ Finding for the lane (addendum appended to its brief): the same request's `featu
   weights and scores NaN. The densify helper moved from `external_sets.py`'s copy into `v2_common.dense_bake`.
 * Tests: `Rev5Tables` (load + pad + bit-exact requested columns, five refusals, fitter guard, revision probe); full
   `test_v2c` 69 tests OK.
+
+## 2026-10-04 11:55 — one extractor contract for E15 and the external sets
+
+`e14_kadis_ordinal.extractor(revision)` is now the single owner of the extractor contract (binary + sha256, era, arguments,
+environment, width, requested slots). Rev4 returns the existing pins unchanged; Rev5 reads `/var/tmp/rev5-extract/build_meta.json`
+(written when the Rev5 extractor is built) and requests `basic,peaks,v2`. `apply_contract` keeps requested slots (must be
+finite) and turns the extractor's structural zeros elsewhere into NaN. `e15_coverage.py extract|table --revision 5` and
+`external_sets.py extract|table --revision 5` use it; their table manifests now carry the extraction's own feature-set id and
+formula revision. With `--root <rev5 root>` every output lands under that root (the Rev5 root needs `e15/selection.parquet`
+copied from the Rev4 root: same pairs). Test `ExtractorContract`.
