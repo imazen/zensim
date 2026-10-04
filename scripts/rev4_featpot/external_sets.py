@@ -32,7 +32,7 @@ import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 
 import e14_kadis_ordinal as e14
-from v2_common import FITBIN, SOURCE_ORDER, V2
+from v2_common import FITBIN, SOURCE_ORDER, V2, dense_bake
 
 PAIRS = {
     "nits": Path("/mnt/v/datasets/nits-iqa_extracted/nits_iqa_pairs.tsv"),
@@ -148,22 +148,6 @@ def spearman(x: np.ndarray, y: np.ndarray) -> float:
 
 
 UNREAD_FROM = 1825  # external tables carry f1825+ as NaN (texgain/satsign not extracted, as the E14/E15 legs)
-
-
-def dense_bake(bake: Path, cache: Path) -> Path:
-    """The cell's bake rewritten to the dense contract by the owner (`bake_dial_refit densify`, identity gate: predictions
-    bit-identical on its probe rows). Cell bakes are identity-width: a zero-weight input still multiplies its NaN, so an
-    identity-width bake scores NaN on a table whose unread columns are NaN; the dense bake carries exactly the inputs it reads."""
-    out = cache / "dense" / f"{hashlib.sha256(bake.read_bytes()).hexdigest()[:16]}.bin"
-    if not out.is_file():
-        out.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        r = subprocess.run([str(FITBIN), "densify", "--in", str(bake), "--out", str(tmp)], check=True, capture_output=True,
-                           text=True)
-        if "BIT-IDENTICAL" not in r.stdout + r.stderr:
-            raise ValueError(f"densify identity gate did not report bit-identical predictions for {bake}")
-        tmp.rename(out)
-    return out
 
 
 def reads_unextracted(cell: Path) -> bool:
