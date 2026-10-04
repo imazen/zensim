@@ -4,6 +4,14 @@ Registered 2026-10-02 (Mountain Time, afternoon), before any fit. Lane `steerche
 `quarantine/claude/steercheck`, never pushed from the lane). Brief: `~/tmp/zensim-paper/rev4/STEERCHECK_brief.md`.
 Results are appended below this registration in the same file once the runs finish.
 
+> **Correction (2026-10-04 03:40 MT).** The steering pass counts in this record (broad 96 / owner 12) come from the COSTSET
+> strict-route human-only bakes (H128, 8,000 human pairs, no SafeSyn/CID22/coverage legs). Those bakes were later found
+> non-monotone under per-block JPEG upgrades (`neighsteer_2026-10-04.md`, correction banner and §7), so pass counts measured with
+> them do not rank the feature sets as an adopted-recipe model would. With featpot cv16:cf98 bakes (densified, stamped Rev4, uniform
+> three-seed ensembles): broad by_v2fy 92/96 and v2 + basic 91/96 (COSTSET bakes: 86 and 87-88); owner 12/12 each
+> (`jpegsteer_2026-10-04.md` banner). Cost and rank numbers here are unaffected. Conclusions that rest on a few broad passes between
+> sets (e.g. a set "losing" 6-14 passes) should be re-measured on adopted-recipe bakes before use.
+
 ## Registration (Part B)
 
 Recipe: `benchmarks/steercheck_2026-10-02.recipe.json` (committed with this text, before any extraction or fit).
