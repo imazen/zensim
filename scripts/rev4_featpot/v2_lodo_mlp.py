@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
-from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, arm_columns, block_spec, recipe_of, split_weight,
+from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, N_SEEDS, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, arm_columns, block_spec, recipe_of, split_weight,
                        PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, selection_id, sha, table_path)
 
@@ -156,7 +156,7 @@ def main() -> None:
     ap.add_argument("--spec", required=True)
     ap.add_argument("--head", choices=HEADS, required=True)
     ap.add_argument("--heldout", choices=SOURCE_ORDER, required=True)
-    ap.add_argument("--seed-index", type=int, choices=range(10), required=True)
+    ap.add_argument("--seed-index", type=int, choices=range(N_SEEDS), required=True)
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
     args = ap.parse_args()

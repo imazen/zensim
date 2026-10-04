@@ -64,6 +64,11 @@ HUMAN_DEV_MODULUS = 5  # label-free: a human reference is dev when sha256(ref) m
 
 INIT_SEEDS = (1101, 1103, 1107, 1109, 1117, 1123, 1129, 1151, 1153, 1163)
 SAMPLE_SEEDS = tuple(101 + k * 100_000_000 for k in range(10))
+# Seed indices 10-19 (design log E23, 2026-10-04): a second, disjoint stream. Indices 0-9 keep their exact (init, sample)
+# pairs, including the fold rotation modulo 10, so every existing cell stays reproducible.
+INIT_SEEDS_EXT = (1171, 1181, 1187, 1193, 1201, 1213, 1217, 1223, 1229, 1231)
+SAMPLE_SEEDS_EXT = tuple(101 + (10 + k) * 100_000_000 for k in range(10))
+N_SEEDS = len(INIT_SEEDS) + len(INIT_SEEDS_EXT)
 EPOCHS = 120
 # Which epoch's weights a cell keeps (design log E5/E5b, amendment R4): "best_dev" = the trainer's best dev-aggregate
 # epoch (R1-R3); "last" = the final-epoch checkpoint (dumped by the trainer, identical to its state after training).
@@ -328,7 +333,12 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
 
 def seeds(heldout: str, seed_index: int) -> tuple[int, int]:
     fold = SOURCE_ORDER.index(heldout)
-    return INIT_SEEDS[seed_index], SAMPLE_SEEDS[(seed_index + fold) % len(SAMPLE_SEEDS)]
+    if not 0 <= seed_index < N_SEEDS:
+        raise ValueError(f"seed index {seed_index} outside 0..{N_SEEDS - 1}")
+    if seed_index < len(INIT_SEEDS):
+        return INIT_SEEDS[seed_index], SAMPLE_SEEDS[(seed_index + fold) % len(SAMPLE_SEEDS)]
+    j = seed_index - len(INIT_SEEDS)
+    return INIT_SEEDS_EXT[j], SAMPLE_SEEDS_EXT[(j + fold) % len(SAMPLE_SEEDS_EXT)]
 
 
 def confirm_seeds(seed_index: int) -> tuple[int, int]:

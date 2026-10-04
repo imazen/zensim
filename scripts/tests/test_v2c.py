@@ -54,6 +54,28 @@ def f64_bank_set(bank: Path, name: str, rows: int, seed: int, identical=(2,), ex
     return values
 
 
+class Seeds(unittest.TestCase):
+    """Design log E23: seed indices 10-19 extend the streams without moving any existing cell's (init, sample) pair."""
+
+    def test_indices_0_to_9_unchanged(self):
+        init = (1101, 1103, 1107, 1109, 1117, 1123, 1129, 1151, 1153, 1163)
+        sample = tuple(101 + k * 100_000_000 for k in range(10))
+        for fold, held in enumerate(v2_common.SOURCE_ORDER):
+            for i in range(10):
+                self.assertEqual(v2_common.seeds(held, i), (init[i], sample[(i + fold) % 10]))
+
+    def test_indices_10_to_19_disjoint_and_bounded(self):
+        old = {v2_common.seeds(h, i) for h in v2_common.SOURCE_ORDER for i in range(10)}
+        new = {v2_common.seeds(h, i) for h in v2_common.SOURCE_ORDER for i in range(10, 20)}
+        self.assertEqual(len(new), 50)
+        self.assertFalse({a for a, _ in old} & {a for a, _ in new})
+        self.assertFalse({b for _, b in old} & {b for _, b in new})
+        self.assertTrue(all(b < 2**31 for _, b in new))
+        for bad in (-1, 20):
+            with self.assertRaises(ValueError):
+                v2_common.seeds("kadid", bad)
+
+
 class Guard(unittest.TestCase):
     def test_sealed_paths_refused(self):
         for bad in ("/var/tmp/rev4-featbank/_sealed", "/x/_sealed/y/labels.parquet", "_sealed_extra/z"):
