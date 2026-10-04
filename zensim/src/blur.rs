@@ -10433,10 +10433,16 @@ fn fused_blur_h_local11_wide(
                     let a = f32x16::load(token, src[i..i + 16].try_into().unwrap());
                     let b = f32x16::load(token, dst[i..i + 16].try_into().unwrap());
                     let q = a.mul_add(a, b * b);
-                    let p = if err { let e = a - b; e * e } else { a * b };
+                    let p = if err {
+                        let e = a - b;
+                        e * e
+                    } else {
+                        a * b
+                    };
                     (a, b, q, p)
                 };
-                let add = |a: (f32x16, f32x16, f32x16, f32x16), b: (f32x16, f32x16, f32x16, f32x16)| {
+                let add = |a: (f32x16, f32x16, f32x16, f32x16),
+                           b: (f32x16, f32x16, f32x16, f32x16)| {
                     (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
                 };
                 let pair = |k| add(tap(k), tap(k + 1));
@@ -10445,8 +10451,16 @@ fn fused_blur_h_local11_wide(
                 let sum = add(add(add(s01, s45), pair(8)), tap(10));
                 (sum.0 * inv).store((&mut out_mu1[row + x..row + x + 16]).try_into().unwrap());
                 (sum.1 * inv).store((&mut out_mu2[row + x..row + x + 16]).try_into().unwrap());
-                (sum.2 * inv).store((&mut out_sigma_sq[row + x..row + x + 16]).try_into().unwrap());
-                (sum.3 * inv).store((&mut out_sigma12[row + x..row + x + 16]).try_into().unwrap());
+                (sum.2 * inv).store(
+                    (&mut out_sigma_sq[row + x..row + x + 16])
+                        .try_into()
+                        .unwrap(),
+                );
+                (sum.3 * inv).store(
+                    (&mut out_sigma12[row + x..row + x + 16])
+                        .try_into()
+                        .unwrap(),
+                );
                 x += 16;
             } else {
                 let mut a = [0.0; 11];

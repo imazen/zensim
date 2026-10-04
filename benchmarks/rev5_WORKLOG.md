@@ -302,3 +302,22 @@ maps improve 41.60/160.63 ms → 38.34/153.21 ms. v3 is unchanged in source.
 Full-vector parity remains byte-identical to the frozen native capture,
 and F2 identity passes on every native token permutation
 (`/var/tmp/rev5/tapstream-parity.log`, 14 s).
+
+The final three kernel attempts changed only AVX-512 code and were reverted.
+Each uses 30 interleaved rounds at 1/4 MP, score/map, v4x/v3.
+Maximum measured gain among the four changed-tier (v4x) cases:
+
+| attempt | maximum gain | disposition |
+|---|---:|---|
+| border | 0.475% | reverted |
+| vtree | -1.564% | reverted |
+| SDwide | 0.663% | reverted |
+
+The unmodified v3 code is retained as a noise/control arm. All strict gate
+results are UNRELIABLE: an unrelated exhaustive SIMD job remains active,
+and zenbench's heavy-process scan excludes the parent but counts the harness's
+own revision-worker descendants. No threshold was relaxed. Thus the
+three-attempt stop rule is provisional, not quiet-box certified. Raw rounds
+and flags are under `/var/tmp/rev5/trials/`; score profiling before the last
+trials is `/var/tmp/rev5/perf-tapstream-score.data` (2,000 samples: dense
+34.59%, V 13.95%, XYB 12.50%, fused H 9.88%, basic 7.72%, gradients 7.05%).
