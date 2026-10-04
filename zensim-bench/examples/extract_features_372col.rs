@@ -118,10 +118,12 @@ fn main() {
     let mut dvifm_quant_f16 = false;
     let mut dvifm_hist = None;
     let mut input_contract = None;
+    let mut era_label: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--input-contract" => audit::take_value(&mut input_contract, args.next()),
             "--sampling" => sampling = Some(args.next().expect("--sampling value")),
+            "--era-label" => era_label = Some(args.next().expect("--era-label value")),
             "--full-944" => full_944 = true,
             "--full-986" => full_986 = true,
             "--full-rev4" => full_rev4 = true,
@@ -211,6 +213,19 @@ fn main() {
         "--full-944/--full-986/--full-rev4/--full-gmsbank/--restore-cuts are mutually exclusive"
     );
     let research_path = full_986 || full_rev4 || full_gmsbank || restore_cuts.is_some();
+    // `--era-label TOKEN`: stamp the extraction's `feature_set_id` era
+    // (`Request::with_era_label`). Research path only; the token must be a
+    // valid `feature_set_id` token ([a-z0-9_]).
+    if let Some(label) = era_label.as_deref() {
+        assert!(
+            research_path,
+            "--era-label needs the research path (--full-986/--full-rev4/--full-gmsbank/--restore-cuts)"
+        );
+        assert!(
+            zensim::feature_set_id::is_valid_token(label),
+            "--era-label {label:?} is not a valid era token ([a-z0-9_]+)"
+        );
+    }
     assert!(
         (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none()) || research_path,
         "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require the research path (--full-986/--full-rev4/--full-gmsbank)"
@@ -285,6 +300,9 @@ fn main() {
             None => zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
         };
         let mut req = zensim::research::Request::for_slots(want, w);
+        if let Some(label) = era_label.as_deref() {
+            req = req.with_era_label(label);
+        }
         if let Some(spec) = spec {
             req = req.with_dvifm_spec(spec);
         }
@@ -637,9 +655,21 @@ fn main() {
             spec_sha.as_deref(),
             dvifm_blocks.as_deref(),
             force_tier.as_deref().unwrap_or("native"),
+            era_label.as_deref(),
         );
+        // The first pair's full research manifest (`formula_revision_eras`,
+        // per-slot provenance): the extractor's own record of which eras
+        // the bytes carry, written beside the CSV.
+        if let Some(m) = FIRST_RESEARCH_MANIFEST.get() {
+            std::fs::write(format!("{}.research_manifest.json", out.display()), m)
+                .expect("write research manifest");
+        }
     }
 }
+
+/// The first research extraction's `manifest_json()` (eras + per-slot
+/// provenance), captured once and written beside the CSV.
+static FIRST_RESEARCH_MANIFEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// The research path's per-pair side products (`--full-986`): the DVIFM
 /// block records when `--dvifm-block-stats` was given, plus the
@@ -693,6 +723,10 @@ fn extract_features(
         // carries the DVIFM constants override / block-record side output.
         let ext = zensim::research::extract(req, &src.source(), &dst.source())
             .map_err(|e| format!("research extract ({}): {e:?}", kp.distorted.display()))?;
+        if FIRST_RESEARCH_MANIFEST.get().is_none() {
+            // Identical for every pair of one run; the first writer wins.
+            let _ = FIRST_RESEARCH_MANIFEST.set(ext.manifest_json());
+        }
         let out = ResearchOut {
             blocks: ext.dvifm_blocks().cloned(),
             feature_set_id: ext.feature_set_id().map(|id| id.to_string()),
@@ -1081,6 +1115,7 @@ fn write_research_manifest(
     spec_sha256: Option<&str>,
     block_stats: Option<&str>,
     tier: &str,
+    era_label: Option<&str>,
 ) {
     let revision = std::env::var("ZENSIM_FORMULA_REV")
         .expect("diagnostic extraction requires explicit ZENSIM_FORMULA_REV");
@@ -1096,6 +1131,7 @@ fn write_research_manifest(
         "populated_feature_ids": emit,
         "feature_set_id": feature_set_id,
         "simd_tier_request": tier,
+        "era_label": era_label,
         "rayon_num_threads": std::env::var("RAYON_NUM_THREADS").ok(),
         "producer_binary_sha256": sha256_hex_of(
             &std::env::current_exe().expect("extractor binary path")
