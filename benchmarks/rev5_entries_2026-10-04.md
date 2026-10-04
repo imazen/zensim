@@ -149,3 +149,5 @@ Raw gate locations: `/var/tmp/rev5/owner-final-gates2`, `owner-final-extra`, `ow
 | _MANIFEST.json | `2a98f41dd90b9d6cb95281f03e10e6cb2aa4bc38c8fff76603799c83ec9b24e0` |
 | before.tsv | `7d09fd10cd143fd3f28e51dd0647f39324eb722d87a23cbc2d3f3248ac2ab29f` |
 | after.tsv | `7d09fd10cd143fd3f28e51dd0647f39324eb722d87a23cbc2d3f3248ac2ab29f` |
+
+The final post-directive [speed matrix](rev5_speed_final_2026-10-04.md) contains all 192 measurements and 48 fixed/per-pixel fits. Every run remains strict-gate unreliable; it does not certify the stop rule. The earlier [engineering ladder](rev5_ladder_2026-10-04.md) is preserved with stage/binary identities.

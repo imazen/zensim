@@ -450,3 +450,35 @@ and synthetic-label provenance are recorded in the entry report. Initial
 harness command named a nonexistent densify_feature_tables binary and stopped;
 corrected rescore_parquet build and tests pass (`owner-evidence-rest`). The
 pre-fix failed logs remain; they are not green gate evidence.
+
+### Final post-directive speed matrix
+
+Final executable `/var/tmp/rev5/xp_owner_final`, SHA-256
+`1eb6419af3491ecb7dc573b9c2a64f55a8cd8f054861bb5d9cd5825f89836f21`.
+The full matrix repeats all 192 records: four sizes, both bakes, revisions
+3/4/5, v4x/v3, score/map, single/eight threads, 30 rounds per group.
+Pins moved to CPU 16 / CPUs 16–23 to avoid the exhaustive job's affinity.
+Every strict run still has 120 gate waits and `unreliable=true`; no gate was
+relaxed. Complete 48-row latency and 48-fit tables (including small-image
+regressions, R² and residuals) are in
+`benchmarks/rev5_speed_final_2026-10-04.md`, raw data
+`/var/tmp/rev5/owner-speed-matrix`. The previous full matrix and 288-record
+engineering ladder are preserved, with their original binary identities.
+
+| by_v2fy, 1 MP | Rev3 ms | Rev4 ms | Rev5 ms |
+|---|---:|---:|---:|
+| v4x, 1 threads, score | 27.7583 | 34.2143 | 23.1004 |
+| v4x, 1 threads, map | 61.8644 | 67.6762 | 40.7353 |
+| v4x, 8 threads, score | 15.7522 | 17.7496 | 15.6754 |
+| v4x, 8 threads, map | 30.8050 | 32.8866 | 26.3264 |
+| v3, 1 threads, score | 47.1235 | 40.0593 | 32.1459 |
+| v3, 1 threads, map | 93.3898 | 75.1679 | 48.7670 |
+| v3, 8 threads, score | 20.9300 | 21.8130 | 19.5173 |
+| v3, 8 threads, map | 36.7919 | 35.3972 | 29.7106 |
+
+The three consecutive below-2% kernel trials remain provisional rather
+than a certified speed-loop stop: the strict quiet-box condition was not
+met. The unrelated PID 760429 was still at 100% CPU at the final refresh.
+No model was retrained or promoted, no corpus modified, and no push made.
+The only remaining qualification/domain limits are listed in the owner
+decisions file; the standard unsampled by_v2fy bake is served.
