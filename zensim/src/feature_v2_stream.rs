@@ -200,7 +200,7 @@ impl RollingPlane {
             //
             // Strictly more deterministic, too: this always yields zeros,
             // where `resize` left a prefix of the previous walk's pixels.
-            crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements,need);
+            crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements, need);
             buf = vec![0.0; need];
         }
         Self {
@@ -758,7 +758,9 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         }
         let n_new = self.advance_rows.min(h0 - hi0);
 
-        if !self.omit_scale0_xb { crate::fold_timing::work(crate::fold_timing::Work::Scale0XbStoredRows,4*n_new); }
+        if !self.omit_scale0_xb {
+            crate::fold_timing::work(crate::fold_timing::Work::Scale0XbStoredRows, 4 * n_new);
+        }
         // --- Scale-0 conversion, both sides. ---
         //
         // MT (fold-MT lane): the two sides write DISJOINT plane sets and read

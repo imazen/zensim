@@ -46,10 +46,12 @@ pub(crate) enum Work {
     ScratchZeroElements,
     Scale0XbStoredRows,
 }
-static WORK: [AtomicU64;6] = [const { AtomicU64::new(0) };6];
+static WORK: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
 #[inline]
 pub(crate) fn work(kind: Work, amount: usize) {
-    if on() { WORK[kind as usize].fetch_add(amount as u64, Ordering::Relaxed); }
+    if on() {
+        WORK[kind as usize].fetch_add(amount as u64, Ordering::Relaxed);
+    }
 }
 
 /// One accumulator slot. Indices are `(phase, scale)`; see [`Phase`].
@@ -217,8 +219,11 @@ fn threads() -> f64 {
 }
 
 fn dump(walks: u64) {
-    let counts: [u64;6] = std::array::from_fn(|i| WORK[i].swap(0, Ordering::Relaxed));
-    eprintln!("WORK_CENSUS vertical_planes={} activity_chains={} peak_bands={} scale0_xb_cells={} scratch_zero_elements={} scale0_xb_stored_rows={}", counts[0],counts[1],counts[2],counts[3],counts[4],counts[5]);
+    let counts: [u64; 6] = std::array::from_fn(|i| WORK[i].swap(0, Ordering::Relaxed));
+    eprintln!(
+        "WORK_CENSUS vertical_planes={} activity_chains={} peak_bands={} scale0_xb_cells={} scratch_zero_elements={} scale0_xb_stored_rows={}",
+        counts[0], counts[1], counts[2], counts[3], counts[4], counts[5]
+    );
 
     let thr = threads();
     let (walk, _) = sum(Phase::Walk);

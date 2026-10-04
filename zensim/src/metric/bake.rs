@@ -2347,6 +2347,14 @@ mod revision_contract_tests {
             scorer
                 .compute(&rs, &ds, None)
                 .unwrap_or_else(|e| panic!("a Rev5 bake reading f{id} must serve, got {e:?}"));
+            let scalar = scorer.compute(&rs, &ds, None).unwrap();
+            let mut session = scorer.prepare_steering(&rs, 8).unwrap();
+            let spatial = session.compute(&ds, None).unwrap();
+            assert_eq!(
+                scalar.score().to_bits(),
+                spatial.result().score().to_bits(),
+                "f{id} score/map parity"
+            );
         }
         // Same computed vector as research, including the nonzero reference-only slot.
         let model = zenpredict::Model::from_bytes(&bake_declaring(Some("5"), 393)).unwrap();

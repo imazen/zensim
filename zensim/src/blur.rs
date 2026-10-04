@@ -82,7 +82,7 @@ pub fn box_blur_v_from_copy(
     height: usize,
     radius: usize,
 ) {
-    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane,1);
+    crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 1);
     let revision = crate::ssim_form::active_revision();
     if matches!(
         crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),

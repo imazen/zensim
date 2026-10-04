@@ -3397,9 +3397,9 @@ impl ComputeSet {
     /// reference luma ([`APPEND2_CHANNEL`]). Their owning block is the
     /// append kernel, so they are also skipped whenever it runs.
     pub(crate) fn free_work(&self, ch: usize, scale: usize) -> crate::fused::FreeExtrasWork {
-        if self.formula_revision >= FormulaRevision::Rev5 && scale==0 && ch!=1 {
+        if self.formula_revision >= FormulaRevision::Rev5 && scale == 0 && ch != 1 {
             // Count actual scale-zero chroma consumers, regardless of plan intent.
-            crate::fold_timing::work(crate::fold_timing::Work::Scale0XbCell,1);
+            crate::fold_timing::work(crate::fold_timing::Work::Scale0XbCell, 1);
         }
         let bounded_err = self.bounded_err();
         crate::fused::FreeExtrasWork {
@@ -3828,7 +3828,10 @@ impl ScratchV2Strip {
     fn new_for(max_n: usize, needs: StripPlaneNeeds) -> Self {
         let hn = if needs.h { max_n } else { 0 };
         let vn = if needs.v2 { max_n } else { 0 };
-        crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements, 2*max_n+4*hn+8*vn);
+        crate::fold_timing::work(
+            crate::fold_timing::Work::ScratchZeroElements,
+            2 * max_n + 4 * hn + 8 * vn,
+        );
         Self {
             src_wide: vec![0.0f32; max_n],
             dst_wide: vec![0.0f32; max_n],
@@ -4336,7 +4339,7 @@ fn run_blur_pass_inner(
     let s12 = &mut s12[..n];
     crate::blur::box_blur_v_from_copy(s12_h, s12, width, height_local, BLUR_RADIUS);
 
-    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain,1);
+    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
     let abs_src = &mut abs_src[..n];
     crate::simd_ops::abs_diff_into(src, mu1, abs_src);
     let activity = &mut activity[..n];

@@ -229,7 +229,10 @@ impl LocalRefineSnapshot {
         distorted: &impl crate::source::ImageSource,
     ) -> Option<Self> {
         let c = &plan.compute;
-        if c.sampling.is_some()
+        // Rev5 uses stable central moments and sixteen-lane pools. The
+        // legacy delta replay carries raw moments, so explicitly refuse it.
+        if c.formula_revision >= FormulaRevision::Rev5
+            || c.sampling.is_some()
             || !c.v2_blocks
             || ret.dims.len() != crate::NUM_SCALES
             || ret.dims[0] != src_dims
@@ -1054,6 +1057,35 @@ mod tests {
     use super::*;
     use crate::feature_v2::{FoldRetention, V2Scratch};
     use crate::source::RgbSlice;
+
+    #[test]
+    fn rev5_neighbour_refinement_refuses() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "local_refine::tests::rev5_neighbour_refinement_refuses",
+            "REV5_REFUSE_OK",
+        ) {
+            return;
+        }
+        let plan = crate::feature_plan::Plan::derive(
+            &crate::feature_set_id::SlotSet::from_slots([13, 459]),
+            720,
+        )
+        .unwrap();
+        let pixels = textured(64, 64, 1);
+        let image = RgbSlice::new(&pixels, 64, 64);
+        assert!(
+            LocalRefineSnapshot::capture(
+                &FoldRetention::default(),
+                &plan,
+                (64, 64),
+                &image,
+                &image
+            )
+            .is_none()
+        );
+        println!("REV5_REFUSE_OK");
+    }
 
     /// `feature_v2::tests::textured_image`'s fixture family, duplicated
     /// here so the test does not reach across modules: gradients + edges +

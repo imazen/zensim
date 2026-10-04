@@ -5428,8 +5428,12 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
     // already resolved to `Local` by the caller.
     _mode: crate::featcanon::Mode,
 ) -> StripChannelAccum {
-    if radius>0 { crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane,4); }
-    if !free.local_only && !free.omit_peaks { crate::fold_timing::work(crate::fold_timing::Work::PeakBand,1); }
+    if radius > 0 {
+        crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
+    }
+    if !free.local_only && !free.omit_peaks {
+        crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
+    }
     let form = free.luma_form();
     let r = radius;
     let inner_end = inner_start + inner_h;
