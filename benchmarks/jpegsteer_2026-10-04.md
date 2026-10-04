@@ -19,6 +19,9 @@ Measured 2026-10-03 23:45 – 2026-10-04 00:05 MT. Development diagnostic, not a
 >
 > The heavy-JPEG failure reported below (3/12, 2/12) is mostly a property of the COSTSET bakes; with adopted-recipe models both
 > sets steer 8×8 blocks at KADID's heaviest JPEG level in 9–10 of 12 cases.
+> Broad-96 panel (`steercheck_2026-10-02/run_broad.py`, `STEERCHECK_PREPARED=1 STEERCHECK_REV=4`, uniform three-seed ensembles of the
+> same cf98 bakes): by_v2fy 92/96 (block 8 24/24, 16 24/24, 32 24/24, 64 20/24; lowest M3f 0.84), v2 + basic 91/96 (23, 23, 24, 21;
+> lowest M3f 0.82); every failure is an M2 miss (≥ 0.951) at large blocks. COSTSET bakes: 86/96 and 87/96.
 
 ## Setup
 
