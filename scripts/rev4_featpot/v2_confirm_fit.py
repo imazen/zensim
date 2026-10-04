@@ -23,7 +23,7 @@ import numpy as np
 
 from v2_common import (load_frozen, recipe_of, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
-from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, train_and_select
+from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select
 
 CONFIRM_SCHEMA = "rev4-featpot-v2c-confirm-v1"
 RESULT_SCHEMA = "rev4-featpot-v2c-confirm-cell-v1"
@@ -53,14 +53,16 @@ def main() -> None:
     ap.add_argument("--seed-index", type=int, choices=range(10), required=True)
     ap.add_argument("--dest", type=Path, help="write here instead of <root>/confirm/cells/... (determinism checks)")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
+    ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
     args = ap.parse_args()
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
     if lists["schema"] != "rev4-featpot-v2-keeplists-v2":
         raise ValueError("keep-list schema mismatch")
-    entry = lists["specs"][core_spec]
-    family, variant, keep = entry["family"], entry["variant"], entry["keep"]
+    # 2026-10-04 (set-compare confirmatory read): registered arms, E9 block/set specs and sel: subsets resolve exactly as in the
+    # LODO cells (v2_lodo_mlp.resolve_keep); a registered arm's keep list is unchanged.
+    family, variant, keep = resolve_keep(core_spec, args.columns, lists)
     vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
     receipt = json.loads(receipt_path.read_text())
@@ -89,12 +91,28 @@ def main() -> None:
         fit, dev = checked(legs[leg]["fit"]), checked(legs[leg]["dev"])
         weights[leg] = acceptance_weight(NOMINAL_WEIGHT[leg], refs_of(fit))
         groups += [(leg, fit, weights[leg], 0, "withinref,both"), (f"{leg}_development", dev, 0, val_w, "withinref,both")]
+    recipe = recipe_of(args.spec)
+    coverage_record, curated_extra = None, None
+    if "coverage_weight" in recipe:  # design log E15/E17: the coverage leg exactly as v2_lodo_mlp builds it (label-free ordinal pool)
+        import v2_teacher
+        if max(keep) >= v2_teacher.ORDINAL_WIDTH:
+            raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+        cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest))
+        curated_extra = cpath
+        weights["coverage"] = acceptance_weight(recipe["coverage_weight"], refs_of(cpath))
+        groups.append(("coverage", cpath, weights["coverage"], 0, "withinref,rank"))
+    if "kadis_ordinal" in recipe or recipe.get("teacher_subset"):
+        raise ValueError(f"{args.spec}: the confirm fitter implements the coverage leg only (no ko/ts recipe tokens)")
     hfit, hdev = checked(legs["human_all"]["fit"]), checked(legs["human_all"]["dev"])
     weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
     init_seed, sample_seed = confirm_seeds(args.seed_index)
-    bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe_of(args.spec))
+    try:
+        bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
+    finally:
+        if curated_extra is not None:
+            curated_extra.unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
     predictions = {}
     for name, table in tables.items():
@@ -112,7 +130,8 @@ def main() -> None:
            "human_nominal_weight": NOMINAL_WEIGHT["human"] if human_w is None else human_w, "family": family,
            "variant": variant, "eval_variant": variant, "kept_features": len(keep), "head": args.head,
            "seed_index": args.seed_index, "init_seed": init_seed, "sample_seed": sample_seed, "train_weights": weights,
-           "hidden": HIDDEN, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH, "width": width,
+           "hidden": recipe.get("hidden", HIDDEN), "epochs": EPOCHS, "recipe_tokens": recipe,
+           **({"coverage_leg": coverage_record} if coverage_record else {}), "pairs_per_epoch": PAIRS_PER_EPOCH, "width": width,
            "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha, "confirm_receipt_sha256": sha(confirm_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"),
            "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
