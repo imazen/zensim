@@ -1987,7 +1987,7 @@ fn pjnd_transducer_v<T: F32x8Backend + Copy>(
 /// just "removed and hoped for the best".
 #[derive(Default, Clone, Copy)]
 #[cfg_attr(not(test), allow(dead_code))] // test-referenced reference impl (raw_moment_reformulation_matches_terriberry)
-struct OnlineMoments {
+pub(crate) struct OnlineMoments {
     n: f64,
     mean: f64,
     m2: f64,
@@ -1997,6 +1997,58 @@ struct OnlineMoments {
 
 #[cfg_attr(not(test), allow(dead_code))] // see struct note: exercised by the Terriberry parity test
 impl OnlineMoments {
+    /// Two-pass moments within a small block; no subtraction of raw powers.
+    fn block(values: &[f64]) -> Self {
+        if values.is_empty() {
+            return Self::default();
+        }
+        let n = values.len() as f64;
+        let origin = values[0];
+        let mean = origin + values.iter().map(|v| v - origin).sum::<f64>() / n;
+        let mut out = Self {
+            n,
+            mean,
+            ..Self::default()
+        };
+        for &v in values {
+            let d = v - mean;
+            let d2 = d * d;
+            out.m2 += d2;
+            out.m3 += d2 * d;
+            out.m4 += d2 * d2;
+        }
+        out
+    }
+
+    /// Chan/Pébay merge, always called in raster block/strip order.
+    fn merge(&mut self, b: Self) {
+        if b.n == 0.0 {
+            return;
+        }
+        if self.n == 0.0 {
+            *self = b;
+            return;
+        }
+        let a = *self;
+        let n = a.n + b.n;
+        let d = b.mean - a.mean;
+        let d2 = d * d;
+        let d3 = d2 * d;
+        let d4 = d2 * d2;
+        self.mean = a.mean + d * (b.n / n);
+        self.m4 = a.m4
+            + b.m4
+            + d4 * a.n * b.n * (a.n * a.n - a.n * b.n + b.n * b.n) / (n * n * n)
+            + 6.0 * d2 * (a.n * a.n * b.m2 + b.n * b.n * a.m2) / (n * n)
+            + 4.0 * d * (a.n * b.m3 - b.n * a.m3) / n;
+        self.m3 = a.m3
+            + b.m3
+            + d3 * a.n * b.n * (a.n - b.n) / (n * n)
+            + 3.0 * d * (a.n * b.m2 - b.n * a.m2) / n;
+        self.m2 = a.m2 + b.m2 + d2 * a.n * b.n / n;
+        self.n = n;
+    }
+
     #[inline]
     fn update(&mut self, x: f64) {
         let n1 = self.n;
@@ -4338,6 +4390,7 @@ fn run_blur_pass_inner(
 /// Per-row-reduced f64 accumulator for the dense (always-on) block.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct DenseAccum {
+    pub(crate) central: OnlineMoments,
     pub(crate) sum_d: f64,
     pub(crate) sum_d2: f64,
     pub(crate) sum_d3: f64,
@@ -4374,6 +4427,7 @@ impl DenseAccum {
     /// already tolerated for the phase-4 SIMD-lane-then-row reduction).
     #[inline]
     pub(crate) fn accumulate(&mut self, other: &DenseAccum) {
+        self.central.merge(other.central);
         self.sum_d += other.sum_d;
         self.sum_d2 += other.sum_d2;
         self.sum_d3 += other.sum_d3;
@@ -10450,12 +10504,15 @@ pub(crate) fn finish_channel_scale(
     //     the file's 5e-4 relative tolerance (verified by
     //     `simd_matches_scalar_within_tolerance`). ---
     let mean_d = dense.sum_d / n_f;
-    let raw2 = dense.sum_d2 / n_f;
-    let raw3 = dense.sum_d3 / n_f;
-    let raw4 = dense.sum_d4 / n_f;
-    let m2 = (raw2 - mean_d * mean_d).max(0.0);
-    let m4 =
-        (raw4 - 4.0 * mean_d * raw3 + 6.0 * mean_d * mean_d * raw2 - 3.0 * mean_d.powi(4)).max(0.0);
+    let (m2, m4) = if dense.central.n > 0.0 {
+        (dense.central.m2 / n_f, dense.central.m4 / n_f)
+    } else {
+        let raw2 = dense.sum_d2 / n_f;
+        let raw3 = dense.sum_d3 / n_f;
+        let raw4 = dense.sum_d4 / n_f;
+        ((raw2 - mean_d * mean_d).max(0.0),
+         (raw4 - 4.0 * mean_d * raw3 + 6.0 * mean_d * mean_d * raw2 - 3.0 * mean_d.powi(4)).max(0.0))
+    };
     let dev2 = m2.sqrt();
     let dev4 = m4.quarter_root(crate::det_math::active_root_form());
 
@@ -15692,6 +15749,11 @@ fn derive_v2app_coeffs(
     let raw4 = dense.sum_d4 * inv_n;
     let m2 = (raw2 - mu * mu).max(0.0);
     let m4 = (raw4 - 4.0 * mu * raw3 + 6.0 * mu * mu * raw2 - 3.0 * mu.powi(4)).max(0.0);
+    let (m2, m4) = if dense.central.n > 0.0 {
+        (dense.central.m2 * inv_n, dense.central.m4 * inv_n)
+    } else {
+        (m2, m4)
+    };
     c.dev_mu = mu;
     c.dev_raw2 = raw2;
     c.dev_raw3 = raw3;
@@ -18986,6 +19048,36 @@ pub(crate) mod tests {
     /// range `[0, 2]` (not arbitrary floats) since that's what the real
     /// kernel feeds both paths. Also exercises `OnlineMoments` directly
     /// so it isn't dead code despite leaving the hot path.
+    #[test]
+    fn rev5_stable_block_moments_match_two_pass() {
+        for base in [0.0, 0.5, 1.0, 1e4] {
+            for n in [1usize, 16, 153, 1025] {
+                let values: Vec<_> = (0..n)
+                    .map(|i| base + ((i * 137 % 1009) as f64 - 500.0) * 1e-7)
+                    .collect();
+                let mean = values.iter().sum::<f64>() / n as f64;
+                let m2 = values.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+                let m4 = values.iter().map(|x| (x - mean).powi(4)).sum::<f64>();
+                let mut actual = OnlineMoments::default();
+                for block in values.chunks(16) {
+                    actual.merge(OnlineMoments::block(block));
+                }
+                for (a, e) in [(actual.m2, m2), (actual.m4, m4)] {
+                    assert!(
+                        (a - e).abs() <= 1e-6 * e.abs().max(1e-30),
+                        "base={base} n={n} actual={a} reference={e}"
+                    );
+                }
+            }
+        }
+        let mut constant = OnlineMoments::default();
+        for _ in 0..10 {
+            constant.merge(OnlineMoments::block(&[0.7; 16]));
+        }
+        assert_eq!(constant.m2, 0.0);
+        assert_eq!(constant.m4, 0.0);
+    }
+
     #[test]
     fn raw_moment_reformulation_matches_terriberry() {
         let mut state: u32 = 0x5eed_1234;
@@ -28476,6 +28568,7 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     mut r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let stable = crate::ssim_form::active_revision() >= FormulaRevision::Rev5;
     let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
     while b0 < height {
@@ -28490,9 +28583,10 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
             let mut p_i = [P::zero(); 4];
             let mut p_kn = [P::zero(); 3];
             let mut p_kd = [P::zero(); 3];
+            let mut local = [0.0f64; 16];
             for x in 0..width {
                 let i = row + x;
-                dense_elem_canon(
+                let d = dense_elem_canon(
                     src[i],
                     dst[i],
                     mu1[i],
@@ -28512,6 +28606,13 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
                     &mut p_kn,
                     &mut p_kd,
                 );
+                if stable {
+                    local[x & 15] = d as f64;
+                    if x & 15 == 15 || x + 1 == width {
+                        acc.central
+                            .merge(OnlineMoments::block(&local[..(x & 15) + 1]));
+                    }
+                }
             }
             for j in 0..13 {
                 band[j] += r[j].fin();
@@ -28693,7 +28794,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
     p_i: &mut [P; 4],
     p_kn: &mut [P; 3],
     p_kd: &mut [P; 3],
-) {
+) -> f32 {
     let lane = x & (P::LANES - 1);
     let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd) =
         dense_terms32(s, dd, m1, m2, q, p, act, transducer_bank, direct);
@@ -28722,6 +28823,7 @@ fn dense_elem_canon<P: crate::featcanon::Pool>(
             lane,
         );
     }
+    t[0]
 }
 
 /// **canon64 vector body** — [`dense_block_kernel_canon`]'s `P = LanesF64`
@@ -29062,6 +29164,7 @@ fn dense_block_kernel_exact(
 ) -> DenseAccum {
     use crate::featcanon::{Neum64, Pool as _};
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let stable = crate::ssim_form::active_revision() >= FormulaRevision::Rev5;
     let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
     while b0 < height {
@@ -29076,6 +29179,7 @@ fn dense_block_kernel_exact(
             let mut p_i = [Neum64::zero(); 4];
             let mut p_kn = [Neum64::zero(); 3];
             let mut p_kd = [Neum64::zero(); 3];
+            let mut local = [0.0f64; 16];
             for x in 0..width {
                 let i = row + x;
                 let lane = x & 7;
@@ -29085,6 +29189,13 @@ fn dense_block_kernel_exact(
                 let m2 = mu2[i] as f64;
                 let act = activity[i] as f64;
                 let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64, direct);
+                if stable {
+                    local[x & 15] = d;
+                    if x & 15 == 15 || x + 1 == width {
+                        acc.central
+                            .merge(OnlineMoments::block(&local[..(x & 15) + 1]));
+                    }
+                }
                 let d2 = d * d;
                 let diff_src = (s - m1).abs();
                 let diff_dst = (dd - m2).abs();

@@ -102,3 +102,23 @@ Initial f64 choice preserves the Rev4 per-element error floor; FEATACC
 measurement and SIMD speed work remain pending. Extended the existing
 `tier_audit_features` owner to request only Rev5's supported families.
 Gate: `featcanon_rev5_parity`, release, 3/3 tests pass (0.29 s; a2.log).
+
+### FEATACC initial A1/A2 measurement (before F1)
+
+12 registered pairs, v3, one thread, existing exact/fresh ruler; max relative
+error (floor 1e-9), Rev3 -> Rev5: basic 7.95158e-4 -> 2.28536e-4;
+peaks 1.15493e-3 -> 2.05528e-4; v2 0.306175 -> 0.0736313.
+All three families improve. Worst v2 remains f664, 17x9 crop:
+Rev5 3.485591236e-4 vs exact 3.762639432e-4. This is BEFORE stable moments.
+Data `/var/tmp/rev5/a2-accuracy-valid/summary.json`; prior `a2-accuracy/`
+is INVALID (systemd expanded inline shell variables). No training data mixed.
+
+## 2026-10-04 — Step 4 F1
+
+Extended the existing OnlineMoments owner with two-pass 16-element blocks
+and fixed-order Chan/Pébay merges. Rev5 dense folds carry these central
+moments through strip accumulation; feature and prepared-map finalizers use
+them. Historical revisions keep the original raw-power arithmetic. The exact
+Rev5 ruler also uses stable moments. Release constant-plus-small-noise and
+constant tests pass at relative 1e-6 (bases 0, .5, 1, 10000; n 1,16,153,1025),
+and Rev5 tier parity passes 3/3. Log `/var/tmp/rev5/f1.log`.
