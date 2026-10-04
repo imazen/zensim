@@ -890,7 +890,7 @@ impl Default for TailAccum {
         Self {
             hist: [[0; TAILHIST_BINS]; 4],
             max: [0.0; 4],
-            fold: matches!(crate::ssim_form::active_revision(), FormulaRevision::Rev4),
+            fold: crate::ssim_form::active_revision() >= FormulaRevision::Rev4,
             diag: rev4_diag_enabled().then(|| Box::new([[0; DIAG_BINS]; 4])),
         }
     }
@@ -3235,7 +3235,7 @@ impl ComputeSet {
         let v2_blocks = !t.v1_only;
         let append = t.append_block && v2_blocks;
         let append2 = t.append2_block && v2_blocks;
-        Self {
+        let mut set = Self {
             formula_revision: t.formula_revision,
             v1_basic: true,
             full_res_xb: true,
@@ -3266,7 +3266,53 @@ impl ComputeSet {
             gmsnative: t.gmsnative && v2_blocks,
             dvifmgate: t.dvifmgate && v2_blocks,
             free_extras: t.free_extras,
+        };
+        set.rev5_scope();
+        set
+    }
+
+    /// The two-family scope of [`crate::feature_defs::FormulaRevision::Rev5`]
+    /// (`benchmarks/rev5_spec_2026-10-04.md` §1): `basic + peaks + v2`.
+    ///
+    /// Every flag naming a family outside that set is cleared, the
+    /// masked/IW pool modes degrade to `Peaks`, and the free extras are
+    /// off — so a plan whose LAYOUT reaches further than the request (the
+    /// full-width `basic,peaks,v2` extraction is the driving case: the
+    /// layout turns on every block flag the width reaches, and without
+    /// this the walk would compute families nobody asked for) still
+    /// computes only them. [`Self::from_toggles`] applies it under the
+    /// Rev5 revision; the request-level refusal for ASKED-FOR unsupported
+    /// slots lives in `feature_plan` (`PlanError::UnsupportedAtRev5`).
+    ///
+    /// Sub-toggles of the supported families (`gradient`, `blockiness`,
+    /// `transducer_bank`, `transducers_luma_only`, `v1_only` via
+    /// `v2_blocks`, `local_only`, `omit_edges`, `sampling`, and the
+    /// per-scale masks) are untouched — they narrow work inside the
+    /// supported families, which is exactly what a read-set-derived plan
+    /// is for.
+    pub(crate) fn rev5_scope(&mut self) {
+        if self.formula_revision < crate::feature_defs::FormulaRevision::Rev5 {
+            return;
         }
+        if self.v1_pools != V1PoolsMode::Off {
+            self.v1_pools = V1PoolsMode::Peaks;
+        }
+        self.v1_full_scales = Self::ALL_SCALES;
+        self.append = false;
+        self.append2 = false;
+        self.append2_dst_activity = false;
+        self.csfw = false;
+        self.dvifm = false;
+        self.gridblk = false;
+        self.ringbasis = false;
+        self.tailhist = false;
+        self.arttype = false;
+        self.gmsbank = false;
+        self.mapdev = false;
+        self.z1max = false;
+        self.gmsnative = false;
+        self.dvifmgate = false;
+        self.free_extras = V1FreeExtras::Off;
     }
 
     /// Does the v1 fused kernel need to carry the four raw moments?
@@ -13632,7 +13678,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     use crate::feature_v2_stream::StripPlaneProducer;
     // ITEM D: one derivation of WHAT this request computes. Every local
     // below reads from it instead of re-deriving from `toggles`.
-    let compute = compute.unwrap_or_else(|| ComputeSet::from_toggles(toggles));
+    let mut compute = compute.unwrap_or_else(|| ComputeSet::from_toggles(toggles));
+    // rev5: plan-supplied sets are already scoped (`from_toggles` and
+    // `Plan::normalized` both apply `rev5_scope`); a hand-built set is
+    // clamped here so the walk can never run a family Rev5 does not serve.
+    compute.rev5_scope();
     let fold_v1 = compute.v1_basic;
     // BLOCK-SKIPPING: a v1-only request computes NOTHING v2-era. Every
     // v2 toggle is forced off in `ComputeSet::from_toggles` rather than
@@ -20260,7 +20310,7 @@ pub(crate) mod tests {
         let default = TailAccum::default();
         assert_eq!(
             default.fold,
-            matches!(crate::ssim_form::active_revision(), FormulaRevision::Rev4),
+            crate::ssim_form::active_revision() >= FormulaRevision::Rev4,
             "fold follows the process revision"
         );
         let (mut legacy, mut folded) = (

@@ -3173,6 +3173,11 @@ mod tests {
             canon,
             "Rev4 must run the canonical body"
         );
+        assert_eq!(
+            conv(Some(FormulaRevision::Rev5)),
+            canon,
+            "Rev5 must run the canonical body"
+        );
         println!(
             "OPSIN-LEAF-RAN process={:?} production_differs_from_canonical={}",
             crate::ssim_form::active_revision(),

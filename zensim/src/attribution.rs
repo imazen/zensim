@@ -3593,10 +3593,8 @@ mod tests {
         // different summation tree than the canonical fold — named refusal in
         // `feature_v2`); the folded append2 entry emits the same v2 block
         // canonically, offset by the v1 prefix.
-        let rev4 = matches!(
-            crate::ssim_form::active_revision(),
-            crate::feature_defs::FormulaRevision::Rev4
-        );
+        let rev4 =
+            crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev4;
         let v2_off = if rev4 { BLOCK_END_V1_POOLS } else { 0 };
         let v2_of = |z: &Zensim, s: &RgbSlice, d: &RgbSlice| {
             if rev4 {

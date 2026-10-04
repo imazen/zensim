@@ -153,9 +153,10 @@ impl HfGainForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::RatioExcess,
-            FormulaRevision::Rev2 | FormulaRevision::Rev3 | FormulaRevision::Rev4 => {
-                Self::REV2_HFGAIN
-            }
+            FormulaRevision::Rev2
+            | FormulaRevision::Rev3
+            | FormulaRevision::Rev4
+            | FormulaRevision::Rev5 => Self::REV2_HFGAIN,
         }
     }
 

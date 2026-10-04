@@ -2028,6 +2028,80 @@ mod tests {
         assert_eq!(a, b, "the same ids are emitted either way");
     }
 
+    /// **REV5 addendum (coordinator, 2026-10-04): a Rev5 `basic,peaks,v2`
+    /// request at the registry's full width plans ONLY the three supported
+    /// families** — even though the layout's width reaches the append block
+    /// and the Rev4 feature banks (the layout flags would turn them on in
+    /// the toggles the plan emits, which is exactly the over-computation
+    /// `ComputeSet::rev5_scope` exists to kill). `emitted()` is exactly the
+    /// 576 requested slots, the producer id names `basic+peaks+v2` only,
+    /// every unrequested position stays a structural zero in the
+    /// provenance, and a request reaching past the three families is
+    /// refused at plan time — never computed at a lower revision behind
+    /// the caller's back.
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn rev5_basic_peaks_v2_request_computes_only_the_three_families() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "research::tests::rev5_basic_peaks_v2_request_computes_only_the_three_families",
+            "REV5-EXTRACT-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = (64usize, 64usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let want = family_slots(ComputeToken::Basic)
+            .union(&family_slots(ComputeToken::Peaks))
+            .union(&family_slots(ComputeToken::V2));
+        assert_eq!(want.len(), 576, "the spec's three-family slot count");
+        let e = extract(&Request::for_slots(want.clone(), full_width()), &rs, &rd)
+            .expect("the Rev5 supported set must extract");
+        // Exactly the requested slots — nothing the wider layout reaches.
+        assert_eq!(e.emitted(), &want);
+        assert_eq!(e.emitted().len(), 576);
+        // The producer id names only the three families — no append,
+        // append2, csfw, dvifm or Rev4-bank token may leak in through the
+        // layout width.
+        let id = e.feature_set_id().expect("a full-family request has an id");
+        let only = crate::feature_set_id::ComputeParts::EMPTY
+            .with(ComputeToken::Basic)
+            .with(ComputeToken::Peaks)
+            .with(ComputeToken::V2);
+        assert_eq!(
+            id.compute(),
+            only,
+            "the id must name ONLY the supported families: {id}"
+        );
+        // Every unrequested position stays a structural zero — the
+        // assembler turns exactly these into NaN.
+        for p in e.provenance() {
+            assert_eq!(
+                p.populated,
+                want.contains(usize::from(p.id)),
+                "position {} ({}) populated flag disagrees with the request",
+                p.id,
+                p.name
+            );
+        }
+        // Requests reaching past basic+peaks+v2 refuse — one slot from each
+        // unsupported family Rev5 does not compute.
+        for extra in [228usize, 300, 720, 924, 944, 1100] {
+            let ask = want.clone().union(&SlotSet::from_slots([extra]));
+            let err = extract(&Request::for_slots(ask, full_width()), &rs, &rd)
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("slot {extra} outside basic+peaks+v2 must refuse at Rev5")
+                });
+            assert!(
+                matches!(&err, ResearchError::Plan(m) if m.contains("basic + peaks + v2")),
+                "slot {extra}: expected the Rev5 scope refusal, got {err:?}"
+            );
+        }
+        println!("REV5-EXTRACT-RAN");
+    }
+
     /// Every provenance name is unique across the full width — the property
     /// that makes a manifest's column names a usable key.
     #[test]

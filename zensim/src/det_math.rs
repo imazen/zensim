@@ -134,9 +134,10 @@ impl RootForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev2 | FormulaRevision::Rev3 | FormulaRevision::Rev4 => {
-                Self::NestedSqrt
-            }
+            FormulaRevision::Rev2
+            | FormulaRevision::Rev3
+            | FormulaRevision::Rev4
+            | FormulaRevision::Rev5 => Self::NestedSqrt,
         }
     }
 }
@@ -332,7 +333,10 @@ impl PowForm {
     pub const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
-            FormulaRevision::Rev2 | FormulaRevision::Rev3 | FormulaRevision::Rev4 => Self::PureRust,
+            FormulaRevision::Rev2
+            | FormulaRevision::Rev3
+            | FormulaRevision::Rev4
+            | FormulaRevision::Rev5 => Self::PureRust,
         }
     }
 }

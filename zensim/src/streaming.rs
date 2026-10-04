@@ -8590,6 +8590,7 @@ mod tests {
             crate::feature_defs::FormulaRevision::Rev2 => 2,
             crate::feature_defs::FormulaRevision::Rev3 => 3,
             crate::feature_defs::FormulaRevision::Rev4 => 4,
+            crate::feature_defs::FormulaRevision::Rev5 => 5,
         };
         let expected = spec
             .get("formula_revision")

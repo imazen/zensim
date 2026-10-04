@@ -41,6 +41,17 @@ pub(crate) enum PlanError {
     /// The bake's layer-0 arities do not tile its input width, so its read
     /// set cannot be derived. A malformed bake, not an unservable one.
     UnreadableBake,
+    /// The request asks for slots outside the families
+    /// [`crate::feature_defs::FormulaRevision::Rev5`] computes.
+    ///
+    /// Rev5's registered scope is `basic + peaks + v2`
+    /// (`benchmarks/rev5_spec_2026-10-04.md` §1): a plan whose read set
+    /// leaves them is refused at plan time rather than computed at a lower
+    /// revision behind the caller's back.
+    UnsupportedAtRev5 {
+        /// The requested slots outside `basic + peaks + v2`.
+        extra: SlotSet,
+    },
 }
 
 impl core::fmt::Display for PlanError {
@@ -57,8 +68,39 @@ impl core::fmt::Display for PlanError {
             PlanError::UnreadableBake => {
                 f.write_str("bake layer-0 arities do not tile its input width")
             }
+            PlanError::UnsupportedAtRev5 { extra } => write!(
+                f,
+                "formula revision 5 computes only the basic + peaks + v2 \
+                 families; requested slot(s) {extra} are outside them"
+            ),
         }
     }
+}
+
+/// The slots outside Rev5's two-family scope in `want`, if `revision` is
+/// Rev5 or later — `None` below Rev5 and when the request is in scope.
+///
+/// ONE derivation for the refusal [`Plan::derive_with_layout`] and
+/// [`Plan::for_bake`] share: the compute-side clamp that makes the same
+/// scope hold for layouts wider than the request lives in
+/// [`crate::feature_v2::ComputeSet::rev5_scope`].
+fn rev5_unsupported(
+    want: &SlotSet,
+    layout_width: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) -> Option<SlotSet> {
+    if revision < crate::feature_defs::FormulaRevision::Rev5 {
+        return None;
+    }
+    let ns = crate::NUM_SCALES;
+    let supported = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
+        .union(&crate::feature_defs::family_slots(ComputeToken::Peaks, ns))
+        .union(&crate::feature_defs::family_slots(ComputeToken::V2, ns))
+        .clipped_to(layout_width);
+    // `a.missing_from(&b)` is b∖a — so this is want∖supported, the
+    // requested slots Rev5 does not compute.
+    let extra = supported.missing_from(want);
+    (!extra.is_empty()).then_some(extra)
 }
 
 /// A resolved extraction plan: what to compute, how wide to emit, and which
@@ -130,6 +172,14 @@ impl Plan {
         // still needs a walk that reaches f941.
         let layout_width = layout.walk_width();
         let want = want.clipped_to(layout_width);
+        // rev5 scope (spec §1): the request's slots must live inside
+        // `basic + peaks + v2` — the families Rev5 computes. Anything else
+        // is a loud plan-time error, never a silent lower-revision value.
+        if let Some(extra) =
+            rev5_unsupported(&want, layout_width, crate::ssim_form::active_revision())
+        {
+            return Err(PlanError::UnsupportedAtRev5 { extra });
+        }
         let touches = |t: ComputeToken| -> bool {
             !crate::feature_defs::family_slots(t, ns)
                 .clipped_to(layout_width)
@@ -429,8 +479,15 @@ impl Plan {
         let layout_width = model.caller_input_width();
         let layout = crate::feature_layout::declared_layout(model);
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
+        let walk_width = layout.walk_width();
         let mut plan = Plan::derive_with_layout(&want, layout)?;
         plan.compute.formula_revision = revision;
+        // The derive checked the PROCESS revision; the bake's own
+        // declaration is what this plan computes, so the rev5 scope check
+        // runs again against it.
+        if let Some(extra) = rev5_unsupported(&want, walk_width, revision) {
+            return Err(PlanError::UnsupportedAtRev5 { extra });
+        }
         let sampling =
             crate::sampling::Sampling::from_model(model).map_err(|_| PlanError::UnreadableBake)?;
         if let Some(sampling) = sampling {
@@ -837,6 +894,47 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
+    /// **REV5 scope at the plan boundary:** a Rev5-declared bake reading
+    /// inside `basic + peaks + v2` plans; one reading any other family is
+    /// `UnsupportedAtRev5` naming exactly the out-of-scope slots — never a
+    /// silent lower-revision computation.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_for_bake_refuses_reads_outside_the_supported_families() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "feature_plan::tests::rev5_for_bake_refuses_reads_outside_the_supported_families",
+            "REV5-FOR-BAKE-RAN",
+        ) {
+            return;
+        }
+        let bake = |id: usize| {
+            let recipe = serde_json::json!({
+                "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
+                "metadata": [
+                    {"key": "zentrain.feature_ids", "type": "utf8", "text": id.to_string()},
+                    {"key": "zentrain.formula_revision", "type": "utf8", "text": "5"}],
+                "layers": [{"in_dim":1,"out_dim":1,"activation":"identity",
+                            "dtype":"f32","weights":[1.0],"biases":[0.0]}]
+            });
+            let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+            crate::mlp::Model::from_bytes(&bytes).unwrap()
+        };
+        for id in [22usize, 200, 400, 700] {
+            Plan::for_bake(&bake(id))
+                .unwrap_or_else(|e| panic!("f{id} is inside basic+peaks+v2: {e}"));
+        }
+        for id in [228usize, 300, 720, 924, 944, 1100] {
+            match Plan::for_bake(&bake(id)) {
+                Err(PlanError::UnsupportedAtRev5 { extra }) => {
+                    assert!(extra.contains(id), "f{id}: refusal must name it");
+                }
+                other => panic!("f{id} must refuse as UnsupportedAtRev5: {other:?}"),
+            }
+        }
+        println!("REV5-FOR-BAKE-RAN");
+    }
+
     #[test]
     fn local_only_plan_preserves_reads_and_restores_dependencies() {
         use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
@@ -1650,9 +1748,10 @@ pub(crate) mod servability_census {
         assert!(a.revisions_agree(&b), "same revision must agree");
         a.compute.formula_revision = match a.compute.formula_revision {
             FormulaRevision::Rev1 => FormulaRevision::Rev2,
-            FormulaRevision::Rev2 | FormulaRevision::Rev3 | FormulaRevision::Rev4 => {
-                FormulaRevision::Rev1
-            }
+            FormulaRevision::Rev2
+            | FormulaRevision::Rev3
+            | FormulaRevision::Rev4
+            | FormulaRevision::Rev5 => FormulaRevision::Rev1,
         };
         assert!(
             !a.revisions_agree(&b),

@@ -40,6 +40,15 @@
 
 ### Added
 
+- `FormulaRevision::Rev5` (the `localwin` era, `benchmarks/rev5_spec_2026-10-04.md`): Rev4's formulas over the
+  `basic` (f0–155), `peaks` (f156–227) and `v2` (f372–719) families only, under local-window arithmetic — a per-output
+  11-tap f32 pair tree over each window's own inputs (production mirror padding), 16 fixed virtual lanes, one fixed
+  pairwise reduce, fused multiply-add, and stable central-moment finalizers. `ZENSIM_FORMULA_REV=5` pins it; a plan,
+  bake or extraction request whose read set leaves the three families refuses at plan time
+  (`feature_plan::PlanError::UnsupportedAtRev5`) rather than computing at a lower revision — and a wider layout can
+  no longer smuggle the append/Rev4-bank blocks into a `basic+peaks+v2` request's compute set or feature-set id
+  (`ComputeSet::rev5_scope`, applied by `ComputeSet::from_toggles` and at the walk's own entry). The Rev5 process
+  boundary is Rev4's: `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix.
 - Prepared steering session: a v2-bearing plan now runs the v1 attribution walk once and runs the v2 walk with its v1 block off, instead of folding v1 inside the v2 walk and then walking v1 a second time for the basic map. Maps, features and scores are bit-identical (before/after panels and a forced-route unit test); only the duplicated v1 work is gone. Measurements: `benchmarks/costset3_2026-10-03.md`.
 - Planner: a bake whose reads stay inside f0-227 and f372-719 with the v2 block running now skips X/B walk work at every scale whose chroma slots it never reads
   (and no longer accumulates free extras for the v2 MSE slots). Work selection only; no feature value or served score moves. Dense-layout bakes benefit; 944-wide identity bakes still

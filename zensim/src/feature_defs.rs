@@ -464,6 +464,26 @@ pub enum FormulaRevision {
     /// matter against the f64 exact oracle; see
     /// `benchmarks/featcanon_WORKLOG.md`.
     Rev4,
+    /// Revision 4's formulas under **local-window arithmetic** (the
+    /// `localwin` era, `benchmarks/rev5_spec_2026-10-04.md`), computed for
+    /// the `basic` (f0..227), `peaks` (f156..227) and `v2` (f372..719)
+    /// families only.
+    ///
+    /// Rev5 replaces the sliding-sum blur recurrences with a per-output
+    /// 11-tap f32 pair tree over the window's own inputs (production's
+    /// mirror padding), replaces the 8-lane pools with 16 fixed virtual
+    /// lanes and one fixed pairwise reduce, allows fused multiply-add
+    /// wherever the same fused expression is written, and carries the
+    /// stable central-moment finalizers. Bit-identity across tiers is a
+    /// property of the single fixed order, not a hope.
+    ///
+    /// The two-family scope is deliberate: a plan or bake whose read set
+    /// leaves `basic + peaks + v2` is refused at plan time
+    /// ([`crate::feature_plan::PlanError::UnsupportedAtRev5`]) rather than
+    /// computed at a lower revision behind the caller's back. The process
+    /// model is Rev4's: `ZENSIM_FORMULA_REV=5` pins it and
+    /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix.
+    Rev5,
 }
 
 impl FormulaRevision {
@@ -496,6 +516,19 @@ impl FormulaRevision {
                 "tiercanon",
                 "c3negfold",
             ],
+            Self::Rev5 => &[
+                "v1ssimcap",
+                "freecomp",
+                "v1hfgain",
+                "v1detroot",
+                "scorepow",
+                "v1ssimstable",
+                "v2ssimstable",
+                "v1extfused",
+                "tiercanon",
+                "c3negfold",
+                "localwin",
+            ],
         }
     }
 
@@ -525,7 +558,7 @@ impl FormulaRevision {
     /// remaining free-vs-append gap into a MEASUREMENT of the append route's
     /// own error (plan R4) rather than an unattributed disagreement.
     pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(self, Self::Rev2 | Self::Rev3 | Self::Rev4)
+        matches!(self, Self::Rev2 | Self::Rev3 | Self::Rev4 | Self::Rev5)
     }
 
     /// Every slot id this revision moves, derived from the signal table's own
@@ -1170,6 +1203,47 @@ const REV_TIERCANON: Revision = Revision {
            (`ssim_form::refuse_rev4_mix`). STILL PROPOSED.",
 };
 
+/// The defect behind the `localwin` era: window sums evaluated by updating
+/// the PREVIOUS window (`sum + add − rem`), so rounding error accrues with
+/// position instead of being re-bounded per output, and raw-power-sum →
+/// central-moment conversions that catastrophically cancel.
+///
+/// Registered on the registry rather than on a signal for the same reason
+/// [`DEFECT_TIER_DIVERGENCE`] is: it is a property of the arithmetic shape,
+/// not of one formula. Sources: `benchmarks/featcanon_WORKLOG.md` (f32
+/// storage of the sliding running sum is the dominant structured error;
+/// `ssim_dev4` raw-moment cancellation), `benchmarks/rev5_spec_2026-10-04.md`.
+const DEFECT_WINDOW_DRIFT: Defect = Defect {
+    id: "WINDRIFT",
+    note: "The box blurs evaluate each window by updating the previous \
+           window's running sum, so f32 rounding error accrues with position \
+           rather than re-bounding per output; `ssim_dev4`-style raw-moment \
+           conversions (`raw4 − 4µ·raw3 + 6µ²·raw2 − 3µ⁴`) cancel \
+           catastrophically on near-constant content (the FEATACC 17×9 crop \
+           collapses a positive ~3.76e-4 to 0).",
+};
+
+/// The `localwin` era: Rev4's formulas under per-output local-window
+/// arithmetic — Rev5.
+const REV_LOCALWIN: Revision = Revision {
+    era: "localwin",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "rev5: the 11-tap box blurs (H and V, and the fused SSIM planes) \
+           sum each output's own 11 inputs in a fixed f32 pair tree with \
+           production's mirror padding — no running-sum recurrence, so an \
+           output depends only on its window. Pools carry 16 fixed virtual \
+           lanes closed by one fixed pairwise reduce; fused multiply-add is \
+           written wherever it is the same fused expression. Elements stay \
+           f32. The central moments use block-local moments merged through \
+           the fixed-order Chan/Pébay formulas — no raw-power-sum expansion. \
+           Scoped to the basic + peaks + v2 families: a plan or bake whose \
+           read set leaves them is refused at plan time rather than computed \
+           at a lower revision behind the caller's back. Moves every live \
+           slot (an arithmetic era); tier-identical by construction of the \
+           one fixed order.",
+};
+
 /// The registered eras that change the ARITHMETIC of every canonical leaf
 /// rather than one signal's formula.
 ///
@@ -1178,8 +1252,10 @@ const REV_TIERCANON: Revision = Revision {
 /// [`FormulaRevision::moved_slots`]), is registered for
 /// `research::era_is_registered`, and — when the build computes it — is every
 /// slot's provenance era (`research::current_era_of`).
-pub(crate) const ARITHMETIC_REVISIONS: &[(Defect, Revision)] =
-    &[(DEFECT_TIER_DIVERGENCE, REV_TIERCANON)];
+pub(crate) const ARITHMETIC_REVISIONS: &[(Defect, Revision)] = &[
+    (DEFECT_TIER_DIVERGENCE, REV_TIERCANON),
+    (DEFECT_WINDOW_DRIFT, REV_LOCALWIN),
+];
 
 /// Whether `era` names a registered ARITHMETIC era.
 pub(crate) fn is_arithmetic_era(era: &str) -> bool {
@@ -3352,6 +3428,49 @@ mod tests {
                 FormulaRevision::Rev3.moved_slots(width, NUM_SCALES).len() < live.len(),
                 "Rev3's moved set must stay per-signal at width {width}"
             );
+        }
+    }
+
+    /// rev5: `localwin` is REGISTERED as the second ARITHMETIC era — it
+    /// moves every live slot, it is Rev5's and only Rev5's, and it is still
+    /// Proposed. Same invariants the `tiercanon` gate pins, one era later.
+    #[test]
+    fn localwin_is_a_registered_arithmetic_era_moving_every_live_slot() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        assert!(super::is_arithmetic_era("localwin"));
+        assert!(!super::is_score_path_era("localwin"));
+        let r = super::arithmetic_revision("localwin").expect("registered");
+        assert_eq!(r.status, super::RevisionStatus::Proposed);
+        assert_eq!(super::ARITHMETIC_REVISIONS[1].0.id, "WINDRIFT");
+        // No per-signal entry claims it: the registry-level entry is the one
+        // owner, so the two cannot drift apart.
+        assert!(
+            super::signals().all(|s| s.revisions.iter().all(|r| r.era != "localwin")),
+            "localwin must not also be attached to a SignalDef"
+        );
+        for rev in [
+            FormulaRevision::Rev1,
+            FormulaRevision::Rev2,
+            FormulaRevision::Rev3,
+            FormulaRevision::Rev4,
+        ] {
+            assert!(!rev.era_tokens().contains(&"localwin"), "{rev:?}");
+        }
+        // Rev5 = Rev4's eras + localwin, in that order — `tiercanon` stays
+        // in the token list because Rev5 builds on the canonical leaves.
+        assert!(FormulaRevision::Rev5.era_tokens().contains(&"localwin"));
+        assert_eq!(
+            &FormulaRevision::Rev5.era_tokens()[..FormulaRevision::Rev4.era_tokens().len()],
+            FormulaRevision::Rev4.era_tokens()
+        );
+        for width in [372u16, 944, 1825] {
+            let live: Vec<u16> = (0..width as usize)
+                .filter_map(|id| super::def_at(id, NUM_SCALES))
+                .map(|d| d.id)
+                .collect();
+            assert_eq!(super::era_moved_slots("localwin", width, NUM_SCALES), live);
+            assert_eq!(FormulaRevision::Rev5.moved_slots(width, NUM_SCALES), live);
         }
     }
 

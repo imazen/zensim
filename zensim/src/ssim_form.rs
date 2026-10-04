@@ -925,9 +925,10 @@ impl SsimLumaForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::Ssim2Legacy,
-            FormulaRevision::Rev2 | FormulaRevision::Rev3 | FormulaRevision::Rev4 => {
-                Self::REV2_LUMA
-            }
+            FormulaRevision::Rev2
+            | FormulaRevision::Rev3
+            | FormulaRevision::Rev4
+            | FormulaRevision::Rev5 => Self::REV2_LUMA,
         }
     }
 
@@ -1019,6 +1020,7 @@ pub(crate) fn active_revision() -> FormulaRevision {
         Ok("2") => FormulaRevision::Rev2,
         Ok("3") => FormulaRevision::Rev3,
         Ok("4") => FormulaRevision::Rev4,
+        Ok("5") => FormulaRevision::Rev5,
         _ => SHIPPED_REVISION,
     })
 }
@@ -1150,7 +1152,7 @@ pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), cr
 
 /// The reason [`refuse_rev4_mix`] gives.
 #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // the v2 walk's guard
-pub(crate) const REV4_MIX: &str = "formula revision 4 cannot be mixed with another revision in one process: other formula gates follow ZENSIM_FORMULA_REV, so the request and the process must both be revision 4 or both be earlier";
+pub(crate) const REV4_MIX: &str = "formula revisions 4 and 5 cannot be mixed with another revision in one process: other formula gates follow ZENSIM_FORMULA_REV, so the request and the process must carry the same revision when either is revision 4 or later";
 
 /// **Refuse a computation whose revision disagrees with the process revision
 /// when either one is Rev4** (featcanon D1).

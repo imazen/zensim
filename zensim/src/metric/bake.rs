@@ -912,12 +912,12 @@ impl<'a> BakeScorer<'a> {
             if revision >= crate::feature_defs::FormulaRevision::Rev4 {
                 if plan.compute.sampling.is_some() {
                     return Err(ZensimError::ModelLoadFailed {
-                        reason: "formula revision 4 does not serve sampled bake plans: the subset-extraction front end is not proven tier-canonical",
+                        reason: "formula revisions 4 and later do not serve sampled bake plans: the subset-extraction front end is not proven tier-canonical",
                     });
                 }
                 if !no_companion {
                     return Err(ZensimError::ModelLoadFailed {
-                        reason: "formula revision 4 does not serve bakes with a corruption companion: companion read coverage is not part of the canonical fold plan",
+                        reason: "formula revisions 4 and later do not serve bakes with a corruption companion: companion read coverage is not part of the canonical fold plan",
                     });
                 }
                 return Ok(());
@@ -2292,6 +2292,62 @@ mod revision_contract_tests {
         println!("REV3-BAKE-MISMATCH-RAN");
     }
 
+    /// **REV5 scope: a Rev5 bake reading inside `basic + peaks + v2` serves;
+    /// one reading any other family is refused at plan time.**
+    ///
+    /// The refusal is `Plan::for_bake`'s `UnsupportedAtRev5`, surfaced as a
+    /// load refusal — the bake's declared revision (5) is what the plan's
+    /// scope check reads, so this also pins that a Rev5-declared bake does
+    /// not silently compute at a lower revision. The cross-mix arm asserts
+    /// the symmetric `refuse_rev4_mix` property: a Rev4 bake in a Rev5
+    /// process cannot be served.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn rev5_bake_serves_supported_reads_and_refuses_unsupported() {
+        if !run_at_revision(
+            "5",
+            "metric::bake::revision_contract_tests::rev5_bake_serves_supported_reads_and_refuses_unsupported",
+            "REV5-BAKE-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+
+        // One reader from each supported family: basic, peaks, v2 (two
+        // scales). All serve at the declared Rev5.
+        for id in [22usize, 200, 400, 700] {
+            let model =
+                zenpredict::Model::from_bytes(&bake_declaring(Some("5"), id)).expect("parse bake");
+            let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+            scorer
+                .compute(&rs, &ds, None)
+                .unwrap_or_else(|e| panic!("a Rev5 bake reading f{id} must serve, got {e:?}"));
+        }
+        // masked, iw, append, append2, csfw and a Rev4 bank slot: Rev5 does
+        // not compute them, so the plan — and the serve — refuses. The
+        // refusal lands wherever the plan is first demanded (`new`'s
+        // `check_servable` is eager), never silently at a lower revision.
+        for id in [228usize, 300, 720, 924, 944, 1100] {
+            let model =
+                zenpredict::Model::from_bytes(&bake_declaring(Some("5"), id)).expect("parse bake");
+            let served = crate::BakeScorer::new(&model)
+                .and_then(|mut scorer| scorer.compute(&rs, &ds, None).map(|_| ()));
+            assert!(served.is_err(), "a Rev5 bake reading f{id} must refuse");
+        }
+        // A Rev4-declaring bake in a Rev5 process is the cross-boundary mix.
+        let model =
+            zenpredict::Model::from_bytes(&bake_declaring(Some("4"), 22)).expect("parse bake");
+        let served = crate::BakeScorer::new(&model)
+            .and_then(|mut scorer| scorer.compute(&rs, &ds, None).map(|_| ()));
+        assert!(
+            served.is_err(),
+            "a Rev4 bake must not be served by a Rev5 process"
+        );
+        println!("REV5-BAKE-RAN");
+    }
+
     /// **A revision-3 bake serves a complete scalar score AND a spatial
     /// attribution map through `BakeScorer`.**
     ///
@@ -2864,8 +2920,9 @@ mod revision_contract_tests {
             crate::feature_layout::formula_revision(&model).expect("undeclared resolves"),
             crate::ssim_form::SHIPPED_REVISION
         );
-        // `4` is registered since featcanon (Rev4, the `tiercanon` era); the
-        // first unregistered value is `5`.
+        // `4` is registered since featcanon (Rev4, the `tiercanon` era) and
+        // `5` since rev5 (the `localwin` era); the first unregistered value
+        // is `6`.
         let bytes = bake_declaring(Some("4"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert_eq!(
@@ -2873,6 +2930,12 @@ mod revision_contract_tests {
             crate::feature_defs::FormulaRevision::Rev4
         );
         let bytes = bake_declaring(Some("5"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        assert_eq!(
+            crate::feature_layout::formula_revision(&model).expect("5 resolves"),
+            crate::feature_defs::FormulaRevision::Rev5
+        );
+        let bytes = bake_declaring(Some("6"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert!(
             crate::feature_layout::formula_revision(&model).is_err(),
