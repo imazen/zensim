@@ -1,0 +1,414 @@
+{
+  "schema": "rev4-featpot-external-score-v1",
+  "control": "sel:59f0bbc2f290@h32:H128:cv16:cf98@control-root",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "sets": [
+    "nits",
+    "live",
+    "mciqa"
+  ],
+  "specs": {
+    "sel:59f0bbc2f290@h32:H128:cv16:cf98@control-root": {
+      "nits": {
+        "all": {
+          "mean": 0.70984635585289,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D1": {
+          "mean": 0.9173693310736337,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D2": {
+          "mean": 0.9145721585665405,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D3": {
+          "mean": 0.943988847296842,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D4": {
+          "mean": 0.18588586818223798,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D5": {
+          "mean": 0.7807222829060361,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D6": {
+          "mean": 0.6325699990564398,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D7": {
+          "mean": 0.934753438652369,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D8": {
+          "mean": 0.785930443746822,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:D9": {
+          "mean": 0.9176472340166452,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        }
+      },
+      "live": {
+        "all": {
+          "mean": 0.9277647190435068,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "disjoint:all": {
+          "mean": 0.917433941328848,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "disjoint:distortion:fastfading": {
+          "mean": 0.9502828331332531,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "disjoint:distortion:gblur": {
+          "mean": 0.9488288115246098,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "disjoint:distortion:jp2k": {
+          "mean": 0.9563431665077364,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "disjoint:distortion:jpeg": {
+          "mean": 0.972341419316883,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "disjoint:distortion:wn": {
+          "mean": 0.6822511404561825,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:fastfading": {
+          "mean": 0.946537474413478,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:gblur": {
+          "mean": 0.955733742717682,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:jp2k": {
+          "mean": 0.9676864899806077,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:jpeg": {
+          "mean": 0.982860284132471,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "distortion:wn": {
+          "mean": 0.7369502440560541,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        }
+      },
+      "mciqa": {
+        "all": {
+          "mean": 0.24908749610839576,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "dim:cs_z": {
+          "mean": 0.474454335000509,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "dim:gn_z": {
+          "mean": 0.24908749610839576,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "dim:scm_z": {
+          "mean": 0.37133008533132783,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "model:BIG": {
+          "mean": 0.25189919111049464,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "model:CIC": {
+          "mean": 0.14880940326186384,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "model:CT2": {
+          "mean": 0.16279513661267153,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "model:DDC": {
+          "mean": 0.35741419510768124,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        },
+        "model:GCP": {
+          "mean": 0.21537202842800277,
+          "delta": 0.0,
+          "se": null,
+          "n": 50
+        }
+      }
+    },
+    "sel:59f0bbc2f290@h32:H128:cv16:cf98": {
+      "nits": {
+        "all": {
+          "mean": 0.7098477578171422,
+          "delta": 1.4019642522433706e-06,
+          "se": 1.425894522376504e-06,
+          "n": 50
+        },
+        "distortion:D1": {
+          "mean": 0.9173693310736337,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D2": {
+          "mean": 0.9145721585665405,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D3": {
+          "mean": 0.943988847296842,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D4": {
+          "mean": 0.18588586818223798,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D5": {
+          "mean": 0.7807222829060361,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D6": {
+          "mean": 0.6325699990564398,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D7": {
+          "mean": 0.934753438652369,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:D8": {
+          "mean": 0.7859660262467401,
+          "delta": 3.558249991811202e-05,
+          "se": 3.558249991811202e-05,
+          "n": 50
+        },
+        "distortion:D9": {
+          "mean": 0.9176472340166452,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        }
+      },
+      "live": {
+        "all": {
+          "mean": 0.927764399198052,
+          "delta": -3.198454547281848e-07,
+          "se": 3.1603938316013216e-07,
+          "n": 50
+        },
+        "disjoint:all": {
+          "mean": 0.9174339539379462,
+          "delta": 1.2609098252180928e-08,
+          "se": 1.2609098252180926e-08,
+          "n": 50
+        },
+        "disjoint:distortion:fastfading": {
+          "mean": 0.9502828331332531,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "disjoint:distortion:gblur": {
+          "mean": 0.9488288115246098,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "disjoint:distortion:jp2k": {
+          "mean": 0.9563431665077364,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "disjoint:distortion:jpeg": {
+          "mean": 0.972341419316883,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "disjoint:distortion:wn": {
+          "mean": 0.6822511404561825,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:fastfading": {
+          "mean": 0.946537474413478,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:gblur": {
+          "mean": 0.955733742717682,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:jp2k": {
+          "mean": 0.967688180597683,
+          "delta": 1.6906170752317706e-06,
+          "se": 1.6906170752317706e-06,
+          "n": 50
+        },
+        "distortion:jpeg": {
+          "mean": 0.982860284132471,
+          "delta": 0.0,
+          "se": 0.0,
+          "n": 50
+        },
+        "distortion:wn": {
+          "mean": 0.736950637694851,
+          "delta": 3.936387970382427e-07,
+          "se": 3.936387970382426e-07,
+          "n": 50
+        }
+      },
+      "mciqa": {
+        "all": {
+          "mean": 0.24908653114457124,
+          "delta": -9.649638244711711e-07,
+          "se": 6.75436337749179e-07,
+          "n": 50
+        },
+        "dim:cs_z": {
+          "mean": 0.47445275331359554,
+          "delta": -1.581686913523228e-06,
+          "se": 6.401346334790632e-07,
+          "n": 50
+        },
+        "dim:gn_z": {
+          "mean": 0.24908653114457124,
+          "delta": -9.649638244711711e-07,
+          "se": 6.75436337749179e-07,
+          "n": 50
+        },
+        "dim:scm_z": {
+          "mean": 0.37132883140894213,
+          "delta": -1.2539223857110926e-06,
+          "se": 6.123030554983126e-07,
+          "n": 50
+        },
+        "model:BIG": {
+          "mean": 0.2519007379953077,
+          "delta": 1.546884813051208e-06,
+          "se": 2.737145496707696e-06,
+          "n": 50
+        },
+        "model:CIC": {
+          "mean": 0.14881127264916091,
+          "delta": 1.8693872970662607e-06,
+          "se": 2.3338004078025437e-06,
+          "n": 50
+        },
+        "model:CT2": {
+          "mean": 0.16279432285747114,
+          "delta": -8.137552004021387e-07,
+          "se": 2.7760032073064884e-06,
+          "n": 50
+        },
+        "model:DDC": {
+          "mean": 0.3574137638548849,
+          "delta": -4.3125279640676696e-07,
+          "se": 2.590351867427107e-06,
+          "n": 50
+        },
+        "model:GCP": {
+          "mean": 0.21536181148675226,
+          "delta": -1.0216941250477118e-05,
+          "se": 3.644523482008873e-06,
+          "n": 50
+        }
+      }
+    }
+  },
+  "root": "/var/tmp/e25/complete",
+  "control_root": "/var/tmp/rev4-featpot/v2c",
+  "refused_reads_unextracted_columns": []
+}

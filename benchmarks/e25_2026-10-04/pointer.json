@@ -1,0 +1,14 @@
+{
+  "schema": "featpot-e25-archive-v1",
+  "root": "/mnt/tower/output/zensim/e25-2026-10-04",
+  "verified_files": 1562,
+  "bytes": 209795576,
+  "inventory_sha256": "7f281f40cda8c031921be1e48c39c9f98cd3b13b44415bc4c6910b165943140e",
+  "final_gate_cells": 50,
+  "final_e25_prediction_cells": 50,
+  "external_arm_prediction_files": 150,
+  "final_run_exit_code": 0,
+  "all_sha256_verified": true,
+  "source_tables": "original roots, hash-pinned in inputs.tsv",
+  "failed_attempts_preserved": true
+}

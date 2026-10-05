@@ -1,0 +1,23 @@
+{
+  "schema": "featpot-e25-checks-v1",
+  "gate_cells": 50,
+  "predictions_exact": true,
+  "full_metric_dictionaries_exact": true,
+  "gate_precedes_all_e25_numbers": true,
+  "complete_cells": 50,
+  "external_paired_cells_per_set": 50,
+  "missing_cells": 0,
+  "refused_external_cells": 0,
+  "e24_rule_helper_regression": "PASS exact existing E24 decisions",
+  "tools_unchanged_during_run": true,
+  "python_compile": "PASS",
+  "script_lint": "PASS 811",
+  "ci_exact_clippy": "PASS",
+  "failed_attempts_preserved": [
+    "/var/tmp/e25/run/STATUS.json",
+    "/var/tmp/e25/final/STATUS.json"
+  ],
+  "production_arithmetic_changed": false,
+  "sealed_data_read": false,
+  "failed_metadata_attempt_vs_complete_numeric_parity": "PASS 50 exact prediction vectors and score dictionaries"
+}
