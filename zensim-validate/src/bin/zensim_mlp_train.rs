@@ -271,6 +271,7 @@ struct Args {
     dump_checkpoints_every: usize,
 
     /// Directory for --dump-checkpoints-every output (default: cwd).
+    /// Must be absent or empty before this invocation; surviving files are refused.
     #[arg(long)]
     dump_checkpoints_dir: Option<std::path::PathBuf>,
 
@@ -2836,6 +2837,33 @@ fn stamp_checkpoint_metadata(
     bytes
 }
 
+/// An epoch filename is not proof that this invocation wrote the checkpoint.
+/// Refuse directory reuse before table admission or training can touch files.
+fn preflight_checkpoint_directory(args: &Args) -> std::io::Result<()> {
+    if args.dump_checkpoints_every == 0 {
+        return Ok(());
+    }
+    let dir = args
+        .dump_checkpoints_dir
+        .as_deref()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    match std::fs::read_dir(dir) {
+        Ok(mut entries) => {
+            if entries.next().transpose()?.is_some() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "checkpoint directory must be empty before this invocation: {dir:?}; use a fresh --dump-checkpoints-dir"
+                    ),
+                ));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    Ok(())
+}
+
 fn main() {
     zensim_validate::tier_cap::apply_from_env();
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
@@ -3000,6 +3028,10 @@ fn main() {
     let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
     preflight_cli_capabilities(&args, &matches, want_gpu);
+    preflight_checkpoint_directory(&args).unwrap_or_else(|e| {
+        eprintln!("checkpoint output preflight: {e}");
+        std::process::exit(2);
+    });
     let out_dtype = match args.out_dtype.to_ascii_lowercase().as_str() {
         "f32" => zenpredict::WeightDtype::F32,
         "f16" => zenpredict::WeightDtype::F16,
@@ -4764,9 +4796,11 @@ fn main() {
     });
     println!("Wrote {} bytes to {out_path:?}", bake_bytes.len());
 
-    // H-TRAJ (balance campaign 2026-08-28): stamp every checkpoint dump with
+    // H-TRAJ (balance campaign 2026-08-28): stamp this invocation's dumps with
     // reproduction/admission metadata and its own sampler prefix, so a
     // promoted last-epoch dump preserves the main output qualification keys.
+    // The entry preflight required an empty checkpoint directory; surviving
+    // dumps from another run cannot acquire this run's admission or seeds.
     // No raw byte-key heuristic: canonical metadata splicing replaces entries.
     // Failure is fatal, matching mandatory reproduction metadata.
     if args.dump_checkpoints_every > 0 {
