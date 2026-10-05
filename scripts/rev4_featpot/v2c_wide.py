@@ -1004,7 +1004,11 @@ def attach_hdr(out: Path, bank: Path) -> None:
     pq.write_table(pa.Table.from_pylist(keys), kpath, compression="zstd")
     compact = {k: man[k] for k in ("study", "role", "rows", "teacher_sha256", "target_transform", "requested_ids",
                                   "binary_sha256", "build_commit", "row_order_sha256", "input_contract")}
-    compact.update(formula_revision=5, feature_set_id=man["research"]["feature_set_id"], bank_manifest_sha256=sha(mpath))
+    # Channel subsets have no reconstructible family-token FeatureSetId. Keep
+    # the native owner output as provenance rather than a malformed null
+    # trainer declaration; explicit requested IDs and slot provenance own it.
+    compact.update(formula_revision=5, population="agree-only",
+                   source_bank_feature_set_id=man["research"]["feature_set_id"], bank_manifest_sha256=sha(mpath))
     sidecar = Path(f"{path}.manifest.json")
     sidecar.write_text(json.dumps(compact, indent=1)+"\n")
     receipt["legs"]["hdr"] = {"fit": {"rel": str(path.relative_to(out)), "sha256": sha(path),

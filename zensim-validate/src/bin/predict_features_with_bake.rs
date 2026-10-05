@@ -14,6 +14,10 @@
 //!     u32 LE n_rows
 //!     f32 LE feature_matrix[n_rows][n_features]  (row-major)
 //!
+//! `--f64-wire` uses the same header and f64 LE payload, preserving native
+//! research precision and printing 17 decimal places. `--production` keeps
+//! the bake's default score disposition rather than applying --bake-post.
+//!
 //! Smaller fast path (`--features <space-sep floats>`): a single row of
 //! features as a CLI arg, identical semantics to a 1-row input file.
 //!
@@ -40,7 +44,7 @@ fn parse_features_arg(s: &str) -> Result<(usize, usize, Vec<f32>), String> {
     Ok((vals.len(), 1, vals))
 }
 
-fn read_features_file(path: &PathBuf) -> Result<(usize, usize, Vec<f32>), String> {
+fn read_features_file(path: &PathBuf, wide: bool) -> Result<(usize, usize, Vec<f64>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
     if bytes.len() < 8 {
         return Err(format!(
@@ -53,7 +57,11 @@ fn read_features_file(path: &PathBuf) -> Result<(usize, usize, Vec<f32>), String
     let expected_floats = n_rows
         .checked_mul(n_features)
         .ok_or_else(|| format!("{path:?}: n_rows*n_features overflow ({n_rows} * {n_features})"))?;
-    let expected_bytes = 8 + expected_floats * 4;
+    let bytes_per_value = if wide { 8 } else { 4 };
+    let expected_bytes = expected_floats
+        .checked_mul(bytes_per_value)
+        .and_then(|n| n.checked_add(8))
+        .ok_or_else(|| "feature payload byte count overflow".to_string())?;
     if bytes.len() != expected_bytes {
         return Err(format!(
             "{path:?}: payload size mismatch: header says {n_rows} rows × {n_features} features = {expected_bytes} bytes, got {}",
@@ -62,13 +70,12 @@ fn read_features_file(path: &PathBuf) -> Result<(usize, usize, Vec<f32>), String
     }
     let mut out = Vec::with_capacity(expected_floats);
     for i in 0..expected_floats {
-        let off = 8 + i * 4;
-        out.push(f32::from_le_bytes([
-            bytes[off],
-            bytes[off + 1],
-            bytes[off + 2],
-            bytes[off + 3],
-        ]));
+        let off = 8 + i * bytes_per_value;
+        out.push(if wide {
+            f64::from_le_bytes(bytes[off..off + 8].try_into().unwrap())
+        } else {
+            f64::from(f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()))
+        });
     }
     Ok((n_features, n_rows, out))
 }
@@ -94,8 +101,12 @@ fn main() -> ExitCode {
     let mut features_arg: Option<String> = None;
     let mut features_file: Option<PathBuf> = None;
     let mut codec_hint: Option<String> = None;
+    let mut f64_wire = false;
+    let mut production = false;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--f64-wire" => f64_wire = true,
+            "--production" => production = true,
             "--codec" => {
                 codec_hint = match args.next() {
                     Some(v) => Some(v),
@@ -161,14 +172,16 @@ fn main() -> ExitCode {
         }
     };
     let (n_features_in, n_rows, feature_buf) = match (features_arg, features_file) {
-        (Some(s), None) => match parse_features_arg(&s) {
+        (Some(s), None) => match parse_features_arg(&s)
+            .map(|(w, n, v)| (w, n, v.into_iter().map(f64::from).collect::<Vec<_>>()))
+        {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("{e}");
                 return ExitCode::FAILURE;
             }
         },
-        (None, Some(p)) => match read_features_file(&p) {
+        (None, Some(p)) => match read_features_file(&p, f64_wire) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("{e}");
@@ -200,11 +213,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let mut scorer = BakeScorer::new(&model).expect("invalid score metadata");
     let params = post_mode_params(&bake_post).expect("invalid bake-post");
-    let mut scorer = BakeScorer::new(&model)
-        .expect("invalid score metadata")
-        .with_score_disposition(&params)
-        .expect("invalid score disposition");
+    if !production {
+        scorer = scorer
+            .with_score_disposition(&params)
+            .expect("invalid score disposition");
+    }
     let mut row_f64 = Vec::with_capacity(n_features_in);
 
     let stdout = std::io::stdout();
@@ -216,11 +231,16 @@ fn main() -> ExitCode {
         let end = start + n_features_in;
         let row = &feature_buf[start..end];
         row_f64.clear();
-        row_f64.extend(row.iter().map(|&x| f64::from(x)));
+        row_f64.extend_from_slice(row);
         let score = scorer
             .score_features(&row_f64, 0, 0, codec_hint.as_deref())
             .expect("invalid feature row");
-        if writeln!(out, "{score:.6}").is_err() {
+        let written = if f64_wire {
+            writeln!(out, "{score:.17}")
+        } else {
+            writeln!(out, "{score:.6}")
+        };
+        if written.is_err() {
             return ExitCode::FAILURE;
         }
     }

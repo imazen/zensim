@@ -130,6 +130,37 @@ def cmd_e26_grid(args) -> int:
     return 0
 
 
+def e26_bound_bake(cell: Path, cache: Path) -> tuple[Path, dict]:
+    """Coordinator-approved serving binding; immutable cells and learned weights stay intact."""
+    import subprocess
+    result = json.loads((cell / "result.json").read_text())
+    source = cell / "refit/last.bin"
+    if sha(source) != result["selected_bake_sha256"] or result["selected_epoch"] != 119 or result["epoch_rule"] != "last":
+        raise ValueError("E26 serving binding requires the selected immutable final-epoch bake")
+    stamp = Path(os.environ.get("E26_STAMP_BIN", "/var/tmp/r5steer/bin/bake_stamp_revision"))
+    stamp_sha = "6c3a94006e2a4dffc41717da4e0ed2f8ba8e9013538ce77efe6ea79678359afb"
+    if sha(stamp) != stamp_sha:
+        raise ValueError("E26 stamp binary differs from the coordinator's admitted owner")
+    dense = dense_bake(source, cache)
+    dest = cache / "rev5_bound" / f"{sha(source)}.bin"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    receipt = dest.with_suffix(".receipt.json")
+    if dest.exists():
+        old = json.loads(receipt.read_text())
+        if (old["source_sha256"] != sha(source) or old["dense_sha256"] != sha(dense)
+                or old["stamped_sha256"] != sha(dest) or old["stamp_binary_sha256"] != stamp_sha):
+            raise ValueError("E26 serving binding changed after receipt")
+        return dest, old
+    log = subprocess.run([str(stamp), str(dense), "5", str(dest)], capture_output=True, text=True, check=True)
+    record = dict(source=str(source), source_sha256=sha(source), dense_sha256=sha(dense), stamped_sha256=sha(dest),
+        stamp_binary_sha256=stamp_sha, result_sha256=sha(cell / "result.json"), formula_revision=5,
+        gate="BIT-IDENTICAL: dense_bake owner 512-row prediction gate; stamp is metadata-only section splice",
+        serving_binding="coordinator-approved explicit stamp", trainer_admission_qualified=False,
+        immutable_original_preserved=True, stamp_log=log.stdout+log.stderr)
+    receipt.write_text(json.dumps(record, indent=1)+"\n")
+    return dest, record
+
+
 def cmd_e26_score(args) -> int:
     """Use the unchanged E21/E24 SDR owner against all fifty E24 Rev5 control cells."""
     import e13_teacher as e13

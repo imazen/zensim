@@ -27,16 +27,23 @@ def hdr_leg(record: dict, keep: list[int]) -> tuple[Path, dict]:
     """Admit only the pinned, fit-only E26 TRAIN leg carried by the data receipt."""
     from v2_common import sha, table_path, selection_id
 
+    if (not isinstance(record, dict) or set(record) != {"fit", "keys_sha256"}
+            or not isinstance(record["fit"], dict)
+            or not {"rel", "sha256", "manifest_sha256"} <= set(record["fit"])):
+        raise ValueError("HDR leg requires a fit-only receipt record")
     path = table_path(record["fit"])
     manifest_path = Path(f"{path}.manifest.json")
-    if sha(path) != record["fit"]["sha256"] or sha(manifest_path) != record["fit"]["manifest_sha256"]:
-        raise ValueError("HDR fit table/manifest changed after receipt")
+    if sha(manifest_path) != record["fit"]["manifest_sha256"]:
+        raise ValueError("HDR fit manifest changed after receipt")
     man = json.loads(manifest_path.read_text())
     if (man.get("study") != "E26" or man.get("role") != "train" or man.get("rows") != 7390
+            or man.get("population") != "agree-only"
             or man.get("teacher_sha256") != HDR_TRAIN_SHA or man.get("formula_revision") != 5
             or man.get("target_transform") != HDR_TRANSFORM or man.get("requested_ids") != keep
-            or selection_id(keep) != "59f0bbc2f290" or set(record) != {"fit", "keys_sha256"}):
+            or selection_id(keep) != "59f0bbc2f290"):
         raise ValueError("HDR leg is not the registered fit-only Rev5 agreement population/read set")
+    if sha(path) != record["fit"]["sha256"]:
+        raise ValueError("HDR fit table changed after receipt")
     keys_path = path.with_suffix(".keys.parquet")
     if sha(keys_path) != record["keys_sha256"]:
         raise ValueError("HDR fit row authority changed")

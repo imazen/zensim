@@ -17,3 +17,50 @@ Coordinator resolved placement: only the five allowed consumers run, all
 single-thread cells; existing tower capacity explicitly accepted. No extra
 filler or worker will be started/restarted. Transform and rank-only leg
 committed before fitting at 8e8f3170.
+
+Native parity: exact 420-ID Rev5 research extraction matches canonical
+720 HDR features bitwise on 16x16 (padding) and 65x97 pairs; SDR extraction
+refuses the HDR sources. Existing native decoder test passes. Hidden API
+snapshots regenerated and api-doc-check passes; supported API unchanged.
+
+Production blocker discovered by one exact E24-control/TRAIN-pair probe:
+selected E24 bake refuses native Rev5 scoring. Its immutable trainer log
+records null revision and unknown feature identities despite Rev5 table
+sidecars. Fitting/scoring stopped before the first E26 fit; coordinator
+request and exact proof paths recorded in E26_decisions.md. Native feature
+extraction and admission checks continue; no cross-revision bypass.
+
+Actual loader/packer tests: synthetic receipts exercise negative target
+retention, row reversal, VAL role, disagreement, duplicate row ID, wrong
+revision/read set/transform/source pin, changed table/manifest, dev leg and
+confirmation/all packing refusals. Three tests pass; never fit fixtures.
+
+2026-10-05 UTC — coordinator authorized receipt-bound Rev5 serving binding
+for all 50 immutable E24 controls and all 100 E26 arm cells: existing
+dense_bake (512-row BIT-IDENTICAL gate), then pinned bake_stamp_revision.
+Per-bake source/dense/stamped hashes and gate receipts go in a new directory.
+The trainer admission's null revision / qualified_provenance false remains
+an explicit historical gap; the stamp owns serving revision. One control
+probe gives native/cache score 74.35427856445312, bit-identical.
+
+Native extraction complete: TRAIN7390 (627s), VAL3900 (326s), exact420
+requested IDs, original hashes/order, absent NaNs. No E26 grid launched.
+First Docker executor smoke stopped at table admission, before fitting:
+null feature_set_id is a malformed trainer declaration. Native research
+intentionally has no family-token shorthand for channel-subset plans; retain
+that null under source_bank_feature_set_id, explicit IDs and per-slot
+provenance rather than inventing an identity. Existing SDR trainer gap and
+registered controls/rule are unchanged. Failed archive/logs remain preserved.
+
+Independent review E26_REVIEW.md: fix P2 by checking fit-only record shape,
+pinned sidecar, TRAIN/E26/Rev5/agree-only7390/read-set contract BEFORE any fit
+or keys payload hashing/open. Later membership, row-order, targets and hashes
+still gate. Actual loader/packer tests4/4 pass with io.open tripwires; the
+reviewed pre-fix actual loader fails the new forbidden_val tripwire.
+Program/profile/image must be rebuilt; coordinator push confirmation gates
+fleet enqueue. No filler or worker starts/restarts.
+
+Before first successful fit, freeze report-only steering reference: first
+admitted TRAIN ref (source1066,1200x1600), its full registered quality ladder,
+control and each arm's without_kadid_s0 cell. This is descriptive only and
+cannot change selection or the registered SDR/HDR rule.
