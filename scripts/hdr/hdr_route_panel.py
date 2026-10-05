@@ -212,8 +212,8 @@ def _teacher_panel(paths, output_dir):
         print(role, result["pooled_srocc_signed"], result["within_reference"], result["agree_count"], flush=True)
 
 
-def _e26_panel(root, control_root, bank, output_dir):
-    """E26 frozen native feature cache, production BakeScorer and canonical signed panels."""
+def _e26_panel(root, control_root, bank, output_dir, native_proof):
+    """E26 frozen HDR VAL assessment."""
     import hashlib
     sys.path.insert(0, str(REPO / "scripts/rev4_featpot"))
     sys.path.insert(0, str(REPO))
@@ -226,6 +226,12 @@ def _e26_panel(root, control_root, bank, output_dir):
     root, control_root, bank, output_dir = map(Path, (root, control_root, bank, output_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
     man = json.loads((bank / "_MANIFEST.json").read_text())
+    proof = json.loads(Path(native_proof).read_text())
+    if (proof.get("status") != "PASS" or proof.get("rows") != 3900
+            or proof.get("pixel_identical_rows") != 0 or proof.get("mismatched_rows") != 0
+            or proof.get("maximum_absolute_delta") != 0 or not proof.get("row_order_verified")
+            or proof.get("val_bank_manifest_sha256") != sha(bank / "_MANIFEST.json")):
+        raise ValueError("E26 native cache proof mismatch")
     ids = e24.e21.columns("by_v2fy")
     if (man.get("role") != "val" or man.get("rows") != 3900 or man.get("formula_revision") != "Rev5"
             or man.get("teacher_sha256") != HDR_TEACHER_SHA["val"] or man.get("requested_ids") != ids):
@@ -252,6 +258,8 @@ def _e26_panel(root, control_root, bank, output_dir):
         f.write(struct.pack("<II", width, len(keys)))
         f.write(X.tobytes())
     tool = os.environ.get("ZL_PREDICT", str(REPO / "target/release/predict_features_with_bake"))
+    if sha(Path(tool)) != proof["cached_executable_sha256"]:
+        raise ValueError("E26 cache predictor changed")
     cells = {}
     for label, base, spec in [("control", control_root, e24.CONTROL),
                              *((f"hd{w}", root, e24.CONTROL+f":hd{w}") for w in (4, 16))]:
@@ -302,6 +310,7 @@ def _e26_panel(root, control_root, bank, output_dir):
                     pairing="all 50 registered (fold,seed) cells", arms=arms,
                     adopt=next((a for a in ("hd4", "hd16") if arms[a]["passes"]), None),
                     val_bank_manifest_sha256=sha(bank / "_MANIFEST.json"), tools={str(p):sha(p) for p in (Path(tool), FITBIN, PANEL)},
+                    native_cache_proof_sha256=sha(Path(native_proof)), native_cache_proof=proof,
                     status="COMPLETE", cells=cells)
     (output_dir / "e26_hdr_decision.json").write_text(json.dumps(decision, indent=1)+"\n")
     print(json.dumps({"adopt":decision["adopt"], "arms":arms}), flush=True)
@@ -313,8 +322,9 @@ if "--e26-root" in sys.argv:
     e26_ap.add_argument("--e26-control-root", required=True)
     e26_ap.add_argument("--e26-val-bank", required=True)
     e26_ap.add_argument("--e26-output-dir", required=True)
+    e26_ap.add_argument("--e26-native-proof", required=True)
     e26_args = e26_ap.parse_args()
-    _e26_panel(e26_args.e26_root, e26_args.e26_control_root, e26_args.e26_val_bank, e26_args.e26_output_dir)
+    _e26_panel(e26_args.e26_root, e26_args.e26_control_root, e26_args.e26_val_bank, e26_args.e26_output_dir, e26_args.e26_native_proof)
     raise SystemExit(0)
 
 

@@ -350,6 +350,7 @@ fn main() {
         .map(|p| std::fs::read(p).expect("score bake"))
         .collect();
     let refusals = std::sync::Mutex::new(Vec::<serde_json::Value>::new());
+    let identities = std::sync::Mutex::new(vec![false; cells.len()]);
     let composition: Option<serde_json::Value> = audit_composition.as_ref().map(|path| {
         serde_json::from_slice(&std::fs::read(path).expect("composition"))
             .expect("composition JSON")
@@ -418,6 +419,7 @@ fn main() {
                         }
                         let source = Pq16Image::from_rgb16(&r16, rw, rh, primaries);
                         let distorted = Pq16Image::from_rgb16(&d16, dw, dh, dist_primaries);
+                        identities.lock().unwrap()[i] = primaries == dist_primaries && r16 == d16;
                         let encoding = HdrEncoding::Pq { peak_nits: 10_000.0 };
                         if !score_scorers.is_empty() {
                             let mut line = format!("{}\t{}", c.ref_file.display(), c.dist_file.display());
@@ -478,6 +480,7 @@ fn main() {
                                 &mut scratch,
                             )
                             .map_err(|e| format!("compute {}: {e:?}", c.dist_base))?;
+                            assert_eq!(r.features().len(), 944, "regime width");
                             r.features().to_vec()
                         };
                         let feats = &canonical;
@@ -544,6 +547,7 @@ fn main() {
         "source_manifests":pairs_tsvs, "decoder":"zenpng native16 + zenjxl RGB16_BT2100_PQ",
         "feature_input_era":"hdr-common-primaries-v2",
         "requested_ids":requested_ids,
+        "pixels_identical":identities.into_inner().unwrap(),
         "research":research_manifest.into_inner().unwrap().map(|s| serde_json::from_str::<serde_json::Value>(&s).unwrap())
     });
     let manifest_path = out_path.with_extension("manifest.json");

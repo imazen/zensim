@@ -4,12 +4,12 @@ Part A landed as-is at main ef31614a77db7788d8aea34715d8f1030e5e0ab9,
 as confirmed by the coordinator. Part B is its direct child; no rebase.
 
 Before any fit: fixed q_jod transform and explicit native research caller
-registered in the original E26 record. No E26 fit has started. Full decision
+registered in the original E26 record. At that checkpoint no fit had started. Full decision
 rule, arms, feature IDs, seeds, folds, and VAL population remain unchanged.
 
-The existing shared fleet queue is not host scoped: host_filler.sh invokes
+Initial placement concern (resolved below): the shared queue is not host scoped: host_filler.sh invokes
 kids_pick.py with QUEUE=fleet_queue; kids_pick.py reads unqualified triples.
-It serves prohibited hosts as well as allowed hosts. E26 will not enter this
+It could serve prohibited hosts if such fillers ran; the coordinator later confirmed that none run. E26 will not enter this
 queue until its allowed-host restriction is enforceable. Existing workers
 are owned by other lanes and are not stopped or restarted.
 
@@ -88,3 +88,22 @@ envelope; other jobsets and all filler PIDs unchanged. Own worker starts
 and restarts remain forbidden. New actual loader tests4/4 and pre-fix
 negative control, native tests2/2, root and native strict Clippy and
 lint-scripts813 all pass. Final scientific panels still pending.
+
+2026-10-05 04:17UTC: full120-epoch smoke PASS,42m38s, selected119 and
+7869 heldout predictions. Existing harvest_fit_cells.verify_blob verifies
+all hashes/identities/tier. Source4c3b106b; identical dense/stamp owner then
+new-student cached/native TRAIN score74.24549102783203, bit-exact.
+Full100-cell jobsetfitv2e26r2-20261005 enqueued top of sharedqueue via the
+existing owners. No filler/worker directly launched or restarted. Actual
+initial reachable slots5/3/2/2;i270 unavailable. Resource envelope is
+E26-only; existing fillers' status text still reports requested free slots,
+so actual Docker census, not that message, gives the started count.
+
+Whole3900-row native VAL/control cached-production parity PASS: maximum
+delta0, all rows finite, exact original order, pixel-identical population0.
+Existing native extractor now emits an ordered pixel-identity census in its
+manifest. The frozen bank/feature-extraction executable stays immutable.
+HDR panel requires this hash-bound whole-population proof and the same
+cache predictor binary; identity shortcuts cannot silently contaminate the
+fast path. Core trainer/program/data/thresholds unchanged. Full native proof
+took677s at2 threads,0.82GiB peak; no human interpretation of these labels.
