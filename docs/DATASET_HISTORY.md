@@ -5050,3 +5050,19 @@ The composition owner verifies companion Table provenance; the historical
 primary remains unqualified and the human-role decision remains pending.
 See `benchmarks/shippath6_WORKLOG.md` and
 `~/tmp/zensim-paper/rev4/SHIPPATH6_DONE.md`.
+
+## 2026-10-05 — SHIPPATH7 Rev5 evaluation feature instruments
+
+Features-only, same registered populations: ladder9593, standard replacement
+4424, negative-tail2000, identity38, steering96/4/8/27, and seven original Rev5
+confirmation/terminal banks totaling10721 rows. All15 tables (26911 rows) declare
+Rev5 `rev5_localwin`, exact populated by_v2fy420 IDs and the pinned c649 extractor/
+legacy-RGB8 decoder. Steering uses59 exact canonical RGB8 deliveries. Source,
+row/order, feature-vector, decoded-pixel and final table/declaration hashes are
+retained; no protected/confirmation/T0 label attachment/read or model fit.
+
+Frozen-input roots are preserved. Preparation grants no gate pass or exposure
+approval; spent populations remain spent, the old May grid's pixels remain
+unavailable, and the new table hash needs its own canonical floor-bar binding.
+[SHIPPATH7 worklog](../benchmarks/shippath7_WORKLOG.md) describes artifact paths,
+owner controls, pending exposure freeze and composition provenance limitations.

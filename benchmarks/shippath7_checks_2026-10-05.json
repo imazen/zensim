@@ -1,0 +1,270 @@
+{
+ "schema": "shippath7-checks-v1",
+ "implementation_commit": "17f4dadee1a8480246b5e440f385634645e00d49",
+ "parent_main": "06ea889a21dd",
+ "features_only": true,
+ "protected_confirmation_T0_labels_read": false,
+ "model_fits": 0,
+ "scores_computed": false,
+ "table_count": 15,
+ "rows": 26911,
+ "zero_consumed_f32_changes": true,
+ "actual_rust_admission_qualified": true,
+ "historical_replay": null,
+ "nan_padding_and_identity_rows_preserved": true,
+ "tests": {
+  "python_assessment": 6,
+  "python_full_eval": 4,
+  "rust_feature_set": 8,
+  "actual_external_admission": 1,
+  "historical_bank_bytes_equal": true,
+  "canonical_decode_control": true,
+  "confirmation_feature_pixel_control_rows": 14,
+  "ci_exact_clippy": "pass",
+  "cargo_fmt": "pass",
+  "script_lint": "pass"
+ },
+ "pending": [
+  "human union production-role owner decision",
+  "complete qualified primary/companion cross-era and decoder compatibility",
+  "label exposure freeze and owner authorization",
+  "canonical floor-bar binding to new table hash",
+  "actual frozen-model gate scoring/steering/RD/HDR/runtime qualification"
+ ],
+ "artifact_pins": [
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/ladder.parquet",
+   "sha256": "f67e478ca7f54b7f096ed4ecc27b76c3d6f4555a529897864b920634b2fab8ce"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/ladder.parquet.manifest.json",
+   "sha256": "d1d1750f4d439790e195fe9881f943224dbbb6a0316f0405d04740a42bb13217"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/ladder.keys.parquet",
+   "sha256": "378c3cb29dcb8105a40c04aaac2d38a1a101b152bd1a31cc73ddd69a72e9b387"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/standard.parquet",
+   "sha256": "f5f9191bac723d5bb1e3dd7b4ee08dc7fd88ce867acdb6984a6341954d544d4a"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/standard.parquet.manifest.json",
+   "sha256": "01f62a26b089f877c2e3ee967fcff01ab58995ba14e10deb75c601bd9df4634e"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/standard.keys.parquet",
+   "sha256": "863fcc48111295ebef4f1ee8734cd565a01838e0b45da1b549ebe6a6792c3131"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/negtail.parquet",
+   "sha256": "3a94421f335fddb0ffa9f0b7eb9c361ac03764acef679f380de8c994a2a59f9f"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/negtail.parquet.manifest.json",
+   "sha256": "fa1ce646b6f6f943fe73c0ec591a8fe86d1638718c04b6eb8528324f0e32c09f"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/negtail.keys.parquet",
+   "sha256": "df00e3cb8798028b206c66b5a9f20456c69f2ef9190b4dada8ac369071847ee9"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/identity.parquet",
+   "sha256": "1713941688ba6260a48e5a3d0f0a17422be1a1d9ae5766cfb0be2c2b9f8de629"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/identity.parquet.manifest.json",
+   "sha256": "75e78ddfa4c87e383a7024b3c35b943e70b683b4b9aaa961ca51a96c85aea46a"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/identity.keys.parquet",
+   "sha256": "4c71ab9c7e4279f837017381dfe14160140163e4b6a31fd73009af4e564de836"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/broad.parquet",
+   "sha256": "edc40da4cc4cfcf07704e5dd92ff0d92f43c49ff1d33d97f84f0ced793770562"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/broad.parquet.manifest.json",
+   "sha256": "dc51f48fd13865e4d02ce8f18699769fb06c7d6ef69680dce5d914602dd87308"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/broad.keys.parquet",
+   "sha256": "b6e568ba487a8667fb3eda60b5712fa6c3e0778dfd48bb53f481e6f6b71dc7d4"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/owner.parquet",
+   "sha256": "954ee6e719be918765830f266ed66126151ee08e3f5e8fc0f11ee5473ef82afc"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/owner.parquet.manifest.json",
+   "sha256": "19eedac19f2dc61c63d7e6f739a01540f78e7e35361ce8bab85d1a21488f2386"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/owner.keys.parquet",
+   "sha256": "7204cc0ccec03b2a221e05fd9c3b023e3ed796182a2811a3232440951ef9d525"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/jpeg8.parquet",
+   "sha256": "1b3c5f021cde04d517912346ed84310730675b91a57d933a8e4c319e7894be4f"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/jpeg8.parquet.manifest.json",
+   "sha256": "d09842273ca35eb0887a548dec86859d1dd9b8e63898a0af760b8d941fbf1008"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/jpeg8.keys.parquet",
+   "sha256": "66900bb3e5a9f95f6768630fc884761c8f241e89e974a625008e15ad65f084b5"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/m3.parquet",
+   "sha256": "40b2803577a7a29bcc741767049a0f6c6b9a1efcc98f8d5515045fc1e4782b1e"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/m3.parquet.manifest.json",
+   "sha256": "2851cac4ea27bc1567a47edf28e35a5a2ef8826ec692236fa868e497980bfc99"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/instruments/m3.keys.parquet",
+   "sha256": "60a326893428bcb4266293c6f73b9e80ad20c06b2d8bd6b3f513ab5cf25b71d1"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/cid22_b.parquet",
+   "sha256": "9e250c0a1b204055525d22a52fc74d17fae855c25f2fb495a79a0089d1858a2b"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/cid22_b.parquet.manifest.json",
+   "sha256": "b66e4048391a5a4adec8b58a24394b17f06f7717a26b91ed4ad96cfd57c60737"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/cid22_b.keys.parquet",
+   "sha256": "6e0ca3e28cf89432fbe6f6db206e7eb8cac4cec9d458a83d63b10b62838e93b3"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/aic4.parquet",
+   "sha256": "0b0ae480a6e8a0eec8cc30b58612a2791651c7f9a332ef65618846546bd5ea1f"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/aic4.parquet.manifest.json",
+   "sha256": "f234049b3b3d10c773306558e71ec778df5e828f00991a27df9602395bbc8114"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/aic4.keys.parquet",
+   "sha256": "d9fbc3acae37d0cedd1d020678d3642213b62beecb643d2e63c2a18bcf014a5b"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/konjnd_jpeg_select.parquet",
+   "sha256": "c5208b6fc201b01523d10fd7de49f60f771ceeff35bf6fcfbdefb7add2dc2874"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/konjnd_jpeg_select.parquet.manifest.json",
+   "sha256": "54d3b9933349873be965913880e9638014783e45ea5ed9e082b9b5a06ae45131"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/konjnd_jpeg_select.keys.parquet",
+   "sha256": "bfb066864d72ea7afebe612ea32e79dd9815e429ee0b0a16a8d84deab9bc3026"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/konjnd_jpeg_terminal.parquet",
+   "sha256": "dbf0fb9f40df2ffd9a757d81d97328693af3c9ecae17ee55fb7e3fa2e6bd27f0"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/konjnd_jpeg_terminal.parquet.manifest.json",
+   "sha256": "efc56c8bb65dc1337a455cc18efe7ed6690997e98f47ad7b3e2343da6b857b60"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/konjnd_jpeg_terminal.keys.parquet",
+   "sha256": "1a1c583eef28bdd0d3fc238462a2a18be10d080cba238153719ebc19d8673eb4"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/csiq.parquet",
+   "sha256": "67f0a3a0657a3b2a50408ee605e2a76a8b5539fe881fabaa87f29aa86561aad6"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/csiq.parquet.manifest.json",
+   "sha256": "a76b7bcf892c62fbebe1faba8b981503b41a9c39a05ff1c1d166289a4d7a8853"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/csiq.keys.parquet",
+   "sha256": "5866a933e31969158ae1c469e5f06afb3f1dabb961fde11b19c6474229eadd75"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/mcljci.parquet",
+   "sha256": "1e5b395daf379fc5a6d714634e44d468b03b3909fbc94a921d1a76f075659675"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/mcljci.parquet.manifest.json",
+   "sha256": "2bd327fd4c1d73e1d0e1f393d01013ba249c65cefcd26498fea8de8d77c8a342"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/mcljci.keys.parquet",
+   "sha256": "01d25dea93d75c61dd6486f9e8fb87a8ddbfc53411b7a1544f64c63b4e95720d"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/kadid_terminal.parquet",
+   "sha256": "4361b43f1c986e4834dc56094442f9f39f9231f3163380815cd4c7b38d1b0b85"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/kadid_terminal.parquet.manifest.json",
+   "sha256": "752620e45576703a270634e9508731c11a873d4db4618241a3c8a61a469bf2fd"
+  },
+  {
+   "path": "/var/tmp/shippath7/verified/confirmation-features/kadid_terminal.keys.parquet",
+   "sha256": "d83d142ae057c591fb9f2617b2fdbdc7b7cba55b946e2a48f02ac131734116f6"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/ladder.json",
+   "sha256": "83f3d56483d2b065578bb0d324a736132091fe09000edbaace6c8f98dc9b50cd"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/standard.json",
+   "sha256": "a7a5efd180ee61e101e459ed43d7a2407b7cb0df5fbcdd89bd11bbeaea5ee343"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/negtail.json",
+   "sha256": "b67da36e25431fa00c1fc8aab008244ab979d04712a8140fc533e90d05373cf4"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/identity.json",
+   "sha256": "8053643a3ad6898ba05b31be7964a447e585271361b9ae9a04643c9dc53ac7ad"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/broad.json",
+   "sha256": "a71450b80b4178636caa76e73863b344c40860b0aaf2b706c5db0ae34ff6e508"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/owner.json",
+   "sha256": "3606f84bf3f2b7f88a67c7272e85b7d9dbf69bcd5d54dfb7af8c7710f6c680cf"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/jpeg8.json",
+   "sha256": "ecd23473c50e39188d37d63ea2c79313f3b1505ed40a498e6afb374ff4282da9"
+  },
+  {
+   "path": "/var/tmp/shippath7/inputs/m3.json",
+   "sha256": "ad31b1e246bed885b0dbb710323426032b199f83b8fe1a6880d64a830b6c5963"
+  }
+ ],
+ "receipts": {
+  "ALL_ASSESSMENT.json": {
+   "path": "/var/tmp/shippath7/verified/ALL_ASSESSMENT.json",
+   "sha256": "21ca226d562c2c0fc533222850fafbc67deb1b5dc6ac77795a9b0651c5a5a088"
+  },
+  "ADMISSION.json": {
+   "path": "/var/tmp/shippath7/verified/ADMISSION.json",
+   "sha256": "4a0d235a0e7ec2ce95aed046924e0ccbdf539258fae435f90f02e3b4cb2de125"
+  },
+  "FINAL_AUDIT.json": {
+   "path": "/var/tmp/shippath7/verified/FINAL_AUDIT.json",
+   "sha256": "e4bee48dda83acd9f69ac33136bf4218adc35b1a7f97808de227dc86b90caa94"
+  },
+  "EXPOSURE_FREEZE.json": {
+   "path": "/var/tmp/shippath7/verified/EXPOSURE_FREEZE.json",
+   "sha256": "53e263139dabd8136aae015ed1057cc54a1d43e865990ceae915f91f462dd8ab"
+  },
+  "EVAL_IDENTITY.json": {
+   "path": "/var/tmp/shippath7/verified/EVAL_IDENTITY.json",
+   "sha256": "f173fc1d0993e270499c2a8ff3d982f1f463cff4604c2961621765994c1e2eab"
+  }
+ }
+}

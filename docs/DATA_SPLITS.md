@@ -1285,3 +1285,20 @@ fit spline anchor, then oracle TRAIN-development packed inference. No human fit,
 full recipe/seed selection, confirmation/T0/secret label, EVAL, protected read,
 fleet, publishing or scientific quality claim. Coverage-family filtering does
 not alter feature or ordinal target values. Frozen source roots stay immutable.
+
+## 2026-10-05 — SHIPPATH7 features-only preparation; exposure pending
+
+The coordinator authorized Rev5 assessment features only, using registered gate
+populations and by_v2fy's existing420 IDs. Fifteen declared tables retain original
+keys/order, identity rows and byte/decoder pins. Confirmation/terminal banks are
+projected without sealed labels; no protected/confirmation/T0 labels were read.
+This preparation does not release labels or reassign data roles. R7 panels remain
+spent; KADID terminal remains subject to its terminal read contract.
+
+Before a future label read, freeze the complete final composition/companion and
+calibration/thresholds, TRAIN recipe/choices, all instrument/decoded pixel/decoder/
+evaluator hashes, populations and original roles, statistics/multiplicity and
+prior exposure, then obtain owner authorization. The five-source human union's
+production-role decision remains pending in SHIPPATH_decisions.md. No decision,
+training, candidate selection or qualification is implied by feature admission.
+See [worklog](../benchmarks/shippath7_WORKLOG.md) and its explicit exposure receipt.
