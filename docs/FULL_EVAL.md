@@ -563,3 +563,16 @@ refused before creation. A capsule is evidence, not authorization to read labels
 Freeze the complete assessment/exposure contract and obtain owner authorization
 before protected/confirmation/T0 label attachment. See
 [SHIPPATH7 worklog](../benchmarks/shippath7_WORKLOG.md).
+
+The SHIPPATH8 review fix closes automatically discovered metadata boundaries.
+Before creating identity output, the wrapper asks the existing verdict owner for
+`--print-input-paths`, preflights and binds every returned path plus all supported
+root/table/model declarations, including absent locations and companion TRAIN
+metadata. Discovery reads only an allowed companion binary when needed to obtain
+its bound paths; it opens no external declaration payload or evaluation table.
+Lexical/resolved protected ancestry refuses before opening metadata. Every file
+reported by `--print-inputs` must match the checked inventory, and all checked
+inputs must remain stable. `labels_read` is derived from the completed boundary
+checks; incomplete discovery has no no-label assertion. Historical scoring stages
+and their numerical/qualification contracts remain unchanged. See
+[SHIPPATH8 worklog](../benchmarks/shippath8_WORKLOG.md).

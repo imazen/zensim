@@ -194,7 +194,7 @@ def cmd_extract(a) -> int:
         "absent_slots": "NaN", "restore_cuts": TOKENS, "build_commit": a.build_commit, "binary_sha256": sha256_file(a.bin),
         "formula_revision": f"Rev{a.revision}", "root_form": "sqrt", "input_contract": "legacy-rgb8", "tier_request": a.tier,
         "era_label": a.era, "feature_set_id": next(iter(fsids)), "formula_revision_eras": eras,
-        "pairs_tsv_sha256": tsv_hashes, "pairs_origin": f"{OLD_BANK}/{s}/keys.parquet (ref_path,dist_path in row order)",
+        "pairs_tsv_sha256": tsv_hashes, "pairs_origin": f"{key_path} (ref_path,dist_path in row order)",
         "keys_sha256": sha256_file(outdir / "keys.parquet") if spec else sha256_file(key_path),
         "features_parquet_sha256": sha256_file(outdir / "features.parquet"), "dtype": "float64",
         "chunks": chunk_meta, "wall_s_total": round(time.time() - t_all, 1),

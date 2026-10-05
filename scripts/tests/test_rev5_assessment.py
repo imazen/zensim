@@ -138,7 +138,78 @@ with open(arg('--audit-jsonl'),'w') as f:
         self.assertEqual(result['pair_key'].to_pylist(),['a','b'])
         self.assertEqual(result['row_id'].to_pylist(),[0,1])
         self.assertEqual(result['f13'].to_pylist(),[13/7,1+13/7])
+        manifest_out=json.loads((args.out/'fixture/_MANIFEST.json').read_text())
+        self.assertEqual(manifest_out['pairs_origin'],str(self.base/'keys.parquet')+' (ref_path,dist_path in row order)')
         self.assertEqual(pq.read_table(args.out/'fixture/keys.parquet')['pixels_identical'].to_pylist(),[True,False])
+
+    def metadata_fixture(self):
+        record=self.build()
+        assessment=self.root/'view/ASSESSMENT.json'
+        proof=self.root/'proof.json';proof.write_text(json.dumps({'qualified_provenance':True,'tables':record['tables']}))
+        corpus=self.root/'corpus';corpus.mkdir()
+        table={'path':record['tables'][0]['path'],'sha256':record['tables'][0]['sha256']}
+        (corpus/'ext_cid22val.parquet').symlink_to(table['path'])
+        capsule={'schema':'rev5-assessment-eval-identity-v1','features_only':True,'labels_read':False,'features_root':str(corpus),'assessments':[{'path':str(assessment),'sha256':identity.sha(assessment)}],'admission':{'path':str(proof),'sha256':identity.sha(proof)},'inputs':{k:table for k in ['ext_cid22val.parquet','dial-grid','identity-probe','negtail-probe']}}
+        cp=self.root/'capsule.json';cp.write_text(json.dumps(capsule))
+        return cp,Path(table['path']),corpus
+
+    def protected_metadata_case(self, location):
+        import builtins
+        import io
+        cp,table,corpus=self.metadata_fixture()
+        # Synthetic sentinels only; never inspect a scientific protected tree.
+        protected=self.work/'_sealed';protected.mkdir()
+        sentinel=protected/'sentinel.json';sentinel.write_text('{"sampling":{"human_score":[987654321]}}')
+        alias=corpus/'_MANIFEST.json' if location=='root' else Path(str(table)+'._MANIFEST.json')
+        alias.symlink_to(sentinel)
+        opened=[]
+        def tripwire(original):
+            def guarded(path,*args,**kwargs):
+                if not isinstance(path,int) and Path(path).resolve()==sentinel:
+                    opened.append(str(path))
+                    raise AssertionError('protected sentinel opened')
+                return original(path,*args,**kwargs)
+            return guarded
+        with patch.object(builtins,'open',tripwire(builtins.open)),patch.object(io,'open',tripwire(io.open)):
+            with self.assertRaises(PermissionError): identity.validate(cp,self.work/'refused')
+        self.assertEqual(opened,[])
+        self.assertFalse((self.work/'refused').exists())
+
+    def test_reviewer_root_manifest_symlink_refuses_before_open(self):
+        self.protected_metadata_case('root')
+
+    def test_reviewer_alternate_table_sidecar_symlink_refuses_before_open(self):
+        self.protected_metadata_case('alternate')
+
+    def test_all_declaration_locations_and_model_sidecars_are_checked(self):
+        cp,table,corpus=self.metadata_fixture()
+        bake=self.root/'model';bake.write_text('synthetic')
+        sealed=self.work/'_sealed';sealed.mkdir();sentinel=sealed/'sentinel';sentinel.write_text('synthetic')
+        aliases=[table.parent/'_MANIFEST.json',Path(str(corpus/'ext_cid22val.parquet')+'.manifest.json'),Path(str(bake)+'.spec.json')]
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                alias.symlink_to(sentinel)
+                with self.assertRaises(PermissionError):identity.validate(cp,self.work/'out',[bake])
+                alias.unlink()
+        discovery={'schema':'bake-verdict-input-paths-v1','complete':True,'metadata_read':False,'files':[str(sentinel)]}
+        with self.assertRaises(PermissionError):identity.validate(cp,self.work/'out',[bake],discovery)
+
+    def test_metadata_presence_and_bytes_are_bound_and_incomplete_claim_is_unknown(self):
+        cp,table,corpus=self.metadata_fixture()
+        before=identity.validate(cp,self.work/'out')
+        self.assertIsNone(before['labels_read'])
+        self.assertFalse(before['label_boundary']['complete_discovery_checked'])
+        root=corpus/'_MANIFEST.json'
+        discovery={'schema':'bake-verdict-input-paths-v1','complete':True,'metadata_read':False,'files':[str(root)]}
+        root.write_text('{"formula_revision":5}')
+        first=identity.validate(cp,self.work/'out',owner_inputs=discovery)
+        self.assertFalse(first['labels_read'])
+        self.assertTrue(first['label_boundary']['complete_discovery_checked'])
+        root.write_text('{"formula_revision":4}')
+        second=identity.validate(cp,self.work/'out',owner_inputs=discovery)
+        self.assertNotEqual(first['checked_inputs'],second['checked_inputs'])
+        stale={'files':[{'path':str(root),'sha256':next(v['sha256'] for v in first['checked_inputs'] if v['path']==str(root))}]}
+        with self.assertRaises(ValueError):identity.validate(cp,self.work/'out',owner_inputs=discovery,owner_identity=stale)
 
     def test_identity_capsule_binds_all_tables_and_never_scores(self):
         record = self.build()
@@ -152,11 +223,13 @@ with open(arg('--audit-jsonl'),'w') as f:
         heavy = self.root/'heavy'; heavy.write_text('#!/bin/bash\nshift 4\nexec "$@"\n'); heavy.chmod(0o755)
         bv = self.root/'verdict'; bv.write_text('''#!/usr/bin/env python3
 import json,sys
+if '--print-input-paths' in sys.argv:
+ print(json.dumps({'schema':'bake-verdict-input-paths-v1','complete':True,'metadata_read':False,'files':[]}));sys.exit(0)
 assert '--print-inputs' in sys.argv
 assert '--fulleval' not in sys.argv
 assert sys.argv[sys.argv.index('--corpora')+1]=='cid22'
 assert '--corruption-grid' in sys.argv and '--perpair-metrics' in sys.argv
-print(json.dumps({'argv':sys.argv[1:]}))
+print(json.dumps({'argv':sys.argv[1:],'files':[]}))
 '''); bv.chmod(0o755)
         bake = self.root/'model'; bake.write_text('synthetic model; fake evaluator')
         out = self.work/'transport'

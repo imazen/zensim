@@ -42,19 +42,25 @@ fi
 if [[ -n "${ZENSIM_EVAL_INSTRUMENTS:-}${ZENSIM_EVAL_CORRUPTION_HEAD:-}" && "$STAGE" != identities ]]; then
     echo "assessment/companion transport requires --stage identities; scoring needs a separate exposure freeze" >&2; exit 2
 fi
-mkdir -p "$OUTDIR"
 JSON="$OUTDIR/$NAME.fulleval.json"; MD="$OUTDIR/$NAME.verdict.md"
 VERDICT="$OUTDIR/$NAME.verdict-stage.json"; COHERENCE="$OUTDIR/$NAME.coherence-stage.json"
-WORK=$(mktemp -d "$OUTDIR/.${NAME}.eval.XXXXXX")
-trap 'rm -rf "$WORK"' EXIT
-# A stage owns this output stem while it runs. Another process may use a
-# different stem. Keep the lock file: unlinking it would create two locks.
-exec 9>"$OUTDIR/.$NAME.eval.lock"
-flock 9
-if [[ -z "${ZENSIM_BAKE_VERDICT:-${ZL_BV:-}}" && "$STAGE" != coherence && "$STAGE" != qualify ]]; then
-    "${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" -p zensim-validate --bin bake_verdict >&2
+prepare_output() {
+    mkdir -p "$OUTDIR"
+    WORK=$(mktemp -d "$OUTDIR/.${NAME}.eval.XXXXXX")
+    trap 'rm -rf "$WORK"' EXIT
+    exec 9>"$OUTDIR/.$NAME.eval.lock"
+    flock 9
+}
+build_verdict() {
+    if [[ -z "${ZENSIM_BAKE_VERDICT:-${ZL_BV:-}}" && "$STAGE" != coherence && "$STAGE" != qualify ]]; then
+        "${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" -p zensim-validate --bin bake_verdict >&2
+    fi
+    [[ -x "$BV" ]] || { echo "build bake_verdict or run the verdict stage first" >&2; exit 3; }
+}
+if [[ "$STAGE" != identities ]]; then
+    prepare_output
+    build_verdict
 fi
-[[ -x "$BV" ]] || { echo "build bake_verdict or run the verdict stage first" >&2; exit 3; }
 BV_EXTRA=()
 BV_REGIME=$REGIME
 if [[ "$REGIME" == "924" ]]; then
@@ -132,10 +138,16 @@ if [[ "$STAGE" == identities ]]; then
         fi
     fi
 fi
+if [[ "$STAGE" == identities ]]; then
+    build_verdict
+    DISCOVERED_INPUTS=$("${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --print-input-paths)
+    INSTRUMENT_ID=$("${IDENTITY_CHECK[@]}" --owner-inputs <<< "$DISCOVERED_INPUTS")
+    prepare_output
+fi
 "${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --print-inputs > "$WORK/verdict-inputs.json"
 if [[ "$STAGE" == identities ]]; then
-    [[ "$("${IDENTITY_CHECK[@]}")" == "$INSTRUMENT_ID" ]] || { echo "instrument inputs changed during identity collection" >&2; exit 3; }
-    jq --argjson instruments "$INSTRUMENT_ID" '{features_only:true,labels_read:false,input_identity:.,assessment_instruments:$instruments,scoring:"not_requested"}' "$WORK/verdict-inputs.json" > "$WORK/identity.json"
+    [[ "$("${IDENTITY_CHECK[@]}" --owner-inputs --owner-identity "$WORK/verdict-inputs.json" <<< "$DISCOVERED_INPUTS")" == "$INSTRUMENT_ID" ]] || { echo "instrument inputs changed during identity collection" >&2; exit 3; }
+    jq --argjson instruments "$INSTRUMENT_ID" '{features_only:true,labels_read:$instruments.labels_read,label_boundary:$instruments.label_boundary,input_identity:.,assessment_instruments:$instruments,scoring:"not_requested"}' "$WORK/verdict-inputs.json" > "$WORK/identity.json"
     mv "$WORK/identity.json" "$OUTDIR/$NAME.identities.json"
     echo "$OUTDIR/$NAME.identities.json"
     exit 0

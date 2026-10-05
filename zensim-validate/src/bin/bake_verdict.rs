@@ -1020,6 +1020,7 @@ struct Args {
     /// this flag is only the shell's way in, so there is still ONE rule.
     print_features_root: bool,
     print_inputs: bool,
+    print_input_paths: bool,
 }
 
 fn print_usage() {
@@ -1156,6 +1157,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut regime_flag_passed = false;
     let mut print_features_root = false;
     let mut print_inputs = false;
+    let mut print_input_paths = false;
     let mut cross_regime = false;
     let mut allow_unpopulated_slots = false;
     let mut require_feature_set_match = false;
@@ -1387,6 +1389,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 let v = args.next().ok_or("--identity-probe requires <parquet>")?;
                 identity_probe = Some(PathBuf::from(v));
             }
+            "--print-input-paths" => {
+                print_input_paths = true;
+            }
             "--print-inputs" => {
                 print_inputs = true;
             }
@@ -1606,6 +1611,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         features_root_explicit: features_root_set,
         print_features_root,
         print_inputs,
+        print_input_paths,
         per_pair_output,
         per_pair_refs,
         dial_grid,
@@ -4535,20 +4541,8 @@ fn composition_feature_sets(
     serde_json::json!({"scoring":scoring,"members":members})
 }
 
-/// Complete artifact identity for this evaluator's own resolved inputs.
-/// Used both by --print-inputs (no scoring) and the result, so orchestration
-/// never duplicates corpus-slot or default-path policy.
-fn evaluation_input_identity(
-    args: &Args,
-    corpora: &[(String, PathBuf, String, u64)],
-    members: &[PathBuf],
-) -> Result<serde_json::Value, String> {
-    use std::collections::BTreeMap;
-    use zensim_validate::train_manifest::sha256_file;
-    let mut files: BTreeMap<PathBuf, Option<String>> = corpora
-        .iter()
-        .map(|(_, p, sha, _)| (p.clone(), Some(sha.clone())))
-        .collect();
+/// Same automatic input locations for normal identities and features-only preflight.
+fn evaluation_input_paths(args: &Args, corpora: &[PathBuf], members: &[PathBuf]) -> Vec<PathBuf> {
     let mut paths = vec![
         args.features_root.join("_MANIFEST.json"),
         args.dial_grid.clone(),
@@ -4582,25 +4576,168 @@ fn evaluation_input_identity(
     // interpreted values. Adding/removing/changing an unknown table's decoder
     // sidecar must invalidate reuse too. These are the table_metadata owner's
     // three supported declaration locations; absent files are recorded as null.
-    for table in corpora.iter().map(|(_, p, _, _)| p).chain(
+    for table in corpora.iter().chain(
         [&args.dial_grid, &args.corruption_grid]
             .into_iter()
             .chain(args.ramp_grid.iter())
             .chain(args.negtail_probe.iter())
             .chain(args.identity_probe.iter()),
     ) {
-        paths.extend([
-            table
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("_MANIFEST.json"),
-            PathBuf::from(format!("{}.manifest.json", table.display())),
-            PathBuf::from(format!("{}._MANIFEST.json", table.display())),
-        ]);
+        paths.extend(table_declaration_paths(table));
     }
     for member in members {
         paths.push(PathBuf::from(format!("{}.spec.json", member.display())));
     }
+    paths.extend_from_slice(corpora);
+    paths
+}
+
+fn refuse_protected_input(path: &Path) -> Result<(), String> {
+    let protected = |p: &Path| {
+        p.components().any(|c| {
+            let s = c.as_os_str().to_string_lossy().to_lowercase();
+            s.contains("_sealed") || s.starts_with("labels__")
+        })
+    };
+    if protected(path) {
+        return Err(format!("protected input path: {}", path.display()));
+    }
+    // Resolve the nearest existing ancestor too: absent declarations can live
+    // below a symlink, and dangling symlinks must never become unchecked reads.
+    let mut ancestor = path;
+    loop {
+        match ancestor.canonicalize() {
+            Ok(p) => {
+                if protected(&p) {
+                    return Err(format!("protected input ancestry: {}", path.display()));
+                }
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if ancestor
+                    .symlink_metadata()
+                    .is_ok_and(|m| m.file_type().is_symlink())
+                {
+                    return Err(format!("unresolved input symlink: {}", path.display()));
+                }
+                ancestor = ancestor
+                    .parent()
+                    .ok_or_else(|| format!("unresolved input: {}", path.display()))?;
+                if ancestor.as_os_str().is_empty() {
+                    ancestor = Path::new(".");
+                }
+            }
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        }
+    }
+    Ok(())
+}
+
+/// Enumerate without opening any table/declaration/sidecar payload. The only
+/// payload needed for dynamic discovery is an already preflighted companion
+/// binary, parsed by its existing loader. No model score or admission is run.
+fn print_input_paths(args: &Args) -> Result<serde_json::Value, String> {
+    if !args.features_root_explicit || !args.regime_720 {
+        return Err("input discovery requires explicit features-root and regime720".into());
+    }
+    let members = if args.ensemble.is_empty() {
+        vec![args.bake.clone()]
+    } else {
+        args.ensemble.clone()
+    };
+    let corpora: Vec<_> = args
+        .corpora
+        .iter()
+        .map(|c| {
+            slot_720_file(c.name, &args.features_root)
+                .map(|name| args.features_root.join(name))
+                .ok_or_else(|| format!("no720 slot for {}", c.name))
+        })
+        .collect::<Result<_, _>>()?;
+    let mut paths = evaluation_input_paths(args, &corpora, &members);
+    paths.push(args.bake.clone());
+    paths.push(std::env::current_exe().map_err(|e| e.to_string())?);
+    for path in &paths {
+        refuse_protected_input(path)?;
+    }
+    if let Some(path) = &args.corruption_head
+        && let CompanionHead::Tree(head) = load_companion_head(path)?
+        && let Some(record) = head.training_admission_json()
+    {
+        let record: serde_json::Value = serde_json::from_str(record).map_err(|e| e.to_string())?;
+        for table in record["training_tables"]
+            .as_array()
+            .ok_or("missing companion TRAIN paths")?
+        {
+            for spec in [table, &table["declaration"], &table["selection"]] {
+                paths.push(PathBuf::from(
+                    spec["path"]
+                        .as_str()
+                        .ok_or("companion pinned path required")?,
+                ));
+            }
+            let table_path = PathBuf::from(table["path"].as_str().unwrap());
+            paths.extend(table_declaration_paths(&table_path));
+            if let Some(source) = table.get("source_table") {
+                paths.push(PathBuf::from(
+                    source.as_str().ok_or("companion source path required")?,
+                ));
+            }
+        }
+        for binding in record["bindings"]
+            .as_array()
+            .ok_or("missing companion bindings")?
+        {
+            paths.push(PathBuf::from(
+                binding["path"]
+                    .as_str()
+                    .ok_or("companion binding path required")?,
+            ));
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    // Preflight the complete dynamic set before any downstream owner can read it.
+    for path in &paths {
+        refuse_protected_input(path)?;
+    }
+    Ok(
+        serde_json::json!({"schema":"bake-verdict-input-paths-v1", "complete":true,
+        "metadata_read":false, "files":paths}),
+    )
+}
+
+fn table_declaration_paths(table: &Path) -> [PathBuf; 3] {
+    [
+        table
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("_MANIFEST.json"),
+        PathBuf::from(format!("{}.manifest.json", table.display())),
+        PathBuf::from(format!("{}._MANIFEST.json", table.display())),
+    ]
+}
+
+/// Complete content identity; historical scoring and identity semantics stay unchanged.
+fn evaluation_input_identity(
+    args: &Args,
+    corpora: &[(String, PathBuf, String, u64)],
+    members: &[PathBuf],
+) -> Result<serde_json::Value, String> {
+    use std::collections::BTreeMap;
+    use zensim_validate::train_manifest::sha256_file;
+    let mut files: BTreeMap<PathBuf, Option<String>> = corpora
+        .iter()
+        .map(|(_, p, sha, _)| (p.clone(), Some(sha.clone())))
+        .collect();
+    let paths = evaluation_input_paths(
+        args,
+        &corpora
+            .iter()
+            .map(|(_, p, _, _)| p.clone())
+            .collect::<Vec<_>>(),
+        members,
+    );
     for path in paths {
         if let std::collections::btree_map::Entry::Vacant(entry) = files.entry(path) {
             let sha = if entry.key().exists() {
@@ -4869,6 +5006,18 @@ fn main() -> ExitCode {
     // `--print-features-root`: resolve the root FROM THE BAKE and exit. Runs
     // BEFORE the era note below on purpose — that note describes the root the
     // run will SCORE on, and this mode scores nothing.
+    if args.print_input_paths {
+        return match print_input_paths(&args) {
+            Ok(v) => {
+                println!("{}", v);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("bake_verdict: input discovery: {e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     if args.print_features_root {
         return print_features_root(&args);
     }
@@ -8509,6 +8658,72 @@ mod tree_admission_tests {
             tables.len()
         );
     }
+    #[test]
+    fn discovery_lists_all_metadata_without_reading_it_and_refuses_symlinks() {
+        let root = std::env::temp_dir().join(format!("discovery-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let (record, table) = fixture(&root);
+        let head = root.join("head.zcth");
+        std::fs::write(&head, head_bytes(&record)).unwrap();
+        let model = root.join("primary.bin");
+        // Discovery does not parse or score the primary, nor parse sidecars.
+        std::fs::write(&model, b"synthetic model bytes").unwrap();
+        let args = parse_args_from(
+            [
+                "--bake".into(),
+                model.to_string_lossy().into(),
+                "--regime".into(),
+                "720".into(),
+                "--features-root".into(),
+                root.to_string_lossy().into(),
+                "--corpora".into(),
+                "cid22".into(),
+                "--dial-grid".into(),
+                table.to_string_lossy().into(),
+                "--corruption-head".into(),
+                head.to_string_lossy().into(),
+                "--print-input-paths".into(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        let alternate = PathBuf::from(format!("{}._MANIFEST.json", table.display()));
+        let root_meta = root.join("_MANIFEST.json");
+        // Invalid JSON must not be parsed or hashed by this inventory mode.
+        std::fs::write(&root_meta, b"not JSON").unwrap();
+        let v = print_input_paths(&args).unwrap();
+        assert_eq!(v["metadata_read"], false);
+        for p in [
+            &root_meta,
+            &alternate,
+            &PathBuf::from(format!("{}.spec.json", model.display())),
+        ] {
+            assert!(v["files"].as_array().unwrap().contains(&json!(p)));
+        }
+        #[cfg(unix)]
+        {
+            let sealed = root.join("_sealed");
+            std::fs::create_dir(&sealed).unwrap();
+            let sentinel = sealed.join("synthetic-sentinel.json");
+            std::fs::write(&sentinel, b"synthetic protected labels").unwrap();
+            std::fs::remove_file(&root_meta).unwrap();
+            for alias in [
+                &root_meta,
+                &alternate,
+                &PathBuf::from(format!("{}.spec.json", model.display())),
+            ] {
+                std::os::unix::fs::symlink(&sentinel, alias).unwrap();
+                assert!(
+                    print_input_paths(&args)
+                        .unwrap_err()
+                        .contains("protected input")
+                );
+                std::fs::remove_file(alias).unwrap();
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn original_train_sources_must_match_and_pass_protected_path_preflight() {
         let root = std::env::temp_dir().join(format!("zcth-verdict-source-{}", std::process::id()));
