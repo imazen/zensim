@@ -1,0 +1,244 @@
+{
+  "schema": "shippath2-evidence-v1",
+  "model_qualified": false,
+  "human_role_decision": "PENDING",
+  "recipe_tables_byte_identical": 21,
+  "pool_byte_identical": true,
+  "feature_values_changed": false,
+  "coverage_rows": 17600,
+  "coverage_feature_target_bits_identical": true,
+  "all_header_admissions": 22,
+  "smoke_admitted_groups": 5,
+  "selected_epoch": 2,
+  "requested_smoke_epochs": 3,
+  "pairs_per_epoch": 500,
+  "init_seed": 1101,
+  "sample_seed": 101,
+  "selected_requested_draws": 1500,
+  "selected_sampler_pairs": 1170,
+  "epoch000_requested_draws": 500,
+  "epoch000_sampler_pairs": 381,
+  "selected_sampler_digest": "fd7e3d98a73610bf",
+  "epoch000_sampler_digest": "cde17141028de719",
+  "declared_ids": 420,
+  "input_layout_width": 720,
+  "hidden": 128,
+  "head": "N",
+  "packed_finite_train_development_predictions": 3785,
+  "consumer_feature_set_id": "basic+v2/rev5_localwin#62adfc93",
+  "models": {
+    "smoke-complete/refit/last.bin": {
+      "sha256": "e1348b34a2c84932d083c00298f3bdb24f1a6ddf1d3d793d37da53e5dd1d3018",
+      "bytes": 983826
+    },
+    "smoke-complete-dense.bin": {
+      "sha256": "fda2b1d79458687e0b8bd44e01ce24423c748c62034133737301a480d836c8fe",
+      "bytes": 226454
+    },
+    "smoke-complete-packed.bin": {
+      "sha256": "cee16b511ba96f440292753537e0af851f49ca59cd8dcc642068f2980b8c72ab",
+      "bytes": 118576
+    }
+  },
+  "tables": {
+    "kadid.parquet": {
+      "sha256": "d1f37f29b9d05980b68e79272fc61c6a249a054973c44567286d0ee3a9a2f010",
+      "rows": 7869,
+      "row_keys_sha256": "c6cdfd8006ee6bb11050cfcaa3a13332475b10620a7325ed452548c60534a99e",
+      "row_selection_sha256": "4b0b398da9047d917b19dc9873645051b87e832399afb093369e056766650350",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "tid2013.parquet": {
+      "sha256": "cce93ad4dec5a77d308a2aaa0ff01c923da4e34950468001b54ce33504079c05",
+      "rows": 3000,
+      "row_keys_sha256": "9ae2783715e417aea29ad167a7ce971f71069331f24d685e4718c190c1722e05",
+      "row_selection_sha256": "b1b17600211d4c6ec1ceeca9d56dff2595eadc3fa8b3ec9cce312c1ceff1bdec",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "konfig.parquet": {
+      "sha256": "94f5c1aa1ac562a497da19b1ba0f9cf2cc174de59189980b4c58feb21904954a",
+      "rows": 756,
+      "row_keys_sha256": "2baa6583dfd02430e96c95af85d0aa25ca57c54c10de574c1c3569a3a85ff924",
+      "row_selection_sha256": "a3479802055576fa748461acc416289f54da03aad14d1a7012dfb8de7eb37a41",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "cid22_a25.parquet": {
+      "sha256": "32c7b77b3d75c4ed9c61914eb4f62201d7085057bcbb2880b1702d3ea30279d6",
+      "rows": 2192,
+      "row_keys_sha256": "f7315db637f36b03b73a028008bb49804ce62c8e28e747ff0b1031a851c9d88d",
+      "row_selection_sha256": "00f8af009d80dab9573e2f1444e771d4a196e3610decfef521fb57dd213f3352",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "aic3.parquet": {
+      "sha256": "dcb773fd86426a5fa088458327190df346deb481f27cecb5cc923eee38740119",
+      "rows": 600,
+      "row_keys_sha256": "c240474ffcf976b1028fad9af47ee95aec43e87f436622c8494dbfd1bb9136dd",
+      "row_selection_sha256": "b8a51d15aa9a3e9e7d3ddc7737a6841d8ee96a64e0f3ecb0662f69cd05e9f63d",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "safesyn_fit.parquet": {
+      "sha256": "15963508e9502d6615006686cd993096b54bd08914ed97f61ffad093f7816fa6",
+      "rows": 141054,
+      "row_keys_sha256": "394bb35bb0778645b2d8680e599fb093d8c8c2fbaa463f9d73b5712f503453c9",
+      "row_selection_sha256": "1bb4212afb4e699929fbcb8b6335d9f329d7e74be2f831305212f04c7e1e08cb",
+      "role": "TRAIN oracle teacher",
+      "role_decision": null
+    },
+    "safesyn_dev.parquet": {
+      "sha256": "4165da2edb54913e4856c5a37cafd154ce96d5f9e7ef9203ff2880dc9b09f795",
+      "rows": 38757,
+      "row_keys_sha256": "e99c80d767d9084826000035e8b274de8627659b81b53dceebe359b33fa89625",
+      "row_selection_sha256": "e4691ba325fa784409c88a8216080817143229428a426251dcaacaa89a96ad53",
+      "role": "TRAIN oracle teacher",
+      "role_decision": null
+    },
+    "cid22_fit.parquet": {
+      "sha256": "5726053da43c9bc0bf33a26ad99c3b9fdde64de42425e685cc84527c606d5999",
+      "rows": 12163,
+      "row_keys_sha256": "43f4e23de925cdeda87853a641a40c92d6d4bba8a9310c6832adeb27ca2261cb",
+      "row_selection_sha256": "117e627fabf390cb7edc979f26db4c2a60b877bb1369fbe3c7d44ae8c7516b87",
+      "role": "TRAIN oracle teacher",
+      "role_decision": null
+    },
+    "cid22_dev.parquet": {
+      "sha256": "c4f4f142541f33b56241c1f824127568d89851539701c04934a8e4fdb926572a",
+      "rows": 3785,
+      "row_keys_sha256": "0314511ca0a6759b75f6876745f68a2cd7502939051901b596da56a799e203fd",
+      "row_selection_sha256": "a2dc31edfab495f668a3f4fc188c36da279a23ec5d1034ccc4f4febd36f27034",
+      "role": "TRAIN oracle teacher",
+      "role_decision": null
+    },
+    "human_without_kadid_fit.parquet": {
+      "sha256": "f395dee444575c4e1a875bc9efe1049befceabeb4643a1b11c0e623b8b68dcc4",
+      "rows": 5311,
+      "row_keys_sha256": "c035c515d0bcfc105640a0d924b5d399735d8faae81e39bc90a3f13f27ae1f22",
+      "row_selection_sha256": "4fe7679907d316be03ba8aa63733075807e59ab6d1e8d682f3afd64cac8a803b",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_kadid_dev.parquet": {
+      "sha256": "1199e456671c336d471d879b1dff513556456d77f6ac5fa865aee7a278d74365",
+      "rows": 1237,
+      "row_keys_sha256": "187bfab64df0598b6e7fcbc571b8e65834012f68f648edd6250e4933e57c1db5",
+      "row_selection_sha256": "1ec96f494a8b94f7fcf3487556c44d711ed268dfcf1dd3168a98935552bbc8d9",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_tid2013_fit.parquet": {
+      "sha256": "db66fa217a50aa553cd84862e732ed1224bd27f34dc640ca8630b0fc6957d2cd",
+      "rows": 9450,
+      "row_keys_sha256": "608f0dee624d175ccb5bd4c9f37d0ffb4200cfd9da798e381daffe73d53026b6",
+      "row_selection_sha256": "578e58462c87028b1031f00429d12aa3d7a5275c136322b8199e1318e35eb113",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_tid2013_dev.parquet": {
+      "sha256": "c12350bd68b6fbb6b2f4e7e04d478e0bed08e0495aab6eae07560ae3930005b9",
+      "rows": 1967,
+      "row_keys_sha256": "e701ced660fc17d15027d145fdbafbfe5b9d976a3cf52fb1b1acbe41f7588034",
+      "row_selection_sha256": "a6ea10bd8aad7bcfa30c96ae9806075f1be0aa5b81a861c85260f7d04b5f2bd4",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_konfig_fit.parquet": {
+      "sha256": "91fbae7de2cbcf0630d4d0339b246d5ca77b0ed3658bf22dde01e2bfd5ac104f",
+      "rows": 11298,
+      "row_keys_sha256": "55373c1a91c0bc0f17735e79e95924ab9821ccb533cc672f4c00e1e27cbfa754",
+      "row_selection_sha256": "b0bfc8347c9e84397a66be717a16a7064da054eab85352a64fc0a2d2da7bb76f",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_konfig_dev.parquet": {
+      "sha256": "b4f392600fbad9bac495c760500d8d54d898aa73408f90eca20ed936549e7574",
+      "rows": 2363,
+      "row_keys_sha256": "1b0469499da33aefede04ef26f958e7bc1f333096c6241eeb761c46579866100",
+      "row_selection_sha256": "b2e694e8affe10404b6cf56425d394814b1878a6e7e1f9456b0092ebb46b18e9",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_cid22_a25_fit.parquet": {
+      "sha256": "f1b2935d4ecb5fdb640d053976fac944a5c4e95b317ab1f9c8df40e7a2af3140",
+      "rows": 10391,
+      "row_keys_sha256": "f8d8452b10da00c2c93f6c2b2b55b1d404e27f806393d7ebbbf182bfac39ec1f",
+      "row_selection_sha256": "3096f3ffe500c111543fbf7ee44a435b302a705bd4499909c71727b75080ec42",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_cid22_a25_dev.parquet": {
+      "sha256": "c80ec8c35925d3a3250f23820861d224f6ff6479741d8202f7a1d86073919df7",
+      "rows": 1834,
+      "row_keys_sha256": "726509e521bf509b90361f4aefc6e753bf60577c6fb872651a02a867c0424ec2",
+      "row_selection_sha256": "8663bb9a1a4864ba240f0e34eab999fbe067bd55b5b5b5e517f7937f5c0a8bf3",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_aic3_fit.parquet": {
+      "sha256": "2321f21266afaffd9510add8133aab848b15a62382a77b495c44a1ebd4e85182",
+      "rows": 11430,
+      "row_keys_sha256": "5ac2f3226b5cc64cae86fa61bb9864d46fdafccb5fa368933c06f5ad797f9871",
+      "row_selection_sha256": "b465f4c08e5c8ae30faa62ff0ea15a0c59ec432577d726400e3853e7319f351d",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_without_aic3_dev.parquet": {
+      "sha256": "57c4dce45bda78032bee4eddcbb9f8355f44bd0527e192009cb018cc52c0bd59",
+      "rows": 2387,
+      "row_keys_sha256": "2b8429b7647c462d08431967f687cc1f60710d5fe4e2e8f9f86c7bed562daf64",
+      "row_selection_sha256": "61e6489d2d687f8c684ea84f14854c4321296bca32f7f73910825fce736743c3",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_all_fit.parquet": {
+      "sha256": "26203648f5320cbacb27c7c3391f25e749a0c128ff7facf9ee369d1c03018c67",
+      "rows": 11970,
+      "row_keys_sha256": "29a3e3d03e0fcf76da8870c151d0369d0dfa9bef5329bad3caf626d101b92433",
+      "row_selection_sha256": "44317d7734dab0bb3fc67b47f4cc9648da0d3c17c914a5acd24b2d16b6a2f8d5",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    },
+    "human_all_dev.parquet": {
+      "sha256": "9f1300168f6345cb260320d182f7a10b8ef2b31077f9d5da86ebd96580eccaf9",
+      "rows": 2447,
+      "row_keys_sha256": "50d4beba770e4c15e1631b0a413c86a33c0e52b71ca502fa5948b1e76d3fbd66",
+      "row_selection_sha256": "d992b2967d0b1bf0b54dc4f7d2600b010796f5d3288d4c11e6b2a5daf8aa3e0e",
+      "role": "design-released-human",
+      "role_decision": "SHIPPATH-human-production-role"
+    }
+  },
+  "coverage_selection": {
+    "path": "/var/tmp/shippath2/coverage_cf98_73a4971728924434976513c8cf4772b4.parquet",
+    "rows_in": 42021,
+    "rows_kept": 17600,
+    "row_selection_sha256": "4809a0e6d32750b048b7a21b458148fb9dd9b650aa6beb3b6b54efcfd027d045",
+    "targets_changed": 0,
+    "keys_sha256": "78bb771c987b068fabe55bd131c23c570032c807e72f6d2a7fed010f08465756",
+    "row_keys_sha256": "0ba54a70fc41cd4b38ca33e42232c3b147acae0b40bad1afb9260c5d22e8755d",
+    "mask": 152,
+    "families": [
+      "light",
+      "spatial",
+      "new"
+    ],
+    "pool_sha256": "6bf584ac70579bdf9a0242b7ccfd688ff0182cb5c75e35085ba71967207f8f5e",
+    "pool_formula_revision": 5
+  },
+  "binary_sha256": {
+    "zensim_mlp_train": "192ce944ac2e272e20f85f382c76073f61494da42dee453520260a08ba21ee4d",
+    "bake_dial_refit": "251a8209a96f9cbd4a489514f5b8e94018cef7f03247ad33d4448a318c0b9411",
+    "bake_block_profile": "042a75a997707013f132339a78cb9ec2ecf7425d62a968d23c06135b8aa6f1ce"
+  },
+  "checks": {
+    "python_full_recipe": 10,
+    "python_chunk1_regression": 7,
+    "rust_checkpoint": 2,
+    "rust_pack_regression": 1,
+    "clippy": "pass",
+    "fmt": "pass",
+    "script_lint": 814
+  }
+}

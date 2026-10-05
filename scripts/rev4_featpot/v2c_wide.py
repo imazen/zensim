@@ -103,7 +103,7 @@ KEY_COLUMNS = ["pair_key", "row_id", "ref_group", "pixels_identical"]
 def safe_path(path) -> Path:
     """Refuse any path with a `_sealed` component: the sealed label directory is never opened, listed or copied."""
     p = Path(path)
-    if any(part == "_sealed" or part.startswith("_sealed") for part in p.parts):
+    if any(part == "_sealed" or part.startswith("_sealed") for part in (*p.parts, *p.resolve().parts)):
         raise PermissionError(f"refusing a path under _sealed: {p}")
     return p
 
@@ -673,6 +673,27 @@ def write_keeplists(out: Path, extra_arms: dict[str, list[int]], width: int) -> 
     print(json.dumps({"keep_lists": str(path), "sha256": sha(path), "specs": len(lists)}))
 
 
+def admitted_bank(bank: Path, set_name: str, receipt: dict) -> dict:
+    manifest_path = bank_file(bank, set_name, "_MANIFEST.json")
+    manifest = json.loads(manifest_path.read_text())
+    check_manifest(manifest, set_name)
+    recorded = receipt["bank"][set_name]
+    if (sha(manifest_path) != recorded["manifest_sha256"]
+            or sha(bank_file(bank, set_name, "features.parquet")) != recorded["features_sha256"]
+            or sha(bank_file(bank, set_name, "keys.parquet")) != recorded["keys_sha256"]
+            or manifest["input_contract"] != "legacy-rgb8"):
+        raise ValueError(f"{set_name}: bank receipt/input contract changed")
+    # Every chunk must be bound to the same executable, arithmetic and IDs.
+    for chunk in manifest["chunks"]:
+        producer = chunk["extractor_manifest"]
+        if (producer["producer_binary_sha256"] != PROFILE.binary
+                or producer["feature_set_id"] != PROFILE.feature_set_id
+                or int(producer["formula_revision"]) != 5
+                or producer["populated_feature_ids"] != [i for lo, hi in PROFILE.requested for i in range(lo, hi)]):
+            raise ValueError(f"{set_name}: chunk producer binding changed")
+    return recorded
+
+
 def admit_teachers(bank: Path, source: Path, out: Path) -> None:
     """Fresh metadata-only admission view of frozen Rev5 TRAIN teacher legs.
 
@@ -697,23 +718,7 @@ def admit_teachers(bank: Path, source: Path, out: Path) -> None:
         raise ValueError("source is not the frozen real Rev5 main receipt")
     prepared = []
     for teacher, (set_name, _, _) in TEACHERS.items():
-        manifest_path = bank_file(bank, set_name, "_MANIFEST.json")
-        manifest = json.loads(manifest_path.read_text())
-        check_manifest(manifest, set_name)
-        recorded = receipt["bank"][set_name]
-        if (sha(manifest_path) != recorded["manifest_sha256"]
-                or sha(bank_file(bank, set_name, "features.parquet")) != recorded["features_sha256"]
-                or sha(bank_file(bank, set_name, "keys.parquet")) != recorded["keys_sha256"]
-                or manifest["input_contract"] != "legacy-rgb8"):
-            raise ValueError(f"{set_name}: bank receipt/input contract changed")
-        # Every chunk must be bound to the same executable, arithmetic and IDs.
-        for chunk in manifest["chunks"]:
-            producer = chunk["extractor_manifest"]
-            if (producer["producer_binary_sha256"] != PROFILE.binary
-                    or producer["feature_set_id"] != PROFILE.feature_set_id
-                    or int(producer["formula_revision"]) != 5
-                    or producer["populated_feature_ids"] != [i for lo, hi in PROFILE.requested for i in range(lo, hi)]):
-                raise ValueError(f"{set_name}: chunk producer binding changed")
+        recorded = admitted_bank(bank, set_name, receipt)
         for split in ("fit", "dev"):
             record = receipt["legs"][teacher][split]
             path = safe_path(source / record["rel"])
@@ -754,9 +759,130 @@ def admit_teachers(bank: Path, source: Path, out: Path) -> None:
     print(json.dumps({"admission_view": str(out), "files": len(files), "feature_values_changed": False}))
 
 
+def admit_recipe(bank: Path, source: Path, out: Path) -> None:
+    """Fresh full-recipe view; human scientific role stays explicitly pending.
+
+    Only frozen main/real teacher, design-human and their existing fit/dev
+    tables are copied. Row keys exclude target columns. No human targets or
+    feature cells are decoded; original Parquet bytes and ordering survive.
+    """
+    import copy
+    from v2_common import human_dev
+    from v2_teacher import row_keys_sha, selection_sha
+    from e15_coverage import admit_pool
+    bank, source, out = safe_path(bank), safe_path(source), safe_path(out)
+    if PROFILE.revision != 5 or PROFILE.era != "rev5_localwin" or out.exists():
+        raise ValueError("admit-recipe needs the Rev5 profile and a fresh output")
+    wide = source / "wide/main/real"
+    rp = wide / "receipt.json"
+    receipt = json.loads(rp.read_text())
+    frozen = json.loads((source / "wide/frozen.json").read_text())
+    if (frozen["wide_receipts"].get("main/real") != sha(rp) or receipt["schema"] != SCHEMA
+            or receipt["family"] != "main" or receipt["variant"] != "real" or not receipt["complete"]
+            or receipt["formula_revision"] != 5 or receipt["feature_set_id"] != PROFILE.feature_set_id
+            or receipt["era"] != PROFILE.era or receipt["extras"]):
+        raise ValueError("source is not the complete frozen real Rev5 recipe")
+    banks = {name: admitted_bank(bank, name, receipt) for name in
+             (*dict.fromkeys(n for source_name in SOURCE_ORDER for n in SOURCES[source_name]),
+              *(v[0] for v in TEACHERS.values()))}
+    frames, source_keys = {}, {}
+    for name in (*SOURCE_ORDER, *TEACHERS):
+        splits = ("full",) if name in SOURCES else ("fit", "dev")
+        for split in splits:
+            record = receipt["legs"][name][split]
+            kp = wide / (f"{name}.keys.parquet" if split == "full" else f"{name}_{split}.keys.parquet")
+            want = receipt["legs"][name]["keys_sha256"] if split == "full" else record["keys_sha256"]
+            if sha(kp) != want:
+                raise ValueError(f"{kp}: frozen row keys changed")
+            # Target column is deliberately not read, including human keys.
+            frames[name, split] = pq.read_table(kp, columns=META[:-1]).to_pandas()
+            source_keys[name, split] = want
+    if sha(source / "wide/keep_lists.json") != frozen["keep_lists_sha256"]:
+        raise ValueError("source keep lists changed after freeze")
+    prepared = []
+    for name, leg in receipt["legs"].items():
+        if name not in (*SOURCE_ORDER, *TEACHERS, "human_all", *(f"human_without_{h}" for h in SOURCE_ORDER)):
+            raise ValueError(f"{name}: not a registered recipe leg")
+        splits = ("full",) if name in SOURCES else ("fit", "dev")
+        for split in splits:
+            rec = leg[split]
+            path = safe_path(source / rec["rel"])
+            expected = wide / (f"{name}.parquet" if split == "full" else f"{name}_{split}.parquet")
+            if path.resolve() != expected.resolve():
+                raise ValueError("recipe receipt points outside registered real tables")
+            sp = Path(f"{path}.manifest.json")
+            stored = json.loads(sp.read_text())
+            if (sha(path) != rec["sha256"] or sha(sp) != rec["manifest_sha256"]
+                    or stored["source_bank_feature_set_id"] != PROFILE.feature_set_id
+                    or stored["formula_revision"] != 5):
+                raise ValueError(f"{path}: recipe table/sidecar changed")
+            human = name not in TEACHERS
+            members = ([name] if name in SOURCES or name in TEACHERS else
+                       [h for h in SOURCE_ORDER if name != f"human_without_{h}"])
+            parts, selections = [], []
+            for member in members:
+                source_split = split if member in TEACHERS else "full"
+                frame = frames[member, source_split]
+                mask = (np.array([human_dev(r) for r in frame.ref_basename]) == (split == "dev")
+                        if name.startswith("human_") else np.ones(len(frame), dtype=bool))
+                parts.append(frame.loc[mask])
+                selections.append({"source": member, "split": source_split,
+                                   "source_keys_sha256": source_keys[member, source_split],
+                                   "row_indices_sha256": selection_sha(np.flatnonzero(mask)), "rows": int(mask.sum())})
+            keys = pa.Table.from_pandas(pd.concat(parts, ignore_index=True), preserve_index=False)
+            refs = pq.read_table(path, columns=["ref_basename"])["ref_basename"].to_pylist()
+            if refs != keys["ref_basename"].to_pylist() or len(refs) != rec["rows"]:
+                raise ValueError(f"{name}/{split}: reconstructed key selection/order differs")
+            declarations = {**stored, "feature_set_id": PROFILE.feature_set_id,
+                "decoder_era": f"legacy-rgb8/extract_features_372col@sha256:{PROFILE.binary}",
+                "extractor_build_commit": PROFILE.build, "table_sha256": rec["sha256"],
+                "source_table_sha256": rec["sha256"], "source_manifest_sha256": rec["manifest_sha256"],
+                "source_receipt_sha256": sha(rp), "bank_manifest_sha256":
+                    {m: banks[m]["manifest_sha256"] for member in members for m in
+                     (SOURCES[member] if member in SOURCES else (TEACHERS[member][0],))},
+                "row_keys_sha256": row_keys_sha(keys), "row_selection": selections,
+                "row_selection_sha256": hashlib.sha256(json.dumps(selections, sort_keys=True,
+                    separators=(",", ":")).encode()).hexdigest(),
+                "data_role": "design-released-human" if human else "TRAIN oracle teacher",
+                "data_role_decision_required": "SHIPPATH-human-production-role" if human else None,
+                "human_sources": members if human else [], "feature_values_changed": False}
+            prepared.append((name, split, path, rec, keys, declarations))
+    # Coverage validates before copying its frozen pool. Failure never edits the source.
+    admit_pool(source / "e15", out / "e15")
+    dest_wide = out / "wide/main/real"
+    dest_wide.mkdir(parents=True)
+    new_receipt = copy.deepcopy(receipt)
+    for name, split, path, rec, keys, declarations in prepared:
+        dest = dest_wide / path.name
+        shutil.copyfile(path, dest)
+        if sha(dest) != rec["sha256"]:
+            raise ValueError("recipe byte-preserving copy failed")
+        kp = dest.with_suffix(".keys.parquet")
+        pq.write_table(keys, kp, compression="zstd")
+        declarations["keys_sha256"] = sha(kp)
+        sp = Path(f"{dest}.manifest.json")
+        sp.write_text(json.dumps(declarations, indent=1) + "\n")
+        updated = {**rec, "manifest_sha256": sha(sp), "keys_sha256": sha(kp)}
+        new_receipt["legs"][name][split] = updated
+        if split == "full":
+            new_receipt["legs"][name]["keys_sha256"] = sha(kp)
+    new_receipt["admission_view"] = {"schema": "rev5-recipe-admission-v1", "source_root": str(source),
+        "source_receipt_sha256": sha(rp), "feature_values_changed": False,
+        "human_role_decision": "PENDING: SHIPPATH-human-production-role", "table_code": code_identity()}
+    dest_rp = dest_wide / "receipt.json"
+    dest_rp.write_text(json.dumps(new_receipt, indent=1) + "\n")
+    shutil.copyfile(source / "wide/keep_lists.json", out / "wide/keep_lists.json")
+    (out / "wide/frozen.json").write_text(json.dumps({"schema": "rev5-recipe-admission-freeze-v1",
+        "wide_receipts": {"main/real": sha(dest_rp)}, "keep_lists_sha256": sha(out / "wide/keep_lists.json"),
+        "auxiliary_files": {str(p.relative_to(out)): sha(p) for p in (out / "e15").iterdir() if p.is_file()},
+        "admission_view": new_receipt["admission_view"]}, indent=1) + "\n")
+    print(json.dumps({"recipe_admission": str(out), "tables": len(prepared), "feature_values_changed": False,
+                      "human_role_decision": "PENDING"}))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers"])
+    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers", "admit-recipe"])
     ap.add_argument("--source-root", type=Path, help="admit-teachers: immutable frozen Rev5 instrument root")
     ap.add_argument("--bank", type=Path, default=CANON_BANK)
     ap.add_argument("--out", "--root", dest="out", type=Path, default=OUT_DEFAULT)
@@ -783,10 +909,10 @@ def main() -> None:
     v2_common.V2 = args.out  # receipts hold root-relative table paths (table_path); the root is --out
     extras = parse_extras(args.extra)
     fams = args.family or list(FAMILIES)
-    if args.action == "admit-teachers":
+    if args.action in ("admit-teachers", "admit-recipe"):
         if args.source_root is None:
             ap.error("admit-teachers requires --source-root")
-        admit_teachers(args.bank, args.source_root, args.out)
+        (admit_recipe if args.action == "admit-recipe" else admit_teachers)(args.bank, args.source_root, args.out)
     elif args.action == "build":
         build(args.bank, args.out, args.legs, fams, args.variant or list(VARIANTS), extras, args.peer_dir)
     elif args.action == "confirm":

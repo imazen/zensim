@@ -2283,9 +2283,10 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         &md_nospline,
     );
 
-    // Caller width never changes — pruning is invisible to callers, which
-    // is the entire contract. Read the anchor at this width both times.
-    let n_in = model.caller_input_width();
+    // Anchor tables are keyed by canonical feature ID. Dense bakes carry
+    // fewer wire inputs but may read a higher ID; load through that ID for
+    // both packing/calibration arms (also the optional verification table).
+    let n_in = identity_row_width(&model);
     let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n_in, &a.target_col);
     let reference_preds = forward_scored_6dec(&reference_bytes, &feats)?;
 
@@ -5759,6 +5760,97 @@ mod tests {
             mapped_top > 90.0,
             "packed top output should map near the top target (got {mapped_top:.2})"
         );
+    }
+
+    #[test]
+    fn pack_refits_declared_ids_from_identity_columns_with_nan_holes() {
+        use arrow::array::ArrayRef;
+        use arrow::datatypes::{DataType, Field, Schema};
+        use parquet::arrow::ArrowWriter;
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("zensim-pack-declared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let anchor = dir.join("anchor.parquet");
+        let ts: Vec<f64> = (0..24).map(|i| i as f64 / 24.0).collect();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("human_score", DataType::Float64, false),
+            Field::new("f0", DataType::Float64, false),
+            Field::new("f1", DataType::Float64, false),
+            Field::new("f2", DataType::Float64, false),
+        ]));
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(Float64Array::from(
+                ts.iter().map(|x| x * 100.0).collect::<Vec<_>>(),
+            )),
+            Arc::new(Float64Array::from(ts.clone())),
+            Arc::new(Float64Array::from(vec![f64::NAN; ts.len()])),
+            Arc::new(Float64Array::from(ts)),
+        ];
+        let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+        let mut writer =
+            ArrowWriter::try_new(File::create(&anchor).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        let input = dir.join("dense.bin");
+        let recipe = serde_json::json!({"schema_hash":0,"scaler_mean":[0.,0.],"scaler_scale":[1.,1.],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"0 2"},
+                        {"key":"zentrain.formula_revision","type":"utf8","text":"5"},
+                        {"key":"zentrain.repro","type":"utf8","text":"synthetic-provenance-sentinel"}],
+            "layers":[{"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f32",
+                       "weights":[0.25,0.75],"biases":[0.0]}]});
+        std::fs::write(
+            &input,
+            zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap(),
+        )
+        .unwrap();
+        let args = PackArgs {
+            input,
+            out: dir.join("packed.bin"),
+            dtype: "f16".into(),
+            zerobias_bulk: Some(0.0),
+            protect_last: false,
+            neg_tail: true,
+            no_neg_tail: false,
+            anchor,
+            target_col: "human_score".into(),
+            feat_prefix: "f".into(),
+            verify: "none".into(),
+            verify_col: "human_score".into(),
+            verify_scale: 1.0,
+            expect_sha256: None,
+            no_prune: false,
+            no_prune_constants: false,
+            prune_identity_tol: 1e-4,
+        };
+        cmd_pack(&args).unwrap(); // Before the fix, the f2 declaration fails on two loaded columns.
+        let bytes = std::fs::read(&args.out).unwrap();
+        let model = Model::from_bytes(&bytes).unwrap();
+        assert_eq!(model.n_inputs(), 2);
+        assert_eq!(zensim::declared_feature_ids(&model), Some(vec![0, 2]));
+        assert_eq!(
+            model
+                .metadata()
+                .get_utf8("zentrain.formula_revision")
+                .unwrap(),
+            "5"
+        );
+        assert_eq!(
+            model.metadata().get_utf8("zentrain.repro").unwrap(),
+            "synthetic-provenance-sentinel"
+        );
+        let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+        assert!(
+            scorer
+                .score_features(&[0.5, f64::NAN, 0.5], 16, 16, None)
+                .unwrap()
+                .is_finite()
+        );
+        assert!(
+            scorer
+                .score_features(&[0.5, f64::NAN], 16, 16, None)
+                .is_err()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -4978,3 +4978,28 @@ Source hashes, exact commands, tests and all remaining gates are indexed in
 [SHIPPATH worklog](../benchmarks/shippath_WORKLOG.md). The immutable research
 receipts, provenance limitations and the Rev5 spec's 03:25 UTC correction
 remain authoritative for their original artifacts.
+
+## 2026-10-05 — SHIPPATH2 full recipe provenance view and strict export plumbing
+
+Artifact authority `/var/tmp/shippath2/recipe-complete`, from frozen
+`/var/tmp/rev4-featpot/v2c5` and `/var/tmp/rev5-featbank`. Four oracle teacher,
+five design-human source and twelve human union/LODO fit/dev Parquets are copied
+byte-identically. Generated label-free keys bind original key-file hashes,
+ordered reference-disjoint development selections and row-key hashes. Human
+role remains pending (SHIPPATH_decisions.md); preparing declarations does not
+change scientific roles or create independent validation.
+
+E15 pool remains42021 rows, SHA `6bf584ac70579bdf9a0242b7ccfd688ff0182cb5c75e35085ba71967207f8f5e`;
+keys remain SHA `bc225a115ab8505738a5c17ced6d4fc592a9a38ac6d9ec98661f4e8f0898addf`.
+New declaration binds actual extractor c649e810…/legacy-rgb8, Rev5 producer
+basic+peaks+v2@w1825/rev5_localwin#36c3f3af, original selection-file/row-index/key
+hashes and preserved derivation metadata. cf98 selects 17,600 existing rows with
+zero target changes; original pool and all frozen sidecars remain unchanged.
+
+A three-epoch TRAIN-only export smoke exercises the existing Rust trainer and
+strict Python selection owner without historical replay. Epoch dumps preserve
+revision/producer/repro and exact epoch-prefix sampler coverage. Canonical pack
+needed an ID-indexed anchor width fix for declared dense inputs; a NaN-hole
+regression and packed inference check cover it. No public API, arithmetic,
+production weight/default or scientific qualification changed. Evidence/report:
+`benchmarks/shippath2_WORKLOG.md`, `~/tmp/zensim-paper/rev4/SHIPPATH2_DONE.md`.

@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -37,6 +38,77 @@ SEEDS, HEAD, BASE = range(3), "N", "set:v2+basic@h32:H128"
 
 def work() -> Path:
     return V2 / "e15"
+
+
+def pool_declaration(source: Path, stored: dict, revision: int) -> dict:
+    """Bind an ordinal pool to its actual extractor and ordered label-free keys."""
+    from v2_teacher import row_keys_sha, selection_sha
+    from v2c_wide import safe_path
+    source = safe_path(source)
+    x = e14.extractor(revision)
+    producer_path = source / "extract/features.csv.manifest.json"
+    producer = json.loads(producer_path.read_text())
+    if (producer["producer_binary_sha256"] != x["sha"] or producer["era_label"] != x["era"]
+            or int(producer["formula_revision"]) != revision or e14.sha256(x["bin"]) != x["sha"]
+            or (x["requested"] is not None and producer["populated_feature_ids"] !=
+                [i for lo, hi in x["requested"] for i in range(lo, hi)])):
+        raise ValueError("coverage extractor contract changed")
+    keys_path = source / "coverage_pool.keys.parquet"
+    keys = pq.read_table(keys_path)
+    table = source / "coverage_pool.parquet"
+    refs = pq.read_table(table, columns=["ref_basename"])["ref_basename"].to_pylist()
+    if refs != keys["ladder"].to_pylist():
+        raise ValueError("coverage pool/key row order differs")
+    selection_path = source / "selection.parquet"
+    key_columns = ["source_filename", "type", "family", "severity_level", "severity", "sign"]
+    selection = pq.read_table(selection_path, columns=key_columns).to_pandas()
+    index = pd.MultiIndex.from_frame(selection)
+    if not index.is_unique:
+        raise ValueError("coverage selection row identities are not unique")
+    indices = index.get_indexer(pd.MultiIndex.from_frame(keys.select(key_columns).to_pandas()))
+    if (indices < 0).any() or (np.diff(indices) <= 0).any():
+        raise ValueError("coverage keys do not preserve selection row identity/order")
+    return {**stored, "feature_set_id": producer["feature_set_id"], "formula_revision": revision,
+            "decoder_era": f"legacy-rgb8/extract_features_372col@sha256:{x['sha']}",
+            "extractor_build_commit": x["build"], "extractor_manifest_sha256": e14.sha256(producer_path),
+            "selection_file_sha256": e14.sha256(selection_path),
+            "table_sha256": e14.sha256(table), "keys_sha256": e14.sha256(keys_path),
+            "row_keys_sha256": row_keys_sha(keys), "row_selection_sha256": selection_sha(indices),
+            "data_role": "TRAIN ordinal KADIS source_id%10<8; no human labels",
+            "row_selection_rule": "ordered indices into selection.parquet; original identity/single-rung exclusions retained"}
+
+
+def admit_pool(source: Path, out: Path) -> None:
+    """Fresh byte-identical view of the pinned Rev5 pool; never writes the frozen source."""
+    from v2_teacher import POOL_SHA_REV5, POOL_KEYS_SHA
+    from v2c_wide import safe_path
+    source, out = safe_path(source), safe_path(out)
+    if out.exists():
+        raise ValueError("coverage admission output must be fresh")
+    pool, keys = source / "coverage_pool.parquet", source / "coverage_pool.keys.parquet"
+    if e14.sha256(pool) != POOL_SHA_REV5 or e14.sha256(keys) != POOL_KEYS_SHA:
+        raise ValueError("coverage pool/keys are not the pinned Rev5 inputs")
+    stored_path = Path(f"{pool}.manifest.json")
+    stored = json.loads(stored_path.read_text())
+    receipt_path = source / "coverage_pool.manifest.json"
+    receipt = json.loads(receipt_path.read_text())
+    x = e14.extractor(5)
+    if (int(stored["formula_revision"]) != 5 or stored["source_bank_feature_set_id"] !=
+            json.loads((source / "extract/features.csv.manifest.json").read_text())["feature_set_id"]
+            or receipt["sha256"] != POOL_SHA_REV5 or receipt["keys_sha256"] != POOL_KEYS_SHA
+            or receipt["extractor_sha256"] != x["sha"] or receipt["era"] != x["era"]
+            or receipt["formula_revision"] != 5):
+        raise ValueError("coverage receipt/producer changed")
+    declaration = pool_declaration(source, stored, 5)
+    declaration.update({"source_manifest_sha256": e14.sha256(stored_path),
+                        "source_receipt_sha256": e14.sha256(receipt_path), "feature_values_changed": False})
+    out.mkdir(parents=True)
+    for path in (pool, keys):
+        shutil.copyfile(path, out / path.name)
+        if e14.sha256(out / path.name) != e14.sha256(path):
+            raise ValueError("coverage byte-preserving copy failed")
+    Path(f"{out / pool.name}.manifest.json").write_text(json.dumps(declaration, indent=1) + "\n")
+    print(json.dumps({"coverage_admission": str(out), "rows": receipt["rows"], "feature_values_changed": False}))
 
 
 def family_of(t) -> str:
@@ -198,15 +270,16 @@ def cmd_table(args) -> int:
     cols.update({f"f{i}": nan for i in range(W, wide)})
     out = work() / "coverage_pool.parquet"
     pq.write_table(pa.table(cols), out, compression="zstd", use_byte_stream_split=[f"f{i}" for i in range(wide)])
-    Path(f"{out}.manifest.json").write_text(json.dumps({
+    stored = {
         "source_bank_feature_set_id": fsid,
         "composite": (f"Rev4 POTENTIAL E15 coverage pool (ordinal ladders; f0-f1824 Rev4 bank arithmetic; f1825-f{wide - 1} NaN, "
                       "not extracted); diagnostic only" if X["revision"] == 4 else
                       f"Rev5 POTENTIAL E15 coverage pool (ordinal ladders; basic+peaks+v2 at f0-f227, f372-f719, Rev5 arithmetic; "
-                      f"every other slot to f{wide - 1} NaN); diagnostic only"), "formula_revision": X["revision"]}, indent=1) + "\n")
+                      f"every other slot to f{wide - 1} NaN); diagnostic only"), "formula_revision": X["revision"]}
     keys = sel.loc[keep, ["source_filename", "type", "family", "severity_level", "severity", "sign"]].copy()
     keys.insert(0, "ladder", key[keep])
     keys.to_parquet(work() / "coverage_pool.keys.parquet")
+    Path(f"{out}.manifest.json").write_text(json.dumps(pool_declaration(work(), stored, X["revision"]), indent=1) + "\n")
     man = {"schema": "rev4-featpot-e15-coverage-pool-v1", "label": "POTENTIAL — ceiling, not a model score",
            "rows": int(keep.sum()), "ladders": int(len(set(key[keep]))), "dropped_identical": int(ident.sum()),
            "dropped_single_rung": int((~ident).sum() - keep.sum()), "width": W, "nan_columns": f"f{W}-f{wide - 1}",
@@ -377,8 +450,9 @@ def cmd_score19(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["select", "generate", "extract", "table", "grid", "score", "grid16", "score16", "grid18",
+    ap.add_argument("cmd", choices=["admit", "select", "generate", "extract", "table", "grid", "score", "grid16", "score16", "grid18",
                                     "score18", "grid19", "score19"])
+    ap.add_argument("--source-root", type=Path, help="admit: immutable instrument root containing e15")
     ap.add_argument("--root")
     ap.add_argument("--out")
     ap.add_argument("--weight", type=float, default=4.0)
@@ -387,6 +461,11 @@ def main() -> int:
     ap.add_argument("--monotonicity", action="store_true")
     ap.add_argument("--revision", type=int, choices=[4, 5], default=4, help="extract/table: extractor contract (e14.extractor)")
     args = ap.parse_args()
+    if args.cmd == "admit":
+        if args.source_root is None or args.out is None:
+            ap.error("admit requires --source-root and --out (fresh e15 directory)")
+        admit_pool(args.source_root / "e15", Path(args.out))
+        return 0
     return {"select": cmd_select, "generate": cmd_generate, "extract": cmd_extract, "table": cmd_table, "grid": cmd_grid,
             "score": cmd_score, "grid16": cmd_grid16, "score16": cmd_score16, "grid18": cmd_grid18,
             "score18": cmd_score18, "grid19": cmd_grid19, "score19": cmd_score19}[args.cmd](args)

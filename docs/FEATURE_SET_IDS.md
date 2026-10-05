@@ -513,3 +513,63 @@ admit human/confirmation/permuted tables, the E15 coverage pool, HDR, or an
 integrity companion. Table provenance and scientific split authorization are
 separate requirements. See [SHIPPATH worklog](../benchmarks/shippath_WORKLOG.md)
 for the one-epoch smoke and the remaining gates.
+
+### Full Rev5 recipe admission and strict epoch export — October 5, 2026
+
+`v2c_wide.py admit-recipe` extends the bounded fresh-view owner to the complete
+frozen `main/real` recipe: four oracle teacher tables, five design source tables,
+`human_all` and five `human_without_*` fit/dev pairs, plus the pinned E15 pool.
+Use the same explicit Rev5 bank/producer/binary/build options as `admit-teachers`,
+with a fresh `--out`. Originals stay immutable. Each recipe Parquet is copied
+byte-identically; label-free keys are reconstructed from frozen source keys and
+the existing SHA(reference) mod5 development rule, with original source order.
+Human targets and feature cells are not decoded to construct these views.
+
+Every sidecar declares `feature_set_id`, revision and executable-bound decoder
+contract, table/source/receipt hashes, ordered row-key hash and row-selection
+hash. Ordered key identity is compact UTF-8 JSON with column names and ordered
+string values; row indices hash as little-endian u64. Human union selection
+hashes bind ordered per-source index hashes and frozen key-file hashes. Coverage
+binds indices into `selection.parquet`, the original pool/key hashes and actual
+extractor receipt. `e15_coverage.py admit --source-root ROOT --out FRESH_E15_DIR`
+exposes the same pool-only operation. Newly built pools also emit this metadata.
+`v2_teacher.write_curated/coverage_leg` retain declarations and source lineage;
+filtered coverage carries its selected key file, family/mask, ordered pool-row
+index hash and unchanged-target count. Existing target-clipping research rules
+remain explicit in `targets_changed`; cf98 changes no target or feature value.
+
+The new `rev5-recipe-admission-freeze-v1` format pins training receipts, keep
+lists and pool/key/sidecar files. `load_frozen(training_only=True)` accepts it;
+the ordinary historical freeze path retains its confirmation requirements.
+This format contains no confirmation payload. It is a provenance view, not
+scientific role admission. See `benchmarks/SHIPPATH_decisions.md`: human sidecars
+remain `design-released-human` with `SHIPPATH-human-production-role` pending.
+
+Both existing wrappers accept `--strict-admission --train-only --dest FRESH_DIR`
+(outside the immutable input root), plus `--data-role-decision JSON` after the
+coordinator resolves the request. They validate table bytes, row keys/order,
+declarations and human decision binding before training. Only then is replay
+removed; Rust admission still enforces registered slots, revisions and decoder
+consistency. Historical default argv retains the same replay label and order.
+Strict runs cannot reuse a historical result or silently execute assessment.
+
+For the exact by_v2fy recipe use
+`--spec sel:59f0bbc2f290@h32:H128:cv16:cf98 --head N --columns <the 420 registered IDs>`
+and the registered full/LODO seed index (LODO also requires `--heldout SOURCE`).
+Defaults remain 120 epochs × 50,000 draws, log interval 17 and selected epoch 119;
+no full human fit runs until its coordinator decision is recorded. Strict
+metadata checks are not a model-quality certificate. Strict defaults select
+this checkout's `target/debug/zensim_mlp_train`, rather than the historical fit-cell
+trainer; an explicit `REV4_V2_BIN_DIR` override retains precedence. Build/record
+current binaries before using that override.
+
+`zensim_mlp_train` now copies revision/producer/optional declared sampling and
+embedded admission/reproduction into epoch dumps. Every dump records its own
+zero-based epoch, requested budget and sampler prefix (`epoch+1`), through the
+existing sampler owner. Missing optional sampling/coverage stays missing. The
+canonical densifier preserves these keys; the packer reads ID-indexed anchor
+columns through the highest declared ID rather than dense input count, then
+quantizes before TRAIN spline calibration. A dense 420-input model reaching f719
+therefore needs 720 identity-indexed feature positions. No serving/public API or
+feature arithmetic changed. `benchmarks/shippath2_WORKLOG.md` records the bounded
+TRAIN-only smoke and the remaining scientific/product limitations.

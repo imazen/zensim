@@ -1263,3 +1263,25 @@ This is software plumbing validation: it does not reproduce cv16:cf98, change
 design populations into production TRAIN, assess a holdout, select a model,
 or establish production qualification. Receipt and commands:
 [SHIPPATH worklog](../benchmarks/shippath_WORKLOG.md).
+
+## Exposure ledger — 2026-10-05: SHIPPATH2 recipe metadata views and TRAIN export smoke
+
+Coordinator authorized complete metadata-only fresh copies of frozen Rev5 v2c5
+main/real human and oracle teacher recipe tables, plus the E15 ordinal pool.
+All 21 original recipe Parquets and the pool are byte-preserved. Human key reads
+project only pair_key/source_row_id/ref_basename/member_set; table reads project
+only reference names. Human target columns are not decoded, fitted, assessed or
+selected on. Five-source design release/exposure remains the September 30 ruling
+above; no production TRAIN reclassification is made. The explicit decision
+request is `benchmarks/SHIPPATH_decisions.md` (also delivered with the report).
+Both strict wrapper entry points were checked to refuse the actual pending
+human role before trainer invocation; no real approved decision was created.
+
+The registered local plumbing smoke uses only SafeSyn and CID22 oracle TRAIN
+fit/internal-development, plus 17,600 cf98 rungs of the existing KADIS TRAIN ordinal
+pool (light/spatial/new). H128/N/420 IDs, init 1101/sample 101, 3 epochs × 500 draws;
+last-epoch export, canonical densify and f16 pack with explicit CID22 oracle TRAIN
+fit spline anchor, then oracle TRAIN-development packed inference. No human fit,
+full recipe/seed selection, confirmation/T0/secret label, EVAL, protected read,
+fleet, publishing or scientific quality claim. Coverage-family filtering does
+not alter feature or ordinal target values. Frozen source roots stay immutable.

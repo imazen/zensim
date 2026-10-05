@@ -113,7 +113,7 @@ def table_path(record: dict) -> Path:
 FROZEN_SCHEMA = "rev4-featpot-v2c-frozen-v1"
 
 
-def load_frozen(root: Path | None = None) -> tuple[dict, str]:
+def load_frozen(root: Path | None = None, *, training_only: bool = False) -> tuple[dict, str]:
     """(record, sha256) of `<root>/wide/frozen.json` after re-hashing every file it pins (confirm receipt, wide receipts,
     keep lists, extra arms). Raises if the canon tables changed after the freeze or no freeze exists."""
     root = V2 if root is None else root
@@ -121,6 +121,16 @@ def load_frozen(root: Path | None = None) -> tuple[dict, str]:
     if not path.is_file():
         raise ValueError(f"{path}: the canon root is not frozen (run `v2c_wide.py freeze`)")
     record = json.loads(path.read_text())
+    if training_only and record.get("schema") == "rev5-recipe-admission-freeze-v1":
+        pins = {**{f"wide/{k}/receipt.json": v for k, v in record["wide_receipts"].items()},
+                "wide/keep_lists.json": record["keep_lists_sha256"], **record["auxiliary_files"]}
+        for rel, want in pins.items():
+            path = Path(rel)
+            if path.is_absolute() or ".." in path.parts or any(p.startswith("_sealed") for p in path.parts):
+                raise ValueError("admission freeze contains an unsafe relative path")
+            if sha(Path(root) / path) != want:
+                raise ValueError(f"{rel}: changed after the admission freeze")
+        return record, sha(Path(root) / "wide/frozen.json")
     if record.get("schema") != FROZEN_SCHEMA:
         raise ValueError(f"{path}: unexpected schema")
     wide = Path(root) / "wide"

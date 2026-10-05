@@ -23,7 +23,7 @@ import numpy as np
 
 from v2_common import (load_frozen, recipe_of, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
-from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select
+from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select, strict_training_groups
 
 CONFIRM_SCHEMA = "rev4-featpot-v2c-confirm-v1"
 RESULT_SCHEMA = "rev4-featpot-v2c-confirm-cell-v1"
@@ -52,9 +52,22 @@ def main() -> None:
     ap.add_argument("--head", choices=HEADS, required=True)
     ap.add_argument("--seed-index", type=int, choices=range(10), required=True)
     ap.add_argument("--dest", type=Path, help="write here instead of <root>/confirm/cells/... (determinism checks)")
+    ap.add_argument("--strict-admission", action="store_true", help="strict Rev5 table admission; no historical replay")
+    ap.add_argument("--data-role-decision", type=Path, help="coordinator's bound human-role decision JSON")
+    ap.add_argument("--train-only", action="store_true", help="stop after selected bake; no confirmatory predictions")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
     args = ap.parse_args()
+    if args.strict_admission and (args.dest is None or not args.train_only):
+        ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
+    if args.strict_admission and (args.dest.resolve() == V2.resolve() or V2.resolve() in args.dest.resolve().parents):
+        ap.error("strict --dest must be outside the immutable admission root")
+    if args.strict_admission:
+        from v2c_wide import safe_path
+        safe_path(V2)
+        safe_path(args.dest)
+        if args.dest.exists() and any(args.dest.iterdir()):
+            raise ValueError("strict route requires a fresh destination; cannot reuse a historical result")
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
@@ -70,14 +83,15 @@ def main() -> None:
     if (receipt["schema"] != WIDE_SCHEMAS[1] or receipt["family"] != family or receipt["variant"] != variant
             or width < WIDTH or not receipt.get("complete")):
         raise ValueError("wide receipt identity mismatch or incomplete (confirmatory fits need the canon tables, all legs)")
-    frozen, frozen_sha = load_frozen(V2)  # refuses an unfrozen root or any receipt changed since the freeze
+    frozen, frozen_sha = load_frozen(V2, training_only=args.strict_admission and args.train_only)  # refuses an unfrozen root or any receipt changed since the freeze
     if frozen["wide_receipts"].get(f"{family}/{variant}") != sha(receipt_path):
         raise ValueError("wide receipt is not the frozen one")
-    confirm_path = V2 / "wide" / "confirm" / "receipt.json"
-    confirm = json.loads(confirm_path.read_text())
-    if confirm["schema"] != CONFIRM_SCHEMA or confirm["width"] != width or confirm["feature_set_id"] != receipt["feature_set_id"]:
-        raise ValueError("confirmatory receipt does not match the wide receipt (schema, width or feature_set_id)")
-    tables = confirm_tables(family, variant, confirm)
+    if not args.train_only:
+        confirm_path = V2 / "wide" / "confirm" / "receipt.json"
+        confirm = json.loads(confirm_path.read_text())
+        if confirm["schema"] != CONFIRM_SCHEMA or confirm["width"] != width or confirm["feature_set_id"] != receipt["feature_set_id"]:
+            raise ValueError("confirmatory receipt does not match the wide receipt (schema, width or feature_set_id)")
+        tables = confirm_tables(family, variant, confirm)
     dest = args.dest or cell_dir(args.spec, args.head, args.seed_index)
     if (dest / "result.json").is_file():
         print(json.dumps({"skip": str(dest / "result.json")}))
@@ -97,7 +111,8 @@ def main() -> None:
         import v2_teacher
         if max(keep) >= v2_teacher.ORDINAL_WIDTH:
             raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
-        cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest))
+        cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest),
+                                                       admitted_root=V2 if args.strict_admission else None)
         curated_extra = cpath
         weights["coverage"] = acceptance_weight(recipe["coverage_weight"], refs_of(cpath))
         groups.append(("coverage", cpath, weights["coverage"], 0, "withinref,rank"))
@@ -110,12 +125,24 @@ def main() -> None:
     init_seed, sample_seed = confirm_seeds(args.seed_index)
     try:
         from v2_common import refuse_nonfinite_kept
+        if args.strict_admission:
+            strict_training_groups(groups, args.data_role_decision)
         refuse_nonfinite_kept([g[1] for g in groups], keep)  # Rev5 tables mark absent slots NaN
-        bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
+        bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
+                                                  strict_admission=args.strict_admission,
+                                                  data_role_decision=args.data_role_decision)
     finally:
         if curated_extra is not None:
             curated_extra.unlink(missing_ok=True)
+            Path(f"{curated_extra}.manifest.json").unlink(missing_ok=True)
+            curated_extra.with_suffix(".keys.parquet").unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
+    if args.train_only:
+        (dest / "result.json").write_text(json.dumps({"training_only": True, "selection": selection,
+            "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
+            "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
+            "train_weights": weights, "coverage_leg": coverage_record}) + "\n")
+        return
     predictions = {}
     for name, table in tables.items():
         path = table_path(table)

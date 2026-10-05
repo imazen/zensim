@@ -23,7 +23,7 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import panel_batch  # noqa: E402
 from v2_common import (EPOCH_RULE, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, N_SEEDS, NOMINAL_WEIGHT, PAIRS_PER_EPOCH, arm_columns, block_spec, recipe_of, split_weight,
-                       PANEL, REPLAY, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
+                       PANEL, REPLAY, REPO, SOURCE_ORDER, TEACHERS, TRAINER, V2, WIDTH, acceptance_weight,
                        parse_spec, seeds, selection_id, sha, table_path)
 
 WIDE_SCHEMAS = ("rev4-featpot-v2-wide-v2", "rev4-featpot-v2c-wide-v1")
@@ -72,10 +72,17 @@ def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
 
 
 def train_command(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
-                  out: Path, recipe: dict | None = None) -> list[str]:
+                  out: Path, recipe: dict | None = None, *, strict_admission: bool = False,
+                  data_role_decision: Path | None = None) -> list[str]:
     """The trainer argv of one v2 cell; `groups` = (name, path, train_weight, val_weight, mode). Shared with
     v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
-    cmd = [str(TRAINER)]
+    if strict_admission:
+        strict_training_groups(groups, data_role_decision)
+    # Strict defaults use this checkout's trainer, not the pinned historical
+    # fit-cell binary. An explicit existing binary-directory override wins.
+    trainer = (Path(os.environ.get("REV4_V2_BIN_DIR", str(REPO / "target/debug"))) / "zensim_mlp_train"
+               if strict_admission else TRAINER)
+    cmd = [str(trainer)]
     for name, path, tw, vw, mode in groups:
         cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
     recipe = recipe or {}
@@ -84,8 +91,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
             "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),
             "--pair-sampling", "uniform", "--max-features", str(width), "--keep-features", str(keep_file),
             "--mse-weight", "1", "--early-stop-patience", "0", "--val-policy", "mean",
-            "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", str(LOG_EVERY), "--no-auto-eval",
-            "--historical-replay", REPLAY, "--out", str(out)]
+            "--val-aggregate", "geomean3", "--out-dtype", "f32", "--log-every", str(LOG_EVERY), "--no-auto-eval"]
+    if not strict_admission:
+        cmd += ["--historical-replay", REPLAY]
+    cmd += ["--out", str(out)]
     if "group_l1" in recipe:  # design log E8: proximal group lasso on layer-1 input rows
         cmd += ["--group-l1", repr(recipe["group_l1"])]
     if head == "N":
@@ -93,20 +102,73 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     return cmd
 
 
+def strict_training_groups(groups: list, data_role_decision: Path | None = None) -> list[dict]:
+    """Require declared full provenance and a separately supplied human-role decision.
+
+    This checks metadata/label-free keys before returning trainer argv. The
+    Rust trainer remains the authoritative registered-slot/revision admission
+    owner and refuses incompatibilities without historical replay.
+    """
+    from v2c_wide import safe_path
+    from v2_teacher import key_path, row_keys_sha
+    decision = None
+    if data_role_decision is not None:
+        decision = json.loads(safe_path(data_role_decision).read_text())
+    records = []
+    for name, path, _, _, _ in groups:
+        path = safe_path(path)
+        sp = Path(f"{path}.manifest.json")
+        d = json.loads(sp.read_text())
+        if (d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
+                or d.get("formula_revision") != 5 or not d.get("decoder_era")
+                or d.get("table_sha256") != sha(path) or not d.get("row_selection_sha256")):
+            raise ValueError(f"{name}: strict admission requires bound Rev5 table provenance")
+        if d.get("data_role_decision_required"):
+            if (decision is None or decision.get("schema") != "shippath-human-role-decision-v1"
+                    or decision.get("decision_id") != d["data_role_decision_required"]
+                    or decision.get("state") != "approved" or not decision.get("decided_by")
+                    or decision.get("allowed_use") != "qualified-recipe-training"
+                    or decision.get("sources") != list(SOURCE_ORDER)
+                    or decision.get("source_receipt_sha256") != d.get("source_receipt_sha256")):
+                raise ValueError("PENDING SHIPPATH-human-production-role: supply the coordinator's bound decision")
+        elif d.get("data_role") not in ("TRAIN oracle teacher", "TRAIN ordinal KADIS source_id%10<8; no human labels"):
+            raise ValueError(f"{name}: strict admission needs an explicit permitted data role")
+        kp = key_path(path)
+        if sha(kp) != d.get("keys_sha256"):
+            raise ValueError(f"{name}: admitted row key file changed")
+        keys = pq.read_table(kp)
+        refs = refs_of(path)
+        ref_col = "ladder" if "ladder" in keys.column_names else "ref_basename"
+        if row_keys_sha(keys) != d.get("row_keys_sha256") or refs != keys[ref_col].to_pylist():
+            raise ValueError(f"{name}: admitted row key identity/order differs")
+        records.append({"name": name, "table_sha256": d["table_sha256"], "manifest_sha256": sha(sp),
+                        "keys_sha256": d["keys_sha256"], "row_keys_sha256": d["row_keys_sha256"],
+                        "row_selection_sha256": d["row_selection_sha256"],
+                        "data_role_decision_sha256": sha(data_role_decision) if d.get("data_role_decision_required") else None})
+    if not records:
+        raise ValueError("strict admission needs at least one training/development table")
+    return records
+
+
 def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
-                     dest: Path, recipe: dict | None = None) -> tuple[Path, dict[int, float], dict]:
+                     dest: Path, recipe: dict | None = None, *, strict_admission: bool = False,
+                     data_role_decision: Path | None = None) -> tuple[Path, dict[int, float], dict]:
     """Train one cell and return (selected bake, dev curve, selection record) under EPOCH_RULE.
 
     best_dev: the trainer's own best-validation bake (refit/best.bin); the recorded epoch is the argmax of the log's
     4-decimal curve, which can differ from the trainer's full-precision pick on ties (label only; the bake is the
     trainer's). last: the trainer also dumps the final epoch's weights (--dump-checkpoints-every EPOCHS-1 fires at epoch 0
     and EPOCHS-1) and that checkpoint is the selected bake (refit/last.bin)."""
+    # Admission precedes output creation and the Rust trainer's payload reads.
+    cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe,
+                        strict_admission=strict_admission, data_role_decision=data_role_decision)
     (dest / "refit").mkdir(exist_ok=True)
-    cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe)
     ckpt = dest / "ckpt"
     if EPOCH_RULE == "last":
+        if strict_admission and ckpt.exists() and any(ckpt.iterdir()):
+            raise ValueError("strict route requires a fresh checkpoint directory")
         ckpt.mkdir(exist_ok=True)
-        cmd += ["--dump-checkpoints-every", str(EPOCHS - 1), "--dump-checkpoints-dir", str(ckpt)]
+        cmd += ["--dump-checkpoints-every", str(max(1, EPOCHS - 1)), "--dump-checkpoints-dir", str(ckpt)]
     elif EPOCH_RULE != "best_dev":
         raise ValueError(f"unknown EPOCH_RULE {EPOCH_RULE!r}")
     run(cmd, dest / "train.log")
@@ -122,7 +184,10 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
         selected = EPOCHS - 1
     else:
         bake, selected = dest / "refit" / "best.bin", best
-    return bake, curve, {"epoch_rule": EPOCH_RULE, "selected_epoch": selected, "best_epoch_by_curve": best}
+    selection = {"epoch_rule": EPOCH_RULE, "selected_epoch": selected, "best_epoch_by_curve": best}
+    if strict_admission:
+        selection["strict_table_admission"] = strict_training_groups(groups, data_role_decision)
+    return bake, curve, selection
 
 
 def read_curve(log: Path) -> dict[int, float]:
@@ -161,8 +226,22 @@ def main() -> None:
     ap.add_argument("--heldout", choices=SOURCE_ORDER, required=True)
     ap.add_argument("--seed-index", type=int, choices=range(N_SEEDS), required=True)
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
+    ap.add_argument("--strict-admission", action="store_true", help="strict Rev5 table admission; no historical replay")
+    ap.add_argument("--data-role-decision", type=Path, help="coordinator's bound human-role decision JSON")
+    ap.add_argument("--dest", type=Path, help="strict route output directory outside frozen inputs")
+    ap.add_argument("--train-only", action="store_true", help="stop after selected bake, without human assessment")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
     args = ap.parse_args()
+    if args.strict_admission and (args.dest is None or not args.train_only):
+        ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
+    if args.strict_admission and (args.dest.resolve() == V2.resolve() or V2.resolve() in args.dest.resolve().parents):
+        ap.error("strict --dest must be outside the immutable admission root")
+    if args.strict_admission:
+        from v2c_wide import safe_path
+        safe_path(V2)
+        safe_path(args.dest)
+        if args.dest.exists() and any(args.dest.iterdir()):
+            raise ValueError("strict route requires a fresh destination; cannot reuse a historical result")
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
@@ -177,10 +256,15 @@ def main() -> None:
     if (receipt["schema"] not in WIDE_SCHEMAS or receipt["family"] != family or receipt["variant"] != variant
             or width < WIDTH or (receipt["schema"] == WIDE_SCHEMAS[0] and width != WIDTH)):
         raise ValueError("wide receipt identity mismatch")
+    if args.strict_admission:
+        from v2_common import load_frozen
+        frozen, _ = load_frozen(V2, training_only=True)
+        if frozen["wide_receipts"].get(f"{family}/{variant}") != sha(receipt_path):
+            raise ValueError("wide receipt is not the admitted frozen one")
     if any(not 0 <= c < width for c in keep):
         raise ValueError(f"{core_spec}: kept columns outside 0..{width}")
     # Two-part cell path under v2/cells (the fit-cell executor's destination contract).
-    dest = V2 / "cells" / f"{args.spec}__{args.head}" / f"without_{args.heldout}_s{args.seed_index}"
+    dest = args.dest or V2 / "cells" / f"{args.spec}__{args.head}" / f"without_{args.heldout}_s{args.seed_index}"
     if (dest / "result.json").is_file():
         print(json.dumps({"skip": str(dest / "result.json")}))
         return
@@ -221,7 +305,8 @@ def main() -> None:
         import v2_teacher
         if max(keep) >= v2_teacher.ORDINAL_WIDTH:
             raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
-        cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest))
+        cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest),
+                                                       admitted_root=V2 if args.strict_admission else None)
         curated_extra = cpath
         weights["coverage"] = acceptance_weight(recipe["coverage_weight"], refs_of(cpath))
         groups.append(("coverage", cpath, weights["coverage"], 0, "withinref,rank"))
@@ -233,13 +318,25 @@ def main() -> None:
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
     try:
         from v2_common import refuse_nonfinite_kept
+        if args.strict_admission:
+            strict_training_groups(groups, args.data_role_decision)
         refuse_nonfinite_kept([g[1] for g in groups], keep)  # Rev5 tables mark absent slots NaN; a kept one is refused here
-        bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe)
+        bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
+                                                  strict_admission=args.strict_admission,
+                                                  data_role_decision=args.data_role_decision)
     finally:
         for tmp in (curated, curated_extra):
             if tmp is not None:
                 tmp.unlink(missing_ok=True)
+                Path(f"{tmp}.manifest.json").unlink(missing_ok=True)
+                tmp.with_suffix(".keys.parquet").unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
+    if args.train_only:
+        (dest / "result.json").write_text(json.dumps({"training_only": True, "selection": selection,
+            "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
+            "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
+            "train_weights": weights, "coverage_leg": coverage_record}) + "\n")
+        return
     heldout = legs[args.heldout]
     table = checked(heldout["full"])
     pred = predict(bake, table, dest / "eval_preds.tsv")

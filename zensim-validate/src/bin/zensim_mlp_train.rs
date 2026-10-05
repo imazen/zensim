@@ -2799,6 +2799,43 @@ fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu:
     );
 }
 
+/// Preserve training declarations without touching checkpoint weights or calibration.
+/// Earlier checkpoints carry their own sampler prefix, never the full-run coverage.
+fn stamp_checkpoint_metadata(
+    checkpoint: &[u8],
+    final_bake: &[u8],
+    repro_json: &str,
+    epoch: usize,
+    coverage: Option<&str>,
+) -> Vec<u8> {
+    let model = zenpredict::Model::from_bytes(final_bake).expect("final bake metadata");
+    let metadata = model.metadata();
+    let mut repro: serde_json::Value =
+        serde_json::from_str(repro_json).expect("repro_json reparse");
+    repro["checkpoint_epoch"] = serde_json::json!(format!("{epoch:03}"));
+    repro["requested_epochs"] = repro["epochs"].clone();
+    repro["epochs"] = serde_json::json!(epoch + 1);
+    repro["checkpoint_policy"] = serde_json::json!("explicit epoch dump; no development selection");
+    let mut bytes =
+        zenpredict_bake::append_metadata_utf8(checkpoint, "zentrain.repro", &repro.to_string())
+            .expect("checkpoint repro metadata");
+    for key in [
+        "zentrain.formula_revision",
+        "zentrain.feature_set_id",
+        "zentrain.sampling",
+    ] {
+        if let Ok(value) = metadata.get_utf8(key) {
+            bytes = zenpredict_bake::append_metadata_utf8(&bytes, key, value)
+                .expect("checkpoint admitted training metadata");
+        }
+    }
+    if let Some(value) = coverage {
+        bytes = zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.sample_coverage", value)
+            .expect("checkpoint prefix sampler coverage");
+    }
+    bytes
+}
+
 fn main() {
     zensim_validate::tier_cap::apply_from_env();
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
@@ -4537,67 +4574,71 @@ fn main() {
     // forward/backward pass. `--no-sample-coverage` skips it for a run that
     // cannot afford even that; the bake then carries no block at all, which
     // the board renders NOT MEASURED — never a zero.
-    let sample_coverage_json: Option<String> = if args.no_sample_coverage {
-        println!("[coverage] zentrain.sample_coverage SKIPPED (--no-sample-coverage)");
-        None
-    } else {
-        let sim_groups: Vec<mlp_train::sampling::SimGroup> = loaded
-            .iter()
-            // Exactly the groups the sampler can draw from: `train_indices`
-            // is `train_weight > 0.0`, so a validation-only group must not
-            // enter the CDF here either.
-            .filter(|g| g.train_w > 0.0)
-            .map(|g| mlp_train::sampling::SimGroup {
-                name: g.name.clone(),
-                train_weight: g.train_w,
-                n_rows: g.human_scores.len(),
-                human_scores: g.human_scores.clone(),
-                // `ref_ids` only steers the draw when the group opted in —
-                // same condition the trainer applies when it builds
-                // `TrainingGroup`.
-                ref_ids: if g.within_ref {
-                    g.ref_ids.clone()
-                } else {
-                    None
-                },
-                within_ref: g.within_ref,
-            })
-            .collect();
-        if sim_groups.is_empty() {
-            println!("[coverage] no training groups — nothing to describe");
+    let sample_coverage_for_epochs = |n_epochs| -> Option<String> {
+        if args.no_sample_coverage {
+            println!("[coverage] zentrain.sample_coverage SKIPPED (--no-sample-coverage)");
             None
         } else {
-            let params = mlp_train::sampling::SimParams {
-                seed: args.sample_seed.unwrap_or(args.seed),
-                epochs: hyperparams.n_epochs,
-                pairs_per_epoch: hyperparams.pairs_per_epoch,
-                low_q_boost: hyperparams.low_q_boost,
-                mid_q_boost: hyperparams.mid_q_boost,
-                high_q_boost: hyperparams.high_q_boost,
-                stratified_bands: hyperparams.stratified_bands,
-                early_window: 0,
-                per_sample_alpha_head: args.per_sample_alpha_head,
-                stratified_pairs: hyperparams.pair_sampling == mlp_train::PairSampling::Stratified,
-            };
-            let t0 = std::time::Instant::now();
-            let sim = mlp_train::sampling::simulate(&sim_groups, &params);
-            let v = mlp_train::sampling::run_coverage_json(
-                &sim,
-                &sim_groups,
-                &params,
-                args.init_seed.unwrap_or(args.seed),
-            );
-            println!(
-                "[coverage] pooled row coverage {:.4} over {} pairs, group-share L1 {:.4},                  digest {} ({:.1}s)",
-                sim.full.pooled_row_coverage,
-                sim.full.n_pairs,
-                sim.full.group_share_l1,
-                sim.digest.hex(),
-                t0.elapsed().as_secs_f64()
-            );
-            Some(v.to_string())
+            let sim_groups: Vec<mlp_train::sampling::SimGroup> = loaded
+                .iter()
+                // Exactly the groups the sampler can draw from: `train_indices`
+                // is `train_weight > 0.0`, so a validation-only group must not
+                // enter the CDF here either.
+                .filter(|g| g.train_w > 0.0)
+                .map(|g| mlp_train::sampling::SimGroup {
+                    name: g.name.clone(),
+                    train_weight: g.train_w,
+                    n_rows: g.human_scores.len(),
+                    human_scores: g.human_scores.clone(),
+                    // `ref_ids` only steers the draw when the group opted in —
+                    // same condition the trainer applies when it builds
+                    // `TrainingGroup`.
+                    ref_ids: if g.within_ref {
+                        g.ref_ids.clone()
+                    } else {
+                        None
+                    },
+                    within_ref: g.within_ref,
+                })
+                .collect();
+            if sim_groups.is_empty() {
+                println!("[coverage] no training groups — nothing to describe");
+                None
+            } else {
+                let params = mlp_train::sampling::SimParams {
+                    seed: args.sample_seed.unwrap_or(args.seed),
+                    epochs: n_epochs,
+                    pairs_per_epoch: hyperparams.pairs_per_epoch,
+                    low_q_boost: hyperparams.low_q_boost,
+                    mid_q_boost: hyperparams.mid_q_boost,
+                    high_q_boost: hyperparams.high_q_boost,
+                    stratified_bands: hyperparams.stratified_bands,
+                    early_window: 0,
+                    per_sample_alpha_head: args.per_sample_alpha_head,
+                    stratified_pairs: hyperparams.pair_sampling
+                        == mlp_train::PairSampling::Stratified,
+                };
+                let t0 = std::time::Instant::now();
+                let sim = mlp_train::sampling::simulate(&sim_groups, &params);
+                let v = mlp_train::sampling::run_coverage_json(
+                    &sim,
+                    &sim_groups,
+                    &params,
+                    args.init_seed.unwrap_or(args.seed),
+                );
+                println!(
+                    "[coverage] pooled row coverage {:.4} over {} pairs, group-share L1 {:.4},                  digest {} ({:.1}s)",
+                    sim.full.pooled_row_coverage,
+                    sim.full.n_pairs,
+                    sim.full.group_share_l1,
+                    sim.digest.hex(),
+                    t0.elapsed().as_secs_f64()
+                );
+                Some(v.to_string())
+            }
         }
     };
+    let sample_coverage_json = sample_coverage_for_epochs(hyperparams.n_epochs);
 
     // MANDATORY: embed reproduction provenance into the bake bytes themselves.
     // append_metadata_utf8 is zenpredict-bake's section-level splice with
@@ -4724,15 +4765,15 @@ fn main() {
     println!("Wrote {} bytes to {out_path:?}", bake_bytes.len());
 
     // H-TRAJ (balance campaign 2026-08-28): stamp every checkpoint dump with
-    // the SAME repro (+ its epoch) so a checkpoint promoted to candidacy is
-    // freeze-packagable under the mandatory-repro rule. Idempotent (skips
-    // already-stamped files); failure is FATAL like the final embed.
+    // reproduction/admission metadata and its own sampler prefix, so a
+    // promoted last-epoch dump preserves the main output qualification keys.
+    // No raw byte-key heuristic: canonical metadata splicing replaces entries.
+    // Failure is fatal, matching mandatory reproduction metadata.
     if args.dump_checkpoints_every > 0 {
         let dir = args
             .dump_checkpoints_dir
             .clone()
             .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let key_bytes = b"zentrain.repro";
         let mut stamped_n = 0usize;
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for ent in rd.flatten() {
@@ -4751,18 +4792,26 @@ fn main() {
                         std::process::exit(4);
                     }
                 };
-                if bytes.windows(key_bytes.len()).any(|w| w == key_bytes) {
-                    continue; // already stamped (idempotent re-run)
+                let epoch: usize = epoch_s.parse().unwrap_or_else(|_| {
+                    eprintln!("FATAL: invalid checkpoint epoch {pth:?}");
+                    std::process::exit(4);
+                });
+                if epoch >= hyperparams.n_epochs {
+                    eprintln!("FATAL: stale checkpoint outside this run {pth:?}");
+                    std::process::exit(4);
                 }
-                let mut v: serde_json::Value =
-                    serde_json::from_str(&repro_json).expect("repro_json reparse");
-                v["checkpoint_epoch"] = serde_json::Value::String(epoch_s.to_string());
-                let stamped =
-                    zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.repro", &v.to_string())
-                        .unwrap_or_else(|e| {
-                            eprintln!("FATAL: could not embed zentrain.repro into {pth:?}: {e:?}");
-                            std::process::exit(4);
-                        });
+                let coverage = if epoch + 1 == hyperparams.n_epochs {
+                    sample_coverage_json.clone()
+                } else {
+                    sample_coverage_for_epochs(epoch + 1)
+                };
+                let stamped = stamp_checkpoint_metadata(
+                    &bytes,
+                    &bake_bytes,
+                    &repro_json,
+                    epoch,
+                    coverage.as_deref(),
+                );
                 if let Err(e) = std::fs::write(&pth, &stamped) {
                     eprintln!("FATAL: rewrite checkpoint {pth:?}: {e}");
                     std::process::exit(4);
@@ -4770,7 +4819,9 @@ fn main() {
                 stamped_n += 1;
             }
         }
-        println!("Stamped {stamped_n} checkpoint dump(s) with zentrain.repro (+checkpoint_epoch)");
+        println!(
+            "Stamped {stamped_n} checkpoint dump(s) with complete training metadata (+checkpoint_epoch/prefix coverage)"
+        );
     }
 
     // Provenance sidecar `<bake>.spec.json` — so downstream tooling (bandwise
@@ -5147,5 +5198,124 @@ mod capability_preflight_tests {
         let n = load_auto_transforms_from_screen(&path, 0.05, 4, 0, &mut transforms, &mut params);
         assert_eq!(n, 3); // inclusive threshold, no top-N cap
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_admission_tests {
+    use super::stamp_checkpoint_metadata;
+    use zenpredict::{Activation, WeightDtype};
+
+    fn fixture() -> Vec<u8> {
+        let mut w1 = vec![0.0; 720];
+        w1[13] = 0.5;
+        zensim_validate::mlp_train::bake_two_layer_znpr_v3(
+            &vec![0.0; 720],
+            &vec![1.0; 720],
+            &w1,
+            &[0.25],
+            &[2.0],
+            &[0.0],
+            720,
+            1,
+            1,
+            WeightDtype::F32,
+            None,
+            None,
+            Activation::LeakyRelu,
+        )
+    }
+
+    #[test]
+    fn checkpoint_retains_declarations_prefix_and_prediction_bits() {
+        let base = fixture();
+        let mut final_bake = base.clone();
+        for (key, value) in [
+            ("zentrain.formula_revision", "5"),
+            (
+                "zentrain.feature_set_id",
+                "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+            ),
+            ("zentrain.sampling", "v1:xyb:triangle:2"),
+        ] {
+            final_bake = zenpredict_bake::append_metadata_utf8(&final_bake, key, value).unwrap();
+        }
+        let repro = serde_json::json!({"epochs": 3, "init_seed": 1101, "sample_seed": 101,
+            "table_admission": {"qualified_provenance": true, "historical_replay": null}})
+        .to_string();
+        let prefix = r#"{"params":{"epochs":1},"full":{"n_pairs":500}}"#;
+        let stamped = stamp_checkpoint_metadata(&base, &final_bake, &repro, 0, Some(prefix));
+        let unstamped = zenpredict::Model::from_bytes(&base).unwrap();
+        assert!(
+            unstamped
+                .metadata()
+                .get_utf8("zentrain.formula_revision")
+                .is_err()
+        );
+        let model = zenpredict::Model::from_bytes(&stamped).unwrap();
+        let metadata = model.metadata();
+        assert_eq!(metadata.get_utf8("zentrain.formula_revision").unwrap(), "5");
+        assert_eq!(
+            metadata.get_utf8("zentrain.sampling").unwrap(),
+            "v1:xyb:triangle:2"
+        );
+        assert_eq!(
+            metadata.get_utf8("zentrain.feature_set_id").unwrap(),
+            "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
+        );
+        assert_eq!(
+            metadata.get_utf8("zentrain.sample_coverage").unwrap(),
+            prefix
+        );
+        let actual: serde_json::Value =
+            serde_json::from_str(metadata.get_utf8("zentrain.repro").unwrap()).unwrap();
+        assert_eq!(actual["epochs"], 1);
+        assert_eq!(actual["requested_epochs"], 3);
+        assert_eq!(actual["checkpoint_epoch"], "000");
+        assert_eq!(actual["table_admission"]["qualified_provenance"], true);
+        let mut before = zensim::BakeScorer::new(&unstamped).unwrap();
+        let mut after = zensim::BakeScorer::new(&model).unwrap();
+        for input in [-4.0, 0.0, 1.0, 7.5] {
+            let mut row = vec![0.0; 720];
+            row[13] = input;
+            assert_eq!(
+                before.score_features(&row, 16, 16, None).unwrap().to_bits(),
+                after.score_features(&row, 16, 16, None).unwrap().to_bits()
+            );
+        }
+        // Replacing existing entries must update the chosen epoch, never skip on a raw key match.
+        let restamped =
+            stamp_checkpoint_metadata(&stamped, &final_bake, &repro, 2, Some("final-prefix"));
+        let model = zenpredict::Model::from_bytes(&restamped).unwrap();
+        let repro: serde_json::Value =
+            serde_json::from_str(model.metadata().get_utf8("zentrain.repro").unwrap()).unwrap();
+        assert_eq!(repro["epochs"], 3);
+        assert_eq!(
+            model
+                .metadata()
+                .get_utf8("zentrain.sample_coverage")
+                .unwrap(),
+            "final-prefix"
+        );
+    }
+
+    #[test]
+    fn checkpoint_does_not_invent_missing_sampling_or_coverage() {
+        let bytes = fixture();
+        let result = stamp_checkpoint_metadata(&bytes, &bytes, r#"{"epochs":3}"#, 2, None);
+        let model = zenpredict::Model::from_bytes(&result).unwrap();
+        assert!(model.metadata().get_utf8("zentrain.sampling").is_err());
+        assert!(
+            model
+                .metadata()
+                .get_utf8("zentrain.sample_coverage")
+                .is_err()
+        );
+        assert!(
+            model
+                .metadata()
+                .get_utf8("zentrain.formula_revision")
+                .is_err()
+        );
     }
 }
