@@ -474,3 +474,42 @@ a run; `--require-feature-set-match` treats it as a refusal like any other.
 * **Never** edit or delete an existing entry — supersede it with a new one and
   point `superseded_by` at the replacement, the same discipline
   `benchmarks/eval_annotations.json` uses.
+
+## Rev5 TRAIN teacher admission view — October 5, 2026
+
+`rev5_localwin` is registered as formula revision 5, producer
+`basic+peaks+v2@w1825/rev5_localwin#36c3f3af`, with exactly
+f0–f227 and f372–f719 populated. Storage may be padded to 1853; padding
+does not authorize any absent ID. The canonical Rust hash and slot-coverage
+tests check this declaration.
+
+The existing `scripts/rev4_featpot/v2c_wide.py admit-teachers` command creates
+a fresh byte-preserving admission view of only the four frozen, real Rev5
+SafeSyn/CID22 oracle TRAIN fit/internal-development tables. It verifies the
+frozen receipt, table and sidecar hashes, bank feature/key/manifest hashes,
+and every extractor chunk's binary, revision and measured IDs before output.
+It writes `feature_set_id`, integer `formula_revision`, and `decoder_era` in
+the keys recognized by `feature_set::admit_training_tables`. The decoder era
+is `legacy-rgb8/extract_features_372col@sha256:<actual producing binary>`;
+individual decoder source commits are not inferred. Original manifests,
+receipts, research tables and features stay immutable.
+
+Example (from the repository root; output must not exist):
+
+```bash
+TMPDIR=/var/tmp/shippath ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- \
+  python3 scripts/rev4_featpot/v2c_wide.py admit-teachers \
+  --revision 5 --bank /var/tmp/rev5-featbank \
+  --source-root /var/tmp/rev4-featpot/v2c5 --out /var/tmp/shippath/teachers \
+  --expect-era rev5_localwin \
+  --expect-fsid basic+peaks+v2@w1825/rev5_localwin#36c3f3af \
+  --expect-binary c649e810f2c3e1d2811e623adc5c7600e952229a7a14db7db9d71ebd9cbbde8b \
+  --expect-build 1a9d5a8a17ffb57b87b3600ee2b3116011598e45
+```
+
+Use the Rust trainer directly, without historical replay, for an admitted
+TRAIN-only recipe. This command does not qualify the full research recipe or
+admit human/confirmation/permuted tables, the E15 coverage pool, HDR, or an
+integrity companion. Table provenance and scientific split authorization are
+separate requirements. See [SHIPPATH worklog](../benchmarks/shippath_WORKLOG.md)
+for the one-epoch smoke and the remaining gates.

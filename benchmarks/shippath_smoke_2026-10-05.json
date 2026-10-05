@@ -1,0 +1,62 @@
+{
+  "schema": "shippath-provenance-smoke-v1",
+  "model_qualified": false,
+  "training_table_provenance_qualified": true,
+  "formula_revision": 5,
+  "historical_replay": null,
+  "tables": {
+    "safesyn_fit.parquet": {
+      "source": "/var/tmp/rev4-featpot/v2c5/wide/main/real/safesyn_fit.parquet",
+      "sha256": "15963508e9502d6615006686cd993096b54bd08914ed97f61ffad093f7816fa6",
+      "manifest_sha256": "aecf603176e4fb543d7f22eca83ca5fb007871e6702d526df32981e7f00976f2",
+      "rows": 141054,
+      "references": 2312
+    },
+    "safesyn_dev.parquet": {
+      "source": "/var/tmp/rev4-featpot/v2c5/wide/main/real/safesyn_dev.parquet",
+      "sha256": "4165da2edb54913e4856c5a37cafd154ce96d5f9e7ef9203ff2880dc9b09f795",
+      "manifest_sha256": "be569a24207e72c743260be880bfbdbaebd132141785c6d4e4e7fa0e1cacd335",
+      "rows": 38757,
+      "references": 634
+    },
+    "cid22_fit.parquet": {
+      "source": "/var/tmp/rev4-featpot/v2c5/wide/main/real/cid22_fit.parquet",
+      "sha256": "5726053da43c9bc0bf33a26ad99c3b9fdde64de42425e685cc84527c606d5999",
+      "manifest_sha256": "cf6f9d9120fbd28d5500afe0210b941a381f340dea8f4714b95357b55bf3aaf4",
+      "rows": 12163,
+      "references": 139
+    },
+    "cid22_dev.parquet": {
+      "source": "/var/tmp/rev4-featpot/v2c5/wide/main/real/cid22_dev.parquet",
+      "sha256": "c4f4f142541f33b56241c1f824127568d89851539701c04934a8e4fdb926572a",
+      "manifest_sha256": "7bab80f150a75f69a5cdf9de16283e13c02310fb46b43f962e857be0953f897d",
+      "rows": 3785,
+      "references": 43
+    }
+  },
+  "declared_ids_n": 420,
+  "caller_input_width": 720,
+  "consumer_feature_set_id": "basic+v2/rev5_localwin#62adfc93",
+  "epochs": 1,
+  "pairs_per_epoch": 500,
+  "init_seed": 1101,
+  "sample_seed": 101,
+  "not_full_recipe": "TRAIN teachers only; no human or cv16:cf98 legs",
+  "dense_model": {
+    "path": "/var/tmp/shippath/smoke-dense.bin",
+    "bytes": 225318,
+    "sha256": "6207cab4a2c2d7d338116eaae5d1699662bc716f9a60b9714db9bbffd7149705"
+  },
+  "trainer_sha256": "f1292729c51edc33265b6149869df6166ea5f2242e2c3894db7f0dd4c6f2185e",
+  "checks": {
+    "rust_admission": 7,
+    "registry_matching": 10,
+    "python_view": 7,
+    "clippy": "pass",
+    "fmt": "pass",
+    "densify_bit_identical_probes": 512,
+    "finite_teacher_predictions": 3785,
+    "script_lint": 813
+  },
+  "full_qualification": "MISSING; see shippath_gate_map_2026-10-05.md"
+}

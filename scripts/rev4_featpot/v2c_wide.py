@@ -28,6 +28,7 @@ keys.parquet and _MANIFEST.json of the Rev4 bank, through `bank_file`, which ref
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -672,9 +673,91 @@ def write_keeplists(out: Path, extra_arms: dict[str, list[int]], width: int) -> 
     print(json.dumps({"keep_lists": str(path), "sha256": sha(path), "specs": len(lists)}))
 
 
+def admit_teachers(bank: Path, source: Path, out: Path) -> None:
+    """Fresh metadata-only admission view of frozen Rev5 TRAIN teacher legs.
+
+    The decoder era names the actual producing executable and input contract,
+    not guessed dependency commits. This is table provenance, not split/model
+    qualification. Human, confirmatory and permuted tables are never admitted
+    by this bounded route; the historical instrument remains immutable.
+    """
+    if PROFILE.revision != 5 or PROFILE.era != "rev5_localwin":
+        raise ValueError("admit-teachers requires the frozen Rev5 local-window profile")
+    source, out, bank = safe_path(source), safe_path(out), safe_path(bank)
+    if out.exists():
+        raise ValueError(f"{out}: admission output must be fresh")
+    wide = source / "wide" / "main" / "real"
+    receipt_path = wide / "receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    frozen = json.loads((source / "wide" / "frozen.json").read_text())
+    if (frozen["wide_receipts"].get("main/real") != sha(receipt_path)
+            or receipt["schema"] != SCHEMA or receipt["family"] != "main" or receipt["variant"] != "real"
+            or receipt["formula_revision"] != 5 or receipt["feature_set_id"] != PROFILE.feature_set_id
+            or receipt["era"] != PROFILE.era or receipt["extras"]):
+        raise ValueError("source is not the frozen real Rev5 main receipt")
+    prepared = []
+    for teacher, (set_name, _, _) in TEACHERS.items():
+        manifest_path = bank_file(bank, set_name, "_MANIFEST.json")
+        manifest = json.loads(manifest_path.read_text())
+        check_manifest(manifest, set_name)
+        recorded = receipt["bank"][set_name]
+        if (sha(manifest_path) != recorded["manifest_sha256"]
+                or sha(bank_file(bank, set_name, "features.parquet")) != recorded["features_sha256"]
+                or sha(bank_file(bank, set_name, "keys.parquet")) != recorded["keys_sha256"]
+                or manifest["input_contract"] != "legacy-rgb8"):
+            raise ValueError(f"{set_name}: bank receipt/input contract changed")
+        # Every chunk must be bound to the same executable, arithmetic and IDs.
+        for chunk in manifest["chunks"]:
+            producer = chunk["extractor_manifest"]
+            if (producer["producer_binary_sha256"] != PROFILE.binary
+                    or producer["feature_set_id"] != PROFILE.feature_set_id
+                    or int(producer["formula_revision"]) != 5
+                    or producer["populated_feature_ids"] != [i for lo, hi in PROFILE.requested for i in range(lo, hi)]):
+                raise ValueError(f"{set_name}: chunk producer binding changed")
+        for split in ("fit", "dev"):
+            record = receipt["legs"][teacher][split]
+            path = safe_path(source / record["rel"])
+            expected = wide / f"{teacher}_{split}.parquet"
+            if path.resolve() != expected.resolve():
+                raise ValueError("teacher receipt points outside the permitted real TRAIN table")
+            sidecar = Path(f"{path}.manifest.json")
+            stored = json.loads(sidecar.read_text())
+            if (sha(path) != record["sha256"] or sha(sidecar) != record["manifest_sha256"]
+                    or stored["source_bank_feature_set_id"] != PROFILE.feature_set_id
+                    or stored["formula_revision"] != 5):
+                raise ValueError(f"{path}: table/sidecar receipt changed")
+            declarations = {**stored, "feature_set_id": PROFILE.feature_set_id,
+                            "decoder_era": f"legacy-rgb8/extract_features_372col@sha256:{PROFILE.binary}",
+                            "admission_scope": "TRAIN teachers only; model qualification remains separate",
+                            "source_table_sha256": record["sha256"],
+                            "source_manifest_sha256": record["manifest_sha256"],
+                            "source_receipt_sha256": sha(receipt_path),
+                            "bank_manifest_sha256": recorded["manifest_sha256"],
+                            "extractor_build_commit": PROFILE.build,
+                            "decoder_binding": "actual producing executable; individual decoder commits not inferred"}
+            prepared.append((path, record, declarations))
+    out.mkdir(parents=True)
+    files = {}
+    for path, record, declarations in prepared:
+        dest = out / path.name
+        shutil.copyfile(path, dest)
+        if sha(dest) != record["sha256"]:
+            raise ValueError(f"{dest}: byte-preserving copy failed")
+        sidecar = Path(f"{dest}.manifest.json")
+        sidecar.write_text(json.dumps(declarations, indent=1) + "\n")
+        files[dest.name] = {"source": str(path), "sha256": record["sha256"],
+                            "manifest_sha256": sha(sidecar), "rows": record["rows"],
+                            "references": record["references"]}
+    (out / "admission_receipt.json").write_text(json.dumps({
+        "schema": "rev5-teacher-admission-v1", "files": files,
+        "feature_values_changed": False, "table_code": code_identity()}, indent=1) + "\n")
+    print(json.dumps({"admission_view": str(out), "files": len(files), "feature_values_changed": False}))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze"])
+    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers"])
+    ap.add_argument("--source-root", type=Path, help="admit-teachers: immutable frozen Rev5 instrument root")
     ap.add_argument("--bank", type=Path, default=CANON_BANK)
     ap.add_argument("--out", "--root", dest="out", type=Path, default=OUT_DEFAULT)
     ap.add_argument("--legs", default="all", help="comma list of: human, safesyn, cid22, teachers, all")
@@ -700,7 +783,11 @@ def main() -> None:
     v2_common.V2 = args.out  # receipts hold root-relative table paths (table_path); the root is --out
     extras = parse_extras(args.extra)
     fams = args.family or list(FAMILIES)
-    if args.action == "build":
+    if args.action == "admit-teachers":
+        if args.source_root is None:
+            ap.error("admit-teachers requires --source-root")
+        admit_teachers(args.bank, args.source_root, args.out)
+    elif args.action == "build":
         build(args.bank, args.out, args.legs, fams, args.variant or list(VARIANTS), extras, args.peer_dir)
     elif args.action == "confirm":
         build_confirm(args.bank, args.out, fams, extras, args.peer_dir, args.variant)

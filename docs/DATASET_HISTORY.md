@@ -4961,3 +4961,20 @@ HDR-VDP-3 paper sections 3 and 5 state UPIQ quality calibration/recalibration (>
 - `hdrteach_train.parquet` SHA256 `deb70e775b043a578c77e0c3ff27960ebfa936e9d901497f9d74389e6ce9fbce`
 - `hdrteach_val.parquet` SHA256 `4b0f39dea0255659232f248070c8683dd7edf5916c63621cbb099b4afb6c9057`
 - `agreement.json` SHA256 `607ac4090a74c5f5537d096e1ed491b70b31f8ccc1b47c03752adaef305cb9db`
+
+## 2026-10-05: SHIPPATH byte-preserving Rev5 TRAIN teacher admission view
+
+The existing v2c builder now has a bounded `admit-teachers` route. Four copied
+TRAIN teacher Parquets have the same SHA-256 as their frozen v2c5 source
+files; no feature/target/key order changed and no original was overwritten.
+New sidecars expose the recorded Rev5 producer identity and bind decoder era
+to the actual c649e810… producing executable under legacy-rgb8. The shared
+validation registry now knows Rev5's measured 576-slot subset. A canonical
+Rust smoke fit embeds revision 5, that producer ID and qualified table
+provenance without historical replay. It remains a bounded software smoke,
+not a by_v2fy qualification or the full h32:H128:cv16:cf98 recipe.
+
+Source hashes, exact commands, tests and all remaining gates are indexed in
+[SHIPPATH worklog](../benchmarks/shippath_WORKLOG.md). The immutable research
+receipts, provenance limitations and the Rev5 spec's 03:25 UTC correction
+remain authoritative for their original artifacts.

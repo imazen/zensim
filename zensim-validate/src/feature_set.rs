@@ -1355,6 +1355,51 @@ pub fn admit_training_tables(
 mod training_admission_tests {
     use super::*;
     #[test]
+    fn rev5_measured_subset_admits_real_ids_and_refuses_nan_padding() {
+        let dir = std::env::temp_dir().join(format!("zensim-admit-rev5-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("teacher.csv");
+        let header = (0..1853)
+            .map(|i| format!("f{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        std::fs::write(&path, format!("human_score,{header}\n")).unwrap();
+        let sidecar = std::path::PathBuf::from(format!("{}.manifest.json", path.display()));
+        let mut metadata = serde_json::json!({
+            "feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+            "formula_revision": 5,
+            "decoder_era": "fixture-executable-binding"
+        });
+        std::fs::write(&sidecar, metadata.to_string()).unwrap();
+        let paths = vec![path];
+        let ids = [0, 155, 156, 227, 372, 719];
+        let admitted = admit_training_tables(&paths, None, Some(&ids), Some(1853)).unwrap();
+        assert_eq!(admitted["qualified_provenance"], true);
+        assert_eq!(admitted["formula_revision"], 5);
+        assert_eq!(admitted["tables"][0]["inferred"], false);
+        for absent in [228, 371, 720, 1824, 1852] {
+            let err = admit_training_tables(&paths, None, Some(&[absent]), Some(1853)).unwrap_err();
+            assert!(err.contains("not populated"), "{err}");
+        }
+        let replay =
+            admit_training_tables(&paths, Some("diagnostic"), Some(&ids), Some(1853)).unwrap();
+        assert_eq!(replay["qualified_provenance"], false);
+        metadata["formula_revision"] = serde_json::json!(4);
+        std::fs::write(&sidecar, metadata.to_string()).unwrap();
+        assert!(
+            admit_training_tables(&paths, None, Some(&ids), Some(1853))
+                .unwrap_err()
+                .contains("conflicts")
+        );
+        metadata["formula_revision"] = serde_json::json!(5);
+        metadata.as_object_mut().unwrap().remove("decoder_era");
+        std::fs::write(&sidecar, metadata.to_string()).unwrap();
+        let incomplete = admit_training_tables(&paths, None, Some(&ids), Some(1853)).unwrap();
+        assert_eq!(incomplete["qualified_provenance"], false);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn training_sampling_contract_cannot_be_mixed_even_in_replay() {
         let dir =
             std::env::temp_dir().join(format!("zensim-admit-sampling-{}", std::process::id()));

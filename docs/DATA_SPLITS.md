@@ -1244,3 +1244,22 @@ cannot treat UPIQ as an independent human test. No UPIQ label/image or secret ho
 is opened by this task. No model is trained, qualified, promoted or pushed.
 Evidence and final artifact admission: [worklog](../benchmarks/hdrcorr_WORKLOG.md),
 [teacher report](../benchmarks/hdrteach_2026-10-04.md).
+
+## Exposure ledger — 2026-10-05: SHIPPATH Rev5 teacher admission smoke
+
+Explicit SHIPPATH brief; own jj workspace and local commits only. Reads only
+SafeSyn and CID22 201-reference oracle TRAIN fit/internal-development tables
+from frozen `/var/tmp/rev4-featpot/v2c5/wide/main/real`. New view
+`/var/tmp/shippath/teachers` preserves the four Parquet files byte for byte:
+141,054 / 38,757 SafeSyn fit/dev rows, 12,163 / 3,785 CID22 fit/dev rows.
+Internal development remains TRAIN. No T0/human/holdout labels, `_sealed`
+files, human_all tables or coverage targets were read. Bank features/keys and
+producer manifests were hashed for the two teacher sets only.
+
+The canonical trainer ran one epoch / 500 pairs, N head / H128 / the existing
+420 by_v2fy IDs, init 1101 / sample 101, no auto evaluation, no historical
+replay. Embedded admission reports qualified table provenance at Rev5.
+This is software plumbing validation: it does not reproduce cv16:cf98, change
+design populations into production TRAIN, assess a holdout, select a model,
+or establish production qualification. Receipt and commands:
+[SHIPPATH worklog](../benchmarks/shippath_WORKLOG.md).
