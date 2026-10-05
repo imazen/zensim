@@ -1,0 +1,133 @@
+{
+  "schema": "shippath3-review-fixes-v1",
+  "reviewed_implementation": "4b65805f4b81200cd4e62276590f7d599acc9a81",
+  "commits": {
+    "P1": "a600e7a02bd59c2c58394cfe7d35510e43f70b35",
+    "P2": "c0684e66a6340505799a434b2c76c5583ae03628"
+  },
+  "checks": {
+    "python-final-evidence.log": {
+      "passed": true,
+      "sha256": "8ea53de6f546e84248b5ba6699c744ff5ab5ad5135f581681ada86638b36c800"
+    },
+    "chunk1-final.log": {
+      "passed": true,
+      "sha256": "d84bc5650e654a1e7e6228f4fb300a7420328f826cf5e442469ae557ec1e51fc"
+    },
+    "rust-metadata-final.log": {
+      "passed": true,
+      "sha256": "ca9dae48c9f305dbed2288c134557cccba54d580718ab1b7e9468c52c741ad26"
+    },
+    "clippy.log": {
+      "passed": true,
+      "sha256": "66fef80c5f657f3cfcb2dbb0a74fb2246777fad46854ed3db4e4eeab7ca18027"
+    },
+    "fmt-final.log": {
+      "passed": true,
+      "sha256": "2858e943d71d2895abf5ed3cde49c80b020187309ce5d803aa9e330a3059e3c9"
+    },
+    "lint-final-evidence.log": {
+      "passed": true,
+      "sha256": "f706647d2ae9d94a52f04af04d4ba6b810f7bedf0c06a8a0d2c9beb3f941594c"
+    },
+    "build-final.log": {
+      "passed": true,
+      "sha256": "eef572ba1bdb7d5a7daf3f02a2e5439a3a2f760cffe5de5a7b58c87cd646afe0"
+    }
+  },
+  "checkpoint_regression": {
+    "fresh_table_admission": {
+      "formula_revision": 5,
+      "historical_replay": null,
+      "issues": [],
+      "qualified_provenance": true,
+      "sampling": null,
+      "tables": [
+        {
+          "actual_width": 720,
+          "feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+          "inferred": false,
+          "path": "/var/tmp/shippath3/shippath3-checkpoint-syjf3zy4/oracle.parquet",
+          "requested_ids": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "source": "/var/tmp/shippath3/shippath3-checkpoint-syjf3zy4/oracle.parquet: stored table declaration",
+          "stored_declarations": {
+            "decoder_era": "synthetic-ownership-regression",
+            "feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+            "formula_revision": 5
+          }
+        }
+      ]
+    },
+    "new_init_seed": 1103,
+    "original_init_seed": 1101,
+    "reuse": [
+      {
+        "contract": "historical replay",
+        "new_outputs": 0,
+        "returncode": 2,
+        "surviving_bytes_unchanged": true,
+        "table_admission_reached": false
+      },
+      {
+        "contract": "qualified Rev5",
+        "new_outputs": 0,
+        "returncode": 2,
+        "surviving_bytes_unchanged": true,
+        "table_admission_reached": false
+      }
+    ],
+    "scope": "synthetic-only surviving-file CLI regression",
+    "surviving_checkpoint_sha256": "0ec0a45f60b4bcbe20d3abd6d1827b61b5028f7012c2ed9618873e59a2bb24df",
+    "trainer_sha256": "b40cbf994500e1b331a09046a2b449526d87faa9de18f0def2269eb4f34167c6"
+  },
+  "negative_controls": {
+    "checkpoint_binary_sha256": "459b7dadaa7065ca64fc3b778549d6f141224b69b051209ad676049d09b23420",
+    "checkpoint_expected_failures": 2,
+    "root_source_sha256": {
+      "scripts/rev4_featpot/v2_common.py": "2b3deef22fc3cfba2d95d0d46aad8f6228e1095dfca485b94d2d659845acda21",
+      "scripts/rev4_featpot/v2c_wide.py": "6af2123348fbccdcede1be8df86bff35a6205359b65d9f2d4eeb920ce18e05d2",
+      "scripts/rev4_featpot/v2_lodo_mlp.py": "0a141b2d279dacbc8b95e3e661106e8299cb119116594bb34dbc3c0c5e1f0107",
+      "scripts/rev4_featpot/v2_confirm_fit.py": "b6a85886ee430e3a0cc47d47db900eae815e8820e4a2ae83bbbfa9aa07f96962",
+      "scripts/rev4_featpot/e15_coverage.py": "e6ef8705750a614b59e45625fc06392afe51aba1dfce0dcbff030e772aad6a65",
+      "scripts/rev4_featpot/v2_teacher.py": "d1b191ece6980cfb0c8ea25a8bf58536deeaae371935c88e01f9f0e9ffb02599",
+      "zensim-validate/src/bin/zensim_mlp_train.rs": "144d4e8194c6bc1d259403070a3e7f41dfba42fc73b984bc9a3727fa57d723a9"
+    },
+    "root_regression_methods": 3,
+    "synthetic_only": true
+  },
+  "guards": {
+    "builders": [
+      "source",
+      "bank",
+      "inherited immutable ancestors"
+    ],
+    "strict_clis": [
+      "admission root",
+      "frozen source root",
+      "bank root",
+      "resolved aliases",
+      "TMPDIR"
+    ],
+    "derived": [
+      "curated table",
+      "keys",
+      "manifest",
+      "coverage scratch",
+      "refit",
+      "checkpoints",
+      "log",
+      "keep file"
+    ],
+    "old_views_without_bank_binding": "refuse; regenerate at a fresh location"
+  },
+  "human_role": "PENDING",
+  "protected_reads": false,
+  "fleet_use": false,
+  "push_performed": false,
+  "model_qualified": false
+}
