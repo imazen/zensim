@@ -690,16 +690,47 @@ def canonical_main(argv):
     revision_refit = m["schema"] == "canonical-corruption-refit-train-v2"
     revision = m["formula_revision"]
     basic_v2_ids = list(range(228)) + list(range(372, 720))
+    by_v2fy_ids = None
     caller_width = 1825 if revision_refit else 372
     if revision_refit:
         require(a.training_screen_only, "revision refit is TRAIN-only")
         require(m["origins"]["evaluate"] == [], "revision refit forbids evaluation origins")
         require(revision in (4, 5) and m["root_form"] == "sqrt"
                 and m["input_precision"] == "f32", "revision refit arithmetic contract")
-        require(m["feature_ids"] in (list(range(372 if revision == 4 else 228)), basic_v2_ids),
-                "revision refit feature regime")
-        require(m["head_feature_ids"] in ([list(range(228)), list(range(372)), basic_v2_ids]
-                                            if revision == 4 else [list(range(228)), basic_v2_ids])
+        if m.get("head_regime") == "by-v2fy-420":
+            registration = json.loads(pinned(m["regime_registration"]).read_text())
+            candidate = json.loads(pinned(registration["candidate_ids"]).read_text())
+            by_v2fy_ids = candidate["candidates"]["by_v2fy"]
+            require(registration["schema"] == "canonical-corruption-by-v2fy-registration-v1"
+                    and registration["regime"] == "by-v2fy-420"
+                    and registration["head_feature_ids"] == by_v2fy_ids
+                    and registration["head_feature_count"] == len(by_v2fy_ids) == 420
+                    and all(type(i) is int for i in by_v2fy_ids)
+                    and by_v2fy_ids == sorted(set(by_v2fy_ids))
+                    and by_v2fy_ids[-1] == 719
+                    and registration["formula_revisions"] == [4, 5]
+                    and registration["scope"] == "TRAIN development; no production qualification",
+                    "by_v2fy preregistration required")
+            require(m["feature_ids"] == m["head_feature_ids"] == by_v2fy_ids,
+                    "by_v2fy input/head IDs must exactly match the candidate")
+            caller_width = m.get("head_caller_input_width")
+            require(caller_width == registration["caller_input_width"] == 720,
+                    "by_v2fy caller width must be 720")
+            receipt = json.loads(pinned(registration["declared_ids_receipt"]).read_text())
+            require(receipt["schema"] == "r5integ3-declared-ids-owner-receipt-v1"
+                    and len(receipt["bakes"]) == 6
+                    and all(b["declared_feature_ids"] == by_v2fy_ids for b in receipt["bakes"])
+                    and m["base_bake"] in [b["artifact"] for b in receipt["bakes"]],
+                    "by_v2fy bake-declared IDs owner verification required")
+        allowed_inputs = [list(range(372 if revision == 4 else 228)), basic_v2_ids]
+        allowed_heads = [list(range(228)), basic_v2_ids]
+        if revision == 4:
+            allowed_heads.append(list(range(372)))
+        if by_v2fy_ids is not None:
+            allowed_inputs.append(by_v2fy_ids)
+            allowed_heads.append(by_v2fy_ids)
+        require(m["feature_ids"] in allowed_inputs, "revision refit feature regime")
+        require(m["head_feature_ids"] in allowed_heads
                 and m.get("negative_fit_weight", 1) == 1
                 and m["identity_policy"] == "exclude-short-circuit-pairs-v1",
                 "registered revision refit recipe")
@@ -727,7 +758,7 @@ def canonical_main(argv):
                         and layout["numerical_recipe_changed"] is False
                         and layout["feature_read_set_changed"] is False,
                         "basic/v2 layout correction registration required")
-        else:
+        elif by_v2fy_ids is None:
             require(m["feature_ids"] == list(range(372 if revision == 4 else 228)),
                     "legacy revision-refit input IDs required")
         extraction = json.loads(pinned(m["extraction_manifest"]).read_text())
@@ -743,7 +774,7 @@ def canonical_main(argv):
     # an explicit new declaration, never inferred from the source table width.
     head_ids = m.get("head_feature_ids", m["feature_ids"])
     require((head_ids in (list(range(228)), list(range(372)))
-             or (revision_refit and head_ids == basic_v2_ids))
+             or (revision_refit and head_ids in (basic_v2_ids, by_v2fy_ids)))
             and all(type(i) is int for i in head_ids), "unregistered head feature regime")
     negative_fit_weight = m.get("negative_fit_weight", 1)
     require(type(negative_fit_weight) is int and negative_fit_weight in (1, 4, 16, 64),
@@ -855,7 +886,7 @@ def canonical_main(argv):
         filename = role + ".parquet"
         views[mask].to_parquet(a.out_dir/filename, index=False)
         contracts[filename] = dict(duplicate_key_columns=["origin","width","height","reference_pixels_sha256","distorted_pixels_sha256"])
-        if revision_refit and head_ids == basic_v2_ids:
+        if revision_refit and head_ids in (basic_v2_ids, by_v2fy_ids):
             contracts[filename]["feature_ids"] = m["feature_ids"]
     (a.out_dir/"contracts.json").write_text(json.dumps(contracts, indent=2)+"\n")
     subprocess.run([sys.executable,str(Path(__file__).with_name("validate_parquet.py")),
@@ -932,7 +963,7 @@ def canonical_main(argv):
                    "--audit-jsonl",str(run/"audit.jsonl"),"--audit-bake",str(base),"--audit-corruption-head",str(head)]
         if revision_refit:
             command += ["--restore-cuts", "basic,peaks,masked,iw,v2"
-                        if revision == 4 and head_ids != basic_v2_ids else "basic,peaks,v2"]
+                        if revision == 4 and head_ids not in (basic_v2_ids, by_v2fy_ids) else "basic,peaks,v2"]
         env = dict(os.environ, ZENSIM_FORMULA_REV=str(revision), ZENSIM_ROOT_FORM=m["root_form"], RAYON_NUM_THREADS="4" if revision_refit else "8")
         with (run/"surface.log").open("w") as log:
             subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)

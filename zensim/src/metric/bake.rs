@@ -1590,6 +1590,32 @@ mod revision_contract_tests {
     }
 
     #[test]
+    #[ignore = "requires registered candidate IDs and external full bakes"]
+    #[cfg(feature = "feature-regime-v2")]
+    fn external_by_v2fy_declared_ids_registration_audit() {
+        let candidate = std::env::var("ZENSIM_PLAN_AUDIT_IDS_JSON").expect("candidate IDs path");
+        let candidate: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(candidate).unwrap()).unwrap();
+        let expected: Vec<u16> =
+            serde_json::from_value(candidate["candidates"]["by_v2fy"].clone()).unwrap();
+        assert_eq!(expected.len(), 420);
+        assert!(expected.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(expected.last(), Some(&719));
+        let paths = std::env::var("ZENSIM_PLAN_AUDIT_BAKES").expect("colon-separated bake paths");
+        assert!(!paths.is_empty());
+        for path in paths.split(':') {
+            let model = zenpredict::Model::from_bytes(&std::fs::read(path).unwrap()).unwrap();
+            // Use the serving metadata owner, never a second bake parser.
+            let actual = crate::declared_feature_ids(&model).expect("declared dense bake");
+            assert_eq!(actual, expected, "candidate/bake ID mismatch: {path}");
+            println!(
+                "R5INTEG3_IDS {}",
+                serde_json::json!({"path": path, "ids": actual})
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "requires the registered R5INTEG2 head and full bake artifacts"]
     #[cfg(all(feature = "feature-regime-v2", feature = "corruption-head"))]
     fn external_basic_v2_companion_compute_plan_audit() {
@@ -1599,7 +1625,19 @@ mod revision_contract_tests {
         let head =
             crate::corruption_head::CorruptionHead::from_bytes(&std::fs::read(head_path).unwrap())
                 .unwrap();
-        let expected: Vec<u16> = (0..228).chain(372..720).collect();
+        let exact_base =
+            std::env::var("ZENSIM_PLAN_AUDIT_REGIME").is_ok_and(|regime| regime == "by-v2fy-420");
+        let expected: Vec<u16> = if exact_base {
+            let path = std::env::var("ZENSIM_PLAN_AUDIT_IDS_JSON").expect("candidate IDs path");
+            let candidate: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            let ids: Vec<u16> =
+                serde_json::from_value(candidate["candidates"]["by_v2fy"].clone()).unwrap();
+            assert_eq!(ids.len(), 420);
+            ids
+        } else {
+            (0..228).chain(372..720).collect()
+        };
         assert_eq!(head.declared_feature_ids(), expected);
         assert_eq!(head.caller_input_width(), 720);
         let paths = std::env::var("ZENSIM_PLAN_AUDIT_BAKES").expect("colon-separated bake paths");
@@ -1611,9 +1649,20 @@ mod revision_contract_tests {
             let composed = base.with_corruption_head(&head, None).unwrap();
             let head_compute = composed.plan().unwrap().compute;
             let same = base_compute == head_compute;
+            let tag = if exact_base {
+                "R5INTEG3_PLAN"
+            } else {
+                "R5INTEG2_PLAN"
+            };
             println!(
-                "R5INTEG2_PLAN {path} same_compute={same} base={base_compute:?} composed={head_compute:?}"
+                "{tag} {path} same_compute={same} base={base_compute:?} composed={head_compute:?}"
             );
+            if exact_base {
+                // Compare every private ComputeSet field, including all families,
+                // channel/scale flags, pools and stencil settings.
+                assert_eq!(base_compute, head_compute, "companion added work to {path}");
+                continue;
+            }
             // Complete basic/peak reads may add scale-0 X/B moments and
             // peak reductions omitted by a base. No unrelated family is allowed.
             assert!(head_compute.full_res_xb);

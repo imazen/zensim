@@ -4921,3 +4921,30 @@ probes. P2 admits manifest roles and every origin before any audit/table/payload
 read; historical evaluation behavior stays intact. Both fixes have direct
 regressions. Scalar/steering correctness and measured additional X/B/peak work
 are distinct from scientific specificity and qualification.
+
+## 2026-10-04: R5INTEG3 exact by_v2fy read-set preregistration (TRAIN development)
+
+`benchmarks/r5integ3_REGISTRATION.json` pins exactly420 by_v2fy semantic IDs
+from the costset2 candidate JSON, verified by `zensim::declared_feature_ids`
+against all six Rev4/Rev5 full by_v2fy bakes before fitting. Caller width720.
+Reuse matching immutable Rev4/Rev5 research features and original TRAIN
+fit/calibration origin split; unchanged fixed canonical recipe, seed4101 and
+seven gates. No extraction for fitting, masked/IW reads, tuning or relabeling.
+The existing trainer admits this separately registered exact gapped projection;
+existing Rust exporter/parity and scorer owners remain responsible for serving.
+Rev5 uses actual full R5CONFIRM bakes for the fit base and matrix. Register15
+full compositions, unchanged five prepared probes,12-origin identity checks,
+and exact private ComputeSet equality. This cannot qualify a production model.
+
+R5INTEG3 measured result: fixed Rev4/Rev5 heads both pass all seven gates on
+all15 actual full-bake compositions (9 Rev4 incl. supplemental U,6 Rev5).
+Calibration detection2532/2546 and2534/2546; honest activation/lowering0/160;
+real bugs147/155 and148/155; below q20 Rev4 2533–2537/2546, Rev5 2536–2537/2546.
+These give4 and2 fewer positive detections than576-read heads on the same
+TRAIN split. Exact private whole-ComputeSet equality passes all15, including
+Rev5 by_v2fy full_res_xb=false and Peaks=Off; no added feature extraction.
+Head inference remains additional work. Prepared75 rows (60 accept/15 typed
+reject/3360 unchanged base-map queries), identity180 and cross-revision2 pass.
+Full row, score and probability parity errors are zero. This remains TRAIN
+research. Artifacts/pointers: `benchmarks/r5integ3_ARTIFACTS.json`;
+`~/tmp/zensim-paper/rev4/R5INTEG3_assets/summary.json` owns detailed results.

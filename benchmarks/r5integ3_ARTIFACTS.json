@@ -1,0 +1,93 @@
+{
+  "schema": "r5integ3-artifacts-v1",
+  "scope": "TRAIN development; no production qualification",
+  "model_qualified": false,
+  "regime": "by-v2fy-420",
+  "caller_input_width": 720,
+  "heads": {
+    "4": {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG3_assets/head-rev4-by-v2fy-420-w720.zcth",
+      "sha256": "8aca993bbc6e131016016bf6a16855e511fc89ae4dae3a4d95db3decef609a12",
+      "bytes": 205790
+    },
+    "5": {
+      "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG3_assets/head-rev5-by-v2fy-420-w720.zcth",
+      "sha256": "8e6ed23eca6257b9d6911c4032b21ec0d16385b6879c03a1a587a93fe8944f74",
+      "bytes": 205822
+    }
+  },
+  "summary": {
+    "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG3_assets/summary.json",
+    "sha256": "2187ddcb0bda0d99a45a445372b736d39e8b8d690a0f2dd72214acf51889e329",
+    "bytes": 3912179
+  },
+  "archive": {
+    "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/evidence.tar.zst",
+    "sha256": "aa7272e771cbd982fd69568fedd2e615e5cb9cdfcaceb3acb7afc0ee136fec4d",
+    "bytes": 1311489822
+  },
+  "handoff": {
+    "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG3_assets/HANDOFF.json",
+    "bytes": 2069,
+    "sha256": "f1f42c83c847f8189075edef0043c442cf1884bb16c2167af060d7f8050a31ae"
+  },
+  "archive_verification": {
+    "path": "/home/lilith/tmp/zensim-paper/rev4/R5INTEG3_assets/ARCHIVE_VERIFIED.json",
+    "sha256": "30210012c5831713c256e3a80cc85051988226484819f2c7c2b843f15609f27e",
+    "bytes": 360
+  },
+  "verified_members": 516,
+  "full_evidence_directory": "/var/tmp/r5integ/r5integ3",
+  "full_bakes": {
+    "rev4": 9,
+    "rev5": 6,
+    "smoke": 0
+  },
+  "all_compositions_pass_seven_gates": true,
+  "private_compute_plan_exact_equal_all15": true,
+  "prepared": {
+    "rows": 75,
+    "accepted": 60,
+    "rejected_corruption": 15,
+    "exact_base_map_queries": 3360
+  },
+  "durable_mirrors": {
+    "summary.json": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/summary.json",
+      "bytes": 3912179,
+      "sha256": "2187ddcb0bda0d99a45a445372b736d39e8b8d690a0f2dd72214acf51889e329"
+    },
+    "HANDOFF.json": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/HANDOFF.json",
+      "bytes": 2069,
+      "sha256": "f1f42c83c847f8189075edef0043c442cf1884bb16c2167af060d7f8050a31ae"
+    },
+    "SOURCE_PIN.json": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/SOURCE_PIN.json",
+      "bytes": 4485,
+      "sha256": "f08b4bf90695b425e51191834bc861799c3a4c75a278a8d710f95eb446eb0ff1"
+    },
+    "ARCHIVE_VERIFIED.json": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/ARCHIVE_VERIFIED.json",
+      "bytes": 360,
+      "sha256": "30210012c5831713c256e3a80cc85051988226484819f2c7c2b843f15609f27e"
+    },
+    "EVIDENCE_INDEX.json": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/EVIDENCE_INDEX.json",
+      "bytes": 138492,
+      "sha256": "05960a56e47c8f4955ec719c8d3180f3c160c264e8de44bf930b97b71d936d06"
+    },
+    "head-rev4-by-v2fy-420-w720.zcth": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/head-rev4-by-v2fy-420-w720.zcth",
+      "bytes": 205790,
+      "sha256": "8aca993bbc6e131016016bf6a16855e511fc89ae4dae3a4d95db3decef609a12"
+    },
+    "head-rev5-by-v2fy-420-w720.zcth": {
+      "path": "/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/head-rev5-by-v2fy-420-w720.zcth",
+      "bytes": 205822,
+      "sha256": "8e6ed23eca6257b9d6911c4032b21ec0d16385b6879c03a1a587a93fe8944f74"
+    }
+  },
+  "labels_changed": false,
+  "recipe_changed": false
+}

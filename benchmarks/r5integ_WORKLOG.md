@@ -323,3 +323,62 @@ SHA2568c6595fe75b33884a38c6e8dbfd9ce19a48215cda49207f150ea36790ff180c0.
 member hash. Handoff/index/source pins, summary and both heads have verified
 secondary copies beside the tower archive. The source/results commit is e445e549;
 the final documentation/pointer commit is recorded in R5INTEG2_DONE.md.
+
+### R5INTEG3 preregistration — 2026-10-04
+
+Before fitting, register by-v2fy-420 at `benchmarks/r5integ3_REGISTRATION.json`:
+exact 420 semantic IDs from the costset2 candidate JSON, caller width720,
+Rev4+Rev5, unchanged seed4101/recipe/split/gates. The existing Rust metadata
+owner verified all six Rev4/Rev5 by_v2fy full bakes against those exact IDs;
+receipt/log pinned under `/var/tmp/r5integ/r5integ3/DECLARED_IDS.json`.
+Use original immutable research columns, with matching producer pins and the
+already corrected serving extractor. No fresh extraction for fitting.
+The Rev5 fit/attach base is now actual R5CONFIRM byv2fy-full-s0, not smoke.
+Register15 full compositions (9 Rev4 including supplemental U,6 Rev5),
+the same five TRAIN prepared pairs and12-origin identity probes, plus exact
+private ComputeSet equality for all15. Retain failures without tuning.
+This is TRAIN development and cannot qualify a production head.
+Receipt orchestration correction: Rust harness prefixed the first of six ID
+lines; receipt parsing now accepts the prefix. The first registration commit
+held only this worklog; the next commits the actual registration and pinned
+six-bake receipt. Both precede either fit; no scientific setting changed.
+
+R5INTEG3 fixed-fit and plan/probe results: both420-ID heads fit on the same
+5499 fit/2706 calibration unique pairs. Rev4 calibration2532/2546 detections,
+0/160 honest activation/lowering,147/155 real bugs; Rev5 calibration2534/2546,
+0/160,148/155. Both fitted base compositions pass all seven unchanged gates.
+Rust parity on8205 rows/head: exact raw margins/probabilities and fire sets.
+Private plan equality PASSES all15 registered full compositions. In particular
+Rev5 by_v2fy retains full_res_xb=false and v1_pools=Off; Rev4's inherent Peaks
+mode is identical with/without head. No added family/channel/scale flags.
+Prepared15 compositions/75 rows:60 accepted,15 typed CorruptionDetected,
+3360 exact base-map queries, zero for rejections. Identity180 and cross-revision
+refusal2 pass.14 admission tests,34 corruption tests,36 revision-contract
+tests, clippy, lint-scripts and fmt pass. Full8510-row matrix remains running.
+
+R5INTEG3 full matrix COMPLETE:9 Rev4 full compositions and6 actual Rev5 full
+R5CONFIRM compositions, all7/7 gates. Detection2532/2546 (Rev4),2534/2546
+(Rev5),0/160 honest activation/lowering,147/155 and148/155 real bugs.
+Composed below q20 Rev4 2533–2537/2546; Rev5 2536–2537/2546. Each audits8510
+TRAIN attempts. Feature, scalar/cache and stored-f32 score/probability errors
+are zero. Exact fit/calibration recipe and TRAIN roles unchanged; no new fit
+extraction. The two matching full-s0 audits reuse the fitter's identical
+composition/pair packet;13 other matrix compositions were scored anew.
+The420-ID heads lose4/2 calibration detections versus the576-read heads but
+remove the extra scale-0 X/B work (and Rev5 Peaks), as exact private plans
+establish. Retain both fixed heads and old controls; no tuning or selection.
+
+R5INTEG3 archival verification COMPLETE:516 members,4224170695 uncompressed
+bytes,1311489822-byte zstd archive at
+`/mnt/tower/output/zensim/r5integ-2026-10-04/r5integ3/evidence.tar.zst`, SHA256
+`aa7272e771cbd982fd69568fedd2e615e5cb9cdfcaceb3acb7afc0ee136fec4d`.
+An initial unverified bundle included a live run-heavy status file; retained
+under `unverified-attempt-1/`. The final wrapper uses a separate scratch TMPDIR
+and excludes ephemeral tmp.* files. Every final member hash matches its index.
+Large summary3912179 bytes SHA256
+`2187ddcb0bda0d99a45a445372b736d39e8b8d690a0f2dd72214acf51889e329`
+and both heads have verified tower mirrors; only small pointer JSON is committed.
+`benchmarks/r5integ3_ARTIFACTS.json` binds heads, summary, full archive/handoff.
+Coordinator landed the earlier chain as4e3e23de; this branch stays on2d5e7ec0
+plus R5INTEG3 commits for landing its net diff. No push/rebase/integration.
+R5INTEG3_DONE.md will be written last after the final local commit and checks.

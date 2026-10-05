@@ -129,6 +129,62 @@ class Admission(unittest.TestCase):
                         patch("pandas.read_parquet", side_effect=AssertionError("payload opened")):
                     trainer.canonical_main(argv)
 
+    def test_by_v2fy_registration_admission_before_payload_reads(self):
+        import hashlib
+        ids = json.loads((Path(__file__).resolve().parents[2] /
+                         "benchmarks/costset2_2026-10-03.candidate_ids.json").read_text())["candidates"]["by_v2fy"]
+        def pin(path):
+            return dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            candidate = root / "candidate.json"
+            candidate.write_text(json.dumps(dict(candidates=dict(by_v2fy=ids))))
+            base = dict(path="synthetic-full-bake.bin", sha256="synthetic")
+            original_receipt = dict(schema="r5integ3-declared-ids-owner-receipt-v1",
+                                    bakes=[dict(artifact=base, declared_feature_ids=ids) for _ in range(6)])
+            original_reg = dict(schema="canonical-corruption-by-v2fy-registration-v1",
+                                regime="by-v2fy-420", head_feature_ids=ids, head_feature_count=420,
+                                formula_revisions=[4, 5], caller_input_width=720,
+                                scope="TRAIN development; no production qualification", candidate_ids=pin(candidate))
+            for revision in (4, 5):
+                for change, error in [("valid", "extraction_manifest"),
+                                      ("undeclared", "feature regime"),
+                                      ("head-read", "exactly match"),
+                                      ("input-read", "exactly match"),
+                                      ("caller", "caller width"),
+                                      ("registration", "preregistration"),
+                                      ("bake-read", "bake-declared IDs"),
+                                      ("base-binding", "bake-declared IDs"),
+                                      ("changed-registration", "changed input")]:
+                    receipt = copy.deepcopy(original_receipt)
+                    reg = copy.deepcopy(original_reg)
+                    m = dict(schema="canonical-corruption-refit-train-v2", formula_revision=revision,
+                             root_form="sqrt", input_precision="f32", feature_ids=ids.copy(),
+                             head_feature_ids=ids.copy(), head_regime="by-v2fy-420",
+                             head_caller_input_width=720, base_bake=base,
+                             identity_policy="exclude-short-circuit-pairs-v1", origins=dict(
+                                 fit=["2010", "1054", "6068", "6610", "7066", "9380", "8206", "8384"],
+                                 calibrate=["1214", "6064", "9066", "8462"], evaluate=[]))
+                    if change == "undeclared": m.pop("head_regime")
+                    if change == "head-read": m["head_feature_ids"][0] = 0
+                    if change == "input-read": m["feature_ids"][0] = 228
+                    if change == "caller": m["head_caller_input_width"] = 1825
+                    if change == "registration": reg["head_feature_count"] = 421
+                    if change == "bake-read": receipt["bakes"][0]["declared_feature_ids"][0] = 0
+                    if change == "base-binding": m["base_bake"] = dict(path="another.bin", sha256="another")
+                    rp = root / "receipt.json"; rp.write_text(json.dumps(receipt))
+                    reg["declared_ids_receipt"] = pin(rp)
+                    reg_path = root / "registration.json"; reg_path.write_text(json.dumps(reg))
+                    m["regime_registration"] = pin(reg_path)
+                    if change == "changed-registration": reg_path.write_text("{}")
+                    mp = root / "manifest.json"; mp.write_text(json.dumps(m))
+                    with self.subTest(revision=revision, change=change), \
+                            patch("pandas.read_parquet", side_effect=AssertionError("payload opened")), \
+                            self.assertRaisesRegex((ValueError, KeyError), error):
+                        trainer.canonical_main(["--canonical-manifest", str(mp), "--out-dir", str(root / "out"),
+                                                "--training-screen-only"])
+                    self.assertFalse((root / "out").exists())
+
     @staticmethod
     def native_pair(index=1):
         import hashlib
