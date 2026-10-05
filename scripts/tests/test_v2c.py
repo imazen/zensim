@@ -1199,7 +1199,11 @@ class TeacherSubsets(unittest.TestCase):
             new = pq.read_table(src)["human_score"].to_numpy().copy()
             new[::3] = 1.5
             rec = t.write_curated(src, d / "out.parquet", keep, new)
-            self.assertEqual(rec, {"rows_in": n, "rows_kept": int(keep.sum())})
+            original = pq.read_table(src)["human_score"].to_numpy()
+            self.assertEqual(rec, {"rows_in": n, "rows_kept": int(keep.sum()),
+                                   "targets_changed": int(np.count_nonzero(original[keep] != new[keep])),
+                                   "row_selection_sha256": hashlib.sha256(
+                                       np.flatnonzero(keep).astype("<u8").tobytes()).hexdigest()})
             got = pq.read_table(d / "out.parquet").to_pandas()
             want = pq.read_table(src).to_pandas().assign(human_score=new)[keep].reset_index(drop=True)
             pd.testing.assert_frame_equal(got, want)

@@ -186,3 +186,27 @@ Final fits:100 completed; last ledger upload17:05:36UTC,12.81h since
 04:17 launch. Wall capacities including draining/churn: tower1.722675367
 cells/h(22),i2654.327934547(36),r35001.107453779(10),r3800x3.968582059(32).
 Coordinator tail_trim intervention supersedes earlier provisional ETA.
+
+
+Landing merge and checks complete (2026-10-05): rebased E26 onto fetched
+main@origin6874a981 (SHIPPATH9), preserving strict/historical admission,
+immutable-output/checkpoint protections, teacher/ordinal propagation and
+E26 native HDR leg. v2c_wide keeps both full-recipe/assessment actions and
+hdr-leg; rev5_bank keeps both label-free assessment manifest and HDR mode.
+P2 manifest/record admission still precedes any HDR candidate payload open.
+Frozen v28 program/data/image and all completed numerical evidence unchanged.
+Original source history retained at quarantine/codex/hdrcorr-e26-frozen;
+merged owner hashes and logs are in the landing validation pointer.
+
+Final checks PASS:162 Python tests (including four E26 actual-loader/packer
+read tripwires and historical/strict/checkpoint/corruption-admission paths),
+25 trainer/29 pack-refit/41 verdict Rust tests,15 research tests,36 serving
+revision tests,2 native HDR extractor tests; CI-exact root Clippy, native
+Clippy -D warnings, formatting, API snapshots and820 script lint. One
+verdict and three serving corpus tests remain explicitly ignored/opt-in.
+Two stale assertions inherited from main were repaired: capacity fit tuples
+now carry declared epochs; historical curated receipt checks ordered row
+selection and changed targets as well as row counts. No runtime behavior
+change. Initial Python missing-binary failures and API-count mismatch are
+retained; rebuilt merged trainer/panel and regenerated snapshots pass.
+No push; coordinator reviews the merge. Full results remain research-only.
