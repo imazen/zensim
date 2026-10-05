@@ -201,6 +201,8 @@ fn main() {
     let mut input_contract = None;
     let mut audit_composition: Option<PathBuf> = None;
     let mut score_bakes: Vec<PathBuf> = Vec::new();
+    let mut requested_ids: Option<Vec<u16>> = None;
+    let mut absolute_pairs = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -227,6 +229,23 @@ fn main() {
             }
             "--threads" => {
                 n_threads = args[i + 1].parse().expect("threads");
+                i += 2;
+            }
+            "--absolute-pairs" => {
+                absolute_pairs = true;
+                i += 1;
+            }
+            "--requested-ids" => {
+                assert!(requested_ids.is_none(), "duplicate requested ids");
+                let ids: Vec<u16> = args[i + 1]
+                    .split(',')
+                    .map(|x| x.parse().expect("feature id"))
+                    .collect();
+                assert!(
+                    !ids.is_empty() && ids.windows(2).all(|w| w[0] < w[1]),
+                    "sorted unique ids required"
+                );
+                requested_ids = Some(ids);
                 i += 2;
             }
             "--score-bake" => {
@@ -275,8 +294,24 @@ fn main() {
             let rb = Path::new(f[c_ref]).file_name().expect("ref base");
             let db = Path::new(f[c_dist]).file_name().expect("dist base");
             cells.push(Cell {
-                ref_file: ref_root.join(rb),
-                dist_file: enc.join(db),
+                ref_file: if absolute_pairs {
+                    assert!(
+                        Path::new(f[c_ref]).is_absolute(),
+                        "absolute reference required"
+                    );
+                    PathBuf::from(f[c_ref])
+                } else {
+                    ref_root.join(rb)
+                },
+                dist_file: if absolute_pairs {
+                    assert!(
+                        Path::new(f[c_dist]).is_absolute(),
+                        "absolute distortion required"
+                    );
+                    PathBuf::from(f[c_dist])
+                } else {
+                    enc.join(db)
+                },
                 dist_base: db.to_string_lossy().into_owned(),
                 q: f[c_q].to_string(),
             });
@@ -292,6 +327,24 @@ fn main() {
         score_bakes.is_empty() || audit_composition.is_none(),
         "scoring and audit modes are separate"
     );
+    assert!(
+        requested_ids.is_none() || (score_bakes.is_empty() && audit_composition.is_none()),
+        "research extraction is a separate mode"
+    );
+    let research_req = requested_ids.as_ref().map(|ids| {
+        assert!(
+            ids.iter()
+                .all(|&x| usize::from(x) < zensim::research::full_width()),
+            "feature id out of range"
+        );
+        zensim::research::Request::for_slots(
+            zensim::feature_set_id::SlotSet::from_slots(ids.iter().map(|&x| usize::from(x))),
+            zensim::research::full_width(),
+        )
+        .with_era_label("e26-native-hdr-rev5")
+        .with_parallel(false)
+    });
+    let research_manifest = std::sync::Mutex::new(None::<String>);
     let score_bytes: Vec<Vec<u8>> = score_bakes
         .iter()
         .map(|p| std::fs::read(p).expect("score bake"))
@@ -384,6 +437,22 @@ fn main() {
                             }
                             return Ok(line);
                         }
+                        if let Some(req) = &research_req {
+                            let result = zensim::research::extract_hdr(req, &source, &distorted, encoding)
+                                .map_err(|e| format!("research {}: {e:?}", c.dist_base))?;
+                            let manifest = result.manifest_json();
+                            let mut recorded = research_manifest.lock().unwrap();
+                            if let Some(previous) = recorded.as_ref() {
+                                assert_eq!(previous, &manifest, "research provenance changed between rows");
+                            } else { *recorded = Some(manifest); }
+                            let mut line = format!("{}\t{}", c.dist_base, c.q);
+                            for (id, value) in result.values().iter().enumerate() {
+                                let measured = requested_ids.as_ref().unwrap().binary_search(&(id as u16)).is_ok();
+                                if measured && !value.is_finite() { return Err(format!("nonfinite requested f{id}")); }
+                                line.push_str(&format!("\t{:?}", if measured { *value } else { f64::NAN }));
+                            }
+                            return Ok(line);
+                        }
                         let r = z
                             .compute_folded720_append2_features_hdr(
                                 &source,
@@ -451,7 +520,7 @@ fn main() {
     let manifest = serde_json::json!({
         "input_contract":input_contract,
         "formula_revision":format!("{:?}",zensim::feature_v2::active_formula_revision()),
-        "rows":cells.len(), "feature_count":if score_bakes.is_empty() { Some(944) } else { None },
+        "rows":cells.len(), "feature_count":if score_bakes.is_empty() { Some(if requested_ids.is_some() { zensim::research::full_width() } else { 944 }) } else { None },
         "score_bakes":score_bakes,
         "refused_scores":refused_count,
         "reference_primaries":if declared_cicp { "per-image cICP" } else { "BT.2020" },
@@ -459,7 +528,9 @@ fn main() {
         "transfer":"PQ", "display_peak_nits":10000,
         "untagged_reference_policy":"explicit datagen declaration; never inferred from bit depth",
         "source_manifests":pairs_tsvs, "decoder":"zenpng native16 + zenjxl RGB16_BT2100_PQ",
-        "feature_input_era":"hdr-common-primaries-v2"
+        "feature_input_era":"hdr-common-primaries-v2",
+        "requested_ids":requested_ids,
+        "research":research_manifest.into_inner().unwrap().map(|s| serde_json::from_str::<serde_json::Value>(&s).unwrap())
     });
     let manifest_path = out_path.with_extension("manifest.json");
     let mut manifest_file = std::fs::OpenOptions::new()
@@ -491,7 +562,11 @@ fn main() {
         String::from("ref_path\tdist_path")
     };
     if score_bakes.is_empty() {
-        for i in 0..944 {
+        for i in 0..if requested_ids.is_some() {
+            zensim::research::full_width()
+        } else {
+            944
+        } {
             header.push_str(&format!("\tf{i}"));
         }
     } else {
@@ -529,99 +604,5 @@ fn main() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn hdr_datagen_keeps_low_bits_and_refuses_conflicting_transfer() {
-        let root = std::env::temp_dir().join(format!(
-            "zensim-hdr-native-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&root).unwrap();
-        let pixels: Vec<_> = (0..256)
-            .map(|i| rgb::Rgb::new(12000 + i, 22000, 33000))
-            .collect();
-        for (tag, metadata, valid) in [
-            ("declared-untagged", None, true),
-            (
-                "pq",
-                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(9, 16, 0, true))),
-                true,
-            ),
-            (
-                "hlg",
-                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(9, 18, 0, true))),
-                false,
-            ),
-            (
-                "bt709",
-                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(1, 16, 0, true))),
-                false,
-            ),
-            (
-                "p3",
-                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(12, 16, 0, true))),
-                false,
-            ),
-        ] {
-            let bytes = zenpng::encode_rgb16(
-                imgref::Img::new(pixels.as_slice(), 16, 16),
-                metadata.as_ref(),
-                &zenpng::EncodeConfig::default(),
-                &enough::Unstoppable,
-                &enough::Unstoppable,
-            )
-            .unwrap();
-            let path = root.join(format!("{tag}.png"));
-            std::fs::write(&path, bytes).unwrap();
-            let declared = decode_ref_png16(&path, true);
-            assert_eq!(
-                declared.is_ok(),
-                matches!(tag, "pq" | "p3" | "bt709"),
-                "declared {tag}"
-            );
-            if let Ok((_, _, _, primaries)) = declared {
-                assert_eq!(
-                    primaries,
-                    match tag {
-                        "p3" => zensim::ColorPrimaries::DisplayP3,
-                        "bt709" => zensim::ColorPrimaries::Srgb,
-                        _ => zensim::ColorPrimaries::Bt2020,
-                    }
-                );
-            }
-            let result = decode_ref_png16(&path, false);
-            assert_eq!(result.is_ok(), valid, "{tag}");
-            if let Ok((actual, w, h, primaries)) = result {
-                assert_eq!((w, h), (16, 16));
-                for (a, b) in actual.iter().zip(&pixels) {
-                    assert_eq!(*a, [b.r, b.g, b.b]);
-                }
-                assert_eq!(
-                    zensim::ImageSource::color_primaries(&Pq16Image::from_rgb16(
-                        &actual, w, h, primaries
-                    )),
-                    zensim::ColorPrimaries::Bt2020
-                );
-            }
-        }
-        let pixels8 = vec![[128u8; 3]; 256];
-        let rgb8: &[rgb::Rgb<u8>] = bytemuck::cast_slice(&pixels8);
-        let bytes = zenpng::encode_rgb8(
-            imgref::Img::new(rgb8, 16, 16),
-            None,
-            &zenpng::EncodeConfig::default(),
-            &enough::Unstoppable,
-            &enough::Unstoppable,
-        )
-        .unwrap();
-        let path = root.join("eight.png");
-        std::fs::write(&path, bytes).unwrap();
-        assert!(decode_ref_png16(&path, false).is_err());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-}
+#[path = "hdr944_extract/tests.rs"]
+mod tests;

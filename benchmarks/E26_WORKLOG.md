@@ -12,3 +12,8 @@ kids_pick.py with QUEUE=fleet_queue; kids_pick.py reads unqualified triples.
 It serves prohibited hosts as well as allowed hosts. E26 will not enter this
 queue until its allowed-host restriction is enforceable. Existing workers
 are owned by other lanes and are not stopped or restarted.
+
+Coordinator resolved placement: only the five allowed consumers run, all
+single-thread cells; existing tower capacity explicitly accepted. No extra
+filler or worker will be started/restarted. Transform and rank-only leg
+committed before fitting at 8e8f3170.

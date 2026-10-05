@@ -235,6 +235,8 @@ def recipe_of(spec: str) -> dict:
             out["teacher_subset"] = tok[2:]
         elif tok.startswith("ko") and "kadis_ordinal" not in out and 0 < float(tok[2:]) <= 64:
             out["kadis_ordinal"] = float(tok[2:])
+        elif tok.startswith("hd") and "hdr_weight" not in out and 0 < float(tok[2:]) <= 64:
+            out["hdr_weight"] = float(tok[2:])
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out

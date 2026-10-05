@@ -113,6 +113,44 @@ def as_good(row: dict, spec_: str) -> dict:
                                               and w2["mean"] > -2 * w2["se"])}
 
 
+def cmd_e26_grid(args) -> int:
+    """Registered E26: two HDR weights, ten seeds, five folds; the E24 control is reused."""
+    cols = e21.columns("by_v2fy")
+    cells = []
+    for weight in (4, 16):
+        spec_ = CONTROL + f":hd{weight}"
+        for source in SOURCE_ORDER:
+            for seed in SEEDS:
+                cells.append({"name": f"{spec_}__N/without_{source}_s{seed}",
+                    "argv": ["v2_lodo_mlp.py", "--spec", spec_, "--head", "N", "--heldout", source,
+                             "--seed-index", str(seed), "--root", str(V2), "--columns", ",".join(map(str, cols))]})
+    Path(args.out).write_text(json.dumps({"program_sha": args.program_sha, "data_sha": args.data_sha,
+                                         "cells": cells}, indent=1)+"\n")
+    print(json.dumps({"cells": len(cells), "arms": [CONTROL+f":hd{w}" for w in (4, 16)]}))
+    return 0
+
+
+def cmd_e26_score(args) -> int:
+    """Use the unchanged E21/E24 SDR owner against all fifty E24 Rev5 control cells."""
+    import e13_teacher as e13
+
+    root, control_root = Path(V2), Path(args.control_root)
+    same_heldout_keys(control_root, root)
+    def cell_of(spec_: str, source: str, seed: int) -> Path:
+        base = control_root if spec_ == CONTROL else root
+        return base / "cells" / f"{spec_}__N" / f"without_{source}_s{seed}" / "result.json"
+    e13.cell_of, e13.V2, e13.SEEDS, e13.BASE = cell_of, root, SEEDS, CONTROL
+    arms = [(f"hd{w}", CONTROL+f":hd{w}") for w in (4, 16)]
+    rc = e13.score_arms(arms, "e26_sdr", False)
+    full = json.loads((root / "compare/e26_sdr.json").read_text())
+    if full["missing_cells"]:
+        raise ValueError("E26 decision requires all 100 arm cells and 50 E24 control cells")
+    decision = {label: as_good(full["rows"][label], spec_) for label, spec_ in arms}
+    (root / "compare/e26_sdr_decision.json").write_text(json.dumps(decision, indent=1)+"\n")
+    print(json.dumps(decision))
+    return rc
+
+
 def cmd_e25(args) -> int:
     """Addendum D: frozen Rev4 weights on Rev5 tables, after all 50 exact Rev4 gates.
 
@@ -290,7 +328,8 @@ def cmd_e25(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["grid", "score", "e25"])
+    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score"])
+    ap.add_argument("--control-root", default="/var/tmp/rev4-featpot/v2c5")
     ap.add_argument("--root")
     ap.add_argument("--rev4-root", default="/var/tmp/rev4-featpot/v2c")
     ap.add_argument("--out")
@@ -298,7 +337,8 @@ def main() -> int:
     ap.add_argument("--data-sha", default="")
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
-    return {"grid": cmd_grid, "score": cmd_score, "e25": cmd_e25}[args.cmd](args)
+    return {"grid": cmd_grid, "score": cmd_score, "e25": cmd_e25,
+            "e26-grid": cmd_e26_grid, "e26-score": cmd_e26_score}[args.cmd](args)
 
 
 if __name__ == "__main__":

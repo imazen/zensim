@@ -19,6 +19,37 @@ import pyarrow.parquet as pq
 
 from v2_common import COVERAGE_FAMILIES, REPO, TEACHER_CODECS, TEACHER_SUBSETS, V2
 
+HDR_TRANSFORM = "score=10*q_jod;no-clipping"
+HDR_TRAIN_SHA = "deb70e775b043a578c77e0c3ff27960ebfa936e9d901497f9d74389e6ce9fbce"
+
+
+def hdr_leg(record: dict, keep: list[int]) -> tuple[Path, dict]:
+    """Admit only the pinned, fit-only E26 TRAIN leg carried by the data receipt."""
+    from v2_common import sha, table_path, selection_id
+
+    path = table_path(record["fit"])
+    manifest_path = Path(f"{path}.manifest.json")
+    if sha(path) != record["fit"]["sha256"] or sha(manifest_path) != record["fit"]["manifest_sha256"]:
+        raise ValueError("HDR fit table/manifest changed after receipt")
+    man = json.loads(manifest_path.read_text())
+    if (man.get("study") != "E26" or man.get("role") != "train" or man.get("rows") != 7390
+            or man.get("teacher_sha256") != HDR_TRAIN_SHA or man.get("formula_revision") != 5
+            or man.get("target_transform") != HDR_TRANSFORM or man.get("requested_ids") != keep
+            or selection_id(keep) != "59f0bbc2f290" or set(record) != {"fit", "keys_sha256"}):
+        raise ValueError("HDR leg is not the registered fit-only Rev5 agreement population/read set")
+    keys_path = path.with_suffix(".keys.parquet")
+    if sha(keys_path) != record["keys_sha256"]:
+        raise ValueError("HDR fit row authority changed")
+    keys = pq.read_table(keys_path).to_pylist()
+    table = pq.read_table(path, columns=["ref_basename", "human_score"])
+    if len(keys) != 7390 or table.num_rows != 7390 or any(k["role"] != "train" or not k["agree"] for k in keys):
+        raise ValueError("HDR TRAIN agreement membership mismatch")
+    if (len({k["row_id"] for k in keys}) != 7390
+            or table["ref_basename"].to_pylist() != [k["ref_path"] for k in keys]
+            or table["human_score"].to_pylist() != [10 * k["hdrvdp3_q_jod"] for k in keys]):
+        raise ValueError("HDR row order/reference/target transform mismatch")
+    return path, {**man, "table_sha256": sha(path), "keys_sha256": record["keys_sha256"]}
+
 STRATA_NAME = "data/e13/safesyn_fit_strata.npz"
 # Design log E14: the KADIS ordinal ladder table (e14_kadis_ordinal.py table), pinned by sha.
 ORDINAL_NAME = "data/e14/kadis_ordinal.parquet"

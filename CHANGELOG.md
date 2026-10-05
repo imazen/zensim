@@ -63,6 +63,10 @@
 
 ### Added
 
+- Research extraction accepts explicit native HDR requests via `research::extract_hdr`,
+  sharing the production PU fold walk and existing request/provenance owner.
+  The existing `hdr944_extract` tool supports an explicit feature-ID read set.
+
 - `FormulaRevision::Rev5` (the `localwin` era, `benchmarks/rev5_spec_2026-10-04.md`): Rev4's formulas over the
   `basic` (f0–155), `peaks` (f156–227) and `v2` (f372–719) families only, under local-window arithmetic — a per-output
   11-tap f32 pair tree over each window's own inputs (production mirror padding), 16 fixed virtual lanes, one fixed
