@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One evaluation pipeline: independently reusable verdict and coherence stages.
 # Rust owns scores/statistics; bake_verdict and m3a_sweep own input identities.
-# Usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]
+# Usage: run_full_eval.sh [--stage all|verdict|coherence|qualify|identities] bake name [regime] [root]
 # Or: run_full_eval.sh --stage feature-screen recipe.json fresh-output [--cache directory]
 # Existing ZENSIM_M3_ONLY maps to coherence; M3_REUSE requests only VALID reuse.
 # Historical results lacking identities are never a cache hit. Re-run their
@@ -17,8 +17,8 @@ if [[ "$STAGE" == feature-screen ]]; then
     # BakeScorer audit and panel. Never enters the protected full-eval defaults.
     exec python3 "$(dirname "${BASH_SOURCE[0]}")/lib/feature_screen.py" "$@"
 fi
-case "$STAGE" in all|verdict|coherence|qualify) ;; *) echo "unknown stage: $STAGE" >&2; exit 2 ;; esac
-if [[ $# -lt 2 ]]; then echo "usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]" >&2; exit 2; fi
+case "$STAGE" in all|verdict|coherence|qualify|identities) ;; *) echo "unknown stage: $STAGE" >&2; exit 2 ;; esac
+if [[ $# -lt 2 ]]; then echo "usage: run_full_eval.sh [--stage all|verdict|coherence|qualify|identities] bake name [regime] [root]" >&2; exit 2; fi
 BAKE=$1; NAME=$2; REGIME=${3:-720}
 FEATURES_ROOT_OVERRIDE=${4:-${ZENSIM_FEATURES_ROOT:-}}
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -30,6 +30,18 @@ HEAVY=("${ZENSIM_RUN_HEAVY:-$HOME/work/zen/scripts/run-heavy}" --mem 16G --jobs 
 command -v jq >/dev/null
 [[ -s "$BAKE" ]] || { echo "bake missing: $BAKE" >&2; exit 3; }
 [[ "$NAME" != */* && -n "$NAME" ]] || { echo "name must be a filename stem" >&2; exit 2; }
+if [[ "$STAGE" == identities ]]; then
+    [[ "$REGIME" == 720 && -n "${ZENSIM_EVAL_INSTRUMENTS:-}" && -n "$FEATURES_ROOT_OVERRIDE" ]] || { echo "identities requires regime 720 and explicit features-only instruments and root" >&2; exit 2; }
+    [[ -z "${ZENSIM_EVAL_CORRUPTION_HEAD_THRESHOLD:-}" || -n "${ZENSIM_EVAL_CORRUPTION_HEAD:-}" ]] || { echo "companion threshold requires a companion" >&2; exit 2; }
+    IDENTITY_CHECK=(python3 "$REPO_ROOT/scripts/lib/assessment_identity.py" "$ZENSIM_EVAL_INSTRUMENTS" "$OUTDIR"
+        "$BAKE" "${ZENSIM_EVAL_CORRUPTION_HEAD:-}" "${ZENSIM_EVAL_ENSEMBLE:-}")
+    INSTRUMENT_ID=$("${IDENTITY_CHECK[@]}")
+    [[ "$FEATURES_ROOT_OVERRIDE" == "$(jq -r .features_root <<< "$INSTRUMENT_ID")" ]] || { echo "instrument root mismatch" >&2; exit 2; }
+    [[ ! -e "$OUTDIR/.disabled-assessment-input" ]] || { echo "disabled input sentinel exists" >&2; exit 2; }
+fi
+if [[ -n "${ZENSIM_EVAL_INSTRUMENTS:-}${ZENSIM_EVAL_CORRUPTION_HEAD:-}" && "$STAGE" != identities ]]; then
+    echo "assessment/companion transport requires --stage identities; scoring needs a separate exposure freeze" >&2; exit 2
+fi
 mkdir -p "$OUTDIR"
 JSON="$OUTDIR/$NAME.fulleval.json"; MD="$OUTDIR/$NAME.verdict.md"
 VERDICT="$OUTDIR/$NAME.verdict-stage.json"; COHERENCE="$OUTDIR/$NAME.coherence-stage.json"
@@ -107,7 +119,27 @@ if [[ -n "${ZENSIM_EVAL_ENSEMBLE:-}" ]]; then
     [[ -n "${ZENSIM_EVAL_ENSEMBLE_WEIGHTS:-}" ]] || { echo "complete ensemble needs explicit weights" >&2; exit 2; }
     BV_ARGS+=(--ensemble "$ZENSIM_EVAL_ENSEMBLE" --ensemble-weights "$ZENSIM_EVAL_ENSEMBLE_WEIGHTS")
 fi
+if [[ "$STAGE" == identities ]]; then
+    # Override every optional table default. This branch exits before scoring.
+    BV_ARGS+=(--corpora cid22 --dial-grid "$(jq -r '.inputs["dial-grid"].path' <<< "$INSTRUMENT_ID")"
+        --negtail-probe "$(jq -r '.inputs["negtail-probe"].path' <<< "$INSTRUMENT_ID")"
+        --identity-probe "$(jq -r '.inputs["identity-probe"].path' <<< "$INSTRUMENT_ID")"
+        --corruption-grid "$OUTDIR/.disabled-assessment-input" --perpair-metrics "$OUTDIR/.disabled-assessment-input")
+    if [[ -n "${ZENSIM_EVAL_CORRUPTION_HEAD:-}" ]]; then
+        BV_ARGS+=(--corruption-head "$ZENSIM_EVAL_CORRUPTION_HEAD")
+        if [[ -n "${ZENSIM_EVAL_CORRUPTION_HEAD_THRESHOLD:-}" ]]; then
+            BV_ARGS+=(--corruption-head-threshold "$ZENSIM_EVAL_CORRUPTION_HEAD_THRESHOLD")
+        fi
+    fi
+fi
 "${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --print-inputs > "$WORK/verdict-inputs.json"
+if [[ "$STAGE" == identities ]]; then
+    [[ "$("${IDENTITY_CHECK[@]}")" == "$INSTRUMENT_ID" ]] || { echo "instrument inputs changed during identity collection" >&2; exit 3; }
+    jq --argjson instruments "$INSTRUMENT_ID" '{features_only:true,labels_read:false,input_identity:.,assessment_instruments:$instruments,scoring:"not_requested"}' "$WORK/verdict-inputs.json" > "$WORK/identity.json"
+    mv "$WORK/identity.json" "$OUTDIR/$NAME.identities.json"
+    echo "$OUTDIR/$NAME.identities.json"
+    exit 0
+fi
 valid_verdict() {
     [[ -s "$1" ]] && jq -e --slurpfile i "$WORK/verdict-inputs.json" \
         '.input_identity == $i[0] and .scoring.surface == "zensim::BakeScorer" and (.rank | type == "object")' "$1" >/dev/null

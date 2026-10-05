@@ -31,6 +31,10 @@ import pyarrow.parquet as pq
 
 OLD_BANK = Path("/var/tmp/rev4-featbank/bank")
 TOKENS = "basic,peaks,v2"
+ASSESSMENT_KEY_COLUMNS = {"pair_key", "row_id", "ref_path", "dist_path", "ref_group", "pixels_identical",
+    "entry", "image_id", "codec", "q", "codec_param", "param_kind", "case", "panel", "block",
+    "source_reference", "source_distorted", "source_role", "delivery_receipt", "source_row_id", "origin",
+    "ref_pixels_sha256", "dist_pixels_sha256", "knob", "n_stimuli", "width", "height"}
 SLOT_RANGES = ((0, 228), (372, 720))  # Basic f0..155 + Peaks f156..227, V2 f372..719 (feature_set_id::ComputeToken)
 SCHEMA = "rev5-featbank-v1"
 
@@ -53,7 +57,39 @@ def requested_ids() -> list[int]:
 
 def cmd_extract(a) -> int:
     s = a.set
-    keys = pq.read_table(OLD_BANK / s / "keys.parquet")
+    assessment = getattr(a, "instrument_manifest", None)
+    spec = None
+    key_path = OLD_BANK / s / "keys.parquet"
+    if assessment:
+        from v2c_wide import assessment_path as safe_path
+        from v2_common import refuse_immutable_output
+        if not s or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in s):
+            raise ValueError("assessment set token required")
+        spec = json.loads(safe_path(assessment).read_text())
+        if a.limit or spec.get("schema") != "rev5-assessment-keys-v1" or spec.get("labels_read") is not False:
+            raise ValueError("explicit label-free assessment keys required")
+        key_path = safe_path(spec["keys"]["path"])
+        roots = [Path(v) for v in spec["immutable_roots"]] + [key_path.parent, Path(assessment).parent]
+        for dest in [Path(a.out) / s, Path(a.out) / "_work" / s]:
+            refuse_immutable_output(dest, roots)
+            if dest.exists():
+                raise ValueError("fresh assessment bank/scratch required")
+        if set(pq.ParquetFile(key_path).schema_arrow.names) - ASSESSMENT_KEY_COLUMNS:
+            raise ValueError("label-bearing assessment keys forbidden before payload read")
+        if a.revision != 5 or sha256_file(key_path) != spec["keys"]["sha256"] or sha256_file(a.bin) != spec["extractor"]["sha256"]:
+            raise ValueError("changed assessment keys/extractor")
+    keys = pq.read_table(key_path)
+    if spec:
+        if set(keys.column_names) - ASSESSMENT_KEY_COLUMNS or keys.num_rows != spec["rows"] or keys.num_rows == 0:
+            raise ValueError("assessment key columns/rows are not label-free")
+        for path in keys.column("ref_path").to_pylist() + keys.column("dist_path").to_pylist():
+            safe_path(path)
+        pixel_columns = [c for c in ("ref_path", "dist_path", "source_reference", "source_distorted") if c in keys.column_names]
+        roots += sorted({safe_path(p).resolve().parent for c in pixel_columns for p in keys.column(c).to_pylist()})
+        for dest in [Path(a.out) / s, Path(a.out) / "_work" / s]:
+            refuse_immutable_output(dest, roots)
+        if keys.column("row_id").to_pylist() != list(range(keys.num_rows)) or len(set(keys.column("pair_key").to_pylist())) != keys.num_rows:
+            raise ValueError("assessment ordinal/key order required")
     n = a.limit or keys.num_rows
     ref, dist = keys.column("ref_path").to_pylist(), keys.column("dist_path").to_pylist()
     pk = keys.column("pair_key").to_pylist()
@@ -63,6 +99,7 @@ def cmd_extract(a) -> int:
     wd.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, ZENSIM_FORMULA_REV=str(a.revision), ZENSIM_ROOT_FORM="sqrt", RAYON_NUM_THREADS=str(a.threads))
     want = set(requested_ids())
+    audit_records = []
     writer, chunk_meta, tsv_hashes, fsids, eras, width, t_all = None, [], [], set(), None, None, time.time()
     for ci, lo in enumerate(range(0, n, a.chunk)):
         hi = min(lo + a.chunk, n)
@@ -70,11 +107,14 @@ def cmd_extract(a) -> int:
         with open(tsv, "w") as f:
             f.write("ref_path\tdist_path\thuman_score\trow_id\n")
             for i in range(lo, hi):
-                f.write(f"{ref[i]}\t{dist[i]}\t0\t{i}\n")
+                f.write(f"{ref[i]}\t{dist[i]}\t{i if spec else 0}\t{i}\n")
         tsv_hashes.append(sha256_file(tsv))
         csvp = wd / f"chunk_{ci:03d}.csv"
         cmd = [a.bin, "--corpus", "pairs-tsv", "--path", str(tsv), "--out", str(csvp), "--restore-cuts", TOKENS,
                "--input-contract", "legacy-rgb8", "--era-label", a.era, "--force-tier", a.tier]
+        audit_path = wd / f"chunk_{ci:03d}.audit.jsonl"
+        if spec:
+            cmd += ["--audit-jsonl", str(audit_path)]
         t0 = time.time()
         with open(wd / f"chunk_{ci:03d}.log", "w") as lg:
             rc = subprocess.run(cmd, env=env, stdout=lg, stderr=subprocess.STDOUT).returncode
@@ -113,27 +153,60 @@ def cmd_extract(a) -> int:
         if writer is None:
             writer = pq.ParquetWriter(outdir / "features.parquet", out.schema, compression="zstd", compression_level=3)
         writer.write_table(out, row_group_size=5000)
+        audits = None
+        if spec:
+            audits = [json.loads(line) for line in audit_path.read_text().splitlines()]
+            audits.sort(key=lambda r: r["human_score"])
+            if len(audits) != hi-lo or [r["human_score"] for r in audits] != list(range(lo, hi)):
+                raise ValueError("assessment audit key coverage")
+            for j, audit in enumerate(audits):
+                expected = lo+j
+                if audit["model_inputs"] or audit["reference"] != ref[expected] or audit["distorted"] != dist[expected]:
+                    raise ValueError("features-only audit must have no model and exact paths")
+                if "canonical_features_f32_le_sha256" in audit and audit["canonical_features_f32_le_sha256"] != hashlib.sha256(np.array(
+                        [tab.column(f"f{i}")[j].as_py() for i in range(w)], dtype="<f4").tobytes()).hexdigest():
+                    raise ValueError("extractor/CSV f32 byte parity failed")
+                if "delivery_receipt" in keys.column_names:
+                    delivery_path = safe_path(keys.column("delivery_receipt")[expected].as_py())
+                    delivery = json.loads(delivery_path.read_text())
+                    if any(delivery[k] != audit[k] for k in ("width", "height", "reference_pixels_sha256", "distorted_pixels_sha256")):
+                        raise ValueError("canonical steering decoded pixel parity failed")
+            audit_records.extend(audits)
         csv_bytes = csvp.stat().st_size
         csvp.unlink()
         chunk_meta.append({"chunk": ci, "rows": hi - lo, "pairs_tsv_sha256": tsv_hashes[-1], "extract_wall_s": round(t_ext, 2),
-                           "csv_bytes_deleted": csv_bytes, "extractor_manifest": man})
+                           "csv_bytes_deleted": csv_bytes, "extractor_manifest": man, **({"audit_path":str(audit_path),"audit_sha256":sha256_file(audit_path)} if spec else {})})
         log(f"{s} chunk {ci} rows {lo}-{hi} extract {t_ext:.1f}s")
     writer.close()
     if len(fsids) != 1:
         sys.exit(f"feature_set_id changed between chunks: {fsids}")
     if not a.limit:
-        (outdir / "keys.parquet").write_bytes((OLD_BANK / s / "keys.parquet").read_bytes())
+        if spec:
+            extra = {k: pa.array([v[k] for v in audit_records]) for k in (
+                "pixels_identical", "width", "height", "reference_file_sha256", "distorted_file_sha256",
+                "reference_pixels_sha256", "distorted_pixels_sha256")}
+            delivered = pa.table({**{k: keys.column(k) for k in keys.column_names if k not in extra}, **extra})
+            pq.write_table(delivered, outdir / "keys.parquet", compression="zstd")
+        else:
+            (outdir / "keys.parquet").write_bytes(key_path.read_bytes())
     manifest = {
         "set": s, "schema": SCHEMA, "rows": n, "feature_width": width, "requested_slot_ranges": [list(r) for r in SLOT_RANGES],
         "absent_slots": "NaN", "restore_cuts": TOKENS, "build_commit": a.build_commit, "binary_sha256": sha256_file(a.bin),
         "formula_revision": f"Rev{a.revision}", "root_form": "sqrt", "input_contract": "legacy-rgb8", "tier_request": a.tier,
         "era_label": a.era, "feature_set_id": next(iter(fsids)), "formula_revision_eras": eras,
         "pairs_tsv_sha256": tsv_hashes, "pairs_origin": f"{OLD_BANK}/{s}/keys.parquet (ref_path,dist_path in row order)",
-        "keys_sha256": sha256_file(OLD_BANK / s / "keys.parquet"),
+        "keys_sha256": sha256_file(outdir / "keys.parquet") if spec else sha256_file(key_path),
         "features_parquet_sha256": sha256_file(outdir / "features.parquet"), "dtype": "float64",
         "chunks": chunk_meta, "wall_s_total": round(time.time() - t_all, 1),
         "assembler": {"path": "scripts/rev4_featpot/rev5_bank.py", "sha256": sha256_file(__file__)},
     }
+    if spec:
+        manifest["assessment"] = {"features_only": True, "labels_read": False,
+            "input_keys": spec["keys"], "input_manifest_sha256": sha256_file(assessment),
+            "instrument": spec["instrument"], "exposure_freeze": spec["exposure_freeze"],
+            "human_score_semantics":"ordinal row key only; no target", "input_manifest":str(assessment),
+            "all_decoded_pixels_bound":True, "immutable_roots":[str(r.resolve()) for r in roots],
+            "extractor_feature_digest_available": all("canonical_features_f32_le_sha256" in r for r in audit_records)}
     (outdir / "_MANIFEST.json").write_text(json.dumps(manifest, indent=1))
     log(f"{s} DONE rows {n} width {width} wall {manifest['wall_s_total']}s fsid {manifest['feature_set_id']}")
     return 0
@@ -166,6 +239,7 @@ def main() -> int:
     ap.add_argument("cmd", choices=["extract", "verify-against"])
     ap.add_argument("set")
     ap.add_argument("--bin")
+    ap.add_argument("--instrument-manifest", type=Path, help="explicit label-free assessment keys; historical bank default unchanged")
     ap.add_argument("--build-commit", default="")
     ap.add_argument("--revision", type=int, choices=[4, 5], default=5)
     ap.add_argument("--era", default="")

@@ -1008,6 +1008,18 @@
    "kind": "set",
    "legacy_name": "986",
    "evidence": "feature_v2::FeatureRegime::Folded720Dvifm \u2014 default-OFF, no canonical root yet"
+  },
+  "basic+v2@w720/rev5_localwin#62adfc93": {
+   "compute": "basic+v2",
+   "layout": 720,
+   "era": "rev5_localwin",
+   "slots": "13-25,39-155,401-429,459-719",
+   "slots_hash8": "62adfc93",
+   "n_slots": 420,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/shippath7_REGISTRATION.md",
+   "note": "Features-only projection of the pinned Rev5 bank onto the existing by_v2fy consumed IDs; all other slots NaN. Rust owner checks the hash."
   }
  },
  "roots": {

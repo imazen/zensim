@@ -1355,6 +1355,86 @@ pub fn admit_training_tables(
 mod training_admission_tests {
     use super::*;
     #[test]
+    fn assessment_projection_is_registered_by_exact_consumed_ids() {
+        let v: serde_json::Value = serde_json::from_str(include_str!(
+            "../../benchmarks/costset2_2026-10-03.candidate_ids.json"
+        ))
+        .unwrap();
+        let ids: Vec<usize> = serde_json::from_value(v["candidates"]["by_v2fy"].clone()).unwrap();
+        let slots = SlotSet::from_slots(ids);
+        let id = FeatureSetId::from_slots_with_layout(
+            compute_parts_for_slots(&slots),
+            720,
+            "rev5_localwin",
+            &slots,
+        )
+        .unwrap();
+        assert_eq!(id.to_string(), "basic+v2@w720/rev5_localwin#62adfc93");
+        assert_eq!(
+            resolve_declared_set(id, "explicit assessment".into())
+                .unwrap()
+                .slots,
+            slots
+        );
+    }
+
+    #[test]
+    #[ignore = "requires explicitly pinned features-only assessment manifest"]
+    fn external_assessment_tables_admission() {
+        let p = std::path::PathBuf::from(std::env::var("SHIPPATH7_ASSESSMENT").unwrap());
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap();
+        assert_eq!(v["features_only"], true);
+        assert_eq!(v["labels_read"], false);
+        let ids: Vec<usize> = serde_json::from_value(v["feature_ids"].clone()).unwrap();
+        assert_eq!(ids.len(), 420);
+        let paths: Vec<std::path::PathBuf> = v["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| {
+                for spec in [t, &t["declaration"], &t["keys"]] {
+                    let path = std::path::Path::new(spec["path"].as_str().unwrap());
+                    assert!(
+                        !path
+                            .components()
+                            .any(|c| c.as_os_str().to_string_lossy().contains("_sealed"))
+                    );
+                    assert_eq!(
+                        crate::train_manifest::sha256_file(path).unwrap(),
+                        spec["sha256"].as_str().unwrap()
+                    );
+                }
+                std::path::PathBuf::from(t["path"].as_str().unwrap())
+            })
+            .collect();
+        let mut admitted = admit_training_tables(&paths, None, Some(&ids), Some(720)).unwrap();
+        for (table, binding) in admitted["tables"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(v["tables"].as_array().unwrap())
+        {
+            table["sha256"] = binding["sha256"].clone();
+            table["declaration"] = binding["declaration"].clone();
+            table["keys"] = binding["keys"].clone();
+        }
+        assert!(admit_training_tables(&paths, None, Some(&[0]), Some(720)).is_err());
+        assert!(admit_training_tables(&paths, None, None, Some(720)).is_err());
+        assert_eq!(admitted["qualified_provenance"], true);
+        assert_eq!(admitted["formula_revision"], 5);
+        assert_eq!(admitted["historical_replay"], serde_json::Value::Null);
+        std::fs::write(
+            std::env::var("SHIPPATH7_ADMISSION_OUT").unwrap(),
+            serde_json::to_vec_pretty(&admitted).unwrap(),
+        )
+        .unwrap();
+        println!(
+            "SHIPPATH7 actual Rust admission: {} declared features-only tables",
+            paths.len()
+        );
+    }
+
+    #[test]
     fn rev5_measured_subset_admits_real_ids_and_refuses_nan_padding() {
         let dir = std::env::temp_dir().join(format!("zensim-admit-rev5-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

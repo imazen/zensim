@@ -74,6 +74,91 @@ mod native_interventions;
 #[path = "support/gradient_check.rs"]
 mod gradient_check;
 
+fn decode_assessment_pair(
+    reference: &str,
+    distorted: &str,
+) -> Result<(image::RgbImage, image::RgbImage), image::ImageError> {
+    Ok((
+        image::open(reference)?.to_rgb8(),
+        image::open(distorted)?.to_rgb8(),
+    ))
+}
+
+fn deliver_assessment_pixels(reference: &str, distorted: &str, output: &str) {
+    use sha2::{Digest, Sha256};
+    use std::path::{Path, PathBuf};
+    let sha = |b: &[u8]| {
+        Sha256::digest(b)
+            .iter()
+            .map(|v| format!("{v:02x}"))
+            .collect::<String>()
+    };
+    let safe = |p: &Path| {
+        !p.components().any(|c| {
+            let c = c.as_os_str().to_string_lossy().to_lowercase();
+            c.contains("_sealed") || c.contains("labels__")
+        })
+    };
+    let inputs: Vec<_> = [reference, distorted]
+        .iter()
+        .map(|p| {
+            let p = Path::new(p);
+            assert!(safe(p), "protected path");
+            let p = p.canonicalize().expect("existing input");
+            assert!(safe(&p), "protected input ancestry");
+            p
+        })
+        .collect();
+    let out = PathBuf::from(output);
+    assert!(
+        safe(&out) && !out.exists(),
+        "fresh label-free output required"
+    );
+    let parent = out
+        .parent()
+        .expect("output parent")
+        .canonicalize()
+        .expect("existing output parent");
+    assert!(
+        safe(&parent)
+            && inputs
+                .iter()
+                .all(|p| !parent.starts_with(p.parent().unwrap())),
+        "immutable input ancestry"
+    );
+    let before: Vec<_> = inputs
+        .iter()
+        .map(|p| sha(&std::fs::read(p).unwrap()))
+        .collect();
+    let (r, d) = decode_assessment_pair(reference, distorted).expect("canonical RGB8 decode");
+    assert_eq!(r.dimensions(), d.dimensions(), "pair geometry");
+    assert!(
+        inputs
+            .iter()
+            .zip(&before)
+            .all(|(p, h)| sha(&std::fs::read(p).unwrap()) == *h),
+        "inputs changed during decode"
+    );
+    std::fs::create_dir(&out).expect("fresh output");
+    r.save(out.join("reference.png"))
+        .expect("deliver reference");
+    d.save(out.join("distorted.png"))
+        .expect("deliver distortion");
+    let receipt = serde_json::json!({"schema":"canonical-steering-rgb8-delivery-v1",
+        "decoder":"image::open().to_rgb8() (same function as steering owner)",
+        "reference":inputs[0],"distorted":inputs[1],"reference_file_sha256":before[0],
+        "distorted_file_sha256":before[1],"reference_pixels_sha256":sha(r.as_raw()),
+        "distorted_pixels_sha256":sha(d.as_raw()),"width":r.width(),"height":r.height(),
+        "output_reference_sha256":sha(&std::fs::read(out.join("reference.png")).unwrap()),
+        "output_distorted_sha256":sha(&std::fs::read(out.join("distorted.png")).unwrap()),
+        "features_only":true,"model_inputs":[],"labels_read":false});
+    std::fs::write(
+        out.join("DELIVERY.json"),
+        serde_json::to_vec_pretty(&receipt).unwrap(),
+    )
+    .unwrap();
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
@@ -92,6 +177,11 @@ fn main() {
         return;
     }
     #[cfg(feature = "custom-profiles")]
+    if args.first().map(String::as_str) == Some("--decode-only") {
+        assert!(args.len() == 4, "--decode-only REF DIST FRESH_DIRECTORY");
+        deliver_assessment_pixels(&args[1], &args[2], &args[3]);
+        return;
+    }
     if args.first().map(String::as_str) == Some("--refinement-analysis") {
         assert!(
             args.len() == 4 && args[2] == "--json",
@@ -198,8 +288,7 @@ fn main() {
             );
         }
     }
-    let r = image::open(&args[0]).expect("open ref").to_rgb8();
-    let d = image::open(&args[1]).expect("open dist").to_rgb8();
+    let (r, d) = decode_assessment_pair(&args[0], &args[1]).expect("decode pair");
     let (w, h) = (r.width() as usize, r.height() as usize);
     assert_eq!(
         (d.width() as usize, d.height() as usize),

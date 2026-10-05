@@ -541,3 +541,25 @@ The [registered prototype and results](../benchmarks/steering_integrity_2026-09-
 retain all severe misses, ambiguous activations and missing product gates.
 No new head, scatter instrumentation or pipeline-parity result alone qualifies
 an all-purpose target dial or native spatial allocator.
+
+## October 5: Rev5 features-only instrument identities
+
+`--stage identities` transports composition and assessment instrument identities
+without scoring. It requires regime720, an explicit features root and
+`ZENSIM_EVAL_INSTRUMENTS` pointing to a `rev5-assessment-eval-identity-v1` capsule.
+The capsule pins features-only assessment manifests, every table/keys/declaration
+and a passing receipt from the actual Rust table-admission owner. Its `inputs`
+name exactly `ext_cid22val.parquet`, `dial-grid`, `negtail-probe`, `identity-probe`.
+The corpus slot must resolve to one of the admitted, label-free tables. All other
+optional corpus/instrument defaults are excluded from this branch.
+
+Optional `ZENSIM_EVAL_CORRUPTION_HEAD` and
+`ZENSIM_EVAL_CORRUPTION_HEAD_THRESHOLD` accompany the existing ensemble/member
+weights to `bake_verdict --print-inputs`. Output `<name>.identities.json` binds
+that owner's composition identity and the complete instrument capsule, then
+exits before verdict/coherence/qualification. These new transport variables are
+refused for scoring stages. An output inside an admitted/source/bank root is
+refused before creation. A capsule is evidence, not authorization to read labels.
+Freeze the complete assessment/exposure contract and obtain owner authorization
+before protected/confirmation/T0 label attachment. See
+[SHIPPATH7 worklog](../benchmarks/shippath7_WORKLOG.md).

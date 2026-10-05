@@ -108,6 +108,13 @@ def safe_path(path) -> Path:
     return p
 
 
+def assessment_path(path) -> Path:
+    p = safe_path(path)
+    if any(v.startswith("labels__") for v in (*p.parts, *p.resolve().parts)):
+        raise PermissionError("protected label path refused")
+    return p
+
+
 def bank_file(bank: Path, name: str, filename: str) -> Path:
     """The only way this module names a bank file: <bank>/<set>/<features|keys|manifest> of a known set."""
     if filename not in BANK_FILES:
@@ -891,9 +898,77 @@ def admit_recipe(bank: Path, source: Path, out: Path) -> None:
                       "human_role_decision": "PENDING"}))
 
 
+def build_assessment(bank: Path, out: Path, names: list[str], ids: list[int]) -> dict:
+    """Declared Rev5 features-only views; preserve every key including identities."""
+    from v2_common import refuse_immutable_output
+    from rev5_bank import ASSESSMENT_KEY_COLUMNS
+    registered_ids = json.loads((REPO / "benchmarks/costset2_2026-10-03.candidate_ids.json").read_text())["candidates"]["by_v2fy"]
+    if PROFILE.revision != 5 or ids != registered_ids:
+        raise ValueError("Rev5 by_v2fy420 assessment required")
+    bank = assessment_path(bank)
+    refuse_immutable_output(out, [bank])
+    if assessment_path(out).exists():
+        raise ValueError("fresh assessment output required")
+    prepared = []
+    for name in names:
+        if not name or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in name):
+            raise ValueError("assessment set token required")
+        base = assessment_path(bank / name)
+        paths = {f: assessment_path(base / f) for f in BANK_FILES}
+        m = json.loads(paths["_MANIFEST.json"].read_text())
+        check_manifest(m, name)
+        refuse_immutable_output(out, [bank] + [Path(v) for v in m.get("assessment", {}).get("immutable_roots", [])])
+        schema = pq.ParquetFile(paths["keys.parquet"]).schema_arrow
+        if any(n in schema.names for n in ["human_score", "target", "mos", "ssim2_gpu"]):
+            raise ValueError("label-bearing keys forbidden")
+        feature_schema = pq.ParquetFile(paths["features.parquet"]).schema_arrow.names
+        if any(n not in ("pair_key", "row_id") and not (n.startswith("f") and n[1:].isdigit()) for n in feature_schema):
+            raise ValueError("label-bearing feature bank forbidden")
+        if sha(paths["keys.parquet"]) != m["keys_sha256"] or sha(paths["features.parquet"]) != m["features_parquet_sha256"]:
+            raise ValueError("changed assessment bank")
+        keys = pq.read_table(paths["keys.parquet"], columns=[n for n in schema.names if n in ASSESSMENT_KEY_COLUMNS or n in [
+            "width", "height", "reference_file_sha256", "distorted_file_sha256", "reference_pixels_sha256", "distorted_pixels_sha256"]])
+        X, feature_keys = read_matrix(paths["features.parquet"], ids, m["rows"])
+        if not np.isfinite(X).all() or keys.num_rows != m["rows"] or keys.column("pair_key").to_pylist() != feature_keys.tolist():
+            raise ValueError("assessment features/key parity")
+        key_order = keys.column("pair_key").to_pylist()
+        if len(set(key_order)) != len(key_order) or keys.column("row_id").to_pylist() != list(range(keys.num_rows)):
+            raise ValueError("assessment row selection/order must be exact")
+        prepared.append((name, m, keys, X, paths))
+    out.mkdir(parents=True)
+    record = {"schema":"rev5-assessment-tables-v1", "features_only":True,"labels_read":False,
+        "feature_ids":ids,"feature_set_id":"basic+v2@w720/"+PROFILE.era+"#62adfc93",
+        "formula_revision":5,"decoder_era":f"legacy-rgb8/extract_features_372col@sha256:{PROFILE.binary}",
+        "table_code":code_identity(),"bank_root":str(bank.resolve()),"tables":[]}
+    for name, m, keys, X, paths in prepared:
+        kp = out / (name + ".keys.parquet");pq.write_table(keys, kp, compression="zstd")
+        columns = {k:keys.column(k) for k in keys.column_names}
+        columns["ref_basename"] = keys.column("ref_group")
+        positions = {v:i for i,v in enumerate(ids)}
+        for i in range(720):
+            columns[f"f{i}"] = pa.array(X[:,positions[i]] if i in positions else np.full(len(X),np.nan,dtype=np.float32))
+        table = out / (name + ".parquet");pq.write_table(pa.table(columns), table, compression="zstd")
+        ordered = hashlib.sha256(json.dumps(keys.to_pydict(),sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
+        declaration = {k:record[k] for k in ["feature_set_id","formula_revision","decoder_era","features_only","labels_read"]}
+        declaration.update(source_bank_feature_set_id=m["feature_set_id"], extractor_build_commit=m["build_commit"],
+            extractor_binary_sha256=m["binary_sha256"], source_root=str(bank.resolve()),
+            source_files={f:{"path":str(p),"sha256":sha(p)} for f,p in paths.items()},
+            rows=keys.num_rows,feature_ids=ids,table_sha256=sha(table),keys_sha256=sha(kp),
+            ordered_keys_sha256=ordered,consumed_features_f32_le_sha256=hashlib.sha256(np.asarray(X,dtype="<f4").tobytes()).hexdigest(),
+            absent_slots="NaN",assessment=m.get("assessment",{"features_only":True,"scope":"original confirmation bank; future protected label exposure requires separate freeze"}))
+        sidecar=Path(str(table)+".manifest.json");sidecar.write_text(json.dumps(declaration,indent=1)+"\n")
+        record["tables"].append({"set":name,"path":str(table.resolve()),"sha256":sha(table),"rows":keys.num_rows,
+            "declaration":{"path":str(sidecar.resolve()),"sha256":sha(sidecar)},
+            "keys":{"path":str(kp.resolve()),"sha256":sha(kp)},"ordered_keys_sha256":ordered})
+    (out/"ASSESSMENT.json").write_text(json.dumps(record,indent=1)+"\n")
+    return record
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers", "admit-recipe"])
+    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers", "admit-recipe", "assessment"])
+    ap.add_argument("--assessment-set", action="append", default=[])
+    ap.add_argument("--assessment-ids", type=Path)
     ap.add_argument("--source-root", type=Path, help="admit-teachers: immutable frozen Rev5 instrument root")
     ap.add_argument("--bank", type=Path, default=CANON_BANK)
     ap.add_argument("--out", "--root", dest="out", type=Path, default=OUT_DEFAULT)
@@ -920,7 +995,12 @@ def main() -> None:
     v2_common.V2 = args.out  # receipts hold root-relative table paths (table_path); the root is --out
     extras = parse_extras(args.extra)
     fams = args.family or list(FAMILIES)
-    if args.action in ("admit-teachers", "admit-recipe"):
+    if args.action == "assessment":
+        if not args.assessment_set or args.assessment_ids is None:
+            ap.error("assessment needs explicit sets and IDs")
+        ids = json.loads(safe_path(args.assessment_ids).read_text())
+        print(json.dumps(build_assessment(args.bank,args.out,args.assessment_set,ids)["tables"]))
+    elif args.action in ("admit-teachers", "admit-recipe"):
         if args.source_root is None:
             ap.error("admit-teachers requires --source-root")
         (admit_recipe if args.action == "admit-recipe" else admit_teachers)(args.bank, args.source_root, args.out)
