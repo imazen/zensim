@@ -1,0 +1,67 @@
+{
+ "schema": "e27-coordinator-launch-pointer-v1",
+ "jobset": "fitv2e27-20261005",
+ "actual_launch_utc": "2026-10-05T19:21:36Z",
+ "source": "coordinator launch; existing v2_loop/score_chain and allowed-host fillers",
+ "tower_relative_root": "output/zensim/e27-2026-10-05/launch-records",
+ "copy_manifest_sha256": "893507d4b82cf736bfb3f318462ff6841252bcd380007f5b49afa35aa76cf320",
+ "copy_files": 21,
+ "copy_bytes": 48994,
+ "tail_trim": false,
+ "source_push_by_lane": false,
+ "program_sha256": "a53912d8442e0fd44675b89d9c6fa0b4098fc99e5d6f6caa33b26181c5f279d7",
+ "data_sha256": "3f008d2f563c212aec75a46a55900dd10b9afb834fecd79ec889fd78d34df78d",
+ "zenmetrics_profile_commit": "344fa081b0f0a915ea2cc8a5878547e9383d4828",
+ "image_publish_receipt": {
+  "status": "PASS",
+  "image_id_local": "sha256:2548f87e16a9c976643c57d1cacccd97e9bcd13526afa0e8c5689263d0282ee0",
+  "image_id_tower": "sha256:3de660ba786817edcedda1f496ef443865e23b4cae0196e46daac4ffc5509954",
+  "repo_digest": "ghcr.io/imazen/zenfleet-worker@sha256:2548f87e16a9c976643c57d1cacccd97e9bcd13526afa0e8c5689263d0282ee0",
+  "note": "tower docker lacks ghcr credentials; coordinator pushed from dev after docker save|load; RootFS layers, Env (incl ZEN_FIT_PROGRAM_SHA=a53912d8...), Entrypoint and Cmd byte-identical to tower; image IDs differ only by daemon representation (as recorded for i265 by the lane)"
+ },
+ "runtime_memory_bytes": 6442450944,
+ "runtime_host_caps": {
+  "tower": 5,
+  "i265": 3,
+  "i270": 3,
+  "r3500": 2,
+  "r3800x": 2
+ },
+ "runtime_threads_per_cell": 1,
+ "actual_reachable_workers_at_initial_inspection": {
+  "tower": 5,
+  "i265": 3,
+  "r3500": 2,
+  "r3800x": 2
+ },
+ "runtime_snapshot_timestamp_correction": {
+  "reason": "original local receipt file mtime; corrects hand-entered future timestamp19:36Z",
+  "original_sha256": "58a364ad521525fb108fb6aaa01471db44363c623651e8c478da00dd0691a090",
+  "corrected_sha256": "aefef6f6c16633c19a77b73ee125912beb4de6a33e99afc94a3277f7ad0d3052",
+  "actual_runtime_inspection_utc": "2026-10-05T19:32:28.803404+00:00",
+  "immutable_launch_archive_retained": true
+ },
+ "launch_deviations": [
+  "coordinator publishes byte-identical image from dev after Tower lacks GHCR credentials; no dev fleet training authorization",
+  "coordinator adds required6g jobset_caps entry, missing from initial launcher"
+ ],
+ "assessment_invocation_fix": {
+  "status": "PASS",
+  "scope": "execution path and explicit Rev5 environment only; no VAL payload open",
+  "unchanged_predictor_sha256": "e4a411209ff5c9fe221ab7a4fc04e506f210f06776ad68cf687bd62e5990928c",
+  "before_script_sha256": "b7c0b23380589f30a38497d39b9a4319b8725ee0b0f1c9f11b242a724a69fca5",
+  "after_script_sha256": "c6b3348be39a053715c77b67aaee1d33a56eae27a981b32d9ed03faf2b81d192",
+  "reason": "Tower NFS mount noexec; Rev5 stamp requires matching process revision; canonical panel explicitly pinned",
+  "local_predictor": "/var/tmp/e27/bin/predict_features_with_bake",
+  "formula_revision": 5,
+  "canonical_panel": "/var/tmp/fitv2/bin-v2/panel",
+  "panel_sha256": "c9c610b8bcddd0cb66c411c10de07ecd283e2030dd26a48845878f5eb403ef16",
+  "train_smoke_prediction": 74.63024139404297,
+  "prior_native_prediction": 74.63024139404297,
+  "absolute_delta": 0.0,
+  "wire_sha256": "038de184a3234bbe690fd950f457dfcf3c1b50d8b3493d76cc07a7b57b0d4db2",
+  "max_tier": "v3",
+  "tier_reason": "same ceiling as frozen E26/E27 fit profile and native TRAIN smoke"
+ },
+ "scientific_results": "PENDING all100 installed cells and posted SDR result; then full HDR and external panels; no verdict in this launch record"
+}

@@ -117,3 +117,60 @@ receipts before image publication/upload/queue mutation. No authorization exists
 E27 is absent from the byte-identical queue. No owner or tail controller started.
 Report-only external SDR and full registered HDR commands are prepared for after
 harvest; neither assessment ran during preparation. No source push.
+
+
+## E27 fleet launch — coordinator, 2026-10-05 19:21 UTC
+
+Coordinator launched fitv2e27-20261005 at19:21:36Z, top of the existing queue.
+E26 landed as caee5bed; zenmetrics profile344fa081 is pushed/verified on origin.
+E27_REVIEW.md found no code defects (168Python/20sampling/25trainer tests and
+short historical/hd4/hp4/ha4 fits preserve the registered mechanics). Original
+readiness records remain immutable snapshots of pre-launch state.
+
+Two launch deviations are explicit. Tower lacked ghcr credentials; coordinator
+saved the image, verified identical RootFS/Env/Entrypoint/Cmd, and published from
+dev using the i265 image representation2548f87e. This is artifact publication by
+the coordinator, not authorization for fleet training on dev. Program/data and
+fit identity unchanged. IMAGE_PUBLISH_RECEIPT.json is the authoritative receipt.
+
+My launcher omitted jobset_caps.json even though E26 had required this actual
+runtime envelope. Manifest memory hints alone were insufficient. Coordinator
+added6g and host caps tower5/i2653/i2703/r3500 2/r3800x2 to the existing owner.
+Verified launch_v2 consumes that entry; no filler/worker restart by the lane.
+Existing v2_loop/score_chain controllers1713829/1713830 run; no tail_trim.
+Status, authorization, publisher and cap receipts are recorded in LAUNCH_RECEIPT.
+Authorization prose says nominal19:25; actual status timestamp19:21:36 and the
+coordinator's19:21 message govern launch timing. No changed scientific rule.
+
+All100 verified/installed cells and posted SDR decision are prerequisites for
+registered HDR VAL and report-only external SDR panels. No early HDR panel or
+E27 verdict. Landing rebase onto main@origin follows final scientific records;
+no source push. Keep original cells and E26/preparation evidence immutable.
+
+## Post-harvest invocation preflight — 2026-10-05
+
+The prepared HDR invoker pointed its exact pinned cache predictor at the Tower
+NFS mount, which is noexec. Copied the same bytes to /var/tmp/e27/bin and verified
+e4a411209ff5 unchanged; no rebuild, fit, bank, model or rule change. Explicitly
+pin process revision5 to match every serving stamp and the canonical panel
+c9c610b8 from bin-v2. The existing one-TRAIN-row wire and smoke bound bake give
+74.63024139404297, bit-identical to the original native/cache smoke (delta0).
+No VAL payload read for this preflight. Preserved original command and recorded
+both hashes in PANEL_INVOCATION_FIX.json; the corrected invocation is used only
+after all100 installed cells and the posted SDR decision.
+
+Launch-records archive:21 files/48994bytes, verified manifest
+893507d4b82cf736bfb3f318462ff6841252bcd380007f5b49afa35aa76cf320
+at output/zensim/e27-2026-10-05/launch-records. Runtime snapshot confirms actual
+5/3/2/2 workers on Tower/i265/r3500/r3800x, 6GiB, one fit thread. The snapshot's
+manually typed19:36Z timestamp was ahead of actual time; the local corrected
+receipt uses its original file mtime, with before/after hashes in
+LAUNCH_ARCHIVE_TIMESTAMP_CORRECTION.json. Immutable launch archive retained.
+Await owner watches100 fleet receipts plus posted E27 SDR result. No new
+fleet controller, filler, worker, tail trim or source push.
+
+The final HDR invoker also explicitly caps ZENSIM_MAX_TIER=v3, matching the
+frozen fit profile and native TRAIN smoke. Repeat of the same single TRAIN wire
+is still74.63024139404297, delta0; no VAL payload read. Original invocation and
+first path-fix receipt retained; final hash in PANEL_INVOCATION_FIX and pointer.
+Launch-record lint:820 scripts checked, all runnable.
