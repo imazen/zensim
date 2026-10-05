@@ -337,6 +337,14 @@ def main() -> None:
         curated_extra = cpath
         weights["coverage"] = acceptance_weight(recipe["coverage_weight"], refs_of(cpath))
         groups.append(("coverage", cpath, weights["coverage"], 0, "withinref,rank"))
+    hdr_record = None
+    if "hdr_weight" in recipe:
+        import v2_teacher
+        if int(receipt.get("formula_revision", 4)) != 5:
+            raise ValueError("HDR teacher leg requires the registered Rev5 SDR root")
+        hpath, hdr_record = v2_teacher.hdr_leg(legs["hdr"], keep)
+        weights["hdr"] = acceptance_weight(recipe["hdr_weight"], refs_of(hpath))
+        groups.append(("hdr", hpath, weights["hdr"], 0, "withinref,rank"))
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
     hdev = checked(legs[f"human_without_{args.heldout}"]["dev"])
     weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
@@ -383,6 +391,7 @@ def main() -> None:
            **({"teacher_subset": teacher_record} if teacher_record else {}),
            **({"ordinal_leg": ordinal_record} if ordinal_record else {}),
            **({"coverage_leg": coverage_record} if coverage_record else {}),
+           **({"hdr_leg": hdr_record} if hdr_record else {}),
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, **selection,

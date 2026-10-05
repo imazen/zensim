@@ -100,6 +100,8 @@ def main() -> None:
         weights[leg] = acceptance_weight(NOMINAL_WEIGHT[leg], refs_of(fit))
         groups += [(leg, fit, weights[leg], 0, "withinref,both"), (f"{leg}_development", dev, 0, val_w, "withinref,both")]
     recipe = recipe_of(args.spec)
+    if "hdr_weight" in recipe:
+        raise ValueError("E26 is registered for LODO cells only; no HDR confirmation fit")
     coverage_record, curated_extra = None, None
     if "coverage_weight" in recipe:  # design log E15/E17: the coverage leg exactly as v2_lodo_mlp builds it (label-free ordinal pool)
         import v2_teacher

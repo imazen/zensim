@@ -12,7 +12,7 @@
 #   pub modules                                 7
 #   pub types (struct/enum/trait/alias)        26
 #   pub consts/statics                          7
-#   free functions                             36
+#   free functions                             37
 #   inherent methods                          170
 #   struct fields                             114
 #   enum variants                              34
@@ -30,11 +30,11 @@
 #   feature_v2                       33
 #   fold_engine                       8
 #   profile                           1
-#   research                        143
+#   research                        144
 #   score_math                       26
 #   source                            4
 
-## items (394 lines)
+## items (395 lines)
 
 #[non_exhaustive] pub enum feature_v2::FormulaRevision
 #[non_exhaustive] pub struct research::DvifmFieldMap
@@ -242,6 +242,7 @@ pub fn research::RevisionRef::clone(&self) -> research::RevisionRef
 pub fn research::RevisionRef::eq(&self, &research::RevisionRef) -> bool
 pub fn research::RevisionRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::extract(&research::Request, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<research::Extraction, research::ResearchError>
+pub fn research::extract_hdr(&research::Request, &impl source::ImageSource, &impl source::ImageSource, feature_v2::HdrEncoding) -> core::result::Result<research::Extraction, research::ResearchError>
 pub fn research::family_slots(feature_set_id::ComputeToken) -> feature_set_id::SlotSet
 pub fn research::full_width() -> usize
 pub fn research::nonzero_structural_fill_slots() -> feature_set_id::SlotSet

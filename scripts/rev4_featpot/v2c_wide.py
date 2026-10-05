@@ -964,9 +964,64 @@ def build_assessment(bank: Path, out: Path, names: list[str], ids: list[int]) ->
     return record
 
 
+def attach_hdr(out: Path, bank: Path) -> None:
+    """Attach one admitted E26 fit leg to a fresh SDR root; never pack VAL."""
+    from rev5_bank import HDR_TEACHER_SHA, HDR_TRANSFORM
+    import e21_cheap_recipe as e21
+
+    refuse_if_frozen(out)
+    rp = out / "wide/main/real/receipt.json"
+    receipt = json.loads(rp.read_text())
+    if receipt.get("formula_revision") != 5 or "hdr" in receipt["legs"]:
+        raise ValueError("HDR attachment requires a fresh Rev5 SDR receipt")
+    mpath = bank / "_MANIFEST.json"
+    man = json.loads(mpath.read_text())
+    ids = e21.columns("by_v2fy")
+    if (man.get("role") != "train" or man.get("study") != "E26" or man.get("rows") != 7390
+            or man.get("teacher_sha256") != HDR_TEACHER_SHA["train"] or man.get("formula_revision") != "Rev5"
+            or man.get("requested_ids") != ids or man.get("target_transform") != HDR_TRANSFORM):
+        raise ValueError("inadmissible native HDR bank")
+    for name, pin in [("keys.parquet", "keys_sha256"), ("features.parquet", "features_parquet_sha256")]:
+        if sha(bank / name) != man[pin]:
+            raise ValueError("native HDR bank changed after extraction")
+    keys = pq.read_table(bank / "keys.parquet").to_pylist()
+    if len(keys) != 7390 or any(k["role"] != "train" or not k["agree"] for k in keys):
+        raise ValueError("HDR keys are not TRAIN agree-only")
+    features = pq.read_table(bank / "features.parquet")
+    if features["row_id"].to_pylist() != [k["row_id"] for k in keys]:
+        raise ValueError("HDR feature/label row join mismatch")
+    width = receipt["width"]
+    cols = {"ref_basename": pa.array([k["ref_path"] for k in keys]),
+            "human_score": pa.array([10 * k["hdrvdp3_q_jod"] for k in keys], type=pa.float64())}
+    for i in range(width):
+        values = features[f"f{i}"].to_numpy() if f"f{i}" in features.column_names else np.full(len(keys), np.nan)
+        if not (np.isfinite(values).all() if i in ids else np.isnan(values).all()):
+            raise ValueError(f"HDR measured/absent contract f{i}")
+        cols[f"f{i}"] = pa.array(values.astype(np.float32))
+    path = rp.parent / "hdr_fit.parquet"
+    pq.write_table(pa.table(cols), path, compression="zstd")
+    kpath = path.with_suffix(".keys.parquet")
+    pq.write_table(pa.Table.from_pylist(keys), kpath, compression="zstd")
+    compact = {k: man[k] for k in ("study", "role", "rows", "teacher_sha256", "target_transform", "requested_ids",
+                                  "binary_sha256", "build_commit", "row_order_sha256", "input_contract")}
+    # Channel subsets have no reconstructible family-token FeatureSetId. Keep
+    # the native owner output as provenance rather than a malformed null
+    # trainer declaration; explicit requested IDs and slot provenance own it.
+    compact.update(formula_revision=5, population="agree-only",
+                   source_bank_feature_set_id=man["research"]["feature_set_id"], bank_manifest_sha256=sha(mpath))
+    sidecar = Path(f"{path}.manifest.json")
+    sidecar.write_text(json.dumps(compact, indent=1)+"\n")
+    receipt["legs"]["hdr"] = {"fit": {"rel": str(path.relative_to(out)), "sha256": sha(path),
+        "manifest_sha256": sha(sidecar), "rows": 7390, "keys_sha256": sha(kpath)}, "keys_sha256": sha(kpath)}
+    receipt["required_legs"].append("hdr")
+    rp.write_text(json.dumps(receipt, indent=1)+"\n")
+    print(json.dumps({"hdr_attached": str(path), "receipt_sha256": sha(rp)}))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers", "admit-recipe", "assessment"])
+    ap.add_argument("action", choices=["build", "confirm", "keeplists", "verify", "freeze", "admit-teachers", "admit-recipe", "assessment", "hdr-leg"])
+    ap.add_argument("--hdr-bank", type=Path)
     ap.add_argument("--assessment-set", action="append", default=[])
     ap.add_argument("--assessment-ids", type=Path)
     ap.add_argument("--source-root", type=Path, help="admit-teachers: immutable frozen Rev5 instrument root")
@@ -1004,6 +1059,8 @@ def main() -> None:
         if args.source_root is None:
             ap.error("admit-teachers requires --source-root")
         (admit_recipe if args.action == "admit-recipe" else admit_teachers)(args.bank, args.source_root, args.out)
+    elif args.action == "hdr-leg":
+        attach_hdr(args.out, args.hdr_bank)
     elif args.action == "build":
         build(args.bank, args.out, args.legs, fams, args.variant or list(VARIANTS), extras, args.peer_dir)
     elif args.action == "confirm":

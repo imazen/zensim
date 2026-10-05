@@ -76,6 +76,12 @@ def members_for(root: Path, kind: str, selected: list[tuple[str, str]]) -> dict[
             raise ValueError(f"{family}/{variant}: wide receipt identity mismatch")
         if not receipt.get("complete"):
             raise ValueError(f"{family}/{variant}: receipt incomplete (a leg is missing)")
+        if "hdr" in receipt["legs"]:
+            if kind != "lodo":
+                raise ValueError("E26 HDR leg is registered for LODO only; VAL/confirmation packing refused")
+            import v2_teacher
+            import e21_cheap_recipe as e21
+            v2_teacher.hdr_leg(receipt["legs"]["hdr"], e21.columns("by_v2fy"))
         files[f"wide/{family}/{variant}/receipt.json"] = vdir / "receipt.json"
         for leg, rec in receipt["legs"].items():
             if kind == "confirm" and leg not in CONFIRM_LEGS:

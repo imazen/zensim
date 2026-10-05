@@ -1,0 +1,120 @@
+{
+ "schema": "e26-final-evidence-pointer-v1",
+ "status": "COMPLETE_REGISTERED_EXPERIMENT",
+ "adopt": "hd4",
+ "human_or_product_qualified": false,
+ "artifact_root": "output/zensim/e26-2026-10-05/",
+ "archive_receipt": {
+  "path": "FINAL_COPY_RECEIPT.json",
+  "sha256": "2684b0718694cb0128d16076575fe220a4855cc10ba0f37d0ee64b4be44e04d4",
+  "files": 2517,
+  "bytes": 483202164
+ },
+ "files": {
+  "e26_hdr_decision.json": {
+   "path": "records/e26_hdr_decision.json",
+   "sha256": "0b6d7e4854382a7255fbe96663d6c2ad3c44b3d7245c5a191809b7ab76cbbbcb",
+   "bytes": 1911690
+  },
+  "e26_sdr_decision.json": {
+   "path": "records/e26_sdr_decision.json",
+   "sha256": "b981e292c11e94a3cb0f85e0c591ace55d55c9144c61e95d1d6600f1d84b98a9",
+   "bytes": 1607
+  },
+  "e26_external.json": {
+   "path": "records/e26_external.json",
+   "sha256": "66cec3f765b0958f4e1378b58858fe7304313d8fb1fdfa667deb57e8b0a1031b",
+   "bytes": 13295
+  },
+  "E26_FINAL_SUMMARY.json": {
+   "path": "records/E26_FINAL_SUMMARY.json",
+   "sha256": "ef2968100521f830aad949452682d9f5c6d307ac09332cbc5819a001835744bf",
+   "bytes": 47233
+  },
+  "PROGRAM_BINARY_PROVENANCE_FINAL.json": {
+   "path": "records/PROGRAM_BINARY_PROVENANCE_FINAL.json",
+   "sha256": "ec839e6bc3de7020ce4182b1ad6577dacfbb74dc9f6b40064e71788a49a5c829",
+   "bytes": 1358
+  },
+  "FLEET_TIMING_FINAL.json": {
+   "path": "records/FLEET_TIMING_FINAL.json",
+   "sha256": "297443efd71504a9c964cc2a82862930ab538d4e84c552a9c124c17c0d3e51fd",
+   "bytes": 1306
+  }
+ },
+ "populations": {
+  "hdr_train_agree": 7390,
+  "hdr_val_rows": 3900,
+  "hdr_val_references": 300,
+  "control_cells": 50,
+  "hd4_cells": 50,
+  "hd16_cells": 50
+ },
+ "registered_arms": {
+  "hd4": {
+   "sdr_as_good": true,
+   "within_reference": {
+    "hdrvdp3": {
+     "delta": 0.0014655677655677746,
+     "se": 0.0003411001471767929,
+     "n": 50
+    },
+    "cvvdp": {
+     "delta": 0.0015161172161172077,
+     "se": 0.0003392474364166754,
+     "n": 50
+    }
+   },
+   "pooled_report_only": {
+    "hdrvdp3": {
+     "delta": -0.044864262128246485,
+     "se": 0.010204776683478998,
+     "n": 50
+    },
+    "cvvdp": {
+     "delta": 0.002463227209948373,
+     "se": 0.002913011323973664,
+     "n": 50
+    }
+   },
+   "passes": true
+  },
+  "hd16": {
+   "sdr_as_good": true,
+   "within_reference": {
+    "hdrvdp3": {
+     "delta": 0.0014747252747252793,
+     "se": 0.0003378213879858726,
+     "n": 50
+    },
+    "cvvdp": {
+     "delta": 0.0015007326007325662,
+     "se": 0.00033559844516359565,
+     "n": 50
+    }
+   },
+   "pooled_report_only": {
+    "hdrvdp3": {
+     "delta": -0.12476287879994075,
+     "se": 0.01353817411392506,
+     "n": 50
+    },
+    "cvvdp": {
+     "delta": -0.031632877625536224,
+     "se": 0.005351011123719184,
+     "n": 50
+    }
+   },
+   "passes": true
+  }
+ },
+ "qualification_missing": [
+  "human HDR validation",
+  "encoder local repair/RD/spatial qualification",
+  "full runtime/product qualification",
+  "original HDR encoder commit provenance",
+  "strict trainer table admission: formula_revision null / qualified_provenance false; serving revision supplied by approved stamp"
+ ],
+ "provenance_correction": "Actual v28 deployed Rust binaries are the existing fleet-v2 set; copied binary_mix descriptors incorrectly name v25b. Frozen bytes preserved; supplemental receipt gives actual hashes and bounded prior parity evidence.",
+ "fleet_incident": "Coordinator stopped tail_trim PID3635590~16:19UTC after~4h final-two holder losses every~2m; holders then survived and completed. Final wall duration12.81h."
+}

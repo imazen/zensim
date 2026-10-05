@@ -1334,6 +1334,33 @@ pub fn extract(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
 ) -> Result<Extraction, ResearchError> {
+    extract_impl(req, source, distorted, None)
+}
+
+/// Extract an explicit research read set through the production native HDR walk.
+///
+/// Input formats, alpha, primaries and stride follow
+/// [`crate::Zensim::compute_folded720_features_hdr`]. The explicit encoding
+/// supplies the absolute-light display model; no SDR conversion is performed.
+/// Planning, gathering and provenance are shared with [`extract`].
+///
+/// # Errors
+/// Refuses unsupported HDR input, unreproducible revisions, or invalid plans.
+pub fn extract_hdr(
+    req: &Request,
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: crate::feature_v2::HdrEncoding,
+) -> Result<Extraction, ResearchError> {
+    extract_impl(req, source, distorted, Some(encoding))
+}
+
+fn extract_impl(
+    req: &Request,
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    hdr: Option<crate::feature_v2::HdrEncoding>,
+) -> Result<Extraction, ResearchError> {
     let ns = crate::NUM_SCALES;
     let plan = Plan::derive_with_layout(&req.want, req.layout())?;
     check_revision(req, &plan.emit)?;
@@ -1372,15 +1399,28 @@ pub fn extract(
     {
         extras.dvifm = dvifm_extras.as_mut();
     }
-    let result = crate::feature_v2::compute_folded720_streaming_extras(
-        source,
-        distorted,
-        Some(120_000_000),
-        req.parallel,
-        toggles,
-        &mut scratch,
-        extras,
-    )
+    let result = if let Some(encoding) = hdr {
+        crate::feature_v2::compute_folded720_hdr_streaming_extras(
+            source,
+            distorted,
+            encoding,
+            Some(120_000_000),
+            req.parallel,
+            toggles,
+            &mut scratch,
+            extras,
+        )
+    } else {
+        crate::feature_v2::compute_folded720_streaming_extras(
+            source,
+            distorted,
+            Some(120_000_000),
+            req.parallel,
+            toggles,
+            &mut scratch,
+            extras,
+        )
+    }
     .map_err(ResearchError::Compute)?;
 
     // GATHER into the declared LAYOUT. The walk emits at its own identity

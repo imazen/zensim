@@ -37,6 +37,105 @@ ASSESSMENT_KEY_COLUMNS = {"pair_key", "row_id", "ref_path", "dist_path", "ref_gr
     "ref_pixels_sha256", "dist_pixels_sha256", "knob", "n_stimuli", "width", "height"}
 SLOT_RANGES = ((0, 228), (372, 720))  # Basic f0..155 + Peaks f156..227, V2 f372..719 (feature_set_id::ComputeToken)
 SCHEMA = "rev5-featbank-v1"
+HDR_TEACHER_SHA = {
+    "train": "deb70e775b043a578c77e0c3ff27960ebfa936e9d901497f9d74389e6ce9fbce",
+    "val": "4b0f39dea0255659232f248070c8683dd7edf5916c63621cbb099b4afb6c9057",
+}
+HDR_TRANSFORM = "score=10*q_jod;no-clipping"
+
+
+def cmd_hdr_extract(a) -> int:
+    """The same bank owner, explicit native HDR research mode and original teacher order."""
+    import csv
+    import e21_cheap_recipe as e21
+
+    if a.revision != 5 or a.limit:
+        raise ValueError("E26 requires a complete Rev5 role; partial tables are inadmissible")
+    teacher = Path(a.hdr_teacher)
+    tab = pq.read_table(teacher)
+    role = (tab.schema.metadata or {}).get(b"zensim.hdrteach.role", b"").decode()
+    if role not in HDR_TEACHER_SHA or sha256_file(teacher) != HDR_TEACHER_SHA[role]:
+        raise ValueError("teacher is not the registered immutable HDRTEACH role")
+    rows = tab.to_pylist()
+    if any(r["role"] != role for r in rows) or len(rows) != {"train": 7425, "val": 3900}[role]:
+        raise ValueError("teacher role/coverage mismatch")
+    rows = [r for r in rows if role == "val" or r["agree"]]
+    if len(rows) != {"train": 7390, "val": 3900}[role]:
+        raise ValueError("registered agreement population mismatch")
+    ids = e21.columns("by_v2fy")
+    want = set(ids)
+    hashes = {}
+    for r in rows:
+        for prefix in ("ref", "dist"):
+            path, digest = r[f"{prefix}_path"], r[f"{prefix}_sha256"]
+            if path in hashes and hashes[path] != digest:
+                raise ValueError("conflicting native input hash")
+            hashes[path] = digest
+    for path, expected in hashes.items():
+        if sha256_file(path) != expected:
+            raise ValueError(f"native input changed: {path}")
+    outdir = Path(a.out) / a.set
+    outdir.mkdir(parents=True, exist_ok=False)
+    wd = outdir / "_work"
+    wd.mkdir()
+    keys = pa.Table.from_pylist(rows)
+    pq.write_table(keys, outdir / "keys.parquet", compression="zstd")
+    keys_sha = sha256_file(outdir / "keys.parquet")
+    width, writer, producer, chunks = None, None, None, []
+    env = dict(os.environ, ZENSIM_FORMULA_REV="5", ZENSIM_ROOT_FORM="sqrt", RAYON_NUM_THREADS=str(a.threads))
+    start = time.time()
+    try:
+        for ci, lo in enumerate(range(0, len(rows), a.chunk)):
+            group = rows[lo:lo + a.chunk]
+            pairs, result = wd / f"pairs_{ci:03d}.tsv", wd / f"features_{ci:03d}.tsv"
+            with pairs.open("w") as f:
+                w = csv.writer(f, delimiter="\t")
+                w.writerow(["q", "ref_path", "dist_path"])
+                w.writerows((r["q"], r["ref_path"], r["dist_path"]) for r in group)
+            cmd = [a.bin, "--pairs", str(pairs), "--ref-root", "/", "--enc-root", "/", "--absolute-pairs",
+                   "--requested-ids", ",".join(map(str, ids)), "--input-contract", "hdr-common-primaries-v2-cicp-pq10000",
+                   "--threads", str(a.threads), "--out", str(result)]
+            t0 = time.time()
+            with (wd / f"chunk_{ci:03d}.log").open("w") as lg:
+                subprocess.run(cmd, env=env, stdout=lg, stderr=subprocess.STDOUT, check=True)
+            man = json.loads(result.with_suffix(".manifest.json").read_text())
+            if man["formula_revision"] != "Rev5" or man["requested_ids"] != ids or man["rows"] != len(group):
+                raise ValueError("native extractor revision/read-set/coverage mismatch")
+            if producer is not None and producer != man["research"]:
+                raise ValueError("research provenance changed between chunks")
+            producer = man["research"]
+            width = man["feature_count"]
+            features = pacsv.read_csv(result, parse_options=pacsv.ParseOptions(delimiter="\t"),
+                convert_options=pacsv.ConvertOptions(column_types={"q": pa.string(), "dist_basename": pa.string(),
+                    **{f"f{i}": pa.float64() for i in range(width)}}))
+            if (features["dist_basename"].to_pylist() != [Path(r["dist_path"]).name for r in group]
+                    or features["q"].to_pylist() != [r["q"] for r in group]):
+                raise ValueError("native row order/key join failed")
+            for i in range(width):
+                values = features[f"f{i}"].to_numpy()
+                if not (np.isfinite(values).all() if i in want else np.isnan(values).all()):
+                    raise ValueError(f"measured/absent contract failed f{i}")
+            features = features.select([f"f{i}" for i in range(width)])
+            features = features.add_column(0, "row_id", pa.array([r["row_id"] for r in group]))
+            if writer is None:
+                writer = pq.ParquetWriter(outdir / "features.parquet", features.schema, compression="zstd")
+            writer.write_table(features)
+            chunks.append(dict(rows=len(group), pairs_sha256=sha256_file(pairs), extractor_manifest=man,
+                               wall_s=time.time()-t0))
+            log(f"{a.set} chunk {ci}: {len(group)} native rows in {time.time()-t0:.1f}s")
+    finally:
+        if writer is not None:
+            writer.close()
+    manifest = dict(schema=SCHEMA, study="E26", role=role, rows=len(rows), feature_width=width,
+                    formula_revision="Rev5", root_form="sqrt", input_contract="hdr-common-primaries-v2-cicp-pq10000",
+                    requested_ids=ids, absent_slots="NaN", target_transform=HDR_TRANSFORM,
+                    teacher_sha256=HDR_TEACHER_SHA[role], keys_sha256=keys_sha,
+                    features_parquet_sha256=sha256_file(outdir / "features.parquet"),
+                    build_commit=a.build_commit, binary_sha256=sha256_file(a.bin), research=producer,
+                    native_inputs=hashes, row_order_sha256=hashlib.sha256(json.dumps([r["row_id"] for r in rows]).encode()).hexdigest(),
+                    chunks=chunks, wall_s=time.time()-start, assembler_sha256=sha256_file(__file__))
+    (outdir / "_MANIFEST.json").write_text(json.dumps(manifest, indent=1)+"\n")
+    return 0
 
 
 def sha256_file(p) -> str:
@@ -240,6 +339,7 @@ def main() -> int:
     ap.add_argument("set")
     ap.add_argument("--bin")
     ap.add_argument("--instrument-manifest", type=Path, help="explicit label-free assessment keys; historical bank default unchanged")
+    ap.add_argument("--hdr-teacher", help="immutable HDRTEACH role; native E26 extraction")
     ap.add_argument("--build-commit", default="")
     ap.add_argument("--revision", type=int, choices=[4, 5], default=5)
     ap.add_argument("--era", default="")
@@ -253,7 +353,7 @@ def main() -> int:
     if a.cmd == "extract":
         if not (a.bin and a.build_commit and a.era):
             ap.error("extract needs --bin, --build-commit and --era")
-        return cmd_extract(a)
+        return cmd_hdr_extract(a) if a.hdr_teacher else cmd_extract(a)
     return cmd_verify_against(a)
 
 

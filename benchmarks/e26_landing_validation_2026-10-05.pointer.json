@@ -1,0 +1,94 @@
+{
+ "schema": "e26-landing-validation-pointer-v1",
+ "status": "PASS",
+ "artifact_root": "output/zensim/e26-2026-10-05/",
+ "main_base": "6874a9818fe5f2062415fdd6667f50d4fd80eaa6",
+ "landing_change_id": "opmvyyto",
+ "tests": {
+  "python": 162,
+  "e26_actual_loader_packer": 4,
+  "rust_trainer": 25,
+  "rust_pack_refit": 29,
+  "rust_verdict": 41,
+  "rust_verdict_ignored": 1,
+  "research": 15,
+  "serving_revision": 36,
+  "serving_revision_ignored": 3,
+  "native_hdr": 2,
+  "api_snapshot": 1,
+  "lint_scripts": 820
+ },
+ "checks": [
+  "CI-exact just clippy",
+  "native HDR Clippy -D warnings",
+  "cargo fmt --all --check",
+  "just lint-scripts",
+  "just api-doc-check"
+ ],
+ "logs": {
+  "MERGE_FMT.log": {
+   "path": "landing/checks/MERGE_FMT.log",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "MERGE_LINT_FINAL.log": {
+   "path": "landing/checks/MERGE_LINT_FINAL.log",
+   "sha256": "39f721e0fc6647e68023bf3303d54d2d50facf02c3599928e770fd245441be23"
+  },
+  "MERGE_CLIPPY.log": {
+   "path": "landing/checks/MERGE_CLIPPY.log",
+   "sha256": "5aa89044076c0b7c9999b1135dc39b7683ccd061b2373ce643c174520a1abd00"
+  },
+  "MERGE_TRAINER_BUILD.log": {
+   "path": "landing/checks/MERGE_TRAINER_BUILD.log",
+   "sha256": "5cff968563bd1dc6e8aa5f59a974b8617e0c3fb76a334e44849fa85ed6e560e7"
+  },
+  "MERGE_PANEL_BUILD.log": {
+   "path": "landing/checks/MERGE_PANEL_BUILD.log",
+   "sha256": "e38804bb7158dd92654c913b71f967281188d0800206da205b9b50af13b6eeb1"
+  },
+  "MERGE_RUST_OWNERS.log": {
+   "path": "landing/checks/MERGE_RUST_OWNERS.log",
+   "sha256": "adf793b522551683faeabfa674c455822de1a08f2303fac55a1fdf56a2286132"
+  },
+  "MERGE_RESEARCH.log": {
+   "path": "landing/checks/MERGE_RESEARCH.log",
+   "sha256": "eb49562bc7fb4c585226edfc18917e2dc1613aad0427bafdf2de7ea46421055a"
+  },
+  "MERGE_SERVING.log": {
+   "path": "landing/checks/MERGE_SERVING.log",
+   "sha256": "949ef35547fcaae1012da1d5d1cf65bc0ac42b3e12c2bff2ff911e75786af674"
+  },
+  "MERGE_API_FINAL.log": {
+   "path": "landing/checks/MERGE_API_FINAL.log",
+   "sha256": "ed61317d984713bfe5de82689f9002f39dda79aacb59cd684e84a2ed1a3839af"
+  },
+  "MERGE_NATIVE_TEST.log": {
+   "path": "landing/checks/MERGE_NATIVE_TEST.log",
+   "sha256": "237f790201ec1a40fea27ff266b08fe0f3eb5f19a5e8dcfe918c66972d534394"
+  },
+  "MERGE_NATIVE_CLIPPY.log": {
+   "path": "landing/checks/MERGE_NATIVE_CLIPPY.log",
+   "sha256": "0c7504f8c81b20ed2e8c76a05ce1b069be4d07b643144c21ee356dd9c4a55627"
+  },
+  "MERGE_PYTHON_FINAL.log": {
+   "path": "landing/checks/MERGE_PYTHON_FINAL.log",
+   "sha256": "4156a2874b44aace33ffa9d78c06fc97437263c599c48dc30732a572282eb78a"
+  },
+  "MERGE_REMAINING.log": {
+   "path": "landing/checks/MERGE_REMAINING.log",
+   "sha256": "f04389a10c734954e0866ca7ad03c72d2b4b53c03bba8fe720f9fbcd9c44fc19"
+  }
+ },
+ "merged_source_sha256": {
+  "v2_common.py": "90ce93755216fda3efa064d1540a4bbfc3dcc1f60927970df9c5c4cc3c765823",
+  "v2_lodo_mlp.py": "e82c37a2dbb9b07886fb5fd18d66538a52f5accc58fcb8e72aa94f0de765fa9f",
+  "v2_teacher.py": "8185465d4e59c9e2e4dd05d99d46e49b17757d942d0dfd99430c010c9268529c",
+  "v2_confirm_fit.py": "887b5a199901478476d8bb31b25ac0c7634ece217f331f9b3c8a60683986e507",
+  "v2c_wide.py": "6f9364fe8eed5270860215d8d9b0ab50cb5b26cc189e31187cbe766598b9a291",
+  "rev5_bank.py": "e42eec57fed223c19dd3b72d2a3c0476c20067ad614b9d76de16d5b95fdda0a7"
+ },
+ "frozen_fit_program": "v28/7e8ac08b6b97fc78057251bdfa4af2a605543d8a36c0b2e1be4aec458634d5a0",
+ "limitations": "Software merge checks only; no re-fit or scientific panel replay with merged sources; native ignored corpus gates remain opt-in. Original frozen v28 evidence retained.",
+ "repairs": "Preserved main strict/assessment owners and E26 HDR attachment. Updated two inherited stale Python fixtures/assertions for epochs tuple and curated provenance; regenerated API aggregate counts. Initial missing-binary/check failures retained.",
+ "landing_archive": "landing/"
+}

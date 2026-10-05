@@ -212,6 +212,122 @@ def _teacher_panel(paths, output_dir):
         print(role, result["pooled_srocc_signed"], result["within_reference"], result["agree_count"], flush=True)
 
 
+def _e26_panel(root, control_root, bank, output_dir, native_proof):
+    """E26 frozen HDR VAL assessment."""
+    import hashlib
+    sys.path.insert(0, str(REPO / "scripts/rev4_featpot"))
+    sys.path.insert(0, str(REPO))
+    import e24_rev5 as e24
+    from e13_teacher import paired
+    from v2_common import dense_bake, sha, FITBIN, PANEL
+    from rev5_bank import HDR_TEACHER_SHA
+    from scripts.lib.zen_stats import panel_batch_indexed
+
+    root, control_root, bank, output_dir = map(Path, (root, control_root, bank, output_dir))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    man = json.loads((bank / "_MANIFEST.json").read_text())
+    proof = json.loads(Path(native_proof).read_text())
+    if (proof.get("status") != "PASS" or proof.get("rows") != 3900
+            or proof.get("pixel_identical_rows") != 0 or proof.get("mismatched_rows") != 0
+            or proof.get("maximum_absolute_delta") != 0 or not proof.get("row_order_verified")
+            or proof.get("val_bank_manifest_sha256") != sha(bank / "_MANIFEST.json")):
+        raise ValueError("E26 native cache proof mismatch")
+    ids = e24.e21.columns("by_v2fy")
+    if (man.get("role") != "val" or man.get("rows") != 3900 or man.get("formula_revision") != "Rev5"
+            or man.get("teacher_sha256") != HDR_TEACHER_SHA["val"] or man.get("requested_ids") != ids):
+        raise ValueError("E26 VAL bank is not the complete registered native Rev5 population")
+    for name, pin in [("keys.parquet", "keys_sha256"), ("features.parquet", "features_parquet_sha256")]:
+        if sha(bank / name) != man[pin]:
+            raise ValueError("E26 native VAL cache changed")
+    keys = pq.read_table(bank / "keys.parquet").to_pylist()
+    features = pq.read_table(bank / "features.parquet")
+    if features["row_id"].to_pylist() != [r["row_id"] for r in keys] or any(r["role"] != "val" for r in keys):
+        raise ValueError("E26 VAL feature/label row join mismatch")
+    groups = defaultdict(list)
+    for i, row in enumerate(keys):
+        groups[row["ref_path"]].append(i)
+    if len(groups) != 300 or any(len(v) != 13 for v in groups.values()):
+        raise ValueError("E26 VAL reference census differs")
+    width = man["feature_width"]
+    X = np.column_stack([features[f"f{i}"].to_numpy() for i in range(width)]).astype("<f8")
+    for i in range(width):
+        if not (np.isfinite(X[:, i]).all() if i in ids else np.isnan(X[:, i]).all()):
+            raise ValueError(f"E26 native VAL measured/absent contract f{i}")
+    wire = output_dir / "native_val.f64.wire"
+    with wire.open("wb") as f:
+        f.write(struct.pack("<II", width, len(keys)))
+        f.write(X.tobytes())
+    tool = os.environ.get("ZL_PREDICT", str(REPO / "target/release/predict_features_with_bake"))
+    if sha(Path(tool)) != proof["cached_executable_sha256"]:
+        raise ValueError("E26 cache predictor changed")
+    cells = {}
+    for label, base, spec in [("control", control_root, e24.CONTROL),
+                             *((f"hd{w}", root, e24.CONTROL+f":hd{w}") for w in (4, 16))]:
+        result_cells = []
+        for source in e24.SOURCE_ORDER:
+            for seed in e24.SEEDS:
+                cell = base / "cells" / f"{spec}__N" / f"without_{source}_s{seed}"
+                result = json.loads((cell / "result.json").read_text())
+                bake = cell / "refit/last.bin"
+                if (result["selected_bake_sha256"] != sha(bake) or result["selected_epoch"] != 119
+                        or result["epoch_rule"] != "last" or result["heldout"] != source or result["seed_index"] != seed):
+                    raise ValueError("E26 cell identity/epoch/bake receipt mismatch")
+                dense, binding = e24.e26_bound_bake(cell, output_dir)
+                proc = subprocess.run([tool, "--bake", str(dense), "--features-file", str(wire), "--f64-wire", "--production"],
+                                      capture_output=True, text=True, check=True)
+                pred = np.array([float(v) for v in proc.stdout.split()], dtype=np.float64)
+                if len(pred) != 3900 or not np.isfinite(pred).all():
+                    raise ValueError("E26 native VAL prediction coverage/nonfinite refusal")
+                bases = {"prediction": pred, "hdrvdp3": [r["hdrvdp3_q_jod"] for r in keys],
+                         "cvvdp": [r["cvvdp_jod"] for r in keys]}
+                jobs = [("ALL", "prediction", target, None) for target in ("hdrvdp3", "cvvdp")]
+                jobs += [(ref, "prediction", target, ix) for target in ("hdrvdp3", "cvvdp") for ref, ix in groups.items()]
+                panels = panel_batch_indexed(bases, jobs, stats="srocc")
+                if any(p["n_dropped"] or not math.isfinite(p["srocc_signed"]) for p in panels):
+                    raise ValueError("E26 canonical signed panel dropped/undefined admitted rows")
+                means = {t: float(np.mean([p["srocc_signed"] for p in panels[2+j*300:2+(j+1)*300]]))
+                         for j, t in enumerate(("hdrvdp3", "cvvdp"))}
+                np.save(output_dir / f"{label}_{source}_s{seed}.npy", pred, allow_pickle=False)
+                result_cells.append(dict(source=source, seed=seed, bake_sha256=sha(bake), dense_sha256=sha(dense),
+                    result_sha256=sha(cell / "result.json"), serving_binding=binding, prediction_sha256=hashlib.sha256(pred.astype("<f8").tobytes()).hexdigest(),
+                    within_reference=means, pooled={t: panels[j]["srocc_signed"] for j, t in enumerate(("hdrvdp3", "cvvdp"))},
+                    per_reference={t: [p["srocc_signed"] for p in panels[2+j*300:2+(j+1)*300]] for j,t in enumerate(("hdrvdp3", "cvvdp"))}))
+        cells[label] = result_cells
+        print(f"E26 HDR {label}: {len(result_cells)} complete VAL panels", flush=True)
+    sdr = json.loads((root / "compare/e26_sdr_decision.json").read_text())
+    arms = {}
+    for label in ("hd4", "hd16"):
+        if [(c["source"], c["seed"]) for c in cells[label]] != [(c["source"], c["seed"]) for c in cells["control"]]:
+            raise ValueError("E26 HDR cell pairing mismatch")
+        within = {t: paired([c["within_reference"][t] for c in cells[label]],
+                            [c["within_reference"][t] for c in cells["control"]]) for t in ("hdrvdp3", "cvvdp")}
+        pooled = {t: paired([c["pooled"][t] for c in cells[label]],
+                            [c["pooled"][t] for c in cells["control"]]) for t in ("hdrvdp3", "cvvdp")}
+        hdr_pass = within["hdrvdp3"]["delta"] > 2*within["hdrvdp3"]["se"] and within["cvvdp"]["delta"] >= -2*within["cvvdp"]["se"]
+        arms[label] = dict(sdr=sdr[label], within_reference=within, pooled_report_only=pooled,
+                           hdr_pass=bool(hdr_pass), passes=bool(hdr_pass and sdr[label]["as_good"]))
+    decision = dict(schema="e26-registered-decision-v1", rows=3900, references=300, cells_per_arm=50,
+                    pairing="all 50 registered (fold,seed) cells", arms=arms,
+                    adopt=next((a for a in ("hd4", "hd16") if arms[a]["passes"]), None),
+                    val_bank_manifest_sha256=sha(bank / "_MANIFEST.json"), tools={str(p):sha(p) for p in (Path(tool), FITBIN, PANEL)},
+                    native_cache_proof_sha256=sha(Path(native_proof)), native_cache_proof=proof,
+                    status="COMPLETE", cells=cells)
+    (output_dir / "e26_hdr_decision.json").write_text(json.dumps(decision, indent=1)+"\n")
+    print(json.dumps({"adopt":decision["adopt"], "arms":arms}), flush=True)
+
+
+if "--e26-root" in sys.argv:
+    e26_ap = argparse.ArgumentParser(description="Registered E26 native HDR VAL panel")
+    e26_ap.add_argument("--e26-root", required=True)
+    e26_ap.add_argument("--e26-control-root", required=True)
+    e26_ap.add_argument("--e26-val-bank", required=True)
+    e26_ap.add_argument("--e26-output-dir", required=True)
+    e26_ap.add_argument("--e26-native-proof", required=True)
+    e26_args = e26_ap.parse_args()
+    _e26_panel(e26_args.e26_root, e26_args.e26_control_root, e26_args.e26_val_bank, e26_args.e26_output_dir, e26_args.e26_native_proof)
+    raise SystemExit(0)
+
+
 if "--teacher-parquet" in sys.argv:
     teacher_ap = argparse.ArgumentParser(description="Pinned HDRTEACH descriptive teacher agreement")
     teacher_ap.add_argument("--teacher-parquet", action="append", required=True)
