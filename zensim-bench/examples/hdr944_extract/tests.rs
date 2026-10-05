@@ -21,7 +21,7 @@ fn e26_native_readset_matches_canonical_hdr_and_refuses_sdr() {
         return;
     }
     let registry: serde_json::Value = serde_json::from_str(include_str!(
-        "../../benchmarks/costset2_2026-10-03.candidate_ids.json"
+        "../../../benchmarks/costset2_2026-10-03.candidate_ids.json"
     ))
     .unwrap();
     let ids: Vec<usize> = registry["candidates"]["by_v2fy"]
