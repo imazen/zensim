@@ -107,3 +107,5 @@ HDR panel requires this hash-bound whole-population proof and the same
 cache predictor binary; identity shortcuts cannot silently contaminate the
 fast path. Core trainer/program/data/thresholds unchanged. Full native proof
 took677s at2 threads,0.82GiB peak; no human interpretation of these labels.
+
+Native final census-source checks: two native tests pass, strict native Clippy passes. Durable tower native-bank copy verified98 files/260964434bytes including extraction work manifests. Full100 fits still running; final scientific panels remain pending. Existing fillers only, no worker restarts.

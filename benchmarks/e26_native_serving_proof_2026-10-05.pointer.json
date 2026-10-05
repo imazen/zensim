@@ -1,0 +1,22 @@
+{
+ "schema": "e26-native-serving-proof-pointer-v1",
+ "tower_relative_path": "output/zensim/e26-2026-10-05/serving-proof/VAL_NATIVE_CACHE_PARITY.json",
+ "proof": {
+  "status": "PASS",
+  "rows": 3900,
+  "pixel_identical_rows": 0,
+  "maximum_absolute_delta": 0.0,
+  "mismatched_rows": 0,
+  "native_manifest_sha": "218daa88152adcab2efd0a97bc6d2588ab6b1a4e10a1294ae5c33a7681500fd1",
+  "val_bank_manifest_sha256": "93a13b49e772ed4550c3974c0c3c3285d63ffcbb16d142f75d8a8effc0c46bae",
+  "features_sha256": "07b8a55de9c84f9f05b7ac963abd96e77c85f4dbae474ad477b3506e00a00862",
+  "keys_sha256": "89590be56be0fcf45ba885a5334190de34f1738fe24d24b069ca7acf4b57d367",
+  "native_executable_sha256": "ca646a744abf63f6a85d7d56e7b2d27a34891a55964ab56514f71ee762d4ac60",
+  "cached_executable_sha256": "e4a411209ff5c9fe221ab7a4fc04e506f210f06776ad68cf687bd62e5990928c",
+  "row_order_verified": true,
+  "control_source_sha256": "c6aa317ed45b68defc8eb73a7a8c34f090c8ad08a509a8420250bb9cf67e5980"
+ },
+ "scope": "All3900 registered HDR VAL rows; no pixel-identical rows. Native production/cached production bitwise equality on bound E24 control without_kadid_s0; separate smoke student native parity. No general pixel identity support inferred for cache scoring.",
+ "qualification": "serving parity only; human HDR/product/encoder qualification missing",
+ "sha256": "5a90ba18696c6d7649b9ad50d2304ecb2edaf4c6e2611893c41cddb0c7d95195"
+}
