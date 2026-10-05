@@ -240,6 +240,17 @@ def resolve_keep(core_spec: str, columns: str | None, lists: dict) -> tuple[str,
     raise ValueError(f"{core_spec}: not in the keep lists")
 
 
+def hdr_training_group(record: dict, keep: list[int], recipe: dict) -> tuple[tuple, dict]:
+    """Admit the unchanged E26 TRAIN authority, then apply the registered loss form."""
+    import v2_teacher
+    path, admitted = v2_teacher.hdr_leg(record, keep)
+    mode = recipe.get("hdr_mode", "withinref,rank")
+    if mode not in ("withinref,rank", "rank", "withinref,both"):
+        raise ValueError("unregistered HDR loss form")
+    weight = acceptance_weight(recipe["hdr_weight"], refs_of(path))
+    return ("hdr", path, weight, 0, mode), admitted
+
+
 def strict_output_preflight(root: Path, dest: Path) -> None:
     """Protect every immutable ancestor before CLI destination/scratch writes."""
     from v2_common import admission_input_roots, refuse_immutable_output
@@ -339,12 +350,11 @@ def main() -> None:
         groups.append(("coverage", cpath, weights["coverage"], 0, "withinref,rank"))
     hdr_record = None
     if "hdr_weight" in recipe:
-        import v2_teacher
         if int(receipt.get("formula_revision", 4)) != 5:
             raise ValueError("HDR teacher leg requires the registered Rev5 SDR root")
-        hpath, hdr_record = v2_teacher.hdr_leg(legs["hdr"], keep)
-        weights["hdr"] = acceptance_weight(recipe["hdr_weight"], refs_of(hpath))
-        groups.append(("hdr", hpath, weights["hdr"], 0, "withinref,rank"))
+        group, hdr_record = hdr_training_group(legs["hdr"], keep, recipe)
+        weights["hdr"] = group[2]
+        groups.append(group)
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
     hdev = checked(legs[f"human_without_{args.heldout}"]["dev"])
     weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
