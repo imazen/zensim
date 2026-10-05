@@ -1,7 +1,7 @@
 These two ZCTH fixtures are synthetic format/ownership controls, not trained
 scientific companions. Both use the existing Python `emit_zcth` owner on the
 same one-stump binary classifier (128 synthetic rows, one HGB iteration,
-max_leaf_nodes=2, seed914). V3 has no admitted capability. V4 was emitted with
+max_leaf_nodes=2, seed6). V3 has no admitted capability. V4 was emitted with
 the synthetic record factory in `scripts/tests/test_zcth_admission.py`.
 
 The verdict regression replaces only the v4 metadata section, updating its

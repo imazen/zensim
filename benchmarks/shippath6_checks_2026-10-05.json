@@ -1,0 +1,893 @@
+{
+  "schema": "shippath6-companion-admission-checks-v1",
+  "parent": "0eb019058148532e2f2d540c3adbe8b721893088",
+  "implementation_commit": "5483be4c87ec0ebfee0c64bf5926b0ced241ef2e",
+  "scope": "registered R5INTEG3 TRAIN replay; companion leg only; no whole-model qualification",
+  "head": {
+    "path": "/var/tmp/shippath6/refit/head.zcth",
+    "sha256": "568380f1bd2fe6202ebcc5a194078d7885035f466abe93ada3a4b3ea8f4a26f2",
+    "wire_version": 4,
+    "revision": 5,
+    "caller_width": 720,
+    "declared_ids": 420,
+    "trees": 100,
+    "nodes": 6100
+  },
+  "admission": {
+    "path": "/var/tmp/shippath6/TRAINING_ADMISSION.json",
+    "sha256": "c0dd3003c3dd642bde88afa2603ab6d0f8c35079760ef14c9400fce12bbf3c88",
+    "feature_set_id": "basic+peaks+v2@w1825/r5integ_rev5#36c3f3af",
+    "decoder_era": "legacy-rgb8/executable-sha256:01ed2897b7f4b07203d172a614a47dbd4c87b4d39dd42998f25cc131f29a7740",
+    "training_tables": [
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet",
+        "sha256": "f04aba6f2c612d398d552f37576cdac2501a9b73e1473f10d69f8879476f8906",
+        "source_table": "/var/tmp/r5integ/rev5-honest-train-keyed.parquet",
+        "role": "TRAIN",
+        "usage": [
+          "fit",
+          "calibrate"
+        ],
+        "declaration": {
+          "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet.manifest.json",
+          "sha256": "d149626d28e27c9467aaef769df0415d2bb4815cdeb00e887b14ecfb582f3c6b"
+        },
+        "selection": {
+          "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet.selection.json",
+          "sha256": "45cf0d396e93da186b0955867e586e9dd2ec7075688318985ae87fe5bb2f53af"
+        }
+      },
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-train.parquet",
+        "sha256": "e245fe40bf308753abdac4be076da9968a6336dd3aff27723d4360fccd46d036",
+        "source_table": "/var/tmp/r5integ/rev5-train.parquet",
+        "role": "TRAIN",
+        "usage": [
+          "fit",
+          "calibrate"
+        ],
+        "declaration": {
+          "path": "/var/tmp/shippath6/train-view/rev5-train.parquet.manifest.json",
+          "sha256": "82fbb35418f10d9eaa33b05a9ef7de7c99f9d78fd1050618de71f7b37ded3275"
+        },
+        "selection": {
+          "path": "/var/tmp/shippath6/train-view/rev5-train.parquet.selection.json",
+          "sha256": "b8d254d9d68bb5b6a2904715fac9b08ed5de1cf58bb8373beba1b82347554917"
+        }
+      }
+    ],
+    "bindings": [
+      {
+        "path": "/var/tmp/r5integ/extract_features_372col-used",
+        "sha256": "01ed2897b7f4b07203d172a614a47dbd4c87b4d39dd42998f25cc131f29a7740",
+        "kind": "decoder-producer"
+      },
+      {
+        "path": "/var/tmp/r5integ/rev5-final-raw.csv.manifest.json",
+        "sha256": "a12964c344cd4dc8d8f59b391e2511eb564e5300832f36001aa792d1df676076",
+        "kind": "extraction-manifest"
+      },
+      {
+        "path": "/mnt/v/output/zensim/canonical-corruption-refit-final-2026-09-08/CONTENT_ADMISSION.json",
+        "sha256": "d86a79ebbfa36548370f10995cda38785fd938fe14ea570d74e456ba9fd98ea0",
+        "kind": "content-admission"
+      },
+      {
+        "path": "/var/tmp/r5integ/r5integ3/rev5-MANIFEST.json",
+        "sha256": "96354540d966fbe565905c649575e16706e01f49819b55c24837d939de4dea18",
+        "kind": "recipe"
+      },
+      {
+        "path": "/home/lilith/work/zen/zensim--shippath/benchmarks/r5integ3_REGISTRATION.json",
+        "sha256": "0c22db6abeb063f8897caecdd54f4236d83f41351c103f3581363d8b01ee6a3f",
+        "kind": "registration"
+      },
+      {
+        "path": "/var/tmp/r5integ/r5integ3/fit-rev5/prepared.npz",
+        "sha256": "b1a7172c5b8ec5d8004f4f7db5adbd62e680927c0eb908963076a049464bc5f6",
+        "kind": "preparation"
+      },
+      {
+        "path": "/var/tmp/r5integ/r5integ3/fit-rev5/rows.json",
+        "sha256": "cca7605f7c5ab5c44e19955bd7b034eccc8102e4fd576cb3d1773b71551042bb",
+        "kind": "rows"
+      },
+      {
+        "path": "/var/tmp/r5integ/rev5-INPUTS.json",
+        "sha256": "ec8406b4a4dc462d7c47f8df5220fa0300c5b2be8f95ed3e625aca9a25be7f49",
+        "kind": "inputs"
+      }
+    ]
+  },
+  "required_checks": {
+    "corruption-tests-final": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim",
+        "--all-features",
+        "--lib",
+        "corruption_head",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/var/tmp/shippath6/corruption-tests-final.log",
+      "sha256": "82a12de08f44a9ab5d0508762e03e62474fa95e139950b753def74ba8dccbf5e"
+    },
+    "revision-tests": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim",
+        "--all-features",
+        "--lib",
+        "metric::bake::revision_contract_tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/var/tmp/shippath6/revision-tests.log",
+      "sha256": "f9f9138e80b75d9c43bb9f897c75e4154cfcd18a4c531e34abc0f5893c59db2e"
+    },
+    "verdict-tests-final": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim-validate",
+        "--bin",
+        "bake_verdict",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/var/tmp/shippath6/verdict-tests-final.log",
+      "sha256": "85917f5d905ee5eb787a7340f66689581f88d41ec4f474d2ab6e7bc0f4e52850"
+    },
+    "freeze-tests": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim-validate",
+        "--bin",
+        "freeze_check",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/var/tmp/shippath6/freeze-tests.log",
+      "sha256": "12336bd6d36921ead677fe026b5ab4297c68cecd19ec68458727eb0658d2ccb3"
+    },
+    "clippy": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "just",
+        "clippy"
+      ],
+      "log": "/var/tmp/shippath6/clippy.log",
+      "sha256": "a55803e3662e7277b7e307ea840eef812bb519b3f47c0fa6c7670021a65f4269"
+    },
+    "api-doc-check": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "just",
+        "api-doc-check"
+      ],
+      "log": "/var/tmp/shippath6/api-doc-check.log",
+      "sha256": "ebd00511628497742e7420eae0020633cff904437ea94eea85d07034718d6491"
+    },
+    "fmt-check": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "log": "/var/tmp/shippath6/fmt-check.log",
+      "sha256": "c215fc93a4a3b02b960fe2feac70d9b95f91524d9c5c623cb62e4ab2cb6d2276"
+    },
+    "lint": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "just",
+        "lint-scripts"
+      ],
+      "log": "/var/tmp/shippath6/lint.log",
+      "sha256": "7d3daea8dc8c4391d4805a164afbd62fa8e0b903691860bcf49a69cd84144398"
+    },
+    "lint-final-docs": {
+      "returncode": 0,
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "just",
+        "lint-scripts"
+      ],
+      "log": "/var/tmp/shippath6/lint-final-docs.log",
+      "sha256": "0848cdd4604a89d3cf2469cc71268e10005adcc166473eeb90510dda38d72081"
+    }
+  },
+  "canonical_owner_runs": [
+    {
+      "name": "refit-parity",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "target/release/corrhead_parity",
+        "--head",
+        "/var/tmp/shippath6/refit/head.zcth",
+        "--parity",
+        "/var/tmp/shippath6/refit/parity.npz",
+        "--set",
+        "test"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/refit-parity.log",
+      "sha256": "447f01afba6821212201ed6977f516067c01c3603e8a3f01392620ff115c8c5b"
+    },
+    {
+      "name": "surface",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "zensim-bench/target/release/examples/extract_features_372col",
+        "--corpus",
+        "pairs",
+        "--path",
+        "/var/tmp/r5integ/rev5-nonidentity-pairs.tsv",
+        "--out",
+        "/var/tmp/shippath6/refit/features.csv",
+        "--restore-cuts",
+        "basic,peaks,v2",
+        "--audit-jsonl",
+        "/var/tmp/shippath6/refit/audit.jsonl",
+        "--audit-bake",
+        "/home/lilith/tmp/rev5bakes/byv2fy-full-s0.bin",
+        "--audit-corruption-head",
+        "/var/tmp/shippath6/refit/head.zcth"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/surface.log",
+      "sha256": "a70e1574c7139ab6a2af33c88d998e224b83cc55da86e76a851b21d5fb0a25a5"
+    },
+    {
+      "name": "gate-report",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "/home/lilith/.local/share/mise/installs/python/latest/bin/python3",
+        "scripts/v_next/corruption_gate_eval.py",
+        "--audit-jsonl",
+        "/var/tmp/shippath6/refit/audit.jsonl",
+        "--inputs-json",
+        "/var/tmp/r5integ/rev5-INPUTS.json",
+        "--out-json",
+        "/var/tmp/shippath6/refit/report.json",
+        "--model-context",
+        "canonical-fit",
+        "--fit-manifest",
+        "/var/tmp/r5integ/r5integ3/rev5-MANIFEST.json"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/gate-report.log",
+      "sha256": "461df66719c67261aeb39d6126daa1e5118b0a26cddf900e30d27e52a1470424"
+    },
+    {
+      "name": "companion-proof",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim-validate",
+        "--bin",
+        "bake_verdict",
+        "external_companion_admission_owner_audit",
+        "--",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/companion-proof.log",
+      "sha256": "89871ed39e5e075cb32dfcce8bf3c06b95a3bd82df6071e26fffb9982db2ac7b"
+    },
+    {
+      "name": "freeze-leg-check",
+      "command": [
+        "/home/lilith/.local/share/mise/installs/python/latest/bin/python3",
+        "/var/tmp/shippath6/check_freeze_leg.py"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/freeze-leg-check.log",
+      "sha256": "35c9753684f580946e31f07ded1d0337465d5c1ecbf08f51991612c93b6b7b4d"
+    },
+    {
+      "name": "runtime-checks",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "/home/lilith/.local/share/mise/installs/python/latest/bin/python3",
+        "/var/tmp/shippath6/runtime_checks.py"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/runtime-checks.log",
+      "sha256": "76e1d5df9a8448e22a6450afb4c468ecee9f93056a415684626492ff22912f8a"
+    },
+    {
+      "name": "format-parity",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "/home/lilith/.local/share/mise/installs/python/latest/bin/python3",
+        "scripts/verify_corrhead_format.py",
+        "--baseline-exporter",
+        "/var/tmp/shippath6/baseline_exporter.py",
+        "--parity-bin",
+        "target/release/corrhead_parity",
+        "--out-dir",
+        "/var/tmp/shippath6/format-parity"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/format-parity.log",
+      "sha256": "fd4c5c5856d8854347c974f33034c5c5c4a15b662ead2b98d7b94158a14b7f2c"
+    },
+    {
+      "name": "python-tests",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "/home/lilith/.local/share/mise/installs/python/latest/bin/python3",
+        "-m",
+        "unittest",
+        "scripts.tests.test_zcth_admission",
+        "scripts.tests.test_integrity_admission",
+        "-v"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/python-tests.log",
+      "sha256": "868ee3d350391266c2173c8d821f1c90855f39b13fb58ea59a57eed7e16fb10c"
+    },
+    {
+      "name": "plan",
+      "command": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim",
+        "--all-features",
+        "--lib",
+        "external_basic_v2_companion_compute_plan_audit",
+        "--",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath6/plan.log",
+      "sha256": "f045eb874c38c1e4295944ceaf60c11e247b6cf4f5e8679685f73cc979525182"
+    }
+  ],
+  "numerical_parity": {
+    "header_numeric_bytes_identical": true,
+    "sections": [
+      {
+        "name": "declared_ids",
+        "bytes": 840,
+        "sha256": "707549ff6df97cf61a365bb2088fc11f24d7df5c5ab9faeac65aac919cd139e3",
+        "raw_bytes_identical": true
+      },
+      {
+        "name": "mean",
+        "bytes": 3360,
+        "sha256": "7844bfc6ce4611cda757de413c09e5b37aaa0b3bf299020ba0514ee85b7e77f9",
+        "raw_bytes_identical": true
+      },
+      {
+        "name": "scale",
+        "bytes": 3360,
+        "sha256": "1b9ba096a1201eb5519b3a9379c8e00eb3ffdc355ed95e420788d5da19394a20",
+        "raw_bytes_identical": true
+      },
+      {
+        "name": "tree_offsets",
+        "bytes": 404,
+        "sha256": "6a13af20ff626dbe2557991b922362f7ff744db8b685e14a5b69f3d98ccac3c8",
+        "raw_bytes_identical": true
+      },
+      {
+        "name": "nodes",
+        "bytes": 195200,
+        "sha256": "ce8150e7ece36c4be75e0d99589b2a4ebb956b6d45992b4d1d44ff3ef2e80492",
+        "raw_bytes_identical": true
+      },
+      {
+        "name": "iso_x",
+        "bytes": 96,
+        "sha256": "e367fcd317978d97524164b539c38174863a1e4431ed29c2e31da768bea70904",
+        "raw_bytes_identical": true
+      },
+      {
+        "name": "iso_y",
+        "bytes": 96,
+        "sha256": "1b0f5d943e96dcfa05ed818fef7549165b23fd70fdb904ad1f5a6140a2816d6a",
+        "raw_bytes_identical": true
+      }
+    ],
+    "previous_head_sha256": "8e6ed23eca6257b9d6911c4032b21ec0d16385b6879c03a1a587a93fe8944f74",
+    "new_head_sha256": "568380f1bd2fe6202ebcc5a194078d7885035f466abe93ada3a4b3ea8f4a26f2"
+  },
+  "gates": {
+    "scope": "same registered TRAIN calibration; no new selection or product qualification",
+    "gates": {
+      "zero_native_codec_activation": true,
+      "honest_activation_le_1pct": true,
+      "zero_native_codec_lowering": true,
+      "honest_lowering_le_1pct": true,
+      "detection_ge_95pct": true,
+      "real_bug_detection_ge_90pct": true,
+      "below_q20_ge_99pct": true
+    },
+    "summary_identical_to_registered_control": true
+  },
+  "table_provenance": {
+    "COMPANION_LEG_ONLY": {
+      "returncode": 1,
+      "table_provenance": {
+        "detail": "Require compatible feature/formula/decoder declarations for every table, model and companion; see feature_set_composition",
+        "gate": "Table provenance",
+        "state": "pass"
+      },
+      "command": [
+        "/home/lilith/work/zen/zensim--shippath/target/release/freeze_check",
+        "--qualify",
+        "--fulleval",
+        "/var/tmp/shippath6/proof/COMPANION_LEG_ONLY.json"
+      ],
+      "scope": "companion-leg proof only; whole model remains unqualified"
+    },
+    "FULL_COMPOSITION": {
+      "returncode": 1,
+      "table_provenance": {
+        "detail": "Explicit historical replay in the scorer cannot qualify a new model",
+        "gate": "Table provenance",
+        "state": "fail"
+      },
+      "command": [
+        "/home/lilith/work/zen/zensim--shippath/target/release/freeze_check",
+        "--qualify",
+        "--fulleval",
+        "/var/tmp/shippath6/proof/FULL_COMPOSITION.json"
+      ],
+      "scope": "companion-leg proof only; whole model remains unqualified"
+    }
+  },
+  "runtime": {
+    "prepared_compositions": 6,
+    "prepared_rows": 30,
+    "identity_rows": 12,
+    "cross_revision_refusals": [
+      {
+        "name": "v4-rev5-head-on-rev4",
+        "returncode": 101,
+        "expected_typed_refusal": true,
+        "command": [
+          "/home/lilith/work/zen/zensim--shippath/zensim-bench/target/release/examples/extract_features_372col",
+          "--corpus",
+          "pairs",
+          "--path",
+          "/var/tmp/r5integ/r5integ2/prepared-pairs.tsv",
+          "--out",
+          "/var/tmp/shippath6/v4-rev5-head-on-rev4.csv",
+          "--restore-cuts",
+          "basic,peaks,v2",
+          "--audit-jsonl",
+          "/var/tmp/shippath6/v4-rev5-head-on-rev4.jsonl",
+          "--audit-bake",
+          "/home/lilith/tmp/chromaq/bakes_full/byv2fy-full-s0.bin",
+          "--audit-corruption-head",
+          "/var/tmp/shippath6/refit/head.zcth"
+        ]
+      },
+      {
+        "name": "legacy-rev4-head-on-rev5",
+        "returncode": 101,
+        "expected_typed_refusal": true,
+        "command": [
+          "/home/lilith/work/zen/zensim--shippath/zensim-bench/target/release/examples/extract_features_372col",
+          "--corpus",
+          "pairs",
+          "--path",
+          "/var/tmp/r5integ/r5integ2/prepared-pairs.tsv",
+          "--out",
+          "/var/tmp/shippath6/legacy-rev4-head-on-rev5.csv",
+          "--restore-cuts",
+          "basic,peaks,v2",
+          "--audit-jsonl",
+          "/var/tmp/shippath6/legacy-rev4-head-on-rev5.jsonl",
+          "--audit-bake",
+          "/home/lilith/tmp/rev5bakes/byv2fy-full-s0.bin",
+          "--audit-corruption-head",
+          "/var/tmp/r5integ/r5integ3/fit-rev4/seed-4101/head.zcth"
+        ]
+      }
+    ],
+    "extractor_sha256": "32d200af9758a677ace867e63262ec1e1e4dd8dc7267e8df8060b7edf292c88a",
+    "head_sha256": "568380f1bd2fe6202ebcc5a194078d7885035f466abe93ada3a4b3ea8f4a26f2",
+    "scope": "same registered TRAIN runtime probes only"
+  },
+  "legacy_format": {
+    "role": "synthetic-format-check",
+    "scientific_fits": 0,
+    "synthetic_fits": 1,
+    "rows_per_case": 512,
+    "cases": [
+      {
+        "file": "current-native.zcth",
+        "sha256": "89d9b0b90b3430c78cbd3327de05920126bd44fd61af4aba457f8358c3fb7aca",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/current-native.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "b7f341a71edbaac19bc88e45e6b2c038a8254d6a73fe90b3a952ab154c446f3a"
+      },
+      {
+        "file": "current-f32.zcth",
+        "sha256": "1e555361de7afbeb226e53146a4b907d302ae3493f220103df489b59b40dc8e5",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/current-f32.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "8f2e918a31cdd0f59601963d4427ae856582522bd53248d55842feb1c71157df"
+      },
+      {
+        "file": "revision-1.zcth",
+        "sha256": "0d98a91ac7409059be0b223a6cc347fbc4fa4b7fe651bec789ec4a9854186341",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/revision-1.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "f751f65b965b571f8f3e8b8bcad0908106bd8e0bf1dbf22bbe7f22daee40f3d0"
+      },
+      {
+        "file": "revision-2.zcth",
+        "sha256": "e93428d5cbe57d6f5f29a9a5f2489c008938071539ef45bb6cfe17a2956b7782",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/revision-2.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "d9914fe099135c48a60f34af7ffe5f9b5ddbc1449826bfa772d44ad7e069516a"
+      },
+      {
+        "file": "revision-3.zcth",
+        "sha256": "3810554ea5210512a069677bd748301c8f7acb3dc9e9584dda14dabc593974ea",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/revision-3.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "5faeed6938b0e726932690d66504b53d86f39544432cfa46e04b86f1382fa435"
+      },
+      {
+        "file": "revision-4.zcth",
+        "sha256": "5ba734a32c6272ed21d771d0a88a58bda0ad02008198dc802f227db882a95551",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/revision-4.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "561b3e5e7743ab9ebd137340b5c4aa857b30b7de9431c0eea85ed09a1a775b89"
+      },
+      {
+        "file": "revision-5.zcth",
+        "sha256": "e50ce9cc658be0e945d984a54fe0a7e43259c2569504136723b8fe1e9e154e44",
+        "command": [
+          "/var/tmp/shippath6/target-root/release/corrhead_parity",
+          "--head",
+          "/var/tmp/shippath6/format-parity/revision-5.zcth",
+          "--parity",
+          "/var/tmp/shippath6/format-parity/synthetic.npz",
+          "--set",
+          "train"
+        ],
+        "parity_log_sha256": "67565ebd0b31048ef748e03a5115f77569a2d1efedab0be623d44078437f82b7"
+      }
+    ],
+    "legacy_v1_v2_bytes_identical": true,
+    "legacy_v3_bytes_identical": true,
+    "invalid_contracts_refused": 3,
+    "exporter_sha256": "821822b3689a011bafb4b8537d5a3c93b0ebcd3415f0d1dbe0952187169978c9",
+    "baseline_exporter_sha256": "6e3cc78aa36bd20dddaf3a4d7e473b88c2d654a872b17798b78546282348918b",
+    "parity_binary_sha256": "872460d09f091542bc4d20ef1c24f9102fb82621cef08c811c61f2d08b4dfc5a",
+    "script_sha256": "3a494f5dd9313460d869479e342ead68799a7f072fff1beff6374a364709aa97"
+  },
+  "immutable_inputs": {
+    "all_unchanged": true,
+    "verified_files": 16,
+    "specs": [
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet",
+        "sha256": "f04aba6f2c612d398d552f37576cdac2501a9b73e1473f10d69f8879476f8906",
+        "source_table": "/var/tmp/r5integ/rev5-honest-train-keyed.parquet",
+        "role": "TRAIN",
+        "usage": [
+          "fit",
+          "calibrate"
+        ],
+        "declaration": {
+          "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet.manifest.json",
+          "sha256": "d149626d28e27c9467aaef769df0415d2bb4815cdeb00e887b14ecfb582f3c6b"
+        },
+        "selection": {
+          "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet.selection.json",
+          "sha256": "45cf0d396e93da186b0955867e586e9dd2ec7075688318985ae87fe5bb2f53af"
+        }
+      },
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet.manifest.json",
+        "sha256": "d149626d28e27c9467aaef769df0415d2bb4815cdeb00e887b14ecfb582f3c6b"
+      },
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-honest-train-keyed.parquet.selection.json",
+        "sha256": "45cf0d396e93da186b0955867e586e9dd2ec7075688318985ae87fe5bb2f53af"
+      },
+      {
+        "path": "/var/tmp/r5integ/rev5-honest-train-keyed.parquet",
+        "sha256": "f04aba6f2c612d398d552f37576cdac2501a9b73e1473f10d69f8879476f8906"
+      },
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-train.parquet",
+        "sha256": "e245fe40bf308753abdac4be076da9968a6336dd3aff27723d4360fccd46d036",
+        "source_table": "/var/tmp/r5integ/rev5-train.parquet",
+        "role": "TRAIN",
+        "usage": [
+          "fit",
+          "calibrate"
+        ],
+        "declaration": {
+          "path": "/var/tmp/shippath6/train-view/rev5-train.parquet.manifest.json",
+          "sha256": "82fbb35418f10d9eaa33b05a9ef7de7c99f9d78fd1050618de71f7b37ded3275"
+        },
+        "selection": {
+          "path": "/var/tmp/shippath6/train-view/rev5-train.parquet.selection.json",
+          "sha256": "b8d254d9d68bb5b6a2904715fac9b08ed5de1cf58bb8373beba1b82347554917"
+        }
+      },
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-train.parquet.manifest.json",
+        "sha256": "82fbb35418f10d9eaa33b05a9ef7de7c99f9d78fd1050618de71f7b37ded3275"
+      },
+      {
+        "path": "/var/tmp/shippath6/train-view/rev5-train.parquet.selection.json",
+        "sha256": "b8d254d9d68bb5b6a2904715fac9b08ed5de1cf58bb8373beba1b82347554917"
+      },
+      {
+        "path": "/var/tmp/r5integ/rev5-train.parquet",
+        "sha256": "e245fe40bf308753abdac4be076da9968a6336dd3aff27723d4360fccd46d036"
+      },
+      {
+        "path": "/var/tmp/r5integ/extract_features_372col-used",
+        "sha256": "01ed2897b7f4b07203d172a614a47dbd4c87b4d39dd42998f25cc131f29a7740",
+        "kind": "decoder-producer"
+      },
+      {
+        "path": "/var/tmp/r5integ/rev5-final-raw.csv.manifest.json",
+        "sha256": "a12964c344cd4dc8d8f59b391e2511eb564e5300832f36001aa792d1df676076",
+        "kind": "extraction-manifest"
+      },
+      {
+        "path": "/mnt/v/output/zensim/canonical-corruption-refit-final-2026-09-08/CONTENT_ADMISSION.json",
+        "sha256": "d86a79ebbfa36548370f10995cda38785fd938fe14ea570d74e456ba9fd98ea0",
+        "kind": "content-admission"
+      },
+      {
+        "path": "/var/tmp/r5integ/r5integ3/rev5-MANIFEST.json",
+        "sha256": "96354540d966fbe565905c649575e16706e01f49819b55c24837d939de4dea18",
+        "kind": "recipe"
+      },
+      {
+        "path": "/home/lilith/work/zen/zensim--shippath/benchmarks/r5integ3_REGISTRATION.json",
+        "sha256": "0c22db6abeb063f8897caecdd54f4236d83f41351c103f3581363d8b01ee6a3f",
+        "kind": "registration"
+      },
+      {
+        "path": "/var/tmp/r5integ/r5integ3/fit-rev5/prepared.npz",
+        "sha256": "b1a7172c5b8ec5d8004f4f7db5adbd62e680927c0eb908963076a049464bc5f6",
+        "kind": "preparation"
+      },
+      {
+        "path": "/var/tmp/r5integ/r5integ3/fit-rev5/rows.json",
+        "sha256": "cca7605f7c5ab5c44e19955bd7b034eccc8102e4fd576cb3d1773b71551042bb",
+        "kind": "rows"
+      },
+      {
+        "path": "/var/tmp/r5integ/rev5-INPUTS.json",
+        "sha256": "ec8406b4a4dc462d7c47f8df5220fa0300c5b2be8f95ed3e625aca9a25be7f49",
+        "kind": "inputs"
+      }
+    ],
+    "scope": "only explicit TRAIN and metadata/producer pins; no receipt-reference traversal"
+  },
+  "evidence": {
+    "REFIT_MANIFEST.json": {
+      "path": "/var/tmp/shippath6/REFIT_MANIFEST.json",
+      "sha256": "3a0ddf15f6ca7c63286c4864b20a6c322d0288460b2bddcdc14fb40bbbab6214",
+      "bytes": 916
+    },
+    "refit/REFIT.json": {
+      "path": "/var/tmp/shippath6/refit/REFIT.json",
+      "sha256": "c4b060da6ce567f3bc4147d3736271de78f5420725df49047ee0ddc58ae852f5",
+      "bytes": 329
+    },
+    "trainer-refit-source.py": {
+      "path": "/var/tmp/shippath6/trainer-refit-source.py",
+      "sha256": "821822b3689a011bafb4b8537d5a3c93b0ebcd3415f0d1dbe0952187169978c9",
+      "bytes": 94969
+    },
+    "PLAN.json": {
+      "path": "/var/tmp/shippath6/PLAN.json",
+      "sha256": "2bf4f460522a8b01bb9052a80198df278c6652c640556855a483c643c7f0e011",
+      "bytes": 8169
+    },
+    "PREPARED.json": {
+      "path": "/var/tmp/shippath6/PREPARED.json",
+      "sha256": "a887dc4a850d2717a3cf43b3875f1f5a6c5bbc47d97eb428fedb32208c6b864d",
+      "bytes": 9696
+    },
+    "proof/FULL_COMPOSITION.json": {
+      "path": "/var/tmp/shippath6/proof/FULL_COMPOSITION.json",
+      "sha256": "617eba065ab0aff13226ec6dfe54f864eb1dabde62519d5a0d705a61e6b1c449",
+      "bytes": 32578
+    },
+    "proof/COMPANION_LEG_ONLY.json": {
+      "path": "/var/tmp/shippath6/proof/COMPANION_LEG_ONLY.json",
+      "sha256": "ed5f6d1436f0bd28b7f34bf2411a54f3cc7dc63dd38b679aad40277435c3d901",
+      "bytes": 13798
+    },
+    "refit/audit.jsonl": {
+      "path": "/var/tmp/shippath6/refit/audit.jsonl",
+      "sha256": "3a1c2706b7736b9b42028e7475e6a5b9907163ca1083309b1743b5005f7fa010",
+      "bytes": 29245326
+    },
+    "refit/report.json": {
+      "path": "/var/tmp/shippath6/refit/report.json",
+      "sha256": "886dfacc54a8e9e0c119ff076885e528d7cfdfb6f8ae7e2a7d20b195d0f75f99",
+      "bytes": 517227
+    },
+    "refit/parity.npz": {
+      "path": "/var/tmp/shippath6/refit/parity.npz",
+      "sha256": "72aa803a9b30caa960cce2abb9386aac99ae4b7942aa6a7b0cd7a4a73934a915",
+      "bytes": 13829401
+    }
+  },
+  "pending_decision": "SHIPPATH-human-production-role",
+  "protected_reference_payloads_read": false,
+  "fleet_used": false,
+  "pushed": false,
+  "surface_parity": {
+    "rows": 8510,
+    "max_consumed_feature_abs_delta": 0,
+    "pixel_cache_literal_scores_exact": true,
+    "head_sha256": "568380f1bd2fe6202ebcc5a194078d7885035f466abe93ada3a4b3ea8f4a26f2"
+  }
+}
