@@ -610,3 +610,9 @@ stamps only those receipts; it never discovers stamp targets by scanning the
 directory. Failed writes receive no receipt, and an unrecorded late checkpoint
 is left untouched. This adds no public API and changes no training/packing
 arithmetic. Other epoch/validation log records retain their existing format.
+
+SHIPPATH5 preserves native non-UTF-8 paths accepted by the public `train_mlp`
+API. UTF-8 receipts retain their string format; other paths use Serde's tagged
+`OsStr` encoding (`Unix` raw bytes / `Windows` native code units). The stamping
+owner decodes the exact native path, never its lossy display string. Receipt
+ownership still begins only after a successful write.

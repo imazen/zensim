@@ -2878,8 +2878,14 @@ fn preflight_checkpoint_directory(args: &Args) -> std::io::Result<()> {
 /// This invocation's log vector is the ownership list, never a directory scan.
 fn emitted_checkpoint_paths(log: &[String]) -> Vec<(PathBuf, usize)> {
     #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum CheckpointPath {
+        Utf8(PathBuf),
+        Native(std::ffi::OsString),
+    }
+    #[derive(serde::Deserialize)]
     struct WrittenCheckpoint {
-        path: PathBuf,
+        path: CheckpointPath,
         epoch: usize,
     }
     log.iter()
@@ -2887,7 +2893,11 @@ fn emitted_checkpoint_paths(log: &[String]) -> Vec<(PathBuf, usize)> {
         .map(|receipt| {
             let written: WrittenCheckpoint =
                 serde_json::from_str(receipt).expect("checkpoint write receipt");
-            (written.path, written.epoch)
+            let path = match written.path {
+                CheckpointPath::Utf8(path) => path,
+                CheckpointPath::Native(path) => PathBuf::from(path),
+            };
+            (path, written.epoch)
         })
         .collect()
 }
@@ -5264,6 +5274,41 @@ mod checkpoint_admission_tests {
             None,
             Activation::LeakyRelu,
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_receipts_stamp_exact_native_path_only() {
+        use std::os::unix::ffi::OsStringExt;
+        let dir = std::env::temp_dir().join(format!("shippath5-stamp-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let owned = dir.join(std::ffi::OsString::from_vec(b"epoch-\xff.bin".to_vec()));
+        let foreign = dir.join(std::ffi::OsString::from_vec(b"epoch-\xfe.bin".to_vec()));
+        assert_eq!(owned.to_string_lossy(), foreign.to_string_lossy());
+        assert_ne!(owned.as_os_str(), foreign.as_os_str());
+        let base = fixture();
+        std::fs::write(&owned, &base).unwrap();
+        std::fs::write(&foreign, &base).unwrap();
+        let log = vec![format!(
+            "  checkpoint dump: {}",
+            serde_json::json!({
+                "path": owned.as_os_str(), "epoch": 0, "bytes": base.len()
+            })
+        )];
+        assert_eq!(emitted_checkpoint_paths(&log), vec![(owned.clone(), 0)]);
+        assert_eq!(
+            stamp_emitted_checkpoints(&log, &base, r#"{"init_seed":1103,"epochs":3}"#, |_| None)
+                .unwrap(),
+            1
+        );
+        let stamped = std::fs::read(&owned).unwrap();
+        assert_ne!(stamped, base);
+        let model = zenpredict::Model::from_bytes(&stamped).unwrap();
+        let repro: serde_json::Value =
+            serde_json::from_str(model.metadata().get_utf8("zentrain.repro").unwrap()).unwrap();
+        assert_eq!(repro["init_seed"], 1103);
+        assert_eq!(std::fs::read(&foreign).unwrap(), base);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -1,0 +1,298 @@
+{
+  "schema": "shippath5-checks-v1",
+  "parent": "f3b3fc3c6ff80a104e12ac080b92fae85d396817",
+  "checks": {
+    "stamp-tests": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim-validate",
+        "--bin",
+        "zensim_mlp_train",
+        "checkpoint_admission_tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/stamp-tests.log",
+      "sha256": "aaca923ef3e61f442f0969b9871bac6da899841c6724a9c957ced216ec18ec4f"
+    },
+    "writer-tests": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim-validate",
+        "--lib",
+        "htraj_checkpoint",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/writer-tests.log",
+      "sha256": "0d21b25e6f2187481ec157be7422f5e49d2bf8d4bf62088ed7c869326dd18c06"
+    },
+    "failed-write-test": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "test",
+        "-p",
+        "zensim-validate",
+        "--lib",
+        "checkpoint_write_receipts_require_successful_io",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/failed-write-test.log",
+      "sha256": "4902dc0b4c7b753b7d0209a472afcc5828b0d54b45c4fbc5d32f530d45366693"
+    },
+    "build": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "build",
+        "-p",
+        "zensim-validate",
+        "--lib",
+        "--bin",
+        "zensim_mlp_train"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/build.log",
+      "sha256": "0ce4fc0d6febb627f5f5380a66a19ecdd63f762e4a14eb92c4cff41d198d952b"
+    },
+    "caller-tests": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "python3",
+        "-m",
+        "unittest",
+        "scripts.tests.test_shippath3_checkpoint",
+        "scripts.tests.test_shippath4_callers",
+        "-v"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/caller-tests.log",
+      "sha256": "0349017c67766c9e995089de2a74641df347121cc748ae6d4f1cae41c921b7f9"
+    },
+    "clippy": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "just",
+        "clippy"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/clippy.log",
+      "sha256": "76d4162214528ac64111deaf917b50611b4d53454516f78954622bdaf58e9b28"
+    },
+    "fmt": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/fmt.log",
+      "sha256": "9acb10ff192cac451d7a29a3f151b8133bf2ea21014c71b5a04769c3f9ade620"
+    },
+    "lint": {
+      "argv": [
+        "/home/lilith/work/zen/scripts/run-heavy",
+        "--mem",
+        "16G",
+        "--jobs",
+        "8",
+        "--",
+        "just",
+        "lint-scripts"
+      ],
+      "returncode": 0,
+      "log": "/var/tmp/shippath5/lint.log",
+      "sha256": "af240ee572c79ce1a3229624c0a2d1df205773a4f63b08281f2a6d08106ab5cd"
+    },
+    "nonutf8-negative": {
+      "returncode": 101,
+      "expected_returncode": 101,
+      "log": "/var/tmp/shippath5/nonutf8-negative.log",
+      "sha256": "b0788eeba7d71038e25ef9eeda7b2298ba5fc8802f6ef08286a1b85e711030ba"
+    },
+    "nonutf8-positive": {
+      "returncode": 0,
+      "expected_returncode": 0,
+      "log": "/var/tmp/shippath5/nonutf8-positive.log",
+      "sha256": "ccd9b1a034939a74a1149ecfc8ee6f7e68583b5bcf6478aaec9ff6f0dfed514b"
+    },
+    "harness-build": {
+      "returncode": 0,
+      "expected_returncode": 0,
+      "log": "/var/tmp/shippath5/harness-build.log",
+      "sha256": "ea8d5a9903e45ad6d80814d67b79c96e63f514bb570971f5f999498fe6a5068f"
+    },
+    "harness-nonutf8": {
+      "returncode": 0,
+      "expected_returncode": 0,
+      "log": "/var/tmp/shippath5/harness-nonutf8.log",
+      "sha256": "73e2dfe9049ac4f2c89c65fff409e7e1eabcfb29b6df5d2e496ee03f2b9ce012"
+    },
+    "harness-utf8": {
+      "returncode": 0,
+      "expected_returncode": 0,
+      "log": "/var/tmp/shippath5/harness-utf8.log",
+      "sha256": "f04383c73b174aa18bf79d5e18d20b0242d56ba1d3637c81467787381f9db821"
+    }
+  },
+  "path_parity": {
+    "schema": "shippath5-native-path-regression-v1",
+    "public_owner": "train_mlp",
+    "synthetic_rows": 48,
+    "features": 4,
+    "hidden": 8,
+    "epochs": 3,
+    "pairs_per_epoch": 128,
+    "all_four_raw_model_files_identical_across_five_cases": true,
+    "cases": {
+      "/var/tmp/shippath5/control-nonutf8": {
+        "best.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch001.bin": {
+          "sha256": "807b3d7b6558a2ab0b4216190550608c9cc20ac32f7bddf65abddd34d441ccb5",
+          "bytes": 452
+        },
+        "ckpt_epoch000.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch002.bin": {
+          "sha256": "2b23a141346e8e4d792508ed0224c86b01e93ba0b0db7920e66740c497d2b70b",
+          "bytes": 452
+        }
+      },
+      "/var/tmp/shippath5/control-utf8": {
+        "best.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch001.bin": {
+          "sha256": "807b3d7b6558a2ab0b4216190550608c9cc20ac32f7bddf65abddd34d441ccb5",
+          "bytes": 452
+        },
+        "ckpt_epoch000.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch002.bin": {
+          "sha256": "2b23a141346e8e4d792508ed0224c86b01e93ba0b0db7920e66740c497d2b70b",
+          "bytes": 452
+        }
+      },
+      "/var/tmp/shippath4-review/path-control-parent-nonutf8": {
+        "best.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch001.bin": {
+          "sha256": "807b3d7b6558a2ab0b4216190550608c9cc20ac32f7bddf65abddd34d441ccb5",
+          "bytes": 452
+        },
+        "ckpt_epoch000.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch002.bin": {
+          "sha256": "2b23a141346e8e4d792508ed0224c86b01e93ba0b0db7920e66740c497d2b70b",
+          "bytes": 452
+        }
+      },
+      "/var/tmp/shippath4-review/path-control-parent-utf8": {
+        "best.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch001.bin": {
+          "sha256": "807b3d7b6558a2ab0b4216190550608c9cc20ac32f7bddf65abddd34d441ccb5",
+          "bytes": 452
+        },
+        "ckpt_epoch000.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch002.bin": {
+          "sha256": "2b23a141346e8e4d792508ed0224c86b01e93ba0b0db7920e66740c497d2b70b",
+          "bytes": 452
+        }
+      },
+      "/var/tmp/shippath4-review/path-control-new-utf8": {
+        "best.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch001.bin": {
+          "sha256": "807b3d7b6558a2ab0b4216190550608c9cc20ac32f7bddf65abddd34d441ccb5",
+          "bytes": 452
+        },
+        "ckpt_epoch000.bin": {
+          "sha256": "f2a53f0ef708c809eb21942746dde208a1a98c7b1ca809785ebcc642585d9d88",
+          "bytes": 452
+        },
+        "ckpt_epoch002.bin": {
+          "sha256": "2b23a141346e8e4d792508ed0224c86b01e93ba0b0db7920e66740c497d2b70b",
+          "bytes": 452
+        }
+      }
+    },
+    "harness_source_sha256": "1dd04fb82655eee7cc43cf8826bf93ff9523d6ac3bee82bbced6b1cd1066636f",
+    "new_harness_sha256": "2208e4da75d765ab3cd0bb9a6a2da58d82a8583a65a030024c10487975b2847f",
+    "library_sha256": "6c32aa17621c3bf3b9b3f07f594244f3a886764e23153ea3e82401ea289cb116",
+    "trainer_sha256": "d52bb1713f6a26bfd518f3895e028a3726d6f3da2fbf95b43f2c25ef08cc3c62"
+  },
+  "synthetic_only": true,
+  "human_role": "PENDING",
+  "protected_reads": false,
+  "fleet_use": false,
+  "push_performed": false,
+  "model_qualified": false
+}

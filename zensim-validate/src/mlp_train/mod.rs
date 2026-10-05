@@ -1038,7 +1038,14 @@ fn write_checkpoint_dump(
     log: &mut Vec<String>,
 ) {
     std::fs::write(path, bytes).expect("H-TRAJ checkpoint dump write failed");
-    let receipt = serde_json::json!({"path": path, "epoch": epoch, "bytes": bytes.len()});
+    // Path's Serde implementation rejects valid non-UTF-8 native names.
+    // Preserve the string format when possible; OsStr's tagged Unix bytes /
+    // Windows code units are lossless and never use the display replacement.
+    let receipt_path = match path.to_str() {
+        Some(path) => serde_json::json!(path),
+        None => serde_json::json!(path.as_os_str()),
+    };
+    let receipt = serde_json::json!({"path": receipt_path, "epoch": epoch, "bytes": bytes.len()});
     let line = format!("  checkpoint dump: {receipt}");
     eprintln!("{line}");
     log.push(line);
@@ -11996,6 +12003,92 @@ mod group_l1_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn train_mlp_non_utf8_checkpoint_paths_are_lossless() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let root = std::env::temp_dir().join(format!("shippath5-paths-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        // These two valid Unix names have the same lossy display representation.
+        let components = [
+            std::ffi::OsString::from_vec(b"valid-unix-\xff".to_vec()),
+            std::ffi::OsString::from_vec(b"valid-unix-\xfe".to_vec()),
+            std::ffi::OsString::from("valid-utf8"),
+        ];
+        assert_eq!(
+            components[0].to_string_lossy(),
+            components[1].to_string_lossy()
+        );
+        assert_ne!(components[0], components[1]);
+        let features: Vec<_> = (0..48)
+            .map(|i| vec![i as f64 / 48.0, 1.0 - i as f64 / 48.0, 0.0, 0.0])
+            .collect();
+        let refs: Vec<_> = features.iter().map(|r| r.as_slice()).collect();
+        let scores: Vec<_> = (0..48).map(|i| i as f64 / 48.0).collect();
+        let mut control = None;
+        for component in components {
+            let dir = root.join(component);
+            std::fs::create_dir(&dir).unwrap();
+            let mut groups = [TrainingGroup {
+                name: "synthetic".into(),
+                human_scores: &scores,
+                features: FeatureRows::Borrowed(&refs),
+                metric_sigmas: None,
+                train_weight: 1.0,
+                validation_weight: 1.0,
+                ref_ids: None,
+                loss_mode: GroupLossMode::default(),
+            }];
+            let hp = MlpHyperparams {
+                n_hidden: 8,
+                n_epochs: 3,
+                pairs_per_epoch: 128,
+                log_every: 1,
+                early_stop_patience: 0,
+                dump_checkpoints_every: 1,
+                dump_checkpoints_dir: Some(dir.clone()),
+                ..Default::default()
+            };
+            let mut log = Vec::new();
+            let model = train_mlp(&mut groups, 4, &hp, &mut log);
+            Model::from_bytes(&model).unwrap();
+            let receipts: Vec<serde_json::Value> = log
+                .iter()
+                .filter_map(|line| line.strip_prefix("  checkpoint dump: "))
+                .map(|receipt| serde_json::from_str(receipt).unwrap())
+                .collect();
+            assert_eq!(receipts.len(), 3);
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3);
+            let mut dumps = Vec::new();
+            for (epoch, receipt) in receipts.iter().enumerate() {
+                let path = match receipt["path"].as_str() {
+                    Some(s) => std::path::PathBuf::from(s),
+                    None => std::path::PathBuf::from(
+                        serde_json::from_value::<std::ffi::OsString>(receipt["path"].clone())
+                            .unwrap(),
+                    ),
+                };
+                assert_eq!(
+                    path.as_os_str(),
+                    dir.join(format!("ckpt_epoch{epoch:03}.bin")).as_os_str()
+                );
+                assert_eq!(receipt["epoch"], epoch);
+                let bytes = std::fs::read(path).unwrap();
+                assert_eq!(receipt["bytes"], bytes.len());
+                Model::from_bytes(&bytes).unwrap();
+                dumps.push(bytes);
+            }
+            if let Some((control_model, control_dumps)) = &control {
+                assert_eq!(&model, control_model);
+                assert_eq!(&dumps, control_dumps);
+            } else {
+                control = Some((model, dumps));
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn checkpoint_write_receipts_require_successful_io() {
         let dir = std::env::temp_dir().join(format!("shippath4-write-{}", std::process::id()));
