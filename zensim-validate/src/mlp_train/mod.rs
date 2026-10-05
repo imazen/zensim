@@ -1028,6 +1028,22 @@ impl Default for MlpHyperparams {
 /// variant reports (the GPU path currently does not).
 pub static LAST_BEST_VAL: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
 
+/// Record the exact path/epoch only after this training invocation writes it.
+/// The standalone trainer consumes these receipts from its own log vector;
+/// directory contents and epoch schedules are not checkpoint ownership proofs.
+fn write_checkpoint_dump(
+    path: &std::path::Path,
+    bytes: &[u8],
+    epoch: usize,
+    log: &mut Vec<String>,
+) {
+    std::fs::write(path, bytes).expect("H-TRAJ checkpoint dump write failed");
+    let receipt = serde_json::json!({"path": path, "epoch": epoch, "bytes": bytes.len()});
+    let line = format!("  checkpoint dump: {receipt}");
+    eprintln!("{line}");
+    log.push(line);
+}
+
 /// Per-INPUT-FEATURE L2 multiplier on layer-1 rows (len = n_features), set by
 /// the trainer bin before training. The scale-mass regularizer: coarse-scale
 /// inputs get mult > 1 so the optimizer prefers fine-scale reliance — the
@@ -3552,16 +3568,7 @@ pub fn train_mlp_strategy(
                     .clone()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let ckpt_path = dir.join(format!("ckpt_epoch{epoch:03}.bin"));
-                std::fs::write(&ckpt_path, &ckpt_bytes)
-                    .expect("H-TRAJ checkpoint dump write failed");
-                log_line(
-                    &format!(
-                        "  checkpoint dump: {} ({} B)",
-                        ckpt_path.display(),
-                        ckpt_bytes.len()
-                    ),
-                    log,
-                );
+                write_checkpoint_dump(&ckpt_path, &ckpt_bytes, epoch, log);
             }
             if val_score > best_val_score {
                 best_val_score = val_score;
@@ -11070,16 +11077,7 @@ fn train_mlp_per_sample_alpha_head(
                     .clone()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let ckpt_path = dir.join(format!("ckpt_epoch{epoch:03}.bin"));
-                std::fs::write(&ckpt_path, &ckpt_bytes)
-                    .expect("H-TRAJ checkpoint dump write failed");
-                log_line(
-                    &format!(
-                        "  checkpoint dump: {} ({} B)",
-                        ckpt_path.display(),
-                        ckpt_bytes.len()
-                    ),
-                    log,
-                );
+                write_checkpoint_dump(&ckpt_path, &ckpt_bytes, epoch, log);
             }
             if ema_active {
                 ema_swap_all!();
@@ -11998,6 +11996,36 @@ mod group_l1_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkpoint_write_receipts_require_successful_io() {
+        let dir = std::env::temp_dir().join(format!("shippath4-write-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut log = Vec::new();
+        let path = dir.join("ckpt_epoch000.bin");
+        super::write_checkpoint_dump(&path, b"written bytes", 0, &mut log);
+        assert_eq!(std::fs::read(&path).unwrap(), b"written bytes");
+        assert_eq!(log.len(), 1);
+        let receipt: serde_json::Value =
+            serde_json::from_str(log[0].strip_prefix("  checkpoint dump: ").unwrap()).unwrap();
+        assert_eq!(receipt["path"], path.to_str().unwrap());
+        assert_eq!(receipt["epoch"], 0);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::write_checkpoint_dump(
+                &dir.join("missing/ckpt_epoch001.bin"),
+                b"unwritten",
+                1,
+                &mut log,
+            );
+        }));
+        assert!(failed.is_err());
+        assert_eq!(
+            log.len(),
+            1,
+            "failed write must not acquire an ownership receipt"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     use zenpredict::{Model, Predictor};
 
     fn predict_one(predictor: &mut Predictor<'_>, features: &[f64]) -> f64 {
@@ -14217,6 +14245,21 @@ mod tests {
             dumps.len() >= 3,
             "expected >=3 plain-lane checkpoint dumps, got {dumps:?}"
         );
+        let receipts: Vec<serde_json::Value> = log
+            .iter()
+            .filter_map(|line| line.strip_prefix("  checkpoint dump: "))
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(receipts.len(), dumps.len());
+        for receipt in receipts {
+            let path = std::path::PathBuf::from(receipt["path"].as_str().unwrap());
+            let epoch = receipt["epoch"].as_u64().unwrap();
+            assert_eq!(path, dir.join(format!("ckpt_epoch{epoch:03}.bin")));
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().len(),
+                receipt["bytes"].as_u64().unwrap()
+            );
+        }
         for d in &dumps {
             let bytes = std::fs::read(d).unwrap();
             assert_eq!(bytes[4], 3, "dump not ZNPR v3: {}", d.display());
@@ -14309,6 +14352,21 @@ mod tests {
             dumps.len() >= 3,
             "expected >=3 checkpoint dumps (epochs 0,10,20), got {dumps:?}"
         );
+        let receipts: Vec<serde_json::Value> = log
+            .iter()
+            .filter_map(|line| line.strip_prefix("  checkpoint dump: "))
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(receipts.len(), dumps.len());
+        for receipt in receipts {
+            let path = std::path::PathBuf::from(receipt["path"].as_str().unwrap());
+            let epoch = receipt["epoch"].as_u64().unwrap();
+            assert_eq!(path, dir.join(format!("ckpt_epoch{epoch:03}.bin")));
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().len(),
+                receipt["bytes"].as_u64().unwrap()
+            );
+        }
         for d in &dumps {
             let bytes = std::fs::read(d).unwrap();
             assert!(

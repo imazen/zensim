@@ -5016,3 +5016,17 @@ binding require a fresh rebuild, preserving their frozen bytes. Regression data
 is synthetic only; no human payload, protected label, scientific role, feature
 value, trainer arithmetic or model qualification changed. See
 `benchmarks/shippath3_WORKLOG.md` and `~/tmp/zensim-paper/rev4/SHIPPATH3_DONE.md`.
+
+
+## 2026-10-05 — SHIPPATH4 checkpoint caller compatibility (synthetic only)
+
+The SHIPPATH3 empty-directory rule rejected first fits whose inputs coexist
+with dumps. The correction permits input/unrelated files, refuses surviving
+trainer model artifacts, and stamps only invocation-local post-write receipts
+from both CPU dump writers. Existing caller layouts and selected paths are
+unchanged. Regressions use the real p2_mlp.train owner and synthetic rows; no
+real labels or immutable inputs are read or modified. Before/after training
+and packing compare all numerical/model/calibration bytes and canonical wire
+bytes after eliding run identity; packing the same input is fully byte-identical.
+The human-role decision stays pending. See benchmarks/shippath4_WORKLOG.md and
+~/tmp/zensim-paper/rev4/SHIPPATH4_DONE.md.

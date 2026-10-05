@@ -86,7 +86,7 @@ class CheckpointOwnershipTests(unittest.TestCase):
                 result = run(argv)
                 with self.subTest(strict=strict):
                     self.assertNotEqual(result.returncode, 0, result.stdout)
-                    self.assertIn("checkpoint directory must be empty", result.stdout)
+                    self.assertIn("checkpoint artifacts", result.stdout)
                     self.assertEqual(stale.read_bytes(), surviving)
                     self.assertEqual(list(ckpt.iterdir()), [stale])
                     self.assertFalse((ckpt.parent / "best.bin").exists())

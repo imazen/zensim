@@ -1,0 +1,327 @@
+{
+  "schema": "shippath4-checkpoint-compatibility-v1",
+  "parent": "80d744e4748168d4cb9dce24f4678e85e10d43a5",
+  "checks": {
+    "python-final.log": {
+      "passed": true,
+      "sha256": "9fe9c21e3f14e59976c795f1a631c63af1b1025f299742f5e3601c3b58af3f26"
+    },
+    "teacher-tests.log": {
+      "passed": true,
+      "sha256": "dadb6e562c0d62a8c3ad78a669bc5e29a8e270cd1179ece1c0ea5278d72904f4"
+    },
+    "checkpoint-unit-tests.log": {
+      "passed": true,
+      "sha256": "d4416db607e165957fb96dd499047b5dde33e8a3543fd7c263cb23107144fe7d"
+    },
+    "writer-lane-tests.log": {
+      "passed": true,
+      "sha256": "65b23fe87a06bf595dfb4d94a0c1bab8c5d458e236d550d4203816358c9662d6"
+    },
+    "failed-write-test.log": {
+      "passed": true,
+      "sha256": "a27317904ec03fe0542065e50bf31f5bfadc50cc62f0eaf9f1a36c40d2e82c9f"
+    },
+    "clippy.log": {
+      "passed": true,
+      "sha256": "a485244c88a24c28fedd0622cc524dbd495846f6c0c5afefb5b916d859b019aa"
+    },
+    "fmt-check.log": {
+      "passed": true,
+      "sha256": "0706772325168b257f614fc5fc94968710a0d873a320f93a4b7d3e4bb35287c2"
+    },
+    "lint-final.log": {
+      "passed": true,
+      "sha256": "dcfc164c676f8cb0a871ae177a0d4e7e74bfd881489374b639778c25df15d7a1"
+    },
+    "build-verified.log": {
+      "passed": true,
+      "sha256": "da4bb14af1ed033d0b083b5c40c0e87dd9e159117df0c2faf35f1d15394ddfac"
+    },
+    "parity-final.log": {
+      "passed": true,
+      "sha256": "c9d5f98c81b990f7eb663931cb9fdf5eb58b7e52916f8ec709f00c843a24edf5"
+    },
+    "wire-verification.log": {
+      "passed": true,
+      "sha256": "b7b27e017e96f26a8a9fedcb2d7f8e9d1f97b3cf6562f3ea74f597cb2b83da4c"
+    },
+    "normalizer-build.log": {
+      "passed": true,
+      "sha256": "dd25acccec7491136124e061a1572bd2bc05bb7e70037625b7f0f4418737b167"
+    }
+  },
+  "caller_negative_control": {
+    "expected_failure": true,
+    "log_sha256": "aa3928f5f17bcd5972b6959abc6e4141218ac8542b90c86aa8bfaf74b9dde274",
+    "reviewed_trainer_sha256": "ef17cc710c57d50c523a4abfd7581b2e9eec6606779539b1afb2233bb1b8b265"
+  },
+  "parity": {
+    "synthetic_only": true,
+    "fresh_v2": {
+      "before": {
+        "curve": {
+          "0": 0.8381,
+          "1": 0.3071,
+          "2": 0.4738
+        },
+        "selection": {
+          "epoch_rule": "last",
+          "selected_epoch": 2,
+          "best_epoch_by_curve": 0
+        },
+        "trainer_sha256": "ef17cc710c57d50c523a4abfd7581b2e9eec6606779539b1afb2233bb1b8b265"
+      },
+      "after": {
+        "curve": {
+          "0": 0.8381,
+          "1": 0.3071,
+          "2": 0.4738
+        },
+        "selection": {
+          "epoch_rule": "last",
+          "selected_epoch": 2,
+          "best_epoch_by_curve": 0
+        },
+        "trainer_sha256": "8cc6c1bdd77467dfb568e66135a0176192d1b7881940f34aa386ea08582ffd33"
+      }
+    },
+    "models": {
+      "refit/best.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "341e9dd81496182d8df02b84962c65531c657c0e62616ccf7b09f03eeb2d9bd0",
+        "before_sha256": "d26fced553abe09cd121a7361ca274f9d427f03c4ad417845e14c1316e22e17c",
+        "after_sha256": "a2e5ecef366a75adfc6b671d4d052639afa4cb73fca6396903927e9aefdf75bc",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "370a9ec38254b1fd1a4d357ed2169c612d7a101851cdfacbb37ccd5b74cd4704"
+      },
+      "refit/last.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "0d6ba33beef944322a270112d627d58baca2cc03894870c32adcb37d5dfcb160",
+        "before_sha256": "178c96da0532e2ced847cc92d82e3033a41ad341b361b2e7cdd6a64241074157",
+        "after_sha256": "df1670d064410bab1032f890ed6cdd1dc9b0c80a619f17099682e89c8266a2e2",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "eb73cab7ec8d83183f96406d40aa26e33331a0a2071b5dada5c4962cd938e90f"
+      },
+      "retained-ckpt/ckpt_epoch000.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "341e9dd81496182d8df02b84962c65531c657c0e62616ccf7b09f03eeb2d9bd0",
+        "before_sha256": "9fecd29453f9377c5312436af24c3320f78440f208ec05241d90fd1c36bb7424",
+        "after_sha256": "d202675fa969cdf457a2a63e595926b3b4cffe7d9bdc9767caccca64c7afd4cf",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "e801764be0896dc93fc12cf2fc81682a6683e0727b6505d3cdced7912456d8fd"
+      },
+      "retained-ckpt/ckpt_epoch002.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "0d6ba33beef944322a270112d627d58baca2cc03894870c32adcb37d5dfcb160",
+        "before_sha256": "178c96da0532e2ced847cc92d82e3033a41ad341b361b2e7cdd6a64241074157",
+        "after_sha256": "df1670d064410bab1032f890ed6cdd1dc9b0c80a619f17099682e89c8266a2e2",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "eb73cab7ec8d83183f96406d40aa26e33331a0a2071b5dada5c4962cd938e90f"
+      }
+    },
+    "p2_first_fit": {
+      "best.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "dec21eadd535f54b5fada71de408ffcc2e325e2bd1ce783ffe4e81e773fd2d4d",
+        "before_sha256": "1dcb45bc4b2af2e3d2df829ab33cd83de32bedd28406e7e54f3daaebf68b7dba",
+        "after_sha256": "6452407afbaa07706d3e2cd315030c1ab901910bb21f0e3f2f789eebc057d2a2",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "inputs",
+          "table_admission",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [
+          "inputs",
+          "table_admission"
+        ],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "384bf6581df7a7a267b74ea2f46fc1f4c6d22c4c9ab8dd4c6bfa5012dba3b205"
+      },
+      "ckpt_epoch000.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "6fd233e5e06e1a712db1b3ee06257270daff6d207711ee8801bf7705b7d74879",
+        "before_sha256": "3f9bc1b4e266f504b60e71ded570424306c1e3fec0db715def4d52778ad67016",
+        "after_sha256": "f99c17177e12ffc7dbdddecfc1cc285333c101a9f93251553acf716f65e6a32f",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "inputs",
+          "table_admission",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [
+          "inputs",
+          "table_admission"
+        ],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "52a0f0f946a5072fab934e9e9d6850f1c73420464266e8232ac201cc515fd2fa"
+      },
+      "ckpt_epoch001.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "dec21eadd535f54b5fada71de408ffcc2e325e2bd1ce783ffe4e81e773fd2d4d",
+        "before_sha256": "dd572e6cd86df05c95b084b03a55281f6b6a2cebacb0b14e6cc9d16e5489a85f",
+        "after_sha256": "a01b6f438b2e09a6082b8b4926859e2e6922389a649a0df17cc329744c4bc3bf",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "inputs",
+          "table_admission",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [
+          "inputs",
+          "table_admission"
+        ],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "2c1c3d03fcc8a60c782c66eaae2a2d3c6cb2ca6dbb0ddd304365c183da810609"
+      },
+      "ckpt_epoch002.bin": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "039150881a4dd195a78091564778d4a8a6ae3fced86743fe73f5103ffa9012ec",
+        "before_sha256": "6ba611db7107c163c8ab363c1c4065b19e2019a9ee8260ff6b4f0b02068e01ed",
+        "after_sha256": "09d5d22bc68366d521bd38f1b79603a87daa0567a8b6beeba2c36cb522d785a3",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "inputs",
+          "table_admission",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [
+          "inputs",
+          "table_admission"
+        ],
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "7bedb247771143ecba46a10075482c1146f42b6a777de00a44e565e6b8683798"
+      }
+    },
+    "pack": {
+      "same": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "2476b9d238ec3bb681f5953f05b9d790f149200fc038ad51ba1144fce7f6ed9a",
+        "before_sha256": "7c18d82074ca46883dd3b2c91f675f7af3f9031dbb1197abf8eb58fd2156dc73",
+        "after_sha256": "7c18d82074ca46883dd3b2c91f675f7af3f9031dbb1197abf8eb58fd2156dc73",
+        "changed_metadata_keys": [],
+        "changed_repro_fields": [],
+        "location_only_repro_fields": [],
+        "calibration_spline_bytes_identical": true,
+        "raw_bytes_identical": true,
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "9f3facbe8d773f7be68ecbbe081425504bdd90e47f884bf01bc2ef7555b660e0"
+      },
+      "own": {
+        "all_nonmetadata_bytes_identical": true,
+        "numerical_sha256": "2476b9d238ec3bb681f5953f05b9d790f149200fc038ad51ba1144fce7f6ed9a",
+        "before_sha256": "7c18d82074ca46883dd3b2c91f675f7af3f9031dbb1197abf8eb58fd2156dc73",
+        "after_sha256": "17f25762c65f8993aec95d17463f8a8d8a0653bb766f06a6f936705d1805aad5",
+        "changed_metadata_keys": [
+          "zentrain.repro"
+        ],
+        "changed_repro_fields": [
+          "argv",
+          "trainer_head_at_train",
+          "trainer_source_dir"
+        ],
+        "location_only_repro_fields": [],
+        "calibration_spline_bytes_identical": true,
+        "raw_bytes_identical": false,
+        "complete_wire_bytes_identical_after_canonical_repro_normalization": true,
+        "normalized_sha256": "9f3facbe8d773f7be68ecbbe081425504bdd90e47f884bf01bc2ef7555b660e0"
+      }
+    },
+    "packer_sha256": {
+      "before": "ec9fd47ecd74bef79e2f9132234a259e9da3279ce7f3bc747166f12ceefaa011",
+      "after": "251a8209a96f9cbd4a489514f5b8e94018cef7f03247ad33d4448a318c0b9411"
+    }
+  },
+  "caller_regression": {
+    "owner": "p2_mlp.train",
+    "inputs_in_dump_dir": true,
+    "budgets": {
+      "epochs": 3,
+      "pairs_per_epoch": 128,
+      "hidden": 32,
+      "init_seed": 1101,
+      "sample_seed": 101
+    },
+    "input_bytes_unchanged": true,
+    "unrelated_bin_unchanged": true,
+    "refused_artifacts": [
+      "ckpt_epoch001.bin",
+      "ckpt_epoch999.bin",
+      "ckpt_epochevil.bin",
+      "best.bin",
+      "last.bin",
+      "selected.bin",
+      "custom-chosen.bin"
+    ],
+    "all_refusals_before_admission": true,
+    "old_seed_new_seed": [
+      1101,
+      1103
+    ]
+  },
+  "tracking": {
+    "both_cpu_checkpoint_write_sites": true,
+    "receipt_after_successful_write": true,
+    "failed_write_not_recorded": true,
+    "late_foreign_dump_unchanged": true,
+    "new_public_api": false
+  },
+  "human_role": "PENDING",
+  "protected_reads": false,
+  "fleet_use": false,
+  "push_performed": false,
+  "model_qualified": false
+}

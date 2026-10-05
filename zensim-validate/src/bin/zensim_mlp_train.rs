@@ -271,7 +271,7 @@ struct Args {
     dump_checkpoints_every: usize,
 
     /// Directory for --dump-checkpoints-every output (default: cwd).
-    /// Must be absent or empty before this invocation; surviving files are refused.
+    /// Existing inputs are allowed; surviving checkpoints/model outputs are refused.
     #[arg(long)]
     dump_checkpoints_dir: Option<std::path::PathBuf>,
 
@@ -2838,7 +2838,7 @@ fn stamp_checkpoint_metadata(
 }
 
 /// An epoch filename is not proof that this invocation wrote the checkpoint.
-/// Refuse directory reuse before table admission or training can touch files.
+/// Allow colocated inputs, but refuse surviving trainer artifacts before reads.
 fn preflight_checkpoint_directory(args: &Args) -> std::io::Result<()> {
     if args.dump_checkpoints_every == 0 {
         return Ok(());
@@ -2848,20 +2848,65 @@ fn preflight_checkpoint_directory(args: &Args) -> std::io::Result<()> {
         .as_deref()
         .unwrap_or_else(|| std::path::Path::new("."));
     match std::fs::read_dir(dir) {
-        Ok(mut entries) => {
-            if entries.next().transpose()?.is_some() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "checkpoint directory must be empty before this invocation: {dir:?}; use a fresh --dump-checkpoints-dir"
-                    ),
-                ));
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                let configured_output = args.out.as_ref().and_then(|p| p.file_name());
+                if (name.starts_with("ckpt_epoch") && name.ends_with(".bin"))
+                    || matches!(name.as_ref(), "best.bin" | "last.bin" | "selected.bin")
+                    || configured_output.is_some_and(|output| output == entry.file_name())
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "checkpoint artifacts already exist: {:?}; use a fresh --dump-checkpoints-dir",
+                            entry.path()
+                        ),
+                    ));
+                }
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
     Ok(())
+}
+
+/// Receipts are appended by the two checkpoint write sites after fs::write.
+/// This invocation's log vector is the ownership list, never a directory scan.
+fn emitted_checkpoint_paths(log: &[String]) -> Vec<(PathBuf, usize)> {
+    #[derive(serde::Deserialize)]
+    struct WrittenCheckpoint {
+        path: PathBuf,
+        epoch: usize,
+    }
+    log.iter()
+        .filter_map(|line| line.strip_prefix("  checkpoint dump: "))
+        .map(|receipt| {
+            let written: WrittenCheckpoint =
+                serde_json::from_str(receipt).expect("checkpoint write receipt");
+            (written.path, written.epoch)
+        })
+        .collect()
+}
+
+fn stamp_emitted_checkpoints(
+    log: &[String],
+    final_bake: &[u8],
+    repro_json: &str,
+    coverage_for_epoch: impl Fn(usize) -> Option<String>,
+) -> std::io::Result<usize> {
+    let written = emitted_checkpoint_paths(log);
+    for (path, epoch) in &written {
+        let bytes = std::fs::read(path)?;
+        let coverage = coverage_for_epoch(*epoch);
+        let stamped =
+            stamp_checkpoint_metadata(&bytes, final_bake, repro_json, *epoch, coverage.as_deref());
+        std::fs::write(path, stamped)?;
+    }
+    Ok(written.len())
 }
 
 fn main() {
@@ -4799,60 +4844,21 @@ fn main() {
     // H-TRAJ (balance campaign 2026-08-28): stamp this invocation's dumps with
     // reproduction/admission metadata and its own sampler prefix, so a
     // promoted last-epoch dump preserves the main output qualification keys.
-    // The entry preflight required an empty checkpoint directory; surviving
-    // dumps from another run cannot acquire this run's admission or seeds.
-    // No raw byte-key heuristic: canonical metadata splicing replaces entries.
+    // Stamp only paths recorded immediately after a successful write by this
+    // invocation. Colocated inputs and late unrelated files are never scanned.
     // Failure is fatal, matching mandatory reproduction metadata.
     if args.dump_checkpoints_every > 0 {
-        let dir = args
-            .dump_checkpoints_dir
-            .clone()
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let mut stamped_n = 0usize;
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for ent in rd.flatten() {
-                let pth = ent.path();
-                let name = pth.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let Some(epoch_s) = name
-                    .strip_prefix("ckpt_epoch")
-                    .and_then(|s| s.strip_suffix(".bin"))
-                else {
-                    continue;
-                };
-                let bytes = match std::fs::read(&pth) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("FATAL: read checkpoint {pth:?}: {e}");
-                        std::process::exit(4);
-                    }
-                };
-                let epoch: usize = epoch_s.parse().unwrap_or_else(|_| {
-                    eprintln!("FATAL: invalid checkpoint epoch {pth:?}");
-                    std::process::exit(4);
-                });
-                if epoch >= hyperparams.n_epochs {
-                    eprintln!("FATAL: stale checkpoint outside this run {pth:?}");
-                    std::process::exit(4);
-                }
-                let coverage = if epoch + 1 == hyperparams.n_epochs {
-                    sample_coverage_json.clone()
-                } else {
-                    sample_coverage_for_epochs(epoch + 1)
-                };
-                let stamped = stamp_checkpoint_metadata(
-                    &bytes,
-                    &bake_bytes,
-                    &repro_json,
-                    epoch,
-                    coverage.as_deref(),
-                );
-                if let Err(e) = std::fs::write(&pth, &stamped) {
-                    eprintln!("FATAL: rewrite checkpoint {pth:?}: {e}");
-                    std::process::exit(4);
-                }
-                stamped_n += 1;
+        let stamped_n = stamp_emitted_checkpoints(&log, &bake_bytes, &repro_json, |epoch| {
+            if epoch + 1 == hyperparams.n_epochs {
+                sample_coverage_json.clone()
+            } else {
+                sample_coverage_for_epochs(epoch + 1)
             }
-        }
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("FATAL: stamp emitted checkpoints: {e}");
+            std::process::exit(4);
+        });
         println!(
             "Stamped {stamped_n} checkpoint dump(s) with complete training metadata (+checkpoint_epoch/prefix coverage)"
         );
@@ -5237,7 +5243,7 @@ mod capability_preflight_tests {
 
 #[cfg(test)]
 mod checkpoint_admission_tests {
-    use super::stamp_checkpoint_metadata;
+    use super::{emitted_checkpoint_paths, stamp_checkpoint_metadata, stamp_emitted_checkpoints};
     use zenpredict::{Activation, WeightDtype};
 
     fn fixture() -> Vec<u8> {
@@ -5258,6 +5264,55 @@ mod checkpoint_admission_tests {
             None,
             Activation::LeakyRelu,
         )
+    }
+
+    #[test]
+    fn stamping_uses_write_receipts_and_leaves_a_late_foreign_dump_untouched() {
+        let dir = std::env::temp_dir().join(format!("shippath4-receipts-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut log = vec!["epoch 0 | validation".to_string()];
+        let base = fixture();
+        for epoch in [0, 2] {
+            let path = dir.join(format!("quoted \"dir\"\nckpt_epoch{epoch:03}.bin"));
+            std::fs::write(&path, &base).unwrap();
+            log.push(format!(
+                "  checkpoint dump: {}",
+                serde_json::json!({
+                    "path": path, "epoch": epoch, "bytes": base.len()
+                })
+            ));
+        }
+        // This file arrived after entry preflight. A scan would stamp it too.
+        let foreign = dir.join("ckpt_epoch001.bin");
+        let stale =
+            stamp_checkpoint_metadata(&base, &base, r#"{"init_seed":1101,"epochs":3}"#, 1, None);
+        std::fs::write(&foreign, &stale).unwrap();
+        let final_bake =
+            zenpredict_bake::append_metadata_utf8(&base, "zentrain.formula_revision", "5").unwrap();
+        let count = stamp_emitted_checkpoints(
+            &log,
+            &final_bake,
+            r#"{"init_seed":1103,"epochs":3,"table_admission":{"qualified_provenance":true}}"#,
+            |epoch| Some(format!("prefix-{}", epoch + 1)),
+        )
+        .unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(std::fs::read(&foreign).unwrap(), stale);
+        for (path, epoch) in emitted_checkpoint_paths(&log) {
+            let bytes = std::fs::read(path).unwrap();
+            let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+            let metadata = model.metadata();
+            let repro: serde_json::Value =
+                serde_json::from_str(metadata.get_utf8("zentrain.repro").unwrap()).unwrap();
+            assert_eq!(repro["init_seed"], 1103);
+            assert_eq!(repro["checkpoint_epoch"], format!("{epoch:03}"));
+            assert_eq!(metadata.get_utf8("zentrain.formula_revision").unwrap(), "5");
+            assert_eq!(
+                metadata.get_utf8("zentrain.sample_coverage").unwrap(),
+                format!("prefix-{}", epoch + 1)
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
