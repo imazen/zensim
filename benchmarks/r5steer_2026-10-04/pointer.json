@@ -1,0 +1,10 @@
+{
+  "schema": "r5steer-tower-pointer-v1",
+  "tower_root": "/mnt/tower/output/zensim/r5steer-2026-10-04",
+  "verified_files": 1202,
+  "bytes": 248214740,
+  "raw_case_reports": 624,
+  "repeated_owner_case_reports": 1,
+  "inventory_sha256": "1110a41c62250e5a0219af93f8e569fc7170f5985903340feaf93471e4557310",
+  "all_copies_sha256_verified": true
+}
