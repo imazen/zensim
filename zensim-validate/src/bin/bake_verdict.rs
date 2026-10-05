@@ -4241,6 +4241,15 @@ fn feature_set_block(model: &Model, root: &Path) -> serde_json::Value {
 // Qualification must cover every model and every table, not just the primary
 // model/root label. Unknown historical declarations remain measurable but cannot
 // become a provenance pass. Reuse the table-admission and feature-set owners.
+/// Companion provenance and metadata discovery share this protected-ancestry
+/// policy. The features-only Python inventory mirrors it before any hashing.
+fn protected_input_ancestry(path: &Path) -> bool {
+    path.components().any(|c| {
+        let s = c.as_os_str().to_string_lossy().to_lowercase();
+        s.contains("_sealed") || s.contains("holdout") || s.starts_with("labels__")
+    })
+}
+
 /// Verify the v4 companion leg against its bound TRAIN files and the actual
 /// scoring tables. Runtime servability and scientific/product gates are separate.
 fn tree_companion_feature_set(
@@ -4332,10 +4341,7 @@ fn tree_companion_feature_set(
                 .canonicalize()
                 .map_err(|e| format!("{}: {e}", path.display()))?;
             require(
-                !resolved.components().any(|c| {
-                    let s = c.as_os_str().to_string_lossy().to_lowercase();
-                    s.contains("_sealed") || s.contains("holdout")
-                }),
+                !protected_input_ancestry(path) && !protected_input_ancestry(&resolved),
                 "protected input path forbidden",
             )?;
         }
@@ -4593,13 +4599,7 @@ fn evaluation_input_paths(args: &Args, corpora: &[PathBuf], members: &[PathBuf])
 }
 
 fn refuse_protected_input(path: &Path) -> Result<(), String> {
-    let protected = |p: &Path| {
-        p.components().any(|c| {
-            let s = c.as_os_str().to_string_lossy().to_lowercase();
-            s.contains("_sealed") || s.starts_with("labels__")
-        })
-    };
-    if protected(path) {
+    if protected_input_ancestry(path) {
         return Err(format!("protected input path: {}", path.display()));
     }
     // Resolve the nearest existing ancestor too: absent declarations can live
@@ -4608,7 +4608,7 @@ fn refuse_protected_input(path: &Path) -> Result<(), String> {
     loop {
         match ancestor.canonicalize() {
             Ok(p) => {
-                if protected(&p) {
+                if protected_input_ancestry(&p) {
                     return Err(format!("protected input ancestry: {}", path.display()));
                 }
                 break;
@@ -8719,6 +8719,68 @@ mod tree_admission_tests {
                         .contains("protected input")
                 );
                 std::fs::remove_file(alias).unwrap();
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn holdout_sources_and_bindings_refuse_in_discovery_and_provenance() {
+        let root =
+            std::env::temp_dir().join(format!("companion-path-policy-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let (record, table) = fixture(&root);
+        let protected = root.join("private-HOLDOUT-population");
+        std::fs::create_dir(&protected).unwrap();
+        let sentinel = protected.join("synthetic.json");
+        std::fs::write(&sentinel, b"synthetic sentinel, never scientific data").unwrap();
+        let alias = root.join("allowed-alias.json");
+        std::os::unix::fs::symlink(&sentinel, &alias).unwrap();
+        let head = root.join("head.zcth");
+        let args = parse_args_from(
+            [
+                "--bake".into(),
+                root.join("primary.bin").to_string_lossy().into(),
+                "--regime".into(),
+                "720".into(),
+                "--features-root".into(),
+                root.to_string_lossy().into(),
+                "--corpora".into(),
+                "cid22".into(),
+                "--dial-grid".into(),
+                table.to_string_lossy().into(),
+                "--corruption-head".into(),
+                head.to_string_lossy().into(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        std::fs::write(&head, head_bytes(&record)).unwrap();
+        assert!(print_input_paths(&args).is_ok());
+        assert_eq!(inspect(&record, &table)["qualified_provenance"], true);
+        for candidate in [&sentinel, &alias] {
+            for source in [true, false] {
+                let mut changed = record.clone();
+                if source {
+                    changed["training_tables"][0]["source_table"] = json!(candidate);
+                } else {
+                    changed["bindings"][0]["path"] = json!(candidate);
+                }
+                std::fs::write(&head, head_bytes(&changed)).unwrap();
+                assert!(
+                    print_input_paths(&args)
+                        .unwrap_err()
+                        .contains("protected input")
+                );
+                let result = inspect(&changed, &table);
+                assert_eq!(result["qualified_provenance"], false);
+                assert!(
+                    result["reason"]
+                        .as_str()
+                        .unwrap()
+                        .contains("protected input path")
+                );
             }
         }
         std::fs::remove_dir_all(root).unwrap();

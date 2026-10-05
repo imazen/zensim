@@ -1,0 +1,90 @@
+{
+  "schema": "shippath9-checks-v1",
+  "base": "1d4c842563d7a2bcbe5d4bb39d6d2e56d35b5d51",
+  "finding_closed": "P1 companion holdout paths refused before discovery and inventory hashing",
+  "policy": "shared Rust protected_input_ancestry; one Python mirror; lexical and resolved _sealed/holdout substrings or labels__ prefixes",
+  "python_assessment_tests": 14,
+  "orchestration_tests": 4,
+  "rust_verdict_tests_passed": 41,
+  "rust_external_test_ignored": 1,
+  "ci_exact_clippy": "pass",
+  "format": "pass",
+  "script_lint": "pass",
+  "script_lint_count": 819,
+  "initial_python_regressions_fail_on_reviewed_guard_with_open_tripwire": true,
+  "initial_rust_regression_fails_on_reviewed_guard_without_hashing": "forbidden candidate returned",
+  "actual_integration": {
+    "schema": "shippath9-holdout-regressions-v1",
+    "binary_sha256": "416076fddc1571067d7e17e53cd5d6b462a67e2dbcfabf150a8d54557f456fda",
+    "baseline_real_owner_succeeds": true,
+    "baseline_checked_candidates": 97,
+    "baseline_present_files": 70,
+    "baseline_labels_read": false,
+    "allowed_composition_feature_sets_unchanged": true,
+    "cases": [
+      {
+        "case": "source-direct",
+        "discovery_refuses_without_candidates": true,
+        "provenance_refuses": true,
+        "wrapper_refuses_before_output": true,
+        "syscall_sentinel_opens_and_reads": 0,
+        "python_tripwire_sentinel_opens": 0,
+        "numerical_head_bytes_unchanged": true
+      },
+      {
+        "case": "source-symlink",
+        "discovery_refuses_without_candidates": true,
+        "provenance_refuses": true,
+        "wrapper_refuses_before_output": true,
+        "syscall_sentinel_opens_and_reads": 0,
+        "python_tripwire_sentinel_opens": 0,
+        "numerical_head_bytes_unchanged": true
+      },
+      {
+        "case": "binding-direct",
+        "discovery_refuses_without_candidates": true,
+        "provenance_refuses": true,
+        "wrapper_refuses_before_output": true,
+        "syscall_sentinel_opens_and_reads": 0,
+        "python_tripwire_sentinel_opens": 0,
+        "numerical_head_bytes_unchanged": true
+      },
+      {
+        "case": "binding-symlink",
+        "discovery_refuses_without_candidates": true,
+        "provenance_refuses": true,
+        "wrapper_refuses_before_output": true,
+        "syscall_sentinel_opens_and_reads": 0,
+        "python_tripwire_sentinel_opens": 0,
+        "numerical_head_bytes_unchanged": true
+      }
+    ],
+    "no_real_protected_labels_read": true,
+    "no_scoring": true
+  },
+  "preservation": {
+    "schema": "shippath9-preservation-v1",
+    "original_bundles": [
+      {
+        "bundle": "/home/lilith/tmp/zensim-paper/rev4/SHIPPATH7_assets",
+        "indexed_files": 446,
+        "index_sha256": "83d1864d9d818d25758b4dd736168211eb15ac70155bc1ffdf0b6d21c460d5be",
+        "all_files_unchanged": true
+      },
+      {
+        "bundle": "/home/lilith/tmp/zensim-paper/rev4/SHIPPATH8_assets",
+        "indexed_files": 93,
+        "index_sha256": "5cda1c4320d7c9d186def8ec9b8b75b996c18fcc917a05a03821afe887dcde9e",
+        "all_files_unchanged": true
+      }
+    ],
+    "regression_head_numerical_sections_unchanged": true,
+    "allowed_composition_feature_sets_unchanged": true
+  },
+  "no_real_protected_confirmation_T0_labels_read": true,
+  "no_scores_or_fits": true,
+  "fleet": false,
+  "pushed": false,
+  "human_production_role_decision": "pending",
+  "exposure_authorization": "pending"
+}

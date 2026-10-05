@@ -6,15 +6,19 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'rev4_featpot'))
-from v2c_wide import safe_path as bank_safe_path
 import pyarrow.parquet as pq
 from rev5_bank import ASSESSMENT_KEY_COLUMNS
 from v2_common import refuse_immutable_output
 
 
+def protected_input_ancestry(path):
+    """Mirror bake_verdict's shared companion/discovery ancestry policy."""
+    return any('_sealed' in v.lower() or 'holdout' in v.lower() or v.lower().startswith('labels__') for v in Path(path).parts)
+
+
 def safe_path(path):
-    p = bank_safe_path(path)
-    if any('_sealed' in v.lower() or v.lower().startswith('labels__') for v in (*p.parts, *p.resolve().parts)):
+    p = Path(path)
+    if protected_input_ancestry(p) or protected_input_ancestry(p.resolve()):
         raise PermissionError('protected label path refused')
     return p
 

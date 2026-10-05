@@ -5082,3 +5082,17 @@ identities and SHIPPATH7 evidence stay immutable; the correction is explicitly
 recorded rather than restamping the extraction. Actual Rev5 admission passes,
 exposure remains pending and the human production-role decision is unchanged.
 See [worklog](../benchmarks/shippath8_WORKLOG.md).
+
+## 2026-10-05 — SHIPPATH9 companion holdout-boundary correction
+
+The focused SHIPPATH8 review found that discovery and inventory omitted the
+companion owner's existing holdout-ancestry protection. Companion provenance
+and discovery now use one Rust predicate, mirrored by the Python preflight;
+both lexical and resolved paths reject `_sealed`, `holdout` and `labels__`
+components before candidate return or hashing. Four direct/symlinked source and
+binding controls show zero sentinel opens/reads through the actual owners.
+Only newly created synthetic sentinels were used; no real protected labels
+were read. No model, table, role, exposure permission or qualification changed.
+Original SHIPPATH7/8 indexed evidence is reverified unchanged. The allowed
+composition identity is unchanged and exposure remains pending. See
+[worklog](../benchmarks/shippath9_WORKLOG.md).

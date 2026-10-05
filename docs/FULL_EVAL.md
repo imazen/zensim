@@ -576,3 +576,12 @@ inputs must remain stable. `labels_read` is derived from the completed boundary
 checks; incomplete discovery has no no-label assertion. Historical scoring stages
 and their numerical/qualification contracts remain unchanged. See
 [SHIPPATH8 worklog](../benchmarks/shippath8_WORKLOG.md).
+
+SHIPPATH9 shares one Rust protected-component predicate between companion
+provenance and discovery; the Python inventory mirrors that predicate. Both
+lexical and resolved ancestry reject case-insensitive `_sealed` or `holdout`
+substrings and `labels__` prefixes before returning candidates or hashing.
+Source and binding paths receive the same complete preflight. Direct and
+symlinked holdout-source/binding controls refuse with zero sentinel opens;
+incomplete/refused discovery cannot emit a no-label receipt. See
+[SHIPPATH9 worklog](../benchmarks/shippath9_WORKLOG.md).

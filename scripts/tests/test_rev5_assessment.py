@@ -181,6 +181,52 @@ with open(arg('--audit-jsonl'),'w') as f:
     def test_reviewer_alternate_table_sidecar_symlink_refuses_before_open(self):
         self.protected_metadata_case('alternate')
 
+    def holdout_companion_case(self, kind, symlinked):
+        import builtins
+        import io
+        cp, _, _ = self.metadata_fixture()
+        protected = self.work/'private-HOLDOUT-population'
+        protected.mkdir()
+        sentinel = protected/(kind+'.json')
+        sentinel.write_text('{"synthetic_human_score":[987654321]}')
+        candidate = sentinel
+        if symlinked:
+            candidate = self.root/(kind+'-alias.json')
+            candidate.symlink_to(sentinel)
+        opened = []
+        def tripwire(original):
+            def guarded(path, *args, **kwargs):
+                if not isinstance(path, int) and Path(path).resolve() == sentinel:
+                    opened.append(str(path))
+                    raise AssertionError('holdout sentinel opened')
+                return original(path, *args, **kwargs)
+            return guarded
+        discovery = {'schema':'bake-verdict-input-paths-v1', 'complete':True,
+                     'metadata_read':False, 'files':[str(candidate)]}
+        with patch.object(builtins, 'open', tripwire(builtins.open)), patch.object(io, 'open', tripwire(io.open)):
+            with self.assertRaises(PermissionError):
+                identity.validate(cp, self.work/'refused', owner_inputs=discovery)
+            # Inventory must preflight the whole set before even hashing an
+            # allowed prefix; no caller can bypass discovery's refusal.
+            with patch.object(identity, 'sha') as hashing:
+                with self.assertRaises(PermissionError):
+                    identity.checked_inventory([cp, candidate])
+                hashing.assert_not_called()
+        self.assertEqual(opened, [])
+        self.assertFalse((self.work/'refused').exists())
+
+    def test_direct_holdout_companion_source_refuses_before_open(self):
+        self.holdout_companion_case('source', False)
+
+    def test_symlinked_holdout_companion_source_refuses_before_open(self):
+        self.holdout_companion_case('source', True)
+
+    def test_direct_holdout_companion_binding_refuses_before_open(self):
+        self.holdout_companion_case('binding', False)
+
+    def test_symlinked_holdout_companion_binding_refuses_before_open(self):
+        self.holdout_companion_case('binding', True)
+
     def test_all_declaration_locations_and_model_sidecars_are_checked(self):
         cp,table,corpus=self.metadata_fixture()
         bake=self.root/'model';bake.write_text('synthetic')
