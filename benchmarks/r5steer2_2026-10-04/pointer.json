@@ -1,0 +1,12 @@
+{
+  "schema": "r5steer2-pointer-v1",
+  "root": "/mnt/tower/output/zensim/r5steer2-2026-10-04",
+  "verified_files": 423,
+  "bytes": 78161846,
+  "inventory_sha256": "e0bf1ec27e52f117d932c2a65b2afca75924ba3132443ab461f37a2360fb398b",
+  "raw_final_gradient_reports": 20,
+  "cross_reports": 108,
+  "owner_size_reports": 8,
+  "all_sha256_verified": true,
+  "prior_reference_archive": "/mnt/tower/output/zensim/r5steer-2026-10-04"
+}

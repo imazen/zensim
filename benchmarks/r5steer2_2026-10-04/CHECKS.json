@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "python_compile": true,
+  "fmt_check": true,
+  "ci_exact_clippy": true,
+  "script_lint": true,
+  "trailing_whitespace": false,
+  "production_library_files_changed": false,
+  "source_sha256": {
+    "zensim/examples/diffmap_block_coherence.rs": "89fe2c20da8babe8c3f6e7aa1adc0258bcd5f6a843632d53aa727c1c4b151a79",
+    "zensim/examples/support/gradient_check.rs": "277f2eac563da0148562e760f564dd18eb6998006b22d5c6eb899fe2d2718649",
+    "benchmarks/r5steer_2026-10-04/run2.py": "ca75c9cea2aab2748edf84d9fb87622cd5997c0a4270de1b8b50977a8417d25a",
+    "benchmarks/r5steer_2026-10-04/summarize2.py": "423c77df0bd022734449672855835a46cf20b72dcb6fb52d2e78bae64e967095"
+  }
+}

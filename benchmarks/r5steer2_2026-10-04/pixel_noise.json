@@ -1,0 +1,38 @@
+[
+  {
+    "revision": 4,
+    "kind": "single_pixel16",
+    "probes": 27,
+    "zero_score_spans": 1,
+    "relative_l2": 0.11987846446754975,
+    "cosine": 0.9928462017021401,
+    "minimum_nonzero_score_span": 2.5431315009427635e-06
+  },
+  {
+    "revision": 4,
+    "kind": "block16",
+    "probes": 27,
+    "zero_score_spans": 0,
+    "relative_l2": 0.03939647637006758,
+    "cosine": 0.9994866825384415,
+    "minimum_nonzero_score_span": 0.00010426839193655724
+  },
+  {
+    "revision": 5,
+    "kind": "single_pixel16",
+    "probes": 28,
+    "zero_score_spans": 3,
+    "relative_l2": 0.09515668355140602,
+    "cosine": 0.9954982797337365,
+    "minimum_nonzero_score_span": 2.5431315009427635e-06
+  },
+  {
+    "revision": 5,
+    "kind": "block16",
+    "probes": 28,
+    "zero_score_spans": 0,
+    "relative_l2": 0.016775984216116556,
+    "cosine": 0.9998599706764042,
+    "minimum_nonzero_score_span": 0.00023396809895359638
+  }
+]

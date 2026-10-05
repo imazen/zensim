@@ -1,0 +1,26 @@
+{
+  "schema": "r5steer2-execution-v1",
+  "status": "COMPLETE_UNQUALIFIED",
+  "arithmetic_frozen_at": "60174678",
+  "production_library_modified": false,
+  "analytic_pixel_gradient_available": false,
+  "gradient_cases": 10,
+  "gradient_reports": 20,
+  "cross_reports": 108,
+  "owner_size_reports": 8,
+  "diagnostic_binary_sha256": "1052b1c2ac22a506131bf0b0a56e34f01ba4ee40bb13bd2f3fbf697c9fb3ec73",
+  "previous_local_commit": "214094b49103e8933fa15319dadcd42f08f43660",
+  "resources": {
+    "memory": "16G",
+    "jobs": 8,
+    "panel_workers": 4,
+    "rayon_threads_per_worker": 1
+  },
+  "reverse_cross": "not run: Rev5-trained weights at Rev4 use incompatible features",
+  "negative_attempts": [
+    "attempt1/STATUS.json",
+    "attempt2/STATUS.json"
+  ],
+  "external_json_tolerance": "4*f64::EPSILON; internal score/feature parity and same-step gradients remain exact",
+  "scope": "diagnosis only; no training, tuning or model qualification"
+}

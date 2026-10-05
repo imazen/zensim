@@ -1,0 +1,81 @@
+[
+  {
+    "name": "owner-I61-s2-b32",
+    "reference": "/mnt/v/dataset/kadid10k/images/I61.png",
+    "distorted": "/mnt/v/dataset/kadid10k/images/I61_10_03.png",
+    "block": 32,
+    "seed": 2
+  },
+  {
+    "name": "broad-136-b32",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-10.png",
+    "block": 32,
+    "index": "136",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-136-b64",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-10.png",
+    "block": 64,
+    "index": "136",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-199-b64",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-10.png",
+    "block": 64,
+    "index": "199",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-31-b8",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-10.png",
+    "block": 8,
+    "index": "31",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-31-b16",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-10.png",
+    "block": 16,
+    "index": "31",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-31-b32",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-10.png",
+    "block": 32,
+    "index": "31",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-31-b64",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-10.png",
+    "block": 64,
+    "index": "31",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-34-b32",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-13.png",
+    "block": 32,
+    "index": "34",
+    "seed": "ensemble"
+  },
+  {
+    "name": "broad-34-b64",
+    "reference": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+    "distorted": "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-13.png",
+    "block": 64,
+    "index": "34",
+    "seed": "ensemble"
+  }
+]

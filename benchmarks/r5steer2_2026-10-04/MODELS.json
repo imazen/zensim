@@ -1,0 +1,140 @@
+[
+  {
+    "arm": "fpbyv2fy",
+    "seed_index": 0,
+    "legacy_label": 5101,
+    "source": "/var/tmp/rev4-featpot/v2c5/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s0/refit/last.bin",
+    "source_sha256": "c6aa317ed45b68defc8eb73a7a8c34f090c8ad08a509a8420250bb9cf67e5980",
+    "dense_sha256": "a4e98321537180c66a46cbba0b8bbc3e3646f329e6689cee2c4707d9cb720934",
+    "rev5": "/var/tmp/r5steer/rev5screen/human-fpbyv2fy-h128-full-s5101.bin",
+    "rev5_sha256": "aef1039ac30dac52e598f1ed855fbaed64a634e8c15c9fe299b9f9c6469e940f",
+    "rev4": "/var/tmp/neighsteer/fpscreen/human-fpbyv2fy-h128-full-s5101.bin",
+    "rev4_sha256": "8751311160719fe57eefbc0f373c6bb413ddd30ea234faa71402f72555df1d75",
+    "fleet_receipt_sha256": "794edf1ef5de38dd530d72357dd5d342e7abae33887c55a0dcc6a2c0a3aa2697",
+    "receipt": {
+      "argv_sha": "f028e02213c4e68a702faedd06627d6620f804915e56397529bd2088aac16a70",
+      "cell": "sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s0",
+      "data_sha": "d33b06b847c89441c65ac84ad83f2472a8328e700d5c67f457370e80a36391fa",
+      "files": {
+        "dense/c6aa317ed45b68de.bin": "a4e98321537180c66a46cbba0b8bbc3e3646f329e6689cee2c4707d9cb720934",
+        "eval_preds.log": "18a2b89c4bd21d541148786a2d872dace0fa1246fccde18faa4b9ca0ba3d0d0f",
+        "eval_preds.tsv": "ea1e6f65ce198c5d506df44f6a00e9c62f59d0ddf20e75fc3aad06f337d7264c",
+        "fleet_stdout.log": "a6d408ba71ebac2be631bb93d5e2a193ff6bf37039b0607d44704a2888f28e83",
+        "keep_features.txt": "282362d6a43e641cfb0346764538f82e4f027a428e7130be0f2acb0a09286291",
+        "refit/best.bin": "d88c7c82ae129066cb2fb7adce0b17aed9aba4b891c22a722ea99936bad7ac8e",
+        "refit/best.bin.spec.json": "7d6d4fc5e65df14a4c3691bc5029bc0bc35996b7a019859af4156389fd7c6116",
+        "refit/last.bin": "c6aa317ed45b68defc8eb73a7a8c34f090c8ad08a509a8420250bb9cf67e5980",
+        "result.json": "4ce296aeac1b2db212af2b342d32b0149e09f6e1eeb9aa62eddbcadd7596c627",
+        "train.log": "cd6b2c98618fa6ed61b55745e2eb15c20a142926365637d2a8af929bf772614f"
+      },
+      "program_sha": "16716aef5492c44ca0ab0efc9bb92860ff7b5aedae143166498f2afc773bdece",
+      "result_sha": "4ce296aeac1b2db212af2b342d32b0149e09f6e1eeb9aa62eddbcadd7596c627",
+      "schema": "zenfleet-fit-cell-receipt-v1",
+      "selected_bake_sha": "c6aa317ed45b68defc8eb73a7a8c34f090c8ad08a509a8420250bb9cf67e5980",
+      "tier": {
+        "cpu_avx512f": false,
+        "effective": "v3",
+        "max_tier_env": ""
+      }
+    },
+    "rev4_source_sha256": "07e21eb6806f4e31e7dd6c3e60c6e39e9e30c6c9e92ccacdf7933a4f8a36fdc3",
+    "init_seed": 1101,
+    "sample_seed": 101,
+    "epochs": 120,
+    "cross": "/var/tmp/r5steer2/crossscreen/human-fpbyv2fy-h128-full-s5101.bin",
+    "cross_sha256": "dce5dab32d9ef9255bfd92068f9b846162e587e4a7e70ce934ebba2bd203edff",
+    "rev4_dense": "/var/tmp/r5steer/rev4-cache/dense/07e21eb6806f4e31.bin"
+  },
+  {
+    "arm": "fpbyv2fy",
+    "seed_index": 1,
+    "legacy_label": 5103,
+    "source": "/var/tmp/rev4-featpot/v2c5/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s1/refit/last.bin",
+    "source_sha256": "c7f5aa2d11cbe5b2d3de927779cb63718e4e1578a3b1cd6a7589ed713473544e",
+    "dense_sha256": "296d406d6184e007c1ada527518380c6a8d2cea24abfe52f201506674fc23e9b",
+    "rev5": "/var/tmp/r5steer/rev5screen/human-fpbyv2fy-h128-full-s5103.bin",
+    "rev5_sha256": "97ba00ae38e846c0918233e53879e07804470788e36add7936c3f3f751b0e351",
+    "rev4": "/var/tmp/neighsteer/fpscreen/human-fpbyv2fy-h128-full-s5103.bin",
+    "rev4_sha256": "231c0d8b1c473d234f6ba693d1f53f67f0ab4941c4ac0bd70224e7fdf2f71e70",
+    "fleet_receipt_sha256": "5be5720e6d28c1b8fc00417cd81045ca0dff354c698ab85121110e121e66b307",
+    "receipt": {
+      "argv_sha": "f8d29621de95af6f77f59ed6c1cfd21493a34215f9d72f9d4156a45bec634a17",
+      "cell": "sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s1",
+      "data_sha": "d33b06b847c89441c65ac84ad83f2472a8328e700d5c67f457370e80a36391fa",
+      "files": {
+        "dense/c7f5aa2d11cbe5b2.bin": "296d406d6184e007c1ada527518380c6a8d2cea24abfe52f201506674fc23e9b",
+        "eval_preds.log": "ee13b32d41af988ff8bef64c8e52aa75a23eb8a25e43381c0d33d2af71229bc0",
+        "eval_preds.tsv": "3e51091e0a7eab0f72087ef6fe0d85d533b18424a0a2046d1a96f631b63a27ce",
+        "fleet_stdout.log": "8c6859fbed90cbb91d6121fcbb3dcfa1449b5ae15ce9d7902fe8451632d50482",
+        "keep_features.txt": "282362d6a43e641cfb0346764538f82e4f027a428e7130be0f2acb0a09286291",
+        "refit/best.bin": "2e882bb20f190a6df8b98498c6a81a090c031a5c365f8962d592c52df5ec2d88",
+        "refit/best.bin.spec.json": "7b5b601169bfa2c3c214c410c447998d4d83cadc11be5b8b0343fa944f139e25",
+        "refit/last.bin": "c7f5aa2d11cbe5b2d3de927779cb63718e4e1578a3b1cd6a7589ed713473544e",
+        "result.json": "d1f6d15b1eb1629ae26336fd36740f9cb1aafe0b67de559155c67d9a9d6ca78b",
+        "train.log": "da7c98d6fba7e4a7fe9b788cd735f820ad02b7a85b613ba3b70e05c2f72d5502"
+      },
+      "program_sha": "16716aef5492c44ca0ab0efc9bb92860ff7b5aedae143166498f2afc773bdece",
+      "result_sha": "d1f6d15b1eb1629ae26336fd36740f9cb1aafe0b67de559155c67d9a9d6ca78b",
+      "schema": "zenfleet-fit-cell-receipt-v1",
+      "selected_bake_sha": "c7f5aa2d11cbe5b2d3de927779cb63718e4e1578a3b1cd6a7589ed713473544e",
+      "tier": {
+        "cpu_avx512f": false,
+        "effective": "v3",
+        "max_tier_env": ""
+      }
+    },
+    "rev4_source_sha256": "61c954f67592ef20e183c1e70565deb6c783b6d121bad9abb8d251304501e63a",
+    "init_seed": 1103,
+    "sample_seed": 100000101,
+    "epochs": 120,
+    "cross": "/var/tmp/r5steer2/crossscreen/human-fpbyv2fy-h128-full-s5103.bin",
+    "cross_sha256": "3d9999351948bb3a9c1ac3ec3b7f1f394534b10b999301e4105bfcaf3b96e0d4",
+    "rev4_dense": "/var/tmp/r5steer/rev4-cache/dense/61c954f67592ef20.bin"
+  },
+  {
+    "arm": "fpbyv2fy",
+    "seed_index": 2,
+    "legacy_label": 5107,
+    "source": "/var/tmp/rev4-featpot/v2c5/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s2/refit/last.bin",
+    "source_sha256": "78838c8fe1bcda5d2ca554119e315cfb7e6764f591ab6adfc0e21b6778ef8c0b",
+    "dense_sha256": "36fd0d9156fa223845798d0b35aa2428fb8529e2eaaa63c575dc892edc0883db",
+    "rev5": "/var/tmp/r5steer/rev5screen/human-fpbyv2fy-h128-full-s5107.bin",
+    "rev5_sha256": "60fb892303b66eb9f98b141f22ad5b30e1f718d21193235523a540dbe8e1c8b8",
+    "rev4": "/var/tmp/neighsteer/fpscreen/human-fpbyv2fy-h128-full-s5107.bin",
+    "rev4_sha256": "a707f5820c2557195adcf0b50b258985b3abb2ff0a152b3defed9c250be82559",
+    "fleet_receipt_sha256": "9f9d659150ee3a1fdb1e9186a9678d5bf69bbcc4407d5ca1df033261fdefe320",
+    "receipt": {
+      "argv_sha": "3ad812e7e1ea24a4e577d19cce02d99375aad7beae4881bf371759544b241d52",
+      "cell": "sel:59f0bbc2f290@h32:H128:cv16:cf98__N/without_kadid_s2",
+      "data_sha": "d33b06b847c89441c65ac84ad83f2472a8328e700d5c67f457370e80a36391fa",
+      "files": {
+        "dense/78838c8fe1bcda5d.bin": "36fd0d9156fa223845798d0b35aa2428fb8529e2eaaa63c575dc892edc0883db",
+        "eval_preds.log": "5eb8cad7bc958a3998e14ef0c69803d7c0892f75af2fcca21649203b81a56275",
+        "eval_preds.tsv": "2c8b9e56c1fcdd5999fb59343e93ff3249088274686c019c7744768a516cef1e",
+        "fleet_stdout.log": "934a1a53f495a122326599f3ea6aebb59246c2d2dcb066e16b08d0b8f2f2308c",
+        "keep_features.txt": "282362d6a43e641cfb0346764538f82e4f027a428e7130be0f2acb0a09286291",
+        "refit/best.bin": "e5e6ea08af833feed267419d478c1a456f0c62cb26b83f6359790cdb1c649388",
+        "refit/best.bin.spec.json": "aef6e07559ccc3b964f15293511457c659aaf8e9c6e7ea982f557a4c6ba7e3ff",
+        "refit/last.bin": "78838c8fe1bcda5d2ca554119e315cfb7e6764f591ab6adfc0e21b6778ef8c0b",
+        "result.json": "1a23c4d07b0441d96538a72df2f56f8b347d1a40e13e64eda721dfd27332321a",
+        "train.log": "d1ba7c2bf32d1eb42ab72ae985e0378104cec0e062b6b276d4f429ce0315c63d"
+      },
+      "program_sha": "16716aef5492c44ca0ab0efc9bb92860ff7b5aedae143166498f2afc773bdece",
+      "result_sha": "1a23c4d07b0441d96538a72df2f56f8b347d1a40e13e64eda721dfd27332321a",
+      "schema": "zenfleet-fit-cell-receipt-v1",
+      "selected_bake_sha": "78838c8fe1bcda5d2ca554119e315cfb7e6764f591ab6adfc0e21b6778ef8c0b",
+      "tier": {
+        "cpu_avx512f": false,
+        "effective": "v3",
+        "max_tier_env": ""
+      }
+    },
+    "rev4_source_sha256": "c8434b47da04a50301d26e3293f9325e27c1a37f16e0049e5c756e6f011ce7d1",
+    "init_seed": 1107,
+    "sample_seed": 200000101,
+    "epochs": 120,
+    "cross": "/var/tmp/r5steer2/crossscreen/human-fpbyv2fy-h128-full-s5107.bin",
+    "cross_sha256": "5b816b4c63c488711457c841b714e893b222abf7d2d523c5e13a2ba0c4974dc4",
+    "rev4_dense": "/var/tmp/r5steer/rev4-cache/dense/c8434b47da04a503.bin"
+  }
+]

@@ -70,8 +70,18 @@ use zensim::{DiffmapWeighting, RgbSlice, Zensim, ZensimProfile};
 #[path = "support/native_interventions.rs"]
 mod native_interventions;
 
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+#[path = "support/gradient_check.rs"]
+mod gradient_check;
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    if args.first().map(String::as_str) == Some("--gradient-check") {
+        assert!(args.len() == 4 && args[2] == "--json");
+        gradient_check::run(&args[1], &args[3]);
+        return;
+    }
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     if args.first().map(String::as_str) == Some("--native-interventions") {
         assert!(
