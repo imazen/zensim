@@ -26,3 +26,24 @@ calibrated on it (HDR-VDP-3 paper §3, §5).
 
 Reported, not ruled on: the external SDR sets, the HDRCORR corruption TRAIN AUC, steering on one HDR panel. Any change to this
 rule after a fit starts is a new registration.
+
+## Implementation constants fixed before fitting
+
+The shared teacher transform is `score = 10 * q_jod`, with no clipping, offset,
+normalization, or fitted coefficients. TRAIN's raw label range alone
+(7.853718501290521–9.99170577163005) places the fixed targets at
+78.53718501290521–99.9170577163005 score units. The natural q_jod ceiling
+10 maps to 100; negative values would remain negative. No VAL distribution
+is used to choose this transform. Both hd4 and hd16 use these identical targets.
+The HDR leg is fit-only, within-reference rank supervision, with acceptance
+weight `nominal / mean_ref(1 - 1/n_ref)` as in the existing coverage leg.
+There is no HDR dev group, early stopping, or checkpoint selection.
+
+The concrete missing research caller is the existing `hdr944_extract` owner.
+Its explicit native-PQ request will call `research::extract_hdr(req, src, dst,
+encoding)`, sharing the existing research gathering/provenance and the same
+planned native-HDR fold walk as `BakeScorer::compute_hdr`. This additive
+research API accepts the existing ImageSource format/dimensions/stride and
+explicit HdrEncoding; SDR `research::extract` remains unchanged. The owner
+will expose an explicit requested-ID option and preserve its existing modes.
+No new trainer, scorer, packer, or extractor is introduced.
