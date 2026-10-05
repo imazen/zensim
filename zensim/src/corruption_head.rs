@@ -398,7 +398,7 @@ fn read_f64_vec(
     n: usize,
 ) -> Result<Vec<f64>, CorruptionHeadError> {
     let raw = sec.slice(bytes, name)?;
-    if raw.len() != n * 8 {
+    if raw.len() % 8 != 0 || raw.len() / 8 != n {
         return Err(CorruptionHeadError::SectionShape {
             name,
             len: sec.len,
@@ -515,9 +515,20 @@ impl CorruptionHead {
         let sec_iso_y = rd_section(bytes, 104);
         let sec_meta = rd_section(bytes, 112);
 
+        if version == ADMITTED_INPUT_VERSION
+            && (flags & !(FLAG_HAS_SCALER | FLAG_HAS_ISOTONIC) != 0
+                || (flags & FLAG_HAS_SCALER == 0 && (sec_mean.len != 0 || sec_scale.len != 0))
+                || (flags & FLAG_HAS_ISOTONIC == 0 && (sec_iso_x.len != 0 || sec_iso_y.len != 0)))
+        {
+            return Err(CorruptionHeadError::NotServable {
+                profile: "ZCTH",
+                detail: "v4 flags must describe every scaler/calibration section".into(),
+            });
+        }
+
         // declared ids
         let raw_ids = sec_ids.slice(bytes, "declared_ids")?;
-        if raw_ids.len() != n_declared * 2 {
+        if raw_ids.len() % 2 != 0 || raw_ids.len() / 2 != n_declared {
             return Err(CorruptionHeadError::SectionShape {
                 name: "declared_ids",
                 len: sec_ids.len,
@@ -550,19 +561,19 @@ impl CorruptionHead {
 
         // tree offsets
         let raw_toff = sec_toff.slice(bytes, "tree_offsets")?;
-        if raw_toff.len() != (n_trees + 1) * 4 {
+        if raw_toff.len() % 4 != 0 || raw_toff.len() / 4 != n_trees.saturating_add(1) {
             return Err(CorruptionHeadError::SectionShape {
                 name: "tree_offsets",
                 len: sec_toff.len,
                 stride: 4,
-                expected_elems: n_trees + 1,
+                expected_elems: n_trees.saturating_add(1),
             });
         }
         let tree_offsets: Vec<u32> = (0..=n_trees).map(|i| rd_u32(raw_toff, i * 4)).collect();
 
         // nodes
         let raw_nodes = sec_nodes.slice(bytes, "nodes")?;
-        if raw_nodes.len() != n_nodes * NODE_LEN {
+        if raw_nodes.len() % NODE_LEN != 0 || raw_nodes.len() / NODE_LEN != n_nodes {
             return Err(CorruptionHeadError::SectionShape {
                 name: "nodes",
                 len: sec_nodes.len,
@@ -665,7 +676,51 @@ impl CorruptionHead {
             training_admission,
         };
         head.validate_trees()?;
+        if version == ADMITTED_INPUT_VERSION {
+            head.validate_admitted_numerics()?;
+        }
         Ok(head)
+    }
+
+    /// The v4 digest proves byte identity, not that its floats can be scored.
+    /// Keep legacy parsing/arithmetic unchanged; admitted heads must refuse
+    /// malformed numerical contracts before exposing their admission record.
+    fn validate_admitted_numerics(&self) -> Result<(), CorruptionHeadError> {
+        let valid = self.baseline.is_finite()
+            && self.deadband_t.is_finite()
+            && (0.0..=1.0).contains(&self.deadband_t)
+            && self.clip.is_finite()
+            && self.clip >= 0.0
+            && self.mean.iter().all(|x| x.is_finite())
+            && self.scale.iter().all(|x| x.is_finite() && *x > 0.0)
+            && self.nodes.iter().all(|node| {
+                node.flags & !(NODE_FLAG_LEAF | NODE_FLAG_MISSING_LEFT) == 0
+                    && node.value.is_finite()
+                    // sklearn may use infinity to separate missing inputs.
+                    && (node.is_leaf() || !node.threshold.is_nan())
+            })
+            && self
+                .iso_x
+                .iter()
+                .all(|x| x.is_finite() && (0.0..=1.0).contains(x))
+            && self
+                .iso_y
+                .iter()
+                .all(|y| y.is_finite() && (0.0..=1.0).contains(y))
+            && self.iso_x.windows(2).all(|pair| pair[0] < pair[1])
+            && self.iso_y.windows(2).all(|pair| pair[0] <= pair[1])
+            && self
+                .iso_x
+                .windows(2)
+                .zip(self.iso_y.windows(2))
+                .all(|(xs, ys)| ((ys[1] - ys[0]) / (xs[1] - xs[0])).is_finite());
+        if !valid {
+            return Err(CorruptionHeadError::NotServable {
+                profile: "ZCTH",
+                detail: "v4 invalid numerical header/scaler/tree/calibration contract".into(),
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn formula_revision(&self) -> crate::feature_defs::FormulaRevision {
@@ -1266,6 +1321,79 @@ mod tests {
             assert!(result.is_err(), "Rev1 head must not consume Rev3 features");
         }
         println!("TREE-REVISION-CHECK-RAN");
+    }
+
+    #[test]
+    fn admitted_numerical_contract_refuses_rehashed_unsafe_values() {
+        let valid = || {
+            let mut b = Builder::single_stump(3, 0.25, -5.0, 5.0);
+            b.revision_field = 5;
+            b.meta = r#"{"training_admission":{"schema":"zcth-training-admission-v1","formula_revision":5,"head_feature_ids":[3],"feature_set_id":"basic+peaks+v2@w1825/rev5_localwin#36c3f3af","decoder_era":"synthetic","training_tables":[{"role":"TRAIN"}]}}"#;
+            b.iso_x = vec![0.0, 1.0];
+            b.iso_y = vec![0.0, 1.0];
+            b
+        };
+        let mutations: [fn(&mut Builder); 16] = [
+            |b| b.clip = -1.0,
+            |b| b.clip = f32::NAN,
+            |b| b.clip = f32::INFINITY,
+            |b| b.baseline = f64::NAN,
+            |b| b.deadband_t = f64::NAN,
+            |b| b.deadband_t = 1.1,
+            |b| b.mean[0] = f64::NAN,
+            |b| b.scale[0] = 0.0,
+            |b| b.scale[0] = f64::INFINITY,
+            |b| b.nodes[1].value = f64::NAN,
+            |b| b.nodes[0].threshold = f64::NAN,
+            |b| b.nodes[0].flags = 4,
+            |b| b.iso_x[1] = 0.0,
+            |b| b.iso_y[0] = f64::NAN,
+            |b| b.iso_y = vec![1.0, 0.0],
+            |b| b.iso_x[1] = f64::from_bits(1),
+        ];
+        let head =
+            CorruptionHead::from_bytes(&valid().build_version(ADMITTED_INPUT_VERSION)).unwrap();
+        assert!(head.probability_f64(&[0.5; 8]).unwrap().is_finite());
+        for mutate in mutations {
+            let mut b = valid();
+            mutate(&mut b);
+            // The builder recomputes both schema and content digests. These
+            // refusals must come from numerical validation, not stale hashes.
+            assert!(matches!(
+                CorruptionHead::from_bytes(&b.build_version(ADMITTED_INPUT_VERSION)),
+                Err(CorruptionHeadError::NotServable { .. })
+            ));
+            assert!(CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).is_ok());
+        }
+        for flags in [1u16, 2, 7] {
+            let mut bytes = valid().build_version(ADMITTED_INPUT_VERSION);
+            bytes[6..8].copy_from_slice(&flags.to_le_bytes());
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::new()
+                .chain_update(&bytes[..HEADER_LEN])
+                .chain_update(&bytes[ADMITTED_HEADER_LEN..])
+                .finalize();
+            bytes[HEADER_LEN..ADMITTED_HEADER_LEN].copy_from_slice(&digest);
+            assert!(CorruptionHead::from_bytes(&bytes).is_err());
+        }
+        for at in [20usize, 24, 28] {
+            for count in [u32::MAX, 0x8000_0000] {
+                let mut bytes = valid().build_version(ADMITTED_INPUT_VERSION);
+                bytes[at..at + 4].copy_from_slice(&count.to_le_bytes());
+                use sha2::{Digest, Sha256};
+                let digest = Sha256::new()
+                    .chain_update(&bytes[..HEADER_LEN])
+                    .chain_update(&bytes[ADMITTED_HEADER_LEN..])
+                    .finalize();
+                bytes[HEADER_LEN..ADMITTED_HEADER_LEN].copy_from_slice(&digest);
+                // Check counts by division, so even 32-bit loaders refuse
+                // before unchecked multiplication or collection/allocation.
+                assert!(matches!(
+                    CorruptionHead::from_bytes(&bytes),
+                    Err(CorruptionHeadError::SectionShape { .. })
+                ));
+            }
+        }
     }
 
     #[test]

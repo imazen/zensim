@@ -11,6 +11,10 @@
 
 ### Changed
 
+- Refuse malformed ZCTH v4 numerical/flag contracts before scoring, and verify
+  original TRAIN source bindings alongside copied views during companion
+  provenance admission. Legacy v1/v2/v3 parsing and scoring remain unchanged.
+
 - Opt-in ZCTH v4 corruption companions bind the complete model and TRAIN
   feature/revision/decoder admission with SHA-256. The loader exposes verified
   admission to the existing verdict owner. Legacy v1/v2/v3 bytes and scoring

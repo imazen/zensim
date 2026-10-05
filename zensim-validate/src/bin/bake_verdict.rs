@@ -4298,8 +4298,15 @@ fn tree_companion_feature_set(
             )?;
         }
         let mut specs = Vec::new();
+        // A copied TRAIN view does not verify the original source declaration.
+        // Include originals in the same complete preflight and hash pass used
+        // by the exporter, before any admission payload can be opened.
+        let mut sources = Vec::new();
         for t in tables {
             specs.extend([t, &t["declaration"], &t["selection"]]);
+            if let Some(source) = t.get("source_table") {
+                sources.push(serde_json::json!({"path":source,"sha256":t["sha256"]}));
+            }
             require(
                 t["declaration"]["path"].as_str()
                     == t["path"]
@@ -4309,6 +4316,7 @@ fn tree_companion_feature_set(
                 "TRAIN declaration must be its actual per-table sidecar",
             )?;
         }
+        specs.extend(sources.iter());
         specs.extend(bindings);
         // Preflight the complete role/path list before hashing any payload.
         for spec in &specs {
@@ -8501,6 +8509,44 @@ mod tree_admission_tests {
             tables.len()
         );
     }
+    #[test]
+    fn original_train_sources_must_match_and_pass_protected_path_preflight() {
+        let root = std::env::temp_dir().join(format!("zcth-verdict-source-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let (mut record, table) = fixture(&root);
+        let original = root.join("original.csv");
+        std::fs::copy(&table, &original).unwrap();
+        record["training_tables"][0]["source_table"] = json!(original);
+        assert_eq!(inspect(&record, &table)["qualified_provenance"], true);
+        std::fs::write(&original, b"different original TRAIN bytes").unwrap();
+        let result = inspect(&record, &table);
+        assert_eq!(result["qualified_provenance"], false);
+        assert!(
+            result["reason"]
+                .as_str()
+                .unwrap()
+                .contains("changed admission input")
+        );
+        let sealed = root.join("_sealed");
+        std::fs::create_dir(&sealed).unwrap();
+        let protected = sealed.join("synthetic-sentinel.csv");
+        // Its bytes cannot match the pinned table. The protected-path refusal
+        // must win before the hash pass can discover that mismatch.
+        std::fs::write(&protected, b"synthetic sentinel, never scientific data").unwrap();
+        record["training_tables"][0]["source_table"] = json!(protected);
+        let result = inspect(&record, &table);
+        assert_eq!(result["qualified_provenance"], false);
+        assert!(
+            result["reason"]
+                .as_str()
+                .unwrap()
+                .contains("protected input path")
+        );
+        record["training_tables"][0]["source_table"] = json!(42);
+        assert_eq!(inspect(&record, &table)["qualified_provenance"], false);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn actual_composition_verifies_bound_tree_leg_and_refuses_changes() {
         let root = std::env::temp_dir().join(format!("zcth-verdict-{}", std::process::id()));

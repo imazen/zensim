@@ -634,3 +634,9 @@ parity and seven TRAIN integrity gates. The actual Table provenance gate passes
 a clearly scoped companion-only proof; the full historical-primary composition
 continues to fail that row. No human role decision or whole-model qualification
 changed. See [worklog](../benchmarks/shippath6_WORKLOG.md).
+
+The post-landing SHIPPATH6 review adds v4 numerical/flag validation before
+admission is exposed and verifies each optional original `source_table` against
+the copied TRAIN table hash. Original source paths participate in the complete
+protected-path preflight before payload hashing. Neither correction changes
+legacy bytes/arithmetic or grants primary/product qualification.
