@@ -5030,3 +5030,23 @@ and packing compare all numerical/model/calibration bytes and canonical wire
 bytes after eliding run identity; packing the same input is fully byte-identical.
 The human-role decision stays pending. See benchmarks/shippath4_WORKLOG.md and
 ~/tmp/zensim-paper/rev4/SHIPPATH4_DONE.md.
+
+
+## 2026-10-05 — SHIPPATH6 registered companion refit (unchanged TRAIN data)
+
+Replayed the pinned R5INTEG3 Rev5/by_v2fy-420 preparation through the existing
+HGB/scaler/isotonic factory and extended exporter: seed4101, fit5499/calibrate2706,
+8205 unique source/pixel pairs. No new row/source selection, tuning, extraction,
+EVAL or human fit. Fresh per-table admission views copy the two original TRAIN
+Parquets byte-identically; original frozen roots remain immutable. The completed
+canonical content-screen receipt is SHA-bound without reopening its protected
+reference payloads. The executable-bound legacy-RGB8 decoder era records only
+what the original extraction receipt proves.
+
+ZCTH v4 preserves every numerical section of the registered v3 head, adds full
+content/admission binding, and passes exact Rust and pixel/cache parity, all
+seven original TRAIN gates and prepared/identity/revision/ComputeSet checks.
+The composition owner verifies companion Table provenance; the historical
+primary remains unqualified and the human-role decision remains pending.
+See `benchmarks/shippath6_WORKLOG.md` and
+`~/tmp/zensim-paper/rev4/SHIPPATH6_DONE.md`.

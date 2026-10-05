@@ -92,6 +92,13 @@
   }
  },
  "eras": {
+  "r5integ_rev5": {
+   "build_commit": null,
+   "root": "/var/tmp/r5integ",
+   "formula_revision": 5,
+   "label": "Pinned R5INTEG Rev5 research TRAIN producer",
+   "note": "Extraction receipt and decoder executable SHA-256 bound per companion admission; basic/peaks/v2 only. Original producer 01ed2897b7f4b07203d172a614a47dbd4c87b4d39dd42998f25cc131f29a7740; corrected serving handoff separately pinned. benchmarks/r5integ_WORKLOG.md; benchmarks/shippath6_REGISTRATION.md"
+  },
   "rev5_localwin": {
    "build_commit": "60174678",
    "root": "/var/tmp/rev5-featbank",
@@ -359,6 +366,17 @@
   }
  },
  "sets": {
+  "basic+peaks+v2@w1825/r5integ_rev5": {
+   "compute": "basic+peaks+v2",
+   "layout": 1825,
+   "era": "r5integ_rev5",
+   "slots": "0-227,372-719",
+   "slots_hash8": "36c3f3af",
+   "n_slots": 576,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "/var/tmp/r5integ/rev5-final-raw.csv.manifest.json; R5INTEG3 source pin and complete f32 parity; benchmarks/shippath6_REGISTRATION.md"
+  },
   "basic+peaks+v2@w1825/rev5_localwin": {
    "compute": "basic+peaks+v2",
    "layout": 1825,

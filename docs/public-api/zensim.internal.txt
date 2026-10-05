@@ -13,7 +13,7 @@
 #   pub types (struct/enum/trait/alias)        26
 #   pub consts/statics                          7
 #   free functions                             36
-#   inherent methods                          169
+#   inherent methods                          170
 #   struct fields                             114
 #   enum variants                              34
 #   trait roster entries (type × trait)       121
@@ -23,7 +23,7 @@
 #   (root)                           34
 #   __bench_stages                   10
 #   bake_metadata                    43
-#   corruption_head                  70
+#   corruption_head                  71
 #   det_math                         13
 #   f64                               3
 #   feature_set_id                    5
@@ -34,7 +34,7 @@
 #   score_math                       26
 #   source                            4
 
-## items (393 lines)
+## items (394 lines)
 
 #[non_exhaustive] pub enum feature_v2::FormulaRevision
 #[non_exhaustive] pub struct research::DvifmFieldMap
@@ -117,6 +117,7 @@ pub fn corruption_head::CorruptionHead::probability_f64(&self, &[f64]) -> core::
 pub fn corruption_head::CorruptionHead::schema_hash(&self) -> u64
 pub fn corruption_head::CorruptionHead::score(&self, &[f32]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
 pub fn corruption_head::CorruptionHead::score_f64(&self, &[f64]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::training_admission_json(&self) -> core::option::Option<&str>
 pub fn corruption_head::CorruptionHead::verdict(&self, &[f64], f64) -> core::result::Result<corruption_head::CorruptionVerdict, corruption_head::CorruptionHeadError>
 pub fn corruption_head::CorruptionHeadError::assert_fields_are_eq(&self)
 pub fn corruption_head::CorruptionHeadError::clone(&self) -> corruption_head::CorruptionHeadError

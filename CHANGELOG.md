@@ -11,6 +11,11 @@
 
 ### Changed
 
+- Opt-in ZCTH v4 corruption companions bind the complete model and TRAIN
+  feature/revision/decoder admission with SHA-256. The loader exposes verified
+  admission to the existing verdict owner. Legacy v1/v2/v3 bytes and scoring
+  remain unchanged; this metadata contract alone grants no product qualification.
+
 - Compatible Rev4 corruption companions now score pixels through the existing
   revision-checked union plan. Cross-revision heads and unsupported families
   still refuse. The research refit/export tools support revision-bound v3

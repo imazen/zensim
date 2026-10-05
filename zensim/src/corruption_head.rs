@@ -26,7 +26,7 @@
 //! table of `(offset, len)`, and a declared-feature-id list so a head obeys
 //! the same dense contract as [`crate::declared_feature_ids`].
 //!
-//! ## Wire format, `ZCTH` v1/v2/v3 (little-endian throughout)
+//! ## Wire format, `ZCTH` v1/v2/v3/v4 (little-endian throughout)
 //!
 //! Version 2 rounds each declared input to IEEE f32, then widens to f64
 //! before standardisation. This binds pixel inference to f32 training tables.
@@ -34,12 +34,18 @@
 //! the version participates in the schema hash and old readers refuse v2.
 //! Versions 1/2 describe native-pyramid Rev1 features. Version 3 also rounds
 //! inputs to f32 and binds an explicit formula revision in the header/hash.
+//! Version 4 keeps v3 arithmetic and extends the header to 152 bytes. Bytes
+//! 120..152 contain SHA-256 of bytes 0..120 followed by bytes 152..EOF; all
+//! sections are contiguous after the digest. The digest binds numerical bytes
+//! and metadata together. Metadata must contain a header-matching TRAIN
+//! admission record, which the qualification owner verifies against pinned
+//! files. This digest is an integrity check, not a signature or qualification.
 //! Fractional sampling is not described by any of these versions.
 //!
 //! ```text
-//! Header, 120 bytes
+//! Header, 120 bytes for v1/v2/v3; 152 bytes for v4
 //!    0..4    magic                b"ZCTH"
-//!    4..6    format_version  u16  = 1 (native) / 2 (f32) / 3 (f32 + revision)
+//!    4..6    format_version  u16  = 1 (native) / 2 (f32) / 3 or 4 (f32 + revision)
 //!    6..8    flags           u16  bit0 has_isotonic, bit1 has_scaler
 //!    8..16   schema_hash     u64  FNV-1a over the canonical shape descriptor
 //!   16..20   caller_input_width u32
@@ -49,7 +55,7 @@
 //!   32..40   baseline        f64
 //!   40..48   deadband_t      f64  fires when P > t
 //!   48..52   clip            f32  standardisation clip, +-clip
-//!   52..56   formula_revision u32 = 1/2/3 for v3; reserved zero for v1/v2
+//!   52..56   formula_revision u32 = 1..5 for v3/v4; reserved zero for v1/v2
 //!   56..64   sec_declared_ids  Section  u16  * n_declared
 //!   64..72   sec_scaler_mean   Section  f64  * n_declared
 //!   72..80   sec_scaler_scale  Section  f64  * n_declared
@@ -57,7 +63,8 @@
 //!   88..96   sec_nodes         Section  Node * n_nodes
 //!   96..104  sec_iso_x         Section  f64  * n_knots
 //!  104..112  sec_iso_y         Section  f64  * n_knots
-//!  112..120  sec_meta          Section  utf8 JSON provenance
+//!  112..120  sec_meta          Section  utf8 JSON provenance/admission
+//!  120..152  content_sha256             v4 only
 //!
 //! Node, 32 bytes
 //!    0..8    threshold     f64
@@ -93,6 +100,8 @@ pub const MAGIC: [u8; 4] = *b"ZCTH";
 pub const FORMAT_VERSION: u16 = 1;
 const F32_INPUT_VERSION: u16 = 2;
 const REVISION_INPUT_VERSION: u16 = 3;
+const ADMITTED_INPUT_VERSION: u16 = 4;
+const ADMITTED_HEADER_LEN: usize = HEADER_LEN + 32;
 /// Header length in bytes; the section table ends here.
 const HEADER_LEN: usize = 120;
 /// One node's serialized width.
@@ -355,6 +364,7 @@ pub struct CorruptionHead {
     iso_y: Vec<f64>,
     schema_hash: u64,
     meta: String,
+    training_admission: Option<String>,
 }
 
 fn rd_u16(b: &[u8], at: usize) -> u16 {
@@ -420,23 +430,63 @@ impl CorruptionHead {
         let version = rd_u16(bytes, 4);
         if !matches!(
             version,
-            FORMAT_VERSION | F32_INPUT_VERSION | REVISION_INPUT_VERSION
+            FORMAT_VERSION | F32_INPUT_VERSION | REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION
         ) {
             return Err(CorruptionHeadError::UnsupportedVersion {
                 got: version,
-                supported: REVISION_INPUT_VERSION,
+                supported: ADMITTED_INPUT_VERSION,
             });
+        }
+        if version == ADMITTED_INPUT_VERSION {
+            use sha2::{Digest, Sha256};
+            if bytes.len() < ADMITTED_HEADER_LEN {
+                return Err(CorruptionHeadError::Truncated {
+                    expected: ADMITTED_HEADER_LEN,
+                    got: bytes.len(),
+                });
+            }
+            let digest = Sha256::new()
+                .chain_update(&bytes[..HEADER_LEN])
+                .chain_update(&bytes[ADMITTED_HEADER_LEN..])
+                .finalize();
+            if digest.as_slice() != &bytes[HEADER_LEN..ADMITTED_HEADER_LEN] {
+                return Err(CorruptionHeadError::NotServable {
+                    profile: "ZCTH",
+                    detail: "v4 content/admission SHA-256 mismatch".into(),
+                });
+            }
+            let mut end = ADMITTED_HEADER_LEN;
+            for at in (56..120).step_by(8) {
+                let sec = rd_section(bytes, at);
+                if sec.offset as usize != end {
+                    return Err(CorruptionHeadError::NotServable {
+                        profile: "ZCTH",
+                        detail: "v4 sections must be contiguous after the admission header".into(),
+                    });
+                }
+                end = end
+                    .checked_add(sec.len as usize)
+                    .ok_or(CorruptionHeadError::Truncated {
+                        expected: usize::MAX,
+                        got: bytes.len(),
+                    })?;
+            }
+            if end != bytes.len() {
+                return Err(CorruptionHeadError::NotServable {
+                    profile: "ZCTH",
+                    detail: "v4 sections must cover the complete file".into(),
+                });
+            }
         }
         let revision_field = rd_u32(bytes, 52);
         use crate::feature_defs::FormulaRevision;
         let formula_revision = match (version, revision_field) {
-            (FORMAT_VERSION | F32_INPUT_VERSION, 0) | (REVISION_INPUT_VERSION, 1) => {
-                FormulaRevision::Rev1
-            }
-            (REVISION_INPUT_VERSION, 2) => FormulaRevision::Rev2,
-            (REVISION_INPUT_VERSION, 3) => FormulaRevision::Rev3,
-            (REVISION_INPUT_VERSION, 4) => FormulaRevision::Rev4,
-            (REVISION_INPUT_VERSION, 5) => FormulaRevision::Rev5,
+            (FORMAT_VERSION | F32_INPUT_VERSION, 0)
+            | (REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION, 1) => FormulaRevision::Rev1,
+            (REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION, 2) => FormulaRevision::Rev2,
+            (REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION, 3) => FormulaRevision::Rev3,
+            (REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION, 4) => FormulaRevision::Rev4,
+            (REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION, 5) => FormulaRevision::Rev5,
             _ => {
                 return Err(CorruptionHeadError::NotServable {
                     profile: "ZCTH",
@@ -557,7 +607,7 @@ impl CorruptionHead {
             &declared_ids,
             iso_x.len() as u32,
         );
-        if version == REVISION_INPUT_VERSION {
+        if matches!(version, REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION) {
             descriptor.extend_from_slice(&revision_field.to_le_bytes());
         }
         let computed = fnv1a64(&descriptor);
@@ -568,6 +618,34 @@ impl CorruptionHead {
             });
         }
 
+        let training_admission = if version == ADMITTED_INPUT_VERSION {
+            let value: serde_json::Value =
+                serde_json::from_str(&meta).map_err(|e| CorruptionHeadError::NotServable {
+                    profile: "ZCTH",
+                    detail: format!("v4 admission JSON: {e}"),
+                })?;
+            let record = &value["training_admission"];
+            let ids: Vec<_> = declared_ids.iter().map(|&id| usize::from(id)).collect();
+            if record["schema"] != "zcth-training-admission-v1"
+                || record["formula_revision"] != revision_field
+                || record["head_feature_ids"] != serde_json::json!(ids)
+                || record["feature_set_id"]
+                    .as_str()
+                    .and_then(crate::feature_set_id::FeatureSetId::parse)
+                    .is_none()
+                || record["decoder_era"]
+                    .as_str()
+                    .is_none_or(|s| s.trim().is_empty())
+                || record["training_tables"]
+                    .as_array()
+                    .is_none_or(Vec::is_empty)
+            {
+                return Err(CorruptionHeadError::NotServable { profile: "ZCTH", detail: "v4 admission must bind feature IDs, formula revision, decoder era and TRAIN tables".into() });
+            }
+            Some(record.to_string())
+        } else {
+            None
+        };
         let head = Self {
             round_inputs_to_f32: version != FORMAT_VERSION,
             formula_revision,
@@ -584,6 +662,7 @@ impl CorruptionHead {
             iso_y,
             schema_hash: stored_hash,
             meta,
+            training_admission,
         };
         head.validate_trees()?;
         Ok(head)
@@ -693,6 +772,14 @@ impl CorruptionHead {
     #[must_use]
     pub fn metadata_json(&self) -> &str {
         &self.meta
+    }
+
+    /// Content-bound training admission for a v4 companion. Legacy provenance
+    /// cannot claim this capability. File/table verification belongs to the
+    /// evaluator; a record alone is not scientific or product qualification.
+    #[must_use]
+    pub fn training_admission_json(&self) -> Option<&str> {
+        self.training_admission.as_deref()
     }
 
     /// The baked deadband in probability units: the head fires when
@@ -1051,9 +1138,14 @@ mod tests {
         }
 
         fn build_version(&self, version: u16) -> Vec<u8> {
+            let header_len = if version == ADMITTED_INPUT_VERSION {
+                ADMITTED_HEADER_LEN
+            } else {
+                HEADER_LEN
+            };
             let mut body: Vec<u8> = Vec::new();
             let push = |body: &mut Vec<u8>, data: &[u8]| -> Section {
-                let off = HEADER_LEN + body.len();
+                let off = header_len + body.len();
                 body.extend_from_slice(data);
                 Section {
                     offset: off as u32,
@@ -1102,11 +1194,11 @@ mod tests {
                 &self.declared_ids,
                 self.iso_x.len() as u32,
             );
-            if version == REVISION_INPUT_VERSION {
+            if matches!(version, REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION) {
                 descriptor.extend_from_slice(&self.revision_field.to_le_bytes());
             }
             let hash = fnv1a64(&descriptor);
-            let mut h = vec![0u8; HEADER_LEN];
+            let mut h = vec![0u8; header_len];
             h[0..4].copy_from_slice(&MAGIC);
             h[4..6].copy_from_slice(&version.to_le_bytes());
             h[6..8].copy_from_slice(&flags.to_le_bytes());
@@ -1118,7 +1210,7 @@ mod tests {
             h[32..40].copy_from_slice(&self.baseline.to_le_bytes());
             h[40..48].copy_from_slice(&self.deadband_t.to_le_bytes());
             h[48..52].copy_from_slice(&self.clip.to_le_bytes());
-            if version == REVISION_INPUT_VERSION {
+            if matches!(version, REVISION_INPUT_VERSION | ADMITTED_INPUT_VERSION) {
                 h[52..56].copy_from_slice(&self.revision_field.to_le_bytes());
             }
             for (i, s) in [
@@ -1132,6 +1224,14 @@ mod tests {
                 h[at + 4..at + 8].copy_from_slice(&s.len.to_le_bytes());
             }
             h.extend_from_slice(&body);
+            if version == ADMITTED_INPUT_VERSION {
+                use sha2::{Digest, Sha256};
+                let digest = Sha256::new()
+                    .chain_update(&h[..HEADER_LEN])
+                    .chain_update(&h[ADMITTED_HEADER_LEN..])
+                    .finalize();
+                h[HEADER_LEN..ADMITTED_HEADER_LEN].copy_from_slice(&digest);
+            }
             h
         }
     }
@@ -1166,6 +1266,53 @@ mod tests {
             assert!(result.is_err(), "Rev1 head must not consume Rev3 features");
         }
         println!("TREE-REVISION-CHECK-RAN");
+    }
+
+    #[test]
+    fn admitted_content_binds_every_model_section_and_never_qualifies_legacy() {
+        let mut b = Builder::single_stump(3, 0.25, -5.0, 5.0);
+        b.revision_field = 5;
+        b.meta = r#"{"training_admission":{"schema":"zcth-training-admission-v1","formula_revision":5,"head_feature_ids":[3],"feature_set_id":"basic+peaks+v2@w1825/rev5_localwin#36c3f3af","decoder_era":"synthetic","training_tables":[{"role":"TRAIN"}]}}"#;
+        b.iso_x = vec![0.0, 1.0];
+        b.iso_y = vec![0.0, 1.0];
+        let bytes = b.build_version(ADMITTED_INPUT_VERSION);
+        let head = CorruptionHead::from_bytes(&bytes).unwrap();
+        assert!(head.training_admission_json().is_some());
+        let legacy = CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).unwrap();
+        assert!(legacy.training_admission_json().is_none());
+        for value in [-0.1, 0.25, 0.5] {
+            let mut row = [0.0; 8];
+            row[3] = value;
+            assert_eq!(head.decision_function(&row), legacy.decision_function(&row));
+            assert_eq!(head.probability_f64(&row), legacy.probability_f64(&row));
+        }
+        let mut positions = vec![32, 40, 48, 52, HEADER_LEN];
+        positions.extend((56..120).step_by(8).map(|at| rd_u32(&bytes, at) as usize));
+        for at in positions {
+            let mut changed = bytes.clone();
+            changed[at] ^= 1;
+            assert!(
+                CorruptionHead::from_bytes(&changed).is_err(),
+                "unbound byte {at}"
+            );
+        }
+        // Even a rehashed record cannot disagree with the numerical header.
+        let mut changed = bytes;
+        changed[52..56].copy_from_slice(&4u32.to_le_bytes());
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::new()
+            .chain_update(&changed[..HEADER_LEN])
+            .chain_update(&changed[ADMITTED_HEADER_LEN..])
+            .finalize();
+        changed[HEADER_LEN..ADMITTED_HEADER_LEN].copy_from_slice(&digest);
+        assert!(CorruptionHead::from_bytes(&changed).is_err());
+        b.meta = r#"{"training_admission":{"schema":"zcth-training-admission-v1","formula_revision":4,"head_feature_ids":[3],"feature_set_id":"basic+peaks+v2@w1825/rev5_localwin#36c3f3af","decoder_era":"synthetic","training_tables":[{"role":"TRAIN"}]}}"#;
+        assert!(matches!(
+            CorruptionHead::from_bytes(&b.build_version(ADMITTED_INPUT_VERSION)),
+            Err(CorruptionHeadError::NotServable { .. })
+        ));
+        b.meta = "{}";
+        assert!(CorruptionHead::from_bytes(&b.build_version(ADMITTED_INPUT_VERSION)).is_err());
     }
 
     #[test]
@@ -1641,10 +1788,10 @@ mod tests {
             CorruptionHead::from_bytes(&bytes),
             Err(CorruptionHeadError::SchemaHashMismatch { .. })
         ));
-        bytes[4..6].copy_from_slice(&4_u16.to_le_bytes());
+        bytes[4..6].copy_from_slice(&5_u16.to_le_bytes());
         assert!(matches!(
             CorruptionHead::from_bytes(&bytes),
-            Err(CorruptionHeadError::UnsupportedVersion { got: 4, .. })
+            Err(CorruptionHeadError::UnsupportedVersion { got: 5, .. })
         ));
     }
 

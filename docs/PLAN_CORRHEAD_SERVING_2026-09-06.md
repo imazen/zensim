@@ -292,3 +292,23 @@ reports the answer either way.
 - `benchmarks/corruption_head_serving_2026-09-06.md` (the record),
   CHANGELOG `[Unreleased] / Added`, the CLAUDE.md corruption-head paragraph,
   `docs/DATASET_HISTORY.md` ROUND, `benchmarks/INDEX.md`.
+
+## 2026-10-05 — opt-in content-bound companion admission (ZCTH v4)
+
+The existing exporter/loader now support v4 alongside unchanged v1/v2/v3.
+V4 extends the header to 152 bytes, with SHA-256 over bytes0..120 followed by
+bytes152..EOF stored at120..152. Sections remain numerically identical and
+contiguous; the schema hash includes v4 and its explicit formula revision.
+Metadata encloses provenance and `zcth-training-admission-v1`: producer feature
+identity, formula revision, executable-bound decoder era, TRAIN table bytes,
+per-table declaration/row-selection hashes and fit/calibration usage, plus
+pinned producer, extraction, recipe, registration, preparation, rows and original
+completed content-screen receipt. No protected receipt payloads are reopened.
+
+`CorruptionHead::training_admission_json` exposes only verified v4 metadata.
+`bake_verdict::composition_feature_sets` verifies all bound files and actual
+TRAIN/scoring feature/formula/decoder compatibility. A digest is not a signature,
+role authorization or model qualification. Legacy metadata cannot mint admission.
+See [SHIPPATH6 worklog](../benchmarks/shippath6_WORKLOG.md) for the unchanged
+registered R5INTEG3 refit and companion-leg Table provenance proof. The historical
+primary and pending human-role decision still block whole-model qualification.

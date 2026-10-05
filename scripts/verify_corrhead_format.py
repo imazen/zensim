@@ -61,7 +61,10 @@ def main():
         assert before.read_bytes() == after.read_bytes(), 'legacy exporter changed bytes'
         cases.append(after)
     for revision in [1, 2, 3, 4, 5]:
-        cases.append(emit(new, f'revision-{revision}', input_precision='f32', formula_revision=revision))
+        before = emit(old, f'old-revision-{revision}', input_precision='f32', formula_revision=revision)
+        after = emit(new, f'revision-{revision}', input_precision='f32', formula_revision=revision)
+        assert before.read_bytes() == after.read_bytes(), 'legacy v3 exporter changed bytes'
+        cases.append(after)
     for revision, precision in [(0, 'f32'), (6, 'f32'), (5, 'native')]:
         try:
             emit(new, 'refused', input_precision=precision, formula_revision=revision)
@@ -83,6 +86,7 @@ def main():
                              parity_log_sha256=sha(log)))
     report = dict(role='synthetic-format-check', scientific_fits=0, synthetic_fits=1,
                   rows_per_case=512, cases=receipts, legacy_v1_v2_bytes_identical=True,
+                  legacy_v3_bytes_identical=True,
                   invalid_contracts_refused=3, exporter_sha256=sha(exporter),
                   baseline_exporter_sha256=sha(args.baseline_exporter),
                   parity_binary_sha256=sha(args.parity_bin), script_sha256=sha(__file__))

@@ -201,7 +201,7 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
     for i in ids:
         d += _s.pack("<H", int(i))
     d += _s.pack("<I", n_knots)
-    if version == 3:
+    if version in (3, 4):
         if formula_revision not in (1, 2, 3, 4, 5):
             raise ValueError("ZCTH v3 requires formula revision 1 through 5")
         d += _s.pack("<I", formula_revision)
@@ -211,11 +211,13 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
 
 
 def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
-              deadband_t, provenance, *, input_precision="native", formula_revision=None):
-    """Emit legacy Rev1 ZCTH v1/v2, or explicit-revision v3 with f32 inputs.
+              deadband_t, provenance, *, input_precision="native", formula_revision=None,
+              training_admission=None):
+    """Emit legacy v1/v2/v3, or content-bound admitted v4 with f32 inputs.
 
     Explicit formula_revision opts into v3; it requires freshly matching
-    extraction, not relabeling historical weights. Defaults preserve v1/v2 bytes.
+    extraction, not relabeling historical weights. training_admission opts into
+    v4 after verifying its pinned TRAIN files. Defaults preserve v1/v2/v3 bytes.
 
     The mirror of `emit_znpr`, and the reason `can_bake` is no longer
     `name == "logistic"`. Every field is copied out of the fitted estimator;
@@ -244,6 +246,12 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
         if formula_revision not in (1, 2, 3, 4, 5) or input_precision != "f32":
             raise ValueError("ZCTH v3 requires f32 inputs and formula revision 1 through 5")
         version = 3
+    if training_admission is not None:
+        if version != 3:
+            raise ValueError("ZCTH v4 admission requires explicit revision and f32 inputs")
+        verify_training_admission(training_admission, formula_revision, feat_idx)
+        version = 4
+    header_len = ZCTH_HEADER_LEN + (32 if version == 4 else 0)
 
     if getattr(clf, "n_trees_per_iteration_", 1) != 1:
         raise SystemExit(f"ZCTH is binary-only; this estimator emits "
@@ -287,7 +295,7 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     body, secs = bytearray(), []
 
     def push(data):
-        off = ZCTH_HEADER_LEN + len(body)
+        off = header_len + len(body)
         body.extend(data)
         secs.append((off, len(data)))
 
@@ -298,12 +306,14 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     push(bytes(node_blob))
     push(iso_x.tobytes(order="C"))
     push(iso_y.tobytes(order="C"))
-    push(json.dumps(provenance, sort_keys=True).encode("utf-8"))
+    metadata = (dict(provenance=provenance, training_admission=training_admission)
+                if version == 4 else provenance)
+    push(json.dumps(metadata, sort_keys=True).encode("utf-8"))
 
     flags = ZCTH_FLAG_SCALER | (ZCTH_FLAG_ISOTONIC if len(iso_x) else 0)
     schema = zcth_schema_hash(caller_width, len(ids), len(preds), n_nodes,
                               float(clip), ids, len(iso_x), version=version, formula_revision=formula_revision)
-    h = bytearray(ZCTH_HEADER_LEN)
+    h = bytearray(header_len)
     h[0:4] = ZCTH_MAGIC
     h[4:6] = _s.pack("<H", version)
     h[6:8] = _s.pack("<H", flags)
@@ -315,10 +325,12 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     h[32:40] = _s.pack("<d", baseline)
     h[40:48] = _s.pack("<d", float(deadband_t))
     h[48:52] = _s.pack("<f", float(clip))
-    if version == 3:
+    if version in (3, 4):
         h[52:56] = _s.pack("<I", formula_revision)
     for k, (off, ln) in enumerate(secs):
         h[56 + k * 8: 64 + k * 8] = _s.pack("<II", off, ln)
+    if version == 4:
+        h[120:152] = hashlib.sha256(bytes(h[:120]) + bytes(body)).digest()
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as f:
@@ -328,6 +340,70 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
           f"{n_nodes} nodes; schema {schema:#018x}; deadband P>{deadband_t}, "
           f"i.e. score < {100.0 * (1.0 - deadband_t):g})")
     return out_path
+
+
+def verify_training_admission(record, revision, ids):
+    """Verify v4's TRAIN-only files before fitting/exporting; never open holdouts."""
+    from pathlib import Path
+    def require(ok, why):
+        if not ok:
+            raise ValueError("ZCTH training admission: " + why)
+    require(record.get("schema") == "zcth-training-admission-v1"
+            and record.get("formula_revision") == revision
+            and record.get("head_feature_ids") == list(ids), "revision/read-set mismatch")
+    require(isinstance(record.get("feature_set_id"), str) and record["feature_set_id"]
+            and isinstance(record.get("decoder_era"), str) and record["decoder_era"].strip(),
+            "feature identity and decoder era required")
+    tables = record.get("training_tables", [])
+    require(tables and all(t.get("role") == "TRAIN" and t.get("usage")
+                          and set(t["usage"]) <= {"fit", "calibrate"} for t in tables),
+            "only explicit TRAIN fit/calibrate tables are permitted")
+    require(set().union(*(set(t["usage"]) for t in tables)) == {"fit", "calibrate"},
+            "both TRAIN legs required")
+    # Check every path before touching any file, including role failures above.
+    specs = [t for t in tables]
+    specs += [t[k] for t in tables for k in ("declaration", "selection")]
+    bindings = record.get("bindings", [])
+    require({b.get("kind") for b in bindings} >= {
+        "decoder-producer", "extraction-manifest", "content-admission", "recipe", "registration", "preparation", "rows"},
+        "missing producer/recipe/content bindings")
+    require(len({b.get("kind") for b in bindings}) == len(bindings), "duplicate binding kind")
+    for table in tables:
+        require(table["declaration"]["path"] == table["path"] + ".manifest.json",
+                "TRAIN declaration must be its actual per-table sidecar")
+        if "source_table" in table:
+            specs.append(dict(path=table["source_table"], sha256=table["sha256"]))
+    specs += bindings
+    for spec in specs:
+        p = Path(spec["path"])
+        require(p.is_absolute() and not any("_sealed" in part or "holdout" in part.lower()
+                                           for part in p.resolve().parts), "protected/nonabsolute input")
+        require(isinstance(spec.get("sha256"), str) and len(spec["sha256"]) == 64,
+                "SHA-256 required")
+    for spec in specs:
+        require(_sha256(spec["path"]) == spec["sha256"], "changed input: " + spec["path"])
+    for table in tables:
+        declaration = json.loads(Path(table["declaration"]["path"]).read_text())
+        require(all(declaration.get(k) == record[k] for k in
+                    ("feature_set_id", "formula_revision", "decoder_era")), "declaration mismatch")
+        selection = json.loads(Path(table["selection"]["path"]).read_text())
+        require(selection.get("schema") == "zcth-train-row-selection-v1"
+                and selection.get("table_sha256") == table["sha256"]
+                and set(selection.get("roles", {})) == set(table["usage"])
+                and all(selection["roles"][r] for r in table["usage"]), "row selection/role mismatch")
+    bound = {b["kind"]: b for b in bindings}
+    require(record["decoder_era"] == "legacy-rgb8/executable-sha256:" + bound["decoder-producer"]["sha256"],
+            "decoder era must identify the pinned decoding executable")
+    extraction = json.loads(Path(bound["extraction-manifest"]["path"]).read_text())
+    require(extraction["feature_set_id"] == record["feature_set_id"]
+            and int(extraction["formula_revision"]) == revision
+            and extraction["producer_binary_sha256"] == bound["decoder-producer"]["sha256"],
+            "extraction/decoder binding mismatch")
+    content = json.loads(Path(bound["content-admission"]["path"]).read_text())
+    require(content.get("schema") == "canonical-corruption-content-admission-v1"
+            and content.get("complete") is True and not content.get("unresolved"),
+            "incomplete original content admission")
+    return record
 
 
 def load_X(path, idx, extra=()):
@@ -981,7 +1057,114 @@ def canonical_main(argv):
                     scope=scope, source="exact exported single fit through Rust pixel/cache audit", command=command),indent=2)+"\n")
 
 
+def refit_admitted_preparation(argv):
+    """Replay a pinned TRAIN preparation through the canonical fixed fit owner.
+
+    This route verifies TRAIN payloads and the completed content-screen receipt,
+    without reopening protected reference payloads behind that historical receipt.
+    """
+    from pathlib import Path
+    import pandas as pd
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--refit-admission-manifest", type=Path, required=True)
+    ap.add_argument("--out-dir", type=Path, required=True)
+    a = ap.parse_args(argv)
+    def require(ok, why):
+        if not ok:
+            raise ValueError("admitted preparation: " + why)
+    def pinned(spec):
+        p = Path(spec["path"])
+        require(p.is_absolute() and not any("_sealed" in part or "holdout" in part.lower()
+                                           for part in p.resolve().parts), "protected input forbidden")
+        require(_sha256(p) == spec["sha256"], "changed input: " + str(p))
+        return p
+    m = json.loads(a.refit_admission_manifest.read_text())
+    require(m["schema"] == "zcth-admitted-preparation-refit-v1", "refit manifest schema")
+    canonical_path = pinned(m["canonical_manifest"])
+    canonical = json.loads(canonical_path.read_text())
+    registration_path = pinned(m["registration"])
+    registration = json.loads(registration_path.read_text())
+    ids = registration["head_feature_ids"]
+    require(canonical["schema"] == "canonical-corruption-refit-train-v2"
+            and canonical["head_regime"] == "by-v2fy-420" and canonical["formula_revision"] == 5
+            and canonical["head_feature_ids"] == canonical["feature_ids"] == ids
+            and len(ids) == 420 and ids == sorted(set(ids)) and ids[-1] == 719
+            and canonical["head_caller_input_width"] == 720
+            and canonical["seeds"] == [4101] and canonical["deadband"] == .9
+            and canonical["negative_fit_weight"] == 1 and canonical["input_precision"] == "f32"
+            and canonical["root_form"] == "sqrt"
+            and canonical["hyperparameters"] == {"early_stopping": False, "max_iter": 100, "max_leaf_nodes": 31}
+            and canonical["origins"] == dict(fit=registration["fit_origins"], calibrate=registration["calibrate_origins"], evaluate=[])
+            and registration["schema"] == "canonical-corruption-by-v2fy-registration-v1"
+            and registration["recipe"]["seed"] == 4101 and registration["selection"].startswith("none:"),
+            "registered unchanged R5INTEG3 recipe required")
+    record = json.loads(pinned(m["training_admission"]).read_text())
+    verify_training_admission(record, 5, ids)
+    bound = {b["kind"]: b for b in record["bindings"]}
+    require(bound["recipe"]["sha256"] == m["canonical_manifest"]["sha256"]
+            and bound["registration"]["sha256"] == m["registration"]["sha256"]
+            and bound["preparation"]["sha256"] == m["prepared"]["sha256"]
+            and bound["rows"]["sha256"] == m["rows"]["sha256"], "refit inputs differ from admission")
+    prepared_path = pinned(m["prepared"]); rows_path = pinned(m["rows"])
+    inputs = [canonical_path, registration_path, prepared_path, rows_path]
+    inputs += [Path(t["path"]) for t in record["training_tables"]]
+    inputs += [Path(b["path"]) for b in record["bindings"]]
+    out = a.out_dir.resolve()
+    require(not a.out_dir.exists() and not any(out.is_relative_to(p.resolve().parent) for p in inputs),
+            "fresh output outside immutable input roots required")
+    rows = json.loads(rows_path.read_text())
+    with np.load(prepared_path, allow_pickle=False) as p:
+        X = p["X"]; y = p["y"]; fit = p["fit"]; cal = p["calibrate"]; evaluate = p["evaluate"]
+    require(X.shape == (8205, 420) and np.isfinite(X).all()
+            and len(rows) == 8205 and fit.dtype == cal.dtype == np.bool_
+            and int(fit.sum()) == 5499 and int(cal.sum()) == 2706
+            and not evaluate.any() and np.all(fit ^ cal) and set(y) == {0, 1}, "pinned preparation shape/splits")
+    require(all(r["role"] == "train" and r["fit_role"] in ("fit", "calibrate")
+                and r["origin"] in canonical["origins"][r["fit_role"]]
+                and r["label"] == int(y[i]) and bool(fit[i]) == (r["fit_role"] == "fit")
+                for i, r in enumerate(rows)), "TRAIN role/target mismatch")
+    require(len({(r["origin"], r["width"], r["height"], r["reference_pixels_sha256"], r["distorted_pixels_sha256"]) for r in rows}) == len(rows),
+            "unique source/pixel keys required")
+    # Prove the cached preparation is the exact declared selection of the bound
+    # original feature bytes, not merely an array with the correct dimensions.
+    originals = {t["source_table"]: t for t in record["training_tables"]}
+    require(set(originals) == {r["source_table"] for r in rows}, "source table coverage")
+    cols = [f"f{i}" for i in ids]
+    for source, table in originals.items():
+        require(_sha256(source) == table["sha256"], "original TRAIN table changed")
+        data = pd.read_parquet(table["path"], columns=["row_id", *cols]).set_index("row_id")
+        require(data.index.is_unique, "ambiguous original row keys")
+        positions = [i for i, r in enumerate(rows) if r["source_table"] == source]
+        keys = [rows[i]["source_row_id"] for i in positions]
+        require(np.array_equal(data.loc[keys, cols].to_numpy(dtype=np.float32).astype(np.float64), X[positions]),
+                "prepared feature bytes differ from original TRAIN selection")
+        selection = json.loads(Path(table["selection"]["path"]).read_text())
+        require(selection["roles"] == {role: [rows[i]["source_row_id"] for i in positions if rows[i]["fit_role"] == role]
+                                      for role in table["usage"]}, "row selection differs from refit")
+    weights = np.empty(len(rows))
+    for origin in set(r["origin"] for r in rows):
+        mask = np.array([r["origin"] == origin for r in rows])
+        weights[mask] = 1.0 / mask.sum()
+    scaler = StandardScaler().fit(X[fit], sample_weight=weights[fit])
+    Z = np.clip(scaler.transform(X), -8, 8)
+    clf, iso = fit_canonical_hgb(Z, y, fit, cal, weights, 4101, canonical["hyperparameters"])
+    a.out_dir.mkdir(parents=True)
+    provenance = dict(manifest_sha256=_sha256(canonical_path), seed=4101, sklearn=_sklearn_version(),
+                      trainer_sha256=_sha256(__file__), feature_ids=ids, formula_revision=5,
+                      root_form="sqrt", negative_fit_weight=1, input_precision="f32",
+                      admitted_preparation_manifest_sha256=_sha256(a.refit_admission_manifest))
+    emit_zcth(str(a.out_dir/"head.zcth"), 720, ids, scaler.mean_, scaler.scale_, 8., clf, iso, .9,
+              provenance, input_precision="f32", formula_revision=5, training_admission=record)
+    np.savez_compressed(a.out_dir/"parity.npz", test_X=np.ascontiguousarray(X),
+                        test_raw=clf.decision_function(Z), test_p=iso.predict(clf.predict_proba(Z)[:, 1]))
+    (a.out_dir/"REFIT.json").write_text(json.dumps(dict(scope="registered TRAIN replay; no new selection",
+        rows=8205, fit=5499, calibrate=2706, seed=4101, head_sha256=_sha256(a.out_dir/"head.zcth"),
+        manifest_sha256=_sha256(a.refit_admission_manifest), model_qualified=False), indent=2)+"\n")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--refit-admission-manifest":
+        return refit_admitted_preparation(sys.argv[1:])
     if len(sys.argv) > 1 and sys.argv[1] == "--strict-train-manifest":
         return strict_train_main(sys.argv[1:])
     if len(sys.argv) > 1 and sys.argv[1] == "--canonical-manifest":

@@ -616,3 +616,21 @@ API. UTF-8 receipts retain their string format; other paths use Serde's tagged
 `OsStr` encoding (`Unix` raw bytes / `Windows` native code units). The stamping
 owner decodes the exact native path, never its lossy display string. Receipt
 ownership still begins only after a successful write.
+
+### SHIPPATH6 companion admission — 2026-10-05
+
+Opt-in ZCTH v4 binds the complete tree numerical contract to its TRAIN producer,
+formula revision, executable-bound decoder era, per-table bytes, declarations
+and row selections. The existing composition owner verifies these pins and
+actual scoring compatibility before emitting `qualified_provenance=true` for
+that companion member. Legacy v1/v2/v3 remain unqualified without admission.
+The append-only `r5integ_rev5` producer registration matches the original Rev5
+extraction receipt; its absent source commit is not inferred from an exporter
+snapshot. The decoder era identifies the exact historical decoding executable,
+not a separately proven codec commit or native color policy.
+
+The registered R5INTEG3 refit preserves all predictive bytes, 8205-row Rust
+parity and seven TRAIN integrity gates. The actual Table provenance gate passes
+a clearly scoped companion-only proof; the full historical-primary composition
+continues to fail that row. No human role decision or whole-model qualification
+changed. See [worklog](../benchmarks/shippath6_WORKLOG.md).

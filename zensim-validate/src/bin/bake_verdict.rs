@@ -4235,6 +4235,239 @@ fn feature_set_block(model: &Model, root: &Path) -> serde_json::Value {
 // Qualification must cover every model and every table, not just the primary
 // model/root label. Unknown historical declarations remain measurable but cannot
 // become a provenance pass. Reuse the table-admission and feature-set owners.
+/// Verify the v4 companion leg against its bound TRAIN files and the actual
+/// scoring tables. Runtime servability and scientific/product gates are separate.
+fn tree_companion_feature_set(
+    head: &zensim::corruption_head::CorruptionHead,
+    scoring_paths: &[PathBuf],
+) -> serde_json::Value {
+    use zensim_validate::feature_set as fs;
+    let verify = || -> Result<serde_json::Value, String> {
+        let record: serde_json::Value = serde_json::from_str(
+            head.training_admission_json()
+                .ok_or("tree companion has no content-bound training/decoder admission")?,
+        )
+        .map_err(|e| e.to_string())?;
+        let require = |ok: bool, why: &str| if ok { Ok(()) } else { Err(why.to_owned()) };
+        let tables = record["training_tables"]
+            .as_array()
+            .ok_or("missing TRAIN tables")?;
+        let allowed = |v: &serde_json::Value| {
+            v.as_array().is_some_and(|a| {
+                !a.is_empty()
+                    && a.iter()
+                        .all(|x| matches!(x.as_str(), Some("fit" | "calibrate")))
+            })
+        };
+        require(
+            !tables.is_empty()
+                && tables
+                    .iter()
+                    .all(|t| t["role"] == "TRAIN" && allowed(&t["usage"])),
+            "only explicit TRAIN fit/calibrate tables are permitted",
+        )?;
+        let usages: std::collections::BTreeSet<_> = tables
+            .iter()
+            .flat_map(|t| t["usage"].as_array().unwrap())
+            .filter_map(|v| v.as_str())
+            .collect();
+        require(
+            usages == ["calibrate", "fit"].into(),
+            "both TRAIN legs required",
+        )?;
+        let bindings = record["bindings"]
+            .as_array()
+            .ok_or("missing admission bindings")?;
+        let mut bound = std::collections::BTreeMap::new();
+        for b in bindings {
+            let kind = b["kind"].as_str().ok_or("binding kind required")?;
+            require(bound.insert(kind, b).is_none(), "duplicate binding kind")?;
+        }
+        for kind in [
+            "decoder-producer",
+            "extraction-manifest",
+            "content-admission",
+            "recipe",
+            "registration",
+            "preparation",
+            "rows",
+        ] {
+            require(
+                bound.contains_key(kind),
+                "missing producer/recipe/content bindings",
+            )?;
+        }
+        let mut specs = Vec::new();
+        for t in tables {
+            specs.extend([t, &t["declaration"], &t["selection"]]);
+            require(
+                t["declaration"]["path"].as_str()
+                    == t["path"]
+                        .as_str()
+                        .map(|p| format!("{p}.manifest.json"))
+                        .as_deref(),
+                "TRAIN declaration must be its actual per-table sidecar",
+            )?;
+        }
+        specs.extend(bindings);
+        // Preflight the complete role/path list before hashing any payload.
+        for spec in &specs {
+            let path = Path::new(spec["path"].as_str().ok_or("pinned path required")?);
+            require(path.is_absolute(), "absolute pinned paths required")?;
+            let resolved = path
+                .canonicalize()
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            require(
+                !resolved.components().any(|c| {
+                    let s = c.as_os_str().to_string_lossy().to_lowercase();
+                    s.contains("_sealed") || s.contains("holdout")
+                }),
+                "protected input path forbidden",
+            )?;
+        }
+        for spec in specs {
+            let path = Path::new(spec["path"].as_str().unwrap());
+            let sha =
+                zensim_validate::train_manifest::sha256_file(path).map_err(|e| e.to_string())?;
+            require(
+                spec["sha256"].as_str() == Some(&sha),
+                &format!("changed admission input: {}", path.display()),
+            )?;
+        }
+        let read_binding = |kind| -> Result<serde_json::Value, String> {
+            let bytes =
+                std::fs::read(bound[kind]["path"].as_str().unwrap()).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+        };
+        let extraction = read_binding("extraction-manifest")?;
+        require(
+            extraction["feature_set_id"] == record["feature_set_id"]
+                && extraction["formula_revision"]
+                    .as_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    == record["formula_revision"].as_u64()
+                && extraction["producer_binary_sha256"] == bound["decoder-producer"]["sha256"],
+            "extraction/decoder binding mismatch",
+        )?;
+        require(
+            record["decoder_era"].as_str()
+                == bound["decoder-producer"]["sha256"]
+                    .as_str()
+                    .map(|sha| format!("legacy-rgb8/executable-sha256:{sha}"))
+                    .as_deref(),
+            "decoder era must identify its pinned executable",
+        )?;
+        let content = read_binding("content-admission")?;
+        require(
+            content["schema"] == "canonical-corruption-content-admission-v1"
+                && content["complete"] == true
+                && content["unresolved"].as_array().is_some_and(Vec::is_empty),
+            "incomplete original content admission",
+        )?;
+        let producer_id = zensim::feature_set_id::FeatureSetId::parse(
+            record["feature_set_id"]
+                .as_str()
+                .ok_or("missing feature identity")?,
+        )
+        .ok_or("invalid feature identity")?;
+        require(
+            fs::registry()
+                .formula_revision(producer_id.era())
+                .map(u64::from)
+                == record["formula_revision"].as_u64(),
+            "unregistered/mismatched producer revision",
+        )?;
+        let ids: Vec<_> = head
+            .declared_feature_ids()
+            .iter()
+            .map(|&id| usize::from(id))
+            .collect();
+        let slots = zensim::feature_set_id::SlotSet::from_slots(ids.iter().copied());
+        let consumer = fs::FeatureSetRef {
+            id: zensim::feature_set_id::FeatureSetId::from_slots(
+                fs::compute_parts_for_slots(&slots),
+                producer_id.era(),
+                &slots,
+            )
+            .ok_or("invalid consumer identity")?,
+            slots,
+            layout: Some(head.caller_input_width()),
+            source: "v4 content-bound companion".into(),
+            inferred: false,
+        };
+        let training_paths: Vec<_> = tables
+            .iter()
+            .map(|t| PathBuf::from(t["path"].as_str().unwrap()))
+            .collect();
+        let admission =
+            fs::admit_training_tables(&training_paths, None, Some(&ids), Some(usize::MAX))?;
+        require(
+            admission["qualified_provenance"] == true,
+            "TRAIN feature/formula/decoder admission failed",
+        )?;
+        for (index, table) in tables.iter().enumerate() {
+            let declaration = &admission["tables"][index]["stored_declarations"];
+            require(
+                ["feature_set_id", "formula_revision", "decoder_era"]
+                    .iter()
+                    .all(|key| declaration[key] == record[key]),
+                "TRAIN declaration conflicts with the bound record",
+            )?;
+            let selection: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(table["selection"]["path"].as_str().unwrap())
+                    .map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            require(
+                selection["schema"] == "zcth-train-row-selection-v1"
+                    && selection["table_sha256"] == table["sha256"],
+                "row-selection table binding mismatch",
+            )?;
+            let roles = selection["roles"]
+                .as_object()
+                .ok_or("missing selection roles")?;
+            require(
+                roles.len() == table["usage"].as_array().unwrap().len()
+                    && table["usage"].as_array().unwrap().iter().all(|r| {
+                        roles
+                            .get(r.as_str().unwrap())
+                            .and_then(|v| v.as_array())
+                            .is_some_and(|a| !a.is_empty())
+                    }),
+                "row-selection usage mismatch",
+            )?;
+        }
+        require(!scoring_paths.is_empty(), "no scoring tables to verify")?;
+        for path in training_paths.iter().chain(scoring_paths) {
+            let producer = fs::table_feature_set_ref(path)?.ok_or("unknown table producer")?;
+            let mismatches = fs::check(&consumer, &producer);
+            require(
+                mismatches.is_empty(),
+                &format!("{}: {mismatches:?}", path.display()),
+            )?;
+        }
+        let scoring_admission =
+            fs::admit_training_tables(scoring_paths, None, Some(&ids), Some(usize::MAX))?;
+        require(
+            scoring_admission["qualified_provenance"] == true
+                && scoring_admission["formula_revision"] == record["formula_revision"],
+            "scoring feature/formula/decoder admission failed",
+        )?;
+        for t in scoring_admission["tables"].as_array().unwrap() {
+            require(
+                t["stored_declarations"]["decoder_era"] == record["decoder_era"],
+                "scoring decoder era mismatch",
+            )?;
+        }
+        Ok(
+            serde_json::json!({"role":"corruption", "feature_set_id":consumer.id.to_string(),
+            "training_admission":record,"table_admission":admission,"scoring_table_admission":scoring_admission,
+            "historical_replay":false,"qualified_provenance":true}),
+        )
+    };
+    verify().unwrap_or_else(|error| serde_json::json!({"role":"corruption", "qualified_provenance":false, "reason":error}))
+}
+
 fn composition_feature_sets(
     ens: &Ensemble,
     paths: &[PathBuf],
@@ -4288,10 +4521,8 @@ fn composition_feature_sets(
     let mut members: Vec<_> = ens.models.iter().map(|m| inspect(m, "member")).collect();
     match &ens.corruption_head {
         Some(CompanionHead::Znpr(model)) => members.push(inspect(model, "corruption")),
-        Some(CompanionHead::Tree(_)) => members.push(serde_json::json!({
-            "role":"corruption","qualified_provenance":false,
-            "reason":"tree companion has no declared training/decoder era admission; runtime servability is a separate check"})),
-        None => {},
+        Some(CompanionHead::Tree(head)) => members.push(tree_companion_feature_set(head, paths)),
+        None => {}
     }
     serde_json::json!({"scoring":scoring,"members":members})
 }
@@ -8111,5 +8342,245 @@ mod tests {
             "inverted band rendered as {cell:?}"
         );
         assert!(!srocc_cell("cid22", h_abs, h_signed).contains("INVERTED"));
+    }
+}
+
+#[cfg(test)]
+mod tree_admission_tests {
+    use super::*;
+    use serde_json::{Value, json};
+    use sha2::{Digest, Sha256};
+
+    fn pin(path: &Path) -> Value {
+        json!({"path":path,"sha256":zensim_validate::train_manifest::sha256_file(path).unwrap()})
+    }
+    fn write_json(path: &Path, value: &Value) -> Value {
+        std::fs::write(path, value.to_string()).unwrap();
+        pin(path)
+    }
+    fn head_bytes(record: &Value) -> Vec<u8> {
+        // Numerical bytes come from the real Python exporter fixture. Only
+        // metadata is changed here to exercise adversarial receipt bindings.
+        let mut bytes = include_bytes!("../../tests/data/companion-v4.zcth").to_vec();
+        let offset = u32::from_le_bytes(bytes[112..116].try_into().unwrap()) as usize;
+        bytes.truncate(offset);
+        let meta =
+            json!({"provenance":{"synthetic_format_fixture":true},"training_admission":record})
+                .to_string();
+        bytes[116..120].copy_from_slice(&(meta.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(meta.as_bytes());
+        let digest = Sha256::new()
+            .chain_update(&bytes[..120])
+            .chain_update(&bytes[152..])
+            .finalize();
+        bytes[120..152].copy_from_slice(&digest);
+        bytes
+    }
+    fn fixture(root: &Path) -> (Value, PathBuf) {
+        let table = root.join("train.csv");
+        let header = (0..720)
+            .map(|i| format!("f{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        std::fs::write(&table, format!("{header}\n")).unwrap();
+        let producer = root.join("synthetic-decoder.bin");
+        std::fs::write(&producer, b"synthetic decoder executable identity").unwrap();
+        let decoder = format!(
+            "legacy-rgb8/executable-sha256:{}",
+            pin(&producer)["sha256"].as_str().unwrap()
+        );
+        let id = "basic+peaks+v2@w1825/rev5_localwin#36c3f3af";
+        let declaration = write_json(
+            &root.join("train.csv.manifest.json"),
+            &json!({"feature_set_id":id,"formula_revision":5,"decoder_era":decoder}),
+        );
+        let selection = write_json(
+            &root.join("selection.json"),
+            &json!({"schema":"zcth-train-row-selection-v1","table_sha256":pin(&table)["sha256"],"roles":{"fit":["synthetic-fit"],"calibrate":["synthetic-calibrate"]}}),
+        );
+        let mut bindings = vec![];
+        for (kind, value) in [
+            (
+                "extraction-manifest",
+                json!({"feature_set_id":id,"formula_revision":"5","producer_binary_sha256":pin(&producer)["sha256"]}),
+            ),
+            (
+                "content-admission",
+                json!({"schema":"canonical-corruption-content-admission-v1","complete":true,"unresolved":[],"scope":"synthetic only"}),
+            ),
+            ("recipe", json!({"synthetic":true})),
+            ("registration", json!({"synthetic":true})),
+            ("preparation", json!({"synthetic":true})),
+            ("rows", json!({"synthetic":true})),
+        ] {
+            let mut p = write_json(&root.join(format!("{kind}.json")), &value);
+            p["kind"] = json!(kind);
+            bindings.push(p);
+        }
+        let mut producer_pin = pin(&producer);
+        producer_pin["kind"] = json!("decoder-producer");
+        bindings.push(producer_pin);
+        let mut table_pin = pin(&table);
+        table_pin["role"] = json!("TRAIN");
+        table_pin["usage"] = json!(["fit", "calibrate"]);
+        table_pin["declaration"] = declaration;
+        table_pin["selection"] = selection;
+        (
+            json!({"schema":"zcth-training-admission-v1","feature_set_id":id,"formula_revision":5,
+            "decoder_era":decoder,"head_feature_ids":[13,401,719],"training_tables":[table_pin],"bindings":bindings}),
+            table,
+        )
+    }
+    fn inspect(record: &Value, table: &Path) -> Value {
+        let head =
+            zensim::corruption_head::CorruptionHead::from_bytes(&head_bytes(record)).unwrap();
+        let ens = Ensemble {
+            models: vec![],
+            has_transforms: vec![],
+            corruption_head: Some(CompanionHead::Tree(Box::new(head))),
+            corruption_threshold: 10.0,
+            weights: None,
+        };
+        let composition = composition_feature_sets(
+            &ens,
+            &[table.to_path_buf()],
+            &json!({"fixture":"companion leg only"}),
+        );
+        composition["members"][0].clone()
+    }
+
+    #[test]
+    #[ignore = "requires explicit pinned TRAIN head/tables and an output directory"]
+    fn external_companion_admission_owner_audit() {
+        let head_path =
+            PathBuf::from(std::env::var("SHIPPATH6_HEAD").expect("pinned TRAIN head required"));
+        let base_path =
+            PathBuf::from(std::env::var("SHIPPATH6_BASE").expect("pinned original base required"));
+        let tables: Vec<_> = std::env::split_paths(
+            &std::env::var_os("SHIPPATH6_TABLES").expect("admitted TRAIN tables required"),
+        )
+        .collect();
+        let out =
+            PathBuf::from(std::env::var("SHIPPATH6_PROOF_OUT").expect("proof output required"));
+        let head = zensim::corruption_head::CorruptionHead::from_bytes(
+            &std::fs::read(&head_path).unwrap(),
+        )
+        .unwrap();
+        let model = Model::from_bytes(&std::fs::read(&base_path).unwrap()).unwrap();
+        let scoring = json!({"surface":"zensim::BakeScorer","members":[pin(&base_path)],"corruption":pin(&head_path)});
+        let ens = Ensemble {
+            models: vec![model],
+            has_transforms: vec![false],
+            corruption_head: Some(CompanionHead::Tree(Box::new(head))),
+            corruption_threshold: 10.,
+            weights: None,
+        };
+        let composition = composition_feature_sets(&ens, &tables, &scoring);
+        assert_eq!(composition["members"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            composition["members"][1]["qualified_provenance"], true,
+            "{composition}"
+        );
+        // This original full primary is historical research. The pending human
+        // role decision cannot be bypassed by admitting only its companion.
+        assert_eq!(composition["members"][0]["qualified_provenance"], false);
+        std::fs::create_dir(&out).unwrap();
+        write_json(
+            &out.join("FULL_COMPOSITION.json"),
+            &json!({"scope":"original historical primary + newly admitted companion; not qualified","scoring":scoring,"feature_set_composition":composition}),
+        );
+        let leg_scoring =
+            json!({"surface":"zensim::BakeScorer","members":[],"corruption":pin(&head_path)});
+        write_json(
+            &out.join("COMPANION_LEG_ONLY.json"),
+            &json!({"scope":"companion Table provenance leg only; no primary or product qualification",
+            "scoring":leg_scoring,"feature_set_composition":{"scoring":leg_scoring,"members":[composition["members"][1].clone()]}}),
+        );
+        println!(
+            "SHIPPATH6_COMPANION Table provenance: verified actual owner on {} TRAIN tables",
+            tables.len()
+        );
+    }
+    #[test]
+    fn actual_composition_verifies_bound_tree_leg_and_refuses_changes() {
+        let root = std::env::temp_dir().join(format!("zcth-verdict-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let (record, table) = fixture(&root);
+        assert_eq!(inspect(&record, &table)["qualified_provenance"], true);
+        let legacy = zensim::corruption_head::CorruptionHead::from_bytes(include_bytes!(
+            "../../tests/data/companion-v3.zcth"
+        ))
+        .unwrap();
+        assert!(legacy.training_admission_json().is_none());
+        assert_eq!(
+            tree_companion_feature_set(&legacy, std::slice::from_ref(&table))["qualified_provenance"],
+            false
+        );
+        let current =
+            zensim::corruption_head::CorruptionHead::from_bytes(&head_bytes(&record)).unwrap();
+        assert_eq!(
+            tree_companion_feature_set(&current, &[])["qualified_provenance"],
+            false
+        );
+        for role in ["EVAL", "TEST", "train", ""] {
+            let mut changed = record.clone();
+            changed["training_tables"][0]["role"] = json!(role);
+            changed["training_tables"][0]["path"] = json!("/var/tmp/_sealed/never-read.parquet");
+            let result = inspect(&changed, &table);
+            assert_eq!(result["qualified_provenance"], false);
+            assert!(result["reason"].as_str().unwrap().contains("TRAIN"));
+        }
+        let mut specs = vec![
+            record["training_tables"][0].clone(),
+            record["training_tables"][0]["declaration"].clone(),
+            record["training_tables"][0]["selection"].clone(),
+        ];
+        specs.extend(record["bindings"].as_array().unwrap().iter().cloned());
+        for spec in specs {
+            let p = Path::new(spec["path"].as_str().unwrap());
+            let original = std::fs::read(p).unwrap();
+            let mut changed = original.clone();
+            changed.extend_from_slice(b"changed");
+            std::fs::write(p, changed).unwrap();
+            assert_eq!(
+                inspect(&record, &table)["qualified_provenance"],
+                false,
+                "{}",
+                p.display()
+            );
+            std::fs::write(p, original).unwrap();
+        }
+        for (field, value) in [
+            ("feature_set_id", json!("unknown")),
+            ("formula_revision", json!(4)),
+            ("decoder_era", json!("different")),
+        ] {
+            let mut changed = record.clone();
+            let p = Path::new(
+                changed["training_tables"][0]["declaration"]["path"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .to_path_buf();
+            let original = std::fs::read(&p).unwrap();
+            let mut declaration: Value = serde_json::from_slice(&original).unwrap();
+            declaration[field] = value;
+            changed["training_tables"][0]["declaration"] = write_json(&p, &declaration);
+            assert_eq!(inspect(&changed, &table)["qualified_provenance"], false);
+            std::fs::write(p, original).unwrap();
+        }
+        let mut changed = record.clone();
+        let selection_path = Path::new(
+            changed["training_tables"][0]["selection"]["path"]
+                .as_str()
+                .unwrap(),
+        )
+        .to_path_buf();
+        let mut selection: Value =
+            serde_json::from_slice(&std::fs::read(&selection_path).unwrap()).unwrap();
+        selection["roles"]["evaluate"] = json!(["forbidden"]);
+        changed["training_tables"][0]["selection"] = write_json(&selection_path, &selection);
+        assert_eq!(inspect(&changed, &table)["qualified_provenance"], false);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

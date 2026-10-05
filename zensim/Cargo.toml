@@ -74,9 +74,10 @@ iw-diagnostics = []
 ## The companion CORRUPTION HEAD: a gradient-boosted tree ensemble in its own
 ## `ZCTH` wire format (`zensim::corruption_head`), plus the one owner of the
 ## deploy composition. NOT default: `Zensim::compute` never runs it, and the
-## public API delta on a default build is zero. Adds no dependency.
+## public API delta on a default build is zero. V4 admission validation uses
+## optional JSON/SHA dependencies only when this feature is enabled.
 ## Design: `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`.
-corruption-head = []
+corruption-head = ["dep:serde_json", "dep:sha2"]
 ## TEST-ONLY scalar oracle for the pooled-feature math (`feature_v2::oracle`):
 ## an L1 Neumaier-compensated reference plus an L2 EXACT Shewchuk-expansion
 ## accumulator, used as ground truth for the era-2 error bounds
@@ -208,6 +209,8 @@ zenpredict = { workspace = true }
 # public API (`Zensim::with_stop`, `ZensimError::Cancelled`).
 enough = { workspace = true }
 zenresize = { workspace = true }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.11.0", optional = true }
 
 [dev-dependencies]
 # jxl-encoder-family perceptual diffmap, for the RD block-selection comparison
