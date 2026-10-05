@@ -573,3 +573,24 @@ quantizes before TRAIN spline calibration. A dense 420-input model reaching f719
 therefore needs 720 identity-indexed feature positions. No serving/public API or
 feature arithmetic changed. `benchmarks/shippath2_WORKLOG.md` records the bounded
 TRAIN-only smoke and the remaining scientific/product limitations.
+
+### SHIPPATH3 review corrections — 2026-10-05
+
+Epoch metadata stamping requires an absent or empty checkpoint directory at
+the Rust entry point whenever dumps are enabled. This preflight runs before
+table admission/training. Reusing any nonempty directory fails without changing
+its surviving models; a filename/epoch range cannot prove checkpoint ownership.
+Fresh-run arithmetic, prefix metadata and final-epoch selection are unchanged.
+
+New full-recipe admission receipts bind absolute resolved `source_root` and
+`bank_root`, alongside the current view root. Table declarations carry
+`admission_root` and immutable ancestry through derived selections. Both strict
+CLIs guard the destination and `TMPDIR` before creating any output; the shared
+training/curation/coverage owners also guard their derived paths, sidecars and
+key files. Resolved symlinks into an input root are refused. Admission builders
+protect their source/bank ancestry too. Historical default routing is unchanged.
+
+Older SHIPPATH2 views without a bound bank root are refused by the strict output
+preflight and must be regenerated in a fresh location. Never edit a frozen view
+in place to add this binding. Provenance and the pending human-role decision
+retain their original meaning; these path protections grant no scientific use.

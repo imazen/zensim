@@ -238,6 +238,137 @@ class RecipeAdmissionTests(unittest.TestCase):
             owner.admit_recipe(self.bank, alias, self.out)
         self.assertFalse(self.out.exists())
 
+    def immutable_snapshot(self):
+        return {str(p): owner.sha(p) for root in (self.source, self.bank, self.out)
+                for p in root.rglob("*") if p.is_file()}
+
+    def test_admission_outputs_refuse_source_bank_and_resolved_aliases(self):
+        before = self.immutable_snapshot()
+        alias = self.root / "bank-alias"
+        alias.symlink_to(self.bank, target_is_directory=True)
+        for root in (self.source, self.bank, alias):
+            dest = root / "forbidden-admission"
+            with self.subTest(root=root):
+                with self.assertRaisesRegex(ValueError, "immutable input root"):
+                    owner.admit_recipe(self.bank, self.source, dest)
+                self.assertFalse(dest.exists())
+                self.assertEqual(before, self.immutable_snapshot())
+
+    def test_old_admission_without_bank_binding_is_refused_before_output(self):
+        self.admit()
+        rp = self.out / "wide/main/real/receipt.json"
+        receipt = json.loads(rp.read_text())
+        receipt["admission_view"].pop("bank_root")
+        self.json(rp, receipt)
+        frozen_path = self.out / "wide/frozen.json"
+        frozen = json.loads(frozen_path.read_text())
+        frozen["admission_view"] = receipt["admission_view"]
+        frozen["wide_receipts"]["main/real"] = owner.sha(rp)
+        self.json(frozen_path, frozen)
+        dest = self.root / "safe-destination"
+        with self.assertRaisesRegex(ValueError, "bank_root; regenerate"):
+            fit.strict_output_preflight(self.out, dest)
+        self.assertFalse(dest.exists())
+
+    def test_pool_admission_refuses_original_instrument_and_symlink(self):
+        before = self.immutable_snapshot()
+        alias = self.root / "source-alias"
+        alias.symlink_to(self.source, target_is_directory=True)
+        for root in (self.source, alias):
+            dest = root / "forbidden-pool"
+            with self.assertRaisesRegex(ValueError, "immutable input root"):
+                coverage.admit_pool(self.source / "e15", dest)
+            self.assertFalse(dest.exists())
+            self.assertEqual(before, self.immutable_snapshot())
+
+    def test_strict_cli_outputs_and_scratch_refuse_all_input_roots(self):
+        import os
+        import v2_common as common
+        import v2_confirm_fit as confirm
+        self.admit()
+        before = self.immutable_snapshot()
+        alias = self.root / "source-alias"
+        alias.symlink_to(self.source, target_is_directory=True)
+        safe_scratch = self.root / "safe-scratch"
+        safe_scratch.mkdir()
+        for module in (fit, confirm):
+            for root in (self.source, self.bank, self.out, alias):
+                for scratch_case in (False, True):
+                    forbidden = root / f"forbidden-{module.__name__}-{scratch_case}"
+                    dest = self.root / "safe-dest" if scratch_case else forbidden
+                    scratch = root if scratch_case else safe_scratch
+                    argv = ["test", "--root", str(self.out), "--strict-admission", "--train-only",
+                            "--dest", str(dest), "--spec",
+                            f"sel:{common.selection_id([0])}@h32:H128:cv16:cf98", "--columns", "0",
+                            "--head", "N", "--seed-index", "0"]
+                    if module is fit:
+                        argv += ["--heldout", "tid2013"]
+                    with self.subTest(module=module.__name__, root=root, scratch=scratch_case), \
+                         patch.object(sys, "argv", argv), patch.object(common, "V2", self.out), \
+                         patch.object(fit, "V2", self.out), patch.object(confirm, "V2", self.out), \
+                         patch.dict(os.environ, {"TMPDIR": str(scratch)}), \
+                         patch.object(fit, "run", side_effect=AssertionError("trainer must not run")):
+                        with self.assertRaisesRegex(ValueError, "immutable input root"):
+                            module.main()
+                        self.assertFalse(dest.exists())
+                        self.assertFalse(forbidden.exists())
+                        self.assertEqual(before, self.immutable_snapshot())
+
+    def test_derived_coverage_and_curated_outputs_refuse_all_input_roots(self):
+        self.admit()
+        before = self.immutable_snapshot()
+        src = self.group("safesyn_fit")[0][1]
+        target = pq.read_table(src, columns=["human_score"])["human_score"].to_numpy()
+        alias = self.root / "view-alias"
+        alias.symlink_to(self.out, target_is_directory=True)
+        for root in (self.source, self.bank, self.out, alias):
+            with self.subTest(root=root):
+                with self.assertRaisesRegex(ValueError, "immutable input root"):
+                    teacher.coverage_leg(0x98, root, admitted_root=self.out)
+                with self.assertRaisesRegex(ValueError, "immutable input root"):
+                    teacher.write_curated(src, root / "forbidden-curated.parquet",
+                                          np.ones(len(target), dtype=bool), target)
+                with (self.assertRaisesRegex(ValueError, "immutable input root"),
+                      patch.object(fit, "run", side_effect=AssertionError("trainer must not run"))):
+                    fit.train_and_select(self.group("safesyn_fit"), 1103, 101, 1853,
+                        self.root / "keep", "N", root, strict_admission=True)
+                self.assertEqual(before, self.immutable_snapshot())
+
+    def test_safe_cli_outputs_still_refuse_pending_human_role(self):
+        import os
+        import v2_common as common
+        import v2_confirm_fit as confirm
+        self.admit()
+        before = self.immutable_snapshot()
+        scratch = self.root / "safe-scratch"
+        scratch.mkdir()
+        original_read = pq.read_table
+
+        def label_free_human_read(path, *args, **kwargs):
+            if Path(path).name.startswith(("human_", *SOURCE_ORDER)):
+                columns = kwargs.get("columns")
+                self.assertIsNotNone(columns)
+                self.assertFalse(set(columns) & {"target", "human_score"})
+            return original_read(path, *args, **kwargs)
+
+        for module in (fit, confirm):
+            dest = self.root / f"safe-{module.__name__}"
+            argv = ["test", "--root", str(self.out), "--strict-admission", "--train-only",
+                    "--dest", str(dest), "--spec", f"sel:{common.selection_id([0])}@h32:H128:cv16:cf98",
+                    "--columns", "0", "--head", "N", "--seed-index", "0"]
+            if module is fit:
+                argv += ["--heldout", "tid2013"]
+            with (patch.object(sys, "argv", argv), patch.object(common, "V2", self.out),
+                  patch.object(fit, "V2", self.out), patch.object(confirm, "V2", self.out),
+                  patch.dict(os.environ, {"TMPDIR": str(scratch)}),
+                  patch.object(pq, "read_table", side_effect=label_free_human_read),
+                  patch.object(fit, "run", side_effect=AssertionError("trainer must not run"))):
+                with self.assertRaisesRegex(ValueError, "PENDING SHIPPATH-human-production-role"):
+                    module.main()
+                self.assertTrue((dest / "keep_features.txt").is_file())
+                self.assertEqual(before, self.immutable_snapshot())
+                self.assertEqual(list(scratch.iterdir()), [])
+
     def test_last_epoch_wins_even_when_development_best_is_earlier(self):
         self.admit()
         dest = self.root / "cell"

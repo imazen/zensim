@@ -23,7 +23,7 @@ import numpy as np
 
 from v2_common import (load_frozen, recipe_of, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
-from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select, strict_training_groups
+from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select, strict_training_groups, strict_output_preflight
 
 CONFIRM_SCHEMA = "rev4-featpot-v2c-confirm-v1"
 RESULT_SCHEMA = "rev4-featpot-v2c-confirm-cell-v1"
@@ -60,14 +60,8 @@ def main() -> None:
     args = ap.parse_args()
     if args.strict_admission and (args.dest is None or not args.train_only):
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
-    if args.strict_admission and (args.dest.resolve() == V2.resolve() or V2.resolve() in args.dest.resolve().parents):
-        ap.error("strict --dest must be outside the immutable admission root")
     if args.strict_admission:
-        from v2c_wide import safe_path
-        safe_path(V2)
-        safe_path(args.dest)
-        if args.dest.exists() and any(args.dest.iterdir()):
-            raise ValueError("strict route requires a fresh destination; cannot reuse a historical result")
+        strict_output_preflight(V2, args.dest)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())

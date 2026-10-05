@@ -78,11 +78,14 @@ def pool_declaration(source: Path, stored: dict, revision: int) -> dict:
             "row_selection_rule": "ordered indices into selection.parquet; original identity/single-rung exclusions retained"}
 
 
-def admit_pool(source: Path, out: Path) -> None:
+def admit_pool(source: Path, out: Path, *, immutable_roots=(), admission_root: Path | None = None) -> None:
     """Fresh byte-identical view of the pinned Rev5 pool; never writes the frozen source."""
     from v2_teacher import POOL_SHA_REV5, POOL_KEYS_SHA
     from v2c_wide import safe_path
+    from v2_common import refuse_immutable_output
     source, out = safe_path(source), safe_path(out)
+    roots = (source.resolve(), source.parent.resolve(), *immutable_roots)
+    refuse_immutable_output(out, roots)
     if out.exists():
         raise ValueError("coverage admission output must be fresh")
     pool, keys = source / "coverage_pool.parquet", source / "coverage_pool.keys.parquet"
@@ -101,7 +104,10 @@ def admit_pool(source: Path, out: Path) -> None:
         raise ValueError("coverage receipt/producer changed")
     declaration = pool_declaration(source, stored, 5)
     declaration.update({"source_manifest_sha256": e14.sha256(stored_path),
-                        "source_receipt_sha256": e14.sha256(receipt_path), "feature_values_changed": False})
+                        "source_receipt_sha256": e14.sha256(receipt_path), "feature_values_changed": False,
+                        "immutable_input_roots": [str(p) for p in (out.resolve(), *roots)]})
+    if admission_root is not None:
+        declaration["admission_root"] = str(admission_root.resolve())
     out.mkdir(parents=True)
     for path in (pool, keys):
         shutil.copyfile(path, out / path.name)

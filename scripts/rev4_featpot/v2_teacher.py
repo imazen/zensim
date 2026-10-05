@@ -79,12 +79,17 @@ def write_curated(src: Path, dest: Path, keep: np.ndarray, new_target: np.ndarra
     src, dest = safe_path(src), safe_path(dest)
     if dest.exists() or Path(f"{dest}.manifest.json").exists() or key_path(dest).exists():
         raise ValueError(f"{dest}: curated output must be fresh")
+    source_manifest = Path(f"{src}.manifest.json")
+    declaration = json.loads(source_manifest.read_text()) if source_manifest.is_file() else {}
+    if declaration:
+        from v2_common import refuse_immutable_output, table_input_roots
+        roots = table_input_roots(src)
+        for path in (dest, Path(f"{dest}.manifest.json"), key_path(dest)):
+            refuse_immutable_output(path, roots)
     keep = np.asarray(keep, dtype=bool)
     pf = pq.ParquetFile(src)
     if pf.metadata.num_rows != len(keep) or len(new_target) != len(keep):
         raise ValueError(f"{src}: {pf.metadata.num_rows} rows, mask has {len(keep)}")
-    source_manifest = Path(f"{src}.manifest.json")
-    declaration = json.loads(source_manifest.read_text()) if source_manifest.is_file() else {}
     source_keys = key_path(src)
     keys = None
     if declaration.get("feature_set_id"):
@@ -192,6 +197,9 @@ def _packed_or_root(name: str) -> Path:
 def coverage_leg(mask: int, scratch: Path, *, admitted_root: Path | None = None) -> tuple[Path, dict]:
     """Rows of the pinned coverage pool whose family bit is set in `mask`, copied to scratch; returns (path, record)."""
     from v2c_wide import safe_path
+    if admitted_root is not None:
+        from v2_common import admission_input_roots, refuse_immutable_output
+        refuse_immutable_output(scratch, admission_input_roots(admitted_root))
     pool, keys = ((safe_path(admitted_root) / "e15" / Path(POOL_NAME).name,
                    safe_path(admitted_root) / "e15" / Path(POOL_KEYS_NAME).name) if admitted_root is not None else
                   (_packed_or_root(POOL_NAME), _packed_or_root(POOL_KEYS_NAME)))

@@ -71,6 +71,17 @@ def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
     return pred
 
 
+def strict_group_input_roots(groups: list) -> tuple[Path, ...]:
+    from v2_common import table_input_roots
+    roots = []
+    for name, path, _, _, _ in groups:
+        bound = table_input_roots(path)
+        if not bound:
+            raise ValueError(f"{name}: strict outputs require immutable input root bindings; regenerate a fresh admission view")
+        roots.extend(bound)
+    return tuple(dict.fromkeys(roots))
+
+
 def train_command(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
                   out: Path, recipe: dict | None = None, *, strict_admission: bool = False,
                   data_role_decision: Path | None = None) -> list[str]:
@@ -78,6 +89,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
     if strict_admission:
         strict_training_groups(groups, data_role_decision)
+        from v2_common import refuse_immutable_output
+        roots = strict_group_input_roots(groups)
+        for path in (out, keep_file):
+            refuse_immutable_output(path, roots)
     # Strict defaults use this checkout's trainer, not the pinned historical
     # fit-cell binary. An explicit existing binary-directory override wins.
     trainer = (Path(os.environ.get("REV4_V2_BIN_DIR", str(REPO / "target/debug"))) / "zensim_mlp_train"
@@ -159,6 +174,13 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
     4-decimal curve, which can differ from the trainer's full-precision pick on ties (label only; the bake is the
     trainer's). last: the trainer also dumps the final epoch's weights (--dump-checkpoints-every EPOCHS-1 fires at epoch 0
     and EPOCHS-1) and that checkpoint is the selected bake (refit/last.bin)."""
+    # Guard derived paths even when this owner is called without either CLI.
+    if strict_admission:
+        from v2_common import refuse_immutable_output
+        roots = strict_group_input_roots(groups)
+        for path in (dest, dest / "refit", dest / "refit/best.bin", dest / "refit/last.bin",
+                     dest / "ckpt", dest / "train.log", keep_file):
+            refuse_immutable_output(path, roots)
     # Admission precedes output creation and the Rust trainer's payload reads.
     cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe,
                         strict_admission=strict_admission, data_role_decision=data_role_decision)
@@ -218,6 +240,17 @@ def resolve_keep(core_spec: str, columns: str | None, lists: dict) -> tuple[str,
     raise ValueError(f"{core_spec}: not in the keep lists")
 
 
+def strict_output_preflight(root: Path, dest: Path) -> None:
+    """Protect every immutable ancestor before CLI destination/scratch writes."""
+    from v2_common import admission_input_roots, refuse_immutable_output
+    roots = admission_input_roots(root)
+    for path in (dest, dest / "keep_features.txt", dest / "refit", dest / "ckpt",
+                 Path(os.environ.get("TMPDIR") or dest)):
+        refuse_immutable_output(path, roots)
+    if dest.exists() and any(dest.iterdir()):
+        raise ValueError("strict route requires a fresh destination; cannot reuse a historical result")
+
+
 def main() -> None:
     os.environ.setdefault("ZEN_PANEL_BIN", str(PANEL))  # the fit-cell executor sets it; local runs may not
     ap = argparse.ArgumentParser(description=__doc__)
@@ -234,14 +267,8 @@ def main() -> None:
     args = ap.parse_args()
     if args.strict_admission and (args.dest is None or not args.train_only):
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
-    if args.strict_admission and (args.dest.resolve() == V2.resolve() or V2.resolve() in args.dest.resolve().parents):
-        ap.error("strict --dest must be outside the immutable admission root")
     if args.strict_admission:
-        from v2c_wide import safe_path
-        safe_path(V2)
-        safe_path(args.dest)
-        if args.dest.exists() and any(args.dest.iterdir()):
-            raise ValueError("strict route requires a fresh destination; cannot reuse a historical result")
+        strict_output_preflight(V2, args.dest)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())

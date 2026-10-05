@@ -144,6 +144,54 @@ def load_frozen(root: Path | None = None, *, training_only: bool = False) -> tup
     return record, sha(path)
 
 
+def refuse_immutable_output(path: Path, roots) -> Path:
+    """Refuse resolved equality/ancestry, including symlinks and fresh children."""
+    from v2c_wide import safe_path
+    path = safe_path(path)
+    resolved = path.resolve()
+    for root in roots:
+        root = safe_path(root).resolve()
+        if resolved == root or root in resolved.parents:
+            raise ValueError(f"{path}: output lies inside immutable input root {root}")
+    return path
+
+
+def admission_input_roots(root: Path) -> tuple[Path, ...]:
+    """Read all protected roots from the hash-bound training admission receipt.
+
+    Older admission views without a bank-root binding must be regenerated at
+    a fresh location; never amend their frozen receipt in place.
+    """
+    from v2c_wide import safe_path
+    root = safe_path(root)
+    frozen, _ = load_frozen(root, training_only=True)
+    receipt = json.loads((root / "wide/main/real/receipt.json").read_text())
+    view = receipt.get("admission_view", {})
+    if (frozen.get("schema") != "rev5-recipe-admission-freeze-v1"
+            or frozen.get("admission_view") != view or view.get("schema") != "rev5-recipe-admission-v1"):
+        raise ValueError("strict outputs require a bound full-recipe admission record")
+    roots = [root.resolve()]
+    for key in ("source_root", "bank_root"):
+        value = view.get(key)
+        if not isinstance(value, str) or not value or not Path(value).is_absolute():
+            raise ValueError(f"admission record lacks an absolute {key}; regenerate a fresh admission view")
+        roots.append(safe_path(value).resolve())
+    for value in view.get("immutable_input_roots", []):
+        if not isinstance(value, str) or not value or not Path(value).is_absolute():
+            raise ValueError("admission record contains an invalid immutable input root")
+        roots.append(safe_path(value).resolve())
+    return tuple(roots)
+
+
+def table_input_roots(table: Path) -> tuple[Path, ...]:
+    """Carry immutable ancestry through selected/curated table declarations."""
+    from v2c_wide import safe_path
+    declaration = json.loads(safe_path(Path(f"{table}.manifest.json")).read_text())
+    if declaration.get("admission_root"):
+        return admission_input_roots(Path(declaration["admission_root"]))
+    return tuple(safe_path(p).resolve() for p in declaration.get("immutable_input_roots", []))
+
+
 def split_weight(spec: str) -> tuple[str, float | None]:
     """'oracle_hi~p1@h2' -> ('oracle_hi~p1', 2.0): the instrument-retune sweep's human-weight override (design log E2).
     No suffix -> (spec, None), i.e. NOMINAL_WEIGHT['human']."""

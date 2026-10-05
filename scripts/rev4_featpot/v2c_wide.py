@@ -705,6 +705,8 @@ def admit_teachers(bank: Path, source: Path, out: Path) -> None:
     if PROFILE.revision != 5 or PROFILE.era != "rev5_localwin":
         raise ValueError("admit-teachers requires the frozen Rev5 local-window profile")
     source, out, bank = safe_path(source), safe_path(out), safe_path(bank)
+    from v2_common import refuse_immutable_output
+    refuse_immutable_output(out, (source, bank))
     if out.exists():
         raise ValueError(f"{out}: admission output must be fresh")
     wide = source / "wide" / "main" / "real"
@@ -767,16 +769,21 @@ def admit_recipe(bank: Path, source: Path, out: Path) -> None:
     feature cells are decoded; original Parquet bytes and ordering survive.
     """
     import copy
-    from v2_common import human_dev
+    from v2_common import admission_input_roots, human_dev, refuse_immutable_output
     from v2_teacher import row_keys_sha, selection_sha
     from e15_coverage import admit_pool
     bank, source, out = safe_path(bank), safe_path(source), safe_path(out)
+    refuse_immutable_output(out, (source, bank))
     if PROFILE.revision != 5 or PROFILE.era != "rev5_localwin" or out.exists():
         raise ValueError("admit-recipe needs the Rev5 profile and a fresh output")
     wide = source / "wide/main/real"
     rp = wide / "receipt.json"
     receipt = json.loads(rp.read_text())
     frozen = json.loads((source / "wide/frozen.json").read_text())
+    input_roots = (source.resolve(), bank.resolve())
+    if frozen.get("schema") == "rev5-recipe-admission-freeze-v1":
+        input_roots += admission_input_roots(source)
+        refuse_immutable_output(out, input_roots)
     if (frozen["wide_receipts"].get("main/real") != sha(rp) or receipt["schema"] != SCHEMA
             or receipt["family"] != "main" or receipt["variant"] != "real" or not receipt["complete"]
             or receipt["formula_revision"] != 5 or receipt["feature_set_id"] != PROFILE.feature_set_id
@@ -845,10 +852,12 @@ def admit_recipe(bank: Path, source: Path, out: Path) -> None:
                     separators=(",", ":")).encode()).hexdigest(),
                 "data_role": "design-released-human" if human else "TRAIN oracle teacher",
                 "data_role_decision_required": "SHIPPATH-human-production-role" if human else None,
-                "human_sources": members if human else [], "feature_values_changed": False}
+                "human_sources": members if human else [], "feature_values_changed": False,
+                "admission_root": str(out.resolve()),
+                "immutable_input_roots": [str(p) for p in (out.resolve(), *input_roots)]}
             prepared.append((name, split, path, rec, keys, declarations))
     # Coverage validates before copying its frozen pool. Failure never edits the source.
-    admit_pool(source / "e15", out / "e15")
+    admit_pool(source / "e15", out / "e15", immutable_roots=input_roots, admission_root=out)
     dest_wide = out / "wide/main/real"
     dest_wide.mkdir(parents=True)
     new_receipt = copy.deepcopy(receipt)
@@ -866,7 +875,9 @@ def admit_recipe(bank: Path, source: Path, out: Path) -> None:
         new_receipt["legs"][name][split] = updated
         if split == "full":
             new_receipt["legs"][name]["keys_sha256"] = sha(kp)
-    new_receipt["admission_view"] = {"schema": "rev5-recipe-admission-v1", "source_root": str(source),
+    new_receipt["admission_view"] = {"schema": "rev5-recipe-admission-v1", "source_root": str(source.resolve()),
+        "bank_root": str(bank.resolve()),
+        "immutable_input_roots": [str(p) for p in input_roots],
         "source_receipt_sha256": sha(rp), "feature_values_changed": False,
         "human_role_decision": "PENDING: SHIPPATH-human-production-role", "table_code": code_identity()}
     dest_rp = dest_wide / "receipt.json"

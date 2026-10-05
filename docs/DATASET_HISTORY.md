@@ -5003,3 +5003,16 @@ needed an ID-indexed anchor width fix for declared dense inputs; a NaN-hole
 regression and packed inference check cover it. No public API, arithmetic,
 production weight/default or scientific qualification changed. Evidence/report:
 `benchmarks/shippath2_WORKLOG.md`, `~/tmp/zensim-paper/rev4/SHIPPATH2_DONE.md`.
+
+
+## 2026-10-05 — SHIPPATH3 review corrections (no new data)
+
+Independent review reproduced stale checkpoint provenance relabeling and writes
+under immutable source/bank roots. Rust now rejects nonempty checkpoint output
+directories before admission/training. Fresh full-recipe receipts bind the bank
+and original source paths; strict destination, scratch and derived-output guards
+resolve symlink ancestry against all immutable inputs. Older views without that
+binding require a fresh rebuild, preserving their frozen bytes. Regression data
+is synthetic only; no human payload, protected label, scientific role, feature
+value, trainer arithmetic or model qualification changed. See
+`benchmarks/shippath3_WORKLOG.md` and `~/tmp/zensim-paper/rev4/SHIPPATH3_DONE.md`.
