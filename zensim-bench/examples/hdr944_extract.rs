@@ -453,7 +453,20 @@ fn main() {
                             }
                             return Ok(line);
                         }
-                        let r = z
+                        let canonical = if let Some(scorer) = &scorer
+                            && zensim::feature_v2::active_formula_revision() == zensim::feature_v2::FormulaRevision::Rev5
+                        {
+                            // Rev5 supports the registered planned basic/peaks/v2
+                            // read set, not the legacy append2/full-pool walk.
+                            let ids = scorer.consumed_feature_ids().map_err(|e| e.to_string())?;
+                            let req = zensim::research::Request::for_slots(
+                                zensim::feature_set_id::SlotSet::from_slots(ids.iter().map(|&x| usize::from(x))),
+                                zensim::research::full_width(),
+                            ).with_parallel(false);
+                            zensim::research::extract_hdr(&req, &source, &distorted, encoding)
+                                .map_err(|e| format!("audit research: {e:?}"))?.values().to_vec()
+                        } else {
+                            let r = z
                             .compute_folded720_append2_features_hdr(
                                 &source,
                                 &distorted,
@@ -465,8 +478,9 @@ fn main() {
                                 &mut scratch,
                             )
                             .map_err(|e| format!("compute {}: {e:?}", c.dist_base))?;
-                        let feats = r.features();
-                        assert_eq!(feats.len(), 944, "regime width");
+                            r.features().to_vec()
+                        };
+                        let feats = &canonical;
                         if let Some(scorer) = &mut scorer {
                             let ids = scorer.consumed_feature_ids().map_err(|e| e.to_string())?;
                             let identical = primaries == dist_primaries && r16 == d16;
@@ -520,7 +534,7 @@ fn main() {
     let manifest = serde_json::json!({
         "input_contract":input_contract,
         "formula_revision":format!("{:?}",zensim::feature_v2::active_formula_revision()),
-        "rows":cells.len(), "feature_count":if score_bakes.is_empty() { Some(if requested_ids.is_some() { zensim::research::full_width() } else { 944 }) } else { None },
+        "rows":cells.len(), "feature_count":if score_bakes.is_empty() { Some(if requested_ids.is_some() || (composition.is_some() && zensim::feature_v2::active_formula_revision() == zensim::feature_v2::FormulaRevision::Rev5) { zensim::research::full_width() } else { 944 }) } else { None },
         "score_bakes":score_bakes,
         "refused_scores":refused_count,
         "reference_primaries":if declared_cicp { "per-image cICP" } else { "BT.2020" },
@@ -562,7 +576,7 @@ fn main() {
         String::from("ref_path\tdist_path")
     };
     if score_bakes.is_empty() {
-        for i in 0..if requested_ids.is_some() {
+        for i in 0..if requested_ids.is_some() || (composition.is_some() && zensim::feature_v2::active_formula_revision() == zensim::feature_v2::FormulaRevision::Rev5) {
             zensim::research::full_width()
         } else {
             944

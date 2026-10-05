@@ -5096,3 +5096,39 @@ were read. No model, table, role, exposure permission or qualification changed.
 Original SHIPPATH7/8 indexed evidence is reverified unchanged. The allowed
 composition identity is unchanged and exposure remains pending. See
 [worklog](../benchmarks/shippath9_WORKLOG.md).
+
+## 2026-10-05 E26 native Rev5 teacher leg (registered execution)
+
+[Registration](../benchmarks/e26_hdr_teacher_registration_2026-10-05.md) fixes
+by_v2fy, headN, hd4/hd16, ten seeds/five folds, unchanged E24 Rev5 controls.
+TRAIN alone supplies7390 agreement rows from the immutable HDRTEACH TRAIN
+table; target exactly10*q_jod, no clipping, fit-only withinref,rank with
+coverage acceptance weighting. Transform committed before any fit at8e8f3170.
+VAL retains all3900 rows/300 references, including disagreements, for the
+frozen registered two-teacher assessment. No HDR dev, calibration, early
+stopping or checkpoint search. Every fit selects zero-based epoch119.
+Native PQ16 PNG/JXL, declared actual primaries and PQ10000 use the production
+planned HDR fold through the existing research/extractor owners, exact420
+IDs, f64 features, absent NaNs; fitting casts those measured slots to f32 as
+the SDR owner does. Original file hashes, order, keys, extraction executable
+and source are pinned in native producer manifests. Explicit IDs/per-slot
+provenance identify the channel subset; its reconstructible family-token
+FeatureSetId is null. Never replace that with a width-inferred identity.
+
+[Native bank pins](../benchmarks/e26_native_features_2026-10-05.pointer.json).
+Program v28=7e8ac08b6b97fc78057251bdfa4af2a605543d8a36c0b2e1be4aec458634d5a0;
+TRAIN-only data pack=2eb85985a69a255a784c4b8f50a1a9180034c8ccc69d92f95d179c5ba723d3c2.
+P2 admission fix checks record/sidecar contract before any candidate payload
+opens; actual loader/packer forbidden-VAL read tripwires pass. Original failed
+smoke retained. No UPIQ or sealed read. Encoder commits remain the inherited
+HDRTEACH unknowns; new byte hashes cannot establish missing codec commits.
+
+Coordinator-authorized serving binding, identical for50 controls and100 arms:
+existing dense_bake BIT-IDENTICAL512-row gate then pinned bake_stamp_revision
+to separate Rev5 outputs with per-bake source/dense/stamped/gate receipts.
+Immutable cells remain untouched. v2c5 trainer logs formula_revision null and
+qualified_provenance false are an explicit admission gap, to fix forward
+separately; serving revision comes from the stamp, not retrospective trainer
+qualification. Report-only external SDR, canonical corruption TRAIN and one
+fixed HDR TRAIN steering panel cannot change the registered adoption rule.
+[Execution worklog](../benchmarks/E26_WORKLOG.md).

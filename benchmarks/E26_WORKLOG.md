@@ -64,3 +64,27 @@ Before first successful fit, freeze report-only steering reference: first
 admitted TRAIN ref (source1066,1200x1600), its full registered quality ladder,
 control and each arm's without_kadid_s0 cell. This is descriptive only and
 cannot change selection or the registered SDR/HDR rule.
+
+Report-only corruption panel frozen before first successful fit: unchanged
+HDRCORR9036-row canonical TRAIN packet, all12 TRAIN origins and honest
+q10/q20/native cohorts; matched without_kadid seeds0,1,2 for control,hd4,
+hd16. Existing production serve_custom_bake and corruption_gate_eval owners
+score/report all9036 rows, preserve deduplication and negative scores, with
+no threshold fitting or integrity activation claim. This descriptive subset
+is not the50-cell HDR/SDR adoption panel.
+
+Native control steering:15/15 fixed TRAIN rows pass exact420-ID features
+and cached/native/prepared score parity; max feature and score error0.
+Identity100/refinement0 pass, unsupported refinement IDs empty. Existing
+HDR audit mode now uses the research planned walk atRev5 rather than the
+unsupported legacy append2/full-pool walk; previous revisions keep that
+legacy path. Native extraction pin f0a81037 remains untouched; separate
+audit executable is pinned in evidence.
+
+Program v28=7e8ac08b, data r2=2eb85985, image digest b99cf76e, profile
+08ae0dfa pushed by coordinator. Full120-epoch Docker smoke runs before
+enqueue. Existing launcher has E26-only6g/AVX2 and RAM-safe concurrency
+envelope; other jobsets and all filler PIDs unchanged. Own worker starts
+and restarts remain forbidden. New actual loader tests4/4 and pre-fix
+negative control, native tests2/2, root and native strict Clippy and
+lint-scripts813 all pass. Final scientific panels still pending.
