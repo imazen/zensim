@@ -5132,3 +5132,19 @@ separately; serving revision comes from the stamp, not retrospective trainer
 qualification. Report-only external SDR, canonical corruption TRAIN and one
 fixed HDR TRAIN steering panel cannot change the registered adoption rule.
 [Execution worklog](../benchmarks/E26_WORKLOG.md).
+
+Final registered E26 result: hd4 is the lowest passing weight; both arms pass
+SDR as-good and the two within-reference HDR conditions over all50 matched
+cells. Hd4 HDR-VDP-3 delta+0.0014655677655677746, SE0.0003411001471767929;
+CVVDP delta+0.0015161172161172077, SE0.0003392474364166754. Hd16 deltas
++0.0014747252747252793 / +0.0015007326007325662, SEs0.0003378213879858726 /
+0.00033559844516359565. Pooled HDR-VDP-3 falls(-0.044864262128246485 hd4,
+-0.12476287879994075 hd16); it remains reported-only under the preregistration.
+Human HDR, encoder RD/spatial and full product qualification remain MISSING.
+All150 full VAL panels retain3900 rows/300 references and per-bake bindings;
+whole native/cache control parity is bit-identical with0 pixel-identical rows.
+Full records: output/zensim/e26-2026-10-05 (tower); large JSONs are external.
+V28's actual packed Rust executables are the existing fleet-v2 set
+6b28576f/81ec2207/c9c610b8, not the v25b hashes in copied binary_mix prose.
+The embedded inventory is correct; supplemental provenance erratum records
+actual hashes and bounded canonical parity evidence without rewriting the pack.

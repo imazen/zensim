@@ -109,3 +109,80 @@ fast path. Core trainer/program/data/thresholds unchanged. Full native proof
 took677s at2 threads,0.82GiB peak; no human interpretation of these labels.
 
 Native final census-source checks: two native tests pass, strict native Clippy passes. Durable tower native-bank copy verified98 files/260964434bytes including extraction work manifests. Full100 fits still running; final scientific panels remain pending. Existing fillers only, no worker restarts.
+
+First5 cells canonical harvest PASS. Actual fleet without_kadid_s0 matches full smoke result science and selected weights exactly (runtime/path metadata excluded by canonical compare_science). First5 arm cells have dense/stamp receipts, originals intact. Frozen hd4 steering15/15 passes exact canonical/cached/prepared features and scores, same final audit executable as control. Corruption hd4 three seeds score all9036 frozen TRAIN rows; canonical report retains8213 unique/7725 positives/480 honest and qualified=false. Remaining fits and final50-cell decisions pending.
+
+All reachable hosts measured at06:25UTC: tower5 slots2.49cells/h, i2653slots4.33, r35002slots1.10, r3800x2slots3.88;24 complete/verified/bound. ETA~6.44h remaining plus final panels, provisional from hd4 observed service times. Ledger timestamps are pass-level: service times use consecutive ledger uploads per worker (first from pass start). Live FitCell claim renewal confirmed; no custom lease controller. Full100 unchanged, no failures observed.
+
+Coordinator landing instruction: main advanced to0eb01905 (SHIPPATH
+strict-admission chain). Leave running v28 and its pinned experiment owners
+unchanged through fit/panel completion. Afterwards rebase E26 records onto
+main@origin, merge strict/historical/HDR behavior and retain their tests,
+including the seven overlapping files named by the coordinator. Coordinator
+reviews the merge; this lane does not push. At07:03UTC27 cells have completed,
+with no failures observed. E26_DONE remains unwritten until all work is done.
+
+At08:53UTC50/100 ledger completions (48hd4,2hd16); first hd16
+canonical harvest PASS, v3/last119. Immutable experimental owner sources
+archived and hash-verified on tower:272 files/10308748 bytes under
+output/zensim/e26-2026-10-05/frozen-owner-source, including the original
+7ad72c87 native extractor source separately from the final proof owner.
+This preserves producer/scoring evidence across the later SHIPPATH merge;
+binary build provenance remains in build_meta_e26_v28.json. No rebase yet.
+
+At09:23UTC54/100 canonical-verified and dense/stamp-bound cells, all
+v3/last119, no failures. Measured capacities: tower2.48cells/h,
+i2654.33, r35001.10, r3800x3.98. First hd16 service times i265
+2440–2456s, r3800x1776–1826s. Provisional remaining~3.87h (fluid fit
+ETA13:16UTC; slow-host tail and final panels add time), full100 unchanged.
+Per-cell intervals retained in FLEET_TIMING_0922.json.
+
+At10:31UTC70/100 ledger completions;68 canonical-verified/stamped.
+All three frozen steering compositions now pass15/15 TRAIN rows with
+zero canonical/cached/prepared feature and score errors, no unsupported
+refinement/density IDs. Hd16 corruption seeds0–2 scored all9036 frozen
+TRAIN rows through production BakeScorer; canonical report COMPLETE,
+8213 unique/7725 positive/480 honest, qualified=false. Registered final
+SDR/HDR panels still wait for all100; no population or rule changes.
+
+Coordinator incident report (resumed2026-10-05): tail_trim PID3635590
+was stopped at approximately16:19UTC after the last two cells
+(hd16 aic3 seeds8/9) repeatedly lost their holders about every2 minutes
+for roughly4 hours. Once tail_trim stopped, their holders survived and
+both fits completed. This supersedes the earlier smooth-service ETA;
+retain the incident and completed outputs. Root cause is not independently
+diagnosed here. All100 cells are now installed; the existing SDR owner
+reports both arms as_good. No filler/worker restart by this lane.
+
+Packed executable provenance erratum (final audit): earlier "exact v25b
+Rust binaries" prose was inaccurate. Immutable v28 embedded files inventory
+and tar members agree on trainer6b28576f/predictor81ec2207/panelc9c610b8:
+the existing fleet-v2 set, covered as old_set by the canonical13-check
+ALL_IDENTICAL record benchmarks/rev4_featpot_canon_binary_parity_2026-10-01.json.
+Copied binary_mix descriptors instead name v25b605d20e0/56da0529/f76b85a7.
+Do not rewrite frozen pack or its metadata; supplemental receipt
+PROGRAM_BINARY_PROVENANCE_FINAL.json records actual hashes, source records
+and bounded parity evidence. No direct100-cell HDR equivalence claim.
+Registered populations, recipe, weights, seed pairing and adoption rule
+remain unchanged; human/product qualification remains missing.
+
+Final registered E26 result: hd4 is the lowest passing weight; both arms pass
+SDR as-good and the two within-reference HDR conditions over all50 matched
+cells. Hd4 HDR-VDP-3 delta+0.0014655677655677746, SE0.0003411001471767929;
+CVVDP delta+0.0015161172161172077, SE0.0003392474364166754. Hd16 deltas
++0.0014747252747252793 / +0.0015007326007325662, SEs0.0003378213879858726 /
+0.00033559844516359565. Pooled HDR-VDP-3 falls(-0.044864262128246485 hd4,
+-0.12476287879994075 hd16); it remains reported-only under the preregistration.
+Human HDR, encoder RD/spatial and full product qualification remain MISSING.
+All150 full VAL panels retain3900 rows/300 references and per-bake bindings;
+whole native/cache control parity is bit-identical with0 pixel-identical rows.
+Full records: output/zensim/e26-2026-10-05 (tower); large JSONs are external.
+V28's actual packed Rust executables are the existing fleet-v2 set
+6b28576f/81ec2207/c9c610b8, not the v25b hashes in copied binary_mix prose.
+The embedded inventory is correct; supplemental provenance erratum records
+actual hashes and bounded canonical parity evidence without rewriting the pack.
+
+Final fits:100 completed; last ledger upload17:05:36UTC,12.81h since
+04:17 launch. Wall capacities including draining/churn: tower1.722675367
+cells/h(22),i2654.327934547(36),r35001.107453779(10),r3800x3.968582059(32).
+Coordinator tail_trim intervention supersedes earlier provisional ETA.
