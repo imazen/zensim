@@ -79,3 +79,17 @@ minimise MSE and maximise Kendall and Pearson correlation.
   Pearson and a Kendall surrogate to its loss.
 * Proposed E28 (to register before fitting): arms (a) and (b) above with the SSIM2 data mix incl. CID22-train SSIM2 teacher; E21
   as-good rule on LODO plus external sets; report Kendall/Pearson/MSE per source.
+
+## 7. Updates (2026-10-05 22:00 UTC)
+
+* **SSIM2 recipe — verified** (`~/tmp/zensim-paper/rev4/SSIM2RECIPE_DONE.md`, draft `E28_registration_DRAFT.md`). Corrections to §6:
+  the objective's weights are unpublished (libjxl `tools/ssimulacra2.cc:286-291`: MSE on CID22-train only, Kendall on all four
+  sets, Pearson at a lower weight); SSIM2 tunes ~113 parameters (108 weights + remap); KonFiG "F boosting" is the flicker-boosted
+  triplet reconstruction (KonFiG Exp I), which our `konfig_*` tables do NOT carry (they carry the nominal design grid
+  `1 − q_jnd/3.2`) — reconstructing it is a port of the authors' MATLAB Thurstonian fit over raw data we hold; the CID22-train leg
+  (201 refs, 17,611 pairs) already carries self-computed fast-ssim2 labels, i.e. the owner's suggestion is the standing design, and it
+  is self-distillation of SSIM2's fit, not CID22 human signal; Nelder–Mead suits ≤~128 grouped weights, Powell beyond.
+* **E27:** 24/100 done at 21:51 UTC (~10 cells/h; completion ~05:30 UTC Oct 6).
+* **DISKCLEAN:** freed 4.3 GB (one byte-identical parquet); ~187 GB kept pending owner decision because no byte-identical tower copy
+  exists (`~/tmp/zensim-paper/rev4/DISKCLEAN_DONE.md`). Anomaly to check: `tbig_720_full.parquet` and two `tbig-join-out` parquets
+  have the same size but different sha256 locally vs tower — possible silent corruption on one side.
