@@ -1,0 +1,98 @@
+{
+ "schema": "shippath8-checks-v1",
+ "base": "cff1c27ba41b363ce662624692c8987cc8ee55e5",
+ "implementation_commit": "6b27fd02dbe480b8c1a9db6284aa1c95eaa63b4e",
+ "review_findings_closed": [
+  "P1 complete discovered metadata preflight and derived label-boundary claim",
+  "P3 actual assessment key_path in pairs_origin"
+ ],
+ "python_assessment_tests": 10,
+ "orchestration_tests": 4,
+ "rust_verdict_tests_passed": 40,
+ "rust_external_test_ignored": 1,
+ "actual_table_admission_count": 15,
+ "rows": 26911,
+ "ci_exact_clippy": "pass",
+ "format": "pass",
+ "script_lint": "pass",
+ "reviewer_regressions": {
+  "baseline_real_owner_succeeds": true,
+  "regressions": [
+   {
+    "case": "protected-root-sidecar",
+    "reviewed_python_preflight_incorrectly_accepts": true,
+    "fixed_python_refuses": true,
+    "tripwire_sentinel_opens": 0,
+    "fixed_wrapper_refuses_before_evaluator": true,
+    "returncode": 1
+   },
+   {
+    "case": "protected-table-sidecar",
+    "reviewed_python_preflight_incorrectly_accepts": true,
+    "fixed_python_refuses": true,
+    "tripwire_sentinel_opens": 0,
+    "fixed_wrapper_refuses_before_evaluator": true,
+    "returncode": 1
+   }
+  ],
+  "no_real_protected_label_read": true,
+  "no_scoring": true
+ },
+ "artifact_audit": {
+  "tables": 15,
+  "rows": 26911,
+  "table_and_keys_bytes_identical": true,
+  "consumed_420_vector_hashes_unchanged": true,
+  "unconsumed_300_slots_nan": true,
+  "corrected_pairs_origin_sets": [
+   "ladder",
+   "standard",
+   "negtail",
+   "identity",
+   "broad",
+   "owner",
+   "jpeg8",
+   "m3"
+  ],
+  "original_extraction_and_assembler_identity_preserved": true,
+  "refreshed_pins_pass": true,
+  "admission_qualified": true,
+  "exposure_still_pending": true,
+  "no_scoring": true
+ },
+ "original_ship7_evidence_reverified_files": 446,
+ "original_ship7_index_sha256": "83d1864d9d818d25758b4dd736168211eb15ac70155bc1ffdf0b6d21c460d5be",
+ "no_real_protected_confirmation_T0_labels_read": true,
+ "scientific_scores": 0,
+ "fits": 0,
+ "fleet": false,
+ "pushed": false,
+ "pending_exposure_approval": true,
+ "human_production_role_decision": "pending",
+ "artifact_pins": {
+  "ALL_ASSESSMENT.json": {
+   "path": "/var/tmp/shippath8/verified/ALL_ASSESSMENT.json",
+   "sha256": "f6c2b832a98c37e36683160a1a48e81211475d5d8e3d3c4c71d4aa35cab5358f"
+  },
+  "ADMISSION.json": {
+   "path": "/var/tmp/shippath8/verified/ADMISSION.json",
+   "sha256": "1d5dc57d783837c32dd45386f5e9222db2fc7ffed3ec354bdeadfecaffda1237"
+  },
+  "AUDIT.json": {
+   "path": "/var/tmp/shippath8/verified/AUDIT.json",
+   "sha256": "caadbd3953e33962b86d7cf7e227b35a3cc4b324b9b56104a99d29e30cf6e31b"
+  },
+  "EXPOSURE_FREEZE.json": {
+   "path": "/var/tmp/shippath8/verified/EXPOSURE_FREEZE.json",
+   "sha256": "de12c2a821f33ea682cb3e2783262b3d0ac6df1e5cd31a340302515b5c46f498"
+  },
+  "EVAL_IDENTITY.json": {
+   "path": "/var/tmp/shippath8/verified/EVAL_IDENTITY.json",
+   "sha256": "77e2a4db7565bb46bc286369b992d8217a68508a53c516b77b312ab912d6f7a6"
+  },
+  "PROVENANCE_CORRECTIONS.json": {
+   "path": "/var/tmp/shippath8/verified/PROVENANCE_CORRECTIONS.json",
+   "sha256": "712c3a1848486fa96adcd223bc26bea8e354afd0213a19ffde478a265d0fee18"
+  }
+ }
+}
