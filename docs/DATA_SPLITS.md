@@ -1390,3 +1390,15 @@ E27 preparation smoke completed: full hp4/kadid/s0, final119,7390 HDR TRAIN,
 retained and corrected by explicit Rev5 invocation, with no refit. No HDR VAL
 assessment or fleet enqueue during preparation. Readiness is separately gated
 on coordinator E26 landing and matching zenmetrics push confirmations.
+
+## 2026-10-06 E27 registered assessment completed
+
+All100 final119 arm cells and200 complete HDR VAL panels were verified. Neither
+arm passes E27: hp4 passes SDR and pooled HDR-VDP-3 improvement but fails pooled
+CVVDP noninferiority; ha4 fails SDR and HDR guards. Retain the control. E26 hd4,
+all external categories and raw geometry remain report-only. Historical table
+admission stays unqualified; approved Rev5 stamps supply serving binding. Human
+HDR judgment, encoder provenance completion and shipping gates remain missing.
+See [E27 worklog](../benchmarks/E27_WORKLOG.md),
+[complete measured summary](../benchmarks/e27_result_summary_2026-10-05.json) and
+[immutable Tower evidence](../benchmarks/e27_final_2026-10-05.pointer.json).

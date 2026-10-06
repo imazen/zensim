@@ -174,3 +174,44 @@ frozen fit profile and native TRAIN smoke. Repeat of the same single TRAIN wire
 is still74.63024139404297, delta0; no VAL payload read. Original invocation and
 first path-fix receipt retained; final hash in PANEL_INVOCATION_FIX and pointer.
 Launch-record lint:820 scripts checked, all runnable.
+
+## E27 registered assessment completed — 2026-10-06
+
+MISSING: human HDR judgment/current qualification, complete original encoder
+provenance, strict trainer table admission for the historical program, and
+shipping/runtime/product gates. This study establishes no new shipping default.
+
+All100 arm cells were receipt/hash verified and installed; last119 throughout.
+The existing score owner posted its complete-set SDR result; the canonical
+waiter completed at04:29:17Z. No new filler/worker or tail_trim was launched.
+Registered HDR VAL covers all3900 rows/300 references for each of50 controls,
+50 hp4,50 ha4 and50 report-only E26 hd4 cells. Fresh dense512-row prediction
+gates and the approved Rev5 stamps bind all200 serving bakes; source hashes
+remain unchanged. Native/cache proof, bank, predictor and statistical-owner
+hashes match the pre-registered pins. No dropped/nonfinite panel rows.
+
+Verdict: retain the control; neither E27 arm passes. hp4 is SDR as-good
+(meanDelta+0.000609925836325429, SE0.0011019651341445987) and pooled HDR-VDP-3
+improves+0.12304812916115589 (SE0.006596765718227003), but pooled CVVDP
+declines-0.0889260400361078 (SE0.002981641513570055), failing its >=-2SE guard.
+ha4 fails SDR (meanDelta-0.03880942362030192, SE0.0014751554799661538) and
+within-reference teacher noninferiority plus pooled CVVDP. The full original
+rule is applied without threshold changes; no passing-arm tie occurs.
+
+Both report-only panels are complete: E26 hd4 and external NITS/LIVE/MC-IQA
+(all50 paired cells and every existing category); raw density retains195000
+model-row observations per composition and all50 cell points. Repeated model
+rows are not independent examples. Full means, paired deltas/SE, all SDR sources
+and all external categories are in
+[e27_result_summary_2026-10-05.json](e27_result_summary_2026-10-05.json).
+Original HDR VAL/native proof reuse is explicit; no new all-model pixel replay
+or human qualification is claimed. Legacy admission formula_revision null /
+qualified_provenance false persists; only serving binding comes from the stamp.
+
+Tower final-assessment archive hash-verifies3629 files/662966352bytes, manifest
+38c04362dd80cb9d20e1bcde882d7250ae1eca02651c36adbc748464f7ade26a.
+The [final pointer](e27_final_2026-10-05.pointer.json) retains all100 immutable
+arm cells,50 controls,50 E26 report cells,200 full panel predictions/bindings,
+external inputs/results, ledger, proof and runtime receipts. Preparation,
+readiness and launch snapshots remain unchanged. All large new artifacts stay
+on Tower. Landing rebase/validation follows; no source push.
