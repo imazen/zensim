@@ -158,6 +158,13 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-05 — E27 launch omitted the actual jobset memory-cap entry. RESOLVED for the running study by the coordinator.**
+  Manifest memory hints did not set the fleet runtime cap. The coordinator installed the existing
+  `jobset_caps.json` entry with 6g and the registered host caps; observed workers used that envelope.
+  Future launches must verify the existing runtime-cap owner before placement. No replacement worker
+  or filler was launched by this lane. [E27 launch record](benchmarks/E27_WORKLOG.md) retains the
+  omission, runtime correction and immutable publication receipts.
+
 * **2026-09-30 — Rev1–Rev3 research tailhist Bin slots keep the sign-bit top-bin defect. OPEN by decision; fixed only at Rev4 (`c3negfold`).**
   `TailEdges::bin` (`feature_v2.rs`) binned `f64::to_bits` directly, so a sign-bit-set value (tiny negative
   `art`/`det` from f32 rounding in `edge_dissim`; NaN) sorted above every positive edge and landed in the TOP bin.
