@@ -215,3 +215,22 @@ arm cells,50 controls,50 E26 report cells,200 full panel predictions/bindings,
 external inputs/results, ledger, proof and runtime receipts. Preparation,
 readiness and launch snapshots remain unchanged. All large new artifacts stay
 on Tower. Landing rebase/validation follows; no source push.
+
+## E27 landing validation — 2026-10-06
+
+Rebased only the E27 chain onto main@origin ec4768cf; original fit tip6413f8f6
+remains pinned separately. All five program Python source pins and all core
+source files are unchanged from the reviewed fit source. Historical, strict,
+hd4/hd16, hp4/ha4 and forbidden-VAL actual-loader tripwires retain their tests.
+The complete168-test Python suite passes, as do20sampling/25trainer/29pack/
+41verdict/15research/36serving/2native/API-doc checks; fmt, lint and both clippy
+commands pass. One pre-existing verdict and three pre-existing serving tests
+remain ignored, unchanged; no new ignore or relaxed threshold. Logs and
+LANDING_VALIDATION.json are preserved with hashes in the landing archive.
+No program rebuild/refit, scientific-rule change, source push or shipping
+qualification. The final rebased tip is reported in E27_DONE.md for review.
+
+The [full SDR diagnostic record](e27_sdr_report_2026-10-05.json) preserves all
+source/seed control values and auxiliary W1/W2/W3/W4 panels. Its inherited E13
+improvement-rule metadata/adopt flags are report-only; E27 uses E21 as-good
+from e27_sdr_decision.json and the registered four HDR guards. No altered rule.

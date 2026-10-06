@@ -1,0 +1,75 @@
+{
+ "schema": "e27-landing-validation-pointer-v1",
+ "status": "PASS",
+ "main_origin": "ec4768cfca4f599eec0713a6c296e91db2184baa",
+ "validated_source_tip": "8591792359a667a9258a7326327e6a555f34e0ab",
+ "frozen_fit_source_tip": "6413f8f6d72ae9c1a2039d3c5e1ba644800f71f8",
+ "archive": "tower:/mnt/user/coefficient/output/zensim/e27-2026-10-05/landing-validation",
+ "manifest_sha256": "e15cd4a830ea3c125a4ef36785b6592093cf6f92087fb4c9d524f70564961ffd",
+ "files": 388,
+ "bytes": 7399280,
+ "verified_receipt_sha256": "174ed65cab08a89d6de0786fa2ebb1963b6201c3a1ac29dfc15a885e3d34cad2",
+ "validation_receipt_sha256": "927ebbb06870b404c88643f04ef8fc90df42882a54eab6d8ecfea24c2ff1dd25",
+ "logs": {
+  "MERGE_API.log": {
+   "sha256": "dd9b5e48d6c89b66808618569a2f189e0ae2435256a60c2ffc81b32c52af42d9",
+   "bytes": 459
+  },
+  "MERGE_CHECKS.log": {
+   "sha256": "c2b86a24d208c9b776a2e8855739e587807bfa31e272b696bc2d10372def6a6f",
+   "bytes": 184
+  },
+  "MERGE_CLIPPY.log": {
+   "sha256": "897d3768cb263665f30de0d440611e75d99e3fdf99e91a81efed88241274dc1a",
+   "bytes": 461
+  },
+  "MERGE_FMT.log": {
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0
+  },
+  "MERGE_LINT.log": {
+   "sha256": "39f721e0fc6647e68023bf3303d54d2d50facf02c3599928e770fd245441be23",
+   "bytes": 80
+  },
+  "MERGE_NATIVE_CLIPPY.log": {
+   "sha256": "5976a57851f2bcf50e1b62e4a2a8574aab84b2ab0aedf1ddf7000bf0e6bef2c6",
+   "bytes": 1753
+  },
+  "MERGE_NATIVE_TEST.log": {
+   "sha256": "98d095f8d8efef29e461025dedead9e09896412e235878b709f1ae26b527add2",
+   "bytes": 2130
+  },
+  "MERGE_PYTHON.log": {
+   "sha256": "f2604b597aaba692b3c8a18e5f0140e36d1e0a682a4b49454fbeb80c3230844d",
+   "bytes": 33151
+  },
+  "MERGE_RESEARCH.log": {
+   "sha256": "d715cdfd2f95f4a4a8d13e26b2a6d0f4c9119f9d1e6cb679a14d9d9331aecf98",
+   "bytes": 1494
+  },
+  "MERGE_RUST_OWNERS.log": {
+   "sha256": "56ffcfbe59174a7647422c8a9c1f84d9c0be6e4e0453657c17ee1541b66d5cc6",
+   "bytes": 8312
+  },
+  "MERGE_SAMPLING.log": {
+   "sha256": "df2f1c2cda9c2b7d63ae64d81e0c13530e9d01f60e302235f5c332d10bb32b52",
+   "bytes": 2217
+  },
+  "MERGE_SERVING.log": {
+   "sha256": "993b18d181274fed448f545cf31d49a4c588b8513d8cd31a55fbbb6b2a6c189d",
+   "bytes": 4409
+  },
+  "MERGE_TRAINER_BUILD.log": {
+   "sha256": "293372a11d54d2f1af0a0f0e363e372ce84ea7fe40753df2d280bfc5472e2fb1",
+   "bytes": 83
+  }
+ },
+ "core_pins_unchanged": true,
+ "existing_ignored": {
+  "verdict": 1,
+  "serving": 3
+ },
+ "new_ignored": 0,
+ "no_push": true,
+ "final_tip_record": "~/tmp/zensim-paper/rev4/E27_DONE.md"
+}
