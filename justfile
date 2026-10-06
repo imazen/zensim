@@ -159,6 +159,14 @@ demo-speed-accuracy *options:
 lint-scripts:
     python3 scripts/lint_scripts.py
 
+# Display the canonical detached-compute waiter's progress and terminal record.
+[positional-arguments]
+await-status heartbeat:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cat "$1.status"
+    if [[ -f "$1.done" ]]; then cat "$1.done"; fi
+
 # Paired arithmetic-revision cost A/B (issue #61). Builds the interleaved
 # extraction instrument ONCE and runs it in alternating revision-1/revision-3
 # blocks on one pinned core, with `fast_ssim2` as the cross-block drift anchor.
