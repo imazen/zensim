@@ -43,9 +43,21 @@ def bound_record(rec, policy):
     declaration = json.loads(Path(f"{path}.manifest.json").read_text())
     if sha(Path(f"{path}.manifest.json")) != files[manifest_rel]:
         raise ValueError("E28 manifest changed")
-    if declaration.get("table_sha256") != files[rel] or declaration.get("formula_revision") != 5:
+    if ("table_sha256" in declaration and declaration["table_sha256"] != files[rel]) or declaration.get("formula_revision") != 5:
         raise ValueError("E28 table declaration binding mismatch")
     return path, declaration
+
+
+def admit_receipt(root):
+    policy = admission_pin()
+    rel = "wide/main/real/receipt.json"
+    path = root / rel
+    if sha(path) != policy["prepared_files"].get(rel):
+        raise ValueError("E28 receipt is outside the approved input inventory")
+    receipt = json.loads(path.read_text())
+    if receipt.get("formula_revision") != 5 or receipt.get("e28_teacher_pin_sha256") != sha(PIN):
+        raise ValueError("E28 approved receipt identity differs")
+    return receipt
 
 
 def human_declaration(rec, arm, source, split, policy, pin):
@@ -58,7 +70,7 @@ def human_declaration(rec, arm, source, split, policy, pin):
     source_rel = f"wide/main/real/{source}.parquet"
     source_keys = f"wide/main/real/{source}.keys.parquet"
     keys_rel = expected.replace(".parquet", ".keys.parquet")
-    required = dict(study="E28", arm=arm, source=source, split=split,
+    required = dict(study="E28", table_sha256=policy["prepared_files"][expected], arm=arm, source=source, split=split,
                     role="TRAIN" if split == "fit" else "DEV",
                     registration_commit=pin["registration_commit"], teacher_pin_sha256=sha(PIN),
                     member_sets=pin["arms"][arm]["human_members"][source],

@@ -16,7 +16,7 @@ import scipy
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import recipe_correlations, panel_batch
-from e28_recipe import GROUPING, PIN, read_pin, checked, admit_humans
+from e28_recipe import GROUPING, PIN, read_pin, checked, admit_humans, admit_receipt
 from v2_common import V2, SOURCE_ORDER, sha, table_path
 
 
@@ -56,7 +56,7 @@ def fit(heldout,dest):
     committed=subprocess.check_output(["jj","file","show","-r","@-",str(GROUPING.relative_to(GROUPING.parents[1]))],cwd=GROUPING.parents[1])
     if committed != GROUPING.read_bytes():raise ValueError("NM grouping is not committed at @-")
     dest.mkdir(parents=True)
-    rec_path=V2/"wide/main/real/receipt.json";receipt=json.loads(rec_path.read_text());legs=receipt["legs"]
+    rec_path=V2/"wide/main/real/receipt.json";receipt=admit_receipt(V2);legs=receipt["legs"]
     if receipt.get("e28_teacher_pin_sha256") != sha(PIN):raise ValueError("E28 leg pin differs from prepared data")
     if legs["cid22"]!=pin["teachers"]["cid22"]:raise ValueError("CID22 teacher changed")
     admit_humans("s2m",heldout,legs)

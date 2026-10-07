@@ -105,7 +105,8 @@ class Admission(unittest.TestCase):
 
     def test_all_manifests_precede_any_mlp_cli_or_nm_fit_payload(self):
         self.mutate('role','VAL')
-        vdir=self.root/'wide/main/real';(vdir/'receipt.json').write_text(json.dumps(dict(schema='rev4-featpot-v2c-wide-v1',family='main',variant='real',width=1853,legs=self.legs,e28_teacher_pin_sha256=c.sha(e.PIN))))
+        vdir=self.root/'wide/main/real';(vdir/'receipt.json').write_text(json.dumps(dict(schema='rev4-featpot-v2c-wide-v1',family='main',variant='real',width=1853,formula_revision=5,legs=self.legs,e28_teacher_pin_sha256=c.sha(e.PIN))))
+        self.policy['prepared_files']['wide/main/real/receipt.json']=c.sha(vdir/'receipt.json')
         (self.root/'wide/keep_lists.json').write_text(json.dumps(dict(schema='rev4-featpot-v2-keeplists-v2')))
         from e21_cheap_recipe import columns
         argv=['v2_lodo_mlp.py','--spec',e.spec('s2m'),'--head','N','--heldout','kadid','--seed-index','0','--columns',','.join(map(str,columns('by_v2fy')))]
@@ -151,6 +152,33 @@ class Admission(unittest.TestCase):
             with self.guard(),patch.object(e.shutil,'copy2',side_effect=AssertionError('copied before refusal')):
                 with self.assertRaisesRegex(ValueError,'confirmation/HDR'):e.prepare(source,out)
             self.assertFalse(out.exists());self.assertEqual(self.opens,[])
+
+    def test_prepare_copies_only_explicitly_approved_members(self):
+        source=self.root/'approved-source';vdir=source/'wide/main/real';vdir.mkdir(parents=True)
+        ref_fit=next(f'fit{i}' for i in range(100) if not c.human_dev(f'fit{i}'))
+        ref_dev=next(f'dev{i}' for i in range(100) if c.human_dev(f'dev{i}'))
+        table=vdir/'konfig.parquet';refs=[ref_fit,ref_fit,ref_dev,ref_dev]
+        pq.write_table(pa.table(dict(ref_basename=refs,human_score=[10.,90.,20.,80.],f13=[1.,2.,3.,4.])),table)
+        kp=table.with_suffix('.keys.parquet')
+        pq.write_table(pa.table(dict(pair_key=['p0','p1','p2','p3'],source_row_id=[0,1,2,3],ref_basename=refs,member_set=['konfig_train']*4,target=[.1,.9,.2,.8])),kp)
+        mp=Path(str(table)+'.manifest.json');mp.write_text(json.dumps(dict(formula_revision=5,table_sha256=c.sha(table))))
+        receipt=vdir/'receipt.json';receipt.write_text(json.dumps(dict(formula_revision=5,legs={'konfig':dict(full=dict(rel='wide/main/real/konfig.parquet',sha256=c.sha(table),manifest_sha256=c.sha(mp)),keys_sha256=c.sha(kp))})))
+        keep=source/'wide/keep_lists.json';keep.write_text('{}')
+        policy=copy.deepcopy(self.policy);policy['source_files']={str(p.relative_to(source)):c.sha(p) for p in [table,kp,mp,receipt,keep]}
+        pin=copy.deepcopy(self.pin);pin['source_receipt_sha256']=c.sha(receipt);pin['arms']={'s2m':{'human_members':{'konfig':['konfig_train']}}}
+        for name in ['hdr_unapproved.parquet','unapproved-labels.parquet']:
+            extra=vdir/name;extra.write_bytes(b'synthetic unreadable protected labels');self.payloads.add(extra.resolve())
+        out=self.root/'approved-out';copies=[];copy2=e.shutil.copy2
+        def copied(a,b):copies.append(str(Path(a).relative_to(source)));return copy2(a,b)
+        def jj(argv,**kwargs):return 'f'*40 if argv[1]=='log' else Path(e.__file__).read_bytes()
+        with self.guard(),patch.object(e,'read_pin',return_value=pin),patch.object(e,'admission_pin',return_value=policy),patch.object(e.subprocess,'check_output',side_effect=jj),patch.object(e.shutil,'copy2',side_effect=copied):
+            e.prepare(source,out)
+        self.assertEqual(set(copies),set(policy['source_files']))
+        self.assertEqual(len(copies),5)
+        self.assertFalse((out/'wide/main/real/hdr_unapproved.parquet').exists())
+        self.assertFalse((out/'wide/main/real/unapproved-labels.parquet').exists())
+        self.assertEqual(self.opens,[])
+        self.assertEqual(pq.read_table(out/'wide/main/real/e28_s2m_konfig_fit.keys.parquet').column_names,e.KEY_COLUMNS)
 
 
 if __name__=='__main__':unittest.main()

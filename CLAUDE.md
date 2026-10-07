@@ -158,6 +158,15 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E28 human-leg/preparation admission gaps (review P2). FIXED locally.**
+  Curated human manifests were checksum-only and could be rewired to VAL/dev or another pin;
+  preparation recursively copied extra confirmation/HDR payloads before refusal. The new owners
+  admit an explicit frozen inventory, expected arm/source/split/role/populations, source bindings
+  and label-free row keys before any human table checksum or label decode. All active manifests
+  precede table opens, and preparation rejects forbidden directories before copying only approved
+  members. Synthetic regressions in `scripts/tests/test_e28_admission.py` have open tripwires.
+  The reviewed v32 pack had correct populations; these fixes close reproduced boundary failures.
+
 * **2026-10-07 — E28 opt-in pooled sampling coverage replay omitted pooled endpoint draws. FIXED locally (`5b2cc589`).**
   The original E28 coverage replay still called the legacy pair draw alone. The live trainer already
   pooled endpoints, so its weights were unaffected, but the embedded coverage digest described the

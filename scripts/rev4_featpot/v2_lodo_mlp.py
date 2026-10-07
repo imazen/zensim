@@ -312,7 +312,8 @@ def main() -> None:
         raise ValueError(f"{core_spec}: kept columns outside 0..{width}")
     recipe = recipe_of(args.spec)
     if "ssim2_recipe" in recipe:
-        from e28_recipe import admit_humans
+        from e28_recipe import admit_humans, admit_receipt
+        admit_receipt(V2)
         admit_humans(recipe["ssim2_recipe"], args.heldout, receipt["legs"])
     # Two-part cell path under v2/cells (the fit-cell executor's destination contract).
     dest = args.dest or V2 / "cells" / f"{args.spec}__{args.head}" / f"without_{args.heldout}_s{args.seed_index}"
