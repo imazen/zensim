@@ -376,7 +376,7 @@ def palette_extract_group(a, name, keys, source_receipts):
             for i,r in enumerate(group,lo):
                 f.write(f"{r['ref_path']}\t{r['dist_path']}\t{i}\t{i}\n")
         cmd = [a.bin,"--corpus","pairs-tsv","--path",str(pairs),"--out",str(csvp),"--palette-only",
-               "--input-contract","legacy-rgb8","--era-label","palette_v1","--audit-jsonl",str(audit)]
+               "--input-contract","legacy-rgb8","--era-label","palette_v2","--audit-jsonl",str(audit)]
         with (wd/f"{ci:04d}.log").open("w") as lg:
             subprocess.run(cmd, env=env, stdout=lg, stderr=subprocess.STDOUT, check=True)
         man=json.loads(Path(str(csvp)+".manifest.json").read_text())
@@ -389,7 +389,7 @@ def palette_extract_group(a, name, keys, source_receipts):
                 or man['producer_binary_sha256']!=sha256_file(a.bin)):
             raise ValueError('palette producer receipt mismatch')
         fsid=man['feature_set_id']
-        if not fsid.startswith("palette@w1867/palette_v1#") or (producer is not None and producer!=fsid):
+        if not fsid.startswith("palette@w1867/palette_v2#") or (producer is not None and producer!=fsid):
             raise ValueError("palette feature identity mismatch")
         producer=fsid
         tab=pacsv.read_csv(csvp,convert_options=pacsv.ConvertOptions(include_columns=['row_id']+[f'f{i}' for i in PALETTE_IDS],
@@ -415,7 +415,7 @@ def palette_extract_group(a, name, keys, source_receipts):
     if writer is None:raise ValueError('empty palette input')
     writer.close()
     manifest={'schema':'palette-sidecar-v1','set':name,'rows':len(records),'labels_read':False,'serving_allowed':False,
-              'formula_revision':5,'palette_revision':'palette_v1','feature_set_id':producer,'feature_ids':PALETTE_IDS,
+              'formula_revision':5,'palette_revision':'palette_v2','feature_set_id':producer,'feature_ids':PALETTE_IDS,
               'dtype':'float64','input_contract':'legacy-rgb8','build_commit':a.build_commit,'binary_sha256':sha256_file(a.bin),
               'assembler_sha256':sha256_file(__file__),'keys_sha256':sha256_file(out/'keys.parquet'),
               'features_sha256':sha256_file(out/'features__palette.parquet'),'sources':source_receipts,'chunks':chunks,
@@ -425,8 +425,8 @@ def palette_extract_group(a, name, keys, source_receipts):
 
 
 def cmd_palette(a):
-    if a.revision!=5 or a.limit or a.era!='palette_v1' or a.tier!='native':
-        raise ValueError('palette requires complete Rev5 palette_v1 native extraction')
+    if a.revision!=5 or a.limit or a.era!='palette_v2' or a.tier!='native':
+        raise ValueError('palette requires complete Rev5 palette_v2 native extraction')
     root=Path(a.palette_instrument)
     if root.resolve()!=Path('/var/tmp/rev4-featpot/v2c5').resolve():raise ValueError('explicit authorized v2c5 root required')
     selected={};receipts={}
@@ -462,6 +462,64 @@ def cmd_palette(a):
         {'path':str(keypath),'sha256':sha256_file(keypath),'columns_read':['__index_level_0__'],'join':'original selection row index'}])
     (Path(a.out)/'_MANIFEST.json').write_text(json.dumps({'schema':'palette-bank-v1','build_commit':a.build_commit,
         'labels_read':False,'sets':{k:{'rows':v['rows'],'manifest_sha256':sha256_file(Path(a.out)/k/'_MANIFEST.json')} for k,v in done.items()},'instrument_keys':receipts},indent=1)+'\n')
+    return 0
+
+
+def cmd_palette_views(a):
+    """Join the measured family into ordered instrument views, preserving repeats."""
+    root=Path(a.palette_instrument)
+    if root.resolve()!=Path('/var/tmp/rev4-featpot/v2c5').resolve() or a.limit:
+        raise ValueError('complete authorized instrument required')
+    bank=Path(a.palette_views)
+    top=json.loads((bank/'_MANIFEST.json').read_text())
+    if top['build_commit']!=a.build_commit or top['labels_read']:
+        raise ValueError('palette bank binding mismatch')
+    out=Path(a.out);out.mkdir(parents=True,exist_ok=False)
+    features={};positions={};receipts={}
+    for member in PALETTE_MEMBERS:
+        path=bank/member/'_MANIFEST.json'
+        man=json.loads(path.read_text())
+        feature_path=bank/member/'features__palette.parquet'
+        if (man['feature_ids']!=PALETTE_IDS or man['palette_revision']!='palette_v2' or man['labels_read'] or man['build_commit']!=a.build_commit
+                or man['binary_sha256']!=sha256_file(a.bin)
+                or man['features_sha256']!=sha256_file(feature_path)
+                or top['sets'][member]['manifest_sha256']!=sha256_file(path)):
+            raise ValueError('palette group provenance mismatch')
+        tab=pq.read_table(feature_path)
+        keys=tab['pair_key'].to_pylist()
+        if len(keys)!=len(set(keys)):raise ValueError('duplicate bank key')
+        features[member]=tab
+        positions[member]={k:i for i,k in enumerate(keys)}
+        receipts[member]={'path':str(path),'sha256':sha256_file(path)}
+    views={}
+    for name in PALETTE_TABLES:
+        keypath=root/'wide/main/real'/f'{name}.keys.parquet'
+        if top['instrument_keys'][name]['sha256']!=sha256_file(keypath):
+            raise ValueError('instrument source changed after extraction')
+        keys=pq.read_table(keypath,columns=['pair_key','member_set'])
+        members=keys['member_set'].to_pylist();pairs=keys['pair_key'].to_pylist()
+        if not set(members)<=PALETTE_MEMBERS:raise ValueError('protected member refused')
+        ordered_members=sorted(set(members));offsets={};chunks=[];offset=0
+        for member in ordered_members:
+            offsets[member]=offset;chunks.append(features[member]);offset+=len(features[member])
+        joined=pa.concat_tables(chunks).take(pa.array([offsets[m]+positions[m][k] for m,k in zip(members,pairs)]))
+        if joined['pair_key'].to_pylist()!=pairs:raise ValueError('instrument join order mismatch')
+        view=keys.append_column('row_id',pa.array(range(len(keys)),type=pa.int64()))
+        for i in PALETTE_IDS:view=view.append_column(f'palette_f{i}',joined[f'f{i}'])
+        for field in ('reference_pixels_sha256','distorted_pixels_sha256'):view=view.append_column(field,joined[field])
+        path=out/f'{name}.parquet';pq.write_table(view,path,compression='zstd')
+        views[name]={'rows':len(view),'unique_member_pair_keys':len(set(zip(members,pairs))),
+                     'sha256':sha256_file(path),'instrument_keys_path':str(keypath),'instrument_keys_sha256':sha256_file(keypath),
+                     'columns_read':['pair_key','member_set'],'groups':{m:receipts[m] for m in ordered_members}}
+        log(f'PALETTE view {name}: {len(view)} ordered rows')
+    manifest={'schema':'palette-instrument-views-v1','build_commit':a.build_commit,'assembler_sha256':sha256_file(__file__),
+        'bank_manifest_sha256':sha256_file(bank/'_MANIFEST.json'),'labels_read':False,'serving_allowed':False,
+        'feature_set_id':'palette@w1867/palette_v2#30b09cd1','feature_ids':PALETTE_IDS,
+        'column_map':{str(i):f'palette_f{i}' for i in PALETTE_IDS},'views':views,
+        'coverage_pool':'../bank/coverage_pool/features__palette.parquet; original selection ordinal key receipt',
+        'external':'../bank/{nits,live,mciqa}/features__palette.parquet; external features only',
+        'collision_policy':'Named palette_f columns never overwrite instrument f1825+ auxiliary columns.'}
+    (out/'_MANIFEST.json').write_text(json.dumps(manifest,indent=2)+'\n')
     return 0
 
 
@@ -504,6 +562,7 @@ def main() -> int:
     ap.add_argument("cmd", choices=["extract", "verify-against"])
     ap.add_argument("set")
     ap.add_argument("--bin")
+    ap.add_argument("--palette-views", help="complete pinned palette bank to project into ordered TRAIN instrument views")
     ap.add_argument("--palette-chromaq", help="existing CHROMAQ ladder owner directory, diagnostic only")
     ap.add_argument("--palette-instrument", help="authorized v2c5 TRAIN/external features-only sidecars")
     ap.add_argument("--instrument-manifest", type=Path, help="explicit label-free assessment keys; historical bank default unchanged")
@@ -521,6 +580,8 @@ def main() -> int:
     if a.cmd == "extract":
         if not (a.bin and a.build_commit and a.era):
             ap.error("extract needs --bin, --build-commit and --era")
+        if a.palette_views:
+            return cmd_palette_views(a)
         if a.palette_chromaq:
             return cmd_palette_chromaq(a)
         if a.palette_instrument:

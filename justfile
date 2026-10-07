@@ -328,7 +328,16 @@ palette-legacy-capture out:
     done
 
 palette-bank bin commit out:
-    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v1 --out {{out}} --chunk 512 --threads 8
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}} --chunk 512 --threads 8
 
 palette-chromaq bin commit out:
-    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-chromaq /home/lilith/tmp/chromaq --bin {{bin}} --build-commit {{commit}} --era palette_v1 --out {{out}} --chunk 128 --threads 8
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-chromaq /home/lilith/tmp/chromaq --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}} --chunk 128 --threads 8
+
+palette-diagnostic-report root:
+    python3 scripts/rev4_featpot/palette_diagnostic.py {{root}}
+
+palette-status log:
+    rg 'PALETTE |CHROMAQ |Traceback|ValueError|run-heavy: done' {{log}} | tail -8
+
+palette-instrument-views bin commit bank out:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-views {{bank}} --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}}
