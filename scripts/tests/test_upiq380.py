@@ -1,5 +1,6 @@
 """Production UPIQ metadata admission and zero-label-open refusal tripwires."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -77,7 +78,7 @@ class UpiqAdmission(unittest.TestCase):
     def test_all_leg_manifests_precede_human_table_and_label_access(self):
         a = copy.deepcopy(self.a)
         for row in a["rows"]:
-            row["split"] = "fit"
+            self.bind_row(row)
         (self.root / "extraction-admission.json").write_text(json.dumps(a))
         receipt = {"legs": {}}
         manifests = {}
@@ -106,6 +107,24 @@ class UpiqAdmission(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "leg manifest identity"):
                         u.verify(args)
                     self.assertEqual(tripwire.call_count, 0)
+
+    @staticmethod
+    def bind_row(row):
+        row.update(split="fit", reference_sha256="1" * 64, distorted_sha256="2" * 64)
+        row["pair_key"] = hashlib.sha256(("upiq380-original-byte-pair-v1\0" + row["condition_id"] + "\0"
+            + row["reference_sha256"] + "\0" + row["distorted_sha256"]).encode()).hexdigest()
+
+    def test_split_and_row_key_rewiring_refuse_before_labels(self):
+        a = copy.deepcopy(self.a)
+        for row in a["rows"]:
+            self.bind_row(row)
+        for field, value in [("split", "development"), ("pair_key", "0" * 64),
+                ("reference_sha256", "not-a-hash"), ("distorted_sha256", "A" * 64)]:
+            with self.subTest(field=field):
+                bad = copy.deepcopy(a)
+                bad["rows"][-1][field] = value
+                self.refuse_without_opens(bad)
+        self.refuse_without_opens(self.a)  # An unbound metadata-only list cannot read labels.
 
 
 if __name__ == "__main__":

@@ -75,6 +75,22 @@ def admit_metadata(a):
     names = list(expected[0])
     if [{k: r.get(k) for k in names} for r in rows] != expected:
         raise ValueError("UPIQ-380 ordered membership/path binding mismatch")
+    binding_fields = {"reference_sha256", "distorted_sha256", "split", "pair_key"}
+    if any(binding_fields & set(r) for r in rows):
+        reference_hashes = {}
+        for r in rows:
+            if not binding_fields <= set(r):
+                raise ValueError("partial reference split/key binding")
+            for field in ("reference_sha256", "distorted_sha256"):
+                h = r[field]
+                if not isinstance(h, str) or len(h) != 64 or any(c not in "0123456789abcdef" for c in h):
+                    raise ValueError("invalid original-byte hash binding")
+            split = "development" if int(r["reference_sha256"], 16) % 5 == 0 else "fit"
+            key = hashlib.sha256(("upiq380-original-byte-pair-v1\0" + r["condition_id"] + "\0"
+                + r["reference_sha256"] + "\0" + r["distorted_sha256"]).encode()).hexdigest()
+            previous = reference_hashes.setdefault(r["reference_rel"], r["reference_sha256"])
+            if r["split"] != split or r["pair_key"] != key or previous != r["reference_sha256"]:
+                raise ValueError("reference hash/split/row-key binding mismatch")
     return rows
 
 
@@ -118,7 +134,9 @@ def prepare(args):
 
 
 def targets(a):
-    admit_metadata(a)
+    rows = admit_metadata(a)
+    if any("reference_sha256" not in r for r in rows):
+        raise ValueError("reference split must be frozen before label reads")
     if sha(LABEL) != a["label_sha256"]:
         raise ValueError("admitted HDR-only label source changed")
     with LABEL.open(newline="") as f:

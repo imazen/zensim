@@ -417,3 +417,11 @@ upiq380-build:
 
 upiq380-clippy:
     cargo clippy --locked -p zensim-validate --bin upiq_pu_score -- -D warnings
+
+[positional-arguments]
+upiq380-binary-refusals binary admission dest:
+    python3 scripts/tests/upiq380_binary_refusals.py --binary "$1" --admission "$2" --dest "$3"
+
+[positional-arguments]
+upiq380-split-negative revision out:
+    python3 scripts/tests/upiq380_split_negative_control.py --before-revision "$1" --out "$2"
