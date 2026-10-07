@@ -182,7 +182,9 @@ def external(record, cells, out):
     ):
         raise ValueError("all three registered external populations required")
     table_object_kinds(
-        record, [entry for arms in entries.values() for entry in arms.values()]
+        record,
+        [entry for arms in entries.values() for entry in arms.values()],
+        (("predictor", "tool"),),
     )
     metadata = retain(record, {"metadata"})
     manifests = {}
@@ -203,8 +205,10 @@ def external(record, cells, out):
             ):
                 raise ValueError("unqualified external feature/key declaration")
             manifests[name, arm] = m
-    blobs = retain(record, {"payload"})
-    from v2_lodo_mlp import predict
+    blobs = retain(record, {"payload", "tool"})
+    tool = out / "predict_features_with_bake"
+    tool.write_bytes(blobs["predictor"])
+    tool.chmod(0o500)
 
     report = {}
     for name, arms in entries.items():
@@ -220,14 +224,46 @@ def external(record, cells, out):
             if original is not None and not original[common].equals(frame[common]):
                 raise ValueError("external arm/control labels/order differ")
             original = frame
-            table = out / f"{name}-{arm}.parquet"
-            table.write_bytes(blobs[entry["table"]])
-            Path(str(table) + ".manifest.json").write_bytes(metadata[entry["manifest"]])
+            table = pq.read_table(pa.BufferReader(blobs[entry["table"]]))
+            if table["pair_key"].to_pylist() != frame.pair_key.tolist():
+                raise ValueError("external feature/key pair order differs")
+            width = 1867 if arm == "palette" else 1825
+            matrix = np.full((len(frame), width), np.nan, dtype="<f8")
+            ids = ARM_IDS if arm == "palette" else BASE_IDS
+            for id in ids:
+                column = f"palette_f{id}" if id >= 1825 else f"f{id}"
+                # Same one-time cast as training; numeric auxiliaries cannot
+                # satisfy a named palette input.
+                matrix[:, id] = (
+                    table[column].to_numpy().astype(np.float32).astype(np.float64)
+                )
+            if not np.isfinite(matrix[:, ids]).all():
+                raise ValueError("external primary features unmeasured/nonfinite")
+            wire = out / f"{name}-{arm}.f64.wire"
+            wire.write_bytes(struct.pack("<II", width, len(frame)) + matrix.tobytes())
             panels[arm] = {}
             for (fold, seed), cell in cells[arm].items():
                 dest = out / name / arm / f"{fold}_s{seed}"
                 dest.mkdir(parents=True)
-                pred = predict(cell / "refit/last.bin", table, dest / "pred.tsv")
+                dense = dense_bake(cell / "refit/last.bin", dest)
+                pred = np.array(
+                    [
+                        float(v)
+                        for v in subprocess.check_output(
+                            [
+                                str(tool),
+                                "--bake",
+                                str(dense),
+                                "--features-file",
+                                str(wire),
+                                "--f64-wire",
+                                "--production",
+                            ],
+                            text=True,
+                        ).split()
+                    ]
+                )
+                (dest / "pred.json").write_text(json.dumps(pred.tolist()) + "\n")
                 panels[arm][f"{fold}_s{seed}"] = external_metrics(pred, frame, name)
         report[name] = dict(summary=external_summary(panels), panels=panels)
     return dict(
