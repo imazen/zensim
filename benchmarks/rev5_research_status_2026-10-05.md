@@ -175,3 +175,14 @@ minimise MSE and maximise Kendall and Pearson correlation.
   timestamps never authorize delete), rebased onto `master` alone. Re-review running.
 * **Fleet capacity:** i270 currently refuses the fleet's SSH key and presents a changed host key, so it is out until checked; E28 runs on
   tower, i265, r3500 and r3800x (12 concurrent cells).
+
+## 13. Updates (2026-10-07 14:50 UTC)
+
+* **E28 is training.** Relaunched as `fitv2e28b-20261007` at 14:40 UTC with the reviewed admission fix (zensim main `0f2946bf`,
+  zenmetrics `ce261832`). The v36 package was verified through the image's real executor entry point before launch. Twelve cells run at
+  a time (tower 5, i265 3, r3500 2, r3800x 2); trainers confirmed running, no cell failures. 100 cells in total.
+* **Worker claim fix landed** on zenmetrics master (`f26c61cb`) after two review rounds: a shutting-down worker no longer deletes a
+  claim it doesn't own, and a renewal collision with the same worker no longer drops a live cell. The best-effort window between the
+  ownership read and the delete remains and is documented. Fit images built after this pick it up; E28's image predates it.
+* **SHIPPATH (D1 production fit + E30)** review found two admission/harvest ordering defects; round 11 is fixing them.
+  **Palette round 2** (no public API change, semantic verifier, final E32 text) is under re-review.
