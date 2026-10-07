@@ -51,7 +51,7 @@
      let two = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"2"}]));
      assert!(BakeScorer::ensemble(&[one, two], None).is_err());
 -    for bad in ["", "5", "rev0", "second"] {
-+    for bad in ["", "6", "rev0", "second"] {
++    for bad in ["", "999", "rev0", "second"] {
          let model = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":bad}]));
          assert!(BakeScorer::new(&model).is_err(), "{bad:?} must be unknown");
      }

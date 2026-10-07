@@ -115,6 +115,9 @@ mainfix-revision-probe program fixture outdir *models:
     set -euo pipefail
     python3 scripts/mainfix_revision_pin_probe.py --program "$1" --fixture "$2" --output-dir "$3" "${@:4}"
 
+mainfix-mirror evidence destination:
+    rsync -a --no-owner --no-group '{{evidence}}/' '{{destination}}/'
+
 # Quick offline rank/dial report (not full-eval or product qualification).
 # Emits markdown plus a self-contained HTML report. Optional REF
 # bake enables the per-zone dial-agreement panel; RAMP grid enables the
