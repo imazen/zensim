@@ -281,3 +281,15 @@ minimise MSE and maximise Kendall and Pearson correlation.
   on all three seeds meanwhile.
 * **E29 incident:** an import in a new unit test ran an unguarded legacy CLI that read a legacy HDR VAL panel (teacher-scored,
   22,860 rows). No fit or decision used it; recorded in the exposure ledger; the module is now guarded.
+
+## 21. Updates (2026-10-07 19:35 UTC)
+
+* **Import hazard closed on main** (`a9a5ca0a`): after the E29 incident, the review found five more legacy scripts that read an
+  evaluation or protected panel just by being imported — including one that reads the sealed hidden KADIS panel. They now refuse
+  import, the incident module's CLI only runs as a script, and a tripwire test proves importing any of the six reads nothing.
+* **E29** needs a second round (its Rust trainer path loaded HDR data before validating the row keys; a scoring sign issue).
+  **E31/E32** trainer extensions are being written, each with a proof that the baseline path is unchanged. The shared fresh
+  control waits for all three.
+* **Production model:** label-free gates are running on all three seeds; evaluation gates wait for the owner to choose the final
+  composition (one seed or an ensemble).
+* **Speed qualification:** Rev4/Rev5 score parity recorded across tiers and threads (`ced5090f`); timing runs wait for a quiet box.
