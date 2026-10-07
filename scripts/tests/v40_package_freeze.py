@@ -82,9 +82,12 @@ def freeze(bundle, source, source_commit, metrics_commit):
     )
     (bundle / "jobset_caps.json").write_text(json.dumps(caps, indent=2) + "\n")
     smokes = []
-    for arm, attempt in (("control", 2), ("hb4", 1), ("hc4", 1), ("palette", 1)):
+    selection = json.loads((bundle / "SMOKE_SELECTION.json").read_text())
+    if set(selection) != {"control", "hb4", "hc4", "palette"}:
+        raise ValueError("exact arm smoke selection required")
+    for arm in selection:
         for mode in ("bounded", "first-epoch"):
-            use_attempt = attempt if mode == "bounded" else 1
+            use_attempt = selection[arm][mode]
             folder = bundle / f"smoke-{arm}-{mode}-{use_attempt}"
             files = list(folder.glob("*_PATH_PASS.json"))
             if len(files) != 1:
@@ -118,7 +121,8 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "ASSESSMENT_SOURCE.json",
         "assessment-program.tar.gz",
         "EXECUTOR_SMOKES.json",
-        "HARVEST_REFUSALS-3.json",
+        "SMOKE_SELECTION.json",
+        "HARVEST_REFUSALS.json",
         "CONTROL_DECISION.md",
         "E30_COMPLETE_PINS.json",
         "v40-fit-contract.json",
