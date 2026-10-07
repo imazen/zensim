@@ -557,11 +557,75 @@ def cmd_palette_chromaq(a):
     return 0
 
 
+def cmd_palette_verify(a):
+    """Validate artifact schema, hashes, row identity and ordered joins independently."""
+    root=Path(a.palette_verify)
+    bank=root/'bank';top=json.loads((bank/'_MANIFEST.json').read_text())
+    expected=PALETTE_MEMBERS|{'nits','live','mciqa','coverage_pool'}
+    if set(top['sets'])!=expected or top['build_commit']!=a.build_commit or top['labels_read']:
+        raise ValueError('complete authorized bank required')
+    verified={};tables={}
+    for name,entry in top['sets'].items():
+        folder=bank/name;mp=folder/'_MANIFEST.json';m=json.loads(mp.read_text())
+        if (sha256_file(mp)!=entry['manifest_sha256'] or m['build_commit']!=a.build_commit
+                or m['palette_revision']!='palette_v2' or m['labels_read'] or m['serving_allowed']
+                or m['binary_sha256']!=sha256_file(a.bin) or m['feature_ids']!=PALETTE_IDS):
+            raise ValueError('palette receipt mismatch')
+        for file,key in [('keys.parquet','keys_sha256'),('features__palette.parquet','features_sha256')]:
+            if sha256_file(folder/file)!=m[key]:raise ValueError('palette file changed')
+        keys=pq.read_table(folder/'keys.parquet',columns=['pair_key'])
+        t=pq.read_table(folder/'features__palette.parquet')
+        names={'pair_key','row_id','reference_pixels_sha256','distorted_pixels_sha256'}|{f'f{i}' for i in PALETTE_IDS}
+        if set(t.column_names)!=names or len(t)!=m['rows'] or len(t)!=entry['rows']:
+            raise ValueError('palette schema/row mismatch')
+        if t['pair_key'].to_pylist()!=keys['pair_key'].to_pylist() or t['row_id'].to_pylist()!=list(range(len(t))):
+            raise ValueError('palette key/order mismatch')
+        for i in PALETTE_IDS:
+            if t[f'f{i}'].type!=pa.float64() or not np.isfinite(t[f'f{i}'].to_numpy()).all():raise ValueError('invalid palette measured values')
+        if sum(c['rows'] for c in m['chunks'])!=len(t):raise ValueError('chunk row coverage')
+        for c in m['chunks']:
+            em=c['extractor_manifest']
+            if em['feature_set_id']!='palette@w1867/palette_v2#30b09cd1' or em['populated_feature_ids']!=PALETTE_IDS:
+                raise ValueError('chunk producer identity')
+        verified[name]={'rows':len(t),'features_sha256':m['features_sha256']}
+        tables[name]=t
+    im=json.loads((root/'instrument/_MANIFEST.json').read_text())
+    if im['labels_read'] or set(im['views'])!=set(PALETTE_TABLES) or im['bank_manifest_sha256']!=sha256_file(bank/'_MANIFEST.json'):
+        raise ValueError('instrument manifest mismatch')
+    views={}
+    for name,m in im['views'].items():
+        path=root/'instrument'/f'{name}.parquet'
+        if sha256_file(path)!=m['sha256'] or sha256_file(m['instrument_keys_path'])!=m['instrument_keys_sha256']:
+            raise ValueError('instrument file/source changed')
+        v=pq.read_table(path);keys=pq.read_table(m['instrument_keys_path'],columns=['pair_key','member_set'])
+        if len(v)!=m['rows'] or v['row_id'].to_pylist()!=list(range(len(v))):raise ValueError('instrument rows')
+        for col in ('pair_key','member_set'):
+            if v[col].to_pylist()!=keys[col].to_pylist():raise ValueError('instrument key order')
+        # Compare each measured column against a key lookup in the bank,
+        # independent of the projection's concatenation/offset algorithm.
+        members=v['member_set'].to_pylist();pairs=v['pair_key'].to_pylist()
+        lookups={member:{k:j for j,k in enumerate(tables[member]['pair_key'].to_pylist())} for member in set(members)}
+        for member in set(members):
+            ix=np.array([j for j,memb in enumerate(members) if memb==member],dtype=np.int64)
+            bank_ix=np.array([lookups[member][pairs[j]] for j in ix],dtype=np.int64)
+            for i in PALETTE_IDS:
+                if not np.array_equal(v[f'palette_f{i}'].to_numpy()[ix],tables[member][f'f{i}'].to_numpy()[bank_ix]):
+                    raise ValueError('instrument measured value join mismatch')
+        views[name]={'rows':len(v),'sha256':m['sha256'],'exact_column_join':True}
+    receipt={'schema':'palette-final-verification-v1','build_commit':a.build_commit,'verifier_sha256':sha256_file(__file__),
+        'bank':verified,'instrument':views,'bank_rows':sum(x['rows'] for x in verified.values()),
+        'instrument_rows':sum(x['rows'] for x in views.values()),'labels_read':False,'serving_allowed':False}
+    with (root/'_VERIFIED.json').open('x') as f:json.dump(receipt,f,indent=2);f.write('\n')
+    log(f"PALETTE verified bank {receipt['bank_rows']} rows; ordered views {receipt['instrument_rows']} rows")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["extract", "verify-against"])
     ap.add_argument("set")
     ap.add_argument("--bin")
+    ap.add_argument("--palette-verify", help="independent final palette artifact and join verification")
     ap.add_argument("--palette-views", help="complete pinned palette bank to project into ordered TRAIN instrument views")
     ap.add_argument("--palette-chromaq", help="existing CHROMAQ ladder owner directory, diagnostic only")
     ap.add_argument("--palette-instrument", help="authorized v2c5 TRAIN/external features-only sidecars")
@@ -580,6 +644,8 @@ def main() -> int:
     if a.cmd == "extract":
         if not (a.bin and a.build_commit and a.era):
             ap.error("extract needs --bin, --build-commit and --era")
+        if a.palette_verify:
+            return cmd_palette_verify(a)
         if a.palette_views:
             return cmd_palette_views(a)
         if a.palette_chromaq:
