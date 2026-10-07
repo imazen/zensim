@@ -293,3 +293,15 @@ minimise MSE and maximise Kendall and Pearson correlation.
 * **Production model:** label-free gates are running on all three seeds; evaluation gates wait for the owner to choose the final
   composition (one seed or an ensemble).
 * **Speed qualification:** Rev4/Rev5 score parity recorded across tiers and threads (`ced5090f`); timing runs wait for a quiet box.
+
+## 22. Updates (2026-10-07 20:05 UTC)
+
+* **E31 and E32 trainer extensions keep the baseline bit-identical.** Each lane reran a full-budget control cell (KADID held out,
+  seed 0) under its extended trainer; the model bytes match E30's cell exactly (after stripping run-specific metadata). The
+  extensions are in cross-review; then they land with E29's and the combined package (shared control + arms) gets built.
+* **Owner items now open:**
+  1. Final production composition (one seed or an ensemble) — evaluation gates wait for it.
+  2. E31 provenance: the producer of the legacy UPIQ HDR JOD file is unknown; E31's registration requires recovering it or an
+     explicit owner decision to accept the gap before the E31 arm is fit. E29 and E32 don't depend on it.
+  3. Whether exploratory runs should also drop AIC-3 (new registrations already use the four-source design).
+  4. The `zensim-validate` partial-producer test expectation (Known Bugs).
