@@ -309,8 +309,170 @@ def revision_tables(runs: dict[str, dict], labels: dict[str, tuple[str, int, int
     return lines
 
 
+
+def speedq_stop_report(args) -> int:
+    """Render a real parity refusal; never invent timing or coverage."""
+    path = args.raw_dir / "full-parity/PARITY_FAILED.json"
+    if not path.exists(): path = args.raw_dir / "parity/PARITY_FAILED.json"
+    receipt = json.loads(path.read_text())
+    a, b = receipt["baseline"], receipt["different"]
+    assert receipt["status"] == "STOP_SCORE_PARITY_BUG" and not receipt["timing_started"]
+    assert a["revision"] == b["revision"]
+    assert a["score_bits"] != b["score_bits"] or a["input_sha256"] != b["input_sha256"]
+    historical = a["revision"] == 3
+    status = "HISTORICAL_REV3_BIT_REFUSAL" if historical else receipt["status"]
+    rows = [{k: r[k] for k in ("revision", "tier", "threads", "width", "height", "score", "score_bits")}
+            for r in receipt["checked"]]
+    missing = ["paired runtime and CIs", "alpha/beta fits", "MT scaling", "RSS", "B and peers", "remaining score-parity grid"]
+    out = {"status": status, "timing_started": False, "missing": missing,
+           "required_model_parity_cells": 576, "checked_model_parity_cells": len(rows),
+           "input_sha256": a["input_sha256"], "model": a["model"], "scores": rows,
+           "score_difference": b["score"] - a["score"], "raw_dir": str(args.raw_dir),
+           "timing": [], "fits": [], "scaling": [], "rss": [], "peers": []}
+    args.out_json.write_text(json.dumps(out, indent=2) + "\n")
+    lines = ["# Rev5 SPEEDQ — STOPPED at score parity", "", "MISSING: " + "; ".join(missing) + ".", "",
+             f"Checked {len(rows)} of 576 by_v2fy model parity cells; no timing segment started.",
+             "This is the 420-ID, H128, one-output model with fixed Rev4-trained weights, restamped through the metadata owner.",
+             "Different revisions may differ; this failure compares the same revision and input across dispatch ceilings.", "",
+             "| revision | tier | threads | size | score | f64 score bits |", "|---|---|---|---|---|---|"]
+    lines += [f"| {r['revision']} | {r['tier']} | {r['threads']} | {r['width']}x{r['height']} | {r['score']} | `{r['score_bits']}` |" for r in rows]
+    lines += ["", f"Rev{a['revision']} {b['tier']} minus {a['tier']}: {out['score_difference']} score units.", "",
+              "This archived Rev3 bitwise refusal predates the coordinator's amendment; Rev3 is now an admitted, tolerance-flagged timing baseline." if historical else "Strict Rev4/Rev5 parity or input identity failed. No timing was admitted.",
+              "No Rev5-versus-Rev4 speed verdict is available: there are no paired timing rounds, fits, scaling or RSS measurements.", "",
+              f"Raw evidence: `{args.raw_dir}`. Build and evidence pins are in the adjacent `.meta` file.", ""]
+    args.out_md.write_text("\n".join(lines))
+    return 0
+
+def speedq_report(args) -> int:
+    """The existing report owner, extended to the full paired SPEEDQ grid."""
+    import statistics
+    tiers = ['v4x','v4','v3','scalar']
+    threads = [1,2,4,8,16,32]
+    sizes = ['64x64','128x128','256x256','512x512','1024x1024','2048x2048','4096x4096','1920x1080']
+    arms = ['by_v2fy_r3','by_v2fy_r4','by_v2fy_r5','zensim_B','fast_ssim2','butteraugli','ssimulacra2_rs']
+    root = args.raw_dir
+    receipt = root/'full-parity/PARITY_STRICT_PASS.json'
+    if not receipt.exists(): receipt = root/'full-parity/PARITY_PASS.json'
+    from speedq_run import parity_receipt
+    parity_receipt(receipt)
+    parity = json.loads(receipt.read_text())
+    medians = {}; analyses = {}; headers = {}; memories = {}
+    expected = [(t,n,g) for t in tiers for n in threads for g in sizes]
+    for tier,n,geometry in expected:
+        path = root/'timing'/f'{tier}-t{n}-{geometry}'
+        if not (path/'COMPLETE.json').exists(): continue
+        inner = json.loads((path/'zenbench.inner.json').read_text())
+        assert not inner['zenbench_unreliable'] and all(v is True for v in inner['gate_clean'])
+        header = json.loads((path/'header.json').read_text())
+        assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
+        values = inner['paired_rounds']
+        assert set(values) == set(arms) and all(len(v) == header['rounds'] for v in values.values())
+        medians[(tier,n,geometry)] = {a: statistics.median(values[a]) for a in arms}
+        analyses[(tier,n,geometry)] = json.loads((path/'paired_analysis.json').read_text())
+        headers[(tier,n,geometry)] = header
+    for g in sizes:
+        for n in [1,32]:
+            for arm in arms:
+                path=root/'rss'/f'v4x-t{n}-{g}-{arm}.json'
+                if path.exists():
+                    row=json.loads(path.read_text());assert row['quiet_gate']['admitted']
+                    memories[(g,n,arm)]=row['max_rss_kib']
+    missing=[]
+    if len(medians)!=192: missing.append(f'paired timing segments: {len(medians)}/192')
+    if len(memories)!=112: missing.append(f'RSS measurements: {len(memories)}/112 (v4x, 1/32 threads)')
+    pixels={g:math.prod(int(v) for v in g.split('x')) for g in sizes}
+    fits={}
+    for t in tiers:
+        for n in threads:
+            for arm in arms:
+                if all((t,n,g) in medians for g in sizes):
+                    xs=[pixels[g] for g in sizes];ys=[medians[(t,n,g)][arm] for g in sizes]
+                    alpha,beta=least_squares(xs,ys)
+                    mean=sum(ys)/len(ys)
+                    err=sum((y-alpha-beta*x)**2 for x,y in zip(xs,ys))
+                    total=sum((y-mean)**2 for y in ys)
+                    fits[(t,n,arm)]=(alpha,beta,1-err/total if total else 1.0)
+    slower=[(key,a) for key,a in analyses.items() if a['ci_lower']>0 and not a['resolution_limited']]
+    faster=[(key,a) for key,a in analyses.items() if a['ci_upper']<0 and not a['resolution_limited']]
+    inconclusive=len(analyses)-len(slower)-len(faster)
+    legacy=parity['rev3_differences']
+    def compact(v): return float(f'{v:.8g}')
+    result={
+        'status':'INCOMPLETE' if missing else 'MEASURED', 'missing':missing,
+        'timing_coverage':[len(medians),192], 'rss_coverage':[len(memories),112],
+        'axes':{'tiers':tiers,'threads':threads,'geometries':sizes,'arms':arms},
+        'layout':'configuration = tier outer, threads inner; timing/CI rows = geometry order; fit rows = arm order',
+        'precision':'summary medians/intercepts in ns; CI bounds rounded outward to whole ns; beta/R2 eight significant digits; exact rounds/analyses retained in raw',
+        'medians_ns':[[[medians[(t,n,g)][a] for a in arms] if (t,n,g) in medians else None for g in sizes] for t in tiers for n in threads],
+        'r5_minus_r4_ci_ns':[[[math.floor(analyses[(t,n,g)]['ci_lower']),round(analyses[(t,n,g)]['ci_median']),math.ceil(analyses[(t,n,g)]['ci_upper'])] if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
+        'alpha_ns_beta_ns_per_pixel_r2':[[[round(fits[(t,n,a)][0]),compact(fits[(t,n,a)][1]),compact(fits[(t,n,a)][2])] if (t,n,a) in fits else None for a in arms] for t in tiers for n in threads],
+        'rss_kib':[[[memories.get((g,n,a)) for a in arms] for n in [1,32]] for g in sizes],
+        'rss_scope':'fresh whole process, synthetic setup + model load + one score; v4x and 1/32 requested threads; no prewarmed application buffers',
+        'scaling':'speedup = same-size median(1T)/median(NT); efficiency = speedup/N, derived from medians_ns for every arm/tier/size',
+        'verdict':{'slower_cells':len(slower),'faster_cells':len(faster),'inconclusive_cells':inconclusive,'rev5_at_least_as_fast_everywhere':False if slower else (True if len(faster)==192 else None)},
+        'parity':{'strict_pass':384,'strict_required':384,'strict_feature_bits_pass':384,'consumed_features_per_cell':420,'rev3_cells':192,'rev3_tolerance_failed_cells':sum(r['tolerance_violations']>0 for r in legacy),'rev3_max_abs_feature_difference':max(r['max_abs_feature_difference'] for r in legacy),'rev3_max_tolerance_fraction':max(r['max_tolerance_fraction'] for r in legacy),'rev3_max_abs_score_difference':max(abs(r['score_difference']) for r in legacy)},
+        'raw_directory':str(root),
+        'statistics_owner':'zenbench e45822161a710acd013c572a98627e64663b1bcf; randomized paired rounds, 10K bootstrap, paired IQR filtering',
+        'model_source_sha256':'802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1',
+    }
+    args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')
+    lines=['# Rev5 SPEEDQ runtime qualification','']
+    if missing: lines += ['MISSING: '+ '; '.join(missing)+'.','']
+    lines += [f"Rev5 is {'slower in '+str(len(slower))+' cells' if slower else 'not established as at least as fast everywhere'} versus Rev4: {len(faster)} faster, {len(slower)} slower, {inconclusive} inconclusive of {len(analyses)} measured size/tier/thread cells. Classification uses the paired 95% CI for Rev5 minus Rev4, with timer-resolution limits retained.", '',
+        'The same 420-ID, H128, one-output by_v2fy timing weights run through isolated Rev3/Rev4/Rev5 formula owners. They are fixed Rev4-trained research weights, not a Rev5 product-bake qualification. B runs its serving Rev1 arithmetic. Inputs are the existing deterministic speed-matrix RGB8 pairs; no labels or holdouts were opened.','',
+        'All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 is a timing baseline: SIMD ceilings satisfy the documented feature tolerance, while all 48 scalar cells fail it (max feature absolute difference 3.6560852526013043e-6; max tolerance fraction 3.428426473557622). The failed legacy tolerance is recorded, not renamed a pass.','',
+        'Each timing segment requires load1 < 2.0 and no foreign cargo/rustc/training before warmup and immediately before rounds. The retained rounds must all have a clean zenbench gate and no observed build/training interference. Persistent workers time the scoring call with Instant; separate parent rounds retain IPC/bookkeeping. Pair statistics reuse zenbench’s engine owner; no IPC estimate is subtracted. Setup, metadata stamping, input generation, and Rust-av sRGB widening are outside the timed body. Rayon pools and scoring buffers are warm.','',
+        'Dispatch labels are ceilings forced through archmage with its testing guard; kernels without a v4 variant may use v3. Threads 1/2/4/8 use CCD0; 16 spans CCDs, and 32 adds SMT. Cache topology changes are part of these measured configurations.','',
+        '## Alpha and beta fits','',
+        'Unconstrained OLS over all eight geometries: time_ns = alpha_ns + beta_ns_per_pixel × pixels. Alpha below is µs; beta is ns/pixel. A negative alpha is a fit artifact, not a negative physical setup cost; R² exposes fit adequacy. These are descriptive fits to medians, not constants baked into source.','',
+        '| arm | tier | threads | alpha µs | beta ns/pixel | R² |','|---|---|---:|---:|---:|---:|']
+    for arm in arms:
+        for t in tiers:
+            for n in threads:
+                if (t,n,arm) in fits:
+                    a,b,r2=fits[(t,n,arm)]
+                    lines.append(f'| {arm} | {t} | {n} | {a/1000:.3f} | {b:.6g} | {r2:.4f} |')
+    lines+=['','## MT scaling','',
+        'Each entry is speedup / efficiency versus the same size/tier/revision at one thread. The JSON retains all arm medians, so B and peer scaling use the same formula.','',
+        '| revision | tier | size | 2T | 4T | 8T | 16T | 32T |','|---|---|---|---:|---:|---:|---:|---:|']
+    for arm in arms[:3]:
+        for t in tiers:
+            for g in sizes:
+                if not all((t,n,g) in medians for n in threads):continue
+                base=medians[(t,1,g)][arm]
+                values=[base/medians[(t,n,g)][arm] for n in threads[1:]]
+                entries=[f'{v:.2f}/{v/n:.2f}' for v,n in zip(values,threads[1:])]
+                lines.append('| '+arm[-2:]+' | '+t+' | '+g+' | '+' | '.join(entries)+' |')
+    lines+=['','## Rev5 versus Rev4 paired intervals','',
+        'All 192 intervals are in the JSON (nanoseconds, Rev5 minus Rev4). The table names geometries where the entire CI is above zero and shows the slowest percentage change in that configuration, with its paired CI. Crossing zero is inconclusive, not proof of equivalence.','',
+        '| tier | threads | slower geometries | largest slowdown | paired CI µs at that size |','|---|---:|---|---:|---|']
+    for t in tiers:
+        for n in threads:
+            selected=[(g,a) for (tier,th,g),a in slower if tier==t and th==n]
+            if selected:
+                g,a=max(selected,key=lambda item:item[1]['pct_change'])
+                lines.append(f"| {t} | {n} | {', '.join(g for g,_ in selected)} | {a['pct_change']:.2f}% ({g}) | [{a['ci_lower']/1000:.3f}, {a['ci_upper']/1000:.3f}] |")
+    lines+=['','## Peak RSS','',
+        'KiB from /usr/bin/time -v, fresh processes, v4x at 1 and 32 threads. Each entry shows 1T / 32T. This includes setup, input buffers and model loading; it differs from the warm scoring-only timing boundary. Other tiers and intermediate thread-count RSS were not measured.','',
+        '| size | '+ ' | '.join(arms)+' |', '|---|'+'---:|'*len(arms)]
+    for g in sizes:
+        if all((g,n,a) in memories for n in [1,32] for a in arms):
+            lines.append('| '+g+' | '+' | '.join(f'{memories[(g,1,a)]} / {memories[(g,32,a)]}' for a in arms)+' |')
+    lines+=['','## Peers at v4x, one thread','',
+        'Warm whole-call median milliseconds. All peer tiers/thread configurations remain in the JSON; their fits are above. Butteraugli and Rust-av may stay single-threaded despite the requested thread setting.','',
+        '| size | '+' | '.join(arms)+' |','|---|'+'---:|'*len(arms)]
+    for g in sizes:
+        if ('v4x',1,g) in medians:
+            lines.append('| '+g+' | '+' | '.join(f"{medians[('v4x',1,g)][a]/1e6:.4f}" for a in arms)+' |')
+    lines+=['',f'Raw rounds and per-segment load/governor/affinity/gate headers: `{root}`. Adjacent `.meta` records source, toolchain, binary/model pins, commands and mirror verification. Exact worker rounds, parent IPC rounds, full paired analyses and all RSS logs are retained there.','']
+    args.out_md.write_text('\n'.join(lines))
+    return 0
+
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--speedq", action="store_true", help="report SPEEDQ parity and the admitted timing/RSS grid")
     ap.add_argument("--raw-dir", required=True, type=Path)
     ap.add_argument("--out-json", required=True, type=Path)
     ap.add_argument("--out-md", required=True, type=Path)
@@ -323,6 +485,9 @@ def main() -> int:
         "edit to the generated .md is erased by the next run.",
     )
     args = ap.parse_args()
+    if args.speedq:
+        complete = any((args.raw_dir/"full-parity"/name).exists() for name in ["PARITY_STRICT_PASS.json","PARITY_PASS.json"])
+        return speedq_report(args) if complete else speedq_stop_report(args)
     notes = args.notes or args.out_md.with_suffix(".notes.md")
 
     meta_path = args.raw_dir / "run.meta.json"

@@ -228,6 +228,16 @@ bench-speed-matrix raw="/mnt/v/output/zensim/demos/speed-matrix-2026-09-18/raw" 
         | grep '^{' \
         | python3 -c "import json,sys; print(next(e for e in (json.loads(l).get('executable') for l in sys.stdin) if e and 'ssim2_speed_bar' in e))"
     }
+    if [[ "${SPEEDQ:-0}" == 1 ]]; then
+        export ZENSIM_BENCH_SKIP_CPP_FFI=1
+        BIN_SPEEDQ=$(build --features speedq,ssim2-rayon)
+        export BIN_SPEEDQ
+        rc=0
+        scripts/demos/speed_matrix_run.sh "$raw" || rc=$?
+        python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir "$raw" \
+            --out-json "$stem.json" --out-md "$stem.md"
+        exit "$rc"
+    fi
     BIN_PLAIN=$(build) BIN_RAYON=$(build --features ssim2-rayon) \
         scripts/demos/speed_matrix_run.sh "$raw"
     python3 scripts/demos/speed_matrix_report.py --raw-dir "$raw" \
@@ -465,3 +475,38 @@ upiq380-python-lint:
 [positional-arguments]
 upiq380-mirror source dest:
     rsync -a --no-owner --no-group "$1/" "$2/"
+
+# SPEEDQ uses the existing synthetic matrix images and Rust scoring surfaces.
+# Explicitly omit optional C++ oracle arms: only existing Rust peers are required.
+speedq-build:
+    ZENSIM_BENCH_SKIP_CPP_FFI=1 cargo bench --no-run --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar --features speedq,ssim2-rayon --message-format=json-render-diagnostics
+
+speedq-clippy:
+    ZENSIM_BENCH_SKIP_CPP_FFI=1 cargo clippy --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar --features speedq,ssim2-rayon -- -D warnings
+
+[positional-arguments]
+speedq-parity binary dest *options:
+    #!/usr/bin/env bash
+    binary=$1
+    dest=$2
+    shift 2
+    exec python3 scripts/demos/speedq_run.py parity --binary "$binary" --dest "$dest" "$@"
+
+speedq-test:
+    python3 -m unittest discover -s scripts/demos -p 'test_speedq.py' -v
+
+[positional-arguments]
+speedq-mirror source dest:
+    nice -n19 ionice -c3 rsync -a --no-owner --no-group "$1/" "$2/"
+
+[positional-arguments]
+speedq-timing *options:
+    python3 scripts/demos/speedq_run.py timing "$@"
+
+[positional-arguments]
+speedq-rss *options:
+    python3 scripts/demos/speedq_run.py rss "$@"
+
+# Freeze the executable named by the successful Cargo JSON build receipt.
+speedq-freeze build_log dest:
+    python3 scripts/demos/speedq_run.py freeze --build-log "{{build_log}}" --dest "{{dest}}"

@@ -4,7 +4,11 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use zenpredict::Model;
 use zensim::{BakeScorer, RgbSlice, Zensim, ZensimProfile};
 
@@ -179,18 +183,178 @@ fn worker(arm: &str) {
     let score = action();
     assert!(score.is_finite(), "nonfinite score");
     let bits = score.to_bits();
+    let actual_threads = if std::env::var_os("ZEN_S2_RSS_ONLY").is_none() {
+        let actual = rayon::current_num_threads();
+        assert_eq!(
+            actual,
+            std::env::var("RAYON_NUM_THREADS")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
+        );
+        Some(actual)
+    } else {
+        None
+    };
     let ready = json!({"pid":std::process::id(),"arm":arm,"tier":tier,"width":w,"height":h,
         "score":score,"score_bits":format!("{bits:016x}"),"input_sha256":input_sha,
         "model":model_info,"threads":std::env::var("RAYON_NUM_THREADS").unwrap(),
-        "ssim2_rayon":cfg!(feature="ssim2-rayon"),"feature_values":*feature_values.borrow()});
+        "ssim2_rayon":cfg!(feature="ssim2-rayon"),"feature_values":*feature_values.borrow(),"actual_rayon_threads":actual_threads});
+    if std::env::var_os("ZEN_S2_RSS_ONLY").is_some() {
+        println!("{ready}");
+        return;
+    }
+    for _ in 0..2 {
+        assert_eq!(action().to_bits(), bits, "same-worker warmup score changed");
+    }
+    let listener = UnixListener::bind(std::env::var("ZEN_S2_SOCKET").unwrap()).unwrap();
     println!("{ready}");
+    std::io::stdout().flush().unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    writeln!(stream, "{ready}").unwrap();
+    let reader = BufReader::new(stream.try_clone().unwrap());
+    for line in reader.lines() {
+        let line = line.unwrap();
+        if line == "quit" {
+            break;
+        }
+        assert_eq!(line, "call");
+        let start = Instant::now();
+        let score = action();
+        let elapsed = start.elapsed().as_nanos() as u64;
+        assert_eq!(score.to_bits(), bits, "same-worker timing score changed");
+        writeln!(stream, "{elapsed}").unwrap();
+    }
 }
 
+struct Worker {
+    input: UnixStream,
+    output: BufReader<UnixStream>,
+    ready: Value,
+}
+impl Worker {
+    fn new(name: &str) -> Self {
+        let paths: Value =
+            serde_json::from_str(&std::env::var("ZEN_S2_WORKER_SOCKETS").unwrap()).unwrap();
+        let input = UnixStream::connect(paths[name].as_str().unwrap()).unwrap();
+        let mut output = BufReader::new(input.try_clone().unwrap());
+        let mut line = String::new();
+        assert!(
+            output.read_line(&mut line).unwrap() > 0,
+            "worker READY missing"
+        );
+        let ready = serde_json::from_str(&line).unwrap();
+        Self {
+            input,
+            output,
+            ready,
+        }
+    }
+    fn call(&mut self) -> u64 {
+        writeln!(self.input, "call").unwrap();
+        let mut line = String::new();
+        assert!(
+            self.output.read_line(&mut line).unwrap() > 0,
+            "worker stopped"
+        );
+        line.trim().parse().unwrap()
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = writeln!(self.input, "quit");
+    }
+}
 pub(super) fn run() {
-    let arm = std::env::var("ZEN_S2_SPEEDQ_WORKER").expect("explicit parity worker arm");
-    assert!(
-        std::env::var_os("ZEN_S2_RSS_ONLY").is_some(),
-        "SPEEDQ stopped at parity; timing is unqualified"
+    if let Ok(arm) = std::env::var("ZEN_S2_SPEEDQ_WORKER") {
+        worker(&arm);
+        return;
+    }
+    let (w, h) = geometry();
+    let dest = std::path::PathBuf::from(std::env::var("ZENBENCH_RESULT_PATH").unwrap());
+    assert!(!dest.exists(), "fresh raw result required");
+    let declarations = [
+        ("by_v2fy_r3", "by_v2fy", "3"),
+        ("by_v2fy_r4", "by_v2fy", "4"),
+        ("by_v2fy_r5", "by_v2fy", "5"),
+        ("zensim_B", "zensim_B", "1"),
+        ("fast_ssim2", "fast_ssim2", "1"),
+        ("butteraugli", "butteraugli", "1"),
+        ("ssimulacra2_rs", "ssimulacra2_rs", "1"),
+    ];
+    let only = std::env::var("ZEN_S2_ARMS").expect("explicit arm inventory");
+    let mut owners = Vec::new();
+    let mut metadata = serde_json::Map::new();
+    for (name, arm, revision) in declarations {
+        if !only.split(',').any(|s| s == name) {
+            continue;
+        }
+        let worker = Worker::new(name);
+        assert_eq!(worker.ready["arm"], arm);
+        if arm == "by_v2fy" {
+            assert_eq!(worker.ready["model"]["revision"], revision);
+        }
+        metadata.insert(name.into(), worker.ready.clone());
+        owners.push((name, worker, Arc::new(Mutex::new(Vec::<u64>::new()))));
+    }
+    assert_eq!(
+        owners.len(),
+        only.split(',').count(),
+        "unknown/duplicate arm"
     );
-    worker(&arm);
+    let traces: Vec<_> = owners
+        .iter()
+        .map(|(name, _, calls)| (*name, Arc::clone(calls)))
+        .collect();
+    let rounds = super::env_usize("ZEN_S2_ROUNDS", 32);
+    let result = zenbench::run(move |suite| {
+        suite.compare(format!("speedq_{w}x{h}"), |group| {
+            group
+                .config()
+                .max_rounds(rounds)
+                .min_rounds(rounds)
+                .max_wall_time(Duration::from_secs(3600))
+                .warmup_time(Duration::from_millis(20))
+                .auto_rounds(false);
+            group.config().min_iterations = 1;
+            group.config().max_iterations = 1;
+            for (name, mut owner, calls) in owners {
+                group.bench(name, move |b| {
+                    b.iter(|| {
+                        let ns = owner.call();
+                        calls.lock().unwrap().push(ns);
+                        zenbench::black_box(ns)
+                    })
+                });
+            }
+        });
+    });
+    result.save(&dest).unwrap();
+    let comp = &result.comparisons[0];
+    assert!(
+        comp.samples.iter().all(|s| s.iterations == 1),
+        "one call per round"
+    );
+    let mut inner = serde_json::Map::new();
+    for (name, trace) in traces {
+        let calls = trace.lock().unwrap();
+        assert!(calls.len() >= comp.samples.len());
+        // zenbench warmup/estimation precede measurement, and every completed
+        // round makes exactly one call to every owner (engine.rs retained_samples).
+        inner.insert(
+            name.into(),
+            json!(&calls[calls.len() - comp.samples.len()..]),
+        );
+    }
+    let report = json!({"schema":"speedq-inner-rounds-v2","workers":metadata,
+        "paired_rounds":inner,"zenbench_gate_waits":result.gate_waits,
+        "zenbench_unreliable":result.unreliable,"gate_clean":comp.samples.iter().map(|s|s.gate_clean).collect::<Vec<_>>(),
+        "timer_resolution_ns":result.timer_resolution_ns,"parent_rounds_include_ipc":true,"worker_rounds_exclude_ipc":true,
+        "sample_alignment":"last N calls after zenbench warmup/estimation; one call per completed retained round"});
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest.with_extension("inner.json"))
+        .unwrap();
+    writeln!(f, "{}", serde_json::to_string_pretty(&report).unwrap()).unwrap();
 }

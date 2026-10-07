@@ -6,6 +6,12 @@
 
 ### Added
 
+- Internal SPEEDQ extension to the existing speed matrix: isolated Rev3/Rev4/Rev5
+  owners, strict Rev4/Rev5 parity, recorded Rev3 tolerance failures, quiet-gated
+  paired rounds, descriptive alpha/beta fits and separate fresh-process RSS.
+  Runtime verdicts require the completed measured grid; no serving API changes.
+
+
 - Research-only internal `palette` family and 42 explicit dominant-colour shift
   features (f1825–f1866, N=2–8), with signed OKLab lightness/chroma/hue,
   weighted assignment and palette population transport. Training extraction

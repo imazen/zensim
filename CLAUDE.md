@@ -169,6 +169,17 @@ because cleanup tests or a historical training reproduction pass.
   The same tests now refuse before opens; emitted data was correctly bound.
   See `benchmarks/upiq380_ingestion_policy_2026-10-07.md`.
 
+* **2026-10-07 — SPEEDQ's initial stop applied bit parity to Rev3. AMENDED.**
+  The coordinator confirmed the scalar/SIMD split is documented in
+  `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md` row (d) and DATASET_HISTORY.
+  Rev3 is only a timing baseline; compare its features against the existing
+  `max(1e-6 abs, 1e-5*scale)` policy and record failures. Rev4/Rev5 retain strict score-bit parity
+  across all required tiers and thread counts before timing. Initial receipts
+  remain in the SPEEDQ raw archive; no arithmetic or serving policy changed.
+  The amended full grid passes all 384 strict Rev4/Rev5 score checks and bit identity for all 420 consumed features in those cells. Rev3
+  scalar exceeds the feature policy in 48 of 192 cells (max abs 3.6560853e-6);
+  its SIMD tiers pass. Rev3 remains an explicitly flagged timing baseline.
+
 * **2026-10-07 — E28 admission refused the executor's approved root link. FIXED locally (`8283d518`).**
   The approved-inventory path check rejected symlink ancestors above the
   prepared root, including fit-cell-exec's verified FIT_ROOT binding. It now
@@ -422,3 +433,9 @@ because cleanup tests or a historical training reproduction pass.
   If the speed-matrix run really saw two different numbers, the cause is
   somewhere other than revision selection; re-open with the two scores and the
   bake sha256.
+
+## SPEEDQ runtime evidence
+
+`SPEEDQ=1 SPEEDQ_ANALYZER=<pinned paired_rounds binary> just bench-speed-matrix <raw-root> <summary-stem>` extends the existing paired speed matrix with isolated formula workers. Correctness covers 8 geometries × 4 dispatch ceilings × 6 thread counts × 3 revisions before timing. Rev4/Rev5 are score-bit strict; the coordinator explicitly admits Rev3 as a timing baseline with its scalar feature-tolerance failure recorded.
+
+Each timing segment must pass the load1 < 2.0 / no foreign build or training gate before setup and again before rounds. All retained zenbench round gates must be clean; excluded attempts remain as `.bak` directories and retries re-enter the quiet gate. Seven explicit worker owners keep per-call timing inside the scorer, with parent IPC rounds stored separately. Peak RSS is a separate fresh-process pass at v4x, 1 and 32 requested threads. `just speedq-freeze` selects artifacts from Cargo JSON instead of guessing a target filename. `just speedq-test` checks parity refusal, evidence preservation, artifact selection and report units/coverage. No stress calibration workloads run.

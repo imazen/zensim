@@ -33,6 +33,19 @@ OUT="${1:?usage: speed_matrix_run.sh <out-dir> [calibrated-bake-dir]}"
 CAL="${2:-/var/tmp/zensim-validation-2026-09-15/recovery/calibrated}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# SPEEDQ completes correctness before the quiet-gated timing and RSS passes.
+if [[ "${SPEEDQ:-0}" == 1 ]]; then
+  : "${BIN_SPEEDQ:?build the speedq,ssim2-rayon bench first}"
+  : "${SPEEDQ_ANALYZER:?provide the pinned zenbench paired_rounds executable}"
+  parity="$OUT/full-parity/PARITY_STRICT_PASS.json"
+  if [[ ! -f "$parity" && ! -f "$OUT/full-parity/PARITY_PASS.json" ]]; then
+    python3 "$REPO/scripts/demos/speedq_run.py" parity --binary "$BIN_SPEEDQ" --dest "$OUT/full-parity" --collect-legacy-failures
+  fi
+  [[ -f "$parity" ]] || parity="$OUT/full-parity/PARITY_PASS.json"
+  python3 "$REPO/scripts/demos/speedq_run.py" timing --binary "$BIN_SPEEDQ" --dest "$OUT/timing" --parity "$parity" --analyzer "$SPEEDQ_ANALYZER" --rounds "${ROUNDS:-32}"
+  exec python3 "$REPO/scripts/demos/speedq_run.py" rss --binary "$BIN_SPEEDQ" --dest "$OUT/rss" --parity "$parity"
+fi
+
 SIZES="${SIZES:-64,256,1024,2048,4096}"
 ROUNDS="${ROUNDS:-32}"
 WALL_S="${WALL_S:-3600}"
