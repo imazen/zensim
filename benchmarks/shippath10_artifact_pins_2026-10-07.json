@@ -1,0 +1,22 @@
+{
+  "schema": "shippath10-ready-artifacts-v1",
+  "program_sha": "6bc158276777b4bd9ebd6eb2df9abecc113713121360820cf0258913ed6a7fa0",
+  "data_sha": "8f2dae5e024670c02bbb81e5ed18254a5132f4423fc672f6aeb1059560bba084",
+  "image": "ghcr.io/imazen/zenfleet-worker:fit-d1-e30-v38-w8dc42d4e",
+  "image_id": "sha256:2efae6bf28c7f8bc7b241b6664a45e83fa1261652ca9d58b1b682cfea67d2a49",
+  "decision_sha256": "1baaa0ae980757d69e351240cb9c0c4d3c5369bde2eb52addafcd49845dbe94a",
+  "frozen_sha256": "4e1c0d997acea3a985f21c858ced0231d832a6ee27f34568dbc98ac450653999",
+  "ledger_commit": "1d3bf35a78a149f0925029d71014c6df8535f550",
+  "zenmetrics_profile_commit": "9a55587e1c506b0a344fea6075465066beb187d8",
+  "fit_source_commit": "c1ddee4915e50a36e692ac2ac9cf45cf3e48b2a9",
+  "binary_source_commit": "1b222dffe6651d6dc01e35523812f66e6f165d4e",
+  "manifest_sha256": {
+    "fitv2e30-20261007": "ffaef44e1410623aa8b2af35976374b3b453f2e3b0bf5877cde2634c4314aac5",
+    "fitv2d1-20261007": "328d7495a3bddda1a707a7811f5d344e9d3a12c1a840e2fc9d0b5202331363c6"
+  },
+  "memory_cap_bytes": 6442450944,
+  "short_smoke_memory_peak_bytes": 1647517696,
+  "threads": 1,
+  "tier": "v3",
+  "full_120_epoch_execution": "not run; prepared only; E28 first"
+}

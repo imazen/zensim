@@ -362,3 +362,7 @@ shippath10-inspect model:
 # The fleet program packer owns source pin and binary inventory validation.
 shippath10-program bundle zenmetrics bin_dir:
     TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 {{zenmetrics}}/scripts/jobsys/pack_fit_program.py --source . --executor {{zenmetrics}}/scripts/jobsys/fit_cell_exec.py --bin-dir {{bin_dir}} --build-meta {{bundle}}/build-meta.json --profile v2d1 --out {{bundle}}/image-context/program.tar.gz
+
+# Every archive component and declared cell is checked against its owner pins.
+shippath10-bundle-check bundle:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}}
