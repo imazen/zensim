@@ -164,6 +164,11 @@ because cleanup tests or a historical training reproduction pass.
   only the fleet data archive held. Fixed the import; re-extracted `wide/` from the pinned archive. Future launchers
   must stage the local prepared root before the chain runs.
 
+* **2026-10-07 — UPIQ draft admission omitted split/key checks. FIXED locally.**
+  Five rewired/unbound cases reached a blocked label open before the guard.
+  The same tests now refuse before opens; emitted data was correctly bound.
+  See `benchmarks/upiq380_ingestion_policy_2026-10-07.md`.
+
 * **2026-10-07 — E28 admission refused the executor's approved root link. FIXED locally (`8283d518`).**
   The approved-inventory path check rejected symlink ancestors above the
   prepared root, including fit-cell-exec's verified FIT_ROOT binding. It now

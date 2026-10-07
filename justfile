@@ -431,3 +431,37 @@ shippath11-build-fit:
 
 shippath11-real-check bundle zenmetrics:
     TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath11_real_entry_checks.py --bundle {{bundle}} --zenmetrics {{zenmetrics}}
+
+# UPIQ-380 ingestion is local artifact production; E31 remains a draft.
+upiq380-check:
+    python3 -m unittest scripts.tests.test_upiq380
+
+[positional-arguments]
+upiq380 *options:
+    python3 scripts/rev4_featpot/upiq380.py "$@"
+
+upiq380-rust-check:
+    cargo test --locked -p zensim-validate --bin upiq_pu_score
+
+upiq380-build:
+    cargo build --locked --release -p zensim-validate --bin upiq_pu_score
+
+upiq380-clippy:
+    cargo clippy --locked -p zensim-validate --bin upiq_pu_score -- -D warnings
+
+[positional-arguments]
+upiq380-binary-refusals binary admission dest prior="":
+    python3 scripts/tests/upiq380_binary_refusals.py --binary "$1" --admission "$2" --dest "$3" --prior-binary "$4"
+
+[positional-arguments]
+upiq380-split-negative revision out:
+    python3 scripts/tests/upiq380_split_negative_control.py --before-revision "$1" --out "$2"
+
+# Scope static Python checks to the UPIQ ingestion/admission owners.
+upiq380-python-lint:
+    ruff check scripts/rev4_featpot/upiq380.py scripts/tests/test_upiq380.py scripts/tests/upiq380_binary_refusals.py
+
+# Preserve artifact bytes on the NAS without requesting ownership changes.
+[positional-arguments]
+upiq380-mirror source dest:
+    rsync -a --no-owner --no-group "$1/" "$2/"
