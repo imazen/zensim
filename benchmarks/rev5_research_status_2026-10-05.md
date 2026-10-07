@@ -102,3 +102,9 @@ minimise MSE and maximise Kendall and Pearson correlation.
   references (0.998) but only 0.828 pooled, so a single-teacher pooled leg makes the model that teacher's cross-image calibration. Next:
   a consensus leg (pairs where both teachers agree on cross-image order) or human HDR data (UPIQ needs owner approval).
 * Loop plan and state: `~/tmp/zensim-paper/rev4/LOOP.md` (owner directive 2026-10-07).
+* **Disk (2026-10-07 09:35 UTC):** owner-approved move of the INUSE-audit `MOVE_TO_TOWER` set finished — 124.4 GB (72 dirs + 647
+  strictly unreferenced probe root files) to `tower:/mnt/user/coefficient/archive/mntv-2026-10-07/<same relative path>`, each item
+  sha256-manifest-verified on both sides before local deletion (ledger `~/tmp/zensim-paper/rev4/MNTV_MOVE_LEDGER.tsv`). Plus the zensr
+  move (55.2 GB, `ZENSR_MOVE_LEDGER.tsv`). NVMe now 122 GB free. Not moved (owner decision pending): decoded-image caches (~183 GB, encodes
+  durable), 3 ASK items; `datasets/*`, `dataset/*`, `input/papers` stay local by owner rule. E28 registered (82c9af81), E29 registered
+  (982f3983), KonFiG F-scale reconstruction lane running.
