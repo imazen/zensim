@@ -113,6 +113,82 @@ def as_good(row: dict, spec_: str) -> dict:
                                               and w2["mean"] > -2 * w2["se"])}
 
 
+def e28_arm_decisions(sdr: dict, pooled: dict) -> tuple[dict, str | None]:
+    """Registered E28 gates; ten paired seed means over the five fixed folds."""
+    out = {}
+    for arm in ("s2o", "s2m"):
+        signal = all(pooled[arm][metric]["delta"] > 2 * pooled[arm][metric]["se"]
+                     for metric in ("krocc", "plcc_raw"))
+        out[arm] = {**sdr[arm], "pooled": pooled[arm], "recipe_signal": bool(signal),
+                    "passes": bool(sdr[arm]["as_good"] and signal)}
+    # The registration explicitly prefers s2o when both pass, retaining SafeSyn.
+    adopted = next((a for a in ("s2o", "s2m") if out[a]["passes"]), None)
+    return out, adopted
+
+
+def cmd_e28_score(args) -> int:
+    """E28 assessment through E13/E24 and the signed in-process stat owner."""
+    import e13_teacher as e13
+    from e28_recipe import spec, read_pin
+    from lib.zen_stats import recipe_correlations
+
+    root, control_root = Path(V2), Path(args.control_root)
+    same_heldout_keys(control_root, root)
+    arms = [(a, spec(a)) for a in ("s2o", "s2m")]
+
+    def cell_of(sp: str, source: str, seed: int) -> Path:
+        base = control_root if sp == CONTROL else root
+        return base / "cells" / f"{sp}__N" / f"without_{source}_s{seed}" / "result.json"
+
+    if any(not cell_of(sp, s, i).is_file()
+           for sp in (CONTROL, *(sp for _, sp in arms)) for s in SOURCE_ORDER for i in SEEDS):
+        raise ValueError("E28 decision requires all 100 arm cells and 50 E24 control cells")
+    e13.cell_of, e13.V2, e13.SEEDS, e13.BASE = cell_of, root, SEEDS, CONTROL
+    rc = e13.score_arms(arms, "e28_sdr", False)
+    full = json.loads((root / "compare/e28_sdr.json").read_text())
+    sdr = {a: as_good(full["rows"][a], sp) for a, sp in arms}
+    meta = {s: e13.heldout_meta(s) for s in SOURCE_ORDER}
+    measurements = {}
+    geometry = root / "compare/e28_geometry.tsv"
+    with geometry.open("w") as stream:
+        stream.write("arm\tsource\tseed\trow\treference\ttarget\tprediction\n")
+        for a, sp in [("control", CONTROL), *arms]:
+            measurements[a] = {}
+            for s in SOURCE_ORDER:
+                y = meta[s].target.to_numpy(dtype=np.float64)
+                refs = meta[s].ref_basename.to_numpy()
+                measurements[a][s] = []
+                for i in SEEDS:
+                    r = json.loads(cell_of(sp, s, i).read_text())
+                    if r["heldout"] != s or r["seed_index"] != i or r["selected_epoch"] != 119:
+                        raise ValueError("E28 assessment cell identity/epoch mismatch")
+                    p = np.asarray(r["prediction"], dtype=np.float64)
+                    tau, rho = recipe_correlations(p, y)
+                    within = [recipe_correlations(p[g], y[g])
+                              for g in meta[s].groupby("ref_basename").indices.values() if len(g) >= 2]
+                    measurements[a][s].append(dict(krocc=tau, plcc_raw=rho,
+                        srocc=r["score"]["srocc_signed"], plcc=r["score"]["plcc"],
+                        mse=float(np.mean((p-y)**2)),
+                        within_reference_krocc=float(np.mean([x[0] for x in within])),
+                        within_reference_plcc=float(np.mean([x[1] for x in within]))))
+                    for row, (ref, target, prediction) in enumerate(zip(refs, y, p)):
+                        stream.write(f"{a}\t{s}\t{i}\t{row}\t{ref}\t{target!r}\t{prediction!r}\n")
+    pooled = {a: {m: e13.paired(
+        [float(np.mean([measurements[a][s][i][m] for s in SOURCE_ORDER])) for i in SEEDS],
+        [float(np.mean([measurements['control'][s][i][m] for s in SOURCE_ORDER])) for i in SEEDS])
+        for m in ("krocc", "plcc_raw")} for a, _ in arms}
+    decision, adopted = e28_arm_decisions(sdr, pooled)
+    record = dict(schema="e28-decision-v1", label="POTENTIAL — ceiling, not a model score",
+                  arms=decision, adopted=adopted, control_root=str(control_root), control=CONTROL,
+                  pooled_rule="signed raw tau-b and raw Pearson; paired ten seed means across five fixed folds",
+                  per_cell=measurements, geometry=str(geometry), geometry_sha256=sha(geometry),
+                  konfig_deviation=read_pin()["konfig_deviation"],
+                  external="NITS/LIVE/MCIQA are report-only through the existing external SDR owner")
+    (root / "compare/e28_decision.json").write_text(json.dumps(record, indent=1)+"\n")
+    print(json.dumps(dict(arms=decision, adopted=adopted)), flush=True)
+    return rc
+
+
 def cmd_e26_grid(args) -> int:
     """Registered E26/E27 HDR grids; ten seeds/five folds, reused E24 control."""
     cols = e21.columns("by_v2fy")
@@ -434,7 +510,7 @@ def cmd_e25(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score", "e27-grid", "e27-score"])
+    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score", "e27-grid", "e27-score", "e28-score"])
     ap.add_argument("--control-root", default="/var/tmp/rev4-featpot/v2c5")
     ap.add_argument("--root")
     ap.add_argument("--rev4-root", default="/var/tmp/rev4-featpot/v2c")
@@ -445,7 +521,7 @@ def main() -> int:
     args = ap.parse_args()
     return {"grid": cmd_grid, "score": cmd_score, "e25": cmd_e25,
             "e26-grid": cmd_e26_grid, "e26-score": cmd_e26_score,
-            "e27-grid": cmd_e26_grid, "e27-score": cmd_e26_score}[args.cmd](args)
+            "e27-grid": cmd_e26_grid, "e27-score": cmd_e26_score, "e28-score": cmd_e28_score}[args.cmd](args)
 
 
 if __name__ == "__main__":
