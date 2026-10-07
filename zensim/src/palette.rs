@@ -1,4 +1,7 @@
 //! Research-only palette_v2. Contract and bounds: benchmarks/palette_design_2026-10-07.md.
+// The research error and extraction surface exist only with this feature.
+#![cfg(feature = "feature-regime-v2")]
+
 use crate::source::{ColorPrimaries, ImageSource, PixelFormat};
 
 pub(crate) const BASE: usize = 1825;
