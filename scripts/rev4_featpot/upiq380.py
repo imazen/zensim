@@ -188,16 +188,81 @@ def ingest(args):
         "member_set_sha256":sha(admission),"build_commit":args.build_commit})
 
 
+def verify(args):
+    """Audit all manifest semantics before hashing/reading any human table."""
+    dest = Path(args.dest)
+    a = json.loads((dest / "extraction-admission.json").read_text())
+    rows = admit_metadata(a)
+    receipt = json.loads((dest / "INGEST_RECEIPT.json").read_text())
+    records = []
+    for split in ("fit", "development"):
+        rec = receipt["legs"][split]
+        path = dest / f"upiq380_{split}.parquet"
+        keys_path = path.with_suffix(".keys.parquet")
+        man_path = Path(f"{path}.manifest.json")
+        if (rec["table"] != str(path) or rec["keys"] != str(keys_path) or rec["manifest"] != str(man_path)
+                or sha(man_path) != rec["manifest_sha256"]):
+            raise ValueError("leg approved inventory/manifest pin mismatch")
+        man = json.loads(man_path.read_text())
+        expected = [r for r in rows if r["split"] == split]
+        if (man["schema"] != "upiq380-v2-leg-v1" or man["source"] != "UPIQ-380" or man["arm"] != "uh4"
+                or man["role"] != "train" or man["tier"] != "T2" or man["split"] != split
+                or man["authority"] != a["authority"] or man["formula_revision"] != 5
+                or man["requested_ids"] != a["requested_ids"] or man["input_contract"] != a["input_contract"]
+                or man["build_commit"] != args.build_commit or man["binary_sha256"] != sha(args.binary)
+                or man["admission_sha256"] != sha(dest / "extraction-admission.json")
+                or man["target_transform"] != TRANSFORM or man["split_rule"] != RULE
+                or man["member_set"] != [r["condition_id"] for r in expected]
+                or man["rows"] != len(expected) or man["label_source"]["sha256"] != LABEL_SHA
+                or man["label_source"]["path"] != str(LABEL)):
+            raise ValueError("leg manifest identity/member/source/role mismatch")
+        records.append((split, path, keys_path, man, expected))
+    truth = targets(a)
+    with Path(args.features).open(newline="") as f:
+        features = {r["condition_id"]: r for r in csv.DictReader(f, delimiter="\t")}
+    splits = {}
+    for split, path, keys_path, man, expected in records:
+        if sha(keys_path) != man["keys_sha256"]:
+            raise ValueError("key hash mismatch before human table read")
+        key_table = pq.read_table(keys_path)
+        if any(name in key_table.column_names for name in ("JOD", "human_JOD", "human_score", "target")):
+            raise ValueError("labels present in key sidecar")
+        keys = key_table.to_pylist()
+        if (len(keys) != len(expected) or any(k.get(name) != r[name] for k, r in zip(keys, expected)
+                for name in r) or any(k["role"] != "train" or k["source"] != "UPIQ-380" for k in keys)):
+            raise ValueError("ordered key binding mismatch before human table read")
+        if sha(path) != man["table_sha256"]:
+            raise ValueError("human table hash mismatch")
+        table = pq.read_table(path)
+        if (table["condition_id"].to_pylist() != [r["condition_id"] for r in keys]
+                or table["pair_key"].to_pylist() != [r["pair_key"] for r in keys]
+                or table["ref_basename"].to_pylist() != [r["reference_sha256"] for r in keys]
+                or table["human_JOD"].to_pylist() != [truth[r["condition_id"]] for r in keys]
+                or table["human_score"].to_pylist() != [100 + 10 * truth[r["condition_id"]] for r in keys]):
+            raise ValueError("human row key/reference/target binding mismatch")
+        for i in range(WIDTH):
+            before = np.array([float(features[r["condition_id"]][f"f{i}"]) for r in keys], dtype=np.float64)
+            after = table[f"f{i}"].to_numpy()
+            if not np.array_equal(before.view(np.uint64), after.view(np.uint64)):
+                raise ValueError(f"feature bits changed in transport f{i}")
+        splits[split] = set(table["ref_basename"].to_pylist())
+    if splits["fit"] & splits["development"]:
+        raise ValueError("reference byte hash leaked across slices")
+    write(dest / "VERIFY_PASS.json", dict(status="PASS", rows=380, references=30,
+        all_feature_bits_match_extraction=True, all_targets_match_pinned_HDR_only_JOD=True,
+        label_free_keys=True, split_reference_hash_overlap=0, original_mixed_UPIQ_CSV_read=False))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("command", choices=["prepare", "ingest"])
+    ap.add_argument("command", choices=["prepare", "ingest", "verify"])
     ap.add_argument("--dest", required=True)
     ap.add_argument("--images", default=str(ROOT))
     ap.add_argument("--build-commit", required=True)
     ap.add_argument("--features")
     ap.add_argument("--binary")
     args = ap.parse_args()
-    (prepare if args.command == "prepare" else ingest)(args)
+    {"prepare": prepare, "ingest": ingest, "verify": verify}[args.command](args)
 
 
 if __name__ == "__main__":

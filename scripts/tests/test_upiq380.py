@@ -1,8 +1,10 @@
 """Production UPIQ metadata admission and zero-label-open refusal tripwires."""
 import copy
+import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -71,6 +73,39 @@ class UpiqAdmission(unittest.TestCase):
     def test_unapproved_image_inventory_refuses_without_label_opens(self):
         (self.root / "narwaria/01/extra.exr").touch()
         self.refuse_without_opens(self.a)
+
+    def test_all_leg_manifests_precede_human_table_and_label_access(self):
+        a = copy.deepcopy(self.a)
+        for row in a["rows"]:
+            row["split"] = "fit"
+        (self.root / "extraction-admission.json").write_text(json.dumps(a))
+        receipt = {"legs": {}}
+        manifests = {}
+        for split in ("fit", "development"):
+            path = self.root / f"upiq380_{split}.parquet"
+            key = path.with_suffix(".keys.parquet")
+            man = Path(f"{path}.manifest.json")
+            members = a["rows"] if split == "fit" else []
+            manifests[split] = dict(schema="upiq380-v2-leg-v1", source="UPIQ-380", arm="uh4", role="train",
+                tier="T2", split=split, authority=a["authority"], formula_revision=5,
+                requested_ids=a["requested_ids"], input_contract=a["input_contract"], build_commit="fixture",
+                binary_sha256="1" * 64, admission_sha256="1" * 64, target_transform=u.TRANSFORM,
+                split_rule=u.RULE, member_set=[r["condition_id"] for r in members], rows=len(members),
+                label_source={"sha256":u.LABEL_SHA,"path":str(u.LABEL)})
+            receipt["legs"][split] = dict(table=str(path), keys=str(key), manifest=str(man), manifest_sha256="1" * 64)
+        (self.root / "INGEST_RECEIPT.json").write_text(json.dumps(receipt))
+        args = SimpleNamespace(dest=str(self.root), features="unopened-features", binary="fixture-binary", build_commit="fixture")
+        for field, value in [("role", "val"), ("source", "UPIQ-SDR"), ("arm", "other"),
+                ("requested_ids", [0]), ("member_set", ["l-i01-l-01-1"])]:
+            with self.subTest(field=field):
+                bad = copy.deepcopy(manifests)
+                bad["development"][field] = value
+                for split in bad:
+                    Path(receipt["legs"][split]["manifest"]).write_text(json.dumps(bad[split]))
+                with patch.object(u, "sha", return_value="1" * 64), patch.object(u, "targets", side_effect=AssertionError("labels opened")) as tripwire:
+                    with self.assertRaisesRegex(ValueError, "leg manifest identity"):
+                        u.verify(args)
+                    self.assertEqual(tripwire.call_count, 0)
 
 
 if __name__ == "__main__":
