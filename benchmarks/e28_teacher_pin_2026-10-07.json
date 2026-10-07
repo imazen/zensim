@@ -100,7 +100,8 @@
    "pooled_legs": [
     "cid22",
     "kadid",
-    "tid2013"
+    "tid2013",
+    "konfig"
    ]
   }
  },
@@ -109,6 +110,6 @@
  "pearson_draw_batch_rows": 32,
  "pearson_schedule": "one auxiliary pooled-row batch after every 32 pair draws of an opted-in leg; same leg only; independent sample RNG; zero-variance batches have zero gradient",
  "human_weight": "split the R1 human weight in proportion to eligible reference counts; no comparison crosses datasets",
- "konfig_deviation": "design-grid labels, not flicker-boosted reconstruction; within-reference only because no shared cross-image scale is declared",
+ "konfig_deviation": "design-grid labels, not flicker-boosted reconstruction; s2o keeps within-reference supervision; s2m pools within this dataset as the four-leg recipe requests",
  "s2m_coverage": "four-leg restriction drops coverage despite inherited recipe suffix; no SafeSyn/KADIS leg"
 }
