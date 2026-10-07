@@ -657,3 +657,12 @@ v40-python-tests trainer:
 
 v40-admission binary dest:
     python3 scripts/tests/v40_native_admission.py --binary {{binary}} --dest {{dest}} --upiq-manifest /mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07/upiq380_fit.parquet.manifest.json
+
+v40-projection-tests:
+    PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_projection
+
+v40-projection source palette out commit:
+    python3 scripts/rev4_featpot/e32_palette.py --source {{source}} --palette-root {{palette}} --out {{out}} --fleet-root /var/tmp/rev4-featpot/v2e32 --build-commit {{commit}}
+
+v40-parity bundle e30 dest fold:
+    python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} --fold {{fold}}
