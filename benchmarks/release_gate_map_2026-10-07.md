@@ -36,7 +36,7 @@ be explicit; historical defaults may reach labels that are not authorized.
 
 | Gate / owner command | Required inputs and pass rule | Status for production | Protected reads |
 |---|---|---|---|
-| **E30 / D1 population:** `python3 scripts/rev4_featpot/e30_four_source.py score --root "$D1" --results "$E30_RESULTS" --control-root "$E24" --control-pins "$CONTROL_PINS" --out "$E30_REPORT"` | Exactly 40 nA3 cells, four folds × seeds0–9; matching E24 control only those folds. E21 rule: signed mean delta ≥−.002, every source ≥−.005, worst-three-types W2 >−2 SE. Externals are report-only. No aic3 fold or payload. | **blocked on E28, E30 completion/verdict**; preparation and harvest verification done. | Only D1 design TRAIN populations; no AIC labels. |
+| **E30 / D1 population:** `python3 scripts/rev4_featpot/e30_four_source.py score --root "$D1" --results "$E30_RESULTS" --control-root "$E24" --control-pins "$CONTROL_PINS" --out "$E30_REPORT"` | Completed, hash-bound report for 40 nA3 cells/four folds/seeds0–9 and pinned E24 controls. Report E21 deltas as removal cost: **no numerical pass/adoption rule and not a gate on D1**. Externals report-only; no AIC fold. | **blocked on E30 completion and report binding**; E28 complete on current main. D1 remains fixed even if reported deltas are negative. | Only D1 design TRAIN populations; no AIC labels. |
 | **Table provenance:** canonical strict fit/harvest; `$INSPECTOR "$FINAL"`; `$BV … --fulleval …`, `$FC --qualify --fulleval …` | All seven per-table admissions; exact D1 four-source receipt, feature-set/revision/decoder, row-selection/key/order hashes, producer/sampling/tool/recipe identities. No inferred/unknown leg or historical replay. Epoch119 and 120×50000 budget, registered seeds. Every companion independently admits. | **done plumbing; blocked on registered fits**. Short smokes cannot qualify/install as full cells. | TRAIN only; metadata guards refuse protected sources/bindings. |
 | **Rust surface / final identity:** `serve_custom_bake --corruption-head "$HEAD" "$FINAL" "$REF" "$DIST"`; pixel/cache audit through existing extractor and BakeScorer | Complete composition runs through public Rust surface; spline, ensemble/routing, head/threshold all included. Exact consumed IDs and tree raw/fire parity; complete pixel/cache/prepared precision contract, identity100. No Python inference or revision stamp as admission. | **ready; blocked on final composition choice and fits**. Earlier serving proofs use research weights. | Explicit TRAIN probes only. |
 | **G-RANK / board axes:** `$BV --bake "$FINAL" --features-root "$EVAL" --corpora "$AUTHORIZED_CORPORA" … --fulleval "$VERDICT"`; `$PANEL --input "$PAIRS" --json --per-group`; `$PANEL --input "$PAIRS" --json --scatter` | Full human aggregate and each supported content aggregate ≥SSIM2, incumbent CID22-band performance, no collapse. Preserve per-corpus signed SROCC, KROCC, logistic PLCC and raw Pearson, PWRC/OR/Z-RMSE, bands, within-reference means, coverage, raw scatter/tails/saturation and counts. Existing freeze selection floors F4/F5/F7/F8 are reported; selection is separate from qualification. | **blocked on final model, authorized exposure and complete compatible labeled instrument**. E24/E25 are research evidence; NITS loss remains disclosed. **Owner decision:** freeze exact supported content aggregates, human populations and any currently undefined no-collapse/band comparison rule before reading. | Yes for human EVAL/T0; prior exposure and authorization required. Exposed D1/LODO and R7 results cannot be called fresh tests. |
@@ -45,7 +45,7 @@ be explicit; historical defaults may reach labels that are not authorized.
 | **Negative tails / identity:** `$BV … --negtail-probe "$TAIL" --identity-probe "$IDENTITY"` | C1 mono≥.93, C2 tied≤.05, C3 some all-negative-truth score<0, C4 deepest probe<0, C5 feature-inference identity band[97.5,100], pixel identity exactly100, C6 no distortion above identity. No dial clamp. Original 2000 tails and38 identities retained. | **ready features; blocked on final composed model/peer truth**. | No protected label required on registered synthetic probes. |
 | **G-STEER:** `$DM "$REF" "$DIST" --bake "$FINAL" --block 8 --json "$OUT"`; `scripts/m3a_sweep.sh --bake "$FINAL" --bin "$DM" --grid full --label "$NAME" --logdir "$OUTDIR"` | M2≥.99, M3≥.70; complete finite-repair feature/scalar/density replay, local_refine neighbor-exact or explicit refusal. Broad96 (24×8/16/32/64), owner12 (4×3 seeds), KADID JPEG8×8, full27 M3/M3a fixtures. Identity and geometry/padding/stride cases included. | **ready base-pair features; blocked on final composition support/measurements**. Research93/96 broad is not full pass (minimum M2 .957894737). M3 wrapper does not forward companions; extend existing owner before complete-composition use. | TRAIN spatial fixtures; no terminal labels. |
 | **STEERCODEC / CHROMAQ:** registered `benchmarks/r5steer_2026-10-04/run2.py`, `benchmarks/chromaq_2026-10-04/analyze.py "$SWEEP444" "$SWEEP420" "$SCORES" "$OUT"`; codec-owned `zensim_diffmap_rd`/`zensim_cq_rd` | Rev5 spec requires rerun broad/owner/JPEG, CHROMAQ and JXL/zenjpeg/zqi map-guided vs oracle/random quality-swap allocations at equal block share, judged by fixed zensim, SSIM2 and butteraugli on identical decoded bytes. Preserve signed interventions and honest low-quality anchors. | **blocked on final bytes and parametrizing historical drivers** (their hardcoded research models must not be run as production tests). **Owner decision:** no additional CHROMAQ, zqi or equal-share acceptance threshold is registered; report diagnostics, obtain rule before assessment. | Registered TRAIN scenes only; any expanded population requires admission. |
-| **G-RD / spatial value:** codec owners `jxl-encoder/examples/zensim_diffmap_rd.rs --native-interventions`, `scripts/rd_probe_analyze_2026-07-18.py --interventions "$NATIVE_PACKET"`; JPEG/AVIF/WebP owners in target protocol | Active/neutral/intervention controls in each supported codec; vs strong scalar controller ≥0% geometric-mean byte savings on every independent judge, ≥1% on one, no content aggregate regression. Overlapping judged-quality intervals, source-bootstrap uncertainty, all emitted bytes/pixel/quantizer/judge and cost pins. Own-score improvements alone fail this gate. | **blocked on full final-model native experiments and complete composition binding**. Existing negative research unchanged. JXL first; no sibling edits/runs authorized here. | TRAIN fit/calibration and separately authorized EVAL source families; not human terminal labels by default. |
+| **G-RD / spatial value:** codec owners `jxl-encoder/examples/zensim_diffmap_rd.rs --native-interventions`, `scripts/v_next/rd_probe_analyze_2026-07-18.py --interventions "$NATIVE_PACKET"`; JPEG/AVIF/WebP owners in target protocol | Active/neutral/intervention controls in each supported codec; vs strong scalar controller ≥0% geometric-mean byte savings on every independent judge, ≥1% on one, no content aggregate regression. Overlapping judged-quality intervals, source-bootstrap uncertainty, all emitted bytes/pixel/quantizer/judge and cost pins. Own-score improvements alone fail this gate. | **blocked on final-model experiments/binding**. Analyzer `--interventions` currently asserts historical model SHA `cd1098b4…` (line554); parameterize and bind the final production model before using it for this gate. No sibling edits/runs authorized here. | TRAIN fit/calibration and separately authorized EVAL source families; not human terminal labels by default. |
 | **G-TARGET:** `cargo run --release --manifest-path zensim-target/Cargo.toml --example demo_matrix -- --source-manifest "$SOURCES" --compositions "$COMPOSITIONS" --calibration "$TRAIN_CAL" --budgets 1,2,3 --codecs "$CODECS" --out "$FRESH"` plus native codec owners | Witness each attainable range before requests, hide bounds from runtime; TRAIN-fit seeds. 1shot median≤2/p95≤8/undershoot>8≤5%; 2shot≤1/≤3/>3≤5%; 3shot≤.5/≤1/max≤3/>1≤1%. Per codec/configuration/SDR-HDR lane; same requests,100% dispositions, uncertain/unattainable separate, count native reconstructions/map work. | **blocked on feasibility registration, final composition and native controller measurements**. Use demo_matrix’s admitted bounds/compositions route; legacy --source/--bake demo mode is not the complete exam. | TRAIN calibration, authorized EVAL pixels/judges. Human/protected bindings only by separate authorization. |
 | **Integrity / ZCTH v4:** `python3 scripts/v_next/train_corruption_head.py --refit-admission-manifest "$TRAIN_REFIT_PIN" --out-dir "$FRESH"`; `$BV … --corruption-head "$HEAD" --corruption-head-threshold 0.9 --corruption-grid "$REVIEWED_GRID"`; `python3 scripts/v_next/corruption_gate_eval.py --integrity-admission "$ADMISSION" --audit-jsonl "$AUDITS" --out-json "$REPORT"` | Header/numeric/admission digest validates; TRAIN source-table/declaration/role/decoder and selections match. Activation separate from lowering: zero honest native activations/lowering, overall≤1%, unique detection≥95%, real bugs≥90%, legacy belowq20≥99%,100% tested non-inert RGB swaps. Reviewed catastrophic/recoverable/ambiguous strata and source-matched anchors per activation contract. | **done companion TRAIN admission/parity**, **blocked on final composition and untouched source-family EVAL/severity screen**. [SHIPPATH6](shippath6_WORKLOG.md) refit has identical numeric sections and seven unchanged TRAIN gates; this is not EVAL qualification. **Owner decision:** freeze unresolved stratified bars/anchors before new evaluation, never universalize catalog positives. | TRAIN companion record only; EVAL corruption labels/source screen require explicit admission. No default protected reference-list rehash. |
 | **Rev5 correctness:** `cargo test -p zensim --release --all-features --test featcanon_rev5_parity`; feature_invariants, per_bake_revision, legacy tier audit and steering tests | Bit parity v4x/v4/v3/scalar/wasm128/NEON, fixed virtual lanes/FMA; stable moments two-pass reference within1e−6 relative and positive crop; exact Difference/Similarity identity, computed ReferenceOnly; Rev1–4 bytes unchanged. Per-family accuracy vs exact no worse than Rev3. Freeze60174678 output arithmetic. | **done landed arithmetic gates** with native/WASM/i686/NEON evidence in [Rev5 worklog](rev5_WORKLOG.md); final artifact/build regression rerun still **ready**. No values changed here. | Synthetic and explicitly admitted TRAIN audit pairs only. |
@@ -54,14 +54,11 @@ be explicit; historical defaults may reach labels that are not authorized.
 | **HDR scope:** native `BakeScorer::compute_hdr`/prepared ingress checks; `scripts/hdr/hdr_route_panel.py … --parquet "$ADMITTED_HDR"`; HDR rank/dial/spatial/RD/target/cost owners | Correct native PQ/cICP/common-primary absolute nits and precision. SDR fits may demonstrate API transfer, not human HDR accuracy. HDR judges on interpreted native pixels; same release rows per supported HDR lane. One public score needs registered alignment/qualified mixed TRAIN or justified metadata head. | **blocked on owner supported-scope decision and independent human HDR/display study**. E26hd4 within-ref passes but pooledHDR degrades; E27 neither arm passes. D3 UPIQ TRAIN and teacher agreement are not independent validation. No “HDR qualified” claim; no silent restriction of supported inputs. | Registered HDR VAL already exposed; fresh human HDR needs new authorization; restUPIQ remainsT0. |
 | **KADID TERMINAL / D2:** `python3 scripts/rev4_featpot/kadid_terminal_read.py --receipt "$COMMITTED_PIN" --authorization "$AUTH" --output "$NEW_RESULT"` | Exactly2000 original stimuli; report signedSROCC,KROCC,PLCC,within-refSROCC,per-typeSROCC,full scatter. Production signedSROCC delta vsB≥−2SE, paired **reference** bootstrap10000 draws, fixed seed in pin; delta vsresearchRev4by_v2fy≥−.005. Single final frozen composition, after every pre-terminal gate passes. Failures spend set too. | **ready harness; blocked on fits, release gates, complete stimulus mapping and coordinator authorization/pre-read committed pin**. Final seed/ensemble/research comparator identity is an **owner decision before labels**; no best-on-terminal selection. | **Yes, exactly one authorized read. Forbidden in this lane.** |
 
-The current `freeze_check::qualification_report` checks Rust surface, Table
-provenance, ladder identity, CONTRACT/REGRESSION, five floors and five named
-product artifacts. Its five-gate JSON alone does **not** consume every scorecard
-row (integrity, HDR scope, runtime/memory, supported inputs or spec diagnostics).
-Do not interpret its PASS as complete release qualification. The terminal pin
-requires a coordinator-reviewed supplemental report covering every row above,
-with owner artifacts and composition pins. No new numerical thresholds are
-introduced by that report or this harness.
+The current `freeze_check::qualification_report` covers surface/provenance,
+ladder identity, CONTRACT/REGRESSION, five floors and five product artifacts.
+It omits integrity, HDR scope, runtime/memory, supported inputs and some spec
+diagnostics. Terminal authorization requires coordinator-reviewed supplemental
+evidence for all rows; its PASS alone is incomplete. No new bar is introduced.
 
 ## Harvest to serving candidate: fixed identities and command chain
 
@@ -195,11 +192,15 @@ Schema `kadid-terminal-final-model-v1` has:
   `model_sha256`; `gates` maps each name in the script's `GATES` to
   `{state:pass,artifact:{path,sha256}}`. Coordinator reviews these owner
   artifacts and supplemental unresolved rows before authorizing. This is an
-  authorization boundary, not a synthetic substitute for scientific evidence.
+  authorization boundary. Separately, `reports.E30` is
+  `{state:completed,artifact:{path,sha256}}`: complete registered four-source
+  report with no rule/adopt fields; numerical deltas never veto D1.
 - `labels` is the original-label adapter spec `{path,sha256,format,
   ref_col,dist_col,label_col}` plus `rows_key`/`usecols` if needed. Dedicated
   TERMINAL-only original manifest; no `select` or `via_pairs`, no discovery.
-  Its SHA comes from an existing receipt or the coordinator's pre-read pin;
+  The SHA must be64 lowercase hex; JSON needs a nonempty `rows_key`, and
+  `usecols`, if present, must include all adapter columns. Its SHA comes from
+  an existing receipt or the coordinator's pre-read pin;
   **do not hash actual terminal labels to prepare this file**.
 
 Population TSV has exactly `source_row_id,pair_key,ref_basename,distortion_type,
@@ -225,14 +226,17 @@ Commit the final receipt JSON locally before any label read. Coordinator file
 `kadid-terminal-authorization-v1` must have `authorize_once:true`, same
 `design_line`, exact `receipt_sha256`, nonempty `coordinator_message`, full
 40-hex `pre_read_commit`, `receipt_repo_path`, absolute canonical `ledger` and
-shared `journal`. `git show COMMIT:PATH` must hash to the exact receipt. No live
-authorization or final receipt was generated here.
+shared `journal`. Parse **the verified committed bytes**, never reopen the
+live receipt after matching its hash. No live authorization/receipt exists here.
 
 Before label hashing, the harness validates authorization, committed pin, all
 non-label specs/bindings, gate artifacts, exact model inspector metadata,
-prediction receipt/schema/order and original2000 population. Protected lexical
-and resolved ancestry uses the existing shared guard; metadata symlinks into
-labels fail before opening. Exposure appends to `docs/DATA_SPLITS.md` under
+prediction receipt/schema/order and original2000 population. Every metadata
+path must lie lexically and after resolution under source/preparation roots:
+repo, `~/tmp/zensim-paper/rev4`, `/mnt/v/output/zensim`, `/var/tmp/rev4-featpot`.
+Original corpus stores, banks, terminal/T0 populations and shared protected
+markers refuse before hash/parse. Stage label-free artifacts outside those
+roots; receipt fields cannot authorize metadata aliases into them. Exposure appends to `docs/DATA_SPLITS.md` under
 `flock`, writes/fsyncs shared exclusive journal
 `~/tmp/zensim-paper/rev4/KADID_TERMINAL_SPENT.json`, and fsyncs ledger reservation
 **before the first label open**. Duplicate reads refuse even if output is lost,
@@ -240,15 +244,18 @@ another workspace is used, confirmation fails, label hash fails or a statistic
 fails. The journal is never deleted to retry this design line.
 
 Only then are labels hashed/read and joined by exact original ref/dist paths;
-coverage must be exactly2000 with no nonfinite/drop. Within-ref summaries use
-canonical `panel --per-group`; per-type and all signed SROCC use canonical
-batch; PLCC/KROCC conventions are the existing panel (logistic PLCC, absolute
-KROCC), with raw Pearson retained. Reference draws use NumPy default_rng seed
+coverage must be exactly2000 with no nonfinite/drop. Canonical panel
+`--signed-quality` fixes higher-is-better direction for SROCC and Kendall tau-b.
+PLCC is four-parameter logistic fitted Pearson with the fitted mapping restored
+to increasing predicted-quality direction; signed raw Pearson remains separate.
+Within-ref means reduce canonical `srocc_signed` results (min3); no Auto
+polarity. Per-type SROCC also stays signed. Legacy panel modes are unchanged. Reference draws use NumPy default_rng seed
 fixed in receipt; shared drawn reference indices for both models, all stimuli
 of each selected reference retained,10000 draws, sample SD(ddof1) of paired
 SROCC deltas as SE. Confirmation uses the registered inequalities inclusively.
 Failure is final; no model/seed/rule change follows from this read. Result SHA
-and PASS/FAIL append to ledger. ERROR still leaves the durable spent record.
+and PASS/FAIL append to ledger. ERROR retains the spent record and emits a
+fixed error category only; parser contents/tracebacks cannot cross result/CLI boundaries.
 
 Synthetic positive and negative fixtures run the real Rust panel10000 paired
 resamples; authorization, commit/hash, model/gate, symlink and spent-state
