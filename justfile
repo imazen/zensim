@@ -4,6 +4,10 @@
 releasegate-tests:
     TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_kadid_terminal*.py' -v
 
+# Repeat the bound-payload probes against this tree or a source-only old-tip export.
+releasegate-bound-payload-tests source=".":
+    cd "{{source}}" && TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_kadid_terminal_bound_payloads.py' -v
+
 # Canonical signed-quality CLI and legacy panel mode regressions.
 releasegate-panel-tests:
     cargo test -p zensim-validate --bin panel -- --nocapture
