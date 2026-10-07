@@ -1386,3 +1386,16 @@ HDR/confirmation members, and has not been uploaded or enqueued.
 local full-budget smokes, finite diagnostic non-convergence, source pins and
 resource measurements. The complete registered scientific verdict requires
 100 harvested bake cells and 50 matched E24 control cells.
+
+
+### E28 admission followup (2026-10-07)
+
+The new E28 human fit/dev views are additionally bound to the frozen
+`benchmarks/e28_admission_inventory_2026-10-07.json` inventory. MLP and NM admit
+all active manifests before opening training labels, then validate the four
+label-free key columns, ordered row identities, allowed member sets and the
+reference-hash split. Preparation copies an explicit source inventory only and
+refuses confirmation/HDR directories before copying. The 37 numerical tables
+are unchanged; key sidecars, manifest bindings and receipt provenance changed.
+Producer and artifact receipts: `benchmarks/e28_admission_2026-10-07.pointer.md`.
+The existing E28 exploratory population and qualification limits still apply.

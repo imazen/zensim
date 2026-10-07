@@ -160,3 +160,77 @@ local transfer supervisor. A first transfer failed on SSH argument quoting befor
 extraction; the retry used an explicitly quoted remote command and succeeded.
 Supplemental transfer receipts preserve that failure and the final documentation
 snapshot. No source, image, data or manifest was published as part of preparation.
+
+
+## Admission review corrections — 2026-10-07
+
+The pre-launch review reproduced two P2 defects on synthetic changed inputs:
+new human legs lacked population/split admission, and preparation copied extra
+confirmation payloads before refusal. The reviewed v32 archive itself had the
+registered populations. These corrections change admission and provenance;
+the registered objective, populations, optimizer budgets and numerical tables
+remain unchanged.
+
+`a06541fd` adds a frozen approval inventory and explicit preparation membership.
+`e7fffcaa` freezes the resulting 101-member prepared inventory and performs the
+human preflight in both fit entry points. `910633ed` rejects symlink redirects
+of approved tables, manifests, key sidecars and receipts before payload access.
+The new manifest checks bind the expected arm, source, fit/dev split and
+TRAIN/DEV role; allowed member sets; registration and teacher pin; original
+source table/manifest/keys; ordered source row identities; curated label-free
+keys and the approved input inventory. Every active human manifest passes
+before key decoding; the four-column keys then prove ordered identity, allowed
+population, reference-hash split and disjoint fit/dev references. Both MLP and
+NM perform this preflight before any label-bearing training table checksum or
+read, including the CID22 teacher read. NM's direct human loader requires an
+explicit arm/source/split context.
+
+Preparation scans directory names and symlinks before opening source receipts
+or copying. It hashes approved metadata before label-bearing members and copies
+only the 53 explicitly approved source members. Unlisted physical HDR files
+are never opened or copied. The 16 new curated key sidecars contain exactly
+pair_key, source_row_id, ref_basename and member_set, without target values.
+Their manifests and receipt name the actual preparation producer `a06541fd`.
+All 37 numerical table hashes match v32 exactly. The old archives remain intact.
+
+Eight synthetic regressions cover the reviewer's VAL/dev/wrong-pin substitutions
+and additional arm/source/key/inventory substitutions, late invalid manifests
+through both complete fit owners, malformed key identity/population/split or
+extra target columns, path redirects, forbidden confirm/HDR directories, and
+successful preparation with unreadable unapproved extra payloads. Python and
+Arrow open tripwires assert zero label-bearing payload opens before refusal;
+the directory tests also assert zero copies and no output root. The final
+caller suite passes all 183 tests; zenmetrics fit-tool checks pass all 42.
+An initial full-suite invocation omitted the required trainer/panel environment
+and failed three checks; the retained log records that setup failure. Restoring
+the built-artifact environment resolved it without changing expectations.
+
+Final fit-script producer: `910633ed751880ddb91128616d35d15a7f3e89fe`.
+The three Rust binaries remain byte-identical to the reviewed producer
+`5b2cc589429546b8c569509bc4fea3e04c5ad2af`; no Rust source changed in this followup.
+Final zenmetrics profile commit: `594b014bf2eee738774e425986c7af2ebc603108`
+(change `tqmnqysxwxtuvksolxzwtvxqrzlosmss`), a local change for coordinator landing.
+The frozen admission JSON is included in the program and profile pins.
+
+The final v34 installed image passes a bounded s2m/KADID/seed-0 smoke with
+2 epochs × 128 draws, selected epoch 1, 420 features and H128/head N. All 7,869
+admitted exploratory KADID rows are scored after fitting. Training weights
+match the previous full smoke exactly, and the live sampler digest
+`e7b89fc0a50d7798` matches the embedded coverage block. Both pooled constants
+remain 0.5. This is a short smoke, not a new complete 120-epoch trajectory or
+an adoption result. The prior full smokes and nonconverged NM diagnostic retain
+their original package identities and limitations.
+
+The new smoke measured maximum RSS 336076 KiB with time -v and cgroup peak
+1254961152 bytes under the unchanged 6 GiB cap, with zero OOM events. Its outer
+Docker supervisor reported run-heavy rc=0 in 4 seconds / peak-RSS 0.03 GiB.
+The Python suite reported run-heavy rc=0 in 65 seconds / peak-RSS 0.44 GiB.
+These are local verification measurements, not fleet throughput claims.
+
+The registered manifest remains 100 cells and 120 × 50,000/final epoch 119.
+The updated launcher requires a new explicit coordinator authorization tying
+reviewed corrections, landed source and published profile pins to the new
+package/image identities. Its absent-authorization check refuses before
+publication and leaves the fleet queue bytes unchanged. No authorization file,
+queue entry, push, image publication or R2 upload was made by this lane.
+The adjacent admission pointer records the replacement artifacts and evidence.
