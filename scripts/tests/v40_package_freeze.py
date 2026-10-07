@@ -147,6 +147,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "IMAGE_RECIPE.json",
         "bin/inspect_qualified_checkpoint",
         "harvest_driver_v40.py",
+        "postfit.sh",
     ]
     files += [s["receipt"] for s in smokes]
     files += [str(Path(v["path"]).relative_to(bundle)) for v in w2.values()]
