@@ -158,6 +158,17 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E31/E32 native group admission. FIXED locally in V40.**
+
+  The inherited native entry could inspect feature payloads before refusing bad
+  UPIQ keys, and palette admission did not bind group weights or complete ordered
+  observation identity. The shared trainer preflight now admits every declaration
+  and key domain before any feature payload. Actual-binary probes retain zero
+  feature opens for late-group failures, development training, VAL keys, false
+  order pins, missing pair/ordinal identities and duplicate ordinal indices.
+  Historical replay remains explicitly unqualified.
+
+
 * **2026-10-07 — E29 preparation import/root regressions. FIXED locally.**
 
   The new E29 adapter initially lacked the existing scripts/ import bootstrap

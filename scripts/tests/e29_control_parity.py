@@ -45,6 +45,7 @@ def main():
     p.add_argument('--bundle', type=Path, required=True)
     p.add_argument('--e30', type=Path, required=True)
     p.add_argument('--dest', type=Path, required=True)
+    p.add_argument('--fold', choices=('kadid', 'tid2013', 'konfig', 'cid22_a25'), default='kadid')
     p.add_argument('--verify-only', action='store_true', help='audit an existing full validation cell without fitting')
     a = p.parse_args()
     if not a.verify_only:
@@ -52,13 +53,16 @@ def main():
     pinned = json.loads((a.bundle / 'E30_COMPLETE_PINS.json').read_text())
     producer = json.loads((a.bundle / 'PINNED_ARTIFACTS.json').read_text())
     assert sha(a.bundle / 'bin/zensim_mlp_train') == producer['files']['bin/zensim_mlp_train']['sha256']
-    job = json.loads((a.e30 / 'fit-manifest-fitv2e30-20261007.json').read_text())[0]
+    jobs = json.loads((a.e30 / 'fit-manifest-fitv2e30-20261007.json').read_text())
+    matches = [j for j in jobs if j['kind']['argv'][j['kind']['argv'].index('--heldout')+1] == a.fold and j['kind']['argv'][j['kind']['argv'].index('--seed-index')+1] == '0']
+    assert len(matches) == 1
+    job = matches[0]
     argv = job['kind']['argv'][:]
-    assert argv[argv.index('--heldout')+1] == 'kadid'
+    assert argv[argv.index('--heldout')+1] == a.fold
     assert argv[argv.index('--seed-index')+1] == '0'
     oldcell = Path(argv[argv.index('--dest')+1])
     old = oldcell / 'refit/last.bin'
-    assert sha(old) == pinned['cells']['kadid_s0']['bake_sha256']
+    assert sha(old) == pinned['cells'][f'{a.fold}_s0']['bake_sha256']
     argv[argv.index('--root')+1] = str(a.bundle / 'v2e29')
     argv[argv.index('--data-role-decision')+1] = str(a.bundle / 'v2e29/human_role_decision.json')
     argv[argv.index('--dest')+1] = str(a.dest / 'cell')
@@ -94,7 +98,7 @@ def main():
     identical = files[0].read_bytes() == files[1].read_bytes()
     report = dict(schema='e29-full-control-parity-v1', status='PASS' if identical else 'MISMATCH',
                   control_choice='coordinator shared fresh v40; unchanged by this result',
-                  cell='kadid_s0', epochs=120, pairs_per_epoch=50000, selected_epoch=119,
+                  cell=f'{a.fold}_s0', epochs=120, pairs_per_epoch=50000, selected_epoch=119,
                   tier='v3', rayon_threads=1, trainer_sha256=sha(a.bundle/'bin/zensim_mlp_train'),
                   e30_checkpoint_sha256=sha(old), extended_checkpoint_sha256=sha(newcell/'refit/last.bin'),
                   e30_nonrepro_sha256=sha(files[0]), extended_nonrepro_sha256=sha(files[1]),

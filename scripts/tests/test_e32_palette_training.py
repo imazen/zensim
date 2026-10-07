@@ -169,7 +169,7 @@ class PaletteTraining(unittest.TestCase):
                         ("fit" if split=="fit" else "development")))
         pool=root/"e15/coverage_pool.parquet"
         keys=pq.read_table(teacher.key_path(pool))
-        keys=keys.append_column("__index_level_0__",pa.array(list(range(len(keys))),type=pa.int64()))
+        keys=keys.set_column(keys.schema.get_field_index("__index_level_0__"),"__index_level_0__",pa.array(list(range(len(keys))),type=pa.int64()))
         pq.write_table(keys,teacher.key_path(pool))
         paths.append((pool,"TRAIN-ordinal"))
         for path,role in paths:

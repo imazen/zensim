@@ -178,6 +178,11 @@ pub(crate) fn reference(
 }
 
 pub(crate) fn verify_keys(path: &Path, metadata: &Value) -> Result<(), String> {
+    crate::training_keys::verify(
+        path,
+        metadata,
+        crate::training_keys::expected_rows(metadata)?,
+    )?;
     let keys = path.with_extension("keys.parquet");
     if crate::train_manifest::sha256_file(&keys).map_err(|e| e.to_string())?
         != metadata["keys_sha256"].as_str().unwrap()
@@ -382,6 +387,8 @@ mod tests {
         let fields = vec![
             Field::new("member_set", DataType::Utf8, false),
             Field::new("pair_key", DataType::Utf8, false),
+            Field::new("ref_basename", DataType::Utf8, false),
+            Field::new("source_row_id", DataType::Int64, false),
         ];
         let batch = RecordBatch::try_new(
             Arc::new(Schema::new(fields)),
@@ -393,6 +400,8 @@ mod tests {
                     "p3",
                     "p4",
                 ])),
+                Arc::new(StringArray::from(vec!["r0", "r0", "r1", "r1"])),
+                Arc::new(arrow::array::Int64Array::from(vec![0, 1, 2, 3])),
             ],
         )
         .unwrap();
@@ -459,6 +468,16 @@ mod tests {
         m["keys_sha256"] = serde_json::json!(
             crate::train_manifest::sha256_file(&f.path().with_extension("keys.parquet")).unwrap()
         );
+        m["rows"] = serde_json::json!(4);
+        m["row_keys_sha256"] = serde_json::json!(
+            crate::training_keys::read(
+                &f.path().with_extension("keys.parquet"),
+                &["member_set", "pair_key", "ref_basename", "source_row_id"],
+                &["member_set", "pair_key", "ref_basename", "source_row_id"]
+            )
+            .unwrap()
+            .digest
+        );
         f.declaration(&m);
         let admitted = crate::feature_set::admit_training_tables(
             &[f.path()],
@@ -520,6 +539,15 @@ mod tests {
             77. + 1825.
         );
         write_keys(&f.path().with_extension("keys.parquet"), "kadid_terminal");
+        m["row_keys_sha256"] = serde_json::json!(
+            crate::training_keys::read(
+                &f.path().with_extension("keys.parquet"),
+                &["member_set", "pair_key", "ref_basename", "source_row_id"],
+                &["member_set", "pair_key", "ref_basename", "source_row_id"]
+            )
+            .unwrap()
+            .digest
+        );
         m["keys_sha256"] = serde_json::json!(
             crate::train_manifest::sha256_file(&f.path().with_extension("keys.parquet")).unwrap()
         );

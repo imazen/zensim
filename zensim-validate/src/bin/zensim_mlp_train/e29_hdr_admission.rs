@@ -34,10 +34,10 @@ fn key_string(array: &dyn Array, index: usize) -> Result<String, String> {
     Err(refusal("unsupported label-free key type"))
 }
 
-pub(super) fn admit(
+pub(super) fn admit_keys(
     path: &Path,
     selected: &[usize],
-    pair_specs: &[String],
+    _pair_specs: &[String],
 ) -> Result<Value, String> {
     let sidecar = std::fs::read(format!("{}.manifest.json", path.display()))
         .map_err(|e| refusal(&format!("manifest: {e}")))?;
@@ -193,6 +193,16 @@ pub(super) fn admit(
     {
         return Err(refusal("key file pin changed"));
     }
+    Ok(d)
+}
+
+pub(super) fn admit(
+    path: &Path,
+    selected: &[usize],
+    pair_specs: &[String],
+) -> Result<Value, String> {
+    let d = admit_keys(path, selected, pair_specs)?;
+    let arm = d["arm"].as_str().unwrap_or_default();
     // Pair-list path/content and table hashes are deferred until key admission.
     if arm == "hc4" {
         let name = d["pair_list"]

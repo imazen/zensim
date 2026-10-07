@@ -553,6 +553,10 @@ pub(crate) fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
                 "keys_sha256",
                 "row_keys_sha256",
                 "row_selection_sha256",
+                "row_selection",
+                "rows",
+                "rows_kept",
+                "observations",
             ] {
                 if !matches!(
                     key,

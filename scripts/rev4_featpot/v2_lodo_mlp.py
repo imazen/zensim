@@ -194,6 +194,9 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None,
         if palette:
             from e32_palette import admit_keys
             admit_keys(path, d, keys)
+        if not palette:
+            from v2_teacher import admit_ordered_keys
+            admit_ordered_keys(path, d, keys)
         if d.get("data_role_decision_required"):
             human_keys(keys, d)
         checked_metadata.append((name, path, sp, d, keys))

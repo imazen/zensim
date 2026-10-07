@@ -2942,6 +2942,10 @@ fn stamp_emitted_checkpoints(
     Ok(written.len())
 }
 
+#[path = "../training_keys.rs"]
+mod training_keys;
+#[path = "zensim_mlp_train/group_admission.rs"]
+mod group_admission;
 #[path = "zensim_mlp_train/e29_hdr_admission.rs"]
 mod e29_hdr_admission;
 
@@ -3249,6 +3253,10 @@ fn main() {
             eprintln!("--keep-features: {e}");
             std::process::exit(2)
         })
+    });
+    group_admission::preflight(&group_modes, &args, selected_ids.as_deref()).unwrap_or_else(|e| {
+        eprintln!("native group admission: {e}");
+        std::process::exit(2)
     });
     let admission_paths = group_modes.iter()
         .filter(|g| !(args.hdr_consensus_research && g.0 == "hdr"))

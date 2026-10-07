@@ -642,3 +642,18 @@ e32-existing-rust-tests scratch target:
 e32-control-parity scratch bindir root control freeze dest:
     TMPDIR="$1" ZENSIM_MAX_TIER=v3 OPENBLAS_NUM_THREADS=1 ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/tests/e28_short_parity.py --new "$2/zensim_mlp_train" --fit-bin "$2/bake_dial_refit" --inspector "$2/examples/inspect_qualified_checkpoint" --prepared-root "$3" --e30-control "$4" --control-freeze "$5" --dest "$6"
 
+
+# V40 integrated admission and package checks, local only.
+v40-build:
+    cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+
+v40-native-tests:
+    cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
+
+v40-python-tests trainer:
+    TMPDIR=$HOME/tmp/v40 SHIPPATH_TRAINER={{trainer}} PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_e32_palette_training.py'
+    TMPDIR=$HOME/tmp/v40 SHIPPATH_TRAINER={{trainer}} PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
+    TMPDIR=$HOME/tmp/v40 PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards scripts.tests.test_e31_training scripts.tests.test_e31_control_freeze
+
+v40-admission binary dest:
+    python3 scripts/tests/v40_native_admission.py --binary {{binary}} --dest {{dest}} --upiq-manifest /mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07/upiq380_fit.parquet.manifest.json
