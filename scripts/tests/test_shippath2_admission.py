@@ -18,6 +18,7 @@ import v2_lodo_mlp as fit
 import v2_teacher as teacher
 import v2c_wide as owner
 from v2_common import SOURCE_ORDER, SOURCES, TEACHERS, human_dev
+from v2_human_role import PRODUCTION_SOURCES, LEDGER_COMMIT
 
 
 class RecipeAdmissionTests(unittest.TestCase):
@@ -58,7 +59,7 @@ class RecipeAdmissionTests(unittest.TestCase):
         for name in (*SOURCE_ORDER, *TEACHERS):
             refs = [f"{name}|ref{i // 2}" for i in range(24)]
             frame = pd.DataFrame({"pair_key": [f"{name}|pair{i}" for i in range(24)], "source_row_id": range(24),
-                                  "ref_basename": refs, "member_set": name, "target": np.arange(24, dtype=float)})
+                                  "ref_basename": refs, "member_set": SOURCES[name][0] if name in SOURCES else name, "target": np.arange(24, dtype=float)})
             frames[name] = frame
             leg = {}
             for split in (("full",) if name in SOURCES else ("fit", "dev")):
@@ -194,15 +195,37 @@ class RecipeAdmissionTests(unittest.TestCase):
         self.admit()
         decision = {"schema": "shippath-human-role-decision-v1", "decision_id": "SHIPPATH-human-production-role",
                     "state": "approved", "decided_by": "SYNTHETIC TEST ONLY", "allowed_use": "qualified-recipe-training",
-                    "sources": list(SOURCE_ORDER), "source_receipt_sha256": owner.sha(self.wide / "receipt.json")}
+                    "sources": list(PRODUCTION_SOURCES), "ledger_commit": LEDGER_COMMIT,
+                    "source_receipt_sha256": owner.sha(self.wide / "receipt.json")}
         p = self.root / "fixture-only-decision.json"
         self.json(p, decision)
-        records = fit.strict_training_groups(self.group("human_all_fit"), p)
+        records = fit.strict_training_groups(self.group("human_without_aic3_fit"), p)
         self.assertEqual(records[0]["data_role_decision_sha256"], owner.sha(p))
         decision["source_receipt_sha256"] = "wrong"
         self.json(p, decision)
         with self.assertRaisesRegex(ValueError, "PENDING"):
             fit.strict_training_groups(self.group("human_all_fit"), p)
+
+    def test_aic_family_decisions_and_tables_refused_before_payload(self):
+        self.admit()
+        good = {"schema": "shippath-human-role-decision-v1", "decision_id": "SHIPPATH-human-production-role",
+                "state": "approved", "decided_by": "SYNTHETIC TEST ONLY", "allowed_use": "qualified-recipe-training",
+                "sources": list(PRODUCTION_SOURCES), "ledger_commit": LEDGER_COMMIT,
+                "source_receipt_sha256": owner.sha(self.wide / "receipt.json")}
+        p = self.root / "fixture-only-decision.json"
+        self.json(p, good)
+        original_sha = fit.sha
+        def tripwire(path):
+            if str(path).endswith(".parquet"):
+                raise AssertionError("human payload opened before refusal")
+            return original_sha(path)
+        with patch.object(fit, "sha", side_effect=tripwire):
+            with self.assertRaisesRegex(ValueError, "AIC"):
+                fit.strict_training_groups(self.group("human_all_fit"), p)
+            for forbidden in ("aic3", "aic4", "jpeg-aic", "sdr25", "AIC-3"):
+                self.json(p, {**good, "sources": [*PRODUCTION_SOURCES, forbidden]})
+                with self.assertRaisesRegex(ValueError, "AIC"):
+                    fit.strict_training_groups(self.group("human_without_aic3_fit"), p)
 
     def test_strict_and_historical_argv_and_tamper_refusal(self):
         self.admit()
@@ -365,7 +388,7 @@ class RecipeAdmissionTests(unittest.TestCase):
                   patch.object(fit, "run", side_effect=AssertionError("trainer must not run"))):
                 with self.assertRaisesRegex(ValueError, "PENDING SHIPPATH-human-production-role"):
                     module.main()
-                self.assertTrue((dest / "keep_features.txt").is_file())
+                self.assertFalse(dest.exists())
                 self.assertEqual(before, self.immutable_snapshot())
                 self.assertEqual(list(scratch.iterdir()), [])
 

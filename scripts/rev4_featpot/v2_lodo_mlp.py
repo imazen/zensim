@@ -135,32 +135,30 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
     """
     from v2c_wide import safe_path
     from v2_teacher import key_path, row_keys_sha
+    from v2_human_role import decision_record, human_declaration, human_keys
     decision = None
     if data_role_decision is not None:
-        decision = json.loads(safe_path(data_role_decision).read_text())
+        raw = json.loads(safe_path(data_role_decision).read_text())
+        decision = decision_record(data_role_decision, raw.get("source_receipt_sha256"))
     records = []
     for name, path, _, _, _ in groups:
         path = safe_path(path)
         sp = Path(f"{path}.manifest.json")
         d = json.loads(sp.read_text())
+        if d.get("data_role_decision_required") or d.get("human_sources"):
+            human_declaration(d, decision)
         if (d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
                 or d.get("formula_revision") != 5 or not d.get("decoder_era")
                 or d.get("table_sha256") != sha(path) or not d.get("row_selection_sha256")):
             raise ValueError(f"{name}: strict admission requires bound Rev5 table provenance")
-        if d.get("data_role_decision_required"):
-            if (decision is None or decision.get("schema") != "shippath-human-role-decision-v1"
-                    or decision.get("decision_id") != d["data_role_decision_required"]
-                    or decision.get("state") != "approved" or not decision.get("decided_by")
-                    or decision.get("allowed_use") != "qualified-recipe-training"
-                    or decision.get("sources") != list(SOURCE_ORDER)
-                    or decision.get("source_receipt_sha256") != d.get("source_receipt_sha256")):
-                raise ValueError("PENDING SHIPPATH-human-production-role: supply the coordinator's bound decision")
-        elif d.get("data_role") not in ("TRAIN oracle teacher", "TRAIN ordinal KADIS source_id%10<8; no human labels"):
+        if not d.get("data_role_decision_required") and d.get("data_role") not in ("TRAIN oracle teacher", "TRAIN ordinal KADIS source_id%10<8; no human labels"):
             raise ValueError(f"{name}: strict admission needs an explicit permitted data role")
         kp = key_path(path)
         if sha(kp) != d.get("keys_sha256"):
             raise ValueError(f"{name}: admitted row key file changed")
         keys = pq.read_table(kp)
+        if d.get("data_role_decision_required"):
+            human_keys(keys, d)
         refs = refs_of(path)
         ref_col = "ladder" if "ladder" in keys.column_names else "ref_basename"
         if row_keys_sha(keys) != d.get("row_keys_sha256") or refs != keys[ref_col].to_pylist():
@@ -289,6 +287,8 @@ def main() -> None:
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
     if args.strict_admission:
         strict_output_preflight(V2, args.dest)
+        from v2_human_role import preflight_recipe
+        preflight_recipe(V2, args.data_role_decision, args.heldout)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())

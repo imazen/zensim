@@ -62,6 +62,8 @@ def main() -> None:
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
     if args.strict_admission:
         strict_output_preflight(V2, args.dest)
+        from v2_human_role import preflight_recipe
+        preflight_recipe(V2, args.data_role_decision)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())

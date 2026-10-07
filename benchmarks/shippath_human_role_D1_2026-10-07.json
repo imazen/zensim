@@ -1,0 +1,40 @@
+{
+  "schema": "shippath-human-role-decision-v1",
+  "decision_id": "SHIPPATH-human-production-role",
+  "state": "approved",
+  "decided_by": "owner, live Coordinator decision 2026-10-07",
+  "decision_date": "2026-10-07",
+  "allowed_use": "qualified-recipe-training",
+  "sources": [
+    "kadid",
+    "tid2013",
+    "konfig",
+    "cid22_a25"
+  ],
+  "populations": {
+    "kadid": [
+      "TRAIN",
+      "SELECT"
+    ],
+    "tid2013": [
+      "TRAIN"
+    ],
+    "konfig": [
+      "TRAIN",
+      "VAL"
+    ],
+    "cid22_a25": [
+      "CID22-A, 25 references"
+    ]
+  },
+  "excluded_sources": [
+    "AIC family (including AIC-3, AIC-4 and SDR25)"
+  ],
+  "ledger_commit": "1d3bf35a78a149f0925029d71014c6df8535f550",
+  "ledger_path": "docs/DATA_SPLITS.md",
+  "source_receipt_sha256": "764f3cfa4ad3b55ff6334b6e75be6f9f39fca538add433ac0ef79603dc4398e2",
+  "source_frozen_sha256": "1611e7667aae2ed17c2d47008b727b7472eba2571de6913de1a6b697e34b84f3",
+  "source_receipt": "/var/tmp/rev4-featpot/v2c5/wide/main/real/receipt.json",
+  "source_frozen": "/var/tmp/rev4-featpot/v2c5/wide/frozen.json",
+  "scope": "D1 production human recipe only; no protected confirmation or T0 exposure authorization; E30 cost does not gate D1"
+}
