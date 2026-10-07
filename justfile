@@ -685,3 +685,6 @@ v40-research-tests:
 
 v40-assessment-build:
     cargo build --locked --release -p zensim-validate --bin bake_dial_refit --bin predict_features_with_bake
+
+v40-bundle-check bundle:
+    python3 scripts/tests/v40_bundle_check.py --bundle {{bundle}}

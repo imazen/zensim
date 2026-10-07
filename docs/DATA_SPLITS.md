@@ -1578,3 +1578,28 @@ E29/E31/E32 before scientific fitting; the solo proposal is superseded. Role/exp
 root, executor smokes, producer pins and tower mirror:
 [E29 worklog](../benchmarks/E29_WORKLOG.md) and
 [preparation pointer](../benchmarks/e29_preparation_2026-10-07.pointer.md).
+
+### V40 local integration exposure audit (2026-10-07)
+
+V40 integrates E29R2, E31 and E32 with D1's four-source production-human decision.
+The retained control/E29 inputs contain KADID TRAIN+SELECT, TID2013, KonFiG
+TRAIN+VAL and CID22-A25; AIC-3 remains excluded. Native group admission checks
+all declarations, weights, source/decision bindings and ordered identity keys
+before feature payload hashing or loading. The palette arm joins the same frozen
+observations to the declared palette-v2 bank without changing inherited values,
+keys, multiplicity or order. The prepared UPIQ data contains only the registered
+330 TRAIN-fit rows; its 50 development rows are not staged in the fit archive.
+
+Local preparation and smokes read only those D1 populations, the registered
+TRAIN teacher/coverage inputs, E29's 7,390 TRAIN agreement rows and UPIQ's 330
+TRAIN-fit rows. The cached-inference parity probe uses twelve released KADID
+TRAIN+SELECT feature rows per arm. Distortion-type assessment keys are projected
+into a separately byte-pinned label-free W2 join. No KADID TERMINAL, AIC-3,
+HDR VAL, UPIQ development, protected confirmation or T0 labels were opened.
+
+The 160 launchable cells are fresh control (40), hb4/hc4 (80), and palette (40),
+with four D1 folds and ten fixed seed indices. The 40 uh4 cells are prepared but
+unlaunchable pending the owner's UPIQ producer disposition. Launch templates are
+inert, source/image/data publication and queue changes were not performed, and
+future protected/external panel reads remain behind an explicit exposure freeze.
+Evidence: `benchmarks/v40_2026-10-07.pointer.md` and its canonical artifact root.
