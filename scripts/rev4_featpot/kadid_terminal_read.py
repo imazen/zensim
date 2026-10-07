@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 import numpy as np
 
@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import zen_stats
 from lib.assessment_identity import safe_path
 import v2c_labels
+import _terminal_bound_io
 
 DESIGN = "by_v2fy-rev5-d1-20261007"
 GATES = (
@@ -59,6 +60,7 @@ CODE = {
         Path(__file__).resolve(),
         Path(v2c_labels.__file__).resolve(),
         Path(zen_stats.__file__).resolve(),
+        Path(_terminal_bound_io.__file__).resolve(),
     )
 }
 
@@ -160,39 +162,17 @@ def metadata_path(path):
 
 
 def metadata_open(path, mode="rb", **kwargs):
-    """Bind every component from / using directory fds and O_NOFOLLOW (Linux).
+    """Bind admitted ancestry and a checked leaf; Linux only, no fallback."""
+    return _terminal_bound_io._open_admitted(metadata_path(path), mode, **kwargs)
 
-    Legitimate prepared aliases resolve during admission. Retargeting an alias
-    afterwards cannot change this walk; replacing a resolved ancestor/leaf with
-    a symlink refuses. Once a directory is open its handle survives renames.
-    No fallback to a pathname open on platforms lacking the required flags.
-    """
-    resolved = metadata_path(path)
-    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-    modes = {
-        "rb": os.O_RDONLY,
-        "r+": os.O_RDWR,
-        "x": os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        "w": os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        "a": os.O_WRONLY | os.O_APPEND,
-    }
-    flags = modes[mode] | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
-    parent = os.open("/", directory_flags)
-    fd = None
+
+def _reject_label_alias(path, labels_identity):
+    """stat checks identity without opening the protected label payload."""
     try:
-        for component in resolved.parts[1:-1]:
-            next_parent = os.open(component, directory_flags, dir_fd=parent)
-            os.close(parent)
-            parent = next_parent
-        fd = os.open(resolved.name, flags, 0o600, dir_fd=parent)
-        require(stat.S_ISREG(os.fstat(fd).st_mode), "regular metadata file required")
-        bound = os.fdopen(fd, mode, **kwargs)
-        fd = None  # bound owns it now, including exceptional close paths.
-        return bound
-    finally:
-        os.close(parent)
-        if fd is not None:
-            os.close(fd)
+        info = os.stat(path)
+    except FileNotFoundError:
+        return  # exclusive output creation still refuses any later alias
+    require((info.st_dev, info.st_ino) != labels_identity, "label inode alias in metadata/output")
 
 
 def metadata_bytes(path):
@@ -342,6 +322,11 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
     )
     receipt = json.loads(committed)
     validate_label_adapter(receipt.get("labels"))
+    labels = os.stat(receipt["labels"]["path"])
+    require(stat.S_ISREG(labels.st_mode), "regular original label file required")
+    labels_identity = (labels.st_dev, labels.st_ino)
+    for path in (receipt_path, authorization_path, REGISTRATION, CONTRACT, *CODE.values()):
+        _reject_label_alias(metadata_path(path), labels_identity)
     require(
         receipt.get("schema") == "kadid-terminal-final-model-v1"
         and receipt.get("design_line") == DESIGN
@@ -379,14 +364,13 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         *receipt["models"].values(),
         *receipt["bindings"],
     ]
-    labels = Path(receipt["labels"]["path"]).resolve()
     for spec in specs:
         path = metadata_path(spec["path"])
-        require(path.resolve() != labels, "label alias in metadata/input inventory")
+        _reject_label_alias(path, labels_identity)
     ledger, journal, output = map(Path, (ledger, journal, output))
     for path in (ledger, journal, output):
         metadata_path(path)
-        require(path.resolve() != labels, "label alias in output")
+        _reject_label_alias(path, labels_identity)
     require(
         ledger.is_file() and not journal.exists() and not output.exists(),
         "spent read or missing ledger/existing output",
@@ -424,10 +408,7 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         report["artifact"]
     ]
     for spec in evidence:
-        require(
-            metadata_path(spec["path"]).resolve() != labels,
-            "label alias in gate evidence",
-        )
+        _reject_label_alias(metadata_path(spec["path"]), labels_identity)
     for spec in evidence:
         checked(spec)
     e30 = json.loads(checked_bytes(report["artifact"]))
@@ -583,6 +564,7 @@ def reserve(ledger, journal, receipt_sha):
 
 
 def assess(receipt, population, predictions):
+    require(zen_stats._panel_pass_fds(), "verified bound panel required before labels")
     # First label open occurs here, AFTER authorization, all gates and exposure.
     try:
         label_rows = v2c_labels.load_label_rows(receipt["labels"])
@@ -596,7 +578,6 @@ def assess(receipt, population, predictions):
     )
     y = [lookup[(r["ref_path"], r["dist_path"])] for r in population]
     x = {m: [float(r[m]) for r in predictions] for m in MODELS}
-    os.environ["ZEN_PANEL_BIN"] = receipt["panel"]["path"]
     groups = {
         r: [i for i, p in enumerate(population) if p["ref_basename"] == r]
         for r in sorted({p["ref_basename"] for p in population})
@@ -612,12 +593,13 @@ def assess(receipt, population, predictions):
             signed = json.loads(
                 subprocess.run(
                     [
-                        receipt["panel"]["path"],
+                        zen_stats._find_panel_bin(),
                         "--input",
                         wire.name,
                         "--json",
                         "--signed-quality",
                     ],
+                    pass_fds=zen_stats._panel_pass_fds(),
                     capture_output=True,
                     text=True,
                     check=True,
@@ -747,12 +729,19 @@ def assess(receipt, population, predictions):
 
 
 def execute(receipt, authorization, ledger, journal, output):
-    try:
-        r, receipt_sha, pop, pred = preflight(
-            receipt, authorization, ledger, journal, output
-        )
-    except Exception:
-        raise TerminalReadError("preflight-refused") from None
+    with ExitStack() as bound:
+        try:
+            r, receipt_sha, pop, pred = preflight(
+                receipt, authorization, ledger, journal, output
+            )
+            panel = bound.enter_context(checked_open(r["panel"]))
+            bound.enter_context(zen_stats._bound_panel(panel.fileno()))
+        except Exception:
+            raise TerminalReadError("preflight-refused") from None
+        return _execute_admitted(r, receipt_sha, pop, pred, ledger, journal, output)
+
+
+def _execute_admitted(r, receipt_sha, pop, pred, ledger, journal, output):
     try:
         reserve(ledger, journal, receipt_sha)
     except Exception:

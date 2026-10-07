@@ -16,8 +16,9 @@ spec: {"path", "sha256", "format": "tsv"|"csv"|"json" (+ "rows_key"), "ref_col",
        # via_pairs: the label file carries no paths (MCL-JCI-style); it is keyed to a pinned pairs file by explicit columns
 """
 
+import hashlib
+import io
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -28,10 +29,11 @@ import pyarrow.parquet as pq
 from v2_common import sha
 
 
-def _read(path: Path, fmt: str, usecols: list[str] | None = None, rows_key: str | None = None) -> pd.DataFrame:
+def _read(data: bytes, fmt: str, usecols: list[str] | None = None, rows_key: str | None = None) -> pd.DataFrame:
+    """Parse only the retained bytes whose digest the caller checked."""
     if fmt == "json":  # {"<rows_key>": [ {col: value, ...}, ... ]}
-        return pd.DataFrame(json.loads(path.read_text())[rows_key]).astype(str)
-    return pd.read_csv(path, sep="\t" if fmt == "tsv" else ",", dtype=str, keep_default_na=False, usecols=usecols)
+        return pd.DataFrame(json.loads(data)[rows_key]).astype(str)
+    return pd.read_csv(io.BytesIO(data), sep="\t" if fmt == "tsv" else ",", dtype=str, keep_default_na=False, usecols=usecols)
 
 
 def _stem(path: str) -> str:
@@ -58,15 +60,17 @@ def select_mask(frame: pd.DataFrame, rule: dict | None) -> np.ndarray:
 def load_label_rows(spec: dict, root_check: bool = True) -> pd.DataFrame:
     """Columns ref_path, dist_path, label (float), file_row; after the sha256 check."""
     path = Path(spec["path"])
-    if root_check and sha(path) != spec["sha256"]:
+    data = path.read_bytes()
+    if root_check and hashlib.sha256(data).hexdigest() != spec["sha256"]:
         raise ValueError(f"{path}: sha256 differs from the pin")
-    frame = _read(path, spec["format"], spec.get("usecols"), spec.get("rows_key"))
+    frame = _read(data, spec["format"], spec.get("usecols"), spec.get("rows_key"))
     if spec.get("via_pairs"):
         vp = spec["via_pairs"]
         pp = Path(vp["path"])
-        if sha(pp) != vp["sha256"]:
+        pair_data = pp.read_bytes()
+        if hashlib.sha256(pair_data).hexdigest() != vp["sha256"]:
             raise ValueError(f"{pp}: sha256 differs from the pin")
-        pairs = _read(pp, "tsv")
+        pairs = _read(pair_data, "tsv")
         left, right = [a for a, _ in vp["on"]], [b for _, b in vp["on"]]
         n = len(frame)
         pairs = pairs[[*dict.fromkeys([*right, "ref_path", "dist_path"])]]  # only the key columns: never a label column of the pairs file
