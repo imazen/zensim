@@ -1,5 +1,9 @@
 # zensim dev commands
 
+# Synthetic D2 read only. Caller supplies a pinned canonical Rust panel.
+releasegate-tests:
+    python3 -m unittest discover -s scripts/tests -p test_kadid_terminal_read.py -v
+
 # The rustdoc-JSON nightly is PINNED (keep in sync with the `api-doc-check`
 # job in .github/workflows/ci.yml): an unpinned tracking nightly churns
 # cross-crate path rendering with zero repo changes — MEASURED 2026-09-06,
