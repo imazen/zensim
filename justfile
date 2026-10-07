@@ -100,6 +100,25 @@ rev4serve-gate:
 clippy:
     cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings
 
+# E32 research transport gates. Scratch/targets are caller-owned disk paths.
+[positional-arguments]
+e32-extension-tests scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib palette_training -- --nocapture
+    TMPDIR="$1" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p test_e32_palette_training.py
+
+[positional-arguments]
+e32-extension-build scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+
+[positional-arguments]
+e32-shippath-regression scratch trainer:
+    TMPDIR="$1" SHIPPATH_TRAINER="$2" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
+
+# Full 120 x 50,000 control replay, pinned E30 model comparison, no fleet owner.
+[positional-arguments]
+e32-control-parity scratch bindir root control freeze dest:
+    TMPDIR="$1" ZENSIM_MAX_TIER=v3 OPENBLAS_NUM_THREADS=1 ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/tests/e28_short_parity.py --new "$2/zensim_mlp_train" --fit-bin "$2/bake_dial_refit" --inspector "$2/examples/inspect_qualified_checkpoint" --prepared-root "$3" --e30-control "$4" --control-freeze "$5" --dest "$6"
+
 # Quick offline rank/dial report (not full-eval or product qualification).
 # Emits markdown plus a self-contained HTML report. Optional REF
 # bake enables the per-zone dial-agreement panel; RAMP grid enables the
