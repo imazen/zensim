@@ -352,3 +352,10 @@ palette-mirror source destination:
 # Research-only semantic admission controls, no image or label access.
 palette-admission-test:
     python3 -m unittest discover -s scripts/tests -p test_palette_admission.py -v
+
+# Round-two review gates, serialized with the caller's run-heavy wrapper.
+palette-round2-gates:
+    cargo test -p zensim --all-features --lib
+    just clippy
+    just api-doc
+    just api-doc-check

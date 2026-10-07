@@ -52,6 +52,7 @@ class PaletteAdmission(unittest.TestCase):
 
     def test_other_semantic_changes_refused(self):
         for field, value in [('feature_ids', list(reversed(owner.PALETTE_IDS))),
+                ('feature_ids', [float(i) for i in owner.PALETTE_IDS]),
                 ('build_commit', 'c' * 40), ('serving_allowed', True),
                 ('serving_allowed', 0), ('labels_read', 0), ('schema', 'unknown'),
                 ('feature_set_id', 'palette@w1867/unknown#30b09cd1')]:

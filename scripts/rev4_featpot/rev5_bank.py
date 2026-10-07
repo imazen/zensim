@@ -574,6 +574,7 @@ def validate_palette_instrument_manifest(path, build_commit, bank_sha256, pinned
             or im.get('build_commit')!=build_commit
             or im.get('feature_set_id')!='palette@w1867/palette_v2#30b09cd1'
             or im.get('feature_ids')!=PALETTE_IDS
+            or any(type(i) is not int for i in im.get('feature_ids',[]))
             or im.get('column_map')!={str(i):f'palette_f{i}' for i in PALETTE_IDS}
             or set(im.get('views',{}))!=set(PALETTE_TABLES)
             or im.get('bank_manifest_sha256')!=bank_sha256):
@@ -628,6 +629,7 @@ def cmd_palette_verify(a):
         # Compare each measured column against a key lookup in the bank,
         # independent of the projection's concatenation/offset algorithm.
         members=v['member_set'].to_pylist();pairs=v['pair_key'].to_pylist()
+        if not set(members)<=PALETTE_MEMBERS:raise ValueError('unauthorized instrument member')
         lookups={member:{k:j for j,k in enumerate(tables[member]['pair_key'].to_pylist())} for member in set(members)}
         for member in set(members):
             ix=np.array([j for j,memb in enumerate(members) if memb==member],dtype=np.int64)
