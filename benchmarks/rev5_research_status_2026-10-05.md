@@ -348,3 +348,13 @@ minimise MSE and maximise Kendall and Pearson correlation.
 * **UPIQ provenance accepted** (file traced to zenmetrics' 2026-06-09 UPIQ-PU work from the official UPIQ release) → E31 can run
   with the shared control in the v40 package.
 * i270 host keys accepted; stale workspaces and inactive build folders being removed.
+
+## 27. Housekeeping per the owner (2026-10-07 22:20 UTC)
+
+* **Stale workspaces removed:** 42 in zensim and 11 in zenmetrics (each snapshotted first; unpushed work kept on local
+  `stale-ws/<name>` bookmarks). Four zensim workspaces whose working copies were stale were left in place so no unsnapshotted edit
+  is lost: `gaddrinst`, `steercheck`, `zensim--gmsbank`, `zensim--gmsd-chroma`.
+* **Inactive Cargo target folders deleted:** 171 folders, ~739 GB, under `~/work` and `~/tmp` (active lane workspaces and a
+  folder another session was writing to were kept; top-level executables archived to
+  `/mnt/tower/output/target-binaries-2026-10-07/` first). Free space on the shared NVMe: 726 GB.
+* **i270:** new host keys accepted. The box is currently booted into Windows, so the fleet can't use it until it boots Ubuntu.
