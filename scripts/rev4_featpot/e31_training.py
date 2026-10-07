@@ -25,7 +25,11 @@ def disposition(path):
         legacy_label_sha256=LABEL_SHA,
         accept_unresolved_producer=True,
     )
-    if any(d.get(k) != v for k, v in expected.items()) or not d.get("decided_by"):
+    if (
+        any(d.get(k) != v for k, v in expected.items())
+        or not isinstance(d.get("decided_by"), str)
+        or not d["decided_by"]
+    ):
         raise ValueError("E31 requires the owner's bound legacy-label disposition")
     return d
 

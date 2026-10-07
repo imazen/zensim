@@ -464,7 +464,7 @@ def main() -> None:
         selection["upiq380_fit_admission"] = hdr_record
     best_epoch = selection["selected_epoch"]
     if args.train_only:
-        (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+        (dest / "result.json").write_text(json.dumps({"schema": "e31-native-hdr-research-training-cell-v1" if native_recipe else ("rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1"),
             "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
             "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,

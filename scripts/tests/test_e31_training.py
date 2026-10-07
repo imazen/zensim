@@ -137,6 +137,23 @@ class E31Training(unittest.TestCase):
                             e31.columns("by_v2fy"),
                         )
 
+    def test_missing_owner_disposition_stops_before_trainer_argv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "unread-native.parquet"
+            Path(f"{path}.manifest.json").write_text(json.dumps({"source": "UPIQ-380"}))
+            with self.assertRaisesRegex(ValueError, "label-provenance disposition"):
+                fit.train_command(
+                    [("upiq380", path, 4.34410740924913, 0, "rank")],
+                    1101,
+                    101,
+                    1853,
+                    Path(tmp) / "keep.txt",
+                    "N",
+                    Path(tmp) / "uncreated.bin",
+                    strict_admission=True,
+                )
+            self.assertFalse((Path(tmp) / "uncreated.bin").exists())
+
     def test_d3_is_not_label_gap_disposition(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decision.json"
