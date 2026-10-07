@@ -2792,12 +2792,20 @@ pub(crate) static DVIFMGATE_SIGNALS: [SignalDef; 5] = {
 };
 
 // Palette IDs are explicit N-major placements, with their own research semantics.
-const PALETTE_REVISION: &[Revision] = &[Revision {
-    era: "palette_v1",
-    commit: "8a4f8314",
-    status: RevisionStatus::Landed,
-    note: "Research-only introduction; design commit, producer manifest pins implementation. No existing arithmetic change.",
-}];
+const PALETTE_REVISION: &[Revision] = &[
+    Revision {
+        era: "palette_v1",
+        commit: "8a4f8314",
+        status: RevisionStatus::Landed,
+        note: "Initial research producer; superseded after a signed-population regression. Retained as historical provenance.",
+    },
+    Revision {
+        era: "palette_v2",
+        commit: "-",
+        status: RevisionStatus::Landed,
+        note: "Signed lightness/chroma compare independently population-weighted means; producer BUILD_COMMIT pins the implementation. Existing families unchanged.",
+    },
+];
 const fn palette_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
     SignalDef {
         family: ComputeToken::Palette,

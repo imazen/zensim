@@ -811,6 +811,13 @@ impl Request {
         if palette.is_empty() {
             return Ok(Plan::derive_with_layout(&self.want, self.layout())?);
         }
+        if self.era_label == "palette_v1" {
+            return Err(ResearchError::RevisionUnavailable {
+                wanted: self.era_label.clone(),
+                incompatible: palette,
+                actual: vec!["palette_v2".to_string()],
+            });
+        }
         #[cfg(not(feature = "training"))]
         return Err(ResearchError::Plan(
             "palette requires the training research build".into(),
@@ -1142,7 +1149,7 @@ fn build_computes(r: &feature_defs::Revision) -> bool {
 /// bytes beside it.
 fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
     if signal.family == ComputeToken::Palette {
-        return "palette_v1";
+        return "palette_v2";
     }
     // An active ARITHMETIC era (Rev4's `tiercanon`) moved every slot, so it
     // is every slot's era — registered in `feature_defs::ARITHMETIC_REVISIONS`,
@@ -1482,7 +1489,7 @@ fn extract_impl(
     {
         if hdr.is_some() {
             return Err(ResearchError::Plan(
-                "palette_v1 does not support native HDR".into(),
+                "palette_v2 does not support native HDR".into(),
             ));
         }
         let palette = crate::palette::extract(source, distorted)?;

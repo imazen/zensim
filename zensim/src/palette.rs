@@ -1,4 +1,4 @@
-//! Research-only palette_v1. Contract and bounds: benchmarks/palette_design_2026-10-07.md.
+//! Research-only palette_v2. Contract and bounds: benchmarks/palette_design_2026-10-07.md.
 use crate::source::{ColorPrimaries, ImageSource, PixelFormat};
 
 pub(crate) const BASE: usize = 1825;
@@ -34,12 +34,12 @@ fn samples(source: &impl ImageSource) -> Result<Vec<Colour>, crate::research::Re
         || source.pixel_format() != PixelFormat::Srgb8Rgb
         || source.color_primaries() != ColorPrimaries::Srgb
     {
-        return Err(crate::research::ResearchError::Plan("palette_v1 requires legacy RGB8 sRGB/BT.709 D65; other colour contracts are unsupported".into()));
+        return Err(crate::research::ResearchError::Plan("palette_v2 requires legacy RGB8 sRGB/BT.709 D65; other colour contracts are unsupported".into()));
     }
     let (w, h) = (source.width(), source.height());
     if w == 0 || h == 0 {
         return Err(crate::research::ResearchError::Plan(
-            "palette_v1 requires nonempty images".into(),
+            "palette_v2 requires nonempty images".into(),
         ));
     }
     let (nx, ny) = (w.min(32), h.min(32));
@@ -251,10 +251,10 @@ fn compare(a: Vec<Colour>, b: Vec<Colour>) -> [f64; 6] {
         let mass = (r.weight + d.weight) * 0.5;
         let shift = distance(r.lab, d.lab);
         out[0] += mass * shift;
-        out[1] += mass * (d.lab[0] - r.lab[0]);
+        out[1] += d.weight * d.lab[0] - r.weight * r.lab[0];
         let rc = libm::hypot(r.lab[1], r.lab[2]);
         let dc = libm::hypot(d.lab[1], d.lab[2]);
-        out[2] += mass * (dc - rc);
+        out[2] += d.weight * dc - r.weight * rc;
         if rc > 1e-12 && dc > 1e-12 {
             let angle = libm::atan2(
                 r.lab[1] * d.lab[2] - r.lab[2] * d.lab[1],
@@ -382,6 +382,57 @@ mod tests {
             .map(|i| 0.5 * (a[i].weight + b[p[i]].weight) * distance(a[i].lab, b[p[i]].lab))
             .sum::<f64>();
         assert_eq!(got.to_bits(), best.to_bits());
+        // Independent transport oracle: split integer populations into four
+        // equal atoms and enumerate every bijection. This covers zero-mass
+        // centres and rearranged populations without sharing the flow code.
+        for n in 2..=8 {
+            for seed in 0..32usize {
+                let positions: Vec<_> = (0..n)
+                    .map(|i| {
+                        [
+                            0.2 + i as f64 * 0.06,
+                            ((i * 7) % 5) as f64 * 0.03,
+                            ((i * 11) % 7) as f64 * 0.02,
+                        ]
+                    })
+                    .collect();
+                let source_indices: Vec<_> =
+                    (0..4).map(|i| (seed * 7 + i * 3 + i * i) % n).collect();
+                let target_indices: Vec<_> = (0..4)
+                    .map(|i| (seed * 11 + i * 5 + i * i * i + 1) % n)
+                    .collect();
+                let centres: Vec<_> = (0..n)
+                    .map(|i| Colour {
+                        lab: positions[i],
+                        weight: source_indices.iter().filter(|&&j| i == j).count() as f64 / 4.0,
+                    })
+                    .collect();
+                let weights: Vec<_> = (0..n)
+                    .map(|i| target_indices.iter().filter(|&&j| i == j).count() as f64 / 4.0)
+                    .collect();
+                let source_atoms: Vec<_> = source_indices
+                    .iter()
+                    .map(|&i| Colour {
+                        lab: positions[i],
+                        weight: 0.25,
+                    })
+                    .collect();
+                let target_atoms: Vec<_> = target_indices
+                    .iter()
+                    .map(|&i| Colour {
+                        lab: positions[i],
+                        weight: 0.25,
+                    })
+                    .collect();
+                let mut oracle = f64::INFINITY;
+                exhaustive(&source_atoms, &target_atoms, 0, 0, 0.0, &mut oracle);
+                let transported = emd(&centres, &weights);
+                assert!(
+                    (transported - oracle).abs() < 1e-14,
+                    "transport N={n} seed={seed}: {transported} != {oracle}"
+                );
+            }
+        }
     }
     // Diagnostic RGB8 edits are generated here through the same extraction
     // owner. The inverse is a test-only mirror of Ottosson's published matrix.
@@ -403,6 +454,59 @@ mod tests {
             };
             (s * 255.0).round() as u8
         })
+    }
+    #[test]
+    fn global_rgb8_edits_have_direction_at_every_n() {
+        let labs: Vec<_> = (0..8)
+            .map(|i| {
+                [
+                    0.3 + i as f64 * 0.055,
+                    0.018 * libm::cos(0.4),
+                    0.018 * libm::sin(0.4),
+                ]
+            })
+            .collect();
+        let image = |colours: &[Lab]| {
+            (0..1024)
+                .map(|i| rgb_of_lab(colours[(i % 32) / 4]))
+                .collect::<Vec<_>>()
+        };
+        let src = image(&labs);
+        let source = crate::RgbSlice::new(&src, 32, 32);
+        for (signal, delta) in [
+            (1, -0.03),
+            (1, 0.03),
+            (2, -0.5),
+            (2, 0.5),
+            (3, -0.2),
+            (3, 0.2),
+        ] {
+            let mut edited = labs.clone();
+            for lab in &mut edited {
+                match signal {
+                    1 => lab[0] += delta,
+                    2 => {
+                        lab[1] *= 1.0 + delta;
+                        lab[2] *= 1.0 + delta;
+                    }
+                    3 => {
+                        let [_, a, b] = *lab;
+                        lab[1] = a * libm::cos(delta) - b * libm::sin(delta);
+                        lab[2] = a * libm::sin(delta) + b * libm::cos(delta);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            let dst = image(&edited);
+            let values = extract(&source, &crate::RgbSlice::new(&dst, 32, 32)).unwrap();
+            for n in 2..=8 {
+                assert!(
+                    values[(n - 2) * 6 + signal] * delta > 0.0,
+                    "global edit signal {signal} delta {delta}, N={n}: {:?}",
+                    &values[(n - 2) * 6..(n - 1) * 6]
+                );
+            }
+        }
     }
     #[test]
     fn unlabelled_colour_edits() {

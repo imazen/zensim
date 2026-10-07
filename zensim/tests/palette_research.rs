@@ -17,9 +17,9 @@ fn palette_tier_and_old_family_parity() {
         let (s, d) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
         let palette = research::family_slots(ComputeToken::Palette);
         let req = Request::for_slots(palette.clone(), 1867)
-            .with_era_label("palette_v1")
+            .with_era_label("palette_v2")
             .dense();
-        let sparse_req = Request::for_slots(palette.clone(), 1867).with_era_label("palette_v1");
+        let sparse_req = Request::for_slots(palette.clone(), 1867).with_era_label("palette_v2");
         assert_eq!(sparse_req.validate().unwrap(), palette);
         let sparse = research::extract(&sparse_req, &s, &d).unwrap();
         assert!(sparse.values()[..1825].iter().all(|v| v.to_bits() == 0));
@@ -102,4 +102,20 @@ fn palette_respects_strided_rows() {
         research::extract(&req, &s, &rows).unwrap().values(),
         &[0.0; 42]
     );
+}
+
+#[test]
+fn superseded_palette_revision_refuses() {
+    let want = research::family_slots(ComputeToken::Palette);
+    let old = Request::for_slots(want.clone(), 1867).with_era_label("palette_v1");
+    assert!(matches!(
+        old.validate(),
+        Err(research::ResearchError::RevisionUnavailable { .. })
+    ));
+    let old_named = Request::for_slots(want, 1867)
+        .at_revision(research::RevisionRef::Named("palette_v1".into()));
+    assert!(matches!(
+        old_named.validate(),
+        Err(research::ResearchError::RevisionUnavailable { .. })
+    ));
 }
