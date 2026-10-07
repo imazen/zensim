@@ -60,7 +60,7 @@ class Admission(unittest.TestCase):
             self.legs['e28_s2m_'+source]=recs
 
     @contextmanager
-    def guard(self):
+    def guard(self, root=None):
         # SHA uses Python opens; Arrow has a native open, so guard its read owner too.
         original_io, original_builtin, original_arrow = io.open, builtins.open, pq.read_table
         def check(path):
@@ -70,8 +70,9 @@ class Admission(unittest.TestCase):
         def builtin_open(path,*a,**k):check(path);return original_builtin(path,*a,**k)
         def arrow(path,*a,**k):check(path);return original_arrow(path,*a,**k)
         with ExitStack() as stack:
-            stack.enter_context(patch.object(c,'V2',self.root));stack.enter_context(patch.object(mlp,'V2',self.root))
-            stack.enter_context(patch.object(nm,'V2',self.root));stack.enter_context(patch.object(e,'admission_pin',return_value=self.policy))
+            root=root or self.root
+            stack.enter_context(patch.object(c,'V2',root));stack.enter_context(patch.object(mlp,'V2',root))
+            stack.enter_context(patch.object(nm,'V2',root));stack.enter_context(patch.object(e,'admission_pin',return_value=self.policy))
             stack.enter_context(patch.object(io,'open',side_effect=io_open));stack.enter_context(patch.object(builtins,'open',side_effect=builtin_open))
             stack.enter_context(patch.object(pq,'read_table',side_effect=arrow));yield
 
@@ -146,6 +147,20 @@ class Admission(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,'prepared root contains forbidden confirmation/HDR'):nm.fit('kadid',self.root/('nm-out-'+name))
                 self.assertEqual(self.opens,[])
             sentinel.unlink();extra.rmdir()
+
+    def test_root_reached_through_a_linked_ancestor_is_admitted(self):
+        # The fit executor reaches the prepared root through a link (/var/tmp/rev4-featpot -> its verified
+        # extraction). That ancestor is outside the approved namespace; links below the root still refuse
+        # (test_approved_paths_cannot_redirect_to_another_payload).
+        vdir=self.root/'wide/main/real';(vdir/'receipt.json').write_text(json.dumps(dict(schema='rev4-featpot-v2c-wide-v1',family='main',variant='real',width=1853,formula_revision=5,legs=self.legs,e28_teacher_pin_sha256=c.sha(e.PIN))))
+        self.policy['prepared_files']['wide/main/real/receipt.json']=c.sha(vdir/'receipt.json')
+        link=self.root.parent/(self.root.name+'-fitroot');link.symlink_to(self.root.parent,target_is_directory=True)
+        self.addCleanup(link.unlink)
+        linked=link/self.root.name
+        with self.guard(root=linked):
+            self.assertEqual(e.admit_receipt(linked)['formula_revision'],5)
+            declarations,keys=e.admit_humans('s2m','kadid',self.legs)
+        self.assertEqual(len(declarations),4);self.assertEqual(self.opens,[])
 
     def test_label_free_keys_admitted_without_opening_targets(self):
         with self.guard():

@@ -31,8 +31,16 @@ def admission_pin():
 
 
 def inventory_path(path):
-    """Approved names may not redirect to another physical input."""
-    if any(p.is_symlink() for p in [path, *path.parents]):
+    """Approved names may not redirect to another physical input.
+
+    Only components below the prepared root are checked: the fit executor deliberately reaches the root
+    through a link (`/var/tmp/rev4-featpot` -> its verified data extraction), which is outside the approved
+    inventory's namespace. Every approved path must lie under the root."""
+    import v2_common
+    root = Path(v2_common.V2)
+    if root not in path.parents:
+        raise ValueError("E28 approved inventory path is outside the prepared root")
+    if any(p.is_symlink() for p in [path, *path.parents] if root in p.parents):
         raise ValueError("E28 approved inventory path is a symlink")
     return path
 
