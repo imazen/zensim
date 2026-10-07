@@ -70,16 +70,16 @@ def main():
         assert record["status"] == "PASS" and record["program_sha"] == pins["program_sha"]
     actual = subprocess.check_output(["docker", "image", "inspect", "-f", "{{.Id}}", pins["image"]], text=True).strip()
     assert actual == pins["image_id"]
-    code = '''import hashlib,json,pathlib,os
+    code = '''import hashlib,json,pathlib,os,sys
 b=pathlib.Path('/opt/fleet-fits/program')
 m=json.loads((b/'build_meta.json').read_text())
 for path,expected in m['files'].items():
  assert hashlib.sha256((b/path).read_bytes()).hexdigest()==expected,path
 assert hashlib.sha256(pathlib.Path('/usr/local/bin/zenfleet-worker').read_bytes()).hexdigest()==m['worker']['binary_sha256']
-assert os.environ['ZEN_FIT_PROGRAM_SHA']==PROGRAM
+assert os.environ['ZEN_FIT_PROGRAM_SHA']==sys.argv[1]
 print(json.dumps({'program_files':len(m['files']),'worker_build':m['worker']['worker_build_id']}))
-'''.replace("PROGRAM", repr(pins["program_sha"]))
-    image = json.loads(subprocess.check_output(["docker", "run", "--rm", "--network=none", "--cpus=1", "--memory=512m", "--memory-swap=512m", "--entrypoint", "python3", pins["image"], "-c", code], text=True))
+'''
+    image = json.loads(subprocess.check_output(["docker", "run", "--rm", "--network=none", "--cpus=1", "--memory=512m", "--memory-swap=512m", "--entrypoint", "python3", pins["image"], "-c", code, pins["program_sha"]], text=True))
     report = dict(status="PASS", launchable_cells=count, prepared_blocked_cells=0,
         variants=variants, executor_smokes=10, maximum_container_peak_bytes=max(s["memory_peak_bytes"] for s in smokes),
         image=image, image_id=actual, program_sha256=pins["program_sha"],
