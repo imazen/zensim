@@ -105,6 +105,9 @@ def complete(bundle, study, results, control, tools, *, only_control=False):
 
     program = bundle / "program.tar.gz"
     inspector = bundle / "bin/inspect_qualified_checkpoint"
+    package = json.loads((bundle / "PACKAGE_PINNED.json").read_text())
+    if sha(program) != package["program_sha"] or sha(inspector) != package["inspector_sha"]:
+        raise ValueError("INCOMPLETE: frozen assessment program/inspector changed")
     rows = {}
     arms = {"e29": ("hb4", "hc4"), "e31": ("uh4",), "e32": ("palette",)}[study]
     for label in ("control",) if only_control else ("control", *arms):
@@ -112,6 +115,8 @@ def complete(bundle, study, results, control, tools, *, only_control=False):
         manifest = bundle / f"fit-manifest-fitv40-{jobset}-20261007.json"
         if not manifest.is_file():
             raise ValueError("INCOMPLETE: owner-blocked/unprepared manifest")
+        if sha(manifest) != package["manifests"].get(f"fitv40-{jobset}-20261007"):
+            raise ValueError("INCOMPLETE: frozen registered manifest changed")
         jobs = json.loads(manifest.read_text())
         spec = (
             SPEC
