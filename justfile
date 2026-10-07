@@ -374,3 +374,6 @@ shippath11-tests zenmetrics:
 
 shippath11-build-fit:
     TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --release -p zensim-validate --example inspect_qualified_checkpoint --bin zensim_mlp_train --bin bake_dial_refit --bin panel
+
+shippath11-real-check bundle zenmetrics:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath11_real_entry_checks.py --bundle {{bundle}} --zenmetrics {{zenmetrics}}
