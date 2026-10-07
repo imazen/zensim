@@ -2801,7 +2801,7 @@ const PALETTE_REVISION: &[Revision] = &[
     },
     Revision {
         era: "palette_v2",
-        commit: "-",
+        commit: "f9a38a33",
         status: RevisionStatus::Landed,
         note: "Signed lightness/chroma compare independently population-weighted means; producer BUILD_COMMIT pins the implementation. Existing families unchanged.",
     },

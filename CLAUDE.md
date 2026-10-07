@@ -167,6 +167,12 @@ because cleanup tests or a historical training reproduction pass.
   unpopulated basic slots 0–12 and 26–38; making the test pass means changing its expected count for this entry (or registering the
   projection differently), which needs the owner's OK.
 
+* **2026-10-07 — Palette revision declaration lacked its landed commit. FIXED.**
+  The full library census rejected the temporary `"-"` marker for palette_v2.
+  Its declaration now pins the actual corrective commit `f9a38a33`; the
+  existing assertion remains unchanged. Extracted provenance already pinned
+  producer `e60a6ad7`, so this metadata correction changes no measured value.
+
 * **2026-10-07 — Initial palette signed-population regression. FIXED at palette_v2.**
   Matched mean populations could report a positive lightness shift for a global
   -0.03 OKLab edit after median-cut repartition (N=3). Signed lightness/chroma
