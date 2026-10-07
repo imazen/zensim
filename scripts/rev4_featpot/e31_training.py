@@ -49,9 +49,12 @@ def fit_metadata(path, decision, keep):
     if len(keys) != 330 or [r["condition_id"] for r in keys] != d["member_set"]:
         raise ValueError("E31 fit ordered membership mismatch")
     refs = []
-    for i, r in enumerate(keys):
+    row_ids = [r["row_id"] for r in keys]
+    if row_ids != sorted(set(row_ids)) or any(not 0 <= i < 380 for i in row_ids):
+        raise ValueError("E31 fit original row identity/order mismatch")
+    for r in keys:
         binding = "upiq380-original-byte-pair-v1\0" + r["condition_id"] + "\0" + r["reference_sha256"] + "\0" + r["distorted_sha256"]
-        if (r["row_id"] != i or r["role"] != "train" or r["source"] != "UPIQ-380"
+        if (r["role"] != "train" or r["source"] != "UPIQ-380"
                 or r["authority"] != "D3-2026-10-07" or r["split"] != "fit"
                 or int(r["reference_sha256"], 16) % 5 == 0
                 or r["pair_key"] != hashlib.sha256(binding.encode()).hexdigest()):
