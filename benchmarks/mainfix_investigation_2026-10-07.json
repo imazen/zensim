@@ -1,0 +1,340 @@
+{
+  "status": "AWAITING_COORDINATOR_TEST_CONTRACT_SIGNOFF",
+  "base_and_rust_build_commit": "6497a365c9540412fa1423a922cbb2a38f126468",
+  "diagnostic_tools_commit": "7dc9bb52fd3e31be44104957c9a4f406aafc7eab",
+  "rust_implementation_changed": false,
+  "test_expectations_changed": false,
+  "serving_behavior_changed": false,
+  "history": {
+    "2022da95": "2022da95ebd2a3a184b28029a1966db7cec3d531 feat: add research-only weighted OKLab palette shifts",
+    "44df6062": "44df606219485d43c1f605c5a8e237161d6f90ad refactor: keep palette dispatch outside the supported public token API",
+    "0a8a7ef8": "0a8a7ef851e211419f94ebf9896f08de42dd4dd9 merge: palette_v2 top-N colour-shift research features, semantic verifier, E32 registration (reviewed: PALETTE_REVIEW, PALETTE2_REVIEW)",
+    "560de601": "560de601006da590369cfea034d9481efd969bf6 feat(rev5): FormulaRevision::Rev5 plumbing \u2014 basic+peaks+v2 scope",
+    "60174678": "60174678682753458b3aeb9c403ee87ca0d157b7 fix(rev5): reject missing families and complete extraction"
+  },
+  "source_comparison": {
+    "main_commit": "6497a365c9540412fa1423a922cbb2a38f126468",
+    "prodqual_commit": "6aa91cbcc95cb88288141c16b5a0d3298c24e35b",
+    "files": [
+      {
+        "path": "zensim/src/research.rs",
+        "main_sha256": "54c0eb8f6210a5f4588d08bb332cc79429def2d27ced10de686061be3429e255",
+        "prodqual_sha256": "54c0eb8f6210a5f4588d08bb332cc79429def2d27ced10de686061be3429e255",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/src/feature_defs.rs",
+        "main_sha256": "f252e9263c5d65563e25c1dff039678fefcfdbf818cea63ba3024ac60c09ed29",
+        "prodqual_sha256": "f252e9263c5d65563e25c1dff039678fefcfdbf818cea63ba3024ac60c09ed29",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/src/feature_plan.rs",
+        "main_sha256": "ccd6480278d8bc7ca499b2ca10247da8c244cbc43d17ac83d0506741df7bdcca",
+        "prodqual_sha256": "ccd6480278d8bc7ca499b2ca10247da8c244cbc43d17ac83d0506741df7bdcca",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/src/feature_layout.rs",
+        "main_sha256": "f67a1bdfede137984dad187d8ae439a884a2bdf368f08668f5806a9ffe278444",
+        "prodqual_sha256": "f67a1bdfede137984dad187d8ae439a884a2bdf368f08668f5806a9ffe278444",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/src/metric.rs",
+        "main_sha256": "a686a05cfe925efce7a58174e100008a8e4d4c44d800213104ab710c3deed8d9",
+        "prodqual_sha256": "a686a05cfe925efce7a58174e100008a8e4d4c44d800213104ab710c3deed8d9",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/src/metric/bake.rs",
+        "main_sha256": "89a4a1bdd69105dddaccb59e50cd2b7f33423872e0eacb5a3e233ad1947ac9ff",
+        "prodqual_sha256": "89a4a1bdd69105dddaccb59e50cd2b7f33423872e0eacb5a3e233ad1947ac9ff",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/src/ssim_form.rs",
+        "main_sha256": "b241818e9dc6b08816d067a1fe053194768dbd327a710709c44ca7f67804658c",
+        "prodqual_sha256": "b241818e9dc6b08816d067a1fe053194768dbd327a710709c44ca7f67804658c",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/tests/featcanon_rev4_contract.rs",
+        "main_sha256": "b4346b005b2a0ac0cc6fc22408e2c1daa4ab0eed83357900b7d174303898b25c",
+        "prodqual_sha256": "b4346b005b2a0ac0cc6fc22408e2c1daa4ab0eed83357900b7d174303898b25c",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim/tests/research_engine_parity.rs",
+        "main_sha256": "0a9b9b29db02a48a4ae6bf79a352af8eaec50790a41a5cf7e4b2c0af02d7f3ad",
+        "prodqual_sha256": "0a9b9b29db02a48a4ae6bf79a352af8eaec50790a41a5cf7e4b2c0af02d7f3ad",
+        "same_bytes": true
+      },
+      {
+        "path": "zensim-validate/tests/bake_surface.rs",
+        "main_sha256": "3e83fc29367fc6528412850c1920f0c8b281891f09d678f62741bdfe7277537d",
+        "prodqual_sha256": "3e83fc29367fc6528412850c1920f0c8b281891f09d678f62741bdfe7277537d",
+        "same_bytes": true
+      }
+    ]
+  },
+  "findings": [
+    {
+      "test": "featcanon_rev4_contract::served_paths_serve_rev4",
+      "file": "zensim/tests/featcanon_rev4_contract.rs:438",
+      "observed": "research::extract(Request::everything()) returns 1867; assertion expects 1825",
+      "introducing_commit": "2022da95ebd2a3a184b28029a1966db7cec3d531",
+      "cause": "training research full layout includes 42 appended palette slots, not a production-width change",
+      "required_decision": "Approve separate comprehensive research width and explicit legacy-width/prefix assertions"
+    },
+    {
+      "test": "research_engine_parity::research_everything_agrees_with_the_production_walk",
+      "file": "zensim/tests/research_engine_parity.rs:161",
+      "observed": "1153x72 production emits 1825; expected full research namespace is 1867",
+      "introducing_commit": "2022da95ebd2a3a184b28029a1966db7cec3d531",
+      "cause": "test equates all registered research slots with the palette-free production walk",
+      "required_decision": "Approve explicit 1825 production width, preserve full research width and every legacy bit comparison"
+    },
+    {
+      "test": "bake_surface::formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse",
+      "file": "zensim-validate/tests/bake_surface.rs:364",
+      "observed": "revision 5 accepted; old negative control expects it unknown",
+      "introducing_commit": "560de601006da590369cfea034d9481efd969bf6",
+      "cause": "Rev5 known by registered spec and landed plumbing; test was not updated",
+      "required_decision": "Approve replacing unknown 5 with 999 and adding explicit known-5 acceptance"
+    },
+    {
+      "test": "basic_only_bake_compatibility_respects_partial_producers",
+      "disposition": "Owner-decision test untouched and not run in this lane"
+    }
+  ],
+  "revision_pin": {
+    "metadata_selects_plan_revision": 5,
+    "metadata_suffices_for_pixel_serving": false,
+    "required_process_env": "ZENSIM_FORMULA_REV=5",
+    "spec": "benchmarks/rev5_spec_2026-10-04.md section 1",
+    "current_behavior_matches_spec": true,
+    "proposed_behavior_change": null,
+    "observed_probe": {
+      "scope": "identity fixture only; serving revision contract, no quality gate",
+      "program_sha256": "03a91d0d788de6638566af2f3886231aab9c4f2d7a9aeb4cce9f431cb8e154b6",
+      "fixture_sha256": "f0adb9c6213b1069781e6b87007535dfe8c9e0609248551f3b54058af5b7a95d",
+      "fixture": "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+      "model_sha256": [
+        "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+        "1bf8f3afbf0d4c760e3fcfb1e36fa3ca8c2c19f838b0f6719b8c681fa682fdec",
+        "54118c54ce7fe90bf1e9dcec52f7f822caf54e93e5b1d1a95a2bbd37f741b688"
+      ],
+      "cases": [
+        {
+          "seed": 0,
+          "process_revision": null,
+          "returncode": 1,
+          "expected_contract_observed": true,
+          "command": [
+            "/mnt/v/output/zensim/mainfix-2026-10-07/bin/serve_custom_bake",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/models/seed0.bin",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png"
+          ],
+          "log": "seed0-revision-unset.log"
+        },
+        {
+          "seed": 1,
+          "process_revision": null,
+          "returncode": 1,
+          "expected_contract_observed": true,
+          "command": [
+            "/mnt/v/output/zensim/mainfix-2026-10-07/bin/serve_custom_bake",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/models/seed1.bin",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png"
+          ],
+          "log": "seed1-revision-unset.log"
+        },
+        {
+          "seed": 2,
+          "process_revision": null,
+          "returncode": 1,
+          "expected_contract_observed": true,
+          "command": [
+            "/mnt/v/output/zensim/mainfix-2026-10-07/bin/serve_custom_bake",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/models/seed2.bin",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png"
+          ],
+          "log": "seed2-revision-unset.log"
+        },
+        {
+          "seed": 0,
+          "process_revision": "5",
+          "returncode": 0,
+          "expected_contract_observed": true,
+          "command": [
+            "/mnt/v/output/zensim/mainfix-2026-10-07/bin/serve_custom_bake",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/models/seed0.bin",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png"
+          ],
+          "log": "seed0-revision-5.log"
+        },
+        {
+          "seed": 1,
+          "process_revision": "5",
+          "returncode": 0,
+          "expected_contract_observed": true,
+          "command": [
+            "/mnt/v/output/zensim/mainfix-2026-10-07/bin/serve_custom_bake",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/models/seed1.bin",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png"
+          ],
+          "log": "seed1-revision-5.log"
+        },
+        {
+          "seed": 2,
+          "process_revision": "5",
+          "returncode": 0,
+          "expected_contract_observed": true,
+          "command": [
+            "/mnt/v/output/zensim/mainfix-2026-10-07/bin/serve_custom_bake",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/models/seed2.bin",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png",
+            "/mnt/v/output/zensim/mainfix-2026-10-07/fixtures/identity.png"
+          ],
+          "log": "seed2-revision-5.log"
+        }
+      ],
+      "all_expected_contracts_observed": true
+    }
+  },
+  "gates": [
+    {
+      "log": "baseline-targets.log",
+      "returncode": 101,
+      "reproduce": "just mainfix-baseline",
+      "resource_lines": [
+        "run-heavy: done rc=101 140s | peak-RSS 1.26GiB | min-avail 32046MiB | peak-load 14.09"
+      ]
+    },
+    {
+      "log": "contract-gates.log",
+      "returncode": 0,
+      "reproduce": "just mainfix-contracts",
+      "resource_lines": [
+        "run-heavy: done rc=0 28s | peak-RSS 1.97GiB | min-avail 43210MiB | peak-load 9.52"
+      ]
+    },
+    {
+      "log": "serving-probe-build.log",
+      "returncode": 0,
+      "reproduce": "cargo build -p zensim --all-features --example serve_custom_bake",
+      "resource_lines": [
+        "run-heavy: done rc=0 29s | peak-RSS 0.96GiB | min-avail 43201MiB | peak-load 11.55"
+      ]
+    },
+    {
+      "log": "revision-pin.log",
+      "returncode": 0,
+      "reproduce": "python3 scripts/mainfix_revision_pin_probe.py --program <preserved executable> --fixture <pinned checked-in identity fixture> --output-dir <fresh result dir> <three pinned model paths>",
+      "resource_lines": [
+        "run-heavy: done rc=0 0s | peak-RSS 0.03GiB | min-avail 46361MiB | peak-load 7.53"
+      ]
+    },
+    {
+      "log": "revision-pin-just.log",
+      "returncode": 0,
+      "reproduce": "just mainfix-revision-probe <program> <fixture> <fresh output dir> <seed0> <seed1> <seed2>",
+      "resource_lines": [
+        "run-heavy: done rc=0 0s | peak-RSS 0.03GiB | min-avail 46698MiB | peak-load 10.14"
+      ]
+    }
+  ],
+  "full_suite": {
+    "command": "cargo test -p zensim --all-features",
+    "run": false,
+    "reason": "Brief requires stopping when stale test contracts need coordinator sign-off; no fixed test tree exists yet",
+    "after_signoff": "Apply reviewed patch, rerun all affected targets including bake_surface, and run the requested full zensim suite; do not claim green before those results"
+  },
+  "proposal": {
+    "path": "benchmarks/mainfix_proposed_test_contracts_2026-10-07.patch",
+    "sha256": "5b5b12ceee3ef84657111c7d1298cd8503e19ceb57bb15e11d7a44fc658b9d27",
+    "applied": false,
+    "git_apply_check": "PASS",
+    "tests_run_on_proposal": false
+  },
+  "evidence_root": "/mnt/v/output/zensim/mainfix-2026-10-07",
+  "tower_mirror": "/mnt/tower/output/zensim/mainfix-2026-10-07",
+  "program_pins": {
+    "bake_surface": {
+      "bytes": 10713480,
+      "sha256": "496dc27e3aee9e99c5b8da1bd0372f6b4864d3754722312b846c3eae06244ba1"
+    },
+    "featcanon_rev4_contract": {
+      "bytes": 8037168,
+      "sha256": "1407e17d1c759260ebdd1b045e30799be818df70201b4dd11d2b5755fe460f1d"
+    },
+    "palette_research": {
+      "bytes": 5924944,
+      "sha256": "b2dba41fb9bb5d330b1c406991791f2cbf45b7e9cbe5f0e9759d46854147af5f"
+    },
+    "research_engine_parity": {
+      "bytes": 6752536,
+      "sha256": "5e7e673a2b1fefb63d37d0d8542e91bc1463085c2769c842ed19c10d89cc8c13"
+    },
+    "serve_custom_bake": {
+      "bytes": 9094800,
+      "sha256": "03a91d0d788de6638566af2f3886231aab9c4f2d7a9aeb4cce9f431cb8e154b6"
+    },
+    "zensim-unit-tests": {
+      "bytes": 22940224,
+      "sha256": "92d298022fdd1942a3dc759fa6d0303e9bfc693b5cef1e83062286d8430de6c8"
+    }
+  },
+  "resources_and_reproduction": {
+    "TMPDIR": "/home/lilith/tmp/mainfix",
+    "CARGO_TARGET_DIR": "/home/lilith/tmp/mainfix/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "wrapper": "/home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 --",
+    "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1\n"
+  },
+  "storage": {
+    "cleanup": {
+      "removed_at_utc": "2026-10-07T20:43:41.465158+00:00",
+      "removed_path": "/home/lilith/tmp/mainfix/target",
+      "apparent_bytes_before": 3388354762,
+      "free_bytes_before": 20045287424,
+      "free_bytes_after": 23383048192,
+      "target_confirmed_cargo_output": true,
+      "target_not_in_use": true,
+      "preserved_programs": 6,
+      "tower_payload_hashes_verified_before_removal": 48,
+      "scope": "Only this lane\u2019s inactive Cargo target removed; evidence, prior lanes and unrelated files untouched"
+    },
+    "mirror_before_cleanup": {
+      "verified_at_utc": "2026-10-07T20:42:57.809257+00:00",
+      "payloads_verified_before_cleanup": 48,
+      "tower": "/mnt/tower/output/zensim/mainfix-2026-10-07",
+      "random_three": [
+        {
+          "path": "baseline-targets.rc",
+          "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+          "verified_local_and_tower": true
+        },
+        {
+          "path": "revision-pin/seed1-revision-5.log",
+          "sha256": "2bd646ed500e25e28573aa27eab5b361ff64b0818c07400cb0dac9a530e50c3f",
+          "verified_local_and_tower": true
+        },
+        {
+          "path": "models/seed2.bin",
+          "sha256": "54118c54ce7fe90bf1e9dcec52f7f822caf54e93e5b1d1a95a2bbd37f741b688",
+          "verified_local_and_tower": true
+        }
+      ]
+    },
+    "mirror_recipe": "just mainfix-mirror <evidence> <destination>"
+  }
+}

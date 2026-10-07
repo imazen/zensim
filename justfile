@@ -100,6 +100,24 @@ rev4serve-gate:
 clippy:
     cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings
 
+# MAINFIX reports stale test contracts without changing their expectations.
+mainfix-baseline:
+    cargo test -p zensim -p zensim-validate --all-features --no-fail-fast \
+        --test featcanon_rev4_contract --test research_engine_parity --test bake_surface
+
+mainfix-contracts:
+    cargo test -p zensim --all-features --lib rev5_bake_serves_supported_reads_and_refuses_unsupported -- --nocapture
+    cargo test -p zensim --all-features --test palette_research -- --nocapture
+
+[positional-arguments]
+mainfix-revision-probe program fixture outdir *models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 scripts/mainfix_revision_pin_probe.py --program "$1" --fixture "$2" --output-dir "$3" "${@:4}"
+
+mainfix-mirror evidence destination:
+    rsync -a --no-owner --no-group '{{evidence}}/' '{{destination}}/'
+
 # Quick offline rank/dial report (not full-eval or product qualification).
 # Emits markdown plus a self-contained HTML report. Optional REF
 # bake enables the per-zone dial-agreement panel; RAMP grid enables the
