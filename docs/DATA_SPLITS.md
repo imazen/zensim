@@ -1557,3 +1557,18 @@ evaluation label was read by the fit. Packed models: s0 `f803b74c…`, s1 `1bf8f
 `/mnt/tower/output/zensim-production-d1-2026-10-07/`). Release gates that read evaluation data wait for the owner to freeze the
 final composition (which seed or ensemble) before any read, per the scorecard.
 
+
+### E29 four-source HDR-consensus preparation (2026-10-07)
+
+Local amendment only; no full E29 fit, launch or assessment. D1 source/role
+approval is unchanged. Preparation copies the exact frozen four-source SDR
+inventory and 7,390 existing agreement-only HDR TRAIN rows; hb4 changes only
+the target and hc4 adds the complete two-teacher cross-reference pair list.
+No new AIC, HDR VAL/confirmation or protected-label read occurred. Native HDR
+subset provenance remains explicit and unqualified. All 40 completed E30 nA3
+model/result artifacts were verified and pinned without label reads; exact
+program reuse parity is not asserted. One matched-control manifest remains a
+registration proposal before any full fitting. Role/exposure receipt, staged
+root, executor smokes, producer pins and tower mirror:
+[E29 worklog](../benchmarks/E29_WORKLOG.md) and
+[preparation pointer](../benchmarks/e29_preparation_2026-10-07.pointer.md).

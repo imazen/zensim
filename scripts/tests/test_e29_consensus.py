@@ -113,6 +113,24 @@ class ConsensusTests(unittest.TestCase):
                 e24.cmd_e29_score(args)
             read.assert_not_called()
 
+    def test_unfrozen_baseline_blocks_hdr_panel_before_val(self):
+        import importlib.util
+        module_path = Path(__file__).resolve().parents[1] / 'hdr/hdr_route_panel.py'
+        spec = importlib.util.spec_from_file_location('e29_hdr_import_tripwire', module_path)
+        hdr = importlib.util.module_from_spec(spec)
+        with patch.object(e29.pq, 'read_table', side_effect=AssertionError('import payload read')) as imported_read, \
+                patch('subprocess.run', side_effect=AssertionError('import subprocess')) as process:
+            spec.loader.exec_module(hdr)
+            imported_read.assert_not_called()
+            process.assert_not_called()
+        with patch.object(hdr.pq, 'read_table', side_effect=AssertionError('HDR VAL read')) as read, \
+                patch.object(Path, 'mkdir', side_effect=AssertionError('assessment output')) as mkdir:
+            with self.assertRaisesRegex(ValueError, 'INCOMPLETE'):
+                hdr._e26_panel('/nonexistent', '/nonexistent', '/nonexistent',
+                               '/nonexistent', '/nonexistent', study='e29')
+            read.assert_not_called()
+            mkdir.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

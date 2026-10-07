@@ -61,3 +61,20 @@ Freeze data/program/image/manifest hashes, build_commit, binary identities,
 exact declared grid, role receipts and actual fit-cell-exec smoke receipts.
 Stage the identical prepared root locally for the scorer and mirror evidence
 and artifacts to tower. Missing control/registration pins block launch.
+
+Preparation incident addendum (before any full E29 fit): a new import tripwire
+initially imported the legacy HDR panel before installing its mocks. The old
+module executed its legacy CLI on import and read the 22,860-row
+`hdrgrid_mc944_t2_val.parquet` default (952 columns), including teacher targets
+and features. It printed target swing diagnostics and failed before any student
+prediction because the predictor executable was absent. No fit, target, pair
+threshold, control choice or decision gate used that table; the registered
+3,900-row hdr_v3mix VAL and confirmations were not opened. The unintended
+legacy HDR VAL read violates the preparation restriction and is disclosed for
+coordinator review. It cannot be undone or labelled unexposed.
+
+The panel CLI is now guarded by `main`; import and absent-control HDR panel
+tripwires intercept reads/processes before execution. Rebuilt program/image
+pins replace earlier smoke-only versions, which are preserved. No full fit or
+new assessment is authorized by this corrective addendum. Incident receipt:
+`/mnt/v/output/zensim/e29-2026-10-07/UNINTENDED_EXPOSURE.json`.

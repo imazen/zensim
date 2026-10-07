@@ -12,6 +12,11 @@
   Runtime verdicts require the completed measured grid; no serving API changes.
 
 
+- E29 research preparation: four-source strict admission, existing HDR TRAIN
+  Borda/agreement-pair arms, paired-seed assessment adapters and trusted real
+  executor smoke verification. No serving qualification or full fit launch
+  (a4d1c3bd, 9d563474, a9b92db3, 39ec9bfc).
+
 - Research-only internal `palette` family and 42 explicit dominant-colour shift
   features (f1825–f1866, N=2–8), with signed OKLab lightness/chroma/hue,
   weighted assignment and palette population transport. Training extraction
