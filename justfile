@@ -527,6 +527,11 @@ speedq-test:
 speedq-status raw_dir:
     python3 scripts/demos/speedq_run.py status --dest "$1"
 
+# Run one traced segment; keep its destination separate from qualification data.
+[positional-arguments]
+speedq-diagnose *options:
+    python3 scripts/demos/speedq_run.py diagnose "$@"
+
 [positional-arguments]
 speedq-mirror source dest:
     nice -n19 ionice -c3 rsync -a --no-owner --no-group "$1/" "$2/"
