@@ -215,3 +215,16 @@ minimise MSE and maximise Kendall and Pearson correlation.
 * **UPIQ-380 ingested** for D3: 380 HDR pairs on 30 references (fit 330 / development 50 by reference hash), Rev5 by_v2fy features
   through the same HDR route as E26/E27, admitted from dataset metadata before the label file was opened; no other UPIQ data read.
   E31 (one human HDR rank arm) is drafted. Under review.
+
+## 16. Updates (2026-10-07 16:25 UTC)
+
+* **E28:** 74 of 100 cells done at 16:21 UTC; all installed cells pass the budget audit. Verdict expected within the hour.
+* **SHIPPATH landed** in both repos after its second review (zensim `3f273924`, zenmetrics `e056defc`): the D1 four-source strict route,
+  E30's 40 cells and the three production fits, with admission that checks populations before any payload read and a harvest that
+  binds the registered budget, so a short smoke can never install as a full cell. Launch order: E30 after E28 completes; the production
+  fit after E30's verdict, because E30 is the registered check of dropping the AIC-3 leg.
+* **UPIQ-380:** the review confirmed the data (all 380 pairs re-extracted bit-identically, labels and split correct) and found three
+  defects to fix before E31 can be registered: malformed extraction options fall back to the legacy label reader; the extractor checks
+  feature-ID count, not identity; and the draft trained on AIC-3. E31 is being rewritten as a four-source design with E30's nA3 cells
+  as its control.
+* **CI snapshot fix** landed: a lock-check snapshot is now 0.5 GB instead of 18 GB.
