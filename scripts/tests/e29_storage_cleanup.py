@@ -76,8 +76,12 @@ def main():
             subprocess.run(['sudo', 'rm', '-rf', '--', str(path)], check=True)
         else:
             path.unlink()
-    shutil.rmtree(SCRATCH)
-    SCRATCH.mkdir()
+    for p in SCRATCH.iterdir():
+        if p.name in ("target", "zenmetrics-target", "ctl-snapshot", "pycache", "fmt-initial.log") or p.name.startswith("tmp") and "." not in p.name:
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
     out['status'] = 'PASS'
     (ROOT / 'CLEANUP_RECEIPT.json').write_text(json.dumps(out, indent=2)+'\n')
     shutil.copy2(ROOT / 'CLEANUP_RECEIPT.json', TOWER / 'CLEANUP_RECEIPT.json')

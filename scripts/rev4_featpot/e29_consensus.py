@@ -105,7 +105,7 @@ def complete_cells(results, control, pins_path):
     if pins_path is None or not pins_path.is_file():
         raise ValueError("INCOMPLETE: frozen complete E30/fresh matched-control pins absent")
     pins = json.loads(pins_path.read_text())
-    if pins.get("study") != "E29" or pins.get("control_choice") not in ("exact-E30-nA3", "fresh-matched"):
+    if pins.get("study") != "E29" or pins.get("control_choice") != "fresh-matched":
         raise ValueError("INCOMPLETE: unregistered E29 baseline")
     records = {}
     for label, base, spec in [("control", control, SPEC), ("hb4", results, SPEC + ":hb4"),

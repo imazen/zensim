@@ -78,3 +78,13 @@ tripwires intercept reads/processes before execution. Rebuilt program/image
 pins replace earlier smoke-only versions, which are preserved. No full fit or
 new assessment is authorized by this corrective addendum. Incident receipt:
 `/mnt/v/output/zensim/e29-2026-10-07/UNINTENDED_EXPOSURE.json`.
+
+Coordinator control decision (2026-10-07, before any scientific arm fit):
+E29, E31 and E32 use one shared fresh matched control under the combined v40
+program. Its 40 cells preserve the E30 nA3 by_v2fy / N / Rev5 D1 recipe,
+four folds, ten seeds, 120 epochs × 50,000 draws, final epoch 119. This
+supersedes the exact-E30 reuse option and solo E29 control proposal above.
+A full control-recipe baseline parity cell is a validation check, not a
+choice between controls. A mismatch is recorded; the shared fresh control
+still runs. No E30 cell may replace it based on results. The combined package
+and image are coordinator work later; this lane lands code and tests only.
