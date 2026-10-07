@@ -243,3 +243,16 @@ minimise MSE and maximise Kendall and Pearson correlation.
   one human HDR rank arm. E29 (HDR teacher consensus) is being amended to the same four-source design and implemented.
 * **Release prep:** a production gate map and the one-time KADID TERMINAL read script (refuses without a final-model receipt and an
   explicit authorization; tested only on synthetic data) are in review.
+
+## 18. Updates (2026-10-07 18:10 UTC)
+
+* **E30: dropping the AIC-3 human leg costs nothing measurable.** Four-source cells versus the five-source control: signed
+  +0.0003 ± 0.0015, every held-out source at or above +0.0002, W2 −0.0029 ± 0.0078. All 40 cells audited at the registered budget.
+  E30 is report-only; D1 stands either way, and now it stands with evidence. Records on main (`ccbf0ec7`).
+* **The D1 production fit is running** (`fitv2d1-20261007`, three full-data seeds, by_v2fy at Rev5 on KADID TRAIN+SELECT, TID2013,
+  KonFiG TRAIN+VAL and CID22-A), launched 18:00 UTC. Each seed is densified, packed to f16 and calibrated inside the fit; harvest is
+  bound to the registered budget and admission identities.
+* **Next experiments:** E29 (HDR teacher consensus), E31 (UPIQ-380 human HDR leg) and E32 (palette colour shift) are being built
+  as four-source designs that reuse E30's 40 cells as their control; none launches before its implementation is reviewed.
+* **Release prep:** the KADID TERMINAL read script is in its second round (the first review found two ways it could open the
+  wrong file); speed qualification passed its Rev4/Rev5 parity preflight and is moving to timing.
