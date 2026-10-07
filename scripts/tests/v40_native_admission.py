@@ -32,7 +32,7 @@ def main():
     a.dest.mkdir(parents=True, exist_ok=False)
     report = {}
 
-    def run(name, groups, ids, width, flags=()):
+    def run(name, groups, ids, width, flags=(), reason=None):
         out = a.dest / name
         out.mkdir()
         argv = [
@@ -81,6 +81,8 @@ def main():
             opens,
             p.stderr,
         )
+        if reason is not None:
+            assert reason in p.stderr, (name, p.stderr)
         report[name] = dict(
             status="PASS", exit_code=2, feature_payload_opens=0, model_writes=0
         )
@@ -149,6 +151,33 @@ def main():
                 fixture.save(original)
                 groups.append(("late", late, 1, 0, "withinref,both"))
             run("palette-" + case, groups, palette.ARM_IDS, 1867)
+        # A receipt-bound development leg passed with a training weight must
+        # reach the weight gate, rather than failing an earlier changed pin.
+        dev = fixture.path.with_name("safesyn_dev.parquet")
+        dev.write_bytes(fixture.path.read_bytes())
+        teacher.key_path(dev).write_bytes(original_keys)
+        d = copy.deepcopy(original)
+        d["research_palette"]["role"] = "TRAIN-oracle-development"
+        d["keys_sha256"] = common.sha(teacher.key_path(dev))
+        d["row_keys_sha256"] = teacher.row_keys_sha(
+            pq.read_table(teacher.key_path(dev))
+        )
+        Path(f"{dev}.manifest.json").write_text(json.dumps(d))
+        rp = dev.parent / "receipt.json"
+        r = json.loads(rp.read_text())
+        r["legs"]["safesyn"]["dev"].update(
+            sha256=d["table_sha256"],
+            rows=d.get("rows", 24),
+            manifest_sha256=common.sha(Path(f"{dev}.manifest.json")),
+        )
+        rp.write_text(json.dumps(r))
+        run(
+            "palette-bound-development-weight",
+            [("safesyn_development", dev, 1, 0, "withinref,both")],
+            palette.ARM_IDS,
+            1867,
+            reason="fit/development role disagrees with training/validation weights",
+        )
     finally:
         fixture.doCleanups()
 
@@ -243,7 +272,46 @@ def main():
             keys_sha256=common.sha(kp), row_keys_sha256=teacher.row_keys_sha(keys)
         )
         sp.write_text(json.dumps(original))
-        run("upiq-ordinary-VAL-keys", groups, upiq.columns("by_v2fy"), 1853, flags)
+        rp = base / "receipt.json"
+        r = json.loads(rp.read_text())
+        r["legs"]["safesyn"]["fit"]["manifest_sha256"] = common.sha(sp)
+        rp.write_text(json.dumps(r))
+        run(
+            "upiq-ordinary-VAL-keys",
+            groups,
+            upiq.columns("by_v2fy"),
+            1853,
+            flags,
+            reason="observation identity",
+        )
+        # These failures precede even the late native key rejection.
+        for name, index, tw, vw in [
+            ("human-development-training", 5, 1, 0),
+            ("human-fit-development", 4, 0, 1),
+            ("teacher-development-training", 1, 1, 0),
+        ]:
+            changed = groups[:]
+            g = changed[index]
+            changed[index] = (g[0], g[1], tw, vw, g[4])
+            sp.write_text(
+                json.dumps(
+                    {
+                        k: v
+                        for k, v in original.items()
+                        if k not in ["role", "split", "tier"]
+                    }
+                )
+            )
+            r["legs"]["safesyn"]["fit"]["manifest_sha256"] = common.sha(sp)
+            rp.write_text(json.dumps(r))
+            run(
+                name,
+                changed,
+                upiq.columns("by_v2fy"),
+                1853,
+                flags,
+                reason="fit/development role disagrees with training/validation weights",
+            )
     finally:
         f.doCleanups()
     (a.dest / "RESULT.json").write_text(json.dumps(report, indent=2) + "\n")
