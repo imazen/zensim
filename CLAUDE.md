@@ -158,6 +158,14 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E28 opt-in pooled sampling coverage replay omitted pooled endpoint draws. FIXED locally (`5b2cc589`).**
+  The original E28 coverage replay still called the legacy pair draw alone. The live trainer already
+  pooled endpoints, so its weights were unaffected, but the embedded coverage digest described the
+  wrong stream. Replay now calls the live pooled-draw owner; full executor smoke verification compares
+  the recorded digest to `ZENSIM_SAMPLE_DIGEST=1` emitted by the actual trainer. The same change refuses
+  nonzero pooled objective flags with a GPU runtime before payload reads. Disabled legacy paths keep
+  their prior coverage shape. Evidence: `benchmarks/E28_WORKLOG.md`.
+
 * **2026-09-30 — Rev1–Rev3 research tailhist Bin slots keep the sign-bit top-bin defect. OPEN by decision; fixed only at Rev4 (`c3negfold`).**
   `TailEdges::bin` (`feature_v2.rs`) binned `f64::to_bits` directly, so a sign-bit-set value (tiny negative
   `art`/`det` from f32 rounding in `edge_dissim`; NaN) sorted above every positive edge and landed in the TOP bin.
