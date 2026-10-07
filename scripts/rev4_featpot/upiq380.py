@@ -48,15 +48,15 @@ def metadata_rows(root):
             raise ValueError("UPIQ HDR source directories incomplete")
         for scene in scenes:
             c = int(scene.name)
-            expected = {f"i{c:02}.exr"} | {f"i{c:02}_{d:02}_{l}.exr" for d in range(1, nd + 1) for l in range(1, nl + 1)}
+            expected = {f"i{c:02}.exr"} | {f"i{c:02}_{d:02}_{level}.exr" for d in range(1, nd + 1) for level in range(1, nl + 1)}
             names = {p.name for p in scene.iterdir() if not p.name.startswith("._")}
             if names != expected:
                 raise ValueError("UPIQ HDR filename inventory mismatch")
             for d in range(1, nd + 1):
-                for l in range(1, nl + 1):
-                    rows.append(dict(condition_id=f"{prefix}-i{c:02}-{prefix}-{d:02}-{l}", dataset=dataset,
-                        content=c, distortion=d, level=l, reference_rel=f"{dataset}/{c:02}/i{c:02}.exr",
-                        distorted_rel=f"{dataset}/{c:02}/i{c:02}_{d:02}_{l}.exr"))
+                for level in range(1, nl + 1):
+                    rows.append(dict(condition_id=f"{prefix}-i{c:02}-{prefix}-{d:02}-{level}", dataset=dataset,
+                        content=c, distortion=d, level=level, reference_rel=f"{dataset}/{c:02}/i{c:02}.exr",
+                        distorted_rel=f"{dataset}/{c:02}/i{c:02}_{d:02}_{level}.exr"))
     return rows
 
 

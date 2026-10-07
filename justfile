@@ -425,3 +425,7 @@ upiq380-binary-refusals binary admission dest prior="":
 [positional-arguments]
 upiq380-split-negative revision out:
     python3 scripts/tests/upiq380_split_negative_control.py --before-revision "$1" --out "$2"
+
+# Scope static Python checks to the UPIQ ingestion/admission owners.
+upiq380-python-lint:
+    ruff check scripts/rev4_featpot/upiq380.py scripts/tests/test_upiq380.py scripts/tests/upiq380_binary_refusals.py

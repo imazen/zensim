@@ -56,6 +56,8 @@ def main():
     cases.append(("duplicate-member", a, False))
     cases.append(("wrong-allowlist-pin", baseline, True))
     image_root = dest / "nonexistent-images"
+    # Let the prior binary reach the exact reviewed content-directory boundary.
+    (image_root / "narwaria").mkdir(parents=True)
     wrong_ids = copy.deepcopy(baseline)
     wrong_ids["image_root"] = str(image_root)
     wrong_ids["requested_ids"][0] = 0

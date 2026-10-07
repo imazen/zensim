@@ -23,8 +23,8 @@ class UpiqAdmission(unittest.TestCase):
                 scene.mkdir(parents=True)
                 (scene / f"i{c:02}.exr").touch()
                 for d in range(1, nd + 1):
-                    for l in range(1, nl + 1):
-                        (scene / f"i{c:02}_{d:02}_{l}.exr").touch()
+                    for level in range(1, nl + 1):
+                        (scene / f"i{c:02}_{d:02}_{level}.exr").touch()
         self.a = dict(schema="upiq380-extraction-admission-v1", role="train", tier="T2", authority="D3-2026-10-07",
             formula_revision=5, input_contract="upiq-exr-bt709-nits-v1", requested_ids=u.columns("by_v2fy"),
             image_root=str(self.root), rows=u.metadata_rows(self.root), split_rule=u.RULE,
