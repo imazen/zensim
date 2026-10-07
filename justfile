@@ -354,3 +354,7 @@ shippath10-tests:
 # Explicit two-epoch/128-pair local smoke through the real strict owner.
 shippath10-smoke root dest bin_dir route:
     TMPDIR=$HOME/tmp OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_short_smoke.py {{root}} {{dest}} {{bin_dir}} {{route}}
+
+# Canonical model loader verifies preserved admission, revision and sampler metadata.
+shippath10-inspect model:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo run -p zensim-validate --release --example inspect_qualified_checkpoint -- {{model}}
