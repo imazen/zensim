@@ -330,3 +330,12 @@ minimise MSE and maximise Kendall and Pearson correlation.
   integration (imageflow and others) must set the pin when it adopts the new model. Not a bug; it belongs in the release notes.
 * **E29 round 2 passes review.** It feeds the combined v40 program now being integrated with E31/E32.
 * **Disk:** reclaimed ~69 GB of inactive build output from finished zensim lanes (binaries archived to tower first).
+
+## 25. Updates (2026-10-07 21:35 UTC)
+
+* **Main's zensim tests are green again** (`32b58f7b`): the three stale test contracts were updated after a strictness review
+  found no weakening; the full zensim suite passed 900 tests (664 library, 227 integration across 38 targets, 9 doctests).
+* In flight: the combined v40 program (E29 + E31 + E32 with one shared native admission check), the fourth round of the KADID
+  TERMINAL read script, review of the label-free production gate report, and speed qualification (waiting for a quiet box).
+* Still waiting on the owner: final production composition, E31 provenance, AIC-3 in exploratory runs, and the zensim-validate
+  partial-producer test.
