@@ -119,6 +119,7 @@ def main() -> None:
     ap.add_argument("--kind", choices=["lodo", "confirm", "all"], required=True)
     ap.add_argument("--select", action="append", default=None, metavar="FAMILY/VARIANT")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--upiq-label-disposition", type=Path, help="owner-bound E31 decision included with TRAIN fit")
     ap.add_argument("--upiq380-fit", type=Path, help="prepare only the pinned E31 TRAIN fit transport; grants no disposition or launch")
     args = ap.parse_args()
     every = [(f, v) for f in FAMILIES for v in VARIANTS]
@@ -159,8 +160,14 @@ def main() -> None:
             raise ValueError("E31 fit transport refuses development/foreign roles")
         if sha(native) != TABLE_SHA:
             raise ValueError("E31 immutable TRAIN fit payload changed")
+        if args.upiq_label_disposition is not None:
+            from e31_training import disposition
+            disposition(args.upiq_label_disposition)
+            members["rev4-featpot/upiq380-fit/owner_disposition.json"] = args.upiq_label_disposition
         for path in (native, manifest, keys):
             members[f"rev4-featpot/upiq380-fit/{path.name}"] = path
+    if args.upiq_label_disposition is not None and args.upiq380_fit is None:
+        raise ValueError("E31 disposition requires TRAIN-fit transport")
     inventory = {"build_commit": json.loads((args.root / "wide/frozen.json").read_text()).get("build_commit"), "schema": "zenfleet-fit-data-v1", "label": "POTENTIAL — ceiling, not a model score",
                  "program": f"Rev{revision} potential Instrument v2-canon ({args.kind})", "variant_dirs": [f"{f}/{v}" for f, v in selected],
                  "files": {name: sha(path) for name, path in sorted(members.items())}}

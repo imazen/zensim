@@ -53,13 +53,17 @@ def main():
             "reviewed", "source_landed", "pins_pushed", "E30_completed", "control_choice_frozen"))
         assert not (b / f"LAUNCH_AUTHORIZATION-{jobset}.json").exists()
         count += len(jobs)
-    assert count == 160 and len(variants) == 4 and set(variants.values()) == {40}
-    prepared = json.loads((b / "prepared-manifest-E31-NOT-LAUNCHABLE.json").read_text())
-    assert len(prepared) == 40 and json.loads((b / "E31_PENDING.json").read_text())["launchable"] is False
+    assert count == 200 and len(variants) == 5 and set(variants.values()) == {40}
     contract = json.loads((b / "v40-fit-contract.json").read_text())
-    assert "uh4" not in json.dumps(contract)
+    assert {v["name"] for v in contract["variants"]} == {"control", "hb4", "hc4", "palette", "uh4"}
+    uh4 = next(v for v in contract["variants"] if v["name"] == "uh4")
+    assert uh4["launchable"] is True and uh4["research_upiq"] is True
+    decision = uh4["upiq_admission"]["label_disposition"]
+    assert decision["state"] == "approved" and decision["decided_by"] == "owner"
+    assert decision["ledger_commit"].startswith("ddf375af")
+    assert digest(b / "upiq380-fit/owner_disposition.json") == uh4["upiq_admission"]["label_disposition_sha256"]
     smokes = json.loads((b / "EXECUTOR_SMOKES.json").read_text())["smokes"]
-    assert len(smokes) == 8
+    assert len(smokes) == 10
     for item in smokes:
         assert digest(b / item["receipt"]) == item["sha256"]
         record = json.loads((b / item["receipt"]).read_text())
@@ -76,8 +80,8 @@ assert os.environ['ZEN_FIT_PROGRAM_SHA']==PROGRAM
 print(json.dumps({'program_files':len(m['files']),'worker_build':m['worker']['worker_build_id']}))
 '''.replace("PROGRAM", repr(pins["program_sha"]))
     image = json.loads(subprocess.check_output(["docker", "run", "--rm", "--network=none", "--cpus=1", "--memory=512m", "--memory-swap=512m", "--entrypoint", "python3", pins["image"], "-c", code], text=True))
-    report = dict(status="PASS", launchable_cells=count, prepared_blocked_cells=40,
-        variants=variants, executor_smokes=8, maximum_container_peak_bytes=max(s["memory_peak_bytes"] for s in smokes),
+    report = dict(status="PASS", launchable_cells=count, prepared_blocked_cells=0,
+        variants=variants, executor_smokes=10, maximum_container_peak_bytes=max(s["memory_peak_bytes"] for s in smokes),
         image=image, image_id=actual, program_sha256=pins["program_sha"],
         action="local archive, metadata and image inventory; no worker entrypoint or queue action")
     with (b / "BUNDLE_CHECK.json").open("x") as stream:

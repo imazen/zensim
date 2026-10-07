@@ -10,12 +10,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--image", required=True)
-    p.add_argument("--arm", choices=("control", "hb4", "hc4", "palette"), required=True)
+    p.add_argument("--arm", choices=("control", "hb4", "hc4", "palette", "uh4"), required=True)
     p.add_argument("--mode", choices=("bounded", "first-epoch"), required=True)
     p.add_argument("--attempt", type=int, default=1)
     a = p.parse_args()
     b = a.bundle
-    study = {"control": "control", "hb4": "e29", "hc4": "e29", "palette": "e32"}[a.arm]
+    study = {"control": "control", "hb4": "e29", "hc4": "e29", "palette": "e32", "uh4": "e31"}[a.arm]
     spec = json.loads((b / f"fit-spec-fitv40-{study}-20261007.json").read_text())
     cell = next(
         c
@@ -54,7 +54,7 @@ def main():
     scratch = b / "container-scratch"
     scratch.mkdir(exist_ok=True)
     driver = Path(__file__).with_name("e28_executor_smoke.py")
-    data = "palette-fit-data.tar.gz" if a.arm == "palette" else "e29-fit-data.tar.gz"
+    data = {"palette": "palette-fit-data.tar.gz", "uh4": "e31-fit-data.tar.gz"}.get(a.arm, "e29-fit-data.tar.gz")
     subprocess.run(
         [
             "docker",

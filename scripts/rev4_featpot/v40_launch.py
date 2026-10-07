@@ -8,12 +8,12 @@ import subprocess
 
 from shippath10_launch import sha
 
-JOBSETS = tuple(f"fitv40-{s}-20261007" for s in ("control", "e29", "e32"))
+JOBSETS = tuple(f"fitv40-{s}-20261007" for s in ("control", "e29", "e32", "e31"))
 
 
 def gate(bundle, jobset):
     if jobset not in JOBSETS:
-        raise PermissionError("E31 is owner-blocked and has no launcher")
+        raise PermissionError("unregistered V40 jobset")
     authorization = bundle / f"LAUNCH_AUTHORIZATION-{jobset}.json"
     if not authorization.is_file():
         raise PermissionError(
@@ -64,7 +64,7 @@ def gate(bundle, jobset):
         from v40_score import complete
 
         control = Path("/var/tmp/rev4-featpot/v40-control-results")
-        study = "e29" if jobset == JOBSETS[1] else "e32"
+        study = jobset.split("-")[1]
         cells = complete(
             bundle,
             study,

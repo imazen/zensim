@@ -10,7 +10,7 @@ import v40_launch as owner
 
 
 class Launch(unittest.TestCase):
-    def test_absent_approval_and_blocked_e31_open_no_fleet_owner(self):
+    def test_absent_approval_all_four_jobsets_open_no_fleet_owner(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with (
@@ -23,7 +23,7 @@ class Launch(unittest.TestCase):
                     side_effect=AssertionError("fleet read"),
                 ),
             ):
-                for name in owner.JOBSETS + ("fitv40-e31-20261007",):
+                for name in owner.JOBSETS + ("unregistered",):
                     with self.assertRaises(PermissionError):
                         owner.launch(root, name)
             self.assertEqual(list(root.iterdir()), [])

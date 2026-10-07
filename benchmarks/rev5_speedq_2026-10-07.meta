@@ -89,13 +89,14 @@
   "commands": {
     "parity": "TMPDIR=/home/lilith/tmp /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-parity /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/amended-parity-instrument /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/full-parity --collect-legacy-failures",
     "queued_smoke": "TMPDIR=/home/lilith/tmp just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/timing-instrument-process-owners --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --only v4x-t1-64x64,v4x-t32-2048x2048",
-    "report": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/amended --out-json benchmarks/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md"
+    "report": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/amended --out-json benchmarks/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md",
+    "queued_full_collection": "After both smoke COMPLETE/PASS markers, trace-disabled SPEEDQ=1 BIN_SPEEDQ=raw/provenance/timing-instrument-process-owners SPEEDQ_ANALYZER=raw/provenance/paired-rounds-analyzer bash scripts/demos/speed_matrix_run.sh raw/amended; generates all 192 timing segments then 112 RSS records with quiet gates before each segment"
   },
-  "mirror_verification": "raw/provenance/mirror-amended-verification.json; full parity receipt, BB timing binary and paired-rounds analyzer verified against Tower; final instrument/new feature receipt will be mirrored after collection",
+  "mirror_verification": "raw/provenance/mirror-process-owners-verification.json: process-owner timing binary, source manifest, and live foreign-owner probe SHA256s match Tower; earlier full-parity/analyzer verification receipts preserved",
   "validation": {
     "python_tests": "13 passed",
     "bench_build_and_clippy": "process-owners build rc0: run-heavy 20s, peak-RSS 0.69GiB, min available 47976MiB, peak load 1.50; clippy rc0: 1s, 0.24GiB, 48675MiB, load 1.50",
-    "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. Two-distinct-owner control passed. Previous a898 trace CI green; corrected process accounting CI pending at https://github.com/imazen/zenbench/actions/runs/37696531423",
+    "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. Live sleeping-thread regression and two-distinct-owner control passed. Every CI test job passed on Linux x64/ARM64, Windows x64/ARM64, macOS Intel/ARM64, i686, armv7, MSRV, lint and coverage; Linux ARM64 post-job cache upload still pending at https://github.com/imazen/zenbench/actions/runs/37696531423",
     "parity": "576 model cells; run-heavy 78s, peak-RSS 0.26GiB, min available 31284MiB, peak load 5.51",
     "admitted_timing": "none; all completed attempts with noisy round gates are excluded"
   },

@@ -42,18 +42,25 @@ def freeze(bundle, source, source_commit, metrics_commit):
             if name.parts[0] == "bin":
                 path.chmod(0o755)
     # Freeze the label-free distortion-type join used by the registered W2 owner.
-    import pyarrow.parquet as pq
-    w2 = {}
-    for member in ("kadid_train", "kadid_select", "tid2013"):
-        original = Path("/var/tmp/rev4-featbank/bank") / member / "keys.parquet"
-        table = pq.read_table(original, columns=["pair_key", "dist_path"])
-        target = bundle / "w2-keys" / f"{member}.parquet"
-        target.parent.mkdir(exist_ok=True)
-        with target.open("xb") as stream:
-            pq.write_table(table, stream)
-        w2[member] = dict(path=str(target), sha256=sha(target), rows=len(table),
-            original_path=str(original), original_sha256=sha(original))
-    write(bundle / "W2_KEY_PINS.json", dict(schema="v40-w2-label-free-keys-v1", members=w2))
+    w2_pin = bundle / "W2_KEY_PINS.json"
+    if w2_pin.exists():
+        w2 = json.loads(w2_pin.read_text())["members"]
+        for pin in w2.values():
+            if sha(Path(pin["path"])) != pin["sha256"]:
+                raise ValueError("frozen W2 join changed")
+    else:
+        import pyarrow.parquet as pq
+        w2 = {}
+        for member in ("kadid_train", "kadid_select", "tid2013"):
+            original = Path("/var/tmp/rev4-featbank/bank") / member / "keys.parquet"
+            table = pq.read_table(original, columns=["pair_key", "dist_path"])
+            target = bundle / "w2-keys" / f"{member}.parquet"
+            target.parent.mkdir(exist_ok=True)
+            with target.open("xb") as stream:
+                pq.write_table(table, stream)
+            w2[member] = dict(path=str(target), sha256=sha(target), rows=len(table),
+                original_path=str(original), original_sha256=sha(original))
+        write(w2_pin, dict(schema="v40-w2-label-free-keys-v1", members=w2))
     # Keep the tested fit runtime intact. Freeze assessment separately, including
     # import dependencies absent from the deliberately small fit-only archive.
     assessment = bundle / "assessment-runtime"
@@ -96,7 +103,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
     (bundle / "jobset_caps.json").write_text(json.dumps(caps, indent=2) + "\n")
     smokes = []
     selection = json.loads((bundle / "SMOKE_SELECTION.json").read_text())
-    if set(selection) != {"control", "hb4", "hc4", "palette"}:
+    if set(selection) != {"control", "hb4", "hc4", "palette", "uh4"}:
         raise ValueError("exact arm smoke selection required")
     for arm in selection:
         for mode in ("bounded", "first-epoch"):
@@ -124,7 +131,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
             )
     write(
         bundle / "EXECUTOR_SMOKES.json",
-        dict(schema="v40-eight-executor-smokes-v1", smokes=smokes),
+        dict(schema="v40-ten-executor-smokes-v1", smokes=smokes),
     )
     files = [
         "program.tar.gz",
@@ -148,6 +155,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "bin/inspect_qualified_checkpoint",
         "harvest_driver_v40.py",
         "postfit.sh",
+        "upiq380-fit/owner_disposition.json",
     ]
     files += [s["receipt"] for s in smokes]
     files += [str(Path(v["path"]).relative_to(bundle)) for v in w2.values()]
@@ -160,7 +168,8 @@ def freeze(bundle, source, source_commit, metrics_commit):
         ):
             raise ValueError("registered grid changed")
         data_file = (
-            "palette-fit-data.tar.gz" if "-e32-" in jobset else "e29-fit-data.tar.gz"
+            "palette-fit-data.tar.gz" if "-e32-" in jobset else
+            "e31-fit-data.tar.gz" if "-e31-" in jobset else "e29-fit-data.tar.gz"
         )
         data_sha = sha(bundle / data_file)
         if data_sha not in pins["data_shas"] or any(
@@ -236,32 +245,8 @@ runpy.run_path(str(r / "scripts/rev4_featpot/{owner}"), run_name="__main__")
         with (bundle / filename).open("x") as f:
             f.write(text)
         (bundle / filename).chmod(0o755)
-    pending = json.loads((bundle / "E31_PENDING.json").read_text())
-    pending.update(
-        program_sha256=pins["program_sha"],
-        data_sha256=sha(bundle / "e31-pending-fit-data.tar.gz"),
-        manifest_sha256=sha(bundle / "prepared-manifest-E31-NOT-LAUNCHABLE.json"),
-        next_action="Owner disposition, newly pinned contract/data/program, review, executor smokes and explicit authorization; current V40 has no launchable uh4 variant.",
-    )
-    (bundle / "E31_PENDING.pre-freeze.json").write_bytes(
-        (bundle / "E31_PENDING.json").read_bytes()
-    )
-    (bundle / "E31_PENDING.json").write_text(json.dumps(pending, indent=2) + "\n")
     d1 = bundle / "v2d1"
-    d1.symlink_to(
-        Path("/mnt/v/output/zensim/shippath11-2026-10-07/v2d1").resolve(),
-        target_is_directory=True,
-    )
     upiq = bundle / "upiq380-fit"
-    upiq.mkdir()
-    for name in (
-        "upiq380_fit.parquet",
-        "upiq380_fit.keys.parquet",
-        "upiq380_fit.parquet.manifest.json",
-    ):
-        (upiq / name).symlink_to(
-            Path("/mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07") / name
-        )
     write(
         bundle / "LOCAL_ROOTS.json",
         dict(
@@ -273,7 +258,7 @@ runpy.run_path(str(r / "scripts/rev4_featpot/{owner}"), run_name="__main__")
         ),
     )
     print(
-        "PASS: local runtime, eight smoke pins, three inert authorization templates, blocked E31"
+        "PASS: local runtime, ten smoke pins, four inert authorization templates, owner-disposed E31"
     )
 
 

@@ -191,17 +191,33 @@ def contracts(bundle, e29_data, palette_data):
         for table in inputs.values():
             table["n_features"] = 1867
     variants.append(c)
+    # The owner's ledger decision binds the same immutable 330-row TRAIN fit.
+    from e31_training import fit_group, fit_metadata
+    native = bundle / "upiq380-fit/upiq380_fit.parquet"
+    decision = bundle / "upiq380-fit/owner_disposition.json"
+    group, admitted = fit_group(native, decision, base["columns"])
+    c = copy.deepcopy(base)
+    c.update(schema="v40-research-fit-contract-v1", name="uh4", launchable=True,
+        root="/var/tmp/rev4-featpot/v2d1", spec=SPEC + ":uh4",
+        data_sha=sha(bundle / "e31-fit-data.tar.gz"), research_hdr=False,
+        research_upiq=True, feature_set_id=None,
+        sdr_feature_set_id=base["feature_set_id"],
+        upiq_admission=admitted, input_contracts=copy.deepcopy(input_contracts),
+        train_weights=copy.deepcopy(weights))
+    c["routes"] = {fold: sorted([*tables, fit_metadata(native, decision, base["columns"])], key=lambda t: t["name"])
+        for fold, tables in c["routes"].items() if fold != "production"}
+    for fold in PRODUCTION_SOURCES:
+        c["train_weights"][fold]["hdr"] = group[2]
+        c["input_contracts"][fold]["upiq380"] = dict(loss_mode="Rank",
+            n_features=1853, rows=330, train_w=group[2], val_w=0.0, within_ref=False)
+    variants.append(c)
     output = bundle / "v40-fit-contract.json"
     write(
         output,
         dict(
             schema="v40-research-fit-package-v1",
             variants=variants,
-            E31=dict(
-                name="uh4",
-                launchable=False,
-                reason="owner disposition of UPIQ legacy JOD producer gap required",
-            ),
+
         ),
     )
     return output
@@ -215,6 +231,7 @@ def specs(bundle, program, e29_data, palette_data, ctl):
         ("control", ("control",)),
         ("e29", ("hb4", "hc4")),
         ("e32", ("palette",)),
+        ("e31", ("uh4",)),
     ]:
         cells = []
         for arm in arms:
@@ -243,6 +260,9 @@ def specs(bundle, program, e29_data, palette_data, ctl):
                         "--heldout",
                         fold,
                     ]
+                    if arm == "uh4":
+                        argv += ["--upiq380-fit", "/var/tmp/rev4-featpot/upiq380-fit/upiq380_fit.parquet",
+                            "--upiq-label-disposition", "/var/tmp/rev4-featpot/upiq380-fit/owner_disposition.json"]
                     cells.append(dict(name=name, argv=argv))
         jobset = f"fitv40-{study}-20261007"
         path = bundle / f"fit-spec-{jobset}.json"
@@ -265,71 +285,6 @@ def specs(bundle, program, e29_data, palette_data, ctl):
             ],
             check=True,
         )
-    pending_data = bundle / "e31-pending-fit-data.tar.gz"
-    cells = []
-    for fold in PRODUCTION_SOURCES:
-        for seed in range(10):
-            name = f"{SPEC}:uh4__N/without_{fold}_s{seed}"
-            root = "/var/tmp/rev4-featpot/v2d1"
-            cells.append(
-                dict(
-                    name=name,
-                    argv=[
-                        "v2_lodo_mlp.py",
-                        "--spec",
-                        SPEC + ":uh4",
-                        "--head",
-                        "N",
-                        "--seed-index",
-                        str(seed),
-                        "--root",
-                        root,
-                        "--columns",
-                        ",".join(map(str, by_name["control"]["columns"])),
-                        "--strict-admission",
-                        "--train-only",
-                        "--data-role-decision",
-                        root + "/human_role_decision.json",
-                        "--upiq380-fit",
-                        "/var/tmp/rev4-featpot/upiq380-fit/upiq380_fit.parquet",
-                        "--upiq-label-disposition",
-                        "/var/tmp/rev4-featpot/upiq380-fit/OWNER_DISPOSITION_REQUIRED.json",
-                        "--heldout",
-                        fold,
-                        "--dest",
-                        f"/var/tmp/rev4-featpot/v40-e31-results/cells/{name}",
-                    ],
-                )
-            )
-    path = bundle / "prepared-spec-E31-NOT-LAUNCHABLE.json"
-    write(path, dict(program_sha=sha(program), data_sha=sha(pending_data), cells=cells))
-    subprocess.run(
-        [
-            str(ctl),
-            "declare-fits",
-            "--spec",
-            str(path),
-            "--out",
-            str(bundle / "prepared-manifest-E31-NOT-LAUNCHABLE.json"),
-        ],
-        check=True,
-    )
-    # E31 remains an explicit, unlaunchable preparation inventory, never a declaration.
-    write(
-        bundle / "E31_PENDING.json",
-        dict(
-            schema="v40-owner-blocked-arm-v1",
-            arm="uh4",
-            launchable=False,
-            cell_count=40,
-            folds=list(PRODUCTION_SOURCES),
-            seeds=list(range(10)),
-            spec=SPEC + ":uh4",
-            required_disposition="e31-upiq-label-disposition-v1",
-            fit_source="/mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07/upiq380_fit.parquet",
-            development_payload_included=False,
-        ),
-    )
 
 
 def main():

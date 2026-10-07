@@ -28,6 +28,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+    if std::env::args().nth(2).as_deref() == Some("--e31-research") {
+        let admission = &repro["table_admission"];
+        assert_eq!(admission["qualified_provenance"], false);
+        assert_eq!(admission["formula_revision"], 5);
+        assert!(admission["historical_replay"].is_null());
+        assert_eq!(model.metadata().get_utf8("zentrain.formula_revision")?, "5");
+        assert!(zensim_validate::feature_set::bake_declared_training_set(&model).is_none());
+        assert_eq!(
+            admission["tables"]
+                .as_array()
+                .ok_or("missing SDR tables")?
+                .len(),
+            7
+        );
+        let native = &admission["upiq380"];
+        assert_eq!(
+            native["manifest_sha256"],
+            "2da346bb17e08a4a63aae9ed89b159b36edd331199a9dd1c42b4a05b53ac939e"
+        );
+        assert_eq!(
+            native["table_sha256"],
+            "7f09debedc591e7dd3494846ada9fe0c93b01779918b8358e2cf8053f5f1a6c4"
+        );
+        assert_eq!(
+            native["keys_sha256"],
+            "c47ca1c12d1e8e206464938884ff9d05baa8274785826060604d16caf0bff49e"
+        );
+        assert_eq!(native["label_disposition"]["state"], "approved");
+        assert_eq!(native["native_width"], 1825);
+        assert_eq!(native["logical_width"], 1853);
+        println!(
+            "{}",
+            serde_json::json!({"status":"PASS", "formula_revision":5,
+            "qualified_provenance":false, "feature_set_id":null, "repro":repro})
+        );
+        return Ok(());
+    }
     assert_eq!(repro["table_admission"]["qualified_provenance"], true);
     assert_eq!(repro["table_admission"]["formula_revision"], 5);
     assert!(repro["table_admission"]["historical_replay"].is_null());

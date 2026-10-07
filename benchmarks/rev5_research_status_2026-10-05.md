@@ -339,3 +339,12 @@ minimise MSE and maximise Kendall and Pearson correlation.
   TERMINAL read script, review of the label-free production gate report, and speed qualification (waiting for a quiet box).
 * Still waiting on the owner: final production composition, E31 provenance, AIC-3 in exploratory runs, and the zensim-validate
   partial-producer test.
+
+## 26. Owner decisions (2026-10-07 21:50 UTC)
+
+* **Production ships seed 0 alone** — frozen in `benchmarks/production_composition_2026-10-07.json` before any evaluation-reading
+  gate. The evaluation release gates now run on that model.
+* **AIC-3 is fine for feature experiments** (feature-ceiling style); production stays on D1's four sources.
+* **UPIQ provenance accepted** (file traced to zenmetrics' 2026-06-09 UPIQ-PU work from the official UPIQ release) → E31 can run
+  with the shared control in the v40 package.
+* i270 host keys accepted; stale workspaces and inactive build folders being removed.

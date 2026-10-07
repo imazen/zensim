@@ -154,6 +154,21 @@ class E31Training(unittest.TestCase):
                 )
             self.assertFalse((Path(tmp) / "uncreated.bin").exists())
 
+    def test_recorded_owner_decision_is_receipt_bound(self):
+        path = Path(__file__).resolve().parents[2] / "benchmarks/e31_upiq_owner_disposition_2026-10-07.json"
+        decision = e31.disposition(path)
+        self.assertEqual(decision["decided_by"], "owner")
+        self.assertTrue(decision["ledger_commit"].startswith("ddf375af"))
+        self.assertEqual(decision["human_sources"], ["kadid", "tid2013", "konfig", "cid22_a25"])
+        with tempfile.TemporaryDirectory() as tmp:
+            candidate = Path(tmp) / "decision.json"
+            for field, value in (("state", "pending"), ("manifest_sha256", "0" * 64),
+                    ("legacy_label_sha256", "0" * 64), ("allowed_use", "production")):
+                bad = {**decision, field: value}
+                candidate.write_text(json.dumps(bad))
+                with self.assertRaises(ValueError):
+                    e31.disposition(candidate)
+
     def test_d3_is_not_label_gap_disposition(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decision.json"
