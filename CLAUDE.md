@@ -158,6 +158,16 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — Palette verification accepted wrong instrument identity/map. FIXED in PALETTE2.**
+  Round-one joins ignored the instrument's feature-set identity and column map;
+  palette_v1 relabelling and swapped 1825/1826 maps passed. Admission now
+  requires a consumer-frozen exact-byte SHA-256 and checks the registered
+  identity, ordered integer IDs, exact map, producer commit and false serving
+  flag before any feature-table read. The strict negative controls fail before
+  and pass after the fix. Original receipts remain `_VERIFIED.round1.json`;
+  `_VERIFIED.json` is the new semantic-identity receipt.
+
+
 * **2026-10-07 — SHIPPATH7's by_v2fy projection producer broke three registry tests. Two FIXED (`47a2e1d4`), one OPEN pending an owner decision.**
   `benchmarks/feature_sets_registry.json` registers `basic+v2@w720/rev5_localwin#62adfc93` as a producer whose recorded slots are the
   420 by_v2fy IDs (all other slots NaN). The zensim registry gates derived the full 504-slot `basic+v2` set and failed; the entry now
@@ -186,8 +196,8 @@ because cleanup tests or a historical training reproduction pass.
   reads while generic token expansion produces 504 slots. No expectation was
   changed by PALETTE. The registered `by_v2fy_420` selection on main fixes
   both gates; retain the frozen-base historical receipts. The separate
-  zensim-validate partial-producer test remains OPEN pending its owner. Saved baseline output is indexed in the PALETTE evidence
-  pointer; the palette-only request has its own exact emitted-ID gate.
+  zensim-validate partial-producer test remains OPEN pending its owner. Saved baseline output is indexed in the PALETTE
+  evidence pointer; the palette-only request has its own exact emitted-ID gate.
 
 * **2026-10-05 — E27 launch omitted the actual jobset memory-cap entry. RESOLVED for the running study by the coordinator.**
   Manifest memory hints did not set the fleet runtime cap. The coordinator installed the existing

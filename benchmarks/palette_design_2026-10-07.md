@@ -77,3 +77,14 @@ hue and the population-transport pairing. Preserve the initial v1 artifact
 set as superseded evidence; regenerate every feature table and diagnostic
 under palette_v2. No old family's arithmetic changes. Full-circle hue
 rematching and spatial/high-frequency limitations remain explicit.
+
+Round-two dispatch correction (2026-10-07): the initial public
+ComputeToken::Palette proposal above is withdrawn. The registry now uses
+crate-private Family::Palette dispatch and a private research wire bit;
+no supported public variant/function/type is added. The existing
+palette@w1867/palette_v2#30b09cd1 artifact identity is retained. New extraction
+continues through explicit registered IDs and the research request path.
+The numerical sampling/assignment/sign arithmetic is unchanged. Independent
+review additionally demonstrated a systematic centre-lattice blind spot:
+at 64x64 all even-column changes can go unsampled. This is a registered
+limitation, not merely a small-island limit; changing it needs a new version.

@@ -1454,3 +1454,25 @@ Archive: `/mnt/tower/output/zensim-palette-archive-2026-10-07/palette_v2/`;
 three random file hashes match the mirror. R2 mirror absent. Full provenance,
 measured diagnostic limits and the inherited library failures are recorded in
 [PALETTE pointer](../benchmarks/palette_2026-10-07.pointer.md).
+
+## Exposure ledger — 2026-10-07: PALETTE2 identity admission correction
+
+No new pixel extraction, human-label read, model fit or role change. Canonical
+palette_v2 features retain producer e60a6ad7 and the original pinned bank and
+instrument manifest bytes. New instrument admission requires the consumer's
+frozen instrument manifest SHA-256 and exact palette_v2 identity, ordered
+integer IDs, map, producer commit and false serving flag before feature reads.
+Strict palette_v1 and swapped-map negative controls reject consistently
+rehashed wrong identities as well as changed bytes. The original value-join
+receipt (hash recorded above) is retained as `_VERIFIED.round1.json`; the new
+`_VERIFIED.json` SHA-256 is `5424cd0d015ca48e94d3a04fc94a2507eadd75e805e977ec39842208756465b1`.
+All 254,778 bank rows and 209,576 instrument observations passed the new
+verification. External roles and D1 stay unchanged; AIC-3 remains unread.
+
+The supported public token/API snapshots are unchanged from rebased main.
+E32's [final registration proposal](../benchmarks/e32_palette_registration_2026-10-07.md)
+requires E30's complete frozen 40-cell nA3 control and exact parity, or one
+fresh matched control registered before any E32 fit. The four-source seed
+composite and fixed KADID/TID W2 reductions are defined before outcomes.
+No launch is authorized until the coordinator registers and freezes all
+transport/program/data/control pins. See the [round-two pointer](../benchmarks/palette2_2026-10-07.pointer.md).

@@ -6,7 +6,7 @@
 
 ### Added
 
-- Research-only `palette` compute token and 42 explicit dominant-colour shift
+- Research-only internal `palette` family and 42 explicit dominant-colour shift
   features (f1825–f1866, N=2–8), with signed OKLab lightness/chroma/hue,
   weighted assignment and palette population transport. Training extraction
   supports `--palette-only`; serving refuses the family. Existing feature
@@ -20,6 +20,11 @@
   Qualification records are quarantined in `benchmarks/gmsd-chroma_*`.
 
 ### Changed
+
+- PALETTE2 keeps the supported public token/API surface unchanged, validates
+  pinned instrument bytes plus exact identity/IDs/map before value joins, and
+  defines E32 paired-seed statistics and E30 control prerequisites (44df6062,
+  8af7a7a9, 21cc8b50).
 
 - The research palette family uses `palette_v2`: signed L/C subtract each
   palette's own population-weighted mean, preserving global edit direction
