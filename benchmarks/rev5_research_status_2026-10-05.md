@@ -108,3 +108,11 @@ minimise MSE and maximise Kendall and Pearson correlation.
   move (55.2 GB, `ZENSR_MOVE_LEDGER.tsv`). NVMe now 122 GB free. Not moved (owner decision pending): decoded-image caches (~183 GB, encodes
   durable), 3 ASK items; `datasets/*`, `dataset/*`, `input/papers` stay local by owner rule. E28 registered (82c9af81), E29 registered
   (982f3983), KonFiG F-scale reconstruction lane running.
+* **KonFiG flicker-boosted (F) JND scale reconstructed** (2774d1d1; `scripts/canonical_corpus/konfig_fscale.py`, output
+  `/mnt/v/dataset/konfig-iqa/derived/konfig_fscale_trainval_2026-10.parquet`, TRAIN+VAL sources only; held-out test sources dropped
+  before parsing). Oracle: the authors' unmodified MATLAB under GNU Octave agrees within 0.005 JND over all 637 values. Kendall τ between
+  our SSIMULACRA2 and the F scale = 0.772 (SSIM2's published Part-A figure 0.767); the design-grid label we train on scores 0.584 on the
+  same cells. Scale is distortion-oriented and not level-monotone by design (23/49 sequences, reproduced by the oracle). E28 keeps its
+  registered design-grid KonFiG label; an F-scale variant needs its own registration after E28.
+* **E28** implementation ready (`E28_READY.md`): s2o/s2m smokes pass (KADID held-out SROCC 0.878 / 0.769), legacy paths byte-identical,
+  285 Rust + 175 Python tests pass; nm diagnostic non-convergent within its fixed budget (diagnostic only). Pre-launch review running.
