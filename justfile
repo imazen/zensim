@@ -2,7 +2,7 @@
 
 # Synthetic D2 read only. Caller supplies a pinned canonical Rust panel.
 releasegate-tests:
-    python3 -m unittest discover -s scripts/tests -p test_kadid_terminal_read.py -v
+    python3 -m unittest discover -s scripts/tests -p 'test_kadid_terminal*.py' -v
 
 # Canonical signed-quality CLI and legacy panel mode regressions.
 releasegate-panel-tests:

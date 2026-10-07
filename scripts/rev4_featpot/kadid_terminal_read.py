@@ -12,13 +12,16 @@ import argparse
 import csv
 import fcntl
 import hashlib
+import io
 import json
 import os
+import stat
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -151,11 +154,72 @@ def metadata_path(path):
             ),
             "metadata outside trusted preparation roots",
         )
-    return p
+    # Return precisely the resolved pathname whose ancestry was admitted.
+    # All later payload I/O walks this spelling without following any symlink.
+    return resolved
+
+
+def metadata_open(path, mode="rb", **kwargs):
+    """Bind every component from / using directory fds and O_NOFOLLOW (Linux).
+
+    Legitimate prepared aliases resolve during admission. Retargeting an alias
+    afterwards cannot change this walk; replacing a resolved ancestor/leaf with
+    a symlink refuses. Once a directory is open its handle survives renames.
+    No fallback to a pathname open on platforms lacking the required flags.
+    """
+    resolved = metadata_path(path)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    modes = {
+        "rb": os.O_RDONLY,
+        "r+": os.O_RDWR,
+        "x": os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        "w": os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        "a": os.O_WRONLY | os.O_APPEND,
+    }
+    flags = modes[mode] | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    parent = os.open("/", directory_flags)
+    fd = None
+    try:
+        for component in resolved.parts[1:-1]:
+            next_parent = os.open(component, directory_flags, dir_fd=parent)
+            os.close(parent)
+            parent = next_parent
+        fd = os.open(resolved.name, flags, 0o600, dir_fd=parent)
+        require(stat.S_ISREG(os.fstat(fd).st_mode), "regular metadata file required")
+        bound = os.fdopen(fd, mode, **kwargs)
+        fd = None  # bound owns it now, including exceptional close paths.
+        return bound
+    finally:
+        os.close(parent)
+        if fd is not None:
+            os.close(fd)
 
 
 def metadata_bytes(path):
-    return metadata_path(path).read_bytes()
+    with metadata_open(path) as bound:
+        return bound.read()
+
+
+def metadata_sha(path):
+    return hashlib.sha256(metadata_bytes(path)).hexdigest()
+
+
+def checked_bytes(spec):
+    data = metadata_bytes(spec["path"])
+    require(hashlib.sha256(data).hexdigest() == spec["sha256"], "changed input")
+    return data
+
+
+@contextmanager
+def checked_open(spec):
+    # The external model inspector gets the same fd that we hashed, not the
+    # mutable model/inspector pathname. Its child inherits only these fds.
+    with metadata_open(spec["path"]) as bound:
+        require(
+            hashlib.sha256(bound.read()).hexdigest() == spec["sha256"], "changed input"
+        )
+        bound.seek(0)
+        yield bound
 
 
 def validate_label_adapter(spec):
@@ -205,13 +269,13 @@ def validate_label_adapter(spec):
 def checked(spec):
     path = metadata_path(spec["path"])
     require(path.is_absolute(), "absolute paths required")
-    require(sha(path) == spec["sha256"], f"changed input: {path}")
+    checked_bytes(spec)
     return path
 
 
 def rows(path):
-    with metadata_path(path).open(newline="") as f:
-        return list(csv.DictReader(f, delimiter="\t"))
+    data = checked_bytes(path) if isinstance(path, dict) else metadata_bytes(path)
+    return list(csv.DictReader(io.StringIO(data.decode(), newline=""), delimiter="\t"))
 
 
 def committed_bytes(commit, pin):
@@ -289,12 +353,11 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         "registered population/statistics required",
     )
     require(
-        receipt["registration_sha256"] == sha(metadata_path(REGISTRATION)),
+        receipt["registration_sha256"] == metadata_sha(REGISTRATION),
         "changed D2 registration",
     )
     require(
-        receipt.get("code_sha256")
-        == {k: sha(metadata_path(p)) for k, p in CODE.items()},
+        receipt.get("code_sha256") == {k: metadata_sha(p) for k, p in CODE.items()},
         "unbound read/label/statistic owners",
     )
     require(
@@ -336,16 +399,14 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         "composition primary binding missing",
     )
     require(
-        sha(checked(receipt["models"]["profile_b"]))
-        == sha(
-            metadata_path(
-                REPO
-                / "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
-            )
+        hashlib.sha256(checked_bytes(receipt["models"]["profile_b"])).hexdigest()
+        == metadata_sha(
+            REPO
+            / "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
         ),
         "profile B must be the shipped codec_target bake",
     )
-    qualification = json.loads(metadata_bytes(checked(receipt["qualification"])))
+    qualification = json.loads(checked_bytes(receipt["qualification"]))
     require(
         qualification.get("composition") == receipt["composition"]
         and qualification.get("model_sha256")
@@ -369,7 +430,7 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         )
     for spec in evidence:
         checked(spec)
-    e30 = json.loads(metadata_bytes(checked(report["artifact"])))
+    e30 = json.loads(checked_bytes(report["artifact"]))
     sources = ("kadid", "tid2013", "konfig", "cid22_a25")
     require(
         e30.get("schema") == "rev4-featpot-e30-four-source-v1"
@@ -386,9 +447,7 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         and "adopt" not in e30["rows"]["nA3"],
         "complete registered report-only E30 artifact required",
     )
-    prediction_receipt = json.loads(
-        metadata_bytes(checked(receipt["prediction_receipt"]))
-    )
+    prediction_receipt = json.loads(checked_bytes(receipt["prediction_receipt"]))
     require(
         prediction_receipt
         == {
@@ -404,17 +463,22 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         },
         "prediction owner receipt does not bind final surface/bytes/population",
     )
-    metadata = json.loads(
-        subprocess.run(
-            [
-                str(checked(receipt["inspector"])),
-                str(checked(receipt["models"]["production"])),
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    )
+    with (
+        checked_open(receipt["inspector"]) as inspector,
+        checked_open(receipt["models"]["production"]) as model,
+    ):
+        metadata = json.loads(
+            subprocess.run(
+                [
+                    f"/proc/self/fd/{inspector.fileno()}",
+                    f"/proc/self/fd/{model.fileno()}",
+                ],
+                pass_fds=(inspector.fileno(), model.fileno()),
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
     require(
         metadata.get("qualified_provenance") is True
         and metadata.get("formula_revision") == 5
@@ -442,8 +506,8 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         == {v["name"]: v["table_sha256"] for v in contract["routes"]["production"]},
         "decoded model does not bind registered D1 input tables",
     )
-    population = rows(checked(receipt["population"]))
-    predictions = rows(checked(receipt["predictions"]))
+    population = rows(receipt["population"])
+    predictions = rows(receipt["predictions"])
     require(
         len(population) == len(predictions) == 2000,
         "all 2000 original stimuli required",
@@ -495,7 +559,7 @@ def reserve(ledger, journal, receipt_sha):
     token = f"KADID-TERMINAL-SPENT:{DESIGN}"
     # O_EXCL is shared across workspaces/outputs; flock also serializes ledger
     # append. A crash or failed statistic cannot permit a second look.
-    with metadata_path(ledger).open("r+") as f:
+    with metadata_open(ledger, "r+") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         require(token not in f.read(), "terminal design line already spent")
         record = {
@@ -504,7 +568,7 @@ def reserve(ledger, journal, receipt_sha):
             "state": "spent-before-label-open",
             "time_utc": datetime.now(timezone.utc).isoformat(),
         }
-        with metadata_path(journal).open("x") as j:
+        with metadata_open(journal, "x") as j:
             json.dump(record, j, indent=2)
             j.flush()
             os.fsync(j.fileno())
@@ -724,17 +788,15 @@ def execute(receipt, authorization, ledger, journal, output):
             if isinstance(error, TerminalReadError)
             else "assessment-error",
         }
-        metadata_path(output).write_text(
-            json.dumps(result, indent=2, allow_nan=False) + "\n"
-        )
+        with metadata_open(output, "w") as f:
+            f.write(json.dumps(result, indent=2, allow_nan=False) + "\n")
         raise TerminalReadError(result["error"]) from None
-    metadata_path(output).write_text(
-        json.dumps(result, indent=2, allow_nan=False) + "\n"
-    )
-    with metadata_path(ledger).open("a") as f:
+    with metadata_open(output, "w") as f:
+        f.write(json.dumps(result, indent=2, allow_nan=False) + "\n")
+    with metadata_open(ledger, "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(
-            f"\nD2 result `{Path(output)}` SHA-256 `{sha(metadata_path(output))}`: **{result['confirmation']}**. "
+            f"\nD2 result `{Path(output)}` SHA-256 `{metadata_sha(output)}`: **{result['confirmation']}**. "
             "Labels read once; no retuning permitted.\n"
         )
         f.flush()

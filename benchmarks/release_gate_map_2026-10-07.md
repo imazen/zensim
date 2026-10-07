@@ -229,13 +229,15 @@ Commit the final receipt JSON locally before any label read. Coordinator file
 shared `journal`. Parse **the verified committed bytes**, never reopen the
 live receipt after matching its hash. No live authorization/receipt exists here.
 
+Bound-I/O details: [round-three record](releasegate3_WORKLOG_2026-10-07.md).
+
 Before label hashing, the harness validates authorization, committed pin, all
 non-label specs/bindings, gate artifacts, exact model inspector metadata,
 prediction receipt/schema/order and original2000 population. Every metadata
 path must lie lexically and after resolution under source/preparation roots:
 repo, `~/tmp/zensim-paper/rev4`, `/mnt/v/output/zensim`, `/var/tmp/rev4-featpot`.
 Original corpus stores, banks, terminal/T0 populations and shared protected
-markers refuse before hash/parse. Stage label-free artifacts outside those
+markers refuse before handle-bound hash/parse. Stage label-free artifacts outside those
 roots; receipt fields cannot authorize metadata aliases into them. Exposure appends to `docs/DATA_SPLITS.md` under
 `flock`, writes/fsyncs shared exclusive journal
 `~/tmp/zensim-paper/rev4/KADID_TERMINAL_SPENT.json`, and fsyncs ledger reservation
