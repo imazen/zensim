@@ -1,5 +1,5 @@
 {
-  "harness_commit": "efd5f8fdc85f40985f7473e640546b75e0f6bf4f",
+  "harness_commit": "8d927a20c613e74a305822da27382f6cdf052f31",
   "host": "dev",
   "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.0\nLLVM version: 23.1.1",
   "kernel": "Linux 7.0.0-34-generic #34-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:29:37 UTC 2026",
@@ -39,14 +39,16 @@
     "amended-parity-instrument": "4b2fb45e943a99fcb396ceb3725371e9df3e7231f9751557a1e72aee69784dde",
     "paired-rounds-analyzer": "798d938626e31c54e524da56687c468f7178d1629b4ee4f268692a290ccbba82",
     "timing-instrument": "69ca3401319d9fa509051a6d092cd804d105a9cd53c414f011693895f48bc313",
-    "timing-instrument-6f95cd15": "1be53c775d56cb4c75515c32408797c105e968a121589f51c1616a7b7cdfe183"
+    "timing-instrument-6f95cd15": "1be53c775d56cb4c75515c32408797c105e968a121589f51c1616a7b7cdfe183",
+    "timing-instrument-process-owners": "a03a0660e685f7e0d30b294a0119612dbb17963be53405132701a17e5a3ab81d"
   },
   "build_logs": [
     "/home/lilith/tmp/speedq-2026-10-07/build-taskgate.log",
-    "/home/lilith/tmp/speedq-2026-10-07/build-globalgate.log"
+    "/home/lilith/tmp/speedq-2026-10-07/build-globalgate.log",
+    "/home/lilith/tmp/speedq-2026-10-07/build-process-owners.log"
   ],
   "statistics_pin": "e45822161a710acd013c572a98627e64663b1bcf",
-  "final_zenbench_pin": "6f95cd15a757188ac7c4df4dd54f27c7b51bc9c7",
+  "final_zenbench_pin": "82ff70a3f0c212cf88f53d6e9c3e02de13f32eec",
   "model_scope": "fixed Rev4-trained by_v2fy 420-ID H128 single-output timing weights, restamped to three revisions; not a product-bake qualification",
   "parity_policy": "Rev4/Rev5 strict score and all consumed-feature bits; Rev3 scalar tolerance failure explicitly admitted by coordinator as a flagged timing baseline",
   "calibration_workloads": false,
@@ -55,7 +57,7 @@
   "rss_boundary": "fresh process including input setup, model load, one score; v4x 1/32 requested threads only",
   "mirror": "/mnt/tower/output/zensim/speedq-2026-10-07/raw",
   "status": "PARITY_COMPLETE_RUNTIME_PENDING",
-  "reporter_commit": "b9bfde0138b643045c29d40450f8c83b91abae15",
+  "reporter_commit": "f026000a5f4135c1885e2af313b914ee7edc0c00",
   "strict_score_and_feature_parity_cells": [
     384,
     384
@@ -81,19 +83,28 @@
     "amended/full-parity/PARITY_STRICT_PASS.json": "edea70edde6bf713c9c0c610390af015f1e258b2d64b3bc0b5b32e0ab7b926cc",
     "amended/full-parity/STRICT_FEATURE_BITS.json": "4f0fdf333deca0ed90587a020e89a910276e89e08a3b9860601cd5be18818230",
     "provenance/timing-instrument-final": "1be53c775d56cb4c75515c32408797c105e968a121589f51c1616a7b7cdfe183",
-    "provenance/paired-rounds-analyzer": "798d938626e31c54e524da56687c468f7178d1629b4ee4f268692a290ccbba82"
+    "provenance/paired-rounds-analyzer": "798d938626e31c54e524da56687c468f7178d1629b4ee4f268692a290ccbba82",
+    "provenance/timing-instrument-process-owners": "a03a0660e685f7e0d30b294a0119612dbb17963be53405132701a17e5a3ab81d"
   },
   "commands": {
     "parity": "TMPDIR=/home/lilith/tmp /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-parity /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/amended-parity-instrument /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/full-parity --collect-legacy-failures",
-    "queued_smoke": "TMPDIR=/home/lilith/tmp just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/timing-instrument --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --only v4x-t1-64x64,v4x-t32-2048x2048",
+    "queued_smoke": "TMPDIR=/home/lilith/tmp just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/timing-instrument-process-owners --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/amended/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --only v4x-t1-64x64,v4x-t32-2048x2048",
     "report": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/amended --out-json benchmarks/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md"
   },
   "mirror_verification": "raw/provenance/mirror-amended-verification.json; full parity receipt, BB timing binary and paired-rounds analyzer verified against Tower; final instrument/new feature receipt will be mirrored after collection",
   "validation": {
     "python_tests": "13 passed",
-    "bench_build_and_clippy": "rc0; run-heavy 21s, peak-RSS 0.70GiB, min available 43629MiB, peak load 3.67",
-    "zenbench": "148 lib tests and 25 paired stats tests passed; latest corrected source 6f95cd15; all CI platforms green at https://github.com/imazen/zenbench/actions/runs/37669018119",
+    "bench_build_and_clippy": "process-owners build rc0: run-heavy 20s, peak-RSS 0.69GiB, min available 47976MiB, peak load 1.50; clippy rc0: 1s, 0.24GiB, 48675MiB, load 1.50",
+    "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. Two-distinct-owner control passed. Previous a898 trace CI green; corrected process accounting CI pending at https://github.com/imazen/zenbench/actions/runs/37696531423",
     "parity": "576 model cells; run-heavy 78s, peak-RSS 0.26GiB, min available 31284MiB, peak load 5.51",
     "admitted_timing": "none; one completed RPC attempt had noisy round gates and is excluded"
+  },
+  "admission_fix_evidence": {
+    "claim": "Foreign process leaders counted once; user tasks deduplicated. Global CPU and gate thresholds unchanged.",
+    "before": "Live sleeping-user-thread fixture fails: (global CPU 0.05, heavy count 2) vs expected (0.05, 1).",
+    "after": "Same fixture passes; two distinct foreign leaders still count as 2 at both tested CPU loads.",
+    "diagnostic": "amended/gate-diagnostics/timing/v4x-t1-64x64; traced data explicitly rejected by reporter",
+    "source_archive": "provenance/process-owners-build-source/manifest.json",
+    "traced_timings_qualified": false
   }
 }
