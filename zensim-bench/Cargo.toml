@@ -170,7 +170,7 @@ bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 which = "8"
 # Includes the Linux heartbeat gate fix and retained paired timing rounds.
 # Registry 0.1.9 cannot export individual observations for latency p95.
-zenbench = { git = "https://github.com/imazen/zenbench", rev = "a89867431d754a32b4efade3b4110288081b6b56" }
+zenbench = { git = "https://github.com/imazen/zenbench", rev = "82ff70a3f0c212cf88f53d6e9c3e02de13f32eec" }
 # `testable_dispatch` lets benches/tier_isolation.rs disable the baseline SIMD
 # token (NEON on aarch64) so the scalar arm is real rather than a second
 # measurement of the SIMD path.
