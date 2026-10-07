@@ -349,7 +349,7 @@ e28-executor-image-smoke evidence mode="bounded" arm="s2m":
 
 # D1 role binding, immutable derivation and registered E30/production grids.
 shippath10-tests:
-    TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_shippath*_*.py' -q
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 -m unittest discover -s scripts/tests -p 'test_shippath*_*.py' -q
 
 # Explicit two-epoch/128-pair local smoke through the real strict owner.
 shippath10-smoke root dest bin_dir route:
@@ -358,3 +358,7 @@ shippath10-smoke root dest bin_dir route:
 # Canonical model loader verifies preserved admission, revision and sampler metadata.
 shippath10-inspect model:
     TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo run -p zensim-validate --release --example inspect_qualified_checkpoint -- {{model}}
+
+# The fleet program packer owns source pin and binary inventory validation.
+shippath10-program bundle zenmetrics bin_dir:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 {{zenmetrics}}/scripts/jobsys/pack_fit_program.py --source . --executor {{zenmetrics}}/scripts/jobsys/fit_cell_exec.py --bin-dir {{bin_dir}} --build-meta {{bundle}}/build-meta.json --profile v2d1 --out {{bundle}}/image-context/program.tar.gz

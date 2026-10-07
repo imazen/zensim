@@ -38,6 +38,12 @@ def gate(root, jobset):
         if (smoke['status'] != 'PASS' or smoke['qualified_provenance'] is not True
                 or smoke['program_sha'] != ids['program_sha'] or smoke['data_sha'] != ids['data_sha']):
             raise ValueError("matching installed-program strict smoke required")
+    metadata = json.loads((root / 'QUALIFIED_METADATA.json').read_text())
+    inference = json.loads((root / 'PACKED_INFERENCE.json').read_text())
+    if (metadata['packed']['status'] != 'PASS' or metadata['packed']['qualified_provenance'] is not True
+            or metadata['packed']['formula_revision'] != 5 or metadata['packed']['admitted_tables'] != 7
+            or metadata['packed_sha256'] != inference['packed_model_sha256'] or inference['status'] != 'PASS'):
+        raise ValueError("packed model must preserve the decoded admission contract and pass inference")
     peak = int((root / 'CONTAINER_MEMORY_PEAK.txt').read_text())
     events = dict(line.split() for line in (root / 'CONTAINER_MEMORY_EVENTS.txt').read_text().splitlines())
     if peak >= ids['memory_cap_bytes'] or int(events['oom']) or int(events['oom_kill']):
