@@ -219,3 +219,48 @@ keys refuse before either table or pair-list open; changed transforms, escaping
 pair paths, changed pair pins and absent pair CLI binding also refuse. The valid
 hc4 admission control reaches only its malformed synthetic Parquet. Evidence:
 `/mnt/v/output/zensim/e29r2-2026-10-07/native-admission-both-arms/RESULT.json`.
+
+
+## Rebuilt round 2 trainer baseline proof
+
+The rebuilt trainer SHA-256 is
+`20ad70f6649ec901500b7d3a57a0dc7de91c0978ffd862f4f2cce717382431dc`;
+its source/manifest/lock bindings are recorded in `TRAINER_SOURCE_PINS.json`
+under `/mnt/v/output/zensim/e29r2-2026-10-07/`. A separate local parity bundle
+uses that binary, the unchanged canonical refit/inspection tools, and a transport
+alias to the preserved immutable prepared root. The original bundle, image,
+program and parity receipts are unchanged.
+
+The canonical `e29-control-parity` owner completed a new kadid/seed-0 baseline
+fit: 120 epochs × 50,000 draws, v3/one thread, selected epoch 119, densify/quantize
+and TRAIN-only calibration through the strict LODO owner. All seven receipts,
+seeds, weights, coverage selection and development scores match the original
+E30 cell. Reproduction metadata also matches after the previously documented
+clock/machine/build/transport-path normalization. Canonical stripping removes
+only `zentrain.repro`; all 215,978 remaining bytes match with SHA-256
+`4fc21dc98d83cdcfba25f38623921e90595e976c75ad2fa8a4f8b2eb7f1a95f2`.
+Evidence: `control-parity/PARITY.json`, full driver/trainer logs and both fresh
+stripped archives. This tests one baseline cell, not the combined binary or
+all 40 scientific controls. Shared fresh v40 controls remain mandatory.
+
+Actual wrapper measurement:
+`run-heavy: done rc=0 305s | peak-RSS 1.05GiB | min-avail 41002MiB | peak-load 6.14`.
+Release build: `rc=0 13s | peak-RSS 1.56GiB | min-avail 46079MiB | peak-load 9.02`.
+CI clippy: `rc=0 52s | peak-RSS 0.93GiB | min-avail 40365MiB | peak-load 10.36`.
+E29/E26/import-guard plus sampler suite:
+`rc=0 88s | peak-RSS 1.51GiB | min-avail 43976MiB | peak-load 13.76`.
+
+This round used synthetic native admission/statistics probes, label-free
+preflight keys and approved D1 baseline TRAIN/development inputs. It opened no
+real HDR VAL, protected/confirmation/terminal or AIC labels and ran no HDR arm
+fit or assessment, fleet job, image publication or push. The inherited exposure
+incident remains disclosed and is not erased by these fixes.
+
+
+A final fetch/rebase incorporates main@origin
+`d54fcb53236eee7f749fac10da81692466f1c9c4` without conflicts. Its only addition
+relative to the previously tested base is the research-status document. The
+trainer entry, all trainer library modules, manifests and lock still match the
+retained binary producer exactly; no rebuild or retraining is substituted by
+that document-only rebase. The import guards, incident/production ledger records
+and both lane recipe/changelog additions remain present.
