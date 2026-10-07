@@ -31,6 +31,8 @@ def main():
     oldcell = Path(argv[argv.index('--dest')+1])
     old = oldcell / 'refit/last.bin'
     assert sha(old) == pinned['cells']['kadid_s0']['bake_sha256']
+    argv[argv.index('--root')+1] = str(a.bundle / 'v2e29')
+    argv[argv.index('--data-role-decision')+1] = str(a.bundle / 'v2e29/human_role_decision.json')
     argv[argv.index('--dest')+1] = str(a.dest / 'cell')
     env = dict(os.environ, REV4_V2_BIN_DIR=str(a.bundle / 'bin'),
                ZENSIM_MAX_TIER='v3', RAYON_NUM_THREADS='1', OMP_NUM_THREADS='1')
