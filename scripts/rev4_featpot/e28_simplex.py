@@ -16,12 +16,16 @@ import scipy
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from lib.zen_stats import recipe_correlations, panel_batch
-from e28_recipe import GROUPING, PIN, read_pin, checked
+from e28_recipe import GROUPING, PIN, read_pin, checked, admit_humans
 from v2_common import V2, SOURCE_ORDER, sha, table_path
 
 
-def load_table(rec, columns):
-    path=checked(rec)
+def load_table(rec, columns, *, source="cid22", split="fit", arm=None):
+    if arm is None and rec.get("rel") != f"wide/main/real/{source}_{split}.parquet" and split != "full":
+        raise ValueError("NM teacher/source record identity differs")
+    if split=="full" and rec.get("rel") != f"wide/main/real/{source}.parquet":
+        raise ValueError("NM assessment source record identity differs")
+    path=checked(rec,arm=arm,source=source,split=split)
     table=pq.read_table(path,columns=["human_score",*[f"f{i}" for i in columns]])
     x=np.column_stack([table[f"f{i}"].to_numpy() for i in columns]).astype(np.float64)
     y=table["human_score"].to_numpy().astype(np.float64)/100
@@ -55,10 +59,11 @@ def fit(heldout,dest):
     rec_path=V2/"wide/main/real/receipt.json";receipt=json.loads(rec_path.read_text());legs=receipt["legs"]
     if receipt.get("e28_teacher_pin_sha256") != sha(PIN):raise ValueError("E28 leg pin differs from prepared data")
     if legs["cid22"]!=pin["teachers"]["cid22"]:raise ValueError("CID22 teacher changed")
+    admit_humans("s2m",heldout,legs)
     cols=grouping["columns"];groups=grouping["groups"]
     records={"cid22":legs["cid22"]["fit"]}
     records.update({s:legs[f"e28_s2m_{s}"]["fit"] for s in pin["arms"]["s2m"]["human_members"] if s!=heldout})
-    arrays={s:load_table(r,cols) for s,r in records.items()}
+    arrays={s:load_table(r,cols,source=s,arm=None if s=="cid22" else "s2m") for s,r in records.items()}
     stacked=np.concatenate([v[0] for v in arrays.values()]);mu=stacked.mean(axis=0);sd=stacked.std(axis=0);sd[sd<1e-12]=1
     del stacked
     arrays={s:(group_features(x,cols,groups,mu,sd),y) for s,(x,y) in arrays.items()}
@@ -92,7 +97,7 @@ def fit(heldout,dest):
     np.savez(dest/"fit.npz",weights=selected.x[:-4],remap=selected.x[-4:],mu=mu,sd=sd,columns=cols)
     (dest/"weights.tsv").write_text("group\tcolumns\tweight\n"+"".join(f"{name}\t{','.join(map(str,ids))}\t{w!r}\n" for (name,ids),w in zip(groups.items(),selected.x[:-4])))
     # No held-out labels or features entered optimization or standardization.
-    eval_record=legs[heldout]["full"];x,y=load_table(eval_record,cols)
+    eval_record=legs[heldout]["full"];x,y=load_table(eval_record,cols,source=heldout,split="full")
     pred=remap(0.5+group_features(x,cols,groups,mu,sd)@selected.x[:-4],selected.x[-4:])*100
     score=panel_batch([(heldout,pred,y*100)],stats="full")[0]
     tau,rho=recipe_correlations(pred,y)

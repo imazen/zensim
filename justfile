@@ -312,7 +312,7 @@ e28-build:
     cargo build --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --bin subset_sim
 
 e28-python-check:
-    python3 -m unittest scripts.tests.test_e28_recipe scripts.tests.test_e28_decision scripts.tests.test_e26_hdr_leg
+    python3 -m unittest scripts.tests.test_e28_recipe scripts.tests.test_e28_admission scripts.tests.test_e28_decision scripts.tests.test_e26_hdr_leg
 
 [positional-arguments]
 e28-parity baseline new fitbin dest inspector:
