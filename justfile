@@ -118,6 +118,11 @@ e32-shippath-regression scratch trainer:
 e32-serving-refusal scratch target:
     TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim --all-features --lib rev5_for_bake_refuses_reads_outside_the_supported_families -- --nocapture
 
+[positional-arguments]
+e32-existing-rust-tests scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib feature_set -- --nocapture
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib parquet_loader -- --nocapture
+
 # Full 120 x 50,000 control replay, pinned E30 model comparison, no fleet owner.
 [positional-arguments]
 e32-control-parity scratch bindir root control freeze dest:
