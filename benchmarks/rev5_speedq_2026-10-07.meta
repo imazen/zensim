@@ -97,7 +97,7 @@
     "bench_build_and_clippy": "process-owners build rc0: run-heavy 20s, peak-RSS 0.69GiB, min available 47976MiB, peak load 1.50; clippy rc0: 1s, 0.24GiB, 48675MiB, load 1.50",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. Two-distinct-owner control passed. Previous a898 trace CI green; corrected process accounting CI pending at https://github.com/imazen/zenbench/actions/runs/37696531423",
     "parity": "576 model cells; run-heavy 78s, peak-RSS 0.26GiB, min available 31284MiB, peak load 5.51",
-    "admitted_timing": "none; one completed RPC attempt had noisy round gates and is excluded"
+    "admitted_timing": "none; all completed attempts with noisy round gates are excluded"
   },
   "admission_fix_evidence": {
     "claim": "Foreign process leaders counted once; user tasks deduplicated. Global CPU and gate thresholds unchanged.",
@@ -105,6 +105,13 @@
     "after": "Same fixture passes; two distinct foreign leaders still count as 2 at both tested CPU loads.",
     "diagnostic": "amended/gate-diagnostics/timing/v4x-t1-64x64; traced data explicitly rejected by reporter",
     "source_archive": "provenance/process-owners-build-source/manifest.json",
-    "traced_timings_qualified": false
+    "traced_timings_qualified": false,
+    "remaining_noise": {
+      "diagnostic": "amended/gate-diagnostics/process-owners/v4x-t1-64x64",
+      "rejected_rounds": 8,
+      "total_rounds": 32,
+      "leader_probe": "foreign-owner-probe.json: all 18 still-live traced foreign PIDs equal Tgid; genuine distinct owners",
+      "qualification": "excluded; smoke remains queued with trace disabled"
+    }
   }
 }
