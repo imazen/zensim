@@ -128,7 +128,7 @@ def load_frozen(root: Path | None = None, *, training_only: bool = False, metada
             path = Path(rel)
             if path.is_absolute() or ".." in path.parts or any(p.startswith("_sealed") for p in path.parts):
                 raise ValueError("admission freeze contains an unsafe relative path")
-            if metadata_only and path.suffix == ".parquet" and not path.name.endswith(".keys.parquet"):
+            if metadata_only and ((path.suffix == ".parquet" and not path.name.endswith(".keys.parquet")) or path.name.endswith(".pairs.json")):
                 continue
             if sha(Path(root) / path) != want:
                 raise ValueError(f"{rel}: changed after the admission freeze")
@@ -241,8 +241,8 @@ def recipe_of(spec: str) -> dict:
             out["ssim2_recipe"] = tok
         elif tok.startswith("hd") and "hdr_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["hdr_weight"] = float(tok[2:])
-        elif tok[:2] in ("hp", "ha") and "hdr_weight" not in out and tok[2:] == "4":
-            out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both"}[tok[:2]])
+        elif tok[:2] in ("hp", "ha", "hb", "hc") and "hdr_weight" not in out and tok[2:] == "4":
+            out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out

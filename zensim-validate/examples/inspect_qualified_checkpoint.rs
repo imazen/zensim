@@ -5,6 +5,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = zenpredict::Model::from_bytes(&bytes)?;
     let repro: serde_json::Value =
         serde_json::from_str(model.metadata().get_utf8("zentrain.repro")?)?;
+    if std::env::args().nth(2).as_deref() == Some("--e29-research") {
+        assert_eq!(repro["hdr_consensus_research"], true);
+        assert_eq!(repro["table_admission"]["qualified_provenance"], false);
+        assert_eq!(repro["table_admission"]["formula_revision"], 5);
+        assert!(repro["table_admission"]["historical_replay"].is_null());
+        assert_eq!(model.metadata().get_utf8("zentrain.formula_revision")?, "5");
+        assert!(zensim_validate::feature_set::bake_declared_training_set(&model).is_none());
+        let hdr: Vec<_> = repro["table_admission"]["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| t["stored_declarations"]["study"] == "E29")
+            .collect();
+        assert_eq!(hdr.len(), 1);
+        assert_eq!(hdr[0]["stored_declarations"]["role"], "train");
+        assert_eq!(hdr[0]["stored_declarations"]["rows"], 7390);
+        println!(
+            "{}",
+            serde_json::json!({"status":"PASS", "formula_revision":5,
+            "qualified_provenance":false, "feature_set_id":null, "repro":repro})
+        );
+        return Ok(());
+    }
     assert_eq!(repro["table_admission"]["qualified_provenance"], true);
     assert_eq!(repro["table_admission"]["formula_revision"], 5);
     assert!(repro["table_admission"]["historical_replay"].is_null());

@@ -93,7 +93,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use zensim_validate::mlp_train;
-use zensim_validate::mlp_train::{GroupLossMode, TripletPool, train_mlp_strategy};
+use zensim_validate::mlp_train::{GroupLossMode, TripletPool, train_mlp_strategy_pairs};
 use zensim_validate::train_manifest;
 
 #[path = "../contamination_guard.rs"]
@@ -593,6 +593,12 @@ struct Args {
     /// Dataset group to receive within-leg pooled rank/Pearson; repeat per eligible group.
     #[arg(long)]
     pooled_leg: Vec<String>,
+    /// E29 research: explicit NAME:JSON pair-list; existing CPU rank owner only.
+    #[arg(long)]
+    rank_pair_list: Vec<String>,
+    /// E29 native HDR subset manifests, admitted separately from strict SDR tables.
+    #[arg(long)]
+    hdr_consensus_research: bool,
     /// Fixed share of eligible within-reference draws replaced by pooled rows.
     #[arg(long, default_value_t = 0.0)]
     pooled_rank_share: f64,
@@ -3094,11 +3100,24 @@ fn main() {
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
     assert!(
         !want_gpu
-            || (args.pooled_leg.is_empty()
+            || (args.rank_pair_list.is_empty()
+                && !args.hdr_consensus_research
+                && args.pooled_leg.is_empty()
                 && args.pooled_rank_share == 0.0
                 && args.pooled_pearson_weight == 0.0),
         "pooled objective is CPU-only"
     );
+    if args.hdr_consensus_research {
+        assert!(
+            args.nonneg_distance
+                && !args.pool_head
+                && !args.hybrid_head
+                && !args.per_sample_alpha_head
+                && args.n_hidden_layers == 1
+                && args.pooled_leg.is_empty(),
+            "E29 requires the registered plain N head"
+        );
+    }
     preflight_cli_capabilities(&args, &matches, want_gpu);
     preflight_checkpoint_directory(&args).unwrap_or_else(|e| {
         eprintln!("checkpoint output preflight: {e}");
@@ -3211,14 +3230,22 @@ fn main() {
         0, // Pool has not been opened; requesting the loss already requires its head.
     );
 
+    assert!(
+        args.rank_pair_list.is_empty() || args.no_sample_coverage,
+        "pair-list replay requires --no-sample-coverage; actual digest remains available"
+    );
     let selected_ids = args.keep_features.as_deref().map(|spec| {
         parse_keep_features(spec, args.max_features).unwrap_or_else(|e| {
             eprintln!("--keep-features: {e}");
             std::process::exit(2)
         })
     });
-    let table_admission = zensim_validate::feature_set::admit_training_tables(
-        &group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>(),
+    let mut table_admission = zensim_validate::feature_set::admit_training_tables(
+        &group_modes
+            .iter()
+            .filter(|g| !(args.hdr_consensus_research && g.0 == "hdr"))
+            .map(|g| g.1.clone())
+            .collect::<Vec<_>>(),
         args.historical_replay.as_deref(),
         selected_ids.as_deref(),
         Some(args.max_features),
@@ -3227,6 +3254,45 @@ fn main() {
         eprintln!("{e}");
         std::process::exit(2)
     });
+    if args.hdr_consensus_research {
+        assert!(
+            args.historical_replay.is_none(),
+            "E29 SDR must pass strict admission"
+        );
+        let g = group_modes
+            .iter()
+            .find(|g| g.0 == "hdr")
+            .expect("E29 HDR group missing");
+        assert!(
+            g.3 == 0.0 && !g.4 && g.5 == GroupLossMode::Rank,
+            "E29 HDR must be fit-only pooled rank"
+        );
+        let sidecar =
+            std::fs::read(format!("{}.manifest.json", g.1.display())).expect("HDR manifest");
+        let d: serde_json::Value = serde_json::from_slice(&sidecar).expect("HDR metadata");
+        assert!(
+            d["study"] == "E29"
+                && d["role"] == "train"
+                && d["rows"] == 7390
+                && d["population"] == "agree-only"
+                && d["formula_revision"] == 5
+                && d["teacher_sha256"]
+                    == "deb70e775b043a578c77e0c3ff27960ebfa936e9d901497f9d74389e6ce9fbce"
+                && d["requested_ids"]
+                    == serde_json::json!(selected_ids.as_ref().expect("E29 exact IDs"))
+                && (d["arm"] == "hb4" || d["arm"] == "hc4"),
+            "unapproved E29 HDR population"
+        );
+        table_admission["tables"].as_array_mut().unwrap().push(serde_json::json!({"path":g.1,
+            "feature_set_id":null,"inferred":false,"stored_declarations":d,"requested_ids":selected_ids}));
+        table_admission["qualified_provenance"] = serde_json::json!(false);
+        table_admission["issues"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(
+                "E29 native HDR subset is research-only, not a full RGB feature family"
+            ));
+    }
     eprintln!("[table-admission] {table_admission}");
 
     // DATA-INTEGRITY GUARD (2026-05-25, task #215): refuse to TRAIN on a mock
@@ -4528,7 +4594,22 @@ fn main() {
                 }
                 _ => None,
             };
-        train_mlp_strategy(
+        let mut rank_pairs = std::collections::BTreeMap::new();
+        for spec in &args.rank_pair_list {
+            let (name, path) = spec.split_once(':').expect("NAME:pair-list.json");
+            assert!(
+                args.hdr_consensus_research && name == "hdr",
+                "pair-list is scoped to E29 HDR research"
+            );
+            let pairs: Vec<[usize; 2]> =
+                serde_json::from_slice(&std::fs::read(path).expect("pair-list read"))
+                    .expect("pair-list JSON");
+            assert!(
+                rank_pairs.insert(name.to_owned(), pairs).is_none(),
+                "duplicate pair-list"
+            );
+        }
+        train_mlp_strategy_pairs(
             &mut groups,
             n_features,
             &hyperparams,
@@ -4539,6 +4620,7 @@ fn main() {
             pjnd_anchor_loaded.as_ref(),
             konjnd_agg_loaded.as_ref(),
             triplet_pool.as_ref(),
+            &rank_pairs,
         )
     };
 
@@ -4652,6 +4734,14 @@ fn main() {
             record["pooled_objective"] = serde_json::json!({"legs": args.pooled_leg,
                 "rank_share": args.pooled_rank_share, "pearson_weight": args.pooled_pearson_weight,
                 "pearson_batch_rows": 32, "pearson_schedule": "per-leg 32 accepted pair draws; uniform independent rows; partial epoch flush"});
+        }
+        if args.hdr_consensus_research {
+            record["hdr_consensus_research"] = serde_json::json!(true);
+            record["rank_pair_lists"] = serde_json::json!(args.rank_pair_list.iter().map(|spec| {
+                let (name, path) = spec.split_once(':').expect("pair list spec");
+                serde_json::json!({"group":name,"path":path,
+                    "sha256":train_manifest::sha256_file(std::path::Path::new(path)).expect("pair-list hash")})
+            }).collect::<Vec<_>>());
         }
         record.to_string()
     };

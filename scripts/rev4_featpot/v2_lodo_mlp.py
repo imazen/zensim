@@ -121,6 +121,9 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
         cmd += ["--pooled-rank-share", str(pin["pooled_rank_share"]), "--pooled-pearson-weight", str(pin["pooled_pearson_weight"])]
         for name in active:
             cmd += ["--pooled-leg", name]
+    if "hdr_consensus" in recipe:
+        from e29_consensus import trainer_options
+        cmd += trainer_options(groups, recipe["hdr_consensus"])
     if head == "N":
         cmd.append("--nonneg-distance")
     return cmd
@@ -148,6 +151,11 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         d = json.loads(sp.read_text())
         if d.get("data_role_decision_required") or d.get("human_sources"):
             human_declaration(d, decision)
+        if d.get("study") == "E29":
+            from e29_consensus import admit_metadata
+            admit_metadata(path, d)
+            checked_metadata.append((name, path, sp, d, pq.read_table(key_path(path))))
+            continue
         bank_members(d)
         if (d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
                 or d.get("formula_revision") != 5 or not d.get("decoder_era")
@@ -257,6 +265,9 @@ def resolve_keep(core_spec: str, columns: str | None, lists: dict) -> tuple[str,
 def hdr_training_group(record: dict, keep: list[int], recipe: dict) -> tuple[tuple, dict]:
     """Admit the unchanged E26 TRAIN authority, then apply the registered loss form."""
     import v2_teacher
+    if "hdr_consensus" in recipe:
+        from e29_consensus import hdr_group
+        return hdr_group(record, keep, recipe)
     path, admitted = v2_teacher.hdr_leg(record, keep)
     mode = recipe.get("hdr_mode", "withinref,rank")
     if mode not in ("withinref,rank", "rank", "withinref,both"):
@@ -302,6 +313,11 @@ def main() -> None:
         strict_output_preflight(V2, args.dest)
         from v2_human_role import preflight_recipe
         role_decision = preflight_recipe(V2, args.data_role_decision, args.heldout)
+    if "hdr_consensus" in recipe_of(args.spec):
+        if not args.strict_admission:
+            raise ValueError("E29 requires strict four-source SDR admission")
+        from e29_consensus import preflight
+        preflight(V2, args.heldout, recipe_of(args.spec)["hdr_consensus"])
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
@@ -381,7 +397,7 @@ def main() -> None:
     if "hdr_weight" in recipe:
         if int(receipt.get("formula_revision", 4)) != 5:
             raise ValueError("HDR teacher leg requires the registered Rev5 SDR root")
-        group, hdr_record = hdr_training_group(legs["hdr"], keep, recipe)
+        group, hdr_record = hdr_training_group(legs["hdr_consensus"] if "hdr_consensus" in recipe else legs["hdr"], keep, recipe)
         weights["hdr"] = group[2]
         groups.append(group)
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
@@ -412,7 +428,8 @@ def main() -> None:
                 tmp.with_suffix(".keys.parquet").unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
     if args.train_only:
-        (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+        (dest / "result.json").write_text(json.dumps({"schema": "e29-research-training-cell-v1" if hdr_record and "hdr_consensus" in recipe else ("rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1"),
+            "hdr_leg": hdr_record,
             "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
             "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,

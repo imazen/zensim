@@ -519,3 +519,14 @@ speedq-rss *options:
 # Freeze the executable named by the successful Cargo JSON build receipt.
 speedq-freeze build_log dest:
     python3 scripts/demos/speedq_run.py freeze --build-log "{{build_log}}" --dest "{{dest}}"
+
+# E29 uses the existing trainer, strict four-source admission and actual executor.
+e29-tests:
+    python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg
+    cargo test -p zensim-validate --lib sampling:: -- --nocapture
+
+e29-build:
+    cargo build --release -p zensim-validate --bin zensim_mlp_train --example inspect_qualified_checkpoint
+
+e29-scorer-preflight root:
+    env -i PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/tmp/e29" python3 scripts/rev4_featpot/e24_rev5.py e29-score --root {{root}} --preflight-only

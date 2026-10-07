@@ -322,6 +322,58 @@ pub(crate) fn pool_draw(
     }
 }
 
+/// Replace only an opted-in group's draw, preserving every disabled RNG stream.
+pub(crate) fn list_draw(draw: Draw, lists: &[Option<&[[usize; 2]]>], rng: &mut SplitMix64) -> Draw {
+    match draw {
+        Draw::Pair { train_pos, .. } | Draw::SameRow { train_pos, .. }
+            if lists[train_pos].is_some() =>
+        {
+            let pairs = lists[train_pos].unwrap();
+            let [ia, ib] = pairs[(rng.next_u64() as usize) % pairs.len()];
+            Draw::Pair { train_pos, ia, ib }
+        }
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    #[test]
+    fn pair_list_excludes_unlisted_pairs_and_preserves_disabled_rng() {
+        let pairs = [[0, 3], [1, 2]];
+        let mut a = SplitMix64::new(91);
+        let mut b = SplitMix64::new(91);
+        let unchanged = list_draw(
+            Draw::SameRow {
+                train_pos: 0,
+                row: 9,
+            },
+            &[None],
+            &mut a,
+        );
+        assert!(matches!(unchanged, Draw::SameRow { row: 9, .. }));
+        assert_eq!(a.next_u64(), b.next_u64());
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..100 {
+            let Draw::Pair { ia, ib, train_pos } = list_draw(
+                Draw::SameRow {
+                    train_pos: 0,
+                    row: 9,
+                },
+                &[Some(&pairs)],
+                &mut a,
+            ) else {
+                panic!("no pair")
+            };
+            assert_eq!(train_pos, 0);
+            assert!(pairs.contains(&[ia, ib]));
+            seen.insert([ia, ib]);
+        }
+        assert_eq!(seen.len(), 2);
+    }
+}
+
 pub(crate) fn draw_pair(ctx: &PairDrawCtx<'_>, rng: &mut SplitMix64) -> Draw {
     // `--pair-sampling stratified`: a SCHEDULE, so it reads `draw_index`
     // and consumes NO rng. See the StratifiedPlan note above for why the
