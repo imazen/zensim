@@ -310,3 +310,25 @@ check-cross-libc:
 # digests still hold.
 legacy-bake-zen4-golden:
     ZENSIM_ZEN4_GOLDEN_BAKE_SHA=1 cargo test -p zensim-validate --test legacy_bake_sha -- --nocapture
+
+# Research-only PALETTE gates, keep the original Rev5 arithmetic gates intact.
+palette-test:
+    cargo test -p zensim --all-features --lib palette -- --nocapture
+    cargo test -p zensim --all-features --test palette_research -- --nocapture
+
+palette-build:
+    cargo build --release --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+
+# Explicit captures refuse to replace existing base/candidate evidence.
+palette-legacy-capture out:
+    #!/usr/bin/env bash
+    set -eu
+    for rev in 1 2 3 4 5; do
+        ZENSIM_FORMULA_REV="$rev" PALETTE_LEGACY_CAPTURE="{{out}}/rev$rev.bin" cargo test -p zensim --all-features --test palette_legacy_vectors -- --nocapture
+    done
+
+palette-bank bin commit out:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v1 --out {{out}} --chunk 512 --threads 8
+
+palette-chromaq bin commit out:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-chromaq /home/lilith/tmp/chromaq --bin {{bin}} --build-commit {{commit}} --era palette_v1 --out {{out}} --chunk 128 --threads 8

@@ -16,6 +16,7 @@ Identity gate (`--revision 4`): the same request at Rev4 must reproduce the Rev4
 """
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -333,11 +334,178 @@ def cmd_verify_against(a) -> int:
     return 0 if not bad and absent_ok else 1
 
 
+# PALETTE uses the existing feature-bank owner; inputs are projected keys,
+# never the target-bearing instrument tables or labels__* payloads.
+PALETTE_MEMBERS = {"kadid_train", "kadid_select", "tid2013", "konfig_train", "konfig_val", "cid22_a25", "safesyn", "cid22_train"}
+PALETTE_TABLES = ("kadid", "tid2013", "konfig", "cid22_a25", "safesyn_fit", "safesyn_dev", "cid22_fit", "cid22_dev")
+PALETTE_IDS = list(range(1825, 1867))
+
+
+def palette_extract_group(a, name, keys, source_receipts):
+    """Extract thin keyed sidecars with pixel-bound receipts and strict row coverage."""
+    out = Path(a.out) / name
+    if out.exists():
+        manifest_path = out / '_MANIFEST.json'
+        if not manifest_path.exists():
+            raise ValueError(f'incomplete existing palette group: {out}; preserve before retry')
+        manifest = json.loads(manifest_path.read_text())
+        if (manifest['build_commit'] != a.build_commit or manifest['binary_sha256'] != sha256_file(a.bin)
+                or manifest['assembler_sha256'] != sha256_file(__file__) or manifest['sources'] != source_receipts
+                or manifest['rows'] != len(keys) or manifest['feature_ids'] != PALETTE_IDS
+                or manifest['keys_sha256'] != sha256_file(out/'keys.parquet')
+                or manifest['features_sha256'] != sha256_file(out/'features__palette.parquet')):
+            raise ValueError('existing palette receipt mismatch')
+        stored = pq.read_table(out/'keys.parquet', columns=['pair_key'])
+        if stored['pair_key'].to_pylist() != keys['pair_key'].to_pylist():
+            raise ValueError('existing palette key order mismatch')
+        log(f'PALETTE verified completed group {name}: {len(keys)} rows')
+        return manifest
+    out.mkdir(parents=True, exist_ok=False)
+    wd = out / "_work"
+    wd.mkdir()
+    pq.write_table(keys, out / "keys.parquet", compression="zstd")
+    records = keys.to_pylist()
+    writer, producer, chunks = None, None, []
+    env = dict(os.environ, TMPDIR=str(Path.home()/"tmp/palette"), ZENSIM_FORMULA_REV="5", ZENSIM_ROOT_FORM="sqrt", RAYON_NUM_THREADS=str(a.threads))
+    start = time.time()
+    for ci, lo in enumerate(range(0, len(records), a.chunk)):
+        group = records[lo:lo+a.chunk]
+        pairs, csvp, audit = (wd/f"{ci:04d}.{ext}" for ext in ("tsv", "csv", "audit.jsonl"))
+        with pairs.open("w") as f:
+            f.write("ref_path\tdist_path\thuman_score\trow_id\n")
+            for i,r in enumerate(group,lo):
+                f.write(f"{r['ref_path']}\t{r['dist_path']}\t{i}\t{i}\n")
+        cmd = [a.bin,"--corpus","pairs-tsv","--path",str(pairs),"--out",str(csvp),"--palette-only",
+               "--input-contract","legacy-rgb8","--era-label","palette_v1","--audit-jsonl",str(audit)]
+        with (wd/f"{ci:04d}.log").open("w") as lg:
+            subprocess.run(cmd, env=env, stdout=lg, stderr=subprocess.STDOUT, check=True)
+        man=json.loads(Path(str(csvp)+".manifest.json").read_text())
+        if man['formula_revision']!='5' or man['populated_feature_ids']!=PALETTE_IDS:
+            raise ValueError("palette extractor revision/coverage mismatch")
+        research_path=Path(str(csvp)+'.research_manifest.json')
+        research=json.loads(research_path.read_text())
+        if (research['zensim_build_commit']!=a.build_commit or research['emitted_slot_count']!=42
+                or research['emitted_slots']!='1825-1866'
+                or man['producer_binary_sha256']!=sha256_file(a.bin)):
+            raise ValueError('palette producer receipt mismatch')
+        fsid=man['feature_set_id']
+        if not fsid.startswith("palette@w1867/palette_v1#") or (producer is not None and producer!=fsid):
+            raise ValueError("palette feature identity mismatch")
+        producer=fsid
+        tab=pacsv.read_csv(csvp,convert_options=pacsv.ConvertOptions(include_columns=['row_id']+[f'f{i}' for i in PALETTE_IDS],
+            column_types={'row_id':pa.int64(),**{f'f{i}':pa.float64() for i in PALETTE_IDS}}))
+        order=np.argsort(tab['row_id'].to_numpy(),kind='stable');tab=tab.take(pa.array(order))
+        if tab['row_id'].to_pylist()!=list(range(lo,lo+len(group))):raise ValueError('palette row join mismatch')
+        if not all(np.isfinite(tab[f'f{i}'].to_numpy()).all() for i in PALETTE_IDS):raise ValueError('nonfinite palette features')
+        audits=sorted((json.loads(l) for l in audit.read_text().splitlines()),key=lambda r:r['human_score'])
+        if len(audits)!=len(group):raise ValueError('palette audit coverage')
+        for i,(r,v) in enumerate(zip(group,audits),lo):
+            if v['model_inputs'] or v['human_score']!=i or v['reference']!=r['ref_path'] or v['distorted']!=r['dist_path']:
+                raise ValueError('palette audit model/path/order mismatch')
+            for key,old in [('reference_pixels_sha256','ref_pixels_sha256'),('distorted_pixels_sha256','dist_pixels_sha256')]:
+                if old in r and r[old]!=v[key]:raise ValueError(f"pixel-era mismatch {name} row {i} {key}")
+        result=tab.add_column(0,'pair_key',pa.array([r['pair_key'] for r in group]))
+        for field in ('reference_pixels_sha256','distorted_pixels_sha256'):
+            result=result.append_column(field,pa.array([v[field] for v in audits]))
+        if writer is None:writer=pq.ParquetWriter(out/'features__palette.parquet',result.schema,compression='zstd')
+        writer.write_table(result)
+        chunks.append({'rows':len(group),'pairs_sha256':sha256_file(pairs),'audit_sha256':sha256_file(audit),
+                       'csv_sha256':sha256_file(csvp),'research_manifest_sha256':sha256_file(research_path),'extractor_manifest':man})
+        log(f"PALETTE {name} {lo+len(group)}/{len(records)}")
+    if writer is None:raise ValueError('empty palette input')
+    writer.close()
+    manifest={'schema':'palette-sidecar-v1','set':name,'rows':len(records),'labels_read':False,'serving_allowed':False,
+              'formula_revision':5,'palette_revision':'palette_v1','feature_set_id':producer,'feature_ids':PALETTE_IDS,
+              'dtype':'float64','input_contract':'legacy-rgb8','build_commit':a.build_commit,'binary_sha256':sha256_file(a.bin),
+              'assembler_sha256':sha256_file(__file__),'keys_sha256':sha256_file(out/'keys.parquet'),
+              'features_sha256':sha256_file(out/'features__palette.parquet'),'sources':source_receipts,'chunks':chunks,
+              'wall_s':time.time()-start,'instrument_auxiliary_ids':'Do not overwrite instrument f1825+; join explicitly by registered ID mapping.'}
+    (out/'_MANIFEST.json').write_text(json.dumps(manifest,indent=1)+'\n')
+    return manifest
+
+
+def cmd_palette(a):
+    if a.revision!=5 or a.limit or a.era!='palette_v1' or a.tier!='native':
+        raise ValueError('palette requires complete Rev5 palette_v1 native extraction')
+    root=Path(a.palette_instrument)
+    if root.resolve()!=Path('/var/tmp/rev4-featpot/v2c5'):raise ValueError('explicit authorized v2c5 root required')
+    selected={};receipts={}
+    for name in PALETTE_TABLES:
+        path=root/'wide/main/real'/f'{name}.keys.parquet'
+        # Parquet projection prevents target payload reads.
+        tab=pq.read_table(path,columns=['pair_key','member_set'])
+        receipts[name]={'path':str(path),'sha256':sha256_file(path),'columns_read':tab.column_names,'rows':len(tab)}
+        for key,member in zip(tab['pair_key'].to_pylist(),tab['member_set'].to_pylist()):
+            if member not in PALETTE_MEMBERS:raise ValueError('protected member refused before bank access')
+            selected.setdefault(member,set()).add(key)
+    done={}
+    columns=['pair_key','ref_path','dist_path','ref_pixels_sha256','dist_pixels_sha256']
+    for member,want in selected.items():
+        path=OLD_BANK/member/'keys.parquet'
+        tab=pq.read_table(path,columns=columns)
+        tab=tab.filter(pa.array([k in want for k in tab['pair_key'].to_pylist()]))
+        if set(tab['pair_key'].to_pylist())!=want:raise ValueError('palette member key coverage mismatch')
+        done[member]=palette_extract_group(a,member,tab,[{'path':str(path),'sha256':sha256_file(path),'columns_read':columns},receipts])
+    for name in ('nits','live','mciqa'):
+        path=root/'external'/f'{name}.keys.parquet'
+        tab=pq.read_table(path,columns=columns)
+        done[name]=palette_extract_group(a,name,tab,[{'path':str(path),'sha256':sha256_file(path),'columns_read':columns,'role':'external-features-only'}])
+    # Existing e15 owner records the ordered selection indices in label-free keys.
+    keypath=root/'e15/coverage_pool.keys.parquet'
+    path=root/'e15/selection.parquet'
+    cols=['source_filename','type','severity_level','ref_path','dist_path','family']
+    indices=pq.read_table(keypath,columns=['__index_level_0__'])['__index_level_0__'].to_pylist()
+    tab=pq.read_table(path,columns=cols).take(pa.array(indices))
+    if len(indices)!=len(set(indices)):raise ValueError('coverage ordinal index duplication')
+    tab=tab.add_column(0,'pair_key',pa.array([hashlib.sha256((r['ref_path']+'\0'+r['dist_path']).encode()).hexdigest() for r in tab.to_pylist()]))
+    done['coverage_pool']=palette_extract_group(a,'coverage_pool',tab,[{'path':str(path),'sha256':sha256_file(path),'columns_read':cols,'role':'TRAIN-ordinal'},
+        {'path':str(keypath),'sha256':sha256_file(keypath),'columns_read':['__index_level_0__'],'join':'original selection row index'}])
+    (Path(a.out)/'_MANIFEST.json').write_text(json.dumps({'schema':'palette-bank-v1','build_commit':a.build_commit,
+        'labels_read':False,'sets':{k:{'rows':v['rows'],'manifest_sha256':sha256_file(Path(a.out)/k/'_MANIFEST.json')} for k,v in done.items()},'instrument_keys':receipts},indent=1)+'\n')
+    return 0
+
+
+def cmd_palette_chromaq(a):
+    import importlib.util
+    owner=Path(a.palette_chromaq)/'analyze.py'
+    spec=importlib.util.spec_from_file_location('chromaq_owner',owner)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    fields=['image_path','knob_tuple_json','encoded_filename']
+    rows=[];sources=[]
+    for name in ('sweep444.tsv','sweep420.tsv'):
+        path=Path(a.palette_chromaq)/'out'/name
+        sources.append({'path':str(path),'sha256':sha256_file(path),'columns_read':fields})
+        with path.open() as f:
+            for raw in csv.DictReader(f,delimiter='\t'):
+                r={k:raw[k] for k in fields}
+                family,multiplier=module.family(json.loads(r['knob_tuple_json']))
+                ref=str(Path(a.palette_chromaq)/'src'/Path(r['image_path']).name)
+                dist=str(Path(a.palette_chromaq)/'dist'/(Path(r['encoded_filename']).stem+'.png'))
+                rows.append({'pair_key':hashlib.sha256((ref+'\0'+dist).encode()).hexdigest(),
+                             'ref_path':ref,'dist_path':dist,'ladder':family,'multiplier':float(multiplier)})
+    sources.append({'classification_owner':str(owner),'sha256':sha256_file(owner),'labels_read':False})
+    manifest=palette_extract_group(a,'chromaq',pa.Table.from_pylist(rows),sources)
+    features=pq.read_table(Path(a.out)/'chromaq/features__palette.parquet',columns=[f'f{i}' for i in PALETTE_IDS])
+    groups={}
+    for i,r in enumerate(rows):groups.setdefault((r['ladder'],r['multiplier']),[]).append(i)
+    signals=['mean_shift','lightness_signed','chroma_signed','hue_signed','weight_emd','largest_shift']
+    with (Path(a.out)/'chromaq/curves.csv').open('x') as f:
+        writer=csv.writer(f);writer.writerow(['ladder','multiplier','N','pairs']+[x+'_mean' for x in signals]+[x+'_median' for x in signals])
+        for (ladder,multiplier),ix in sorted(groups.items()):
+            for n in range(2,9):
+                columns=[features[f'f{1825+(n-2)*6+j}'].to_numpy()[ix] for j in range(6)]
+                writer.writerow([ladder,multiplier,n,len(ix)]+[float(np.mean(c)) for c in columns]+[float(np.median(c)) for c in columns])
+    log(f'CHROMAQ diagnostic complete: {len(rows)} pairs; {len(groups)*7} curve cells')
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["extract", "verify-against"])
     ap.add_argument("set")
     ap.add_argument("--bin")
+    ap.add_argument("--palette-chromaq", help="existing CHROMAQ ladder owner directory, diagnostic only")
+    ap.add_argument("--palette-instrument", help="authorized v2c5 TRAIN/external features-only sidecars")
     ap.add_argument("--instrument-manifest", type=Path, help="explicit label-free assessment keys; historical bank default unchanged")
     ap.add_argument("--hdr-teacher", help="immutable HDRTEACH role; native E26 extraction")
     ap.add_argument("--build-commit", default="")
@@ -353,6 +521,10 @@ def main() -> int:
     if a.cmd == "extract":
         if not (a.bin and a.build_commit and a.era):
             ap.error("extract needs --bin, --build-commit and --era")
+        if a.palette_chromaq:
+            return cmd_palette_chromaq(a)
+        if a.palette_instrument:
+            return cmd_palette(a)
         return cmd_hdr_extract(a) if a.hdr_teacher else cmd_extract(a)
     return cmd_verify_against(a)
 
