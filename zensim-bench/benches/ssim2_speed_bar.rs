@@ -90,6 +90,10 @@
 //! `zensim_validate::bake_runtime::score_row` dispatches; the output PCHIP
 //! spline (one scalar eval) is NOT in the arm and that exclusion is stated
 //! wherever the numbers are published.
+#[cfg(feature = "speedq")]
+#[path = "speedq/mod.rs"]
+mod speedq;
+
 use imgref::Img;
 use zenpredict::{Model, Predictor};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
@@ -351,6 +355,11 @@ fn cap_tier_v3(_cap: bool) -> Result<(), String> {
 }
 
 fn main() {
+    #[cfg(feature = "speedq")]
+    if std::env::var_os("ZEN_S2_SPEEDQ").is_some() {
+        speedq::run();
+        return;
+    }
     let calls = std::env::var("ZEN_S2_CALLS").ok().map(|s| {
         let n: usize = s.parse().expect("ZEN_S2_CALLS must be a positive integer");
         assert!(n > 0, "ZEN_S2_CALLS must be positive");

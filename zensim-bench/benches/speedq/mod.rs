@@ -1,0 +1,196 @@
+//! SPEEDQ score-parity preflight for the existing speed matrix.
+//! Formula revisions and dispatch ceilings are isolated in separate processes.
+//! Timing remains blocked until every required score-parity cell passes.
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::cell::RefCell;
+use std::rc::Rc;
+use zenpredict::Model;
+use zensim::{BakeScorer, RgbSlice, Zensim, ZensimProfile};
+
+const SOURCE_SHA: &str = "802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1";
+const ID_SHA: &str = "0a6a20dc356acef3bef9deffc411f03189813e8b924fddcf7b22f7efea6b9f17";
+const ID_BYTES: &str = include_str!("../../../benchmarks/costset2_2026-10-03.candidate_ids.json");
+
+fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|v| format!("{v:02x}"))
+        .collect()
+}
+
+fn geometry() -> (usize, usize) {
+    let text = std::env::var("ZEN_S2_GEOMETRY").expect("explicit geometry");
+    let (w, h) = text.split_once('x').expect("WIDTHxHEIGHT");
+    let pair = (w.parse().unwrap(), h.parse().unwrap());
+    assert!(pair.0 > 0 && pair.1 > 0);
+    pair
+}
+
+#[cfg(target_arch = "x86_64")]
+fn tier() -> String {
+    use archmage::{SimdToken, X64V3Token, X64V4Token, X64V4xToken};
+    let requested = std::env::var("ZEN_S2_TIER").expect("explicit tier");
+    match requested.as_str() {
+        "v4x" => assert!(X64V4xToken::summon().is_some(), "v4x unavailable"),
+        "v4" => {
+            X64V4xToken::dangerously_disable_token_process_wide(true).unwrap();
+            assert!(X64V4Token::summon().is_some() && X64V4xToken::summon().is_none());
+        }
+        "v3" => {
+            X64V4Token::dangerously_disable_token_process_wide(true).unwrap();
+            assert!(X64V3Token::summon().is_some() && X64V4Token::summon().is_none());
+        }
+        "scalar" => {
+            X64V3Token::dangerously_disable_token_process_wide(true).unwrap();
+            assert!(X64V3Token::summon().is_none() && X64V4Token::summon().is_none());
+        }
+        _ => panic!("unknown tier"),
+    }
+    requested
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn tier() -> String {
+    panic!("SPEEDQ dev grid requires x86_64");
+}
+
+fn worker(arm: &str) {
+    let _guard = archmage::testing::lock_token_testing();
+    let tier = tier();
+    let (w, h) = geometry();
+    let (src, dst) = super::test_pair(w, h);
+    let mut hash = Sha256::new();
+    hash.update(bytemuck::cast_slice::<[u8; 3], u8>(&src));
+    hash.update(bytemuck::cast_slice::<[u8; 3], u8>(&dst));
+    let input_sha = hash
+        .finalize()
+        .iter()
+        .map(|v| format!("{v:02x}"))
+        .collect::<String>();
+    let src = Box::leak(src.into_boxed_slice());
+    let dst = Box::leak(dst.into_boxed_slice());
+    let mut model_info = Value::Null;
+    let feature_values = Rc::new(RefCell::new(Vec::<f64>::new()));
+    let keep_features = std::env::var_os("ZEN_S2_PARITY_FEATURES").is_some();
+    let mut action: Box<dyn FnMut() -> f64> = match arm {
+        "by_v2fy" => {
+            let path = std::env::var("ZEN_S2_SPEEDQ_BAKE").expect("pinned bake path");
+            let original = std::fs::read(path).unwrap();
+            assert_eq!(digest(&original), SOURCE_SHA, "timing weights changed");
+            let revision = std::env::var("ZENSIM_FORMULA_REV").unwrap();
+            assert!(matches!(revision.as_str(), "3" | "4" | "5"));
+            // Existing metadata owner preserves weight sections without requantization.
+            let bytes = zenpredict_bake::append_metadata_utf8(
+                &original,
+                "zentrain.formula_revision",
+                &revision,
+            )
+            .unwrap();
+            let stamped_sha = digest(&bytes);
+            let model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
+            assert_eq!(model.layers().next().unwrap().out_dim, 128, "H128 shape");
+            assert_eq!(model.n_outputs(), 1);
+            let mut scorer = BakeScorer::new(model).unwrap().with_parallel(true);
+            assert_eq!(digest(ID_BYTES.as_bytes()), ID_SHA);
+            let canonical: Value = serde_json::from_str(ID_BYTES).unwrap();
+            let expected: Vec<u16> = canonical["candidates"]["by_v2fy"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_u64().unwrap() as u16)
+                .collect();
+            assert_eq!(expected.len(), 420);
+            assert_eq!(scorer.consumed_feature_ids().unwrap(), expected);
+            model_info = json!({"source_sha256": SOURCE_SHA, "stamped_sha256": stamped_sha,
+                "revision": revision, "hidden":128, "consumed_ids":expected,
+                "scope":"fixed Rev4-trained timing weights; no retraining or product qualification"});
+            let retained = Rc::clone(&feature_values);
+            Box::new(move || {
+                let result = scorer
+                    .compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h), None)
+                    .unwrap();
+                if keep_features {
+                    *retained.borrow_mut() = expected
+                        .iter()
+                        .map(|id| result.features()[usize::from(*id)])
+                        .collect();
+                }
+                result.score()
+            })
+        }
+        "zensim_B" => {
+            assert_eq!(
+                std::env::var("ZENSIM_FORMULA_REV").unwrap(),
+                "1",
+                "B is serving Rev1"
+            );
+            let z = Zensim::new(ZensimProfile::B).with_parallel(true);
+            Box::new(move || {
+                z.compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h))
+                    .unwrap()
+                    .score()
+            })
+        }
+        "fast_ssim2" => Box::new(move || {
+            fast_ssim2::compute_ssimulacra2(
+                imgref::Img::new(&*src, w, h),
+                imgref::Img::new(&*dst, w, h),
+            )
+            .unwrap()
+        }),
+        "butteraugli" => Box::new(move || {
+            let rs: &[rgb::RGB8] = bytemuck::cast_slice(&*src);
+            let ds: &[rgb::RGB8] = bytemuck::cast_slice(&*dst);
+            butteraugli::butteraugli(
+                imgref::Img::new(rs, w, h),
+                imgref::Img::new(ds, w, h),
+                &butteraugli::ButteraugliParams::default(),
+            )
+            .unwrap()
+            .score
+        }),
+        "ssimulacra2_rs" => {
+            // Same boundary as the existing peer: sRGB widening is untimed.
+            let rs = super::make_f32_srgb(src);
+            let ds = super::make_f32_srgb(dst);
+            Box::new(move || {
+                let s = ssimulacra2::Rgb::new(
+                    rs.clone(),
+                    w,
+                    h,
+                    ssimulacra2::TransferCharacteristic::SRGB,
+                    ssimulacra2::ColorPrimaries::BT709,
+                )
+                .unwrap();
+                let d = ssimulacra2::Rgb::new(
+                    ds.clone(),
+                    w,
+                    h,
+                    ssimulacra2::TransferCharacteristic::SRGB,
+                    ssimulacra2::ColorPrimaries::BT709,
+                )
+                .unwrap();
+                ssimulacra2::compute_frame_ssimulacra2(s, d).unwrap()
+            })
+        }
+        _ => panic!("unknown SPEEDQ arm"),
+    };
+    let score = action();
+    assert!(score.is_finite(), "nonfinite score");
+    let bits = score.to_bits();
+    let ready = json!({"pid":std::process::id(),"arm":arm,"tier":tier,"width":w,"height":h,
+        "score":score,"score_bits":format!("{bits:016x}"),"input_sha256":input_sha,
+        "model":model_info,"threads":std::env::var("RAYON_NUM_THREADS").unwrap(),
+        "ssim2_rayon":cfg!(feature="ssim2-rayon"),"feature_values":*feature_values.borrow()});
+    println!("{ready}");
+}
+
+pub(super) fn run() {
+    let arm = std::env::var("ZEN_S2_SPEEDQ_WORKER").expect("explicit parity worker arm");
+    assert!(
+        std::env::var_os("ZEN_S2_RSS_ONLY").is_some(),
+        "SPEEDQ stopped at parity; timing is unqualified"
+    );
+    worker(&arm);
+}

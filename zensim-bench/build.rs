@@ -2,6 +2,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=ZENSIM_BENCH_SKIP_CPP_FFI");
+    if std::env::var("ZENSIM_BENCH_SKIP_CPP_FFI").as_deref() == Ok("1") {
+        println!("cargo:warning=C++ oracle arms excluded by explicit build flag");
+        return;
+    }
     println!("cargo:rerun-if-changed=ffi/");
     println!("cargo:rerun-if-env-changed=LIBJXL_DIR");
     println!("cargo:rerun-if-env-changed=LIBJXL_BUILD_DIR");
