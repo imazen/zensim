@@ -97,6 +97,12 @@
   }
  },
  "eras": {
+ "palette_v2": {
+  "build_commit": "f9a38a33",
+  "root": null,
+  "label": "palette_v2",
+  "note": "Correct independently population-weighted signed L/C; v1 artifact values are incompatible."
+ },
  "palette_v1": {
   "build_commit": "8a4f8314",
   "root": null,
@@ -377,6 +383,18 @@
   }
  },
  "sets": {
+ "palette@w1867/palette_v2#30b09cd1": {
+  "compute": "palette",
+  "layout": 1867,
+  "era": "palette_v2",
+  "slots": "1825-1866",
+  "slots_hash8": "30b09cd1",
+  "n_slots": 42,
+  "role": "producer",
+  "kind": "set",
+  "evidence": "benchmarks/palette_design_2026-10-07.md; f9a38a33",
+  "note": "Research-only corrected signed population means; supersedes palette_v1, serving refused."
+ },
  "palette@w1867/palette_v1#30b09cd1": {
   "compute": "palette",
   "layout": 1867,

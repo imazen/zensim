@@ -10,7 +10,7 @@
   features (f1825–f1866, N=2–8), with signed OKLab lightness/chroma/hue,
   weighted assignment and palette population transport. Training extraction
   supports `--palette-only`; serving refuses the family. Existing feature
-  IDs and arithmetic remain unchanged. Design: `benchmarks/palette_design_2026-10-07.md`.
+  IDs and arithmetic remain unchanged. Design: `benchmarks/palette_design_2026-10-07.md` (2f993850).
 
 - Revise the unconsumed experimental C8 GMSBANK definition (2026-09-24):
   native Y gradients, coarse X/Y/B gradients with separately calibrated
@@ -20,6 +20,11 @@
   Qualification records are quarantined in `benchmarks/gmsd-chroma_*`.
 
 ### Changed
+
+- The research palette family uses `palette_v2`: signed L/C subtract each
+  palette's own population-weighted mean, preserving global edit direction
+  after repartition. Reject superseded `palette_v1` requests and retain its
+  incompatible sidecars as evidence (f9a38a33).
 
 - Refuse malformed ZCTH v4 numerical/flag contracts before scoring, and verify
   original TRAIN source bindings alongside copied views during companion

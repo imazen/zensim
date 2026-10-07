@@ -167,6 +167,13 @@ because cleanup tests or a historical training reproduction pass.
   unpopulated basic slots 0–12 and 26–38; making the test pass means changing its expected count for this entry (or registering the
   projection differently), which needs the owner's OK.
 
+* **2026-10-07 — Initial palette signed-population regression. FIXED at palette_v2.**
+  Matched mean populations could report a positive lightness shift for a global
+  -0.03 OKLab edit after median-cut repartition (N=3). Signed lightness/chroma
+  now subtract each palette's independently weighted means. The full RGB8
+  direction regression remains strict for every N=2–8. Initial palette_v1
+  sidecars remain superseded evidence and cannot mix with palette_v2.
+
 * **2026-10-07 — Rev1 registry gates fail on the recorded by_v2fy projection. FIXED on main at `47a2e1d4`.**
   Frozen base `1d3bf35a` reproduces both definition-registry and producer-plan
   census failures: `basic+v2@w720/rev5_localwin#62adfc93` records 420 projected

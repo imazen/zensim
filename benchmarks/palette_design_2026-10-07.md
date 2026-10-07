@@ -65,3 +65,15 @@ oracle teacher legs), plus NITS/LIVE/MCIQA features only. AIC-3 and every
 protected/terminal set are refused. Pin producer, binary, keys and pixels;
 no reinterpretation of existing instrument auxiliary slots as palette IDs.
 Registration E32 remains a draft outside git; no fit is authorized here.
+
+Correction registered before any fit or label read: palette_v2
+(2026-10-07). A stronger eight-colour RGB8 regression exposed a positive
+signed lightness result for a global -0.03 edit at N=3. Using the mean
+of matched populations in the signed terms was wrong after repartition.
+For signed L and C, independently weight the reference and distorted
+palette means by their own populations and subtract reference from distorted.
+The optimal assignment still defines mean/largest centre shift, matched
+hue and the population-transport pairing. Preserve the initial v1 artifact
+set as superseded evidence; regenerate every feature table and diagnostic
+under palette_v2. No old family's arithmetic changes. Full-circle hue
+rematching and spatial/high-frequency limitations remain explicit.
