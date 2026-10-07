@@ -1557,3 +1557,18 @@ evaluation label was read by the fit. Packed models: s0 `f803b74c…`, s1 `1bf8f
 `/mnt/tower/output/zensim-production-d1-2026-10-07/`). Release gates that read evaluation data wait for the owner to freeze the
 final composition (which seed or ensemble) before any read, per the scorecard.
 
+## Owner decisions — 2026-10-07 (evening): production composition, AIC-3 in feature experiments, UPIQ provenance
+
+Owner, verbatim: "seed 0. aic3 is fije for feature experiments, the way we tesr feature ceilings in set sometimes, if you do that.
+upiq hdr file see online or mod date, ok to use either way. accept new keys. remove stale wpekspaces, delete targer folders"
+
+* **Production composition: D1 seed 0 alone** (no ensemble). Frozen in `benchmarks/production_composition_2026-10-07.json`
+  (packed model `f803b74c…`) before any release gate reads evaluation data.
+* **AIC-3 in feature experiments:** allowed, as in earlier feature-ceiling tests on sets. Production training and
+  qualification still follow D1 (AIC-3 excluded); feature-experiment models stay research-only.
+* **UPIQ HDR JOD derivative provenance:** `/mnt/v/output/zenmetrics/upiq-pu/upiq_cid_jod.csv` (10,220 bytes) was written
+  2026-06-09 21:57 MT during zenmetrics' UPIQ PU-replication work (commits `a36b07bf` / `bd4f83bb`, benchmark addenda 5–6),
+  derived from the official UPIQ release `upiq_subjective_scores.csv` (dated 2021-02-08; UPIQ project,
+  https://www.cl.cam.ac.uk/research/rainbow/projects/upiq/). The exact producer script was not recovered; the owner accepts the
+  file either way, which satisfies E31's provenance clause. E31 may be fit.
+
