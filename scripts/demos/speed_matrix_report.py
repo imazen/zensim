@@ -413,6 +413,7 @@ def speedq_report(args) -> int:
         'parity':{'strict_pass':384,'strict_required':384,'strict_feature_bits_pass':384,'consumed_features_per_cell':420,'rev3_cells':192,'rev3_tolerance_failed_cells':sum(r['tolerance_violations']>0 for r in legacy),'rev3_max_abs_feature_difference':max(r['max_abs_feature_difference'] for r in legacy),'rev3_max_tolerance_fraction':max(r['max_tolerance_fraction'] for r in legacy),'rev3_max_abs_score_difference':max(abs(r['score_difference']) for r in legacy)},
         'raw_directory':str(root),
         'statistics_owner':'zenbench e45822161a710acd013c572a98627e64663b1bcf; randomized paired rounds, 10K bootstrap, paired IQR filtering',
+        'peer_versions':{'fast_ssim2':'0.8.2','butteraugli':'0.9.3','ssimulacra2_rs':'0.5.1','archmage':'0.9.29','rayon_enabled_for_all_three_peers':True},
         'model_source_sha256':'802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1',
     }
     args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')
@@ -459,7 +460,7 @@ def speedq_report(args) -> int:
         if all((g,n,a) in memories for n in [1,32] for a in arms):
             lines.append('| '+g+' | '+' | '.join(f'{memories[(g,1,a)]} / {memories[(g,32,a)]}' for a in arms)+' |')
     lines+=['','## Peers at v4x, one thread','',
-        'Warm whole-call median milliseconds. All peer tiers/thread configurations remain in the JSON; their fits are above. Butteraugli and Rust-av may stay single-threaded despite the requested thread setting.','',
+        'Warm whole-call median milliseconds. All peer tiers/thread configurations remain in the JSON; their fits are above. All three peers are built with Rayon support; their measured scaling depends on their execution paths and input size. Rust-av has no archmage dispatch ceiling and runs the same compiled code in each tier row.','',
         '| size | '+' | '.join(arms)+' |','|---|'+'---:|'*len(arms)]
     for g in sizes:
         if ('v4x',1,g) in medians:
