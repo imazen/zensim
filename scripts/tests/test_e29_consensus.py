@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pyarrow as pa
+from argparse import Namespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rev4_featpot"))
@@ -92,6 +94,24 @@ class ConsensusTests(unittest.TestCase):
                 fit.strict_training_groups([("hdr", Path("/nonexistent/hdr.parquet"), 4, 0, "rank")])
             hashed.assert_not_called()
             opened.assert_not_called()
+
+    def test_wrong_key_roles_refuse_before_feature_or_pair_payload_hash(self):
+        keys = pa.table({'row_id': list(range(7390)), 'role': ['val'] * 7390,
+                         'agree': [True] * 7390, 'ref_basename': ['ref'] * 7390})
+        with patch.object(e29.pq, 'read_table', return_value=keys) as read, \
+                patch.object(e29, 'sha', side_effect=AssertionError('payload hash')) as hashed:
+            with self.assertRaises(ValueError):
+                e29.admit_metadata(Path('/nonexistent/hdr.parquet'), self.metadata())
+            self.assertEqual(read.call_count, 1)  # permitted label-free keys only
+            hashed.assert_not_called()
+
+    def test_unfrozen_baseline_blocks_scorer_before_labels(self):
+        args = Namespace(root='/nonexistent', preflight_only=False, results='/nonexistent',
+                         control_root='/nonexistent', control_pins=None)
+        with patch.object(e24.pq, 'read_table', side_effect=AssertionError('label read')) as read:
+            with self.assertRaisesRegex(ValueError, 'INCOMPLETE'):
+                e24.cmd_e29_score(args)
+            read.assert_not_called()
 
 
 if __name__ == "__main__":

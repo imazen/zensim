@@ -530,3 +530,13 @@ e29-build:
 
 e29-scorer-preflight root:
     env -i PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/tmp/e29" python3 scripts/rev4_featpot/e24_rev5.py e29-score --root {{root}} --preflight-only
+
+# Local review evidence only; no fleet queue, image publication or source push.
+e29-executor-smoke bundle mode arm:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- bash {{bundle}}/run_executor_smoke.sh {{mode}} {{arm}}
+
+e29-harvest-checks bundle zenmetrics *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath11_real_entry_checks.py --study e29 --bundle {{bundle}} --zenmetrics {{zenmetrics}} {{flags}}
+
+e29-bundle-check bundle:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29
