@@ -346,3 +346,11 @@ e28-smoke-receipts root arm tools inspector:
 # The evidence directory carries the reviewed image/job/data pins and driver.
 e28-executor-image-smoke evidence mode="bounded" arm="s2m":
     bash "{{evidence}}/run_executor_smoke.sh" "{{mode}}" "{{arm}}"
+
+# D1 role binding, immutable derivation and registered E30/production grids.
+shippath10-tests:
+    TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_shippath*_*.py' -q
+
+# Explicit two-epoch/128-pair local smoke through the real strict owner.
+shippath10-smoke root dest bin_dir route:
+    TMPDIR=$HOME/tmp OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_short_smoke.py {{root}} {{dest}} {{bin_dir}} {{route}}

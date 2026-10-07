@@ -52,6 +52,10 @@ def preflight_recipe(root, decision_path, heldout=None):
     load_frozen(root, training_only=True)
     receipt = json.loads(safe_path(root / "wide/main/real/receipt.json").read_text())
     decision = decision_record(decision_path, receipt["admission_view"]["source_receipt_sha256"])
+    view = receipt["admission_view"]
+    if (view.get("source_frozen_sha256") != decision.get("source_frozen_sha256")
+            or view.get("human_role_decision_sha256") != sha(decision_path)):
+        raise ValueError("D1 decision/frozen receipt is not bound in this admission view")
     if heldout is not None and heldout not in PRODUCTION_SOURCES:
         raise ValueError("D1/E30 forbid an AIC-family held-out fold")
     name = f"human_without_{heldout}" if heldout else "human_all"
@@ -63,6 +67,15 @@ def preflight_recipe(root, decision_path, heldout=None):
         if sha(Path(f"{path}.manifest.json")) != rec["manifest_sha256"]:
             raise ValueError("human declaration changed after freeze")
         human_declaration(d, decision)
+        import pyarrow.parquet as pq
+        from v2_teacher import key_path, row_keys_sha
+        kp = safe_path(key_path(path))
+        if sha(kp) != d["keys_sha256"]:
+            raise ValueError("D1 human row-key pin changed")
+        keys = pq.read_table(kp)
+        human_keys(keys, d)
+        if row_keys_sha(keys) != d["row_keys_sha256"]:
+            raise ValueError("D1 human row-key order changed")
         if d["human_sources"] != expected:
             raise ValueError("D1 human leg must omit AIC and the held-out source exactly")
     return decision
