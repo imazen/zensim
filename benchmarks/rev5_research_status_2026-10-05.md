@@ -256,3 +256,16 @@ minimise MSE and maximise Kendall and Pearson correlation.
   as four-source designs that reuse E30's 40 cells as their control; none launches before its implementation is reviewed.
 * **Release prep:** the KADID TERMINAL read script is in its second round (the first review found two ways it could open the
   wrong file); speed qualification passed its Rev4/Rev5 parity preflight and is moving to timing.
+
+## 19. Updates (2026-10-07 18:40 UTC)
+
+* **Production fit:** one of three seeds done at 18:20 UTC; the other two are training.
+* **E29 / E31 / E32 control.** Both E31 and E32 stopped correctly at their registered parity check: E30's trainer refuses the new
+  inputs (the UPIQ table identity, the palette IDs) before fitting, so no arm can run on E30's exact program and E30's cells can't be
+  reused as-is. Using the registrations' own fallback, decided now before any arm fit: one extended program carries all three
+  experiments' extensions, and one fresh matched control (E30's four-source recipe run under that program, 40 cells) serves all
+  three. The extension must first be shown not to move the baseline (a control cell is expected bit-identical to E30's). Recorded in
+  `benchmarks/e29_e31_e32_shared_control_decision_2026-10-07.md`.
+* **Disk:** the shared NVMe is down to about 21 GB free. My E29 lane accounts for most of the last drop and is trimming to its
+  pinned artifacts; the two largest consumers belong to other sessions (`~/tmp/downstream-0.9.30` 190 GB,
+  `/mnt/v/output/imazen-26-compat` 51 GB).
