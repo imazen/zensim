@@ -344,3 +344,7 @@ palette-instrument-views bin commit bank out:
 
 palette-verify bin commit root:
     python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-verify {{root}} --bin {{bin}} --build-commit {{commit}} --era palette_v2
+
+palette-mirror source destination:
+    mkdir -p {{destination}}
+    rsync -rlt --omit-dir-times --info=progress2 {{source}}/ {{destination}}/
