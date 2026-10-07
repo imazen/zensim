@@ -269,3 +269,15 @@ minimise MSE and maximise Kendall and Pearson correlation.
 * **Disk:** the shared NVMe is down to about 21 GB free. My E29 lane accounts for most of the last drop and is trimming to its
   pinned artifacts; the two largest consumers belong to other sessions (`~/tmp/downstream-0.9.30` 190 GB,
   `/mnt/v/output/imazen-26-compat` 51 GB).
+
+## 20. Updates (2026-10-07 19:10 UTC)
+
+* **The D1 production fit is complete.** Three seeds (0–2), all audited at the registered budget (120 epochs, 50,000 pairs, epoch
+  119, the four D1 sources, 420 features), each densified, packed to f16 (~110 KB) and TRAIN-calibrated. Packed model hashes match
+  their records; tower mirror verified (`/mnt/tower/output/zensim-production-d1-2026-10-07/`).
+* **Owner decision needed before any evaluation gate:** which composition ships — one seed, or an ensemble. No rule for choosing
+  among the three seeds was registered, and the scorecard requires freezing the model bytes before gates read evaluation data
+  (choosing after looking would be adaptive selection). Label-free gates (serving surface, Rev5 parity, API/format, runtime) run
+  on all three seeds meanwhile.
+* **E29 incident:** an import in a new unit test ran an unguarded legacy CLI that read a legacy HDR VAL panel (teacher-scored,
+  22,860 rows). No fit or decision used it; recorded in the exposure ledger; the module is now guarded.

@@ -1539,3 +1539,21 @@ was read. The AIC-3 drop shows no measured cost (signed +0.0003 ± 0.0015). The 
 three full-data seeds on KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL and CID22-A) launched afterwards. Records:
 `benchmarks/e30_result_summary_2026-10-07.json`.
 
+## Exposure ledger — 2026-10-07: E29 preparation read a legacy HDR VAL panel (incident)
+
+During E29 implementation, a new unit test imported `scripts/hdr/hdr_route_panel.py`, whose CLI ran unguarded at import and
+read the entire legacy HDR VAL panel `/mnt/v/zen/zensim-training/hdrgrid-mc944-t1-2026-08-27/hdrgrid_mc944_t2_val.parquet`
+(22,860 rows × 952 columns, including its teacher-score `human_score` column) and printed a target-swing diagnostic before
+failing. No student prediction, no model fit, no threshold or target choice used it; the registered hdr_v3mix 3,900-row VAL,
+confirmation, AIC and human-label payloads were not opened. The module now has a main guard and zero-open import tripwires.
+This legacy panel's teacher targets count as seen by the E29 lane from this date. Receipt:
+`/mnt/v/output/zensim/e29-2026-10-07/UNINTENDED_EXPOSURE.json` (build `a9b92db3`).
+
+## 2026-10-07 D1 production fit complete
+
+`fitv2d1-20261007`: three full-data seeds (0–2), by_v2fy at Rev5 on the D1 population, each 120 epochs × 50,000 pairs, epoch
+119, densified, packed to f16 and TRAIN-calibrated in the fit; harvest bound to the registered budget and admission. No
+evaluation label was read by the fit. Packed models: s0 `f803b74c…`, s1 `1bf8f3af…`, s2 `54118c54…` (tower
+`/mnt/tower/output/zensim-production-d1-2026-10-07/`). Release gates that read evaluation data wait for the owner to freeze the
+final composition (which seed or ensemble) before any read, per the scorecard.
+
