@@ -30,6 +30,13 @@ def admission_pin():
     return policy
 
 
+def inventory_path(path):
+    """Approved names may not redirect to another physical input."""
+    if any(p.is_symlink() for p in [path, *path.parents]):
+        raise ValueError("E28 approved inventory path is a symlink")
+    return path
+
+
 def bound_record(rec, policy):
     """Admit a record's names and metadata before its label-bearing checksum."""
     rel = rec.get("rel")
@@ -39,7 +46,9 @@ def bound_record(rec, policy):
     manifest_rel = rel + ".manifest.json"
     if rec.get("manifest_sha256") != files.get(manifest_rel):
         raise ValueError("E28 manifest is outside the approved input inventory")
-    path = table_path(rec)
+    path = inventory_path(table_path(rec))
+    inventory_path(Path(f"{path}.manifest.json"))
+    inventory_path(path.with_suffix(".keys.parquet"))
     declaration = json.loads(Path(f"{path}.manifest.json").read_text())
     if sha(Path(f"{path}.manifest.json")) != files[manifest_rel]:
         raise ValueError("E28 manifest changed")
@@ -51,7 +60,7 @@ def bound_record(rec, policy):
 def admit_receipt(root):
     policy = admission_pin()
     rel = "wide/main/real/receipt.json"
-    path = root / rel
+    path = inventory_path(root / rel)
     if sha(path) != policy["prepared_files"].get(rel):
         raise ValueError("E28 receipt is outside the approved input inventory")
     receipt = json.loads(path.read_text())

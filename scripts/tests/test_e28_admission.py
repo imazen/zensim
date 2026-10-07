@@ -96,6 +96,17 @@ class Admission(unittest.TestCase):
                 self.assertEqual(self.opens,[])
             mp.write_bytes(original);rec['manifest_sha256']=c.sha(mp);self.policy['prepared_files'][rec['rel']+'.manifest.json']=rec['manifest_sha256']
 
+    def test_approved_paths_cannot_redirect_to_another_payload(self):
+        rec=self.legs['e28_s2m_konfig']['fit'];path=self.root/rec['rel']
+        protected=self.root/'synthetic-protected.parquet';protected.write_bytes(path.read_bytes())
+        self.payloads.add(protected.resolve())
+        original=path.read_bytes();path.unlink();path.symlink_to(protected)
+        with self.guard():
+            with self.assertRaisesRegex(ValueError,'symlink'):e.training_groups('s2m','kadid',self.legs,[],32)
+            with self.assertRaisesRegex(ValueError,'symlink'):nm.load_table(rec,[13,14],source='konfig',arm='s2m')
+        self.assertEqual(self.opens,[])
+        path.unlink();path.write_bytes(original)
+
     def test_unapproved_record_and_reviewer_generic_nm_call_refuse_without_payload(self):
         rec=self.legs['e28_s2m_konfig']['fit'];rec['sha256']='0'*64
         with self.guard():
