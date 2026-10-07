@@ -2935,6 +2935,9 @@ fn stamp_emitted_checkpoints(
     Ok(written.len())
 }
 
+#[path = "zensim_mlp_train/e29_hdr_admission.rs"]
+mod e29_hdr_admission;
+
 fn main() {
     zensim_validate::tier_cap::apply_from_env();
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
@@ -3259,30 +3262,26 @@ fn main() {
             args.historical_replay.is_none(),
             "E29 SDR must pass strict admission"
         );
-        let g = group_modes
-            .iter()
-            .find(|g| g.0 == "hdr")
-            .expect("E29 HDR group missing");
+        if args.target_column != "human_score" || args.target_scale != 1.0 {
+            eprintln!("E29 HDR admission: declared human_score target requires --target-scale 1");
+            std::process::exit(2);
+        }
+        let hdr_groups: Vec<_> = group_modes.iter().filter(|g| g.0 == "hdr").collect();
+        assert_eq!(hdr_groups.len(), 1, "E29 requires exactly one HDR group");
+        let g = hdr_groups[0];
         assert!(
             g.3 == 0.0 && !g.4 && g.5 == GroupLossMode::Rank,
             "E29 HDR must be fit-only pooled rank"
         );
-        let sidecar =
-            std::fs::read(format!("{}.manifest.json", g.1.display())).expect("HDR manifest");
-        let d: serde_json::Value = serde_json::from_slice(&sidecar).expect("HDR metadata");
-        assert!(
-            d["study"] == "E29"
-                && d["role"] == "train"
-                && d["rows"] == 7390
-                && d["population"] == "agree-only"
-                && d["formula_revision"] == 5
-                && d["teacher_sha256"]
-                    == "deb70e775b043a578c77e0c3ff27960ebfa936e9d901497f9d74389e6ce9fbce"
-                && d["requested_ids"]
-                    == serde_json::json!(selected_ids.as_ref().expect("E29 exact IDs"))
-                && (d["arm"] == "hb4" || d["arm"] == "hc4"),
-            "unapproved E29 HDR population"
-        );
+        let d = e29_hdr_admission::admit(
+            &g.1,
+            selected_ids.as_deref().expect("E29 exact IDs"),
+            &args.rank_pair_list,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2)
+        });
         table_admission["tables"].as_array_mut().unwrap().push(serde_json::json!({"path":g.1,
             "feature_set_id":null,"inferred":false,"stored_declarations":d,"requested_ids":selected_ids}));
         table_admission["qualified_provenance"] = serde_json::json!(false);

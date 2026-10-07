@@ -168,3 +168,47 @@ The E29 source is placed on local main; the earlier explicit push-nothing
 instruction remains in effect. Combined packaging, combined-binary parity,
 the 40 shared control fits, scientific arms and assessment remain coordinator
 work. No new solo package/image, fleet launch or scientific assessment ran.
+
+
+## Round 2 review corrections — 2026-10-07
+
+Known Bugs: the reviewed native HDR entry admitted a TRAIN declaration without
+checking its label-free keys, allowing VAL keys to reach the target reader.
+The E29 W2 route also inherited the historical model-dependent sign flip.
+Both are corrected in this round; historical experiment statistics are unchanged.
+
+The native research entry now binds the registered by_v2fy 420 IDs, Rev5,
+7390 agreement-only TRAIN rows, original teacher/table/key/manifest source pins,
+arm target transform and CLI target column/scale. It checks the exact label-free
+key schema, roles, agreement, unique IDs, row count, ordered key digest and key
+file digest before any HDR target/feature or pair-list access. hc4 additionally
+binds its declared pair filename/hash to the CLI; hb4 refuses a pair list.
+The HDR leg remains research-only and does not claim product qualification.
+
+The actual reviewed binary reproduces the synthetic VAL-key bypass (two payload
+opens, zero key opens). The rebuilt binary refuses that case with zero payload
+opens. The native regression includes declaration/source/ID/transform/key
+negative controls and a valid TRAIN-key positive admission control against an
+intentionally malformed synthetic payload. All 23 cases pass; no model is
+written. Evidence: `/mnt/v/output/zensim/e29r2-2026-10-07/native-admission-final/`.
+
+E29 W2 now uses the already checked, fixed quality-oriented signed per-type
+SROCCs. Each arm and control chooses its own lowest three types. Reversed
+predictions retain W2=-1, and differing arm/control membership is tested using
+the canonical panel and an independent SciPy rank oracle. The ten-seed/equal
+four-fold reduction and historical e13 helper remain unchanged.
+
+The lane was rebased onto main@origin
+`a540255b46b96e326e459fa61312a083f081effb`, including the coordinator's a9a5ca0a
+legacy import guards. Merge resolutions preserve both the explicit incident
+and completed D1 production record plus E29 preparation, both changelog additions
+and both recipe sets. E29's fuller HDR panel retains an import-inert `_cli()`
+behind `__main__`; the other legacy guarded modules are inherited unchanged.
+The shared main bookmark was not moved by this lane. No push occurred.
+
+The 22-test E29/E26/import-guard Python suite and 22 sampler tests pass. Release
+build, workspace fmt-check, CI clippy with warnings denied and scoped Ruff F
+checks pass; script lint checks 857 runnable scripts. Full run logs are retained
+under `/home/lilith/tmp/e29r2/`. The rebuilt trainer requires its own full baseline
+parity proof below; the retained earlier proof is not substituted for that run.
+The combined v40 package, scientific controls/arms and assessment remain missing.

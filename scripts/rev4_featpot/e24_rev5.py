@@ -299,6 +299,14 @@ def e29_decisions(cells, sdr):
     return arms, winners[0] if len(winners) == 1 else None
 
 
+def _e29_signed_w2(types):
+    """Reduce checked quality-oriented type SROCCs for this E29 panel only."""
+    if len(types) < 3 or not np.isfinite(types).all():
+        raise ValueError("INCOMPLETE: undefined distortion-type SROCC")
+    worst = sorted(types)
+    return dict(w2_type_min=float(worst[0]), w2_type_worst3=float(np.mean(worst[:3])))
+
+
 def cmd_e29_score(args):
     """Post-harvest SDR scoring; strict preparation works in a clean environment."""
     from e29_consensus import preflight, complete_cells
@@ -352,9 +360,12 @@ def cmd_e29_score(args):
             result.write_text(json.dumps(dict(prediction=pred.tolist(), score=score)) + "\n")
             if "dtype" in meta[source]:
                 types = [e13.spearman(pred[ix], y[ix]) for ix in meta[source].groupby("dtype").indices.values()]
-                if len(types) < 3 or not np.isfinite(types).all():
-                    raise ValueError("INCOMPLETE: undefined distortion-type SROCC")
+                signed_w2 = _e29_signed_w2(types)
             panels[label][source, seed] = e13.worst_case(result, meta[source])
+            if "dtype" in meta[source]:
+                # Historical helpers infer a model-dependent sign. E29 uses
+                # each arm/control panel's own three lowest signed correlations.
+                panels[label][source, seed].update(signed_w2)
     decision = {}
     for arm in ("hb4", "hc4"):
         delta = np.array([[panels[arm][s, i]["signed"] - panels["control"][s, i]["signed"]

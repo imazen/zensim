@@ -522,7 +522,7 @@ speedq-freeze build_log dest:
 
 # E29 uses the existing trainer, strict four-source admission and actual executor.
 e29-tests:
-    python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg
+    python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards
     cargo test -p zensim-validate --lib sampling:: -- --nocapture
 
 e29-build:
@@ -549,3 +549,7 @@ e29-control-parity bundle e30 dest *flags:
 
 e29-storage-cleanup *flags:
     TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_storage_cleanup.py {{flags}}
+
+# Native E29 entry: declaration/label-free key refusals before feature targets.
+e29-hdr-admission binary prior_binary dest:
+    python3 scripts/tests/e29_hdr_binary_refusals.py --binary "{{binary}}" --prior-binary "{{prior_binary}}" --dest "{{dest}}"

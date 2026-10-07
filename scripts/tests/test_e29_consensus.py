@@ -1,5 +1,4 @@
 """Independent E29 numerical cases and population-open tripwires."""
-import copy
 import sys
 import unittest
 from pathlib import Path
@@ -64,6 +63,29 @@ class ConsensusTests(unittest.TestCase):
         cells["hb4"].pop()
         with self.assertRaises(ValueError):
             e24.hdr_arm_decisions(cells, {}, "e29")
+
+    def test_e29_w2_keeps_fixed_quality_sign_and_panel_membership(self):
+        from scipy.stats import spearmanr
+        from lib.zen_stats import panel_batch
+        y = np.arange(6, dtype=float)
+        increasing = panel_batch([("inc", y, y)], stats="srocc")[0]["srocc_signed"]
+        reversed_ = panel_batch([("rev", -y, y)], stats="srocc")[0]["srocc_signed"]
+        self.assertEqual(e24._e29_signed_w2([increasing] * 3)["w2_type_worst3"], 1)
+        self.assertEqual(e24._e29_signed_w2([reversed_] * 3)["w2_type_worst3"], -1)
+        arm = [y[::-1], np.array([0, 2, 1, 3, 5, 4]), y, np.array([2, 0, 1, 5, 3, 4])]
+        control = [y, y[::-1], np.array([2, 0, 1, 5, 3, 4]), np.array([0, 2, 1, 3, 5, 4])]
+        memberships = []
+        for label, predictions in (("arm", arm), ("control", control)):
+            actual = [v["srocc_signed"] for v in panel_batch(
+                [(f"{label}{i}", x, y) for i, x in enumerate(predictions)], stats="srocc")]
+            oracle = [float(spearmanr(x, y).statistic) for x in predictions]
+            memberships.append(np.argsort(oracle)[:3].tolist())
+            self.assertAlmostEqual(e24._e29_signed_w2(actual)["w2_type_worst3"],
+                                   float(np.mean(sorted(oracle)[:3])), places=10)
+        self.assertNotEqual(memberships[0], memberships[1])
+        for values in ([1, 1], [1, float("nan"), 1]):
+            with self.assertRaises(ValueError):
+                e24._e29_signed_w2(values)
 
     def metadata(self):
         return dict(study="E29", role="train", rows=7390, population="agree-only", formula_revision=5,
