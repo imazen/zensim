@@ -286,6 +286,42 @@ pub(crate) enum Draw {
 /// (within-ref) for the rows, with an early return after the group value
 /// when the group is unusable. Any change re-rolls every subsequent draw
 /// of every model ever trained, so it must be treated as an era break.
+/// Replace a fixed share of draws with two uniform rows in the SAME leg.
+/// The disabled path consumes no random values and returns the original draw.
+pub(crate) fn pool_draw(
+    draw: Draw,
+    counts: &[usize],
+    enabled: &[bool],
+    share: f64,
+    rng: &mut SplitMix64,
+) -> Draw {
+    let pos = match draw {
+        Draw::Pair { train_pos, .. } | Draw::SameRow { train_pos, .. } => train_pos,
+        _ => return draw,
+    };
+    if share == 0.0 || !enabled[pos] {
+        return draw;
+    }
+    if rng.next_f64_unit() >= share {
+        return draw;
+    }
+    let n = counts[pos];
+    let ia = (rng.next_u64() as usize) % n;
+    let ib = (rng.next_u64() as usize) % n;
+    if ia == ib {
+        Draw::SameRow {
+            train_pos: pos,
+            row: ia,
+        }
+    } else {
+        Draw::Pair {
+            train_pos: pos,
+            ia,
+            ib,
+        }
+    }
+}
+
 pub(crate) fn draw_pair(ctx: &PairDrawCtx<'_>, rng: &mut SplitMix64) -> Draw {
     // `--pair-sampling stratified`: a SCHEDULE, so it reads `draw_index`
     // and consumes NO rng. See the StratifiedPlan note above for why the
@@ -439,6 +475,9 @@ pub struct SimParams {
     /// Replay a `--pair-sampling stratified` run. `false` (default for a
     /// legacy bake, which had no such flag) replays the uniform draw.
     pub stratified_pairs: bool,
+    /// Optional within-leg pooled rank sampling, matching the live CPU trainer.
+    pub pooled_legs: Vec<String>,
+    pub pooled_rank_share: f64,
 }
 
 /// Per-group coverage descriptors over one window.
@@ -796,6 +835,25 @@ impl Acc {
 /// the run's sequence by construction rather than by a re-implementation
 /// that has to be kept in sync.
 pub fn simulate(groups: &[SimGroup], params: &SimParams) -> SimResult {
+    assert!(
+        params.pooled_rank_share.is_finite() && (0.0..=1.0).contains(&params.pooled_rank_share)
+    );
+    let pooled_mask: Vec<bool> = groups
+        .iter()
+        .map(|g| params.pooled_legs.contains(&g.name))
+        .collect();
+    assert!(
+        params
+            .pooled_legs
+            .iter()
+            .all(|name| groups.iter().any(|g| &g.name == name)),
+        "unknown pooled leg"
+    );
+    assert!(
+        params.pooled_legs.is_empty()
+            || (!params.per_sample_alpha_head && !params.stratified_pairs),
+        "pooled replay requires plain uniform CPU sampling"
+    );
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     let mut cum = 0.0;
     let cdf: Vec<f64> = groups
@@ -881,6 +939,17 @@ pub fn simulate(groups: &[SimGroup], params: &SimParams) -> SimResult {
     for step in 0..total {
         ctx.draw_index = step as u64;
         let d = draw_pair(&ctx, &mut rng);
+        let d = if params.pooled_legs.is_empty() {
+            d
+        } else {
+            pool_draw(
+                d,
+                &row_counts,
+                &pooled_mask,
+                params.pooled_rank_share,
+                &mut rng,
+            )
+        };
         digest.push(d);
         full.record(groups, d);
         if step < early_n {
@@ -962,7 +1031,7 @@ pub fn run_coverage_json(
     params: &SimParams,
     init_seed: u64,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "schema": 1,
         "what": "what this run's PAIR SAMPLER actually touched. A seed moves what a run \
                  SEES, not only where it lands: the sample stream is seeded, so two sample \
@@ -1001,7 +1070,15 @@ pub fn run_coverage_json(
         })).collect::<Vec<_>>(),
         "full": coverage_json(&r.full),
         "early": coverage_json(&r.early),
-    })
+    });
+    if !params.pooled_legs.is_empty() {
+        value["pooled_objective"] = serde_json::json!({
+            "legs": params.pooled_legs,
+            "rank_share": params.pooled_rank_share,
+            "coverage_scope": "rank-pair endpoints; independent auxiliary Pearson rows excluded",
+        });
+    }
+    value
 }
 
 #[cfg(test)]
@@ -1031,6 +1108,8 @@ mod tests {
             early_window: 100,
             per_sample_alpha_head: false,
             stratified_pairs: false,
+            pooled_legs: Vec::new(),
+            pooled_rank_share: 0.0,
         }
     }
 
@@ -1323,6 +1402,8 @@ mod tests {
             early_window: 0,
             per_sample_alpha_head: false,
             stratified_pairs: false,
+            pooled_legs: Vec::new(),
+            pooled_rank_share: 0.0,
         };
         let r = simulate(&gs, &p);
         let v = run_coverage_json(&r, &gs, &p, 777);
@@ -1401,6 +1482,8 @@ mod tests {
             early_window: 0,
             per_sample_alpha_head: false,
             stratified_pairs: false,
+            pooled_legs: Vec::new(),
+            pooled_rank_share: 0.0,
         };
         let (p1, p2) = (mk(100), mk(999));
         let j = |p: &SimParams, init: u64| {
@@ -1479,6 +1562,8 @@ mod tests {
             early_window: 0,
             per_sample_alpha_head: false,
             stratified_pairs: true,
+            pooled_legs: Vec::new(),
+            pooled_rank_share: 0.0,
         }
     }
 
@@ -1640,5 +1725,44 @@ mod tests {
         let mut q = strat_params(4242);
         q.stratified_pairs = false;
         assert_ne!(a.digest.hex(), simulate(&gs, &q).digest.hex());
+    }
+}
+
+#[cfg(test)]
+mod pooled_tests {
+    use super::*;
+    #[test]
+    fn pooled_draws_keep_leg_and_disabled_stream() {
+        let draw = Draw::Pair {
+            train_pos: 1,
+            ia: 0,
+            ib: 1,
+        };
+        let mut a = SplitMix64::new(27);
+        let mut b = SplitMix64::new(27);
+        assert_eq!(
+            pool_draw(draw, &[2, 100], &[false, true], 0.0, &mut a),
+            draw
+        );
+        assert_eq!(a.next_u64(), b.next_u64());
+        let mut changed = 0;
+        for _ in 0..10000 {
+            match pool_draw(draw, &[2, 100], &[false, true], 0.5, &mut a) {
+                Draw::Pair { train_pos, ia, ib } => {
+                    assert_eq!(train_pos, 1);
+                    assert!(ia < 100 && ib < 100);
+                    if ia != 0 || ib != 1 {
+                        changed += 1;
+                    }
+                }
+                Draw::SameRow { train_pos, .. } => assert_eq!(train_pos, 1),
+                _ => panic!("invalid pooled draw"),
+            }
+        }
+        assert!(changed > 4700 && changed < 5300);
+        assert_eq!(
+            pool_draw(draw, &[2, 100], &[false, false], 1.0, &mut a),
+            draw
+        );
     }
 }

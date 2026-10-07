@@ -310,3 +310,34 @@ check-cross-libc:
 # digests still hold.
 legacy-bake-zen4-golden:
     ZENSIM_ZEN4_GOLDEN_BAKE_SHA=1 cargo test -p zensim-validate --test legacy_bake_sha -- --nocapture
+
+# E28 registered within-leg pooled objective verification.
+e28-rust-check:
+    cargo test -p zensim-validate --lib loss_pearson -- --nocapture
+    cargo test -p zensim-validate --lib sampling:: -- --nocapture
+
+e28-build:
+    cargo build --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --bin subset_sim
+
+e28-python-check:
+    python3 -m unittest scripts.tests.test_e28_recipe scripts.tests.test_e28_admission scripts.tests.test_e28_decision scripts.tests.test_e26_hdr_leg
+
+[positional-arguments]
+e28-parity baseline new fitbin dest inspector:
+    python3 scripts/tests/e28_short_parity.py --baseline "$1" --new "$2" --fit-bin "$3" --dest "$4" --inspector "$5"
+
+# Full caller regression; SHIPPATH_TRAINER and ZEN_PANEL_BIN select built artifacts.
+e28-python-full:
+    python3 -m unittest discover -s scripts/tests
+
+[positional-arguments]
+e28-smokes driver="/var/tmp/e28/v32/run_smokes.sh":
+    bash "$1"
+
+[positional-arguments]
+e28-nm root dest fold="kadid":
+    python3 scripts/rev4_featpot/e28_simplex.py --root "$1" --dest "$2" --heldout "$3"
+
+[positional-arguments]
+e28-smoke-receipts root arm tools inspector:
+    python3 scripts/tests/e28_smoke_receipts.py --root "$1" --arm "$2" --tools "$3" --inspector "$4"

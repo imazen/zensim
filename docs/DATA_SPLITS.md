@@ -1424,3 +1424,48 @@ Owner decisions, verbatim (2026-10-07, in reply to the decision brief https://cl
   test (~21 looks, `docs/DATASET_HISTORY.md`), and E26/E27 showed teacher-only HDR legs cannot settle cross-image HDR calibration. Any
   other UPIQ portion stays T0. A new independent human HDR test is needed later (the planned Squintly HDR study).
 
+
+## 2026-10-07 E28 registered SSIM2-recipe preparation
+
+[Registration](../benchmarks/e28_ssim2recipe_registration_2026-10-07.md)
+fixes two bake arms and one grouped POTENTIAL diagnostic on the Rev5 by_v2fy
+420-ID subset. [Teacher pin](../benchmarks/e28_teacher_pin_2026-10-07.json)
+records the unchanged SafeSyn/CID22 tables and the exact human member sets.
+The new dataset legs are derived from the existing admitted exploratory full
+source tables, retaining original labels and the R1 reference-hash dev split.
+Pooled rank and Pearson comparisons never cross dataset/teacher legs.
+
+`s2o` retains the R1 teachers, four non-held-out human sources and coverage;
+shared-scale SafeSyn/CID22/KADID/TID legs receive the new pooled terms.
+`s2m` admits only CID22 fit, KADID TRAIN, TID2013 and KonFiG TRAIN, excluding
+the held-out source where applicable. Its four-dataset restriction excludes
+SafeSyn, KADID SELECT, KonFiG VAL, cid22_a25, AIC-3 and ordinal coverage.
+KonFiG uses the design-grid label, with the registered reconstruction caveat.
+
+The local kadid/seed-0 smoke of each bake arm opens admitted held-out KADID
+labels only after the fixed final-epoch fit. The NM smoke standardizes included
+fit rows only and opens held-out KADID only after freezing its parameters.
+E24 KADID control-cell statistics supply report-only NM deltas. No protected
+bank labels, HDR VAL or confirmation payloads are inputs to E28 preparation.
+No external SDR labels are opened during preparation. All results remain
+POTENTIAL; historical replay does not establish strict training qualification.
+The data transport includes admitted exploratory assessment tables, excludes
+HDR/confirmation members, and has not been uploaded or enqueued.
+
+[Preparation evidence](../benchmarks/E28_WORKLOG.md) records fixed choices,
+local full-budget smokes, finite diagnostic non-convergence, source pins and
+resource measurements. The complete registered scientific verdict requires
+100 harvested bake cells and 50 matched E24 control cells.
+
+
+### E28 admission followup (2026-10-07)
+
+The new E28 human fit/dev views are additionally bound to the frozen
+`benchmarks/e28_admission_inventory_2026-10-07.json` inventory. MLP and NM admit
+all active manifests before opening training labels, then validate the four
+label-free key columns, ordered row identities, allowed member sets and the
+reference-hash split. Preparation copies an explicit source inventory only and
+refuses confirmation/HDR directories before copying. The 37 numerical tables
+are unchanged; key sidecars, manifest bindings and receipt provenance changed.
+Producer and artifact receipts: `benchmarks/e28_admission_2026-10-07.pointer.md`.
+The existing E28 exploratory population and qualification limits still apply.

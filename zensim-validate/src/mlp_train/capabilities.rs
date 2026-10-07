@@ -8,6 +8,31 @@ pub fn validate_training_capabilities(
     has_absolute_group: bool,
     triplet_rows: usize,
 ) -> MlpHyperparams {
+    assert!(
+        hyperparams.pooled_rank_share.is_finite()
+            && (0.0..=1.0).contains(&hyperparams.pooled_rank_share),
+        "--pooled-rank-share must be in [0,1]"
+    );
+    assert!(
+        hyperparams.pooled_pearson_weight.is_finite() && hyperparams.pooled_pearson_weight >= 0.0,
+        "--pooled-pearson-weight must be nonnegative"
+    );
+    if !hyperparams.pooled_legs.is_empty() {
+        assert!(
+            !hyperparams.pool_head
+                && !hyperparams.hybrid_head
+                && !hyperparams.per_sample_alpha_head
+                && hyperparams.minibatch_size == 1
+                && hyperparams.norm_in_norm_weight == 0.0
+                && hyperparams.pair_sampling == super::PairSampling::Uniform,
+            "pooled objective requires plain CPU head, uniform sampling and minibatch-size 1"
+        );
+    } else {
+        assert!(
+            hyperparams.pooled_rank_share == 0.0 && hyperparams.pooled_pearson_weight == 0.0,
+            "pooled objective requires --pooled-leg"
+        );
+    }
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
     // time for the architectural lift (GMSD's std-pooling +

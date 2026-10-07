@@ -1,0 +1,115 @@
+{
+ "schema": "e28-teacher-pin-v1",
+ "registration_commit": "82c9af81",
+ "source_receipt_sha256": "cab32005397b423dcb37038d49e5503187efaa90a7e14f62434268a2dd7a3d14",
+ "teachers": {
+  "safesyn": {
+   "bounds": [
+    -63.317153070929706,
+    97.57614404331888
+   ],
+   "fit": {
+    "rel": "wide/main/real/safesyn_fit.parquet",
+    "sha256": "15963508e9502d6615006686cd993096b54bd08914ed97f61ffad093f7816fa6",
+    "manifest_sha256": "5917a34b59e8b106440ea096db18725a03038ce2d03e42d5fc05ff9f23bfd761",
+    "rows": 141054,
+    "references": 2312,
+    "keys_sha256": "808a066c1ab30eb48bf3bf05d660c6c3f04321122d1f07200e7a592db5a1df80"
+   },
+   "dev": {
+    "rel": "wide/main/real/safesyn_dev.parquet",
+    "sha256": "4165da2edb54913e4856c5a37cafd154ce96d5f9e7ef9203ff2880dc9b09f795",
+    "manifest_sha256": "8a407b64ca3c6c8416321e65887cc373ff385560117b10ba23ebcbace7d436b8",
+    "rows": 38757,
+    "references": 634,
+    "keys_sha256": "f315322872c9deea0cfa6a427ab038c17609ba3af5a19d17439ec50e8d3d634f"
+   }
+  },
+  "cid22": {
+   "bounds": [
+    24.28598371398119,
+    92.44692301111213
+   ],
+   "fit": {
+    "rel": "wide/main/real/cid22_fit.parquet",
+    "sha256": "5726053da43c9bc0bf33a26ad99c3b9fdde64de42425e685cc84527c606d5999",
+    "manifest_sha256": "f02112b5e05fc29d3537ede0ae9fba1e62f89161d3d8d9d8fde928f05a2b21bf",
+    "rows": 12163,
+    "references": 139,
+    "keys_sha256": "8e20713203779c086d3afa4db9c800aff2fa6ac70cd04c20bb3faee87c0d3fa2"
+   },
+   "dev": {
+    "rel": "wide/main/real/cid22_dev.parquet",
+    "sha256": "c4f4f142541f33b56241c1f824127568d89851539701c04934a8e4fdb926572a",
+    "manifest_sha256": "3884b83942d7a009c1f34bb2c268a3d0bd22c021c1b0f2966135361ee15554cb",
+    "rows": 3785,
+    "references": 43,
+    "keys_sha256": "e5482878fe1665c13c076a2a45b41228fc5cb0eece69c261f713a8b882889ccb"
+   }
+  }
+ },
+ "arms": {
+  "s2o": {
+   "teachers": [
+    "safesyn",
+    "cid22"
+   ],
+   "human_members": {
+    "kadid": [
+     "kadid_train",
+     "kadid_select"
+    ],
+    "tid2013": [
+     "tid2013"
+    ],
+    "konfig": [
+     "konfig_train",
+     "konfig_val"
+    ],
+    "cid22_a25": [
+     "cid22_a25"
+    ],
+    "aic3": [
+     "aic3"
+    ]
+   },
+   "coverage": true,
+   "pooled_legs": [
+    "safesyn",
+    "cid22",
+    "kadid",
+    "tid2013"
+   ]
+  },
+  "s2m": {
+   "teachers": [
+    "cid22"
+   ],
+   "human_members": {
+    "kadid": [
+     "kadid_train"
+    ],
+    "tid2013": [
+     "tid2013"
+    ],
+    "konfig": [
+     "konfig_train"
+    ]
+   },
+   "coverage": false,
+   "pooled_legs": [
+    "cid22",
+    "kadid",
+    "tid2013",
+    "konfig"
+   ]
+  }
+ },
+ "pooled_rank_share": 0.5,
+ "pooled_pearson_weight": 0.5,
+ "pearson_draw_batch_rows": 32,
+ "pearson_schedule": "one auxiliary pooled-row batch after every 32 pair draws of an opted-in leg; same leg only; independent sample RNG; zero-variance batches have zero gradient",
+ "human_weight": "split the R1 human weight in proportion to eligible reference counts; no comparison crosses datasets",
+ "konfig_deviation": "design-grid labels, not flicker-boosted reconstruction; s2o keeps within-reference supervision; s2m pools within this dataset as the four-leg recipe requests",
+ "s2m_coverage": "four-leg restriction drops coverage despite inherited recipe suffix; no SafeSyn/KADIS leg"
+}

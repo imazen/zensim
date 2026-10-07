@@ -311,3 +311,25 @@ def scatter(predicted: Sequence[float], target: Sequence[float]) -> dict:
         if result.get("schema") != "scatter-v2":
             raise ValueError("unexpected Rust scatter schema")
         return result
+
+
+def recipe_correlations(predicted, target):
+    """In-process signed raw Pearson and tau-b for E28 objective evaluations.
+
+    No logistic fit or absolute polarity: the monotone score head must learn
+    the declared orientation. SciPy tau-b is the independent O(n log n)
+    reference already used by verify_panel_parity.py. The E28 parity test
+    compares this path with the Rust panel before any diagnostic fit.
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.kendalltau.html
+    """
+    import numpy as np
+    from scipy.stats import kendalltau
+    x, y = np.asarray(predicted, dtype=np.float64), np.asarray(target, dtype=np.float64)
+    if x.shape != y.shape or x.ndim != 1 or not np.isfinite(x).all() or not np.isfinite(y).all():
+        raise ValueError("recipe correlations require finite, equal one-dimensional arrays")
+    if len(x) < 2 or np.ptp(x) == 0 or np.ptp(y) == 0:
+        return 0.0, 0.0
+    xc, yc = x-x.mean(), y-y.mean()
+    denominator = float(np.sqrt(np.dot(xc,xc)*np.dot(yc,yc)))
+    pearson = float(np.dot(xc,yc)/denominator) if denominator >= 1e-12 else 0.0
+    return float(kendalltau(x,y,variant="b",method="asymptotic").statistic), pearson
