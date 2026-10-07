@@ -158,6 +158,14 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — Three zensim integration tests fail on main. OPEN (fix in progress).** Found by the PRODQUAL-A label-free gate
+  run: `featcanon_rev4_contract::served_paths_serve_rev4` (1867 vs 1825 features) and
+  `research_engine_parity::research_everything_agrees_with_the_production_walk` (production 1825 vs research 1867) most likely
+  from the palette landing (`0a8a7ef8`), which was verified with `--lib` and the palette integration tests only; and
+  `bake_surface::formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse` (revision 5 accepted where the
+  test expects unknown). Related: serving the Rev5 production bakes currently needs `ZENSIM_FORMULA_REV=5`. Landings now run
+  the full `cargo test -p zensim --all-features` (integration tests included).
+
 * **2026-10-07 — E28 score chain posted an empty result. FIXED (this commit).** `e24_rev5.py e28-score` imported
   `lib.zen_stats` without putting `scripts/` on `sys.path` (sibling scripts insert it), so the chain's scorer died on
   import and `score_chain.sh` logged `E28 RESULT: |`. The scorer also needs the prepared root (`wide/`) locally, which

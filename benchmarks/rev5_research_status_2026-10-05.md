@@ -305,3 +305,17 @@ minimise MSE and maximise Kendall and Pearson correlation.
      explicit owner decision to accept the gap before the E31 arm is fit. E29 and E32 don't depend on it.
   3. Whether exploratory runs should also drop AIC-3 (new registrations already use the four-source design).
   4. The `zensim-validate` partial-producer test expectation (Known Bugs).
+
+## 23. Updates (2026-10-07 20:35 UTC)
+
+* **Production label-free gates: not green.** All three packed models load and score through the public Rust surface, and their
+  scores and features are bit-identical across ten dispatch permutations and WASM. But on the registered feature-only identity
+  probe (an image against itself, band [97.5, 100]) **seed 0 passes (≈98.3) and seeds 1 and 2 fail (≈96.8, ≈97.2)** on all four
+  probe sizes; the pixel path scores exactly 100 for all three. This reads no labels. It bears on the owner's composition choice.
+* **Three integration tests fail on main** (two from the palette landing, which I verified without the integration tests; one on
+  Rev5 revision handling), and serving the Rev5 bakes needs a process environment pin. Logged in Known Bugs; fix in progress.
+* **E29/E31/E32:** all three reviews found that the native trainer entry reads data before fully admitting each group's role,
+  weight and row keys. One integration lane is building a single shared admission owner for the combined program, then the
+  combined package (shared control + E29 + E32; E31's arm waits for the owner's provenance decision).
+* **KADID TERMINAL script:** the metadata race is closed (0 protected opens in 12,000 stressed attempts); round 4 fixes the label
+  and scorer-binary reopen-by-name and hard-link aliases.
