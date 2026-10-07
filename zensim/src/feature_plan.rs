@@ -481,7 +481,7 @@ impl Plan {
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let walk_width = layout.walk_width();
         let palette = want.intersect(&crate::feature_defs::family_slots(
-            ComputeToken::Palette,
+            crate::feature_defs::Family::Palette,
             crate::NUM_SCALES,
         ));
         if !palette.is_empty() {
@@ -1948,12 +1948,18 @@ pub(crate) mod servability_census {
             for t in parts.iter() {
                 want = want.union(&crate::feature_defs::family_slots(t, ns));
             }
+            if parts.has_palette() {
+                want = want.union(&crate::feature_defs::family_slots(
+                    crate::feature_defs::Family::Palette,
+                    ns,
+                ));
+            }
             let mut want = want.clipped_to(width);
             if let Some(selection) = &selection {
                 want = super::apply_registered_slot_selection(selection, want, ns);
             }
             assert_eq!(want, expect, "{compute}@w{width}: registry slots");
-            if parts.contains(crate::feature_set_id::ComputeToken::Palette) {
+            if parts.has_palette() {
                 let request = crate::research::Request::for_slots(want.clone(), width);
                 #[cfg(feature = "training")]
                 assert_eq!(request.validate().unwrap(), want, "palette research slots");

@@ -54,7 +54,7 @@
 //! `v1_feature_width_pure_function.rs` already holds the v1 extractor to.
 
 use crate::ZensimError;
-use crate::feature_defs::{self, Channel, CostClass, RevisionStatus};
+use crate::feature_defs::{self, Channel, CostClass, Family, RevisionStatus};
 use crate::feature_plan::{Plan, PlanError};
 use crate::feature_set_id::{ComputeToken, FeatureSetId, SlotSet};
 use crate::source::ImageSource;
@@ -807,7 +807,10 @@ impl Request {
     // Research-only extension; the existing fold plan sees exactly its old IDs
     // and layout. This deliberately does not relax Plan::for_bake's scope.
     fn plan(&self) -> Result<Plan, ResearchError> {
-        let palette = self.want.intersect(&family_slots(ComputeToken::Palette));
+        let palette = self.want.intersect(&feature_defs::family_slots(
+            Family::Palette,
+            crate::NUM_SCALES,
+        ));
         if palette.is_empty() {
             return Ok(Plan::derive_with_layout(&self.want, self.layout())?);
         }
@@ -1148,7 +1151,7 @@ fn build_computes(r: &feature_defs::Revision) -> bool {
 /// runs, and reporting the landed one would make the provenance lie about the
 /// bytes beside it.
 fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
-    if signal.family == ComputeToken::Palette {
+    if signal.family == Family::Palette {
         return "palette_v2";
     }
     // An active ARITHMETIC era (Rev4's `tiercanon`) moved every slot, so it
@@ -1166,7 +1169,7 @@ fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
 
 /// The commit of a signal's effective revision, or `"-"`.
 fn current_commit_of(signal: &'static feature_defs::SignalDef) -> &'static str {
-    if signal.family == ComputeToken::Palette {
+    if signal.family == Family::Palette {
         return BUILD_COMMIT.unwrap_or("unrecorded");
     }
     if let Some(r) = active_arithmetic_revision() {
@@ -1484,7 +1487,10 @@ fn extract_impl(
     #[cfg(feature = "training")]
     if !plan
         .emit
-        .intersect(&family_slots(ComputeToken::Palette))
+        .intersect(&feature_defs::family_slots(
+            Family::Palette,
+            crate::NUM_SCALES,
+        ))
         .is_empty()
     {
         if hdr.is_some() {
@@ -1526,15 +1532,18 @@ fn extract_impl(
             FeatureSetId::new_with_layout(
                 if plan
                     .emit
-                    .intersect(&family_slots(ComputeToken::Palette))
+                    .intersect(&feature_defs::family_slots(
+                        Family::Palette,
+                        crate::NUM_SCALES,
+                    ))
                     .is_empty()
                 {
                     id.compute()
                 } else {
                     if palette_only {
-                        crate::feature_set_id::ComputeParts::EMPTY.with(ComputeToken::Palette)
+                        crate::feature_set_id::ComputeParts::EMPTY.with_palette()
                     } else {
-                        id.compute().with(ComputeToken::Palette)
+                        id.compute().with_palette()
                     }
                 },
                 plan.layout_width(),
@@ -1545,16 +1554,19 @@ fn extract_impl(
         .or_else(|| {
             if plan
                 .emit
-                .intersect(&family_slots(ComputeToken::Palette))
+                .intersect(&feature_defs::family_slots(
+                    Family::Palette,
+                    crate::NUM_SCALES,
+                ))
                 .is_empty()
             {
                 None
             } else {
                 FeatureSetId::new_with_layout(
                     if palette_only {
-                        crate::feature_set_id::ComputeParts::EMPTY.with(ComputeToken::Palette)
+                        crate::feature_set_id::ComputeParts::EMPTY.with_palette()
                     } else {
-                        plan.compute.compute_parts().with(ComputeToken::Palette)
+                        plan.compute.compute_parts().with_palette()
                     },
                     plan.layout_width(),
                     &req.era_label,
@@ -1665,7 +1677,7 @@ pub fn full_width() -> usize {
     }
     #[cfg(not(feature = "training"))]
     {
-        feature_defs::block_base(ComputeToken::Palette, crate::NUM_SCALES)
+        feature_defs::block_base(Family::Palette, crate::NUM_SCALES)
             .expect("palette block")
             .0
     }

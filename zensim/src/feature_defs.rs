@@ -612,12 +612,46 @@ pub(crate) fn era_moved_slots(era: &str, width: u16, n_scales: usize) -> Vec<u16
         .collect()
 }
 
+/// Internal dispatch family. Palette has no supported public token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Family {
+    Supported(ComputeToken),
+    Palette,
+}
+
+impl From<ComputeToken> for Family {
+    fn from(token: ComputeToken) -> Self {
+        Self::Supported(token)
+    }
+}
+
+impl PartialEq<ComputeToken> for Family {
+    fn eq(&self, token: &ComputeToken) -> bool {
+        *self == Self::Supported(*token)
+    }
+}
+
+impl Family {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Supported(token) => token.as_str(),
+            Self::Palette => "palette",
+        }
+    }
+}
+
+impl core::fmt::Display for Family {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// One registered signal: a feature definition before the layout replicates
 /// it across scales and channels.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SignalDef {
     /// The slot family — the [`ComputeToken`] vocabulary, one owner.
-    pub family: ComputeToken,
+    pub family: Family,
     /// Index within the family's per-cell block (the `idx*` constant).
     pub block_local: u16,
     /// Name stem, `[a-z0-9_]+`, unique within the family.
@@ -1352,7 +1386,7 @@ const fn v1(
     kernel: KernelId,
 ) -> SignalDef {
     SignalDef {
-        family,
+        family: Family::Supported(family),
         block_local,
         name,
         statistic,
@@ -1397,7 +1431,7 @@ const fn v1_rev(
     revisions: &'static [Revision],
 ) -> SignalDef {
     SignalDef {
-        family,
+        family: Family::Supported(family),
         block_local,
         name,
         statistic,
@@ -1428,7 +1462,7 @@ const fn v1_with_defect(
     revisions: &'static [Revision],
 ) -> SignalDef {
     SignalDef {
-        family,
+        family: Family::Supported(family),
         block_local,
         name,
         statistic,
@@ -1482,7 +1516,7 @@ const fn v2sig(
     defect: Option<Defect>,
 ) -> SignalDef {
     SignalDef {
-        family: ComputeToken::V2,
+        family: Family::Supported(ComputeToken::V2),
         block_local,
         name,
         statistic,
@@ -1555,7 +1589,7 @@ const fn app(
     revisions: &'static [Revision],
 ) -> SignalDef {
     SignalDef {
-        family: ComputeToken::Append,
+        family: Family::Supported(ComputeToken::Append),
         block_local,
         name,
         statistic,
@@ -2229,7 +2263,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
         defect: Option<Defect>,
     ) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2313,7 +2347,7 @@ pub(crate) static CSFW: [SignalDef; 3] = {
     use Statistic::Global;
     const fn cs(block_local: u16, name: &'static str) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic: Global,
@@ -2349,7 +2383,7 @@ pub(crate) static DVIFM: [SignalDef; 30] = {
     use Statistic::Mean;
     const fn dv(block_local: u16, name: &'static str) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic: Mean,
@@ -2426,7 +2460,7 @@ pub(crate) static GRIDBLK: [SignalDef; 8] = {
         direction: Direction,
     ) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2465,7 +2499,7 @@ pub(crate) static RINGBASIS: [SignalDef; 6] = {
     use Statistic::Bin;
     const fn rb(block_local: u16, name: &'static str) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic: Bin,
@@ -2506,7 +2540,7 @@ pub(crate) static TAILHIST: [SignalDef; 12] = {
         revisions: &'static [Revision],
     ) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2551,7 +2585,7 @@ pub(crate) static ARTTYPE: [SignalDef; 6] = {
         kernel: KernelId,
     ) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2584,7 +2618,7 @@ pub(crate) static GMSBANK_SIGNALS: [SignalDef; 25] = {
     use KernelId::V2Gradient as K;
     const fn gb(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2642,7 +2676,7 @@ pub(crate) static MAPDEV_SIGNALS: [SignalDef; 5] = {
         direction: Direction,
     ) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic: Global,
@@ -2678,7 +2712,7 @@ pub(crate) static Z1MAX_SIGNALS: [SignalDef; 19] = {
         form: Form,
     ) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2727,7 +2761,7 @@ pub(crate) static GMSNATIVE_SIGNALS: [SignalDef; 15] = {
     use KernelId::V2Gradient as K;
     const fn gn(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic,
@@ -2767,7 +2801,7 @@ pub(crate) static DVIFMGATE_SIGNALS: [SignalDef; 5] = {
     use ComputeToken::Dvifmgate as F;
     const fn dg(block_local: u16, name: &'static str) -> SignalDef {
         SignalDef {
-            family: F,
+            family: Family::Supported(F),
             block_local,
             name,
             statistic: Statistic::Mean,
@@ -2808,7 +2842,7 @@ const PALETTE_REVISION: &[Revision] = &[
 ];
 const fn palette_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
     SignalDef {
-        family: ComputeToken::Palette,
+        family: Family::Palette,
         block_local,
         name,
         statistic: Statistic::Global,
@@ -2895,7 +2929,7 @@ pub(crate) enum Replication {
 
 /// A registered block: a signal table plus where it sits in the layout.
 pub(crate) struct BlockDef {
-    pub family: ComputeToken,
+    pub family: Family,
     pub signals: &'static [SignalDef],
     pub replication: Replication,
 }
@@ -2905,97 +2939,97 @@ pub(crate) struct BlockDef {
 /// would renumber — which the append-only directive forbids.
 pub(crate) static BLOCKS: &[BlockDef] = &[
     BlockDef {
-        family: ComputeToken::Basic,
+        family: Family::Supported(ComputeToken::Basic),
         signals: &BASIC,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Peaks,
+        family: Family::Supported(ComputeToken::Peaks),
         signals: &PEAKS,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Masked,
+        family: Family::Supported(ComputeToken::Masked),
         signals: &MASKED,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Iw,
+        family: Family::Supported(ComputeToken::Iw),
         signals: &IW,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::V2,
+        family: Family::Supported(ComputeToken::V2),
         signals: &V2,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Append,
+        family: Family::Supported(ComputeToken::Append),
         signals: &APPEND,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Append2,
+        family: Family::Supported(ComputeToken::Append2),
         signals: &APPEND2,
         replication: Replication::PerScale,
     },
     BlockDef {
-        family: ComputeToken::Csfw,
+        family: Family::Supported(ComputeToken::Csfw),
         signals: &CSFW,
         replication: Replication::PerScale,
     },
     BlockDef {
-        family: ComputeToken::Dvifm,
+        family: Family::Supported(ComputeToken::Dvifm),
         signals: &DVIFM,
         replication: Replication::Flat,
     },
     BlockDef {
-        family: ComputeToken::Gridblk,
+        family: Family::Supported(ComputeToken::Gridblk),
         signals: &GRIDBLK,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Ringbasis,
+        family: Family::Supported(ComputeToken::Ringbasis),
         signals: &RINGBASIS,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Tailhist,
+        family: Family::Supported(ComputeToken::Tailhist),
         signals: &TAILHIST,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Arttype,
+        family: Family::Supported(ComputeToken::Arttype),
         signals: &ARTTYPE,
         replication: Replication::PerScale,
     },
     BlockDef {
-        family: ComputeToken::Gmsbank,
+        family: Family::Supported(ComputeToken::Gmsbank),
         signals: &GMSBANK_SIGNALS,
         replication: Replication::GmsbankChroma,
     },
     BlockDef {
-        family: ComputeToken::Mapdev,
+        family: Family::Supported(ComputeToken::Mapdev),
         signals: &MAPDEV_SIGNALS,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Z1max,
+        family: Family::Supported(ComputeToken::Z1max),
         signals: &Z1MAX_SIGNALS,
         replication: Replication::PerChannel,
     },
     BlockDef {
-        family: ComputeToken::Gmsnative,
+        family: Family::Supported(ComputeToken::Gmsnative),
         signals: &GMSNATIVE_SIGNALS,
         replication: Replication::NativeXb,
     },
     BlockDef {
-        family: ComputeToken::Dvifmgate,
+        family: Family::Supported(ComputeToken::Dvifmgate),
         signals: &DVIFMGATE_SIGNALS,
         replication: Replication::Flat,
     },
     BlockDef {
-        family: ComputeToken::Palette,
+        family: Family::Palette,
         signals: &PALETTE_SIGNALS,
         replication: Replication::Flat,
     },
@@ -3029,9 +3063,10 @@ impl BlockDef {
 
 /// The base slot id of `family` at `n_scales`, and its block.
 pub(crate) fn block_base(
-    family: ComputeToken,
+    family: impl Into<Family>,
     n_scales: usize,
 ) -> Option<(usize, &'static BlockDef)> {
+    let family = family.into();
     let mut base = 0usize;
     for b in BLOCKS {
         if b.family == family {
@@ -3076,7 +3111,7 @@ pub(crate) fn full_width(n_scales: usize) -> usize {
 /// [`Replication::Flat`] blocks; `Flat` additionally requires `scale == 0`
 /// (it has no scale axis — see the variant's doc).
 pub(crate) fn slot_id(
-    family: ComputeToken,
+    family: impl Into<Family>,
     block_local: usize,
     scale: usize,
     channel: usize,
@@ -3200,14 +3235,14 @@ pub(crate) const CARRIER_SLOTS: [usize; 10] = [178, 190, 196, 226, 231, 237, 243
 /// eight contiguous blocks, the two scattered free tranches, and the carrier
 /// subset. Gated equal to `ComputeSet::populated_slots` for every token by
 /// [`tests::family_slots_match_compute_set_populated_slots`].
-pub(crate) fn family_slots(family: ComputeToken, n_scales: usize) -> SlotSet {
-    match family {
-        ComputeToken::Moments => tranche_slots(Tranche::RawMoments, n_scales),
-        ComputeToken::ClassC => tranche_slots(Tranche::ClassC, n_scales),
-        ComputeToken::Carriers => SlotSet::from_slots(CARRIER_SLOTS),
+pub(crate) fn family_slots(family: impl Into<Family>, n_scales: usize) -> SlotSet {
+    match family.into() {
+        Family::Supported(ComputeToken::Moments) => tranche_slots(Tranche::RawMoments, n_scales),
+        Family::Supported(ComputeToken::ClassC) => tranche_slots(Tranche::ClassC, n_scales),
+        Family::Supported(ComputeToken::Carriers) => SlotSet::from_slots(CARRIER_SLOTS),
         // `Hdr` is RESERVED — registered in the vocabulary, emitted by
         // nothing, so its slot set is legitimately empty rather than absent.
-        ComputeToken::Hdr => SlotSet::default(),
+        Family::Supported(ComputeToken::Hdr) => SlotSet::default(),
         other => match block_base(other, n_scales) {
             Some((base, block)) => SlotSet::from_ranges([(base, base + block.width(n_scales))]),
             None => SlotSet::default(),
@@ -3634,7 +3669,7 @@ mod tests {
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
         assert_eq!(
-            block_base(ComputeToken::Palette, NS).unwrap().0,
+            block_base(Family::Palette, NS).unwrap().0,
             1825,
             "legacy width stays frozen"
         );
@@ -3704,25 +3739,25 @@ mod tests {
     #[test]
     fn block_bases_match_the_documented_layout() {
         let expect = [
-            (ComputeToken::Basic, 0usize, 156usize),
-            (ComputeToken::Peaks, 156, 72),
-            (ComputeToken::Masked, 228, 72),
-            (ComputeToken::Iw, 300, 72),
-            (ComputeToken::V2, 372, 348),
-            (ComputeToken::Append, 720, 204),
-            (ComputeToken::Append2, 924, 20),
-            (ComputeToken::Csfw, 944, 12),
-            (ComputeToken::Dvifm, 956, 30),
-            (ComputeToken::Gridblk, 986, 96),
-            (ComputeToken::Ringbasis, 1082, 72),
-            (ComputeToken::Tailhist, 1154, 144),
-            (ComputeToken::Arttype, 1298, 24),
-            (ComputeToken::Gmsbank, 1322, 180),
-            (ComputeToken::Mapdev, 1502, 60),
-            (ComputeToken::Z1max, 1562, 228),
-            (ComputeToken::Gmsnative, 1790, 30),
-            (ComputeToken::Dvifmgate, 1820, 5),
-            (ComputeToken::Palette, 1825, 42),
+            (Family::Supported(ComputeToken::Basic), 0usize, 156usize),
+            (Family::Supported(ComputeToken::Peaks), 156, 72),
+            (Family::Supported(ComputeToken::Masked), 228, 72),
+            (Family::Supported(ComputeToken::Iw), 300, 72),
+            (Family::Supported(ComputeToken::V2), 372, 348),
+            (Family::Supported(ComputeToken::Append), 720, 204),
+            (Family::Supported(ComputeToken::Append2), 924, 20),
+            (Family::Supported(ComputeToken::Csfw), 944, 12),
+            (Family::Supported(ComputeToken::Dvifm), 956, 30),
+            (Family::Supported(ComputeToken::Gridblk), 986, 96),
+            (Family::Supported(ComputeToken::Ringbasis), 1082, 72),
+            (Family::Supported(ComputeToken::Tailhist), 1154, 144),
+            (Family::Supported(ComputeToken::Arttype), 1298, 24),
+            (Family::Supported(ComputeToken::Gmsbank), 1322, 180),
+            (Family::Supported(ComputeToken::Mapdev), 1502, 60),
+            (Family::Supported(ComputeToken::Z1max), 1562, 228),
+            (Family::Supported(ComputeToken::Gmsnative), 1790, 30),
+            (Family::Supported(ComputeToken::Dvifmgate), 1820, 5),
+            (Family::Palette, 1825, 42),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -4025,7 +4060,12 @@ mod tests {
         for block in BLOCKS {
             let v1_family = matches!(
                 block.family,
-                ComputeToken::Basic | ComputeToken::Peaks | ComputeToken::Masked | ComputeToken::Iw
+                Family::Supported(
+                    ComputeToken::Basic
+                        | ComputeToken::Peaks
+                        | ComputeToken::Masked
+                        | ComputeToken::Iw
+                )
             );
             for s in block.signals {
                 let has_c = s.revisions.iter().any(|r| r.commit == "56bbcda2");
@@ -4479,6 +4519,9 @@ mod owner_gates {
             let mut derived = SlotSet::default();
             for t in parts.iter() {
                 derived = derived.union(&family_slots(t, NS));
+            }
+            if parts.has_palette() {
+                derived = derived.union(&family_slots(Family::Palette, NS));
             }
             let mut derived = derived.clipped_to(width);
             if let Some(selection) = json_str_field(&obj, "slot_selection") {

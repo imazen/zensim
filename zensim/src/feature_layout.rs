@@ -236,6 +236,12 @@ pub(crate) fn slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     for t in id.compute().iter() {
         union = union.union(&crate::feature_defs::family_slots(t, ns));
     }
+    if id.compute().has_palette() {
+        union = union.union(&crate::feature_defs::family_slots(
+            crate::feature_defs::Family::Palette,
+            ns,
+        ));
+    }
     let dense = union.clipped_to(crate::feature_defs::full_width(ns));
     // The SPARSE reading needs a clip width. A legacy `@w<N>` id names it; the
     // canonical layout-free form does not, so try every width any registered
@@ -359,6 +365,12 @@ fn dense_slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     let mut union = SlotSet::from_slots([]);
     for t in id.compute().iter() {
         union = union.union(&crate::feature_defs::family_slots(t, ns));
+    }
+    if id.compute().has_palette() {
+        union = union.union(&crate::feature_defs::family_slots(
+            crate::feature_defs::Family::Palette,
+            ns,
+        ));
     }
     let dense = union.clipped_to(crate::feature_defs::full_width(ns));
     // A set that IS the identity range is not a dense layout, it is the

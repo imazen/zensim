@@ -217,10 +217,7 @@ fn main() {
     );
     let research_path =
         palette_only || full_986 || full_rev4 || full_gmsbank || restore_cuts.is_some();
-    let palette_layout = palette_only
-        || restore_cuts
-            .as_ref()
-            .is_some_and(|tokens| tokens.contains(&zensim::feature_set_id::ComputeToken::Palette));
+    let palette_layout = palette_only;
     // `--era-label TOKEN`: stamp the extraction's `feature_set_id` era
     // (`Request::with_era_label`). Research path only; the token must be a
     // valid `feature_set_id` token ([a-z0-9_]).
@@ -299,7 +296,7 @@ fn main() {
         let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
         let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
         let want = if palette_only {
-            zensim::research::family_slots(zensim::feature_set_id::ComputeToken::Palette)
+            zensim::feature_set_id::SlotSet::from_ranges([(1825, 1867)])
         } else {
             match &restore_cuts {
                 Some(tokens) => tokens.iter().fold(

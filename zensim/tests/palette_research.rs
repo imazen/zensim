@@ -2,7 +2,7 @@
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zensim::{
     RgbSlice,
-    feature_set_id::{ComputeToken, SlotSet},
+    feature_set_id::SlotSet,
     research::{self, Request},
 };
 
@@ -15,7 +15,7 @@ fn palette_tier_and_old_family_parity() {
             .collect();
         let dst: Vec<_> = src.iter().map(|p| [p[0] / 2, p[1], p[2]]).collect();
         let (s, d) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
-        let palette = research::family_slots(ComputeToken::Palette);
+        let palette = SlotSet::from_ranges([(1825, 1867)]);
         let req = Request::for_slots(palette.clone(), 1867)
             .with_era_label("palette_v2")
             .dense();
@@ -31,7 +31,7 @@ fn palette_tier_and_old_family_parity() {
         assert_eq!(base.values(), &sparse.values()[1825..]);
         assert_eq!(base.values().len(), 42);
         let fsid = base.feature_set_id().unwrap();
-        assert!(fsid.compute().contains(ComputeToken::Palette));
+        assert!(fsid.compute().to_string() == "palette");
         assert_eq!(Request::for_set(fsid).unwrap().validate().unwrap(), palette);
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |_| {
             let got = research::extract(&req, &s, &d).unwrap();
@@ -97,7 +97,7 @@ fn palette_respects_strided_rows() {
         }
     }
     let s = RgbSlice::new(&src, 17, 19);
-    let req = Request::for_slots(research::family_slots(ComputeToken::Palette), 1867).dense();
+    let req = Request::for_slots(SlotSet::from_ranges([(1825, 1867)]), 1867).dense();
     assert_eq!(
         research::extract(&req, &s, &rows).unwrap().values(),
         &[0.0; 42]
@@ -106,7 +106,7 @@ fn palette_respects_strided_rows() {
 
 #[test]
 fn superseded_palette_revision_refuses() {
-    let want = research::family_slots(ComputeToken::Palette);
+    let want = SlotSet::from_ranges([(1825, 1867)]);
     let old = Request::for_slots(want.clone(), 1867).with_era_label("palette_v1");
     assert!(matches!(
         old.validate(),
@@ -118,4 +118,33 @@ fn superseded_palette_revision_refuses() {
         old_named.validate(),
         Err(research::ResearchError::RevisionUnavailable { .. })
     ));
+}
+
+#[test]
+fn private_palette_identity_preserves_supported_token_vocabulary() {
+    use zensim::feature_set_id::{ComputeParts, ComputeToken, FeatureSetId};
+    assert_eq!(ComputeToken::ALL.len(), 22);
+    assert_eq!(ComputeToken::parse("palette"), None);
+    let id = FeatureSetId::parse("palette@w1867/palette_v2#30b09cd1").unwrap();
+    assert_eq!(id.compute().to_string(), "palette");
+    assert_eq!(id.compute().iter().count(), 0);
+    let slots = SlotSet::from_ranges([(1825, 1867)]);
+    assert_eq!(Request::for_set(&id).unwrap().validate().unwrap(), slots);
+    let supported = ComputeToken::ALL
+        .iter()
+        .copied()
+        .fold(ComputeParts::EMPTY, ComputeParts::with);
+    assert!(
+        !supported
+            .to_string()
+            .split('+')
+            .any(|name| name == "palette")
+    );
+    let mixed = ComputeParts::parse(&format!("{}+palette", supported)).unwrap();
+    assert_eq!(
+        mixed.iter().collect::<Vec<_>>(),
+        supported.iter().collect::<Vec<_>>()
+    );
+    assert_eq!(ComputeParts::parse(&mixed.to_string()), Some(mixed));
+    assert!(mixed.to_string().contains("dvifmgate+palette+moments"));
 }
