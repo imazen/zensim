@@ -428,7 +428,7 @@ def cmd_palette(a):
     if a.revision!=5 or a.limit or a.era!='palette_v1' or a.tier!='native':
         raise ValueError('palette requires complete Rev5 palette_v1 native extraction')
     root=Path(a.palette_instrument)
-    if root.resolve()!=Path('/var/tmp/rev4-featpot/v2c5'):raise ValueError('explicit authorized v2c5 root required')
+    if root.resolve()!=Path('/var/tmp/rev4-featpot/v2c5').resolve():raise ValueError('explicit authorized v2c5 root required')
     selected={};receipts={}
     for name in PALETTE_TABLES:
         path=root/'wide/main/real'/f'{name}.keys.parquet'
