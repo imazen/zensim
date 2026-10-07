@@ -319,15 +319,38 @@ def rss(binary, root, parity_path):
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
 
 
+def collection_status(root):
+    """Inspect collection markers and the most recent logged quiet check."""
+    root=Path(root)
+    if not root.is_dir():
+        raise FileNotFoundError(root)
+    waits=list(root.glob('timing/*/quiet-waits.jsonl'))+list(root.glob('rss/quiet-waits.jsonl'))
+    latest=None
+    for path in sorted(waits,key=lambda p:p.stat().st_mtime,reverse=True):
+        lines=path.read_text().splitlines()
+        if lines:
+            latest={'path':str(path),'check':json.loads(lines[-1])}
+            break
+    print(json.dumps({'raw_dir':str(root),
+                      'timing_completion_markers':len(list(root.glob('timing/*/COMPLETE.json'))),
+                      'expected_timing_segments':len(TIERS)*len(THREADS)*len(GEOMETRIES),
+                      'rss_records':len(list(root.glob('rss/v4x-*.json'))),
+                      'expected_rss_records':len(GEOMETRIES)*2*len(ARMS),
+                      'excluded_attempts':len(list(root.glob('timing/*.bak'))),
+                      'latest_quiet_check':latest},indent=2))
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('mode',choices=['parity','timing','rss','freeze'])
+    ap.add_argument('mode',choices=['parity','timing','rss','freeze','status'])
     ap.add_argument('--binary'); ap.add_argument('--dest',required=True)
     ap.add_argument('--build-log')
     ap.add_argument('--rounds',type=int,default=32)
     ap.add_argument('--parity'); ap.add_argument('--analyzer'); ap.add_argument('--only',help='comma-separated segment tags')
     ap.add_argument('--collect-legacy-failures',action='store_true',help='complete the strict grid while recording Rev3 tolerance failures; does not admit timings')
     args=ap.parse_args()
+    if args.mode=='status':
+        collection_status(args.dest);return
     if args.mode=='freeze':
         if not args.build_log: ap.error('--build-log required for freeze')
         freeze_binary(args.build_log,args.dest);return
