@@ -240,6 +240,7 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     'governors':sorted({p.read_text().strip() for p in Path('/sys/devices/system/cpu').glob('cpu*/cpufreq/scaling_governor')}),
                     'tier':tier,'threads':threads,'cpuset':CPUSETS[threads],'geometry':geometry,
                     'rounds':rounds,'arms':arms,'worker_pids':[p.pid for p in owners],
+                    'gate_trace':'ZENBENCH_GATE_TRACE' in env,
                     'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
             write(dest/'header.json',header)
             raw=dest/'zenbench.json'
@@ -342,7 +343,7 @@ def collection_status(root):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('mode',choices=['parity','timing','rss','freeze','status'])
+    ap.add_argument('mode',choices=['parity','timing','rss','freeze','status','diagnose'])
     ap.add_argument('--binary'); ap.add_argument('--dest',required=True)
     ap.add_argument('--build-log')
     ap.add_argument('--rounds',type=int,default=32)
@@ -355,10 +356,16 @@ def main():
         if not args.build_log: ap.error('--build-log required for freeze')
         freeze_binary(args.build_log,args.dest);return
     if not args.binary: ap.error('--binary required')
-    if args.mode in ('timing','rss') and not args.parity: ap.error('--parity required')
-    if args.mode=='timing' and not args.analyzer: ap.error('--analyzer required')
+    if args.mode in ('timing','rss','diagnose') and not args.parity: ap.error('--parity required')
+    if args.mode in ('timing','diagnose') and not args.analyzer: ap.error('--analyzer required')
     if args.mode=='parity': preflight(args.binary,args.dest,args.collect_legacy_failures)
     elif args.mode=='timing': timing(args.binary,args.dest,args.rounds,args.parity,args.analyzer,args.only.split(',') if args.only else None)
+    elif args.mode=='diagnose':
+        cells={f'{t}-t{n}-{g}':(g,t,n) for t in TIERS for n in THREADS for g in GEOMETRIES}
+        if args.only not in cells: ap.error('diagnose requires --only with one grid tag')
+        os.environ['ZENBENCH_GATE_TRACE']='1'
+        g,t,n=cells[args.only]
+        run_segment(args.binary,args.dest,g,t,n,args.rounds,parity_receipt(args.parity),args.analyzer)
     else: rss(args.binary,args.dest,args.parity)
 
 

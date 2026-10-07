@@ -222,6 +222,13 @@ class SpeedqTest(unittest.TestCase):
         rec=json.loads(complete.read_text());rec['paired_alignment_verified']=False;complete.write_text(json.dumps(rec))
         with self.assertRaises(AssertionError): report.speedq_report(args)
 
+        # Traced rounds are diagnostics even if every gate happened to pass.
+        rec['paired_alignment_verified']=True;complete.write_text(json.dumps(rec))
+        header=complete.parent/'header.json'
+        rec=json.loads(header.read_text());rec['gate_trace']=True;header.write_text(json.dumps(rec))
+        with self.assertRaisesRegex(AssertionError,'diagnostic tracing'):
+            report.speedq_report(args)
+
 
 
 if __name__ == '__main__':

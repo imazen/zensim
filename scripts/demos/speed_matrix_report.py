@@ -369,6 +369,7 @@ def speedq_report(args) -> int:
         assert not inner['zenbench_unreliable'] and all(v is True for v in inner['gate_clean'])
         header = json.loads((path/'header.json').read_text())
         assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
+        assert not header.get('gate_trace',False), 'diagnostic tracing cannot qualify timing evidence'
         assert complete['rounds']==header['rounds']
         values = inner['paired_rounds']
         assert set(values) == set(arms) and all(len(v) == header['rounds'] for v in values.values())
