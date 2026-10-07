@@ -254,7 +254,7 @@ source_id % 10 == 9  → TEST    ( 14,000 sources /  70,000 cells)
 | **NITS-IQA** (9 refs × 9 distortions × 5 levels = 405 pairs, 512×512, MOS 0–100, 162 observers) | **T0, EVAL-ONLY (INGESTED 2026-10-03)** | Open external held-out set for the featpot instrument (§3e): never a training input. Pairs `build_fr_corpus_pairs.py nits` → `/mnt/v/datasets/nits-iqa_extracted/nits_iqa_pairs.tsv`; `human_score` = MOS/100, QUALITY-oriented (`check_target_orientation` declares `quality`, ground truth = raw `Score.xlsx`). Distortions D1–D9: Gaussian blur, chromatic Gaussian noise, chromatic uniform noise, **contrast change**, **pixelate mosaic**, motion blur, JPEG, JPEG2000, JPEG-XT. The D7 files are JPEG bitstreams named `.bmp` (as released) | Authors' release (Ruikar & Chaudhury, Sensors 2023, doi:10.3390/s23042279, CC BY): no split; whole-set correlation | 9 references never in any training corpus; dHash audit 2026-10-03 (§3e): 1 flag at d≤10 (I8 vs a KADIS cat photo, unrelated); no TID2013 crop |
 | **MCIQA-2K** (2,000 colorized images = 5 colorization models × 400 COCO test2017 images; z-scored MOS for colour smearing, semantic colour misalignment, global naturalness) | **T0, EVAL-ONLY, EXPLORATORY (INGESTED 2026-10-03)** | No-reference by design (humans rated plausibility, not fidelity), so the full-reference read pairs each colorized image with its COCO test2017 original (`coco_test2017_refs/`, same size). Pairs `build_fr_corpus_pairs.py mciqa`; `human_score` = global naturalness min-max scaled (QUALITY-oriented, declared `quality`); CS/SCM/GN z kept as columns. Reported as a colour-sensitivity diagnostic only, never as accuracy-vs-humans for a fidelity metric | Authors (arXiv:2609.14495, CC BY 4.0): official train (1,600) / test (400) split for NR models | COCO test2017 images are not in any training corpus; dHash audit 2026-10-03 (§3e): 31 flags at d≤10, all unrelated (degenerate horizon-like hashes); thumbnail NCC max < 0.9 |
 | **KonIQ-10k** (10,073 in-the-wild photos, 1024×768 + 512×384, MOS) | **Source-image pool (INGESTED 2026-10-03)** | No reference images, so its MOS cannot label a full-reference pair and is never used as a target. Role: content-diverse, license-clean pristine sources for synthetic coverage ladders (design log E15 follow-ups); MOS used only to pick high-quality sources. Any coverage leg built on it is split by source image (`sha256(filename) % 10 < 8` train) | Authors (Hosu et al., TIP 2020; CC-licensed images allowing edits): NR benchmark, 7,058 / 1,000 / 2,015 split | Flickr sources. Audit 2026-10-03 vs 3,101 eval references (T0 estate, NITS, LIVE, MCIQA, KADID, TID, KonFiG, CID22-train, KonJND): dHash 367 flags at d≤10 (52 at d≤6), every closest pair unrelated (dark / flat degenerate hashes); thumbnail NCC max 0.97, top 20 all unrelated smooth-gradient scenes — no duplicate found. Pool table `koniq10k_pool.parquet` (`scripts/canonical_corpus/build_koniq_pool.py`; 10,073 scored images, 8,019 train / 2,054 holdout; the zip's 300 unscored JPEGs excluded) |
-| **UPIQ / HDR** | T0-eval for HDR track | Held-out UPIQ eval per HDR plan | Mikhailiuk 2021: consolidated dataset, JOD-rescaled | — |
+| **UPIQ / HDR** | **UPIQ-380 (HDR subset): T2 TRAIN since 2026-10-07 (owner decision, ledger below); rest of UPIQ: T0** | UPIQ-380 human JOD scores may train HDR legs (its holdout value was spent: ~21 looks, DATASET_HISTORY); any other UPIQ portion stays held-out eval | Mikhailiuk 2021: consolidated dataset, JOD-rescaled. HDR-VDP-3 was calibrated on UPIQ, so UPIQ never independently tests an HDR-VDP-3-trained model | — |
 | **AIC-HDR2025** (5 HDR src × 4 codecs × 5 levels, JND) | — | **UNOBTAINABLE (user ruling 2026-08-05): data was never publicly released and the authors are unresponsive — STOP live-checking `github.com/jpeg-aic/AIC-HDR2025`.** README-only clone at `/mnt/v/datasets/aic-hdr2025/`; dropped from HDR anchor plans (`HDR_PLAN.md`, `PLAN_HDR.md`) | Paper: QoMEX'25, arXiv:2506.12505 | — (no data on disk) |
 | **hdr_v3mix @944 (hdr944-leg)** (17,100 zenjxl HDR-PQ cells → 7,410 train + 3,900 val after dedup; 58 imazen-26-hdr origins) | **T2 (944 LEG BUILT 2026-08-03; REGISTERED 2026-08-05)** | Digit origin split on the leading numeric stem (`origin_split.split_of`): 38 train / 20 val origins, overlap 0, `split_of` agrees 870/870 refs (campaign **Appendix Q** G-Q3). Features = chunk-2 HDR route at `Folded720Append2` (`compute_folded720_append2_features_hdr`, PQ 10k nits); target = cvvdp-mix `0.5·clip01(ssim2/100)+0.5·clip01((JOD−6)/4)`, **quality-oriented, gated** (`check_target_orientation.py hdr_v3mix` in-table mode: train +0.8494 / val +0.8606; caveat: consistency vs carried JOD, not independent). NEW-REGIME leg — never column-mix with SDR tables or the v3 pu-linear 372 corpus (same targets, different feature space). Manifest: `/mnt/v/output/zensim/hdr944-leg/_MANIFEST.json`; Tower `zensim-hdrp1-2026-08-05/hdr944-leg/` | N/A (our corpus; targets are metric teachers) | G-Q4 PASS: imazen-26 zfold7 2026-03 personal captures are temporally+authorially disjoint from every HDR eval source (UPIQ narwaria/korshunov, SI-HDR, HDR-VDC, AVT, CHUG, Rousselot); id-containment 0 hits |
 
@@ -596,7 +596,7 @@ mirror manifest):**
 | KonFiG | `konfig_originsplit_train` ONLY for new recipes | originsplit_val | originsplit_test | full-table-trained models keep their annotation |
 | hdrmix | 38 train-digit origins (verified {0,2,4,6,8}) | val file carries {1,3,5}+{7,9} — carve TERMINAL {7,9} at next HDR wave | — | queued |
 | safesyn / teachers | all-train | — | — | rule: an all-train dataset may NOT gain an eval role without splitting first |
-| T0 estate (aic3/aic4/sdr25/csiq/live/UPIQ…) | NEVER | — | eval-only | checker hard-errors on any T0 name in a train group |
+| T0 estate (aic3/aic4/sdr25/csiq/live/UPIQ except UPIQ-380…) | NEVER | — | eval-only | checker hard-errors on any T0 name in a train group; UPIQ-380 re-designated T2 on 2026-10-07 |
 
 **Recipe migration:** existing bakes are NOT retrained; they carry the audit
 verdict (north-anchor: compliant except the kadis leg + kadid/tid guards).
@@ -1402,3 +1402,25 @@ HDR judgment, encoder provenance completion and shipping gates remain missing.
 See [E27 worklog](../benchmarks/E27_WORKLOG.md),
 [complete measured summary](../benchmarks/e27_result_summary_2026-10-05.json) and
 [immutable Tower evidence](../benchmarks/e27_final_2026-10-05.pointer.json).
+
+## Exposure ledger — 2026-10-07: owner decisions on production human data, KADID TERMINAL and UPIQ-380
+
+Owner decisions, verbatim (2026-10-07, in reply to the decision brief https://claude.ai/artifact/8DxtQmJErgsxTfHRytaCHF):
+
+> D1 (human data): B — approve KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL, CID22-A; AIC-3 stays in the holdout family
+> D2 (KADID TERMINAL): B — register now, read once on the final qualified model
+> D3 (UPIQ): B — re-designate UPIQ-380 as HDR training data
+
+* **D1 — production human training population.** KADID-10k TRAIN + SELECT, TID2013, KonFiG-IQA TRAIN + VAL and CID22-A (25 references)
+  may train the qualified production model (`shippath-human-role-decision-v1`, `allowed_use = qualified-recipe-training`). **AIC-3 is
+  excluded** and stays in the JPEG-AIC holdout family (rule `jpeg-aic-family-holdout-2026-09-01`, §3d), together with the AIC-4 sample
+  and SDR25. Consequence recorded: the R7 confirmatory fits (2026-10-04) trained on all five design sources including AIC-3 and were read
+  on the AIC-4 sample, which shares AIC-3's content; that part of the R7 read is flagged as possibly contaminated by the family rule. The
+  production recipe drops the AIC-3 human leg; the change is checked by a registered comparison before the production fit.
+* **D2 — KADID TERMINAL** (2,000 pairs, never read) is reserved for exactly one confirmatory read of the final qualified model; the read
+  is registered now (`benchmarks/kadid_terminal_registration_2026-10-07.md`) and no label is opened before that model exists and passes
+  its release gates.
+* **D3 — UPIQ-380** (UPIQ's HDR subset) is re-designated from T0 to T2 training data for HDR legs. Basis: it is already burned as a
+  test (~21 looks, `docs/DATASET_HISTORY.md`), and E26/E27 showed teacher-only HDR legs cannot settle cross-image HDR calibration. Any
+  other UPIQ portion stays T0. A new independent human HDR test is needed later (the planned Squintly HDR study).
+
