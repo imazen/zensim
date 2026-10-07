@@ -130,9 +130,7 @@ class SpeedqTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError,'unambiguous'):runner.freeze_binary(log,self.root/'rejected')
         self.assertFalse((self.root/'rejected').exists())
 
-    def test_full_report_fits_measured_axes_and_retains_missing_coverage(self):
-        # A mathematical fixture tests the reporter's units and CI decisions;
-        # these synthetic values never enter qualification output.
+    def full_report_parity_fixture(self):
         parity=self.root/'full-parity';parity.mkdir()
         rows=[]
         for g in runner.GEOMETRIES:
@@ -145,10 +143,17 @@ class SpeedqTest(unittest.TestCase):
         (parity/'PARITY_STRICT_PASS.json').write_text(json.dumps(dict(
             status='STRICT_PASS_LEGACY_TOLERANCE_FAIL',strict_revisions=[4,5],records=rows,
             rev3_differences=[dict(tolerance_violations=1,max_abs_feature_difference=2e-6,max_tolerance_fraction=2,score_difference=0)])))
+        return parity,rows
+
+    def test_full_report_fits_measured_axes_and_retains_missing_coverage(self):
+        # A mathematical fixture tests the reporter's units and CI decisions;
+        # these synthetic values never enter qualification output.
+        parity,rows=self.full_report_parity_fixture()
         for g in runner.GEOMETRIES:
             pixels=__import__('math').prod(map(int,g.split('x')))
             dest=self.root/'timing'/f'v4x-t1-{g}';dest.mkdir(parents=True)
-            (dest/'COMPLETE.json').write_text('{}')
+            (dest/'COMPLETE.json').write_text(json.dumps(dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True)))
+            (dest/'interference.json').write_text(json.dumps(dict(admitted=True,foreign=[])))
             (dest/'zenbench.inner.json').write_text(json.dumps(dict(
                 zenbench_unreliable=False,gate_clean=[True]*32,
                 paired_rounds={a:[100+2*pixels]*32 for a in runner.ARMS})))
@@ -172,6 +177,51 @@ class SpeedqTest(unittest.TestCase):
         rows[0]['revision']=4;rows[0]['score_bits']='different'
         (parity/'PARITY_STRICT_PASS.json').write_text(json.dumps(dict(status='PASS',strict_revisions=[4,5],records=rows)))
         with self.assertRaises(AssertionError): report.speedq_report(args)
+
+    def test_complete_report_maps_all_axes_and_does_not_call_uncertainty_equivalence(self):
+        self.full_report_parity_fixture()
+        provenance=self.root/'provenance';provenance.mkdir()
+        (provenance/'test.artifact.json').write_text(json.dumps(dict(binary_sha256='test',dependencies={'test':dict(package_id='synthetic fixture',features=[])})))
+        configs=[(t,n) for t in runner.TIERS for n in runner.THREADS]
+        for k,(tier,n) in enumerate(configs):
+            for g in runner.GEOMETRIES:
+                pixels=__import__('math').prod(map(int,g.split('x')))
+                dest=self.root/'timing'/f'{tier}-t{n}-{g}';dest.mkdir(parents=True)
+                (dest/'COMPLETE.json').write_text(json.dumps(dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True)))
+                (dest/'interference.json').write_text(json.dumps(dict(admitted=True,foreign=[])))
+                slopes=[1,3,2,4,5,6,7]
+                values={a:[1000*(k+1)+100*i+slopes[i]*pixels]*32 for i,a in enumerate(runner.ARMS)}
+                (dest/'zenbench.inner.json').write_text(json.dumps(dict(zenbench_unreliable=False,gate_clean=[True]*32,paired_rounds=values)))
+                (dest/'header.json').write_text(json.dumps(dict(rounds=32,binary_sha256='test',quiet_gate=dict(admitted=True,load1=1))))
+                delta=values['by_v2fy_r5'][0]-values['by_v2fy_r4'][0]
+                (dest/'paired_analysis.json').write_text(json.dumps(dict(ci_lower=delta-1,ci_median=delta,ci_upper=delta+1,resolution_limited=False,pct_change=100*delta/values['by_v2fy_r4'][0])))
+        rss=self.root/'rss';rss.mkdir()
+        for g in runner.GEOMETRIES:
+            for n in [1,32]:
+                for a in runner.ARMS:
+                    (rss/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(max_rss_kib=12345,quiet_gate=dict(admitted=True))))
+        args=SimpleNamespace(raw_dir=self.root,out_json=self.root/'out.json',out_md=self.root/'out.md')
+        report.speedq_report(args)
+        out=json.loads(args.out_json.read_text())
+        self.assertEqual(out['status'],'MEASURED')
+        self.assertEqual(out['missing'],[])
+        self.assertEqual(out['alpha_ns_beta_ns_per_pixel_r2'][23][6],[24600,7,1])
+        self.assertEqual(out['medians_ns'][23][0][6],24600+7*64*64)
+        self.assertEqual(out['rss_coverage'],[112,112])
+        self.assertTrue(out['verdict']['rev5_at_least_as_fast_everywhere'])
+        self.assertIn('faster in all 192 cells',args.out_md.read_text())
+        # One interval crossing zero makes the everywhere conclusion unproven.
+        path=self.root/'timing/scalar-t32-64x64/paired_analysis.json'
+        rec=json.loads(path.read_text());rec.update(ci_upper=1);path.write_text(json.dumps(rec))
+        report.speedq_report(args)
+        out=json.loads(args.out_json.read_text())
+        self.assertIsNone(out['verdict']['rev5_at_least_as_fast_everywhere'])
+        self.assertEqual(out['verdict']['inconclusive_cells'],1)
+        # A completion filename cannot certify failed alignment or interference.
+        complete=self.root/'timing/scalar-t32-64x64/COMPLETE.json'
+        rec=json.loads(complete.read_text());rec['paired_alignment_verified']=False;complete.write_text(json.dumps(rec))
+        with self.assertRaises(AssertionError): report.speedq_report(args)
+
 
 
 if __name__ == '__main__':

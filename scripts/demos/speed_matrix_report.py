@@ -361,10 +361,15 @@ def speedq_report(args) -> int:
     for tier,n,geometry in expected:
         path = root/'timing'/f'{tier}-t{n}-{geometry}'
         if not (path/'COMPLETE.json').exists(): continue
+        complete=json.loads((path/'COMPLETE.json').read_text())
+        assert complete['status']=='PASS' and complete['paired_alignment_verified'] and complete['zenbench_gate_clean']
+        interference=json.loads((path/'interference.json').read_text())
+        assert interference['admitted'] and not interference['foreign']
         inner = json.loads((path/'zenbench.inner.json').read_text())
         assert not inner['zenbench_unreliable'] and all(v is True for v in inner['gate_clean'])
         header = json.loads((path/'header.json').read_text())
         assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
+        assert complete['rounds']==header['rounds']
         values = inner['paired_rounds']
         assert set(values) == set(arms) and all(len(v) == header['rounds'] for v in values.values())
         medians[(tier,n,geometry)] = {a: statistics.median(values[a]) for a in arms}
@@ -405,6 +410,7 @@ def speedq_report(args) -> int:
     faster=[(key,a) for key,a in analyses.items() if a['ci_upper']<0 and not a['resolution_limited']]
     inconclusive=len(analyses)-len(slower)-len(faster)
     legacy=parity['rev3_differences']
+    legacy_failed=[r for r in legacy if r['tolerance_violations']>0]
     def compact(v): return float(f'{v:.8g}')
     result={
         'status':'INCOMPLETE' if missing else 'MEASURED', 'missing':missing,
@@ -430,9 +436,9 @@ def speedq_report(args) -> int:
     args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')
     lines=['# Rev5 SPEEDQ runtime qualification','']
     if missing: lines += ['MISSING: '+ '; '.join(missing)+'.','']
-    lines += [f"Rev5 is {'slower in '+str(len(slower))+' cells' if slower else 'not established as at least as fast everywhere'} versus Rev4: {len(faster)} faster, {len(slower)} slower, {inconclusive} inconclusive of {len(analyses)} measured size/tier/thread cells. Classification uses pointwise paired 95% CIs for Rev5 minus Rev4, with timer-resolution limits retained; these are not simultaneous intervals over the grid.", '',
+    lines += [f"Rev5 is {'slower in '+str(len(slower))+' cells' if slower else ('faster in all 192 cells' if len(faster)==192 else 'not established as at least as fast everywhere')} versus Rev4: {len(faster)} faster, {len(slower)} slower, {inconclusive} inconclusive of {len(analyses)} measured size/tier/thread cells. Classification uses pointwise paired 95% CIs for Rev5 minus Rev4, with timer-resolution limits retained; these are not simultaneous intervals over the grid.", '',
         'The same 420-ID, H128, one-output by_v2fy timing weights run through isolated Rev3/Rev4/Rev5 formula owners. They are fixed Rev4-trained research weights, not a Rev5 product-bake qualification. B runs its serving Rev1 arithmetic. Inputs are the existing deterministic speed-matrix RGB8 pairs; no labels or holdouts were opened.','',
-        'All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 is a timing baseline: SIMD ceilings satisfy the documented feature tolerance, while all 48 scalar cells fail it (max feature absolute difference 3.6560852526013043e-6; max tolerance fraction 3.428426473557622). The failed legacy tolerance is recorded, not renamed a pass.','',
+        f"All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 remains a timing baseline: {len(legacy_failed)} of 192 cells exceed the documented feature tolerance (max absolute feature difference {max(r['max_abs_feature_difference'] for r in legacy):.17g}; max tolerance fraction {max(r['max_tolerance_fraction'] for r in legacy):.17g}). Failing tiers: {', '.join(sorted({r.get('tier','unspecified') for r in legacy_failed})) or 'none'}. Legacy failures are recorded rather than renamed a pass.",'',
         'Each timing segment requires load1 < 2.0 and no foreign cargo/rustc/training before warmup and immediately before rounds. The retained rounds must all have a clean zenbench gate and no observed build/training interference. Persistent workers time the scoring call with Instant; separate parent rounds retain IPC/bookkeeping. Pair statistics reuse zenbench’s engine owner; no IPC estimate is subtracted. Setup, metadata stamping, input generation, and Rust-av sRGB widening are outside the timed body. Rayon pools and scoring buffers are warm.','',
         'Dispatch labels are ceilings forced through archmage with its testing guard; kernels without a v4 variant may use v3. Threads 1/2/4/8 use CCD0; 16 spans CCDs, and 32 adds SMT. Cache topology changes are part of these measured configurations.','',
         '## Alpha and beta fits','',
