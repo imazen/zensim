@@ -10,6 +10,7 @@ import io
 import json
 from pathlib import Path
 import tarfile
+import subprocess
 
 
 def sha(path):
@@ -26,6 +27,9 @@ def write(path, value):
 
 
 def freeze(bundle, source, source_commit, metrics_commit):
+    resolved = subprocess.check_output(["jj", "log", "-r", source_commit, "--no-graph", "-T", "commit_id"], cwd=source, text=True).strip()
+    if resolved != source_commit or len(metrics_commit) != 40:
+        raise ValueError("freeze requires exact verified source and metrics commit IDs")
     pins = json.loads((bundle / "PACKAGE_PINNED.json").read_text())
     if sha(bundle / "program.tar.gz") != pins["program_sha"]:
         raise ValueError("fit program changed")
