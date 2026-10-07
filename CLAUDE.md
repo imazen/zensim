@@ -158,6 +158,15 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — SHIPPATH7's by_v2fy projection producer broke three registry tests. Two FIXED (`47a2e1d4`), one OPEN pending an owner decision.**
+  `benchmarks/feature_sets_registry.json` registers `basic+v2@w720/rev5_localwin#62adfc93` as a producer whose recorded slots are the
+  420 by_v2fy IDs (all other slots NaN). The zensim registry gates derived the full 504-slot `basic+v2` set and failed; the entry now
+  declares `slot_selection: by_v2fy_420`, which both gates apply exactly. Still failing:
+  `zensim-validate/tests/feature_set_match.rs::basic_only_bake_compatibility_respects_partial_producers`, which assumes every
+  ≥372-wide root populates basic slots (only the September sampling producers are exempt). The projection root correctly reports
+  unpopulated basic slots 0–12 and 26–38; making the test pass means changing its expected count for this entry (or registering the
+  projection differently), which needs the owner's OK.
+
 * **2026-10-05 — E27 launch omitted the actual jobset memory-cap entry. RESOLVED for the running study by the coordinator.**
   Manifest memory hints did not set the fleet runtime cap. The coordinator installed the existing
   `jobset_caps.json` entry with 6g and the registered host caps; observed workers used that envelope.
