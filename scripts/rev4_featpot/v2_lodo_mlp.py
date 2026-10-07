@@ -149,7 +149,11 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         if d.get("data_role_decision_required") or d.get("human_sources"):
             human_declaration(d, decision)
         bank_members(d)
-        if (d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
+        palette = "research_palette" in d
+        if palette:
+            from e32_palette import admit_declaration
+            admit_declaration(d)
+        if ((not palette and d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af")
                 or d.get("formula_revision") != 5 or not d.get("decoder_era")
                 or not d.get("table_sha256") or not d.get("row_selection_sha256")):
             raise ValueError(f"{name}: strict admission requires bound Rev5 table provenance")
@@ -159,6 +163,9 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         if sha(kp) != d.get("keys_sha256"):
             raise ValueError(f"{name}: admitted row key file changed")
         keys = pq.read_table(kp)
+        if palette:
+            from e32_palette import admit_keys
+            admit_keys(path, d, keys)
         if d.get("data_role_decision_required"):
             human_keys(keys, d)
         checked_metadata.append((name, path, sp, d, keys))
@@ -324,6 +331,9 @@ def main() -> None:
     if any(not 0 <= c < width for c in keep):
         raise ValueError(f"{core_spec}: kept columns outside 0..{width}")
     recipe = recipe_of(args.spec)
+    if "research_palette" in receipt:
+        from e32_palette import admit_recipe
+        admit_recipe(receipt, recipe, keep, args.head, args.strict_admission, args.train_only)
     if "ssim2_recipe" in recipe:
         from e28_recipe import admit_humans, admit_receipt
         admit_receipt(V2)
@@ -371,7 +381,10 @@ def main() -> None:
     if "coverage_weight" in recipe and recipe.get("ssim2_recipe") != "s2m":  # design log E15: chosen families of the ordinal coverage pool, rank-only within ladders
         import v2_teacher
         if max(keep) >= v2_teacher.ORDINAL_WIDTH:
-            raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+            if not args.strict_admission:
+                raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
+            from e32_palette import coverage_extension
+            coverage_extension(V2 / "e15" / Path(v2_teacher.POOL_NAME).name, keep)
         cpath, coverage_record = v2_teacher.coverage_leg(recipe["coverage_mask"], Path(os.environ.get("TMPDIR") or dest),
                                                        admitted_root=V2 if args.strict_admission else None)
         curated_extra = cpath

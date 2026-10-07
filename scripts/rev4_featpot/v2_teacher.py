@@ -247,6 +247,14 @@ def coverage_leg(mask: int, scratch: Path, *, admitted_root: Path | None = None)
     pool_sha = {4: POOL_SHA, 5: POOL_SHA_REV5}.get(revision)
     if pool_sha is None:
         raise ValueError(f"{pool}: no registered E15 coverage pool for formula revision {revision}")
+    declaration = json.loads(man.read_text()) if man.is_file() else {}
+    if "research_palette" in declaration:
+        from e32_palette import admit_declaration, admit_keys
+        projection = admit_declaration(declaration)
+        if admitted_root is None or projection["role"] != "TRAIN-ordinal" or projection["inherited_table_sha256"] != pool_sha:
+            raise ValueError("E32 coverage must preserve the exact registered inherited pool")
+        admit_keys(pool, declaration, pq.read_table(keys))
+        pool_sha = declaration["table_sha256"]
     for path, want in ((pool, pool_sha), (keys, POOL_KEYS_SHA)):
         got = hashlib.sha256(path.read_bytes()).hexdigest()
         if got != want:

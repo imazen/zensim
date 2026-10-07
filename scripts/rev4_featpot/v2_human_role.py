@@ -53,6 +53,10 @@ def preflight_recipe(root, decision_path, heldout=None):
         raise ValueError("D1/E30 forbid an AIC-family held-out fold")
     load_frozen(root, training_only=True, metadata_only=True)
     receipt = json.loads(safe_path(root / "wide/main/real/receipt.json").read_text())
+    if "research_palette" in receipt:
+        from e32_palette import CONTRACT
+        if receipt["research_palette"] != CONTRACT:
+            raise ValueError("E32 frozen research transport identity required before payload access")
     decision = decision_record(decision_path, receipt["admission_view"]["source_receipt_sha256"])
     view = receipt["admission_view"]
     if (view.get("source_frozen_sha256") != decision.get("source_frozen_sha256")
@@ -68,6 +72,11 @@ def preflight_recipe(root, decision_path, heldout=None):
             raise ValueError("human declaration changed after freeze")
         human_declaration(d, decision)
         bank_members(d)
+        if ("research_palette" in d) != ("research_palette" in receipt):
+            raise ValueError("E32 cannot mix projected and legacy legs")
+        if "research_palette" in d:
+            from e32_palette import admit_declaration
+            admit_declaration(d)
         import pyarrow.parquet as pq
         from v2_teacher import key_path, row_keys_sha
         kp = safe_path(key_path(path))
@@ -87,6 +96,11 @@ def preflight_recipe(root, decision_path, heldout=None):
         path = safe_path(root / rec["rel"])
         d = json.loads(safe_path(Path(f"{path}.manifest.json")).read_text())
         bank_members(d)
+        if ("research_palette" in d) != ("research_palette" in receipt):
+            raise ValueError("E32 cannot mix projected and legacy legs")
+        if "research_palette" in d:
+            from e32_palette import admit_declaration
+            admit_declaration(d)
         if d.get("human_sources") or d.get("data_role_decision_required"):
             human_declaration(d, decision)
             human_keys(pq.read_table(safe_path(key_path(path))), d)

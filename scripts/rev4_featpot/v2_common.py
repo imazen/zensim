@@ -446,10 +446,15 @@ def refuse_nonfinite_kept(paths, keep) -> None:
     import pyarrow.parquet as pq
     cols = [f"f{i}" for i in keep]
     for path in paths:
-        for batch in pq.ParquetFile(path).iter_batches(batch_size=65536, columns=cols):
+        selected = cols
+        declaration = Path(f"{path}.manifest.json")
+        if declaration.is_file() and "research_palette" in json.loads(declaration.read_text()):
+            from e32_palette import feature_columns
+            selected = feature_columns(path, keep)
+        for batch in pq.ParquetFile(path).iter_batches(batch_size=65536, columns=selected):
             for j in range(batch.num_columns):
                 if not np.isfinite(batch.column(j).to_numpy(zero_copy_only=False)).all():
-                    raise ValueError(f"{path}: kept column {cols[j]} is not finite (an absent slot?); refusing this keep list")
+                    raise ValueError(f"{path}: kept column {selected[j]} is not finite (an absent slot?); refusing this keep list")
 
 
 def dense_bake(bake: Path, cache: Path) -> Path:
