@@ -151,3 +151,12 @@ with warnings denied. Scoped formatting and runnable-script lint passed.
 The full Python regression passed all 175 tests (70.319 seconds; run-heavy
 76 seconds, peak-RSS 0.42 GiB). Archived artifact receipts are recorded in the
 adjacent preparation pointer and readiness record.
+
+The permanent local evidence archive contains 460 payload files (3,017,418,659
+bytes), including the saved final image, all program/data versions, fit receipts,
+parity fixtures and failed-attempt logs. The NAS transfer verified all 460
+SHA-256 checksums; `run-heavy: done rc=0 93s | peak-RSS 0.02GiB` measures the
+local transfer supervisor. A first transfer failed on SSH argument quoting before
+extraction; the retry used an explicitly quoted remote command and succeeded.
+Supplemental transfer receipts preserve that failure and the final documentation
+snapshot. No source, image, data or manifest was published as part of preparation.
