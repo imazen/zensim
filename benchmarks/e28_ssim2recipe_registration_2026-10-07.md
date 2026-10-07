@@ -89,3 +89,18 @@ a new registration.
 3. **KonFiG deviation is declared.** E28 trains on the design-grid KonFiG label, not SSIM2's flicker-boosted reconstruction; the result
    is read as "SSIM2's objective and data mix on our features", not a reproduction of the SSIM2 fit.
 4. Fleet execution uses the existing pipeline (pinned program/data packs, `jobset_caps.json` memory envelope, no `tail_trim`).
+
+## Result (2026-10-07, appended after the registered assessment)
+
+All 100 cells completed at the registered budget (independent audit 100/100). **Neither arm passes; adopted: none; the
+by_v2fy control is retained.**
+
+| Arm | Signed Δ (mean ± SE) | Worst source | Pooled KROCC Δ | Pooled PLCC Δ | As-good | Recipe signal |
+|---|---|---|---|---|---|---|
+| s2o | −0.0018 ± 0.0012 | tid2013 −0.0054 | −0.0027 ± 0.0016 | −0.0019 ± 0.0017 | no (tid2013 < −0.005) | no |
+| s2m | −0.0360 ± 0.0033 | kadid −0.1416 | −0.0368 ± 0.0032 | −0.0333 ± 0.0045 | no | no |
+
+Reading: adding SSIMULACRA2's pooled within-dataset Kendall/Pearson terms to the current mix (s2o) does not improve
+pooled ranking and costs a little on TID2013; SSIMULACRA2's own data mix without SafeSyn and the coverage leg (s2m) is
+much worse, mostly on KADID. Research-only (POTENTIAL); this run used the pre-D1 five-source exploratory design.
+Records: `benchmarks/e28_result_summary_2026-10-07.json`, `benchmarks/e28_final_2026-10-07.pointer.md`.

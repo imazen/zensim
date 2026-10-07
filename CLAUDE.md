@@ -158,6 +158,12 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E28 score chain posted an empty result. FIXED (this commit).** `e24_rev5.py e28-score` imported
+  `lib.zen_stats` without putting `scripts/` on `sys.path` (sibling scripts insert it), so the chain's scorer died on
+  import and `score_chain.sh` logged `E28 RESULT: |`. The scorer also needs the prepared root (`wide/`) locally, which
+  only the fleet data archive held. Fixed the import; re-extracted `wide/` from the pinned archive. Future launchers
+  must stage the local prepared root before the chain runs.
+
 * **2026-10-07 — E28 admission refused the executor's approved root link. FIXED locally (`8283d518`).**
   The approved-inventory path check rejected symlink ancestors above the
   prepared root, including fit-cell-exec's verified FIT_ROOT binding. It now

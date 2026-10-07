@@ -1521,3 +1521,13 @@ fresh matched control registered before any E32 fit. The four-source seed
 composite and fixed KADID/TID W2 reductions are defined before outcomes.
 No launch is authorized until the coordinator registers and freezes all
 transport/program/data/control pins. See the [round-two pointer](../benchmarks/palette2_2026-10-07.pointer.md).
+
+## 2026-10-07 E28 registered assessment completed
+
+All 100 final-119 cells (`fitv2e28b-20261007`) were harvested and audited; the registered E28 assessment read the five
+exploratory held-out panels already admitted in the v2c5 instrument (kadid, tid2013, konfig, cid22_a25, aic3) — the
+same panels E21–E27 read. Neither arm passes; control retained. This is the pre-D1 five-source exploratory design: its
+s2o arm trained on AIC-3 rows when AIC-3 was not held out. E28 models are research-only, are never read on AIC-4 or
+SDR25, and never ship; D1 production qualification excludes AIC-3. No protected, sealed, KADID TERMINAL or T0 payload
+was read. Records: `benchmarks/e28_result_summary_2026-10-07.json`, `benchmarks/e28_final_2026-10-07.pointer.md`.
+

@@ -302,3 +302,15 @@ read-only gate passes with authorization mocked in memory; real launch
 authorization is absent and the actual launcher refuses. Nothing pushed,
 uploaded to R2 or enqueued. Artifact pins:
 [e28_executor_repack_2026-10-07.pointer.md](e28_executor_repack_2026-10-07.pointer.md).
+
+## 2026-10-07 — v36 run complete; verdict
+
+`fitv2e28b-20261007` ran 14:40–16:59 UTC on tower/i265/r3500/r3800x (12 slots), no cell failures. Independent audit of
+all 100 installed cells: 120 epochs, 50,000 pairs, epoch 119. The score chain posted an empty `E28 RESULT` line: the
+scorer's `from lib.zen_stats import …` needed `scripts/` on `sys.path`, and the local prepared root
+`/var/tmp/rev4-featpot/v2e28/wide` didn't exist (only the fleet archive held it). The coordinator re-extracted `wide/`
+from the pinned archive (101-file inventory verified), fixed the import, and reran the scorer; a second rerun
+reproduced every compare file byte for byte. Verdict: neither arm passes (s2o fails the TID2013 per-source guard and
+shows no pooled signal; s2m is much worse). Control retained. Tower archive and hashes:
+`benchmarks/e28_final_2026-10-07.pointer.md`. E28b (F-scale KonFiG label) is not worth running on this evidence: the
+best arm's pooled KROCC moved the wrong way and s2m's deficit is dominated by KADID, not KonFiG.

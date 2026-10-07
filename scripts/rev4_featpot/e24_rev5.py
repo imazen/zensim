@@ -130,6 +130,7 @@ def cmd_e28_score(args) -> int:
     """E28 assessment through E13/E24 and the signed in-process stat owner."""
     import e13_teacher as e13
     from e28_recipe import spec, read_pin
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/, for lib.zen_stats (as sibling scripts do)
     from lib.zen_stats import recipe_correlations
 
     root, control_root = Path(V2), Path(args.control_root)

@@ -1,0 +1,119 @@
+{
+ "schema": "e28-decision-v1",
+ "label": "POTENTIAL \u2014 ceiling, not a model score",
+ "adopted": null,
+ "control": "sel:59f0bbc2f290@h32:H128:cv16:cf98",
+ "pooled_rule": "signed raw tau-b and raw Pearson; paired ten seed means across five fixed folds",
+ "konfig_deviation": "design-grid labels, not flicker-boosted reconstruction; s2o keeps within-reference supervision; s2m pools within this dataset as the four-leg recipe requests",
+ "arms": {
+  "s2o": {
+   "spec": "sel:59f0bbc2f290@h32:H128:cv16:cf98:s2o",
+   "signed_mean": -0.001786110164715644,
+   "signed_se": 0.0011876454280937052,
+   "signed_worst": -0.005449070296570091,
+   "per_source": {
+    "kadid": {
+     "delta": -0.002377902144298405,
+     "se": 0.003325860198008889,
+     "n": 10
+    },
+    "tid2013": {
+     "delta": -0.005449070296570091,
+     "se": 0.0023740291935198813,
+     "n": 10
+    },
+    "konfig": {
+     "delta": -0.0033044810550072134,
+     "se": 0.003701116183464655,
+     "n": 10
+    },
+    "cid22_a25": {
+     "delta": 0.0015074267133109664,
+     "se": 0.0017280458559794018,
+     "n": 10
+    },
+    "aic3": {
+     "delta": 0.0006934759589865225,
+     "se": 0.0013714143865152719,
+     "n": 10
+    }
+   },
+   "w2": -0.015279194031852898,
+   "w2_se": 0.009476752796938211,
+   "as_good": false,
+   "pooled": {
+    "krocc": {
+     "delta": -0.0027263404726369676,
+     "se": 0.0016086795696576422,
+     "n": 10
+    },
+    "plcc_raw": {
+     "delta": -0.0018630378144547822,
+     "se": 0.0017242889319611097,
+     "n": 10
+    }
+   },
+   "recipe_signal": false,
+   "passes": false
+  },
+  "s2m": {
+   "spec": "sel:59f0bbc2f290@h32:H128:cv16:cf98:s2m",
+   "signed_mean": -0.03602878518788785,
+   "signed_se": 0.0033250669971170814,
+   "signed_worst": -0.14163266995655377,
+   "per_source": {
+    "kadid": {
+     "delta": -0.14163266995655377,
+     "se": 0.01567459707054385,
+     "n": 10
+    },
+    "tid2013": {
+     "delta": -0.021567637723977563,
+     "se": 0.002022537162874466,
+     "n": 10
+    },
+    "konfig": {
+     "delta": -0.01770499949126366,
+     "se": 0.003962787412154194,
+     "n": 10
+    },
+    "cid22_a25": {
+     "delta": -0.0014302731773820354,
+     "se": 0.0017012142813528103,
+     "n": 10
+    },
+    "aic3": {
+     "delta": 0.0021916544097377866,
+     "se": 0.002832013308375075,
+     "n": 10
+    }
+   },
+   "w2": -0.2845939345968919,
+   "w2_se": 0.021946257533194305,
+   "as_good": false,
+   "pooled": {
+    "krocc": {
+     "delta": -0.03684143601826839,
+     "se": 0.0031681950447604635,
+     "n": 10
+    },
+    "plcc_raw": {
+     "delta": -0.03332138384142842,
+     "se": 0.004479970626526512,
+     "n": 10
+    }
+   },
+   "recipe_signal": false,
+   "passes": false
+  }
+ },
+ "source_files": {
+  "e28_decision.json": "46f8624287beb25bdc55fa736365e0f44cdc68047fb4c49d6fb0164b51508942",
+  "e28_sdr.json": "f7e2fe1fee22d37c15585a3f622e33b9b15529a636c322428598f8c8874f068f",
+  "e28_geometry.tsv": "dbb31312745cbeff48d71bd35622997a42ef224ac22909e6f3f93d701bc90cb0"
+ },
+ "jobset": "fitv2e28b-20261007",
+ "cells_installed": 100,
+ "budget_audit": "100/100 cells: epochs 120, pairs_per_epoch 50000, selected_epoch 119 (independent audit of installed result.json)",
+ "tower_archive": "/mnt/tower/output/zensim-e28-final-2026-10-07/ (SHA256SUMS over 1,103 files)"
+}
