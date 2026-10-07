@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pyarrow as pa
@@ -230,16 +231,38 @@ def prepare(source, hdr, out, build_commit):
             "folds": list(PRODUCTION_SOURCES), "arms": receipt["legs"]["hdr_consensus"]}
 
 
+def grid(root, results, program_sha, data_sha, matched_control=False):
+    from e30_four_source import grid as base_grid, SPEC
+    from e21_cheap_recipe import columns
+    cells = []
+    for arm in ([None] if matched_control else ["hb4", "hc4"]):
+        spec = SPEC if arm is None else SPEC + ":" + arm
+        for cell in base_grid(root, results, columns("by_v2fy")):
+            name = cell["name"].replace(SPEC, spec)
+            argv = list(cell["argv"])
+            argv[argv.index("--spec") + 1] = spec
+            argv[argv.index("--dest") + 1] = str(results / name)
+            cells.append(dict(name=name, argv=argv))
+    return dict(program_sha=program_sha, data_sha=data_sha, peak_mem_bytes=6*1024**3,
+                threads=1, cells=cells)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("cmd", choices=("prepare", "preflight"))
+    p.add_argument("cmd", choices=("prepare", "preflight", "grid"))
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--hdr", type=Path)
     p.add_argument("--out", type=Path)
     p.add_argument("--build-commit")
+    p.add_argument("--program-sha")
+    p.add_argument("--data-sha")
+    p.add_argument("--results", type=Path)
+    p.add_argument("--matched-control", action="store_true")
     a = p.parse_args()
     if a.cmd == "prepare":
         print(json.dumps(prepare(a.root, a.hdr, a.out, a.build_commit)))
+    elif a.cmd == "grid":
+        a.out.write_text(json.dumps(grid(a.root, a.results, a.program_sha, a.data_sha, a.matched_control), indent=2) + "\n")
     else:
         for fold in PRODUCTION_SOURCES:
             for arm in ("hb4", "hc4"):

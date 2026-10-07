@@ -90,6 +90,16 @@ def preflight_recipe(root, decision_path, heldout=None):
         if d.get("human_sources") or d.get("data_role_decision_required"):
             human_declaration(d, decision)
             human_keys(pq.read_table(safe_path(key_path(path))), d)
+    if "hdr_consensus" in receipt["legs"]:
+        from e29_consensus import admit_metadata
+        for arm, rec in receipt["legs"]["hdr_consensus"].items():
+            if arm not in ("hb4", "hc4"):
+                raise ValueError("unregistered HDR consensus arm")
+            path = safe_path(root / rec["fit"]["rel"])
+            manifest = Path(f"{path}.manifest.json")
+            if sha(manifest) != rec["fit"]["manifest_sha256"]:
+                raise ValueError("E29 HDR manifest changed")
+            admit_metadata(path, json.loads(manifest.read_text()))
     return decision
 
 
