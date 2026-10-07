@@ -28,3 +28,14 @@ HDR VAL read. No student prediction or fit used those rows. The guarded import
 and absent-control tripwires now pass, but the read cannot be undone.
 Full worklog and role/exposure ledger: [E29_WORKLOG.md](E29_WORKLOG.md) and
 [DATA_SPLITS.md](../docs/DATA_SPLITS.md). Large artifacts remain outside git.
+
+Coordinator update: the solo archives/image listed above are historical
+preparation evidence. E29/E31/E32 will use one combined v40 package and
+one shared fresh matched control. The prepared data remains available
+locally; no new solo package/image is produced. Full baseline parity evidence
+is `control-parity-final/PARITY.json` in the same artifact root.
+`CLEANUP_RECEIPT.json` binds the owned-stage/cache removal after tower audit;
+tower `ARCHIVE_MIRROR_RECEIPT.json` preserves the original 11,020-file proof.
+The final local subset and current code evidence have a separate
+`FINAL_LOCAL_MIRROR_RECEIPT.json`; they are not a claim that all original
+extraction stages still exist locally.
