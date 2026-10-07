@@ -1564,7 +1564,13 @@ Local amendment only; no full E29 fit, launch or assessment. D1 source/role
 approval is unchanged. Preparation copies the exact frozen four-source SDR
 inventory and 7,390 existing agreement-only HDR TRAIN rows; hb4 changes only
 the target and hc4 adds the complete two-teacher cross-reference pair list.
-No new AIC, HDR VAL/confirmation or protected-label read occurred. Native HDR
+An import-test mistake opened the entire 22,860-row/952-column legacy
+`hdrgrid_mc944_t2_val.parquet` before mocks were installed. It computed target
+swings, then failed before student prediction; no model fit used it. The
+panel import is now guarded and zero-open tripwires pass. The unintended
+legacy HDR VAL exposure violates the preparation limit and is disclosed;
+registered 3,900-row hdr_v3mix VAL, AIC, confirmation and protected labels
+remain unopened. Native HDR
 subset provenance remains explicit and unqualified. All 40 completed E30 nA3
 model/result artifacts were verified and pinned without label reads; exact
 program reuse parity is not asserted. One matched-control manifest remains a

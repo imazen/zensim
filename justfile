@@ -540,3 +540,6 @@ e29-harvest-checks bundle zenmetrics *flags:
 
 e29-bundle-check bundle:
     TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29
+
+e29-mirror-check bundle mirror:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29 --mirror-only {{mirror}}

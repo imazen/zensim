@@ -19,6 +19,28 @@ if e29:
     for heldout in PRODUCTION_SOURCES:
         for arm in ('hb4','hc4'):
             preflight(root, heldout, arm)
+if '--mirror-only' in sys.argv:
+    import random
+    mirror=Path(sys.argv[sys.argv.index('--mirror-only')+1])
+    excluded={'MIRROR_RECEIPT.json','logs/mirror-verify.log'}
+    files=sorted(p for p in bundle.rglob('*') if p.is_file() and str(p.relative_to(bundle)) not in excluded)
+    entries={}
+    for i,p in enumerate(files):
+        rel=str(p.relative_to(bundle));target=mirror/rel
+        assert target.is_file() and target.stat().st_size==p.stat().st_size,rel
+        source_hash=sha(p);assert sha(target)==source_hash,rel
+        entries[rel]={'sha256':source_hash,'bytes':p.stat().st_size}
+        if i%250==0:
+            print(f'mirror verified {i+1}/{len(files)} files',flush=True)
+    selected=random.SystemRandom().sample(sorted(entries),3)
+    report={'schema':'e29-tower-mirror-receipt-v1','build_commit':json.loads((bundle/'build-meta.json').read_text())['build_commit'],
+            'status':'PASS','source':str(bundle),'mirror':str(mirror),'file_count':len(entries),
+            'files':entries,'three_random_files':{n:entries[n] for n in selected},
+            'excluded_self_and_active_log':sorted(excluded)}
+    raw=json.dumps(report,indent=2)+'\n'
+    (bundle/'MIRROR_RECEIPT.json').write_text(raw);(mirror/'MIRROR_RECEIPT.json').write_text(raw)
+    print(f'PASS: all {len(entries)} file hashes; three random files: {selected}',flush=True)
+    raise SystemExit(0)
 with tarfile.open(bundle/('e29-fit-data.tar.gz' if e29 else 'd1-fit-data.tar.gz')) as archive:
     inventory=json.load(archive.extractfile('input_inventory.json'))
     assert inventory['schema']=='zenfleet-fit-data-v1'
