@@ -77,7 +77,8 @@ class PopulationOrder(unittest.TestCase):
     def test_lower_owner_aic_key_opens_no_payload(self):
         p = self.poison()
         with self.tripwire(), self.assertRaisesRegex(ValueError,"AIC"):
-            fit.strict_training_groups([("human",p,1,0,"rank")],self.decision)
+            fit.strict_training_groups([("safesyn",self.f.out/"wide/main/real/safesyn_fit.parquet",1,0,"rank"),
+                                        ("human",p,1,0,"rank")],self.decision)
 
     def test_prepare_aic_key_opens_no_payload(self):
         self.poison()

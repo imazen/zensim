@@ -366,3 +366,11 @@ shippath10-program bundle zenmetrics bin_dir:
 # Every archive component and declared cell is checked against its owner pins.
 shippath10-bundle-check bundle:
     TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}}
+
+# SHIPPATH11 admission/harvest negatives and real executor-entry smoke.
+shippath11-tests zenmetrics:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 -m unittest discover -s scripts/tests -p 'test_shippath*_*.py' -q
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 -m unittest discover -s {{zenmetrics}}/scripts/jobsys -p 'test*fit*.py' -q
+
+shippath11-build-fit:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --release -p zensim-validate --example inspect_qualified_checkpoint --bin zensim_mlp_train --bin bake_dial_refit --bin panel
