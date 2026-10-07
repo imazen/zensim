@@ -329,6 +329,8 @@ pub(crate) enum KernelId {
     /// the v1 fused kernel's own per-pixel maps consumed by deviation and
     /// block-max pooling.
     RestoreMaps,
+    /// Research palette signature and population transport.
+    Palette,
 }
 
 impl KernelId {
@@ -348,6 +350,7 @@ impl KernelId {
             KernelId::FreeBoundedErr => "free_bounded_err",
             KernelId::Gridblk => "gridblk",
             KernelId::RestoreMaps => "restore_maps",
+            KernelId::Palette => "palette",
         }
     }
 }
@@ -2788,6 +2791,75 @@ pub(crate) static DVIFMGATE_SIGNALS: [SignalDef; 5] = {
     ]
 };
 
+// Palette IDs are explicit N-major placements, with their own research semantics.
+const PALETTE_REVISION: &[Revision] = &[Revision {
+    era: "palette_v1",
+    commit: "8a4f8314",
+    status: RevisionStatus::Landed,
+    note: "Research-only introduction; design commit, producer manifest pins implementation. No existing arithmetic change.",
+}];
+const fn palette_signal(block_local: u16, name: &'static str, direction: Direction) -> SignalDef {
+    SignalDef {
+        family: ComputeToken::Palette,
+        block_local,
+        name,
+        statistic: Statistic::Global,
+        cost: CostClass::Expensive,
+        tranche: Tranche::None,
+        placement: Placement::AllCells,
+        form: Form::Difference,
+        direction,
+        kernel: KernelId::Palette,
+        deprecated: false,
+        defect: None,
+        revisions: PALETTE_REVISION,
+    }
+}
+pub(crate) static PALETTE_SIGNALS: [SignalDef; 42] = [
+    palette_signal(0, "n2_shift", Direction::HigherIsWorse),
+    palette_signal(1, "n2_lightness_signed", Direction::Undeclared),
+    palette_signal(2, "n2_chroma_signed", Direction::Undeclared),
+    palette_signal(3, "n2_hue_signed", Direction::Undeclared),
+    palette_signal(4, "n2_weight_emd", Direction::HigherIsWorse),
+    palette_signal(5, "n2_largest_shift", Direction::HigherIsWorse),
+    palette_signal(6, "n3_shift", Direction::HigherIsWorse),
+    palette_signal(7, "n3_lightness_signed", Direction::Undeclared),
+    palette_signal(8, "n3_chroma_signed", Direction::Undeclared),
+    palette_signal(9, "n3_hue_signed", Direction::Undeclared),
+    palette_signal(10, "n3_weight_emd", Direction::HigherIsWorse),
+    palette_signal(11, "n3_largest_shift", Direction::HigherIsWorse),
+    palette_signal(12, "n4_shift", Direction::HigherIsWorse),
+    palette_signal(13, "n4_lightness_signed", Direction::Undeclared),
+    palette_signal(14, "n4_chroma_signed", Direction::Undeclared),
+    palette_signal(15, "n4_hue_signed", Direction::Undeclared),
+    palette_signal(16, "n4_weight_emd", Direction::HigherIsWorse),
+    palette_signal(17, "n4_largest_shift", Direction::HigherIsWorse),
+    palette_signal(18, "n5_shift", Direction::HigherIsWorse),
+    palette_signal(19, "n5_lightness_signed", Direction::Undeclared),
+    palette_signal(20, "n5_chroma_signed", Direction::Undeclared),
+    palette_signal(21, "n5_hue_signed", Direction::Undeclared),
+    palette_signal(22, "n5_weight_emd", Direction::HigherIsWorse),
+    palette_signal(23, "n5_largest_shift", Direction::HigherIsWorse),
+    palette_signal(24, "n6_shift", Direction::HigherIsWorse),
+    palette_signal(25, "n6_lightness_signed", Direction::Undeclared),
+    palette_signal(26, "n6_chroma_signed", Direction::Undeclared),
+    palette_signal(27, "n6_hue_signed", Direction::Undeclared),
+    palette_signal(28, "n6_weight_emd", Direction::HigherIsWorse),
+    palette_signal(29, "n6_largest_shift", Direction::HigherIsWorse),
+    palette_signal(30, "n7_shift", Direction::HigherIsWorse),
+    palette_signal(31, "n7_lightness_signed", Direction::Undeclared),
+    palette_signal(32, "n7_chroma_signed", Direction::Undeclared),
+    palette_signal(33, "n7_hue_signed", Direction::Undeclared),
+    palette_signal(34, "n7_weight_emd", Direction::HigherIsWorse),
+    palette_signal(35, "n7_largest_shift", Direction::HigherIsWorse),
+    palette_signal(36, "n8_shift", Direction::HigherIsWorse),
+    palette_signal(37, "n8_lightness_signed", Direction::Undeclared),
+    palette_signal(38, "n8_chroma_signed", Direction::Undeclared),
+    palette_signal(39, "n8_hue_signed", Direction::Undeclared),
+    palette_signal(40, "n8_weight_emd", Direction::HigherIsWorse),
+    palette_signal(41, "n8_largest_shift", Direction::HigherIsWorse),
+];
+
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -2914,6 +2986,11 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &DVIFMGATE_SIGNALS,
         replication: Replication::Flat,
     },
+    BlockDef {
+        family: ComputeToken::Palette,
+        signals: &PALETTE_SIGNALS,
+        replication: Replication::Flat,
+    },
 ];
 
 impl BlockDef {
@@ -2977,7 +3054,7 @@ pub(crate) fn block_base(
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
 pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[
-    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825,
+    372, 720, 924, 944, 956, 986, 1322, 1502, 1562, 1790, 1820, 1825, 1867,
 ];
 
 /// Total layout width at `n_scales` with every registered block present.
@@ -3548,7 +3625,12 @@ mod tests {
     #[test]
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
-        assert_eq!(w, 1825, "full registered width at 4 scales");
+        assert_eq!(
+            block_base(ComputeToken::Palette, NS).unwrap().0,
+            1825,
+            "legacy width stays frozen"
+        );
+        assert_eq!(w, 1867, "full registered width with palette");
         for id in 0..w {
             let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
             let ch = match d.channel {
@@ -3632,6 +3714,7 @@ mod tests {
             (ComputeToken::Z1max, 1562, 228),
             (ComputeToken::Gmsnative, 1790, 30),
             (ComputeToken::Dvifmgate, 1820, 5),
+            (ComputeToken::Palette, 1825, 42),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -3653,7 +3736,7 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 1825);
+        assert_eq!(seen.len(), 1867);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what

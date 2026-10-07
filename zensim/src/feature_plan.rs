@@ -480,6 +480,16 @@ impl Plan {
         let layout = crate::feature_layout::declared_layout(model);
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let walk_width = layout.walk_width();
+        let palette = want.intersect(&crate::feature_defs::family_slots(
+            ComputeToken::Palette,
+            crate::NUM_SCALES,
+        ));
+        if !palette.is_empty() {
+            return Err(PlanError::Uncomputable {
+                missing: palette,
+                layout_width,
+            });
+        }
         let mut plan = Plan::derive_with_layout(&want, layout)?;
         plan.compute.formula_revision = revision;
         // The derive checked the PROCESS revision; the bake's own
@@ -897,6 +907,24 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "training"))]
+    fn palette_bakes_refuse_at_serving_boundary() {
+        for id in 1825..1867 {
+            let recipe = serde_json::json!({
+                "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
+                "metadata": [{"key":"zentrain.feature_ids","type":"utf8","text":id.to_string()},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":"1"}],
+                "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                    "dtype":"f32","weights":[1.0],"biases":[0.0]}]});
+            let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+            let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
+            assert!(
+                matches!(super::Plan::for_bake(&model), Err(super::PlanError::Uncomputable { missing, .. }) if missing.contains(id))
+            );
+        }
+    }
+
     /// **REV5 scope at the plan boundary:** a Rev5-declared bake reading
     /// inside `basic + peaks + v2` plans; one reading any other family is
     /// `UnsupportedAtRev5` naming exactly the out-of-scope slots — never a
@@ -1925,6 +1953,18 @@ pub(crate) mod servability_census {
                 want = super::apply_registered_slot_selection(selection, want, ns);
             }
             assert_eq!(want, expect, "{compute}@w{width}: registry slots");
+            if parts.contains(crate::feature_set_id::ComputeToken::Palette) {
+                let request = crate::research::Request::for_slots(want.clone(), width);
+                #[cfg(feature = "training")]
+                assert_eq!(request.validate().unwrap(), want, "palette research slots");
+                #[cfg(not(feature = "training"))]
+                assert!(
+                    request.validate().is_err(),
+                    "palette requires research training"
+                );
+                checked += 1;
+                continue;
+            }
             let plan = Plan::derive(&want, width)
                 .unwrap_or_else(|e| panic!("{compute}@w{width} is not plannable: {e}"));
             assert!(

@@ -135,6 +135,8 @@ pub enum ComputeToken {
     /// visibility instead of the smooth curve, one slot per level,
     /// `f1790+30..`.
     Dvifmgate,
+    /// Research-only dominant colour shifts, f1825..f1866. Serving refuses.
+    Palette,
 }
 
 impl ComputeToken {
@@ -159,6 +161,7 @@ impl ComputeToken {
         ComputeToken::Z1max,
         ComputeToken::Gmsnative,
         ComputeToken::Dvifmgate,
+        ComputeToken::Palette,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -188,6 +191,7 @@ impl ComputeToken {
             ComputeToken::Z1max => "z1max",
             ComputeToken::Gmsnative => "gmsnative",
             ComputeToken::Dvifmgate => "dvifmgate",
+            ComputeToken::Palette => "palette",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",
