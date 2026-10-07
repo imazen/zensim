@@ -129,3 +129,19 @@ minimise MSE and maximise Kendall and Pearson correlation.
   to tower (verified); `~/tmp/aic2026` unzip deleted after its audit products were archived; tbig copies being compared with R2.
 * **New owner request:** dominant-colour (top-N, N = 2–8) shift features — implementation lane `palette-sol`; potential experiment E32 to be
   registered before any fit.
+
+## 10. Updates (2026-10-07 12:55 UTC)
+
+* **E28 (SSIM2 recipe).** The focused re-review closed both original admission findings and found one more: an already-prepared fit
+  root containing an extra `confirm`/`HDR` directory reached the CID22 teacher checksum before being refused. Fixed in the E28
+  quarantine chain (`ab0b395f`: the shared prepared-root admission walks the root for forbidden directories before any checksum;
+  regression fails 4/4 without the fix, 16/16 tests pass with it). The fix changes a packed program payload, so the package is being
+  re-pinned (v35). Then: re-review, land, push the zenmetrics profile, launch. No E28 fit has run.
+* **tail_trim root cause** (read-only diagnosis): `zenfleet-worker`'s SIGTERM claim release deletes the R2 claim without checking that
+  this worker still owns it, so a stale ex-owner deletes a newer owner's claim and the cell loops. Fix (ownership-conditional delete,
+  owner-checked renew) is being implemented with tests that reproduce the E26 loop; tail_trim stays off until it lands.
+* **D4 complete.** tbig: R2, tower and `/mnt/v/zen/tbig-720-2026-07-22` agree (sha `3fc1ef81…`). The stale `~/tmp/tbig_720_full.parquet`
+  is the same file with one ~1 MiB zeroed region at offset 28.9 GB (a dropped download chunk), so it is a corrupt copy; it was archived
+  to tower rather than deleted. The ~/tmp join files are being hashed against tower: identical ones deleted, divergent ones archived.
+* **E32 (palette shift)** draft registration exists (palette_v2 after a sign-inversion fix found by a synthetic darkening test; four-source
+  folds per D1). Extraction is running; registration follows the lane's report and review.
