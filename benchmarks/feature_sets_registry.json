@@ -25,6 +25,11 @@
   }
  },
  "compute_tokens": {
+ "palette": {
+  "slots": "1825-1866",
+  "owner": "zensim::feature_defs::family_slots(ComputeToken::Palette)",
+  "note": "Training research only; serving refuses. Six signals per N=2..8."
+ },
   "basic": {
    "slots": "0-155",
    "owner": "feature_v2::ComputeSet::v1_basic",
@@ -92,6 +97,12 @@
   }
  },
  "eras": {
+ "palette_v1": {
+  "build_commit": "8a4f8314",
+  "root": null,
+  "label": "palette_v1",
+  "note": "Design commitment; implementation producer is pinned in sidecar receipts."
+ },
   "r5integ_rev5": {
    "build_commit": null,
    "root": "/var/tmp/r5integ",
@@ -366,6 +377,18 @@
   }
  },
  "sets": {
+ "palette@w1867/palette_v1#30b09cd1": {
+  "compute": "palette",
+  "layout": 1867,
+  "era": "palette_v1",
+  "slots": "1825-1866",
+  "slots_hash8": "30b09cd1",
+  "n_slots": 42,
+  "role": "producer",
+  "kind": "set",
+  "evidence": "benchmarks/palette_design_2026-10-07.md",
+  "note": "Research only; independent palette semantics. Not a serving adoption."
+ },
   "basic+peaks+v2@w1825/r5integ_rev5": {
    "compute": "basic+peaks+v2",
    "layout": 1825,

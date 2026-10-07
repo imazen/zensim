@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+### Added
+
+- Research-only `palette` compute token and 42 explicit dominant-colour shift
+  features (f1825–f1866, N=2–8), with signed OKLab lightness/chroma/hue,
+  weighted assignment and palette population transport. Training extraction
+  supports `--palette-only`; serving refuses the family. Existing feature
+  IDs and arithmetic remain unchanged. Design: `benchmarks/palette_design_2026-10-07.md`.
+
 - Revise the unconsumed experimental C8 GMSBANK definition (2026-09-24):
   native Y gradients, coarse X/Y/B gradients with separately calibrated
   chroma stabilizers, and coarse joint X/B chromaticity loss/deviation.

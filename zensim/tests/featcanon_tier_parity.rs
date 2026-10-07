@@ -48,12 +48,19 @@ fn test_images(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
 }
 
 fn extract_bits(src: &RgbSlice<'_>, dst: &RgbSlice<'_>) -> Vec<u64> {
-    research::extract(&Request::everything(), src, dst)
-        .expect("extract")
-        .values()
-        .iter()
-        .map(|v| v.to_bits())
-        .collect()
+    research::extract(
+        &Request::for_slots(
+            zensim::feature_set_id::SlotSet::from_ranges([(0, N_SLOTS)]),
+            N_SLOTS,
+        ),
+        src,
+        dst,
+    )
+    .expect("extract")
+    .values()
+    .iter()
+    .map(|v| v.to_bits())
+    .collect()
 }
 
 /// Re-exec THIS test binary with `ZENSIM_FORMULA_REV=<rev>` when the current

@@ -167,6 +167,15 @@ because cleanup tests or a historical training reproduction pass.
   unpopulated basic slots 0–12 and 26–38; making the test pass means changing its expected count for this entry (or registering the
   projection differently), which needs the owner's OK.
 
+* **2026-10-07 — Rev1 registry gates fail on the recorded by_v2fy projection. FIXED on main at `47a2e1d4`.**
+  Frozen base `1d3bf35a` reproduces both definition-registry and producer-plan
+  census failures: `basic+v2@w720/rev5_localwin#62adfc93` records 420 projected
+  reads while generic token expansion produces 504 slots. No expectation was
+  changed by PALETTE. The registered `by_v2fy_420` selection on main fixes
+  both gates; retain the frozen-base historical receipts. The separate
+  zensim-validate partial-producer test remains OPEN pending its owner. Saved baseline output is indexed in the PALETTE evidence
+  pointer; the palette-only request has its own exact emitted-ID gate.
+
 * **2026-10-05 — E27 launch omitted the actual jobset memory-cap entry. RESOLVED for the running study by the coordinator.**
   Manifest memory hints did not set the fleet runtime cap. The coordinator installed the existing
   `jobset_caps.json` entry with 6g and the registered host caps; observed workers used that envelope.
