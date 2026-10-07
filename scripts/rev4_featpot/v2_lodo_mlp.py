@@ -288,7 +288,7 @@ def main() -> None:
     if args.strict_admission:
         strict_output_preflight(V2, args.dest)
         from v2_human_role import preflight_recipe
-        preflight_recipe(V2, args.data_role_decision, args.heldout)
+        role_decision = preflight_recipe(V2, args.data_role_decision, args.heldout)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
@@ -305,7 +305,7 @@ def main() -> None:
         raise ValueError("wide receipt identity mismatch")
     if args.strict_admission:
         from v2_common import load_frozen
-        frozen, _ = load_frozen(V2, training_only=True)
+        frozen, frozen_sha = load_frozen(V2, training_only=True)
         if frozen["wide_receipts"].get(f"{family}/{variant}") != sha(receipt_path):
             raise ValueError("wide receipt is not the admitted frozen one")
     if any(not 0 <= c < width for c in keep):
@@ -399,7 +399,12 @@ def main() -> None:
                 tmp.with_suffix(".keys.parquet").unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
     if args.train_only:
-        (dest / "result.json").write_text(json.dumps({"training_only": True, "selection": selection,
+        (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+            "training_only": True, "selection": selection, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+            "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
+            "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
+            "human_sources": role_decision["sources"] if args.strict_admission else None,
+            "data_role_decision_sha256": sha(args.data_role_decision) if args.strict_admission else None,
             "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
             "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
             "train_weights": weights, "coverage_leg": coverage_record}) + "\n")

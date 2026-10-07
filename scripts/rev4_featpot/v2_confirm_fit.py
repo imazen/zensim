@@ -66,7 +66,7 @@ def main() -> None:
     if args.strict_admission:
         strict_output_preflight(V2, args.dest)
         from v2_human_role import preflight_recipe
-        preflight_recipe(V2, args.data_role_decision)
+        role_decision = preflight_recipe(V2, args.data_role_decision)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
@@ -143,7 +143,12 @@ def main() -> None:
         if args.pack_production:
             from v2_production_pack import pack_production
             packed = pack_production(bake, dest, checked(legs["cid22"]["fit"]))
-        (dest / "result.json").write_text(json.dumps({"training_only": True, "selection": selection,
+        (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+            "training_only": True, "selection": selection, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+            "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
+            "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
+            "human_sources": role_decision["sources"] if args.strict_admission else None,
+            "data_role_decision_sha256": sha(args.data_role_decision) if args.strict_admission else None,
             "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
             "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
             "train_weights": weights, "coverage_leg": coverage_record, **packed}) + "\n")
