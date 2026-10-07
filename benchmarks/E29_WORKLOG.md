@@ -212,3 +212,10 @@ checks pass; script lint checks 857 runnable scripts. Full run logs are retained
 under `/home/lilith/tmp/e29r2/`. The rebuilt trainer requires its own full baseline
 parity proof below; the retained earlier proof is not substituted for that run.
 The combined v40 package, scientific controls/arms and assessment remain missing.
+
+
+The extended native probe covers both arms (29 passing cases total). hc4 VAL
+keys refuse before either table or pair-list open; changed transforms, escaping
+pair paths, changed pair pins and absent pair CLI binding also refuse. The valid
+hc4 admission control reaches only its malformed synthetic Parquet. Evidence:
+`/mnt/v/output/zensim/e29r2-2026-10-07/native-admission-both-arms/RESULT.json`.

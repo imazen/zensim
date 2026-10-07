@@ -21,12 +21,14 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(binary, table, keep, directory, label, target_column="human_score", target_scale="1"):
+def run(binary, table, keep, directory, label, target_column="human_score", target_scale="1", pair_path=None):
     trace = directory / f'{label}.syscalls.log'
     argv = [str(binary), '--group', f'hdr:{table}:1:0:rank', '--hdr-consensus-research',
             '--nonneg-distance', '--target-column', target_column, '--target-scale', target_scale, '--keep-features', str(keep), '--max-features', '1825',
             '--out', str(directory / f'{label}-never.bin'), '--no-auto-eval',
             '--epochs', '1', '--pairs-per-epoch', '1']
+    if pair_path is not None:
+        argv += ['--rank-pair-list', f'hdr:{pair_path}', '--no-sample-coverage']
     p = subprocess.run(['strace', '-qq', '-f', '-e', 'trace=open,openat,openat2',
                         '-o', str(trace), *argv], capture_output=True, text=True)
     (directory / f'{label}.stdout.log').write_text(p.stdout)
@@ -34,7 +36,8 @@ def run(binary, table, keep, directory, label, target_column="human_score", targ
     text = trace.read_text()
     count = lambda path: sum(f'"{path}"' in line for line in text.splitlines())
     return dict(case=label, rc=p.returncode, payload_opens=count(table),
-                key_opens=count(table.with_suffix('.keys.parquet')), argv=argv)
+                key_opens=count(table.with_suffix('.keys.parquet')),
+                pair_opens=count(pair_path) if pair_path is not None else 0, argv=argv)
 
 
 def main():
@@ -129,6 +132,37 @@ def main():
     case = run(args.binary, table, keep, args.dest, 'valid-TRAIN-admission')
     assert case['rc'] != 0 and case['payload_opens'] > 0 and case['key_opens'] > 0, case
     assert 'parquet' in (args.dest / 'valid-TRAIN-admission.stderr.log').read_text().lower()
+    report.append(case)
+    # hc4 also admits keys before pair payloads and binds the declared list to
+    # the actual CLI. Both positive controls intentionally stop at bad Parquet.
+    pairs = args.dest / 'synthetic-pairs.json'
+    pairs.write_text('[[0,1]]\n')
+    def hc4(key_table):
+        d = declaration(key_table)
+        d.update(arm='hc4', target_transform='score=10*q_jod;no-clipping',
+                 pair_list=pairs.name, pair_list_sha256=sha(pairs))
+        return d
+    d = hc4(keys('val')); sidecar.write_text(json.dumps(d))
+    case = run(args.binary, table, keep, args.dest, 'hc4-VAL-keys', pair_path=pairs)
+    assert case['rc'] == 2 and case['payload_opens'] == 0 and case['pair_opens'] == 0, case
+    report.append(case)
+    for label, field, value in [
+        ('hc4-wrong-transform', 'target_transform', 'score=-10*q_jod;no-clipping'),
+        ('hc4-pair-traversal', 'pair_list', '../synthetic-pairs.json'),
+        ('hc4-wrong-pair-pin', 'pair_list_sha256', '0' * 64),
+    ]:
+        d = hc4(valid_keys); d[field] = value; sidecar.write_text(json.dumps(d))
+        case = run(args.binary, table, keep, args.dest, label, pair_path=pairs)
+        assert case['rc'] == 2 and case['payload_opens'] == 0, case
+        if field != 'pair_list_sha256':
+            assert case['pair_opens'] == 0, case
+        report.append(case)
+    d = hc4(valid_keys); sidecar.write_text(json.dumps(d))
+    case = run(args.binary, table, keep, args.dest, 'hc4-missing-pair-cli')
+    assert case['rc'] == 2 and case['payload_opens'] == 0, case
+    report.append(case)
+    case = run(args.binary, table, keep, args.dest, 'hc4-valid-TRAIN-admission', pair_path=pairs)
+    assert case['rc'] != 0 and case['payload_opens'] > 0 and case['pair_opens'] > 0, case
     report.append(case)
     assert not list(args.dest.glob('*-never.bin'))
     result = dict(schema='e29r2-native-hdr-admission-probes-v1', status='PASS',
