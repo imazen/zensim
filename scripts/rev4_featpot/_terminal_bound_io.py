@@ -28,7 +28,9 @@ def _open_regular_at(parent, name, flags, exclusive=False):
             _regular(before)
             # O_PATH acquires identity without a data open/IN_OPEN event. A
             # hard link inserted after stat is checked before any data handle.
-            leaf = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            leaf = os.open(
+                name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent
+            )
             info = os.fstat(leaf)
             _regular(info)
             if _identity(info) != _identity(before):
