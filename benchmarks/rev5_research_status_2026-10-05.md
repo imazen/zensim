@@ -199,3 +199,19 @@ minimise MSE and maximise Kendall and Pearson correlation.
   high-frequency chroma loss, and the 32×32 sample lattice can miss systematic edits.
 * **zenmetrics CI:** the fleet worker image workflow has failed since 2026-09-27 (deploy manifest missing the inherited lints table).
   A verified fix is committed; GitHub rejected the push with an internal error three times, so it will be retried.
+
+## 15. Updates (2026-10-07 16:05 UTC)
+
+* **E28:** 51 of 100 cells done at 15:51 UTC; every installed cell so far passes an independent budget audit (120 epochs, 50,000 pairs,
+  epoch 119) — the running harvest doesn't check the budget itself, so the audit runs again before the verdict.
+* **AIC-3 in E28 (for the owner):** E28 uses the same five-source exploratory design as E21–E27, so its s2o arm trains on AIC-3 when
+  AIC-3 isn't the held-out source and its aic3 fold reads AIC-3 labels. D1 keeps AIC-3 out of the production model, and the §3d family
+  rule calls the JPEG-AIC family "never a training input". E28 stays research-only: its models are never read on AIC-4 or SDR25 and
+  never ship, and any recipe it supports must be re-checked on the four-source D1 route before production. If the owner wants
+  exploratory runs to stop using AIC-3 as well, future registrations (E29 onward) will switch to the four-source design.
+* **SHIPPATH round 11** fixed both review findings (admission now checks populations before any payload read; harvest binds the
+  registered budget and admission identities, and smoke runs can no longer install as full cells). Its v39 image carries the reviewed
+  worker claim fix. Under review.
+* **UPIQ-380 ingested** for D3: 380 HDR pairs on 30 references (fit 330 / development 50 by reference hash), Rev5 by_v2fy features
+  through the same HDR route as E26/E27, admitted from dataset metadata before the label file was opened; no other UPIQ data read.
+  E31 (one human HDR rank arm) is drafted. Under review.
