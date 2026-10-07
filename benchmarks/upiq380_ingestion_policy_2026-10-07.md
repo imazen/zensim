@@ -41,10 +41,26 @@ through run-heavy. There is no model fit or fleet smoke in ingestion. Every
 future fleet smoke must exercise actual fit-cell-exec staging, inventory
 verification and FIT_ROOT binding.
 
-E31 remains a draft at
-`/home/lilith/tmp/zensim-paper/rev4/E31_upiq380_registration_DRAFT.md`.
-It fixes one nominal-weight-4 pooled human-rank arm, E21's unchanged SDR guard,
-seeds 0–9/five SDR folds/final epoch 119. UPIQ training/development and
-UPIQ-calibrated HDR-VDP-3 cannot qualify independent human HDR accuracy.
-Frozen HDR-VDC/AVT video reads are report-only; the independent Squintly HDR
-study and its separately registered decision rule remain missing.
+Round-two review exposed two admission defects: malformed extraction options
+could enter the legacy label reader, and Rust accepted a sorted 420-slot set
+without exact ID identity. Both are fixed locally in `a7625c14`; seven Python
+and seven Rust tests pass. Twenty actual-binary refusals include all eleven
+original cases, exact-ID refusal before image metadata and eight malformed
+CLI refusals before synthetic label access. The original frozen binary
+reproduces both CLI defects and the wrong-ID path access using only scratch
+tripwires. The prior data remains immutable; round-two extraction retains
+the historical 1825-column transport explicitly despite newer research slots.
+
+E31's final proposal is
+[e31_upiq380_registration_2026-10-07.md](e31_upiq380_registration_2026-10-07.md).
+It supersedes the five-source draft: four D1 folds, seeds 0–9, final119,
+E30 nA3 control with exact-parity reuse or one frozen matched fresh control.
+AIC-3 is excluded from every fit/development/preprocessing/packing/evaluation
+or control-discovery read. Launch waits for all 40 E30 nA3 cells and exact pins.
+The one nominal-weight-4 human rank arm retains E21 numerical SDR guards with
+E32's seed-paired reduction. UPIQ TRAIN/development and UPIQ-calibrated
+HDR-VDP-3 cannot qualify independent human HDR accuracy. Frozen HDR-VDC/AVT
+video reads are report-only. The independent Squintly HDR study and its
+separately registered decision rule remain missing. The unrecovered label
+producer requires explicit owner disposition before fitting; see
+[upiq380_label_provenance_2026-10-07.md](upiq380_label_provenance_2026-10-07.md).

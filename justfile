@@ -429,3 +429,8 @@ upiq380-split-negative revision out:
 # Scope static Python checks to the UPIQ ingestion/admission owners.
 upiq380-python-lint:
     ruff check scripts/rev4_featpot/upiq380.py scripts/tests/test_upiq380.py scripts/tests/upiq380_binary_refusals.py
+
+# Preserve artifact bytes on the NAS without requesting ownership changes.
+[positional-arguments]
+upiq380-mirror source dest:
+    rsync -a --no-owner --no-group "$1/" "$2/"
