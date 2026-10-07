@@ -127,6 +127,26 @@ class Admission(unittest.TestCase):
             with self.assertRaises(ValueError):nm.fit('kadid',self.root/'nm-out')
         self.assertEqual(self.opens,[])
 
+    def test_fit_roots_with_confirm_hdr_directories_refuse_before_any_table(self):
+        # Review2 P2: an otherwise valid prepared root with an extra forbidden directory must refuse
+        # in MLP and NM before the CID22 teacher checksum or any human table.
+        vdir=self.root/'wide/main/real';(vdir/'receipt.json').write_text(json.dumps(dict(schema='rev4-featpot-v2c-wide-v1',family='main',variant='real',width=1853,formula_revision=5,legs=self.legs,e28_teacher_pin_sha256=c.sha(e.PIN))))
+        self.policy['prepared_files']['wide/main/real/receipt.json']=c.sha(vdir/'receipt.json')
+        (self.root/'wide/keep_lists.json').write_text(json.dumps(dict(schema='rev4-featpot-v2-keeplists-v2')))
+        with patch.object(c,'V2',self.root):self.payloads.add(c.table_path(self.legs['cid22']['fit']).resolve())
+        from e21_cheap_recipe import columns
+        argv=['v2_lodo_mlp.py','--spec',e.spec('s2m'),'--head','N','--heldout','kadid','--seed-index','0','--columns',','.join(map(str,columns('by_v2fy')))]
+        for name in ['confirm','HDR','hdr','_sealed']:
+            extra=self.root/'wide'/name;sentinel=extra/'synthetic-protected-labels.txt';extra.mkdir();sentinel.write_text('synthetic labels')
+            self.payloads.add(sentinel.resolve())
+            with self.subTest(name=name):
+                with self.guard(),patch.object(sys,'argv',argv):
+                    with self.assertRaisesRegex(ValueError,'prepared root contains forbidden confirmation/HDR'):mlp.main()
+                with self.guard(),patch.object(__import__('subprocess'),'check_output',return_value=e.GROUPING.read_bytes()):
+                    with self.assertRaisesRegex(ValueError,'prepared root contains forbidden confirmation/HDR'):nm.fit('kadid',self.root/('nm-out-'+name))
+                self.assertEqual(self.opens,[])
+            sentinel.unlink();extra.rmdir()
+
     def test_label_free_keys_admitted_without_opening_targets(self):
         with self.guard():
             declarations,keys=e.admit_humans('s2m','kadid',self.legs)

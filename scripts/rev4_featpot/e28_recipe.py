@@ -57,7 +57,17 @@ def bound_record(rec, policy):
     return path, declaration
 
 
+def refuse_forbidden_dirs(root, what):
+    """Metadata-only walk: no confirmation, HDR or sealed directory may sit anywhere under an E28 root."""
+    for base, dirs, _ in os.walk(root, followlinks=False):
+        for name in dirs:
+            if Path(base, name).is_symlink() or name.lower().startswith(("confirm", "hdr", "_sealed")):
+                raise ValueError(f"E28 {what} contains forbidden confirmation/HDR directory")
+
+
 def admit_receipt(root):
+    # Both fit entry points (MLP, NM) admit here, before any teacher or table checksum.
+    refuse_forbidden_dirs(root, "prepared root")
     policy = admission_pin()
     rel = "wide/main/real/receipt.json"
     path = inventory_path(root / rel)
@@ -137,10 +147,7 @@ def admit_humans(arm, heldout, legs):
 
 def source_inventory(source, policy):
     """Refuse forbidden directories before opening even a source receipt."""
-    for base, dirs, _ in os.walk(source, followlinks=False):
-        for name in dirs:
-            if Path(base,name).is_symlink() or name.lower().startswith(("confirm", "hdr", "_sealed")):
-                raise ValueError("E28 preparation source contains forbidden confirmation/HDR directory")
+    refuse_forbidden_dirs(source, "preparation source")
     paths = {}
     for rel in policy["source_files"]:
         path = source / rel
