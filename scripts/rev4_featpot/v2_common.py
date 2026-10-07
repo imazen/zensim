@@ -237,6 +237,8 @@ def recipe_of(spec: str) -> dict:
             out["kadis_ordinal"] = float(tok[2:])
         elif tok.startswith("hd") and "hdr_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["hdr_weight"] = float(tok[2:])
+        elif tok[:2] in ("hp", "ha") and "hdr_weight" not in out and tok[2:] == "4":
+            out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both"}[tok[:2]])
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out
