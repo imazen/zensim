@@ -11,10 +11,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(model.metadata().get_utf8("zentrain.formula_revision")?, "5");
     let declared = zensim_validate::feature_set::bake_declared_training_set(&model)
         .ok_or("missing declared training feature set")?;
-    assert_eq!(
-        declared.to_string(),
-        "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
-    );
+    if repro["table_admission"]["research_family"] == "palette_v2" {
+        let transport: serde_json::Value = serde_json::from_str(include_str!(
+            "../../benchmarks/e32_palette_training_transport_2026-10-07.json"
+        ))?;
+        assert_eq!(declared.to_string(), transport["feature_set_id"]);
+        assert_eq!(repro["table_admission"]["serving_allowed"], false);
+        assert_eq!(repro["keep_features_n"], 462);
+    } else {
+        assert_eq!(
+            declared.to_string(),
+            "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
+        );
+    }
     println!(
         "{}",
         serde_json::json!({"status":"PASS", "formula_revision":5,
