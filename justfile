@@ -18,6 +18,10 @@ prodqual-workspace-build:
 prodqual-fmt-check:
     cargo fmt -p zensim --check
 
+# The archive mount accepts file contents but not local ownership changes.
+prodqual-mirror evidence destination:
+    rsync -a --no-owner --no-group '{{evidence}}/' '{{destination}}/'
+
 prodqual-workspace-tests:
     cargo test --workspace --lib --bins --tests --examples --all-features --exclude zensim-wasm-tests --no-fail-fast -- \
         --skip cid22_aggregate_srocc_matches_audit_reference \
