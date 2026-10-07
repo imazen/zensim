@@ -70,6 +70,7 @@ class TerminalRead(unittest.TestCase):
         self.write_population()
         self.prediction_receipt = self.root / "predictions.json"
         self.qualification = self.root / "qualification.json"
+        self.e30 = self.root / "e30-report.json"
         self.record = dict(
             schema="kadid-terminal-final-model-v1",
             design_line=owner.DESIGN,
@@ -174,11 +175,39 @@ class TerminalRead(unittest.TestCase):
                 )
             )
         )
+        self.e30.write_text(
+            json.dumps(
+                {
+                    "schema": "rev4-featpot-e30-four-source-v1",
+                    "status": "complete",
+                    "missing_cells": 0,
+                    "seeds": list(range(10)),
+                    "rows": {
+                        "nA3": {
+                            "signed": {"mean": -0.5},
+                            "per_source": {v: {} for v in self.record["human_sources"]},
+                        }
+                    },
+                    "control_stats": {
+                        f"{v}_s{i}": {}
+                        for v in self.record["human_sources"]
+                        for i in range(10)
+                    },
+                    "scope": "Report removal cost only; D1 fixed; no adoption rule; no AIC fold",
+                }
+            )
+        )
         self.qualification.write_text(
             json.dumps(
                 dict(
                     composition=self.record["composition"],
                     model_sha256=self.record["models"]["production"]["sha256"],
+                    reports={
+                        "E30": {
+                            "state": "completed",
+                            "artifact": self.spec(self.e30),
+                        }
+                    },
                     gates={
                         g: {"state": "pass", "artifact": self.spec(self.registration)}
                         for g in owner.GATES
@@ -375,6 +404,302 @@ class TerminalRead(unittest.TestCase):
         self.assertEqual(result["metrics"]["production"]["srocc_signed"], -1)
         self.assertFalse(any(result["gates"].values()))
         self.assertIn("**FAIL**", self.ledger.read_text())
+
+    def test_receipt_replacement_cannot_redirect_labels(self):
+        import copy
+
+        replacement = self.root / "labels__unapproved.tsv"
+        replacement.write_bytes(self.labels.read_bytes())
+        swapped = copy.deepcopy(self.record)
+        swapped["labels"]["path"] = str(replacement)
+        original = owner.committed_bytes
+        approved_sha = owner.sha(self.receipt)
+
+        def swap(commit, pin):
+            bound = original(commit, pin)
+            self.receipt.write_text(json.dumps(swapped))
+            return bound
+
+        original_open = io.open
+        opens = []
+
+        def guard(file, *args, **kwargs):
+            if not isinstance(file, int) and Path(file).resolve() == replacement:
+                opens.append(str(file))
+                raise AssertionError("unapproved label sentinel opened")
+            return original_open(file, *args, **kwargs)
+
+        original_assess = owner.assess
+
+        def approved_assess(receipt, population, predictions):
+            self.assertEqual(receipt["labels"]["path"], str(self.labels))
+            return original_assess(receipt, population, predictions)
+
+        with (
+            patch.object(owner, "committed_bytes", side_effect=swap),
+            patch("io.open", guard),
+            patch.object(owner, "assess", side_effect=approved_assess),
+        ):
+            result = self.run_read()
+        self.assertEqual(result["receipt_sha256"], approved_sha)
+        self.assertEqual(result["confirmation"], "PASS")
+        self.assertEqual(opens, [])
+        self.assertTrue(self.journal.exists())
+
+    def test_terminal_t0_metadata_boundaries_before_hash(self):
+        for directory in (
+            "kadid_terminal",
+            "bank/kadid_terminal",
+            "T0",
+            "t0-human",
+            "aic3",
+            "_sealed",
+            "holdout",
+        ):
+            root = self.root / directory
+            root.mkdir(parents=True, exist_ok=True)
+            sentinel = root / "sentinel.csv"
+            sentinel.write_bytes(self.labels.read_bytes())
+            link = self.root / (directory.replace("/", "_") + ".link")
+            link.symlink_to(sentinel)
+            original_open = io.open
+            builtin = builtins.open
+            seen = []
+
+            def guard(real):
+                def opened(file, *args, **kwargs):
+                    if not isinstance(file, int) and Path(file).resolve() == sentinel:
+                        seen.append(str(file))
+                        raise AssertionError("protected sentinel opened")
+                    return real(file, *args, **kwargs)
+
+                return opened
+
+            with (
+                patch("io.open", guard(original_open)),
+                patch("builtins.open", guard(builtin)),
+            ):
+                for path in (sentinel, link):
+                    with self.assertRaises((ValueError, PermissionError)):
+                        owner.preflight(
+                            self.receipt, path, self.ledger, self.journal, self.output
+                        )
+                    with self.assertRaises((ValueError, PermissionError)):
+                        owner.preflight(
+                            path,
+                            self.root / "missing-authorization",
+                            self.ledger,
+                            self.journal,
+                            self.output,
+                        )
+                    for slot in ("population", "bindings"):
+                        saved = self.record[slot]
+                        spec = {
+                            "path": str(path),
+                            "sha256": self.record["labels"]["sha256"],
+                        }
+                        self.record[slot] = [spec] if slot == "bindings" else spec
+                        self.pin()
+                        self.no_open(self.run_read)
+                        self.record[slot] = saved
+            self.assertEqual(seen, [])
+            self.assertFalse(self.journal.exists())
+
+    def test_committed_pin_under_terminal_root_refuses_before_lookup(self):
+        self.auth["receipt_repo_path"] = "bank/kadid_terminal/receipt.json"
+        self.authorization.write_text(json.dumps(self.auth))
+        with patch.object(
+            owner,
+            "committed_bytes",
+            side_effect=AssertionError("protected committed object read"),
+        ) as lookup:
+            self.no_open(self.run_read)
+        lookup.assert_not_called()
+        self.assertFalse(self.journal.exists())
+
+    def test_label_adapter_all_fields_preflight(self):
+        import copy
+
+        saved = copy.deepcopy(self.record["labels"])
+        changes = [
+            ("sha256", None),
+            ("sha256", "not-a-sha"),
+            ("sha256", "a" * 63),
+            ("path", None),
+            ("ref_col", None),
+            ("dist_col", ""),
+            ("label_col", 7),
+            ("format", "json"),
+            ("usecols", ["human_score"]),
+        ]
+        for key, value in changes:
+            self.record["labels"] = copy.deepcopy(saved)
+            if value is None:
+                self.record["labels"].pop(key)
+            else:
+                self.record["labels"][key] = value
+            self.pin()
+            self.no_open(self.run_read)
+            self.assertFalse(self.journal.exists())
+            self.assertNotIn("KADID-TERMINAL-SPENT:", self.ledger.read_text())
+
+    def test_reversed_all_correlations_keep_quality_orientation(self):
+        self.write_population(reverse=True)
+        self.pin()
+        r = self.run_read()
+        m = r["metrics"]["production"]
+        self.assertEqual(m["srocc_signed"], -1)
+        self.assertEqual(m["krocc"], -1)
+        self.assertLess(m["plcc"], -0.99)
+        self.assertEqual(m["plcc_raw"], -1)
+        self.assertEqual(
+            m["plcc_form"],
+            "four-parameter logistic; increasing predicted-quality mapping",
+        )
+        d = r["diagnostics"]["production"]
+        self.assertEqual(d["within_reference_srocc"], -1)
+        self.assertTrue(
+            all(v["srocc_signed"] == v["srocc"] == -1 for v in d["within_reference"])
+        )
+        self.assertTrue(
+            all(v["srocc_signed"] == v["srocc"] == -1 for v in d["per_distortion_type"])
+        )
+
+    def test_label_text_cannot_escape_result_or_cli(self):
+        canary = "SYNTHETIC_LABEL_PRIVATE_CANARY"
+        lines = self.labels.read_text().splitlines()
+        columns = lines[1].split("\t")
+        columns[-1] = canary
+        lines[1] = "\t".join(columns)
+        self.labels.write_text("\n".join(lines) + "\n")
+        self.record["labels"]["sha256"] = owner.sha(self.labels)
+        self.pin()
+        with self.assertRaises(owner.TerminalReadError) as err:
+            self.run_read()
+        self.assertEqual(str(err.exception), "label-adapter-error")
+        self.assertNotIn(canary, self.output.read_text())
+        self.assertTrue(self.journal.exists())
+        self.assertIn("KADID-TERMINAL-SPENT:", self.ledger.read_text())
+        stderr = io.StringIO()
+        # CLI boundary must suppress arbitrary parser contents/tracebacks too.
+        with (
+            patch.object(owner, "execute", side_effect=ValueError(canary)),
+            patch("sys.stderr", stderr),
+        ):
+            rc = owner.main(
+                [
+                    "--receipt",
+                    str(self.receipt),
+                    "--authorization",
+                    str(self.authorization),
+                    "--output",
+                    str(self.output),
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertNotIn(canary, stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_cli_real_label_error_is_sanitized_and_spent(self):
+        canary = "SYNTHETIC_LABEL_PRIVATE_CANARY"
+        lines = self.labels.read_text().splitlines()
+        cols = lines[1].split("\t")
+        cols[-1] = canary
+        lines[1] = "\t".join(cols)
+        self.labels.write_text("\n".join(lines) + "\n")
+        self.record["labels"]["sha256"] = owner.sha(self.labels)
+        self.pin()
+        stderr = io.StringIO()
+        with patch.object(owner, "JOURNAL", self.journal), patch("sys.stderr", stderr):
+            rc = owner.main(
+                [
+                    "--receipt",
+                    str(self.receipt),
+                    "--authorization",
+                    str(self.authorization),
+                    "--ledger",
+                    str(self.ledger),
+                    "--output",
+                    str(self.output),
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("label-adapter-error", stderr.getvalue())
+        self.assertNotIn(canary, stderr.getvalue())
+        self.assertNotIn(canary, self.output.read_text())
+        self.assertNotIn("Traceback", stderr.getvalue())
+        self.assertTrue(self.journal.exists())
+        self.assertIn("KADID-TERMINAL-SPENT:", self.ledger.read_text())
+
+    def test_e30_requires_bound_completion_without_pass(self):
+        r = owner.preflight(
+            self.receipt, self.authorization, self.ledger, self.journal, self.output
+        )
+        self.assertIsInstance(r[0], dict)
+        q = json.loads(self.qualification.read_text())
+        self.assertNotIn("E30", q["gates"])
+        q["reports"]["E30"]["state"] = "pending"
+        self.qualification.write_text(json.dumps(q))
+        self.record["qualification"] = self.spec(self.qualification)
+        self.receipt.write_text(json.dumps(self.record))
+        subprocess.run(["git", "add", "receipt.json"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "test: pending E30 report"],
+            cwd=self.root,
+            check=True,
+        )
+        self.auth.update(
+            receipt_sha256=owner.sha(self.receipt),
+            pre_read_commit=subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+            ).strip(),
+        )
+        self.authorization.write_text(json.dumps(self.auth))
+        self.no_open(self.run_read)
+        self.assertFalse(self.journal.exists())
+
+    def test_signed_quality_against_scipy_with_canonical_fit(self):
+        import numpy as np
+        from scipy.stats import kendalltau, pearsonr, spearmanr
+
+        rng = np.random.default_rng(9471)
+        x = np.linspace(-8, 8, 100)
+        y = 1 / (1 + np.exp(-x))
+        for predicted in (x, -x, np.round(x) + rng.normal(0, 0.2, len(x))):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv") as wire:
+                writer = csv.writer(wire, delimiter="\t")
+                writer.writerow(("predicted", "target"))
+                writer.writerows(zip(predicted, y))
+                wire.flush()
+                cmd = [self.record["panel"]["path"], "--input", wire.name]
+                signed = json.loads(
+                    subprocess.check_output(
+                        cmd + ["--json", "--signed-quality"], text=True
+                    )
+                )
+                mapped = np.array(
+                    [
+                        float(v)
+                        for v in subprocess.check_output(
+                            cmd + ["--emit-rescaled"], text=True
+                        ).splitlines()
+                    ]
+                )
+            self.assertAlmostEqual(
+                signed["srocc_signed"], spearmanr(predicted, y).statistic, places=12
+            )
+            self.assertAlmostEqual(
+                signed["krocc"], kendalltau(predicted, y).statistic, places=12
+            )
+            expected = pearsonr(mapped, y).statistic * np.sign(
+                spearmanr(predicted, mapped).statistic
+            )
+            self.assertAlmostEqual(signed["plcc"], expected, places=12)
+            self.assertAlmostEqual(
+                signed["plcc_raw"], pearsonr(predicted, y).statistic, places=12
+            )
+        # Fitted PLCC is not the raw-Pearson substitute.
+        self.assertGreater(abs(expected - pearsonr(predicted, y).statistic), 0.01)
 
     def test_reference_paired_se_against_independent_oracle(self):
         import numpy as np

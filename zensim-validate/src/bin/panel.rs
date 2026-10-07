@@ -157,6 +157,8 @@ use zensim_validate::panel::{self, PanelStats};
 mod scatter_json;
 
 struct Args {
+    /// Signed D2 correlations with a fixed higher-is-better quality direction.
+    signed_quality: bool,
     scatter: bool,
     input: Option<PathBuf>,
     /// Batch mode: a manifest of many (x, y) vector pairs (`-` = stdin).
@@ -237,6 +239,7 @@ fn print_usage() {
          \x20\x20--col-target <NAME>     override the 'target' column name\n\
          \x20\x20--col-sigma <NAME>      override the 'sigma' column name\n\
          \x20\x20--col-band <NAME>       override the 'band' column name\n\
+         \x20\x20--signed-quality        signed quality SROCC/KROCC/fitted PLCC (--input --json)\n\
          \x20\x20--per-group             + within-band SROCC summary (per_group_srocc)\n\
          \x20\x20--pairwise <PATH|->     forced-choice (2AFC / triplet) agreement:\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20TSV cols group,s_left,s_right,choice[,weight]\n\
@@ -250,6 +253,7 @@ fn print_usage() {
 }
 
 fn parse_args() -> Result<Args, String> {
+    let mut signed_quality = false;
     let mut input: Option<PathBuf> = None;
     let mut batch: Option<PathBuf> = None;
     let mut stats_srocc_only = false;
@@ -282,6 +286,7 @@ fn parse_args() -> Result<Args, String> {
                     other => return Err(format!("--stats must be 'full' or 'srocc', got {other}")),
                 };
             }
+            "--signed-quality" => signed_quality = true,
             "--json" => json = true,
             "--scatter" => scatter = true,
             "--raw-errors" => raw_errors = true,
@@ -339,7 +344,11 @@ fn parse_args() -> Result<Args, String> {
     if scatter && (input.is_none() || !json || per_group || emit_rescaled) {
         return Err("--scatter requires --input --json without other modes".into());
     }
+    if signed_quality && (input.is_none() || !json || scatter || per_group || emit_rescaled) {
+        return Err("--signed-quality requires --input --json without other modes".into());
+    }
     Ok(Args {
+        signed_quality,
         scatter,
         input,
         batch,
@@ -836,6 +845,26 @@ struct BatchRow {
     full: Option<(PanelStats, f64, f64)>, // (compute_panel stats, plcc_raw, mae)
 }
 
+// D2 fixes quality direction before any data is observed. The canonical
+// logistic fit can be decreasing; restore its mapping to increasing score
+// direction, rather than taking an absolute correlation or substituting raw
+// Pearson. No correlation or logistic arithmetic is reimplemented here.
+fn signed_quality_correlations(predicted: &[f64], target: &[f64]) -> serde_json::Value {
+    let mapped = panel::rescale_logistic(predicted, target);
+    let mapping_direction = panel::spearman(predicted, &mapped).signum();
+    serde_json::json!({
+        "schema": "panel-signed-quality-v1",
+        "orientation": "quality",
+        "n": predicted.len(),
+        "n_dropped": 0,
+        "srocc_signed": panel::spearman(predicted, target),
+        "krocc": panel::kendall_tau(predicted, target),
+        "plcc": panel::pearson(&mapped, target) * mapping_direction,
+        "plcc_raw": panel::pearson(predicted, target),
+        "plcc_form": "four-parameter logistic; increasing predicted-quality mapping",
+    })
+}
+
 // Shared by the existing mapped-MAE and explicit raw-error output. Keeping
 // the arithmetic here makes the rescaling choice visible at the call site.
 fn mean_absolute_error(predicted: &[f64], target: &[f64]) -> f64 {
@@ -1295,6 +1324,25 @@ fn main() -> ExitCode {
         }
     };
 
+    if args.signed_quality {
+        if cols.predicted.len() != cols.target.len()
+            || cols.predicted.len() < 3
+            || cols
+                .predicted
+                .iter()
+                .chain(&cols.target)
+                .any(|v| !v.is_finite())
+        {
+            eprintln!("panel: signed quality requires aligned finite pairs");
+            return ExitCode::from(2);
+        }
+        println!(
+            "{}",
+            signed_quality_correlations(&cols.predicted, &cols.target)
+        );
+        return ExitCode::SUCCESS;
+    }
+
     if args.scatter {
         let value = scatter_json::assess(&cols.predicted, &cols.target);
         println!("{value}");
@@ -1483,6 +1531,24 @@ fn render_per_group_json(g: &panel::PerGroupSrocc) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_quality_keeps_reversed_polarity_and_fitted_plcc() {
+        let quality: Vec<f64> = (0..50).map(|i| (f64::from(i) - 25.0) / 3.0).collect();
+        let y: Vec<f64> = quality.iter().map(|v| 1.0 / (1.0 + (-v).exp())).collect();
+        for sign in [1.0, -1.0] {
+            let x: Vec<f64> = quality.iter().map(|v| sign * v).collect();
+            let r = signed_quality_correlations(&x, &y);
+            assert_eq!(r["orientation"], "quality");
+            assert!((r["srocc_signed"].as_f64().unwrap() - sign).abs() < 1e-12);
+            assert!((r["krocc"].as_f64().unwrap() - sign).abs() < 1e-12);
+            let mapped = panel::rescale_logistic(&x, &y);
+            let fitted = panel::pearson(&mapped, &y);
+            assert!((r["plcc"].as_f64().unwrap() - sign * fitted).abs() < 1e-12);
+            assert!(r["plcc"].as_f64().unwrap() * sign > 0.99);
+            assert!((r["plcc"].as_f64().unwrap() - r["plcc_raw"].as_f64().unwrap()).abs() > 0.01);
+        }
+    }
 
     /// The whole point of a per-GROUP stat: a group that ranks BACKWARDS must
     /// come out negative and be counted, where a pooled `.abs()` would hide it.

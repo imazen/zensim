@@ -4,6 +4,13 @@
 releasegate-tests:
     python3 -m unittest discover -s scripts/tests -p test_kadid_terminal_read.py -v
 
+# Canonical signed-quality CLI and legacy panel mode regressions.
+releasegate-panel-tests:
+    cargo test -p zensim-validate --bin panel -- --nocapture
+
+releasegate-panel-parity panel_bin:
+    python3 scripts/verify_panel_parity.py --bin "{{panel_bin}}"
+
 # The rustdoc-JSON nightly is PINNED (keep in sync with the `api-doc-check`
 # job in .github/workflows/ci.yml): an unpinned tracking nightly churns
 # cross-crate path rendering with zero repo changes — MEASURED 2026-09-06,

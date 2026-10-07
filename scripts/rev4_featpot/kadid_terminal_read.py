@@ -44,7 +44,6 @@ GATES = (
     "runtime/memory",
     "input/serving",
     "HDR scope",
-    "E30",
 )
 MODELS = ("production", "profile_b", "research_by_v2fy")
 REPO = Path(__file__).resolve().parents[2]
@@ -70,15 +69,148 @@ def require(condition, message):
         raise ValueError(message)
 
 
+# Metadata belongs to prepared artifacts, source or the exposure journal, never
+# to original corpus stores. Roots are owned here, not supplied by the receipt.
+METADATA_ROOTS = (
+    Path(__file__).resolve().parents[2],
+    Path.home() / "tmp/zensim-paper/rev4",
+    Path("/mnt/v/output/zensim"),
+    Path("/var/tmp/rev4-featpot"),
+)
+CORPUS_ROOTS = (
+    Path("/mnt/v/dataset"),
+    Path("/mnt/v/datasets"),
+    Path("/mnt/v/input"),
+    Path("/mnt/v/collections"),
+    Path("/var/tmp/datasets"),
+    v2c_labels.BANK,
+)
+# DATA_SPLITS T0/terminal bank populations and JPEG-AIC holdout family. Bank
+# inputs are never needed: the label-free population is prepared outside it.
+PROTECTED_POPULATIONS = {
+    "bank",
+    "kadid_terminal",
+    "cid22_b",
+    "cid22val",
+    "cid22_validation_set",
+    "aic3",
+    "aic4",
+    "aic2026",
+    "sdr25",
+    "jpeg-ai-sdr25",
+    "csiq",
+    "nits",
+    "nits-iqa",
+    "mciqa",
+    "mciqa-2k",
+    "upiq",
+    "konjnd_jpeg_terminal",
+}
+
+
+class TerminalReadError(ValueError):
+    """Only a fixed category can cross the post-read or CLI boundary."""
+
+    def __init__(self, category):
+        self.category = (
+            category
+            if category
+            in {
+                "preflight-refused",
+                "exposure-refused",
+                "label-adapter-error",
+                "assessment-error",
+                "execution-error",
+            }
+            else "execution-error"
+        )
+        super().__init__(self.category)
+
+
+def metadata_path(path):
+    p = safe_path(path)
+    require(p.is_absolute(), "absolute metadata paths required")
+    resolved = p.resolve()
+    for candidate in (p, resolved):
+        parts = {v.lower() for v in candidate.parts}
+        require(
+            not parts.intersection(PROTECTED_POPULATIONS)
+            and not any("terminal" in v.lower() for v in candidate.parent.parts)
+            and not any(
+                v == "t0" or v.startswith("t0_") or v.startswith("t0-") for v in parts
+            )
+            and not any(
+                candidate.is_relative_to(root.resolve()) for root in CORPUS_ROOTS
+            ),
+            "terminal/T0 metadata ancestry refused",
+        )
+        require(
+            any(
+                candidate.is_relative_to(root.resolve())
+                for root in (*METADATA_ROOTS, REPO)
+            ),
+            "metadata outside trusted preparation roots",
+        )
+    return p
+
+
+def metadata_bytes(path):
+    return metadata_path(path).read_bytes()
+
+
+def validate_label_adapter(spec):
+    require(isinstance(spec, dict), "original label adapter required")
+    require(
+        isinstance(spec.get("path"), str)
+        and "\0" not in spec["path"]
+        and Path(spec["path"]).is_absolute(),
+        "explicit original label path required",
+    )
+    digest = spec.get("sha256")
+    require(
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(c in "0123456789abcdef" for c in digest),
+        "64-hex label SHA-256 required",
+    )
+    require(
+        spec.get("via_pairs") is None and spec.get("select") is None,
+        "dedicated terminal-only original label manifest required",
+    )
+    cols = [spec.get(k) for k in ("ref_col", "dist_col", "label_col")]
+    require(
+        spec.get("format") in ("tsv", "csv", "json")
+        and all(isinstance(c, str) and c.strip() for c in cols)
+        and len(set(cols)) == 3,
+        "original label adapter required",
+    )
+    if spec["format"] == "json":
+        require(
+            isinstance(spec.get("rows_key"), str) and bool(spec["rows_key"].strip()),
+            "JSON label rows_key required",
+        )
+    usecols = spec.get("usecols")
+    require(
+        usecols is None
+        or (
+            isinstance(usecols, list)
+            and all(isinstance(c, str) and c.strip() for c in usecols)
+            and len(set(usecols)) == len(usecols)
+            and set(cols).issubset(usecols)
+        ),
+        "label usecols must include every adapter column",
+    )
+
+
 def checked(spec):
-    path = safe_path(spec["path"])
+    path = metadata_path(spec["path"])
     require(path.is_absolute(), "absolute paths required")
     require(sha(path) == spec["sha256"], f"changed input: {path}")
     return path
 
 
 def rows(path):
-    with Path(path).open(newline="") as f:
+    with metadata_path(path).open(newline="") as f:
         return list(csv.DictReader(f, delimiter="\t"))
 
 
@@ -107,11 +239,13 @@ def committed_bytes(commit, pin):
 def preflight(receipt_path, authorization_path, ledger, journal, output):
     # Reject even metadata aliases into protected ancestry before opening them.
     receipt_path, authorization_path = (
-        safe_path(receipt_path),
-        safe_path(authorization_path),
+        metadata_path(receipt_path),
+        metadata_path(authorization_path),
     )
-    receipt_sha = sha(receipt_path)
-    auth = json.loads(authorization_path.read_text())
+    # One read: retain the bytes matched against the committed object.
+    receipt_live = metadata_bytes(receipt_path)
+    receipt_sha = hashlib.sha256(receipt_live).hexdigest()
+    auth = json.loads(metadata_bytes(authorization_path))
     require(
         auth.get("schema") == "kadid-terminal-authorization-v1"
         and auth.get("authorize_once") is True
@@ -121,8 +255,9 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         "coordinator authorization required",
     )
     require(
-        Path(auth["ledger"]).resolve() == Path(ledger).resolve()
-        and Path(auth["journal"]).resolve() == Path(journal).resolve(),
+        metadata_path(auth["ledger"]).resolve() == metadata_path(ledger).resolve()
+        and metadata_path(auth["journal"]).resolve()
+        == metadata_path(journal).resolve(),
         "exposure destinations not authorized",
     )
     # The model/scorer pin must already exist in a local committed tree.
@@ -135,12 +270,14 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         not Path(pin).is_absolute() and ".." not in Path(pin).parts,
         "invalid committed pin path",
     )
+    metadata_path(REPO / pin)
     committed = committed_bytes(commit, pin)
     require(
         hashlib.sha256(committed).hexdigest() == receipt_sha,
         "pre-read commit does not bind receipt",
     )
-    receipt = json.loads(receipt_path.read_text())
+    receipt = json.loads(committed)
+    validate_label_adapter(receipt.get("labels"))
     require(
         receipt.get("schema") == "kadid-terminal-final-model-v1"
         and receipt.get("design_line") == DESIGN
@@ -152,10 +289,12 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         "registered population/statistics required",
     )
     require(
-        receipt["registration_sha256"] == sha(REGISTRATION), "changed D2 registration"
+        receipt["registration_sha256"] == sha(metadata_path(REGISTRATION)),
+        "changed D2 registration",
     )
     require(
-        receipt.get("code_sha256") == {k: sha(p) for k, p in CODE.items()},
+        receipt.get("code_sha256")
+        == {k: sha(metadata_path(p)) for k, p in CODE.items()},
         "unbound read/label/statistic owners",
     )
     require(
@@ -179,11 +318,11 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
     ]
     labels = Path(receipt["labels"]["path"]).resolve()
     for spec in specs:
-        path = safe_path(spec["path"])
+        path = metadata_path(spec["path"])
         require(path.resolve() != labels, "label alias in metadata/input inventory")
     ledger, journal, output = map(Path, (ledger, journal, output))
     for path in (ledger, journal, output):
-        safe_path(path)
+        metadata_path(path)
         require(path.resolve() != labels, "label alias in output")
     require(
         ledger.is_file() and not journal.exists() and not output.exists(),
@@ -199,12 +338,14 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
     require(
         sha(checked(receipt["models"]["profile_b"]))
         == sha(
-            REPO
-            / "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
+            metadata_path(
+                REPO
+                / "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
+            )
         ),
         "profile B must be the shipped codec_target bake",
     )
-    qualification = json.loads(checked(receipt["qualification"]).read_text())
+    qualification = json.loads(metadata_bytes(checked(receipt["qualification"])))
     require(
         qualification.get("composition") == receipt["composition"]
         and qualification.get("model_sha256")
@@ -215,14 +356,39 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         ),
         "every pre-terminal release gate must pass for exact composition",
     )
-    evidence = [qualification["gates"][g]["artifact"] for g in GATES]
+    report = qualification.get("reports", {}).get("E30", {})
+    require(report.get("state") == "completed", "completed bound E30 report required")
+    # E30 reports the removal cost; D1 is fixed regardless of its comparison.
+    evidence = [qualification["gates"][g]["artifact"] for g in GATES] + [
+        report["artifact"]
+    ]
     for spec in evidence:
         require(
-            safe_path(spec["path"]).resolve() != labels, "label alias in gate evidence"
+            metadata_path(spec["path"]).resolve() != labels,
+            "label alias in gate evidence",
         )
     for spec in evidence:
         checked(spec)
-    prediction_receipt = json.loads(checked(receipt["prediction_receipt"]).read_text())
+    e30 = json.loads(metadata_bytes(checked(report["artifact"])))
+    sources = ("kadid", "tid2013", "konfig", "cid22_a25")
+    require(
+        e30.get("schema") == "rev4-featpot-e30-four-source-v1"
+        and e30.get("status") == "complete"
+        and e30.get("missing_cells") == 0
+        and e30.get("seeds") == list(range(10))
+        and set(e30.get("rows", {})) == {"nA3"}
+        and set(e30["rows"]["nA3"].get("per_source", {})) == set(sources)
+        and set(e30.get("control_stats", {}))
+        == {f"{source}_s{i}" for source in sources for i in range(10)}
+        and e30.get("scope")
+        == "Report removal cost only; D1 fixed; no adoption rule; no AIC fold"
+        and "rule" not in e30
+        and "adopt" not in e30["rows"]["nA3"],
+        "complete registered report-only E30 artifact required",
+    )
+    prediction_receipt = json.loads(
+        metadata_bytes(checked(receipt["prediction_receipt"]))
+    )
     require(
         prediction_receipt
         == {
@@ -257,7 +423,7 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         and metadata.get("pair_sampling") == "uniform",
         "final qualified Rev5 epoch119 required",
     )
-    contract = json.loads(CONTRACT.read_text())
+    contract = json.loads(metadata_bytes(CONTRACT))
     seed = receipt["seed_index"]
     require(
         type(seed) is int and seed in (0, 1, 2), "registered full-data seed required"
@@ -322,23 +488,6 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
         all(np.isfinite(float(r[m])) for r in predictions for m in MODELS),
         "nonfinite prediction",
     )
-    require(
-        receipt["labels"].get("via_pairs") is None
-        and receipt["labels"].get("select") is None,
-        "dedicated terminal-only original label manifest required",
-    )
-    require(
-        receipt["labels"].get("format") in ("tsv", "csv", "json")
-        and all(
-            isinstance(receipt["labels"].get(k), str) and receipt["labels"][k]
-            for k in ("ref_col", "dist_col", "label_col")
-        ),
-        "original label adapter required",
-    )
-    require(
-        Path(receipt["labels"]["path"]).is_absolute(),
-        "explicit original label path required",
-    )
     return receipt, receipt_sha, population, predictions
 
 
@@ -346,7 +495,7 @@ def reserve(ledger, journal, receipt_sha):
     token = f"KADID-TERMINAL-SPENT:{DESIGN}"
     # O_EXCL is shared across workspaces/outputs; flock also serializes ledger
     # append. A crash or failed statistic cannot permit a second look.
-    with Path(ledger).open("r+") as f:
+    with metadata_path(ledger).open("r+") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         require(token not in f.read(), "terminal design line already spent")
         record = {
@@ -355,7 +504,7 @@ def reserve(ledger, journal, receipt_sha):
             "state": "spent-before-label-open",
             "time_utc": datetime.now(timezone.utc).isoformat(),
         }
-        with Path(journal).open("x") as j:
+        with metadata_path(journal).open("x") as j:
             json.dump(record, j, indent=2)
             j.flush()
             os.fsync(j.fileno())
@@ -371,7 +520,10 @@ def reserve(ledger, journal, receipt_sha):
 
 def assess(receipt, population, predictions):
     # First label open occurs here, AFTER authorization, all gates and exposure.
-    label_rows = v2c_labels.load_label_rows(receipt["labels"])
+    try:
+        label_rows = v2c_labels.load_label_rows(receipt["labels"])
+    except Exception:
+        raise TerminalReadError("label-adapter-error") from None
     lookup = {(r.ref_path, r.dist_path): r.label for r in label_rows.itertuples()}
     require(
         len(label_rows) == len(lookup) == 2000
@@ -387,6 +539,38 @@ def assess(receipt, population, predictions):
     }
     require(len(groups) > 1, "reference bootstrap requires multiple references")
     full = zen_stats.panel_batch([(m, x[m], y) for m in MODELS])
+    for row in full:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv") as wire:
+            writer = csv.writer(wire, delimiter="\t")
+            writer.writerow(("predicted", "target"))
+            writer.writerows(zip(x[row["label"]], y))
+            wire.flush()
+            signed = json.loads(
+                subprocess.run(
+                    [
+                        receipt["panel"]["path"],
+                        "--input",
+                        wire.name,
+                        "--json",
+                        "--signed-quality",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout
+            )
+        require(
+            signed.get("schema") == "panel-signed-quality-v1"
+            and signed.get("orientation") == "quality",
+            "signed quality statistic owner required",
+        )
+        row.update(
+            {
+                k: signed[k]
+                for k in ("srocc_signed", "krocc", "plcc", "plcc_raw", "plcc_form")
+            }
+        )
+        row["srocc"] = row["srocc_signed"]
     diagnostics = {}
     for m in MODELS:
         within = zen_stats.panel_batch(
@@ -416,27 +600,22 @@ def assess(receipt, population, predictions):
             ],
             stats="srocc",
         )
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv") as wire:
-            writer = csv.writer(wire, delimiter="\t")
-            writer.writerow(("predicted", "target", "band"))
-            writer.writerows(
-                (x[m][i], y[i], p["ref_basename"]) for i, p in enumerate(population)
-            )
-            wire.flush()
-            per_group = json.loads(
-                subprocess.run(
-                    [
-                        receipt["panel"]["path"],
-                        "--input",
-                        wire.name,
-                        "--json",
-                        "--per-group",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                ).stdout
-            )["per_group"]
+        for row in (*within, *by_type):
+            row["srocc"] = row["srocc_signed"]
+        # Reduce the already-returned signed canonical per-reference results.
+        # Match the owner min_len=3 and retain undefined/short groups explicitly.
+        eligible = [
+            r["srocc_signed"]
+            for r in within
+            if r["n"] >= 3 and np.isfinite(r["srocc_signed"])
+        ]
+        per_group = {
+            "orientation": "quality",
+            "min_len": 3,
+            "n_groups": len(eligible),
+            "n_excluded": len(within) - len(eligible),
+            "mean": float(np.mean(eligible)) if eligible else float("nan"),
+        }
         diagnostics[m] = {
             "within_reference": within,
             "within_reference_summary": per_group,
@@ -504,10 +683,16 @@ def assess(receipt, population, predictions):
 
 
 def execute(receipt, authorization, ledger, journal, output):
-    r, receipt_sha, pop, pred = preflight(
-        receipt, authorization, ledger, journal, output
-    )
-    reserve(ledger, journal, receipt_sha)
+    try:
+        r, receipt_sha, pop, pred = preflight(
+            receipt, authorization, ledger, journal, output
+        )
+    except Exception:
+        raise TerminalReadError("preflight-refused") from None
+    try:
+        reserve(ledger, journal, receipt_sha)
+    except Exception:
+        raise TerminalReadError("exposure-refused") from None
     try:
         result = dict(
             assess(r, pop, pred),
@@ -535,15 +720,21 @@ def execute(receipt, authorization, ledger, journal, output):
             "receipt_sha256": receipt_sha,
             "design_line_spent": True,
             "confirmation": "ERROR",
-            "error": str(error),
+            "error": error.category
+            if isinstance(error, TerminalReadError)
+            else "assessment-error",
         }
-        Path(output).write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
-        raise
-    Path(output).write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
-    with Path(ledger).open("a") as f:
+        metadata_path(output).write_text(
+            json.dumps(result, indent=2, allow_nan=False) + "\n"
+        )
+        raise TerminalReadError(result["error"]) from None
+    metadata_path(output).write_text(
+        json.dumps(result, indent=2, allow_nan=False) + "\n"
+    )
+    with metadata_path(ledger).open("a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(
-            f"\nD2 result `{Path(output)}` SHA-256 `{sha(output)}`: **{result['confirmation']}**. "
+            f"\nD2 result `{Path(output)}` SHA-256 `{sha(metadata_path(output))}`: **{result['confirmation']}**. "
             "Labels read once; no retuning permitted.\n"
         )
         f.flush()
@@ -551,19 +742,32 @@ def execute(receipt, authorization, ledger, journal, output):
     return result
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipt", required=True, type=Path)
     parser.add_argument("--authorization", required=True, type=Path)
     parser.add_argument("--ledger", type=Path, default=REPO / "docs/DATA_SPLITS.md")
     parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     # Caller-controlled scratch never falls back to /tmp.
     scratch = Path.home() / "tmp/kadid-terminal-read"
     scratch.mkdir(parents=True, exist_ok=True)
     tempfile.tempdir = str(scratch)
-    result = execute(
-        args.receipt, args.authorization, args.ledger, JOURNAL, args.output
-    )
+    try:
+        result = execute(
+            args.receipt, args.authorization, args.ledger, JOURNAL, args.output
+        )
+    except Exception as error:
+        category = (
+            error.category
+            if isinstance(error, TerminalReadError)
+            else "execution-error"
+        )
+        print(f"KADID TERMINAL REFUSED: {category}", file=sys.stderr)
+        return 2
     print(result["confirmation"])
-    sys.exit(0 if result["confirmation"] == "PASS" else 1)
+    return 0 if result["confirmation"] == "PASS" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
