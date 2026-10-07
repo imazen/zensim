@@ -1690,6 +1690,46 @@ mod toggle_gates {
     }
 }
 
+/// Applies a registered `slot_selection` rule from
+/// `benchmarks/feature_sets_registry.json` to a token-derived producer set.
+///
+/// A selection only narrows: it may never name a slot the compute does not
+/// populate, so the registry gates stay exact equalities rather than subsets.
+/// Unknown rule names panic.
+#[cfg(test)]
+pub(crate) fn apply_registered_slot_selection(
+    selection: &str,
+    derived: SlotSet,
+    ns: usize,
+) -> SlotSet {
+    match selection {
+        "full_y_coarse_xyb" => SlotSet::from_slots(
+            derived
+                .iter_slots()
+                .filter(|&id| !crate::feature_v2::ComputeSet::is_full_res_xb(id, ns)),
+        ),
+        // The pinned by_v2fy consumed IDs (SHIPPATH7's features-only Rev5
+        // projection; all other slots are NaN in that bank).
+        "by_v2fy_420" => {
+            let json: serde_json::Value = serde_json::from_str(include_str!(
+                "../../benchmarks/costset2_2026-10-03.candidate_ids.json"
+            ))
+            .expect("by_v2fy candidate IDs JSON");
+            let ids: Vec<usize> = serde_json::from_value(json["candidates"]["by_v2fy"].clone())
+                .expect("by_v2fy candidate IDs");
+            assert_eq!(ids.len(), 420, "by_v2fy_420 must name exactly 420 IDs");
+            let selected = SlotSet::from_slots(ids);
+            assert!(
+                derived.covers(&selected),
+                "by_v2fy_420 selects slots the compute does not populate: {:?}",
+                derived.missing_from(&selected)
+            );
+            selected
+        }
+        other => panic!("unknown slot selection {other:?}"),
+    }
+}
+
 /// **The SERVABILITY CENSUS** — the hard contract gate.
 ///
 /// User directive (2026-09-05): *"also make sure everything can be served"*.
@@ -1872,7 +1912,7 @@ pub(crate) mod servability_census {
     fn every_registered_producer_set_is_plannable() {
         let ns = crate::NUM_SCALES;
         let mut checked = 0usize;
-        for (compute, width, expect, full_y) in registered_producer_sets() {
+        for (compute, width, expect, selection) in registered_producer_sets() {
             let Some(parts) = crate::feature_set_id::ComputeParts::parse(&compute) else {
                 panic!("unparseable compute {compute:?}");
             };
@@ -1881,11 +1921,8 @@ pub(crate) mod servability_census {
                 want = want.union(&crate::feature_defs::family_slots(t, ns));
             }
             let mut want = want.clipped_to(width);
-            if full_y {
-                want = SlotSet::from_slots(
-                    want.iter_slots()
-                        .filter(|&id| !ComputeSet::is_full_res_xb(id, ns)),
-                );
+            if let Some(selection) = &selection {
+                want = super::apply_registered_slot_selection(selection, want, ns);
             }
             assert_eq!(want, expect, "{compute}@w{width}: registry slots");
             let plan = Plan::derive(&want, width)
@@ -1900,7 +1937,7 @@ pub(crate) mod servability_census {
     }
 
     /// The registry's producer entries as `(compute, layout_width, slots)`.
-    fn registered_producer_sets() -> Vec<(String, usize, SlotSet, bool)> {
+    fn registered_producer_sets() -> Vec<(String, usize, SlotSet, Option<String>)> {
         let json = include_str!("../../benchmarks/feature_sets_registry.json");
         let mut out = Vec::new();
         for chunk in json.split("\"compute\":").skip(1) {
@@ -1931,15 +1968,11 @@ pub(crate) mod servability_census {
             else {
                 continue;
             };
-            let full_y = chunk
+            let selection = chunk
                 .split("\"slot_selection\":")
                 .nth(1)
-                .and_then(between_quotes)
-                .is_some_and(|s| {
-                    assert_eq!(s, "full_y_coarse_xyb", "unknown slot selection");
-                    true
-                });
-            out.push((compute, width, slots, full_y));
+                .and_then(between_quotes);
+            out.push((compute, width, slots, selection));
         }
         out
     }

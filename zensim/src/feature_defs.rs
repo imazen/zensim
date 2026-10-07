@@ -4391,12 +4391,8 @@ mod owner_gates {
             }
             let mut derived = derived.clipped_to(width);
             if let Some(selection) = json_str_field(&obj, "slot_selection") {
-                assert_eq!(selection, "full_y_coarse_xyb", "unknown slot selection");
-                derived = SlotSet::from_slots(
-                    derived
-                        .iter_slots()
-                        .filter(|&id| !crate::feature_v2::ComputeSet::is_full_res_xb(id, NS)),
-                );
+                derived =
+                    crate::feature_plan::apply_registered_slot_selection(&selection, derived, NS);
             }
 
             if role == "consumer" {
