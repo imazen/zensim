@@ -534,6 +534,10 @@ e31-pinned-admission bundle upiq dest:
 e31-training-tests:
     TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_e31_*.py' -v
 
+e31-python-checks:
+    ruff check scripts/rev4_featpot/e31_training.py scripts/rev4_featpot/v2_common.py scripts/rev4_featpot/v2_lodo_mlp.py scripts/tests/test_e31_training.py scripts/tests/e31_control_parity.py scripts/tests/e31_extended_admission.py
+    ruff format --check scripts/rev4_featpot/e31_training.py scripts/tests/test_e31_training.py scripts/tests/e31_control_parity.py scripts/tests/e31_extended_admission.py
+
 e31-fit-key-check fit:
     TMPDIR=$HOME/tmp python3 scripts/tests/test_e31_training.py --real-fit {{fit}}
 

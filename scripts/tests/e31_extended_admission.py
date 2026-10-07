@@ -48,6 +48,7 @@ def main():
     Path(f"{dev}.manifest.json").write_text(json.dumps(original))
     selected = e31.columns("by_v2fy")
     cases = {
+        "no-disposition": (a.fit, "rank", selected, "malformed feature_set_id"),
         "different-420-subset": (
             a.fit,
             "rank",
@@ -85,6 +86,9 @@ def main():
             "--out",
             str(a.dest / f"{name}.bin"),
         ]
+        if name == "no-disposition":
+            index = cmd.index("--upiq-label-disposition")
+            del cmd[index : index + 2]
         trace = a.dest / f"{name}.trace"
         result = subprocess.run(
             ["strace", "-f", "-e", "trace=openat", "-o", str(trace), *cmd],
