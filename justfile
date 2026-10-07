@@ -342,8 +342,8 @@ palette-status log:
 palette-instrument-views bin commit bank out:
     python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-views {{bank}} --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}}
 
-palette-verify bin commit root:
-    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-verify {{root}} --bin {{bin}} --build-commit {{commit}} --era palette_v2
+palette-verify bin commit root instrument_sha:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-verify {{root}} --palette-instrument-manifest-sha256 {{instrument_sha}} --bin {{bin}} --build-commit {{commit}} --era palette_v2
 
 palette-mirror source destination:
     mkdir -p {{destination}}

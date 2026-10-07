@@ -558,10 +558,26 @@ def cmd_palette_chromaq(a):
 
 
 def validate_palette_instrument_manifest(path, build_commit, bank_sha256, pinned_sha256):
-    """The instrument admission owner; round-one checks retained for negative controls."""
-    im=json.loads(Path(path).read_text())
-    if im['labels_read'] or set(im['views'])!=set(PALETTE_TABLES) or im['bank_manifest_sha256']!=bank_sha256:
-        raise ValueError('instrument manifest mismatch')
+    """Admit exact pinned bytes and the registered research-only ID/column map.
+
+    The pin is supplied by the consumer's frozen registration, never inferred
+    from the file being admitted. Semantics are checked even when its byte pin
+    matches, so a consistently rehashed wrong-era/map receipt is still refused.
+    """
+    raw=Path(path).read_bytes()
+    if (not isinstance(pinned_sha256,str) or len(pinned_sha256)!=64
+            or hashlib.sha256(raw).hexdigest()!=pinned_sha256):
+        raise ValueError('pinned instrument manifest bytes required')
+    im=json.loads(raw)
+    if (im.get('schema')!='palette-instrument-views-v1'
+            or im.get('labels_read') is not False or im.get('serving_allowed') is not False
+            or im.get('build_commit')!=build_commit
+            or im.get('feature_set_id')!='palette@w1867/palette_v2#30b09cd1'
+            or im.get('feature_ids')!=PALETTE_IDS
+            or im.get('column_map')!={str(i):f'palette_f{i}' for i in PALETTE_IDS}
+            or set(im.get('views',{}))!=set(PALETTE_TABLES)
+            or im.get('bank_manifest_sha256')!=bank_sha256):
+        raise ValueError('instrument semantic identity/map mismatch')
     return im
 
 
@@ -572,6 +588,9 @@ def cmd_palette_verify(a):
     expected=PALETTE_MEMBERS|{'nits','live','mciqa','coverage_pool'}
     if set(top['sets'])!=expected or top['build_commit']!=a.build_commit or top['labels_read']:
         raise ValueError('complete authorized bank required')
+    instrument_path=root/'instrument/_MANIFEST.json'
+    im=validate_palette_instrument_manifest(instrument_path, a.build_commit,
+        sha256_file(bank/'_MANIFEST.json'), a.palette_instrument_manifest_sha256)
     verified={};tables={}
     for name,entry in top['sets'].items():
         folder=bank/name;mp=folder/'_MANIFEST.json';m=json.loads(mp.read_text())
@@ -597,9 +616,6 @@ def cmd_palette_verify(a):
                 raise ValueError('chunk producer identity')
         verified[name]={'rows':len(t),'features_sha256':m['features_sha256']}
         tables[name]=t
-    im=json.loads((root/'instrument/_MANIFEST.json').read_text())
-    validate_palette_instrument_manifest(root/'instrument/_MANIFEST.json', a.build_commit,
-        sha256_file(bank/'_MANIFEST.json'), getattr(a, 'palette_instrument_manifest_sha256', None))
     views={}
     for name,m in im['views'].items():
         path=root/'instrument'/f'{name}.parquet'
@@ -620,7 +636,11 @@ def cmd_palette_verify(a):
                 if not np.array_equal(v[f'palette_f{i}'].to_numpy()[ix],tables[member][f'f{i}'].to_numpy()[bank_ix]):
                     raise ValueError('instrument measured value join mismatch')
         views[name]={'rows':len(v),'sha256':m['sha256'],'exact_column_join':True}
-    receipt={'schema':'palette-final-verification-v1','build_commit':a.build_commit,'verifier_sha256':sha256_file(__file__),
+    receipt={'schema':'palette-final-verification-v2','build_commit':a.build_commit,'verifier_sha256':sha256_file(__file__),
+        'instrument_manifest_sha256':a.palette_instrument_manifest_sha256,
+        'instrument_feature_set_id':im['feature_set_id'],'instrument_feature_ids':im['feature_ids'],
+        'instrument_column_map':im['column_map'],'instrument_build_commit':im['build_commit'],
+        'instrument_serving_allowed':im['serving_allowed'],'semantic_identity_checked':True,
         'bank':verified,'instrument':views,'bank_rows':sum(x['rows'] for x in verified.values()),
         'instrument_rows':sum(x['rows'] for x in views.values()),'labels_read':False,'serving_allowed':False}
     with (root/'_VERIFIED.json').open('x') as f:json.dump(receipt,f,indent=2);f.write('\n')
@@ -633,6 +653,7 @@ def main() -> int:
     ap.add_argument("cmd", choices=["extract", "verify-against"])
     ap.add_argument("set")
     ap.add_argument("--bin")
+    ap.add_argument("--palette-instrument-manifest-sha256", help="frozen exact-byte instrument manifest pin, required for palette verification")
     ap.add_argument("--palette-verify", help="independent final palette artifact and join verification")
     ap.add_argument("--palette-views", help="complete pinned palette bank to project into ordered TRAIN instrument views")
     ap.add_argument("--palette-chromaq", help="existing CHROMAQ ladder owner directory, diagnostic only")
@@ -653,6 +674,8 @@ def main() -> int:
         if not (a.bin and a.build_commit and a.era):
             ap.error("extract needs --bin, --build-commit and --era")
         if a.palette_verify:
+            if not a.palette_instrument_manifest_sha256:
+                ap.error("palette verification needs a frozen --palette-instrument-manifest-sha256")
             return cmd_palette_verify(a)
         if a.palette_views:
             return cmd_palette_views(a)
