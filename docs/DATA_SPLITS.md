@@ -1573,8 +1573,8 @@ registered 3,900-row hdr_v3mix VAL, AIC, confirmation and protected labels
 remain unopened. Native HDR
 subset provenance remains explicit and unqualified. All 40 completed E30 nA3
 model/result artifacts were verified and pinned without label reads; exact
-program reuse parity is not asserted. One matched-control manifest remains a
-registration proposal before any full fitting. Role/exposure receipt, staged
+program reuse parity is not asserted. The coordinator subsequently chose one shared fresh v40 matched control for
+E29/E31/E32 before scientific fitting; the solo proposal is superseded. Role/exposure receipt, staged
 root, executor smokes, producer pins and tower mirror:
 [E29 worklog](../benchmarks/E29_WORKLOG.md) and
 [preparation pointer](../benchmarks/e29_preparation_2026-10-07.pointer.md).

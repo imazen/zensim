@@ -113,6 +113,19 @@ class ConsensusTests(unittest.TestCase):
                 e24.cmd_e29_score(args)
             read.assert_not_called()
 
+    def test_e30_reuse_refuses_before_any_checkpoint_or_label_open(self):
+        import json
+        control = Path('/nonexistent/control-pins.json')
+        with patch.object(Path, 'is_file', return_value=True), \
+                patch.object(Path, 'read_text', return_value=json.dumps(
+                    {'study': 'E29', 'control_choice': 'exact-E30-nA3'})), \
+                patch.object(e29.pq, 'read_table', side_effect=AssertionError('label read')) as read, \
+                patch.object(e29, 'sha', side_effect=AssertionError('checkpoint hash')) as hashed:
+            with self.assertRaisesRegex(ValueError, 'unregistered'):
+                e29.complete_cells(Path('/nonexistent'), Path('/nonexistent'), control)
+            read.assert_not_called()
+            hashed.assert_not_called()
+
     def test_unfrozen_baseline_blocks_hdr_panel_before_val(self):
         import importlib.util
         module_path = Path(__file__).resolve().parents[1] / 'hdr/hdr_route_panel.py'

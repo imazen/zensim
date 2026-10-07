@@ -1,7 +1,6 @@
 # E29 preparation — 2026-10-07
 
-Missing: coordinator registration of the four-source amendment and the single
-matched-control choice; completed matched-control pins and full hb4/hc4 fits;
+Missing: combined v40 package/image review and shared matched-control completion; completed matched-control pins and full hb4/hc4 fits;
 publication/queue enrollment by the coordinator; SDR/HDR assessment and product
 qualification. An unintended legacy HDR VAL import read violated the preparation
 restriction and remains an explicit review exception. This lane prepared and
@@ -16,10 +15,11 @@ Missing/nonfinite metrics and zero SE are INCOMPLETE. AIC is excluded.
 Implementation uses the existing strict `v2_lodo_mlp.py`/`zensim_mlp_train`
 stack, preparation packer, statistics owner and HDR panel. The explicit hc4
 pair-list entry is research tooling in the unpublished validation crate. The
-ordinary trainer entry and inactive pair-list RNG remain unchanged. The new
-program cannot establish E32's exact-binary reuse parity with E30 v39: exactly
-one 40-cell matched control is proposed, with its manifest frozen before full
-fitting. No fresh control was fitted in this lane.
+ordinary trainer entry and inactive pair-list RNG remain unchanged. The coordinator has chosen one shared fresh matched control for E29/E31/E32
+under combined v40. This supersedes the solo control proposal. Exact E30
+reuse is now rejected before checkpoint or label opens. The lane runs one
+full control-recipe validation cell to test baseline numerical parity; it is
+not part of the shared scientific control and cannot change its selection.
 
 ## Data and exposure
 
@@ -57,7 +57,12 @@ provenance and pair-list digest retained. Seven SDR admissions remain strict.
 The research inspector expects this limitation; the ordinary qualified inspector
 still refuses it. No serving model or human HDR qualification is claimed.
 
-## Pins and executor evidence
+## Earlier solo preparation pins and executor evidence
+
+The coordinator superseded solo E29 packaging with the combined v40 package.
+The following archives and image are as-run preparation evidence, not launch
+authority or pins for the future combined package. No new solo package or
+image is built after that decision.
 
 [Artifact pins](/mnt/v/output/zensim/e29-2026-10-07/PINNED_ARTIFACTS.json)
 record producer commits, image identity, binaries, manifests and every smoke.
@@ -116,8 +121,11 @@ zenmetrics fit-tool suite 53. Release build and clippy with warnings denied
 pass; script lint checks 847 runnable scripts. These validate the exercised
 plumbing, not scientific success or full product qualification.
 
-Fresh workspaces `zensim--e29` and `zenmetrics--e29` retain local
-`quarantine/codex/e29` bookmarks for review. Source commits are not pushed.
-The artifact tree, image archive, prepared root and logs are mirrored to
-`/mnt/tower/output/zensim/e29-2026-10-07/`; the mirror receipt verifies every
-file and records three selected artifact hashes. No cleanup discards evidence.
+The complete earlier artifact tree remains on tower. After every original
+file was byte-verified, the user authorized removal of only this lane's
+superseded local extraction stages, duplicated negative blobs and Cargo/source
+caches. `CLEANUP_RECEIPT.json` records 15,980,081,152 allocated bytes removed.
+`ARCHIVE_MIRROR_RECEIPT.json` on tower preserves the complete pre-cleanup
+11,020-file proof; the final local mirror receipt covers the retained subset.
+The local prepared root, one data/program/image archive, binaries, manifests
+and evidence remain available. No unrelated cache or artifact was removed.
