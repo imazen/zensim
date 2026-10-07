@@ -5,12 +5,109 @@ statistics owner; E30 reports removal cost and cannot reverse D1.
 """
 import argparse
 import json
+import subprocess
+import tarfile
 from pathlib import Path
 
 from v2_human_role import PRODUCTION_SOURCES, preflight_recipe
 from v2_common import sha
 
 SPEC = "sel:59f0bbc2f290@h32:H128:cv16:cf98"
+
+
+def completed_control_pins(results, bundle):
+    """Freeze E30's exact 40 nA3 cells, without discovering historical cells.
+
+    This is the control for E31/E32, distinct from E30's E24 comparison.
+    The canonical model inspector verifies each final checkpoint's embedded
+    receipt. No assessment, table payload load, or outcome selection occurs.
+    """
+    manifest_path = bundle / "fit-manifest-fitv2e30-20261007.json"
+    jobs = json.loads(manifest_path.read_text())
+    contract_name = "benchmarks/shippath_qualified_fit_contract_2026-10-07.json"
+    inventory = json.loads((bundle / "PROGRAM_INVENTORY.json").read_text())
+    artifacts = json.loads((bundle / "ARTIFACT_PINS.json").read_text())
+    expected = {f"{SPEC}__N/without_{source}_s{seed}" for source in PRODUCTION_SOURCES for seed in range(10)}
+    names = [job["cell"]["image_path"] for job in jobs]
+    if len(names) != 40 or set(names) != expected:
+        raise ValueError("completed E30 control requires exactly the four-source 40-cell manifest")
+    by_name = dict(zip(names, jobs))
+    program = bundle / "image-context/program.tar.gz"
+    if sha(program) != artifacts["program_sha"] or sha(bundle / "d1-fit-data.tar.gz") != artifacts["data_sha"]:
+        raise ValueError("E30 program/data archive changed")
+    with tarfile.open(program) as archive:
+        contract = json.load(archive.extractfile(contract_name))
+        for name, digest in inventory.items():
+            import hashlib
+            if hashlib.sha256(archive.extractfile(name).read()).hexdigest() != digest:
+                raise ValueError(f"E30 packed program inventory changed: {name}")
+    inspector = bundle / "bin/inspect_qualified_checkpoint"
+    if sha(inspector) != inventory["bin/inspect_qualified_checkpoint"]:
+        raise ValueError("E30 canonical inspector changed")
+    pins = {}
+    for source in PRODUCTION_SOURCES:
+        for seed in range(10):
+            name = f"{SPEC}__N/without_{source}_s{seed}"
+            cell = results / name
+            record = json.loads((cell / "result.json").read_text())
+            fleet = json.loads((cell / "fleet_receipt.json").read_text())
+            selection = record["selection"]
+            if (record["schema"] != "rev5-qualified-training-cell-v1"
+                    or record["execution_contract"] != "registered-fit" or record["training_only"] is not True
+                    or record["spec"] != SPEC or record["head"] != "N" or record["heldout"] != source
+                    or record["seed_index"] != seed or record["epochs"] != 120 or record["pairs_per_epoch"] != 50000
+                    or selection["epoch_rule"] != "last" or selection["selected_epoch"] != 119
+                    or record["human_sources"] != list(PRODUCTION_SOURCES)):
+                raise ValueError(f"E30 control identity/budget differs: {name}")
+            for key in ("wide_receipt_sha256", "frozen_sha256", "data_role_decision_sha256"):
+                if record[key] != contract[key]:
+                    raise ValueError(f"E30 control {key} differs: {name}")
+            admission = selection["strict_table_admission"]
+            if sorted(admission, key=lambda r: r["name"]) != contract["routes"][source]:
+                raise ValueError(f"E30 control fit-table receipts differ: {name}")
+            columns = [int(x) for x in (cell / "keep_features.txt").read_text().split()]
+            if columns != contract["columns"] or record["kept_features"] != len(columns):
+                raise ValueError(f"E30 control consumed feature order differs: {name}")
+            job = by_name[name]
+            kind = job["kind"]
+            if (fleet["cell"] != name or fleet["program_sha"] != artifacts["program_sha"]
+                    or fleet["data_sha"] != artifacts["data_sha"] or fleet["argv_sha"] != kind["argv_sha"]
+                    or kind["program_sha"] != fleet["program_sha"] or kind["data_sha"] != fleet["data_sha"]
+                    or fleet["tier"]["effective"] != "v3"):
+                raise ValueError(f"E30 fleet execution identity differs: {name}")
+            for rel, digest in fleet["files"].items():
+                if Path(rel).is_absolute() or ".." in Path(rel).parts:
+                    raise ValueError("unsafe E30 fleet result member")
+                if sha(cell / rel) != digest:
+                    raise ValueError(f"E30 result bytes changed: {name}/{rel}")
+            bake = cell / "refit/last.bin"
+            if (sha(bake) != record["selected_bake_sha256"] or sha(bake) != fleet["selected_bake_sha"]
+                    or sha(cell / "result.json") != fleet["result_sha"]):
+                raise ValueError(f"E30 selected result/model binding changed: {name}")
+            inspected = json.loads(subprocess.run([str(inspector), str(bake)], check=True, text=True,
+                                                  capture_output=True).stdout)
+            repro = inspected["repro"]
+            if (int(repro["checkpoint_epoch"]) != 119 or repro["epochs"] != 120
+                    or repro["pairs_per_epoch"] != 50000 or repro["pair_sampling"] != "uniform"
+                    or repro["init_seed"] != record["init_seed"] or repro["sample_seed"] != record["sample_seed"]
+                    or repro["init_seed"] != contract["init_seeds"][seed]
+                    or repro["sample_seed"] != contract["sample_seeds"][(seed + contract["fold_order"].index(source)) % 10]
+                    or repro["keep_features_n"] != 420 or repro["max_features"] != record["width"]
+                    or repro["effective_minibatch"] != 1):
+                raise ValueError(f"E30 embedded training contract differs: {name}")
+            admitted_by_name = {r["name"]: r["table_sha256"] for r in admission}
+            if {r["name"]: r["sha256"] for r in repro["inputs"]} != admitted_by_name:
+                raise ValueError(f"E30 embedded input bytes differ: {name}")
+            pins[f"{source}_s{seed}"] = {
+                "result_sha256": sha(cell / "result.json"), "selected_bake_sha256": sha(bake),
+                "feature_list_sha256": sha(cell / "keep_features.txt"), "feature_ids": columns,
+                "fleet_receipt_sha256": sha(cell / "fleet_receipt.json"), "files": fleet["files"],
+                "job": job, "fit_receipt": record, "checkpoint_receipt": inspected,
+            }
+    return {"schema": "e30-completed-control-freeze-v1", "cells": pins, "cell_count": 40,
+            "manifest_sha256": sha(manifest_path), "program_sha256": sha(program),
+            "data_sha256": artifacts["data_sha"], "program_inventory": inventory,
+            "fit_contract_sha256": inventory[contract_name]}
 
 
 def grid(root, results, columns, production=False):
@@ -142,7 +239,7 @@ def external_score(root, results, control, out, pins):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("cmd", choices=("grid", "production-grid", "control-pins", "score", "external-score"))
+    p.add_argument("cmd", choices=("grid", "production-grid", "control-pins", "completed-control-pins", "score", "external-score"))
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--results", type=Path)
     p.add_argument("--control-root", type=Path)
@@ -150,8 +247,14 @@ def main():
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--program-sha")
     p.add_argument("--data-sha")
+    p.add_argument("--bundle", type=Path)
     a = p.parse_args()
-    if a.cmd == "control-pins":
+    if a.cmd == "completed-control-pins":
+        # Exclusive creation keeps a prior freeze immutable.
+        frozen = completed_control_pins(a.results, a.bundle)
+        with a.out.open("x") as output:
+            output.write(json.dumps(frozen, indent=2) + "\n")
+    elif a.cmd == "control-pins":
         a.out.write_text(json.dumps(control_pins(a.control_root), indent=2) + "\n")
     elif a.cmd in ("score", "external-score"):
         (score if a.cmd == "score" else external_score)(a.root, a.results, a.control_root, a.out, a.control_pins)

@@ -519,3 +519,13 @@ speedq-rss *options:
 # Freeze the executable named by the successful Cargo JSON build receipt.
 speedq-freeze build_log dest:
     python3 scripts/demos/speedq_run.py freeze --build-log "{{build_log}}" --dest "{{dest}}"
+
+# E31's control/admission gate. These commands never fit or enqueue a cell.
+e31-control-tests:
+    python3 -m unittest scripts.tests.test_e31_control_freeze
+
+e31-control-freeze bundle results out:
+    python3 scripts/rev4_featpot/e30_four_source.py completed-control-pins --root {{bundle}}/v2d1 --bundle {{bundle}} --results {{results}} --out {{out}}
+
+e31-pinned-admission bundle upiq dest:
+    python3 scripts/tests/e31_pinned_admission.py --bundle {{bundle}} --upiq {{upiq}} --dest {{dest}}
