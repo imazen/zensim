@@ -129,3 +129,42 @@ caches. `CLEANUP_RECEIPT.json` records 15,980,081,152 allocated bytes removed.
 11,020-file proof; the final local mirror receipt covers the retained subset.
 The local prepared root, one data/program/image archive, binaries, manifests
 and evidence remain available. No unrelated cache or artifact was removed.
+
+## Coordinator control decision and baseline proof
+
+The coordinator fixed one shared fresh v40 control before scientific arm
+fitting. Exact E30-cell reuse is refused by the assessment gate even after
+this validation passes; no outcome can replace the fixed fresh control.
+
+One of the 40 control-recipe cells was reproduced completely: kadid fold,
+seed 0, Rev5/by_v2fy/N, init 1101/sample 101, v3 tier, one Rayon thread,
+120 epochs × 50,000 draws, selected final epoch 119. The unchanged strict
+LODO owner used the preserved local prepared root; its seven table receipts
+match E30 exactly. Seeds, weights, coverage selection and every logged
+development score match. The extended trainer binary is
+`49b0b844454a7401636c9eda07118b77e4f5a9108399ff77d261879933b73d51`.
+
+The entire 215,978-byte checkpoint after the canonical strip owner removes
+only `zentrain.repro` is bit-identical: SHA-256
+`4fc21dc98d83cdcfba25f38623921e90595e976c75ad2fa8a4f8b2eb7f1a95f2`.
+Raw archives differ because reproduction metadata records different clock,
+machine, checkout/build identities and transport/output paths. All remaining
+reproduction fields also compare exactly after those documented normalizations;
+raw checkout identities and the binary producer commit are retained separately.
+This proves the E29 extension's exercised baseline cell, not the yet-unbuilt
+combined E29/E31/E32 binary or all 40 cells.
+
+Evidence: `control-parity-final/PARITY.json`, original/extended bakes, canonical
+inspector output and full logs. Actual wrapper measurement:
+`run-heavy: done rc=0 291s | peak-RSS 0.95GiB | min-avail 39488MiB | peak-load 15.33`.
+The latest E29/E26 suite passes 20 tests, including the new reuse refusal,
+and script lint checks 853 runnable scripts. Clean-environment scorer preflight
+still passes after cleanup. No Rust rebuild was needed after rebasing: the
+trainer, its library modules, manifests and lock remain byte-identical to
+the previously built and tested producer. The only subsequent Rust main
+changes are in the separate UPIQ scorer executable.
+
+The E29 source is placed on local main; the earlier explicit push-nothing
+instruction remains in effect. Combined packaging, combined-binary parity,
+the 40 shared control fits, scientific arms and assessment remain coordinator
+work. No new solo package/image, fleet launch or scientific assessment ran.

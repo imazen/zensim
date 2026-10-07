@@ -547,5 +547,5 @@ e29-mirror-check bundle mirror:
 e29-control-parity bundle e30 dest *flags:
     TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} {{flags}}
 
-e29-storage-cleanup:
-    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_storage_cleanup.py
+e29-storage-cleanup *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_storage_cleanup.py {{flags}}

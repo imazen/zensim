@@ -3,7 +3,9 @@
 The frozen full mirror receipt remains on tower; final prepared data, archives,
 producer binaries, manifests and evidence stay local. No broad cache cleanup.
 """
+import argparse
 import hashlib
+import random
 import json
 from pathlib import Path
 import shutil
@@ -20,6 +22,46 @@ def sha(path):
         for chunk in iter(lambda: stream.read(4 << 20), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+def mirror_final():
+    """Verify the kept local subset without overwriting the full tower archive."""
+    old = json.loads((TOWER / 'ARCHIVE_MIRROR_RECEIPT.json').read_text())
+    records = {}
+    for path in sorted(ROOT.rglob('*')):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(ROOT))
+        if rel in ('FINAL_LOCAL_MIRROR_RECEIPT.json', 'logs/final-mirror.log'):
+            continue
+        digest = sha(path)
+        existing = TOWER / rel
+        if existing.is_file() and sha(existing) == digest:
+            dest = existing
+        else:
+            # Earlier evidence remains immutable at its original tower path.
+            dest = TOWER / 'final-code-state' / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists() and sha(dest) != digest:
+                raise ValueError(f'final evidence already differs: {dest}')
+            if not dest.exists():
+                shutil.copy2(path, dest)
+        assert sha(dest) == digest, rel
+        records[rel] = {'sha256': digest, 'bytes': path.stat().st_size,
+                        'tower_relative_path': str(dest.relative_to(TOWER))}
+    selected = random.SystemRandom().sample(list(records), 3)
+    for rel in selected:
+        assert sha(ROOT / rel) == sha(TOWER / records[rel]['tower_relative_path'])
+    receipt = dict(schema='e29-final-local-subset-mirror-v1', status='PASS',
+                   build_commit=json.loads((ROOT / 'CODE_STATE.json').read_text())['build_commit'],
+                   file_count=len(records), files=records, three_random_files=selected,
+                   full_archive_receipt_sha256=sha(TOWER / 'ARCHIVE_MIRROR_RECEIPT.json'),
+                   full_original_archive_files=old['file_count'],
+                   scope='retained local subset; earlier full tower archive preserved unchanged')
+    output = ROOT / 'FINAL_LOCAL_MIRROR_RECEIPT.json'
+    output.write_text(json.dumps(receipt, indent=2)+'\n')
+    shutil.copy2(output, TOWER / output.name)
+    print(json.dumps({k:v for k,v in receipt.items() if k!='files'}), flush=True)
 
 
 def main():
@@ -89,4 +131,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mirror-final', action='store_true')
+    args = parser.parse_args()
+    mirror_final() if args.mirror_final else main()

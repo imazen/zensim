@@ -21,7 +21,7 @@ from v2_common import sha
 def stable_repro(repro):
     """Normalize only transport/build location, clock and machine identifiers."""
     obj = copy.deepcopy(repro)
-    for key in ('timestamp_epoch', 'cwd', 'hostname', 'trainer_source_dir'):
+    for key in ('timestamp_epoch', 'cwd', 'hostname', 'trainer_source_dir', 'trainer_head_at_train'):
         obj[key] = '<volatile>'
     argv = obj['argv']
     argv[0] = '<trainer>'
@@ -50,6 +50,8 @@ def main():
     if not a.verify_only:
         a.dest.mkdir(exist_ok=False)
     pinned = json.loads((a.bundle / 'E30_COMPLETE_PINS.json').read_text())
+    producer = json.loads((a.bundle / 'PINNED_ARTIFACTS.json').read_text())
+    assert sha(a.bundle / 'bin/zensim_mlp_train') == producer['files']['bin/zensim_mlp_train']['sha256']
     job = json.loads((a.e30 / 'fit-manifest-fitv2e30-20261007.json').read_text())[0]
     argv = job['kind']['argv'][:]
     assert argv[argv.index('--heldout')+1] == 'kadid'
@@ -75,9 +77,11 @@ def main():
     for key in ('init_seed', 'sample_seed', 'train_weights', 'coverage_leg', 'dev_curve'):
         assert result[key] == original[key], key
     repros = []
+    checkout_heads = []
     for model in (old, newcell / 'refit/last.bin'):
         inspected = json.loads(subprocess.check_output([str(a.bundle / 'bin/inspect_qualified_checkpoint'), str(model)], text=True))
         assert inspected['checkpoint_epoch'] == '119' and inspected['admitted_tables'] == 7
+        checkout_heads.append(inspected['repro']['trainer_head_at_train'])
         repros.append(stable_repro(inspected['repro']))
     assert repros[0] == repros[1], 'nonvolatile reproduction metadata changed'
     files = []
@@ -94,6 +98,8 @@ def main():
                   tier='v3', rayon_threads=1, trainer_sha256=sha(a.bundle/'bin/zensim_mlp_train'),
                   e30_checkpoint_sha256=sha(old), extended_checkpoint_sha256=sha(newcell/'refit/last.bin'),
                   e30_nonrepro_sha256=sha(files[0]), extended_nonrepro_sha256=sha(files[1]),
+                  checkout_revision_at_train={'e30':checkout_heads[0], 'extended':checkout_heads[1]},
+                  binary_producer_commit=producer['trainer_build_commit'],
                   normalized_repro_sha256=hashlib.sha256(json.dumps(repros[0], sort_keys=True).encode()).hexdigest(),
                   comparison='all non-repro bytes identical; reproduction metadata identical after documented clock/machine/build/transport-path normalization; strict table receipts, seeds, weights, coverage and dev curve identical',
                   command=cmd, input_program_sha256=job['kind']['program_sha'])

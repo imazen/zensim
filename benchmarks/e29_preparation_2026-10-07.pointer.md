@@ -39,3 +39,5 @@ tower `ARCHIVE_MIRROR_RECEIPT.json` preserves the original 11,020-file proof.
 The final local subset and current code evidence have a separate
 `FINAL_LOCAL_MIRROR_RECEIPT.json`; they are not a claim that all original
 extraction stages still exist locally.
+
+Full control parity receipt SHA-256: `88c885ec5d2e8767eed3b881c4fcfd9f835a22659d917d356a5f33f180932dd6`.
