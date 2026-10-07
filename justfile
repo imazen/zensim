@@ -341,3 +341,8 @@ e28-nm root dest fold="kadid":
 [positional-arguments]
 e28-smoke-receipts root arm tools inspector:
     python3 scripts/tests/e28_smoke_receipts.py --root "$1" --arm "$2" --tools "$3" --inspector "$4"
+
+# Bounded/first-epoch checks through the actual prepared-image executor.
+# The evidence directory carries the reviewed image/job/data pins and driver.
+e28-executor-image-smoke evidence mode="bounded" arm="s2m":
+    bash "{{evidence}}/run_executor_smoke.sh" "{{mode}}" "{{arm}}"
