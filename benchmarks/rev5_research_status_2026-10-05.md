@@ -145,3 +145,20 @@ minimise MSE and maximise Kendall and Pearson correlation.
   to tower rather than deleted. The ~/tmp join files are being hashed against tower: identical ones deleted, divergent ones archived.
 * **E32 (palette shift)** draft registration exists (palette_v2 after a sign-inversion fix found by a synthetic darkening test; four-source
   folds per D1). Extraction is running; registration follows the lane's report and review.
+
+## 11. Updates (2026-10-07 13:45 UTC)
+
+* **E28** v35 package built: only `e28_recipe.py` and build metadata changed; the data archive is byte-identical to v34; the reviewer's
+  25-case admission probe refuses all 25 with zero label-bearing opens; the installed-image smoke matches v34 exactly. Independent
+  re-review running; then land, push the zenmetrics profile, launch.
+* **Worker claim fix** implemented locally (ownership-checked release and renewal, seven regression tests that fail on the old code,
+  61 crate tests and clippy pass). Independent review running. It currently sits on unreviewed D1 profile commits and will be rebased
+  onto `master` before landing.
+* **Palette (top-N colour shift) features** built: 42 features (N = 2–8, six signals each), extracted for 254,778 bank rows, verified
+  independently, serving reads refused. Measured limits: hue direction agrees on 97/168 synthetic cases; the features are blind to
+  high-frequency chroma loss (the CHROMAQ HF ladder barely moves them). Review running; E32 registration follows it.
+* **Main test fix.** SHIPPATH7 registered a by_v2fy projection producer that broke three registry tests on main. Two are fixed
+  (`47a2e1d4`); the third (`zensim-validate` `basic_only_bake_compatibility_respects_partial_producers`) needs an owner decision on its
+  expected value and is logged in CLAUDE.md Known Bugs.
+* **Disk:** D4 and the tbig cleanup are complete. All three divergent ~/tmp tbig copies were the canonical files with 1–2 MiB zeroed
+  regions (dropped download chunks); they are archived on tower, not used.
