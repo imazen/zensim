@@ -557,6 +557,50 @@ mod tests {
     }
 
     #[test]
+    fn null_primary_is_never_zero_filled() {
+        let f = Fixture::new("null");
+        write(&f.path(), true, false);
+        let mut reader =
+            ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(f.path()).unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+        let batch = reader.next().unwrap().unwrap();
+        drop(reader);
+        let index = batch.schema().index_of("palette_f1866").unwrap();
+        let mut fields: Vec<_> = batch.schema().fields().iter().cloned().collect();
+        fields[index] = Arc::new(Field::new("palette_f1866", DataType::Float32, true));
+        let mut arrays = batch.columns().to_vec();
+        arrays[index] = Arc::new(Float32Array::from(vec![Some(1.), None, Some(3.), Some(4.)]));
+        let nullable = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).unwrap();
+        let mut writer = ArrowWriter::try_new(
+            std::fs::File::create(f.path()).unwrap(),
+            nullable.schema(),
+            None,
+        )
+        .unwrap();
+        writer.write(&nullable).unwrap();
+        writer.close().unwrap();
+        f.declaration(&metadata());
+        let ids: Vec<_> = primary_ids().into_iter().map(|id| id as u32).collect();
+        let error = crate::parquet_loader::load_parquet_flat_f32(
+            &f.path(),
+            "bad",
+            "human_score",
+            1.,
+            &ids,
+            1867,
+        )
+        .unwrap_err();
+        assert!(error.contains("null primary feature f1866"), "{error}");
+        assert!(
+            crate::parquet_loader::load_parquet(&f.path(), "bad", "human_score", 1.)
+                .unwrap_err()
+                .contains("null primary feature f1866")
+        );
+    }
+
+    #[test]
     fn legacy_auxiliary_and_admission_metadata_unchanged() {
         let f = Fixture::new("legacy");
         write(&f.path(), false, false);

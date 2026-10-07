@@ -815,6 +815,13 @@ fn load_parquet_impl(
             per_col_scratch32.clear();
             for (ci, &pi) in proj_feature_indices.iter().enumerate() {
                 let col = batch.column(pi);
+                if palette_primary
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(&stored[ci]))
+                    && col.null_count() != 0
+                {
+                    return Err(format!("E32 null primary feature f{}", stored[ci]));
+                }
                 if compact {
                     col_block_to_f32(
                         path,
