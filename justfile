@@ -400,3 +400,20 @@ palette-round2-build-checks:
     cargo check -p zensim --no-default-features --features feature-regime-v2
     cargo check --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
     just lint-scripts
+
+# UPIQ-380 ingestion is local artifact production; E31 remains a draft.
+upiq380-check:
+    python3 -m unittest scripts.tests.test_upiq380
+
+[positional-arguments]
+upiq380 *options:
+    python3 scripts/rev4_featpot/upiq380.py "$@"
+
+upiq380-rust-check:
+    cargo test --locked -p zensim-validate --bin upiq_pu_score
+
+upiq380-build:
+    cargo build --locked --release -p zensim-validate --bin upiq_pu_score
+
+upiq380-clippy:
+    cargo clippy --locked -p zensim-validate --bin upiq_pu_score -- -D warnings

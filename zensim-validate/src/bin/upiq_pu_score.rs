@@ -25,6 +25,9 @@ use std::path::Path;
 use zensim::source::{AlphaMode, ImageSource, PixelFormat};
 use zensim::{Zensim, ZensimProfile};
 
+#[path = "upiq_pu_score/ingest.rs"]
+mod ingest;
+
 struct Rgb {
     w: usize,
     h: usize,
@@ -60,8 +63,12 @@ impl ImageSource for Rgb {
 /// contract is absolute nits in BT.709; conflicting color or alpha is refused.
 fn load_exr_rgb(path: &Path) -> Result<Rgb, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    decode_exr_rgb(path, &bytes)
+}
+
+fn decode_exr_rgb(path: &Path, bytes: &[u8]) -> Result<Rgb, String> {
     let decoded = zenexr::ExrDecoderConfig::new()
-        .decode(&bytes, &enough::Unstoppable)
+        .decode(bytes, &enough::Unstoppable)
         .map_err(|e| e.to_string())?;
     let pixels = decoded.pixels();
     if pixels.descriptor().primaries != zenpixels::ColorPrimaries::Bt709 {
@@ -121,6 +128,10 @@ fn arg(args: &[String], key: &str) -> Option<String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if arg(&args, "--training-allowlist").is_some() {
+        ingest::run(&args).expect("UPIQ-380 allowlisted extraction");
+        return;
+    }
     let images = arg(&args, "--images")
         .unwrap_or_else(|| "/mnt/v/datasets/upiq_extracted/upiq_dataset/images".into());
     let subjective = arg(&args, "--subjective")
