@@ -167,6 +167,7 @@ class SpeedqTest(unittest.TestCase):
         self.assertEqual(out['verdict']['slower_cells'],8)
         self.assertFalse(out['verdict']['rev5_at_least_as_fast_everywhere'])
         self.assertIn('MISSING',args.out_md.read_text())
+        self.assertIn('0.100 / 2 / 1.0000',args.out_md.read_text())
         # Corrupt strict score evidence must refuse a plausible looking report.
         rows[0]['revision']=4;rows[0]['score_bits']='different'
         (parity/'PARITY_STRICT_PASS.json').write_text(json.dumps(dict(status='PASS',strict_revisions=[4,5],records=rows)))

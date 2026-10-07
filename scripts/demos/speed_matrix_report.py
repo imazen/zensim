@@ -437,13 +437,16 @@ def speedq_report(args) -> int:
         'Dispatch labels are ceilings forced through archmage with its testing guard; kernels without a v4 variant may use v3. Threads 1/2/4/8 use CCD0; 16 spans CCDs, and 32 adds SMT. Cache topology changes are part of these measured configurations.','',
         '## Alpha and beta fits','',
         'Unconstrained OLS over all eight geometries: time_ns = alpha_ns + beta_ns_per_pixel × pixels. Alpha below is µs; beta is ns/pixel. A negative alpha is a fit artifact, not a negative physical setup cost; R² exposes fit adequacy. These are descriptive fits to medians, not constants baked into source.','',
-        '| arm | tier | threads | alpha µs | beta ns/pixel | R² |','|---|---|---:|---:|---:|---:|']
-    for arm in arms:
-        for t in tiers:
-            for n in threads:
-                if (t,n,arm) in fits:
+        'Each cell lists alpha µs / beta ns/pixel / R². Revisions and peers share a row for each tier/thread configuration.','',
+        '| tier | threads | '+' | '.join(arms)+' |','|---|---:|'+'---:|'*len(arms)]
+    for t in tiers:
+        for n in threads:
+            if all((t,n,arm) in fits for arm in arms):
+                entries=[]
+                for arm in arms:
                     a,b,r2=fits[(t,n,arm)]
-                    lines.append(f'| {arm} | {t} | {n} | {a/1000:.3f} | {b:.6g} | {r2:.4f} |')
+                    entries.append(f'{a/1000:.3f} / {b:.6g} / {r2:.4f}')
+                lines.append('| '+t+' | '+str(n)+' | '+' | '.join(entries)+' |')
     lines+=['','## MT scaling','',
         'Each entry is speedup / efficiency versus the same size/tier/revision at one thread. The JSON retains all arm medians, so B and peer scaling use the same formula.','',
         '| revision | tier | size | 2T | 4T | 8T | 16T | 32T |','|---|---|---|---:|---:|---:|---:|---:|']
