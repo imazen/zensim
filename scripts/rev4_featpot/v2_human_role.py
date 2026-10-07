@@ -49,15 +49,15 @@ def preflight_recipe(root, decision_path, heldout=None):
     """Validate D1 and every human declaration before wrapper payload checks."""
     from v2_common import load_frozen
     from lib.assessment_identity import safe_path
-    load_frozen(root, training_only=True)
+    if heldout is not None and heldout not in PRODUCTION_SOURCES:
+        raise ValueError("D1/E30 forbid an AIC-family held-out fold")
+    load_frozen(root, training_only=True, metadata_only=True)
     receipt = json.loads(safe_path(root / "wide/main/real/receipt.json").read_text())
     decision = decision_record(decision_path, receipt["admission_view"]["source_receipt_sha256"])
     view = receipt["admission_view"]
     if (view.get("source_frozen_sha256") != decision.get("source_frozen_sha256")
             or view.get("human_role_decision_sha256") != sha(decision_path)):
         raise ValueError("D1 decision/frozen receipt is not bound in this admission view")
-    if heldout is not None and heldout not in PRODUCTION_SOURCES:
-        raise ValueError("D1/E30 forbid an AIC-family held-out fold")
     name = f"human_without_{heldout}" if heldout else "human_all"
     expected = [s for s in PRODUCTION_SOURCES if s != heldout]
     for split in ("fit", "dev"):
@@ -67,6 +67,7 @@ def preflight_recipe(root, decision_path, heldout=None):
         if sha(Path(f"{path}.manifest.json")) != rec["manifest_sha256"]:
             raise ValueError("human declaration changed after freeze")
         human_declaration(d, decision)
+        bank_members(d)
         import pyarrow.parquet as pq
         from v2_teacher import key_path, row_keys_sha
         kp = safe_path(key_path(path))
@@ -78,4 +79,23 @@ def preflight_recipe(root, decision_path, heldout=None):
             raise ValueError("D1 human row-key order changed")
         if d["human_sources"] != expected:
             raise ValueError("D1 human leg must omit AIC and the held-out source exactly")
+    # Include teacher and coverage declarations/keys in the same payload-free phase.
+    from v2_common import TEACHERS
+    other = [receipt["legs"][t][split] for t in TEACHERS for split in ("fit", "dev")]
+    other.append({"rel": "e15/coverage_pool.parquet"})
+    for rec in other:
+        path = safe_path(root / rec["rel"])
+        d = json.loads(safe_path(Path(f"{path}.manifest.json")).read_text())
+        bank_members(d)
+        if d.get("human_sources") or d.get("data_role_decision_required"):
+            human_declaration(d, decision)
+            human_keys(pq.read_table(safe_path(key_path(path))), d)
     return decision
+
+
+def bank_members(declaration):
+    """Population allowlist shared by preparation and lower table admission."""
+    from v2_common import TEACHERS
+    allowed = {*MEMBER_SOURCE, *(t[0] for t in TEACHERS.values())}
+    if not set(declaration.get("bank_manifest_sha256", {})) <= allowed:
+        raise ValueError("D1 declaration includes an unapproved/AIC bank member")

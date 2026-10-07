@@ -168,6 +168,8 @@ because cleanup tests or a historical training reproduction pass.
   epoch before deliberate stop. Prior direct-owner smokes did not exercise
   that executor link. Evidence: `benchmarks/E28_WORKLOG.md`.
 
+- 2026-10-07 SHIPPATH11: strict D1 admission previously hashed freeze coverage and human payloads before rejecting AIC folds/keys. Population checks now finish in a metadata/key phase; open-tripwire regressions cover CLI, lower admission and preparation.
+
 * **2026-10-07 — SHIPPATH7's by_v2fy projection producer broke three registry tests. Two FIXED (`47a2e1d4`), one OPEN pending an owner decision.**
   `benchmarks/feature_sets_registry.json` registers `basic+v2@w720/rev5_localwin#62adfc93` as a producer whose recorded slots are the
   420 by_v2fy IDs (all other slots NaN). The zensim registry gates derived the full 504-slot `basic+v2` set and failed; the entry now

@@ -135,21 +135,23 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
     """
     from v2c_wide import safe_path
     from v2_teacher import key_path, row_keys_sha
-    from v2_human_role import decision_record, human_declaration, human_keys
+    from v2_human_role import decision_record, human_declaration, human_keys, bank_members
     decision = None
     if data_role_decision is not None:
         raw = json.loads(safe_path(data_role_decision).read_text())
         decision = decision_record(data_role_decision, raw.get("source_receipt_sha256"))
     records = []
+    checked_metadata = []
     for name, path, _, _, _ in groups:
         path = safe_path(path)
         sp = Path(f"{path}.manifest.json")
         d = json.loads(sp.read_text())
         if d.get("data_role_decision_required") or d.get("human_sources"):
             human_declaration(d, decision)
+        bank_members(d)
         if (d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af"
                 or d.get("formula_revision") != 5 or not d.get("decoder_era")
-                or d.get("table_sha256") != sha(path) or not d.get("row_selection_sha256")):
+                or not d.get("table_sha256") or not d.get("row_selection_sha256")):
             raise ValueError(f"{name}: strict admission requires bound Rev5 table provenance")
         if not d.get("data_role_decision_required") and d.get("data_role") not in ("TRAIN oracle teacher", "TRAIN ordinal KADIS source_id%10<8; no human labels"):
             raise ValueError(f"{name}: strict admission needs an explicit permitted data role")
@@ -159,6 +161,11 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         keys = pq.read_table(kp)
         if d.get("data_role_decision_required"):
             human_keys(keys, d)
+        checked_metadata.append((name, path, sp, d, keys))
+    # Every population is admitted before the first table payload is hashed/read.
+    for name, path, sp, d, keys in checked_metadata:
+        if d["table_sha256"] != sha(path):
+            raise ValueError(f"{name}: strict admission requires bound Rev5 table provenance")
         refs = refs_of(path)
         ref_col = "ladder" if "ladder" in keys.column_names else "ref_basename"
         if row_keys_sha(keys) != d.get("row_keys_sha256") or refs != keys[ref_col].to_pylist():
@@ -282,7 +289,13 @@ def main() -> None:
     ap.add_argument("--dest", type=Path, help="strict route output directory outside frozen inputs")
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake, without human assessment")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
+    ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
+    if args.local_smoke_budget:
+        if not (args.strict_admission and args.train_only):
+            ap.error("local smoke requires strict training-only")
+        from v2_smoke_contract import apply_smoke_budget
+        apply_smoke_budget(args.local_smoke_budget, globals())
     if args.strict_admission and (args.dest is None or not args.train_only):
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
     if args.strict_admission:
@@ -400,7 +413,7 @@ def main() -> None:
     best_epoch = selection["selected_epoch"]
     if args.train_only:
         (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
-            "training_only": True, "selection": selection, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+            "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "heldout": args.heldout, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
             "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
             "human_sources": role_decision["sources"] if args.strict_admission else None,

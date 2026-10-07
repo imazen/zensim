@@ -21,7 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "qualified_provenance":true, "feature_set_id":declared.to_string(),
             "checkpoint_epoch":repro["checkpoint_epoch"],
             "pair_sampling":repro["pair_sampling"],
-            "admitted_tables":repro["table_admission"]["tables"].as_array().unwrap().len()})
+            "admitted_tables":repro["table_admission"]["tables"].as_array().unwrap().len(),
+            "repro": repro})
     );
     Ok(())
 }

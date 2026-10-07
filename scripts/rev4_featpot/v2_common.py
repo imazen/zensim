@@ -113,7 +113,7 @@ def table_path(record: dict) -> Path:
 FROZEN_SCHEMA = "rev4-featpot-v2c-frozen-v1"
 
 
-def load_frozen(root: Path | None = None, *, training_only: bool = False) -> tuple[dict, str]:
+def load_frozen(root: Path | None = None, *, training_only: bool = False, metadata_only: bool = False) -> tuple[dict, str]:
     """(record, sha256) of `<root>/wide/frozen.json` after re-hashing every file it pins (confirm receipt, wide receipts,
     keep lists, extra arms). Raises if the canon tables changed after the freeze or no freeze exists."""
     root = V2 if root is None else root
@@ -128,6 +128,8 @@ def load_frozen(root: Path | None = None, *, training_only: bool = False) -> tup
             path = Path(rel)
             if path.is_absolute() or ".." in path.parts or any(p.startswith("_sealed") for p in path.parts):
                 raise ValueError("admission freeze contains an unsafe relative path")
+            if metadata_only and path.suffix == ".parquet" and not path.name.endswith(".keys.parquet"):
+                continue
             if sha(Path(root) / path) != want:
                 raise ValueError(f"{rel}: changed after the admission freeze")
         return record, sha(Path(root) / "wide/frozen.json")
@@ -164,7 +166,7 @@ def admission_input_roots(root: Path) -> tuple[Path, ...]:
     """
     from v2c_wide import safe_path
     root = safe_path(root)
-    frozen, _ = load_frozen(root, training_only=True)
+    frozen, _ = load_frozen(root, training_only=True, metadata_only=True)
     receipt = json.loads((root / "wide/main/real/receipt.json").read_text())
     view = receipt.get("admission_view", {})
     if (frozen.get("schema") != "rev5-recipe-admission-freeze-v1"

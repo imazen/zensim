@@ -14,15 +14,14 @@ from e30_four_source import SPEC
 import v2_common as common
 common.V2 = Path(root)
 import v2_lodo_mlp as lodo
-common.EPOCHS, common.PAIRS_PER_EPOCH = 2, 128
-lodo.V2, lodo.EPOCHS, lodo.PAIRS_PER_EPOCH, lodo.LOG_EVERY = Path(root), 2, 128, 1
+lodo.V2 = Path(root)
 owner = lodo
 argv = ["--spec", SPEC, "--head", "N", "--seed-index", "0", "--root", root,
         "--dest", dest, "--columns", ','.join(map(str, e21.columns('by_v2fy'))),
-        "--strict-admission", "--train-only", "--data-role-decision", str(Path(root)/'human_role_decision.json')]
+        "--strict-admission", "--train-only", "--local-smoke-budget", "2:128", "--data-role-decision", str(Path(root)/'human_role_decision.json')]
 if route == 'production':
     import v2_confirm_fit as owner
-    owner.V2, owner.EPOCHS, owner.PAIRS_PER_EPOCH = Path(root), 2, 128
+    owner.V2 = Path(root)
     argv += ['--pack-production']
 elif route == 'e30':
     argv += ['--heldout', 'kadid']

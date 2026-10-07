@@ -15,7 +15,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from v2_common import SOURCES, TEACHERS, sha, refuse_immutable_output
-from v2_human_role import PRODUCTION_SOURCES, MEMBER_SOURCE, decision_record, human_declaration, human_keys
+from v2_human_role import PRODUCTION_SOURCES, MEMBER_SOURCE, decision_record, human_declaration, human_keys, bank_members
 from v2_teacher import key_path, row_keys_sha, write_curated
 from lib.assessment_identity import safe_path
 
@@ -59,19 +59,24 @@ def prepare(source, original, bank, stage, out, decision_path, fleet_root):
         d = json.loads(sp.read_text())
         if d.get("data_role_decision_required"):
             human_declaration(d, decision)
-        if sha(sp) != rec["manifest_sha256"] or sha(p) != rec["sha256"] or sha(kp) != d["keys_sha256"]:
+        if sha(sp) != rec["manifest_sha256"] or sha(kp) != d["keys_sha256"]:
             raise ValueError("D1 source table/declaration/key pin changed")
         keys = pq.read_table(kp)
         if d.get("human_sources"):
             human_keys(keys, d)
         if row_keys_sha(keys) != d["row_keys_sha256"]:
             raise ValueError("D1 source key order changed")
+        bank_members(d)
         for member, pin in d["bank_manifest_sha256"].items():
             if member not in {*MEMBER_SOURCE, *(t[0] for t in TEACHERS.values())}:
                 raise ValueError("D1 declaration includes an unapproved bank member")
             if sha(safe_path(bank / member / "_MANIFEST.json")) != pin:
                 raise ValueError("D1 original bank binding changed")
         checked.append((name, split, p, d))
+    # All selected populations/keys are checked before any payload access.
+    for name, split, p, d in checked:
+        if sha(p) != d["table_sha256"]:
+            raise ValueError("D1 source table pin changed")
     # Temporary byte-identical approved inputs allow write_curated to preserve
     # source roots while deriving the four LODO masks outside the final root.
     for root in (stage, out):

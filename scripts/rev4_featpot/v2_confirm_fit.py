@@ -58,7 +58,13 @@ def main() -> None:
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake; no confirmatory predictions")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
+    ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
+    if args.local_smoke_budget:
+        if not (args.strict_admission and args.train_only):
+            ap.error("local smoke requires strict training-only")
+        from v2_smoke_contract import apply_smoke_budget
+        apply_smoke_budget(args.local_smoke_budget, globals())
     if args.pack_production and not (args.strict_admission and args.train_only):
         ap.error("production packing requires strict admission and training-only")
     if args.strict_admission and (args.dest is None or not args.train_only):
@@ -144,7 +150,7 @@ def main() -> None:
             from v2_production_pack import pack_production
             packed = pack_production(bake, dest, checked(legs["cid22"]["fit"]))
         (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
-            "training_only": True, "selection": selection, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+            "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
             "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
             "human_sources": role_decision["sources"] if args.strict_admission else None,
