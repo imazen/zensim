@@ -78,6 +78,8 @@ def strict_group_input_roots(groups: list) -> tuple[Path, ...]:
     roots = []
     for name, path, _, _, _ in groups:
         bound = table_input_roots(path)
+        if name == "upiq380":
+            bound = (*bound, Path(path).resolve().parent)
         if not bound:
             raise ValueError(f"{name}: strict outputs require immutable input root bindings; regenerate a fresh admission view")
         roots.extend(bound)
@@ -86,11 +88,12 @@ def strict_group_input_roots(groups: list) -> tuple[Path, ...]:
 
 def train_command(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
                   out: Path, recipe: dict | None = None, *, strict_admission: bool = False,
-                  data_role_decision: Path | None = None) -> list[str]:
+                  data_role_decision: Path | None = None,
+                  upiq_label_disposition: Path | None = None) -> list[str]:
     """The trainer argv of one v2 cell; `groups` = (name, path, train_weight, val_weight, mode). Shared with
     v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
     if strict_admission:
-        strict_training_groups(groups, data_role_decision)
+        strict_training_groups(groups, data_role_decision, upiq_label_disposition)
         from v2_common import refuse_immutable_output
         roots = strict_group_input_roots(groups)
         for path in (out, keep_file):
@@ -100,6 +103,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     trainer = (Path(os.environ.get("REV4_V2_BIN_DIR", str(REPO / "target/debug"))) / "zensim_mlp_train"
                if strict_admission else TRAINER)
     cmd = [str(trainer)]
+    if upiq_label_disposition is not None:
+        if not strict_admission:
+            raise ValueError("E31 requires strict admission")
+        cmd += ["--upiq-label-disposition", str(upiq_label_disposition)]
     for name, path, tw, vw, mode in groups:
         cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
     recipe = recipe or {}
@@ -115,7 +122,7 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     if "group_l1" in recipe:  # design log E8: proximal group lasso on layer-1 input rows
         cmd += ["--group-l1", repr(recipe["group_l1"])]
     if "ssim2_recipe" in recipe:
-        from e28_recipe import PIN, read_pin
+        from e28_recipe import read_pin
         pin = read_pin()
         active = [name for name, _, tw, _, _ in groups if tw > 0 and name in pin["arms"][recipe["ssim2_recipe"]]["pooled_legs"]]
         cmd += ["--pooled-rank-share", str(pin["pooled_rank_share"]), "--pooled-pearson-weight", str(pin["pooled_pearson_weight"])]
@@ -126,7 +133,8 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     return cmd
 
 
-def strict_training_groups(groups: list, data_role_decision: Path | None = None) -> list[dict]:
+def strict_training_groups(groups: list, data_role_decision: Path | None = None,
+                  upiq_label_disposition: Path | None = None) -> list[dict]:
     """Require declared full provenance and a separately supplied human-role decision.
 
     This checks metadata/label-free keys before returning trainer argv. The
@@ -146,6 +154,15 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         path = safe_path(path)
         sp = Path(f"{path}.manifest.json")
         d = json.loads(sp.read_text())
+        if name == "upiq380":
+            from e31_training import fit_metadata
+            from e21_cheap_recipe import columns
+            if upiq_label_disposition is None:
+                raise ValueError("E31 requires a label-provenance disposition")
+            records.append(fit_metadata(path, upiq_label_disposition, columns("by_v2fy")))
+            continue
+        if d.get("source") == "UPIQ-380":
+            raise ValueError("native UPIQ must use the registered E31 group")
         if d.get("data_role_decision_required") or d.get("human_sources"):
             human_declaration(d, decision)
         bank_members(d)
@@ -162,6 +179,13 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         if d.get("data_role_decision_required"):
             human_keys(keys, d)
         checked_metadata.append((name, path, sp, d, keys))
+    if upiq_label_disposition is not None and not any(g[0] == "upiq380" for g in groups):
+        raise ValueError("E31 disposition supplied without UPIQ fit")
+    for name, path, tw, vw, mode in groups:
+        if name == "upiq380":
+            from e31_training import TABLE_SHA
+            if tw != 4.34410740924913 or vw != 0 or mode != "rank" or sha(path) != TABLE_SHA:
+                raise ValueError("E31 requires the registered pooled rank-only nominal-4 fit group")
     # Every population is admitted before the first table payload is hashed/read.
     for name, path, sp, d, keys in checked_metadata:
         if d["table_sha256"] != sha(path):
@@ -181,7 +205,8 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
 
 def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
                      dest: Path, recipe: dict | None = None, *, strict_admission: bool = False,
-                     data_role_decision: Path | None = None) -> tuple[Path, dict[int, float], dict]:
+                     data_role_decision: Path | None = None,
+                  upiq_label_disposition: Path | None = None) -> tuple[Path, dict[int, float], dict]:
     """Train one cell and return (selected bake, dev curve, selection record) under EPOCH_RULE.
 
     best_dev: the trainer's own best-validation bake (refit/best.bin); the recorded epoch is the argmax of the log's
@@ -197,7 +222,8 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
             refuse_immutable_output(path, roots)
     # Admission precedes output creation and the Rust trainer's payload reads.
     cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe,
-                        strict_admission=strict_admission, data_role_decision=data_role_decision)
+                        strict_admission=strict_admission, data_role_decision=data_role_decision,
+                        upiq_label_disposition=upiq_label_disposition)
     (dest / "refit").mkdir(exist_ok=True)
     ckpt = dest / "ckpt"
     if EPOCH_RULE == "last":
@@ -222,7 +248,7 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
         bake, selected = dest / "refit" / "best.bin", best
     selection = {"epoch_rule": EPOCH_RULE, "selected_epoch": selected, "best_epoch_by_curve": best}
     if strict_admission:
-        selection["strict_table_admission"] = strict_training_groups(groups, data_role_decision)
+        selection["strict_table_admission"] = strict_training_groups(groups, data_role_decision, upiq_label_disposition)
     return bake, curve, selection
 
 
@@ -286,6 +312,8 @@ def main() -> None:
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--strict-admission", action="store_true", help="strict Rev5 table admission; no historical replay")
     ap.add_argument("--data-role-decision", type=Path, help="coordinator's bound human-role decision JSON")
+    ap.add_argument("--upiq380-fit", type=Path, help="pinned native HDR fit table for uh4")
+    ap.add_argument("--upiq-label-disposition", type=Path, help="owner decision on the legacy label producer gap")
     ap.add_argument("--dest", type=Path, help="strict route output directory outside frozen inputs")
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake, without human assessment")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
@@ -298,6 +326,18 @@ def main() -> None:
         apply_smoke_budget(args.local_smoke_budget, globals())
     if args.strict_admission and (args.dest is None or not args.train_only):
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
+    native_recipe = recipe_of(args.spec).get("upiq380", False)
+    if native_recipe != bool(args.upiq380_fit) or native_recipe != bool(args.upiq_label_disposition):
+        ap.error("uh4 requires exactly --upiq380-fit and --upiq-label-disposition")
+    if native_recipe:
+        if not args.strict_admission or args.head != "N":
+            ap.error("E31 requires the registered strict N head")
+        from e31_training import fit_group
+        from e21_cheap_recipe import columns
+        upiq_group, upiq_record = fit_group(args.upiq380_fit, args.upiq_label_disposition, columns("by_v2fy"))
+        from v2_common import refuse_immutable_output
+        for output in (args.dest, Path(os.environ.get("TMPDIR") or args.dest)):
+            refuse_immutable_output(output, (args.upiq380_fit.resolve().parent,))
     if args.strict_admission:
         strict_output_preflight(V2, args.dest)
         from v2_human_role import preflight_recipe
@@ -381,7 +421,13 @@ def main() -> None:
     if "hdr_weight" in recipe:
         if int(receipt.get("formula_revision", 4)) != 5:
             raise ValueError("HDR teacher leg requires the registered Rev5 SDR root")
-        group, hdr_record = hdr_training_group(legs["hdr"], keep, recipe)
+        if native_recipe:
+            from e21_cheap_recipe import columns
+            if keep != columns("by_v2fy"):
+                raise ValueError("E31 requires the registered 420 kept slots")
+            group, hdr_record = upiq_group, upiq_record
+        else:
+            group, hdr_record = hdr_training_group(legs["hdr"], keep, recipe)
         weights["hdr"] = group[2]
         groups.append(group)
     hfit = checked(legs[f"human_without_{args.heldout}"]["fit"])
@@ -399,17 +445,20 @@ def main() -> None:
     try:
         from v2_common import refuse_nonfinite_kept
         if args.strict_admission:
-            strict_training_groups(groups, args.data_role_decision)
+            strict_training_groups(groups, args.data_role_decision, args.upiq_label_disposition)
         refuse_nonfinite_kept([g[1] for g in groups], keep)  # Rev5 tables mark absent slots NaN; a kept one is refused here
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
                                                   strict_admission=args.strict_admission,
-                                                  data_role_decision=args.data_role_decision)
+                                                  data_role_decision=args.data_role_decision,
+                                                  upiq_label_disposition=args.upiq_label_disposition)
     finally:
         for tmp in (curated, curated_extra):
             if tmp is not None:
                 tmp.unlink(missing_ok=True)
                 Path(f"{tmp}.manifest.json").unlink(missing_ok=True)
                 tmp.with_suffix(".keys.parquet").unlink(missing_ok=True)
+    if native_recipe:
+        selection["upiq380_fit_admission"] = hdr_record
     best_epoch = selection["selected_epoch"]
     if args.train_only:
         (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",

@@ -135,7 +135,6 @@ def load_frozen(root: Path | None = None, *, training_only: bool = False, metada
         return record, sha(Path(root) / "wide/frozen.json")
     if record.get("schema") != FROZEN_SCHEMA:
         raise ValueError(f"{path}: unexpected schema")
-    wide = Path(root) / "wide"
     pins = {**{f"wide/{k}/receipt.json": v for k, v in record["wide_receipts"].items()},
             "wide/confirm/receipt.json": record["confirm_receipt_sha256"], "wide/keep_lists.json": record["keep_lists_sha256"]}
     if record.get("extra_arms_sha256"):
@@ -239,6 +238,8 @@ def recipe_of(spec: str) -> dict:
             out["kadis_ordinal"] = float(tok[2:])
         elif tok in ("s2o", "s2m") and "ssim2_recipe" not in out:
             out["ssim2_recipe"] = tok
+        elif tok == "uh4" and "hdr_weight" not in out:
+            out.update(hdr_weight=4.0, hdr_mode="rank", upiq380=True)
         elif tok.startswith("hd") and "hdr_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["hdr_weight"] = float(tok[2:])
         elif tok[:2] in ("hp", "ha") and "hdr_weight" not in out and tok[2:] == "4":

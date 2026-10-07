@@ -99,6 +99,9 @@ use zensim_validate::train_manifest;
 #[path = "../contamination_guard.rs"]
 mod contamination_guard;
 
+#[path = "zensim_mlp_train/upiq_training.rs"]
+mod upiq_training;
+
 use mlp_train::{
     AnchorRows, EquivPairs, KonjndAggregationPool, MlpHyperparams, TrainingGroup, TvRegularizer,
     ValidationPolicy,
@@ -137,6 +140,10 @@ struct Args {
     /// The reason and findings are embedded; this cannot qualify a new model.
     #[arg(long, value_name = "REASON")]
     historical_replay: Option<String>,
+
+    /// Bound owner disposition for the registered E31 UPIQ fit ingress.
+    #[arg(long, conflicts_with = "historical_replay")]
+    upiq_label_disposition: Option<PathBuf>,
 
     /// Do not launch the sibling bake_verdict after fitting. Development
     /// screens evaluate explicit T2 inputs through the final BakeScorer and
@@ -3217,12 +3224,22 @@ fn main() {
             std::process::exit(2)
         })
     });
-    let table_admission = zensim_validate::feature_set::admit_training_tables(
-        &group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>(),
-        args.historical_replay.as_deref(),
-        selected_ids.as_deref(),
-        Some(args.max_features),
-    )
+    let admission_paths = group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>();
+    let table_admission = if let Some(decision) = &args.upiq_label_disposition {
+        upiq_training::admit(
+            &admission_paths,
+            decision,
+            selected_ids.as_deref(),
+            args.max_features,
+        )
+    } else {
+        zensim_validate::feature_set::admit_training_tables(
+            &admission_paths,
+            args.historical_replay.as_deref(),
+            selected_ids.as_deref(),
+            Some(args.max_features),
+        )
+    }
     .unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2)
@@ -3322,6 +3339,24 @@ fn main() {
             eprintln!("{e}");
             std::process::exit(1);
         });
+        if table_admission["upiq380"]["path"].as_str() == Some(path.to_string_lossy().as_ref()) {
+            if within_ref
+                || loss_mode != GroupLossMode::Rank
+                || val_w != 0.0
+                || train_w.to_bits() != 4.34410740924913_f64.to_bits()
+                || args.target_column != "human_score"
+                || args.target_scale != 1.0
+            {
+                eprintln!("E31 requires the registered pooled rank-only nominal-4 fit group");
+                std::process::exit(2);
+            }
+            upiq_training::pad_native(&mut g.feature_rows, g.n_features, args.max_features)
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                });
+            g.n_features = args.max_features;
+        }
         g.train_w = train_w;
         g.val_w = val_w;
         // MANDATORY reproduction identity: canonical absolute path + content
