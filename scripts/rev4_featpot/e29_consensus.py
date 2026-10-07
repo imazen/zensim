@@ -197,8 +197,8 @@ def prepare(source, hdr, out, build_commit):
              "source_table_sha256": SOURCE_TABLE, "source_keys_sha256": SOURCE_KEYS,
              "source_manifest_sha256": SOURCE_MANIFEST, "table_sha256": sha(path),
              "keys_sha256": sha(key_path(path)), "row_keys_sha256": row_keys_sha(label_free),
-             "row_selection_sha256": selection_sha(range(7390)), "admission_root": str(out.resolve()),
-             "immutable_input_roots": frozen["admission_view"]["immutable_input_roots"],
+             "row_selection_sha256": selection_sha(range(7390)),
+             "immutable_input_roots": [*frozen["admission_view"]["immutable_input_roots"], str(out.resolve()), "/var/tmp/rev4-featpot/v2e29"],
              "target_transform": "pooled-midrank-Borda-[0,1]" if arm == "hb4" else "score=10*q_jod;no-clipping"}
         if arm == "hc4":
             pairs = base / "hdr_hc4.pairs.json"
