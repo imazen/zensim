@@ -93,3 +93,12 @@ minimise MSE and maximise Kendall and Pearson correlation.
 * **DISKCLEAN:** freed 4.3 GB (one byte-identical parquet); ~187 GB kept pending owner decision because no byte-identical tower copy
   exists (`~/tmp/zensim-paper/rev4/DISKCLEAN_DONE.md`). Anomaly to check: `tbig_720_full.parquet` and two `tbig-join-out` parquets
   have the same size but different sha256 locally vs tower — possible silent corruption on one side.
+
+## 8. Updates (2026-10-07 09:05 UTC)
+
+* **E27 result** (`~/tmp/zensim-paper/rev4/E27_DONE.md`, registration 070b8247): neither arm passes; the E24 Rev5 control stays.
+  hp4 (pooled rank on 10 × q_jod) keeps SDR as good (+0.0006 ± 0.0011) and lifts pooled HDR-VDP-3 SROCC 0.846 → 0.969, but pooled CVVDP
+  falls 0.930 → 0.841 (fails non-inferiority); ha4 (within-ref MSE + rank) fails SDR (−0.039 ± 0.0015). The two teachers agree within
+  references (0.998) but only 0.828 pooled, so a single-teacher pooled leg makes the model that teacher's cross-image calibration. Next:
+  a consensus leg (pairs where both teachers agree on cross-image order) or human HDR data (UPIQ needs owner approval).
+* Loop plan and state: `~/tmp/zensim-paper/rev4/LOOP.md` (owner directive 2026-10-07).
