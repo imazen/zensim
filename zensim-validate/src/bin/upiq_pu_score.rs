@@ -128,7 +128,7 @@ fn arg(args: &[String], key: &str) -> Option<String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if arg(&args, "--training-allowlist").is_some() {
+    if ingest::requested(&args) {
         ingest::run(&args).expect("UPIQ-380 allowlisted extraction");
         return;
     }

@@ -266,7 +266,8 @@ def verify(args):
         splits[split] = set(table["ref_basename"].to_pylist())
     if splits["fit"] & splits["development"]:
         raise ValueError("reference byte hash leaked across slices")
-    write(dest / "VERIFY_PASS.json", dict(status="PASS", rows=380, references=30,
+    audit_path = getattr(args, "audit_out", None) or dest / "VERIFY_PASS.json"
+    write(audit_path, dict(status="PASS", rows=380, references=30,
         all_feature_bits_match_extraction=True, all_targets_match_pinned_HDR_only_JOD=True,
         label_free_keys=True, split_reference_hash_overlap=0, original_mixed_UPIQ_CSV_read=False))
 
@@ -279,6 +280,7 @@ def main():
     ap.add_argument("--build-commit", required=True)
     ap.add_argument("--features")
     ap.add_argument("--binary")
+    ap.add_argument("--audit-out", help="Fresh verification receipt path; preserves existing canonical receipts")
     args = ap.parse_args()
     {"prepare": prepare, "ingest": ingest, "verify": verify}[args.command](args)
 

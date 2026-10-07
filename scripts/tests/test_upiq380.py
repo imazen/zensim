@@ -75,6 +75,13 @@ class UpiqAdmission(unittest.TestCase):
         (self.root / "narwaria/01/extra.exr").touch()
         self.refuse_without_opens(self.a)
 
+    def test_same_width_different_ids_refuse_before_label_open(self):
+        a = copy.deepcopy(self.a)
+        a["requested_ids"][0] = 0
+        self.assertEqual(len(a["requested_ids"]), 420)
+        self.assertEqual(a["requested_ids"], sorted(set(a["requested_ids"])))
+        self.refuse_without_opens(a)
+
     def test_all_leg_manifests_precede_human_table_and_label_access(self):
         a = copy.deepcopy(self.a)
         for row in a["rows"]:
