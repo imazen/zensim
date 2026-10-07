@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 OWNER = Path(__file__).resolve().parents[1] / 'rev4_featpot/rev5_bank.py'
 spec = importlib.util.spec_from_file_location('palette_bank', OWNER)
@@ -69,6 +71,32 @@ class PaletteAdmission(unittest.TestCase):
         pin = self.write(self.manifest)
         with self.path.open('a') as stream: stream.write(' ')
         with self.assertRaises(ValueError): self.admit(pin)
+
+    def test_verifier_entry_rejects_before_feature_reads_or_receipt(self):
+        root = Path(self.scratch.name)
+        bank = root / 'bank'; bank.mkdir()
+        instrument = root / 'instrument'; instrument.mkdir()
+        top = dict(sets={name: {} for name in owner.PALETTE_MEMBERS | {'nits', 'live', 'mciqa', 'coverage_pool'}},
+                   build_commit=self.build, labels_read=False)
+        bankpath = bank / '_MANIFEST.json'; bankpath.write_text(json.dumps(top))
+        bankhash = hashlib.sha256(bankpath.read_bytes()).hexdigest()
+        self.path = instrument / '_MANIFEST.json'
+        for change in ('era', 'mapping', 'byte_pin'):
+            with self.subTest(change=change):
+                manifest = copy.deepcopy(self.manifest)
+                manifest['bank_manifest_sha256'] = bankhash
+                if change == 'era': manifest['feature_set_id'] = 'palette@w1867/palette_v1#30b09cd1'
+                if change == 'mapping':
+                    manifest['column_map']['1825'], manifest['column_map']['1826'] = manifest['column_map']['1826'], manifest['column_map']['1825']
+                pin = self.write(manifest)
+                if change == 'byte_pin':
+                    with self.path.open('a') as stream: stream.write(' ')
+                args = SimpleNamespace(palette_verify=str(root), build_commit=self.build,
+                    palette_instrument_manifest_sha256=pin, bin='must-not-be-read')
+                with patch.object(owner.pq, 'read_table') as read:
+                    with self.assertRaises(ValueError): owner.cmd_palette_verify(args)
+                    read.assert_not_called()
+                self.assertFalse((root / '_VERIFIED.json').exists())
 
     def test_wrong_key_membership_and_bank_refused(self):
         for field, value in [('views', {'aic3': {}}), ('bank_manifest_sha256', 'c' * 64), ('labels_read', True)]:

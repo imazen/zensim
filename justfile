@@ -359,3 +359,8 @@ palette-round2-gates:
     just clippy
     just api-doc
     just api-doc-check
+
+palette-round2-build-checks:
+    cargo check -p zensim --no-default-features --features feature-regime-v2
+    cargo check --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+    just lint-scripts
