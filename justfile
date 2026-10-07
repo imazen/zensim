@@ -645,7 +645,7 @@ e32-control-parity scratch bindir root control freeze dest:
 
 # V40 integrated admission and package checks, local only.
 v40-build:
-    cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+    cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --bin predict_features_with_bake --example inspect_qualified_checkpoint
 
 v40-native-tests:
     cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
@@ -671,4 +671,4 @@ v40-executor-smoke bundle image arm mode attempt="1":
     python3 scripts/tests/v40_executor_smoke.py --bundle {{bundle}} --image {{image}} --arm {{arm}} --mode {{mode}} --attempt {{attempt}}
 
 v40-statistics-tests:
-    PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_projection scripts.tests.test_v40_statistics scripts.tests.test_v40_launch
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_projection scripts.tests.test_v40_statistics scripts.tests.test_v40_launch scripts.tests.test_v40_panels
