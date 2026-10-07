@@ -264,3 +264,41 @@ Archive audit passes: 20 program payloads, 101 data payloads plus inventory,
 Launch authorization is absent and the gate refuses; nothing was pushed,
 uploaded to R2, or enqueued. Pins and evidence:
 [e28_repack_2026-10-07.pointer.md](e28_repack_2026-10-07.pointer.md).
+
+## 2026-10-07 v36 executor-linked-root admission repack
+
+The coordinator reported all 100 v35 fleet cells refusing admission because
+the executor's FIT_ROOT ancestor link was rejected. Fix `8283d518` checks
+approved paths under the prepared root and refuses symlinks below it; the
+executor's verified root binding is admitted. The linked-ancestor regression
+is included in the 17 passing E28 admission/recipe/decision tests.
+Profile `ce261832` changes only the recipe pin; all 42 fit-tool tests pass.
+
+This replacement tests the actual installed `fit-cell-exec` CLI with the
+declared job and unchanged argv. The executor stages, extracts, hashes all
+input inventory members, and creates `/var/tmp/rev4-featpot` pointing at
+its verified extraction. A test-only external site hook bounds the owner
+main to 2 epochs × 128 draws; it changes no packed script or declared argv.
+It produces a complete hash-verified output archive and fleet receipt.
+All 7869 predictions, weights, selected epoch 1, scores and sampler digest
+`e7b89fc0a50d7798` match v35 exactly. Measured max RSS: 336836 KiB;
+container cgroup peak: 1294413824 bytes. Outer run-heavy:
+rc=0, 7s, peak-RSS 0.03GiB, min-avail 46381MiB, peak-load 12.32.
+
+Each arm's unmodified registered argv also reaches epoch 0 through that
+executor and linked root, using 120 × 50,000 draws, then is stopped.
+These are admission/loading checks, not full-trajectory results. The
+registered grid remains 100 cells, H128/head N/420 columns, final epoch
+119, 1 CPU and 6 GiB. New jobset: `fitv2e28b-20261007`.
+
+Reviewer probe passes 25/25 with zero label-bearing opens; real-package
+admission passes 10/10 with zero label-table access. Archive audit passes.
+Exactly the recipe and build metadata differ from v35 in the program;
+all data archive bytes and numerical binaries remain unchanged.
+Launcher keeps the previous gates and adds executor/real-argv evidence.
+The coordinator's e28b capacity snapshot is bound exactly; all capacity
+fields match e28/v32, with only the reason annotation differing. Its
+read-only gate passes with authorization mocked in memory; real launch
+authorization is absent and the actual launcher refuses. Nothing pushed,
+uploaded to R2 or enqueued. Artifact pins:
+[e28_executor_repack_2026-10-07.pointer.md](e28_executor_repack_2026-10-07.pointer.md).

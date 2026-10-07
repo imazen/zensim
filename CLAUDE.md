@@ -158,6 +158,16 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E28 admission refused the executor's approved root link. FIXED locally (`8283d518`).**
+  The approved-inventory path check rejected symlink ancestors above the
+  prepared root, including fit-cell-exec's verified FIT_ROOT binding. It now
+  requires paths under the prepared root and refuses symlinks below it. The
+  linked-ancestor regression is covered by the 17 passing E28 tests. v36
+  additionally tests the actual executor CLI, extraction and link: a bounded
+  fit returns a verified result, and both registered arms reach their first
+  epoch before deliberate stop. Prior direct-owner smokes did not exercise
+  that executor link. Evidence: `benchmarks/E28_WORKLOG.md`.
+
 * **2026-10-07 — SHIPPATH7's by_v2fy projection producer broke three registry tests. Two FIXED (`47a2e1d4`), one OPEN pending an owner decision.**
   `benchmarks/feature_sets_registry.json` registers `basic+v2@w720/rev5_localwin#62adfc93` as a producer whose recorded slots are the
   420 by_v2fy IDs (all other slots NaN). The zensim registry gates derived the full 504-slot `basic+v2` set and failed; the entry now
