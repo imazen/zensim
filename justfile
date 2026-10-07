@@ -599,7 +599,7 @@ e31-fit-key-check fit:
     TMPDIR=$HOME/tmp python3 scripts/tests/test_e31_training.py --real-fit {{fit}}
 
 e31-build-trainer:
-    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --example inspect_qualified_checkpoint
 
 e31-crate-tests:
     TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
@@ -653,7 +653,7 @@ v40-native-tests:
 v40-python-tests trainer:
     TMPDIR=$HOME/tmp/v40 SHIPPATH_TRAINER={{trainer}} PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_e32_palette_training.py'
     TMPDIR=$HOME/tmp/v40 SHIPPATH_TRAINER={{trainer}} PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
-    TMPDIR=$HOME/tmp/v40 PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards scripts.tests.test_e31_training scripts.tests.test_e31_control_freeze
+    TMPDIR=$HOME/tmp/v40 ZEN_PANEL_BIN=$(dirname {{trainer}})/panel PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards scripts.tests.test_e31_training scripts.tests.test_e31_control_freeze
 
 v40-admission binary dest:
     python3 scripts/tests/v40_native_admission.py --binary {{binary}} --dest {{dest}} --upiq-manifest /mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07/upiq380_fit.parquet.manifest.json
@@ -666,3 +666,9 @@ v40-projection source palette out commit:
 
 v40-parity bundle e30 dest fold:
     python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} --fold {{fold}}
+
+v40-executor-smoke bundle image arm mode attempt="1":
+    python3 scripts/tests/v40_executor_smoke.py --bundle {{bundle}} --image {{image}} --arm {{arm}} --mode {{mode}} --attempt {{attempt}}
+
+v40-statistics-tests:
+    PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_projection scripts.tests.test_v40_statistics scripts.tests.test_v40_launch
