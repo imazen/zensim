@@ -116,3 +116,16 @@ minimise MSE and maximise Kendall and Pearson correlation.
   registered design-grid KonFiG label; an F-scale variant needs its own registration after E28.
 * **E28** implementation ready (`E28_READY.md`): s2o/s2m smokes pass (KADID held-out SROCC 0.878 / 0.769), legacy paths byte-identical,
   285 Rust + 175 Python tests pass; nm diagnostic non-convergent within its fixed budget (diagnostic only). Pre-launch review running.
+
+## 9. Owner decisions (2026-10-07) and follow-up
+
+* **D1** production human data = KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL, CID22-A; AIC-3 stays in the JPEG-AIC holdout family
+  (with AIC-4 and SDR25). The R7 AIC-4 read is flagged as possibly contaminated (R7 confirm fits trained on AIC-3). E30 (d61eac11)
+  measures the cost of dropping the AIC-3 leg (no AIC-3 label read). The strict route is being extended to the four-source record.
+* **D2** KADID TERMINAL: registered (`benchmarks/kadid_terminal_registration_2026-10-07.md`); read once on the final qualified model.
+* **D3** UPIQ-380 re-designated T2 HDR training data (DATA_SPLITS). An HDR human-leg experiment will be registered after ingestion.
+* **D4** disk: decodes with locally durable encodes deleted (ladder decodes kept); the two KADIS PNG sets were MOVED to tower instead of
+  deleted because their R2 source (`s3://zentrain/kadis-700k-gpu/distorted/`) no longer exists; gen-* encodes and ~/tmp leftovers moved
+  to tower (verified); `~/tmp/aic2026` unzip deleted after its audit products were archived; tbig copies being compared with R2.
+* **New owner request:** dominant-colour (top-N, N = 2–8) shift features — implementation lane `palette-sol`; potential experiment E32 to be
+  registered before any fit.
