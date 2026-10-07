@@ -55,7 +55,8 @@ def preflight_recipe(root, decision_path, heldout=None):
     receipt = json.loads(safe_path(root / "wide/main/real/receipt.json").read_text())
     if "research_palette" in receipt:
         from e32_palette import CONTRACT
-        if receipt["research_palette"] != CONTRACT:
+        if (receipt["research_palette"] != CONTRACT
+                or receipt["research_palette"].get("serving_allowed") is not False):
             raise ValueError("E32 frozen research transport identity required before payload access")
     decision = decision_record(decision_path, receipt["admission_view"]["source_receipt_sha256"])
     view = receipt["admission_view"]
@@ -76,13 +77,18 @@ def preflight_recipe(root, decision_path, heldout=None):
             raise ValueError("E32 cannot mix projected and legacy legs")
         if "research_palette" in d:
             from e32_palette import admit_declaration
-            admit_declaration(d)
+            projection = admit_declaration(d)
+            if projection["role"] != {"fit":"D1-fit", "dev":"D1-development"}[split]:
+                raise ValueError("E32 human fit/development split differs from its role")
         import pyarrow.parquet as pq
         from v2_teacher import key_path, row_keys_sha
         kp = safe_path(key_path(path))
         if sha(kp) != d["keys_sha256"]:
             raise ValueError("D1 human row-key pin changed")
         keys = pq.read_table(kp)
+        if "research_palette" in d:
+            from e32_palette import admit_keys
+            admit_keys(path, d, keys)
         human_keys(keys, d)
         if row_keys_sha(keys) != d["row_keys_sha256"]:
             raise ValueError("D1 human row-key order changed")
@@ -90,17 +96,21 @@ def preflight_recipe(root, decision_path, heldout=None):
             raise ValueError("D1 human leg must omit AIC and the held-out source exactly")
     # Include teacher and coverage declarations/keys in the same payload-free phase.
     from v2_common import TEACHERS
-    other = [receipt["legs"][t][split] for t in TEACHERS for split in ("fit", "dev")]
-    other.append({"rel": "e15/coverage_pool.parquet"})
-    for rec in other:
+    other = [(receipt["legs"][t][split], "TRAIN-oracle-fit" if split == "fit" else "TRAIN-oracle-development")
+             for t in TEACHERS for split in ("fit", "dev")]
+    other.append(({"rel": "e15/coverage_pool.parquet"}, "TRAIN-ordinal"))
+    for rec, expected_role in other:
         path = safe_path(root / rec["rel"])
         d = json.loads(safe_path(Path(f"{path}.manifest.json")).read_text())
         bank_members(d)
         if ("research_palette" in d) != ("research_palette" in receipt):
             raise ValueError("E32 cannot mix projected and legacy legs")
         if "research_palette" in d:
-            from e32_palette import admit_declaration
-            admit_declaration(d)
+            from e32_palette import admit_declaration, admit_keys
+            projection = admit_declaration(d)
+            if projection["role"] != expected_role:
+                raise ValueError("E32 teacher fit/development/ordinal split differs from its role")
+            admit_keys(path, d, pq.read_table(safe_path(key_path(path))))
         if d.get("human_sources") or d.get("data_role_decision_required"):
             human_declaration(d, decision)
             human_keys(pq.read_table(safe_path(key_path(path))), d)

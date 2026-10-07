@@ -142,7 +142,7 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         decision = decision_record(data_role_decision, raw.get("source_receipt_sha256"))
     records = []
     checked_metadata = []
-    for name, path, _, _, _ in groups:
+    for name, path, train_w, val_w, _ in groups:
         path = safe_path(path)
         sp = Path(f"{path}.manifest.json")
         d = json.loads(sp.read_text())
@@ -152,7 +152,10 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None)
         palette = "research_palette" in d
         if palette:
             from e32_palette import admit_declaration
-            admit_declaration(d)
+            projection = admit_declaration(d)
+            if ((train_w > 0 and projection["role"].endswith("development"))
+                    or (train_w == 0 and val_w > 0 and projection["role"].endswith("fit"))):
+                raise ValueError("E32 fit/development role disagrees with group weights")
         if ((not palette and d.get("feature_set_id") != "basic+peaks+v2@w1825/rev5_localwin#36c3f3af")
                 or d.get("formula_revision") != 5 or not d.get("decoder_era")
                 or not d.get("table_sha256") or not d.get("row_selection_sha256")):

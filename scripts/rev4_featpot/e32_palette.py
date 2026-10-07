@@ -23,6 +23,7 @@ def admit_declaration(d):
                      "bank_manifest_sha256", "instrument_manifest_sha256", "producer_binary_sha256",
                      "build_commit", "serving_allowed", "cast")
     if (any(p.get(k) != CONTRACT[k] for k in identity_keys)
+            or p.get("serving_allowed") is not False
             or p.get("columns") != {str(i): f"palette_f{i}" for i in PALETTE_IDS}
             or d.get("feature_set_id") != FEATURE_SET_ID or d.get("formula_revision") != 5
             or not d.get("decoder_era")):
@@ -63,7 +64,9 @@ def validate_keep(keep):
 def admit_recipe(receipt, recipe, keep, head, strict, train_only):
     from v2_common import recipe_of
     expected = recipe_of("sel:59f0bbc2f290@h32:H128:cv16:cf98")
-    if (receipt.get("research_palette") != CONTRACT or receipt.get("width") != 1867
+    if (receipt.get("research_palette") != CONTRACT
+            or receipt.get("research_palette", {}).get("serving_allowed") is not False
+            or type(receipt.get("width")) is not int or receipt.get("width") != 1867
             or recipe != expected or head != "N" or not strict or not train_only):
         raise ValueError("E32 needs its explicit frozen transport and unchanged E30 recipe, strict train-only head N")
     validate_keep(keep)
