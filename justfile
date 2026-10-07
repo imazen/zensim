@@ -10,6 +10,32 @@
 # the same commit as a `just api-doc` regen.
 apidoc_toolchain := "nightly-2026-09-02"
 
+# Caller-selected qualification scope: no evaluation/human-label payloads.
+# Keep real-corpus tests intact; these five are outside this lane's scope.
+prodqual-workspace-build:
+    cargo test --workspace --all-targets --all-features --exclude zensim-wasm-tests --no-run
+
+prodqual-workspace-tests:
+    cargo test --workspace --lib --bins --tests --examples --all-features --exclude zensim-wasm-tests --no-fail-fast -- \
+        --skip cid22_aggregate_srocc_matches_audit_reference \
+        --skip cid22_first_row_matches_bake_verdict_reference \
+        --skip parallel_matches_sequential_iwssim_log_target \
+        --skip parallel_matches_sequential_default_target_with_scale \
+        --skip canonical_dial_grid_is_the_quarantined_v2_grid
+
+prodqual-rev5:
+    cargo test -p zensim --release --all-features --test featcanon_rev5_parity -- --nocapture
+
+[positional-arguments]
+prodqual-synthetic *models:
+    ZENSIM_FORMULA_REV=5 cargo run -p zensim --release --all-features --example serve_custom_bake -- --prodqual "$@"
+
+prodqual-serving-matrix outdir:
+    scripts/serving_matrix.sh {{outdir}}
+
+prodqual-feature-matrix:
+    python3 scripts/prodqual_feature_matrix.py
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test`, nor by any OTHER CI job — only
