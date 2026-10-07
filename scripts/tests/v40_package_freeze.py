@@ -156,6 +156,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "harvest_driver_v40.py",
         "postfit.sh",
         "upiq380-fit/owner_disposition.json",
+        "E31_OWNER_ADMISSION.json",
     ]
     files += [s["receipt"] for s in smokes]
     files += [str(Path(v["path"]).relative_to(bundle)) for v in w2.values()]
