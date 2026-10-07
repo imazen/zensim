@@ -1,14 +1,59 @@
 """Independent seed-composite and signed lower-tail oracles."""
 
 import unittest
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+import types
+from unittest.mock import patch
 
 import numpy as np
 from scipy.stats import t
 
 from v40_score import sdr_decision, _e29_signed_w2
+import v40_score
 
 
 class Statistics(unittest.TestCase):
+    def test_changed_manifest_refuses_before_cell_or_checkpoint_reads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "program.tar.gz").write_bytes(b"program identity")
+            (root / "bin/inspect_qualified_checkpoint").write_bytes(
+                b"inspector identity"
+            )
+            manifest = root / "fit-manifest-fitv40-control-20261007.json"
+            manifest.write_text('[{"payload": "unopened sentinel"}]')
+            def digest(p):
+                return hashlib.sha256(p.read_bytes()).hexdigest()
+            (root / "PACKAGE_PINNED.json").write_text(
+                json.dumps(
+                    dict(
+                        program_sha=digest(root / "program.tar.gz"),
+                        inspector_sha=digest(root / "bin/inspect_qualified_checkpoint"),
+                        manifests={"fitv40-control-20261007": "0" * 64},
+                    )
+                )
+            )
+
+            def tripwire(*args, **kwargs):
+                raise AssertionError("checkpoint/payload verifier reached")
+
+            with patch.dict(
+                "sys.modules",
+                {
+                    "qualified_fit_contract": types.SimpleNamespace(
+                        trusted_contract=tripwire, verify_training=tripwire
+                    )
+                },
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "frozen registered manifest changed"
+                ):
+                    v40_score.complete(root, "e29", root, root, root, only_control=True)
+
     def test_seed_composites_and_one_sided_df9(self):
         delta = np.arange(40, dtype=float).reshape(10, 4) / 10000 + 0.003
         w2 = np.arange(20, dtype=float).reshape(10, 2) / 10000 + 0.001
