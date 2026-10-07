@@ -676,5 +676,12 @@ v40-statistics-tests:
 v40-freeze bundle source_commit metrics_commit:
     python3 scripts/tests/v40_package_freeze.py --bundle {{bundle}} --source {{justfile_directory()}} --source-commit {{source_commit}} --metrics-commit {{metrics_commit}}
 
-v40-cached-projection bundle out:
-    python3 scripts/tests/v40_cached_projection_smoke.py --bundle {{bundle}} --out {{out}}
+v40-cached-projection bundle out attempt:
+    python3 scripts/tests/v40_cached_projection_smoke.py --bundle {{bundle}} --out {{out}} --harvest-attempt {{attempt}}
+
+v40-research-tests:
+    cargo test --locked -p zensim-validate --bin bake_dial_refit
+    ZENSIM_POW_FORM=pure cargo test --locked -p zensim-validate --bin bake_dial_refit research_scalar_tail_is_bit_identical
+
+v40-assessment-build:
+    cargo build --locked --release -p zensim-validate --bin bake_dial_refit --bin predict_features_with_bake

@@ -74,6 +74,9 @@
 //!   corpus per invocation; arms combine grams with `--weight`s.
 //!   Pre-registration: `benchmarks/linear924_phase1_2026-08-01.md`.
 
+#[path = "research_cached/mod.rs"]
+mod research_cached;
+
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -1537,6 +1540,9 @@ fn pack_layers(
 /// `flags: 0` and `compressed: true` match the Python pipeline verbatim.
 #[derive(Args, Debug)]
 struct DensifyArgs {
+    /// Explicit registered E32 cached-table diagnostic; serving remains refused.
+    #[arg(long)]
+    research_palette_cached: bool,
     /// Input bake (any ZNPR v3; f32/f16 layers).
     #[arg(long = "in")]
     input: PathBuf,
@@ -1706,7 +1712,7 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     // `bake_runtime::CallerGather` gathers them out of the caller's
     // identity-laid-out vector, so pre-gathering here would double-gather.
     let probes = densify_probe_rows(probe_width, a.gate_rows);
-    let before = forward_scored_raw(&bytes, &probes)?;
+    let before = forward_scored_mode(&bytes, &probes, a.research_palette_cached)?;
     // ...EXCEPT when the kept ids are a CONTIGUOUS PREFIX `0..K-1`. Then the
     // densified bake's declared layout is the IDENTITY layout,
     // `zensim::declared_feature_ids` returns `None` for it by design, and its
@@ -1727,7 +1733,7 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     } else {
         probes.clone()
     };
-    let after = forward_scored_raw(&out_bytes, &after_probes)?;
+    let after = forward_scored_mode(&out_bytes, &after_probes, a.research_palette_cached)?;
 
     // THE gate, and it is the strong form: score the ORIGINAL bake with every
     // dropped line's value replaced by `0.0`. If the dropped lines truly
@@ -1751,7 +1757,7 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
                 .collect()
         })
         .collect();
-    let before_zeroed = forward_scored_raw(&bytes, &zeroed)?;
+    let before_zeroed = forward_scored_mode(&bytes, &zeroed, a.research_palette_cached)?;
     let _ = &kept;
     for (i, (x, y)) in before_zeroed.iter().zip(after.iter()).enumerate() {
         if x.to_bits() != y.to_bits() && !(x.is_nan() && y.is_nan()) {
@@ -1899,8 +1905,16 @@ fn verbatim_layers(model: &Model) -> Result<Vec<PackLayer>, String> {
 /// [`forward_scored_6dec`] at FULL f64 bits — the densify identity gate needs
 /// the bits, not a 6-decimal print (which would hide a difference below
 /// 5e-7 and let a non-identical bake ship).
-fn forward_scored_raw(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, String> {
+fn forward_scored_mode(
+    bytes: &[u8],
+    feats: &[Vec<f64>],
+    research: bool,
+) -> Result<Vec<f64>, String> {
     let model = Model::from_bytes(bytes).map_err(|e| format!("parse bake: {e}"))?;
+    if research {
+        let mut scorer = research_cached::PaletteScorer::new(&model)?;
+        return feats.iter().map(|row| scorer.score(row)).collect();
+    }
     let n_inputs = model.caller_input_width();
     let dense = zensim::declared_feature_ids(&model).is_some();
     let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
@@ -3582,6 +3596,9 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
 
 #[derive(Args)]
 struct PredictArgs {
+    /// Explicit registered E32 cached-table diagnostic, score units only.
+    #[arg(long)]
+    research_palette_cached: bool,
     /// Bake to forward (any ZNPR v3, incl. MLPs). With `--ensemble` this is
     /// optional; when both are given it must name one of the members.
     #[arg(long)]
@@ -3702,6 +3719,15 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         }
         Some(a.ensemble_weights.iter().map(|w| w / sum).collect())
     };
+    if a.research_palette_cached && (!a.score_units || models.len() != 1 || weights.is_some()) {
+        return Err("cached palette research requires one model, score units and no blend".into());
+    }
+    // Admit model metadata before opening the table.
+    let mut research = if a.research_palette_cached {
+        Some(research_cached::PaletteScorer::new(&models[0])?)
+    } else {
+        None
+    };
     let g =
         zensim_validate::parquet_loader::load_parquet(&a.corpus, "predict", "human_score", 1.0)?;
 
@@ -3709,7 +3735,11 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
     // (single accumulator, single divide-by-one is skipped below).
     let k = models.len();
     let mut acc = vec![0f64; g.feature_rows.len()];
-    if a.score_units {
+    if let Some(scorer) = research.as_mut() {
+        for (out, row) in acc.iter_mut().zip(&g.feature_rows) {
+            *out = scorer.score(row)?;
+        }
+    } else if a.score_units {
         let mut scorer =
             zensim::BakeScorer::ensemble(&models, weights.as_deref()).map_err(|e| e.to_string())?;
         for (out, row) in acc.iter_mut().zip(&g.feature_rows) {
@@ -5363,6 +5393,7 @@ mod tests {
             let dst = dir.join(format!("densify_{label}_out.bin"));
             std::fs::write(&src, prefix_bake(4, &live)).unwrap();
             let args = DensifyArgs {
+                research_palette_cached: false,
                 input: src.clone(),
                 out: Some(dst.clone()),
                 dry_run: false,
@@ -5395,6 +5426,7 @@ mod tests {
         let output = dir.join("output.bin");
         std::fs::write(&input, bytes).unwrap();
         cmd_densify(&DensifyArgs {
+            research_palette_cached: false,
             input,
             out: Some(output.clone()),
             dry_run: false,
@@ -5869,6 +5901,88 @@ mod tests {
     /// make the forward weight-layout-independent: for rows `[t,t,t]` with
     /// `t ≥ 0`, both hidden units are `3t` (LeakyReLU passthrough) and
     /// `raw = 0.5·3t + 0.5·3t = 3t`.
+    #[test]
+    fn cached_palette_requires_qualified_registration_and_exact_dense_ids() {
+        let ids: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../benchmarks/e32_palette_feature_ids_2026-10-07.json"
+        ))
+        .unwrap();
+        let live: Vec<usize> = serde_json::from_value(ids["arm_ids"].clone()).unwrap();
+        let base = prefix_bake(1867, &live);
+        let base =
+            zenpredict_bake::append_metadata_utf8(&base, "zentrain.formula_revision", "5").unwrap();
+        let base = zenpredict_bake::append_metadata_utf8(
+            &base,
+            "zentrain.feature_set_id",
+            "basic+peaks+v2+palette@w1867/e32_palette_v2#2ec9dcda",
+        )
+        .unwrap();
+        let registered = serde_json::json!({"keep_features_n":462, "argv":["--nonneg-distance"],
+            "table_admission":{"qualified_provenance":true, "research_family":"palette_v2",
+                "serving_allowed":false, "formula_revision":5}});
+        let bytes =
+            zenpredict_bake::append_metadata_utf8(&base, "zentrain.repro", &registered.to_string())
+                .unwrap();
+        let model = Model::from_bytes(&bytes).unwrap();
+        let mut scorer = research_cached::PaletteScorer::new(&model).unwrap();
+        assert!(zensim::BakeScorer::new(&model).is_err());
+        assert!(scorer.score(&vec![0.0; 1867]).unwrap().is_finite());
+        assert!(scorer.score(&vec![0.0; 1866]).is_err());
+        for (key, value) in [
+            ("qualified_provenance", serde_json::json!(false)),
+            ("serving_allowed", serde_json::json!(true)),
+            ("research_family", serde_json::json!("foreign")),
+            ("formula_revision", serde_json::json!(4)),
+        ] {
+            let mut bad = registered.clone();
+            bad["table_admission"][key] = value;
+            let bytes =
+                zenpredict_bake::append_metadata_utf8(&base, "zentrain.repro", &bad.to_string())
+                    .unwrap();
+            assert!(
+                research_cached::PaletteScorer::new(&Model::from_bytes(&bytes).unwrap()).is_err(),
+                "{key}"
+            );
+        }
+        let bad_ids =
+            zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.feature_ids", "0 1").unwrap();
+        assert!(
+            research_cached::PaletteScorer::new(&Model::from_bytes(&bad_ids).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn research_scalar_tail_is_bit_identical_to_serving_and_refuses_unregistered_model() {
+        let base = two_layer_bake_with_spline(&[(-20.0, -30.0), (0.0, 25.0), (100.0, 105.0)]);
+        let base_model = Model::from_bytes(&base).unwrap();
+        let mut md = clone_metadata(&base_model);
+        md.push(OwnedMeta {
+            key: "zentrain.tanh_output_head".into(),
+            kind: MetadataType::Numeric,
+            value: 1.0f32.to_le_bytes().to_vec(),
+        });
+        let bytes = emit_packed(
+            base_model.schema_hash(),
+            base_model.scaler_mean(),
+            base_model.scaler_scale(),
+            &verbatim_layers(&base_model).unwrap(),
+            &md,
+        );
+        let model = Model::from_bytes(&bytes).unwrap();
+        assert!(research_cached::PaletteScorer::new(&model).is_err());
+        let md = zensim::bake_metadata::parse_bake_metadata(&model).unwrap();
+        let mut network = zenpredict::Predictor::new(&model);
+        let mut serving = zensim::BakeScorer::new(&model).unwrap();
+        for v in [-1000.0, -20.0, -1.0, 0.0, 0.1, 1.0, 20.0, 1000.0] {
+            let row = [v; 3];
+            let input = row.map(|x| x as f32);
+            let raw = network.predict(&input).unwrap()[0] as f64;
+            let cached = research_cached::scalar_tail(raw, &md);
+            let canonical = serving.score_features(&row, 0, 0, None).unwrap();
+            assert_eq!(cached.to_bits(), canonical.to_bits());
+        }
+    }
+
     fn two_layer_bake_with_spline(knots: &[(f32, f32)]) -> Vec<u8> {
         let mut payload = (knots.len() as u32).to_le_bytes().to_vec();
         for (x, y) in knots {

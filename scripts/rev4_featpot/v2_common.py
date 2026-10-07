@@ -458,7 +458,7 @@ def refuse_nonfinite_kept(paths, keep) -> None:
                     raise ValueError(f"{path}: kept column {selected[j]} is not finite (an absent slot?); refusing this keep list")
 
 
-def dense_bake(bake: Path, cache: Path) -> Path:
+def dense_bake(bake: Path, cache: Path, *, research_palette_cached=False) -> Path:
     """The bake rewritten to the dense contract by the owner (`bake_dial_refit densify`, identity gate: predictions
     bit-identical on its probe rows). Cell bakes are identity-width, so a zero-weight input still multiplies its NaN; on a
     table with NaN absent slots only the dense bake (exactly the inputs it reads) scores finite."""
@@ -468,7 +468,7 @@ def dense_bake(bake: Path, cache: Path) -> Path:
     if not out.is_file():
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        r = subprocess.run([str(FITBIN), "densify", "--in", str(bake), "--out", str(tmp)], check=True, capture_output=True,
+        r = subprocess.run([str(FITBIN), "densify", "--in", str(bake), "--out", str(tmp), *(["--research-palette-cached"] if research_palette_cached else [])], check=True, capture_output=True,
                            text=True)
         if "BIT-IDENTICAL" not in r.stdout + r.stderr:
             raise ValueError(f"densify identity gate did not report bit-identical predictions for {bake}")

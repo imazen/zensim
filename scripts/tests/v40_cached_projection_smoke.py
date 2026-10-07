@@ -20,6 +20,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--harvest-attempt", type=int, required=True)
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=False)
     sys.path.insert(0, str(a.bundle / "committed-tools"))
@@ -39,7 +40,7 @@ def main():
         # The refusal owner already verified these bytes without installing.
         cell = (
             a.bundle
-            / f"harvest-refusal-4-{key}"
+            / f"harvest-refusal-{a.harvest_attempt}-{key}"
             / blob_root(job["kind"])
             / job["cell"]["image_path"]
         )
@@ -60,6 +61,13 @@ def main():
         dest.mkdir()
         wire, dense = dest / "features.f64.wire", dest / "dense.bin"
         wire.write_bytes(struct.pack("<II", width, 12) + matrix.tobytes())
+        if arm == "palette":
+            refused = subprocess.run([
+                str(a.bundle / "bin/bake_dial_refit"), "densify",
+                "--in", str(cell / "refit/last.bin"), "--out", str(dest / "unflagged.bin")
+            ], capture_output=True, text=True)
+            if refused.returncode == 0 or (dest / "unflagged.bin").exists() or "unavailable to the extraction plan" not in refused.stderr:
+                raise AssertionError("unflagged palette serving/densify must remain refused")
         subprocess.run(
             [
                 str(a.bundle / "bin/bake_dial_refit"),
@@ -68,6 +76,7 @@ def main():
                 str(cell / "refit/last.bin"),
                 "--out",
                 str(dense),
+                *(["--research-palette-cached"] if arm == "palette" else []),
             ],
             check=True,
             capture_output=True,
@@ -84,6 +93,7 @@ def main():
                 "--score-units",
                 "--out",
                 str(output),
+                *(["--research-palette-cached"] if arm == "palette" else []),
             ],
             check=True,
             capture_output=True,
@@ -100,6 +110,7 @@ def main():
                 str(wire),
                 "--f64-wire",
                 "--production",
+                *(["--research-palette-cached"] if arm == "palette" else []),
             ],
             text=True,
         )

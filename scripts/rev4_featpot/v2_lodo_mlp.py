@@ -57,12 +57,12 @@ def refs_of(path: Path) -> list[str]:
     return pq.read_table(path, columns=["ref_basename"])["ref_basename"].to_pylist()
 
 
-def predict(bake: Path, table: Path, out: Path) -> np.ndarray:
+def predict(bake: Path, table: Path, out: Path, *, research_palette_cached=False) -> np.ndarray:
     from v2_common import dense_bake, table_revision
     if table_revision(table) >= 5:  # Rev5 tables carry NaN absent slots: score with the dense bake (bit-identical by gate)
-        bake = dense_bake(bake, out.parent)
+        bake = dense_bake(bake, out.parent, research_palette_cached=research_palette_cached)
     run([str(FITBIN), "predict", "--bake", str(bake), "--corpus", str(table), "--score-units",
-         "--out", str(out)], out.with_suffix(".log"))
+         "--out", str(out), *(["--research-palette-cached"] if research_palette_cached else [])], out.with_suffix(".log"))
     result = pd.read_csv(out, sep="\t")
     if result.columns.tolist() != ["row_idx", "pred"] or not np.array_equal(
             result.row_idx.to_numpy(), np.arange(len(result))):

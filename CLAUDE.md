@@ -158,6 +158,18 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E32 cached assessment planner refusal. FIXED locally in V40.**
+
+  Serving admission correctly refuses the research palette feature IDs. The
+  ordinary densify and cached-prediction owners therefore could not assess the
+  registered E32 arm. Explicit `--research-palette-cached` validation flags now
+  require its qualified Rev5 declaration, fixed 462 IDs, scalar N recipe and
+  research-only disposition. They reuse the canonical predictor, gather,
+  metadata parser, pin and spline math. The serving predicate remains unchanged;
+  an unflagged palette densify still refuses. Cached predictions on twelve
+  approved KADID TRAIN+SELECT rows match the Parquet owner bit for bit for
+  control, hb4, hc4 and palette; no external/HDR VAL/UPIQ development read occurs.
+
 * **2026-10-07 — E31/E32 native group admission. FIXED locally in V40.**
 
   The inherited native entry could inspect feature payloads before refusing bad

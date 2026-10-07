@@ -41,6 +41,19 @@ def freeze(bundle, source, source_commit, metrics_commit):
             path.write_bytes(tar.extractfile(item).read())
             if name.parts[0] == "bin":
                 path.chmod(0o755)
+    # Freeze the label-free distortion-type join used by the registered W2 owner.
+    import pyarrow.parquet as pq
+    w2 = {}
+    for member in ("kadid_train", "kadid_select", "tid2013"):
+        original = Path("/var/tmp/rev4-featbank/bank") / member / "keys.parquet"
+        table = pq.read_table(original, columns=["pair_key", "dist_path"])
+        target = bundle / "w2-keys" / f"{member}.parquet"
+        target.parent.mkdir(exist_ok=True)
+        with target.open("xb") as stream:
+            pq.write_table(table, stream)
+        w2[member] = dict(path=str(target), sha256=sha(target), rows=len(table),
+            original_path=str(original), original_sha256=sha(original))
+    write(bundle / "W2_KEY_PINS.json", dict(schema="v40-w2-label-free-keys-v1", members=w2))
     # Keep the tested fit runtime intact. Freeze assessment separately, including
     # import dependencies absent from the deliberately small fit-only archive.
     assessment = bundle / "assessment-runtime"
@@ -127,11 +140,16 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "E30_COMPLETE_PINS.json",
         "v40-fit-contract.json",
         "WORKER_BUILD.json",
+        "W2_KEY_PINS.json",
+        "SOURCE_BINDINGS.json",
+        "parity-kadid/PARITY.json",
+        "parity-tid2013/PARITY.json",
         "IMAGE_RECIPE.json",
         "bin/inspect_qualified_checkpoint",
         "harvest_driver_v40.py",
     ]
     files += [s["receipt"] for s in smokes]
+    files += [str(Path(v["path"]).relative_to(bundle)) for v in w2.values()]
     common = {rel: sha(bundle / rel) for rel in files}
     for jobset, manifest_sha in pins["manifests"].items():
         manifest = f"fit-manifest-{jobset}.json"

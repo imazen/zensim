@@ -245,7 +245,7 @@ def external(record, cells, out):
             for (fold, seed), cell in cells[arm].items():
                 dest = out / name / arm / f"{fold}_s{seed}"
                 dest.mkdir(parents=True)
-                dense = dense_bake(cell / "refit/last.bin", dest)
+                dense = dense_bake(cell / "refit/last.bin", dest, research_palette_cached=arm == "palette")
                 pred = np.array(
                     [
                         float(v)
@@ -258,6 +258,7 @@ def external(record, cells, out):
                                 str(wire),
                                 "--f64-wire",
                                 "--production",
+                                *(["--research-palette-cached"] if arm == "palette" else []),
                             ],
                             text=True,
                         ).split()
@@ -337,7 +338,7 @@ def upiq(record, cells, out):
             for (fold, seed), cell in grid.items():
                 dest = out / split / arm / f"{fold}_s{seed}"
                 dest.mkdir(parents=True)
-                dense = dense_bake(cell / "refit/last.bin", dest)
+                dense = dense_bake(cell / "refit/last.bin", dest, research_palette_cached=arm == "palette")
                 pred = np.array(
                     [
                         float(v)

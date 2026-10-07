@@ -218,6 +218,21 @@ def score(bundle, study, results, control, root, tools, out, pins):
         for fold in PRODUCTION_SOURCES
     ]
     strict_training_groups(groups, root / "human_role_decision.json")
+    # Retain the exact label-free type join frozen with this package.
+    from v40_panels import bound_bytes
+    import hashlib
+    import io
+    type_record = json.loads(bound_bytes(bundle / "W2_KEY_PINS.json"))
+    if type_record.get("schema") != "v40-w2-label-free-keys-v1" or set(type_record.get("members", {})) != {"kadid_train", "kadid_select", "tid2013"}:
+        raise ValueError("INCOMPLETE: registered distortion-type keys required")
+    type_keys = {}
+    for member, record in type_record["members"].items():
+        payload = bound_bytes(record["path"])
+        if hashlib.sha256(payload).hexdigest() != record["sha256"]:
+            raise ValueError("INCOMPLETE: distortion-type join changed")
+        type_keys[member] = pq.read_table(io.BytesIO(payload), columns=["pair_key", "dist_path"]).to_pandas()
+        if len(type_keys[member]) != record["rows"]:
+            raise ValueError("INCOMPLETE: distortion-type key count differs")
     # No target read above this boundary: all cells and source populations admitted.
     out.mkdir(parents=True)
     panels = {label: {} for label in cells}
@@ -228,9 +243,7 @@ def score(bundle, study, results, control, root, tools, out, pins):
         if fold in e13.TYPE_SOURCES:
             paths = pd.concat(
                 [
-                    pq.read_table(
-                        e13.BANK / m / "keys.parquet", columns=["pair_key", "dist_path"]
-                    ).to_pandas()
+                    type_keys[m]
                     for m in e13.TYPE_SOURCES[fold]
                 ]
             ).drop_duplicates("pair_key")
@@ -245,7 +258,8 @@ def score(bundle, study, results, control, root, tools, out, pins):
                 dest = out / label / f"{fold}_s{seed}"
                 dest.mkdir(parents=True)
                 pred = predict(
-                    grid[fold, seed] / "refit/last.bin", table, dest / "pred.tsv"
+                    grid[fold, seed] / "refit/last.bin", table, dest / "pred.tsv",
+                    research_palette_cached=label == "palette"
                 )
                 panel = panel_batch([(fold, pred, y)], stats="full")[0]
                 rp = dest / "result.json"
