@@ -98,6 +98,14 @@ pub(super) fn run(paths: &[String]) {
                             served.features()[id].to_bits() != extracted.values()[id].to_bits()
                         })
                         .collect();
+                    let cached_mismatches: Vec<usize> = request
+                        .want()
+                        .iter_slots()
+                        .filter(|&id| {
+                            cached.result().features()[id].to_bits()
+                                != extracted.values()[id].to_bits()
+                        })
+                        .collect();
                     let scores = [
                         served.score(),
                         cached.result().score(),
@@ -111,7 +119,8 @@ pub(super) fn run(paths: &[String]) {
                         "feature_score":feature_score, "feature_bits":feature_score.to_bits(),
                         "identity_aware_bits":identity_aware.to_bits(),
                         "finite":scores.iter().all(|s| s.is_finite()),
-                        "feature_mismatches":mismatches, "read_bits":read_bits,
+                        "feature_mismatches":mismatches,
+                        "cached_feature_mismatches":cached_mismatches, "read_bits":read_bits,
                         "density_cells":cached.attribution().density().len(),
                     }));
                 }
@@ -126,7 +135,7 @@ pub(super) fn run(paths: &[String]) {
     }
     println!(
         "{}",
-        json!({"schema":1, "formula_revision":5,
+        json!({"schema":2, "formula_revision":5,
         "input":"synthetic integer texture; cumulative low-bit truncation",
         "geometries":GEOMETRIES, "dropped_bits":DROPPED_BITS, "seeds":seeds})
     );

@@ -15,6 +15,9 @@ apidoc_toolchain := "nightly-2026-09-02"
 prodqual-workspace-build:
     cargo test --workspace --all-targets --all-features --exclude zensim-wasm-tests --no-run
 
+prodqual-fmt-check:
+    cargo fmt -p zensim --check
+
 prodqual-workspace-tests:
     cargo test --workspace --lib --bins --tests --examples --all-features --exclude zensim-wasm-tests --no-fail-fast -- \
         --skip cid22_aggregate_srocc_matches_audit_reference \
@@ -35,6 +38,28 @@ prodqual-serving-matrix outdir:
 
 prodqual-feature-matrix:
     python3 scripts/prodqual_feature_matrix.py
+
+# Match the WASI toolchain pin in CI (the stable LLVM workaround).
+prodqual-wasm-build:
+    RUSTFLAGS='-C target-feature=+simd128' cargo +1.98.1 build -p zensim --target wasm32-wasip1 --release --all-features --example serve_custom_bake
+
+[positional-arguments]
+prodqual-wasm-synthetic program *models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    program="$1"
+    shift
+    wasmtime run --dir "${PRODQUAL_INPUT_ROOT:?set the pinned artifact directory}::/inputs" \
+        --env ZENSIM_FORMULA_REV=5 "$program" --prodqual "$@"
+
+prodqual-training-only:
+    cargo clippy -p zensim --no-default-features --features training --lib -- -D warnings
+    cargo test -p zensim --no-default-features --features training --lib -- --nocapture
+
+prodqual-workspace-failures:
+    cargo test -p zensim -p zensim-validate --all-features --no-fail-fast \
+        --test featcanon_rev4_contract --test research_engine_parity \
+        --test bake_surface --test feature_set_match
 
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
