@@ -400,3 +400,34 @@ palette-round2-build-checks:
     cargo check -p zensim --no-default-features --features feature-regime-v2
     cargo check --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
     just lint-scripts
+
+# D1 role binding, immutable derivation and registered E30/production grids.
+shippath10-tests:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 -m unittest discover -s scripts/tests -p 'test_shippath*_*.py' -q
+
+# Explicit two-epoch/128-pair local smoke through the real strict owner.
+shippath10-smoke root dest bin_dir route:
+    TMPDIR=$HOME/tmp OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_short_smoke.py {{root}} {{dest}} {{bin_dir}} {{route}}
+
+# Canonical model loader verifies preserved admission, revision and sampler metadata.
+shippath10-inspect model:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo run -p zensim-validate --release --example inspect_qualified_checkpoint -- {{model}}
+
+# The fleet program packer owns source pin and binary inventory validation.
+shippath10-program bundle zenmetrics bin_dir:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 {{zenmetrics}}/scripts/jobsys/pack_fit_program.py --source . --executor {{zenmetrics}}/scripts/jobsys/fit_cell_exec.py --bin-dir {{bin_dir}} --build-meta {{bundle}}/build-meta.json --profile v2d1 --out {{bundle}}/image-context/program.tar.gz
+
+# Every archive component and declared cell is checked against its owner pins.
+shippath10-bundle-check bundle:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}}
+
+# SHIPPATH11 admission/harvest negatives and real executor-entry smoke.
+shippath11-tests zenmetrics:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 -m unittest discover -s scripts/tests -p 'test_shippath*_*.py' -q
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 -m unittest discover -s {{zenmetrics}}/scripts/jobsys -p 'test*fit*.py' -q
+
+shippath11-build-fit:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --release -p zensim-validate --example inspect_qualified_checkpoint --bin zensim_mlp_train --bin bake_dial_refit --bin panel
+
+shippath11-real-check bundle zenmetrics:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath11_real_entry_checks.py --bundle {{bundle}} --zenmetrics {{zenmetrics}}

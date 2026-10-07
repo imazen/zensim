@@ -54,14 +54,25 @@ def main() -> None:
     ap.add_argument("--dest", type=Path, help="write here instead of <root>/confirm/cells/... (determinism checks)")
     ap.add_argument("--strict-admission", action="store_true", help="strict Rev5 table admission; no historical replay")
     ap.add_argument("--data-role-decision", type=Path, help="coordinator's bound human-role decision JSON")
+    ap.add_argument("--pack-production", action="store_true", help="densify and f16 pack, then calibrate on TRAIN cid22 oracle")
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake; no confirmatory predictions")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
+    ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
+    if args.local_smoke_budget:
+        if not (args.strict_admission and args.train_only):
+            ap.error("local smoke requires strict training-only")
+        from v2_smoke_contract import apply_smoke_budget
+        apply_smoke_budget(args.local_smoke_budget, globals())
+    if args.pack_production and not (args.strict_admission and args.train_only):
+        ap.error("production packing requires strict admission and training-only")
     if args.strict_admission and (args.dest is None or not args.train_only):
         ap.error("strict route requires --dest and --train-only; assessment is a separately registered read")
     if args.strict_admission:
         strict_output_preflight(V2, args.dest)
+        from v2_human_role import preflight_recipe
+        role_decision = preflight_recipe(V2, args.data_role_decision)
     parse_spec(args.spec)
     core_spec, human_w = split_weight(args.spec)
     lists = json.loads((V2 / "wide" / "keep_lists.json").read_text())
@@ -134,10 +145,19 @@ def main() -> None:
             curated_extra.with_suffix(".keys.parquet").unlink(missing_ok=True)
     best_epoch = selection["selected_epoch"]
     if args.train_only:
-        (dest / "result.json").write_text(json.dumps({"training_only": True, "selection": selection,
+        packed = {}
+        if args.pack_production:
+            from v2_production_pack import pack_production
+            packed = pack_production(bake, dest, checked(legs["cid22"]["fit"]))
+        (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
+            "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
+            "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
+            "wide_receipt_sha256": sha(receipt_path), "frozen_sha256": frozen_sha if args.strict_admission else None,
+            "human_sources": role_decision["sources"] if args.strict_admission else None,
+            "data_role_decision_sha256": sha(args.data_role_decision) if args.strict_admission else None,
             "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
             "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
-            "train_weights": weights, "coverage_leg": coverage_record}) + "\n")
+            "train_weights": weights, "coverage_leg": coverage_record, **packed}) + "\n")
         return
     predictions = {}
     for name, table in tables.items():

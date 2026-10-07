@@ -65,6 +65,12 @@ def members_for(root: Path, kind: str, selected: list[tuple[str, str]]) -> dict[
     # archive carries it; load_frozen re-hashes the receipts / keep lists / extra arms it pins, all of which are packed too.
     if (root / "wide" / "frozen.json").is_file():
         files["wide/frozen.json"] = root / "wide" / "frozen.json"
+        frozen = json.loads(files["wide/frozen.json"].read_text())
+        if frozen.get("schema") == "rev5-recipe-admission-freeze-v1":
+            from v2_common import load_frozen
+            load_frozen(root, training_only=True)
+            for rel in frozen["auxiliary_files"]:
+                files[rel] = root / rel
     elif kind in ("confirm", "all"):
         raise ValueError(f"{root}: not frozen; the confirmatory fits refuse an unfrozen root (run `v2c_wide.py freeze`)")
     if (root / "wide" / "extra_arms.json").is_file():
