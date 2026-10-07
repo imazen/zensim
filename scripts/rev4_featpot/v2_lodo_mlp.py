@@ -330,6 +330,8 @@ def main() -> None:
     if native_recipe != bool(args.upiq380_fit) or native_recipe != bool(args.upiq_label_disposition):
         ap.error("uh4 requires exactly --upiq380-fit and --upiq-label-disposition")
     if native_recipe:
+        if args.spec != "sel:59f0bbc2f290@h32:H128:cv16:cf98:uh4":
+            ap.error("E31 requires the registered control recipe plus uh4 only")
         if not args.strict_admission or args.head != "N":
             ap.error("E31 requires the registered strict N head")
         from e31_training import fit_group
@@ -348,6 +350,10 @@ def main() -> None:
     if lists["schema"] != "rev4-featpot-v2-keeplists-v2":
         raise ValueError("keep-list schema mismatch")
     family, variant, keep = resolve_keep(core_spec, args.columns, lists)
+    if native_recipe:
+        from e21_cheap_recipe import columns
+        if keep != columns("by_v2fy"):
+            raise ValueError("E31 requires the registered 420 kept slots")
     vdir = V2 / "wide" / family / variant
     receipt_path = vdir / "receipt.json"
     receipt = json.loads(receipt_path.read_text())
@@ -422,9 +428,6 @@ def main() -> None:
         if int(receipt.get("formula_revision", 4)) != 5:
             raise ValueError("HDR teacher leg requires the registered Rev5 SDR root")
         if native_recipe:
-            from e21_cheap_recipe import columns
-            if keep != columns("by_v2fy"):
-                raise ValueError("E31 requires the registered 420 kept slots")
             group, hdr_record = upiq_group, upiq_record
         else:
             group, hdr_record = hdr_training_group(legs["hdr"], keep, recipe)

@@ -3226,11 +3226,18 @@ fn main() {
     });
     let admission_paths = group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>();
     let table_admission = if let Some(decision) = &args.upiq_label_disposition {
+        let native =
+            upiq_training::native_group(&group_modes, &args.target_column, args.target_scale)
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                });
         upiq_training::admit(
             &admission_paths,
             decision,
             selected_ids.as_deref(),
             args.max_features,
+            native,
         )
     } else {
         zensim_validate::feature_set::admit_training_tables(
@@ -3340,16 +3347,6 @@ fn main() {
             std::process::exit(1);
         });
         if table_admission["upiq380"]["path"].as_str() == Some(path.to_string_lossy().as_ref()) {
-            if within_ref
-                || loss_mode != GroupLossMode::Rank
-                || val_w != 0.0
-                || train_w.to_bits() != 4.34410740924913_f64.to_bits()
-                || args.target_column != "human_score"
-                || args.target_scale != 1.0
-            {
-                eprintln!("E31 requires the registered pooled rank-only nominal-4 fit group");
-                std::process::exit(2);
-            }
             upiq_training::pad_native(&mut g.feature_rows, g.n_features, args.max_features)
                 .unwrap_or_else(|e| {
                     eprintln!("{e}");

@@ -529,3 +529,26 @@ e31-control-freeze bundle results out:
 
 e31-pinned-admission bundle upiq dest:
     python3 scripts/tests/e31_pinned_admission.py --bundle {{bundle}} --upiq {{upiq}} --dest {{dest}}
+
+# E31 extension validation; builds binaries only, without creating a fleet pack.
+e31-training-tests:
+    TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_e31_*.py' -v
+
+e31-fit-key-check fit:
+    TMPDIR=$HOME/tmp python3 scripts/tests/test_e31_training.py --real-fit {{fit}}
+
+e31-build-trainer:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+
+e31-crate-tests:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
+
+e31-extended-admission trainer fit dest:
+    TMPDIR=$HOME/tmp python3 scripts/tests/e31_extended_admission.py --trainer {{trainer}} --fit {{fit}} --dest {{dest}}
+
+e31-control-parity baseline candidate bin_dir inspector dest:
+    python3 scripts/tests/e31_control_parity.py --baseline '{{baseline}}' --candidate {{candidate}} --stripper {{bin_dir}}/bake_dial_refit --inspector {{inspector}} --dest {{dest}}
+
+e31-control-cell root bin_dir dest scratch:
+    mkdir -p {{scratch}}
+    TMPDIR={{scratch}} OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3 REV4_V2_BIN_DIR={{bin_dir}} ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/v2_lodo_mlp.py --spec sel:59f0bbc2f290@h32:H128:cv16:cf98 --head N --heldout kadid --seed-index 0 --root {{root}} --strict-admission --train-only --data-role-decision {{root}}/human_role_decision.json --columns "$(python3 -c 'import sys;sys.path.insert(0,"scripts/rev4_featpot");from e21_cheap_recipe import columns;print(",".join(map(str,columns("by_v2fy"))))')" --dest {{dest}}
