@@ -130,6 +130,8 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
 fn research_everything_agrees_with_the_production_walk() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
     let full = research::full_width();
+    // The production walk excludes the research-only palette tail.
+    let served_width = 1825;
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     for &(w, h) in CELLS {
@@ -158,7 +160,7 @@ fn research_everything_agrees_with_the_production_walk() {
                 &mut scratch,
             )
             .unwrap_or_else(|e| panic!("production {full} walk at {w}x{h}: {e:?}"));
-        assert_eq!(prod.features().len(), full, "at {w}x{h}");
+        assert_eq!(prod.features().len(), served_width, "at {w}x{h}");
         let e = research::extract(&Request::everything(), &rs, &rd)
             .unwrap_or_else(|e| panic!("research everything at {w}x{h}: {e}"));
         assert_eq!(e.values().len(), full, "research width at {w}x{h}");

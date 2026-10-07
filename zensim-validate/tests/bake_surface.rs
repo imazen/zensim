@@ -359,7 +359,7 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
     let one = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"1"}]));
     let two = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"2"}]));
     assert!(BakeScorer::ensemble(&[one, two], None).is_err());
-    for bad in ["", "5", "rev0", "second"] {
+    for bad in ["", "999", "rev0", "second"] {
         let model = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":bad}]));
         assert!(BakeScorer::new(&model).is_err(), "{bad:?} must be unknown");
     }
@@ -371,6 +371,9 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
         BakeScorer::new(&four).is_ok(),
         "\"4\" is a known (research) revision"
     );
+    // Rev5 is known under the registered local-window arithmetic contract.
+    let five = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"5"}]));
+    assert!(BakeScorer::new(&five).is_ok(), "revision 5 is known");
     // Revision 3 is a KNOWN revision (issue #61): a bake declaring it loads,
     // and scoring its own feature rows is legitimate in any process. A NARROW
     // (basic/peak) bake also serves its PIXELS at its declared revision in
