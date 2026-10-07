@@ -114,11 +114,12 @@ def as_good(row: dict, spec_: str) -> dict:
 
 
 def cmd_e26_grid(args) -> int:
-    """Registered E26: two HDR weights, ten seeds, five folds; the E24 control is reused."""
+    """Registered E26/E27 HDR grids; ten seeds/five folds, reused E24 control."""
     cols = e21.columns("by_v2fy")
     cells = []
-    for weight in (4, 16):
-        spec_ = CONTROL + f":hd{weight}"
+    labels = ("hp4", "ha4") if args.cmd == "e27-grid" else ("hd4", "hd16")
+    for label in labels:
+        spec_ = CONTROL + f":{label}"
         for source in SOURCE_ORDER:
             for seed in SEEDS:
                 cells.append({"name": f"{spec_}__N/without_{source}_s{seed}",
@@ -126,7 +127,7 @@ def cmd_e26_grid(args) -> int:
                              "--seed-index", str(seed), "--root", str(V2), "--columns", ",".join(map(str, cols))]})
     Path(args.out).write_text(json.dumps({"program_sha": args.program_sha, "data_sha": args.data_sha,
                                          "cells": cells}, indent=1)+"\n")
-    print(json.dumps({"cells": len(cells), "arms": [CONTROL+f":hd{w}" for w in (4, 16)]}))
+    print(json.dumps({"cells": len(cells), "arms": [CONTROL+f":{label}" for label in labels]}))
     return 0
 
 
@@ -171,15 +172,89 @@ def cmd_e26_score(args) -> int:
         base = control_root if spec_ == CONTROL else root
         return base / "cells" / f"{spec_}__N" / f"without_{source}_s{seed}" / "result.json"
     e13.cell_of, e13.V2, e13.SEEDS, e13.BASE = cell_of, root, SEEDS, CONTROL
-    arms = [(f"hd{w}", CONTROL+f":hd{w}") for w in (4, 16)]
-    rc = e13.score_arms(arms, "e26_sdr", False)
-    full = json.loads((root / "compare/e26_sdr.json").read_text())
+    study = "e27" if args.cmd == "e27-score" else "e26"
+    labels = ("hp4", "ha4") if study == "e27" else ("hd4", "hd16")
+    arms = [(label, CONTROL+f":{label}") for label in labels]
+    rc = e13.score_arms(arms, f"{study}_sdr", False)
+    full = json.loads((root / f"compare/{study}_sdr.json").read_text())
     if full["missing_cells"]:
         raise ValueError("E26 decision requires all 100 arm cells and 50 E24 control cells")
     decision = {label: as_good(full["rows"][label], spec_) for label, spec_ in arms}
-    (root / "compare/e26_sdr_decision.json").write_text(json.dumps(decision, indent=1)+"\n")
+    (root / f"compare/{study}_sdr_decision.json").write_text(json.dumps(decision, indent=1)+"\n")
     print(json.dumps(decision))
     return rc
+
+
+def hdr_arm_decisions(cells: dict, sdr: dict, study: str) -> tuple[dict, str | None]:
+    """Apply the frozen E26/E27 rules to complete canonical seed/fold panels."""
+    import math
+    from e13_teacher import paired
+    labels = {"e26": ("hd4", "hd16"), "e27": ("hp4", "ha4")}[study]
+    expected = [(source, seed) for source in SOURCE_ORDER for seed in SEEDS]
+    for label in ("control", *labels):
+        if [(c["source"], c["seed"]) for c in cells[label]] != expected:
+            raise ValueError(f"{study} HDR cell pairing/coverage mismatch")
+        if any(not math.isfinite(c[panel][teacher]) for c in cells[label]
+               for panel in ("within_reference", "pooled") for teacher in ("hdrvdp3", "cvvdp")):
+            raise ValueError(f"{study} HDR nonfinite panel refusal")
+    arms = {}
+    for label in labels:
+        stats = {panel: {teacher: paired([c[panel][teacher] for c in cells[label]],
+                                         [c[panel][teacher] for c in cells["control"]])
+                         for teacher in ("hdrvdp3", "cvvdp")}
+                 for panel in ("within_reference", "pooled")}
+        within, pooled = stats["within_reference"], stats["pooled"]
+        if study == "e26":
+            hdr_pass = (within["hdrvdp3"]["delta"] > 2*within["hdrvdp3"]["se"]
+                        and within["cvvdp"]["delta"] >= -2*within["cvvdp"]["se"])
+        else:
+            hdr_pass = (all(v["delta"] >= -2*v["se"] for panel in stats.values() for v in panel.values())
+                        and pooled["hdrvdp3"]["delta"] > 2*pooled["hdrvdp3"]["se"])
+        arms[label] = dict(sdr=sdr[label], within_reference=within,
+                          **{("pooled_report_only" if study == "e26" else "pooled"): pooled},
+                          hdr_pass=bool(hdr_pass), passes=bool(hdr_pass and sdr[label]["as_good"]))
+    passing = [a for a in labels if arms[a]["passes"]]
+    if study == "e26":
+        return arms, next(iter(passing), None)
+    winners = [a for a in passing if arms[a]["pooled"]["hdrvdp3"]["delta"] ==
+               max(arms[b]["pooled"]["hdrvdp3"]["delta"] for b in passing)]
+    return arms, winners[0] if len(winners) == 1 else None
+
+
+def hdr_report_geometry(output_dir: Path, cells: dict, keys: list[dict]) -> None:
+    """Render all stored predictions against raw teachers; no sampling or new fit."""
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(len(cells), 2, figsize=(11, 3.5*len(cells)), constrained_layout=True)
+    for row, (label, models) in enumerate(cells.items()):
+        pred = np.concatenate([np.load(output_dir / f"{label}_{m['source']}_s{m['seed']}.npy",
+                                       allow_pickle=False) for m in models])
+        for j, teacher in enumerate(("hdrvdp3_q_jod", "cvvdp_jod")):
+            target = np.tile([10*k[teacher] for k in keys], len(models))
+            ax = axes[row, j]
+            counts, _, _, artist = ax.hist2d(target, pred, bins=70, cmap="magma", cmin=1)
+            if int(np.nansum(counts)) != len(keys)*len(models):
+                raise ValueError("HDR density omitted rows")
+            ax.set(xlabel=f"10 × {teacher}", ylabel="Student score",
+                   title=f"{label}: all{len(models)} models × {len(keys)} VAL rows")
+            fig.colorbar(artist, ax=ax, label="Model-row observations / bin")
+    fig.savefig(output_dir / "pooled_within_geometry.png", dpi=150)
+    fig.savefig(output_dir / "pooled_within_geometry.pdf")
+    plt.close(fig)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
+    for ax, teacher in zip(axes, ("hdrvdp3", "cvvdp")):
+        for label, models in cells.items():
+            ax.scatter([m["pooled"][teacher] for m in models],
+                       [m["within_reference"][teacher] for m in models],
+                       label=label, s=18, alpha=.6)
+        ax.set(xlabel="Pooled signed SROCC", ylabel="Mean within-reference signed SROCC",
+               title=f"{teacher}: all seed/fold cells")
+        ax.legend()
+    fig.savefig(output_dir / "pooled_vs_within_cells.png", dpi=150)
+    fig.savefig(output_dir / "pooled_vs_within_cells.pdf")
+    plt.close(fig)
 
 
 def cmd_e25(args) -> int:
@@ -359,7 +434,7 @@ def cmd_e25(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score"])
+    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score", "e27-grid", "e27-score"])
     ap.add_argument("--control-root", default="/var/tmp/rev4-featpot/v2c5")
     ap.add_argument("--root")
     ap.add_argument("--rev4-root", default="/var/tmp/rev4-featpot/v2c")
@@ -369,7 +444,8 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
     return {"grid": cmd_grid, "score": cmd_score, "e25": cmd_e25,
-            "e26-grid": cmd_e26_grid, "e26-score": cmd_e26_score}[args.cmd](args)
+            "e26-grid": cmd_e26_grid, "e26-score": cmd_e26_score,
+            "e27-grid": cmd_e26_grid, "e27-score": cmd_e26_score}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+{
+ "schema": "e27-final-assessment-pointer-v1",
+ "status": "COMPLETE",
+ "verdict": "retain-control; neither hp4 nor ha4 passes the registered E27 rule",
+ "archive": "tower:/mnt/user/coefficient/output/zensim/e27-2026-10-05/final-assessment",
+ "copy_manifest_sha256": "38c04362dd80cb9d20e1bcde882d7250ae1eca02651c36adbc748464f7ade26a",
+ "files": 3629,
+ "bytes": 662966352,
+ "verified_receipt_sha256": "674ce89975cdb04f8ed6573b0b2d86c39b8dd86361ea8e0ae8e41d0152255bf7",
+ "cell_coverage": {
+  "E27_arms": 100,
+  "E24_control": 50,
+  "E26_hd4_report_only": 50,
+  "HDR_predictions": 200,
+  "HDR_VAL_rows_per_model": 3900,
+  "HDR_VAL_references": 300
+ },
+ "summary": "e27_result_summary_2026-10-05.json",
+ "earlier_artifacts": "e27_preparation_2026-10-05.pointer.json",
+ "launch": "e27_launch_2026-10-05.pointer.json",
+ "missing": [
+  "HDR human judgment and current qualification",
+  "strict trainer admission for historical program",
+  "encoder provenance completion",
+  "shipping/runtime/product gates"
+ ],
+ "no_source_push": true
+}

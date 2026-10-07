@@ -1,0 +1,92 @@
+{
+ "schema": "e27-preparation-evidence-pointer-v1",
+ "status": "READY_AWAITING_COORDINATOR_LANDING_AND_PIN_PUSH",
+ "human_or_product_qualified": false,
+ "artifact_root": "output/zensim/e27-2026-10-05/",
+ "preparation_receipt": {
+  "path": "preparation/VERIFIED.json",
+  "sha256": "acc7c866140b79f25905e0956636b799ab7676ffcef54297d21580764a72056b",
+  "status": "PASS",
+  "files": 35,
+  "bytes": 657741466,
+  "manifest_sha256": "262542438bd17c6d2d8500deb349c7db0dfdb6ff45b7a2a178c02c774e456a60"
+ },
+ "program_sha256": "a53912d8442e0fd44675b89d9c6fa0b4098fc99e5d6f6caa33b26181c5f279d7",
+ "data_sha256": "3f008d2f563c212aec75a46a55900dd10b9afb834fecd79ec889fd78d34df78d",
+ "manifest_sha256": "8baf0da9fe10fc1fa8475b687cec10eb3df5f1ba581bedc4aaefe841c353bb08",
+ "cells": 100,
+ "threads_per_cell": 1,
+ "peak_mem_bytes": 6442450944,
+ "image": "ghcr.io/imazen/zenfleet-worker:fit-e27-hdr-v29-w8dc42d4e",
+ "image_published": false,
+ "zenmetrics_change_id": "vktmpnnrytkrukrqxknyttnrlsosowzu",
+ "zenmetrics_commit": "344fa081b0f0a915ea2cc8a5878547e9383d4828",
+ "profile": "v2r5hdr27",
+ "python_pins": {
+  "scripts/rev4_featpot/v2_common.py": "cd3af4fff63c9672f834533b382a9e35d3a4ce93c3baf8287bb88bbc0e670604",
+  "scripts/rev4_featpot/v2_lodo_mlp.py": "ad8052869fb01c0c4aabbcddb028b0617ea28a5983395c6ec27a08799c8af0e4",
+  "scripts/rev4_featpot/v2_teacher.py": "8185465d4e59c9e2e4dd05d99d46e49b17757d942d0dfd99430c010c9268529c",
+  "scripts/rev4_featpot/v2_confirm_fit.py": "887b5a199901478476d8bb31b25ac0c7634ece217f331f9b3c8a60683986e507",
+  "scripts/rev4_featpot/v2c_wide.py": "6f9364fe8eed5270860215d8d9b0ab50cb5b26cc189e31187cbe766598b9a291"
+ },
+ "source_e26_tip": "7d02b45845b2cbfa0f44f2f38d1ce345aa263439",
+ "registration_commit": "070b8247",
+ "registration_sha256": "4d7494b8d7bd883bb29e1454ef68dcf24f361099ab3a4794b7384b9d39353b5c",
+ "launch_authorized": false,
+ "tail_controller": false,
+ "smoke": {
+  "cell_receipt": {
+   "path": "/var/tmp/e27/SMOKE_PASS.json",
+   "sha256": "80cc13299a66c77b9cf6190c25c7480f6698623748350a0107554b691f1ea656"
+  },
+  "binding_receipt": {
+   "path": "/var/tmp/e27/SMOKE_BINDING.json",
+   "sha256": "598bc583b318c0ef2bb8a1f866fe731023f02befe969cab35c00d45c9b3f6861"
+  },
+  "native_parity_receipt": {
+   "path": "/var/tmp/e27/NATIVE_SMOKE_PARITY.json",
+   "sha256": "be6ad5a1a2c291755987db2655066565fa1935c6afd8c18966df3740440e5c3c"
+  },
+  "selected_epoch": 119,
+  "native_cache_absolute_delta": 0,
+  "source_bake_sha256": "dcf1a8fcee9333483b789af73cd0bde76e5b67053e87b7de029c34a2587b0614",
+  "stamped_sha256": "4b15f7e0c52b5b0f08154dab49755121497c75fc09432232b9cde9e24b49026c"
+ },
+ "smoke_archive_receipt": {
+  "path": "smoke/VERIFIED.json",
+  "sha256": "ef9384cabf26c9082c79b5ebc3283d509c17cdb3a5704ef40e54a4e88e6f8e9a",
+  "status": "PASS",
+  "files": 30,
+  "bytes": 15122297,
+  "manifest_sha256": "6a98966ce124b50002b7422863c06d5ac507b121b889c3af6c8cc7f13f0c5a36"
+ },
+ "future_panel_inputs": {
+  "status": "PASS",
+  "scope": "metadata and executable hashes only; no VAL payload opened",
+  "proof_sha256": "5a90ba18696c6d7649b9ad50d2304ecb2edaf4c6e2611893c41cddb0c7d95195",
+  "bank_manifest_sha256": "93a13b49e772ed4550c3974c0c3c3285d63ffcbb16d142f75d8a8effc0c46bae",
+  "cache_predictor_sha256": "e4a411209ff5c9fe221ab7a4fc04e506f210f06776ad68cf687bd62e5990928c",
+  "native_cache_rows": 3900,
+  "native_cache_mismatched_rows": 0
+ },
+ "launch_commands": {
+  "status": "PASS",
+  "commands": {
+   "e27_launch.sh": "eedaf1747892a889604100816692c211bdbff02890f15f56041695a4602250fb",
+   "HDR_PANEL_AFTER_HARVEST.sh": "b7c0b23380589f30a38497d39b9a4319b8725ee0b0f1c9f11b242a724a69fca5",
+   "EXTERNAL_SDR_AFTER_HARVEST.sh": "b846fc777a65ce876abd1dcc58c4cd6793067210049d3efc0a5099872495b84f"
+  },
+  "queue_unchanged": true,
+  "coordinator_authorization_absent": true
+ },
+ "ready_records_archive_receipt": {
+  "path": "ready-records/VERIFIED.json",
+  "sha256": "793c74d942d7585ae1ff5a9fecced2440e0f711c4799e0754092e50d98376cd5",
+  "status": "PASS",
+  "files": 29,
+  "bytes": 815620,
+  "manifest_sha256": "3bc570157bb6bdb3c7a27610e3856eb7d9e222e79c69578fecc59cf165772a30"
+ },
+ "native_parity_archive_path": "native-smoke-r2/PARITY.json",
+ "retained_native_refusal_path": "native-smoke/native.refusals.json"
+}

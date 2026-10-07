@@ -18,6 +18,8 @@ import e21_cheap_recipe as e21
 import v2_common
 import v2_teacher
 import v2c_pack
+import v2_lodo_mlp
+import e24_rev5
 
 
 class HdrLegAdmission(unittest.TestCase):
@@ -62,6 +64,33 @@ class HdrLegAdmission(unittest.TestCase):
         self.write()
         with self.assertRaisesRegex(ValueError, "row order"):
             v2_teacher.hdr_leg(self.record, self.cols)
+
+    def test_e27_actual_groups_keep_population_weight_target_and_change_only_loss(self):
+        groups = {}
+        for token, mode in [("hd4", "withinref,rank"), ("hp4", "rank"), ("ha4", "withinref,both")]:
+            recipe = v2_common.recipe_of(e24_rev5.CONTROL+":"+token)
+            group, admitted = v2_lodo_mlp.hdr_training_group(self.record, self.cols, recipe)
+            self.assertEqual(group[4], mode)
+            self.assertEqual(group[3], 0)  # no HDR development contribution
+            self.assertEqual(admitted["target_transform"], v2_teacher.HDR_TRANSFORM)
+            command = v2_lodo_mlp.train_command([group], 1101, 101, 1825,
+                self.root / "keep.txt", "N", self.root / "model.bin", recipe)
+            self.assertEqual(command[command.index("--group")+1].rsplit(":", 1)[1], mode)
+            self.assertEqual(command[command.index("--mse-weight")+1], "1")
+            groups[token] = group[:4]
+        self.assertEqual(groups["hd4"], groups["hp4"])
+        self.assertEqual(groups["hd4"], groups["ha4"])
+        self.assertEqual(pq.read_table(self.path)["human_score"][0].as_py(), -20.0)
+
+    def test_e27_token_bounds_duplicates_and_forbidden_val_fail_closed(self):
+        for token in ["hp16", "ha16", "hp0", "ha0", "hp4:ha4", "hd4:hp4", "hp4:hd4"]:
+            with self.subTest(token=token), self.assertRaises(ValueError):
+                v2_common.recipe_of(e24_rev5.CONTROL+":"+token)
+        self.manifest["role"] = "val"
+        self.write()
+        for token in ["hp4", "ha4"]:
+            self.assert_no_payload_read(self.record, lambda: v2_lodo_mlp.hdr_training_group(
+                self.record, self.cols, v2_common.recipe_of(e24_rev5.CONTROL+":"+token)))
 
     def test_actual_loader_refuses_role_revision_membership_transform_and_pins(self):
         pristine = copy.deepcopy(self.manifest)
@@ -131,6 +160,64 @@ class HdrLegAdmission(unittest.TestCase):
         for kind in ["confirm", "all"]:
             with self.assertRaisesRegex(ValueError, "LODO only"):
                 v2c_pack.members_for(self.root, kind, [("main", "real")])
+
+
+class RegisteredHdrDecisions(unittest.TestCase):
+    def panels(self, gains):
+        return {label: [dict(source=source, seed=seed,
+                     within_reference=dict(hdrvdp3=.8+(seed-4.5)*.0001*(label != 'control'),
+                                           cvvdp=.7+(seed-4.5)*.0001*(label != 'control')),
+                     pooled=dict(hdrvdp3=.6+gain+(seed-4.5)*.0001*(label != 'control'),
+                                 cvvdp=.5+(seed-4.5)*.0001*(label != 'control')))
+                 for source in e24_rev5.SOURCE_ORDER for seed in e24_rev5.SEEDS]
+                for label, gain in dict(control=0., **gains).items()}
+
+    def test_e27_larger_pooled_gain_wins_and_e26_hd4_is_report_only(self):
+        cells = self.panels(dict(hp4=.01, ha4=.02, e26_hd4=.2))
+        arms, adopt = e24_rev5.hdr_arm_decisions(cells, dict(hp4=dict(as_good=True), ha4=dict(as_good=True)), 'e27')
+        self.assertEqual(adopt, 'ha4')
+        self.assertEqual(set(arms), {'hp4', 'ha4'})
+        self.assertTrue(all(a['passes'] for a in arms.values()))
+        cells['hp4'][0]['seed'] = 9
+        with self.assertRaisesRegex(ValueError, 'pairing'):
+            e24_rev5.hdr_arm_decisions(cells, {}, 'e27')
+
+    def test_e27_every_teacher_and_panel_is_a_gate_and_sdr_is_required(self):
+        sdr = dict(hp4=dict(as_good=True), ha4=dict(as_good=True))
+        for panel in ['pooled', 'within_reference']:
+            for teacher in ['hdrvdp3', 'cvvdp']:
+                cells = self.panels(dict(hp4=.01, ha4=0.))
+                for c in cells['hp4']: c[panel][teacher] -= .03
+                with self.subTest(panel=panel, teacher=teacher):
+                    arms, adopt = e24_rev5.hdr_arm_decisions(cells, sdr, 'e27')
+                    self.assertIsNone(adopt)
+                    self.assertFalse(arms['hp4']['passes'])
+        cells = self.panels(dict(hp4=.01, ha4=0.))
+        arms, adopt = e24_rev5.hdr_arm_decisions(cells, dict(hp4=dict(as_good=False), ha4=dict(as_good=True)), 'e27')
+        self.assertIsNone(adopt)
+        self.assertFalse(arms['hp4']['passes'])
+        cells['hp4'][0]['pooled']['cvvdp'] = float('nan')
+        with self.assertRaisesRegex(ValueError, 'nonfinite'):
+            e24_rev5.hdr_arm_decisions(cells, sdr, 'e27')
+
+    def test_e27_positive_gain_below_two_paired_se_does_not_pass(self):
+        cells = self.panels(dict(hp4=.000001, ha4=0.))
+        arms, adopt = e24_rev5.hdr_arm_decisions(cells,
+            dict(hp4=dict(as_good=True), ha4=dict(as_good=True)), 'e27')
+        stats = arms['hp4']['pooled']['hdrvdp3']
+        self.assertGreater(stats['delta'], 0.)
+        self.assertGreater(stats['se'], 0.)
+        self.assertLess(stats['delta'], 2*stats['se'])
+        self.assertFalse(arms['hp4']['passes'])
+        self.assertIsNone(adopt)
+
+    def test_e26_still_uses_within_and_lowest_weight(self):
+        cells = self.panels(dict(hd4=-.2, hd16=-.1))
+        for label in ['hd4', 'hd16']:
+            for c in cells[label]: c['within_reference']['hdrvdp3'] += .01
+        arms, adopt = e24_rev5.hdr_arm_decisions(cells, dict(hd4=dict(as_good=True), hd16=dict(as_good=True)), 'e26')
+        self.assertEqual(adopt, 'hd4')
+        self.assertIn('pooled_report_only', arms['hd4'])
 
 
 if __name__ == "__main__":

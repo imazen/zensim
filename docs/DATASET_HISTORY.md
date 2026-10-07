@@ -5148,3 +5148,51 @@ V28's actual packed Rust executables are the existing fleet-v2 set
 6b28576f/81ec2207/c9c610b8, not the v25b hashes in copied binary_mix prose.
 The embedded inventory is correct; supplemental provenance erratum records
 actual hashes and bounded canonical parity evidence without rewriting the pack.
+
+
+## 2026-10-05 E27 registered preparation on the E26 landing chain
+
+Registration070b8247 fixes hp4 pooled rank and ha4 within-reference MSE+rank,
+nominal HDR weight4 through E26's unchanged weighting convention. Every other
+fit parameter and original TRAIN role/authority stays E26's:7390 agreement
+rows, unclipped10*q_jod, Rev5 native420 by_v2fy IDs, headN, seeds0–9/five folds,
+120 epochs/final119. Fresh v2e27 transport preserves all56 E26 payload hashes;
+no HDR VAL/development/confirmation payload is added. A one-cell hp4 smoke
+checks mechanics, not scientific adoption. E27 HDR VAL is not read for prep.
+
+The assessment owner now supports the registered E27 pooled and within-reference
+gates for both teachers, SDR E21, and larger passing pooled HDR-VDP-3 gain;
+E26 hd4 and full raw/cell geometry remain report-only. Serving binding stays
+approved dense prediction gate followed by receipt-bound Rev5 stamps, identically
+for controls and new arms. Exact E26 executables/shared program data are reused;
+merged runtime scripts and their v2c_wide dependency are explicitly pinned.
+The old trainer's null revision/unqualified admission remains an inherited gap;
+no stamp upgrades training qualification. Human HDR, original encoder commits,
+encoder RD/spatial and product/runtime qualification remain MISSING.
+
+E26 landing review found no defects. No E27 enqueue or source push; the launch
+owner requires coordinator confirmation of E26 landing and matching local
+zenmetrics profile push. No tail controller. A broad filename-only tool lookup
+reached protected _sealed directory enumeration and child access was denied;
+no label payload was opened and no data came from that attempt. Further tool
+lookup is restricted to named tool directories. See the E27 worklog and
+[preparation pointer](../benchmarks/e27_preparation_2026-10-05.pointer.json).
+
+E27 preparation smoke completed: full hp4/kadid/s0, final119,7390 HDR TRAIN,
+7869SDR predictions, zeroHDRdev; native/cache one-TRAIN-row score bit-identical
+74.63024139404297 after dense gate+Rev5 stamp. Default-Rev1 native refusal was
+retained and corrected by explicit Rev5 invocation, with no refit. No HDR VAL
+assessment or fleet enqueue during preparation. Readiness is separately gated
+on coordinator E26 landing and matching zenmetrics push confirmations.
+
+## 2026-10-06 E27 registered assessment completed
+
+All100 final119 arm cells and200 complete HDR VAL panels were verified. Neither
+arm passes E27: hp4 passes SDR and pooled HDR-VDP-3 improvement but fails pooled
+CVVDP noninferiority; ha4 fails SDR and HDR guards. Retain the control. E26 hd4,
+all external categories and raw geometry remain report-only. Historical table
+admission stays unqualified; approved Rev5 stamps supply serving binding. Human
+HDR judgment, encoder provenance completion and shipping gates remain missing.
+See [E27 worklog](../benchmarks/E27_WORKLOG.md),
+[complete measured summary](../benchmarks/e27_result_summary_2026-10-05.json) and
+[immutable Tower evidence](../benchmarks/e27_final_2026-10-05.pointer.json).
