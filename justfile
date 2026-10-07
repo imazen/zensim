@@ -675,3 +675,6 @@ v40-statistics-tests:
 
 v40-freeze bundle source_commit metrics_commit:
     python3 scripts/tests/v40_package_freeze.py --bundle {{bundle}} --source {{justfile_directory()}} --source-commit {{source_commit}} --metrics-commit {{metrics_commit}}
+
+v40-cached-projection bundle out:
+    python3 scripts/tests/v40_cached_projection_smoke.py --bundle {{bundle}} --out {{out}}
