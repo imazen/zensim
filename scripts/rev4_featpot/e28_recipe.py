@@ -7,6 +7,7 @@ import argparse
 import collections
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -74,6 +75,12 @@ def prepare(source: Path, out: Path):
     """Derive legs from admitted Rev5 full tables, using pinned member sets and R1 reference dev split."""
     from v2_teacher import write_curated
     pin = read_pin()
+    producer = subprocess.check_output(["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+                                       cwd=REPO, text=True).strip()
+    committed = subprocess.check_output(["jj", "file", "show", "-r", producer,
+                                        "scripts/rev4_featpot/e28_recipe.py"], cwd=REPO)
+    if committed != Path(__file__).read_bytes():
+        raise ValueError("commit the E28 preparation owner before deriving its data views")
     receipt_path = source / "wide/main/real/receipt.json"
     if sha(receipt_path) != pin["source_receipt_sha256"]:
         raise ValueError("E28 preparation source changed")
@@ -116,7 +123,8 @@ def prepare(source: Path, out: Path):
                 declaration.update(study="E28", label="POTENTIAL — ceiling, not a model score",
                                    member_sets=members, teacher_pin_sha256=sha(PIN), keys_sha256=sha(kp),
                                    source_table_sha256=full["sha256"], split=part,
-                                   split_rule="sha256(ref_basename) mod 5 == 0 is dev", build_commit=pin["registration_commit"])
+                                   split_rule="sha256(ref_basename) mod 5 == 0 is dev", build_commit=producer,
+                                   registration_commit=pin["registration_commit"])
                 Path(f"{dest}.manifest.json").write_text(json.dumps(declaration, indent=1)+"\n")
                 rec[part] = dict(rel=str(dest.relative_to(out)), sha256=sha(dest),
                                  manifest_sha256=sha(Path(f"{dest}.manifest.json")), keys_sha256=sha(kp),
