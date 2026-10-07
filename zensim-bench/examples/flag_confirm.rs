@@ -53,10 +53,18 @@ fn main() {
         let rp = c.next().unwrap();
         let dp = c.next().unwrap();
         let a = decode_rgb8_path(std::path::Path::new(rp))
-            .map(|d| Rgb8 { w: d.width, h: d.height, px: d.pixels })
+            .map(|d| Rgb8 {
+                w: d.width,
+                h: d.height,
+                px: d.pixels,
+            })
             .unwrap_or_else(|e| panic!("{rp}: {e}"));
         let b0 = decode_rgb8_path(std::path::Path::new(dp))
-            .map(|d| Rgb8 { w: d.width, h: d.height, px: d.pixels })
+            .map(|d| Rgb8 {
+                w: d.width,
+                h: d.height,
+                px: d.pixels,
+            })
             .unwrap_or_else(|e| panic!("{dp}: {e}"));
         let b = if b0.w == a.w && b0.h == a.h {
             b0

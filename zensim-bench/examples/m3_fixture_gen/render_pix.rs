@@ -184,12 +184,10 @@ pub(super) fn composite_over_u16(fg: &Rgba8, bg: &Rgb8) -> Res<Rgb8> {
         let af = fp[3] as f64 / 255.0;
         for c in 0..3 {
             // premultiplied linear u16 channels.
-            let fg16 = (linear_srgb::precise::srgb_to_linear_f64(fp[c] as f64 / 255.0)
-                * af
-                * 65535.0)
-                .round() as u32;
-            let bg16 = (linear_srgb::precise::srgb_to_linear_f64(bp[c] as f64 / 255.0)
-                * 65535.0)
+            let fg16 =
+                (linear_srgb::precise::srgb_to_linear_f64(fp[c] as f64 / 255.0) * af * 65535.0)
+                    .round() as u32;
+            let bg16 = (linear_srgb::precise::srgb_to_linear_f64(bp[c] as f64 / 255.0) * 65535.0)
                 .round() as u32;
             // SrcOver on premultiplied u16: fg + bg*(1-a), +0.5 round.
             let o16 = (fg16 * 65535 + bg16 * ia16 + 32767) / 65535;

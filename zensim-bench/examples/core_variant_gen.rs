@@ -93,7 +93,14 @@ fn hex(b: &[u8]) -> String {
 fn mitchell_rung(src: &Rgb8, rung: u32) -> Result<(Rgb8, bool), String> {
     let le = src.w.max(src.h);
     if rung >= le {
-        return Ok((Rgb8 { w: src.w, h: src.h, px: src.px.clone() }, true));
+        return Ok((
+            Rgb8 {
+                w: src.w,
+                h: src.h,
+                px: src.px.clone(),
+            },
+            true,
+        ));
     }
     let scale = rung as f64 / le as f64;
     let (ow, oh) = (
@@ -185,8 +192,11 @@ fn score(refi: &Rgb8, dist: &Rgb8) -> Result<(f64, f64), String> {
     let (w, h) = (refi.w as usize, refi.h as usize);
     let s3: Vec<[u8; 3]> = refi.px.as_chunks::<3>().0.to_vec();
     let d3: Vec<[u8; 3]> = dist.px.as_chunks::<3>().0.to_vec();
-    let ssim2 = fast_ssim2::compute_ssimulacra2(Img::new(s3.as_slice(), w, h), Img::new(d3.as_slice(), w, h))
-        .map_err(|e| format!("ssim2: {e:?}"))?;
+    let ssim2 = fast_ssim2::compute_ssimulacra2(
+        Img::new(s3.as_slice(), w, h),
+        Img::new(d3.as_slice(), w, h),
+    )
+    .map_err(|e| format!("ssim2: {e:?}"))?;
     let s8: &[RGB8] = bytemuck::cast_slice(&s3);
     let d8: &[RGB8] = bytemuck::cast_slice(&d3);
     let butter = butteraugli::butteraugli(
@@ -227,17 +237,22 @@ fn main() {
     std::fs::create_dir_all(out_root.join("pairs/rows")).unwrap();
 
     // resume: renditions with an existing rows file are already complete
-    let done_set: std::collections::HashSet<String> = std::fs::read_dir(out_root.join("pairs/rows"))
-        .map(|d| {
-            d.flatten()
-                .filter_map(|e| e.file_name().to_str().map(|s| s.replace(".tsv", "")))
-                .collect()
-        })
-        .unwrap_or_default();
+    let done_set: std::collections::HashSet<String> =
+        std::fs::read_dir(out_root.join("pairs/rows"))
+            .map(|d| {
+                d.flatten()
+                    .filter_map(|e| e.file_name().to_str().map(|s| s.replace(".tsv", "")))
+                    .collect()
+            })
+            .unwrap_or_default();
 
     // --- load plan ---
     let mut rends: Vec<Rendition> = Vec::new();
-    for (i, line) in std::fs::read_to_string(&rend_path).unwrap().lines().enumerate() {
+    for (i, line) in std::fs::read_to_string(&rend_path)
+        .unwrap()
+        .lines()
+        .enumerate()
+    {
         if i == 0 {
             continue;
         }
@@ -260,7 +275,11 @@ fn main() {
         });
     }
     let mut cells: Vec<Cell> = Vec::new();
-    for (i, line) in std::fs::read_to_string(&cells_path).unwrap().lines().enumerate() {
+    for (i, line) in std::fs::read_to_string(&cells_path)
+        .unwrap()
+        .lines()
+        .enumerate()
+    {
         if i == 0 {
             continue;
         }
@@ -279,8 +298,7 @@ fn main() {
         .filter(|r| !done_set.contains(&r.name))
         .take(limit)
         .collect();
-    let rmap: HashMap<String, &Rendition> =
-        rends.iter().map(|r| (r.name.clone(), r)).collect();
+    let rmap: HashMap<String, &Rendition> = rends.iter().map(|r| (r.name.clone(), r)).collect();
     let cells: Vec<&Cell> = cells
         .iter()
         .filter(|c| rmap.contains_key(&c.rendition))
@@ -298,7 +316,9 @@ fn main() {
 
     let rend_done_path = out_root.join("plan/renditions_done.tsv");
     let need_header = !rend_done_path.exists()
-        || std::fs::metadata(&rend_done_path).map(|m| m.len() == 0).unwrap_or(true);
+        || std::fs::metadata(&rend_done_path)
+            .map(|m| m.len() == 0)
+            .unwrap_or(true);
     let rend_out = Mutex::new(std::io::BufWriter::new(
         std::fs::File::options()
             .create(true)
@@ -422,8 +442,22 @@ fn main() {
             writeln!(
                 w,
                 "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                r.name, r.src_id, r.group, r.src_class, r.rung, r.band, eff_kernel,
-                ref_rel, ref_sha, refi.w, refi.h, r.src_path, src_sha, r.src_sha256, r.src_w, r.src_h
+                r.name,
+                r.src_id,
+                r.group,
+                r.src_class,
+                r.rung,
+                r.band,
+                eff_kernel,
+                ref_rel,
+                ref_sha,
+                refi.w,
+                refi.h,
+                r.src_path,
+                src_sha,
+                r.src_sha256,
+                r.src_w,
+                r.src_h
             )
             .unwrap();
         }
@@ -434,42 +468,47 @@ fn main() {
         // restart can skip fully-completed renditions.
         let mut rows: Vec<String> = Vec::new();
         for c in by_rend.get(&r.name).cloned().unwrap_or_default() {
-            let res = (|| -> Result<(), String> {
-                // reuse a previously written bitstream when resuming a
-                // partially-completed rendition (encode is the expensive step)
-                let dir = out_root.join(format!("dists/{}/{}", r.name, c.codec));
-                let mut bytes_ext: Option<(Vec<u8>, &'static str)> = None;
-                for ext in ["jpg", "webp", "avif", "jxl"] {
-                    let p = dir.join(format!("q{}.{}", c.q, ext));
-                    if let Ok(b) = std::fs::read(&p) {
-                        bytes_ext = Some((b, ext));
-                        break;
+            let res =
+                (|| -> Result<(), String> {
+                    // reuse a previously written bitstream when resuming a
+                    // partially-completed rendition (encode is the expensive step)
+                    let dir = out_root.join(format!("dists/{}/{}", r.name, c.codec));
+                    let mut bytes_ext: Option<(Vec<u8>, &'static str)> = None;
+                    for ext in ["jpg", "webp", "avif", "jxl"] {
+                        let p = dir.join(format!("q{}.{}", c.q, ext));
+                        if let Ok(b) = std::fs::read(&p) {
+                            bytes_ext = Some((b, ext));
+                            break;
+                        }
                     }
-                }
-                let (bytes, ext) = match bytes_ext {
-                    Some(be) => be,
-                    None => {
-                        let (b, e) = encode_cell(c.codec.as_str(), c.q, &refi)?;
-                        let p = dir.join(format!("q{}.{}", c.q, e));
-                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                        std::fs::write(&p, &b).map_err(|e| e.to_string())?;
-                        (b, e)
-                    }
-                };
-                let dist_rel = format!("dists/{}/{}/q{}.{}", r.name, c.codec, c.q, ext);
-                let dist_sha = sha256_hex(&bytes);
-                let dist = zen_decode::decode_rgb8_bytes(&bytes, &dist_rel)
-                    .map_err(|e| format!("dist-decode: {e:?}"))?;
-                let dist = Rgb8 { w: dist.width, h: dist.height, px: dist.pixels };
-                let (ssim2, butter) = score(&refi, &dist)?;
-                rows.push(format!(
+                    let (bytes, ext) = match bytes_ext {
+                        Some(be) => be,
+                        None => {
+                            let (b, e) = encode_cell(c.codec.as_str(), c.q, &refi)?;
+                            let p = dir.join(format!("q{}.{}", c.q, e));
+                            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                            std::fs::write(&p, &b).map_err(|e| e.to_string())?;
+                            (b, e)
+                        }
+                    };
+                    let dist_rel = format!("dists/{}/{}/q{}.{}", r.name, c.codec, c.q, ext);
+                    let dist_sha = sha256_hex(&bytes);
+                    let dist = zen_decode::decode_rgb8_bytes(&bytes, &dist_rel)
+                        .map_err(|e| format!("dist-decode: {e:?}"))?;
+                    let dist = Rgb8 {
+                        w: dist.width,
+                        h: dist.height,
+                        px: dist.pixels,
+                    };
+                    let (ssim2, butter) = score(&refi, &dist)?;
+                    rows.push(format!(
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{}",
                     r.name, r.src_id, r.group, r.src_class, r.rung, r.band, eff_kernel,
                     ref_rel, ref_sha, refi.w, refi.h, dist_rel, dist_sha, c.codec, c.q,
                     ssim2, butter, bytes.len()
                 ));
-                Ok(())
-            })();
+                    Ok(())
+                })();
             if let Err(e) = res {
                 let mut w = err_out.lock().unwrap();
                 writeln!(w, "{}\t{}\tq{}\t{}", r.name, c.codec, c.q, e).unwrap();
@@ -490,7 +529,11 @@ fn main() {
         }
         let d = n_done.fetch_add(1, Ordering::Relaxed) + 1;
         if d % 25 == 0 {
-            eprintln!("  {d}/{} renditions ({} cell errors)", rends.len(), n_err.load(Ordering::Relaxed));
+            eprintln!(
+                "  {d}/{} renditions ({} cell errors)",
+                rends.len(),
+                n_err.load(Ordering::Relaxed)
+            );
         }
     });
     eprintln!(
