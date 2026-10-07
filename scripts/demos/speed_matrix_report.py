@@ -410,9 +410,11 @@ def speedq_report(args) -> int:
         'status':'INCOMPLETE' if missing else 'MEASURED', 'missing':missing,
         'timing_coverage':[len(medians),192], 'rss_coverage':[len(memories),112],
         'axes':{'tiers':tiers,'threads':threads,'geometries':sizes,'arms':arms},
-        'layout':'configuration = tier outer, threads inner; timing/CI rows = geometry order; fit rows = arm order',
+        'layout':'configuration = tier outer, threads inner; timing/CI rows = geometry order; fit rows = arm order; resolution flags 1=limited, 0=not limited, -=missing',
         'precision':'summary medians/intercepts in ns; CI bounds rounded outward to whole ns; beta/R2 eight significant digits; exact rounds/analyses retained in raw',
         'medians_ns':[[[medians[(t,n,g)][a] for a in arms] if (t,n,g) in medians else None for g in sizes] for t in tiers for n in threads],
+        'r5_vs_r4_pct_change':[[compact(analyses[(t,n,g)]['pct_change']) if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
+        'r5_vs_r4_resolution_limited':[[('1' if analyses[(t,n,g)]['resolution_limited'] else '0') if (t,n,g) in analyses else '-' for g in sizes] for t in tiers for n in threads],
         'r5_minus_r4_ci_ns':[[[math.floor(analyses[(t,n,g)]['ci_lower']),round(analyses[(t,n,g)]['ci_median']),math.ceil(analyses[(t,n,g)]['ci_upper'])] if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
         'alpha_ns_beta_ns_per_pixel_r2':[[[round(fits[(t,n,a)][0]),compact(fits[(t,n,a)][1]),compact(fits[(t,n,a)][2])] if (t,n,a) in fits else None for a in arms] for t in tiers for n in threads],
         'rss_kib':[[[memories.get((g,n,a)) for a in arms] for n in [1,32]] for g in sizes],
@@ -428,7 +430,7 @@ def speedq_report(args) -> int:
     args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')
     lines=['# Rev5 SPEEDQ runtime qualification','']
     if missing: lines += ['MISSING: '+ '; '.join(missing)+'.','']
-    lines += [f"Rev5 is {'slower in '+str(len(slower))+' cells' if slower else 'not established as at least as fast everywhere'} versus Rev4: {len(faster)} faster, {len(slower)} slower, {inconclusive} inconclusive of {len(analyses)} measured size/tier/thread cells. Classification uses the paired 95% CI for Rev5 minus Rev4, with timer-resolution limits retained.", '',
+    lines += [f"Rev5 is {'slower in '+str(len(slower))+' cells' if slower else 'not established as at least as fast everywhere'} versus Rev4: {len(faster)} faster, {len(slower)} slower, {inconclusive} inconclusive of {len(analyses)} measured size/tier/thread cells. Classification uses pointwise paired 95% CIs for Rev5 minus Rev4, with timer-resolution limits retained; these are not simultaneous intervals over the grid.", '',
         'The same 420-ID, H128, one-output by_v2fy timing weights run through isolated Rev3/Rev4/Rev5 formula owners. They are fixed Rev4-trained research weights, not a Rev5 product-bake qualification. B runs its serving Rev1 arithmetic. Inputs are the existing deterministic speed-matrix RGB8 pairs; no labels or holdouts were opened.','',
         'All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 is a timing baseline: SIMD ceilings satisfy the documented feature tolerance, while all 48 scalar cells fail it (max feature absolute difference 3.6560852526013043e-6; max tolerance fraction 3.428426473557622). The failed legacy tolerance is recorded, not renamed a pass.','',
         'Each timing segment requires load1 < 2.0 and no foreign cargo/rustc/training before warmup and immediately before rounds. The retained rounds must all have a clean zenbench gate and no observed build/training interference. Persistent workers time the scoring call with Instant; separate parent rounds retain IPC/bookkeeping. Pair statistics reuse zenbench’s engine owner; no IPC estimate is subtracted. Setup, metadata stamping, input generation, and Rust-av sRGB widening are outside the timed body. Rayon pools and scoring buffers are warm.','',
