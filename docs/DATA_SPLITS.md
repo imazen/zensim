@@ -1531,3 +1531,11 @@ s2o arm trained on AIC-3 rows when AIC-3 was not held out. E28 models are resear
 SDR25, and never ship; D1 production qualification excludes AIC-3. No protected, sealed, KADID TERMINAL or T0 payload
 was read. Records: `benchmarks/e28_result_summary_2026-10-07.json`, `benchmarks/e28_final_2026-10-07.pointer.md`.
 
+## 2026-10-07 E30 report and production fit launch
+
+E30's 40 four-source cells (`fitv2e30-20261007`) trained only on the D1 population (no AIC-3 row) and were scored on the
+four D1 held-out panels against the pinned E24 control cells; no AIC-family, protected, sealed, KADID TERMINAL or T0 label
+was read. The AIC-3 drop shows no measured cost (signed +0.0003 ± 0.0015). The D1 production fit (`fitv2d1-20261007`,
+three full-data seeds on KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL and CID22-A) launched afterwards. Records:
+`benchmarks/e30_result_summary_2026-10-07.json`.
+
