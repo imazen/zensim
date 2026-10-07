@@ -2942,12 +2942,12 @@ fn stamp_emitted_checkpoints(
     Ok(written.len())
 }
 
-#[path = "../training_keys.rs"]
-mod training_keys;
-#[path = "zensim_mlp_train/group_admission.rs"]
-mod group_admission;
 #[path = "zensim_mlp_train/e29_hdr_admission.rs"]
 mod e29_hdr_admission;
+#[path = "zensim_mlp_train/group_admission.rs"]
+mod group_admission;
+#[path = "../training_keys.rs"]
+mod training_keys;
 
 fn main() {
     zensim_validate::tier_cap::apply_from_env();
@@ -3258,17 +3258,32 @@ fn main() {
         eprintln!("native group admission: {e}");
         std::process::exit(2)
     });
-    let admission_paths = group_modes.iter()
+    let admission_paths = group_modes
+        .iter()
         .filter(|g| !(args.hdr_consensus_research && g.0 == "hdr"))
-        .map(|g| g.1.clone()).collect::<Vec<_>>();
+        .map(|g| g.1.clone())
+        .collect::<Vec<_>>();
     let mut table_admission = if let Some(decision) = &args.upiq_label_disposition {
-        let native = upiq_training::native_group(&group_modes, &args.target_column, args.target_scale)
-            .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(2) });
-        upiq_training::admit(&admission_paths, decision, selected_ids.as_deref(), args.max_features, native)
+        let native =
+            upiq_training::native_group(&group_modes, &args.target_column, args.target_scale)
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                });
+        upiq_training::admit(
+            &admission_paths,
+            decision,
+            selected_ids.as_deref(),
+            args.max_features,
+            native,
+        )
     } else {
         zensim_validate::feature_set::admit_training_tables(
-            &admission_paths, args.historical_replay.as_deref(),
-            selected_ids.as_deref(), Some(args.max_features))
+            &admission_paths,
+            args.historical_replay.as_deref(),
+            selected_ids.as_deref(),
+            Some(args.max_features),
+        )
     }
     .unwrap_or_else(|e| {
         eprintln!("{e}");

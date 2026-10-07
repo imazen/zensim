@@ -139,7 +139,7 @@ pub(super) fn preflight(
         }
         return Ok(()); // Existing explicitly unqualified historical entry.
     }
-    if args.upiq_label_disposition.is_some() {
+    if let Some(disposition) = &args.upiq_label_disposition {
         let expected: BTreeSet<_> = [
             "safesyn",
             "safesyn_development",
@@ -157,7 +157,7 @@ pub(super) fn preflight(
             return Err("E31 requires exactly the inherited seven SDR groups and upiq380; no HDR companion; registered Rev5/D1 population, pinned UPIQ fit manifest, exact 420-slot projection and pooled rank-only groups required".into());
         }
         upiq_training::native_group(groups, &args.target_column, args.target_scale)?;
-        upiq_training::disposition(&json(args.upiq_label_disposition.as_ref().unwrap())?)?;
+        upiq_training::disposition(&json(disposition)?)?;
     }
     if args.hdr_consensus_research
         && (args.target_column != "human_score" || args.target_scale != 1.0)
@@ -361,13 +361,13 @@ pub(super) fn preflight(
                 );
             }
         }
-        if let Some(role) = d["role"].as_str() {
-            if !matches!(
+        if let Some(role) = d["role"].as_str()
+            && !matches!(
                 (role.to_ascii_lowercase().as_str(), phase),
                 ("train" | "fit", "fit") | ("development" | "dev", "development")
-            ) {
-                return Err("declared role disagrees with original fit/development binding".into());
-            }
+            )
+        {
+            return Err("declared role disagrees with original fit/development binding".into());
         }
         if (phase == "development" && (g.2 != 0.0 || g.3 <= 0.0))
             || (phase == "fit" && (g.2 <= 0.0 || g.3 != 0.0))
