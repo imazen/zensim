@@ -158,6 +158,24 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — E29 preparation import/root regressions. FIXED locally.**
+
+  The new E29 adapter initially lacked the existing scripts/ import bootstrap
+  when called by the data packer; packing refused on `lib` import. The bootstrap
+  is now explicit (`a9b92db3`), and the clean-environment scorer preflight passes.
+  An additional tripwire imported the unguarded HDR panel before installing mocks;
+  the module opened the legacy 22,860-row HDR VAL default and printed target
+  swings before failing on a missing predictor. No prediction or fit followed.
+  The CLI is now guarded (`f634504e`); import and absent-control HDR panel checks
+  refuse before payload reads. Preserve the incident in `UNINTENDED_EXPOSURE.json`
+  and the amendment/exposure ledger; the read cannot be undone.
+  Native HDR manifests also use the approved lexical fleet root without a
+  local-only admission_root (`9d563474`), so actual image executor extraction and
+  FIT_ROOT linkage pass. Evidence and explicit research qualification limits are
+  in `benchmarks/E29_WORKLOG.md`. No full E29 assessment was performed.
+
+
+
 * **2026-10-07 — Three zensim integration tests failed on main. FIXED (stale test contracts; reviewed patch, no weakening).** Found by the PRODQUAL-A label-free gate
   run: `featcanon_rev4_contract::served_paths_serve_rev4` (1867 vs 1825 features) and
   `research_engine_parity::research_everything_agrees_with_the_production_walk` (production 1825 vs research 1867) most likely

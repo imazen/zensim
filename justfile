@@ -542,3 +542,103 @@ speedq-rss *options:
 # Freeze the executable named by the successful Cargo JSON build receipt.
 speedq-freeze build_log dest:
     python3 scripts/demos/speedq_run.py freeze --build-log "{{build_log}}" --dest "{{dest}}"
+
+# E29 uses the existing trainer, strict four-source admission and actual executor.
+e29-tests:
+    python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards
+    cargo test -p zensim-validate --lib sampling:: -- --nocapture
+
+e29-build:
+    cargo build --release -p zensim-validate --bin zensim_mlp_train --example inspect_qualified_checkpoint
+
+e29-scorer-preflight root:
+    env -i PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/tmp/e29" python3 scripts/rev4_featpot/e24_rev5.py e29-score --root {{root}} --preflight-only
+
+# Local review evidence only; no fleet queue, image publication or source push.
+e29-executor-smoke bundle mode arm:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- bash {{bundle}}/run_executor_smoke.sh {{mode}} {{arm}}
+
+e29-harvest-checks bundle zenmetrics *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath11_real_entry_checks.py --study e29 --bundle {{bundle}} --zenmetrics {{zenmetrics}} {{flags}}
+
+e29-bundle-check bundle:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29
+
+e29-mirror-check bundle mirror:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29 --mirror-only {{mirror}}
+
+e29-control-parity bundle e30 dest *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} {{flags}}
+
+e29-storage-cleanup *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_storage_cleanup.py {{flags}}
+
+# Native E29 entry: declaration/label-free key refusals before feature targets.
+e29-hdr-admission binary prior_binary dest:
+    python3 scripts/tests/e29_hdr_binary_refusals.py --binary "{{binary}}" --prior-binary "{{prior_binary}}" --dest "{{dest}}"
+
+# E31's control/admission gate. These commands never fit or enqueue a cell.
+e31-control-tests:
+    python3 -m unittest scripts.tests.test_e31_control_freeze
+
+e31-control-freeze bundle results out:
+    python3 scripts/rev4_featpot/e30_four_source.py completed-control-pins --root {{bundle}}/v2d1 --bundle {{bundle}} --results {{results}} --out {{out}}
+
+e31-pinned-admission bundle upiq dest:
+    python3 scripts/tests/e31_pinned_admission.py --bundle {{bundle}} --upiq {{upiq}} --dest {{dest}}
+
+# E31 extension validation; builds binaries only, without creating a fleet pack.
+e31-training-tests:
+    TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_e31_*.py' -v
+
+e31-python-checks:
+    ruff check scripts/rev4_featpot/e31_training.py scripts/rev4_featpot/v2_common.py scripts/rev4_featpot/v2_lodo_mlp.py scripts/tests/test_e31_training.py scripts/tests/e31_control_parity.py scripts/tests/e31_extended_admission.py
+    ruff format --check scripts/rev4_featpot/e31_training.py scripts/tests/test_e31_training.py scripts/tests/e31_control_parity.py scripts/tests/e31_extended_admission.py
+
+e31-fit-key-check fit:
+    TMPDIR=$HOME/tmp python3 scripts/tests/test_e31_training.py --real-fit {{fit}}
+
+e31-build-trainer:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+
+e31-crate-tests:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
+
+e31-extended-admission trainer fit dest:
+    TMPDIR=$HOME/tmp python3 scripts/tests/e31_extended_admission.py --trainer {{trainer}} --fit {{fit}} --dest {{dest}}
+
+e31-control-parity baseline candidate bin_dir inspector dest:
+    python3 scripts/tests/e31_control_parity.py --baseline '{{baseline}}' --candidate {{candidate}} --stripper {{bin_dir}}/bake_dial_refit --inspector {{inspector}} --dest {{dest}}
+
+e31-control-cell root bin_dir dest scratch:
+    mkdir -p {{scratch}}
+    TMPDIR={{scratch}} OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3 REV4_V2_BIN_DIR={{bin_dir}} ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/v2_lodo_mlp.py --spec sel:59f0bbc2f290@h32:H128:cv16:cf98 --head N --heldout kadid --seed-index 0 --root {{root}} --strict-admission --train-only --data-role-decision {{root}}/human_role_decision.json --columns "$(python3 -c 'import sys;sys.path.insert(0,"scripts/rev4_featpot");from e21_cheap_recipe import columns;print(",".join(map(str,columns("by_v2fy"))))')" --dest {{dest}}
+
+# E32 research transport gates. Scratch/targets are caller-owned disk paths.
+[positional-arguments]
+e32-extension-tests scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib palette_training -- --nocapture
+    TMPDIR="$1" SHIPPATH_TRAINER="$2/release/zensim_mlp_train" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p test_e32_palette_training.py
+
+[positional-arguments]
+e32-extension-build scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+
+[positional-arguments]
+e32-shippath-regression scratch trainer:
+    TMPDIR="$1" SHIPPATH_TRAINER="$2" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
+
+[positional-arguments]
+e32-serving-refusal scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim --all-features --lib rev5_for_bake_refuses_reads_outside_the_supported_families -- --nocapture
+
+[positional-arguments]
+e32-existing-rust-tests scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib feature_set -- --nocapture
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib parquet_loader -- --nocapture
+
+# Full 120 x 50,000 control replay, pinned E30 model comparison, no fleet owner.
+[positional-arguments]
+e32-control-parity scratch bindir root control freeze dest:
+    TMPDIR="$1" ZENSIM_MAX_TIER=v3 OPENBLAS_NUM_THREADS=1 ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/tests/e28_short_parity.py --new "$2/zensim_mlp_train" --fit-bin "$2/bake_dial_refit" --inspector "$2/examples/inspect_qualified_checkpoint" --prepared-root "$3" --e30-control "$4" --control-freeze "$5" --dest "$6"
+

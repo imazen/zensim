@@ -963,6 +963,16 @@ mod tests {
                 other => panic!("f{id} must refuse as UnsupportedAtRev5: {other:?}"),
             }
         }
+        // E32's family has no serving registration. Each palette read must
+        // be refused as uncomputable rather than supplied as a silent zero.
+        for id in 1825..1867 {
+            match Plan::for_bake(&bake(id)) {
+                Err(PlanError::Uncomputable { missing, .. }) => {
+                    assert!(missing.contains(id), "f{id}: refusal must name it");
+                }
+                other => panic!("f{id} must refuse as uncomputable: {other:?}"),
+            }
+        }
         println!("REV5-FOR-BAKE-RAN");
     }
 

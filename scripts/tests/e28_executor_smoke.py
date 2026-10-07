@@ -34,7 +34,7 @@ def main():
     if args.mode == "bounded":
         command = ["/e28-time", "-v", "-o", str(out / (name + "_TIME.txt")), *command]
     root = Path(job["kind"]["argv"][job["kind"]["argv"].index("--root") + 1])
-    train_log = root / "cells" / job["cell"]["image_path"] / "train.log"
+    train_log = (Path(job["kind"]["argv"][job["kind"]["argv"].index("--dest") + 1]) if "--dest" in job["kind"]["argv"] else root / "cells" / job["cell"]["image_path"]) / "train.log"
     first = None
     with (out / (name + "_OUTPUT.tar.gz")).open("wb") as stdout, (out / (name + "_STDERR.log")).open("wb") as stderr:
         proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=stdout, stderr=stderr, env=env, start_new_session=True)

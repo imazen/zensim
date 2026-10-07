@@ -2325,6 +2325,36 @@ pub fn train_mlp_strategy(
     konjnd_agg: Option<&KonjndAggregationPool<'_>>,
     triplets: Option<&TripletPool>,
 ) -> Vec<u8> {
+    train_mlp_strategy_pairs(
+        groups,
+        n_features,
+        hyperparams,
+        log,
+        tv,
+        anchor,
+        equiv,
+        pjnd_anchor,
+        konjnd_agg,
+        triplets,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Research pair-list extension of the existing CPU trainer; empty preserves the legacy stream.
+#[allow(clippy::too_many_arguments)]
+pub fn train_mlp_strategy_pairs(
+    groups: &mut [TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+    anchor: Option<&AnchorRows<'_>>,
+    equiv: Option<&EquivPairs<'_>>,
+    pjnd_anchor: Option<&AnchorRows<'_>>,
+    konjnd_agg: Option<&KonjndAggregationPool<'_>>,
+    triplets: Option<&TripletPool>,
+    rank_pairs: &std::collections::BTreeMap<String, Vec<[usize; 2]>>,
+) -> Vec<u8> {
     let effective = validate_training_capabilities(
         hyperparams,
         groups.iter().any(|g| g.loss_mode.has_mse()),
@@ -2809,7 +2839,28 @@ pub fn train_mlp_strategy(
         .is_some_and(|c| c.weight > 0.0 && c.apply_every > 0 && !c.pairs.is_empty())
         && tv_std.is_some();
     let pooled_on = !hyperparams.pooled_legs.is_empty();
-    let lookahead_ok = fuse_w1 && !parallel && !nin_on && !tv_can_fire && !pooled_on;
+    let lookahead_ok =
+        fuse_w1 && !parallel && !nin_on && !tv_can_fire && !pooled_on && rank_pairs.is_empty();
+    for (name, pairs) in rank_pairs {
+        let gi = *train_indices
+            .iter()
+            .find(|&&gi| groups[gi].name == *name)
+            .expect("inactive pair-list group");
+        assert!(
+            !pairs.is_empty()
+                && pairs
+                    .iter()
+                    .all(|p| p[0] != p[1] && p.iter().all(|&i| i < groups[gi].human_scores.len())),
+            "invalid pair-list endpoints"
+        );
+        assert!(
+            groups[gi].loss_mode == GroupLossMode::Rank
+                && !parallel
+                && !nin_on
+                && pair_plan.is_none(),
+            "pair-list requires plain CPU rank strategy"
+        );
+    }
     let pooled_mask: Vec<bool> = train_indices
         .iter()
         .map(|&gi| hyperparams.pooled_legs.contains(&groups[gi].name))
@@ -2820,6 +2871,10 @@ pub fn train_mlp_strategy(
             "unknown/inactive pooled leg {name}"
         );
     }
+    let pair_lists: Vec<Option<&[[usize; 2]]>> = train_indices
+        .iter()
+        .map(|&gi| rank_pairs.get(&groups[gi].name).map(Vec::as_slice))
+        .collect();
     let mut pearson_rng = SplitMix64::new(
         hyperparams.sample_seed.unwrap_or(hyperparams.seed) ^ 0xe280_7065_6172_736f,
     );
@@ -2933,6 +2988,7 @@ pub fn train_mlp_strategy(
             } else {
                 drawn
             };
+            let drawn = sampling::list_draw(drawn, &pair_lists, &mut rng);
             if let Some(d) = sample_digest.as_mut() {
                 d.push(drawn);
             }

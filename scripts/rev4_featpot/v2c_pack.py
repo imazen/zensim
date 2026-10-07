@@ -125,6 +125,13 @@ def main() -> None:
     chosen = every if args.select is None else [tuple(s.split("/", 1)) for s in args.select]
     if any(c not in every for c in chosen) or len(set(chosen)) != len(chosen):
         raise SystemExit(f"--select: unknown or repeated variant directories {chosen}")
+    receipt_path = args.root / "wide/main/real/receipt.json"
+    if receipt_path.is_file() and "hdr_consensus" in json.loads(receipt_path.read_text()).get("legs", {}):
+        from e29_consensus import preflight
+        from v2_human_role import PRODUCTION_SOURCES
+        for fold in PRODUCTION_SOURCES:
+            for arm in ("hb4", "hc4"):
+                preflight(args.root, fold, arm)
     selected = [c for c in every if c in chosen and (args.root / "wide" / c[0] / c[1] / "receipt.json").is_file()]
     if not selected:
         raise SystemExit("no selected variant receipts exist")
@@ -134,7 +141,7 @@ def main() -> None:
         raise SystemExit(f"mixed formula revisions in selected receipts: {revisions}")
     revision = revisions.pop()
     members = {f"rev4-featpot/{args.name}/{k}": v for k, v in members_for(args.root, args.kind, selected).items()}
-    inventory = {"schema": "zenfleet-fit-data-v1", "label": "POTENTIAL — ceiling, not a model score",
+    inventory = {"build_commit": json.loads((args.root / "wide/frozen.json").read_text()).get("build_commit"), "schema": "zenfleet-fit-data-v1", "label": "POTENTIAL — ceiling, not a model score",
                  "program": f"Rev{revision} potential Instrument v2-canon ({args.kind})", "variant_dirs": [f"{f}/{v}" for f, v in selected],
                  "files": {name: sha(path) for name, path in sorted(members.items())}}
     inv = json.dumps(inventory, sort_keys=True, indent=2).encode() + b"\n"

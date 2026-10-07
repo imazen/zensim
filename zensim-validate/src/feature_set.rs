@@ -492,6 +492,12 @@ fn resolve_declared_set(id: FeatureSetId, source: String) -> Option<FeatureSetRe
 /// root, but conflicting explicit IDs/revisions are never guessed away.
 pub fn table_feature_set_ref(path: &Path) -> Result<Option<FeatureSetRef>, String> {
     let metadata = table_metadata(path)?;
+    if let Some(r) = crate::palette_training::reference(
+        &metadata,
+        format!("{}: explicit E32 research projection", path.display()),
+    )? {
+        return Ok(Some(r));
+    }
     match metadata.get("feature_set_id") {
         Some(value) => {
             let id = value
@@ -509,7 +515,7 @@ pub fn table_feature_set_ref(path: &Path) -> Result<Option<FeatureSetRef>, Strin
     }
 }
 
-fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
+pub(crate) fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
     let root = path.parent().unwrap_or(Path::new("."));
     let mut merged = serde_json::Map::new();
     for manifest in [
@@ -539,7 +545,26 @@ fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
                 "decoder_era",
                 "decoder_revision",
                 "sampling",
+                "research_palette",
+                "data_role",
+                "data_role_decision_required",
+                "human_sources",
+                "table_sha256",
+                "keys_sha256",
+                "row_keys_sha256",
+                "row_selection_sha256",
             ] {
+                if !matches!(
+                    key,
+                    "feature_set_id"
+                        | "formula_revision"
+                        | "decoder_era"
+                        | "decoder_revision"
+                        | "sampling"
+                ) && scope.get("research_palette").is_none()
+                {
+                    continue;
+                }
                 let Some(v) = scope.get(key) else { continue };
                 if let Some(old) = merged.get(key) {
                     // Formula revisions occur as both strings and integers.
@@ -1220,6 +1245,35 @@ pub fn admit_training_tables(
     if replay.is_some_and(|s| s.trim().is_empty()) {
         return Err("--historical-replay requires a nonempty reason and recorded recipe".into());
     }
+    // All E32 roles/maps are checked before keys or any training-table opens.
+    // Legacy tables keep their original admission JSON and execution path.
+    let declarations = paths
+        .iter()
+        .map(|p| table_metadata(p))
+        .collect::<Result<Vec<_>, _>>()?;
+    let palette = declarations
+        .iter()
+        .map(crate::palette_training::validate)
+        .collect::<Result<Vec<_>, _>>()?;
+    if palette.iter().any(|&p| p) {
+        if replay.is_some()
+            || !palette.iter().all(|&p| p)
+            || selected_ids != Some(crate::palette_training::primary_ids().as_slice())
+            || max_features != Some(1867)
+        {
+            return Err("E32 requires all projected legs, exactly the registered 462 IDs/width and no replay".into());
+        }
+        for (path, metadata) in paths.iter().zip(&declarations) {
+            crate::palette_training::verify_keys(path, metadata)?;
+        }
+        for (path, metadata) in paths.iter().zip(&declarations) {
+            if crate::train_manifest::sha256_file(path).map_err(|e| e.to_string())?
+                != metadata["table_sha256"].as_str().unwrap()
+            {
+                return Err("E32 projected table byte pin changed".into());
+            }
+        }
+    }
     let mut tables = Vec::new();
     let mut issues = Vec::new();
     let mut eras = std::collections::BTreeSet::new();
@@ -1343,12 +1397,15 @@ pub fn admit_training_tables(
     } else {
         None
     };
-    Ok(
-        serde_json::json!({"tables": tables, "issues": issues, "historical_replay": replay,
+    let mut admission = serde_json::json!({"tables": tables, "issues": issues, "historical_replay": replay,
         "formula_revision": revision, "sampling": sampling, "qualified_provenance": issues.is_empty() && replay.is_none() && tables.iter().all(|t|
             ["decoder_era", "decoder_revision"].iter().any(|key|
-                t["stored_declarations"].get(key).is_some_and(|v| !v.is_null() && v.as_str() != Some(""))))}),
-    )
+                t["stored_declarations"].get(key).is_some_and(|v| !v.is_null() && v.as_str() != Some(""))))});
+    if palette.iter().any(|&p| p) {
+        admission["research_family"] = serde_json::json!("palette_v2");
+        admission["serving_allowed"] = serde_json::json!(false);
+    }
+    Ok(admission)
 }
 
 #[cfg(test)]

@@ -1,0 +1,266 @@
+# E29 preparation — 2026-10-07
+
+Missing: combined v40 package/image review and shared matched-control completion; completed matched-control pins and full hb4/hc4 fits;
+publication/queue enrollment by the coordinator; SDR/HDR assessment and product
+qualification. An unintended legacy HDR VAL import read violated the preparation
+restriction and remains an explicit review exception. This lane prepared and
+tested plumbing only, with no push or launch.
+
+The amendment was committed as `788cfb50` before any E29 smoke. It retains hb4
+and hc4, the raw two-teacher 0.05 agreement threshold, nominal HDR weight four,
+E21 SDR guards and equal four-fold paired composites over ten seeds. The new
+brief explicitly requires significant pooled gains against both teachers.
+Missing/nonfinite metrics and zero SE are INCOMPLETE. AIC is excluded.
+
+Implementation uses the existing strict `v2_lodo_mlp.py`/`zensim_mlp_train`
+stack, preparation packer, statistics owner and HDR panel. The explicit hc4
+pair-list entry is research tooling in the unpublished validation crate. The
+ordinary trainer entry and inactive pair-list RNG remain unchanged. The coordinator has chosen one shared fresh matched control for E29/E31/E32
+under combined v40. This supersedes the solo control proposal. Exact E30
+reuse is now rejected before checkpoint or label opens. The lane runs one
+full control-recipe validation cell to test baseline numerical parity; it is
+not part of the shared scientific control and cannot change its selection.
+
+## Data and exposure
+
+Prepared root: `/mnt/v/output/zensim/e29-2026-10-07/v2e29`.
+It copies only the frozen D1 inventory and existing native HDR TRAIN authority.
+D1 roles remain those of [DATA_SPLITS](../docs/DATA_SPLITS.md). Four human
+sources are kadid, tid2013, konfig, cid22_a25; teacher/coverage inputs and ordered
+420 feature IDs retain SHIPPATH admission. Metadata and label-free key
+populations precede all payload hashes and reads, including lower-owner checks.
+
+Existing E26/E27 authority contributes 7,390 agreement-only TRAIN rows over
+495 references. Native features are bit-preserved; only targets change. hb4
+uses pooled normalized midrank Borda targets. hc4 contains all 16,140,412
+lexicographically ordered unique cross-reference pairs passing both raw JOD
+thresholds and matching signs. An independent audit compares all feature IEEE
+bits, recomputes targets using NumPy unique-count ranks and checks every pair,
+including completeness against the full eligible universe.
+
+One unintended legacy HDR VAL read occurred during an added import test: the
+unguarded legacy panel opened all 22,860 rows/952 columns of
+`hdrgrid_mc944_t2_val.parquet`, printed target swings and failed before student
+prediction. No fit used those rows. This violates the preparation read limit
+and requires disclosure in coordinator review; see `UNINTENDED_EXPOSURE.json`.
+No new teacher run, AIC discovery/read, registered 3,900-row HDR VAL,
+confirmation or protected human label read occurred. D1 table payloads transported into image smokes include
+only approved training/internal-development populations; held-out full human
+tables were packed after admission but not scored. Existing HDR TRAIN teacher
+columns were read solely for the registered targets/pair list. Metadata and
+selected model artifacts from the exact 40 E30 nA3 cells were independently
+verified and pinned after they completed; no E30 label payload was opened.
+
+Native HDR's historical subset has no full-family feature-set identity. HDR
+checkpoints explicitly remain `qualified_provenance=false`, with Rev5/subset
+provenance and pair-list digest retained. Seven SDR admissions remain strict.
+The research inspector expects this limitation; the ordinary qualified inspector
+still refuses it. No serving model or human HDR qualification is claimed.
+
+## Earlier solo preparation pins and executor evidence
+
+The coordinator superseded solo E29 packaging with the combined v40 package.
+The following archives and image are as-run preparation evidence, not launch
+authority or pins for the future combined package. No new solo package or
+image is built after that decision.
+
+[Artifact pins](/mnt/v/output/zensim/e29-2026-10-07/PINNED_ARTIFACTS.json)
+record producer commits, image identity, binaries, manifests and every smoke.
+
+- Data: `9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008`
+  (70 pinned files, 21 table payloads; 19 SDR and two HDR target variants).
+- Program: `44ca24737293b404e29e150ebce78632cc21d5de7b6416c3058fb53c2100ef58`
+  (31 pinned files; zenmetrics profile commit `f15cb9202532daf97b5ec882380088b7800abf66`).
+- Local image: `ghcr.io/imazen/zenfleet-worker:fit-e29-consensus-v41-w925f9783329f`;
+  ID `sha256:3b85136b13c37d30ae74d30a767bed49dca1e4d13643b26ad0ce4ae59335cb15`.
+  Its saved image and build log are retained. No registry push occurred.
+- Full-budget arm manifest: `592754b6968bfa2c1b94c8fd1f59cd8834e7cdf1e5320944503afda2a4de5217`;
+  80 cells, four folds × ten seeds × two arms. The proposed control manifest
+  has 40 cells; every destination is outside admitted input roots.
+- E30 completed-cell pins: `ecf82b68142946e7be1642affbdb006fcc013f94b9d549044ee3a9a3cad84aeb`.
+  All 40 selected checkpoints pass the original program-bound trusted contract
+  and canonical inspector at epoch 119/120, 50,000 draws per epoch. This pins
+  completion, not an E29 exact-parity control approval.
+
+Three distinct declared local jobs (base/hb4/hc4, 2 epochs × 128 draws) ran
+inside the image through `/usr/local/bin/fit-cell-exec`, including fresh archive
+extraction, SHA verification and `/var/tmp/rev4-featpot` linking to the
+hash-named `/scratch/fit-cell/.../rev4-featpot`. All three returned verified
+blobs with epoch 1 selected. hb4 and hc4 additionally ran their unchanged
+registered argv (120 × 50,000), reached epoch 0 and were deliberately stopped
+by the test driver; those are incomplete smoke runs, never scientific cells.
+
+The panel CLI is now protected by a main guard; importing it cannot trigger
+its legacy data read. Import and absent-control HDR panel tripwires record zero
+payload opens/process calls. The original failure log is preserved.
+
+The owner harvest accepts the short blobs only with `allow_local_smoke=True`.
+Twelve re-signed negative blobs (budget, false epoch119, admission, mode bypass)
+are refused; normal installation also refuses all three short blobs.
+Clean-environment `e24_rev5.py e29-score --preflight-only` passes against the
+staged root. Full assessment requires complete frozen controls/cells before
+any labels; its absent-control tripwire records zero table reads.
+
+Actual container cap was one CPU and six GiB, no swap, tier v3 and one Rayon
+thread. `declare-fits` retains its historical 2-GiB/four-thread packing hint;
+`jobset_caps.json` separately records the intended actual envelope. Bounded
+base/hb4/hc4 `/usr/bin/time -v` maximum RSS was respectively 1,058,412 /
+970,724 / 1,059,196 KiB. The corresponding cgroup peaks were 2,027,532,288 /
+1,917,644,800 / 2,339,270,656 bytes. hc4's full-argv first-epoch cgroup peak
+was 2,373,599,232 bytes. These are smoke measurements, not full-fit forecasts.
+Outer Docker wrapper: `run-heavy: done rc=0 13s | peak-RSS 0.03GiB |
+min-avail 31852MiB | peak-load 2.43` for that hc4 first-epoch run. Full pair
+universe audit: `run-heavy: done rc=0 36s | peak-RSS 3.49GiB |
+min-avail 30538MiB | peak-load 2.66`.
+
+## Validation and review
+
+Evidence logs preserve successful and earlier failed attempts. E29/E26 Python
+suite passes 19 tests, sampler suite 22, SHIPPATH admission regressions 27 and
+zenmetrics fit-tool suite 53. Release build and clippy with warnings denied
+pass; script lint checks 847 runnable scripts. These validate the exercised
+plumbing, not scientific success or full product qualification.
+
+The complete earlier artifact tree remains on tower. After every original
+file was byte-verified, the user authorized removal of only this lane's
+superseded local extraction stages, duplicated negative blobs and Cargo/source
+caches. `CLEANUP_RECEIPT.json` records 15,980,081,152 allocated bytes removed.
+`ARCHIVE_MIRROR_RECEIPT.json` on tower preserves the complete pre-cleanup
+11,020-file proof; the final local mirror receipt covers the retained subset.
+The local prepared root, one data/program/image archive, binaries, manifests
+and evidence remain available. No unrelated cache or artifact was removed.
+
+## Coordinator control decision and baseline proof
+
+The coordinator fixed one shared fresh v40 control before scientific arm
+fitting. Exact E30-cell reuse is refused by the assessment gate even after
+this validation passes; no outcome can replace the fixed fresh control.
+
+One of the 40 control-recipe cells was reproduced completely: kadid fold,
+seed 0, Rev5/by_v2fy/N, init 1101/sample 101, v3 tier, one Rayon thread,
+120 epochs × 50,000 draws, selected final epoch 119. The unchanged strict
+LODO owner used the preserved local prepared root; its seven table receipts
+match E30 exactly. Seeds, weights, coverage selection and every logged
+development score match. The extended trainer binary is
+`49b0b844454a7401636c9eda07118b77e4f5a9108399ff77d261879933b73d51`.
+
+The entire 215,978-byte checkpoint after the canonical strip owner removes
+only `zentrain.repro` is bit-identical: SHA-256
+`4fc21dc98d83cdcfba25f38623921e90595e976c75ad2fa8a4f8b2eb7f1a95f2`.
+Raw archives differ because reproduction metadata records different clock,
+machine, checkout/build identities and transport/output paths. All remaining
+reproduction fields also compare exactly after those documented normalizations;
+raw checkout identities and the binary producer commit are retained separately.
+This proves the E29 extension's exercised baseline cell, not the yet-unbuilt
+combined E29/E31/E32 binary or all 40 cells.
+
+Evidence: `control-parity-final/PARITY.json`, original/extended bakes, canonical
+inspector output and full logs. Actual wrapper measurement:
+`run-heavy: done rc=0 291s | peak-RSS 0.95GiB | min-avail 39488MiB | peak-load 15.33`.
+The latest E29/E26 suite passes 20 tests, including the new reuse refusal,
+and script lint checks 853 runnable scripts. Clean-environment scorer preflight
+still passes after cleanup. No Rust rebuild was needed after rebasing: the
+trainer, its library modules, manifests and lock remain byte-identical to
+the previously built and tested producer. The only subsequent Rust main
+changes are in the separate UPIQ scorer executable.
+
+The E29 source is placed on local main; the earlier explicit push-nothing
+instruction remains in effect. Combined packaging, combined-binary parity,
+the 40 shared control fits, scientific arms and assessment remain coordinator
+work. No new solo package/image, fleet launch or scientific assessment ran.
+
+
+## Round 2 review corrections — 2026-10-07
+
+Known Bugs: the reviewed native HDR entry admitted a TRAIN declaration without
+checking its label-free keys, allowing VAL keys to reach the target reader.
+The E29 W2 route also inherited the historical model-dependent sign flip.
+Both are corrected in this round; historical experiment statistics are unchanged.
+
+The native research entry now binds the registered by_v2fy 420 IDs, Rev5,
+7390 agreement-only TRAIN rows, original teacher/table/key/manifest source pins,
+arm target transform and CLI target column/scale. It checks the exact label-free
+key schema, roles, agreement, unique IDs, row count, ordered key digest and key
+file digest before any HDR target/feature or pair-list access. hc4 additionally
+binds its declared pair filename/hash to the CLI; hb4 refuses a pair list.
+The HDR leg remains research-only and does not claim product qualification.
+
+The actual reviewed binary reproduces the synthetic VAL-key bypass (two payload
+opens, zero key opens). The rebuilt binary refuses that case with zero payload
+opens. The native regression includes declaration/source/ID/transform/key
+negative controls and a valid TRAIN-key positive admission control against an
+intentionally malformed synthetic payload. All 23 cases pass; no model is
+written. Evidence: `/mnt/v/output/zensim/e29r2-2026-10-07/native-admission-final/`.
+
+E29 W2 now uses the already checked, fixed quality-oriented signed per-type
+SROCCs. Each arm and control chooses its own lowest three types. Reversed
+predictions retain W2=-1, and differing arm/control membership is tested using
+the canonical panel and an independent SciPy rank oracle. The ten-seed/equal
+four-fold reduction and historical e13 helper remain unchanged.
+
+The lane was rebased onto main@origin
+`a540255b46b96e326e459fa61312a083f081effb`, including the coordinator's a9a5ca0a
+legacy import guards. Merge resolutions preserve both the explicit incident
+and completed D1 production record plus E29 preparation, both changelog additions
+and both recipe sets. E29's fuller HDR panel retains an import-inert `_cli()`
+behind `__main__`; the other legacy guarded modules are inherited unchanged.
+The shared main bookmark was not moved by this lane. No push occurred.
+
+The 22-test E29/E26/import-guard Python suite and 22 sampler tests pass. Release
+build, workspace fmt-check, CI clippy with warnings denied and scoped Ruff F
+checks pass; script lint checks 857 runnable scripts. Full run logs are retained
+under `/home/lilith/tmp/e29r2/`. The rebuilt trainer requires its own full baseline
+parity proof below; the retained earlier proof is not substituted for that run.
+The combined v40 package, scientific controls/arms and assessment remain missing.
+
+
+The extended native probe covers both arms (29 passing cases total). hc4 VAL
+keys refuse before either table or pair-list open; changed transforms, escaping
+pair paths, changed pair pins and absent pair CLI binding also refuse. The valid
+hc4 admission control reaches only its malformed synthetic Parquet. Evidence:
+`/mnt/v/output/zensim/e29r2-2026-10-07/native-admission-both-arms/RESULT.json`.
+
+
+## Rebuilt round 2 trainer baseline proof
+
+The rebuilt trainer SHA-256 is
+`20ad70f6649ec901500b7d3a57a0dc7de91c0978ffd862f4f2cce717382431dc`;
+its source/manifest/lock bindings are recorded in `TRAINER_SOURCE_PINS.json`
+under `/mnt/v/output/zensim/e29r2-2026-10-07/`. A separate local parity bundle
+uses that binary, the unchanged canonical refit/inspection tools, and a transport
+alias to the preserved immutable prepared root. The original bundle, image,
+program and parity receipts are unchanged.
+
+The canonical `e29-control-parity` owner completed a new kadid/seed-0 baseline
+fit: 120 epochs × 50,000 draws, v3/one thread, selected epoch 119, densify/quantize
+and TRAIN-only calibration through the strict LODO owner. All seven receipts,
+seeds, weights, coverage selection and development scores match the original
+E30 cell. Reproduction metadata also matches after the previously documented
+clock/machine/build/transport-path normalization. Canonical stripping removes
+only `zentrain.repro`; all 215,978 remaining bytes match with SHA-256
+`4fc21dc98d83cdcfba25f38623921e90595e976c75ad2fa8a4f8b2eb7f1a95f2`.
+Evidence: `control-parity/PARITY.json`, full driver/trainer logs and both fresh
+stripped archives. This tests one baseline cell, not the combined binary or
+all 40 scientific controls. Shared fresh v40 controls remain mandatory.
+
+Actual wrapper measurement:
+`run-heavy: done rc=0 305s | peak-RSS 1.05GiB | min-avail 41002MiB | peak-load 6.14`.
+Release build: `rc=0 13s | peak-RSS 1.56GiB | min-avail 46079MiB | peak-load 9.02`.
+CI clippy: `rc=0 52s | peak-RSS 0.93GiB | min-avail 40365MiB | peak-load 10.36`.
+E29/E26/import-guard plus sampler suite:
+`rc=0 88s | peak-RSS 1.51GiB | min-avail 43976MiB | peak-load 13.76`.
+
+This round used synthetic native admission/statistics probes, label-free
+preflight keys and approved D1 baseline TRAIN/development inputs. It opened no
+real HDR VAL, protected/confirmation/terminal or AIC labels and ran no HDR arm
+fit or assessment, fleet job, image publication or push. The inherited exposure
+incident remains disclosed and is not erased by these fixes.
+
+
+A final fetch/rebase incorporates main@origin
+`d54fcb53236eee7f749fac10da81692466f1c9c4` without conflicts. Its only addition
+relative to the previously tested base is the research-status document. The
+trainer entry, all trainer library modules, manifests and lock still match the
+retained binary producer exactly; no rebuild or retraining is substituted by
+that document-only rebase. The import guards, incident/production ledger records
+and both lane recipe/changelog additions remain present.

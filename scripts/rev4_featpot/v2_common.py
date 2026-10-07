@@ -128,14 +128,13 @@ def load_frozen(root: Path | None = None, *, training_only: bool = False, metada
             path = Path(rel)
             if path.is_absolute() or ".." in path.parts or any(p.startswith("_sealed") for p in path.parts):
                 raise ValueError("admission freeze contains an unsafe relative path")
-            if metadata_only and path.suffix == ".parquet" and not path.name.endswith(".keys.parquet"):
+            if metadata_only and ((path.suffix == ".parquet" and not path.name.endswith(".keys.parquet")) or path.name.endswith(".pairs.json")):
                 continue
             if sha(Path(root) / path) != want:
                 raise ValueError(f"{rel}: changed after the admission freeze")
         return record, sha(Path(root) / "wide/frozen.json")
     if record.get("schema") != FROZEN_SCHEMA:
         raise ValueError(f"{path}: unexpected schema")
-    wide = Path(root) / "wide"
     pins = {**{f"wide/{k}/receipt.json": v for k, v in record["wide_receipts"].items()},
             "wide/confirm/receipt.json": record["confirm_receipt_sha256"], "wide/keep_lists.json": record["keep_lists_sha256"]}
     if record.get("extra_arms_sha256"):
@@ -239,10 +238,12 @@ def recipe_of(spec: str) -> dict:
             out["kadis_ordinal"] = float(tok[2:])
         elif tok in ("s2o", "s2m") and "ssim2_recipe" not in out:
             out["ssim2_recipe"] = tok
+        elif tok == "uh4" and "hdr_weight" not in out:
+            out.update(hdr_weight=4.0, hdr_mode="rank", upiq380=True)
         elif tok.startswith("hd") and "hdr_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["hdr_weight"] = float(tok[2:])
-        elif tok[:2] in ("hp", "ha") and "hdr_weight" not in out and tok[2:] == "4":
-            out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both"}[tok[:2]])
+        elif tok[:2] in ("hp", "ha", "hb", "hc") and "hdr_weight" not in out and tok[2:] == "4":
+            out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out
@@ -446,10 +447,15 @@ def refuse_nonfinite_kept(paths, keep) -> None:
     import pyarrow.parquet as pq
     cols = [f"f{i}" for i in keep]
     for path in paths:
-        for batch in pq.ParquetFile(path).iter_batches(batch_size=65536, columns=cols):
+        selected = cols
+        declaration = Path(f"{path}.manifest.json")
+        if declaration.is_file() and "research_palette" in json.loads(declaration.read_text()):
+            from e32_palette import feature_columns
+            selected = feature_columns(path, keep)
+        for batch in pq.ParquetFile(path).iter_batches(batch_size=65536, columns=selected):
             for j in range(batch.num_columns):
                 if not np.isfinite(batch.column(j).to_numpy(zero_copy_only=False)).all():
-                    raise ValueError(f"{path}: kept column {cols[j]} is not finite (an absent slot?); refusing this keep list")
+                    raise ValueError(f"{path}: kept column {selected[j]} is not finite (an absent slot?); refusing this keep list")
 
 
 def dense_bake(bake: Path, cache: Path) -> Path:

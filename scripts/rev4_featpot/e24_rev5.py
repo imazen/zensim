@@ -262,8 +262,130 @@ def cmd_e26_score(args) -> int:
     return rc
 
 
+def e29_seed_stat(values):
+    """Ten seed units; equal four-fold composites, no source-SE quadrature."""
+    values = np.asarray(values, dtype=np.float64)
+    if values.shape != (10, 4) or not np.isfinite(values).all():
+        raise ValueError("INCOMPLETE: E29 needs ten complete four-fold seeds")
+    seeds_ = values.mean(axis=1)
+    se = float(seeds_.std(ddof=1) / np.sqrt(10))
+    if not np.isfinite(se) or se == 0:
+        raise ValueError("INCOMPLETE: E29 undefined/zero seed SE")
+    return dict(delta=float(seeds_.mean()), se=se, n=10, seed_deltas=seeds_.tolist())
+
+
+def e29_decisions(cells, sdr):
+    from v2_human_role import PRODUCTION_SOURCES
+    expected = [(source, seed) for source in PRODUCTION_SOURCES for seed in range(10)]
+    for label in ("control", "hb4", "hc4"):
+        if [(c["source"], c["seed"]) for c in cells[label]] != expected:
+            raise ValueError("INCOMPLETE: E29 pairing differs from registered 40 cells")
+    arms = {}
+    for arm in ("hb4", "hc4"):
+        panels = {}
+        for panel in ("within_reference", "pooled"):
+            panels[panel] = {}
+            for teacher in ("hdrvdp3", "cvvdp"):
+                delta = np.array([a[panel][teacher] - b[panel][teacher]
+                                  for a, b in zip(cells[arm], cells["control"])]).reshape(4, 10).T
+                panels[panel][teacher] = e29_seed_stat(delta)
+        hdr_pass = (all(v["delta"] >= -2*v["se"] for p in panels.values() for v in p.values())
+                    and all(v["delta"] > 2*v["se"] for v in panels["pooled"].values()))
+        arms[arm] = dict(**panels, sdr=sdr[arm], hdr_pass=bool(hdr_pass),
+                         passes=bool(hdr_pass and sdr[arm]["as_good"]))
+    passing = [a for a in arms if arms[a]["passes"]]
+    winners = [a for a in passing if arms[a]["pooled"]["hdrvdp3"]["delta"] ==
+               max(arms[b]["pooled"]["hdrvdp3"]["delta"] for b in passing)]
+    return arms, winners[0] if len(winners) == 1 else None
+
+
+def _e29_signed_w2(types):
+    """Reduce checked quality-oriented type SROCCs for this E29 panel only."""
+    if len(types) < 3 or not np.isfinite(types).all():
+        raise ValueError("INCOMPLETE: undefined distortion-type SROCC")
+    worst = sorted(types)
+    return dict(w2_type_min=float(worst[0]), w2_type_worst3=float(np.mean(worst[:3])))
+
+
+def cmd_e29_score(args):
+    """Post-harvest SDR scoring; strict preparation works in a clean environment."""
+    from e29_consensus import preflight, complete_cells
+    from v2_human_role import PRODUCTION_SOURCES
+    from v2_lodo_mlp import predict, strict_training_groups
+    from v2_common import refuse_immutable_output, admission_input_roots
+    from v2_teacher import key_path
+    import e13_teacher as e13
+    import pandas as pd
+    root = Path(args.root)
+    if args.preflight_only:
+        for source in PRODUCTION_SOURCES:
+            for arm in ("hb4", "hc4"):
+                preflight(root, source, arm)
+        print(json.dumps({"status":"PASS", "scope":"E29 scorer imports/prepared-root admission; no label payload read"}))
+        return 0
+    records = complete_cells(Path(args.results), Path(args.control_root),
+                             Path(args.control_pins) if args.control_pins else None)
+    out = Path(args.out)
+    refuse_immutable_output(out, (*admission_input_roots(root), Path(args.results), Path(args.control_root)))
+    if out.exists():
+        raise ValueError("E29 assessment requires fresh output")
+    receipt = json.loads((root / "wide/main/real/receipt.json").read_text())
+    groups = [(s, root / receipt["legs"][s]["full"]["rel"], 0., 0., "withinref,rank") for s in PRODUCTION_SOURCES]
+    strict_training_groups(groups, root / "human_role_decision.json")
+    meta = {}
+    for source, table, _, _, _ in groups:
+        keys = pq.read_table(key_path(table)).to_pandas()
+        keys["target"] = pq.read_table(table, columns=["human_score"])["human_score"].to_numpy()
+        if source in e13.TYPE_SOURCES:
+            paths = pd.concat([pq.read_table(e13.BANK / m / "keys.parquet", columns=["pair_key", "dist_path"]).to_pandas()
+                               for m in e13.TYPE_SOURCES[source]]).drop_duplicates("pair_key")
+            idx = pd.Index(paths.pair_key).get_indexer(keys.pair_key)
+            if (idx < 0).any():
+                raise ValueError("E29 distortion metadata join differs")
+            keys["dtype"] = [Path(p).stem.split("_")[1] for p in paths.dist_path.to_numpy()[idx]]
+        meta[source] = keys
+    out.mkdir(parents=True)
+    panels = {}
+    for label, rows in records.items():
+        panels[label] = {}
+        for source, seed, cell, r in rows:
+            table = dict((s, p) for s, p, _, _, _ in groups)[source]
+            dest = out / "cells" / label / f"{source}_s{seed}"
+            dest.mkdir(parents=True)
+            pred = predict(cell / "refit/last.bin", table, dest / "eval_preds.tsv")
+            y = meta[source].target.to_numpy(dtype=np.float64)
+            from lib.zen_stats import panel_batch
+            score = panel_batch([(source, pred, y)], stats="full")[0]
+            result = dest / "result.json"
+            result.write_text(json.dumps(dict(prediction=pred.tolist(), score=score)) + "\n")
+            if "dtype" in meta[source]:
+                types = [e13.spearman(pred[ix], y[ix]) for ix in meta[source].groupby("dtype").indices.values()]
+                signed_w2 = _e29_signed_w2(types)
+            panels[label][source, seed] = e13.worst_case(result, meta[source])
+            if "dtype" in meta[source]:
+                # Historical helpers infer a model-dependent sign. E29 uses
+                # each arm/control panel's own three lowest signed correlations.
+                panels[label][source, seed].update(signed_w2)
+    decision = {}
+    for arm in ("hb4", "hc4"):
+        delta = np.array([[panels[arm][s, i]["signed"] - panels["control"][s, i]["signed"]
+                           for s in PRODUCTION_SOURCES] for i in range(10)])
+        signed = e29_seed_stat(delta)
+        w2_seeds = np.array([[panels[arm][s, i]["w2_type_worst3"] - panels["control"][s, i]["w2_type_worst3"]
+                             for s in ("kadid", "tid2013")] for i in range(10)]).mean(axis=1)
+        w2 = e29_seed_stat(np.repeat(w2_seeds[:, None], 4, axis=1))
+        sources = dict(zip(PRODUCTION_SOURCES, delta.mean(axis=0).tolist()))
+        decision[arm] = dict(signed=signed, per_source=sources, w2=w2,
+            as_good=bool(signed["delta"] >= -.002 and min(sources.values()) >= -.005 and w2["delta"] > -2*w2["se"]))
+    (out / "e29_sdr_decision.json").write_text(json.dumps(decision, indent=2) + "\n")
+    print(json.dumps(decision))
+    return 0
+
+
 def hdr_arm_decisions(cells: dict, sdr: dict, study: str) -> tuple[dict, str | None]:
     """Apply the frozen E26/E27 rules to complete canonical seed/fold panels."""
+    if study == "e29":
+        return e29_decisions(cells, sdr)
     import math
     from e13_teacher import paired
     labels = {"e26": ("hd4", "hd16"), "e27": ("hp4", "ha4")}[study]
@@ -511,18 +633,21 @@ def cmd_e25(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score", "e27-grid", "e27-score", "e28-score"])
+    ap.add_argument("cmd", choices=["grid", "score", "e25", "e26-grid", "e26-score", "e27-grid", "e27-score", "e28-score", "e29-score"])
     ap.add_argument("--control-root", default="/var/tmp/rev4-featpot/v2c5")
     ap.add_argument("--root")
     ap.add_argument("--rev4-root", default="/var/tmp/rev4-featpot/v2c")
     ap.add_argument("--out")
     ap.add_argument("--program-sha", default="")
     ap.add_argument("--data-sha", default="")
+    ap.add_argument("--results")
+    ap.add_argument("--control-pins")
+    ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
     return {"grid": cmd_grid, "score": cmd_score, "e25": cmd_e25,
             "e26-grid": cmd_e26_grid, "e26-score": cmd_e26_score,
-            "e27-grid": cmd_e26_grid, "e27-score": cmd_e26_score, "e28-score": cmd_e28_score}[args.cmd](args)
+            "e27-grid": cmd_e26_grid, "e27-score": cmd_e26_score, "e28-score": cmd_e28_score, "e29-score": cmd_e29_score}[args.cmd](args)
 
 
 if __name__ == "__main__":

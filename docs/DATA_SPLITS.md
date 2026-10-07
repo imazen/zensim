@@ -1557,3 +1557,24 @@ evaluation label was read by the fit. Packed models: s0 `f803b74c…`, s1 `1bf8f
 `/mnt/tower/output/zensim-production-d1-2026-10-07/`). Release gates that read evaluation data wait for the owner to freeze the
 final composition (which seed or ensemble) before any read, per the scorecard.
 
+
+### E29 four-source HDR-consensus preparation (2026-10-07)
+
+Local amendment only; no full E29 fit, launch or assessment. D1 source/role
+approval is unchanged. Preparation copies the exact frozen four-source SDR
+inventory and 7,390 existing agreement-only HDR TRAIN rows; hb4 changes only
+the target and hc4 adds the complete two-teacher cross-reference pair list.
+An import-test mistake opened the entire 22,860-row/952-column legacy
+`hdrgrid_mc944_t2_val.parquet` before mocks were installed. It computed target
+swings, then failed before student prediction; no model fit used it. The
+panel import is now guarded and zero-open tripwires pass. The unintended
+legacy HDR VAL exposure violates the preparation limit and is disclosed;
+registered 3,900-row hdr_v3mix VAL, AIC, confirmation and protected labels
+remain unopened. Native HDR
+subset provenance remains explicit and unqualified. All 40 completed E30 nA3
+model/result artifacts were verified and pinned without label reads; exact
+program reuse parity is not asserted. The coordinator subsequently chose one shared fresh v40 matched control for
+E29/E31/E32 before scientific fitting; the solo proposal is superseded. Role/exposure receipt, staged
+root, executor smokes, producer pins and tower mirror:
+[E29 worklog](../benchmarks/E29_WORKLOG.md) and
+[preparation pointer](../benchmarks/e29_preparation_2026-10-07.pointer.md).
