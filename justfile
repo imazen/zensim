@@ -348,3 +348,7 @@ palette-verify bin commit root:
 palette-mirror source destination:
     mkdir -p {{destination}}
     rsync -rlt --omit-dir-times --info=progress2 {{source}}/ {{destination}}/
+
+# Research-only semantic admission controls, no image or label access.
+palette-admission-test:
+    python3 -m unittest discover -s scripts/tests -p test_palette_admission.py -v

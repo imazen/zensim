@@ -557,6 +557,14 @@ def cmd_palette_chromaq(a):
     return 0
 
 
+def validate_palette_instrument_manifest(path, build_commit, bank_sha256, pinned_sha256):
+    """The instrument admission owner; round-one checks retained for negative controls."""
+    im=json.loads(Path(path).read_text())
+    if im['labels_read'] or set(im['views'])!=set(PALETTE_TABLES) or im['bank_manifest_sha256']!=bank_sha256:
+        raise ValueError('instrument manifest mismatch')
+    return im
+
+
 def cmd_palette_verify(a):
     """Validate artifact schema, hashes, row identity and ordered joins independently."""
     root=Path(a.palette_verify)
@@ -590,8 +598,8 @@ def cmd_palette_verify(a):
         verified[name]={'rows':len(t),'features_sha256':m['features_sha256']}
         tables[name]=t
     im=json.loads((root/'instrument/_MANIFEST.json').read_text())
-    if im['labels_read'] or set(im['views'])!=set(PALETTE_TABLES) or im['bank_manifest_sha256']!=sha256_file(bank/'_MANIFEST.json'):
-        raise ValueError('instrument manifest mismatch')
+    validate_palette_instrument_manifest(root/'instrument/_MANIFEST.json', a.build_commit,
+        sha256_file(bank/'_MANIFEST.json'), getattr(a, 'palette_instrument_manifest_sha256', None))
     views={}
     for name,m in im['views'].items():
         path=root/'instrument'/f'{name}.parquet'
