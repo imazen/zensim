@@ -104,7 +104,7 @@ clippy:
 [positional-arguments]
 e32-extension-tests scratch target:
     TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib palette_training -- --nocapture
-    TMPDIR="$1" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p test_e32_palette_training.py
+    TMPDIR="$1" SHIPPATH_TRAINER="$2/release/zensim_mlp_train" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p test_e32_palette_training.py
 
 [positional-arguments]
 e32-extension-build scratch target:
@@ -113,6 +113,10 @@ e32-extension-build scratch target:
 [positional-arguments]
 e32-shippath-regression scratch trainer:
     TMPDIR="$1" SHIPPATH_TRAINER="$2" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
+
+[positional-arguments]
+e32-serving-refusal scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim --all-features --lib rev5_for_bake_refuses_reads_outside_the_supported_families -- --nocapture
 
 # Full 120 x 50,000 control replay, pinned E30 model comparison, no fleet owner.
 [positional-arguments]
