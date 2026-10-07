@@ -1424,3 +1424,33 @@ Owner decisions, verbatim (2026-10-07, in reply to the decision brief https://cl
   test (~21 looks, `docs/DATASET_HISTORY.md`), and E26/E27 showed teacher-only HDR legs cannot settle cross-image HDR calibration. Any
   other UPIQ portion stays T0. A new independent human HDR test is needed later (the planned Squintly HDR study).
 
+
+## Exposure ledger — 2026-10-07: PALETTE research-only feature extraction
+
+The PALETTE lane decoded pixels and projected keys/paths/pixel hashes only;
+no human labels, protected/holdout payloads or AIC-3 row enumeration were read.
+D1 roles remain unchanged. KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL and
+CID22-A25 contribute ordered design views; SafeSyn/CID22 train fit/dev and
+coverage companions retain their existing roles. NITS/LIVE/MCIQA sidecars
+are features-only, report-only. No E32 fit or qualification was performed.
+
+Current independent arithmetic is palette_v2, IDs f1825..f1866, producer set
+`palette@w1867/palette_v2#30b09cd1`, full-width research width 1867.
+Build `e60a6ad74a47981f93f969d63b605c7a88ab09b0` produced 254,778 bank rows and
+209,576 ordered instrument observations under
+`/mnt/v/output/zensim/palette-2026-10-07-v2/`. The instrument uses explicitly
+mapped `palette_f1825`..`palette_f1866` columns to avoid overwriting existing
+auxiliary f1825+ owners; repeated KADID observations remain in source order.
+Coverage path-derived keys are a separate domain from canonical pixel-pair
+keys. All bank hashes and every instrument feature join were independently
+verified. The initial palette_v1 tree is superseded and incompatible with v2;
+it remains preserved and cannot be mixed into a fit. Serving reads are refused.
+
+Bank/instrument/verification SHA-256s respectively:
+`46587338cc74ba59e38fe96e637776bfe74135fde29f3f70e22b51605fc50917`,
+`9f7523bf7d3aaa32418d40d83adb44edccff9e70cc75acc32eb8d5711fe89934`,
+`0f28b79a64061a62748f5f41c2cae35061f7875e3ff8d991b5ad25289307ad48`.
+Archive: `/mnt/tower/output/zensim-palette-archive-2026-10-07/palette_v2/`;
+three random file hashes match the mirror. R2 mirror absent. Full provenance,
+measured diagnostic limits and the inherited library failures are recorded in
+[PALETTE pointer](../benchmarks/palette_2026-10-07.pointer.md).
