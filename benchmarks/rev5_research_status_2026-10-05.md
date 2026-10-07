@@ -162,3 +162,16 @@ minimise MSE and maximise Kendall and Pearson correlation.
   expected value and is logged in CLAUDE.md Known Bugs.
 * **Disk:** D4 and the tbig cleanup are complete. All three divergent ~/tmp tbig copies were the canonical files with 1–2 MiB zeroed
   regions (dropped download chunks); they are archived on tower, not used.
+
+## 12. Updates (2026-10-07 14:20 UTC)
+
+* **E28 landed** on main (`f13b695c`, merge; 184 Python and 285 zensim-validate tests pass on the merged tree) and the zenmetrics fit
+  profile is on master (`2659b6c2`). **The first fleet launch failed**: all 100 cells refused at admission because the admission check
+  rejected any symlink in the data root's absolute path, and the fit executor deliberately reaches that root through a link. The local
+  image smokes never went through the executor, so they missed it. The jobset was stopped and dequeued within ten minutes; no fit ran.
+  Fix `8283d518` (only components below the data root may not be links; regression reproduces the fleet error) is under review, and the
+  v36 package is being built with a mandatory smoke through the executor's real entry point. Relaunch as `fitv2e28b-20261007`.
+* **Worker claim fix**, round 2: both review findings fixed (same-owner renewal collision no longer drops a live chunk; malformed
+  timestamps never authorize delete), rebased onto `master` alone. Re-review running.
+* **Fleet capacity:** i270 currently refuses the fleet's SSH key and presents a changed host key, so it is out until checked; E28 runs on
+  tower, i265, r3500 and r3800x (12 concurrent cells).
