@@ -118,10 +118,13 @@ class SpeedqTest(unittest.TestCase):
         log=self.root/'build.log'
         artifact=dict(reason='compiler-artifact',executable=str(current),target=dict(name='ssim2_speed_bar',kind=['bench']))
         finish=dict(reason='build-finished',success=True)
-        log.write_text('run-heavy chatter\n'+json.dumps(artifact)+'\n'+json.dumps(finish)+'\n')
+        dependency=dict(reason='compiler-artifact',package_id='registry#fast-ssim2@0.8.2',features=['rayon'],target=dict(name='fast_ssim2',kind=['lib']))
+        log.write_text('run-heavy chatter\n'+json.dumps(artifact)+'\n'+json.dumps(dependency)+'\n'+json.dumps(finish)+'\n')
         runner.freeze_binary(log,self.root/'frozen')
         self.assertEqual((self.root/'frozen').read_bytes(),b'current')
         self.assertTrue((self.root/'frozen').stat().st_mode & 0o111)
+        receipt=json.loads((self.root/'frozen.artifact.json').read_text())
+        self.assertEqual(receipt['dependencies']['fast_ssim2']['features'],['rayon'])
         other={**artifact,'executable':str(stale)}
         log.write_text(json.dumps(artifact)+'\n'+json.dumps(other)+'\n'+json.dumps(finish)+'\n')
         with self.assertRaisesRegex(AssertionError,'unambiguous'):runner.freeze_binary(log,self.root/'rejected')

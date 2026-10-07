@@ -377,7 +377,16 @@ def speedq_report(args) -> int:
                 if path.exists():
                     row=json.loads(path.read_text());assert row['quiet_gate']['admitted']
                     memories[(g,n,arm)]=row['max_rss_kib']
+    build_receipts={}
+    for directory in [root/'provenance',root.parent/'provenance']:
+        for path in directory.glob('*.artifact.json'):
+            rec=json.loads(path.read_text())
+            if rec.get('dependencies'): build_receipts[rec['binary_sha256']]=rec['dependencies']
+    inventories={json.dumps(build_receipts[h['binary_sha256']],sort_keys=True) for h in headers.values() if h.get('binary_sha256') in build_receipts}
+    peer_build=json.loads(next(iter(inventories))) if len(inventories)==1 else None
     missing=[]
+    if headers and (len(inventories)!=1 or any(h.get('binary_sha256') not in build_receipts for h in headers.values())):
+        missing.append('matching peer build receipts for every timing segment')
     if len(medians)!=192: missing.append(f'paired timing segments: {len(medians)}/192')
     if len(memories)!=112: missing.append(f'RSS measurements: {len(memories)}/112 (v4x, 1/32 threads)')
     pixels={g:math.prod(int(v) for v in g.split('x')) for g in sizes}
@@ -413,7 +422,7 @@ def speedq_report(args) -> int:
         'parity':{'strict_pass':384,'strict_required':384,'strict_feature_bits_pass':384,'consumed_features_per_cell':420,'rev3_cells':192,'rev3_tolerance_failed_cells':sum(r['tolerance_violations']>0 for r in legacy),'rev3_max_abs_feature_difference':max(r['max_abs_feature_difference'] for r in legacy),'rev3_max_tolerance_fraction':max(r['max_tolerance_fraction'] for r in legacy),'rev3_max_abs_score_difference':max(abs(r['score_difference']) for r in legacy)},
         'raw_directory':str(root),
         'statistics_owner':'zenbench e45822161a710acd013c572a98627e64663b1bcf; randomized paired rounds, 10K bootstrap, paired IQR filtering',
-        'peer_versions':{'fast_ssim2':'0.8.2','butteraugli':'0.9.3','ssimulacra2_rs':'0.5.1','archmage':'0.9.29','rayon_enabled_for_all_three_peers':True},
+        'peer_build':peer_build,
         'model_source_sha256':'802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1',
     }
     args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')

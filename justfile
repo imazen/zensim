@@ -230,7 +230,16 @@ bench-speed-matrix raw="/mnt/v/output/zensim/demos/speed-matrix-2026-09-18/raw" 
     }
     if [[ "${SPEEDQ:-0}" == 1 ]]; then
         export ZENSIM_BENCH_SKIP_CPP_FFI=1
-        BIN_SPEEDQ=$(build --features speedq,ssim2-rayon)
+        mkdir -p "$raw/provenance"
+        stamp=$(date -u +%Y%m%dT%H%M%SZ)
+        build_log="$raw/provenance/build-$stamp.jsonl"
+        ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- \
+            cargo bench --no-run --message-format=json-render-diagnostics \
+            --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar \
+            --features speedq,ssim2-rayon >"$build_log" 2>&1
+        BIN_SPEEDQ=$(python3 scripts/demos/speedq_run.py freeze \
+            --build-log "$build_log" --dest "$raw/provenance/instrument-$stamp")
+        cp zensim-bench/Cargo.lock "$raw/provenance/Cargo-$stamp.lock"
         export BIN_SPEEDQ
         rc=0
         scripts/demos/speed_matrix_run.sh "$raw" || rc=$?
