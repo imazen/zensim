@@ -186,3 +186,16 @@ minimise MSE and maximise Kendall and Pearson correlation.
   ownership read and the delete remains and is documented. Fit images built after this pick it up; E28's image predates it.
 * **SHIPPATH (D1 production fit + E30)** review found two admission/harvest ordering defects; round 11 is fixing them.
   **Palette round 2** (no public API change, semantic verifier, final E32 text) is under re-review.
+
+## 14. Updates (2026-10-07 15:25 UTC)
+
+* **E28 progress:** 18 of 100 cells done and harvested by 15:10 UTC, about 15–20 minutes per cell on 12 slots, no failures. A spot-checked
+  cell ran the full registered budget (120 epochs, 50,000 pairs, selected epoch 119).
+* **Palette features landed** on main (`0a8a7ef8`) after two review rounds: 42 research-only features (top N = 2–8 colour clusters, six
+  shift signals each), no change to the supported public API, a verifier that checks the instrument's identity and column map before
+  any join. **E32 is registered** on main (`benchmarks/e32_palette_registration_2026-10-07.md`): one primary arm (by_v2fy + 42 palette
+  features), four-source LODO, seed-level paired statistics, control = E30's 40 nA3 cells when exact parity holds. E32 launches only
+  after E30 completes. Measured limits stay in the registration: hue sign agrees on 97/168 synthetic cases, the features barely see
+  high-frequency chroma loss, and the 32×32 sample lattice can miss systematic edits.
+* **zenmetrics CI:** the fleet worker image workflow has failed since 2026-09-27 (deploy manifest missing the inherited lints table).
+  A verified fix is committed; GitHub rejected the push with an internal error three times, so it will be retried.
