@@ -52,6 +52,7 @@ use crate::adam_simd;
 // added to the RankNet per-prediction backprop direction. See module
 // docs for the exact formula and gradient derivation.
 mod loss_norm_in_norm;
+mod loss_pearson;
 
 mod goals;
 
@@ -62,6 +63,12 @@ pub use goals::{ValidationPolicy, compute_goal_scores};
 /// architecture (228 → 32 → 1) with `Min` validation gating.
 #[derive(Clone, Debug)]
 pub struct MlpHyperparams {
+    /// Opt-in dataset names for within-leg pooled objective; empty preserves every legacy path.
+    pub pooled_legs: Vec<String>,
+    /// Share of an opted-in leg's within-reference draws replaced with pooled rows.
+    pub pooled_rank_share: f64,
+    /// Weight of pooled Pearson batches; independent uniform rows within each opted-in leg.
+    pub pooled_pearson_weight: f64,
     /// `--nonneg-distance`: constrain the network so the dial's identity and
     /// no-cell-above-identity properties are STRUCTURAL rather than fitted.
     ///
@@ -921,6 +928,9 @@ pub struct MlpHyperparams {
 impl Default for MlpHyperparams {
     fn default() -> Self {
         Self {
+            pooled_legs: Vec::new(),
+            pooled_rank_share: 0.0,
+            pooled_pearson_weight: 0.0,
             nonneg_distance: false,
             nonneg_pin: 100.0,
             n_hidden: 32,
@@ -2798,7 +2808,77 @@ pub fn train_mlp_strategy(
     let tv_can_fire = tv
         .is_some_and(|c| c.weight > 0.0 && c.apply_every > 0 && !c.pairs.is_empty())
         && tv_std.is_some();
-    let lookahead_ok = fuse_w1 && !parallel && !nin_on && !tv_can_fire;
+    let pooled_on = !hyperparams.pooled_legs.is_empty();
+    let lookahead_ok = fuse_w1 && !parallel && !nin_on && !tv_can_fire && !pooled_on;
+    let pooled_mask: Vec<bool> = train_indices
+        .iter()
+        .map(|&gi| hyperparams.pooled_legs.contains(&groups[gi].name))
+        .collect();
+    for name in &hyperparams.pooled_legs {
+        assert!(
+            train_indices.iter().any(|&gi| &groups[gi].name == name),
+            "unknown/inactive pooled leg {name}"
+        );
+    }
+    let mut pearson_rng = SplitMix64::new(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed) ^ 0xe280_7065_6172_736f,
+    );
+    let mut pearson_rows: Vec<Vec<usize>> = vec![Vec::new(); groups.len()];
+    // Pearson rows are independent uniform pooled draws. Re-forward the whole
+    // same-leg batch against one current model, then one auxiliary Adam update.
+    macro_rules! flush_pearson {
+        ($gi:expr, $lr:expr) => {{
+            let gi = $gi;
+            let lr = $lr;
+            let rows = std::mem::take(&mut pearson_rows[gi]);
+            let mut forwards = Vec::with_capacity(rows.len());
+            let mut predictions = Vec::with_capacity(rows.len());
+            let mut targets = Vec::with_capacity(rows.len());
+            let mut scratch = Vec::new();
+            for &row in &rows {
+                let x = std_features.row(gi, row, &mut scratch).to_vec();
+                let (y, hp, h) = forward(
+                    &x,
+                    &w1,
+                    &b1,
+                    &w2,
+                    &b2,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                predictions.push(-ladder_sign * y);
+                targets.push(groups[gi].human_scores[row]);
+                forwards.push((x, hp, h));
+            }
+            let (_, gradient) = loss_pearson::loss_gradient(
+                &predictions,
+                &targets,
+                hyperparams.pooled_pearson_weight,
+            );
+            if gradient.iter().any(|g| *g != 0.0) {
+                for ((x, hp, h), dy) in forwards.iter().zip(gradient) {
+                    crate::simd_mlp::backprop_step(
+                        x,
+                        hp,
+                        h,
+                        -ladder_sign * dy,
+                        &mut adam.gw1,
+                        &mut adam.gb1,
+                        &w2,
+                        &mut adam.gw2,
+                        &mut adam.gb2,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
+                    );
+                }
+                adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+            }
+        }};
+    }
     let mut la_next: Option<Lookahead<'_>> = None;
 
     for epoch in 0..hyperparams.n_epochs {
@@ -2842,6 +2922,17 @@ pub fn train_mlp_strategy(
                     &mut rng,
                 ),
             };
+            let drawn = if pooled_on {
+                sampling::pool_draw(
+                    drawn,
+                    &row_counts,
+                    &pooled_mask,
+                    hyperparams.pooled_rank_share,
+                    &mut rng,
+                )
+            } else {
+                drawn
+            };
             if let Some(d) = sample_digest.as_mut() {
                 d.push(drawn);
             }
@@ -2849,6 +2940,12 @@ pub fn train_mlp_strategy(
                 continue;
             };
             let g_idx = train_indices[train_pos];
+            if pooled_mask[train_pos] && hyperparams.pooled_pearson_weight > 0.0 {
+                pearson_rows[g_idx].push((pearson_rng.next_u64() as usize) % row_counts[train_pos]);
+                if pearson_rows[g_idx].len() == 32 {
+                    flush_pearson!(g_idx, lr);
+                }
+            }
             let g = &groups[g_idx];
 
             // Norm-in-Norm (Li 2020) path: ALWAYS buffer K samples and
@@ -3367,6 +3464,13 @@ pub fn train_mlp_strategy(
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
             apply_post_adam_penalties(&mut w1, n_hidden, lr);
             nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+        }
+        if pooled_on {
+            for &gi in &train_indices {
+                if !pearson_rows[gi].is_empty() {
+                    flush_pearson!(gi, lr);
+                }
+            }
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is

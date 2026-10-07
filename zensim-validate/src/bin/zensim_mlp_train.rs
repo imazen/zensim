@@ -590,6 +590,16 @@ struct Args {
     #[arg(long, default_value_t = 1, value_name = "K")]
     minibatch_size: usize,
 
+    /// Dataset group to receive within-leg pooled rank/Pearson; repeat per eligible group.
+    #[arg(long)]
+    pooled_leg: Vec<String>,
+    /// Fixed share of eligible within-reference draws replaced by pooled rows.
+    #[arg(long, default_value_t = 0.0)]
+    pooled_rank_share: f64,
+    /// Pearson weight on same-leg uniform draw batches of 32 rows.
+    #[arg(long, default_value_t = 0.0)]
+    pooled_pearson_weight: f64,
+
     /// **DEPRECATED**: rayon parallel-batch is now ALWAYS on when
     /// `--minibatch-size > 1` (no behavior change vs sequential —
     /// bit-identical bake bytes per the T8.2 determinism gate). The
@@ -3082,6 +3092,10 @@ fn main() {
         .collect();
     let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
+    assert!(
+        !want_gpu || args.pooled_leg.is_empty(),
+        "pooled objective is CPU-only"
+    );
     preflight_cli_capabilities(&args, &matches, want_gpu);
     preflight_checkpoint_directory(&args).unwrap_or_else(|e| {
         eprintln!("checkpoint output preflight: {e}");
@@ -3097,6 +3111,9 @@ fn main() {
         }
     };
     let mut hyperparams = MlpHyperparams {
+        pooled_legs: args.pooled_leg.clone(),
+        pooled_rank_share: args.pooled_rank_share,
+        pooled_pearson_weight: args.pooled_pearson_weight,
         nonneg_distance: args.nonneg_distance,
         nonneg_pin: args.nonneg_pin,
         n_hidden: args.hidden,
@@ -4582,7 +4599,7 @@ fn main() {
                 })
             })
             .collect();
-        serde_json::json!({
+        let mut record = serde_json::json!({
             "schema": 1,
             "tool": "zensim_mlp_train",
             "table_admission": table_admission,
@@ -4627,8 +4644,13 @@ fn main() {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
-        })
-        .to_string()
+        });
+        if !args.pooled_leg.is_empty() {
+            record["pooled_objective"] = serde_json::json!({"legs": args.pooled_leg,
+                "rank_share": args.pooled_rank_share, "pearson_weight": args.pooled_pearson_weight,
+                "pearson_batch_rows": 32, "pearson_schedule": "per-leg 32 accepted pair draws; uniform independent rows; partial epoch flush"});
+        }
+        record.to_string()
     };
 
     // `zentrain.sample_coverage` — WHAT THIS RUN'S SAMPLER ACTUALLY TOUCHED

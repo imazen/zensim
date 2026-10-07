@@ -286,6 +286,42 @@ pub(crate) enum Draw {
 /// (within-ref) for the rows, with an early return after the group value
 /// when the group is unusable. Any change re-rolls every subsequent draw
 /// of every model ever trained, so it must be treated as an era break.
+/// Replace a fixed share of draws with two uniform rows in the SAME leg.
+/// The disabled path consumes no random values and returns the original draw.
+pub(crate) fn pool_draw(
+    draw: Draw,
+    counts: &[usize],
+    enabled: &[bool],
+    share: f64,
+    rng: &mut SplitMix64,
+) -> Draw {
+    let pos = match draw {
+        Draw::Pair { train_pos, .. } | Draw::SameRow { train_pos, .. } => train_pos,
+        _ => return draw,
+    };
+    if share == 0.0 || !enabled[pos] {
+        return draw;
+    }
+    if rng.next_f64_unit() >= share {
+        return draw;
+    }
+    let n = counts[pos];
+    let ia = (rng.next_u64() as usize) % n;
+    let ib = (rng.next_u64() as usize) % n;
+    if ia == ib {
+        Draw::SameRow {
+            train_pos: pos,
+            row: ia,
+        }
+    } else {
+        Draw::Pair {
+            train_pos: pos,
+            ia,
+            ib,
+        }
+    }
+}
+
 pub(crate) fn draw_pair(ctx: &PairDrawCtx<'_>, rng: &mut SplitMix64) -> Draw {
     // `--pair-sampling stratified`: a SCHEDULE, so it reads `draw_index`
     // and consumes NO rng. See the StratifiedPlan note above for why the
@@ -1640,5 +1676,44 @@ mod tests {
         let mut q = strat_params(4242);
         q.stratified_pairs = false;
         assert_ne!(a.digest.hex(), simulate(&gs, &q).digest.hex());
+    }
+}
+
+#[cfg(test)]
+mod pooled_tests {
+    use super::*;
+    #[test]
+    fn pooled_draws_keep_leg_and_disabled_stream() {
+        let draw = Draw::Pair {
+            train_pos: 1,
+            ia: 0,
+            ib: 1,
+        };
+        let mut a = SplitMix64::new(27);
+        let mut b = SplitMix64::new(27);
+        assert_eq!(
+            pool_draw(draw, &[2, 100], &[false, true], 0.0, &mut a),
+            draw
+        );
+        assert_eq!(a.next_u64(), b.next_u64());
+        let mut changed = 0;
+        for _ in 0..10000 {
+            match pool_draw(draw, &[2, 100], &[false, true], 0.5, &mut a) {
+                Draw::Pair { train_pos, ia, ib } => {
+                    assert_eq!(train_pos, 1);
+                    assert!(ia < 100 && ib < 100);
+                    if ia != 0 || ib != 1 {
+                        changed += 1;
+                    }
+                }
+                Draw::SameRow { train_pos, .. } => assert_eq!(train_pos, 1),
+                _ => panic!("invalid pooled draw"),
+            }
+        }
+        assert!(changed > 4700 && changed < 5300);
+        assert_eq!(
+            pool_draw(draw, &[2, 100], &[false, false], 1.0, &mut a),
+            draw
+        );
     }
 }
