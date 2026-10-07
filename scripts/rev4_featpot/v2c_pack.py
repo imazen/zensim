@@ -15,7 +15,6 @@ Every table is hash-checked against its receipt before it is copied. The caller 
 
 import argparse
 import gzip
-import hashlib
 import io
 import json
 import sys
@@ -120,6 +119,7 @@ def main() -> None:
     ap.add_argument("--kind", choices=["lodo", "confirm", "all"], required=True)
     ap.add_argument("--select", action="append", default=None, metavar="FAMILY/VARIANT")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--upiq380-fit", type=Path, help="prepare only the pinned E31 TRAIN fit transport; grants no disposition or launch")
     args = ap.parse_args()
     every = [(f, v) for f in FAMILIES for v in VARIANTS]
     chosen = every if args.select is None else [tuple(s.split("/", 1)) for s in args.select]
@@ -141,6 +141,26 @@ def main() -> None:
         raise SystemExit(f"mixed formula revisions in selected receipts: {revisions}")
     revision = revisions.pop()
     members = {f"rev4-featpot/{args.name}/{k}": v for k, v in members_for(args.root, args.kind, selected).items()}
+    if args.upiq380_fit is not None:
+        if args.kind != "lodo" or "hdr_consensus" in json.loads(receipt_path.read_text())["legs"]:
+            raise ValueError("E31 fit transport requires D1 LODO without teacher HDR")
+        from e31_training import MANIFEST_SHA, TABLE_SHA, KEYS_SHA
+        import pyarrow.parquet as pq
+        native = args.upiq380_fit
+        manifest, keys = Path(f"{native}.manifest.json"), keys_of(native)
+        if sha(manifest) != MANIFEST_SHA or sha(keys) != KEYS_SHA:
+            raise ValueError("E31 immutable TRAIN fit metadata/key pins required")
+        d = json.loads(manifest.read_text())
+        k = pq.read_table(keys)
+        if (d.get("rows") != 330 or d.get("role") != "train" or d.get("split") != "fit"
+                or d.get("qualified_provenance") is not False or len(k) != 330
+                or set(k["role"].to_pylist()) != {"train"} or set(k["split"].to_pylist()) != {"fit"}
+                or k["condition_id"].to_pylist() != d["member_set"]):
+            raise ValueError("E31 fit transport refuses development/foreign roles")
+        if sha(native) != TABLE_SHA:
+            raise ValueError("E31 immutable TRAIN fit payload changed")
+        for path in (native, manifest, keys):
+            members[f"rev4-featpot/upiq380-fit/{path.name}"] = path
     inventory = {"build_commit": json.loads((args.root / "wide/frozen.json").read_text()).get("build_commit"), "schema": "zenfleet-fit-data-v1", "label": "POTENTIAL — ceiling, not a model score",
                  "program": f"Rev{revision} potential Instrument v2-canon ({args.kind})", "variant_dirs": [f"{f}/{v}" for f, v in selected],
                  "files": {name: sha(path) for name, path in sorted(members.items())}}
