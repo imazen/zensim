@@ -48,6 +48,8 @@ verified against the pre-migration scipy script on identical inputs
 --verify-scipy additionally cross-checks every printed stat against scipy
 to <=1e-9 (the proven equivalence bound) — optional, off by default.
 """
+if __name__ != "__main__":  # CLI only: the module body reads an evaluation/protected panel
+    raise ImportError(f"{__name__} is a command-line script; importing it would read its data panel")
 import argparse, os, subprocess, sys, tempfile
 import numpy as np
 import pyarrow as pa

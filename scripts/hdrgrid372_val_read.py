@@ -7,6 +7,8 @@ scripts/lib/zen_stats.panel.
 
   usage: hdrgrid372_val_read.py <bake.bin> [--parquet P]
 """
+if __name__ != "__main__":  # CLI only: the module body reads an evaluation/protected panel
+    raise ImportError(f"{__name__} is a command-line script; importing it would read its data panel")
 import argparse, os, struct, subprocess, sys, tempfile
 from pathlib import Path
 import numpy as np

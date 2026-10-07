@@ -8,6 +8,8 @@ stats = zen_stats.panel_batch (owner).
 
 usage: hidden_terminal_read.py <bake.bin|name=path> ...
 """
+if __name__ != "__main__":  # CLI only: the module body reads an evaluation/protected panel
+    raise ImportError(f"{__name__} is a command-line script; importing it would read its data panel")
 import os, struct, subprocess, sys, tempfile
 from pathlib import Path
 import numpy as np

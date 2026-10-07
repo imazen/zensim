@@ -8,6 +8,8 @@ Owners only: forward = `predict_features_with_bake` (wire format), stats =
 
   usage: hdrp1_val_read.py <bake.bin> [--parquet P]
 """
+if __name__ != "__main__":  # CLI only: the module body reads an evaluation/protected panel
+    raise ImportError(f"{__name__} is a command-line script; importing it would read its data panel")
 import argparse
 import os
 import struct
