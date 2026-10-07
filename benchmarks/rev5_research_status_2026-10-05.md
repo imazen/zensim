@@ -319,3 +319,14 @@ minimise MSE and maximise Kendall and Pearson correlation.
   combined package (shared control + E29 + E32; E31's arm waits for the owner's provenance decision).
 * **KADID TERMINAL script:** the metadata race is closed (0 protected opens in 12,000 stressed attempts); round 4 fixes the label
   and scorer-binary reopen-by-name and hard-link aliases.
+
+## 24. Updates (2026-10-07 21:05 UTC)
+
+* **The three failing integration tests are stale contracts, not code defects.** The palette landing legitimately widened the
+  research feature registry to 1,867 slots (production still returns 1,825, and palette stays refused at serving), and Rev5
+  became a known revision by design. A proposed test patch keeps every assertion and makes each one check the current contract;
+  it's under a strictness review before it lands.
+* **Serving Rev5 needs `ZENSIM_FORMULA_REV=5` by design** — the Rev5 spec forbids mixing revisions in one process, so a product
+  integration (imageflow and others) must set the pin when it adopts the new model. Not a bug; it belongs in the release notes.
+* **E29 round 2 passes review.** It feeds the combined v40 program now being integrated with E31/E32.
+* **Disk:** reclaimed ~69 GB of inactive build output from finished zensim lanes (binaries archived to tower first).
