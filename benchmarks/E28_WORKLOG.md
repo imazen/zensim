@@ -234,3 +234,33 @@ package/image identities. Its absent-authorization check refuses before
 publication and leaves the fleet queue bytes unchanged. No authorization file,
 queue entry, push, image publication or R2 upload was made by this lane.
 The adjacent admission pointer records the replacement artifacts and evidence.
+
+## 2026-10-07 v35 prepared-root admission repack
+
+Coordinator fix `ab0b395f` calls `refuse_forbidden_dirs` first in the shared
+receipt admission owner. Both MLP and NM refuse extra confirm/HDR/sealed
+directories before the teacher checksum. Local source admission tests pass
+(16); the reviewer probe passes 25/25, including four prepared-root cases,
+with zero label-bearing opens or copies. Real-package admission accepts
+10/10 arm/fold combinations with zero label-table access under tripwires.
+
+Profile commit `2659b6c2` on `594b014b` pins the replacement Python owner;
+42 fit-tool tests pass. The packed program differs from v34 in exactly
+`e28_recipe.py` and `build_meta.json` (fit-script producer `ab0b395f`). All
+other program members, numerical binaries, and the complete data archive
+are identical. Data producer remains `a06541fd`; no Rust rebuild occurred.
+
+The local v35 installed-image s2m/KADID/seed-0 smoke uses 2 × 128 draws.
+Weights, selected epoch 1, sampler digest `e7b89fc0a50d7798`, and all recorded
+scores match v34 exactly. `/usr/bin/time -v` max RSS is 336940 KiB;
+the container's cgroup memory peak is 1231380480 bytes. Outer
+run-heavy smoke: rc=0, 8s, peak-RSS 0.03GiB, min-avail 44033MiB, peak-load 2.83.
+The registered 100-cell grid remains 120 × 50,000 draws, final epoch 119,
+H128/head N/420 columns, 1 CPU and 6 GiB. This bounded smoke does not
+provide a new full-trajectory measurement or model qualification.
+
+Archive audit passes: 20 program payloads, 101 data payloads plus inventory,
+37 receipt table bindings, 100 unique cells, no protected members.
+Launch authorization is absent and the gate refuses; nothing was pushed,
+uploaded to R2, or enqueued. Pins and evidence:
+[e28_repack_2026-10-07.pointer.md](e28_repack_2026-10-07.pointer.md).
