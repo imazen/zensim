@@ -346,3 +346,57 @@ e28-smoke-receipts root arm tools inspector:
 # The evidence directory carries the reviewed image/job/data pins and driver.
 e28-executor-image-smoke evidence mode="bounded" arm="s2m":
     bash "{{evidence}}/run_executor_smoke.sh" "{{mode}}" "{{arm}}"
+
+# Research-only PALETTE gates, keep the original Rev5 arithmetic gates intact.
+palette-test:
+    cargo test -p zensim --all-features --lib palette -- --nocapture
+    cargo test -p zensim --all-features --test palette_research -- --nocapture
+
+palette-build:
+    cargo build --release --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+
+# Explicit captures refuse to replace existing base/candidate evidence.
+palette-legacy-capture out:
+    #!/usr/bin/env bash
+    set -eu
+    for rev in 1 2 3 4 5; do
+        ZENSIM_FORMULA_REV="$rev" PALETTE_LEGACY_CAPTURE="{{out}}/rev$rev.bin" cargo test -p zensim --all-features --test palette_legacy_vectors -- --nocapture
+    done
+
+palette-bank bin commit out:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}} --chunk 512 --threads 8
+
+palette-chromaq bin commit out:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-chromaq /home/lilith/tmp/chromaq --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}} --chunk 128 --threads 8
+
+palette-diagnostic-report root:
+    python3 scripts/rev4_featpot/palette_diagnostic.py {{root}}
+
+palette-status log:
+    rg 'PALETTE |CHROMAQ |Traceback|ValueError|run-heavy: done' {{log}} | tail -8
+
+palette-instrument-views bin commit bank out:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-views {{bank}} --palette-instrument /var/tmp/rev4-featpot/v2c5 --bin {{bin}} --build-commit {{commit}} --era palette_v2 --out {{out}}
+
+palette-verify bin commit root instrument_sha:
+    python3 scripts/rev4_featpot/rev5_bank.py extract palette --palette-verify {{root}} --palette-instrument-manifest-sha256 {{instrument_sha}} --bin {{bin}} --build-commit {{commit}} --era palette_v2
+
+palette-mirror source destination:
+    mkdir -p {{destination}}
+    rsync -rlt --omit-dir-times --info=progress2 {{source}}/ {{destination}}/
+
+# Research-only semantic admission controls, no image or label access.
+palette-admission-test:
+    python3 -m unittest discover -s scripts/tests -p test_palette_admission.py -v
+
+# Round-two review gates, serialized with the caller's run-heavy wrapper.
+palette-round2-gates:
+    cargo test -p zensim --all-features --lib
+    just clippy
+    just api-doc
+    just api-doc-check
+
+palette-round2-build-checks:
+    cargo check -p zensim --no-default-features --features feature-regime-v2
+    cargo check --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+    just lint-scripts

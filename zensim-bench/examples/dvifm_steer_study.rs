@@ -47,10 +47,10 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use zenstats::{kendall_tau, pearson, spearman};
 use zensim::feature_set_id::SlotSet;
 use zensim::research::{DvifmFieldMap, Request};
 use zensim::{BakeScorer, Fused944Session, RgbSlice};
+use zenstats::{kendall_tau, pearson, spearman};
 
 // ===========================================================================
 // fast-ssim2 0.8.2 score composition — the published ssimulacra2/libjxl
@@ -62,42 +62,114 @@ use zensim::{BakeScorer, Fused944Session, RgbSlice};
 // ===========================================================================
 
 const SSIM2_WEIGHT: [f64; 108] = [
-    0.0, 0.000_737_660_670_740_658_6, 0.0,
-    0.0, 0.000_779_348_168_286_730_9, 0.0,
-    0.0, 0.000_437_115_573_010_737_9, 0.0,
-    1.104_172_642_665_734_6, 0.000_662_848_341_292_71, 0.000_152_316_327_837_187_52,
-    0.0, 0.001_640_643_745_659_975_4, 0.0,
-    1.842_245_552_053_929_8, 11.441_172_603_757_666, 0.0,
-    0.000_798_910_943_601_516_3, 0.000_176_816_438_078_653, 0.0,
-    1.878_759_497_954_638_7, 10.949_069_906_051_42, 0.0,
-    0.000_728_934_699_150_807_2, 0.967_793_708_062_683_3, 0.0,
-    0.000_140_034_242_854_358_84, 0.998_176_697_785_496_7, 0.000_319_497_559_344_350_53,
-    0.000_455_099_211_379_206_3, 0.0, 0.0,
-    0.001_364_876_616_324_339_8, 0.0, 0.0,
-    0.0, 0.0, 0.0,
-    7.466_890_328_078_848, 0.0, 17.445_833_984_131_262,
-    0.000_623_560_163_404_146_6, 0.0, 0.0,
-    6.683_678_146_179_332, 0.000_377_244_079_796_112_96, 1.027_889_937_768_264,
-    225.205_153_008_492_74, 0.0, 0.0,
-    19.213_238_186_143_016, 0.001_140_152_458_661_836_1, 0.001_237_755_635_509_985,
-    176.393_175_984_506_94, 0.0, 0.0,
-    24.433_009_998_704_76, 0.285_208_026_121_177_57, 0.000_448_543_692_383_340_8,
-    0.0, 0.0, 0.0,
-    34.779_063_444_837_72, 44.835_625_328_877_896, 0.0,
-    0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0,
-    0.0, 0.000_868_055_657_329_169_8, 0.0,
-    0.0, 0.0, 0.0,
-    0.0, 0.000_531_319_187_435_874_7, 0.0,
-    0.000_165_338_141_613_791_12, 0.0, 0.0,
-    0.0, 0.0, 0.0,
-    0.000_417_917_180_325_133_6, 0.001_729_082_823_472_283_3, 0.0,
-    0.002_082_700_584_663_643_7, 0.0, 0.0,
-    8.826_982_764_996_862, 23.192_433_439_989_26, 0.0,
-    95.108_049_881_108_6, 0.986_397_803_440_068_2, 0.983_438_279_246_535_3,
-    0.001_228_640_504_827_849_3, 171.266_725_589_730_7, 0.980_785_887_243_537_9,
-    0.0, 0.0, 0.0,
-    0.000_513_006_458_899_067_9, 0.0, 0.000_108_540_578_584_115_37,
+    0.0,
+    0.000_737_660_670_740_658_6,
+    0.0,
+    0.0,
+    0.000_779_348_168_286_730_9,
+    0.0,
+    0.0,
+    0.000_437_115_573_010_737_9,
+    0.0,
+    1.104_172_642_665_734_6,
+    0.000_662_848_341_292_71,
+    0.000_152_316_327_837_187_52,
+    0.0,
+    0.001_640_643_745_659_975_4,
+    0.0,
+    1.842_245_552_053_929_8,
+    11.441_172_603_757_666,
+    0.0,
+    0.000_798_910_943_601_516_3,
+    0.000_176_816_438_078_653,
+    0.0,
+    1.878_759_497_954_638_7,
+    10.949_069_906_051_42,
+    0.0,
+    0.000_728_934_699_150_807_2,
+    0.967_793_708_062_683_3,
+    0.0,
+    0.000_140_034_242_854_358_84,
+    0.998_176_697_785_496_7,
+    0.000_319_497_559_344_350_53,
+    0.000_455_099_211_379_206_3,
+    0.0,
+    0.0,
+    0.001_364_876_616_324_339_8,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    7.466_890_328_078_848,
+    0.0,
+    17.445_833_984_131_262,
+    0.000_623_560_163_404_146_6,
+    0.0,
+    0.0,
+    6.683_678_146_179_332,
+    0.000_377_244_079_796_112_96,
+    1.027_889_937_768_264,
+    225.205_153_008_492_74,
+    0.0,
+    0.0,
+    19.213_238_186_143_016,
+    0.001_140_152_458_661_836_1,
+    0.001_237_755_635_509_985,
+    176.393_175_984_506_94,
+    0.0,
+    0.0,
+    24.433_009_998_704_76,
+    0.285_208_026_121_177_57,
+    0.000_448_543_692_383_340_8,
+    0.0,
+    0.0,
+    0.0,
+    34.779_063_444_837_72,
+    44.835_625_328_877_896,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.000_868_055_657_329_169_8,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.000_531_319_187_435_874_7,
+    0.0,
+    0.000_165_338_141_613_791_12,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.000_417_917_180_325_133_6,
+    0.001_729_082_823_472_283_3,
+    0.0,
+    0.002_082_700_584_663_643_7,
+    0.0,
+    0.0,
+    8.826_982_764_996_862,
+    23.192_433_439_989_26,
+    0.0,
+    95.108_049_881_108_6,
+    0.986_397_803_440_068_2,
+    0.983_438_279_246_535_3,
+    0.001_228_640_504_827_849_3,
+    171.266_725_589_730_7,
+    0.980_785_887_243_537_9,
+    0.0,
+    0.0,
+    0.0,
+    0.000_513_006_458_899_067_9,
+    0.0,
+    0.000_108_540_578_584_115_37,
 ];
 
 const SSIM2_C2: f32 = 0.0009;
@@ -380,8 +452,12 @@ fn stratified_sample(rows: &[PairRow], cap: usize) -> Vec<PairRow> {
             .filter(|r| r.leg == leg && r.codec == codec)
             .collect();
         cell.sort_by(|a, b| {
-            (&a.band, &a.ref_basename, &a.q, &a.dist_path)
-                .cmp(&(&b.band, &b.ref_basename, &b.q, &b.dist_path))
+            (&a.band, &a.ref_basename, &a.q, &a.dist_path).cmp(&(
+                &b.band,
+                &b.ref_basename,
+                &b.q,
+                &b.dist_path,
+            ))
         });
         let k = group_cap.min(cell.len());
         if k == cell.len() {
@@ -408,8 +484,7 @@ fn stratified_sample(rows: &[PairRow], cap: usize) -> Vec<PairRow> {
         .collect();
     if picked.len() > cap {
         let n = picked.len();
-        let keep: std::collections::HashSet<usize> =
-            (0..cap).map(|i| (i * n) / cap).collect();
+        let keep: std::collections::HashSet<usize> = (0..cap).map(|i| (i * n) / cap).collect();
         picked = picked
             .into_iter()
             .enumerate()
@@ -545,8 +620,7 @@ fn main() {
     // The w986 request carries the DVIFM block-field side channel through the
     // SAME walk that emits pooled features (the steering field derives from
     // the pump's own block records — no second map pipeline).
-    let req = Request::for_slots(SlotSet::from_ranges([(0, 986)]), 986)
-        .collect_dvifm_fields(true);
+    let req = Request::for_slots(SlotSet::from_ranges([(0, 986)]), 986).collect_dvifm_fields(true);
 
     let mut jsonl = std::fs::File::create(out_dir.join("pairs.jsonl")).expect("pairs.jsonl");
     let mut blocks_bin = std::fs::File::create(out_dir.join("blocks.bin")).expect("blocks.bin");
@@ -573,7 +647,10 @@ fn main() {
         let nby = h / 5;
         if w < 40 || h < 40 {
             n_skipped_size += 1;
-            eprintln!("  [{pi}] skip {w}x{h} (lattice too small) {}", row.dist_path.display());
+            eprintln!(
+                "  [{pi}] skip {w}x{h} (lattice too small) {}",
+                row.dist_path.display()
+            );
             continue;
         }
         let rpx: Vec<[u8; 3]> = refd
@@ -711,8 +788,7 @@ fn main() {
             }
             let nx = w / s;
             let ny = h / s;
-            let mut grid: Vec<(usize, usize, usize, usize)> =
-                Vec::with_capacity(nx * ny);
+            let mut grid: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(nx * ny);
             for ry in 0..ny {
                 for rx in 0..nx {
                     grid.push((rx * s, ry * s, (rx + 1) * s, (ry + 1) * s));
@@ -829,9 +905,8 @@ fn main() {
                 let (_, ax0, ay0, ax1, ay1) = rect_records[ka];
                 let (_, bx0, by0, bx1, by1) = rect_records[kb];
                 // non-adjacent: touching corners allowed, shared edge is not
-                let edge_touch =
-                    (ax1 == bx0 || bx1 == ax0) && ay0.max(by0) < ay1.min(by1)
-                        || (ay1 == by0 || by1 == ay0) && ax0.max(bx0) < ax1.min(bx1);
+                let edge_touch = (ax1 == bx0 || bx1 == ax0) && ay0.max(by0) < ay1.min(by1)
+                    || (ay1 == by0 || by1 == ay0) && ax0.max(bx0) < ax1.min(bx1);
                 if edge_touch {
                     continue;
                 }
@@ -886,8 +961,7 @@ fn main() {
                 }
             }
             let ers = RgbSlice::new(&edited, w, h);
-            let ext2 = zensim::research::extract(&req, &rs, &ers)
-                .expect("leak re-extract");
+            let ext2 = zensim::research::extract(&req, &rs, &ers).expect("leak re-extract");
             let fields2 = ext2.dvifm_fields().expect("leak fields");
             for (l, lv2) in fields2.levels().iter().enumerate() {
                 let lv1 = &fields.levels()[l];
@@ -900,10 +974,8 @@ fn main() {
                         let d = (lv2.eps_blocks()[b] - lv1.eps_blocks()[b]).abs();
                         // block's scale-0 footprint vs the edit rect
                         let (fx0, fy0) = (bx as usize * 5 * scale, by as usize * 5 * scale);
-                        let (fx1, fy1) =
-                            ((fx0 + 5 * scale).min(w), (fy0 + 5 * scale).min(h));
-                        let overlaps =
-                            fx0 < x1 && fx1 > x0 && fy0 < y1 && fy1 > y0;
+                        let (fx1, fy1) = ((fx0 + 5 * scale).min(w), (fy0 + 5 * scale).min(h));
+                        let overlaps = fx0 < x1 && fx1 > x0 && fy0 < y1 && fy1 > y0;
                         if overlaps {
                             inside += d;
                         } else {
@@ -1049,5 +1121,8 @@ fn main() {
         serde_json::to_string_pretty(&summary).unwrap(),
     )
     .expect("summary.json");
-    eprintln!("done: {n_done} pairs in {:.0}s", t_start.elapsed().as_secs_f64());
+    eprintln!(
+        "done: {n_done} pairs in {:.0}s",
+        t_start.elapsed().as_secs_f64()
+    );
 }

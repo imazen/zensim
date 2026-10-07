@@ -54,7 +54,7 @@
 //! `v1_feature_width_pure_function.rs` already holds the v1 extractor to.
 
 use crate::ZensimError;
-use crate::feature_defs::{self, Channel, CostClass, RevisionStatus};
+use crate::feature_defs::{self, Channel, CostClass, Family, RevisionStatus};
 use crate::feature_plan::{Plan, PlanError};
 use crate::feature_set_id::{ComputeToken, FeatureSetId, SlotSet};
 use crate::source::ImageSource;
@@ -552,7 +552,7 @@ impl Request {
     /// registered layout width, at the current revision, single-threaded.
     #[must_use]
     pub fn everything() -> Request {
-        let w = feature_defs::full_width(crate::NUM_SCALES);
+        let w = full_width();
         Request {
             want: SlotSet::from_ranges([(0, w)]),
             layout_width: w,
@@ -804,6 +804,47 @@ impl Request {
         }
     }
 
+    // Research-only extension; the existing fold plan sees exactly its old IDs
+    // and layout. This deliberately does not relax Plan::for_bake's scope.
+    fn plan(&self) -> Result<Plan, ResearchError> {
+        let palette = self.want.intersect(&feature_defs::family_slots(
+            Family::Palette,
+            crate::NUM_SCALES,
+        ));
+        if palette.is_empty() {
+            return Ok(Plan::derive_with_layout(&self.want, self.layout())?);
+        }
+        if self.era_label == "palette_v1" {
+            return Err(ResearchError::RevisionUnavailable {
+                wanted: self.era_label.clone(),
+                incompatible: palette,
+                actual: vec!["palette_v2".to_string()],
+            });
+        }
+        #[cfg(not(feature = "training"))]
+        return Err(ResearchError::Plan(
+            "palette requires the training research build".into(),
+        ));
+        #[cfg(feature = "training")]
+        {
+            let legacy = SlotSet::from_ranges([(0, crate::palette::BASE)]).intersect(&self.want);
+            let legacy_layout = if self.dense {
+                crate::feature_layout::Layout::dense(&legacy)
+            } else {
+                crate::feature_layout::Layout::identity(self.layout_width.min(crate::palette::BASE))
+            };
+            let mut plan = Plan::derive_with_layout(&legacy, legacy_layout)?;
+            plan.layout = self.layout();
+            // An empty legacy request must not acquire the old plan's implicit
+            // basic carriers in a sparse palette-only layout.
+            if legacy.is_empty() {
+                plan.emit = SlotSet::default();
+            }
+            plan.emit = plan.emit.union(&palette.clipped_to(plan.walk_width()));
+            Ok(plan)
+        }
+    }
+
     /// Check the request WITHOUT touching an image: can it be planned, and
     /// can this build reproduce the revision it names?
     ///
@@ -820,7 +861,7 @@ impl Request {
     /// [`ResearchError::Plan`] / [`ResearchError::RevisionUnavailable`] /
     /// [`ResearchError::RevisionUnregistered`], exactly as [`extract`] would.
     pub fn validate(&self) -> Result<SlotSet, ResearchError> {
-        let plan = Plan::derive_with_layout(&self.want, self.layout())?;
+        let plan = self.plan()?;
         check_revision(self, &plan.emit)?;
         Ok(plan.emit)
     }
@@ -1110,6 +1151,9 @@ fn build_computes(r: &feature_defs::Revision) -> bool {
 /// runs, and reporting the landed one would make the provenance lie about the
 /// bytes beside it.
 fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
+    if signal.family == Family::Palette {
+        return "palette_v2";
+    }
     // An active ARITHMETIC era (Rev4's `tiercanon`) moved every slot, so it
     // is every slot's era — registered in `feature_defs::ARITHMETIC_REVISIONS`,
     // not per signal.
@@ -1125,6 +1169,9 @@ fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
 
 /// The commit of a signal's effective revision, or `"-"`.
 fn current_commit_of(signal: &'static feature_defs::SignalDef) -> &'static str {
+    if signal.family == Family::Palette {
+        return BUILD_COMMIT.unwrap_or("unrecorded");
+    }
     if let Some(r) = active_arithmetic_revision() {
         return r.commit;
     }
@@ -1362,7 +1409,7 @@ fn extract_impl(
     hdr: Option<crate::feature_v2::HdrEncoding>,
 ) -> Result<Extraction, ResearchError> {
     let ns = crate::NUM_SCALES;
-    let plan = Plan::derive_with_layout(&req.want, req.layout())?;
+    let plan = req.plan()?;
     check_revision(req, &plan.emit)?;
 
     let mut scratch = crate::feature_v2::V2Scratch::new();
@@ -1399,29 +1446,36 @@ fn extract_impl(
     {
         extras.dvifm = dvifm_extras.as_mut();
     }
-    let result = if let Some(encoding) = hdr {
-        crate::feature_v2::compute_folded720_hdr_streaming_extras(
-            source,
-            distorted,
-            encoding,
-            Some(120_000_000),
-            req.parallel,
-            toggles,
-            &mut scratch,
-            extras,
-        )
+    let palette_only = !plan.emit.is_empty() && plan.emit.iter_slots().all(|id| id >= 1825);
+    #[allow(unused_mut)] // Mutated by the training-only palette block.
+    let mut walk = if palette_only {
+        Vec::new()
     } else {
-        crate::feature_v2::compute_folded720_streaming_extras(
-            source,
-            distorted,
-            Some(120_000_000),
-            req.parallel,
-            toggles,
-            &mut scratch,
-            extras,
-        )
-    }
-    .map_err(ResearchError::Compute)?;
+        let result = if let Some(encoding) = hdr {
+            crate::feature_v2::compute_folded720_hdr_streaming_extras(
+                source,
+                distorted,
+                encoding,
+                Some(120_000_000),
+                req.parallel,
+                toggles,
+                &mut scratch,
+                extras,
+            )
+        } else {
+            crate::feature_v2::compute_folded720_streaming_extras(
+                source,
+                distorted,
+                Some(120_000_000),
+                req.parallel,
+                toggles,
+                &mut scratch,
+                extras,
+            )
+        }
+        .map_err(ResearchError::Compute)?;
+        result.into_features()
+    };
 
     // GATHER into the declared LAYOUT. The walk emits at its own identity
     // width; the layout says which id lives at which position, so a narrower
@@ -1430,7 +1484,28 @@ fn extract_impl(
     // authority on which positions carry a computed number — the byte at an
     // unpopulated position is its finaliser's degenerate value, which is not
     // always `0.0` (see `nonzero_structural_fill_slots`).
-    let walk = result.into_features();
+    #[cfg(feature = "training")]
+    if !plan
+        .emit
+        .intersect(&feature_defs::family_slots(
+            Family::Palette,
+            crate::NUM_SCALES,
+        ))
+        .is_empty()
+    {
+        if hdr.is_some() {
+            return Err(ResearchError::Plan(
+                "palette_v2 does not support native HDR".into(),
+            ));
+        }
+        let palette = crate::palette::extract(source, distorted)?;
+        walk.resize(crate::palette::BASE + crate::palette::WIDTH, 0.0);
+        for (offset, value) in palette.into_iter().enumerate() {
+            if plan.emit.contains(crate::palette::BASE + offset) {
+                walk[crate::palette::BASE + offset] = value;
+            }
+        }
+    }
     let mut values = Vec::new();
     plan.layout.gather(&walk, &mut values);
 
@@ -1455,11 +1530,49 @@ fn extract_impl(
             // reader can rebuild a SPARSE set without searching candidate
             // widths; it is not part of the id's identity.
             FeatureSetId::new_with_layout(
-                id.compute(),
+                if plan
+                    .emit
+                    .intersect(&feature_defs::family_slots(
+                        Family::Palette,
+                        crate::NUM_SCALES,
+                    ))
+                    .is_empty()
+                {
+                    id.compute()
+                } else {
+                    if palette_only {
+                        crate::feature_set_id::ComputeParts::EMPTY.with_palette()
+                    } else {
+                        id.compute().with_palette()
+                    }
+                },
                 plan.layout_width(),
                 &req.era_label,
                 plan.emit.hash8(),
             )
+        })
+        .or_else(|| {
+            if plan
+                .emit
+                .intersect(&feature_defs::family_slots(
+                    Family::Palette,
+                    crate::NUM_SCALES,
+                ))
+                .is_empty()
+            {
+                None
+            } else {
+                FeatureSetId::new_with_layout(
+                    if palette_only {
+                        crate::feature_set_id::ComputeParts::EMPTY.with_palette()
+                    } else {
+                        plan.compute.compute_parts().with_palette()
+                    },
+                    plan.layout_width(),
+                    &req.era_label,
+                    plan.emit.hash8(),
+                )
+            }
         });
 
     // Training side output: flatten each level's records to their 20-f32
@@ -1558,7 +1671,16 @@ pub fn family_slots(family: ComputeToken) -> SlotSet {
 /// The full registered layout width at the shipped scale count.
 #[must_use]
 pub fn full_width() -> usize {
-    feature_defs::full_width(crate::NUM_SCALES)
+    #[cfg(feature = "training")]
+    {
+        feature_defs::full_width(crate::NUM_SCALES)
+    }
+    #[cfg(not(feature = "training"))]
+    {
+        feature_defs::block_base(Family::Palette, crate::NUM_SCALES)
+            .expect("palette block")
+            .0
+    }
 }
 
 #[cfg(test)]

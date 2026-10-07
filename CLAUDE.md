@@ -168,6 +168,16 @@ because cleanup tests or a historical training reproduction pass.
   epoch before deliberate stop. Prior direct-owner smokes did not exercise
   that executor link. Evidence: `benchmarks/E28_WORKLOG.md`.
 
+* **2026-10-07 — Palette verification accepted wrong instrument identity/map. FIXED in PALETTE2.**
+  Round-one joins ignored the instrument's feature-set identity and column map;
+  palette_v1 relabelling and swapped 1825/1826 maps passed. Admission now
+  requires a consumer-frozen exact-byte SHA-256 and checks the registered
+  identity, ordered integer IDs, exact map, producer commit and false serving
+  flag before any feature-table read. The strict negative controls fail before
+  and pass after the fix. Original receipts remain `_VERIFIED.round1.json`;
+  `_VERIFIED.json` is the new semantic-identity receipt.
+
+
 * **2026-10-07 — SHIPPATH7's by_v2fy projection producer broke three registry tests. Two FIXED (`47a2e1d4`), one OPEN pending an owner decision.**
   `benchmarks/feature_sets_registry.json` registers `basic+v2@w720/rev5_localwin#62adfc93` as a producer whose recorded slots are the
   420 by_v2fy IDs (all other slots NaN). The zensim registry gates derived the full 504-slot `basic+v2` set and failed; the entry now
@@ -176,6 +186,28 @@ because cleanup tests or a historical training reproduction pass.
   ≥372-wide root populates basic slots (only the September sampling producers are exempt). The projection root correctly reports
   unpopulated basic slots 0–12 and 26–38; making the test pass means changing its expected count for this entry (or registering the
   projection differently), which needs the owner's OK.
+
+* **2026-10-07 — Palette revision declaration lacked its landed commit. FIXED.**
+  The full library census rejected the temporary `"-"` marker for palette_v2.
+  Its declaration now pins the actual corrective commit `f9a38a33`; the
+  existing assertion remains unchanged. Extracted provenance already pinned
+  producer `e60a6ad7`, so this metadata correction changes no measured value.
+
+* **2026-10-07 — Initial palette signed-population regression. FIXED at palette_v2.**
+  Matched mean populations could report a positive lightness shift for a global
+  -0.03 OKLab edit after median-cut repartition (N=3). Signed lightness/chroma
+  now subtract each palette's independently weighted means. The full RGB8
+  direction regression remains strict for every N=2–8. Initial palette_v1
+  sidecars remain superseded evidence and cannot mix with palette_v2.
+
+* **2026-10-07 — Rev1 registry gates fail on the recorded by_v2fy projection. FIXED on main at `47a2e1d4`.**
+  Frozen base `1d3bf35a` reproduces both definition-registry and producer-plan
+  census failures: `basic+v2@w720/rev5_localwin#62adfc93` records 420 projected
+  reads while generic token expansion produces 504 slots. No expectation was
+  changed by PALETTE. The registered `by_v2fy_420` selection on main fixes
+  both gates; retain the frozen-base historical receipts. The separate
+  zensim-validate partial-producer test remains OPEN pending its owner. Saved baseline output is indexed in the PALETTE
+  evidence pointer; the palette-only request has its own exact emitted-ID gate.
 
 * **2026-10-05 — E27 launch omitted the actual jobset memory-cap entry. RESOLVED for the running study by the coordinator.**
   Manifest memory hints did not set the fleet runtime cap. The coordinator installed the existing

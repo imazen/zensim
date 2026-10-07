@@ -580,7 +580,11 @@ fn main() {
         String::from("ref_path\tdist_path")
     };
     if score_bakes.is_empty() {
-        for i in 0..if requested_ids.is_some() || (composition.is_some() && zensim::feature_v2::active_formula_revision() == zensim::feature_v2::FormulaRevision::Rev5) {
+        for i in 0..if requested_ids.is_some()
+            || (composition.is_some()
+                && zensim::feature_v2::active_formula_revision()
+                    == zensim::feature_v2::FormulaRevision::Rev5)
+        {
             zensim::research::full_width()
         } else {
             944

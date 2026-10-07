@@ -102,6 +102,7 @@ fn main() {
     let mut force_tier = None;
     let mut full_944 = false;
     let mut full_986 = false;
+    let mut palette_only = false;
     let mut full_rev4 = false;
     let mut full_gmsbank = false;
     // Restored cuts (COST_CUTS_AUDIT): `--restore-cuts mapdev,z1max,gmsnative`
@@ -126,6 +127,7 @@ fn main() {
             "--era-label" => era_label = Some(args.next().expect("--era-label value")),
             "--full-944" => full_944 = true,
             "--full-986" => full_986 = true,
+            "--palette-only" => palette_only = true,
             "--full-rev4" => full_rev4 = true,
             "--full-gmsbank" => full_gmsbank = true,
             "--restore-cuts" => {
@@ -204,15 +206,18 @@ fn main() {
             full_986,
             full_rev4,
             full_gmsbank,
+            palette_only,
             restore_cuts.is_some()
         ]
         .iter()
         .filter(|b| **b)
         .count()
             <= 1,
-        "--full-944/--full-986/--full-rev4/--full-gmsbank/--restore-cuts are mutually exclusive"
+        "--full-944/--full-986/--full-rev4/--full-gmsbank/--palette-only/--restore-cuts are mutually exclusive"
     );
-    let research_path = full_986 || full_rev4 || full_gmsbank || restore_cuts.is_some();
+    let research_path =
+        palette_only || full_986 || full_rev4 || full_gmsbank || restore_cuts.is_some();
+    let palette_layout = palette_only;
     // `--era-label TOKEN`: stamp the extraction's `feature_set_id` era
     // (`Request::with_era_label`). Research path only; the token must be a
     // valid `feature_set_id` token ([a-z0-9_]).
@@ -277,8 +282,10 @@ fn main() {
     // there. The request is built once and shared by every pair.
     // `--full-rev4` is the same request at the rev4 bank's full width.
     let research_req = research_path.then(|| {
-        let w = if restore_cuts.is_some() {
-            zensim::research::full_width()
+        let w = if palette_layout {
+            1867
+        } else if restore_cuts.is_some() {
+            1825
         } else if full_gmsbank {
             1502
         } else if full_rev4 {
@@ -288,16 +295,20 @@ fn main() {
         };
         let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
         let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
-        let want = match &restore_cuts {
-            Some(tokens) => tokens.iter().fold(
-                if restore_prefix {
-                    zensim::feature_set_id::SlotSet::from_ranges([(0, 1502)])
-                } else {
-                    zensim::feature_set_id::SlotSet::default()
-                },
-                |acc, &t| acc.union(&zensim::research::family_slots(t)),
-            ),
-            None => zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
+        let want = if palette_only {
+            zensim::feature_set_id::SlotSet::from_ranges([(1825, 1867)])
+        } else {
+            match &restore_cuts {
+                Some(tokens) => tokens.iter().fold(
+                    if restore_prefix {
+                        zensim::feature_set_id::SlotSet::from_ranges([(0, 1502)])
+                    } else {
+                        zensim::feature_set_id::SlotSet::default()
+                    },
+                    |acc, &t| acc.union(&zensim::research::family_slots(t)),
+                ),
+                None => zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
+            }
         };
         let mut req = zensim::research::Request::for_slots(want, w);
         if let Some(label) = era_label.as_deref() {
@@ -394,8 +405,10 @@ fn main() {
 
     if let Some(audit) = &audit {
         audit
-            .validate_feature_width(if restore_cuts.is_some() {
-                zensim::research::full_width()
+            .validate_feature_width(if palette_layout {
+                1867
+            } else if restore_cuts.is_some() {
+                1825
             } else if full_gmsbank {
                 1502
             } else if full_rev4 {
@@ -533,8 +546,10 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    let expected_width = if restore_cuts.is_some() {
-        zensim::research::full_width()
+    let expected_width = if palette_layout {
+        1867
+    } else if restore_cuts.is_some() {
+        1825
     } else if full_gmsbank {
         1502
     } else if full_rev4 {

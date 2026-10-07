@@ -1469,3 +1469,55 @@ refuses confirmation/HDR directories before copying. The 37 numerical tables
 are unchanged; key sidecars, manifest bindings and receipt provenance changed.
 Producer and artifact receipts: `benchmarks/e28_admission_2026-10-07.pointer.md`.
 The existing E28 exploratory population and qualification limits still apply.
+
+## Exposure ledger — 2026-10-07: PALETTE research-only feature extraction
+
+The PALETTE lane decoded pixels and projected keys/paths/pixel hashes only;
+no human labels, protected/holdout payloads or AIC-3 row enumeration were read.
+D1 roles remain unchanged. KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL and
+CID22-A25 contribute ordered design views; SafeSyn/CID22 train fit/dev and
+coverage companions retain their existing roles. NITS/LIVE/MCIQA sidecars
+are features-only, report-only. No E32 fit or qualification was performed.
+
+Current independent arithmetic is palette_v2, IDs f1825..f1866, producer set
+`palette@w1867/palette_v2#30b09cd1`, full-width research width 1867.
+Build `e60a6ad74a47981f93f969d63b605c7a88ab09b0` produced 254,778 bank rows and
+209,576 ordered instrument observations under
+`/mnt/v/output/zensim/palette-2026-10-07-v2/`. The instrument uses explicitly
+mapped `palette_f1825`..`palette_f1866` columns to avoid overwriting existing
+auxiliary f1825+ owners; repeated KADID observations remain in source order.
+Coverage path-derived keys are a separate domain from canonical pixel-pair
+keys. All bank hashes and every instrument feature join were independently
+verified. The initial palette_v1 tree is superseded and incompatible with v2;
+it remains preserved and cannot be mixed into a fit. Serving reads are refused.
+
+Bank/instrument/verification SHA-256s respectively:
+`46587338cc74ba59e38fe96e637776bfe74135fde29f3f70e22b51605fc50917`,
+`9f7523bf7d3aaa32418d40d83adb44edccff9e70cc75acc32eb8d5711fe89934`,
+`0f28b79a64061a62748f5f41c2cae35061f7875e3ff8d991b5ad25289307ad48`.
+Archive: `/mnt/tower/output/zensim-palette-archive-2026-10-07/palette_v2/`;
+three random file hashes match the mirror. R2 mirror absent. Full provenance,
+measured diagnostic limits and the inherited library failures are recorded in
+[PALETTE pointer](../benchmarks/palette_2026-10-07.pointer.md).
+
+## Exposure ledger — 2026-10-07: PALETTE2 identity admission correction
+
+No new pixel extraction, human-label read, model fit or role change. Canonical
+palette_v2 features retain producer e60a6ad7 and the original pinned bank and
+instrument manifest bytes. New instrument admission requires the consumer's
+frozen instrument manifest SHA-256 and exact palette_v2 identity, ordered
+integer IDs, map, producer commit and false serving flag before feature reads.
+Strict palette_v1 and swapped-map negative controls reject consistently
+rehashed wrong identities as well as changed bytes. The original value-join
+receipt (hash recorded above) is retained as `_VERIFIED.round1.json`; the new
+`_VERIFIED.json` SHA-256 is `5424cd0d015ca48e94d3a04fc94a2507eadd75e805e977ec39842208756465b1`.
+All 254,778 bank rows and 209,576 instrument observations passed the new
+verification. External roles and D1 stay unchanged; AIC-3 remains unread.
+
+The supported public token/API snapshots are unchanged from rebased main.
+E32's [final registration proposal](../benchmarks/e32_palette_registration_2026-10-07.md)
+requires E30's complete frozen 40-cell nA3 control and exact parity, or one
+fresh matched control registered before any E32 fit. The four-source seed
+composite and fixed KADID/TID W2 reductions are defined before outcomes.
+No launch is authorized until the coordinator registers and freezes all
+transport/program/data/control pins. See the [round-two pointer](../benchmarks/palette2_2026-10-07.pointer.md).

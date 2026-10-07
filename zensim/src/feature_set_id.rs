@@ -233,6 +233,16 @@ impl ComputeParts {
         self.0 & t.bit() != 0
     }
 
+    // Private research wire bit: no supported ComputeToken variant or iterator
+    // item. Existing public token bits/order remain exactly unchanged.
+    pub(crate) const fn with_palette(self) -> Self {
+        Self(self.0 | (1 << 22))
+    }
+
+    pub(crate) const fn has_palette(self) -> bool {
+        self.0 & (1 << 22) != 0
+    }
+
     /// Is the set empty?
     #[must_use]
     pub const fn is_empty(self) -> bool {
@@ -258,7 +268,11 @@ impl ComputeParts {
         }
         let mut out = Self::EMPTY;
         for part in s.split('+') {
-            out = out.with(ComputeToken::parse(part)?);
+            out = if part == "palette" {
+                out.with_palette()
+            } else {
+                out.with(ComputeToken::parse(part)?)
+            };
         }
         Some(out)
     }
@@ -270,7 +284,17 @@ impl fmt::Display for ComputeParts {
             return f.write_str("none");
         }
         let mut first = true;
-        for t in self.iter() {
+        for t in ComputeToken::ALL.iter().copied() {
+            if t == ComputeToken::Moments && self.has_palette() {
+                if !first {
+                    f.write_str("+")?;
+                }
+                f.write_str("palette")?;
+                first = false;
+            }
+            if !self.contains(t) {
+                continue;
+            }
             if !first {
                 f.write_str("+")?;
             }

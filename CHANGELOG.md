@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+### Added
+
+- Research-only internal `palette` family and 42 explicit dominant-colour shift
+  features (f1825–f1866, N=2–8), with signed OKLab lightness/chroma/hue,
+  weighted assignment and palette population transport. Training extraction
+  supports `--palette-only`; serving refuses the family. Existing feature
+  IDs and arithmetic remain unchanged. Design: `benchmarks/palette_design_2026-10-07.md` (2f993850).
+
 - Revise the unconsumed experimental C8 GMSBANK definition (2026-09-24):
   native Y gradients, coarse X/Y/B gradients with separately calibrated
   chroma stabilizers, and coarse joint X/B chromaticity loss/deviation.
@@ -14,6 +24,16 @@
 - E28 admission (`a06541fd`): validate frozen human manifests/populations and label-free row-key/source bindings before label-bearing payload reads; replace recursive preparation copy with an explicit approved inventory and pre-copy forbidden-directory refusal.
 
 - E28 (`60c531b1`, `a1028fbc`, `6ae1708f`): opt-in dataset-isolated pooled rank and differentiable Pearson training, fixed recipe legs and grouped NM diagnostic, and E13/E24 assessment gates. Default and HDR paths retain their numerical model bytes in short parity fits.
+
+- PALETTE2 keeps the supported public token/API surface unchanged, validates
+  pinned instrument bytes plus exact identity/IDs/map before value joins, and
+  defines E32 paired-seed statistics and E30 control prerequisites (44df6062,
+  8af7a7a9, 21cc8b50).
+
+- The research palette family uses `palette_v2`: signed L/C subtract each
+  palette's own population-weighted mean, preserving global edit direction
+  after repartition. Reject superseded `palette_v1` requests and retain its
+  incompatible sidecars as evidence (f9a38a33).
 
 - Refuse malformed ZCTH v4 numerical/flag contracts before scoring, and verify
   original TRAIN source bindings alongside copied views during companion

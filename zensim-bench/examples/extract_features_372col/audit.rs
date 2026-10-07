@@ -326,11 +326,11 @@ impl Config {
     ) -> Result<Value, String> {
         if !matches!(
             features.len(),
-            372 | 944 | 986 | 1322 | 1502 | 1562 | 1790 | 1820 | 1825
+            372 | 944 | 986 | 1322 | 1502 | 1562 | 1790 | 1820 | 1825 | 1867
         ) || !features.iter().all(|v| v.is_finite())
         {
             return Err(
-                "audit requires 372, 944, 986, 1322, 1502, 1562, 1790, 1820 or 1825 finite canonical features"
+                "audit requires 372, 944, 986, 1322, 1502, 1562, 1790, 1820, 1825 or 1867 finite canonical features"
                     .into(),
             );
         }
