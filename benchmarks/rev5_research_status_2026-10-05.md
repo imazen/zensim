@@ -228,3 +228,18 @@ minimise MSE and maximise Kendall and Pearson correlation.
   feature-ID count, not identity; and the draft trained on AIC-3. E31 is being rewritten as a four-source design with E30's nA3 cells
   as its control.
 * **CI snapshot fix** landed: a lock-check snapshot is now 0.5 GB instead of 18 GB.
+
+## 17. Updates (2026-10-07 17:35 UTC)
+
+* **E28 verdict: no.** Neither SSIM2-recipe arm passes and the by_v2fy control is retained. s2o (SSIMULACRA2's pooled
+  within-dataset Kendall/Pearson terms added to the current mix): signed −0.0018 ± 0.0012, TID2013 −0.0054 (breaks the per-source
+  guard), pooled KROCC −0.0027 and PLCC −0.0019 — no recipe signal. s2m (SSIMULACRA2's own data mix, without SafeSyn and the coverage
+  leg): signed −0.0360, KADID −0.1416. So the answer to "can we use SSIMULACRA2's recipe?" is that we can, and on by_v2fy it doesn't
+  help; dropping SafeSyn/coverage hurts a lot. E28b (F-scale KonFiG label) isn't worth running on this evidence. Records on main
+  (`296b6702`); tower archive verified file by file.
+* **E30 running** since 17:06 UTC (40 four-source cells, 12 at a time). It's report-only and not a gate on D1; the production fit
+  (three seeds) launches once E30's report is recorded, per the D1 ledger.
+* **UPIQ-380 landed and E31 registered** (`6aeddf43`) after two review rounds: four-source D1 design, E30's nA3 cells as control,
+  one human HDR rank arm. E29 (HDR teacher consensus) is being amended to the same four-source design and implemented.
+* **Release prep:** a production gate map and the one-time KADID TERMINAL read script (refuses without a final-model receipt and an
+  explicit authorization; tested only on synthetic data) are in review.
