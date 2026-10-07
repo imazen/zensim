@@ -85,6 +85,11 @@ struct Args {
     /// the knob (those were all uniform).
     #[arg(long, default_value_t = false)]
     stratified_pairs: bool,
+    /// Opt-in pooled rank legs for an explicit group replay.
+    #[arg(long = "pooled-leg")]
+    pooled_legs: Vec<String>,
+    #[arg(long, default_value_t = 0.0)]
+    pooled_rank_share: f64,
 
     /// Verify the replayed sequence hash against a real run's
     /// `ZENSIM_SAMPLE_DIGEST=1` output. Exits 3 on mismatch.
@@ -150,6 +155,8 @@ fn main() {
     let mut strat = args.stratified_bands;
     let mut psa = args.per_sample_alpha_head;
     let mut strat_pairs = args.stratified_pairs;
+    let mut pooled_legs = args.pooled_legs.clone();
+    let mut pooled_rank_share = args.pooled_rank_share;
     let mut source = String::from("cli");
 
     if let Some(fe) = &args.fulleval {
@@ -165,6 +172,10 @@ fn main() {
         if !repro.is_object() {
             eprintln!("subset_sim: {fe:?} has no embedded repro block — cannot reconstruct");
             std::process::exit(2);
+        }
+        if let Some(pool) = repro.get("pooled_objective") {
+            pooled_legs = serde_json::from_value(pool["legs"].clone()).expect("pooled legs");
+            pooled_rank_share = pool["rank_share"].as_f64().expect("pooled rank share");
         }
         source = fe.display().to_string();
         // Groups: repro.inputs[] carries name/path/train_w/within_ref, and its
@@ -276,7 +287,9 @@ fn main() {
     }
 
     let disjoint_words = if args.require_disjoint_sampler_windows {
-        let checked = if strat_pairs {
+        let checked = if !pooled_legs.is_empty() {
+            Err("disjoint-window check does not bound pooled rank RNG draws".to_string())
+        } else if strat_pairs {
             Err("disjoint-window check requires the uniform sampler".to_string())
         } else {
             disjoint_sampler_windows(&seeds, epochs, ppe)
@@ -340,6 +353,8 @@ fn main() {
             early_window: args.early_window,
             per_sample_alpha_head: psa,
             stratified_pairs: strat_pairs,
+            pooled_legs: pooled_legs.clone(),
+            pooled_rank_share,
         };
         let r = sampling::simulate(&sim_groups, &p);
         if let Some(want) = &args.expect_digest {

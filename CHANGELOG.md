@@ -11,6 +11,8 @@
 
 ### Changed
 
+- E28 (`60c531b1`, `a1028fbc`, `6ae1708f`): opt-in dataset-isolated pooled rank and differentiable Pearson training, fixed recipe legs and grouped NM diagnostic, and E13/E24 assessment gates. Default and HDR paths retain their numerical model bytes in short parity fits.
+
 - Refuse malformed ZCTH v4 numerical/flag contracts before scoring, and verify
   original TRAIN source bindings alongside copied views during companion
   provenance admission. Legacy v1/v2/v3 parsing and scoring remain unchanged.

@@ -3093,7 +3093,10 @@ fn main() {
     let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
     assert!(
-        !want_gpu || args.pooled_leg.is_empty(),
+        !want_gpu
+            || (args.pooled_leg.is_empty()
+                && args.pooled_rank_share == 0.0
+                && args.pooled_pearson_weight == 0.0),
         "pooled objective is CPU-only"
     );
     preflight_cli_capabilities(&args, &matches, want_gpu);
@@ -4724,6 +4727,8 @@ fn main() {
                     stratified_bands: hyperparams.stratified_bands,
                     early_window: 0,
                     per_sample_alpha_head: args.per_sample_alpha_head,
+                    pooled_legs: hyperparams.pooled_legs.clone(),
+                    pooled_rank_share: hyperparams.pooled_rank_share,
                     stratified_pairs: hyperparams.pair_sampling
                         == mlp_train::PairSampling::Stratified,
                 };
