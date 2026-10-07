@@ -38,8 +38,10 @@ EPOCH_RE = re.compile(r"epoch\s+(\d+)\s+\|.*?val\(geomean3\)=([+-]?\d+\.\d+)")
 
 
 def run(cmd: list[str], log: Path) -> None:
-    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    log.write_text("$ " + " ".join(cmd) + "\n" + proc.stdout)
+    with log.open("w") as stream:
+        stream.write("$ " + " ".join(cmd) + "\n")
+        stream.flush()
+        proc = subprocess.run(cmd, text=True, stdout=stream, stderr=subprocess.STDOUT)
     if proc.returncode:
         raise RuntimeError(f"{cmd[0]} rc={proc.returncode}; see {log}")
 
@@ -112,6 +114,13 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     cmd += ["--out", str(out)]
     if "group_l1" in recipe:  # design log E8: proximal group lasso on layer-1 input rows
         cmd += ["--group-l1", repr(recipe["group_l1"])]
+    if "ssim2_recipe" in recipe:
+        from e28_recipe import PIN, read_pin
+        pin = read_pin()
+        active = [name for name, _, tw, _, _ in groups if tw > 0 and name in pin["arms"][recipe["ssim2_recipe"]]["pooled_legs"]]
+        cmd += ["--pooled-rank-share", str(pin["pooled_rank_share"]), "--pooled-pearson-weight", str(pin["pooled_pearson_weight"])]
+        for name in active:
+            cmd += ["--pooled-leg", name]
     if head == "N":
         cmd.append("--nonneg-distance")
     return cmd
@@ -315,6 +324,8 @@ def main() -> None:
     weights = {}
     curated, teacher_record, curated_extra = None, None, None
     for leg, (_, _, val_w) in TEACHERS.items():
+        if recipe.get("ssim2_recipe") == "s2m" and leg == "safesyn":
+            continue
         fit, dev = checked(legs[leg]["fit"]), checked(legs[leg]["dev"])
         subset = recipe.get("teacher_subset") if leg == "safesyn" else None
         if subset == "none":  # design log E13: no SafeSyn fit leg (its dev leg still logs)
@@ -339,7 +350,7 @@ def main() -> None:
         weights["kadis_ordinal"] = acceptance_weight(recipe["kadis_ordinal"], refs_of(opath))
         groups.append(("kadis_ordinal", opath, weights["kadis_ordinal"], 0, "withinref,rank"))
     coverage_record = None
-    if "coverage_weight" in recipe:  # design log E15: chosen families of the ordinal coverage pool, rank-only within ladders
+    if "coverage_weight" in recipe and recipe.get("ssim2_recipe") != "s2m":  # design log E15: chosen families of the ordinal coverage pool, rank-only within ladders
         import v2_teacher
         if max(keep) >= v2_teacher.ORDINAL_WIDTH:
             raise ValueError(f"{core_spec}: the coverage pool has no f{v2_teacher.ORDINAL_WIDTH}+ (NaN); refusing this keep list")
@@ -360,6 +371,12 @@ def main() -> None:
     weights["human"] = acceptance_weight(NOMINAL_WEIGHT["human"] if human_w is None else human_w, refs_of(hfit))
     groups += [("human", hfit, weights["human"], 0, "withinref,rank"),
                ("human_development", hdev, 0, HUMAN_VAL_WEIGHT, "withinref,rank")]
+    e28_record = None
+    if "ssim2_recipe" in recipe:
+        from e28_recipe import training_groups
+        groups, e28_record = training_groups(recipe["ssim2_recipe"], args.heldout, legs, groups,
+                                             NOMINAL_WEIGHT["human"] if human_w is None else human_w)
+        weights = {name: tw for name, _, tw, _, _ in groups if tw > 0}
     init_seed, sample_seed = seeds(args.heldout, args.seed_index)
     try:
         from v2_common import refuse_nonfinite_kept
@@ -402,6 +419,7 @@ def main() -> None:
            **({"ordinal_leg": ordinal_record} if ordinal_record else {}),
            **({"coverage_leg": coverage_record} if coverage_record else {}),
            **({"hdr_leg": hdr_record} if hdr_record else {}),
+           **({"ssim2_recipe": e28_record} if e28_record else {}),
            "wide_receipt_sha256": sha(receipt_path), "table_receipt_sha256": sha(receipt_path),
            "keep_lists_sha256": sha(V2 / "wide" / "keep_lists.json"), "binaries": {p.name: sha(p) for p in (TRAINER, FITBIN, PANEL)},
            "dev_geomean3_by_epoch": curve, **selection,
