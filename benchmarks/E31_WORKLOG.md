@@ -3,7 +3,7 @@
 **BLOCKED before arm packaging.** The implementation brief requires control
 parity first and says to stop if it fails. E30's 40 completed nA3 cells are
 frozen; executable E31/control parity is not established. No replacement
-control was selected, no fit ran, and nothing was pushed or enqueued.
+control was selected, no E31 fit ran, and nothing was pushed or enqueued.
 
 Registration: [E31](e31_upiq380_registration_2026-10-07.md), SHA-256
 `016d168d04caa9f2ae1853fed25602f845e081fb009546a6ece6ce4d8ae563a7`.
@@ -70,7 +70,11 @@ Four grid tripwire tests pass: AIC fold, duplicate cell, missing cell and
 unregistered seed all refuse before payload hashing, model inspection or cell
 enumeration. Both actual-binary refusal checks pass. Ruff checks the changed
 Python owners; the two new Python files pass format check. `just lint-scripts`
-passes. No Rust source changed and no crate build/test or clippy run is claimed.
+passes. The 27 existing SHIPPATH regression tests also pass with the pinned
+E30 trainer selected through `SHIPPATH_TRAINER`; their bounded training uses
+synthetic rows only. The first run without that override failed two tests
+because the fresh workspace has no debug trainer. No expectations were changed.
+No Rust source changed and no crate build/test or clippy run is claimed.
 
 Per the first-gate stop rule, the arm route, zenmetrics profile/workspace,
 program/data packs, declaration, image and real-executor smoke, harvest
