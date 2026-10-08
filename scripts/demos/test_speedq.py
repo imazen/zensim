@@ -97,7 +97,8 @@ class SpeedqTest(unittest.TestCase):
 
     def test_contaminated_segment_does_not_starve_remaining_grid(self):
         calls=[]
-        def segment(binary,root,geometry,tier,threads,*args):
+        def segment(binary,root,geometry,tier,threads,*args,**kwargs):
+            self.assertEqual(kwargs['arms'],runner.ARMS)
             calls.append(geometry)
             if geometry=='64x64' and calls.count(geometry)==1:
                 path=Path(root)/f'{tier}-t{threads}-{geometry}'
@@ -114,7 +115,8 @@ class SpeedqTest(unittest.TestCase):
 
     def test_contaminated_rounds_are_archived_before_retry(self):
         calls=[]
-        def segment(binary,root,geometry,tier,threads,*args):
+        def segment(binary,root,geometry,tier,threads,*args,**kwargs):
+            self.assertEqual(kwargs['arms'],runner.ARMS)
             path=Path(root)/f'{tier}-t{threads}-{geometry}';path.mkdir()
             calls.append(path)
             if len(calls)==1:
@@ -128,6 +130,27 @@ class SpeedqTest(unittest.TestCase):
         self.assertEqual((attempts[0]/'raw.json').read_text(),'contaminated raw evidence')
         self.assertTrue((self.root/'v4x-t1-64x64/COMPLETE.json').exists())
         self.assertEqual(len(calls),2)
+
+    def test_timing_passes_explicit_six_arm_selection(self):
+        selected=runner.ARMS[:-1]
+        with patch.object(runner,'parity_receipt',return_value={}), patch.object(runner,'run_segment') as segment:
+            runner.timing('binary',self.root,32,'receipt','analyzer',['v4x-t1-64x64'],selected)
+        segment.assert_called_once_with('binary',self.root,'64x64','v4x',1,32,{},'analyzer',arms=selected)
+        complete=self.root/'v4x-t1-64x64';complete.mkdir();(complete/'COMPLETE.json').write_text('{}')
+        with patch.object(runner,'quiet_gate') as gate:
+            runner.run_segment('binary',self.root,'64x64','v4x',1,32,{},'analyzer',arms=selected)
+        gate.assert_not_called()
+
+    def test_timing_cli_preserves_default_and_refuses_missing_core_arm(self):
+        base=['speedq_run.py','timing','--dest',str(self.root),'--binary','binary','--parity','receipt','--analyzer','analyzer']
+        for selected in [None,runner.ARMS[:-1]]:
+            argv=base+(['--arms',*selected] if selected is not None else [])
+            with patch('sys.argv',argv),patch.object(runner,'timing') as timing:
+                runner.main()
+            self.assertEqual(timing.call_args.args[-1],selected if selected is not None else runner.ARMS)
+        with patch('sys.argv',base+['--arms',*runner.ARMS[1:]]),patch.object(runner,'timing') as timing:
+            with self.assertRaises(SystemExit):runner.main()
+        timing.assert_not_called()
 
     def test_freeze_uses_cargo_receipt_and_refuses_ambiguous_artifacts(self):
         stale=self.root/'old';stale.write_bytes(b'old')
@@ -236,6 +259,26 @@ class SpeedqTest(unittest.TestCase):
         self.assertEqual(out['rss_coverage'],[112,112])
         self.assertTrue(out['verdict']['rev5_at_least_as_fast_everywhere'])
         self.assertIn('faster in all 192 cells',args.out_md.read_text())
+        # Explicitly omitted optional peer values must remain missing while
+        # required six-arm timing coverage, gates and round counts stay intact.
+        amended=self.root/'timing/scalar-t32-64x64'
+        inner=amended/'zenbench.inner.json';rec=json.loads(inner.read_text())
+        rec['paired_rounds'].pop('ssimulacra2_rs');inner.write_text(json.dumps(rec))
+        header=amended/'header.json';rec=json.loads(header.read_text());rec['arms']=runner.ARMS[:-1];header.write_text(json.dumps(rec))
+        report.speedq_report(args);out=json.loads(args.out_json.read_text())
+        self.assertEqual(out['status'],'MEASURED')
+        self.assertEqual(out['timing_coverage'],[192,192])
+        self.assertEqual(out['timing_arm_coverage']['ssimulacra2_rs'],191)
+        self.assertEqual(out['timing_arm_coverage']['by_v2fy_r5'],192)
+        self.assertEqual(out['timing_segment_arm_counts'],{'6':1,'7':191})
+        self.assertIsNone(out['medians_ns'][23][0][6])
+        self.assertIsNone(out['alpha_ns_beta_ns_per_pixel_r2'][23][6])
+        self.assertEqual(out['alpha_ns_beta_ns_per_pixel_r2'][23][2],[24200,2,1])
+        self.assertIn('not measured',args.out_md.read_text())
+        # Losing a core arm cannot be described as the coordinator amendment.
+        rec=json.loads(inner.read_text());rec['paired_rounds'].pop('by_v2fy_r3');inner.write_text(json.dumps(rec))
+        with self.assertRaises(AssertionError):report.speedq_report(args)
+        rec['paired_rounds']['by_v2fy_r3']=[24000+64*64]*32;inner.write_text(json.dumps(rec))
         # One interval crossing zero makes the everywhere conclusion unproven.
         path=self.root/'timing/scalar-t32-64x64/paired_analysis.json'
         rec=json.loads(path.read_text());rec.update(ci_upper=1);path.write_text(json.dumps(rec))

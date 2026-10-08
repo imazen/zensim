@@ -373,8 +373,10 @@ def speedq_report(args) -> int:
         assert header['model_source_sha256']==SOURCE_SHA, 'timing evidence must bind the frozen production model'
         assert complete['rounds']==header['rounds']
         values = inner['paired_rounds']
-        assert set(values) == set(arms) and all(len(v) == header['rounds'] for v in values.values())
-        medians[(tier,n,geometry)] = {a: statistics.median(values[a]) for a in arms}
+        declared=header.get('arms',arms)
+        assert len(set(declared))==len(declared) and set(declared) in (set(arms),set(arms[:-1])), 'only ssimulacra2_rs may be omitted'
+        assert set(values) == set(declared) and all(len(v) == header['rounds'] for v in values.values())
+        medians[(tier,n,geometry)] = {a: statistics.median(values[a]) for a in declared}
         analyses[(tier,n,geometry)] = json.loads((path/'paired_analysis.json').read_text())
         headers[(tier,n,geometry)] = header
     for g in sizes:
@@ -403,7 +405,7 @@ def speedq_report(args) -> int:
     for t in tiers:
         for n in threads:
             for arm in arms:
-                if all((t,n,g) in medians for g in sizes):
+                if all((t,n,g) in medians and arm in medians[(t,n,g)] for g in sizes):
                     xs=[pixels[g] for g in sizes];ys=[medians[(t,n,g)][arm] for g in sizes]
                     alpha,beta=least_squares(xs,ys)
                     mean=sum(ys)/len(ys)
@@ -422,7 +424,10 @@ def speedq_report(args) -> int:
         'axes':{'tiers':tiers,'threads':threads,'geometries':sizes,'arms':arms},
         'layout':'configuration = tier outer, threads inner; timing/CI rows = geometry order; fit rows = arm order; resolution flags 1=limited, 0=not limited, -=missing',
         'precision':'summary medians/intercepts in ns; CI bounds rounded outward to whole ns; beta/R2 eight significant digits; exact rounds/analyses retained in raw',
-        'medians_ns':[[[medians[(t,n,g)][a] for a in arms] if (t,n,g) in medians else None for g in sizes] for t in tiers for n in threads],
+        'medians_ns':[[[medians[(t,n,g)].get(a) for a in arms] if (t,n,g) in medians else None for g in sizes] for t in tiers for n in threads],
+        'timing_arm_coverage':{a:sum(a in row for row in medians.values()) for a in arms},
+        'timing_segment_arm_counts':{str(count):sum(len(row)==count for row in medians.values()) for count in [6,7]},
+        'ssimulacra2_rs_scope':'Earlier seven-arm segments retain measured values; remaining segments omit this optional peer. Its peer table uses v4x rows only. Missing optional timings and fits are null, not inferred.',
         'r5_vs_r4_pct_change':[[compact(analyses[(t,n,g)]['pct_change']) if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
         'r5_vs_r4_resolution_limited':[[('1' if analyses[(t,n,g)]['resolution_limited'] else '0') if (t,n,g) in analyses else '-' for g in sizes] for t in tiers for n in threads],
         'r5_minus_r4_ci_ns':[[[math.floor(analyses[(t,n,g)]['ci_lower']),round(analyses[(t,n,g)]['ci_median']),math.ceil(analyses[(t,n,g)]['ci_upper'])] if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
@@ -445,15 +450,18 @@ def speedq_report(args) -> int:
         f"All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 remains a timing baseline: {len(legacy_failed)} of 192 cells exceed the documented feature tolerance (max absolute feature difference {max(r['max_abs_feature_difference'] for r in legacy):.17g}; max tolerance fraction {max(r['max_tolerance_fraction'] for r in legacy):.17g}). Failing tiers: {', '.join(sorted({r.get('tier','unspecified') for r in legacy_failed})) or 'none'}. Legacy failures are recorded rather than renamed a pass.",'',
         'Each timing segment requires load1 < 2.0 and no foreign cargo/rustc/training before warmup and immediately before rounds. The retained rounds must all have a clean zenbench gate and no observed build/training interference. Persistent workers time the scoring call with Instant; separate parent rounds retain IPC/bookkeeping. Pair statistics reuse zenbench’s engine owner; no IPC estimate is subtracted. Setup, metadata stamping, input generation, and Rust-av sRGB widening are outside the timed body. Rayon pools and scoring buffers are warm.','',
         'Dispatch labels are ceilings forced through archmage with its testing guard; kernels without a v4 variant may use v3. Threads 1/2/4/8 use CCD0; 16 spans CCDs, and 32 adds SMT. Cache topology changes are part of these measured configurations.','',
+        f"Coordinator amendment: earlier seven-arm segments retain ssimulacra2_rs; remaining segments use six arms and omit only that peer. Its timing coverage is {sum('ssimulacra2_rs' in row for row in medians.values())}/192, retained separately from required core coverage. The peer table uses v4x rows only for ssimulacra2_rs. Missing optional timing/fit entries are null, not inferred. RSS retains all seven arms. Gates and all 32 round requirements are unchanged.",'',
         '## Alpha and beta fits','',
         'Unconstrained OLS over all eight geometries: time_ns = alpha_ns + beta_ns_per_pixel × pixels. Alpha below is µs; beta is ns/pixel. A negative alpha is a fit artifact, not a negative physical setup cost; R² exposes fit adequacy. These are descriptive fits to medians, not constants baked into source.','',
         'Each cell lists alpha µs / beta ns/pixel / R². Revisions and peers share a row for each tier/thread configuration.','',
         '| tier | threads | '+' | '.join(arms)+' |','|---|---:|'+'---:|'*len(arms)]
     for t in tiers:
         for n in threads:
-            if all((t,n,arm) in fits for arm in arms):
+            if all((t,n,arm) in fits for arm in arms[:-1]):
                 entries=[]
                 for arm in arms:
+                    if (t,n,arm) not in fits:
+                        entries.append('not measured');continue
                     a,b,r2=fits[(t,n,arm)]
                     entries.append(f'{a/1000:.3f} / {b:.6g} / {r2:.4f}')
                 lines.append('| '+t+' | '+str(n)+' | '+' | '.join(entries)+' |')
@@ -469,7 +477,7 @@ def speedq_report(args) -> int:
                 entries=[f'{v:.2f}/{v/n:.2f}' for v,n in zip(values,threads[1:])]
                 lines.append('| '+arm[-2:]+' | '+t+' | '+g+' | '+' | '.join(entries)+' |')
     lines+=['','## Rev5 versus Rev4 paired intervals','',
-        'All 192 intervals are in the JSON (nanoseconds, Rev5 minus Rev4). The table names geometries where the entire CI is above zero and shows the slowest percentage change in that configuration, with its paired CI. Crossing zero is inconclusive, not proof of equivalence.','',
+        f"The JSON reserves all 192 cells; {len(analyses)} measured intervals are present (nanoseconds, Rev5 minus Rev4), with null for unmeasured cells. The table names geometries where the entire CI is above zero and shows the slowest percentage change in that configuration, with its paired CI. Crossing zero is inconclusive, not proof of equivalence.",'',
         '| tier | threads | slower geometries | largest slowdown | paired CI µs at that size |','|---|---:|---|---:|---|']
     for t in tiers:
         for n in threads:
@@ -488,7 +496,7 @@ def speedq_report(args) -> int:
         '| size | '+' | '.join(arms)+' |','|---|'+'---:|'*len(arms)]
     for g in sizes:
         if ('v4x',1,g) in medians:
-            lines.append('| '+g+' | '+' | '.join(f"{medians[('v4x',1,g)][a]/1e6:.4f}" for a in arms)+' |')
+            lines.append('| '+g+' | '+' | '.join(f"{medians[('v4x',1,g)][a]/1e6:.4f}" if a in medians[('v4x',1,g)] else 'not measured' for a in arms)+' |')
     lines+=['',f'Raw rounds and per-segment load/governor/affinity/gate headers: `{root}`. Adjacent `.meta` records source, toolchain, binary/model pins, commands and mirror verification. Exact worker rounds, parent IPC rounds, full paired analyses and all RSS logs are retained there.','']
     args.out_md.write_text('\n'.join(lines))
     return 0

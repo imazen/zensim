@@ -280,7 +280,7 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
             for log in streams: log.close()
 
 
-def timing(binary, root, rounds, parity_path, analyzer, only=None):
+def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS):
     parity=parity_receipt(parity_path)
     pending=deque((geometry,tier,threads) for tier in TIERS for threads in THREADS for geometry in GEOMETRIES
                   if not only or f'{tier}-t{threads}-{geometry}' in only)
@@ -288,7 +288,7 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None):
         geometry,tier,threads=pending.popleft()
         tag=f'{tier}-t{threads}-{geometry}'
         try:
-            run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer)
+            run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer,arms=arms)
         except TimingNoise as exc:
             dest=Path(root)/tag
             archived=dest.with_name(tag+f'.noise-{time.time_ns()}.bak')
@@ -354,7 +354,13 @@ def main():
     ap.add_argument('--rounds',type=int,default=32)
     ap.add_argument('--parity'); ap.add_argument('--analyzer'); ap.add_argument('--only',help='comma-separated segment tags')
     ap.add_argument('--collect-legacy-failures',action='store_true',help='complete the strict grid while recording Rev3 tolerance failures; does not admit timings')
+    ap.add_argument('--arms',nargs='+',choices=ARMS,default=None,
+                    help='timing workers (default: all seven); only ssimulacra2_rs may be omitted')
     args=ap.parse_args()
+    if args.arms is not None:
+        if args.mode!='timing': ap.error('--arms applies only to timing')
+        if len(set(args.arms))!=len(args.arms) or not set(ARMS[:-1]).issubset(args.arms):
+            ap.error('--arms requires each core arm once; only ssimulacra2_rs may be omitted')
     if args.mode=='status':
         collection_status(args.dest);return
     if args.mode=='freeze':
@@ -364,7 +370,7 @@ def main():
     if args.mode in ('timing','rss','diagnose') and not args.parity: ap.error('--parity required')
     if args.mode in ('timing','diagnose') and not args.analyzer: ap.error('--analyzer required')
     if args.mode=='parity': preflight(args.binary,args.dest,args.collect_legacy_failures)
-    elif args.mode=='timing': timing(args.binary,args.dest,args.rounds,args.parity,args.analyzer,args.only.split(',') if args.only else None)
+    elif args.mode=='timing': timing(args.binary,args.dest,args.rounds,args.parity,args.analyzer,args.only.split(',') if args.only else None,args.arms if args.arms is not None else ARMS)
     elif args.mode=='diagnose':
         cells={f'{t}-t{n}-{g}':(g,t,n) for t in TIERS for n in THREADS for g in GEOMETRIES}
         if args.only not in cells: ap.error('diagnose requires --only with one grid tag')
