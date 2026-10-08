@@ -59,6 +59,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -72,8 +73,48 @@ WT_RE = re.compile(r"(zensim--[a-z0-9][a-z0-9-]*)")
 # a bare `scripts/x.py`, or one embedded in a longer command.
 SCRIPT_RE = re.compile(r"(?<![\w/.-])(scripts/[\w/-]+\.(?:py|sh))")
 
+# Exact (caller, literal) -> (repository, frozen revision, reason).
+_V40_POSTFIT = "/".join(("scripts", "jobsys", "v40_postfit.sh"))
+_V40_METRICS = "66c0a961876bc582fb73484ff0cca7f2ffed673b"
+CROSS_REPO_SCRIPT_REFS = {
+    ("scripts/tests/test_v40_postfit_artifacts.py", _V40_POSTFIT):
+        ("zenmetrics", _V40_METRICS, "V40 artifact tests call the frozen postfit owner"),
+    ("scripts/tests/v40_r4_prepare.py", _V40_POSTFIT):
+        ("zenmetrics", _V40_METRICS, "V40 preparation copies the frozen postfit owner"),
+}
 
-def dead_script_refs(text: str) -> list[str]:
+
+def _cross_repo_ref(source: Path | None, literal: str) -> bool | None:
+    if source is None:
+        return None
+    try:
+        entry = CROSS_REPO_SCRIPT_REFS.get((source.relative_to(ROOT).as_posix(), literal))
+    except ValueError:
+        return None
+    if entry is None:
+        return None
+    repo, revision, _reason = entry
+    sibling = ZEN / repo
+    if not sibling.is_dir():
+        return True  # Only these registered references are unverifiable without the sibling.
+    try:
+        git = ["git", "-C", str(sibling)]
+        if (sibling / ".jj").is_dir():
+            git_dir = subprocess.check_output(
+                ["jj", "git", "root", "--ignore-working-copy"],
+                cwd=sibling, text=True, timeout=60,
+            ).strip()
+            git = ["git", "--git-dir=" + git_dir]
+        result = subprocess.run(
+            [*git, "cat-file", "-t", f"{revision}:{literal}"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "blob"
+
+
+def dead_script_refs(text: str, source: Path | None = None) -> list[str]:
     """Repo-relative script paths that no longer exist.
 
     This check was missing at first, and the gap bit immediately: consolidating
@@ -83,6 +124,9 @@ def dead_script_refs(text: str) -> list[str]:
     `v0_20b/bake_v3.py` shelling to `affine_calibrate_znpr_v2.py`, deleted long
     ago. Cross-language edges are exactly where nothing else is looking.
     """
+    cross = _cross_repo_ref(source, text)
+    if cross is not None:
+        return [] if cross else [f"DEAD-SCRIPT missing frozen sibling script: {text}"]
     return sorted(
         {
             f"DEAD-SCRIPT calls missing script: {ref}"
@@ -213,7 +257,8 @@ def check(p: Path) -> list[str]:
             if unverifiable(raw) or find_source(Path(raw).name):
                 continue
             fails.append(f"DEAD-BIN missing binary with no source: {raw}")
-    fails += dead_script_refs("\n".join(literals))
+    for lit in literals:
+        fails += dead_script_refs(lit, p)
     return sorted(set(fails))
 
 
@@ -308,7 +353,7 @@ def check_shell(p: Path) -> list[str]:
         if unverifiable(raw) or find_source(Path(raw).name):
             continue
         fails.append(f"DEAD-BIN missing binary with no source: {raw}")
-    fails += dead_script_refs(body)
+    fails += dead_script_refs(body, p)
     return sorted(set(fails))
 
 

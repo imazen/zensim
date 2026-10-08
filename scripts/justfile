@@ -1,0 +1,11 @@
+# Script-lint gate and its regressions; run: just --justfile scripts/justfile lint-tests
+lint-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}/.."
+    export TMPDIR="${TMPDIR:-$HOME/tmp}"
+    python3 scripts/test_lint_scripts.py
+    python3 scripts/test_lint_scripts_cross_repo.py
+    ruff check scripts/lint_scripts.py scripts/test_lint_scripts_cross_repo.py
+    ruff format --check scripts/test_lint_scripts_cross_repo.py
+    just --justfile justfile lint-scripts

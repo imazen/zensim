@@ -14,24 +14,33 @@ resolved or rewritten. Publication and launch remain coordinator actions.
 - Frozen assessment source: `f0584d00fab0bc38bce236ca386e34f9e8b63308`.
 - Frozen zenmetrics program owner: `66c0a961876bc582fb73484ff0cca7f2ffed673b`.
 
-## Bound-byte gate
+## Execution authority — coordinator decision
 
-**The merged-tree `FINAL_LOCAL_CHECK` refuses.** Six native files differ from the
+Per the [coordinator disposition of 2026-10-08 17:55Z](/home/lilith/tmp/zensim-paper/rev4/V40_LAND_DISPOSITION.md),
+execution authority is the independently reviewed
+`/mnt/v/output/zensim/v40r4-2026-10-08` packet. It remains bound to binary producer
+`05621a03094bcc1646d92874586b94551a5e36f2`, assessment source
+`f0584d00fab0bc38bce236ca386e34f9e8b63308`, and zenmetrics frozen source
+`66c0a961876bc582fb73484ff0cca7f2ffed673b`. The fleet executes the frozen
+archives, binaries and image. Main's later REV5PERF, ADJUDICATE C2 and
+RELEASEGATE5/6 changes are outside this packet. No rebuild or rebinding occurs.
+
+**Merged-tree bound-byte equality is not required for landing.** The original
+merged-tree `FINAL_LOCAL_CHECK` refusal is retained as historical evidence. At
+the initial merge, six native files differed from the
 160-file producer inventory: `zensim/src/{blur.rs,feature_defs.rs,
 feature_v2_stream.rs,fused.rs}`, `zensim-validate/src/bin/bake_verdict.rs` and
-`zensim-validate/src/dial_addressability.rs`. Seven assessment files differ from
+`zensim-validate/src/dial_addressability.rs`. Seven assessment files differed from
 the 619-file frozen inventory: `scripts/demos/{speed_matrix_report.py,
 speedq_run.py,test_speedq.py}`, `scripts/rev4_featpot/{_terminal_bound_io.py,
 kadid_terminal_read.py,v2c_labels.py}` and
 `scripts/tests/test_kadid_terminal_read.py`.
 
-This matches the independent review's landing warning. No conflict caused the
-drift: the merge retains newer main changes. The reviewed packet is still bound
-to its original source ancestors. The stricter requested condition that merged
-source bytes equal those frozen bytes is unsatisfied. Keeping the original
-packet as the execution authority needs coordinator disposition; choosing merged
-tools or assessment owners requires rebuild, rebinding, parity and review. These
-instructions do not supply that disposition or claim merged-tool parity.
+No conflict caused the drift: the merge retains newer main changes. The
+coordinator accepted the preserved-ancestor execution contract, verified by
+`FROZEN_ANCESTOR_CHECK.json` across all 160 native and 619 assessment records.
+This does not claim merged-tool parity or authorize substituting current-tree
+tools for the reviewed packet.
 
 Exact per-file hashes and test command/status/log receipts are retained under
 `/home/lilith/tmp/v40-land/`, in `MERGE_BOUND_DRIFT.json`,
@@ -48,15 +57,28 @@ shipped-binary admission suites, CI-exact `just clippy` and scoped format checks
 The statistics invocation initially lacked `ZEN_PANEL_BIN`; its retry explicitly
 uses the retained reviewed panel and passes unchanged expectations.
 
-`just lint-scripts` **fails** on two cross-repository false positives:
+The initial `just lint-scripts` run found two cross-repository false positives:
 `scripts/tests/test_v40_postfit_artifacts.py` and
 `scripts/tests/v40_r4_prepare.py` resolve
 `METRICS / "scripts/jobsys/v40_postfit.sh"` into zenmetrics, while the linter
 checks that string relative to zensim. The actual zenmetrics owner exists and
 the postfit/controller suites pass. Both referencing files belong to the frozen
-assessment inventory; they were preserved rather than edited during landing
-preparation. This required gate remains unresolved; no exemption or relaxed
-expectation was introduced.
+assessment inventory and remain unchanged. The disposition authorizes fixing
+the current-tree linter with exactly two entries, keyed by caller and exact
+literal, with target repository and reason. When the zenmetrics sibling exists,
+the linter requires the target to be a file object at frozen commit
+`66c0a961876bc582fb73484ff0cca7f2ffed673b`; a working-tree substitute cannot
+satisfy that check. Unlisted missing references still fail. The new regression
+also covers missing revisions, non-repository siblings, exact-literal matching
+and a frozen target whose working-tree file was removed.
+
+`just lint-scripts`, the existing lint self-tests and the new cross-repository
+tests pass; receipts are under `/home/lilith/tmp/v40-land-fix/`. The linter itself
+also appears in the archived assessment inventory: the explicitly authorized
+current-tree edit preserves its frozen archived bytes and original producer
+binding. The two bound referencing files and execution packet were not edited.
+The repeatable gate is `just --justfile scripts/justfile lint-tests`: both test
+owners, Ruff checks and the root `just lint-scripts` run through that recipe.
 
 The zenmetrics merge passes its 48 fit-tool tests and postfit checks. Initial
 worker invocations against live sibling checkouts fail dependency resolution
@@ -66,11 +88,11 @@ exports the exact merge and passes with all 23 committed CI sibling pins.
 In that isolated snapshot, worker claim regressions, full worker tests including
 doctests, and worker clippy pass. No live sibling or committed lockfile changed.
 
-The supplemental `FROZEN_ANCESTOR_CHECK.json` passes all 160 native and 619
+The preserved `FROZEN_ANCESTOR_CHECK.json` passes all 160 native and 619
 assessment source records against their preserved ancestors, retained tools,
 frozen assessment runtime and actual local image ID. It explicitly retains
-`merged_tree_equality=FAIL` and `coordinator_disposition=PENDING`; it does not
-replace the requested merged-tree check. Its first invocation failed because
+the earlier merged-tree refusal and predates the coordinator decision recorded
+above. Its first invocation failed because
 a jj workspace lacks a colocated `.git`; the retry resolves `jj git root` and
 checks the same objects. Both logs are retained.
 
@@ -80,18 +102,18 @@ and 160 arm fits remain future scientific work.
 
 ## Commands to list for the coordinator
 
-**Not executed.** Resolve the bound-byte gate and any reported test failures
-before publishing or authorizing. If the remote tips advance, preserve bound
+**Not executed.** Landing uses the coordinator's preserved-ancestor execution
+contract and the linter correction above. If the remote tips advance, preserve bound
 ancestors with another merge rather than rebasing them. Safe-push refuses a
-non-descendant target. These commands publish the named local merge commits;
-additional local documentation commits are listed separately in the completion
-record.
+non-descendant target. The zensim command resolves the disposition/fix commit
+on top of `54bb8036`; its exact tip is also in `V40_LAND_FIX_DONE.md`. The
+zenmetrics merge is unchanged.
 
 ```bash
 cd /home/lilith/work/zen/zensim
 TMPDIR=$HOME/tmp/v40-land flock ~/tmp/zensim-paper/rev4/heavy.lock \
   ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- \
-  bash scripts/safe_push.sh -b main -r 2b3875fce60ee4a2d1e1ce23ff74611090d8a7e5
+  bash scripts/safe_push.sh -b main -r 'subject("fix: honor V40 frozen packet landing authority") & descendants(54bb8036)'
 cd /home/lilith/work/zen/zenmetrics
 TMPDIR=$HOME/tmp/v40-land flock ~/tmp/zensim-paper/rev4/heavy.lock \
   ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- \
