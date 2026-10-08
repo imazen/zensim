@@ -84,12 +84,12 @@ impl Rows {
                         pixel.copy_from_slice(&[v[2] as u8, v[1] as u8, v[0] as u8, v[3] as u8])
                     }
                     PixelFormat::Srgb16Rgba => {
-                        for (dst, c) in pixel.chunks_exact_mut(2).zip(v) {
+                        for (dst, c) in pixel.as_chunks_mut::<2>().0.iter_mut().zip(v) {
                             dst.copy_from_slice(&((c * 257) as u16).to_ne_bytes());
                         }
                     }
                     PixelFormat::LinearF32Rgba => {
-                        for (dst, c) in pixel.chunks_exact_mut(4).zip(v) {
+                        for (dst, c) in pixel.as_chunks_mut::<4>().0.iter_mut().zip(v) {
                             dst.copy_from_slice(&(c as f32 / 255.0).to_ne_bytes());
                         }
                     }
