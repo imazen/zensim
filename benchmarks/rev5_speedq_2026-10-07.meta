@@ -71,7 +71,7 @@
     192
   ],
   "timing_segments": [
-    162,
+    173,
     192
   ],
   "rss_measurements": [
@@ -177,12 +177,12 @@
     "six_worker_header_verified": "v4x-t4-64x64"
   },
   "timing_arm_coverage": {
-    "by_v2fy_r3": 162,
-    "by_v2fy_r4": 162,
-    "by_v2fy_r5": 162,
-    "zensim_B": 162,
-    "fast_ssim2": 162,
-    "butteraugli": 162,
+    "by_v2fy_r3": 173,
+    "by_v2fy_r4": 173,
+    "by_v2fy_r5": 173,
+    "zensim_B": 173,
+    "fast_ssim2": 173,
+    "butteraugli": 173,
     "ssimulacra2_rs": 63
   },
   "clean_round_amendment": {
@@ -199,6 +199,6 @@
   },
   "timing_round_rule_counts": {
     "all-32-clean": 118,
-    "first-32-clean-of-<=64 (owner 2026-10-08)": 44
+    "first-32-clean-of-<=64 (owner 2026-10-08)": 55
   }
 }
