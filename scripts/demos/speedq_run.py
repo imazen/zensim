@@ -14,6 +14,7 @@ import time
 import tempfile
 import shutil
 from datetime import datetime, timezone
+from collections import deque
 
 GEOMETRIES = ['64x64','128x128','256x256','512x512','1024x1024','2048x2048','4096x4096','1920x1080']
 TIERS = ['v4x','v4','v3','scalar']
@@ -281,22 +282,21 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
 
 def timing(binary, root, rounds, parity_path, analyzer, only=None):
     parity=parity_receipt(parity_path)
-    for tier in TIERS:
-        for threads in THREADS:
-            for geometry in GEOMETRIES:
-                tag=f'{tier}-t{threads}-{geometry}'
-                if only and tag not in only: continue
-                while True:
-                    try:
-                        run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer)
-                        break
-                    except TimingNoise as exc:
-                        dest=Path(root)/tag
-                        archived=dest.with_name(tag+f'.noise-{time.time_ns()}.bak')
-                        dest.rename(archived)
-                        print(f'{exc}; excluded attempt preserved at {archived}',flush=True)
-                        refresh_activity('retry after contaminated '+tag)
-                        time.sleep(10)
+    pending=deque((geometry,tier,threads) for tier in TIERS for threads in THREADS for geometry in GEOMETRIES
+                  if not only or f'{tier}-t{threads}-{geometry}' in only)
+    while pending:
+        geometry,tier,threads=pending.popleft()
+        tag=f'{tier}-t{threads}-{geometry}'
+        try:
+            run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer)
+        except TimingNoise as exc:
+            dest=Path(root)/tag
+            archived=dest.with_name(tag+f'.noise-{time.time_ns()}.bak')
+            dest.rename(archived)
+            print(f'{exc}; excluded attempt preserved at {archived}; retry after remaining segments',flush=True)
+            refresh_activity('retry after contaminated '+tag)
+            pending.append((geometry,tier,threads))
+            time.sleep(10)
 
 
 def rss(binary, root, parity_path):

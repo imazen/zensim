@@ -95,6 +95,23 @@ class SpeedqTest(unittest.TestCase):
             report.speedq_stop_report(args)
 
 
+    def test_contaminated_segment_does_not_starve_remaining_grid(self):
+        calls=[]
+        def segment(binary,root,geometry,tier,threads,*args):
+            calls.append(geometry)
+            if geometry=='64x64' and calls.count(geometry)==1:
+                path=Path(root)/f'{tier}-t{threads}-{geometry}'
+                path.mkdir()
+                (path/'raw.json').write_text('contaminated raw evidence')
+                raise runner.TimingNoise('unclean round gate')
+        with patch.object(runner,'GEOMETRIES',['64x64','128x128']), patch.object(runner,'THREADS',[1]), patch.object(runner,'TIERS',['v4x']), patch.object(runner,'parity_receipt',return_value={}), patch.object(runner,'run_segment',side_effect=segment), patch.object(runner,'refresh_activity'), patch.object(runner.time,'sleep') as sleep:
+            runner.timing('binary',self.root,32,'parity','analyzer')
+        self.assertEqual(calls,['64x64','128x128','64x64'])
+        self.assertEqual(sleep.call_count,1)
+        archived=list(self.root.glob('*.noise-*.bak'))
+        self.assertEqual(len(archived),1)
+        self.assertEqual((archived[0]/'raw.json').read_text(),'contaminated raw evidence')
+
     def test_contaminated_rounds_are_archived_before_retry(self):
         calls=[]
         def segment(binary,root,geometry,tier,threads,*args):
