@@ -93,7 +93,8 @@
     "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
     "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json",
     "remaining_six_arm_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli",
-    "clean_round_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-clean-rounds-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli"
+    "clean_round_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-clean-rounds-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli",
+    "report_external_json": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c --out-json /mnt/v/output/zensim/speedq-2026-10-07/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md"
   },
   "mirror_verification": "provenance/final-production-mirror-verification.json: entire raw tree copied without deletion; three actual randomly selected timing files sha256-match the mirror; parity/RSS/model and both controller source archives included",
   "validation": {
@@ -205,5 +206,15 @@
   "final_validation": "provenance/final-production-validation.json",
   "publish_scope": "Local only since October 8 arm and clean-round amendments; latest remote report commit 0022abf97c39c5be5618c69453e885db3e131573 predates both",
   "completed_utc": "2026-10-08T09:58:32.174990+00:00",
-  "final_raw_mirror_log": "provenance/final-raw-mirror.log"
+  "final_raw_mirror_log": "provenance/final-raw-mirror.log",
+  "full_json_storage": {
+    "canonical_path": "/mnt/v/output/zensim/speedq-2026-10-07/rev5_speedq_2026-10-07.json",
+    "mirror_path": "/mnt/tower/output/zensim/speedq-2026-10-07/rev5_speedq_2026-10-07.json",
+    "sha256": "f43ed96f19de5670402547a219cc533b0cd80cfd2fe80866497d2983e03e13fb",
+    "bytes": 70345,
+    "pointer": "benchmarks/rev5_speedq_2026-10-07.json.pointer.md",
+    "producing_commit": "ceb9ff459e296e4a7d678fca792b7dc55c7001fc",
+    "mirror_verified_utc": "2026-10-08T10:50:46.083929+00:00",
+    "in_repository_json_summary": false
+  }
 }
