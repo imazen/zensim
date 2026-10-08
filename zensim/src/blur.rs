@@ -7018,30 +7018,63 @@ fn box_blur_v_local11(
     height: usize,
     radius: usize,
 ) {
-    let _ = radius;
+    debug_assert_eq!(radius, 5);
+    if width == 0 || height == 0 {
+        return;
+    }
     let inv = f32x8::splat(token, 1.0 / 11.0);
+    // Cache the frozen tree's pair and quadruple nodes, never an output
+    // recurrence. Each node has the same two operands and rounding as before.
+    // Eight vector columns bound scratch and keep adjacent rows in one tile.
+    let blocks = width / 8;
+    for tile in (0..blocks).step_by(8) {
+        let count = (blocks - tile).min(8);
+        let mut pairs = [[f32x8::zero(token); 8]; 16];
+        let mut quads = pairs;
+        for k in 0..9 {
+            let a = crate::featcanon::tap_mirror(k as isize - 5, height) * width;
+            let b = crate::featcanon::tap_mirror(k as isize - 4, height) * width;
+            for c in 0..count {
+                let x = (tile + c) * 8;
+                pairs[k][c] = f32x8::load(token, input[a + x..a + x + 8].try_into().unwrap())
+                    + f32x8::load(token, input[b + x..b + x + 8].try_into().unwrap());
+            }
+        }
+        for k in 0..7 {
+            for c in 0..count {
+                quads[k][c] = pairs[k][c] + pairs[k + 2][c];
+            }
+        }
+        for y in 0..height {
+            let a = crate::featcanon::tap_mirror(y as isize + 4, height) * width;
+            let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
+            for c in 0..count {
+                let x = (tile + c) * 8;
+                let last = f32x8::load(token, input[b + x..b + x + 8].try_into().unwrap());
+                pairs[(y + 9) & 15][c] =
+                    f32x8::load(token, input[a + x..a + x + 8].try_into().unwrap()) + last;
+                quads[(y + 7) & 15][c] = pairs[(y + 7) & 15][c] + pairs[(y + 9) & 15][c];
+                let sum =
+                    ((quads[y & 15][c] + quads[(y + 4) & 15][c]) + pairs[(y + 8) & 15][c]) + last;
+                (sum * inv).store(
+                    (&mut output[y * width + x..y * width + x + 8])
+                        .try_into()
+                        .unwrap(),
+                );
+            }
+        }
+    }
+    // The incomplete vector uses the unchanged per-output scalar tree.
+    if blocks * 8 == width {
+        return;
+    }
     for y in 0..height {
-        let row = y * width;
-        let rb: [usize; 11] = std::array::from_fn(|k| {
+        let rows: [usize; 11] = std::array::from_fn(|k| {
             crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width
         });
-        let mut x = 0;
-        while x < width {
-            if x + 8 <= width {
-                let t: [f32x8; 11] = std::array::from_fn(|k| {
-                    let i = rb[k] + x;
-                    f32x8::load(token, input[i..i + 8].try_into().unwrap())
-                });
-                let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
-                    + (t[8] + t[9])
-                    + t[10];
-                (sum * inv).store((&mut output[row + x..row + x + 8]).try_into().unwrap());
-                x += 8;
-            } else {
-                let t: [f32; 11] = std::array::from_fn(|k| input[rb[k] + x]);
-                output[row + x] = local_sum_taps(&t) * (1.0 / 11.0);
-                x += 1;
-            }
+        for x in blocks * 8..width {
+            let taps: [f32; 11] = std::array::from_fn(|k| input[rows[k] + x]);
+            output[y * width + x] = local_sum_taps(&taps) * (1.0 / 11.0);
         }
     }
 }
@@ -8089,6 +8122,15 @@ mod tests {
                             );
                         }
                     }
+                    let mut expected = vec![0.0; w * h];
+                    let mut actual = expected.clone();
+                    box_blur_v_local_general(&src, &mut expected, w, h, 5);
+                    box_blur_v_local(&src, &mut actual, w, h, 5);
+                    assert_eq!(
+                        actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        "vertical tree {w}x{h}"
+                    );
                 }
             },
         );
@@ -10788,30 +10830,63 @@ fn box_blur_v_local11_wide(
     height: usize,
     radius: usize,
 ) {
-    let _ = radius;
+    debug_assert_eq!(radius, 5);
+    if width == 0 || height == 0 {
+        return;
+    }
     let inv = f32x16::splat(token, 1.0 / 11.0);
+    // Cache the frozen tree's pair and quadruple nodes, never an output
+    // recurrence. Each node has the same two operands and rounding as before.
+    // Eight vector columns bound scratch and keep adjacent rows in one tile.
+    let blocks = width / 16;
+    for tile in (0..blocks).step_by(8) {
+        let count = (blocks - tile).min(8);
+        let mut pairs = [[f32x16::zero(token); 8]; 16];
+        let mut quads = pairs;
+        for k in 0..9 {
+            let a = crate::featcanon::tap_mirror(k as isize - 5, height) * width;
+            let b = crate::featcanon::tap_mirror(k as isize - 4, height) * width;
+            for c in 0..count {
+                let x = (tile + c) * 16;
+                pairs[k][c] = f32x16::load(token, input[a + x..a + x + 16].try_into().unwrap())
+                    + f32x16::load(token, input[b + x..b + x + 16].try_into().unwrap());
+            }
+        }
+        for k in 0..7 {
+            for c in 0..count {
+                quads[k][c] = pairs[k][c] + pairs[k + 2][c];
+            }
+        }
+        for y in 0..height {
+            let a = crate::featcanon::tap_mirror(y as isize + 4, height) * width;
+            let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
+            for c in 0..count {
+                let x = (tile + c) * 16;
+                let last = f32x16::load(token, input[b + x..b + x + 16].try_into().unwrap());
+                pairs[(y + 9) & 15][c] =
+                    f32x16::load(token, input[a + x..a + x + 16].try_into().unwrap()) + last;
+                quads[(y + 7) & 15][c] = pairs[(y + 7) & 15][c] + pairs[(y + 9) & 15][c];
+                let sum =
+                    ((quads[y & 15][c] + quads[(y + 4) & 15][c]) + pairs[(y + 8) & 15][c]) + last;
+                (sum * inv).store(
+                    (&mut output[y * width + x..y * width + x + 16])
+                        .try_into()
+                        .unwrap(),
+                );
+            }
+        }
+    }
+    // The incomplete vector uses the unchanged per-output scalar tree.
+    if blocks * 16 == width {
+        return;
+    }
     for y in 0..height {
-        let row = y * width;
-        let rb: [usize; 11] = std::array::from_fn(|k| {
+        let rows: [usize; 11] = std::array::from_fn(|k| {
             crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width
         });
-        let mut x = 0;
-        while x < width {
-            if x + 16 <= width {
-                let t: [f32x16; 11] = std::array::from_fn(|k| {
-                    let i = rb[k] + x;
-                    f32x16::load(token, input[i..i + 16].try_into().unwrap())
-                });
-                let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
-                    + (t[8] + t[9])
-                    + t[10];
-                (sum * inv).store((&mut output[row + x..row + x + 16]).try_into().unwrap());
-                x += 16;
-            } else {
-                let t: [f32; 11] = std::array::from_fn(|k| input[rb[k] + x]);
-                output[row + x] = local_sum_taps(&t) * (1.0 / 11.0);
-                x += 1;
-            }
+        for x in blocks * 16..width {
+            let taps: [f32; 11] = std::array::from_fn(|k| input[rows[k] + x]);
+            output[y * width + x] = local_sum_taps(&taps) * (1.0 / 11.0);
         }
     }
 }
