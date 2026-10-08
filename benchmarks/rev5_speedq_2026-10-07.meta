@@ -70,7 +70,7 @@
     192
   ],
   "timing_segments": [
-    1,
+    11,
     192
   ],
   "rss_measurements": [
@@ -134,5 +134,7 @@
     "4": "6cfc11dc211bdf10559e70da5eb630146e918e1fa7a62886cbe2c2d99fad74a8",
     "5": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400"
   },
-  "rev5_served_bytes_equal_frozen_source": true
+  "rev5_served_bytes_equal_frozen_source": true,
+  "process_suspension": false,
+  "collection_end_condition": "all 192 admitted production timing segments, or coordinator explicitly closes quiet window; transitory gate failures continue to wait/retry"
 }
