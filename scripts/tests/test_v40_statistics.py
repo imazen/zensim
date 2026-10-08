@@ -86,6 +86,22 @@ class Statistics(unittest.TestCase):
         with self.assertRaises(ValueError):
             _e29_signed_w2([0.1, float("nan"), 0.4, 0.8])
 
+    def test_constant_seed_composites_refuse_despite_std_rounding(self):
+        from e24_rev5 import e29_seed_stat
+        for constant in (0.001, 0.002, 0.0021, -0.004, 0.003, 0.0007):
+            for row in ([constant] * 4, [constant - .01, constant + .01, constant, constant]):
+                delta = np.tile(row, (10, 1))
+                with self.assertRaisesRegex(ValueError, "zero seed SE"):
+                    e29_seed_stat(delta)
+                with self.assertRaisesRegex(ValueError, "zero seed SE"):
+                    sdr_decision(delta, np.arange(20).reshape(10, 2), "e32")
+        # A small but real variance remains defined; no tolerance changes the rule.
+        varying = np.full((10, 4), .0021)
+        varying[-1, :] += 1e-12
+        self.assertGreater(e29_seed_stat(varying)["se"], 0)
+        with self.assertRaisesRegex(ValueError, "zero seed SE"):
+            sdr_decision(np.arange(40).reshape(10, 4), np.full((10, 2), .0021), "e32")
+
     def test_each_guard_remains_binding(self):
         delta = np.arange(40, dtype=float).reshape(10, 4) / 100000 + 0.004
         delta[:, 2] -= 0.011

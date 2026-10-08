@@ -268,6 +268,8 @@ def e29_seed_stat(values):
     if values.shape != (10, 4) or not np.isfinite(values).all():
         raise ValueError("INCOMPLETE: E29 needs ten complete four-fold seeds")
     seeds_ = values.mean(axis=1)
+    if np.ptp(seeds_) == 0:
+        raise ValueError("INCOMPLETE: E29 undefined/zero seed SE")
     se = float(seeds_.std(ddof=1) / np.sqrt(10))
     if not np.isfinite(se) or se == 0:
         raise ValueError("INCOMPLETE: E29 undefined/zero seed SE")
