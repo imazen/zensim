@@ -140,8 +140,11 @@ rename-aside, changed canonical identity or extra hard links refuse as
 `exposure-refused`; no success is reported for an orphaned inode. This is a
 detection boundary for an uncoordinated rename during a write, not an atomic
 filesystem prohibition on renames. Cooperating editors can acquire the ledger
-lock between transactions, but must preserve the canonical inode to let the
-ongoing read complete; an atomic save intentionally causes refusal.
+lock between transactions, but may only append: they must preserve the canonical
+inode and every prior line, including the spent reservation. Before appending
+its result, the owner verifies the exact design's spent token is still present
+under the transaction lock. A lock-respecting in-place rewrite that removes it
+refuses as `exposure-refused`; an atomic save also causes refusal.
 
 Retargeting the original caller alias cannot redirect either write: checks
 use the retained authorized canonical name. Journal/output spellings are also

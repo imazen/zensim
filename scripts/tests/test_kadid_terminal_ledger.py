@@ -1,7 +1,8 @@
 """Round-six atomic-save, short-lock and label-device regressions; synthetic."""
 import fcntl
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import os
+import io
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -121,6 +122,65 @@ class LedgerTransactions(unittest.TestCase):
         self.assertEqual(observed, ['assessment'])
         self.lock_probe()
         self.assertIn('D2 result', self.t.ledger.read_text())
+
+    def test_lock_respecting_rewrite_cannot_drop_reservation_and_report_pass(self):
+        original = owner.assess
+        inode = self.t.ledger.stat().st_ino
+        token = f"KADID-TERMINAL-SPENT:{owner.DESIGN}"
+
+        def boundary(*args):
+            result = original(*args)
+            with self.t.ledger.open('r+') as writer:
+                fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                text = writer.read()
+                self.assertIn(token, text)
+                writer.seek(0)
+                writer.write('\n'.join(line for line in text.split('\n') if line != token))
+                writer.truncate()
+                writer.flush()
+                os.fsync(writer.fileno())
+                fcntl.flock(writer, fcntl.LOCK_UN)
+            self.assertEqual(self.t.ledger.stat().st_ino, inode)
+            self.assertEqual(self.t.ledger.stat().st_nlink, 1)
+            return result
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        argv = ['--receipt', str(self.t.receipt), '--authorization', str(self.t.authorization),
+                '--ledger', str(self.t.ledger), '--journal', str(self.t.journal),
+                '--output', str(self.t.output)]
+        with patch.object(owner, 'assess', boundary), redirect_stdout(stdout), redirect_stderr(stderr):
+            rc = owner.main(argv)
+        self.assertEqual(rc, 2)
+        self.assertNotIn('PASS', stdout.getvalue())
+        self.assertIn('exposure-refused', stderr.getvalue())
+        self.assertNotIn(token, self.t.ledger.read_text())
+        self.assertNotIn('D2 result', self.t.ledger.read_text())
+        self.assertTrue(self.t.journal.exists())
+        self.lock_probe()
+        with self.assertRaisesRegex(owner.TerminalReadError, 'preflight-refused'):
+            self.t.run_read()
+
+    def test_lock_respecting_append_preserves_reservation_and_result(self):
+        original = owner.assess
+        addition = 'Cooperating append-only writer\n'
+
+        def boundary(*args):
+            with self.t.ledger.open('a') as writer:
+                fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                writer.write(addition)
+                writer.flush()
+                os.fsync(writer.fileno())
+                fcntl.flock(writer, fcntl.LOCK_UN)
+            return original(*args)
+
+        with patch.object(owner, 'assess', boundary):
+            result = self.t.run_read()
+        self.assertEqual(result['confirmation'], 'PASS')
+        text = self.t.ledger.read_text()
+        self.assertIn(f"KADID-TERMINAL-SPENT:{owner.DESIGN}", text)
+        self.assertIn(addition, text)
+        self.assertIn('D2 result', text)
+        self.lock_probe()
 
     def test_exception_releases_lock_before_descriptor_close(self):
         with owner.acceptance.ledger_file(self.t.ledger, Path.open):

@@ -777,6 +777,7 @@ def _execute_admitted(r, receipt_sha, pop, pred, ledger, journal, output):
         f.write(json.dumps(result, indent=2, allow_nan=False) + "\n")
     try:
         with acceptance.ledger_file(ledger, metadata_open) as f:
+            require(f"KADID-TERMINAL-SPENT:{DESIGN}" in f.read(), "spent line lost")
             acceptance.append_ledger(f, ledger,
                 f"\nD2 result `{Path(output)}` SHA-256 `{metadata_sha(output)}`: **{result['confirmation']}**. "
                 "Labels read once; no retuning permitted.\n"
