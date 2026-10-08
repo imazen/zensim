@@ -30,6 +30,16 @@ def main():
     p.add_argument("--quiet-override", type=Path, required=True)
     p.add_argument("--release-authority", type=Path, required=True)
     a = p.parse_args()
+    if (
+        len(a.producer) != 40
+        or subprocess.check_output(
+            ["jj", "log", "-r", a.producer, "--no-graph", "-T", "commit_id"],
+            cwd=REPO,
+            text=True,
+        ).strip()
+        != a.producer
+    ):
+        raise ValueError("staging requires an exact existing producer commit")
     subprocess.run(
         [
             sys.executable,
