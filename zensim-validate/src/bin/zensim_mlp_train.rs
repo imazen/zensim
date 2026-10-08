@@ -93,11 +93,14 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use zensim_validate::mlp_train;
-use zensim_validate::mlp_train::{GroupLossMode, TripletPool, train_mlp_strategy};
+use zensim_validate::mlp_train::{GroupLossMode, TripletPool, train_mlp_strategy_pairs};
 use zensim_validate::train_manifest;
 
 #[path = "../contamination_guard.rs"]
 mod contamination_guard;
+
+#[path = "zensim_mlp_train/upiq_training.rs"]
+mod upiq_training;
 
 use mlp_train::{
     AnchorRows, EquivPairs, KonjndAggregationPool, MlpHyperparams, TrainingGroup, TvRegularizer,
@@ -137,6 +140,10 @@ struct Args {
     /// The reason and findings are embedded; this cannot qualify a new model.
     #[arg(long, value_name = "REASON")]
     historical_replay: Option<String>,
+
+    /// Bound owner disposition for the registered E31 UPIQ fit ingress.
+    #[arg(long, conflicts_with = "historical_replay")]
+    upiq_label_disposition: Option<PathBuf>,
 
     /// Do not launch the sibling bake_verdict after fitting. Development
     /// screens evaluate explicit T2 inputs through the final BakeScorer and
@@ -593,6 +600,12 @@ struct Args {
     /// Dataset group to receive within-leg pooled rank/Pearson; repeat per eligible group.
     #[arg(long)]
     pooled_leg: Vec<String>,
+    /// E29 research: explicit NAME:JSON pair-list; existing CPU rank owner only.
+    #[arg(long)]
+    rank_pair_list: Vec<String>,
+    /// E29 native HDR subset manifests, admitted separately from strict SDR tables.
+    #[arg(long)]
+    hdr_consensus_research: bool,
     /// Fixed share of eligible within-reference draws replaced by pooled rows.
     #[arg(long, default_value_t = 0.0)]
     pooled_rank_share: f64,
@@ -2929,6 +2942,13 @@ fn stamp_emitted_checkpoints(
     Ok(written.len())
 }
 
+#[path = "zensim_mlp_train/e29_hdr_admission.rs"]
+mod e29_hdr_admission;
+#[path = "zensim_mlp_train/group_admission.rs"]
+mod group_admission;
+#[path = "../training_keys.rs"]
+mod training_keys;
+
 fn main() {
     zensim_validate::tier_cap::apply_from_env();
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
@@ -2946,7 +2966,12 @@ fn main() {
     // verification right after `fs::write`.
     let mut manifest_claimed_sha: Option<(String, PathBuf)> = None;
 
+    let mut manifest_inputs = None;
     if let Some(manifest_path) = args.manifest.clone() {
+        group_admission::safe(&manifest_path).unwrap_or_else(|e| {
+            eprintln!("--manifest: {e}");
+            std::process::exit(2);
+        });
         let cfg = train_manifest::parse_manifest(&manifest_path).unwrap_or_else(|e| {
             eprintln!("--manifest {}: {e}", manifest_path.display());
             std::process::exit(2);
@@ -3019,26 +3044,6 @@ fn main() {
             }
         }
 
-        // Load-bearing reproduce-exactly gate: verify every recorded
-        // input file's sha256 BEFORE we touch the trainer. A drift means
-        // the produced bake won't match the shipped one — fail loud.
-        match train_manifest::verify_inputs(&cfg.inputs, args.manifest_allow_sha_drift) {
-            Ok(warnings) => {
-                for w in &warnings {
-                    eprintln!("[manifest] WARNING: {w}");
-                }
-                eprintln!(
-                    "[manifest] verified {} input file(s) from {}",
-                    cfg.inputs.len(),
-                    manifest_path.display()
-                );
-            }
-            Err(e) => {
-                eprintln!("[manifest] {e}");
-                std::process::exit(2);
-            }
-        }
-
         let steps = apply_manifest_to_args(&mut args, &matches, &cfg);
         if !steps.is_empty() {
             eprintln!(
@@ -3050,6 +3055,7 @@ fn main() {
                 eprintln!("[manifest]   - {s}");
             }
         }
+        manifest_inputs = Some((cfg.inputs, manifest_path));
     }
 
     // Resolve the output path now that the manifest (if any) has been
@@ -3094,11 +3100,24 @@ fn main() {
     let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
     assert!(
         !want_gpu
-            || (args.pooled_leg.is_empty()
+            || (args.rank_pair_list.is_empty()
+                && !args.hdr_consensus_research
+                && args.pooled_leg.is_empty()
                 && args.pooled_rank_share == 0.0
                 && args.pooled_pearson_weight == 0.0),
         "pooled objective is CPU-only"
     );
+    if args.hdr_consensus_research {
+        assert!(
+            args.nonneg_distance
+                && !args.pool_head
+                && !args.hybrid_head
+                && !args.per_sample_alpha_head
+                && args.n_hidden_layers == 1
+                && args.pooled_leg.is_empty(),
+            "E29 requires the registered plain N head"
+        );
+    }
     preflight_cli_capabilities(&args, &matches, want_gpu);
     preflight_checkpoint_directory(&args).unwrap_or_else(|e| {
         eprintln!("checkpoint output preflight: {e}");
@@ -3211,22 +3230,120 @@ fn main() {
         0, // Pool has not been opened; requesting the loss already requires its head.
     );
 
+    assert!(
+        args.rank_pair_list.is_empty() || args.no_sample_coverage,
+        "pair-list replay requires --no-sample-coverage; actual digest remains available"
+    );
     let selected_ids = args.keep_features.as_deref().map(|spec| {
         parse_keep_features(spec, args.max_features).unwrap_or_else(|e| {
             eprintln!("--keep-features: {e}");
             std::process::exit(2)
         })
     });
-    let table_admission = zensim_validate::feature_set::admit_training_tables(
-        &group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>(),
-        args.historical_replay.as_deref(),
+    group_admission::preflight(
+        &group_modes,
+        &args,
         selected_ids.as_deref(),
-        Some(args.max_features),
+        manifest_inputs
+            .as_ref()
+            .map_or(&[], |(inputs, _)| inputs.as_slice()),
     )
+    .unwrap_or_else(|e| {
+        eprintln!("native group admission: {e}");
+        std::process::exit(2)
+    });
+    // The complete group, manifest and auxiliary inventory is admitted before
+    // any payload hash/read. A digest or zero auxiliary weight grants no role.
+    if let Some((inputs, manifest_path)) = &manifest_inputs {
+        for input in inputs {
+            group_admission::safe(&input.path).unwrap_or_else(|e| {
+                eprintln!("[manifest] {e}");
+                std::process::exit(2);
+            });
+        }
+        match train_manifest::verify_inputs(inputs, args.manifest_allow_sha_drift) {
+            Ok(warnings) => {
+                for w in &warnings {
+                    eprintln!("[manifest] WARNING: {w}");
+                }
+                eprintln!(
+                    "[manifest] verified {} input file(s) from {}",
+                    inputs.len(),
+                    manifest_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("[manifest] {e}");
+                std::process::exit(2);
+            }
+        }
+    }
+    let admission_paths = group_modes
+        .iter()
+        .filter(|g| !(args.hdr_consensus_research && g.0 == "hdr"))
+        .map(|g| g.1.clone())
+        .collect::<Vec<_>>();
+    let mut table_admission = if let Some(decision) = &args.upiq_label_disposition {
+        let native =
+            upiq_training::native_group(&group_modes, &args.target_column, args.target_scale)
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                });
+        upiq_training::admit(
+            &admission_paths,
+            decision,
+            selected_ids.as_deref(),
+            args.max_features,
+            native,
+        )
+    } else {
+        zensim_validate::feature_set::admit_training_tables(
+            &admission_paths,
+            args.historical_replay.as_deref(),
+            selected_ids.as_deref(),
+            Some(args.max_features),
+        )
+    }
     .unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2)
     });
+    if args.hdr_consensus_research {
+        assert!(
+            args.historical_replay.is_none(),
+            "E29 SDR must pass strict admission"
+        );
+        if args.target_column != "human_score" || args.target_scale != 1.0 {
+            eprintln!("E29 HDR admission: declared human_score target requires --target-scale 1");
+            std::process::exit(2);
+        }
+        let hdr_groups: Vec<_> = group_modes.iter().filter(|g| g.0 == "hdr").collect();
+        assert_eq!(hdr_groups.len(), 1, "E29 requires exactly one HDR group");
+        let g = hdr_groups[0];
+        assert!(
+            g.3 == 0.0 && !g.4 && g.5 == GroupLossMode::Rank,
+            "E29 HDR must be fit-only pooled rank"
+        );
+        let d = e29_hdr_admission::admit(
+            &g.1,
+            selected_ids.as_deref().expect("E29 exact IDs"),
+            &args.rank_pair_list,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2)
+        });
+        table_admission["tables"].as_array_mut().unwrap().push(serde_json::json!({"path":g.1,
+            "feature_set_id":null,"inferred":false,"stored_declarations":d,"requested_ids":selected_ids}));
+        table_admission["qualified_provenance"] = serde_json::json!(false);
+        table_admission["issues"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(
+                "E29 native HDR subset is research-only, not a full RGB feature family"
+            ));
+    }
     eprintln!("[table-admission] {table_admission}");
 
     // DATA-INTEGRITY GUARD (2026-05-25, task #215): refuse to TRAIN on a mock
@@ -3322,6 +3439,14 @@ fn main() {
             eprintln!("{e}");
             std::process::exit(1);
         });
+        if table_admission["upiq380"]["path"].as_str() == Some(path.to_string_lossy().as_ref()) {
+            upiq_training::pad_native(&mut g.feature_rows, g.n_features, args.max_features)
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                });
+            g.n_features = args.max_features;
+        }
         g.train_w = train_w;
         g.val_w = val_w;
         // MANDATORY reproduction identity: canonical absolute path + content
@@ -4528,7 +4653,22 @@ fn main() {
                 }
                 _ => None,
             };
-        train_mlp_strategy(
+        let mut rank_pairs = std::collections::BTreeMap::new();
+        for spec in &args.rank_pair_list {
+            let (name, path) = spec.split_once(':').expect("NAME:pair-list.json");
+            assert!(
+                args.hdr_consensus_research && name == "hdr",
+                "pair-list is scoped to E29 HDR research"
+            );
+            let pairs: Vec<[usize; 2]> =
+                serde_json::from_slice(&std::fs::read(path).expect("pair-list read"))
+                    .expect("pair-list JSON");
+            assert!(
+                rank_pairs.insert(name.to_owned(), pairs).is_none(),
+                "duplicate pair-list"
+            );
+        }
+        train_mlp_strategy_pairs(
             &mut groups,
             n_features,
             &hyperparams,
@@ -4539,6 +4679,7 @@ fn main() {
             pjnd_anchor_loaded.as_ref(),
             konjnd_agg_loaded.as_ref(),
             triplet_pool.as_ref(),
+            &rank_pairs,
         )
     };
 
@@ -4652,6 +4793,14 @@ fn main() {
             record["pooled_objective"] = serde_json::json!({"legs": args.pooled_leg,
                 "rank_share": args.pooled_rank_share, "pearson_weight": args.pooled_pearson_weight,
                 "pearson_batch_rows": 32, "pearson_schedule": "per-leg 32 accepted pair draws; uniform independent rows; partial epoch flush"});
+        }
+        if args.hdr_consensus_research {
+            record["hdr_consensus_research"] = serde_json::json!(true);
+            record["rank_pair_lists"] = serde_json::json!(args.rank_pair_list.iter().map(|spec| {
+                let (name, path) = spec.split_once(':').expect("pair list spec");
+                serde_json::json!({"group":name,"path":path,
+                    "sha256":train_manifest::sha256_file(std::path::Path::new(path)).expect("pair-list hash")})
+            }).collect::<Vec<_>>());
         }
         record.to_string()
     };

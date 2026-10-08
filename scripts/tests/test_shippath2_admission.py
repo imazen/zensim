@@ -59,7 +59,7 @@ class RecipeAdmissionTests(unittest.TestCase):
         for name in (*SOURCE_ORDER, *TEACHERS):
             refs = [f"{name}|ref{i // 2}" for i in range(24)]
             frame = pd.DataFrame({"pair_key": [f"{name}|pair{i}" for i in range(24)], "source_row_id": range(24),
-                                  "ref_basename": refs, "member_set": SOURCES[name][0] if name in SOURCES else name, "target": np.arange(24, dtype=float)})
+                                  "ref_basename": refs, "member_set": SOURCES[name][0] if name in SOURCES else ("cid22_train" if name == "cid22" else name), "target": np.arange(24, dtype=float)})
             frames[name] = frame
             leg = {}
             for split in (("full",) if name in SOURCES else ("fit", "dev")):
@@ -87,7 +87,7 @@ class RecipeAdmissionTests(unittest.TestCase):
                          "family": ["light"] * 2 + ["noise"] * 2 + ["new"] * 2,
                          "source_filename": ["r0"] * 2 + ["r1"] * 2 + ["r2"] * 2,
                          "type": ["16"] * 2 + ["11"] * 2 + ["lbw"] * 2,
-                         "severity_level": [1, 2] * 3, "severity": [1., 2.] * 3, "sign": [1.] * 6})
+                         "severity_level": [1, 2] * 3, "severity": [1., 2.] * 3, "sign": [1.] * 6, "__index_level_0__": list(range(6))})
         pq.write_table(keys, pooldir / "coverage_pool.keys.parquet")
         pool = pa.table({"ref_basename": keys["ladder"], "human_score": [-1., -2., -1., -2., -1., -2.],
                          "f0": np.arange(6, dtype=np.float32), "f719": [float("nan")] * 6})

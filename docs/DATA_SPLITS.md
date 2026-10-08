@@ -1557,6 +1557,52 @@ evaluation label was read by the fit. Packed models: s0 `f803b74c…`, s1 `1bf8f
 `/mnt/tower/output/zensim-production-d1-2026-10-07/`). Release gates that read evaluation data wait for the owner to freeze the
 final composition (which seed or ensemble) before any read, per the scorecard.
 
+
+### E29 four-source HDR-consensus preparation (2026-10-07)
+
+Local amendment only; no full E29 fit, launch or assessment. D1 source/role
+approval is unchanged. Preparation copies the exact frozen four-source SDR
+inventory and 7,390 existing agreement-only HDR TRAIN rows; hb4 changes only
+the target and hc4 adds the complete two-teacher cross-reference pair list.
+An import-test mistake opened the entire 22,860-row/952-column legacy
+`hdrgrid_mc944_t2_val.parquet` before mocks were installed. It computed target
+swings, then failed before student prediction; no model fit used it. The
+panel import is now guarded and zero-open tripwires pass. The unintended
+legacy HDR VAL exposure violates the preparation limit and is disclosed;
+registered 3,900-row hdr_v3mix VAL, AIC, confirmation and protected labels
+remain unopened. Native HDR
+subset provenance remains explicit and unqualified. All 40 completed E30 nA3
+model/result artifacts were verified and pinned without label reads; exact
+program reuse parity is not asserted. The coordinator subsequently chose one shared fresh v40 matched control for
+E29/E31/E32 before scientific fitting; the solo proposal is superseded. Role/exposure receipt, staged
+root, executor smokes, producer pins and tower mirror:
+[E29 worklog](../benchmarks/E29_WORKLOG.md) and
+[preparation pointer](../benchmarks/e29_preparation_2026-10-07.pointer.md).
+
+### V40 local integration exposure audit (2026-10-07)
+
+V40 integrates E29R2, E31 and E32 with D1's four-source production-human decision.
+The retained control/E29 inputs contain KADID TRAIN+SELECT, TID2013, KonFiG
+TRAIN+VAL and CID22-A25; AIC-3 remains excluded. Native group admission checks
+all declarations, weights, source/decision bindings and ordered identity keys
+before feature payload hashing or loading. The palette arm joins the same frozen
+observations to the declared palette-v2 bank without changing inherited values,
+keys, multiplicity or order. The prepared UPIQ data contains only the registered
+330 TRAIN-fit rows; its 50 development rows are not staged in the fit archive.
+
+Local preparation and smokes read only those D1 populations, the registered
+TRAIN teacher/coverage inputs, E29's 7,390 TRAIN agreement rows and UPIQ's 330
+TRAIN-fit rows. The cached-inference parity probe uses twelve released KADID
+TRAIN+SELECT feature rows per arm. Distortion-type assessment keys are projected
+into a separately byte-pinned label-free W2 join. No KADID TERMINAL, AIC-3,
+HDR VAL, UPIQ development, protected confirmation or T0 labels were opened.
+
+The 200 launchable cells are fresh control (40), hb4/hc4 (80), palette (40),
+and uh4 (40), with four D1 folds and ten fixed seed indices. The owner disposition
+record cites ledger commit ddf375af and binds the immutable UPIQ TRAIN-fit receipt. Launch templates are
+inert, source/image/data publication and queue changes were not performed, and
+future protected/external panel reads remain behind an explicit exposure freeze.
+Evidence: `benchmarks/v40_2026-10-07.pointer.md` and its canonical artifact root.
 ## Owner decisions — 2026-10-07 (evening): production composition, AIC-3 in feature experiments, UPIQ provenance
 
 Owner, verbatim: "seed 0. aic3 is fije for feature experiments, the way we tesr feature ceilings in set sometimes, if you do that.

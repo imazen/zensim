@@ -574,3 +574,232 @@ upiq380-mirror source dest:
     rsync -a --no-owner --no-group "$1/" "$2/"
 
 import 'benchmarks/speedq.just'
+
+# E29 uses the existing trainer, strict four-source admission and actual executor.
+e29-tests:
+    python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards
+    cargo test -p zensim-validate --lib sampling:: -- --nocapture
+
+e29-build:
+    cargo build --release -p zensim-validate --bin zensim_mlp_train --example inspect_qualified_checkpoint
+
+e29-scorer-preflight root:
+    env -i PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/tmp/e29" python3 scripts/rev4_featpot/e24_rev5.py e29-score --root {{root}} --preflight-only
+
+# Local review evidence only; no fleet queue, image publication or source push.
+e29-executor-smoke bundle mode arm:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- bash {{bundle}}/run_executor_smoke.sh {{mode}} {{arm}}
+
+e29-harvest-checks bundle zenmetrics *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath11_real_entry_checks.py --study e29 --bundle {{bundle}} --zenmetrics {{zenmetrics}} {{flags}}
+
+e29-bundle-check bundle:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29
+
+e29-mirror-check bundle mirror:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/shippath10_bundle_check.py {{bundle}} --e29 --mirror-only {{mirror}}
+
+e29-control-parity bundle e30 dest *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} {{flags}}
+
+e29-storage-cleanup *flags:
+    TMPDIR=$HOME/tmp/e29 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/tests/e29_storage_cleanup.py {{flags}}
+
+# Native E29 entry: declaration/label-free key refusals before feature targets.
+e29-hdr-admission binary prior_binary dest:
+    python3 scripts/tests/e29_hdr_binary_refusals.py --binary "{{binary}}" --prior-binary "{{prior_binary}}" --dest "{{dest}}"
+
+# E31's control/admission gate. These commands never fit or enqueue a cell.
+e31-control-tests:
+    python3 -m unittest scripts.tests.test_e31_control_freeze
+
+e31-control-freeze bundle results out:
+    python3 scripts/rev4_featpot/e30_four_source.py completed-control-pins --root {{bundle}}/v2d1 --bundle {{bundle}} --results {{results}} --out {{out}}
+
+e31-pinned-admission bundle upiq dest:
+    python3 scripts/tests/e31_pinned_admission.py --bundle {{bundle}} --upiq {{upiq}} --dest {{dest}}
+
+# E31 extension validation; builds binaries only, without creating a fleet pack.
+e31-training-tests:
+    TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_e31_*.py' -v
+
+e31-python-checks:
+    ruff check scripts/rev4_featpot/e31_training.py scripts/rev4_featpot/v2_common.py scripts/rev4_featpot/v2_lodo_mlp.py scripts/tests/test_e31_training.py scripts/tests/e31_control_parity.py scripts/tests/e31_extended_admission.py
+    ruff format --check scripts/rev4_featpot/e31_training.py scripts/tests/test_e31_training.py scripts/tests/e31_control_parity.py scripts/tests/e31_extended_admission.py
+
+e31-fit-key-check fit:
+    TMPDIR=$HOME/tmp python3 scripts/tests/test_e31_training.py --real-fit {{fit}}
+
+e31-build-trainer:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --example inspect_qualified_checkpoint
+
+e31-crate-tests:
+    TMPDIR=$HOME/tmp ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
+
+e31-extended-admission trainer fit dest:
+    TMPDIR=$HOME/tmp python3 scripts/tests/e31_extended_admission.py --trainer {{trainer}} --fit {{fit}} --dest {{dest}}
+
+e31-control-parity baseline candidate bin_dir inspector dest:
+    python3 scripts/tests/e31_control_parity.py --baseline '{{baseline}}' --candidate {{candidate}} --stripper {{bin_dir}}/bake_dial_refit --inspector {{inspector}} --dest {{dest}}
+
+e31-control-cell root bin_dir dest scratch:
+    mkdir -p {{scratch}}
+    TMPDIR={{scratch}} OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1 ZENSIM_MAX_TIER=v3 REV4_V2_BIN_DIR={{bin_dir}} ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/v2_lodo_mlp.py --spec sel:59f0bbc2f290@h32:H128:cv16:cf98 --head N --heldout kadid --seed-index 0 --root {{root}} --strict-admission --train-only --data-role-decision {{root}}/human_role_decision.json --columns "$(python3 -c 'import sys;sys.path.insert(0,"scripts/rev4_featpot");from e21_cheap_recipe import columns;print(",".join(map(str,columns("by_v2fy"))))')" --dest {{dest}}
+
+# E32 research transport gates. Scratch/targets are caller-owned disk paths.
+[positional-arguments]
+e32-extension-tests scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib palette_training -- --nocapture
+    TMPDIR="$1" SHIPPATH_TRAINER="$2/release/zensim_mlp_train" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p test_e32_palette_training.py
+
+[positional-arguments]
+e32-extension-build scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo build --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --example inspect_qualified_checkpoint
+
+[positional-arguments]
+e32-shippath-regression scratch trainer:
+    TMPDIR="$1" SHIPPATH_TRAINER="$2" ~/work/claudehints/scripts/run-heavy --mem 4G --jobs 1 -- env PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
+
+[positional-arguments]
+e32-serving-refusal scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim --all-features --lib rev5_for_bake_refuses_reads_outside_the_supported_families -- --nocapture
+
+[positional-arguments]
+e32-existing-rust-tests scratch target:
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib feature_set -- --nocapture
+    TMPDIR="$1" CARGO_TARGET_DIR="$2" ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- cargo test -p zensim-validate --lib parquet_loader -- --nocapture
+
+# Full 120 x 50,000 control replay, pinned E30 model comparison, no fleet owner.
+[positional-arguments]
+e32-control-parity scratch bindir root control freeze dest:
+    TMPDIR="$1" ZENSIM_MAX_TIER=v3 OPENBLAS_NUM_THREADS=1 ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/tests/e28_short_parity.py --new "$2/zensim_mlp_train" --fit-bin "$2/bake_dial_refit" --inspector "$2/examples/inspect_qualified_checkpoint" --prepared-root "$3" --e30-control "$4" --control-freeze "$5" --dest "$6"
+
+
+# V40 integrated admission and package checks, local only.
+v40-build:
+    cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --bin predict_features_with_bake --example inspect_qualified_checkpoint
+
+v40-native-tests:
+    cargo test --locked -p zensim-validate --lib --bin zensim_mlp_train -- --test-threads=1
+
+v40-python-tests trainer:
+    TMPDIR=$HOME/tmp/v40 SHIPPATH_TRAINER={{trainer}} PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_e32_palette_training.py'
+    TMPDIR=$HOME/tmp/v40 SHIPPATH_TRAINER={{trainer}} PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest discover -s scripts/tests -p 'test_shippath*.py'
+    TMPDIR=$HOME/tmp/v40 ZEN_PANEL_BIN=$(dirname {{trainer}})/panel PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e29_consensus scripts.tests.test_e26_hdr_leg scripts.tests.test_cli_import_guards scripts.tests.test_e31_training scripts.tests.test_e31_control_freeze
+
+v40-admission binary dest:
+    python3 scripts/tests/v40_native_admission.py --binary {{binary}} --dest {{dest}} --upiq-manifest /mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07/upiq380_fit.parquet.manifest.json
+
+v40-projection-tests:
+    PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_projection
+
+v40-projection source palette out commit:
+    python3 scripts/rev4_featpot/e32_palette.py --source {{source}} --palette-root {{palette}} --out {{out}} --fleet-root /var/tmp/rev4-featpot/v2e32 --build-commit {{commit}}
+
+v40-parity bundle e30 dest fold:
+    python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} --fold {{fold}}
+
+v40-executor-smoke bundle image arm mode attempt="1":
+    python3 scripts/tests/v40_executor_smoke.py --bundle {{bundle}} --image {{image}} --arm {{arm}} --mode {{mode}} --attempt {{attempt}}
+
+v40-statistics-tests:
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_projection scripts.tests.test_v40_statistics scripts.tests.test_v40_launch scripts.tests.test_v40_panels
+
+v40-freeze bundle source_commit metrics_commit:
+    python3 scripts/tests/v40_package_freeze.py --bundle {{bundle}} --source {{justfile_directory()}} --source-commit {{source_commit}} --metrics-commit {{metrics_commit}}
+
+v40-cached-projection bundle out attempt:
+    python3 scripts/tests/v40_cached_projection_smoke.py --bundle {{bundle}} --out {{out}} --harvest-attempt {{attempt}}
+
+v40-research-tests:
+    cargo test --locked -p zensim-validate --bin bake_dial_refit
+    ZENSIM_POW_FORM=pure cargo test --locked -p zensim-validate --bin bake_dial_refit research_scalar_tail_is_bit_identical
+
+v40-assessment-build:
+    cargo build --locked --release -p zensim-validate --bin bake_dial_refit --bin predict_features_with_bake
+
+v40-bundle-check bundle:
+    python3 scripts/tests/v40_bundle_check.py --bundle {{bundle}}
+
+# Reviewer shapes use synthetic payloads and approved label-free TRAIN declarations.
+v40-review-admission binary dest:
+    python3 scripts/tests/v40_review_admission.py --binary {{binary}} --dest {{dest}}
+
+v40-source-bindings bundle producer:
+    python3 scripts/tests/v40_source_bindings.py --source {{justfile_directory()}} --bundle {{bundle}} --producer {{producer}}
+
+v40-authorization-gate bundle dest:
+    python3 scripts/tests/v40_authorization_gate.py --bundle {{bundle}} --dest {{dest}}
+
+v40-r2-stage previous bundle quiet_start quiet_release:
+    python3 scripts/tests/v40_r2_stage.py --previous {{previous}} --bundle {{bundle}} --quiet-start {{quiet_start}} --quiet-release {{quiet_release}}
+
+# Complete native inventory, including unregistered manifest and auxiliary inputs.
+v40-inventory-admission binary dest:
+    python3 scripts/tests/v40_inventory_admission.py --binary {{binary}} --dest {{dest}}
+
+v40-postfit-artifacts-tests:
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_postfit_artifacts
+
+v40-scoring-rehearsal bundle image dest attempt="77":
+    python3 scripts/tests/v40_scoring_rehearsal.py --bundle {{bundle}} --image {{image}} --dest {{dest}} --attempt {{attempt}}
+
+v40-r3-stage previous bundle bindir producer quiet_start quiet_override authority build_log:
+    python3 scripts/tests/v40_r3_stage.py --previous {{previous}} --bundle {{bundle}} --bin-dir {{bindir}} --producer {{producer}} --quiet-start {{quiet_start}} --quiet-override {{quiet_override}} --release-authority {{authority}} --build-log {{build_log}}
+
+# Run under the shared heavy lock; the retained trainer is the shipped binary.
+v40-r3-checks bundle dest metrics:
+    just v40-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/author-admission
+    just v40-review-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/review-admission
+    just v40-python-tests {{bundle}}/bin/zensim_mlp_train
+    just v40-statistics-tests
+    just v40-postfit-artifacts-tests
+    just clippy
+    cargo fmt -p zensim -p zensim-validate --check
+    just --justfile {{metrics}}/justfile --working-directory {{metrics}} v40-fit-tools
+    just --justfile {{metrics}}/justfile --working-directory {{metrics}} v40-postfit-checks
+
+v40-r3-executors bundle image attempt="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for arm in control hb4 hc4 palette uh4; do
+        for mode in bounded first-epoch; do
+            just v40-executor-smoke '{{bundle}}' '{{image}}' "$arm" "$mode" '{{attempt}}'
+        done
+    done
+
+v40-r3-parity bundle e30:
+    just v40-parity {{bundle}} {{e30}} {{bundle}}/parity-kadid kadid
+    just v40-parity {{bundle}} {{e30}} {{bundle}}/parity-tid2013 tid2013
+
+v40-r3-lint:
+    ruff check scripts/rev4_featpot/v40_score.py scripts/tests/v40_inventory_admission.py scripts/tests/v40_postfit_fixture.py scripts/tests/v40_scoring_rehearsal.py scripts/tests/v40_r3_stage.py scripts/tests/v40_evidence_archive.py scripts/tests/test_v40_postfit_artifacts.py
+    ruff format --check scripts/rev4_featpot/v40_score.py scripts/tests/v40_inventory_admission.py scripts/tests/v40_postfit_fixture.py scripts/tests/v40_scoring_rehearsal.py scripts/tests/v40_r3_stage.py scripts/tests/v40_evidence_archive.py scripts/tests/test_v40_postfit_artifacts.py
+
+v40-evidence-archive bundle logs mirror:
+    python3 scripts/tests/v40_evidence_archive.py archive --bundle {{bundle}} --logs {{logs}} --mirror {{mirror}}
+
+v40-own-cargo-cleanup bundle mirror:
+    python3 scripts/tests/v40_evidence_archive.py cleanup --bundle {{bundle}} --mirror {{mirror}} --source {{justfile_directory()}}
+
+# Synthetic gate() authorizations only; fixed approved E30 metadata mounts.
+v40-image-authorization bundle image evidence scratch:
+    docker run --rm --network=none --cpus=1 --memory=2g --memory-swap=2g --user $(id -u):$(id -g) --entrypoint python3 -e TMPDIR=/scratch/tmp -e PYTHONPYCACHEPREFIX=/scratch/pycache -v {{bundle}}:{{bundle}}:ro -v /mnt/v/output/zensim/v40-2026-10-07/upiq380-fit:/mnt/v/output/zensim/v40-2026-10-07/upiq380-fit:ro -v /var/tmp/rev4-featpot/e30-results/cells:/var/tmp/rev4-featpot/e30-results/cells:ro -v {{evidence}}:/evidence -v {{scratch}}:/scratch -v {{justfile_directory()}}/scripts/tests/v40_authorization_gate.py:/v40-gate.py:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/fit-manifest-fitv2e30-20261007.json:/mnt/v/output/zensim/shippath11-2026-10-07/fit-manifest-fitv2e30-20261007.json:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/PROGRAM_INVENTORY.json:/mnt/v/output/zensim/shippath11-2026-10-07/PROGRAM_INVENTORY.json:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/ARTIFACT_PINS.json:/mnt/v/output/zensim/shippath11-2026-10-07/ARTIFACT_PINS.json:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/image-context/program.tar.gz:/mnt/v/output/zensim/shippath11-2026-10-07/image-context/program.tar.gz:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/d1-fit-data.tar.gz:/mnt/v/output/zensim/shippath11-2026-10-07/d1-fit-data.tar.gz:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/bin/inspect_qualified_checkpoint:/mnt/v/output/zensim/shippath11-2026-10-07/bin/inspect_qualified_checkpoint:ro {{image}} /v40-gate.py --bundle {{bundle}} --dest /evidence/authorization-gate
+
+# Replay compatibility cannot authorize declared protected populations.
+v40-historical-admission binary dest:
+    python3 scripts/tests/v40_historical_admission.py --binary {{binary}} --dest {{dest}}
+
+v40-binary-metadata-tests:
+    PYTHONPATH=scripts/tests python3 -m unittest scripts.tests.test_v40_binary_metadata
+
+v40-r4-prepare bundle producer source_commit metrics_commit image:
+    python3 scripts/tests/v40_r4_prepare.py --bundle {{bundle}} --producer {{producer}} --source-commit {{source_commit}} --metrics-commit {{metrics_commit}} --image {{image}}
+
+# Complete inherited checks plus replay and producer regressions; shared heavy wrapper required.
+v40-r4-checks bundle dest metrics:
+    just v40-historical-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/historical
+    just v40-inventory-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/inventory
+    just v40-native-tests
+    just v40-binary-metadata-tests
+    just v40-r3-checks {{bundle}} {{dest}}/inherited {{metrics}}

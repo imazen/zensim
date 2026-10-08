@@ -1,0 +1,27 @@
+{
+  "accept_unresolved_producer": true,
+  "allowed_use": "registered-E31-research-training",
+  "decided_by": "owner",
+  "decided_on": "2026-10-07",
+  "decision": "Owner accepts the derivative from the official UPIQ release, including the unrecovered exact producer script; registered E31 research training only.",
+  "decision_id": "E31-legacy-HDR-label-producer-gap",
+  "development_payload_included": false,
+  "human_sources": [
+    "kadid",
+    "tid2013",
+    "konfig",
+    "cid22_a25"
+  ],
+  "ledger_commit": "ddf375afbb583f96201d662eb6e22fcfd881bc38",
+  "ledger_path": "docs/DATA_SPLITS.md",
+  "legacy_label_sha256": "e0b23f539d46845f6cc4a65591474bafbf7eb4faf02da7175fb342caa5df80ac",
+  "manifest_sha256": "2da346bb17e08a4a63aae9ed89b159b36edd331199a9dd1c42b4a05b53ac939e",
+  "official_source": "https://www.cl.cam.ac.uk/research/rainbow/projects/upiq/",
+  "schema": "e31-upiq-label-disposition-v1",
+  "source_commits": [
+    "a36b07bf",
+    "bd4f83bb"
+  ],
+  "source_project": "zenmetrics 2026-06-09 UPIQ-PU work",
+  "state": "approved"
+}

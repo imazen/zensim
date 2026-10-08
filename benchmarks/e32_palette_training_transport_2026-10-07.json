@@ -1,0 +1,17 @@
+{
+  "schema": "e32-palette-projection-v1",
+  "feature_set_id": "basic+peaks+v2+palette@w1867/e32_palette_v2#2ec9dcda",
+  "inherited_feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+  "palette_feature_set_id": "palette@w1867/palette_v2#30b09cd1",
+  "feature_ids_sha256": "207d6d29ed86395166444c60fb4fc788856818801e6b64bcbc36ed7b81d1773d",
+  "bank_manifest_sha256": "46587338cc74ba59e38fe96e637776bfe74135fde29f3f70e22b51605fc50917",
+  "instrument_manifest_sha256": "9f7523bf7d3aaa32418d40d83adb44edccff9e70cc75acc32eb8d5711fe89934",
+  "producer_binary_sha256": "575f39b4a0bb04e224ceca15eed5e878d53273511b884a895a3630e606d4ccc6",
+  "build_commit": "e60a6ad74a47981f93f969d63b605c7a88ab09b0",
+  "serving_allowed": false,
+  "cast": "Float64-to-Float32; finite primary reads",
+  "physical_inherited_width": 1853,
+  "logical_width": 1867,
+  "named_palette_ids": [1825, 1866],
+  "identity_hash_owner": "zensim::feature_set_id; measured by palette_training::tests::contract_identity_and_era_map_refusals"
+}

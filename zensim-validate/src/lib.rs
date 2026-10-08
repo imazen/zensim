@@ -27,6 +27,7 @@ pub mod mlp_train;
 pub mod npz;
 pub mod output_calibration_spline;
 pub mod pairwise;
+mod palette_training;
 pub mod panel;
 pub mod parallel;
 pub mod parquet_loader;
@@ -35,3 +36,5 @@ pub mod prune;
 pub mod simd_mlp;
 pub mod tier_cap;
 pub mod train_manifest;
+
+mod training_keys;

@@ -286,7 +286,7 @@ fn validate_feature_column_names<'a>(
     Ok(())
 }
 
-fn feature_column_run(
+pub(crate) fn feature_column_run(
     path: &Path,
     arrow_fields: &[std::sync::Arc<arrow::datatypes::Field>],
 ) -> Result<(&'static str, usize, usize), String> {
@@ -394,11 +394,16 @@ fn feature_column_run_by_name(
 /// Inspect only the header/footer before allocating or reading feature rows.
 /// Gapped or duplicate IDs refuse through the same owner as the full loader.
 pub fn table_feature_width(path: &Path) -> Result<usize, String> {
+    crate::palette_training::validate(&crate::feature_set::table_metadata(path)?)?;
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if path.extension().is_some_and(|e| e == "parquet") {
         let b = ParquetRecordBatchReaderBuilder::try_new(file)
             .map_err(|e| format!("{}: parquet header: {e}", path.display()))?;
-        Ok(feature_column_run(path, b.schema().fields())?.2)
+        if let Some(columns) = crate::palette_training::columns(path, b.schema().fields())? {
+            Ok(columns.len())
+        } else {
+            Ok(feature_column_run(path, b.schema().fields())?.2)
+        }
     } else {
         use std::io::BufRead;
         let mut header = String::new();
@@ -560,6 +565,7 @@ fn load_parquet_impl(
     subset: &[u32],
     max_width: usize,
 ) -> Result<Option<(LoadedCommon, FeatureStore)>, String> {
+    crate::palette_training::validate(&crate::feature_set::table_metadata(path)?)?;
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
@@ -592,7 +598,14 @@ fn load_parquet_impl(
     // (e.g. the post-jxl-fix near-lossless corpus). Both name the same
     // 372-wide with-iw feature space; only the header text differs, so
     // rejecting one of them just forces a rename-copy of the parquet.
-    let (prefix, f0_arrow_idx, file_n_features) = feature_column_run(path, arrow_fields)?;
+    let (prefix, f0_arrow_idx, physical_width) = feature_column_run(path, arrow_fields)?;
+    let palette_columns = crate::palette_training::columns(path, arrow_fields)?;
+    let file_n_features = palette_columns.as_ref().map_or(physical_width, Vec::len);
+    let feature_index = |id: usize| {
+        palette_columns
+            .as_ref()
+            .map_or(f0_arrow_idx + id, |cols| cols[id])
+    };
     let _ = prefix;
     // Compact f32: the logical width is capped at `max_width` (the trainer's
     // `--max-features`; its post-load truncate becomes a no-op here) and only
@@ -609,7 +622,7 @@ fn load_parquet_impl(
         let all_f32 = in_range
             && subset.iter().all(|&d| {
                 matches!(
-                    arrow_fields[f0_arrow_idx + d as usize].data_type(),
+                    arrow_fields[feature_index(d as usize)].data_type(),
                     DataType::Float32
                 )
             });
@@ -641,7 +654,7 @@ fn load_parquet_impl(
         wanted.push(r);
     }
     for &i in &stored {
-        wanted.push(f0_arrow_idx + i);
+        wanted.push(feature_index(i));
     }
     let mask = ProjectionMask::leaves(&parquet_schema, wanted.iter().copied());
 
@@ -667,7 +680,7 @@ fn load_parquet_impl(
         .map(|&i| {
             sorted_wanted
                 .iter()
-                .position(|&p| p == f0_arrow_idx + i)
+                .position(|&p| p == feature_index(i))
                 .expect("feature idx must be in projection")
         })
         .collect();
@@ -701,6 +714,9 @@ fn load_parquet_impl(
     // Column-major staging for one row block; reused across blocks + batches.
     let mut per_col_scratch: Vec<f64> = Vec::new();
     let mut per_col_scratch32: Vec<f32> = Vec::new();
+    let palette_primary = palette_columns
+        .as_ref()
+        .map(|_| crate::palette_training::primary_ids());
     if compact {
         per_col_scratch32.reserve(stored.len() * TRANSPOSE_BLOCK_ROWS);
     } else {
@@ -797,8 +813,15 @@ fn load_parquet_impl(
             let block_len = TRANSPOSE_BLOCK_ROWS.min(n_rows - block_start);
             per_col_scratch.clear();
             per_col_scratch32.clear();
-            for &pi in &proj_feature_indices {
+            for (ci, &pi) in proj_feature_indices.iter().enumerate() {
                 let col = batch.column(pi);
+                if palette_primary
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(&stored[ci]))
+                    && col.null_count() != 0
+                {
+                    return Err(format!("E32 null primary feature f{}", stored[ci]));
+                }
                 if compact {
                     col_block_to_f32(
                         path,
@@ -807,6 +830,15 @@ fn load_parquet_impl(
                         block_len,
                         &mut per_col_scratch32,
                     )?;
+                    if palette_primary
+                        .as_ref()
+                        .is_some_and(|ids| ids.contains(&stored[ci]))
+                        && per_col_scratch32[per_col_scratch32.len() - block_len..]
+                            .iter()
+                            .any(|v| !v.is_finite())
+                    {
+                        return Err(format!("E32 nonfinite primary feature f{}", stored[ci]));
+                    }
                     continue;
                 }
                 // Feature columns may be Float64/Float32 (the common case)
@@ -821,6 +853,15 @@ fn load_parquet_impl(
                     block_len,
                     &mut per_col_scratch,
                 )?;
+                if palette_primary
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(&stored[ci]))
+                    && per_col_scratch[per_col_scratch.len() - block_len..]
+                        .iter()
+                        .any(|v| !v.is_finite())
+                {
+                    return Err(format!("E32 nonfinite primary feature f{}", stored[ci]));
+                }
             }
             match &mut store {
                 FeatureStore::Flat32(buf) => {

@@ -212,7 +212,7 @@ def _teacher_panel(paths, output_dir):
         print(role, result["pooled_srocc_signed"], result["within_reference"], result["agree_count"], flush=True)
 
 
-def _e26_panel(root, control_root, bank, output_dir, native_proof, study="e26", e26_root=None):
+def _e26_panel(root, control_root, bank, output_dir, native_proof, study="e26", e26_root=None, e29_control_pins=None, e29_sdr_decision=None):
     """Frozen E26/E27 HDR VAL assessment through the same native/cache owner."""
     import hashlib
     sys.path.insert(0, str(REPO / "scripts/rev4_featpot"))
@@ -223,6 +223,15 @@ def _e26_panel(root, control_root, bank, output_dir, native_proof, study="e26", 
     from scripts.lib.zen_stats import panel_batch_indexed
 
     root, control_root, bank, output_dir = map(Path, (root, control_root, bank, output_dir))
+    if study == "e29":
+        from e29_consensus import complete_cells
+        from v2_human_role import PRODUCTION_SOURCES
+        complete_cells(root, control_root, Path(e29_control_pins) if e29_control_pins else None)
+        if not e29_sdr_decision:
+            raise ValueError("INCOMPLETE: E29 frozen SDR decision required before HDR VAL")
+        source_order = PRODUCTION_SOURCES
+    else:
+        source_order = e24.SOURCE_ORDER
     output_dir.mkdir(parents=True, exist_ok=True)
     man = json.loads((bank / "_MANIFEST.json").read_text())
     proof = json.loads(Path(native_proof).read_text())
@@ -260,22 +269,29 @@ def _e26_panel(root, control_root, bank, output_dir, native_proof, study="e26", 
     if sha(Path(tool)) != proof["cached_executable_sha256"]:
         raise ValueError("E26 cache predictor changed")
     cells = {}
-    labels = ("hp4", "ha4") if study == "e27" else ("hd4", "hd16")
+    labels = {"e26": ("hd4", "hd16"), "e27": ("hp4", "ha4"), "e29": ("hb4", "hc4")}[study]
     compositions = [("control", control_root, e24.CONTROL),
                     *((label, root, e24.CONTROL+f":{label}") for label in labels)]
     if study == "e27":
         compositions.append(("e26_hd4", Path(e26_root), e24.CONTROL+":hd4"))
     for label, base, spec in compositions:
         result_cells = []
-        for source in e24.SOURCE_ORDER:
+        for source in source_order:
             for seed in e24.SEEDS:
                 cell = base / "cells" / f"{spec}__N" / f"without_{source}_s{seed}"
                 result = json.loads((cell / "result.json").read_text())
                 bake = cell / "refit/last.bin"
-                if (result["selected_bake_sha256"] != sha(bake) or result["selected_epoch"] != 119
-                        or result["epoch_rule"] != "last" or result["heldout"] != source or result["seed_index"] != seed):
+                selection = result["selection"] if study == "e29" else result
+                if (result["selected_bake_sha256"] != sha(bake) or selection["selected_epoch"] != 119
+                        or selection["epoch_rule"] != "last" or result["heldout"] != source or result["seed_index"] != seed):
                     raise ValueError("E26 cell identity/epoch/bake receipt mismatch")
-                dense, binding = e24.e26_bound_bake(cell, output_dir)
+                if study == "e29":
+                    from v2_common import dense_bake
+                    dense = dense_bake(bake, output_dir)
+                    binding = {"formula_revision":5, "research_only":True,
+                               "qualified_provenance":False, "dense_sha256":sha(dense)}
+                else:
+                    dense, binding = e24.e26_bound_bake(cell, output_dir)
                 proc = subprocess.run([tool, "--bake", str(dense), "--features-file", str(wire), "--f64-wire", "--production"],
                                       capture_output=True, text=True, check=True)
                 pred = np.array([float(v) for v in proc.stdout.split()], dtype=np.float64)
@@ -297,12 +313,12 @@ def _e26_panel(root, control_root, bank, output_dir, native_proof, study="e26", 
                     per_reference={t: [p["srocc_signed"] for p in panels[2+j*300:2+(j+1)*300]] for j,t in enumerate(("hdrvdp3", "cvvdp"))}))
         cells[label] = result_cells
         print(f"{study.upper()} HDR {label}: {len(result_cells)} complete VAL panels", flush=True)
-    sdr = json.loads((root / f"compare/{study}_sdr_decision.json").read_text())
+    sdr = json.loads((Path(e29_sdr_decision) if study == "e29" else root / f"compare/{study}_sdr_decision.json").read_text())
     arms, adopt = e24.hdr_arm_decisions(cells, sdr, study)
     if study == "e27":
         e24.hdr_report_geometry(output_dir, cells, keys)
-    decision = dict(schema=f"{study}-registered-decision-v1", rows=3900, references=300, cells_per_arm=50,
-                    pairing="all 50 registered (fold,seed) cells", arms=arms,
+    decision = dict(schema=f"{study}-registered-decision-v1", rows=3900, references=300, cells_per_arm=len(source_order)*10,
+                    pairing="ten paired seeds with equal four-fold composites" if study == "e29" else "all 50 registered (fold,seed) cells", arms=arms,
                     adopt=adopt,
                     val_bank_manifest_sha256=sha(bank / "_MANIFEST.json"), tools={str(p):sha(p) for p in (Path(tool), FITBIN, PANEL)},
                     native_cache_proof_sha256=sha(Path(native_proof)), native_cache_proof=proof,
@@ -311,19 +327,22 @@ def _e26_panel(root, control_root, bank, output_dir, native_proof, study="e26", 
     print(json.dumps({"adopt":decision["adopt"], "arms":arms}), flush=True)
 
 
+
 def _cli():
-    """Legacy CLI; runs only as a script (an import must never read the HDR panels)."""
-    if "--e26-root" in sys.argv or "--e27-root" in sys.argv:
-        study = "e27" if "--e27-root" in sys.argv else "e26"
+    if any(f"--{study}-root" in sys.argv for study in ("e26", "e27", "e29")):
+        study = next(study for study in ("e26", "e27", "e29") if f"--{study}-root" in sys.argv)
         hdr_ap = argparse.ArgumentParser(description=f"Registered {study} native HDR VAL panel")
         for option in ("root", "control-root", "val-bank", "output-dir", "native-proof"):
             hdr_ap.add_argument(f"--{study}-{option}", required=True)
         if study == "e27":
             hdr_ap.add_argument("--e27-e26-root", required=True)
+        if study == "e29":
+            hdr_ap.add_argument("--e29-control-pins", required=True)
+            hdr_ap.add_argument("--e29-sdr-decision", required=True)
         hdr_args = vars(hdr_ap.parse_args())
         _e26_panel(*(hdr_args[f"{study}_{key}"] for key in
                      ("root", "control_root", "val_bank", "output_dir", "native_proof")),
-                   study=study, e26_root=hdr_args.get("e27_e26_root"))
+                   study=study, e26_root=hdr_args.get("e27_e26_root"), e29_control_pins=hdr_args.get("e29_control_pins"), e29_sdr_decision=hdr_args.get("e29_sdr_decision"))
         raise SystemExit(0)
 
 

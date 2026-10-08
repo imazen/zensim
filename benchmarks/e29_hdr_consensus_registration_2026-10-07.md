@@ -1,5 +1,11 @@
 # E29 — an HDR leg that learns the two teachers' consensus cross-image order (registered 2026-10-07 09:40 UTC, before any E29 fit)
 
+Controlling registration: [the four-source amendment](e29_four_source_amendment_2026-10-07.md)
+and [shared fresh control decision](e29_e31_e32_shared_control_decision_2026-10-07.md)
+supersede this original record’s population, control, arm-retention and inference
+clauses. The original text below is retained as registration history; full fits
+use four folds, both hb4/hc4, the fresh matched V40 control and both-teacher gates.
+
 E27 (`benchmarks/e27_hdr_pooled_registration_2026-10-05.md`; result in `benchmarks/rev5_research_status_2026-10-05.md` §8) showed the
 two HDR teachers agree within references (0.998) but only 0.828 pooled: a pooled leg on HDR-VDP-3 alone (hp4) lifted pooled HDR-VDP-3
 SROCC 0.846 → 0.969 while pooled CVVDP fell 0.930 → 0.841. E29 trains the cross-image order only where the teachers do not disagree.

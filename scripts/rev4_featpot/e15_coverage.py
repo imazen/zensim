@@ -73,7 +73,7 @@ def pool_declaration(source: Path, stored: dict, revision: int) -> dict:
             "extractor_build_commit": x["build"], "extractor_manifest_sha256": e14.sha256(producer_path),
             "selection_file_sha256": e14.sha256(selection_path),
             "table_sha256": e14.sha256(table), "keys_sha256": e14.sha256(keys_path),
-            "row_keys_sha256": row_keys_sha(keys), "row_selection_sha256": selection_sha(indices),
+            "rows": keys.num_rows, "row_keys_sha256": row_keys_sha(keys), "row_selection_sha256": selection_sha(indices),
             "data_role": "TRAIN ordinal KADIS source_id%10<8; no human labels",
             "row_selection_rule": "ordered indices into selection.parquet; original identity/single-rung exclusions retained"}
 

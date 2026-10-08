@@ -11,6 +11,8 @@ import tarfile
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--bundle',type=Path,required=True)
 p.add_argument('--zenmetrics',type=Path,required=True)
+p.add_argument('--study',choices=('shippath','e29'),default='shippath')
+p.add_argument('--pin-e30',type=Path,help='Existing SHIPPATH11 artifact root; verify and freeze 40 installed nA3 cells')
 args=p.parse_args(); root=args.bundle
 sys.path.insert(0,str(args.zenmetrics/'scripts/jobsys'))
 import harvest_fit_cells as h
@@ -42,7 +44,8 @@ def modified_blob(blob, source_job, target_job, changes, output):
             m=tarfile.TarInfo(newprefix+n);m.size=len(b);t.addfile(m,io.BytesIO(b))
 
 
-for route,jobset in [('e30','fitv2e30-20261007'),('production','fitv2d1-20261007')]:
+routes = [('e30','fitv2e30-20261007'),('production','fitv2d1-20261007')] if args.study == 'shippath' else [(arm, 'fitv2e29-'+arm+'-20261007') for arm in ('base','hb4','hc4')]
+for route,jobset in routes:
     smoke=json.loads((root/f'local-smoke-manifest-{jobset}.json').read_text())[0]
     full=json.loads((root/f'fit-manifest-{jobset}.json').read_text())[0]
     blob=root/f'{route}-executor-blob.tar.gz'
@@ -76,5 +79,35 @@ for route,jobset in [('e30','fitv2e30-20261007'),('production','fitv2d1-20261007
     else:
         raise AssertionError('smoke accepted without verification-only flag')
 report['status']='PASS'
+if args.pin_e30:
+    import qualified_fit_contract as q
+    old=args.pin_e30
+    manifest=old/'fit-manifest-fitv2e30-20261007.json'
+    jobs=json.loads(manifest.read_text())
+    assert len(jobs)==40
+    pins={}
+    for job in jobs:
+        kind=job['kind']; argv=kind['argv']
+        source=q.argument(argv,'--heldout'); seed=int(q.argument(argv,'--seed-index'))
+        assert source in ('kadid','tid2013','konfig','cid22_a25') and 0<=seed<10
+        key=f'{source}_s{seed}'; assert key not in pins
+        cell=Path(q.argument(argv,'--dest')); model=cell/'refit/last.bin'
+        result=json.loads((cell/'result.json').read_text())
+        expected=q.trusted_contract(kind,old/'image-context/program.tar.gz',old/'bin/inspect_qualified_checkpoint')
+        assert q.verify_training(result,model,kind,expected,old/'bin/inspect_qualified_checkpoint')=='registered-fit'
+        assert q.sha(model)==result['selected_bake_sha256']
+        receipt=json.loads((cell/'fleet_receipt.json').read_text())
+        assert receipt['program_sha']==kind['program_sha'] and receipt['data_sha']==kind['data_sha'] and receipt['argv_sha']==kind['argv_sha']
+        assert receipt['result_sha']==q.sha(cell/'result.json') and receipt['selected_bake_sha']==q.sha(model)
+        pins[key]={'result_sha256':q.sha(cell/'result.json'),'bake_sha256':q.sha(model),
+                   'receipt_sha256':q.sha(cell/'fleet_receipt.json'),
+                   'declared_cell':job['cell']['image_path'],'argv_sha256':kind['argv_sha']}
+    frozen={'schema':'e29-e30-completion-pins-v1','build_commit':json.loads((root/'build-meta.json').read_text())['build_commit'],
+            'status':'PASS','scope':'E30 nA3 prerequisite only; does not choose or approve E29 control reuse',
+            'cells':pins,'manifest_sha256':q.sha(manifest),'program_sha256':q.sha(old/'image-context/program.tar.gz'),
+            'inspector_sha256':q.sha(old/'bin/inspect_qualified_checkpoint'),'verifier_sha256':q.sha(Path(q.__file__)),
+            'control_reuse_exact_parity':False,'reason':'E29 trainer/program differs; one matched control proposal needs registration before fitting'}
+    (root/'E30_COMPLETE_PINS.json').write_text(json.dumps(frozen,indent=2)+'\n')
+    report['verified_E30_final119_cells']=40
 (root/'HARVEST_BINDING_CHECKS.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report))

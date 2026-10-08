@@ -162,6 +162,83 @@ because cleanup tests or a historical training reproduction pass.
 
 * **2026-10-08 — Frozen production Rev5 misses the universal Rev4 speed gate. SUPERSEDED by SPEEDQ3; the five slower cells were FIXED by REV5PERF2 (`37779f79`, `0bd3b412`) and are faster on `c989a2d4`; the universal claim stays OPEN in the SPEEDQ3 entry.** SPEEDQ2 on runtime `ee9e5b55` and packed seed-0 model `f803b74c` measures all 192 cells: 164 faster, 5 slower, 23 inconclusive using pointwise paired 95% CIs. Slower cells are v4x 1T 64²/128², v4x 2T 64², and v4 1T 64²/128². All 384 Rev4/Rev5 score and 420-consumed-feature bit checks pass. The first-32-clean rule and <2.0 load gate are unchanged. See [the full report](benchmarks/rev5_speedq2_2026-10-08.md) and [the 192-cell before/after comparison](benchmarks/rev5_speedq2_vs_speedq_2026-10-08.md).
 
+* **2026-10-08 — V40 R4 historical population and producer metadata.** The R3
+  historical replay path bypassed ordinary-path forbidden declarations on extra
+  manifest and auxiliary inputs. Replay now inventories every group, extra input
+  and auxiliary declaration, then optional label-free keys, before any payload
+  hashing/loading. Forbidden VAL/T0/terminal/test/AIC/holdout identities refuse;
+  permitted development identities and recipes without sidecars remain unqualified
+  historical compatibility inputs. Packet staging now records the actual producer,
+  retained tool hashes and build-log hash in every current binary record, keeping
+  prior descriptive records under historical fields. Freeze and package checks
+  reconcile these records with source bindings and the actual archive/tool bytes.
+
+
+* **2026-10-08 — V40 R3 complete native inventory and postfit artifacts.** The
+  R2 executable hashed ordinary unregistered manifest payloads and opened four
+  auxiliary tables after admitted groups. Strict native preflight now permits
+  manifest repeats only of admitted group tables, keys and declarations;
+  unregistered provenance and all four unregistered auxiliary routes refuse
+  before any group payload open. Explicit unqualified historical recipes retain
+  ordinary auxiliary compatibility, with protected ancestry still refused.
+  The postfit owner now requires nonempty structured scorer output, exact
+  full-budget cell/control pins, finite registered reductions and every hashed
+  prediction/result artifact before printing success. Empty successful output
+  is a refusal. The synthetic controller tests cover control and all three
+  studies through their real shell boundary. Full frozen-image and bounded
+  final-scoring receipts are required in the R3 preparation pointer.
+
+* **2026-10-07 — V40 R2 launch/admission/statistics. FIXED locally.** Review found the E30
+  prerequisite missing the installed `cells/` level, native `--manifest`
+  hashing inputs before group/key admission, and constant seed composites
+  receiving a rounded nonzero SE. The corrected actual-binary probes refuse
+  before any payload opens; both complete control proofs remain byte-identical.
+  Final package/authorization/mirror receipts are required before readiness;
+  see [the round-two pointer](benchmarks/v40r2_2026-10-07.pointer.md).
+  The controlling four-source E29 amendment and shared fresh control decision
+  are bound into the new package. Historical reviewed artifacts remain intact.
+
+* **2026-10-07 — E32 cached assessment planner refusal. FIXED locally in V40.**
+
+  Serving admission correctly refuses the research palette feature IDs. The
+  ordinary densify and cached-prediction owners therefore could not assess the
+  registered E32 arm. Explicit `--research-palette-cached` validation flags now
+  require its qualified Rev5 declaration, fixed 462 IDs, scalar N recipe and
+  research-only disposition. They reuse the canonical predictor, gather,
+  metadata parser, pin and spline math. The serving predicate remains unchanged;
+  an unflagged palette densify still refuses. Cached predictions on twelve
+  approved KADID TRAIN+SELECT rows match the Parquet owner bit for bit for
+  control, hb4, hc4 and palette; no external/HDR VAL/UPIQ development read occurs.
+
+* **2026-10-07 — E31/E32 native group admission. FIXED locally in V40.**
+
+  The inherited native entry could inspect feature payloads before refusing bad
+  UPIQ keys, and palette admission did not bind group weights or complete ordered
+  observation identity. The shared trainer preflight now admits every declaration
+  and key domain before any feature payload. Actual-binary probes retain zero
+  feature opens for late-group failures, development training, VAL keys, false
+  order pins, missing pair/ordinal identities and duplicate ordinal indices.
+  Historical replay remains explicitly unqualified.
+
+
+* **2026-10-07 — E29 preparation import/root regressions. FIXED locally.**
+
+  The new E29 adapter initially lacked the existing scripts/ import bootstrap
+  when called by the data packer; packing refused on `lib` import. The bootstrap
+  is now explicit (`a9b92db3`), and the clean-environment scorer preflight passes.
+  An additional tripwire imported the unguarded HDR panel before installing mocks;
+  the module opened the legacy 22,860-row HDR VAL default and printed target
+  swings before failing on a missing predictor. No prediction or fit followed.
+  The CLI is now guarded (`f634504e`); import and absent-control HDR panel checks
+  refuse before payload reads. Preserve the incident in `UNINTENDED_EXPOSURE.json`
+  and the amendment/exposure ledger; the read cannot be undone.
+  Native HDR manifests also use the approved lexical fleet root without a
+  local-only admission_root (`9d563474`), so actual image executor extraction and
+  FIT_ROOT linkage pass. Evidence and explicit research qualification limits are
+  in `benchmarks/E29_WORKLOG.md`. No full E29 assessment was performed.
+
+
+
 * **2026-10-07 — Three zensim integration tests failed on main. FIXED (stale test contracts; reviewed patch, no weakening).** Found by the PRODQUAL-A label-free gate
   run: `featcanon_rev4_contract::served_paths_serve_rev4` (1867 vs 1825 features) and
   `research_engine_parity::research_everything_agrees_with_the_production_walk` (production 1825 vs research 1867) most likely

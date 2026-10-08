@@ -28,6 +28,9 @@
 //! (per-sample-α head, hybrid head, tanh output pin) so the produced
 //! score is bit-exact with the slow path on the same feature row.
 
+#[path = "research_cached/mod.rs"]
+mod research_cached;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -103,8 +106,10 @@ fn main() -> ExitCode {
     let mut codec_hint: Option<String> = None;
     let mut f64_wire = false;
     let mut production = false;
+    let mut research_palette_cached = false;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--research-palette-cached" => research_palette_cached = true,
             "--f64-wire" => f64_wire = true,
             "--production" => production = true,
             "--codec" => {
@@ -213,6 +218,29 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if research_palette_cached {
+        if !production || !f64_wire || codec_hint.is_some() {
+            eprintln!("cached palette research requires --production --f64-wire and no codec hint");
+            return ExitCode::FAILURE;
+        }
+        let mut scorer = match research_cached::PaletteScorer::new(&model) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        for row in feature_buf.chunks_exact(n_features_in) {
+            match scorer.score(row) {
+                Ok(score) => println!("{score:.17}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
     let mut scorer = BakeScorer::new(&model).expect("invalid score metadata");
     let params = post_mode_params(&bake_post).expect("invalid bake-post");
     if !production {

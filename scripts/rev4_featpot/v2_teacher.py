@@ -223,6 +223,58 @@ def row_keys_sha(keys: pa.Table) -> str:
     return hashlib.sha256(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+
+def admit_ordered_keys(path, declaration, keys, count=None):
+    """Bind label-free observations before any table hash/header/value read."""
+    from v2_common import sha
+    if count is None:
+        for name in ("rows_kept", "rows", "observations"):
+            if isinstance(declaration.get(name), int):
+                count = declaration[name]
+                break
+    if count is None and isinstance(declaration.get("row_selection"), list):
+        count = sum(s["rows"] for s in declaration["row_selection"])
+    if count is None:
+        rp = Path(path).parent / "receipt.json"
+        if rp.is_file():
+            for leg in json.loads(rp.read_text())["legs"].values():
+                for split in ("fit", "dev", "full"):
+                    record = leg.get(split, {})
+                    if record.get("sha256") == declaration.get("table_sha256"):
+                        count = record["rows"]
+    ordinal = declaration.get("data_role") == "TRAIN ordinal KADIS source_id%10<8; no human labels"
+    if count is None and ordinal:
+        pool_manifest = Path(path).parent / "coverage_pool.manifest.json"
+        if pool_manifest.is_file():
+            count = json.loads(pool_manifest.read_text())["rows"]
+    required = {"ladder", "source_filename", "type", "family", "severity_level", "severity", "sign", "__index_level_0__"} if ordinal else {"pair_key", "ref_basename", "member_set"}
+    allowed = required if ordinal else required | {"source_row_id", "row_id"}
+    if (count is None or keys.num_rows != count or count <= 0
+            or not required <= set(keys.column_names) or not set(keys.column_names) <= allowed
+            or any(keys[c].null_count for c in keys.column_names)
+            or row_keys_sha(keys) != declaration.get("row_keys_sha256")
+            or sha(key_path(Path(path))) != declaration.get("keys_sha256")):
+        raise ValueError(("coverage " if ordinal else "") + "ordered observation schema/count/order/file identity differs")
+    strings = ("ladder", "source_filename", "type", "family") if ordinal else ("pair_key", "ref_basename", "member_set")
+    for name in strings:
+        if keys[name].type not in (pa.string(), pa.large_string()) or any(not v for v in keys[name].to_pylist()):
+            raise ValueError("string observation identity required")
+    if ordinal:
+        for name in ("severity", "sign"):
+            if not pa.types.is_floating(keys[name].type) or not np.isfinite(keys[name].to_numpy()).all():
+                raise ValueError("finite numeric ordinal identity required")
+        if not pa.types.is_integer(keys["severity_level"].type):
+            raise ValueError("integer ordinal level required")
+        indices = keys["__index_level_0__"].to_pylist()
+        if not pa.types.is_integer(keys["__index_level_0__"].type) or min(indices) < 0 or len(indices) != len(set(indices)):
+            raise ValueError("unique original selection ordinal required")
+    else:
+        name = "source_row_id" if "source_row_id" in keys.column_names else "row_id"
+        if name not in keys.column_names or not pa.types.is_integer(keys[name].type) or min(keys[name].to_pylist()) < 0:
+            raise ValueError("original row/observation identity required")
+    return keys
+
+
 def key_path(table: Path) -> Path:
     return table.with_suffix(".keys.parquet")
 
@@ -247,6 +299,14 @@ def coverage_leg(mask: int, scratch: Path, *, admitted_root: Path | None = None)
     pool_sha = {4: POOL_SHA, 5: POOL_SHA_REV5}.get(revision)
     if pool_sha is None:
         raise ValueError(f"{pool}: no registered E15 coverage pool for formula revision {revision}")
+    declaration = json.loads(man.read_text()) if man.is_file() else {}
+    if "research_palette" in declaration:
+        from e32_palette import admit_declaration, admit_keys
+        projection = admit_declaration(declaration)
+        if admitted_root is None or projection["role"] != "TRAIN-ordinal" or projection["inherited_table_sha256"] != pool_sha:
+            raise ValueError("E32 coverage must preserve the exact registered inherited pool")
+        admit_keys(pool, declaration, pq.read_table(keys))
+        pool_sha = declaration["table_sha256"]
     for path, want in ((pool, pool_sha), (keys, POOL_KEYS_SHA)):
         got = hashlib.sha256(path.read_bytes()).hexdigest()
         if got != want:
