@@ -378,3 +378,17 @@ minimise MSE and maximise Kendall and Pearson correlation.
   basic coverage to be reported for them.
 * **Independent process review:** a Codex reviewer (herdr tab `process-review`) is auditing today's process and results against
   the evidence; its report lands as `~/tmp/zensim-paper/rev4/PROCESS_REVIEW.md`.
+
+## 30. Release gates on the frozen seed-0 model (2026-10-08 01:25 UTC)
+
+**Seed 0 does not qualify yet.** Fails: the full 38-image feature-identity gate (all 38 between 92.2 and 97.5 against the
+[97.5, 100] band; pixel identity is exactly 100), standard-grid ties 0.076 (bar ≤ 0.05), and 7 of 135 steering cases (JPEG
+4/8). Passes: dial calibration, negative tails, pixel identity, integrity-head compatibility. Blocked for missing inputs or
+rules: human rank axes (no admitted independent human root), five codec floors, RD, targeting, integrity class, HDR, speed. The
+earlier four-image identity pass was too narrow. A lane is now determining, for each failure, whether the harness or the model
+is wrong; the model stays frozen and no bar changes.
+
+An independent Codex review of the day's process and results found the headline experiment claims supported within their
+scope, flagged that legacy composite error bars ignore fold covariance and that E30 shows "no detectable cost", not
+equivalence, and listed process fixes (one shared admission invariant for every entry point, an end-to-end rehearsal before
+any fleet launch, scoped landing receipts, a release matrix). v40 needs fixes before launch.
