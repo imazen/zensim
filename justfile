@@ -810,3 +810,17 @@ v40-r3-executors bundle image attempt="1":
             just v40-executor-smoke '{{bundle}}' '{{image}}' "$arm" "$mode" '{{attempt}}'
         done
     done
+
+v40-r3-parity bundle e30:
+    just v40-parity {{bundle}} {{e30}} {{bundle}}/parity-kadid kadid
+    just v40-parity {{bundle}} {{e30}} {{bundle}}/parity-tid2013 tid2013
+
+v40-r3-lint:
+    ruff check scripts/rev4_featpot/v40_score.py scripts/tests/v40_inventory_admission.py scripts/tests/v40_postfit_fixture.py scripts/tests/v40_scoring_rehearsal.py scripts/tests/v40_r3_stage.py scripts/tests/v40_evidence_archive.py scripts/tests/test_v40_postfit_artifacts.py
+    ruff format --check scripts/rev4_featpot/v40_score.py scripts/tests/v40_inventory_admission.py scripts/tests/v40_postfit_fixture.py scripts/tests/v40_scoring_rehearsal.py scripts/tests/v40_r3_stage.py scripts/tests/v40_evidence_archive.py scripts/tests/test_v40_postfit_artifacts.py
+
+v40-evidence-archive bundle logs mirror:
+    python3 scripts/tests/v40_evidence_archive.py archive --bundle {{bundle}} --logs {{logs}} --mirror {{mirror}}
+
+v40-own-cargo-cleanup bundle mirror:
+    python3 scripts/tests/v40_evidence_archive.py cleanup --bundle {{bundle}} --mirror {{mirror}} --source {{justfile_directory()}}

@@ -92,6 +92,7 @@ def main():
         json.dumps(
             dict(
                 source_commit=a.producer,
+                trainer_build_commit=a.producer,
                 files={
                     "bin/" + name: dict(
                         sha256=sha(b / "bin" / name), producer_commit=a.producer
