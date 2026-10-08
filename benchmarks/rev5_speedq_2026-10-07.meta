@@ -48,7 +48,8 @@
     "/home/lilith/tmp/speedq-2026-10-07/build-taskgate.log",
     "/home/lilith/tmp/speedq-2026-10-07/build-globalgate.log",
     "/home/lilith/tmp/speedq-2026-10-07/build-process-owners.log",
-    "/home/lilith/tmp/speedq-2026-10-07/production-build.log"
+    "/home/lilith/tmp/speedq-2026-10-07/production-build.log",
+    "/home/lilith/tmp/speedq-2026-10-07/clean-rounds-build.log"
   ],
   "statistics_pin": "e45822161a710acd013c572a98627e64663b1bcf",
   "final_zenbench_pin": "82ff70a3f0c212cf88f53d6e9c3e02de13f32eec",
@@ -59,7 +60,7 @@
   "timing_boundary": "worker Instant around scoring call; persistent warm workers; parent paired randomized rounds retain IPC separately",
   "rss_boundary": "fresh process including input setup, model load, one score; v4x 1/32 requested threads only",
   "mirror": "/mnt/tower/output/zensim/speedq-2026-10-07/raw",
-  "status": "INCOMPLETE",
+  "status": "MEASURED",
   "reporter_commit": "2433d8336947b690f74f8f6c05ffd5aa3f840cb9",
   "strict_score_and_feature_parity_cells": [
     384,
@@ -71,7 +72,7 @@
     192
   ],
   "timing_segments": [
-    173,
+    192,
     192
   ],
   "rss_measurements": [
@@ -94,13 +95,13 @@
     "remaining_six_arm_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli",
     "clean_round_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-clean-rounds-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli"
   },
-  "mirror_verification": "provenance/production-mirror-verification.json verifies frozen model, instrument, source manifest; provenance/production-rss-mirror-verification.json verifies three randomly chosen RSS records; all 112 RSS records/logs and full parity mirrored, final timing mirror pending",
+  "mirror_verification": "provenance/final-production-mirror-verification.json: entire raw tree copied without deletion; three actual randomly selected timing files sha256-match the mirror; parity/RSS/model and both controller source archives included",
   "validation": {
     "python_tests": "21 passed in 0.450s; first-clean shared paired index vector, 31/32 clean at cap, unaligned/over-collected refusal, raw preservation and reporter receipt-index verification",
     "bench_build_and_clippy": "production build rc0: 15s, peak-RSS 0.68GiB, min available 46797MiB, peak load 1.24; clippy rc0: 0s, 0.17GiB, 47346MiB, load 1.22",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. All-platform CI retry fully green at https://github.com/imazen/zenbench/actions/runs/37696531423 (initial Linux ARM64 post-job cache failure had no failed test step).",
     "parity": "f803b74c production model: 576/576 cells; 384 strict Rev4/Rev5 score and all 420 consumed-feature bits pass; 48 Rev3 scalar tolerance failures recorded. run-heavy rc0, 76s, peak-RSS 0.26GiB, min available 46869MiB, peak load 2.37.",
-    "admitted_timing": "Partial admitted production coverage only; all 32 round gates clean in each stored segment; remaining timing grid queued with unchanged gates",
+    "admitted_timing": "192/192 segments; 6144 retained paired rounds; 118 earlier all-32-clean, 74 owner-approved first-32-clean of <=64; raw flags, selections and adaptive parent batches revalidated",
     "rss": "112/112 actual /usr/bin/time -v max-RSS records; unchanged pre-segment quiet gates and production score/input/source bindings pass; scope v4x at 1/32 requested threads",
     "clean_rounds_driver_build_clippy": "build rc0: 15s, peak-RSS 0.70GiB, min available 37978MiB, peak load 0.95; clippy rc0: 1s, peak-RSS 0.17GiB, min available 38679MiB, peak load 0.97"
   },
@@ -177,12 +178,12 @@
     "six_worker_header_verified": "v4x-t4-64x64"
   },
   "timing_arm_coverage": {
-    "by_v2fy_r3": 173,
-    "by_v2fy_r4": 173,
-    "by_v2fy_r5": 173,
-    "zensim_B": 173,
-    "fast_ssim2": 173,
-    "butteraugli": 173,
+    "by_v2fy_r3": 192,
+    "by_v2fy_r4": 192,
+    "by_v2fy_r5": 192,
+    "zensim_B": 192,
+    "fast_ssim2": 192,
+    "butteraugli": 192,
     "ssimulacra2_rs": 63
   },
   "clean_round_amendment": {
@@ -199,6 +200,10 @@
   },
   "timing_round_rule_counts": {
     "all-32-clean": 118,
-    "first-32-clean-of-<=64 (owner 2026-10-08)": 55
-  }
+    "first-32-clean-of-<=64 (owner 2026-10-08)": 74
+  },
+  "final_validation": "provenance/final-production-validation.json",
+  "publish_scope": "Local only since October 8 arm and clean-round amendments; latest remote report commit 0022abf97c39c5be5618c69453e885db3e131573 predates both",
+  "completed_utc": "2026-10-08T09:58:32.174990+00:00",
+  "final_raw_mirror_log": "provenance/final-raw-mirror.log"
 }
