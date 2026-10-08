@@ -614,6 +614,28 @@ rev5perf-timing root analyzer:
         --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli
 
 [positional-arguments]
+rev5perf-validation root:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo fmt -p zensim -- --check > "$1/provenance/fmt.log" 2>&1
+    cargo test -p zensim --all-features > "$1/provenance/all-features-test.log" 2>&1
+    just clippy > "$1/provenance/clippy.log" 2>&1
+    just speedq-clippy > "$1/provenance/speedq-clippy.log" 2>&1
+    just lint-scripts > "$1/provenance/lint-scripts.log" 2>&1
+
+[positional-arguments]
+rev5perf-collect root before analyzer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just rev5perf-gate "$1" "$2"
+    just rev5perf-validation "$1"
+    just rev5perf-timing "$1" "$3"
+    just rev5perf-report --before "$2" --after "$1" --out "$1/comparison.json"
+    just rev5perf-profile "$1/provenance/instrument" "$1/perf" perf
+    just rev5perf-profile "$1/provenance/instrument" "$1/callgrind" callgrind
+    just rev5perf-profile "$1/provenance/instrument" "$1/phases" phases
+
+[positional-arguments]
 speedq-parity binary dest *options:
     #!/usr/bin/env bash
     binary=$1
