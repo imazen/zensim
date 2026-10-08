@@ -12,6 +12,8 @@ from pathlib import Path
 import tarfile
 import subprocess
 
+from v40_binary_metadata import validate as validate_binary_metadata
+
 
 def sha(path):
     h = hashlib.sha256()
@@ -108,6 +110,8 @@ def freeze(bundle, source, source_commit, metrics_commit):
         shared_control_sha256=sha(bundle / "CONTROL_DECISION.md"),
         source_landing_required_before_launch=True))
     bindings = json.loads((bundle / "SOURCE_BINDINGS.json").read_text())
+    metadata = json.loads((bundle / "build-meta.json").read_text())
+    validate_binary_metadata(bundle, metadata, bindings, metadata["files"])
     producer = bindings["binary_producer_commit"]
     ancestor = subprocess.check_output(["jj", "log", "-r", f"{producer} & ancestors({source_commit})", "--no-graph", "-T", "commit_id"], cwd=source, text=True).strip()
     if ancestor != producer:
@@ -166,6 +170,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
     files = [
         "program.tar.gz",
         "build-meta.json",
+        "BUILD_LOG.txt",
         "PACKAGE_PINNED.json",
         "jobset_caps.json",
         "ASSESSMENT_SOURCE.json",

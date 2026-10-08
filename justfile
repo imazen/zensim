@@ -835,3 +835,14 @@ v40-historical-admission binary dest:
 
 v40-binary-metadata-tests:
     PYTHONPATH=scripts/tests python3 -m unittest scripts.tests.test_v40_binary_metadata
+
+v40-r4-prepare bundle producer source_commit metrics_commit image:
+    python3 scripts/tests/v40_r4_prepare.py --bundle {{bundle}} --producer {{producer}} --source-commit {{source_commit}} --metrics-commit {{metrics_commit}} --image {{image}}
+
+# Complete inherited checks plus replay and producer regressions; shared heavy wrapper required.
+v40-r4-checks bundle dest metrics:
+    just v40-historical-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/historical
+    just v40-inventory-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/inventory
+    just v40-native-tests
+    just v40-binary-metadata-tests
+    just v40-r3-checks {{bundle}} {{dest}}/inherited {{metrics}}

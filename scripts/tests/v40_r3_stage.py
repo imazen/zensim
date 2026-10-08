@@ -25,6 +25,7 @@ def main():
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--bin-dir", type=Path, required=True)
     p.add_argument("--producer", required=True)
+    p.add_argument("--build-log", type=Path, required=True)
     p.add_argument("--quiet-start", type=Path, required=True)
     p.add_argument("--quiet-override", type=Path, required=True)
     p.add_argument("--release-authority", type=Path, required=True)
@@ -71,7 +72,7 @@ def main():
         final_release_authority=str(a.release_authority),
         authority_sha256=sha(a.release_authority),
         heavy_wrapper="flock heavy.lock run-heavy --mem 16G --jobs 8",
-        preparation_round=3,
+        preparation_round=4,
     )
     (b / "QUIET_WINDOW_RELEASE.json").write_text(json.dumps(boundary, indent=2) + "\n")
     metadata = json.loads((a.previous / "build-meta.packer-input.json").read_text())
@@ -81,9 +82,27 @@ def main():
         "zensim_lane_commit",
     ):
         metadata[key] = a.producer
+    metadata.setdefault("historical_binary_builds", []).append(
+        {
+            "build_commit": metadata.get("build_commit"),
+            "binary_mix": metadata.get("binary_mix"),
+            "previous_bundle": str(a.previous),
+        }
+    )
+    shutil.copy2(a.build_log, b / "BUILD_LOG.txt")
+    metadata["build_commit"] = a.producer
+    metadata["binary_mix"] = {
+        name: dict(
+            build_commit=a.producer,
+            sha256=sha(b / "bin" / name),
+            producer_record="BUILD_LOG.txt",
+            producer_record_sha256=sha(b / "BUILD_LOG.txt"),
+        )
+        for name in binaries
+    }
     metadata.pop("source_bindings_sha256", None)
     metadata["note"] = (
-        "Fresh native complete-inventory rebuild; unchanged registered budgets, selection and data archives. Source bindings, actual image and final-scoring rehearsal are reverified in round 3."
+        "Fresh historical population admission rebuild; unchanged registered budgets, selection and data archives. Source bindings, actual image and final-scoring rehearsal are reverified in round 4."
     )
     (b / "build-meta.packer-input.json").write_text(
         json.dumps(metadata, indent=2) + "\n"

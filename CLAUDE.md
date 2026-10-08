@@ -158,6 +158,18 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-08 — V40 R4 historical population and producer metadata.** The R3
+  historical replay path bypassed ordinary-path forbidden declarations on extra
+  manifest and auxiliary inputs. Replay now inventories every group, extra input
+  and auxiliary declaration, then optional label-free keys, before any payload
+  hashing/loading. Forbidden VAL/T0/terminal/test/AIC/holdout identities refuse;
+  permitted development identities and recipes without sidecars remain unqualified
+  historical compatibility inputs. Packet staging now records the actual producer,
+  retained tool hashes and build-log hash in every current binary record, keeping
+  prior descriptive records under historical fields. Freeze and package checks
+  reconcile these records with source bindings and the actual archive/tool bytes.
+
+
 * **2026-10-08 — V40 R3 complete native inventory and postfit artifacts.** The
   R2 executable hashed ordinary unregistered manifest payloads and opened four
   auxiliary tables after admitted groups. Strict native preflight now permits

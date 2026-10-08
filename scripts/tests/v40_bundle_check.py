@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import tarfile
 
+from v40_binary_metadata import validate as validate_binary_metadata
+
 
 def digest(path):
     h = hashlib.sha256()
@@ -70,6 +72,7 @@ def main():
         assert record["status"] == "PASS" and record["program_sha"] == pins["program_sha"]
         assert record["image_id"] == pins["image_id"] and record["image"] == pins["image"]
     bindings = json.loads((b / "SOURCE_BINDINGS.json").read_text())
+    validate_binary_metadata(b, metadata, bindings, metadata["files"])
     assert bindings["binary_producer_commit"] == metadata["trainer_producer_commit"]
     for name, binding in bindings["binaries"].items():
         assert digest(b / "bin" / name) == binding["sha256"]

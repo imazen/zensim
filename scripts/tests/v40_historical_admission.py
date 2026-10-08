@@ -112,10 +112,10 @@ def main():
             "pjnd-passthrough-parquet",
             "konjnd-aggregation-parquet",
         )
-        for role, declaration in declarations.items():
+        for role_index, (role, declaration) in enumerate(declarations.items()):
             for route in routes:
                 for alias in (False, True):
-                    dest = args.dest / f"input-{role}-{route}-{alias}"
+                    dest = args.dest / f"input-{role_index}-{route}-{alias}"
                     dest.mkdir()
                     sentinel = dest / "ordinary.parquet"
                     sentinel.write_bytes(b"SYNTHETIC PROTECTED ROLE PAYLOAD")
