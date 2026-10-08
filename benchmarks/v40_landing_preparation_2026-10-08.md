@@ -38,6 +38,46 @@ Exact per-file hashes and test command/status/log receipts are retained under
 `TEST_RECEIPTS.json`, `final-local-check.log` and the individual suite logs.
 The frozen packet and its previous PASS receipt are unchanged.
 
+## Merge verification receipts
+
+The merged zensim tree passes `cargo test --locked -p zensim --all-features`
+(including doctests), the zensim-validate library/trainer suites, the existing
+E32/SHIPPATH/E29/E26/import-guard/E31 suites, V40 projection/statistics/launch/panel
+tests, postfit artifact/controller tests, producer-metadata tests, all four
+shipped-binary admission suites, CI-exact `just clippy` and scoped format checks.
+The statistics invocation initially lacked `ZEN_PANEL_BIN`; its retry explicitly
+uses the retained reviewed panel and passes unchanged expectations.
+
+`just lint-scripts` **fails** on two cross-repository false positives:
+`scripts/tests/test_v40_postfit_artifacts.py` and
+`scripts/tests/v40_r4_prepare.py` resolve
+`METRICS / "scripts/jobsys/v40_postfit.sh"` into zenmetrics, while the linter
+checks that string relative to zensim. The actual zenmetrics owner exists and
+the postfit/controller suites pass. Both referencing files belong to the frozen
+assessment inventory; they were preserved rather than edited during landing
+preparation. This required gate remains unresolved; no exemption or relaxed
+expectation was introduced.
+
+The zenmetrics merge passes its 48 fit-tool tests and postfit checks. Initial
+worker invocations against live sibling checkouts fail dependency resolution
+(`ultrahdr-rs` asks for unpublished `zenjpeg ^0.9.0`). The canonical
+`scripts/ci/lock.sh --check --rev b2d5690380029b73c8499ce39c9cd706bf16dbfc`
+exports the exact merge and passes with all 23 committed CI sibling pins.
+In that isolated snapshot, worker claim regressions, full worker tests including
+doctests, and worker clippy pass. No live sibling or committed lockfile changed.
+
+The supplemental `FROZEN_ANCESTOR_CHECK.json` passes all 160 native and 619
+assessment source records against their preserved ancestors, retained tools,
+frozen assessment runtime and actual local image ID. It explicitly retains
+`merged_tree_equality=FAIL` and `coordinator_disposition=PENDING`; it does not
+replace the requested merged-tree check. Its first invocation failed because
+a jj workspace lacks a colocated `.git`; the retry resolves `jj git root` and
+checks the same objects. Both logs are retained.
+
+No scientific fits or new parity fits ran during this preparation. The reviewed
+packet's full-budget parity still covers 2 of 40 controls; the 40 fresh controls
+and 160 arm fits remain future scientific work.
+
 ## Commands to list for the coordinator
 
 **Not executed.** Resolve the bound-byte gate and any reported test failures
@@ -48,11 +88,11 @@ additional local documentation commits are listed separately in the completion
 record.
 
 ```bash
-cd /home/lilith/work/zen/zensim--v40-land
+cd /home/lilith/work/zen/zensim
 TMPDIR=$HOME/tmp/v40-land flock ~/tmp/zensim-paper/rev4/heavy.lock \
   ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- \
   bash scripts/safe_push.sh -b main -r 2b3875fce60ee4a2d1e1ce23ff74611090d8a7e5
-cd /home/lilith/work/zen/zenmetrics--v40-land
+cd /home/lilith/work/zen/zenmetrics
 TMPDIR=$HOME/tmp/v40-land flock ~/tmp/zensim-paper/rev4/heavy.lock \
   ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- \
   bash scripts/safe_push.sh -b master -r b2d5690380029b73c8499ce39c9cd706bf16dbfc
@@ -145,6 +185,7 @@ The frozen packet's `POSTFIT_COMMANDS.md` supplies the same commands. Listed her
 without executing any of them:
 
 ```bash
+set -euo pipefail
 bundle=/mnt/v/output/zensim/v40r4-2026-10-08
 python3 "$bundle/launch.py" --bundle "$bundle" --jobset fitv40-control-20261007
 TMPDIR=$HOME/tmp/v40 flock ~/tmp/zensim-paper/rev4/heavy.lock \
@@ -157,6 +198,7 @@ Only after the control chain freezes all 40 fresh controls in
 coordinator authorization present:
 
 ```bash
+set -euo pipefail
 bundle=/mnt/v/output/zensim/v40r4-2026-10-08
 for study in e29 e32 e31; do
   python3 "$bundle/launch.py" --bundle "$bundle" --jobset "fitv40-$study-20261007"
