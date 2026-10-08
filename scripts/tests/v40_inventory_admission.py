@@ -7,7 +7,6 @@ The exact same oracle fails on the retained V40R2 trainer.
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 import runpy
 import subprocess

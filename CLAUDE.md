@@ -158,6 +158,20 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-08 — V40 R3 complete native inventory and postfit artifacts.** The
+  R2 executable hashed ordinary unregistered manifest payloads and opened four
+  auxiliary tables after admitted groups. Strict native preflight now permits
+  manifest repeats only of admitted group tables, keys and declarations;
+  unregistered provenance and all four unregistered auxiliary routes refuse
+  before any group payload open. Explicit unqualified historical recipes retain
+  ordinary auxiliary compatibility, with protected ancestry still refused.
+  The postfit owner now requires nonempty structured scorer output, exact
+  full-budget cell/control pins, finite registered reductions and every hashed
+  prediction/result artifact before printing success. Empty successful output
+  is a refusal. The synthetic controller tests cover control and all three
+  studies through their real shell boundary. Full frozen-image and bounded
+  final-scoring receipts are required in the R3 preparation pointer.
+
 * **2026-10-07 — V40 R2 launch/admission/statistics. FIXED locally.** Review found the E30
   prerequisite missing the installed `cells/` level, native `--manifest`
   hashing inputs before group/key admission, and constant seed composites

@@ -780,3 +780,6 @@ v40-r2-stage previous bundle quiet_start quiet_release:
 # Complete native inventory, including unregistered manifest and auxiliary inputs.
 v40-inventory-admission binary dest:
     python3 scripts/tests/v40_inventory_admission.py --binary {{binary}} --dest {{dest}}
+
+v40-postfit-artifacts-tests:
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_postfit_artifacts

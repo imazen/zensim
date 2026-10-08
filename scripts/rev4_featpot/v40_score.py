@@ -189,6 +189,135 @@ def complete(bundle, study, results, control, tools, *, only_control=False):
     return rows
 
 
+def _cell_pins(cells):
+    return {
+        label: {
+            f"{fold}_s{seed}": {
+                "result_sha256": sha(cell / "result.json"),
+                "bake_sha256": sha(cell / "refit/last.bin"),
+            }
+            for (fold, seed), cell in grid.items()
+        }
+        for label, grid in cells.items()
+    }
+
+
+def _control_record(bundle, cells):
+    return dict(
+        schema="v40-complete-control-freeze-v1",
+        control_choice="fresh-matched-v40",
+        program_sha=sha(bundle / "program.tar.gz"),
+        cells=_cell_pins(cells)["control"],
+    )
+
+
+def _json(path):
+    from v40_panels import bound_bytes
+    def nonfinite(value):
+        raise ValueError(f"nonfinite JSON: {value}")
+    return json.loads(bound_bytes(path), parse_constant=nonfinite)
+
+
+def validate_artifacts(bundle, study, results, control, tools, out, pins, stdout, *, freeze_control=False, root=None):
+    """Controller boundary: canonical full-budget cells and fresh exact outputs.
+
+    This does not score or open targets. It verifies all expected panel products
+    and recomputes the registered reductions from their finite summaries.
+    """
+    cells = complete(bundle, study, results, control, tools, only_control=freeze_control)
+    expected = _control_record(bundle, {"control": cells["control"]})
+    if _json(pins) != expected:
+        raise ValueError("INCOMPLETE: exact forty-cell control freeze required")
+    if freeze_control:
+        compatible = {**expected, "study": "E29", "control_choice": "fresh-matched"}
+        if _json(pins.with_name("E29_CONTROL_PINS.json")) != compatible or _json(stdout) != expected:
+            raise ValueError("INCOMPLETE: missing/empty or inconsistent control outputs")
+        return dict(status="PASS", study="control", cells=40)
+    report = _json(out / "decision.json")
+    arms = set(cells) - {"control"}
+    if (report.get("schema") != f"{study}-v40-sdr-assessment-v1"
+            or report.get("program_sha256") != sha(bundle / "program.tar.gz")
+            or report.get("control_pins_sha256") != sha(pins)
+            or report.get("cells") != _cell_pins(cells)
+            or set(report.get("decisions", {})) != arms
+            or set(report.get("panels", {})) != set(cells)
+            or _json(stdout) != report["decisions"]):
+        raise ValueError("INCOMPLETE: assessment schema, arms, cells, pins or scorer output differs")
+    expected_keys = {f"{f}_s{s}" for f in PRODUCTION_SOURCES for s in range(10)}
+    counts = report.get("observation_counts", {})
+    if set(counts) != set(PRODUCTION_SOURCES) or any(type(n) is not int or n < 4 for n in counts.values()):
+        raise ValueError("INCOMPLETE: assessment observation counts required")
+    # Prepared roots intentionally link to frozen source roots. Check both
+    # ancestries, resolve that root once, then use no-follow handles below it.
+    from lib.assessment_identity import safe_path
+    receipt = _json(safe_path(root).resolve() / "wide/main/real/receipt.json") if root is not None else {}
+    if counts != {f: receipt.get("legs", {}).get(f, {}).get("full", {}).get("rows") for f in PRODUCTION_SOURCES}:
+        raise ValueError("INCOMPLETE: observation counts differ from admitted source receipt")
+    artifacts = report.get("artifacts", {})
+    actual = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()} - {"decision.json"}
+    if set(artifacts) != actual or not artifacts:
+        raise ValueError("INCOMPLETE: complete assessment artifact inventory required")
+    from v40_panels import bound_bytes
+    import hashlib
+    import io
+    for rel, pin in artifacts.items():
+        path = Path(rel)
+        if path.is_absolute() or ".." in path.parts or hashlib.sha256(bound_bytes(out / path)).hexdigest() != pin:
+            raise ValueError("INCOMPLETE: assessment artifact changed")
+    import pandas as pd
+    for label, panel in report["panels"].items():
+        if set(panel) != expected_keys:
+            raise ValueError("INCOMPLETE: exact forty-cell panel grid required")
+        for fold in PRODUCTION_SOURCES:
+            for seed in range(10):
+                key = f"{fold}_s{seed}"
+                summary = panel[key]
+                fields = {"signed", "w1_ref_p10", "w3_z_rmse", "w3_or", "w4_neg_share"}
+                if fold in ("kadid", "tid2013"):
+                    fields |= {"w2_type_min", "w2_type_worst3"}
+                if not fields <= summary.keys() or not np.isfinite([summary[k] for k in fields]).all():
+                    raise ValueError("INCOMPLETE: finite required panel metrics missing")
+                if "signed_types" in summary:
+                    if not summary["signed_types"] or not np.isfinite(list(summary["signed_types"].values())).all():
+                        raise ValueError("INCOMPLETE: finite distortion-type metrics required")
+                dest = out / label / key
+                for name in ("result.json", "pred.tsv"):
+                    if str((dest / name).relative_to(out)) not in artifacts:
+                        raise ValueError("INCOMPLETE: required prediction/result artifact missing")
+                product = _json(dest / "result.json")
+                prediction = np.asarray(product.get("prediction"), dtype=np.float64)
+                if prediction.shape != (counts[fold],) or not np.isfinite(prediction).all():
+                    raise ValueError("INCOMPLETE: prediction count/finite identity differs")
+                metric = product.get("score", {})
+                if not all(k in metric and np.isfinite(metric[k]) for k in ("srocc_signed", "z_rmse", "or")):
+                    raise ValueError("INCOMPLETE: finite prediction panel required")
+                if (summary["signed"] != metric["srocc_signed"]
+                        or summary["w3_z_rmse"] != metric["z_rmse"]
+                        or summary["w3_or"] != metric["or"]
+                        or summary["w4_neg_share"] != float((prediction < 0).mean())):
+                    raise ValueError("INCOMPLETE: panel summary differs from prediction product")
+                if fold in ("kadid", "tid2013"):
+                    tail = _e29_signed_w2(list(summary["signed_types"].values()))
+                    if any(tail[k] != summary[k] for k in tail):
+                        raise ValueError("INCOMPLETE: signed distortion tail differs")
+                frame = pd.read_csv(io.BytesIO(bound_bytes(dest / "pred.tsv")), sep="\t")
+                if (frame.columns.tolist() != ["row_idx", "pred"]
+                        or not np.array_equal(frame.row_idx, np.arange(counts[fold]))
+                        or not np.array_equal(frame.pred.to_numpy(), prediction)):
+                    raise ValueError("INCOMPLETE: prediction artifact order/value differs")
+    panels = report["panels"]
+    for arm in arms:
+        delta = [[panels[arm][f"{f}_s{s}"]["signed"] - panels["control"][f"{f}_s{s}"]["signed"]
+                  for f in PRODUCTION_SOURCES] for s in range(10)]
+        w2 = [[panels[arm][f"{f}_s{s}"]["w2_type_worst3"] - panels["control"][f"{f}_s{s}"]["w2_type_worst3"]
+               for f in ("kadid", "tid2013")] for s in range(10)]
+        if report["decisions"][arm] != sdr_decision(delta, w2, study):
+            raise ValueError("INCOMPLETE: registered reduction differs")
+    if study == "e29" and _json(out / "e29_sdr_decision.json") != report["decisions"]:
+        raise ValueError("INCOMPLETE: E29 companion decision artifact differs")
+    return dict(status="PASS", study=study, cells=40 * len(cells), arms=sorted(arms))
+
+
 def score(bundle, study, results, control, root, tools, out, pins):
     from v2_lodo_mlp import strict_training_groups, predict
     from v2_teacher import key_path
@@ -236,10 +365,12 @@ def score(bundle, study, results, control, root, tools, out, pins):
     # No target read above this boundary: all cells and source populations admitted.
     out.mkdir(parents=True)
     panels = {label: {} for label in cells}
+    observation_counts = {}
     for fold, table, _, _, _ in groups:
         meta = pq.read_table(key_path(table)).to_pandas()
         y = pq.read_table(table, columns=["human_score"])["human_score"].to_numpy()
         meta["target"] = y
+        observation_counts[fold] = len(y)
         if fold in e13.TYPE_SOURCES:
             paths = pd.concat(
                 [
@@ -308,21 +439,24 @@ def score(bundle, study, results, control, root, tools, out, pins):
         },
         control_pins_sha256=sha(pins),
         program_sha256=sha(bundle / "program.tar.gz"),
-    )
-    (out / "decision.json").write_text(
-        json.dumps(report, indent=2, allow_nan=False) + "\n"
+        cells=_cell_pins(cells),
+        observation_counts=observation_counts,
     )
     # Existing E29 HDR owner takes precisely this SDR guard object.
     if study == "e29":
         (out / "e29_sdr_decision.json").write_text(
-            json.dumps(decisions, indent=2) + "\n"
+            json.dumps(decisions, indent=2, allow_nan=False) + "\n"
         )
-    print(json.dumps(decisions))
+    report["artifacts"] = {str(p.relative_to(out)): sha(p) for p in sorted(out.rglob("*")) if p.is_file()}
+    (out / "decision.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    print(json.dumps(decisions, allow_nan=False))
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--freeze-control", action="store_true")
+    p.add_argument("--verify-artifacts", action="store_true")
+    p.add_argument("--scorer-output", type=Path)
     for name in (
         "bundle",
         "results",
@@ -335,22 +469,17 @@ def main():
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--study", choices=("e29", "e31", "e32"), required=True)
     a = p.parse_args()
+    if a.verify_artifacts:
+        if a.scorer_output is None:
+            p.error("artifact verification requires --scorer-output")
+        print(json.dumps(validate_artifacts(a.bundle, a.study, a.results, a.control, a.tools, a.out,
+                                           a.control_pins, a.scorer_output, freeze_control=a.freeze_control, root=a.root)))
+        return
     if a.freeze_control:
         rows = complete(
             a.bundle, a.study, a.results, a.control, a.tools, only_control=True
         )["control"]
-        pins = dict(
-            schema="v40-complete-control-freeze-v1",
-            control_choice="fresh-matched-v40",
-            program_sha=sha(a.bundle / "program.tar.gz"),
-            cells={
-                f"{f}_s{s}": {
-                    "result_sha256": sha(c / "result.json"),
-                    "bake_sha256": sha(c / "refit/last.bin"),
-                }
-                for (f, s), c in rows.items()
-            },
-        )
+        pins = _control_record(a.bundle, {"control": rows})
         with a.control_pins.open("x") as file:
             file.write(json.dumps(pins, indent=2) + "\n")
         with a.control_pins.with_name("E29_CONTROL_PINS.json").open("x") as file:
@@ -361,6 +490,7 @@ def main():
                 )
                 + "\n"
             )
+        print(json.dumps(pins, allow_nan=False))
         return
     score(
         a.bundle, a.study, a.results, a.control, a.root, a.tools, a.out, a.control_pins
