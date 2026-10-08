@@ -158,6 +158,14 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-07 — V40 R2 launch/admission/statistics.** Review found the E30
+  prerequisite missing the installed `cells/` level, native `--manifest`
+  hashing inputs before group/key admission, and constant seed composites
+  receiving a rounded nonzero SE. Corrections are on the V40 quarantine lane;
+  actual shipped-binary probes and package re-freeze are required before launch.
+  The controlling four-source E29 amendment and shared fresh control decision
+  are bound into the new package. Historical reviewed artifacts remain intact.
+
 * **2026-10-07 — E32 cached assessment planner refusal. FIXED locally in V40.**
 
   Serving admission correctly refuses the research palette feature IDs. The

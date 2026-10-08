@@ -68,6 +68,19 @@ def main():
         assert digest(b / item["receipt"]) == item["sha256"]
         record = json.loads((b / item["receipt"]).read_text())
         assert record["status"] == "PASS" and record["program_sha"] == pins["program_sha"]
+        assert record["image_id"] == pins["image_id"] and record["image"] == pins["image"]
+    bindings = json.loads((b / "SOURCE_BINDINGS.json").read_text())
+    assert bindings["binary_producer_commit"] == metadata["trainer_producer_commit"]
+    for name, binding in bindings["binaries"].items():
+        assert digest(b / "bin" / name) == binding["sha256"]
+        assert binding["producer_commit"] == metadata["trainer_producer_commit"]
+    assert {"zensim-validate/src/bin/zensim_mlp_train.rs", "zensim-validate/src/bin/zensim_mlp_train/group_admission.rs", "zensim-validate/src/train_manifest.rs", "zensim-validate/src/training_keys.rs"} <= {c["path"] for c in bindings["source_checks"]}
+    registration = json.loads((b / "E29_REGISTRATION.json").read_text())
+    assert registration["state"] == "controlling" and registration["source_landing_required_before_launch"] is True
+    assert digest(b / "E29_CONTROLLING_AMENDMENT.md") == registration["amendment_sha256"]
+    assert digest(b / "CONTROL_DECISION.md") == registration["shared_control_sha256"]
+    assert metadata["files"]["benchmarks/e29_four_source_amendment_2026-10-07.md"] == registration["amendment_sha256"]
+    assert (b / "IMAGE_ID.txt").read_text().strip() == pins["image_id"]
     actual = subprocess.check_output(["docker", "image", "inspect", "-f", "{{.Id}}", pins["image"]], text=True).strip()
     assert actual == pins["image_id"]
     code = '''import hashlib,json,pathlib,os,sys

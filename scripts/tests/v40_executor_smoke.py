@@ -14,6 +14,7 @@ def main():
     p.add_argument("--mode", choices=("bounded", "first-epoch"), required=True)
     p.add_argument("--attempt", type=int, default=1)
     a = p.parse_args()
+    image_id = subprocess.check_output(["docker", "image", "inspect", "-f", "{{.Id}}", a.image], text=True).strip()
     b = a.bundle
     study = {"control": "control", "hb4": "e29", "hc4": "e29", "palette": "e32", "uh4": "e31"}[a.arm]
     spec = json.loads((b / f"fit-spec-fitv40-{study}-20261007.json").read_text())
@@ -96,6 +97,13 @@ def main():
         ],
         check=True,
     )
+
+    receipts = list(out.glob("*_PATH_PASS.json"))
+    if len(receipts) != 1:
+        raise ValueError("missing real executor receipt")
+    record = json.loads(receipts[0].read_text())
+    record.update(image=a.image, image_id=image_id)
+    receipts[0].write_text(json.dumps(record, indent=2) + "\n")
 
 
 if __name__ == "__main__":

@@ -763,3 +763,16 @@ v40-assessment-build:
 
 v40-bundle-check bundle:
     python3 scripts/tests/v40_bundle_check.py --bundle {{bundle}}
+
+# Reviewer shapes use synthetic payloads and approved label-free TRAIN declarations.
+v40-review-admission binary dest:
+    python3 scripts/tests/v40_review_admission.py --binary {{binary}} --dest {{dest}}
+
+v40-source-bindings bundle producer:
+    python3 scripts/tests/v40_source_bindings.py --source {{justfile_directory()}} --bundle {{bundle}} --producer {{producer}}
+
+v40-authorization-gate bundle dest:
+    python3 scripts/tests/v40_authorization_gate.py --bundle {{bundle}} --dest {{dest}}
+
+v40-r2-stage previous bundle quiet_start:
+    python3 scripts/tests/v40_r2_stage.py --previous {{previous}} --bundle {{bundle}} --quiet-start {{quiet_start}}

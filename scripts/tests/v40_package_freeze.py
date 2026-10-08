@@ -98,6 +98,30 @@ def freeze(bundle, source, source_commit, metrics_commit):
             tar.addfile(item, io.BytesIO(raw))
     decisions = source / "benchmarks/e29_e31_e32_shared_control_decision_2026-10-07.md"
     (bundle / "CONTROL_DECISION.md").write_bytes(decisions.read_bytes())
+    amendment = "benchmarks/e29_four_source_amendment_2026-10-07.md"
+    if "— controlling registration," not in (source / amendment).read_text():
+        raise ValueError("E29 controlling registration must precede the fit freeze")
+    (bundle / "E29_CONTROLLING_AMENDMENT.md").write_bytes((source / amendment).read_bytes())
+    write(bundle / "E29_REGISTRATION.json", dict(
+        schema="v40-e29-controlling-registration-v1", state="controlling",
+        source_commit=source_commit, amendment_sha256=sha(bundle / "E29_CONTROLLING_AMENDMENT.md"),
+        shared_control_sha256=sha(bundle / "CONTROL_DECISION.md"),
+        source_landing_required_before_launch=True))
+    bindings = json.loads((bundle / "SOURCE_BINDINGS.json").read_text())
+    producer = bindings["binary_producer_commit"]
+    ancestor = subprocess.check_output(["jj", "log", "-r", f"{producer} & ancestors({source_commit})", "--no-graph", "-T", "commit_id"], cwd=source, text=True).strip()
+    if ancestor != producer:
+        raise ValueError("trainer producer must be an ancestor of the frozen source")
+    required_admission = {"zensim-validate/src/bin/zensim_mlp_train.rs", "zensim-validate/src/bin/zensim_mlp_train/group_admission.rs", "zensim-validate/src/train_manifest.rs", "zensim-validate/src/training_keys.rs"}
+    checks = {c["path"]: c for c in bindings["source_checks"]}
+    if not required_admission <= checks.keys():
+        raise ValueError("entry, manifest, group and key source bindings required")
+    for name, binding in bindings["binaries"].items():
+        if binding["producer_commit"] != producer or sha(bundle / "bin" / name) != binding["sha256"]:
+            raise ValueError(f"retained binary/source binding changed: {name}")
+    for rel, check in checks.items():
+        if sha(source / rel) != check["producer_sha256"] or not check["byte_equal"]:
+            raise ValueError(f"trainer/admission source drift after build: {rel}")
     caps = json.loads((bundle / "jobset_caps.json").read_text())
     for entry in caps.values():
         entry["build_commit"] = source_commit
@@ -120,6 +144,8 @@ def freeze(bundle, source, source_commit, metrics_commit):
             if (
                 r["status"] != "PASS"
                 or r["program_sha"] != pins["program_sha"]
+                or r["image_id"] != pins["image_id"]
+                or r["image"] != pins["image"]
                 or r["memory_peak_bytes"] >= 6 * 1024**3
                 or not r["extraction_verified"]
             ):
@@ -148,11 +174,14 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "SMOKE_SELECTION.json",
         "HARVEST_REFUSALS.json",
         "CONTROL_DECISION.md",
+        "E29_CONTROLLING_AMENDMENT.md",
+        "E29_REGISTRATION.json",
         "E30_COMPLETE_PINS.json",
         "v40-fit-contract.json",
         "WORKER_BUILD.json",
         "W2_KEY_PINS.json",
         "SOURCE_BINDINGS.json",
+        "QUIET_WINDOW_RELEASE.json",
         "parity-kadid/PARITY.json",
         "parity-tid2013/PARITY.json",
         "IMAGE_RECIPE.json",
