@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Compare frozen SPEEDQ feature bits and report its existing paired analyses."""
 import argparse
+import csv
 import hashlib
 import json
 from pathlib import Path
 import struct
+import subprocess
 
 import speedq_run as speedq
 
@@ -46,6 +48,8 @@ def main():
     ap.add_argument('--after', type=Path, required=True)
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--parity-only', action='store_true')
+    ap.add_argument('--analyzer', type=Path, help='replay saved rounds through this pinned analyzer')
+    ap.add_argument('--table', type=Path, help='write exact paired-analysis values as TSV')
     args = ap.parse_args()
     builds = {label: json.loads((root / 'provenance' / 'instrument.artifact.json').read_text())
               for label, root in [('before', args.before), ('after', args.after)]}
@@ -77,11 +81,33 @@ def main():
                 interference = json.loads((root / 'interference.json').read_text())
                 assert interference['admitted'] and not interference['foreign']
                 analysis = json.loads((root / 'paired_analysis.json').read_text())
+                if args.analyzer:
+                    packet = dict(baseline=values['by_v2fy_r4'], candidate=values['by_v2fy_r5'],
+                                  iterations=[1] * 32, timer_resolution_ns=inner['timer_resolution_ns'])
+                    replay = json.loads(subprocess.check_output(
+                        [str(args.analyzer)], input=json.dumps([packet]), text=True))[0]
+                    assert replay == analysis, f'saved paired analysis differs: {label}/{tag}'
                 row[label] = dict(analysis=analysis, round_selection=complete,
                                   binary_sha256=header['binary_sha256'],
                                   model_source_sha256=header['model_source_sha256'])
             result['cells'][tag] = row
+    if args.analyzer:
+        result['analyzer'] = dict(path=str(args.analyzer), sha256=sha(args.analyzer))
     speedq.write(args.out, result)
+    if args.table:
+        args.table.parent.mkdir(parents=True, exist_ok=True)
+        fields = ['cell', 'build', 'rev4_median_ns', 'rev5_median_ns', 'pct_change',
+                  'ci_lower_ns', 'ci_median_ns', 'ci_upper_ns', 'n_outliers',
+                  'n_samples', 'resolution_limited']
+        with args.table.open('w', newline='') as stream:
+            writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
+            writer.writerow(fields)
+            for tag, row in result['cells'].items():
+                for label in ('before', 'after'):
+                    a = row[label]['analysis']
+                    writer.writerow([tag, label, a['baseline']['median'], a['candidate']['median'],
+                                     a['pct_change'], a['ci_lower'], a['ci_median'], a['ci_upper'],
+                                     a['n_outliers'], a['n_samples'], a['resolution_limited']])
     print(json.dumps(result['parity'], indent=2))
 
 
