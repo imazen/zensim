@@ -265,6 +265,8 @@ pub mod profile;
 // at the root (where `src/` is real) is the form that resolves.
 mod simd_ops;
 pub mod source;
+#[cfg(all(test, feature = "training", feature = "feature-regime-v2"))]
+mod source_rows_tests;
 // **THE one owner of the SCORE path's arithmetic** — the two mixing heads,
 // the tanh output pin, the distance→score mapping, and the PCHIP output
 // spline. `#[doc(hidden)] pub` for the same reason `det_math` is: the
