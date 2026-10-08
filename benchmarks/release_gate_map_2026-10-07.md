@@ -171,8 +171,8 @@ Schema `kadid-terminal-final-model-v1` has:
 
 - `design_line: by_v2fy-rev5-d1-20261007`, `population_rows:2000`,
   `bootstrap_resamples:10000`, fixed integer `bootstrap_seed`,
-  `orientation:quality`, registration SHA and `code_sha256` for
-  `kadid_terminal_read.py`, `v2c_labels.py`, `zen_stats.py`, `_terminal_bound_io.py`.
+  `orientation:quality`, registration SHA, `contract_sha256` and the exact
+  `code_sha256` from [round-five admission](releasegate5_admission_2026-10-07.md).
 - D1 `human_sources:[kadid,tid2013,konfig,cid22_a25]`,
   `fit_jobset:fitv2d1-20261007`, `selected_epoch:119`, `seed_index:0|1|2`.
   The canonical inspector independently checks actual Rev5 qualification,

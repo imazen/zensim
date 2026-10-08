@@ -126,9 +126,13 @@ class Hardening(unittest.TestCase):
             patch("os.stat", lambda *a, **k: one_link(real_stat(*a, **k))),
             patch("os.fstat", lambda *a, **k: one_link(real_fstat(*a, **k))),
         ):
-            with self.assertRaises(ValueError):
+            error = None
+            try:
                 self.preflight(alias, self.t.root / "missing-auth.json")
+            except (OSError, ValueError) as exc:
+                error = exc
             _zero_events(self, watch, "transient-nlink-one-protected-inode")
+            self.assertIsInstance(error, ValueError)
         self.unspent()
 
     def test_reviewer_s6_rename_stress_20000_zero_data_opens(self):
