@@ -190,10 +190,14 @@ def main():
         pa.table(
             {
                 "ref_basename": [f"synthetic-ref-{i // 20}" for i in range(count)],
+                # The canonical Parquet predictor requires this loader column;
+                # these generated zeros are fixtures, never human labels.
+                "human_score": np.zeros(count),
                 **columns,
             }
         ),
         feature,
+        compression="zstd",
     )
     fixture.write(
         Path(str(feature) + ".manifest.json"),
@@ -291,7 +295,7 @@ def main():
         patch.object(loader, "predict", predict),
     ):
         for study in fixture.ARMS:
-            out = synthetic / f"assessment-{study}"
+            out = a.dest / f"assessment-{study}"
             stdout = a.dest / f"score-{study}.stdout.json"
             with stdout.open("w") as log, contextlib.redirect_stdout(log):
                 v40_score.score(

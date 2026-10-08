@@ -784,8 +784,29 @@ v40-inventory-admission binary dest:
 v40-postfit-artifacts-tests:
     PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_postfit_artifacts
 
-v40-scoring-rehearsal bundle image dest:
-    python3 scripts/tests/v40_scoring_rehearsal.py --bundle {{bundle}} --image {{image}} --dest {{dest}}
+v40-scoring-rehearsal bundle image dest attempt="77":
+    python3 scripts/tests/v40_scoring_rehearsal.py --bundle {{bundle}} --image {{image}} --dest {{dest}} --attempt {{attempt}}
 
 v40-r3-stage previous bundle bindir producer quiet_start quiet_override authority:
     python3 scripts/tests/v40_r3_stage.py --previous {{previous}} --bundle {{bundle}} --bin-dir {{bindir}} --producer {{producer}} --quiet-start {{quiet_start}} --quiet-override {{quiet_override}} --release-authority {{authority}}
+
+# Run under the shared heavy lock; the retained trainer is the shipped binary.
+v40-r3-checks bundle dest metrics:
+    just v40-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/author-admission
+    just v40-review-admission {{bundle}}/bin/zensim_mlp_train {{dest}}/review-admission
+    just v40-python-tests {{bundle}}/bin/zensim_mlp_train
+    just v40-statistics-tests
+    just v40-postfit-artifacts-tests
+    just clippy
+    cargo fmt -p zensim -p zensim-validate --check
+    just --working-directory {{metrics}} v40-fit-tools
+    just --working-directory {{metrics}} v40-postfit-checks
+
+v40-r3-executors bundle image attempt="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for arm in control hb4 hc4 palette uh4; do
+        for mode in bounded first-epoch; do
+            just v40-executor-smoke '{{bundle}}' '{{image}}' "$arm" "$mode" '{{attempt}}'
+        done
+    done
