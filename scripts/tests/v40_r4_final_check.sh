@@ -53,7 +53,7 @@ assert read(bundle / 'AUTHORIZATION_GATE.json')['status'] == 'PASS'
 for name in ('parity-kadid', 'parity-tid2013'):
     assert read(bundle / name / 'PARITY.json')['status'] == 'PASS'
 late = {}
-for name in ('FINALIZE_COMMAND.log', 'CARGO_TARGET_CLEANUP.json'):
+for name in ('FINALIZE_COMMAND.log', 'AUTHORIZATION_GATE.json', 'CARGO_TARGET_CLEANUP.json'):
     assert sha(bundle / name) == sha(mirror / name)
     late[name] = sha(bundle / name)
 for jobset in read(bundle / 'PACKAGE_PINNED.json')['manifests']:

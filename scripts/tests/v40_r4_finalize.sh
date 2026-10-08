@@ -21,5 +21,6 @@ just v40-freeze "$bundle" "$source_commit" "$metrics_commit" > "$logs/freeze.log
 just v40-bundle-check "$bundle" > "$logs/bundle-check.log" 2>&1
 mkdir "$logs/gate-evidence" "$logs/gate-scratch"
 just v40-image-authorization "$bundle" "$image" "$logs/gate-evidence" "$logs/gate-scratch" > "$logs/image-authorization.log" 2>&1
+cp "$logs/gate-evidence/authorization-gate/RESULT.json" "$bundle/AUTHORIZATION_GATE.json"
 just v40-evidence-archive "$bundle" "$logs" "$mirror" > "$logs/archive.log" 2>&1
 just v40-own-cargo-cleanup "$bundle" "$mirror" > "$logs/target-cleanup.log" 2>&1
