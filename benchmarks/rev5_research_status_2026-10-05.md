@@ -369,3 +369,12 @@ minimise MSE and maximise Kendall and Pearson correlation.
   fleet after review.
 * **Production evaluation gates on seed 0** are finishing; results next.
 * **Speed qualification:** score parity done; timing waits for a quiet box, planned once the review and gate runs finish.
+
+## 29. Updates (2026-10-08 01:00 UTC)
+
+* **i270 is back in Ubuntu** (owner OK; no Windows session was logged in) and available to the fleet (3 slots) for the v40 launch.
+* **The last failing zensim-validate test is resolved** (`5cd12253`, owner left the call to the coordinator): the by_v2fy
+  projection root and the research-only palette family are listed as known partial producers, and the test requires the missing
+  basic coverage to be reported for them.
+* **Independent process review:** a Codex reviewer (herdr tab `process-review`) is auditing today's process and results against
+  the evidence; its report lands as `~/tmp/zensim-paper/rev4/PROCESS_REVIEW.md`.
