@@ -3240,13 +3240,20 @@ fn main() {
             std::process::exit(2)
         })
     });
-    group_admission::preflight(&group_modes, &args, selected_ids.as_deref()).unwrap_or_else(|e| {
+    group_admission::preflight(
+        &group_modes,
+        &args,
+        selected_ids.as_deref(),
+        manifest_inputs
+            .as_ref()
+            .map_or(&[], |(inputs, _)| inputs.as_slice()),
+    )
+    .unwrap_or_else(|e| {
         eprintln!("native group admission: {e}");
         std::process::exit(2)
     });
-    // Admission of every group and key precedes any manifest payload hashing.
-    // Check the complete manifest inventory first, so a late protected entry
-    // cannot permit an earlier entry to be opened. Drift overrides only hashes.
+    // The complete group, manifest and auxiliary inventory is admitted before
+    // any payload hash/read. A digest or zero auxiliary weight grants no role.
     if let Some((inputs, manifest_path)) = &manifest_inputs {
         for input in inputs {
             group_admission::safe(&input.path).unwrap_or_else(|e| {

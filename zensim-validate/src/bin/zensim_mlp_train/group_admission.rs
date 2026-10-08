@@ -128,11 +128,75 @@ fn role_from_receipts<'a>(
     Err("fit/development declaration must bind a recipe receipt".into())
 }
 
+fn resolved(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Strict provenance inputs may only repeat an admitted group table, its
+/// label-free keys, or its declaration. Arbitrary non-table provenance files
+/// need a registered owner too; a matching manifest digest is not admission.
+fn inventory(
+    groups: &[Group],
+    args: &Args,
+    inputs: &[train_manifest::ManifestInput],
+) -> Result<(), String> {
+    let auxiliary = [
+        ("--anchor-parquet", &args.anchor_parquet),
+        ("--cross-codec-eq-parquet", &args.cross_codec_eq_parquet),
+        ("--pjnd-passthrough-parquet", &args.pjnd_passthrough_parquet),
+        (
+            "--konjnd-aggregation-parquet",
+            &args.konjnd_aggregation_parquet,
+        ),
+    ];
+    // Complete ancestry checks precede metadata, key, or payload reads, even
+    // when an auxiliary loss has zero weight or a manifest allows SHA drift.
+    for input in inputs {
+        safe(&input.path)?;
+    }
+    for (_, path) in &auxiliary {
+        if let Some(path) = path {
+            safe(path)?;
+        }
+    }
+    if args.historical_replay.is_some() {
+        return Ok(()); // Preserve explicitly unqualified historical recipes.
+    }
+    for (flag, path) in auxiliary {
+        if path.is_some() {
+            return Err(format!(
+                "{flag}: auxiliary table has no registered strict admission contract"
+            ));
+        }
+    }
+    let admitted: BTreeSet<_> = groups
+        .iter()
+        .flat_map(|g| {
+            [
+                resolved(&g.1),
+                resolved(&g.1.with_extension("keys.parquet")),
+                resolved(&PathBuf::from(format!("{}.manifest.json", g.1.display()))),
+            ]
+        })
+        .collect();
+    for input in inputs {
+        if !admitted.contains(&resolved(&input.path)) {
+            return Err(format!(
+                "unadmitted manifest input {:?}: only group tables, keys and declarations may be repeated",
+                input.key
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn preflight(
     groups: &[Group],
     args: &Args,
     selected: Option<&[usize]>,
+    inputs: &[train_manifest::ManifestInput],
 ) -> Result<(), String> {
+    inventory(groups, args, inputs)?;
     if args.historical_replay.is_some() {
         if args.hdr_consensus_research || args.upiq_label_disposition.is_some() {
             return Err("research extensions require strict admission".into());
