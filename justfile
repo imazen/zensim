@@ -799,8 +799,8 @@ v40-r3-checks bundle dest metrics:
     just v40-postfit-artifacts-tests
     just clippy
     cargo fmt -p zensim -p zensim-validate --check
-    just --working-directory {{metrics}} v40-fit-tools
-    just --working-directory {{metrics}} v40-postfit-checks
+    just --justfile {{metrics}}/justfile --working-directory {{metrics}} v40-fit-tools
+    just --justfile {{metrics}}/justfile --working-directory {{metrics}} v40-postfit-checks
 
 v40-r3-executors bundle image attempt="1":
     #!/usr/bin/env bash
