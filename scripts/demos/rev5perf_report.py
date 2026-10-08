@@ -96,9 +96,9 @@ def main():
     speedq.write(args.out, result)
     if args.table:
         args.table.parent.mkdir(parents=True, exist_ok=True)
-        fields = ['cell', 'build', 'rev4_median_ns', 'rev5_median_ns', 'pct_change',
+        fields = ['cell', 'build', 'rev4_post_iqr_median_ns', 'rev5_post_iqr_median_ns', 'pct_change',
                   'ci_lower_ns', 'ci_median_ns', 'ci_upper_ns', 'n_outliers',
-                  'n_samples', 'resolution_limited']
+                  'n_samples', 'n_retained', 'resolution_limited']
         with args.table.open('w', newline='') as stream:
             writer = csv.writer(stream, delimiter='\t', lineterminator='\n')
             writer.writerow(fields)
@@ -107,7 +107,7 @@ def main():
                     a = row[label]['analysis']
                     writer.writerow([tag, label, a['baseline']['median'], a['candidate']['median'],
                                      a['pct_change'], a['ci_lower'], a['ci_median'], a['ci_upper'],
-                                     a['n_outliers'], a['n_samples'], a['resolution_limited']])
+                                     a['n_outliers'], a['n_samples'], a['baseline']['n'], a['resolution_limited']])
     print(json.dumps(result['parity'], indent=2))
 
 
