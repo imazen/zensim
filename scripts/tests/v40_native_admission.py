@@ -32,7 +32,7 @@ def main():
     a.dest.mkdir(parents=True, exist_ok=False)
     report = {}
 
-    def run(name, groups, ids, width, flags=(), reason=None):
+    def run(name, groups, ids, width, flags=(), reason=None, extra_payloads=()):
         out = a.dest / name
         out.mkdir()
         argv = [
@@ -73,7 +73,9 @@ def main():
         opens = [
             line
             for line in trace.read_text().splitlines()
-            if any(f'"{g[1]}"' in line for g in groups)
+            if (any(f'"{p}"' in line for p in [*(g[1] for g in groups), *extra_payloads])
+                or (".parquet\"" in line and ".keys.parquet\"" not in line))
+            and "O_PATH" not in line and "O_DIRECTORY" not in line and "= -1" not in line
         ]
         assert p.returncode == 2 and not opens and not (out / "model.bin").exists(), (
             name,
@@ -224,6 +226,43 @@ def main():
             ]
         ]
         groups.append(("coverage", coverage, 1, 0, "withinref,rank"))
+        # Manifest inputs must not bypass the complete group/key preflight.
+        manifest = f.root / "train.toml"
+        human = groups[4][1]
+        manifest.write_text(f'[inputs.human]\npath = "{human}"\nsha256 = "{common.sha(human)}"\n')
+        changed = groups[:]
+        g = changed[5]
+        changed[5] = (g[0], g[1], 1, 0, g[4])
+        run("manifest-development-training", changed, upiq.columns("by_v2fy"), 1853,
+            ["--manifest", str(manifest)], reason="fit/development role disagrees with training/validation weights")
+        hp = Path(f"{human}.manifest.json")
+        original_human, original_receipt = hp.read_bytes(), (base / "receipt.json").read_bytes()
+        d = json.loads(original_human)
+        d["role"] = "val"
+        hp.write_text(json.dumps(d))
+        r = json.loads(original_receipt)
+        for leg in r["legs"].values():
+            for split in ("fit", "dev", "full"):
+                if isinstance(leg.get(split), dict) and Path(leg[split].get("rel", "")).name == human.name:
+                    leg[split]["manifest_sha256"] = common.sha(hp)
+        (base / "receipt.json").write_text(json.dumps(r))
+        run("manifest-VAL-human", groups, upiq.columns("by_v2fy"), 1853,
+            ["--manifest", str(manifest)], reason="unapproved role or training/development weight")
+        hp.write_bytes(original_human)
+        (base / "receipt.json").write_bytes(original_receipt)
+        # The late protected entry blocks EVERY input hash, even with drift allowed.
+        for component in ("kadid_terminal", "holdout", "_sealed", "labels__synthetic"):
+            protected = f.root / component / "sentinel.parquet"
+            protected.parent.mkdir()
+            protected.write_bytes(b"SYNTHETIC SENTINEL; never an assessment label")
+            alias = f.root / f"alias-{component}"
+            alias.symlink_to(protected.parent, target_is_directory=True)
+            for route, path in (("direct", protected), ("symlink", alias / protected.name)):
+                manifest.write_text(f'[inputs.a_ordinary]\npath = "{human}"\nsha256 = "{common.sha(human)}"\n[inputs.z_protected]\npath = "{path}"\nsha256 = "{"0" * 64}"\n')
+                for drift in (False, True):
+                    run(f"manifest-{component}-{route}-drift-{drift}", groups, upiq.columns("by_v2fy"), 1853,
+                        ["--manifest", str(manifest), *(["--manifest-allow-sha-drift"] if drift else [])],
+                        reason="protected training input ancestry", extra_payloads=[protected, path])
         native = f.root / "upiq.parquet"
         Path(f"{native}.manifest.json").write_bytes(a.upiq_manifest.read_bytes())
         pq.write_table(

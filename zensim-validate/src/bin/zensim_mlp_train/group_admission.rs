@@ -10,7 +10,7 @@ type Group = (String, PathBuf, f64, f64, bool, GroupLossMode);
 const SOURCES: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 const BASE: &str = "basic+peaks+v2@w1825/rev5_localwin#36c3f3af";
 
-fn safe(path: &Path) -> Result<(), String> {
+pub(super) fn safe(path: &Path) -> Result<(), String> {
     for p in [
         path.to_path_buf(),
         path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),

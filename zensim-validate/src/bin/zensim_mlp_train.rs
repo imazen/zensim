@@ -2966,7 +2966,12 @@ fn main() {
     // verification right after `fs::write`.
     let mut manifest_claimed_sha: Option<(String, PathBuf)> = None;
 
+    let mut manifest_inputs = None;
     if let Some(manifest_path) = args.manifest.clone() {
+        group_admission::safe(&manifest_path).unwrap_or_else(|e| {
+            eprintln!("--manifest: {e}");
+            std::process::exit(2);
+        });
         let cfg = train_manifest::parse_manifest(&manifest_path).unwrap_or_else(|e| {
             eprintln!("--manifest {}: {e}", manifest_path.display());
             std::process::exit(2);
@@ -3039,26 +3044,6 @@ fn main() {
             }
         }
 
-        // Load-bearing reproduce-exactly gate: verify every recorded
-        // input file's sha256 BEFORE we touch the trainer. A drift means
-        // the produced bake won't match the shipped one — fail loud.
-        match train_manifest::verify_inputs(&cfg.inputs, args.manifest_allow_sha_drift) {
-            Ok(warnings) => {
-                for w in &warnings {
-                    eprintln!("[manifest] WARNING: {w}");
-                }
-                eprintln!(
-                    "[manifest] verified {} input file(s) from {}",
-                    cfg.inputs.len(),
-                    manifest_path.display()
-                );
-            }
-            Err(e) => {
-                eprintln!("[manifest] {e}");
-                std::process::exit(2);
-            }
-        }
-
         let steps = apply_manifest_to_args(&mut args, &matches, &cfg);
         if !steps.is_empty() {
             eprintln!(
@@ -3070,6 +3055,7 @@ fn main() {
                 eprintln!("[manifest]   - {s}");
             }
         }
+        manifest_inputs = Some((cfg.inputs, manifest_path));
     }
 
     // Resolve the output path now that the manifest (if any) has been
@@ -3258,6 +3244,33 @@ fn main() {
         eprintln!("native group admission: {e}");
         std::process::exit(2)
     });
+    // Admission of every group and key precedes any manifest payload hashing.
+    // Check the complete manifest inventory first, so a late protected entry
+    // cannot permit an earlier entry to be opened. Drift overrides only hashes.
+    if let Some((inputs, manifest_path)) = &manifest_inputs {
+        for input in inputs {
+            group_admission::safe(&input.path).unwrap_or_else(|e| {
+                eprintln!("[manifest] {e}");
+                std::process::exit(2);
+            });
+        }
+        match train_manifest::verify_inputs(inputs, args.manifest_allow_sha_drift) {
+            Ok(warnings) => {
+                for w in &warnings {
+                    eprintln!("[manifest] WARNING: {w}");
+                }
+                eprintln!(
+                    "[manifest] verified {} input file(s) from {}",
+                    inputs.len(),
+                    manifest_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("[manifest] {e}");
+                std::process::exit(2);
+            }
+        }
+    }
     let admission_paths = group_modes
         .iter()
         .filter(|g| !(args.hdr_consensus_research && g.0 == "hdr"))
