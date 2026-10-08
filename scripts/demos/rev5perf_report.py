@@ -59,6 +59,17 @@ def main():
                 assert complete['status'] == 'PASS' and complete['rounds'] == 32
                 assert complete['zenbench_gate_clean'] and complete['paired_alignment_verified']
                 header = json.loads((root / 'header.json').read_text())
+                assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
+                assert not header.get('gate_trace', False)
+                assert header['model_source_sha256'] == speedq.SOURCE_SHA
+                assert header['round_cap'] == 64 and header['round_rule'] == speedq.CLEAN_ROUND_RULE
+                inner = json.loads((root / 'zenbench.inner.json').read_text())
+                values, selection = speedq.select_clean_rounds(inner, 32)
+                assert all(complete[k] == v for k, v in selection.items())
+                assert set(values) == set(header['arms']) and all(len(v) == 32 for v in values.values())
+                assert not inner['zenbench_unreliable']
+                interference = json.loads((root / 'interference.json').read_text())
+                assert interference['admitted'] and not interference['foreign']
                 analysis = json.loads((root / 'paired_analysis.json').read_text())
                 row[label] = dict(analysis=analysis, round_selection=complete,
                                   binary_sha256=header['binary_sha256'],

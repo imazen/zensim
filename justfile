@@ -590,7 +590,28 @@ rev5perf-report *options:
 
 rev5perf-kernel-test:
     cargo test -p zensim --all-features feature_v2_stream::tests
+    cargo test -p zensim --all-features rev5_simd_edges_match_frozen_windows
     cargo test -p zensim --all-features --test featcanon_rev5_parity
+
+# Supply fresh roots; invoke under the task's shared heavy-command lock.
+[positional-arguments]
+rev5perf-gate dest before:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$1/provenance"
+    just speedq-build > "$1/provenance/build.jsonl" 2>&1
+    just speedq-freeze "$1/provenance/build.jsonl" "$1/provenance/instrument"
+    just speedq-parity "$1/provenance/instrument" "$1/parity" --collect-legacy-failures
+    just rev5perf-report --before "$2" --after "$1" --out "$1/frozen-parity.json" --parity-only
+
+[positional-arguments]
+rev5perf-timing root analyzer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just speedq-timing --binary "$1/provenance/instrument" --dest "$1/timing" \
+        --parity "$1/parity/PARITY_STRICT_PASS.json" --analyzer "$2" \
+        --only scalar-t8-1920x1080,v4-t8-1920x1080,v4-t8-4096x4096,v4-t2-64x64 \
+        --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli
 
 [positional-arguments]
 speedq-parity binary dest *options:
