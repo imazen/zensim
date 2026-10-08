@@ -132,6 +132,129 @@ fn resolved(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
+// Historical compatibility changes recipe/era qualification, never population access.
+// Use the same identity predicate for declarations and label-free key cells.
+fn forbidden_identity(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    value.contains("aic")
+        || value.contains("holdout")
+        || value.contains("terminal")
+        || value.contains("_sealed")
+        || value.starts_with("labels__")
+        || matches!(value.as_str(), "val" | "validation" | "test" | "t0")
+        || value.ends_with("_val") && value != "konfig_val"
+}
+fn forbidden_declaration(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => fields.iter().any(|(key, value)| {
+            if matches!(
+                key.as_str(),
+                "role"
+                    | "split"
+                    | "tier"
+                    | "data_role"
+                    | "keys_role"
+                    | "source"
+                    | "human_sources"
+                    | "member_set"
+                    | "member_sets"
+                    | "bank_manifest_sha256"
+            ) {
+                fn identity(v: &Value) -> bool {
+                    match v {
+                        Value::String(s) => forbidden_identity(s),
+                        Value::Array(a) => a.iter().any(identity),
+                        Value::Object(o) => {
+                            o.iter().any(|(k, v)| forbidden_identity(k) || identity(v))
+                        }
+                        _ => false,
+                    }
+                }
+                identity(value)
+            } else {
+                forbidden_declaration(value)
+            }
+        }),
+        Value::Array(a) => a.iter().any(forbidden_declaration),
+        _ => false,
+    }
+}
+fn historical_population(paths: &[PathBuf]) -> Result<(), String> {
+    let mut declarations = BTreeSet::new();
+    let mut keys = BTreeSet::new();
+    for path in paths {
+        for table in [path.clone(), resolved(path)] {
+            safe(&table)?;
+            if let Some(parent) = table.parent() {
+                declarations.insert(parent.join("_MANIFEST.json"));
+            }
+            declarations.insert(PathBuf::from(format!("{}.manifest.json", table.display())));
+            declarations.insert(PathBuf::from(format!("{}._MANIFEST.json", table.display())));
+            if table.extension().is_some_and(|ext| ext == "parquet") {
+                keys.insert(if table.to_string_lossy().ends_with(".keys.parquet") {
+                    table
+                } else {
+                    table.with_extension("keys.parquet")
+                });
+            }
+        }
+    }
+    // Check every discovery candidate's ancestry before opening any metadata.
+    for path in declarations.iter().chain(&keys) {
+        safe(path)?;
+    }
+    for path in declarations {
+        if path.is_file() && forbidden_declaration(&json(&path)?) {
+            return Err("forbidden historical input population declaration".into());
+        }
+    }
+    // Only optional, label-free identities are read; old recipes without sidecars
+    // remain compatible. Unknown/label-bearing key schemas refuse before rows.
+    const NAMES: &[&str] = &[
+        "pair_key",
+        "source_row_id",
+        "row_id",
+        "ref_basename",
+        "member_set",
+        "role",
+        "split",
+        "tier",
+        "source",
+        "authority",
+        "condition_id",
+        "dataset",
+        "content",
+        "distortion",
+        "level",
+        "reference_rel",
+        "distorted_rel",
+        "reference_sha256",
+        "distorted_sha256",
+        "ladder",
+        "source_filename",
+        "type",
+        "family",
+        "severity_level",
+        "severity",
+        "sign",
+        "__index_level_0__",
+    ];
+    for path in keys {
+        if !path.is_file() {
+            continue;
+        }
+        let keys = training_keys::read(&path, &[], NAMES)?;
+        for name in ["role", "split", "tier", "source", "member_set", "dataset"] {
+            if let Ok(ix) = keys.column(name)
+                && keys.rows.iter().any(|r| forbidden_identity(&r[ix]))
+            {
+                return Err("forbidden historical observation population".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Strict provenance inputs may only repeat an admitted group table, its
 /// label-free keys, or its declaration. Arbitrary non-table provenance files
 /// need a registered owner too; a matching manifest digest is not admission.
@@ -160,7 +283,14 @@ fn inventory(
         }
     }
     if args.historical_replay.is_some() {
-        return Ok(()); // Preserve explicitly unqualified historical recipes.
+        let paths: Vec<_> = groups
+            .iter()
+            .map(|g| g.1.clone())
+            .chain(inputs.iter().map(|i| i.path.clone()))
+            .chain(auxiliary.iter().filter_map(|(_, p)| p.as_ref().cloned()))
+            .collect();
+        historical_population(&paths)?;
+        return Ok(()); // Permitted, explicitly unqualified historical recipes.
     }
     for (flag, path) in auxiliary {
         if path.is_some() {

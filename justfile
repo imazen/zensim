@@ -787,8 +787,8 @@ v40-postfit-artifacts-tests:
 v40-scoring-rehearsal bundle image dest attempt="77":
     python3 scripts/tests/v40_scoring_rehearsal.py --bundle {{bundle}} --image {{image}} --dest {{dest}} --attempt {{attempt}}
 
-v40-r3-stage previous bundle bindir producer quiet_start quiet_override authority:
-    python3 scripts/tests/v40_r3_stage.py --previous {{previous}} --bundle {{bundle}} --bin-dir {{bindir}} --producer {{producer}} --quiet-start {{quiet_start}} --quiet-override {{quiet_override}} --release-authority {{authority}}
+v40-r3-stage previous bundle bindir producer quiet_start quiet_override authority build_log:
+    python3 scripts/tests/v40_r3_stage.py --previous {{previous}} --bundle {{bundle}} --bin-dir {{bindir}} --producer {{producer}} --quiet-start {{quiet_start}} --quiet-override {{quiet_override}} --release-authority {{authority}} --build-log {{build_log}}
 
 # Run under the shared heavy lock; the retained trainer is the shipped binary.
 v40-r3-checks bundle dest metrics:
@@ -828,3 +828,10 @@ v40-own-cargo-cleanup bundle mirror:
 # Synthetic gate() authorizations only; fixed approved E30 metadata mounts.
 v40-image-authorization bundle image evidence scratch:
     docker run --rm --network=none --cpus=1 --memory=2g --memory-swap=2g --user $(id -u):$(id -g) --entrypoint python3 -e TMPDIR=/scratch/tmp -e PYTHONPYCACHEPREFIX=/scratch/pycache -v {{bundle}}:{{bundle}}:ro -v /mnt/v/output/zensim/v40-2026-10-07/upiq380-fit:/mnt/v/output/zensim/v40-2026-10-07/upiq380-fit:ro -v /var/tmp/rev4-featpot/e30-results/cells:/var/tmp/rev4-featpot/e30-results/cells:ro -v {{evidence}}:/evidence -v {{scratch}}:/scratch -v {{justfile_directory()}}/scripts/tests/v40_authorization_gate.py:/v40-gate.py:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/fit-manifest-fitv2e30-20261007.json:/mnt/v/output/zensim/shippath11-2026-10-07/fit-manifest-fitv2e30-20261007.json:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/PROGRAM_INVENTORY.json:/mnt/v/output/zensim/shippath11-2026-10-07/PROGRAM_INVENTORY.json:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/ARTIFACT_PINS.json:/mnt/v/output/zensim/shippath11-2026-10-07/ARTIFACT_PINS.json:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/image-context/program.tar.gz:/mnt/v/output/zensim/shippath11-2026-10-07/image-context/program.tar.gz:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/d1-fit-data.tar.gz:/mnt/v/output/zensim/shippath11-2026-10-07/d1-fit-data.tar.gz:ro -v /mnt/v/output/zensim/shippath11-2026-10-07/bin/inspect_qualified_checkpoint:/mnt/v/output/zensim/shippath11-2026-10-07/bin/inspect_qualified_checkpoint:ro {{image}} /v40-gate.py --bundle {{bundle}} --dest /evidence/authorization-gate
+
+# Replay compatibility cannot authorize declared protected populations.
+v40-historical-admission binary dest:
+    python3 scripts/tests/v40_historical_admission.py --binary {{binary}} --dest {{dest}}
+
+v40-binary-metadata-tests:
+    PYTHONPATH=scripts/tests python3 -m unittest scripts.tests.test_v40_binary_metadata
