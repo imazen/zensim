@@ -3,6 +3,42 @@
 import errno
 import os
 import stat
+from pathlib import Path
+
+
+def safe_path(path):
+    # Keep the terminal's path guard local: no assessment/training imports.
+    p = Path(path)
+    for candidate in (p, p.resolve()):
+        if any(
+            "_sealed" in v.lower()
+            or "holdout" in v.lower()
+            or v.lower().startswith("labels__")
+            for v in candidate.parts
+        ):
+            raise PermissionError("protected label path refused")
+    return p
+
+
+def _protected_devices(roots):
+    devices = set()
+    for root in roots:
+        p = Path(root)
+        # Missing stores still reserve their nearest existing filesystem.
+        while True:
+            try:
+                devices.add(os.stat(p).st_dev)
+                break
+            except FileNotFoundError:
+                if p == p.parent:
+                    raise ValueError("unknown protected filesystem")
+                p = p.parent
+    return devices
+
+
+def _separate(info, protected):
+    if info.st_dev in protected:
+        raise ValueError("metadata and protected stores must use separate filesystems")
 
 
 def _identity(info):
@@ -16,10 +52,11 @@ def _regular(info):
         raise ValueError("regular metadata file with one link required")
 
 
-def _open_regular_at(parent, name, flags, exclusive=False):
+def _open_regular_at(parent, name, flags, exclusive=False, protected=()):
     """Return a data fd for a checked inode; never reopen the caller's leaf."""
     leaf = data = None
     try:
+        _separate(os.fstat(parent), protected)
         if exclusive:
             # O_EXCL never opens an existing leaf, including an inserted alias.
             data = os.open(name, flags, 0o600, dir_fd=parent)
@@ -32,6 +69,7 @@ def _open_regular_at(parent, name, flags, exclusive=False):
                 name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent
             )
             info = os.fstat(leaf)
+            _separate(info, protected)
             _regular(info)
             if _identity(info) != _identity(before):
                 raise ValueError("metadata leaf identity changed")
@@ -52,7 +90,7 @@ def _open_regular_at(parent, name, flags, exclusive=False):
             os.close(leaf)
 
 
-def _open_admitted(resolved, mode="rb", **kwargs):
+def _open_admitted(resolved, mode="rb", protected=(), **kwargs):
     """Walk the owner's admitted absolute spelling without following aliases."""
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     modes = {
@@ -70,7 +108,13 @@ def _open_admitted(resolved, mode="rb", **kwargs):
             next_parent = os.open(component, directory_flags, dir_fd=parent)
             os.close(parent)
             parent = next_parent
-        fd = _open_regular_at(parent, resolved.name, flags, mode in ("x", "w"))
+        fd = _open_regular_at(
+            parent,
+            resolved.name,
+            flags,
+            mode in ("x", "w"),
+            _protected_devices(protected),
+        )
         bound = os.fdopen(fd, mode, **kwargs)
         fd = None  # bound owns it, including exceptional close paths
         return bound

@@ -18,6 +18,13 @@ import kadid_terminal_read as owner
 
 class TerminalRead(unittest.TestCase):
     def setUp(self):
+        # The new filesystem-isolation layer is independent of these payload
+        # and statistic probes. /proc supplies a distinct device identity;
+        # no corpus is read or written. Same-device refusals have real-disk
+        # regressions in test_kadid_terminal_hardening.py.
+        self.corpus_patch = patch.object(owner, "CORPUS_ROOTS", (Path("/proc"),))
+        self.corpus_patch.start()
+        self.addCleanup(self.corpus_patch.stop)
         self.temp = tempfile.TemporaryDirectory(dir=Path.home() / "tmp")
         self.root = Path(self.temp.name)
         self.ledger = self.root / "DATA_SPLITS.md"
@@ -79,6 +86,7 @@ class TerminalRead(unittest.TestCase):
             bootstrap_seed=44001,
             orientation="quality",
             registration_sha256=owner.sha(self.registration),
+            contract_sha256=owner.sha(owner.CONTRACT),
             code_sha256={k: owner.sha(p) for k, p in owner.CODE.items()},
             human_sources=["kadid", "tid2013", "konfig", "cid22_a25"],
             fit_jobset="fitv2d1-20261007",
@@ -108,6 +116,7 @@ class TerminalRead(unittest.TestCase):
         self.pin()
 
     def tearDown(self):
+        self.corpus_patch.stop()
         self.repo_patch.stop()
         self.reg_patch.stop()
         self.temp.cleanup()

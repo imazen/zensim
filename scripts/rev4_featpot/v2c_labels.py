@@ -26,7 +26,8 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from v2_common import sha
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _read(data: bytes, fmt: str, usecols: list[str] | None = None, rows_key: str | None = None) -> pd.DataFrame:
