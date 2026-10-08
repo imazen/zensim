@@ -266,9 +266,19 @@ class Hardening(unittest.TestCase):
                 owner, "preflight" if when == "preflight" else "reserve", boundary
             ),
         ):
-            result = t.run_read()
+            if operation == "replace":
+                with self.assertRaisesRegex(owner.TerminalReadError, "exposure-refused"):
+                    t.run_read()
+            else:
+                result = t.run_read()
             _zero_events(self, watch, f"ledger-{operation}-after-{when}")
         self.assertTrue(mutated)
+        if operation == "replace":
+            self.assertNotIn("KADID-TERMINAL-SPENT:", mutated[0].read_text())
+            self.assertFalse(t.journal.exists())
+            self.assertFalse(t.output.exists())
+            self.assertEqual(approved.read_text(), "Unapproved synthetic ledger\n")
+            return
         self.assertEqual(result["confirmation"], "PASS")
         bound_name = mutated[0] if operation == "replace" else approved
         text = bound_name.read_text()
@@ -280,7 +290,7 @@ class Hardening(unittest.TestCase):
     def test_ledger_alias_after_preflight_keeps_authorized_handle(self):
         self.ledger_substitution("alias", "preflight")
 
-    def test_ledger_replace_after_preflight_keeps_authorized_inode(self):
+    def test_ledger_replace_after_preflight_refuses_changed_canonical_inode(self):
         self.ledger_substitution("replace", "preflight")
 
     def test_ledger_alias_after_reservation_cannot_redirect_result_append(self):

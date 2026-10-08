@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from kadid_terminal_fixture_devices import configure
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rev4_featpot"))
 import kadid_terminal_read as owner
@@ -18,13 +19,7 @@ import kadid_terminal_read as owner
 
 class TerminalRead(unittest.TestCase):
     def setUp(self):
-        # The new filesystem-isolation layer is independent of these payload
-        # and statistic probes. /proc supplies a distinct device identity;
-        # no corpus is read or written. Same-device refusals have real-disk
-        # regressions in test_kadid_terminal_hardening.py.
-        self.corpus_patch = patch.object(owner, "CORPUS_ROOTS", (Path("/proc"),))
-        self.corpus_patch.start()
-        self.addCleanup(self.corpus_patch.stop)
+        configure(self, owner)
         self.temp = tempfile.TemporaryDirectory(dir=Path.home() / "tmp")
         self.root = Path(self.temp.name)
         self.ledger = self.root / "DATA_SPLITS.md"
@@ -116,6 +111,7 @@ class TerminalRead(unittest.TestCase):
         self.pin()
 
     def tearDown(self):
+        self.label_device_patch.stop()
         self.corpus_patch.stop()
         self.repo_patch.stop()
         self.reg_patch.stop()

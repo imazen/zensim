@@ -10,12 +10,10 @@ must all appear in the pinned population and prediction table.
 
 import argparse
 import csv
-import fcntl
 import hashlib
 import io
 import json
 import os
-import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -71,8 +69,7 @@ def require(condition, message):
         raise ValueError(message)
 
 
-# Metadata belongs to prepared artifacts, source or the exposure journal, never
-# to original corpus stores. Roots are owned here, not supplied by the receipt.
+# Metadata/exposure roots are owned here, never by the receipt.
 METADATA_ROOTS = (
     Path(__file__).resolve().parents[2],
     Path.home() / "tmp/zensim-paper/rev4",
@@ -85,10 +82,11 @@ CORPUS_ROOTS = (
     Path("/mnt/v/input"),
     Path("/mnt/v/collections"),
     Path("/var/tmp/datasets"),
+    Path("/mnt/tower/input/datasets"),
+    Path("/mnt/tower/v-datasets-archives-2026-07-22"),
     v2c_labels.BANK,
 )
-# DATA_SPLITS T0/terminal bank populations and JPEG-AIC holdout family. Bank
-# inputs are never needed: the label-free population is prepared outside it.
+# DATA_SPLITS T0/terminal and JPEG-AIC populations; bank inputs are not needed.
 PROTECTED_POPULATIONS = {
     "bank",
     "kadid_terminal",
@@ -161,7 +159,10 @@ def metadata_path(path):
 def metadata_open(path, mode="rb", **kwargs):
     """Bind admitted ancestry and a checked leaf; Linux only, no fallback."""
     resolved = acceptance.destination(path, metadata_path)
-    return _terminal_bound_io._open_admitted(resolved, mode, protected=CORPUS_ROOTS, **kwargs)
+    return _terminal_bound_io._open_admitted(
+        resolved, mode, protected=CORPUS_ROOTS,
+        protected_devices=acceptance.protected_devices(), **kwargs
+    )
 
 
 def _reject_label_alias(path, labels_identity):
@@ -279,6 +280,11 @@ def committed_bytes(commit, pin):
 
 
 def preflight(receipt_path, authorization_path, ledger, journal, output):
+    with acceptance.device_scope():
+        return _preflight(receipt_path, authorization_path, ledger, journal, output)
+
+
+def _preflight(receipt_path, authorization_path, ledger, journal, output):
     # Reject even metadata aliases into protected ancestry before opening them.
     receipt_path, authorization_path = (
         metadata_path(receipt_path),
@@ -315,9 +321,7 @@ def preflight(receipt_path, authorization_path, ledger, journal, output):
     )
     receipt = json.loads(committed)
     validate_label_adapter(receipt.get("labels"))
-    labels = os.stat(receipt["labels"]["path"])
-    require(stat.S_ISREG(labels.st_mode), "regular original label file required")
-    labels_identity = (labels.st_dev, labels.st_ino)
+    labels_identity = acceptance.label_identity(receipt["labels"]["path"])
     for path in (receipt_path, authorization_path, REGISTRATION, CONTRACT, *CODE.values()):
         _reject_label_alias(metadata_path(path), labels_identity)
     require(
@@ -534,7 +538,6 @@ def reserve(ledger, journal, receipt_sha):
     # O_EXCL is shared across workspaces/outputs; flock also serializes ledger
     # append. A crash or failed statistic cannot permit a second look.
     with acceptance.ledger_file(ledger, metadata_open) as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
         require(token not in f.read(), "terminal design line already spent")
         record = {
             "design_line": DESIGN,
@@ -546,14 +549,11 @@ def reserve(ledger, journal, receipt_sha):
             json.dump(record, j, indent=2)
             j.flush()
             os.fsync(j.fileno())
-        f.seek(0, os.SEEK_END)
-        f.write(
+        acceptance.append_ledger(f, ledger,
             f"\n## KADID TERMINAL exposure — {record['time_utc']}\n\n"
             f"{token}\nPre-read receipt SHA-256 `{receipt_sha}`. Reserved once before label opening; "
             "this design line is spent even on failure. No adaptive reuse.\n"
         )
-        f.flush()
-        os.fsync(f.fileno())
 
 
 def assess(receipt, population, predictions):
@@ -722,7 +722,7 @@ def assess(receipt, population, predictions):
 
 
 def execute(receipt, authorization, ledger, journal, output):
-    with ExitStack() as bound, acceptance.destinations(bound):
+    with ExitStack() as bound, acceptance.destinations(bound), acceptance.device_scope():
         try:
             r, receipt_sha, pop, pred = preflight(
                 receipt, authorization, ledger, journal, output
@@ -775,15 +775,14 @@ def _execute_admitted(r, receipt_sha, pop, pred, ledger, journal, output):
         raise TerminalReadError(result["error"]) from None
     with metadata_open(output, "w") as f:
         f.write(json.dumps(result, indent=2, allow_nan=False) + "\n")
-    with acceptance.ledger_file(ledger, metadata_open) as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0, os.SEEK_END)
-        f.write(
-            f"\nD2 result `{Path(output)}` SHA-256 `{metadata_sha(output)}`: **{result['confirmation']}**. "
-            "Labels read once; no retuning permitted.\n"
-        )
-        f.flush()
-        os.fsync(f.fileno())
+    try:
+        with acceptance.ledger_file(ledger, metadata_open) as f:
+            acceptance.append_ledger(f, ledger,
+                f"\nD2 result `{Path(output)}` SHA-256 `{metadata_sha(output)}`: **{result['confirmation']}**. "
+                "Labels read once; no retuning permitted.\n"
+            )
+    except Exception:
+        raise TerminalReadError("exposure-refused") from None
     return result
 
 

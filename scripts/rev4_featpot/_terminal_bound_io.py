@@ -101,7 +101,7 @@ def _open_regular_at(parent, name, flags, exclusive=False, protected=()):
             os.close(leaf)
 
 
-def _open_admitted(resolved, mode="rb", protected=(), **kwargs):
+def _open_admitted(resolved, mode="rb", protected=(), protected_devices=(), **kwargs):
     """Walk the owner's admitted absolute spelling without following aliases."""
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     modes = {
@@ -124,7 +124,7 @@ def _open_admitted(resolved, mode="rb", protected=(), **kwargs):
             resolved.name,
             flags,
             mode in ("x", "w"),
-            _protected_devices(protected),
+            _protected_devices(protected) | set(protected_devices),
         )
         bound = os.fdopen(fd, mode, **kwargs)
         fd = None  # bound owns it, including exceptional close paths
