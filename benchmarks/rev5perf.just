@@ -54,4 +54,3 @@ rev5perf-collect root before analyzer:
     just --justfile benchmarks/rev5perf.just rev5perf-profile "$1/provenance/instrument" "$1/perf" perf
     just --justfile benchmarks/rev5perf.just rev5perf-profile "$1/provenance/instrument" "$1/callgrind" callgrind
     just --justfile benchmarks/rev5perf.just rev5perf-profile "$1/provenance/instrument" "$1/phases" phases
-
