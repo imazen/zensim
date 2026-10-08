@@ -19,7 +19,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--binary', type=Path, required=True)
     ap.add_argument('--dest', type=Path, required=True)
-    ap.add_argument('--mode', choices=['perf', 'callgrind'], required=True)
+    ap.add_argument('--mode', choices=['perf', 'callgrind', 'phases'], required=True)
     args = ap.parse_args()
     args.dest.mkdir(parents=True, exist_ok=False)
     manifest = dict(binary=str(args.binary.resolve()),
@@ -35,6 +35,8 @@ def main():
                 env.update(ZEN_S2_SPEEDQ_WORKER='by_v2fy',
                            ZENSIM_FORMULA_REV=str(rev), ZEN_S2_RSS_ONLY='1',
                            ZEN_S2_PROFILE_CALLS=str(calls if args.mode == 'perf' else 0))
+                if args.mode == 'phases':
+                    env['ZENSIM_FOLD_TIMING'] = '1'
                 worker = ['taskset', '-c', speedq.CPUSETS[threads], str(args.binary.resolve())]
                 if args.mode == 'perf':
                     commands = [
@@ -42,9 +44,11 @@ def main():
                          '-o', str(args.dest / (tag + '.stat'))] + worker,
                         ['perf', 'record', '-F', '997', '-g', '-o',
                          str(args.dest / (tag + '.data'))] + worker]
-                else:
-                    commands = [['valgrind', '--tool=callgrind', '--dump-instr=yes',
+                elif args.mode == 'callgrind':
+                    commands = [['valgrind', '--tool=callgrind', '--trace-children=yes', '--dump-instr=yes',
                                  '--callgrind-out-file=' + str(args.dest / (tag + '.callgrind'))] + worker]
+                else:
+                    commands = [worker]
                 for i, cmd in enumerate(commands):
                     print(tag, args.mode, i, flush=True)
                     with (args.dest / f'{tag}.{i}.log').open('x') as log:
@@ -52,6 +56,8 @@ def main():
                     manifest['commands'].append(dict(tag=tag, command=cmd, returncode=result.returncode))
                     if result.returncode:
                         raise RuntimeError(f'profiler failed: {tag} (see full log)')
+                if args.mode == 'phases':
+                    continue
                 if args.mode == 'perf':
                     report = ['perf', 'report', '--stdio', '--no-children', '-i',
                               str(args.dest / (tag + '.data'))]
