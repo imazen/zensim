@@ -158,11 +158,13 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
-* **2026-10-07 — V40 R2 launch/admission/statistics.** Review found the E30
+* **2026-10-07 — V40 R2 launch/admission/statistics. FIXED locally.** Review found the E30
   prerequisite missing the installed `cells/` level, native `--manifest`
   hashing inputs before group/key admission, and constant seed composites
-  receiving a rounded nonzero SE. Corrections are on the V40 quarantine lane;
-  actual shipped-binary probes and package re-freeze are required before launch.
+  receiving a rounded nonzero SE. The corrected actual-binary probes refuse
+  before any payload opens; both complete control proofs remain byte-identical.
+  Final package/authorization/mirror receipts are required before readiness;
+  see [the round-two pointer](benchmarks/v40r2_2026-10-07.pointer.md).
   The controlling four-source E29 amendment and shared fresh control decision
   are bound into the new package. Historical reviewed artifacts remain intact.
 
