@@ -59,7 +59,7 @@
   "rss_boundary": "fresh process including input setup, model load, one score; v4x 1/32 requested threads only",
   "mirror": "/mnt/tower/output/zensim/speedq-2026-10-07/raw",
   "status": "INCOMPLETE",
-  "reporter_commit": "82158c6e60737f05f948431e79ca08c62af9ec02",
+  "reporter_commit": "6718ea075f57b17c3f85c092fb4e4b27d6b4d13d",
   "strict_score_and_feature_parity_cells": [
     384,
     384
@@ -93,7 +93,7 @@
   },
   "mirror_verification": "provenance/production-mirror-verification.json verifies frozen model, instrument, source manifest; provenance/production-rss-mirror-verification.json verifies three randomly chosen RSS records; all 112 RSS records/logs and full parity mirrored, final timing mirror pending",
   "validation": {
-    "python_tests": "15 passed; new scheduling regression fails before the queue fix and passes after, with preservation of rejected evidence; source/parity/report controls unchanged",
+    "python_tests": "17 passed in 0.382s; CLI default and six-arm propagation, preserved completion skipping, mixed six/seven-arm coverage and missing-core refusal; previous parity and gate controls remain unchanged",
     "bench_build_and_clippy": "production build rc0: 15s, peak-RSS 0.68GiB, min available 46797MiB, peak load 1.24; clippy rc0: 0s, 0.17GiB, 47346MiB, load 1.22",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. All-platform CI retry fully green at https://github.com/imazen/zenbench/actions/runs/37696531423 (initial Linux ARM64 post-job cache failure had no failed test step).",
     "parity": "f803b74c production model: 576/576 cells; 384 strict Rev4/Rev5 score and all 420 consumed-feature bits pass; 48 Rev3 scalar tolerance failures recorded. run-heavy rc0, 76s, peak-RSS 0.26GiB, min available 46869MiB, peak load 2.37.",
@@ -139,13 +139,34 @@
   "collection_end_condition": "all 192 admitted production timing segments, or coordinator explicitly closes quiet window; transitory gate failures continue to wait/retry",
   "controller_commits": {
     "initial": "d1b391e13019f7106968e895c3829a2c62c487a7",
-    "retry_queue": "050d7f2078b950079e0011889ffebd8a8627d1ca"
+    "retry_queue": "050d7f2078b950079e0011889ffebd8a8627d1ca",
+    "six_arm": "6718ea075f57b17c3f85c092fb4e4b27d6b4d13d"
   },
   "retry_order": "Rejected segments return to the end of the pending grid after the unchanged ten-second backoff; only one segment at a time",
   "collection_logs": [
     "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v3.log",
     "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v4.log",
-    "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v5.log"
+    "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v5.log",
+    "/home/lilith/tmp/speedq-2026-10-07/production-six-arm-matrix.log"
   ],
-  "retry_queue_evidence": "provenance/retry-queue-source-050d7f20/manifest.json"
+  "retry_queue_evidence": "provenance/retry-queue-source-050d7f20/manifest.json",
+  "timing_arm_amendment": {
+    "utc": "2026-10-08T05:55:19Z",
+    "earlier_segments": 63,
+    "earlier_arms": 7,
+    "remaining_arms": [
+      "by_v2fy_r3",
+      "by_v2fy_r4",
+      "by_v2fy_r5",
+      "zensim_B",
+      "fast_ssim2",
+      "butteraugli"
+    ],
+    "ssimulacra2_rs_peer_table": "v4x rows only",
+    "rss": "all seven arms unchanged",
+    "publish": "local only per coordinator amendment",
+    "stop_receipt": "provenance/drop-ssim2rs-stop-1791438697616792734.json",
+    "interrupted_attempt": "production-f803b74c/timing/v3-t2-4096x4096.interrupted-1791438729086285788.bak",
+    "source_archive": "provenance/six-arm-source-6718ea07/manifest.json"
+  }
 }
