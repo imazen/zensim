@@ -1,0 +1,617 @@
+{
+  "schema": 2,
+  "scope": "three independent packed seeds; label-free synthetic SDR only",
+  "geometries": [
+    [
+      64,
+      64
+    ],
+    [
+      97,
+      63
+    ],
+    [
+      131,
+      65
+    ],
+    [
+      255,
+      129
+    ]
+  ],
+  "dropped_bits": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "seeds": [
+    {
+      "seed": 0,
+      "caller_width": 420,
+      "declared_reads": 420,
+      "pairs_per_permutation": 28,
+      "permutations": [
+        "all enabled",
+        "x86-64-v4x disabled",
+        "x86-64-v3 Crypto, x86-64-v4x disabled",
+        "AVX-512, x86-64-v4x disabled",
+        "x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64 Crypto, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v1, x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled"
+      ],
+      "finite": true,
+      "pixel_cache_mismatches": 0,
+      "pixel_identity_aware_feature_mismatches": 0,
+      "consumed_feature_mismatches": 0,
+      "cached_feature_mismatches": 0,
+      "native_tier_row_mismatches": 0,
+      "wasm_row_mismatches": 0,
+      "wasm_finite": true,
+      "wasm_consumed_feature_mismatches": 0,
+      "wasm_cached_feature_mismatches": 0,
+      "pixel_identity_exact_100": true,
+      "feature_identity_scores": [
+        98.36815975441085,
+        98.2979819795809,
+        98.32183293954,
+        98.32761109030544
+      ],
+      "feature_identity_band_97_5_to_100": true,
+      "no_distortion_above_identity": true,
+      "ladders_report_only": [
+        {
+          "width": 64,
+          "height": 64,
+          "scores": [
+            100.0,
+            95.76996989357771,
+            91.0651936132951,
+            81.78913214956474,
+            68.2094811568806,
+            48.39401407919781,
+            34.08617784997876
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 97,
+          "height": 63,
+          "scores": [
+            100.0,
+            95.7618140981245,
+            90.96027242079111,
+            81.86008684194313,
+            67.92240609035494,
+            50.53450835780663,
+            35.8903958883956
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 131,
+          "height": 65,
+          "scores": [
+            100.0,
+            95.77815955861337,
+            90.9860471730332,
+            81.79798965719469,
+            68.23434005031353,
+            50.02016598630583,
+            36.206596436053424
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 255,
+          "height": 129,
+          "scores": [
+            100.0,
+            95.8412789124614,
+            91.01777619786945,
+            82.10449210748476,
+            68.62910772256755,
+            50.31626041860391,
+            37.39483132129553
+          ],
+          "nonincreasing": true
+        }
+      ]
+    },
+    {
+      "seed": 1,
+      "caller_width": 420,
+      "declared_reads": 420,
+      "pairs_per_permutation": 28,
+      "permutations": [
+        "all enabled",
+        "x86-64-v4x disabled",
+        "x86-64-v3 Crypto, x86-64-v4x disabled",
+        "AVX-512, x86-64-v4x disabled",
+        "x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64 Crypto, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v1, x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled"
+      ],
+      "finite": true,
+      "pixel_cache_mismatches": 0,
+      "pixel_identity_aware_feature_mismatches": 0,
+      "consumed_feature_mismatches": 0,
+      "cached_feature_mismatches": 0,
+      "native_tier_row_mismatches": 0,
+      "wasm_row_mismatches": 0,
+      "wasm_finite": true,
+      "wasm_consumed_feature_mismatches": 0,
+      "wasm_cached_feature_mismatches": 0,
+      "pixel_identity_exact_100": true,
+      "feature_identity_scores": [
+        96.81424717298958,
+        96.76696026546807,
+        96.76900683558603,
+        96.79637797063307
+      ],
+      "feature_identity_band_97_5_to_100": false,
+      "no_distortion_above_identity": true,
+      "ladders_report_only": [
+        {
+          "width": 64,
+          "height": 64,
+          "scores": [
+            100.0,
+            94.26791716224088,
+            90.02004360472499,
+            80.88396194197595,
+            69.56799019651407,
+            52.61313499776397,
+            37.01080755757447
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 97,
+          "height": 63,
+          "scores": [
+            100.0,
+            94.20012974792549,
+            90.20115099600531,
+            80.8115631603679,
+            69.64932038503879,
+            53.086909389843775,
+            38.208361656723234
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 131,
+          "height": 65,
+          "scores": [
+            100.0,
+            94.31712533966905,
+            90.22348419935476,
+            80.75583328749308,
+            70.0753419039333,
+            53.18809709566794,
+            39.16107389394218
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 255,
+          "height": 129,
+          "scores": [
+            100.0,
+            94.52247150262754,
+            90.23455554188531,
+            81.15222701593997,
+            70.63799502930061,
+            52.84725215396664,
+            39.88437691446978
+          ],
+          "nonincreasing": true
+        }
+      ]
+    },
+    {
+      "seed": 2,
+      "caller_width": 420,
+      "declared_reads": 420,
+      "pairs_per_permutation": 28,
+      "permutations": [
+        "all enabled",
+        "x86-64-v4x disabled",
+        "x86-64-v3 Crypto, x86-64-v4x disabled",
+        "AVX-512, x86-64-v4x disabled",
+        "x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64 Crypto, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+        "x86-64-v1, x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled"
+      ],
+      "finite": true,
+      "pixel_cache_mismatches": 0,
+      "pixel_identity_aware_feature_mismatches": 0,
+      "consumed_feature_mismatches": 0,
+      "cached_feature_mismatches": 0,
+      "native_tier_row_mismatches": 0,
+      "wasm_row_mismatches": 0,
+      "wasm_finite": true,
+      "wasm_consumed_feature_mismatches": 0,
+      "wasm_cached_feature_mismatches": 0,
+      "pixel_identity_exact_100": true,
+      "feature_identity_scores": [
+        97.20547219784015,
+        97.1752002250599,
+        97.17313127727995,
+        97.18860034504641
+      ],
+      "feature_identity_band_97_5_to_100": false,
+      "no_distortion_above_identity": true,
+      "ladders_report_only": [
+        {
+          "width": 64,
+          "height": 64,
+          "scores": [
+            100.0,
+            93.8784504378212,
+            88.39312987972279,
+            79.26248719724387,
+            69.51703545470448,
+            55.83748218173972,
+            44.375715095184255
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 97,
+          "height": 63,
+          "scores": [
+            100.0,
+            93.86243691011263,
+            88.65069963955337,
+            79.217225806479,
+            69.17290040181976,
+            56.89985479026641,
+            45.31931115795367
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 131,
+          "height": 65,
+          "scores": [
+            100.0,
+            93.93340886491697,
+            88.59127605892272,
+            79.5997582341185,
+            69.72798179653854,
+            57.2305275541179,
+            46.7143605378902
+          ],
+          "nonincreasing": true
+        },
+        {
+          "width": 255,
+          "height": 129,
+          "scores": [
+            100.0,
+            94.05053180657737,
+            88.66388195218754,
+            79.85571010458393,
+            70.28362836668369,
+            56.67753767242732,
+            47.29421177695103
+          ],
+          "nonincreasing": true
+        }
+      ]
+    }
+  ],
+  "qualification_status": "NOT_GREEN",
+  "source_commit": "6aa91cbcc95cb88288141c16b5a0d3298c24e35b",
+  "base_commit": "c8c2475f52c8708b285cc9816114703341f29bd8",
+  "guard_commit": "e83fefd01f1e3de47d0da98c6cc9b8714b237c3a",
+  "probe_commit": "3c31aca37d1031ef819a836a392fca6d13fcf98b",
+  "composition": "Not frozen; three standalone seeds only; no selection or tuning",
+  "model_pins": [
+    {
+      "seed": 0,
+      "sha256": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+      "bytes": 110201,
+      "source": "/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s0/refit/production-f16.bin",
+      "tower": "/mnt/tower/output/zensim-production-d1-2026-10-07/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s0/refit/production-f16.bin",
+      "status": "PASS",
+      "feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+      "formula_revision": 5,
+      "qualified_provenance": true,
+      "checkpoint_epoch": "119",
+      "admitted_tables": 7
+    },
+    {
+      "seed": 1,
+      "sha256": "1bf8f3afbf0d4c760e3fcfb1e36fa3ca8c2c19f838b0f6719b8c681fa682fdec",
+      "bytes": 109504,
+      "source": "/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s1/refit/production-f16.bin",
+      "tower": "/mnt/tower/output/zensim-production-d1-2026-10-07/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s1/refit/production-f16.bin",
+      "status": "PASS",
+      "feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+      "formula_revision": 5,
+      "qualified_provenance": true,
+      "checkpoint_epoch": "119",
+      "admitted_tables": 7
+    },
+    {
+      "seed": 2,
+      "sha256": "54118c54ce7fe90bf1e9dcec52f7f822caf54e93e5b1d1a95a2bbd37f741b688",
+      "bytes": 109470,
+      "source": "/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s2/refit/production-f16.bin",
+      "tower": "/mnt/tower/output/zensim-production-d1-2026-10-07/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s2/refit/production-f16.bin",
+      "status": "PASS",
+      "feature_set_id": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af",
+      "formula_revision": 5,
+      "qualified_provenance": true,
+      "checkpoint_epoch": "119",
+      "admitted_tables": 7
+    }
+  ],
+  "program_sha256": {
+    "serve_custom_bake-native": "2622d791a74603d77f854f799b3feaa057359f1e1161c024fb11bce76afbaae2",
+    "serve_custom_bake-native-initial": "33826cda1b27c76a3b11f62b17d13ebb7bdea0a7836bf7a76159e9410ebbb96d",
+    "featcanon_rev5_parity-native-initial": "b84d1b8136fa064ce9ef8e0ae7fd42cf726cbb81d4093887d428ca40d22d1bdc",
+    "serve_custom_bake-wasm128.wasm": "4680a08cb8f3d711864896e59cc7bcc457a0a0b3ae9353fda2bc9a587c960fe2",
+    "featcanon_rev5_parity-native": "a5eda6cb4e4562823b652fcc86156f258939b3012e0b9591a8bb39f1605e77ce",
+    "inspect_qualified_checkpoint-prebuilt": "c4fe929ab8d115dc45fe39eae97665abed7e870c9ea50b53bd3be4c94f58383f",
+    "inspect_qualified_checkpoint": "1202eca2242187aa36c9a07ebdd67c93dafa4505ea61745504ef066e76d9945a"
+  },
+  "baseline_unchanged": [
+    {
+      "seed": 0,
+      "before_after_row_mismatches": 0,
+      "cached_feature_mismatches": 0
+    },
+    {
+      "seed": 1,
+      "before_after_row_mismatches": 0,
+      "cached_feature_mismatches": 0
+    },
+    {
+      "seed": 2,
+      "before_after_row_mismatches": 0,
+      "cached_feature_mismatches": 0
+    }
+  ],
+  "evidence_root": "/mnt/v/output/zensim/prodqual-a-2026-10-07",
+  "tower_mirror": "/mnt/tower/output/zensim/prodqual-a-2026-10-07",
+  "toolchains": {
+    "native": "rustc 1.99.0 (b940084d7), LLVM 23.1.1",
+    "wasm": "Rust 1.98.1, wasm32-wasip1, +simd128",
+    "wasmtime": "40.0.1"
+  },
+  "failures": [
+    {
+      "test": "featcanon_rev4_contract::served_paths_serve_rev4",
+      "finding": "1867 features vs expected 1825",
+      "path": "zensim/tests/featcanon_rev4_contract.rs:438"
+    },
+    {
+      "test": "research_engine_parity::research_everything_agrees_with_the_production_walk",
+      "finding": "1153x72: production 1825 features, research 1867",
+      "path": "zensim/tests/research_engine_parity.rs:161"
+    },
+    {
+      "test": "bake_surface::formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse",
+      "finding": "Test expects revision 5 to be unknown, loader accepts it",
+      "path": "zensim-validate/tests/bake_surface.rs:364"
+    },
+    {
+      "test": "feature_set_match::basic_only_bake_compatibility_respects_partial_producers",
+      "finding": "basic coverage for basic+v2@w720/rev5_localwin#62adfc93: actual 1, expected 0",
+      "path": "zensim-validate/tests/feature_set_match.rs:131"
+    }
+  ],
+  "gate_scope": {
+    "workspace_all_targets": "compiled, not run unfiltered",
+    "workspace_runtime": "lib/bins/tests/examples, five caller-owned payload exclusions, four failing targets",
+    "excluded_tests": [
+      "cid22_aggregate_srocc_matches_audit_reference",
+      "cid22_first_row_matches_bake_verdict_reference",
+      "parallel_matches_sequential_iwssim_log_target",
+      "parallel_matches_sequential_default_target_with_scale",
+      "canonical_dial_grid_is_the_quarantined_v2_grid"
+    ],
+    "bench_mains": "compiled only; external image/model defaults and performance runs outside admitted synthetic inputs",
+    "labels_read": false,
+    "payload_audit": "openat trace: 33 unique external attempted paths, metadata manifests, missing sidecars and historical bake bytes only",
+    "optional_historical_fixtures": "existing missing-fixture early returns are not claimed as fixture coverage",
+    "synthetic": "serial legacy RGB8 SDR, one deterministic texture class, four geometries, seven bit-truncation levels",
+    "not_qualified": [
+      "final composition",
+      "full canonical 38-identity gate",
+      "HDR",
+      "large images",
+      "performance",
+      "evaluation quality"
+    ]
+  },
+  "feature_matrix": {
+    "configurations": 27,
+    "clippy_and_library_tests": "PASS",
+    "initial_failure": "9 configurations, 18 commands: training without feature-regime-v2 referenced absent research module; private palette guard fixed"
+  },
+  "serving_matrix": {
+    "status": "PASS",
+    "comparison_arms": 8,
+    "reference_rows_per_environment": 96,
+    "named_refusals": 0
+  },
+  "commands_common_env": {
+    "TMPDIR": "/home/lilith/tmp/prodqual-a",
+    "CARGO_TARGET_DIR": "/home/lilith/tmp/prodqual-a/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0"
+  },
+  "heavy_wrapper": "/home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 --",
+  "serving_revision_env": {
+    "ZENSIM_FORMULA_REV": "5"
+  },
+  "gates": [
+    {
+      "log": "workspace-build-final.log",
+      "status": "PASS",
+      "command": "just prodqual-workspace-build",
+      "resources": [
+        "run-heavy: done rc=0 111s | peak-RSS 1.89GiB | min-avail 43783MiB | peak-load 15.10"
+      ]
+    },
+    {
+      "log": "workspace-tests.log",
+      "status": "FAIL",
+      "command": "just prodqual-workspace-tests",
+      "resources": [
+        "run-heavy: done rc=101 205s | peak-RSS 1.56GiB | min-avail 44395MiB | peak-load 19.12"
+      ]
+    },
+    {
+      "log": "workspace-failures-final.log",
+      "status": "FAIL",
+      "command": "just prodqual-workspace-failures",
+      "resources": [
+        "run-heavy: done rc=101 45s | peak-RSS 1.24GiB | min-avail 44981MiB | peak-load 10.74"
+      ]
+    },
+    {
+      "log": "rev5-parity-final.log",
+      "status": "PASS",
+      "command": "just prodqual-rev5",
+      "resources": [
+        "run-heavy: done rc=0 14s | peak-RSS 0.59GiB | min-avail 45289MiB | peak-load 13.40"
+      ]
+    },
+    {
+      "log": "doc-tests-final.log",
+      "status": "PASS",
+      "command": "cargo test --workspace --doc",
+      "resources": [
+        "run-heavy: done rc=0 18s | peak-RSS 1.05GiB | min-avail 44241MiB | peak-load 12.25"
+      ]
+    },
+    {
+      "log": "clippy-final.log",
+      "status": "PASS",
+      "command": "just clippy",
+      "resources": [
+        "run-heavy: done rc=0 7s | peak-RSS 0.90GiB | min-avail 46342MiB | peak-load 7.85"
+      ]
+    },
+    {
+      "log": "api-doc-check-final.log",
+      "status": "PASS",
+      "command": "just api-doc-check",
+      "resources": [
+        "run-heavy: done rc=0 4s | peak-RSS 0.39GiB | min-avail 46892MiB | peak-load 10.44"
+      ]
+    },
+    {
+      "log": "feature-matrix-final.log",
+      "status": "PASS",
+      "command": "just prodqual-feature-matrix",
+      "resources": [
+        "run-heavy: done rc=0 274s | peak-RSS 0.97GiB | min-avail 44593MiB | peak-load 12.49"
+      ]
+    },
+    {
+      "log": "serving-matrix.log",
+      "status": "PASS",
+      "command": "just prodqual-serving-matrix /mnt/v/output/zensim/prodqual-a-2026-10-07/serving-matrix",
+      "resources": [
+        "run-heavy: done rc=0 185s | peak-RSS 0.78GiB | min-avail 44797MiB | peak-load 15.10"
+      ]
+    },
+    {
+      "log": "native-synthetic-final.log",
+      "status": "PASS",
+      "command": "just prodqual-synthetic <three pinned models>",
+      "resources": [
+        "run-heavy: done rc=0 90s | peak-RSS 0.91GiB | min-avail 45903MiB | peak-load 15.00"
+      ]
+    },
+    {
+      "log": "wasm-build-final.log",
+      "status": "PASS",
+      "command": "just prodqual-wasm-build",
+      "resources": [
+        "run-heavy: done rc=0 27s | peak-RSS 0.71GiB | min-avail 43527MiB | peak-load 16.64"
+      ]
+    },
+    {
+      "log": "wasm-synthetic-final.log",
+      "status": "PASS",
+      "command": "PRODQUAL_INPUT_ROOT=<evidence root> just prodqual-wasm-synthetic <preserved wasm> /inputs/models/seed0.bin /inputs/models/seed1.bin /inputs/models/seed2.bin",
+      "resources": [
+        "run-heavy: done rc=0 8s | peak-RSS 0.21GiB | min-avail 46680MiB | peak-load 11.87"
+      ]
+    },
+    {
+      "log": "training-only-fix.log",
+      "status": "PASS",
+      "command": "just prodqual-training-only",
+      "resources": [
+        "run-heavy: done rc=0 13s | peak-RSS 0.91GiB | min-avail 44748MiB | peak-load 9.46"
+      ]
+    },
+    {
+      "log": "inspector-build.log",
+      "status": "PASS",
+      "command": "cargo build -p zensim -p zensim-validate --all-features --example inspect_qualified_checkpoint",
+      "resources": [
+        "run-heavy: done rc=0 0s | peak-RSS 0.21GiB | min-avail 41178MiB | peak-load 9.71"
+      ]
+    }
+  ],
+  "storage": {
+    "cleanup": {
+      "removed_at_utc": "2026-10-07T19:57:40.306798+00:00",
+      "removed_path": "/home/lilith/tmp/prodqual-a/target",
+      "apparent_bytes_before": 7939303046,
+      "free_bytes_before": 19318595584,
+      "free_bytes_after": 27259281408,
+      "cargo_rustc_wasmtime_running_before": false,
+      "target_confirmed_cargo_output": true,
+      "programs_preserved_and_hash_verified": true,
+      "tower_payload_hashes_verified_before_removal": 81,
+      "scope": "Only this lane\u2019s inactive Cargo target directory removed; evidence and other lanes left intact"
+    },
+    "mirror_before_cleanup": {
+      "verified_at_utc": "2026-10-07T19:57:17.563145+00:00",
+      "tower": "/mnt/tower/output/zensim/prodqual-a-2026-10-07",
+      "all_payload_hashes_verified": 81,
+      "random_three": [
+        {
+          "path": "wasm-synthetic.json",
+          "sha256": "4e0ddb7a4718e8ffb64a7672b5ba8d68025f9e4ba552a9c53169c29a61cd196c",
+          "verified_local_and_tower": true
+        },
+        {
+          "path": "wasm-build.log",
+          "sha256": "c95a142b73fcbabce19129f9f45b9db904d9f0a61b97f7619928a1235a398951",
+          "verified_local_and_tower": true
+        },
+        {
+          "path": "serving-matrix/bare__REF.tsv",
+          "sha256": "ee9e4749e96ab22191de1460d47b09717b163b9ed6c7ed96db29657b04ba4dd5",
+          "verified_local_and_tower": true
+        }
+      ]
+    },
+    "mirror_command": "just prodqual-mirror <evidence root> <tower mirror>"
+  }
+}

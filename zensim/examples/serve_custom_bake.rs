@@ -53,8 +53,18 @@
 //! ```
 //!
 //! Same `BakeScorer::compute` entry; one output row per `(ref_path, dist_path)`.
+//!
+//! With `feature-regime-v2`, `--prodqual MODEL...` probes only explicitly
+//! named models on synthetic SDR pixels, cached steering and canonical feature
+//! extraction under every available dispatch permutation. Set
+//! `ZENSIM_FORMULA_REV=5`; stdout is JSON and stderr records progress. No
+//! evaluation table, image corpus or human label is opened by this mode.
 
 use zensim::{BakeScorer, RgbSlice};
+
+#[cfg(feature = "feature-regime-v2")]
+#[path = "serve_custom_bake/prodqual.rs"]
+mod prodqual;
 
 fn load_rgb(path: &str) -> (Vec<[u8; 3]>, u32, u32) {
     let img = image::open(path)
@@ -332,6 +342,11 @@ fn head_probe(args: &[String]) {
 fn main() {
     #[allow(unused_mut)]
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(feature = "feature-regime-v2")]
+    if args.first().map(String::as_str) == Some("--prodqual") {
+        prodqual::run(&args[1..]);
+        return;
+    }
     #[cfg(feature = "corruption-head")]
     if args.first().map(String::as_str) == Some("--head-probe") {
         head_probe(&args[1..]);
