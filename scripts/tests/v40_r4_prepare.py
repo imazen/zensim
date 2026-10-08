@@ -26,6 +26,12 @@ def main():
     p.add_argument("--image", required=True)
     a = p.parse_args()
     b = a.bundle
+    previous = b.parent / "v40r3-2026-10-08"
+    shutil.copy2(previous / "harvest_driver_v40.py", b / "harvest_driver_v40.py")
+    shutil.copy2(METRICS / "scripts/jobsys/v40_postfit.sh", b / "postfit.sh")
+    (b / "POSTFIT_COMMANDS.md").write_text(
+        (previous / "POSTFIT_COMMANDS.md").read_text().replace(str(previous), str(b))
+    )
 
     def run(args, cwd=SOURCE):
         subprocess.run([str(x) for x in args], cwd=cwd, check=True)
