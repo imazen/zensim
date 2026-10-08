@@ -585,6 +585,13 @@ speedq-clippy:
 rev5perf-profile binary dest mode="perf":
     python3 scripts/demos/rev5perf_profile.py --binary "{{binary}}" --dest "{{dest}}" --mode "{{mode}}"
 
+rev5perf-report *options:
+    python3 scripts/demos/rev5perf_report.py {{options}}
+
+rev5perf-kernel-test:
+    cargo test -p zensim --all-features feature_v2_stream::tests
+    cargo test -p zensim --all-features --test featcanon_rev5_parity
+
 [positional-arguments]
 speedq-parity binary dest *options:
     #!/usr/bin/env bash

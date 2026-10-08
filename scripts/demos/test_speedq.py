@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import speedq_run as runner
 import speed_matrix_report as report
+import rev5perf_report as perf_report
 
 
 class SpeedqTest(unittest.TestCase):
@@ -241,6 +242,31 @@ class SpeedqTest(unittest.TestCase):
         rec=json.loads(path.read_text());rec['records']=rows;path.write_text(json.dumps(rec))
         with self.assertRaisesRegex(AssertionError,'frozen production model'):
             runner.parity_receipt(path)
+
+    def test_frozen_comparison_rejects_common_mode_feature_and_score_changes(self):
+        import math
+        import shutil
+        parity, rows = self.full_report_parity_fixture()
+        before = self.root / 'before'
+        after = self.root / 'after'
+        shutil.copytree(parity, before / 'parity')
+        shutil.copytree(parity, after / 'parity')
+        self.assertEqual(perf_report.compare_bits(before, after)['strict_score_and_420_feature_checks'], 384)
+        path = after / 'parity' / 'PARITY_STRICT_PASS.json'
+        rec = json.loads(path.read_text())
+        for row in rec['records']:
+            row['feature_values'][0] = math.nextafter(1.0, 2.0)
+        path.write_text(json.dumps(rec))
+        runner.parity_receipt(path)  # Tier parity alone still passes.
+        with self.assertRaisesRegex(AssertionError, 'frozen consumed feature bits changed'):
+            perf_report.compare_bits(before, after)
+        rec['records'] = rows
+        for row in rec['records']:
+            row['score_bits'] = '4052bb6ca0000001'
+        path.write_text(json.dumps(rec))
+        runner.parity_receipt(path)
+        with self.assertRaisesRegex(AssertionError, 'frozen score bits changed'):
+            perf_report.compare_bits(before, after)
 
     def test_full_report_fits_measured_axes_and_retains_missing_coverage(self):
         # A mathematical fixture tests the reporter's units and CI decisions;
