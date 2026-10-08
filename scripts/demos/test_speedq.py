@@ -131,6 +131,54 @@ class SpeedqTest(unittest.TestCase):
         self.assertTrue((self.root/'v4x-t1-64x64/COMPLETE.json').exists())
         self.assertEqual(len(calls),2)
 
+    def test_clean_round_selection_excludes_flagged_rounds_from_both_arms(self):
+        flags=[True]*34;flags[1]=False;flags[4]=None
+        inner=dict(zenbench_unreliable=False,gate_clean=flags,
+                   paired_rounds={'by_v2fy_r4':list(range(34)),
+                                  'by_v2fy_r5':[1000+i for i in range(34)]})
+        original=json.dumps(inner)
+        values,selection=runner.select_clean_rounds(inner)
+        expected=[i for i in range(34) if i not in (1,4)]
+        self.assertEqual(values['by_v2fy_r4'],expected)
+        self.assertEqual(values['by_v2fy_r5'],[1000+i for i in expected])
+        self.assertEqual([b-a for a,b in zip(values['by_v2fy_r4'],values['by_v2fy_r5'])],[1000]*32)
+        self.assertEqual(selection['retained_indices'],expected)
+        self.assertEqual(selection['excluded_indices'],[1,4])
+        self.assertEqual(selection['rounds_total'],34)
+        self.assertEqual(selection['rounds_excluded'],2)
+        self.assertEqual(selection['rule'],runner.CLEAN_ROUND_RULE)
+        self.assertEqual(json.dumps(inner),original)
+
+    def test_clean_round_cap_refuses_31_and_accepts_32_without_salvage(self):
+        inner=dict(zenbench_unreliable=False,gate_clean=[False]*33+[True]*31,
+                   paired_rounds={'by_v2fy_r4':list(range(64)),
+                                  'by_v2fy_r5':list(range(1000,1064))})
+        with self.assertRaisesRegex(runner.TimingNoise,'fewer than 32'):
+            runner.select_clean_rounds(inner)
+        inner['gate_clean'][32]=True
+        values,selection=runner.select_clean_rounds(inner)
+        self.assertEqual(selection['rounds_total'],64)
+        self.assertEqual(selection['rounds_excluded'],32)
+        self.assertEqual(values['by_v2fy_r4'],list(range(32,64)))
+        inner['zenbench_unreliable']=True
+        with self.assertRaisesRegex(runner.TimingNoise,'whole attempt unreliable'):
+            runner.select_clean_rounds(inner)
+
+    def test_clean_round_selection_refuses_misalignment_and_overcollection(self):
+        inner=dict(zenbench_unreliable=False,gate_clean=[True]*32,
+                   paired_rounds={'a':list(range(32)),'b':list(range(31))})
+        with self.assertRaisesRegex(AssertionError,'unaligned'):
+            runner.select_clean_rounds(inner)
+        inner['paired_rounds']['b'].append(31)
+        inner['gate_clean'].append(True)
+        for series in inner['paired_rounds'].values():series.append(32)
+        with self.assertRaisesRegex(AssertionError,'continued past'):
+            runner.select_clean_rounds(inner)
+        inner['gate_clean']=[False]*65
+        inner['paired_rounds']={a:list(range(65)) for a in ['a','b']}
+        with self.assertRaisesRegex(AssertionError,'at most 64'):
+            runner.select_clean_rounds(inner)
+
     def test_timing_passes_explicit_six_arm_selection(self):
         selected=runner.ARMS[:-1]
         with patch.object(runner,'parity_receipt',return_value={}), patch.object(runner,'run_segment') as segment:
@@ -226,6 +274,32 @@ class SpeedqTest(unittest.TestCase):
         rows[0]['revision']=4;rows[0]['score_bits']='different'
         (parity/'PARITY_STRICT_PASS.json').write_text(json.dumps(dict(status='PASS',strict_revisions=[4,5],records=rows)))
         with self.assertRaises(AssertionError): report.speedq_report(args)
+
+    def test_report_uses_clean_rounds_and_verifies_completion_indices(self):
+        self.full_report_parity_fixture()
+        dest=self.root/'timing/v4x-t1-64x64';dest.mkdir(parents=True)
+        flags=[True]*34;flags[1]=False;flags[4]=False
+        values={a:[100+i for i in range(34)] for a in runner.ARMS[:-1]}
+        for series in values.values():series[1]=series[4]=999999
+        inner=dict(zenbench_unreliable=False,gate_clean=flags,paired_rounds=values)
+        selected,selection=runner.select_clean_rounds(inner)
+        complete=dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True,**selection)
+        (dest/'COMPLETE.json').write_text(json.dumps(complete))
+        (dest/'interference.json').write_text(json.dumps(dict(admitted=True,foreign=[])))
+        (dest/'zenbench.inner.json').write_text(json.dumps(inner))
+        (dest/'header.json').write_text(json.dumps(dict(rounds=32,round_cap=64,round_rule=runner.CLEAN_ROUND_RULE,arms=runner.ARMS[:-1],model_source_sha256=runner.SOURCE_SHA,quiet_gate=dict(admitted=True,load1=1))))
+        (dest/'paired_analysis.json').write_text(json.dumps(dict(ci_lower=-1,ci_median=0,ci_upper=1,resolution_limited=False,pct_change=0)))
+        args=SimpleNamespace(raw_dir=self.root,out_json=self.root/'out.json',out_md=self.root/'out.md')
+        report.speedq_report(args);out=json.loads(args.out_json.read_text())
+        expected=__import__('statistics').median(selected['by_v2fy_r4'])
+        self.assertEqual(out['medians_ns'][0][0][1],expected)
+        self.assertNotEqual(expected,__import__('statistics').median(values['by_v2fy_r4']))
+        self.assertEqual(out['timing_round_selection'][0][0],selection)
+        self.assertEqual(out['timing_round_rule_counts'],{runner.LEGACY_ROUND_RULE:0,runner.CLEAN_ROUND_RULE:1})
+        self.assertIn('Owner-approved clean-round amendment (2026-10-08)',args.out_md.read_text())
+        complete['excluded_indices']=[0,4];(dest/'COMPLETE.json').write_text(json.dumps(complete))
+        with self.assertRaisesRegex(AssertionError,'selection differs'):
+            report.speedq_report(args)
 
     def test_complete_report_maps_all_axes_and_does_not_call_uncertainty_equivalence(self):
         self.full_report_parity_fixture()

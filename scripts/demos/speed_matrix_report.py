@@ -353,10 +353,10 @@ def speedq_report(args) -> int:
     root = args.raw_dir
     receipt = root/'full-parity/PARITY_STRICT_PASS.json'
     if not receipt.exists(): receipt = root/'full-parity/PARITY_PASS.json'
-    from speedq_run import parity_receipt, SOURCE_SHA
+    from speedq_run import parity_receipt, SOURCE_SHA, select_clean_rounds, CLEAN_ROUND_RULE, LEGACY_ROUND_RULE
     parity_receipt(receipt)
     parity = json.loads(receipt.read_text())
-    medians = {}; analyses = {}; headers = {}; memories = {}
+    medians = {}; analyses = {}; headers = {}; memories = {}; selections = {}
     expected = [(t,n,g) for t in tiers for n in threads for g in sizes]
     for tier,n,geometry in expected:
         path = root/'timing'/f'{tier}-t{n}-{geometry}'
@@ -366,19 +366,31 @@ def speedq_report(args) -> int:
         interference=json.loads((path/'interference.json').read_text())
         assert interference['admitted'] and not interference['foreign']
         inner = json.loads((path/'zenbench.inner.json').read_text())
-        assert not inner['zenbench_unreliable'] and all(v is True for v in inner['gate_clean'])
+        assert not inner['zenbench_unreliable']
         header = json.loads((path/'header.json').read_text())
         assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
         assert not header.get('gate_trace',False), 'diagnostic tracing cannot qualify timing evidence'
         assert header['model_source_sha256']==SOURCE_SHA, 'timing evidence must bind the frozen production model'
         assert complete['rounds']==header['rounds']
-        values = inner['paired_rounds']
+        rule = complete.get('rule',LEGACY_ROUND_RULE)
+        if rule == LEGACY_ROUND_RULE:
+            assert complete['rounds']==32 and len(inner['gate_clean'])==32
+            assert all(v is True for v in inner['gate_clean'])
+            values = inner['paired_rounds']
+            selection=dict(rule=rule,rounds_total=32,rounds_excluded=0,
+                           excluded_indices=[],retained_indices=list(range(32)))
+        else:
+            assert rule == CLEAN_ROUND_RULE, 'unknown clean-round admission rule'
+            assert header['round_cap']==64 and header['round_rule']==rule
+            values, selection = select_clean_rounds(inner,complete['rounds'])
+            assert all(complete[key]==value for key,value in selection.items()), 'completion round selection differs from raw flags'
         declared=header.get('arms',arms)
         assert len(set(declared))==len(declared) and set(declared) in (set(arms),set(arms[:-1])), 'only ssimulacra2_rs may be omitted'
         assert set(values) == set(declared) and all(len(v) == header['rounds'] for v in values.values())
         medians[(tier,n,geometry)] = {a: statistics.median(values[a]) for a in declared}
         analyses[(tier,n,geometry)] = json.loads((path/'paired_analysis.json').read_text())
         headers[(tier,n,geometry)] = header
+        selections[(tier,n,geometry)] = selection
     for g in sizes:
         for n in [1,32]:
             for arm in arms:
@@ -427,6 +439,9 @@ def speedq_report(args) -> int:
         'medians_ns':[[[medians[(t,n,g)].get(a) for a in arms] if (t,n,g) in medians else None for g in sizes] for t in tiers for n in threads],
         'timing_arm_coverage':{a:sum(a in row for row in medians.values()) for a in arms},
         'timing_segment_arm_counts':{str(count):sum(len(row)==count for row in medians.values()) for count in [6,7]},
+        'timing_round_rule_counts':{rule:sum(s['rule']==rule for s in selections.values()) for rule in [LEGACY_ROUND_RULE,CLEAN_ROUND_RULE]},
+        'timing_round_selection':[[selections.get((t,n,g)) for g in sizes] for t in tiers for n in threads],
+        'clean_round_amendment':'Owner approved 2026-10-08: keep the first 32 clean paired rounds of at most 64; exclude each flagged round from all arms; earlier all-32-clean segments remain valid; archived attempts are not salvaged.',
         'ssimulacra2_rs_scope':'Earlier seven-arm segments retain measured values; remaining segments omit this optional peer. Its peer table uses v4x rows only. Missing optional timings and fits are null, not inferred.',
         'r5_vs_r4_pct_change':[[compact(analyses[(t,n,g)]['pct_change']) if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
         'r5_vs_r4_resolution_limited':[[('1' if analyses[(t,n,g)]['resolution_limited'] else '0') if (t,n,g) in analyses else '-' for g in sizes] for t in tiers for n in threads],
@@ -450,7 +465,9 @@ def speedq_report(args) -> int:
         f"All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 remains a timing baseline: {len(legacy_failed)} of 192 cells exceed the documented feature tolerance (max absolute feature difference {max(r['max_abs_feature_difference'] for r in legacy):.17g}; max tolerance fraction {max(r['max_tolerance_fraction'] for r in legacy):.17g}). Failing tiers: {', '.join(sorted({r.get('tier','unspecified') for r in legacy_failed})) or 'none'}. Legacy failures are recorded rather than renamed a pass.",'',
         'Each timing segment requires load1 < 2.0 and no foreign cargo/rustc/training before warmup and immediately before rounds. The retained rounds must all have a clean zenbench gate and no observed build/training interference. Persistent workers time the scoring call with Instant; separate parent rounds retain IPC/bookkeeping. Pair statistics reuse zenbench’s engine owner; no IPC estimate is subtracted. Setup, metadata stamping, input generation, and Rust-av sRGB widening are outside the timed body. Rayon pools and scoring buffers are warm.','',
         'Dispatch labels are ceilings forced through archmage with its testing guard; kernels without a v4 variant may use v3. Threads 1/2/4/8 use CCD0; 16 spans CCDs, and 32 adds SMT. Cache topology changes are part of these measured configurations.','',
-        f"Coordinator amendment: earlier seven-arm segments retain ssimulacra2_rs; remaining segments use six arms and omit only that peer. Its timing coverage is {sum('ssimulacra2_rs' in row for row in medians.values())}/192, retained separately from required core coverage. The peer table uses v4x rows only for ssimulacra2_rs. Missing optional timing/fit entries are null, not inferred. RSS retains all seven arms. Gates and all 32 round requirements are unchanged.",'',
+        f"Coordinator arm amendment: earlier seven-arm segments retain ssimulacra2_rs; remaining segments use six arms and omit only that peer. Its timing coverage is {sum('ssimulacra2_rs' in row for row in medians.values())}/192, retained separately from required core coverage. The peer table uses v4x rows only for ssimulacra2_rs. Missing optional timing/fit entries are null, not inferred. RSS retains all seven arms.",'',
+        f"Owner-approved clean-round amendment (2026-10-08): new attempts retain the first 32 gate-clean rounds in order, out of at most 64 total. Every flagged round is excluded from every arm using one shared index vector. Earlier all-32-clean segments remain valid; archived attempts are not salvaged. Rule coverage: {sum(s['rule']==LEGACY_ROUND_RULE for s in selections.values())} earlier all-32-clean segments, {sum(s['rule']==CLEAN_ROUND_RULE for s in selections.values())} first-32-clean segments. All raw rounds and flags remain stored. Foreign build/training or zenbench unreliable status still excludes the whole attempt. Adaptive batches request only the clean rounds still missing; persistent workers stay warm, the original explicit warmup runs once, and each batch's untimed zenbench estimation is excluded from worker rounds.",'',
+        'Per-segment total and excluded counts, indices and admission rules are recorded in the JSON timing_round_selection matrix and raw COMPLETE.json receipts.','',
         '## Alpha and beta fits','',
         'Unconstrained OLS over all eight geometries: time_ns = alpha_ns + beta_ns_per_pixel × pixels. Alpha below is µs; beta is ns/pixel. A negative alpha is a fit artifact, not a negative physical setup cost; R² exposes fit adequacy. These are descriptive fits to medians, not constants baked into source.','',
         'Each cell lists alpha µs / beta ns/pixel / R². Revisions and peers share a row for each tier/thread configuration.','',

@@ -22,6 +22,8 @@ THREADS = [1,2,4,8,16,32]
 ARMS = ['by_v2fy_r3','by_v2fy_r4','by_v2fy_r5','zensim_B','fast_ssim2','butteraugli','ssimulacra2_rs']
 BAKE = '/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s0/refit/production-f16.bin'
 SOURCE_SHA = 'f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400'
+CLEAN_ROUND_RULE = 'first-32-clean-of-<=64 (owner 2026-10-08)'
+LEGACY_ROUND_RULE = 'all-32-clean'
 TRAIN_NAMES = {'zensim_mlp_train','train_hybrid.py','v2_lodo_mlp.py','zen-train','zen_train','e28_recipe.py','e28_simplex.py','bake_dial_refit'}
 CPUSETS = {1:'2',2:'2,3',4:'0-3',8:'0-7',16:'0-15',32:'0-31'}
 
@@ -208,6 +210,26 @@ class TimingNoise(RuntimeError):
     """Preserve a contaminated attempt, then admit a fresh quiet segment."""
 
 
+def select_clean_rounds(inner, rounds=32):
+    """Select one shared index vector without modifying any raw arm or flag."""
+    assert rounds == 32, 'SPEEDQ requires 32 retained paired rounds'
+    flags = inner['gate_clean']
+    values = inner['paired_rounds']
+    assert 0 < len(flags) <= 64, 'SPEEDQ attempt must contain at most 64 rounds'
+    assert values and all(len(v) == len(flags) for v in values.values()), 'unaligned raw paired rounds'
+    if inner['zenbench_unreliable']:
+        raise TimingNoise('zenbench marks the whole attempt unreliable')
+    retained = [i for i, flag in enumerate(flags) if flag is True][:rounds]
+    if len(retained) < rounds:
+        raise TimingNoise('fewer than 32 clean rounds by the attempt cap')
+    assert retained[-1] == len(flags)-1, 'collector continued past the first 32 clean rounds'
+    excluded = [i for i, flag in enumerate(flags) if flag is not True]
+    selection = dict(rule=CLEAN_ROUND_RULE, rounds_total=len(flags),
+                     rounds_excluded=len(excluded), excluded_indices=excluded,
+                     retained_indices=retained)
+    return {arm:[series[i] for i in retained] for arm,series in values.items()}, selection
+
+
 def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer, arms=ARMS):
     tag=f'{tier}-t{threads}-{geometry}'
     dest=Path(root)/tag
@@ -243,7 +265,8 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     'nproc':int(subprocess.check_output(['nproc'],text=True)),
                     'governors':sorted({p.read_text().strip() for p in Path('/sys/devices/system/cpu').glob('cpu*/cpufreq/scaling_governor')}),
                     'tier':tier,'threads':threads,'cpuset':CPUSETS[threads],'geometry':geometry,
-                    'rounds':rounds,'arms':arms,'worker_pids':[p.pid for p in owners],
+                    'rounds':rounds,'round_cap':64,'round_rule':CLEAN_ROUND_RULE,
+                    'arms':arms,'worker_pids':[p.pid for p in owners],
                     'gate_trace':'ZENBENCH_GATE_TRACE' in env,
                     'model_source_sha256':SOURCE_SHA,
                     'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
@@ -263,15 +286,19 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     time.sleep(1)
                 if proc.returncode: raise RuntimeError(f'coordinator failed: {dest}')
             inner=json.loads(raw.with_suffix('.inner.json').read_text())
-            clean=not inner['zenbench_unreliable'] and all(v is True for v in inner['gate_clean']) and not foreign
-            write(dest/'interference.json',{'foreign':foreign,'admitted':clean})
-            if not clean: raise TimingNoise(f'gate flagged timing segment: preserve and retry {dest}')
-            a=inner['paired_rounds']['by_v2fy_r4'];b=inner['paired_rounds']['by_v2fy_r5']
+            try:
+                if foreign: raise TimingNoise('foreign build/training during the attempt')
+                values, selection = select_clean_rounds(inner, rounds)
+            except TimingNoise:
+                write(dest/'interference.json',{'foreign':foreign,'admitted':False})
+                raise
+            write(dest/'interference.json',{'foreign':foreign,'admitted':True})
+            a=values['by_v2fy_r4'];b=values['by_v2fy_r5']
             assert len(a)==len(b)==rounds
             packet={'baseline':a,'candidate':b,'iterations':[1]*rounds,'timer_resolution_ns':inner['timer_resolution_ns']}
             result=subprocess.check_output([str(analyzer)],input=json.dumps([packet]),text=True)
             write(dest/'paired_analysis.json',json.loads(result)[0])
-            write(dest/'COMPLETE.json',{'status':'PASS','rounds':rounds,'paired_alignment_verified':True,'zenbench_gate_clean':True})
+            write(dest/'COMPLETE.json',{'status':'PASS','rounds':rounds,'paired_alignment_verified':True,'zenbench_gate_clean':True,**selection})
         finally:
             for proc in owners:
                 if proc.poll() is None:
@@ -357,6 +384,8 @@ def main():
     ap.add_argument('--arms',nargs='+',choices=ARMS,default=None,
                     help='timing workers (default: all seven); only ssimulacra2_rs may be omitted')
     args=ap.parse_args()
+    if args.mode=='timing' and args.rounds!=32:
+        ap.error('SPEEDQ timing requires 32 retained clean rounds')
     if args.arms is not None:
         if args.mode!='timing': ap.error('--arms applies only to timing')
         if len(set(args.arms))!=len(args.arms) or not set(ARMS[:-1]).issubset(args.arms):

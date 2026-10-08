@@ -300,7 +300,11 @@ pub(super) fn run() {
             assert_eq!(worker.ready["model"]["revision"], revision);
         }
         metadata.insert(name.into(), worker.ready.clone());
-        owners.push((name, worker, Arc::new(Mutex::new(Vec::<u64>::new()))));
+        owners.push((
+            name,
+            Arc::new(Mutex::new(worker)),
+            Arc::new(Mutex::new(Vec::<u64>::new())),
+        ));
     }
     assert_eq!(
         owners.len(),
@@ -312,50 +316,103 @@ pub(super) fn run() {
         .map(|(name, _, calls)| (*name, Arc::clone(calls)))
         .collect();
     let rounds = super::env_usize("ZEN_S2_ROUNDS", 32);
-    let result = zenbench::run(move |suite| {
-        suite.compare(format!("speedq_{w}x{h}"), |group| {
-            group
-                .config()
-                .max_rounds(rounds)
-                .min_rounds(rounds)
-                .max_wall_time(Duration::from_secs(3600))
-                .warmup_time(Duration::from_millis(20))
-                .auto_rounds(false);
-            group.config().min_iterations = 1;
-            group.config().max_iterations = 1;
-            for (name, mut owner, calls) in owners {
-                group.bench(name, move |b| {
-                    b.iter(|| {
-                        let ns = owner.call();
-                        calls.lock().unwrap().push(ns);
-                        zenbench::black_box(ns)
-                    })
-                });
-            }
+    assert_eq!(rounds, 32, "SPEEDQ retains exactly 32 clean rounds");
+    let mut gate_clean = Vec::new();
+    let mut inner: serde_json::Map<String, Value> = traces
+        .iter()
+        .map(|(name, _)| ((*name).into(), json!([])))
+        .collect();
+    let mut batches = Vec::new();
+    let mut unreliable = false;
+    let mut gate_waits = 0;
+    let mut timer_resolution_ns = 0;
+    let attempt_start = Instant::now();
+    loop {
+        let clean = gate_clean.iter().filter(|v| **v == Some(true)).count();
+        if clean == rounds || gate_clean.len() == 64 || unreliable {
+            break;
+        }
+        // A batch cannot reach the target before its last round: it requests
+        // only the number still missing, bounded by the remaining attempt cap.
+        let batch_rounds = (rounds - clean).min(64 - gate_clean.len());
+        let remaining = Duration::from_secs(3600).saturating_sub(attempt_start.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        let warmup = if batches.is_empty() {
+            Duration::from_millis(20)
+        } else {
+            Duration::ZERO
+        };
+        let result = zenbench::run(|suite| {
+            suite.compare(format!("speedq_{w}x{h}"), |group| {
+                group
+                    .config()
+                    .max_rounds(batch_rounds)
+                    .min_rounds(batch_rounds)
+                    .max_wall_time(remaining)
+                    .warmup_time(warmup)
+                    .auto_rounds(false);
+                group.config().min_iterations = 1;
+                group.config().max_iterations = 1;
+                for (name, owner, calls) in &owners {
+                    let owner = Arc::clone(owner);
+                    let calls = Arc::clone(calls);
+                    group.bench(*name, move |b| {
+                        b.iter(|| {
+                            let ns = owner.lock().unwrap().call();
+                            calls.lock().unwrap().push(ns);
+                            zenbench::black_box(ns)
+                        })
+                    });
+                }
+            });
         });
-    });
-    result.save(&dest).unwrap();
-    let comp = &result.comparisons[0];
-    assert!(
-        comp.samples.iter().all(|s| s.iterations == 1),
-        "one call per round"
-    );
-    let mut inner = serde_json::Map::new();
-    for (name, trace) in traces {
-        let calls = trace.lock().unwrap();
-        assert!(calls.len() >= comp.samples.len());
-        // zenbench warmup/estimation precede measurement, and every completed
-        // round makes exactly one call to every owner (engine.rs retained_samples).
-        inner.insert(
-            name.into(),
-            json!(&calls[calls.len() - comp.samples.len()..]),
+        let comp = &result.comparisons[0];
+        assert!(
+            comp.samples.iter().all(|s| s.iterations == 1),
+            "one call per round"
         );
+        assert!(comp.samples.len() <= batch_rounds);
+        for (name, trace) in &traces {
+            let calls = trace.lock().unwrap();
+            assert!(calls.len() >= comp.samples.len());
+            // Each batch has untimed zenbench estimation calls. Its final N
+            // calls are exactly the N completed, paired measurement rounds.
+            inner[*name].as_array_mut().unwrap().extend(
+                calls[calls.len() - comp.samples.len()..]
+                    .iter()
+                    .map(|v| json!(v)),
+            );
+        }
+        let completed = comp.samples.len();
+        gate_clean.extend(comp.samples.iter().map(|s| s.gate_clean));
+        unreliable |= result.unreliable;
+        gate_waits += result.gate_waits;
+        timer_resolution_ns = timer_resolution_ns.max(result.timer_resolution_ns);
+        let path = dest.with_file_name(format!("zenbench.batch-{}.json", batches.len()));
+        assert!(!path.exists());
+        result.save(&path).unwrap();
+        batches.push(json!({"path":path.file_name().unwrap().to_str().unwrap(),
+            "rounds_requested":batch_rounds,"rounds_total":completed,
+            "round_offset":gate_clean.len()-completed,"warmup_ms":warmup.as_millis()}));
+        if completed < batch_rounds {
+            break;
+        }
     }
-    let report = json!({"schema":"speedq-inner-rounds-v2","workers":metadata,
-        "paired_rounds":inner,"zenbench_gate_waits":result.gate_waits,
-        "zenbench_unreliable":result.unreliable,"gate_clean":comp.samples.iter().map(|s|s.gate_clean).collect::<Vec<_>>(),
-        "timer_resolution_ns":result.timer_resolution_ns,"parent_rounds_include_ipc":true,"worker_rounds_exclude_ipc":true,
-        "sample_alignment":"last N calls after zenbench warmup/estimation; one call per completed retained round"});
+    let raw = json!({"schema":"speedq-parent-batches-v1","batches":batches,
+        "rounds_total":gate_clean.len(),"round_cap":64});
+    let mut parent = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&dest)
+        .unwrap();
+    writeln!(parent, "{}", serde_json::to_string_pretty(&raw).unwrap()).unwrap();
+    let report = json!({"schema":"speedq-inner-rounds-v3","workers":metadata,
+        "paired_rounds":inner,"zenbench_gate_waits":gate_waits,
+        "zenbench_unreliable":unreliable,"gate_clean":gate_clean,
+        "timer_resolution_ns":timer_resolution_ns,"parent_rounds_include_ipc":true,"worker_rounds_exclude_ipc":true,
+        "sample_alignment":"per-batch final N calls after untimed estimation; one shared gate flag per complete paired round"});
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
