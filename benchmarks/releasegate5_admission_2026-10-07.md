@@ -9,7 +9,9 @@ no real read. Older receipts need regeneration and a new committed pre-read pin.
 Every metadata payload, executable, model, ledger, journal and result must be
 on a filesystem whose device identity differs from every registered protected
 store in `CORPUS_ROOTS`. The opener checks the retained parent directory and
-the retained leaf identity before the data open. Missing store paths reserve
+the retained leaf identity before the data open. Kernel mount metadata also
+reserves the devices of mounted children beneath each protected root; no
+corpus directory traversal is used. Missing store paths reserve
 the filesystem of their nearest existing ancestor; inspection errors refuse.
 The single-link rule remains an additional check, not the hard-link boundary.
 
@@ -88,11 +90,11 @@ destinations refuse; there is no weaker fallback.
 
 ## Synthetic verification
 
-The suite passes55 tests:43 prior cases and12 new methods. No existing test
+The suite passes 56 tests: 43 prior cases and 13 new methods. No existing test
 assertion or numerical threshold changed. The fixture setup adds the contract
 pin and a distinct `/proc` device as a protected-store stand-in for its isolated
 payload/statistic tests; it reads no real corpus. Separate regressions exercise
-actual same-device refusal, transient-one-link reports and20,000 rename flips
+actual same-device refusal, transient-one-link reports and 20,000 rename flips
 on disk, with kernel sentinel watches and syscall instrumentation.
 
 The suite does not demonstrate a real prepared production layout. An independent
