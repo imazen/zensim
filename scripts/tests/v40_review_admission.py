@@ -7,6 +7,7 @@ intended reason; every family has a positive control that does reach payload acc
 Real inputs used: only label-free keys/manifests/dispositions already approved for TRAIN.
 """
 import argparse, copy, hashlib, json, os, re, shutil, subprocess, sys
+from unittest.mock import patch
 from pathlib import Path
 
 import pyarrow as pa
@@ -157,8 +158,36 @@ def e32_family():
 
 
 # ---------------------------------------------------------------- D1 seven-group fixture (+ E31 / E29 late)
-def d1_fixture():
-    f = RecipeAdmissionTests(); f.setUp(); f.admit()
+def d1_fixture(dense=False):
+    f = RecipeAdmissionTests()
+    def densify(path):
+        table = pq.read_table(path)
+        columns = {n: table[n] for n in table.column_names if not n.startswith('f') or not n[1:].isdigit()}
+        for index in range(1853):
+            name = f'f{index}'
+            columns[name] = table[name] if name in table.column_names else pa.array([float('nan')] * len(table), type=pa.float32())
+        pq.write_table(pa.table(columns), path, compression='zstd')
+    # Keep the positive training assertion. The metadata-test owner's sparse
+    # f0/f719 fixture is replaced by a loadable, contiguous synthetic table
+    # before its receipts are admitted; no negative expectations are changed.
+    if dense:
+        original_table = f.table
+        def table(stem, frame):
+            record = original_table(stem, frame)
+            path = f.source / record['rel']
+            densify(path)
+            record['sha256'] = sha(path)
+            return record
+        f.table = table
+    f.setUp()
+    if dense:
+        pool = f.source / 'e15/coverage_pool.parquet'
+        densify(pool)
+        manifest = pool.with_name('coverage_pool.manifest.json')
+        record = json.loads(manifest.read_text()); record['sha256'] = sha(pool)
+        manifest.write_text(json.dumps(record))
+        f.stack.enter_context(patch.object(teacher, 'POOL_SHA_REV5', sha(pool)))
+    f.admit()
     approval = f.root / 'decision.json'
     f.json(approval, dict(schema='shippath-human-role-decision-v1', decision_id='SHIPPATH-human-production-role', state='approved',
                           decided_by='TEST', allowed_use='qualified-recipe-training', sources=list(roles.PRODUCTION_SOURCES),
@@ -205,7 +234,7 @@ def d1_family():
     ids420 = upiq.columns('by_v2fy')
 
     def case(tag, mutate, expect, reason=None, e31=False, e29_late=False):
-        f, root, base, groups = d1_fixture()
+        f, root, base, groups = d1_fixture(dense=expect == 'train')
         try:
             flags = []
             extra_payloads = []
