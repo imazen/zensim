@@ -55,7 +55,7 @@ def gate(bundle, jobset):
     from e30_four_source import completed_control_pins
 
     proof = completed_control_pins(
-        Path("/var/tmp/rev4-featpot/e30-results"),
+        Path("/var/tmp/rev4-featpot/e30-results/cells"),
         Path("/mnt/v/output/zensim/shippath11-2026-10-07"),
     )
     if proof["cell_count"] != 40:
