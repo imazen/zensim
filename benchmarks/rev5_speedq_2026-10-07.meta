@@ -70,7 +70,7 @@
     192
   ],
   "timing_segments": [
-    93,
+    95,
     192
   ],
   "rss_measurements": [
@@ -172,12 +172,12 @@
     "six_worker_header_verified": "v4x-t4-64x64"
   },
   "timing_arm_coverage": {
-    "by_v2fy_r3": 93,
-    "by_v2fy_r4": 93,
-    "by_v2fy_r5": 93,
-    "zensim_B": 93,
-    "fast_ssim2": 93,
-    "butteraugli": 93,
+    "by_v2fy_r3": 95,
+    "by_v2fy_r4": 95,
+    "by_v2fy_r5": 95,
+    "zensim_B": 95,
+    "fast_ssim2": 95,
+    "butteraugli": 95,
     "ssimulacra2_rs": 63
   }
 }
