@@ -392,3 +392,25 @@ An independent Codex review of the day's process and results found the headline 
 scope, flagged that legacy composite error bars ignore fold covariance and that E30 shows "no detectable cost", not
 equivalence, and listed process fixes (one shared admission invariant for every entry point, an end-to-end rehearsal before
 any fleet launch, scoped landing receipts, a release matrix). v40 needs fixes before launch.
+
+## 31. Speed qualification and gate adjudication (2026-10-08 11:30 UTC)
+
+**SPEEDQ (frozen seed 0, `f803b74c`; landed `4f111a90`).** 192/192 size × tier × thread cells, 6144 paired rounds, on
+dev (9950X3D). The release criterion "Rev5 at least as fast as Rev4 everywhere" **fails**: 94 cells faster, 80 slower,
+18 inconclusive (pointwise paired 95% CIs). Slower: the scalar tier in every cell (35–75%); 1920×1080 at ≥4 threads on
+the SIMD tiers (4–24%); v4 at 2048²/4096² with several threads; 64²/128² at 1–2 threads (8–14%, higher fixed cost:
+v4x 1-thread α +795 µs vs −1381 µs). Rev5's per-pixel cost is lower (v4x 1 thread β 21.8 vs 32.6 ns/px). Peak RSS at
+4096², v4x, 32 threads: Rev5 199,636 KiB, Rev4 246,856 KiB. Rev4/Rev5 score and all 420 consumed features are
+bit-identical across 384 cells. Method changes during the run, both recorded in the report: ssimulacra2_rs timed only
+in the first 63 segments (coordinator; it was ~58% of round time and has no tier dispatch); owner-approved rule
+2026-10-08 keeps the first 32 clean rounds of at most 64 instead of discarding a segment with any flagged round (74
+segments, 230 rounds excluded). Report: `benchmarks/rev5_speedq_2026-10-07.md`; full JSON on `/mnt/v` via pointer.
+A bit-identical speed fix for the slow classes is in progress (REV5PERF lane).
+
+**ADJUDICATE (seed-0 gate failures from §30).** C2 ties: a harness defect (matching NaN placeholders compared as
+different); with the comparator fixed, the unchanged model passes the unchanged 0.05 bar (flat 0.0065, ladder 0.036);
+patch under review. C5 identity: a real model property: on raw feature vectors of byte-identical pairs every candidate
+scores below 97.5 because ten reference-only `pjnd_fragility` inputs are nonzero (the "all-zero features" note is wrong);
+zeroing those ten inputs returns every model to the band. Served pixel identity is exactly 100. G-STEER: seven real
+failures; the packed spline floor erases network responses on heavy-JPEG cases; the dense model still fails two.
+Both C5 and G-STEER dispositions await the owner.
