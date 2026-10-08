@@ -6746,18 +6746,53 @@ fn fused_blur_h_local11_scalar(
     radius: usize,
     err: bool,
 ) {
-    fused_blur_h_ssim_local_general(
-        src,
-        dst,
-        out_mu1,
-        out_mu2,
-        out_sigma_sq,
-        out_sigma12,
-        width,
-        height,
-        radius,
-        err,
-    );
+    debug_assert_eq!(radius, 5);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let mut taps = [[0.0f32; 16]; 4];
+    for y in 0..height {
+        let row = y * width;
+        let leaf = |column: isize| {
+            let i = row + crate::featcanon::tap_mirror(column, width);
+            let s = src[i];
+            let d = dst[i];
+            let p = if err {
+                let e = s - d;
+                e * e
+            } else {
+                s * d
+            };
+            [s, d, s.mul_add(s, d * d), p]
+        };
+        for k in 0..11 {
+            let values = leaf(k as isize - 5);
+            for plane in 0..4 {
+                taps[plane][k] = values[plane];
+            }
+        }
+        for x in 0..width {
+            out_mu1[row + x] = local_sum_ring11(&taps[0], x) * (1.0 / 11.0);
+            out_mu2[row + x] = local_sum_ring11(&taps[1], x) * (1.0 / 11.0);
+            out_sigma_sq[row + x] = local_sum_ring11(&taps[2], x) * (1.0 / 11.0);
+            out_sigma12[row + x] = local_sum_ring11(&taps[3], x) * (1.0 / 11.0);
+            if x + 1 < width {
+                let values = leaf(x as isize + 6);
+                for plane in 0..4 {
+                    taps[plane][(x + 11) & 15] = values[plane];
+                }
+            }
+        }
+    }
+}
+
+/// Cache leaves, never partial sums: each output still executes the frozen
+/// 11-tap pair tree. Power-of-two storage makes the wrap bounds provable.
+#[inline(always)]
+fn local_sum_ring11(t: &[f32; 16], base: usize) -> f32 {
+    let at = |k| t[(base + k) & 15];
+    let s8 = ((at(0) + at(1)) + (at(2) + at(3))) + ((at(4) + at(5)) + (at(6) + at(7)));
+    s8 + (at(8) + at(9)) + at(10)
 }
 #[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
 fn fused_blur_h_local11(
@@ -6867,7 +6902,24 @@ fn box_blur_h_local11_scalar(
     height: usize,
     radius: usize,
 ) {
-    box_blur_h_local_general(input, output, width, height, radius);
+    debug_assert_eq!(radius, 5);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let mut taps = [0.0f32; 16];
+    for y in 0..height {
+        let row = y * width;
+        for k in 0..11 {
+            taps[k] = input[row + crate::featcanon::tap_mirror(k as isize - 5, width)];
+        }
+        for x in 0..width {
+            output[row + x] = local_sum_ring11(&taps, x) * (1.0 / 11.0);
+            if x + 1 < width {
+                taps[(x + 11) & 15] =
+                    input[row + crate::featcanon::tap_mirror(x as isize + 6, width)];
+            }
+        }
+    }
 }
 #[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
 fn box_blur_h_local11(
@@ -6934,7 +6986,20 @@ fn box_blur_v_local11_scalar(
     height: usize,
     radius: usize,
 ) {
-    box_blur_v_local_general(input, output, width, height, radius);
+    debug_assert_eq!(radius, 5);
+    if width == 0 || height == 0 {
+        return;
+    }
+    for y in 0..height {
+        let rows: [&[f32]; 11] = std::array::from_fn(|k| {
+            let start = crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width;
+            &input[start..start + width]
+        });
+        for x in 0..width {
+            let taps: [f32; 11] = std::array::from_fn(|k| rows[k][x]);
+            output[y * width + x] = local_sum_taps(&taps) * (1.0 / 11.0);
+        }
+    }
 }
 #[magetypes(define(f32x8), v4x, v4, v3, -scalar)]
 fn box_blur_v_local11(
@@ -7942,6 +8007,93 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rev5_scalar_cached_leaves_match_frozen_windows() {
+        use super::*;
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for (w, h) in [
+            (0, 0),
+            (1, 1),
+            (3, 2),
+            (10, 9),
+            (11, 1),
+            (12, 2),
+            (15, 9),
+            (16, 9),
+            (17, 9),
+            (31, 33),
+            (32, 33),
+            (64, 64),
+            (97, 63),
+            (131, 65),
+            (1919, 9),
+        ] {
+            let src: Vec<f32> = (0..w * h)
+                .map(|i| {
+                    if i % 19 == 0 {
+                        -0.0
+                    } else {
+                        ((i * 137 + 19) % 1009) as f32 / 1009.0 - 0.5
+                    }
+                })
+                .collect();
+            let dst: Vec<f32> = src
+                .iter()
+                .enumerate()
+                .map(|(i, v)| if i % 23 == 0 { *v } else { 0.9 * v + 0.02 })
+                .collect();
+            for err in [false, true] {
+                let mut expected: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; w * h]);
+                let mut actual = expected.clone();
+                let [a, b, c, d] = &mut expected;
+                fused_blur_h_ssim_local_general(&src, &dst, a, b, c, d, w, h, 5, err);
+                let [a, b, c, d] = &mut actual;
+                fused_blur_h_local11_scalar(
+                    archmage::ScalarToken::summon().unwrap(),
+                    &src,
+                    &dst,
+                    a,
+                    b,
+                    c,
+                    d,
+                    w,
+                    h,
+                    5,
+                    err,
+                );
+                for plane in 0..4 {
+                    assert_eq!(
+                        bits(&actual[plane]),
+                        bits(&expected[plane]),
+                        "H {w}x{h} plane {plane} err={err}"
+                    );
+                }
+            }
+            let mut expected = vec![0.0; w * h];
+            let mut actual = expected.clone();
+            box_blur_h_local_general(&src, &mut expected, w, h, 5);
+            box_blur_h_local11_scalar(
+                archmage::ScalarToken::summon().unwrap(),
+                &src,
+                &mut actual,
+                w,
+                h,
+                5,
+            );
+            assert_eq!(bits(&actual), bits(&expected), "plain H {w}x{h}");
+            box_blur_v_local_general(&src, &mut expected, w, h, 5);
+            box_blur_v_local11_scalar(
+                archmage::ScalarToken::summon().unwrap(),
+                &src,
+                &mut actual,
+                w,
+                h,
+                5,
+            );
+            assert_eq!(bits(&actual), bits(&expected), "plain V {w}x{h}");
+        }
+    }
+
     #[test]
     fn rev5_local_windows_match_f64_and_have_local_support() {
         use super::*;

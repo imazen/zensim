@@ -5489,6 +5489,12 @@ fn fused_vblur_ssim_local<P: crate::featcanon::Pool>(
                 if plane.is_empty() {
                     return 0.0;
                 }
+                // Rev5's shared vertical planes arrive here with radius zero.
+                // The one-leaf tree and multiplication by one are the input
+                // value itself; do not stage it through the general tap loop.
+                if radius == 0 {
+                    return plane[base + x];
+                }
                 for (k, t) in t.iter_mut().enumerate() {
                     *t = plane[rb[k] + x];
                 }
