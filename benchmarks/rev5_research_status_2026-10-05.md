@@ -358,3 +358,14 @@ minimise MSE and maximise Kendall and Pearson correlation.
   folder another session was writing to were kept; top-level executables archived to
   `/mnt/tower/output/target-binaries-2026-10-07/` first). Free space on the shared NVMe: 726 GB.
 * **i270:** new host keys accepted. The box is currently booted into Windows, so the fleet can't use it until it boots Ubuntu.
+
+## 28. Updates (2026-10-08 00:35 UTC)
+
+* **Landed** (`1cd8a888`): the production gate map, the KADID TERMINAL read harness after four review rounds (no open P1/P2;
+  three minor P3s are being closed before any real read, which still needs the owner's explicit go), and the label-free
+  production gate report. Full verification passed (zensim 900 tests, zensim-validate, Python incl. 43 terminal-harness tests,
+  clippy, API).
+* **v40** (shared control + E29 + E31 + E32, 200 full-budget cells) is ready and under independent review; it launches on the
+  fleet after review.
+* **Production evaluation gates on seed 0** are finishing; results next.
+* **Speed qualification:** score parity done; timing waits for a quiet box, planned once the review and gate runs finish.
