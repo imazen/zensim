@@ -414,3 +414,17 @@ scores below 97.5 because ten reference-only `pjnd_fragility` inputs are nonzero
 zeroing those ten inputs returns every model to the band. Served pixel identity is exactly 100. G-STEER: seven real
 failures; the packed spline floor erases network responses on heavy-JPEG cases; the dense model still fails two.
 Both C5 and G-STEER dispositions await the owner.
+
+## 32. Landed 2026-10-08 13:30 UTC (main `079042fb`)
+
+- **C2 tie check fix** (`5788652e`): matching NaN placeholders at the same slot now compare equal; finite epsilon stays
+  1e-5. The frozen seed-0 model passes C2 unchanged (standard 28/4318 = 0.0065). The wrong "identity gives all-zero
+  features" note is corrected.
+- **Rev5 speed fixes** (runtime `ee9e5b55`): bit-identical (384/384 strict Rev4/Rev5 score and feature bits; 4,560/4,560
+  extra reviewer cells). Re-timed worst cells: scalar 1920×1080 t8 +73% → +0.5% (inconclusive); v4 1920×1080 t8
+  +27.5% → −8.5%; v4 4096² t8 +4.9% → −26.6%; v4 64² t2 +8.5% → +0.4% (inconclusive). The other 188 cells are being
+  re-timed in a full rerun (SPEEDQ2); the criterion stays unestablished until then.
+- **KADID TERMINAL read hardening** (RELEASEGATE5/6, tip `2ccd1ea5`): device-identity admission, replaced-ledger refusal,
+  per-transaction locks, pinned acceptance inputs, reservation required before PASS. The read now requires the separate
+  preparation/exposure filesystem layout written in the committed requirements; the current shared layout refuses.
+- Landing checks on the combined tip: zensim 902 passed (27 ignored), bake_verdict 50, releasegate tests 66, lint, clippy.
