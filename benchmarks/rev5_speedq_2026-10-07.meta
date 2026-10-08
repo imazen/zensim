@@ -89,7 +89,8 @@
     "queued_smoke": "Production full collection replaces research smoke; existing strict parity precedes every production timing segment",
     "report": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c --out-json benchmarks/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md",
     "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
-    "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json"
+    "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json",
+    "remaining_six_arm_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli"
   },
   "mirror_verification": "provenance/production-mirror-verification.json verifies frozen model, instrument, source manifest; provenance/production-rss-mirror-verification.json verifies three randomly chosen RSS records; all 112 RSS records/logs and full parity mirrored, final timing mirror pending",
   "validation": {
@@ -167,6 +168,7 @@
     "publish": "local only per coordinator amendment",
     "stop_receipt": "provenance/drop-ssim2rs-stop-1791438697616792734.json",
     "interrupted_attempt": "production-f803b74c/timing/v3-t2-4096x4096.interrupted-1791438729086285788.bak",
-    "source_archive": "provenance/six-arm-source-6718ea07/manifest.json"
+    "source_archive": "provenance/six-arm-source-6718ea07/manifest.json",
+    "six_worker_header_verified": "v4x-t4-64x64"
   }
 }
