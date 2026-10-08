@@ -20,14 +20,23 @@ def main():
     parser.add_argument("--previous", type=Path, required=True)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--quiet-start", type=Path, required=True)
+    parser.add_argument("--quiet-release", type=Path)
     args = parser.parse_args()
     boundary = json.loads(args.quiet_start.read_text())
     receipt = Path(boundary["path"])
-    if receipt.stat().st_mtime_ns == boundary["mtime_ns"] or sha(receipt) == boundary["sha256"]:
+    override = None
+    if args.quiet_release is not None:
+        override = json.loads(args.quiet_release.read_text())
+        if (override.get("schema") != "v40-quiet-window-release-v1"
+                or override.get("heavy_build_authorized") is not True
+                or override.get("mode") != "explicit-coordinator-override"
+                or not override.get("coordinator_message")):
+            raise ValueError("explicit coordinator quiet-window override required")
+    elif receipt.stat().st_mtime_ns == boundary["mtime_ns"] or sha(receipt) == boundary["sha256"]:
         raise ValueError("SPEEDQ quiet window has not released; staging/builds forbidden")
     args.bundle.mkdir(parents=True, exist_ok=False)
     (args.bundle / "QUIET_WINDOW_RELEASE.json").write_text(json.dumps(dict(
-        initial=boundary, released_mtime_ns=receipt.stat().st_mtime_ns,
+        initial=boundary, coordinator_override=override, released_mtime_ns=receipt.stat().st_mtime_ns,
         released_sha256=sha(receipt)), indent=2) + "\n")
     pins = json.loads((args.previous / "PACKAGE_PINNED.json").read_text())
     copied = {}

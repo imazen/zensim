@@ -774,5 +774,5 @@ v40-source-bindings bundle producer:
 v40-authorization-gate bundle dest:
     python3 scripts/tests/v40_authorization_gate.py --bundle {{bundle}} --dest {{dest}}
 
-v40-r2-stage previous bundle quiet_start:
-    python3 scripts/tests/v40_r2_stage.py --previous {{previous}} --bundle {{bundle}} --quiet-start {{quiet_start}}
+v40-r2-stage previous bundle quiet_start quiet_release:
+    python3 scripts/tests/v40_r2_stage.py --previous {{previous}} --bundle {{bundle}} --quiet-start {{quiet_start}} --quiet-release {{quiet_release}}
