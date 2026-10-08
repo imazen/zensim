@@ -1,0 +1,138 @@
+{
+  "source_commit": "7647ffb7829a3a19b4c131b5a97064016dcb6d06",
+  "base_commit": "0022abf97c39c5be5618c69453e885db3e131573",
+  "arithmetic_contract_commit": "60174678682753458b3aeb9c403ee87ca0d157b7",
+  "host": "dev",
+  "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor",
+  "rustc": "1.99.0 (b940084d7 2026-09-28)",
+  "raw_root": "/mnt/v/output/zensim/rev5perf-2026-10-08",
+  "model_sha256": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+  "analyzer_sha256": "798d938626e31c54e524da56687c468f7178d1629b4ee4f268692a290ccbba82",
+  "comparison_path": "/mnt/v/output/zensim/rev5perf-2026-10-08/final/comparison.json",
+  "comparison_sha256": "7846b9dcf88e6d99c04e9d9b5d720884b5150873668d4ac237c1a70c23585d8e",
+  "parity": {
+    "status": "PASS",
+    "strict_score_and_420_feature_checks": 384,
+    "all_revision_frozen_comparisons": 576,
+    "before_receipt": "/mnt/v/output/zensim/rev5perf-2026-10-08/before/parity/PARITY_STRICT_PASS.json",
+    "before_sha256": "1d826e5547145085e99cbd10260249275a07d50edd196655e01147eb286311f1",
+    "after_receipt": "/mnt/v/output/zensim/rev5perf-2026-10-08/final/parity/PARITY_STRICT_PASS.json",
+    "after_sha256": "f7349c97c33ec97348a2af7955c2198c4ddc7d9154ae7eda0063c9ae93e9589c"
+  },
+  "builds": {
+    "before": {
+      "cargo_artifact": "/home/lilith/work/zen/zensim--rev5perf/zensim-bench/target/release/deps/ssim2_speed_bar-b74aad12c3e5a42e",
+      "build_log": "/mnt/v/output/zensim/rev5perf-2026-10-08/before/provenance/build.jsonl",
+      "binary_sha256": "081cb9d97cdd0dc8662fd2f8023c33268d86fc529faf00bae74f2d6065970884",
+      "dependencies": {
+        "rayon": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon@1.12.0",
+          "features": []
+        },
+        "archmage": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#archmage@0.9.30",
+          "features": [
+            "avx512",
+            "default",
+            "macros",
+            "std",
+            "testable_dispatch"
+          ]
+        },
+        "ssimulacra2": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#ssimulacra2@0.5.1",
+          "features": [
+            "default",
+            "rayon"
+          ]
+        },
+        "fast_ssim2": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#fast-ssim2@0.8.2",
+          "features": [
+            "default",
+            "imgref",
+            "rayon"
+          ]
+        },
+        "butteraugli": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#butteraugli@0.9.3",
+          "features": [
+            "avx512",
+            "default",
+            "rayon"
+          ]
+        }
+      }
+    },
+    "after": {
+      "cargo_artifact": "/home/lilith/work/zen/zensim--rev5perf/zensim-bench/target/release/deps/ssim2_speed_bar-b74aad12c3e5a42e",
+      "build_log": "/mnt/v/output/zensim/rev5perf-2026-10-08/final/provenance/build.jsonl",
+      "binary_sha256": "89b562e27567fe802fac794c5c3b68ff51a2753ad4c310e0d21d145270567d12",
+      "dependencies": {
+        "archmage": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#archmage@0.9.30",
+          "features": [
+            "avx512",
+            "default",
+            "macros",
+            "std",
+            "testable_dispatch"
+          ]
+        },
+        "rayon": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon@1.12.0",
+          "features": []
+        },
+        "ssimulacra2": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#ssimulacra2@0.5.1",
+          "features": [
+            "default",
+            "rayon"
+          ]
+        },
+        "fast_ssim2": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#fast-ssim2@0.8.2",
+          "features": [
+            "default",
+            "imgref",
+            "rayon"
+          ]
+        },
+        "butteraugli": {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#butteraugli@0.9.3",
+          "features": [
+            "avx512",
+            "default",
+            "rayon"
+          ]
+        }
+      }
+    }
+  },
+  "timing_coverage": [
+    4,
+    192
+  ],
+  "timing_rule": "first-32-clean-of-<=64 (owner 2026-10-08)",
+  "resource_receipt": "rc=0 635s | peak-RSS 3.41GiB | min-avail 42164MiB | peak-load 8.08",
+  "no_push": true,
+  "mirror": {
+    "path": "/mnt/tower/output/zensim-archive-2026-10-08/rev5perf",
+    "verified": true,
+    "random_sha256_checks": [
+      {
+        "relative_path": "final/parity/4096x4096-scalar-t2-r4.log",
+        "sha256": "a4eea35f0eba5811f9a55c073e096504d5b940379223f41c5f8b117bf54cd7d8"
+      },
+      {
+        "relative_path": "before/parity/4096x4096-scalar-t1-r3.log",
+        "sha256": "b3847fb0956b99d37754aef73b695f7ec783e12b462963293c70768b3c65a94b"
+      },
+      {
+        "relative_path": "nodes/parity/1920x1080-v4x-t32-r5.log",
+        "sha256": "69a2d6f14beab49f35a2698fd7c702d27f673efcf75eaaa3f48f7cd7ffae4cba"
+      }
+    ],
+    "log": "/home/lilith/tmp/zensim-paper/rev4/REV5PERF_mirror_retry.log"
+  }
+}
