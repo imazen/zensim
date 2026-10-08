@@ -13,6 +13,8 @@ import subprocess
 import time
 import tempfile
 import shutil
+import fcntl
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from collections import deque
 
@@ -307,7 +309,29 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
             for log in streams: log.close()
 
 
-def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS):
+@contextmanager
+def segment_lock(path):
+    """Coordinate a complete segment with other local heavy-work owners."""
+    if path is None:
+        yield
+        return
+    with Path(path).open('a') as lock:
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                refresh_activity('waiting for segment lock')
+                time.sleep(1)
+        print(f'segment lock acquired: {path}', flush=True)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            print(f'segment lock released: {path}', flush=True)
+
+
+def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lock=None):
     parity=parity_receipt(parity_path)
     pending=deque((geometry,tier,threads) for tier in TIERS for threads in THREADS for geometry in GEOMETRIES
                   if not only or f'{tier}-t{threads}-{geometry}' in only)
@@ -315,7 +339,8 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS):
         geometry,tier,threads=pending.popleft()
         tag=f'{tier}-t{threads}-{geometry}'
         try:
-            run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer,arms=arms)
+            with segment_lock(lock):
+                run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer,arms=arms)
         except TimingNoise as exc:
             dest=Path(root)/tag
             archived=dest.with_name(tag+f'.noise-{time.time_ns()}.bak')
@@ -383,7 +408,10 @@ def main():
     ap.add_argument('--collect-legacy-failures',action='store_true',help='complete the strict grid while recording Rev3 tolerance failures; does not admit timings')
     ap.add_argument('--arms',nargs='+',choices=ARMS,default=None,
                     help='timing workers (default: all seven); only ssimulacra2_rs may be omitted')
+    ap.add_argument('--lock',type=Path,help='exclusive heavy-work flock held from each timing segment quiet gate through worker cleanup')
     args=ap.parse_args()
+    if args.lock is not None and args.mode!='timing':
+        ap.error('--lock applies only to timing')
     if args.mode=='timing' and args.rounds!=32:
         ap.error('SPEEDQ timing requires 32 retained clean rounds')
     if args.arms is not None:
@@ -399,7 +427,7 @@ def main():
     if args.mode in ('timing','rss','diagnose') and not args.parity: ap.error('--parity required')
     if args.mode in ('timing','diagnose') and not args.analyzer: ap.error('--analyzer required')
     if args.mode=='parity': preflight(args.binary,args.dest,args.collect_legacy_failures)
-    elif args.mode=='timing': timing(args.binary,args.dest,args.rounds,args.parity,args.analyzer,args.only.split(',') if args.only else None,args.arms if args.arms is not None else ARMS)
+    elif args.mode=='timing': timing(args.binary,args.dest,args.rounds,args.parity,args.analyzer,args.only.split(',') if args.only else None,args.arms if args.arms is not None else ARMS,lock=args.lock)
     elif args.mode=='diagnose':
         cells={f'{t}-t{n}-{g}':(g,t,n) for t in TIERS for n in THREADS for g in GEOMETRIES}
         if args.only not in cells: ap.error('diagnose requires --only with one grid tag')

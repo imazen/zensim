@@ -1,5 +1,6 @@
 """Negative controls for the pre-timing parity refusal and report."""
 import json
+import fcntl
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -131,6 +132,57 @@ class SpeedqTest(unittest.TestCase):
         self.assertEqual((attempts[0]/'raw.json').read_text(),'contaminated raw evidence')
         self.assertTrue((self.root/'v4x-t1-64x64/COMPLETE.json').exists())
         self.assertEqual(len(calls),2)
+
+    def test_segment_lock_waits_for_owner_and_releases_on_exception(self):
+        path=self.root/'heavy.lock'
+        with path.open('a') as other:
+            fcntl.flock(other,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            def release_owner(seconds):
+                self.assertEqual(seconds,1)
+                fcntl.flock(other,fcntl.LOCK_UN)
+            with patch.object(runner,'refresh_activity'), patch.object(runner.time,'sleep',side_effect=release_owner) as sleep:
+                with self.assertRaisesRegex(RuntimeError,'segment failure'):
+                    with runner.segment_lock(path):
+                        with self.assertRaises(BlockingIOError):
+                            fcntl.flock(other,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                        raise RuntimeError('segment failure')
+            sleep.assert_called_once_with(1)
+            fcntl.flock(other,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            fcntl.flock(other,fcntl.LOCK_UN)
+
+    def test_timing_lock_covers_gate_rounds_and_releases_between_segments(self):
+        path=self.root/'heavy.lock'
+        calls=[]
+        with path.open('a') as other:
+            def assert_held(*args):
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(other,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            def segment(binary,root,geometry,*args,**kwargs):
+                calls.append(geometry)
+                runner.quiet_gate('unused')
+                assert_held()  # last-round boundary
+            real_lock=runner.segment_lock
+            def acquire(path):
+                # At the next segment boundary another lane can acquire it.
+                fcntl.flock(other,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                fcntl.flock(other,fcntl.LOCK_UN)
+                return real_lock(path)
+            with patch.object(runner,'GEOMETRIES',['64x64','128x128']), patch.object(runner,'THREADS',[1]), patch.object(runner,'TIERS',['v4x']), patch.object(runner,'parity_receipt',return_value={}), patch.object(runner,'run_segment',side_effect=segment), patch.object(runner,'quiet_gate',side_effect=assert_held), patch.object(runner,'segment_lock',side_effect=acquire):
+                runner.timing('binary',self.root,32,'receipt','analyzer',lock=path)
+            self.assertEqual(calls,['64x64','128x128'])
+            fcntl.flock(other,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            fcntl.flock(other,fcntl.LOCK_UN)
+
+    def test_timing_cli_passes_lock_and_refuses_it_for_other_modes(self):
+        path=self.root/'heavy.lock'
+        argv=['speedq_run.py','timing','--dest',str(self.root),'--binary','binary','--parity','receipt','--analyzer','analyzer','--lock',str(path)]
+        with patch('sys.argv',argv),patch.object(runner,'timing') as timing:
+            runner.main()
+        self.assertEqual(timing.call_args.kwargs['lock'],path)
+        argv[1]='rss'
+        with patch('sys.argv',argv),patch.object(runner,'rss') as rss:
+            with self.assertRaises(SystemExit):runner.main()
+        rss.assert_not_called()
 
     def test_clean_round_selection_excludes_flagged_rounds_from_both_arms(self):
         flags=[True]*34;flags[1]=False;flags[4]=None
