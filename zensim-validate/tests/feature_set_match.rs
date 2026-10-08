@@ -125,9 +125,18 @@ fn basic_only_bake_compatibility_respects_partial_producers() {
             .into_iter()
             .filter(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated)
             .count();
-        // September 13 sampling producers intentionally omit fine X/B.
-        // Width 372 does not authorize reading those unpopulated basic slots.
-        let expected = usize::from(id.contains("/sampling_v1_y_"));
+        // September 13 sampling producers intentionally omit fine X/B, and the
+        // SHIPPATH7 by_v2fy projection root (`slot_selection: by_v2fy_420`)
+        // populates only the 420 by_v2fy IDs (basic 0-12 and 26-38 are NaN).
+        // The research-only palette family (`palette@...`) populates only its
+        // own f1825-f1866 slots.
+        // Width 372 does not authorize reading those unpopulated basic slots:
+        // the check must report the missing coverage for these producers.
+        let expected = usize::from(
+            id.contains("/sampling_v1_y_")
+                || id.contains("/rev5_localwin#62adfc93")
+                || id.starts_with("palette@"),
+        );
         assert_eq!(slot_fails, expected, "basic slot coverage for {id}");
     }
 }
