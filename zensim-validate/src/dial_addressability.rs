@@ -1240,24 +1240,16 @@ pub struct IdentityMeasure {
     pub worst: Option<(String, String, f64, f64, f64)>,
 }
 
-/// **MEASURED 2026-09-04: the identity feature vector is the ZERO vector, for
-/// every image.** Extracting 372 features for all 38 dial-grid references
-/// against themselves gives 38 byte-identical all-zero rows — which is what a
-/// difference metric must do, and it makes the identity dial a SCALAR PROPERTY
-/// OF THE BAKE (`dial(0⃗)`), not a per-image measurement. The shipped values:
-/// **B 96.2412**, ADD156 (Profile D) 96.1157, v47-QAT (Profile A) 97.6893.
+/// C5 scores raw cached identity features without the pixel-identity shortcut.
+/// The 2026-10-07 Rev5 by_v2fy probe has ten nonzero reference-only
+/// PJND_FRAGILITY inputs (f422, f480, f509, f538, f567, f596, f625, f654,
+/// f683, f712), so its raw score varies by reference and is not `dial(0)`.
+/// The historical 372 all-zero probe captured the product shortcut's
+/// placeholder features, rather than canonical extracted identity features.
+/// The registered [97.5, 100] band and C6 comparison remain unchanged.
 ///
-/// Two consequences the gate acts on. (1) The registered `[97.5, 100]` identity
-/// band is a **v47-era** property: the two shipped LINEAR dials sit ~1.3-1.4
-/// points below it. (2) Shipped B emits up to **99.98** on *lossy* dial-grid
-/// cells while calling a perfect copy 96.24 — real codec output out-scoring an
-/// exact copy, which is a ceiling defect, not a rounding artifact. Both are
-/// reported as CONTRACT rows (absolute product bars) and kept strictly apart
-/// from the REGRESSION rows (bars = the shipped dial's own reach), so a
-/// pre-existing contract failure can never be misread as something a candidate
-/// introduced.
-pub const IDENTITY_IS_THE_ZERO_VECTOR: &str =
-    "ref == dist yields all-zero features for every image; identity dial = dial(0-vector)";
+/// The legacy constant name is retained for source compatibility.
+pub const IDENTITY_IS_THE_ZERO_VECTOR: &str = "raw cached identity features, scored without the pixel-identity shortcut; reference-only PJND_FRAGILITY inputs can be nonzero, so identity dial is not necessarily dial(0-vector)";
 
 /// A codec output may not out-score a perfect copy by more than this (dial
 /// points). Not a tolerance for real inversions — it is the float-noise band

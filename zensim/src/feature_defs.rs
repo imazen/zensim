@@ -223,11 +223,11 @@ pub(crate) enum Placement {
 /// Whether a slot is a difference between reference and distorted, and so
 /// whether an identity pair must drive it to zero.
 ///
-/// **This is why the 372 identity probe is the zero vector and the 944 one is
-/// not.** `append2::LUMA_MEAN_REF` is [`Form::ReferenceOnly`] — it reports a
-/// property of the reference alone, so a perfect copy leaves it at its
-/// reference value, not at 0. That fact cost a lane a day and lived in one
-/// benchmark doc; as a registry field it is a query.
+/// Reference-only slots can remain nonzero on a perfect copy. For example,
+/// `append2::LUMA_MEAN_REF` reports the reference's luminance, and Rev5
+/// `PJND_FRAGILITY` reports reference structure. The historical 372 all-zero
+/// identity probe captured the product shortcut's placeholder features;
+/// it does not establish that canonical extracted identity features are zero.
 ///
 /// [`Form::Undeclared`] is an HONEST state, not a default to fill in later: a
 /// signal whose identity behaviour has not been established (or, for the

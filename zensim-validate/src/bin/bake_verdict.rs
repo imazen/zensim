@@ -683,7 +683,13 @@ const CORPORA: &[Corpus] = &[
     },
 ];
 
+#[path = "bake_verdict/missing_features.rs"]
+mod missing_features;
+
 fn parse_corpora_arg(arg: &str) -> Result<Vec<&'static Corpus>, String> {
+    if arg.trim().eq_ignore_ascii_case("none") {
+        return Ok(Vec::new());
+    }
     let mut out: Vec<&'static Corpus> = Vec::new();
     for name in arg.split(',') {
         let key = name.trim().to_lowercase();
@@ -2760,19 +2766,14 @@ fn dial_panel(
             .or_default()
             .push((grid.q[i], score, i));
     }
-    // Adjacent cells are "codec-saturated" when their 372-feature vectors are
-    // near-identical (the codec emitted the same image at two different q) —
-    // detected by L-inf distance below FEAT_EPS (small margin for GPU-extract
-    // ULP noise).
+    // Adjacent cells are "codec-saturated" when cached feature rows are
+    // near-identical: finite slots retain FEAT_EPS for GPU-extract ULP noise,
+    // and uncomputed NaNs must match at the same positions.
     let feat_eq = |a: usize, b: usize| -> bool {
         const FEAT_EPS: f64 = 1e-5;
         let ra = &grid.feature_rows[a];
         let rb = &grid.feature_rows[b];
-        ra.len() == rb.len()
-            && ra
-                .iter()
-                .zip(rb.iter())
-                .all(|(x, y)| (x - y).abs() <= FEAT_EPS)
+        missing_features::near_equal_rows(ra, rb, FEAT_EPS)
     };
 
     // Per-codec native-param extremes + dial score at the representable
@@ -3619,11 +3620,10 @@ fn dial_panel(
         (pooled[0], pooled[pooled.len() - 1])
     };
     let addr_measure = gaddr::GridMeasure::from_pooled(&scores, mono, flat);
-    // Identity: MEASURED 2026-09-04 — `ref == dist` gives the all-zero feature
-    // vector for every image, so the identity dial is a SCALAR property of the
-    // bake, not a per-image one. Every grid cell is therefore compared against
-    // the probe's `dial_max` (the most permissive identity value), which makes
-    // a nonzero above-identity count unambiguous.
+    // C5 scores raw cached identity features without the pixel-identity
+    // shortcut. Reference-only PJND_FRAGILITY inputs can be nonzero, so these
+    // scores vary by reference. C6 retains the probe's most permissive
+    // `dial_max`; a nonzero above-identity count remains unambiguous.
     let identity_measure = probes.identity.as_ref().map(|(rows, sha)| {
         let mut dials: Vec<f64> = rows.iter().map(|(_, v)| *v).collect();
         dials.sort_by(f64::total_cmp);
@@ -7241,6 +7241,23 @@ Run the dedicated q-sweep harness for those._\n",
 mod tests {
     use super::load_peer_dial_scores;
     use zensim_validate::parquet_loader::DialGrid;
+
+    #[test]
+    fn explicit_no_corpora_is_an_empty_list() {
+        for arg in ["none", " NONE "] {
+            assert!(super::parse_corpora_arg(arg).unwrap().is_empty());
+        }
+        let selected = super::parse_corpora_arg("kadid,kadid").unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "kadid");
+    }
+
+    #[test]
+    fn no_corpora_cannot_be_mixed_with_a_corpus() {
+        for arg in ["none,kadid", "kadid,none", "none,none"] {
+            assert!(super::parse_corpora_arg(arg).is_err());
+        }
+    }
 
     #[test]
     fn verified_pixel_identity_is_served_without_guessing_from_zero_features() {
