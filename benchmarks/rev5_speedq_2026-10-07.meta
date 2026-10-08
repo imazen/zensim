@@ -41,7 +41,8 @@
     "timing-instrument": "69ca3401319d9fa509051a6d092cd804d105a9cd53c414f011693895f48bc313",
     "timing-instrument-6f95cd15": "1be53c775d56cb4c75515c32408797c105e968a121589f51c1616a7b7cdfe183",
     "timing-instrument-process-owners": "a03a0660e685f7e0d30b294a0119612dbb17963be53405132701a17e5a3ab81d",
-    "production-instrument-f803b74c": "218eae0cd71962d6c91d61b5a8b80a66f8e66ddbc65f42bc670905372e3cd3aa"
+    "production-instrument-f803b74c": "218eae0cd71962d6c91d61b5a8b80a66f8e66ddbc65f42bc670905372e3cd3aa",
+    "production-instrument-clean-rounds-f803b74c": "e66834c32f6fadc238c63bfffafdb55822ef8a89980f19ec48fbfab67eef5b95"
   },
   "build_logs": [
     "/home/lilith/tmp/speedq-2026-10-07/build-taskgate.log",
@@ -59,7 +60,7 @@
   "rss_boundary": "fresh process including input setup, model load, one score; v4x 1/32 requested threads only",
   "mirror": "/mnt/tower/output/zensim/speedq-2026-10-07/raw",
   "status": "INCOMPLETE",
-  "reporter_commit": "6718ea075f57b17c3f85c092fb4e4b27d6b4d13d",
+  "reporter_commit": "2433d8336947b690f74f8f6c05ffd5aa3f840cb9",
   "strict_score_and_feature_parity_cells": [
     384,
     384
@@ -77,7 +78,7 @@
     112,
     112
   ],
-  "quiet_gate": "load1 <2.0; no foreign cargo/rustc/training before each segment; all retained zenbench round gates clean",
+  "quiet_gate": "load1 <2.0; no foreign cargo/rustc/training before setup and again before rounds; retain first 32 clean rounds of at most 64, exclude each flagged round from every arm; whole-attempt refusal on foreign build/training or zenbench unreliable",
   "source_flags": "no RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS/CARGO_BUILD_RUSTFLAGS; no native target-cpu flag; global +simd128 applies to wasm32-wasip1 only",
   "frozen_rev5_spec_commit": "60174678",
   "model_id_sha256": "0a6a20dc356acef3bef9deffc411f03189813e8b924fddcf7b22f7efea6b9f17",
@@ -90,16 +91,18 @@
     "report": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c --out-json benchmarks/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md",
     "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
     "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json",
-    "remaining_six_arm_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli"
+    "remaining_six_arm_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli",
+    "clean_round_timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-clean-rounds-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/timing --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli"
   },
   "mirror_verification": "provenance/production-mirror-verification.json verifies frozen model, instrument, source manifest; provenance/production-rss-mirror-verification.json verifies three randomly chosen RSS records; all 112 RSS records/logs and full parity mirrored, final timing mirror pending",
   "validation": {
-    "python_tests": "17 passed in 0.382s; CLI default and six-arm propagation, preserved completion skipping, mixed six/seven-arm coverage and missing-core refusal; previous parity and gate controls remain unchanged",
+    "python_tests": "21 passed in 0.450s; first-clean shared paired index vector, 31/32 clean at cap, unaligned/over-collected refusal, raw preservation and reporter receipt-index verification",
     "bench_build_and_clippy": "production build rc0: 15s, peak-RSS 0.68GiB, min available 46797MiB, peak load 1.24; clippy rc0: 0s, 0.17GiB, 47346MiB, load 1.22",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. All-platform CI retry fully green at https://github.com/imazen/zenbench/actions/runs/37696531423 (initial Linux ARM64 post-job cache failure had no failed test step).",
     "parity": "f803b74c production model: 576/576 cells; 384 strict Rev4/Rev5 score and all 420 consumed-feature bits pass; 48 Rev3 scalar tolerance failures recorded. run-heavy rc0, 76s, peak-RSS 0.26GiB, min available 46869MiB, peak load 2.37.",
     "admitted_timing": "Partial admitted production coverage only; all 32 round gates clean in each stored segment; remaining timing grid queued with unchanged gates",
-    "rss": "112/112 actual /usr/bin/time -v max-RSS records; unchanged pre-segment quiet gates and production score/input/source bindings pass; scope v4x at 1/32 requested threads"
+    "rss": "112/112 actual /usr/bin/time -v max-RSS records; unchanged pre-segment quiet gates and production score/input/source bindings pass; scope v4x at 1/32 requested threads",
+    "clean_rounds_driver_build_clippy": "build rc0: 15s, peak-RSS 0.70GiB, min available 37978MiB, peak load 0.95; clippy rc0: 1s, peak-RSS 0.17GiB, min available 38679MiB, peak load 0.97"
   },
   "admission_fix_evidence": {
     "claim": "Foreign process leaders counted once; user tasks deduplicated. Global CPU and gate thresholds unchanged.",
@@ -141,14 +144,16 @@
   "controller_commits": {
     "initial": "d1b391e13019f7106968e895c3829a2c62c487a7",
     "retry_queue": "050d7f2078b950079e0011889ffebd8a8627d1ca",
-    "six_arm": "6718ea075f57b17c3f85c092fb4e4b27d6b4d13d"
+    "six_arm": "6718ea075f57b17c3f85c092fb4e4b27d6b4d13d",
+    "clean_rounds": "2433d8336947b690f74f8f6c05ffd5aa3f840cb9"
   },
   "retry_order": "Rejected segments return to the end of the pending grid after the unchanged ten-second backoff; only one segment at a time",
   "collection_logs": [
     "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v3.log",
     "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v4.log",
     "/home/lilith/tmp/speedq-2026-10-07/production-full-matrix-v5.log",
-    "/home/lilith/tmp/speedq-2026-10-07/production-six-arm-matrix.log"
+    "/home/lilith/tmp/speedq-2026-10-07/production-six-arm-matrix.log",
+    "/home/lilith/tmp/speedq-2026-10-07/production-clean-round-matrix.log"
   ],
   "retry_queue_evidence": "provenance/retry-queue-source-050d7f20/manifest.json",
   "timing_arm_amendment": {
@@ -179,5 +184,16 @@
     "fast_ssim2": 118,
     "butteraugli": 118,
     "ssimulacra2_rs": 63
+  },
+  "clean_round_amendment": {
+    "owner_approved_date": "2026-10-08",
+    "rule": "first-32-clean-of-<=64 (owner 2026-10-08)",
+    "earlier_all_32_clean_segments": 118,
+    "salvaged_archived_attempts": 0,
+    "source_archive": "/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/clean-rounds-source-2433d833",
+    "local_only": true,
+    "stop_receipt": "provenance/clean-rounds-stop-1791451874284304945.json",
+    "explicit_warmup": "original once; subsequent batches retain workers and exclude untimed estimation",
+    "timer_resolution": "maximum measured batch timer resolution"
   }
 }
