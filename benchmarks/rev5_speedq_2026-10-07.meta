@@ -58,7 +58,7 @@
   "timing_boundary": "worker Instant around scoring call; persistent warm workers; parent paired randomized rounds retain IPC separately",
   "rss_boundary": "fresh process including input setup, model load, one score; v4x 1/32 requested threads only",
   "mirror": "/mnt/tower/output/zensim/speedq-2026-10-07/raw",
-  "status": "PRODUCTION_PARITY_COMPLETE_RUNTIME_PENDING",
+  "status": "INCOMPLETE",
   "reporter_commit": "d1b391e13019f7106968e895c3829a2c62c487a7",
   "strict_score_and_feature_parity_cells": [
     384,
@@ -74,7 +74,7 @@
     192
   ],
   "rss_measurements": [
-    0,
+    98,
     112
   ],
   "quiet_gate": "load1 <2.0; no foreign cargo/rustc/training before each segment; all retained zenbench round gates clean",
@@ -86,7 +86,8 @@
     "parity": "TMPDIR=/home/lilith/tmp /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-parity /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity --collect-legacy-failures",
     "queued_smoke": "Production full collection replaces research smoke; existing strict parity precedes every production timing segment",
     "report": "python3 scripts/demos/speed_matrix_report.py --speedq --raw-dir /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c --out-json benchmarks/rev5_speedq_2026-10-07.json --out-md benchmarks/rev5_speedq_2026-10-07.md",
-    "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c"
+    "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
+    "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json"
   },
   "mirror_verification": "raw/provenance/mirror-process-owners-verification.json: process-owner timing binary, source manifest, and live foreign-owner probe SHA256s match Tower; earlier full-parity/analyzer verification receipts preserved",
   "validation": {
@@ -94,7 +95,8 @@
     "bench_build_and_clippy": "production build rc0: 15s, peak-RSS 0.68GiB, min available 46797MiB, peak load 1.24; clippy rc0: 0s, 0.17GiB, 47346MiB, load 1.22",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. All-platform CI retry fully green at https://github.com/imazen/zenbench/actions/runs/37696531423 (initial Linux ARM64 post-job cache failure had no failed test step).",
     "parity": "f803b74c production model: 576/576 cells; 384 strict Rev4/Rev5 score and all 420 consumed-feature bits pass; 48 Rev3 scalar tolerance failures recorded. run-heavy rc0, 76s, peak-RSS 0.26GiB, min available 46869MiB, peak load 2.37.",
-    "admitted_timing": "production collection in progress; older research timings excluded"
+    "admitted_timing": "production collection in progress; older research timings excluded",
+    "rss": "Partial measured RSS coverage; every stored record admitted by unchanged load/build gate and model score/input/source bindings"
   },
   "admission_fix_evidence": {
     "claim": "Foreign process leaders counted once; user tasks deduplicated. Global CPU and gate thresholds unchanged.",
@@ -123,5 +125,6 @@
     "model_sha256": "802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1",
     "reason": "coordinator replaced research weights with frozen packed production model; none of these timings qualify production"
   },
-  "raw_directory": "/mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c"
+  "raw_directory": "/mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
+  "collection_order": "full parity, serial fresh-process RSS pass, full paired timing grid; no concurrent collection jobs"
 }
