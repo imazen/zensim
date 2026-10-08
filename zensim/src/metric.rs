@@ -3495,7 +3495,8 @@ fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimEr
     let mut out = Vec::with_capacity(w * h * 3);
     for y in 0..h {
         let row = src.row_bytes(y);
-        let px: &[f32] = bytemuck::cast_slice(&row[..w * 16]);
+        let pixels = crate::source::packed_row::<[f32; 4]>(row, w);
+        let px: &[f32] = bytemuck::cast_slice(&pixels);
         for x in 0..w {
             let mut pixel = [px[x * 4], px[x * 4 + 1], px[x * 4 + 2]];
             crate::color::apply_gamut_matrix(

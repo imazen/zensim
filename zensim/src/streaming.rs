@@ -1188,8 +1188,8 @@ fn native_sdr_linear_row(
     absolute_y: usize,
     out: &mut [[f32; 3]],
 ) {
-    let row = source.row_bytes(y);
     let width = source.width();
+    let row = &source.row_bytes(y)[..width * source.pixel_format().bytes_per_pixel()];
     let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
     match source.pixel_format() {
         PixelFormat::Srgb16Rgba => {
@@ -1208,7 +1208,7 @@ fn native_sdr_linear_row(
             }
         }
         PixelFormat::LinearF32Rgba => {
-            let pixels: &[[f32; 4]] = bytemuck::cast_slice(row);
+            let pixels = crate::source::packed_row::<[f32; 4]>(row, width);
             if opaque {
                 for (out, p) in out.iter_mut().zip(&pixels[..width]) {
                     *out = [p[0], p[1], p[2]];
@@ -1474,7 +1474,8 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         // Non-sRGB: linearize, apply gamut matrix, then XYB
                         let mut linear_row = vec![[0.0f32; 3]; width];
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
                             let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
                             for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                 let [r, g, b] = rgb_row[x];
@@ -1500,7 +1501,8 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
                             let row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
                             rgb_buf.extend_from_slice(&row[..width]);
                         }
@@ -1519,7 +1521,8 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
                             let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
                             for &[r, g, b, _a] in &rgba_row[..width] {
                                 rgb_buf.push([r, g, b]);
@@ -1535,7 +1538,8 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
                             let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
                             if opaque {
                                 // Opaque non-sRGB: linearize + gamut
@@ -1578,7 +1582,8 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
                             let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
                             for &[b, g, r, _a] in &bgra_row[..width] {
                                 rgb_buf.push([r, g, b]);
@@ -1594,7 +1599,8 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
                             let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
                             if opaque {
                                 // Opaque non-sRGB: linearize + gamut
@@ -1653,8 +1659,9 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[f32; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
-                            let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+                            let row_bytes =
+                                &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
+                            let rgba_row = crate::source::packed_row::<[f32; 4]>(row_bytes, width);
                             for &[r, g, b, _a] in &rgba_row[..width] {
                                 rgb_buf.push([r, g, b]);
                             }
@@ -1815,7 +1822,7 @@ pub(crate) fn convert_source_to_ycbcr_plane_into_slice(
     // primaries, float input) produce the same linear pixel the XYB path
     // computes, then sRGB-encode it.
     let gamma_row = |y: usize, dst: &mut [[f32; 3]], linear_scratch: &mut [[f32; 3]]| {
-        let row_bytes = source.row_bytes(y);
+        let row_bytes = &source.row_bytes(y)[..width * pixel_format.bytes_per_pixel()];
         let mut direct_gamma = false;
         match pixel_format {
             PixelFormat::Srgb8Rgb => {
@@ -1889,7 +1896,7 @@ pub(crate) fn convert_source_to_ycbcr_plane_into_slice(
                 }
             }
             PixelFormat::Srgb16Rgba => {
-                let rgba_row: &[[u16; 4]] = bytemuck::cast_slice(row_bytes);
+                let rgba_row = crate::source::packed_row::<[u16; 4]>(row_bytes, width);
                 if opaque && !need_gamut {
                     for (x, pixel) in dst.iter_mut().enumerate().take(width) {
                         let [r, g, b, _a] = rgba_row[x];

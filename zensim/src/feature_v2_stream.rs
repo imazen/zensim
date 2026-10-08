@@ -1281,11 +1281,11 @@ fn hdr_source_row_to_nits(
     revision: crate::feature_defs::FormulaRevision,
 ) {
     let width = src.width();
-    let row_bytes = src.row_bytes(y);
+    let row_bytes = &src.row_bytes(y)[..width * src.pixel_format().bytes_per_pixel()];
     let mut already_nits = false;
     match src.pixel_format() {
         PixelFormat::LinearF32Rgba => {
-            let px: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+            let px = crate::source::packed_row::<[f32; 4]>(row_bytes, width);
             for (o, p) in out[..width].iter_mut().zip(&px[..width]) {
                 *o = [p[0], p[1], p[2]];
             }

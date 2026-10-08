@@ -193,6 +193,22 @@ pub trait ImageSource: Sync {
     fn row_bytes(&self, y: usize) -> &[u8];
 }
 
+/// Read native-endian packed pixels without consuming trailing row bytes.
+/// Byte sources do not promise alignment. Aligned rows stay borrowed; an
+/// unaligned row copies only its pixel values, preserving their exact bits.
+#[inline]
+pub(crate) fn packed_row<T: bytemuck::Pod>(row: &[u8], width: usize) -> std::borrow::Cow<'_, [T]> {
+    let row = &row[..width * core::mem::size_of::<T>()];
+    match bytemuck::try_cast_slice(row) {
+        Ok(pixels) => std::borrow::Cow::Borrowed(pixels),
+        Err(_) => std::borrow::Cow::Owned(
+            row.chunks_exact(core::mem::size_of::<T>())
+                .map(bytemuck::pod_read_unaligned)
+                .collect(),
+        ),
+    }
+}
+
 /// Wraps `&[[u8; 3]]` (contiguous sRGB pixels) with width and height.
 #[derive(Clone, Copy, Debug)]
 pub struct RgbSlice<'a> {
