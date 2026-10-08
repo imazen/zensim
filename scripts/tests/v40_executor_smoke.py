@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -52,7 +53,7 @@ def main():
         file.write(json.dumps(jobs[0], indent=2) + "\n")
     out = b / f"smoke-{key}"
     out.mkdir(exist_ok=False)
-    scratch = b / "container-scratch"
+    scratch = b / f"container-scratch-{a.attempt}"
     scratch.mkdir(exist_ok=True)
     driver = Path(__file__).with_name("e28_executor_smoke.py")
     data = {"palette": "palette-fit-data.tar.gz", "uh4": "e31-fit-data.tar.gz"}.get(a.arm, "e29-fit-data.tar.gz")
@@ -61,6 +62,9 @@ def main():
             "docker",
             "run",
             "--rm",
+            "--network=none",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
             "--cpus=1",
             "--memory=6g",
             "--memory-swap=6g",
