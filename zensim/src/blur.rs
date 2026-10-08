@@ -6814,15 +6814,23 @@ fn fused_blur_h_local11(
         let row = y * width;
         let mut x = 0;
         while x < width {
-            if x >= 5 && x + 8 + 5 <= width {
+            if x + 8 <= width {
                 let mut a = [f32x8::zero(token); 11];
                 let mut b = a;
                 let mut q = a;
                 let mut p = a;
                 for k in 0..11 {
-                    let i = row + x + k - 5;
-                    a[k] = f32x8::load(token, src[i..i + 8].try_into().unwrap());
-                    b[k] = f32x8::load(token, dst[i..i + 8].try_into().unwrap());
+                    if x >= 5 && x + 8 + 5 <= width {
+                        let i = row + x + k - 5;
+                        a[k] = f32x8::load(token, src[i..i + 8].try_into().unwrap());
+                        b[k] = f32x8::load(token, dst[i..i + 8].try_into().unwrap());
+                    } else {
+                        let indices: [usize; 8] = std::array::from_fn(|lane| {
+                            row + crate::featcanon::tap_mirror((x + lane + k) as isize - 5, width)
+                        });
+                        a[k] = f32x8::from_array(token, indices.map(|i| src[i]));
+                        b[k] = f32x8::from_array(token, indices.map(|i| dst[i]));
+                    }
                     q[k] = a[k].mul_add(a[k], b[k] * b[k]);
                     p[k] = if err {
                         let e = a[k] - b[k];
@@ -8007,6 +8015,86 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rev5_simd_edges_match_frozen_windows() {
+        if std::env::var("REV5PERF_EDGES_CHILD").as_deref() != Ok("1") {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "blur::tests::rev5_simd_edges_match_frozen_windows",
+                    "--exact",
+                ])
+                .env("REV5PERF_EDGES_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+        use super::*;
+        let _guard = archmage::testing::lock_token_testing();
+        let report = archmage::testing::for_each_token_permutation(
+            archmage::testing::CompileTimePolicy::Warn,
+            |_| {
+                for (w, h) in [
+                    (1, 1),
+                    (7, 3),
+                    (8, 9),
+                    (15, 2),
+                    (16, 9),
+                    (17, 9),
+                    (31, 33),
+                    (32, 33),
+                    (64, 64),
+                    (97, 63),
+                    (131, 65),
+                    (1919, 9),
+                ] {
+                    let src: Vec<f32> = (0..w * h)
+                        .map(|i| {
+                            if i % 19 == 0 {
+                                -0.0
+                            } else {
+                                ((i * 137 + 19) % 1009) as f32 / 1009.0 - 0.5
+                            }
+                        })
+                        .collect();
+                    let dst: Vec<f32> = src
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| if i % 23 == 0 { *v } else { 0.9 * v + 0.02 })
+                        .collect();
+                    for err in [false, true] {
+                        let mut expected: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; w * h]);
+                        let mut actual = expected.clone();
+                        let [a, b, c, d] = &mut expected;
+                        fused_blur_h_ssim_local_general(&src, &dst, a, b, c, d, w, h, 5, err);
+                        let [a, b, c, d] = &mut actual;
+                        fused_blur_h_ssim_local(&src, &dst, a, b, c, d, w, h, 5, err);
+                        for plane in 0..4 {
+                            assert_eq!(
+                                actual[plane]
+                                    .iter()
+                                    .map(|v| v.to_bits())
+                                    .collect::<Vec<_>>(),
+                                expected[plane]
+                                    .iter()
+                                    .map(|v| v.to_bits())
+                                    .collect::<Vec<_>>(),
+                                "{w}x{h} plane {plane} err={err}"
+                            );
+                        }
+                    }
+                }
+            },
+        );
+        assert!(report.permutations_run >= 1);
+    }
+
     #[test]
     fn rev5_scalar_cached_leaves_match_frozen_windows() {
         use super::*;
@@ -10579,11 +10667,23 @@ fn fused_blur_h_local11_wide(
         let row = y * width;
         let mut x = 0;
         while x < width {
-            if x >= 5 && x + 16 + 5 <= width {
+            if x + 16 <= width {
                 let tap = |k: usize| {
-                    let i = row + x + k - 5;
-                    let a = f32x16::load(token, src[i..i + 16].try_into().unwrap());
-                    let b = f32x16::load(token, dst[i..i + 16].try_into().unwrap());
+                    let (a, b) = if x >= 5 && x + 16 + 5 <= width {
+                        let i = row + x + k - 5;
+                        (
+                            f32x16::load(token, src[i..i + 16].try_into().unwrap()),
+                            f32x16::load(token, dst[i..i + 16].try_into().unwrap()),
+                        )
+                    } else {
+                        let indices: [usize; 16] = std::array::from_fn(|lane| {
+                            row + crate::featcanon::tap_mirror((x + lane + k) as isize - 5, width)
+                        });
+                        (
+                            f32x16::from_array(token, indices.map(|i| src[i])),
+                            f32x16::from_array(token, indices.map(|i| dst[i])),
+                        )
+                    };
                     let q = a.mul_add(a, b * b);
                     let p = if err {
                         let e = a - b;
