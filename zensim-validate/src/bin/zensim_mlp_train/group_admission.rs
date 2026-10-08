@@ -652,3 +652,47 @@ pub(super) fn preflight(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod historical_tests {
+    use super::*;
+
+    #[test]
+    fn historical_population_refusal_preserves_released_development_members() {
+        for value in [
+            "val",
+            "VALIDATION",
+            "test",
+            "T0",
+            "terminal",
+            "aic3",
+            "jpeg-aic",
+            "holdout-only",
+            "hdr_val",
+        ] {
+            assert!(forbidden_identity(value), "{value}");
+        }
+        for value in [
+            "train",
+            "fit",
+            "development",
+            "konfig_val",
+            "kadid_select",
+            "cid22_a25",
+        ] {
+            assert!(!forbidden_identity(value), "{value}");
+        }
+        assert!(forbidden_declaration(
+            &serde_json::json!({"keys_role":"val"})
+        ));
+        assert!(forbidden_declaration(
+            &serde_json::json!({"human_sources":["kadid","aic3"]})
+        ));
+        assert!(forbidden_declaration(
+            &serde_json::json!({"research_palette":{"member_sets":["hdr_val"]}})
+        ));
+        assert!(!forbidden_declaration(
+            &serde_json::json!({"role":"development", "note":"historical AIC recipe excluded"})
+        ));
+    }
+}
