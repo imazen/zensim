@@ -6810,11 +6810,23 @@ fn fused_blur_h_local11(
 ) {
     let _ = radius;
     let inv = f32x8::splat(token, 1.0 / 11.0);
+    // The two boundary blocks use the same mirrored columns on every row.
+    // Gather each distinct leaf once, then load overlapping windows from it.
+    let left: [usize; 18] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
+    let last = (width / 8).saturating_sub(1) * 8;
+    let right: [usize; 18] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
     for y in 0..height {
         let row = y * width;
         let mut x = 0;
         while x < width {
             if x + 8 <= width {
+                let interior = x >= 5 && x + 8 + 5 <= width;
+                let edge = (!interior).then(|| {
+                    let indices = if x == 0 { &left } else { &right };
+                    (indices.map(|i| src[row + i]), indices.map(|i| dst[row + i]))
+                });
                 let mut a = [f32x8::zero(token); 11];
                 let mut b = a;
                 let mut q = a;
@@ -6825,11 +6837,9 @@ fn fused_blur_h_local11(
                         a[k] = f32x8::load(token, src[i..i + 8].try_into().unwrap());
                         b[k] = f32x8::load(token, dst[i..i + 8].try_into().unwrap());
                     } else {
-                        let indices: [usize; 8] = std::array::from_fn(|lane| {
-                            row + crate::featcanon::tap_mirror((x + lane + k) as isize - 5, width)
-                        });
-                        a[k] = f32x8::from_array(token, indices.map(|i| src[i]));
-                        b[k] = f32x8::from_array(token, indices.map(|i| dst[i]));
+                        let (a_edge, b_edge) = edge.as_ref().unwrap();
+                        a[k] = f32x8::load(token, a_edge[k..k + 8].try_into().unwrap());
+                        b[k] = f32x8::load(token, b_edge[k..k + 8].try_into().unwrap());
                     }
                     q[k] = a[k].mul_add(a[k], b[k] * b[k]);
                     p[k] = if err {
@@ -6940,14 +6950,28 @@ fn box_blur_h_local11(
 ) {
     let _ = radius;
     let inv = f32x8::splat(token, 1.0 / 11.0);
+    let left: [usize; 18] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
+    let last = (width / 8).saturating_sub(1) * 8;
+    let right: [usize; 18] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
     for y in 0..height {
         let row = y * width;
         let mut x = 0;
         while x < width {
-            if x >= 5 && x + 8 + 5 <= width {
+            if x + 8 <= width {
+                let interior = x >= 5 && x + 8 + 5 <= width;
+                let edge = (!interior).then(|| {
+                    let indices = if x == 0 { &left } else { &right };
+                    indices.map(|i| input[row + i])
+                });
                 let t: [f32x8; 11] = std::array::from_fn(|k| {
-                    let i = row + x + k - 5;
-                    f32x8::load(token, input[i..i + 8].try_into().unwrap())
+                    if let Some(edge) = &edge {
+                        f32x8::load(token, edge[k..k + 8].try_into().unwrap())
+                    } else {
+                        let i = row + x + k - 5;
+                        f32x8::load(token, input[i..i + 8].try_into().unwrap())
+                    }
                 });
                 let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
                     + (t[8] + t[9])
@@ -10705,11 +10729,23 @@ fn fused_blur_h_local11_wide(
 ) {
     let _ = radius;
     let inv = f32x16::splat(token, 1.0 / 11.0);
+    // The two boundary blocks use the same mirrored columns on every row.
+    // Gather each distinct leaf once, then load overlapping windows from it.
+    let left: [usize; 26] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
+    let last = (width / 16).saturating_sub(1) * 16;
+    let right: [usize; 26] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
     for y in 0..height {
         let row = y * width;
         let mut x = 0;
         while x < width {
             if x + 16 <= width {
+                let interior = x >= 5 && x + 16 + 5 <= width;
+                let edge = (!interior).then(|| {
+                    let indices = if x == 0 { &left } else { &right };
+                    (indices.map(|i| src[row + i]), indices.map(|i| dst[row + i]))
+                });
                 let tap = |k: usize| {
                     let (a, b) = if x >= 5 && x + 16 + 5 <= width {
                         let i = row + x + k - 5;
@@ -10718,12 +10754,10 @@ fn fused_blur_h_local11_wide(
                             f32x16::load(token, dst[i..i + 16].try_into().unwrap()),
                         )
                     } else {
-                        let indices: [usize; 16] = std::array::from_fn(|lane| {
-                            row + crate::featcanon::tap_mirror((x + lane + k) as isize - 5, width)
-                        });
+                        let (a_edge, b_edge) = edge.as_ref().unwrap();
                         (
-                            f32x16::from_array(token, indices.map(|i| src[i])),
-                            f32x16::from_array(token, indices.map(|i| dst[i])),
+                            f32x16::load(token, a_edge[k..k + 16].try_into().unwrap()),
+                            f32x16::load(token, b_edge[k..k + 16].try_into().unwrap()),
                         )
                     };
                     let q = a.mul_add(a, b * b);
@@ -10795,14 +10829,28 @@ fn box_blur_h_local11_wide(
 ) {
     let _ = radius;
     let inv = f32x16::splat(token, 1.0 / 11.0);
+    let left: [usize; 26] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
+    let last = (width / 16).saturating_sub(1) * 16;
+    let right: [usize; 26] =
+        std::array::from_fn(|i| crate::featcanon::tap_mirror((last + i) as isize - 5, width));
     for y in 0..height {
         let row = y * width;
         let mut x = 0;
         while x < width {
-            if x >= 5 && x + 16 + 5 <= width {
+            if x + 16 <= width {
+                let interior = x >= 5 && x + 16 + 5 <= width;
+                let edge = (!interior).then(|| {
+                    let indices = if x == 0 { &left } else { &right };
+                    indices.map(|i| input[row + i])
+                });
                 let t: [f32x16; 11] = std::array::from_fn(|k| {
-                    let i = row + x + k - 5;
-                    f32x16::load(token, input[i..i + 16].try_into().unwrap())
+                    if let Some(edge) = &edge {
+                        f32x16::load(token, edge[k..k + 16].try_into().unwrap())
+                    } else {
+                        let i = row + x + k - 5;
+                        f32x16::load(token, input[i..i + 16].try_into().unwrap())
+                    }
                 });
                 let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
                     + (t[8] + t[9])

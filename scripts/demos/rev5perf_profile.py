@@ -62,8 +62,9 @@ def main():
                     commands = [['valgrind', '--tool=callgrind', '--trace-children=yes', '--dump-instr=yes',
                                  '--callgrind-out-file=' + str(args.dest / (tag + '.callgrind'))] + worker]
                 elif args.mode == 'heaptrack':
-                    commands = [['heaptrack', '--record-only', '-o',
-                                 str(args.dest / (tag + '.heaptrack'))] + worker]
+                    commands = [['taskset', '-c', speedq.CPUSETS[threads],
+                                 'heaptrack', '--record-only', '-o',
+                                 str(args.dest / (tag + '.heaptrack')), str(args.binary.resolve())]]
                 else:
                     commands = [worker]
                 for i, cmd in enumerate(commands):
