@@ -8148,6 +8148,13 @@ mod tests {
                     }
                     let mut expected = vec![0.0; w * h];
                     let mut actual = expected.clone();
+                    box_blur_h_local_general(&src, &mut expected, w, h, 5);
+                    box_blur_h_local(&src, &mut actual, w, h, 5);
+                    assert_eq!(
+                        actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        "horizontal tree {w}x{h}"
+                    );
                     box_blur_v_local_general(&src, &mut expected, w, h, 5);
                     box_blur_v_local(&src, &mut actual, w, h, 5);
                     assert_eq!(

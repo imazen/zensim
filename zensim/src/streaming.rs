@@ -1374,6 +1374,30 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     let width = source.width();
     let height = source.height();
 
+    // Rev5 canonical color leaves are independent of row/chunk length. The
+    // producer's two-row RGB calls can borrow strided source rows directly,
+    // avoiding three chunk lists and the temporary packed-RGB copy.
+    if revision >= crate::feature_defs::FormulaRevision::Rev5
+        && !parallel
+        && width > 0
+        && padded_width == width
+        && source.pixel_format() == PixelFormat::Srgb8Rgb
+        && source.color_primaries() == ColorPrimaries::Srgb
+    {
+        for y in 0..height {
+            let row: &[[u8; 3]] = bytemuck::cast_slice(&source.row_bytes(y)[..width * 3]);
+            let offset = y * width;
+            crate::color::srgb_to_positive_xyb_planar_into_at_revision(
+                &row[..width],
+                &mut p0[offset..offset + width],
+                &mut p1[offset..offset + width],
+                &mut p2[offset..offset + width],
+                revision,
+            );
+        }
+        return;
+    }
+
     let chunk_rows = chunk_rows.max(1);
     let p0_chunks: Vec<&mut [f32]> = p0.chunks_mut(chunk_rows * padded_width).collect();
     let p1_chunks: Vec<&mut [f32]> = p1.chunks_mut(chunk_rows * padded_width).collect();
@@ -5568,6 +5592,84 @@ mod tests {
     use crate::metric::WEIGHTS;
     use crate::metric::compute_zensim_with_config;
     use crate::source::RgbSlice;
+
+    #[test]
+    fn rev5_borrowed_rgb_rows_match_chunked_conversion() {
+        let _tokens = archmage::testing::lock_token_testing();
+        struct PaddedRows<'a> {
+            data: &'a [u8],
+            width: usize,
+            height: usize,
+            stride: usize,
+        }
+        impl ImageSource for PaddedRows<'_> {
+            fn width(&self) -> usize {
+                self.width
+            }
+            fn height(&self) -> usize {
+                self.height
+            }
+            fn pixel_format(&self) -> PixelFormat {
+                PixelFormat::Srgb8Rgb
+            }
+            fn alpha_mode(&self) -> AlphaMode {
+                AlphaMode::Opaque
+            }
+            fn row_bytes(&self, y: usize) -> &[u8] {
+                &self.data[y * self.stride..(y + 1) * self.stride]
+            }
+        }
+        for (w, h) in [
+            (1, 3),
+            (7, 5),
+            (16, 9),
+            (17, 65),
+            (64, 64),
+            (97, 131),
+            (128, 128),
+        ] {
+            let stride = w * 3 + 13;
+            let data: Vec<u8> = (0..stride * h)
+                .map(|i| ((i * 37 + i / 7) % 256) as u8)
+                .collect();
+            let src = crate::source::StridedBytes::new(&data, w, h, stride, PixelFormat::Srgb8Rgb);
+            let padded = PaddedRows {
+                data: &data,
+                width: w,
+                height: h,
+                stride,
+            };
+            fn convert(source: &impl ImageSource, parallel: bool) -> [Vec<u32>; 3] {
+                let (w, h) = (source.width(), source.height());
+                let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w * h]);
+                let [a, b, c] = &mut out;
+                convert_source_to_xyb_into_slices_chunked(
+                    source,
+                    a,
+                    b,
+                    c,
+                    w,
+                    parallel,
+                    7,
+                    64,
+                    crate::feature_defs::FormulaRevision::Rev5,
+                );
+                out.map(|p| p.into_iter().map(f32::to_bits).collect::<Vec<_>>())
+            }
+            // Parallel=true retains the original packed-chunk path even in
+            // builds without threads, so this comparison has two real owners.
+            assert_eq!(
+                convert(&src, false),
+                convert(&src, true),
+                "{w}x{h} stride={stride}"
+            );
+            assert_eq!(
+                convert(&padded, false),
+                convert(&src, true),
+                "{w}x{h} padded stride={stride}"
+            );
+        }
+    }
 
     /// **`chunk_rows` is SEMANTICS, not a tuning knob — MEASURED, fold-MT
     /// lane.** This test exists because the lane tried to raise the streaming

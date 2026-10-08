@@ -16,3 +16,13 @@ rev5perf2-timing root analyzer:
         --parity "$1/parity/PARITY_STRICT_PASS.json" --analyzer "$2" --only "$only" \
         --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock \
         --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli
+
+[positional-arguments]
+rev5perf2-verify root before:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$1/provenance"
+    just --justfile benchmarks/rev5perf.just rev5perf-kernel-test > "$1/provenance/kernel-test.log" 2>&1
+    cargo test -p zensim --all-features rev5_borrowed_rgb_rows_match_chunked_conversion > "$1/provenance/rgb-row-test.log" 2>&1
+    just --justfile benchmarks/rev5perf.just rev5perf-gate "$1" "$2" > "$1/provenance/gate.log" 2>&1
+    just --justfile benchmarks/rev5perf.just rev5perf-validation "$1"
