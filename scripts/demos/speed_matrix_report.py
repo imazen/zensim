@@ -332,7 +332,7 @@ def speedq_stop_report(args) -> int:
     args.out_json.write_text(json.dumps(out, indent=2) + "\n")
     lines = ["# Rev5 SPEEDQ — STOPPED at score parity", "", "MISSING: " + "; ".join(missing) + ".", "",
              f"Checked {len(rows)} of 576 by_v2fy model parity cells; no timing segment started.",
-             "This is the 420-ID, H128, one-output model with fixed Rev4-trained weights, restamped through the metadata owner.",
+             "This is the 420-ID, H128, one-output model with a recorded source SHA, restamped through the metadata owner without requantizing its weights.",
              "Different revisions may differ; this failure compares the same revision and input across dispatch ceilings.", "",
              "| revision | tier | threads | size | score | f64 score bits |", "|---|---|---|---|---|---|"]
     lines += [f"| {r['revision']} | {r['tier']} | {r['threads']} | {r['width']}x{r['height']} | {r['score']} | `{r['score_bits']}` |" for r in rows]
