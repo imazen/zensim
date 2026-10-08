@@ -59,7 +59,7 @@
   "rss_boundary": "fresh process including input setup, model load, one score; v4x 1/32 requested threads only",
   "mirror": "/mnt/tower/output/zensim/speedq-2026-10-07/raw",
   "status": "INCOMPLETE",
-  "reporter_commit": "d1b391e13019f7106968e895c3829a2c62c487a7",
+  "reporter_commit": "82158c6e60737f05f948431e79ca08c62af9ec02",
   "strict_score_and_feature_parity_cells": [
     384,
     384
@@ -74,14 +74,16 @@
     192
   ],
   "rss_measurements": [
-    98,
+    112,
     112
   ],
   "quiet_gate": "load1 <2.0; no foreign cargo/rustc/training before each segment; all retained zenbench round gates clean",
   "source_flags": "no RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS/CARGO_BUILD_RUSTFLAGS; no native target-cpu flag; global +simd128 applies to wasm32-wasip1 only",
   "frozen_rev5_spec_commit": "60174678",
   "model_id_sha256": "0a6a20dc356acef3bef9deffc411f03189813e8b924fddcf7b22f7efea6b9f17",
-  "evidence_sha256": {},
+  "evidence_sha256": {
+    "production_full_parity": "ecfe6b12492942a656fa057e6c2500c97de0a7cc5f2a40a0e0f1a689036aaaa9"
+  },
   "commands": {
     "parity": "TMPDIR=/home/lilith/tmp /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-parity /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity --collect-legacy-failures",
     "queued_smoke": "Production full collection replaces research smoke; existing strict parity precedes every production timing segment",
@@ -89,14 +91,14 @@
     "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
     "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json"
   },
-  "mirror_verification": "raw/provenance/mirror-process-owners-verification.json: process-owner timing binary, source manifest, and live foreign-owner probe SHA256s match Tower; earlier full-parity/analyzer verification receipts preserved",
+  "mirror_verification": "raw/provenance/production-mirror-verification.json: frozen production source model, production binary, and source manifest match Tower; final collection mirror pending",
   "validation": {
     "python_tests": "14 passed, including refusal of an identical-score receipt from the wrong source model",
     "bench_build_and_clippy": "production build rc0: 15s, peak-RSS 0.68GiB, min available 46797MiB, peak load 1.24; clippy rc0: 0s, 0.17GiB, 47346MiB, load 1.22",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. All-platform CI retry fully green at https://github.com/imazen/zenbench/actions/runs/37696531423 (initial Linux ARM64 post-job cache failure had no failed test step).",
     "parity": "f803b74c production model: 576/576 cells; 384 strict Rev4/Rev5 score and all 420 consumed-feature bits pass; 48 Rev3 scalar tolerance failures recorded. run-heavy rc0, 76s, peak-RSS 0.26GiB, min available 46869MiB, peak load 2.37.",
     "admitted_timing": "production collection in progress; older research timings excluded",
-    "rss": "Partial measured RSS coverage; every stored record admitted by unchanged load/build gate and model score/input/source bindings"
+    "rss": "112/112 actual /usr/bin/time -v max-RSS records; unchanged pre-segment quiet gates and production score/input/source bindings pass; scope v4x at 1/32 requested threads"
   },
   "admission_fix_evidence": {
     "claim": "Foreign process leaders counted once; user tasks deduplicated. Global CPU and gate thresholds unchanged.",
@@ -126,5 +128,11 @@
     "reason": "coordinator replaced research weights with frozen packed production model; none of these timings qualify production"
   },
   "raw_directory": "/mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
-  "collection_order": "full parity, serial fresh-process RSS pass, full paired timing grid; no concurrent collection jobs"
+  "collection_order": "full parity, serial fresh-process RSS pass, full paired timing grid; no concurrent collection jobs",
+  "served_model_sha256_by_revision": {
+    "3": "60b542dd2c488f349add60366eaf63cf9ede4ec83afa540f285c70b3b6d2e9f1",
+    "4": "6cfc11dc211bdf10559e70da5eb630146e918e1fa7a62886cbe2c2d99fad74a8",
+    "5": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400"
+  },
+  "rev5_served_bytes_equal_frozen_source": true
 }
