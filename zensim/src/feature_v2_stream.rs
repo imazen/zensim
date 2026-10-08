@@ -392,7 +392,14 @@ fn convert_side_y_and_downscale(
     n_new: usize,
     width: usize,
     revision: crate::feature_defs::FormulaRevision,
+    #[allow(unused_variables)] parallel: bool,
 ) {
+    #[cfg(feature = "threads")]
+    if parallel
+        && convert_side_y_and_downscale_parallel(source, planes, hi0, n_new, width, revision)
+    {
+        return;
+    }
     let [x, y, b] = planes;
     for row in (hi0..hi0 + n_new).step_by(2) {
         let rows = (hi0 + n_new - row).min(2);
@@ -424,6 +431,104 @@ fn convert_side_y_and_downscale(
     // The cursor participates in readiness/retirement; its pixels are never read.
     x[0].hi = hi0 + n_new;
     b[0].hi = hi0 + n_new;
+}
+
+/// Restore the producer's existing row-chunk concurrency without retaining
+/// full-resolution chroma. Each task runs the same two-row calls and owns
+/// disjoint Y/coarse-X/coarse-B output rows and two-row chroma scratch.
+#[cfg(feature = "threads")]
+fn convert_side_y_and_downscale_parallel(
+    source: &impl ImageSource,
+    planes: &mut [Vec<RollingPlane>; 3],
+    hi0: usize,
+    n_new: usize,
+    width: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) -> bool {
+    use rayon::prelude::*;
+    let chunks = n_new / CONVERT_CHUNK_ROWS;
+    if chunks < 2 {
+        return false;
+    }
+    let Some(scratch_len) = width.checked_mul(2) else {
+        return false;
+    };
+    let mut scratch = Vec::new();
+    let mut work = Vec::new();
+    // All fallible allocation precedes cursor/output mutation. Under memory
+    // pressure the unchanged serial path can use its existing two-row buffers.
+    if scratch.try_reserve_exact(chunks).is_err() || work.try_reserve_exact(chunks).is_err() {
+        return false;
+    }
+    for _ in 0..chunks {
+        let (mut x, mut b) = (Vec::new(), Vec::new());
+        if x.try_reserve_exact(scratch_len).is_err() || b.try_reserve_exact(scratch_len).is_err() {
+            return false;
+        }
+        x.resize(scratch_len, 0.0);
+        b.resize(scratch_len, 0.0);
+        scratch.push((x, b));
+    }
+    let [x, y, b] = planes;
+    let mut ys = y[0].append_rows(n_new);
+    let mut xs = x[1].append_rows(n_new / 2);
+    let mut bs = b[1].append_rows(n_new / 2);
+    let coarse_width = width / 2;
+    for (chunk, (x_scratch, b_scratch)) in scratch.into_iter().enumerate() {
+        // Keep a possible odd final row in the last task, including when
+        // only one row remains after a lattice boundary. No empty coarse
+        // slice is dropped by an iterator zip.
+        let offset = chunk * CONVERT_CHUNK_ROWS;
+        let rows = if chunk + 1 == chunks {
+            n_new - offset
+        } else {
+            CONVERT_CHUNK_ROWS
+        };
+        let (yc, y_tail) = ys.split_at_mut(rows * width);
+        let (xc, x_tail) = xs.split_at_mut((rows / 2) * coarse_width);
+        let (bc, b_tail) = bs.split_at_mut((rows / 2) * coarse_width);
+        work.push((hi0 + offset, yc, xc, bc, x_scratch, b_scratch));
+        (ys, xs, bs) = (y_tail, x_tail, b_tail);
+    }
+    work.into_par_iter()
+        .for_each(|(row0, ys, xs, bs, mut x, mut b)| {
+            let rows = ys.len() / width;
+            for dy in (0..rows).step_by(2) {
+                let count = (rows - dy).min(2);
+                let n = width * count;
+                let sub = SubsetView::new(source, row0 + dy, count);
+                crate::streaming::convert_source_to_xyb_into_slices(
+                    &sub,
+                    &mut x[..n],
+                    &mut ys[dy * width..dy * width + n],
+                    &mut b[..n],
+                    width,
+                    false,
+                    row0 + dy,
+                    revision,
+                );
+                if count == 2 {
+                    let out = (dy / 2) * coarse_width;
+                    crate::blur::downscale_2x_into(
+                        &x[..n],
+                        width,
+                        &mut xs[out..out + coarse_width],
+                        coarse_width,
+                        1,
+                    );
+                    crate::blur::downscale_2x_into(
+                        &b[..n],
+                        width,
+                        &mut bs[out..out + coarse_width],
+                        coarse_width,
+                        1,
+                    );
+                }
+            }
+        });
+    x[0].hi = hi0 + n_new;
+    b[0].hi = hi0 + n_new;
+    true
 }
 
 /// Ref-cached-feed twin of [`convert_side_scale0`]: copy the source side's
@@ -777,6 +882,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             let source = self.source;
             let distorted = self.distorted;
             let revision = self.revision;
+            let parallel = self.parallel;
             let ref_planes = self.ref_planes;
             let (head, tail) = self.planes.split_at_mut(1);
             let (sp, dp) = (&mut head[0], &mut tail[0]);
@@ -791,11 +897,12 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                         sp[ch][0].hi = hi0 + n_new;
                     }
                 } else {
-                    convert_side_y_and_downscale(source, sp, hi0, n_new, width, revision);
+                    convert_side_y_and_downscale(source, sp, hi0, n_new, width, revision, parallel);
                 }
             };
-            let mut convert_distorted =
-                || convert_side_y_and_downscale(distorted, dp, hi0, n_new, width, revision);
+            let mut convert_distorted = || {
+                convert_side_y_and_downscale(distorted, dp, hi0, n_new, width, revision, parallel)
+            };
             // Each side owns its two-row chroma scratch and rolling planes.
             // Keep the pointwise conversion/downscale calls intact; only their
             // schedule changes, as in the full scale-zero producer below.
@@ -1273,17 +1380,26 @@ mod tests {
         let _ = archmage::testing::for_each_token_permutation(
             archmage::testing::CompileTimePolicy::Warn,
             |_| {
-                for (w, h) in [(64, 64), (97, 63), (257, 289)] {
+                for (w, h) in [
+                    (64, 64),
+                    (97, 63),
+                    (64, 129),
+                    (97, 193),
+                    (257, 257),
+                    (257, 289),
+                ] {
                     let pixels = textured_image(w, h, 71);
                     let image = RgbSlice::new(&pixels, w, h);
                     let cached_planes = materialize(&image);
-                    for cached in [false, true] {
+                    for (cached, parallel) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
                         let feed = cached.then_some(cached_planes.as_slice());
                         let (mut pool_a, mut pool_b) = (Vec::new(), Vec::new());
                         let mut a = StripPlaneProducer::new_with_ref_feed(
                             &image,
                             &image,
-                            false,
+                            parallel,
                             &mut pool_a,
                             FrontEnd::Sdr,
                             feed,
@@ -1294,7 +1410,7 @@ mod tests {
                         let mut b = StripPlaneProducer::new_with_ref_feed(
                             &image,
                             &image,
-                            false,
+                            parallel,
                             &mut pool_b,
                             FrontEnd::Sdr,
                             feed,
