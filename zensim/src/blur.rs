@@ -6808,74 +6808,91 @@ fn fused_blur_h_local11(
     radius: usize,
     err: bool,
 ) {
-    let _ = radius;
+    debug_assert_eq!(radius, 5);
     let inv = f32x8::splat(token, 1.0 / 11.0);
     for y in 0..height {
         let row = y * width;
-        let mut x = 0;
-        while x < width {
-            if x + 8 <= width {
-                let mut a = [f32x8::zero(token); 11];
-                let mut b = a;
-                let mut q = a;
-                let mut p = a;
-                for k in 0..11 {
-                    if x >= 5 && x + 8 + 5 <= width {
-                        let i = row + x + k - 5;
-                        a[k] = f32x8::load(token, src[i..i + 8].try_into().unwrap());
-                        b[k] = f32x8::load(token, dst[i..i + 8].try_into().unwrap());
-                    } else {
-                        let indices: [usize; 8] = std::array::from_fn(|lane| {
-                            row + crate::featcanon::tap_mirror((x + lane + k) as isize - 5, width)
-                        });
-                        a[k] = f32x8::from_array(token, indices.map(|i| src[i]));
-                        b[k] = f32x8::from_array(token, indices.map(|i| dst[i]));
-                    }
-                    q[k] = a[k].mul_add(a[k], b[k] * b[k]);
-                    p[k] = if err {
-                        let e = a[k] - b[k];
-                        e * e
-                    } else {
-                        a[k] * b[k]
-                    };
+        for tile in (0..width).step_by(128) {
+            let count = (width - tile).min(128);
+            // Reuse identical fused leaves across overlapping windows. The
+            // cache includes the ten halo leaves and vector padding; output
+            // sums still execute the frozen per-pixel tree.
+            let mut squares = [0.0f32; 144];
+            let mut products = squares;
+            let load = |plane: &[f32], offset: usize| {
+                if tile + offset >= 5 && tile + offset + 8 <= width + 5 {
+                    let i = row + tile + offset - 5;
+                    f32x8::load(token, plane[i..i + 8].try_into().unwrap())
+                } else {
+                    f32x8::from_array(
+                        token,
+                        std::array::from_fn(|lane| {
+                            plane[row
+                                + crate::featcanon::tap_mirror(
+                                    (tile + offset + lane) as isize - 5,
+                                    width,
+                                )]
+                        }),
+                    )
                 }
-                let tree = |t: [f32x8; 11]| {
-                    ((((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
-                        + (t[8] + t[9])
-                        + t[10])
-                        * inv
+            };
+            for offset in (0..(count + 10).div_ceil(8) * 8).step_by(8) {
+                let a = load(src, offset);
+                let b = load(dst, offset);
+                a.mul_add(a, b * b)
+                    .store((&mut squares[offset..offset + 8]).try_into().unwrap());
+                let p = if err {
+                    let e = a - b;
+                    e * e
+                } else {
+                    a * b
                 };
-                tree(a).store((&mut out_mu1[row + x..row + x + 8]).try_into().unwrap());
-                tree(b).store((&mut out_mu2[row + x..row + x + 8]).try_into().unwrap());
-                tree(q).store(
-                    (&mut out_sigma_sq[row + x..row + x + 8])
-                        .try_into()
-                        .unwrap(),
-                );
-                tree(p).store((&mut out_sigma12[row + x..row + x + 8]).try_into().unwrap());
-                x += 8;
-            } else {
-                let mut a = [0.0; 11];
-                let mut b = a;
-                let mut q = a;
-                let mut p = a;
-                for k in 0..11 {
-                    let i = row + crate::featcanon::tap_mirror(x as isize + k as isize - 5, width);
-                    a[k] = src[i];
-                    b[k] = dst[i];
-                    q[k] = a[k].mul_add(a[k], b[k] * b[k]);
-                    p[k] = if err {
-                        let e = a[k] - b[k];
-                        e * e
-                    } else {
-                        a[k] * b[k]
-                    };
-                }
-                out_mu1[row + x] = local_sum_taps(&a) * (1.0 / 11.0);
-                out_mu2[row + x] = local_sum_taps(&b) * (1.0 / 11.0);
-                out_sigma_sq[row + x] = local_sum_taps(&q) * (1.0 / 11.0);
-                out_sigma12[row + x] = local_sum_taps(&p) * (1.0 / 11.0);
-                x += 1;
+                p.store((&mut products[offset..offset + 8]).try_into().unwrap());
+            }
+            let mut offset = 0;
+            while offset + 8 <= count {
+                let tap = |k: usize| {
+                    (
+                        load(src, offset + k),
+                        load(dst, offset + k),
+                        f32x8::load(
+                            token,
+                            squares[offset + k..offset + k + 8].try_into().unwrap(),
+                        ),
+                        f32x8::load(
+                            token,
+                            products[offset + k..offset + k + 8].try_into().unwrap(),
+                        ),
+                    )
+                };
+                let add = |a: (f32x8, f32x8, f32x8, f32x8), b: (f32x8, f32x8, f32x8, f32x8)| {
+                    (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3)
+                };
+                let pair = |k| add(tap(k), tap(k + 1));
+                let s01 = add(pair(0), pair(2));
+                let s45 = add(pair(4), pair(6));
+                let sum = add(add(add(s01, s45), pair(8)), tap(10));
+                let x = row + tile + offset;
+                (sum.0 * inv).store((&mut out_mu1[x..x + 8]).try_into().unwrap());
+                (sum.1 * inv).store((&mut out_mu2[x..x + 8]).try_into().unwrap());
+                (sum.2 * inv).store((&mut out_sigma_sq[x..x + 8]).try_into().unwrap());
+                (sum.3 * inv).store((&mut out_sigma12[x..x + 8]).try_into().unwrap());
+                offset += 8;
+            }
+            for offset in offset..count {
+                let a: [f32; 11] = std::array::from_fn(|k| {
+                    src[row + crate::featcanon::tap_mirror((tile + offset + k) as isize - 5, width)]
+                });
+                let b: [f32; 11] = std::array::from_fn(|k| {
+                    dst[row + crate::featcanon::tap_mirror((tile + offset + k) as isize - 5, width)]
+                });
+                let q: [f32; 11] = std::array::from_fn(|k| squares[offset + k]);
+                let p: [f32; 11] = std::array::from_fn(|k| products[offset + k]);
+                let x = row + tile + offset;
+                out_mu1[x] = local_sum_taps(&a) * (1.0 / 11.0);
+                out_mu2[x] = local_sum_taps(&b) * (1.0 / 11.0);
+                out_sigma_sq[x] = local_sum_taps(&q) * (1.0 / 11.0);
+                out_sigma12[x] = local_sum_taps(&p) * (1.0 / 11.0);
             }
         }
     }
@@ -10703,37 +10720,62 @@ fn fused_blur_h_local11_wide(
     radius: usize,
     err: bool,
 ) {
-    let _ = radius;
+    debug_assert_eq!(radius, 5);
     let inv = f32x16::splat(token, 1.0 / 11.0);
     for y in 0..height {
         let row = y * width;
-        let mut x = 0;
-        while x < width {
-            if x + 16 <= width {
+        for tile in (0..width).step_by(128) {
+            let count = (width - tile).min(128);
+            // Reuse identical fused leaves across overlapping windows. The
+            // cache includes the ten halo leaves and vector padding; output
+            // sums still execute the frozen per-pixel tree.
+            let mut squares = [0.0f32; 144];
+            let mut products = squares;
+            let load = |plane: &[f32], offset: usize| {
+                if tile + offset >= 5 && tile + offset + 16 <= width + 5 {
+                    let i = row + tile + offset - 5;
+                    f32x16::load(token, plane[i..i + 16].try_into().unwrap())
+                } else {
+                    f32x16::from_array(
+                        token,
+                        std::array::from_fn(|lane| {
+                            plane[row
+                                + crate::featcanon::tap_mirror(
+                                    (tile + offset + lane) as isize - 5,
+                                    width,
+                                )]
+                        }),
+                    )
+                }
+            };
+            for offset in (0..(count + 10).div_ceil(16) * 16).step_by(16) {
+                let a = load(src, offset);
+                let b = load(dst, offset);
+                a.mul_add(a, b * b)
+                    .store((&mut squares[offset..offset + 16]).try_into().unwrap());
+                let p = if err {
+                    let e = a - b;
+                    e * e
+                } else {
+                    a * b
+                };
+                p.store((&mut products[offset..offset + 16]).try_into().unwrap());
+            }
+            let mut offset = 0;
+            while offset + 16 <= count {
                 let tap = |k: usize| {
-                    let (a, b) = if x >= 5 && x + 16 + 5 <= width {
-                        let i = row + x + k - 5;
-                        (
-                            f32x16::load(token, src[i..i + 16].try_into().unwrap()),
-                            f32x16::load(token, dst[i..i + 16].try_into().unwrap()),
-                        )
-                    } else {
-                        let indices: [usize; 16] = std::array::from_fn(|lane| {
-                            row + crate::featcanon::tap_mirror((x + lane + k) as isize - 5, width)
-                        });
-                        (
-                            f32x16::from_array(token, indices.map(|i| src[i])),
-                            f32x16::from_array(token, indices.map(|i| dst[i])),
-                        )
-                    };
-                    let q = a.mul_add(a, b * b);
-                    let p = if err {
-                        let e = a - b;
-                        e * e
-                    } else {
-                        a * b
-                    };
-                    (a, b, q, p)
+                    (
+                        load(src, offset + k),
+                        load(dst, offset + k),
+                        f32x16::load(
+                            token,
+                            squares[offset + k..offset + k + 16].try_into().unwrap(),
+                        ),
+                        f32x16::load(
+                            token,
+                            products[offset + k..offset + k + 16].try_into().unwrap(),
+                        ),
+                    )
                 };
                 let add = |a: (f32x16, f32x16, f32x16, f32x16),
                            b: (f32x16, f32x16, f32x16, f32x16)| {
@@ -10743,41 +10785,27 @@ fn fused_blur_h_local11_wide(
                 let s01 = add(pair(0), pair(2));
                 let s45 = add(pair(4), pair(6));
                 let sum = add(add(add(s01, s45), pair(8)), tap(10));
-                (sum.0 * inv).store((&mut out_mu1[row + x..row + x + 16]).try_into().unwrap());
-                (sum.1 * inv).store((&mut out_mu2[row + x..row + x + 16]).try_into().unwrap());
-                (sum.2 * inv).store(
-                    (&mut out_sigma_sq[row + x..row + x + 16])
-                        .try_into()
-                        .unwrap(),
-                );
-                (sum.3 * inv).store(
-                    (&mut out_sigma12[row + x..row + x + 16])
-                        .try_into()
-                        .unwrap(),
-                );
-                x += 16;
-            } else {
-                let mut a = [0.0; 11];
-                let mut b = a;
-                let mut q = a;
-                let mut p = a;
-                for k in 0..11 {
-                    let i = row + crate::featcanon::tap_mirror(x as isize + k as isize - 5, width);
-                    a[k] = src[i];
-                    b[k] = dst[i];
-                    q[k] = a[k].mul_add(a[k], b[k] * b[k]);
-                    p[k] = if err {
-                        let e = a[k] - b[k];
-                        e * e
-                    } else {
-                        a[k] * b[k]
-                    };
-                }
-                out_mu1[row + x] = local_sum_taps(&a) * (1.0 / 11.0);
-                out_mu2[row + x] = local_sum_taps(&b) * (1.0 / 11.0);
-                out_sigma_sq[row + x] = local_sum_taps(&q) * (1.0 / 11.0);
-                out_sigma12[row + x] = local_sum_taps(&p) * (1.0 / 11.0);
-                x += 1;
+                let x = row + tile + offset;
+                (sum.0 * inv).store((&mut out_mu1[x..x + 16]).try_into().unwrap());
+                (sum.1 * inv).store((&mut out_mu2[x..x + 16]).try_into().unwrap());
+                (sum.2 * inv).store((&mut out_sigma_sq[x..x + 16]).try_into().unwrap());
+                (sum.3 * inv).store((&mut out_sigma12[x..x + 16]).try_into().unwrap());
+                offset += 16;
+            }
+            for offset in offset..count {
+                let a: [f32; 11] = std::array::from_fn(|k| {
+                    src[row + crate::featcanon::tap_mirror((tile + offset + k) as isize - 5, width)]
+                });
+                let b: [f32; 11] = std::array::from_fn(|k| {
+                    dst[row + crate::featcanon::tap_mirror((tile + offset + k) as isize - 5, width)]
+                });
+                let q: [f32; 11] = std::array::from_fn(|k| squares[offset + k]);
+                let p: [f32; 11] = std::array::from_fn(|k| products[offset + k]);
+                let x = row + tile + offset;
+                out_mu1[x] = local_sum_taps(&a) * (1.0 / 11.0);
+                out_mu2[x] = local_sum_taps(&b) * (1.0 / 11.0);
+                out_sigma_sq[x] = local_sum_taps(&q) * (1.0 / 11.0);
+                out_sigma12[x] = local_sum_taps(&p) * (1.0 / 11.0);
             }
         }
     }
