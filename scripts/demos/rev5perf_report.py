@@ -47,7 +47,12 @@ def main():
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--parity-only', action='store_true')
     args = ap.parse_args()
-    result = dict(parity=compare_bits(args.before, args.after), cells={})
+    builds = {label: json.loads((root / 'provenance' / 'instrument.artifact.json').read_text())
+              for label, root in [('before', args.before), ('after', args.after)]}
+    assert builds['before']['dependencies'] == builds['after']['dependencies'], 'build dependency inventory changed'
+    for label, root in [('before', args.before), ('after', args.after)]:
+        assert sha(root / 'provenance' / 'instrument') == builds[label]['binary_sha256'], 'frozen executable changed'
+    result = dict(parity=compare_bits(args.before, args.after), builds=builds, cells={})
     if not args.parity_only:
         before = {p.parent.name: p.parent for p in (args.before / 'timing').glob('*/COMPLETE.json')}
         after = {p.parent.name: p.parent for p in (args.after / 'timing').glob('*/COMPLETE.json')}
@@ -59,6 +64,7 @@ def main():
                 assert complete['status'] == 'PASS' and complete['rounds'] == 32
                 assert complete['zenbench_gate_clean'] and complete['paired_alignment_verified']
                 header = json.loads((root / 'header.json').read_text())
+                assert header['binary_sha256'] == builds[label]['binary_sha256']
                 assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
                 assert not header.get('gate_trace', False)
                 assert header['model_source_sha256'] == speedq.SOURCE_SHA
