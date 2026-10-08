@@ -70,7 +70,7 @@
     192
   ],
   "timing_segments": [
-    0,
+    1,
     192
   ],
   "rss_measurements": [
@@ -91,13 +91,13 @@
     "queued_full_collection": "TMPDIR=/home/lilith/tmp SPEEDQ=1 BIN_SPEEDQ=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c SPEEDQ_ANALYZER=/mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/paired-rounds-analyzer env -u ZENBENCH_GATE_TRACE bash scripts/demos/speed_matrix_run.sh /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c",
     "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-rss --binary /mnt/v/output/zensim/speedq-2026-10-07/raw/provenance/production-instrument-f803b74c --dest /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/rss --parity /mnt/v/output/zensim/speedq-2026-10-07/raw/production-f803b74c/full-parity/PARITY_STRICT_PASS.json"
   },
-  "mirror_verification": "raw/provenance/production-mirror-verification.json: frozen production source model, production binary, and source manifest match Tower; final collection mirror pending",
+  "mirror_verification": "provenance/production-mirror-verification.json verifies frozen model, instrument, source manifest; provenance/production-rss-mirror-verification.json verifies three randomly chosen RSS records; all 112 RSS records/logs and full parity mirrored, final timing mirror pending",
   "validation": {
     "python_tests": "14 passed, including refusal of an identical-score receipt from the wrong source model",
     "bench_build_and_clippy": "production build rc0: 15s, peak-RSS 0.68GiB, min available 46797MiB, peak load 1.24; clippy rc0: 0s, 0.17GiB, 47346MiB, load 1.22",
     "zenbench": "82ff70a3: 140 lib tests and 25 paired statistics tests passed; all-target clippy rc0. All-platform CI retry fully green at https://github.com/imazen/zenbench/actions/runs/37696531423 (initial Linux ARM64 post-job cache failure had no failed test step).",
     "parity": "f803b74c production model: 576/576 cells; 384 strict Rev4/Rev5 score and all 420 consumed-feature bits pass; 48 Rev3 scalar tolerance failures recorded. run-heavy rc0, 76s, peak-RSS 0.26GiB, min available 46869MiB, peak load 2.37.",
-    "admitted_timing": "production collection in progress; older research timings excluded",
+    "admitted_timing": "Partial admitted production coverage only; all 32 round gates clean in each stored segment; remaining timing grid queued with unchanged gates",
     "rss": "112/112 actual /usr/bin/time -v max-RSS records; unchanged pre-segment quiet gates and production score/input/source bindings pass; scope v4x at 1/32 requested threads"
   },
   "admission_fix_evidence": {
