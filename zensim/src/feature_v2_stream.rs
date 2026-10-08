@@ -774,33 +774,43 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         let __t_conv = crate::fold_timing::start();
         if self.omit_scale0_xb {
             let width = self.scales[0].plane_w;
-            if let Some(rp) = self.ref_planes {
-                // Scale-zero chroma is unread. Feed the cached coarse planes
-                // directly rather than copying full-resolution X/B first.
-                self.planes[0][1][0]
-                    .append_rows(n_new)
-                    .copy_from_slice(&rp[0].0[1][hi0 * width..(hi0 + n_new) * width]);
-                for ch in [0, 2] {
-                    self.planes[0][ch][0].hi = hi0 + n_new;
+            let source = self.source;
+            let distorted = self.distorted;
+            let revision = self.revision;
+            let ref_planes = self.ref_planes;
+            let (head, tail) = self.planes.split_at_mut(1);
+            let (sp, dp) = (&mut head[0], &mut tail[0]);
+            let mut convert_source = || {
+                if let Some(rp) = ref_planes {
+                    // Scale-zero chroma is unread. Feed the cached coarse planes
+                    // directly rather than copying full-resolution X/B first.
+                    sp[1][0]
+                        .append_rows(n_new)
+                        .copy_from_slice(&rp[0].0[1][hi0 * width..(hi0 + n_new) * width]);
+                    for ch in [0, 2] {
+                        sp[ch][0].hi = hi0 + n_new;
+                    }
+                } else {
+                    convert_side_y_and_downscale(source, sp, hi0, n_new, width, revision);
                 }
+            };
+            let mut convert_distorted =
+                || convert_side_y_and_downscale(distorted, dp, hi0, n_new, width, revision);
+            // Each side owns its two-row chroma scratch and rolling planes.
+            // Keep the pointwise conversion/downscale calls intact; only their
+            // schedule changes, as in the full scale-zero producer below.
+            #[cfg(feature = "threads")]
+            if self.parallel {
+                rayon::join(convert_source, convert_distorted);
             } else {
-                convert_side_y_and_downscale(
-                    self.source,
-                    &mut self.planes[0],
-                    hi0,
-                    n_new,
-                    width,
-                    self.revision,
-                );
+                convert_source();
+                convert_distorted();
             }
-            convert_side_y_and_downscale(
-                self.distorted,
-                &mut self.planes[1],
-                hi0,
-                n_new,
-                width,
-                self.revision,
-            );
+            #[cfg(not(feature = "threads"))]
+            {
+                convert_source();
+                convert_distorted();
+            }
         } else {
             let front_end = self.front_end;
             #[cfg(feature = "threads")]
