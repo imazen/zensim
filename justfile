@@ -783,3 +783,9 @@ v40-inventory-admission binary dest:
 
 v40-postfit-artifacts-tests:
     PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_v40_postfit_artifacts
+
+v40-scoring-rehearsal bundle image dest:
+    python3 scripts/tests/v40_scoring_rehearsal.py --bundle {{bundle}} --image {{image}} --dest {{dest}}
+
+v40-r3-stage previous bundle bindir producer quiet_start quiet_override authority:
+    python3 scripts/tests/v40_r3_stage.py --previous {{previous}} --bundle {{bundle}} --bin-dir {{bindir}} --producer {{producer}} --quiet-start {{quiet_start}} --quiet-override {{quiet_override}} --release-authority {{authority}}

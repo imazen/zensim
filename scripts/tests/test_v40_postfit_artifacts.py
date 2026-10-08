@@ -1,7 +1,7 @@
 """Failure injections through the real controller and artifact boundary."""
+
 import copy
 import contextlib
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -33,46 +33,101 @@ class Artifacts(unittest.TestCase):
             pins = fixture.freeze(b, grids)
             stdout = b / "stdout.json"
             fixture.write(stdout, pins)
+
             def complete(*args, only_control=False, **kwargs):
                 return fixture.complete_fixture(grids, args[1], only_control)
+
             with patch.object(owner, "complete", complete):
-                self.assertEqual(owner.validate_artifacts(b, "e29", b, b, b, b, b / "V40_CONTROL_PINS.json", stdout, freeze_control=True)["cells"], 40)
+                self.assertEqual(
+                    owner.validate_artifacts(
+                        b,
+                        "e29",
+                        b,
+                        b,
+                        b,
+                        b,
+                        b / "V40_CONTROL_PINS.json",
+                        stdout,
+                        freeze_control=True,
+                    )["cells"],
+                    40,
+                )
                 for name in ("V40_CONTROL_PINS.json", "E29_CONTROL_PINS.json"):
                     path = b / name
                     original = path.read_bytes()
                     for bad in ({}, {**pins, "cells": {}}):
                         fixture.write(path, bad)
                         with self.assertRaises(ValueError):
-                            owner.validate_artifacts(b, "e29", b, b, b, b, b / "V40_CONTROL_PINS.json", stdout, freeze_control=True)
+                            owner.validate_artifacts(
+                                b,
+                                "e29",
+                                b,
+                                b,
+                                b,
+                                b,
+                                b / "V40_CONTROL_PINS.json",
+                                stdout,
+                                freeze_control=True,
+                            )
                     path.write_bytes(original)
                 for study in fixture.ARMS:
                     out = b / study
                     report = fixture.assessment(b, study, grids, out)
                     fixture.write(stdout, report["decisions"])
-                    verify = lambda: owner.validate_artifacts(b, study, b, b, b, out, b / "V40_CONTROL_PINS.json", stdout, root=root)
+
+                    def verify():
+                        return owner.validate_artifacts(
+                            b,
+                            study,
+                            b,
+                            b,
+                            b,
+                            out,
+                            b / "V40_CONTROL_PINS.json",
+                            stdout,
+                            root=root,
+                        )
+
                     self.assertEqual(verify()["status"], "PASS")
-                    for key, value in (("schema", "wrong"), ("decisions", {}), ("program_sha256", "0" * 64), ("control_pins_sha256", "0" * 64), ("cells", {}), ("observation_counts", {}), ("artifacts", {})):
+                    for key, value in (
+                        ("schema", "wrong"),
+                        ("decisions", {}),
+                        ("program_sha256", "0" * 64),
+                        ("control_pins_sha256", "0" * 64),
+                        ("cells", {}),
+                        ("observation_counts", {}),
+                        ("artifacts", {}),
+                    ):
                         changed = {**report, key: value}
                         fixture.write(out / "decision.json", changed)
-                        with self.assertRaises(ValueError): verify()
+                        with self.assertRaises(ValueError):
+                            verify()
                     changed = copy.deepcopy(report)
                     changed["panels"]["control"].pop("kadid_s0")
                     fixture.write(out / "decision.json", changed)
-                    with self.assertRaises(ValueError): verify()
+                    with self.assertRaises(ValueError):
+                        verify()
                     changed = copy.deepcopy(report)
                     changed["panels"]["control"]["kadid_s0"]["signed"] = None
                     fixture.write(out / "decision.json", changed)
-                    with self.assertRaises((ValueError, TypeError)): verify()
+                    with self.assertRaises((ValueError, TypeError)):
+                        verify()
                     fixture.write(out / "decision.json", report)
-                    for name in ("control/kadid_s0/pred.tsv", "control/kadid_s0/result.json", *( ["e29_sdr_decision.json"] if study == "e29" else [])):
+                    for name in (
+                        "control/kadid_s0/pred.tsv",
+                        "control/kadid_s0/result.json",
+                        *(["e29_sdr_decision.json"] if study == "e29" else []),
+                    ):
                         path = out / name
                         original = path.read_bytes()
                         path.unlink()
-                        with self.assertRaises((ValueError, OSError)): verify()
+                        with self.assertRaises((ValueError, OSError)):
+                            verify()
                         path.write_bytes(original)
                     for value in ("", "{}", '{"bad":NaN}'):
                         stdout.write_text(value)
-                        with self.assertRaises(ValueError): verify()
+                        with self.assertRaises(ValueError):
+                            verify()
                     fixture.write(stdout, report["decisions"])
                     self.assertEqual(verify()["status"], "PASS")
 
@@ -126,21 +181,61 @@ else:
         else: value2['panels']['control']['kadid_s0']['signed'] = float('nan')
         path.write_text(json.dumps(value2))
     print(json.dumps(value))
-""".replace('PATHS', repr([str(REPO / 'scripts'), str(REPO / 'scripts/rev4_featpot'), str(REPO / 'scripts/tests')]))
-            for study in ('control', 'e29', 'e31', 'e32'):
-                for mode in ('fail', 'empty', 'empty-object', 'missing-artifact', 'incomplete', 'nonfinite', 'valid'):
-                    b = base / f'{study}-{mode}'
+""".replace(
+                "PATHS",
+                repr(
+                    [
+                        str(REPO / "scripts"),
+                        str(REPO / "scripts/rev4_featpot"),
+                        str(REPO / "scripts/tests"),
+                    ]
+                ),
+            )
+            for study in ("control", "e29", "e31", "e32"):
+                for mode in (
+                    "fail",
+                    "empty",
+                    "empty-object",
+                    "missing-artifact",
+                    "incomplete",
+                    "nonfinite",
+                    "valid",
+                ):
+                    b = base / f"{study}-{mode}"
                     grids, root = fixture.fixture(b)
-                    (b / 'v2e29').symlink_to(root, target_is_directory=True)
-                    for alias in ('v2d1', 'v2e32'): (b / alias).symlink_to(root, target_is_directory=True)
-                    if study != 'control': fixture.freeze(b, grids)
-                    (b / 'score.py').write_text(wrapper)
-                    env = {**os.environ, 'BASH_ENV': str(env_script), 'V40_SYNTHETIC_MODE': mode, 'TMPDIR': str(base)}
-                    with (b / 'controller.log').open('w') as log:
-                        result = subprocess.run(['bash', str(METRICS / 'scripts/jobsys/v40_postfit.sh'), str(b), study], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=30)
-                    text = (b / 'controller.log').read_text()
-                    success = 'SDR RESULT:' in text or 'CONTROL FROZEN:' in text
-                    self.assertEqual((result.returncode == 0, success), (mode == 'valid', mode == 'valid'), (study, mode, text))
+                    (b / "v2e29").symlink_to(root, target_is_directory=True)
+                    for alias in ("v2d1", "v2e32"):
+                        (b / alias).symlink_to(root, target_is_directory=True)
+                    if study != "control":
+                        fixture.freeze(b, grids)
+                    (b / "score.py").write_text(wrapper)
+                    env = {
+                        **os.environ,
+                        "BASH_ENV": str(env_script),
+                        "V40_SYNTHETIC_MODE": mode,
+                        "TMPDIR": str(base),
+                    }
+                    with (b / "controller.log").open("w") as log:
+                        result = subprocess.run(
+                            [
+                                "bash",
+                                str(METRICS / "scripts/jobsys/v40_postfit.sh"),
+                                str(b),
+                                study,
+                            ],
+                            env=env,
+                            stdout=log,
+                            stderr=subprocess.STDOUT,
+                            timeout=30,
+                        )
+                    text = (b / "controller.log").read_text()
+                    success = "SDR RESULT:" in text or "CONTROL FROZEN:" in text
+                    self.assertEqual(
+                        (result.returncode == 0, success),
+                        (mode == "valid", mode == "valid"),
+                        (study, mode, text),
+                    )
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == "__main__":
+    unittest.main()

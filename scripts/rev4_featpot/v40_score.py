@@ -106,7 +106,10 @@ def complete(bundle, study, results, control, tools, *, only_control=False):
     program = bundle / "program.tar.gz"
     inspector = bundle / "bin/inspect_qualified_checkpoint"
     package = json.loads((bundle / "PACKAGE_PINNED.json").read_text())
-    if sha(program) != package["program_sha"] or sha(inspector) != package["inspector_sha"]:
+    if (
+        sha(program) != package["program_sha"]
+        or sha(inspector) != package["inspector_sha"]
+    ):
         raise ValueError("INCOMPLETE: frozen assessment program/inspector changed")
     rows = {}
     arms = {"e29": ("hb4", "hc4"), "e31": ("uh4",), "e32": ("palette",)}[study]
@@ -213,58 +216,103 @@ def _control_record(bundle, cells):
 
 def _json(path):
     from v40_panels import bound_bytes
+
     def nonfinite(value):
         raise ValueError(f"nonfinite JSON: {value}")
+
     return json.loads(bound_bytes(path), parse_constant=nonfinite)
 
 
-def validate_artifacts(bundle, study, results, control, tools, out, pins, stdout, *, freeze_control=False, root=None):
+def validate_artifacts(
+    bundle,
+    study,
+    results,
+    control,
+    tools,
+    out,
+    pins,
+    stdout,
+    *,
+    freeze_control=False,
+    root=None,
+):
     """Controller boundary: canonical full-budget cells and fresh exact outputs.
 
     This does not score or open targets. It verifies all expected panel products
     and recomputes the registered reductions from their finite summaries.
     """
-    cells = complete(bundle, study, results, control, tools, only_control=freeze_control)
+    cells = complete(
+        bundle, study, results, control, tools, only_control=freeze_control
+    )
     expected = _control_record(bundle, {"control": cells["control"]})
     if _json(pins) != expected:
         raise ValueError("INCOMPLETE: exact forty-cell control freeze required")
     if freeze_control:
         compatible = {**expected, "study": "E29", "control_choice": "fresh-matched"}
-        if _json(pins.with_name("E29_CONTROL_PINS.json")) != compatible or _json(stdout) != expected:
-            raise ValueError("INCOMPLETE: missing/empty or inconsistent control outputs")
+        if (
+            _json(pins.with_name("E29_CONTROL_PINS.json")) != compatible
+            or _json(stdout) != expected
+        ):
+            raise ValueError(
+                "INCOMPLETE: missing/empty or inconsistent control outputs"
+            )
         return dict(status="PASS", study="control", cells=40)
     report = _json(out / "decision.json")
     arms = set(cells) - {"control"}
-    if (report.get("schema") != f"{study}-v40-sdr-assessment-v1"
-            or report.get("program_sha256") != sha(bundle / "program.tar.gz")
-            or report.get("control_pins_sha256") != sha(pins)
-            or report.get("cells") != _cell_pins(cells)
-            or set(report.get("decisions", {})) != arms
-            or set(report.get("panels", {})) != set(cells)
-            or _json(stdout) != report["decisions"]):
-        raise ValueError("INCOMPLETE: assessment schema, arms, cells, pins or scorer output differs")
+    if (
+        report.get("schema") != f"{study}-v40-sdr-assessment-v1"
+        or report.get("program_sha256") != sha(bundle / "program.tar.gz")
+        or report.get("control_pins_sha256") != sha(pins)
+        or report.get("cells") != _cell_pins(cells)
+        or set(report.get("decisions", {})) != arms
+        or set(report.get("panels", {})) != set(cells)
+        or _json(stdout) != report["decisions"]
+    ):
+        raise ValueError(
+            "INCOMPLETE: assessment schema, arms, cells, pins or scorer output differs"
+        )
     expected_keys = {f"{f}_s{s}" for f in PRODUCTION_SOURCES for s in range(10)}
     counts = report.get("observation_counts", {})
-    if set(counts) != set(PRODUCTION_SOURCES) or any(type(n) is not int or n < 4 for n in counts.values()):
+    if set(counts) != set(PRODUCTION_SOURCES) or any(
+        type(n) is not int or n < 4 for n in counts.values()
+    ):
         raise ValueError("INCOMPLETE: assessment observation counts required")
     # Prepared roots intentionally link to frozen source roots. Check both
     # ancestries, resolve that root once, then use no-follow handles below it.
     from lib.assessment_identity import safe_path
-    receipt = _json(safe_path(root).resolve() / "wide/main/real/receipt.json") if root is not None else {}
-    if counts != {f: receipt.get("legs", {}).get(f, {}).get("full", {}).get("rows") for f in PRODUCTION_SOURCES}:
-        raise ValueError("INCOMPLETE: observation counts differ from admitted source receipt")
+
+    receipt = (
+        _json(safe_path(root).resolve() / "wide/main/real/receipt.json")
+        if root is not None
+        else {}
+    )
+    if counts != {
+        f: receipt.get("legs", {}).get(f, {}).get("full", {}).get("rows")
+        for f in PRODUCTION_SOURCES
+    }:
+        raise ValueError(
+            "INCOMPLETE: observation counts differ from admitted source receipt"
+        )
     artifacts = report.get("artifacts", {})
-    actual = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()} - {"decision.json"}
+    actual = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()} - {
+        "decision.json"
+    }
     if set(artifacts) != actual or not artifacts:
         raise ValueError("INCOMPLETE: complete assessment artifact inventory required")
     from v40_panels import bound_bytes
     import hashlib
     import io
+
     for rel, pin in artifacts.items():
         path = Path(rel)
-        if path.is_absolute() or ".." in path.parts or hashlib.sha256(bound_bytes(out / path)).hexdigest() != pin:
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or hashlib.sha256(bound_bytes(out / path)).hexdigest() != pin
+        ):
             raise ValueError("INCOMPLETE: assessment artifact changed")
     import pandas as pd
+
     for label, panel in report["panels"].items():
         if set(panel) != expected_keys:
             raise ValueError("INCOMPLETE: exact forty-cell panel grid required")
@@ -275,42 +323,84 @@ def validate_artifacts(bundle, study, results, control, tools, out, pins, stdout
                 fields = {"signed", "w1_ref_p10", "w3_z_rmse", "w3_or", "w4_neg_share"}
                 if fold in ("kadid", "tid2013"):
                     fields |= {"w2_type_min", "w2_type_worst3"}
-                if not fields <= summary.keys() or not np.isfinite([summary[k] for k in fields]).all():
-                    raise ValueError("INCOMPLETE: finite required panel metrics missing")
+                if (
+                    not fields <= summary.keys()
+                    or not np.isfinite([summary[k] for k in fields]).all()
+                ):
+                    raise ValueError(
+                        "INCOMPLETE: finite required panel metrics missing"
+                    )
                 if "signed_types" in summary:
-                    if not summary["signed_types"] or not np.isfinite(list(summary["signed_types"].values())).all():
-                        raise ValueError("INCOMPLETE: finite distortion-type metrics required")
+                    if (
+                        not summary["signed_types"]
+                        or not np.isfinite(list(summary["signed_types"].values())).all()
+                    ):
+                        raise ValueError(
+                            "INCOMPLETE: finite distortion-type metrics required"
+                        )
                 dest = out / label / key
                 for name in ("result.json", "pred.tsv"):
                     if str((dest / name).relative_to(out)) not in artifacts:
-                        raise ValueError("INCOMPLETE: required prediction/result artifact missing")
+                        raise ValueError(
+                            "INCOMPLETE: required prediction/result artifact missing"
+                        )
                 product = _json(dest / "result.json")
                 prediction = np.asarray(product.get("prediction"), dtype=np.float64)
-                if prediction.shape != (counts[fold],) or not np.isfinite(prediction).all():
-                    raise ValueError("INCOMPLETE: prediction count/finite identity differs")
+                if (
+                    prediction.shape != (counts[fold],)
+                    or not np.isfinite(prediction).all()
+                ):
+                    raise ValueError(
+                        "INCOMPLETE: prediction count/finite identity differs"
+                    )
                 metric = product.get("score", {})
-                if not all(k in metric and np.isfinite(metric[k]) for k in ("srocc_signed", "z_rmse", "or")):
+                if not all(
+                    k in metric and np.isfinite(metric[k])
+                    for k in ("srocc_signed", "z_rmse", "or")
+                ):
                     raise ValueError("INCOMPLETE: finite prediction panel required")
-                if (summary["signed"] != metric["srocc_signed"]
-                        or summary["w3_z_rmse"] != metric["z_rmse"]
-                        or summary["w3_or"] != metric["or"]
-                        or summary["w4_neg_share"] != float((prediction < 0).mean())):
-                    raise ValueError("INCOMPLETE: panel summary differs from prediction product")
+                if (
+                    summary["signed"] != metric["srocc_signed"]
+                    or summary["w3_z_rmse"] != metric["z_rmse"]
+                    or summary["w3_or"] != metric["or"]
+                    or summary["w4_neg_share"] != float((prediction < 0).mean())
+                ):
+                    raise ValueError(
+                        "INCOMPLETE: panel summary differs from prediction product"
+                    )
                 if fold in ("kadid", "tid2013"):
                     tail = _e29_signed_w2(list(summary["signed_types"].values()))
                     if any(tail[k] != summary[k] for k in tail):
                         raise ValueError("INCOMPLETE: signed distortion tail differs")
-                frame = pd.read_csv(io.BytesIO(bound_bytes(dest / "pred.tsv")), sep="\t")
-                if (frame.columns.tolist() != ["row_idx", "pred"]
-                        or not np.array_equal(frame.row_idx, np.arange(counts[fold]))
-                        or not np.array_equal(frame.pred.to_numpy(), prediction)):
-                    raise ValueError("INCOMPLETE: prediction artifact order/value differs")
+                frame = pd.read_csv(
+                    io.BytesIO(bound_bytes(dest / "pred.tsv")), sep="\t"
+                )
+                if (
+                    frame.columns.tolist() != ["row_idx", "pred"]
+                    or not np.array_equal(frame.row_idx, np.arange(counts[fold]))
+                    or not np.array_equal(frame.pred.to_numpy(), prediction)
+                ):
+                    raise ValueError(
+                        "INCOMPLETE: prediction artifact order/value differs"
+                    )
     panels = report["panels"]
     for arm in arms:
-        delta = [[panels[arm][f"{f}_s{s}"]["signed"] - panels["control"][f"{f}_s{s}"]["signed"]
-                  for f in PRODUCTION_SOURCES] for s in range(10)]
-        w2 = [[panels[arm][f"{f}_s{s}"]["w2_type_worst3"] - panels["control"][f"{f}_s{s}"]["w2_type_worst3"]
-               for f in ("kadid", "tid2013")] for s in range(10)]
+        delta = [
+            [
+                panels[arm][f"{f}_s{s}"]["signed"]
+                - panels["control"][f"{f}_s{s}"]["signed"]
+                for f in PRODUCTION_SOURCES
+            ]
+            for s in range(10)
+        ]
+        w2 = [
+            [
+                panels[arm][f"{f}_s{s}"]["w2_type_worst3"]
+                - panels["control"][f"{f}_s{s}"]["w2_type_worst3"]
+                for f in ("kadid", "tid2013")
+            ]
+            for s in range(10)
+        ]
         if report["decisions"][arm] != sdr_decision(delta, w2, study):
             raise ValueError("INCOMPLETE: registered reduction differs")
     if study == "e29" and _json(out / "e29_sdr_decision.json") != report["decisions"]:
@@ -351,15 +441,20 @@ def score(bundle, study, results, control, root, tools, out, pins):
     from v40_panels import bound_bytes
     import hashlib
     import io
+
     type_record = json.loads(bound_bytes(bundle / "W2_KEY_PINS.json"))
-    if type_record.get("schema") != "v40-w2-label-free-keys-v1" or set(type_record.get("members", {})) != {"kadid_train", "kadid_select", "tid2013"}:
+    if type_record.get("schema") != "v40-w2-label-free-keys-v1" or set(
+        type_record.get("members", {})
+    ) != {"kadid_train", "kadid_select", "tid2013"}:
         raise ValueError("INCOMPLETE: registered distortion-type keys required")
     type_keys = {}
     for member, record in type_record["members"].items():
         payload = bound_bytes(record["path"])
         if hashlib.sha256(payload).hexdigest() != record["sha256"]:
             raise ValueError("INCOMPLETE: distortion-type join changed")
-        type_keys[member] = pq.read_table(io.BytesIO(payload), columns=["pair_key", "dist_path"]).to_pandas()
+        type_keys[member] = pq.read_table(
+            io.BytesIO(payload), columns=["pair_key", "dist_path"]
+        ).to_pandas()
         if len(type_keys[member]) != record["rows"]:
             raise ValueError("INCOMPLETE: distortion-type key count differs")
     # No target read above this boundary: all cells and source populations admitted.
@@ -373,10 +468,7 @@ def score(bundle, study, results, control, root, tools, out, pins):
         observation_counts[fold] = len(y)
         if fold in e13.TYPE_SOURCES:
             paths = pd.concat(
-                [
-                    type_keys[m]
-                    for m in e13.TYPE_SOURCES[fold]
-                ]
+                [type_keys[m] for m in e13.TYPE_SOURCES[fold]]
             ).drop_duplicates("pair_key")
             ix = pd.Index(paths.pair_key).get_indexer(meta.pair_key)
             if (ix < 0).any():
@@ -389,8 +481,10 @@ def score(bundle, study, results, control, root, tools, out, pins):
                 dest = out / label / f"{fold}_s{seed}"
                 dest.mkdir(parents=True)
                 pred = predict(
-                    grid[fold, seed] / "refit/last.bin", table, dest / "pred.tsv",
-                    research_palette_cached=label == "palette"
+                    grid[fold, seed] / "refit/last.bin",
+                    table,
+                    dest / "pred.tsv",
+                    research_palette_cached=label == "palette",
                 )
                 panel = panel_batch([(fold, pred, y)], stats="full")[0]
                 rp = dest / "result.json"
@@ -447,8 +541,12 @@ def score(bundle, study, results, control, root, tools, out, pins):
         (out / "e29_sdr_decision.json").write_text(
             json.dumps(decisions, indent=2, allow_nan=False) + "\n"
         )
-    report["artifacts"] = {str(p.relative_to(out)): sha(p) for p in sorted(out.rglob("*")) if p.is_file()}
-    (out / "decision.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    report["artifacts"] = {
+        str(p.relative_to(out)): sha(p) for p in sorted(out.rglob("*")) if p.is_file()
+    }
+    (out / "decision.json").write_text(
+        json.dumps(report, indent=2, allow_nan=False) + "\n"
+    )
     print(json.dumps(decisions, allow_nan=False))
 
 
@@ -472,8 +570,22 @@ def main():
     if a.verify_artifacts:
         if a.scorer_output is None:
             p.error("artifact verification requires --scorer-output")
-        print(json.dumps(validate_artifacts(a.bundle, a.study, a.results, a.control, a.tools, a.out,
-                                           a.control_pins, a.scorer_output, freeze_control=a.freeze_control, root=a.root)))
+        print(
+            json.dumps(
+                validate_artifacts(
+                    a.bundle,
+                    a.study,
+                    a.results,
+                    a.control,
+                    a.tools,
+                    a.out,
+                    a.control_pins,
+                    a.scorer_output,
+                    freeze_control=a.freeze_control,
+                    root=a.root,
+                )
+            )
+        )
         return
     if a.freeze_control:
         rows = complete(

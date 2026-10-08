@@ -173,6 +173,7 @@ def freeze(bundle, source, source_commit, metrics_commit):
         "EXECUTOR_SMOKES.json",
         "SMOKE_SELECTION.json",
         "HARVEST_REFUSALS.json",
+        "FINAL_SCORING_REHEARSAL.json",
         "CONTROL_DECISION.md",
         "E29_CONTROLLING_AMENDMENT.md",
         "E29_REGISTRATION.json",
