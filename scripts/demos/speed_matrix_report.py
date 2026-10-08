@@ -353,7 +353,7 @@ def speedq_report(args) -> int:
     root = args.raw_dir
     receipt = root/'full-parity/PARITY_STRICT_PASS.json'
     if not receipt.exists(): receipt = root/'full-parity/PARITY_PASS.json'
-    from speedq_run import parity_receipt
+    from speedq_run import parity_receipt, SOURCE_SHA
     parity_receipt(receipt)
     parity = json.loads(receipt.read_text())
     medians = {}; analyses = {}; headers = {}; memories = {}
@@ -370,6 +370,7 @@ def speedq_report(args) -> int:
         header = json.loads((path/'header.json').read_text())
         assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
         assert not header.get('gate_trace',False), 'diagnostic tracing cannot qualify timing evidence'
+        assert header['model_source_sha256']==SOURCE_SHA, 'timing evidence must bind the frozen production model'
         assert complete['rounds']==header['rounds']
         values = inner['paired_rounds']
         assert set(values) == set(arms) and all(len(v) == header['rounds'] for v in values.values())
@@ -382,6 +383,8 @@ def speedq_report(args) -> int:
                 path=root/'rss'/f'v4x-t{n}-{g}-{arm}.json'
                 if path.exists():
                     row=json.loads(path.read_text());assert row['quiet_gate']['admitted']
+                    if arm.startswith('by_v2fy_'):
+                        assert row['worker']['model']['source_sha256']==SOURCE_SHA, 'RSS evidence must bind the frozen production model'
                     memories[(g,n,arm)]=row['max_rss_kib']
     build_receipts={}
     for directory in [root/'provenance',root.parent/'provenance']:
@@ -432,13 +435,13 @@ def speedq_report(args) -> int:
         'raw_directory':str(root),
         'statistics_owner':'zenbench e45822161a710acd013c572a98627e64663b1bcf; randomized paired rounds, 10K bootstrap, paired IQR filtering',
         'peer_build':peer_build,
-        'model_source_sha256':'802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1',
+        'model_source_sha256':SOURCE_SHA,
     }
     args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')
     lines=['# Rev5 SPEEDQ runtime qualification','']
     if missing: lines += ['MISSING: '+ '; '.join(missing)+'.','']
     lines += [f"Rev5 is {'slower in '+str(len(slower))+' cells' if slower else ('faster in all 192 cells' if len(faster)==192 else 'not established as at least as fast everywhere')} versus Rev4: {len(faster)} faster, {len(slower)} slower, {inconclusive} inconclusive of {len(analyses)} measured size/tier/thread cells. Classification uses pointwise paired 95% CIs for Rev5 minus Rev4, with timer-resolution limits retained; these are not simultaneous intervals over the grid.", '',
-        'The same 420-ID, H128, one-output by_v2fy timing weights run through isolated Rev3/Rev4/Rev5 formula owners. They are fixed Rev4-trained research weights, not a Rev5 product-bake qualification. B runs its serving Rev1 arithmetic. Inputs are the existing deterministic speed-matrix RGB8 pairs; no labels or holdouts were opened.','',
+        f'The frozen seed-0 packed f16 production model (SHA256 {SOURCE_SHA}), with 420 IDs, H128 and one output, runs through isolated Rev3/Rev4/Rev5 formula owners. Revision metadata is appended through the existing owner without requantizing the packed weights; Rev5 is served with ZENSIM_FORMULA_REV=5. B runs its serving Rev1 arithmetic. Inputs are the existing deterministic speed-matrix RGB8 pairs; no labels or holdouts were opened.','',
         f"All 384 Rev4/Rev5 score-bit and 420-consumed-feature bit checks pass across the full grid. Rev3 remains a timing baseline: {len(legacy_failed)} of 192 cells exceed the documented feature tolerance (max absolute feature difference {max(r['max_abs_feature_difference'] for r in legacy):.17g}; max tolerance fraction {max(r['max_tolerance_fraction'] for r in legacy):.17g}). Failing tiers: {', '.join(sorted({r.get('tier','unspecified') for r in legacy_failed})) or 'none'}. Legacy failures are recorded rather than renamed a pass.",'',
         'Each timing segment requires load1 < 2.0 and no foreign cargo/rustc/training before warmup and immediately before rounds. The retained rounds must all have a clean zenbench gate and no observed build/training interference. Persistent workers time the scoring call with Instant; separate parent rounds retain IPC/bookkeeping. Pair statistics reuse zenbench’s engine owner; no IPC estimate is subtracted. Setup, metadata stamping, input generation, and Rust-av sRGB widening are outside the timed body. Rayon pools and scoring buffers are warm.','',
         'Dispatch labels are ceilings forced through archmage with its testing guard; kernels without a v4 variant may use v3. Threads 1/2/4/8 use CCD0; 16 spans CCDs, and 32 adds SMT. Cache topology changes are part of these measured configurations.','',

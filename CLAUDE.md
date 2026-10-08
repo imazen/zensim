@@ -447,6 +447,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## SPEEDQ runtime evidence
 
+The release timing/RSS qualification uses the frozen seed-0 packed f16 production model, source SHA256 `f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400`. Revision metadata is appended by the existing bake owner without requantizing weights; the production arm uses process revision 5. Model SHA bindings in parity, timing and RSS prevent the earlier research-weight run from qualifying this model. Research attempts remain archived separately.
+
 `SPEEDQ=1 SPEEDQ_ANALYZER=<pinned paired_rounds binary> just bench-speed-matrix <raw-root> <summary-stem>` extends the existing paired speed matrix with isolated formula workers. Correctness covers 8 geometries × 4 dispatch ceilings × 6 thread counts × 3 revisions before timing. Rev4/Rev5 are score-bit strict; the coordinator explicitly admits Rev3 as a timing baseline with its scalar feature-tolerance failure recorded.
 
 Each timing segment must pass the load1 < 2.0 / no foreign build or training gate before setup and again before rounds. All retained zenbench round gates must be clean; excluded attempts remain as `.bak` directories and retries re-enter the quiet gate. Seven explicit worker owners keep per-call timing inside the scorer, with parent IPC rounds stored separately. Peak RSS is a separate fresh-process pass at v4x, 1 and 32 requested threads. `just speedq-freeze` selects artifacts from Cargo JSON instead of guessing a target filename. `just speedq-test` checks parity refusal, evidence preservation, artifact selection and report units/coverage. No stress calibration workloads run.

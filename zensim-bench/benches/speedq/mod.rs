@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use zenpredict::Model;
 use zensim::{BakeScorer, RgbSlice, Zensim, ZensimProfile};
 
-const SOURCE_SHA: &str = "802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1";
+const SOURCE_SHA: &str = "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400";
 const ID_SHA: &str = "0a6a20dc356acef3bef9deffc411f03189813e8b924fddcf7b22f7efea6b9f17";
 const ID_BYTES: &str = include_str!("../../../benchmarks/costset2_2026-10-03.candidate_ids.json");
 
@@ -81,7 +81,11 @@ fn worker(arm: &str) {
         "by_v2fy" => {
             let path = std::env::var("ZEN_S2_SPEEDQ_BAKE").expect("pinned bake path");
             let original = std::fs::read(path).unwrap();
-            assert_eq!(digest(&original), SOURCE_SHA, "timing weights changed");
+            assert_eq!(
+                digest(&original),
+                SOURCE_SHA,
+                "frozen production model changed"
+            );
             let revision = std::env::var("ZENSIM_FORMULA_REV").unwrap();
             assert!(matches!(revision.as_str(), "3" | "4" | "5"));
             // Existing metadata owner preserves weight sections without requantization.
@@ -108,7 +112,8 @@ fn worker(arm: &str) {
             assert_eq!(scorer.consumed_feature_ids().unwrap(), expected);
             model_info = json!({"source_sha256": SOURCE_SHA, "stamped_sha256": stamped_sha,
                 "revision": revision, "hidden":128, "consumed_ids":expected,
-                "scope":"fixed Rev4-trained timing weights; no retraining or product qualification"});
+                "source_bytes":original.len(), "revision_metadata_only":true,
+                "scope":"frozen seed-0 packed f16 production weights; metadata-only revision comparison"});
             let retained = Rc::clone(&feature_values);
             Box::new(move || {
                 let result = scorer

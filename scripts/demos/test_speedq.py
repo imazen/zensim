@@ -18,7 +18,7 @@ class SpeedqTest(unittest.TestCase):
 
     def row(self, tier='v4x', bits='4052bb6ca0000000', score=74.92850494384766):
         return dict(revision=3, tier=tier, threads='1', width=64, height=64,
-                    score_bits=bits, score=score, input_sha256='same', model={}, feature_values=[1.0]*420)
+                    score_bits=bits, score=score, input_sha256='same', model={'source_sha256':runner.SOURCE_SHA}, feature_values=[1.0]*420)
 
     def test_parity_refuses_and_preserves_first_mismatch(self):
         dest = self.root / 'parity'
@@ -145,6 +145,15 @@ class SpeedqTest(unittest.TestCase):
             rev3_differences=[dict(tolerance_violations=1,max_abs_feature_difference=2e-6,max_tolerance_fraction=2,score_difference=0)])))
         return parity,rows
 
+    def test_research_weight_receipt_cannot_admit_production_timing(self):
+        parity,rows=self.full_report_parity_fixture()
+        # Identical score/feature bits cannot substitute another source model.
+        rows[0]['model']={'source_sha256':'802c6369aa8e68c5458b32cbffa728f882779209d7822a9d1db0f78e4475f4a1'}
+        path=parity/'PARITY_STRICT_PASS.json'
+        rec=json.loads(path.read_text());rec['records']=rows;path.write_text(json.dumps(rec))
+        with self.assertRaisesRegex(AssertionError,'frozen production model'):
+            runner.parity_receipt(path)
+
     def test_full_report_fits_measured_axes_and_retains_missing_coverage(self):
         # A mathematical fixture tests the reporter's units and CI decisions;
         # these synthetic values never enter qualification output.
@@ -157,7 +166,7 @@ class SpeedqTest(unittest.TestCase):
             (dest/'zenbench.inner.json').write_text(json.dumps(dict(
                 zenbench_unreliable=False,gate_clean=[True]*32,
                 paired_rounds={a:[100+2*pixels]*32 for a in runner.ARMS})))
-            (dest/'header.json').write_text(json.dumps(dict(rounds=32,quiet_gate=dict(admitted=True,load1=1))))
+            (dest/'header.json').write_text(json.dumps(dict(rounds=32,model_source_sha256=runner.SOURCE_SHA,quiet_gate=dict(admitted=True,load1=1))))
             (dest/'paired_analysis.json').write_text(json.dumps(dict(ci_lower=0.1,ci_median=1,ci_upper=1.9,resolution_limited=False,pct_change=0.5)))
         args=SimpleNamespace(raw_dir=self.root,out_json=self.root/'out.json',out_md=self.root/'out.md')
         report.speedq_report(args)
@@ -192,14 +201,14 @@ class SpeedqTest(unittest.TestCase):
                 slopes=[1,3,2,4,5,6,7]
                 values={a:[1000*(k+1)+100*i+slopes[i]*pixels]*32 for i,a in enumerate(runner.ARMS)}
                 (dest/'zenbench.inner.json').write_text(json.dumps(dict(zenbench_unreliable=False,gate_clean=[True]*32,paired_rounds=values)))
-                (dest/'header.json').write_text(json.dumps(dict(rounds=32,binary_sha256='test',quiet_gate=dict(admitted=True,load1=1))))
+                (dest/'header.json').write_text(json.dumps(dict(rounds=32,binary_sha256='test',model_source_sha256=runner.SOURCE_SHA,quiet_gate=dict(admitted=True,load1=1))))
                 delta=values['by_v2fy_r5'][0]-values['by_v2fy_r4'][0]
                 (dest/'paired_analysis.json').write_text(json.dumps(dict(ci_lower=delta-1,ci_median=delta,ci_upper=delta+1,resolution_limited=False,pct_change=100*delta/values['by_v2fy_r4'][0])))
         rss=self.root/'rss';rss.mkdir()
         for g in runner.GEOMETRIES:
             for n in [1,32]:
                 for a in runner.ARMS:
-                    (rss/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(max_rss_kib=12345,quiet_gate=dict(admitted=True))))
+                    (rss/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(max_rss_kib=12345,quiet_gate=dict(admitted=True),worker={'model':{'source_sha256':runner.SOURCE_SHA}})))
         args=SimpleNamespace(raw_dir=self.root,out_json=self.root/'out.json',out_md=self.root/'out.md')
         report.speedq_report(args)
         out=json.loads(args.out_json.read_text())

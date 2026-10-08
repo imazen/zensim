@@ -19,7 +19,8 @@ GEOMETRIES = ['64x64','128x128','256x256','512x512','1024x1024','2048x2048','409
 TIERS = ['v4x','v4','v3','scalar']
 THREADS = [1,2,4,8,16,32]
 ARMS = ['by_v2fy_r3','by_v2fy_r4','by_v2fy_r5','zensim_B','fast_ssim2','butteraugli','ssimulacra2_rs']
-BAKE = '/home/lilith/tmp/chromaq/bakes_full/byv2fy-full-s0.bin'
+BAKE = '/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s0/refit/production-f16.bin'
+SOURCE_SHA = 'f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400'
 TRAIN_NAMES = {'zensim_mlp_train','train_hybrid.py','v2_lodo_mlp.py','zen-train','zen_train','e28_recipe.py','e28_simplex.py','bake_dial_refit'}
 CPUSETS = {1:'2',2:'2,3',4:'0-3',8:'0-7',16:'0-15',32:'0-31'}
 
@@ -190,6 +191,7 @@ def parity_receipt(path):
     rows={(f"{r['width']}x{r['height']}",r['tier'],int(r['threads']),r['revision']):r for r in receipt['records']}
     expected={(g,t,n,r) for g in GEOMETRIES for t in TIERS for n in THREADS for r in [3,4,5]}
     assert set(rows)==expected, 'exact parity grid must cover every required cell'
+    assert {r['model']['source_sha256'] for r in rows.values()} == {SOURCE_SHA}, 'parity must bind the frozen production model'
     for g in GEOMETRIES:
         for revision in (4,5):
             records=[rows[(g,t,n,revision)] for t in TIERS for n in THREADS]
@@ -230,6 +232,7 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                 rec=json.loads(line);worker_info[name]=rec
                 if arm=='by_v2fy':
                     old=parity[(geometry,tier,threads,revision)]
+                    assert rec['model']['source_sha256']==old['model']['source_sha256']==SOURCE_SHA, 'STOP: worker model differs from production parity receipt'
                     assert rec['score_bits']==old['score_bits'] and rec['input_sha256']==old['input_sha256'], 'STOP: worker differs from parity receipt'
             # Warmup belongs to setup. Check the quiet gate again immediately
             # before measured rounds, when every declared owner is idle.
@@ -241,6 +244,7 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     'tier':tier,'threads':threads,'cpuset':CPUSETS[threads],'geometry':geometry,
                     'rounds':rounds,'arms':arms,'worker_pids':[p.pid for p in owners],
                     'gate_trace':'ZENBENCH_GATE_TRACE' in env,
+                    'model_source_sha256':SOURCE_SHA,
                     'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
             write(dest/'header.json',header)
             raw=dest/'zenbench.json'
@@ -314,7 +318,8 @@ def rss(binary, root, parity_path):
                 rec=json.loads(out)
                 if arm=='by_v2fy':
                     old=parity[(geometry,'v4x',threads,revision)]
-                    assert rec['score_bits']==old['score_bits'], 'STOP: RSS score differs from parity'
+                    assert rec['model']['source_sha256']==old['model']['source_sha256']==SOURCE_SHA, 'STOP: RSS model differs from production parity'
+                    assert rec['score_bits']==old['score_bits'] and rec['input_sha256']==old['input_sha256'], 'STOP: RSS score/input differs from parity'
                 maxrss=next(int(l.rsplit(':',1)[1]) for l in (root/f'{tag}.log').read_text().splitlines() if 'Maximum resident set size (kbytes)' in l)
                 write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec})
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
