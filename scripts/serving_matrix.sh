@@ -70,7 +70,7 @@ run_env() {
       tail -20 "$OUT/${env_name}__${label}.build.log"
       return 1
     fi
-    ./target/release/examples/serving_matrix > "$OUT/${env_name}__${label}.tsv" 2>&1
+    "${CARGO_TARGET_DIR:-$REPO/target}/release/examples/serving_matrix" > "$OUT/${env_name}__${label}.tsv" 2>&1
   }
 
   echo "=== environment '$env_name' (fixed: '${env_feats:-<none>}')"

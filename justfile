@@ -1,5 +1,20 @@
 # zensim dev commands
 
+# Synthetic D2 read only. Caller supplies a pinned canonical Rust panel.
+releasegate-tests:
+    TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_kadid_terminal*.py' -v
+
+# Repeat the bound-payload probes against this tree or a source-only old-tip export.
+releasegate-bound-payload-tests source=".":
+    cd "{{source}}" && TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_kadid_terminal_bound_payloads.py' -v
+
+# Canonical signed-quality CLI and legacy panel mode regressions.
+releasegate-panel-tests:
+    cargo test -p zensim-validate --bin panel -- --nocapture
+
+releasegate-panel-parity panel_bin:
+    python3 scripts/verify_panel_parity.py --bin "{{panel_bin}}"
+
 # The rustdoc-JSON nightly is PINNED (keep in sync with the `api-doc-check`
 # job in .github/workflows/ci.yml): an unpinned tracking nightly churns
 # cross-crate path rendering with zero repo changes — MEASURED 2026-09-06,
@@ -9,6 +24,61 @@
 # false-diff class this pin exists to prevent. Bump the pin deliberately, in
 # the same commit as a `just api-doc` regen.
 apidoc_toolchain := "nightly-2026-09-02"
+
+# Caller-selected qualification scope: no evaluation/human-label payloads.
+# Keep real-corpus tests intact; these five are outside this lane's scope.
+prodqual-workspace-build:
+    cargo test --workspace --all-targets --all-features --exclude zensim-wasm-tests --no-run
+
+prodqual-fmt-check:
+    cargo fmt -p zensim --check
+
+# The archive mount accepts file contents but not local ownership changes.
+prodqual-mirror evidence destination:
+    rsync -a --no-owner --no-group '{{evidence}}/' '{{destination}}/'
+
+prodqual-workspace-tests:
+    cargo test --workspace --lib --bins --tests --examples --all-features --exclude zensim-wasm-tests --no-fail-fast -- \
+        --skip cid22_aggregate_srocc_matches_audit_reference \
+        --skip cid22_first_row_matches_bake_verdict_reference \
+        --skip parallel_matches_sequential_iwssim_log_target \
+        --skip parallel_matches_sequential_default_target_with_scale \
+        --skip canonical_dial_grid_is_the_quarantined_v2_grid
+
+prodqual-rev5:
+    cargo test -p zensim --release --all-features --test featcanon_rev5_parity -- --nocapture
+
+[positional-arguments]
+prodqual-synthetic *models:
+    ZENSIM_FORMULA_REV=5 cargo run -p zensim --release --all-features --example serve_custom_bake -- --prodqual "$@"
+
+prodqual-serving-matrix outdir:
+    scripts/serving_matrix.sh {{outdir}}
+
+prodqual-feature-matrix:
+    python3 scripts/prodqual_feature_matrix.py
+
+# Match the WASI toolchain pin in CI (the stable LLVM workaround).
+prodqual-wasm-build:
+    RUSTFLAGS='-C target-feature=+simd128' cargo +1.98.1 build -p zensim --target wasm32-wasip1 --release --all-features --example serve_custom_bake
+
+[positional-arguments]
+prodqual-wasm-synthetic program *models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    program="$1"
+    shift
+    wasmtime run --dir "${PRODQUAL_INPUT_ROOT:?set the pinned artifact directory}::/inputs" \
+        --env ZENSIM_FORMULA_REV=5 "$program" --prodqual "$@"
+
+prodqual-training-only:
+    cargo clippy -p zensim --no-default-features --features training --lib -- -D warnings
+    cargo test -p zensim --no-default-features --features training --lib -- --nocapture
+
+prodqual-workspace-failures:
+    cargo test -p zensim -p zensim-validate --all-features --no-fail-fast \
+        --test featcanon_rev4_contract --test research_engine_parity \
+        --test bake_surface --test feature_set_match
 
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it

@@ -1,9 +1,10 @@
-# E29 four-source amendment — draft before fitting, 2026-10-07
+# E29 four-source amendment — controlling registration, 2026-10-07
 
-Coordinator review/registration is required. This local draft does not launch
-E29. It supersedes the five-source/control/statistical clauses of
+This is the controlling E29 registration, promoted on the coordinator’s
+V40 round-2 instruction before any full E29 fit. It does not authorize launch.
+It supersedes the five-source/control/statistical clauses of
 [e29_hdr_consensus_registration_2026-10-07.md](e29_hdr_consensus_registration_2026-10-07.md)
-and implements the coordinator's E29 brief. No E29 fit preceded this draft.
+and implements the coordinator's E29 brief. No full E29 fit preceded this amendment.
 
 D1 sources are kadid, tid2013, konfig, cid22_a25, with their approved
 KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL and CID22-A25 roles.
@@ -87,4 +88,6 @@ supersedes the exact-E30 reuse option and solo E29 control proposal above.
 A full control-recipe baseline parity cell is a validation check, not a
 choice between controls. A mismatch is recorded; the shared fresh control
 still runs. No E30 cell may replace it based on results. The combined package
-and image are coordinator work later; this lane lands code and tests only.
+and image bind this controlling amendment and the
+[shared-control decision](e29_e31_e32_shared_control_decision_2026-10-07.md).
+The coordinator lands these local commits before authorizing any full fit.

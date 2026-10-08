@@ -47,17 +47,42 @@ import math
 import os
 import subprocess
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Optional, Sequence
 
 # Resolve the `panel` binary once. Prefer release, then debug. Override
 # with the ZEN_PANEL_BIN env var (e.g. for CI / vast.ai images that bake
 # the binary at a known path).
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PANEL_FD = ContextVar("verified_panel_fd", default=None)
+
+
+@contextmanager
+def _bound_panel(fd):
+    """The caller owns and retains this verified descriptor throughout the run."""
+    os.fstat(fd)
+    token = _PANEL_FD.set(fd)
+    try:
+        yield
+    finally:
+        _PANEL_FD.reset(token)
+
+
+def _panel_pass_fds():
+    fd = _PANEL_FD.get()
+    return () if fd is None else (fd,)
 
 
 def _find_panel_bin() -> str:
+    fd = _PANEL_FD.get()
+    if fd is not None:
+        os.fstat(fd)
+        return f"/proc/self/fd/{fd}"
     env = os.environ.get("ZEN_PANEL_BIN")
-    if env and os.path.exists(env):
+    if env is not None:
+        if not env or not os.path.isfile(env):
+            raise FileNotFoundError("zen_stats: explicitly selected panel is missing")
         return env
     for cand in (
         os.path.join(_REPO_ROOT, "target", "release", "panel"),
@@ -132,6 +157,7 @@ def panel(
     try:
         out = subprocess.run(
             [bin_path, "--input", tmp, "--json"],
+            pass_fds=_panel_pass_fds(),
             capture_output=True, text=True, timeout=300, check=True,
         )
     finally:
@@ -176,6 +202,7 @@ def _run_batch(text: str, stats: str, timeout: float) -> list[dict]:
     try:
         out = subprocess.run(
             [bin_path, "--batch", tmp, "--stats", stats],
+            pass_fds=_panel_pass_fds(),
             capture_output=True, text=True, timeout=timeout, check=True,
         )
     except subprocess.CalledProcessError as e:
@@ -304,6 +331,7 @@ def scatter(predicted: Sequence[float], target: Sequence[float]) -> dict:
             f.write(f"{float(x):.17g}\t{float(y):.17g}\n")
         f.flush()
         p = subprocess.run([_find_panel_bin(), "--input", f.name, "--json", "--scatter"],
+                           pass_fds=_panel_pass_fds(),
                            text=True, capture_output=True)
         if p.returncode not in (0, 2) or not p.stdout.strip():
             raise RuntimeError(f"Rust scatter failed: {p.stderr}")

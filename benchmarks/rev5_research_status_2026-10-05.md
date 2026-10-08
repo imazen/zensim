@@ -358,3 +358,37 @@ minimise MSE and maximise Kendall and Pearson correlation.
   folder another session was writing to were kept; top-level executables archived to
   `/mnt/tower/output/target-binaries-2026-10-07/` first). Free space on the shared NVMe: 726 GB.
 * **i270:** new host keys accepted. The box is currently booted into Windows, so the fleet can't use it until it boots Ubuntu.
+
+## 28. Updates (2026-10-08 00:35 UTC)
+
+* **Landed** (`1cd8a888`): the production gate map, the KADID TERMINAL read harness after four review rounds (no open P1/P2;
+  three minor P3s are being closed before any real read, which still needs the owner's explicit go), and the label-free
+  production gate report. Full verification passed (zensim 900 tests, zensim-validate, Python incl. 43 terminal-harness tests,
+  clippy, API).
+* **v40** (shared control + E29 + E31 + E32, 200 full-budget cells) is ready and under independent review; it launches on the
+  fleet after review.
+* **Production evaluation gates on seed 0** are finishing; results next.
+* **Speed qualification:** score parity done; timing waits for a quiet box, planned once the review and gate runs finish.
+
+## 29. Updates (2026-10-08 01:00 UTC)
+
+* **i270 is back in Ubuntu** (owner OK; no Windows session was logged in) and available to the fleet (3 slots) for the v40 launch.
+* **The last failing zensim-validate test is resolved** (`5cd12253`, owner left the call to the coordinator): the by_v2fy
+  projection root and the research-only palette family are listed as known partial producers, and the test requires the missing
+  basic coverage to be reported for them.
+* **Independent process review:** a Codex reviewer (herdr tab `process-review`) is auditing today's process and results against
+  the evidence; its report lands as `~/tmp/zensim-paper/rev4/PROCESS_REVIEW.md`.
+
+## 30. Release gates on the frozen seed-0 model (2026-10-08 01:25 UTC)
+
+**Seed 0 does not qualify yet.** Fails: the full 38-image feature-identity gate (all 38 between 92.2 and 97.5 against the
+[97.5, 100] band; pixel identity is exactly 100), standard-grid ties 0.076 (bar ≤ 0.05), and 7 of 135 steering cases (JPEG
+4/8). Passes: dial calibration, negative tails, pixel identity, integrity-head compatibility. Blocked for missing inputs or
+rules: human rank axes (no admitted independent human root), five codec floors, RD, targeting, integrity class, HDR, speed. The
+earlier four-image identity pass was too narrow. A lane is now determining, for each failure, whether the harness or the model
+is wrong; the model stays frozen and no bar changes.
+
+An independent Codex review of the day's process and results found the headline experiment claims supported within their
+scope, flagged that legacy composite error bars ignore fold covariance and that E30 shows "no detectable cost", not
+equivalence, and listed process fixes (one shared admission invariant for every entry point, an end-to-end rehearsal before
+any fleet launch, scoped landing receipts, a release matrix). v40 needs fixes before launch.
