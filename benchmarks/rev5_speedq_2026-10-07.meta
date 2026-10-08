@@ -70,7 +70,7 @@
     192
   ],
   "timing_segments": [
-    63,
+    65,
     192
   ],
   "rss_measurements": [
@@ -170,5 +170,14 @@
     "interrupted_attempt": "production-f803b74c/timing/v3-t2-4096x4096.interrupted-1791438729086285788.bak",
     "source_archive": "provenance/six-arm-source-6718ea07/manifest.json",
     "six_worker_header_verified": "v4x-t4-64x64"
+  },
+  "timing_arm_coverage": {
+    "by_v2fy_r3": 65,
+    "by_v2fy_r4": 65,
+    "by_v2fy_r5": 65,
+    "zensim_B": 65,
+    "fast_ssim2": 65,
+    "butteraugli": 65,
+    "ssimulacra2_rs": 63
   }
 }
