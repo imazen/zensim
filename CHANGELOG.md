@@ -27,7 +27,7 @@
 
 ### Changed
 
-- Rev5 serving (`e055911f`): four bit-identical performance fixes reuse scalar blur leaves, restore source/distorted conversion and row fan-out, vectorize complete horizontal edge blocks, and cache exact vertical pair-tree nodes; frozen scalar/SIMD kernel gates, 384/384 strict score/420-feature checks, 576/576 frozen comparisons and all-feature tests pass. Re-timed 4/192 cells (two faster, two inconclusive); 188/192 were not remeasured. `benchmarks/rev5perf_2026-10-08.md`.
+- Rev5 serving (`ee9e5b55`): four bit-identical performance fixes reuse scalar blur leaves, restore source/distorted conversion and row fan-out, vectorize complete horizontal edge blocks, and cache exact vertical pair-tree nodes; frozen scalar/SIMD kernel gates, 384/384 strict score/420-feature checks, 576/576 frozen comparisons and all-feature tests pass. Re-timed 4/192 cells (two faster, two inconclusive); 188/192 were not remeasured. `benchmarks/rev5perf_2026-10-08.md`.
 
 - E28 admission (`a06541fd`): validate frozen human manifests/populations and label-free row-key/source bindings before label-bearing payload reads; replace recursive preparation copy with an explicit approved inventory and pre-copy forbidden-directory refusal.
 

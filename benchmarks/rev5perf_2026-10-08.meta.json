@@ -137,7 +137,7 @@
   },
   "landfix": {
     "base_commit": "6a37f4e45af4f15e8076b82e45d4e8d805cfe02a",
-    "rebased_runtime_source_commit": "e055911f97f543edde4afeaf442d15f5b1b2c519",
+    "rebased_runtime_source_commit": "ee9e5b551759a495bfe1212c84645445877065d1",
     "runtime_source_unchanged_from_reviewed_tip": "8d6a7f8000f0e51e859bf6390f71c0bed19955ed",
     "raw_root": "/mnt/v/output/zensim/rev5perf-2026-10-08/landfix",
     "comparison_sha256": "6d4da1f08152317bfdcd831372a0eba7b0861b1d6429f1ebc5d2096bb9ae97a6",
