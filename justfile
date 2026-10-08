@@ -581,6 +581,10 @@ speedq-build:
 speedq-clippy:
     ZENSIM_BENCH_SKIP_CPP_FFI=1 cargo clippy --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar --features speedq,ssim2-rayon -- -D warnings
 
+# Invoke inside the brief's flock/run-heavy envelope. No timing gates change.
+rev5perf-profile binary dest mode="perf":
+    python3 scripts/demos/rev5perf_profile.py --binary "{{binary}}" --dest "{{dest}}" --mode "{{mode}}"
+
 [positional-arguments]
 speedq-parity binary dest *options:
     #!/usr/bin/env bash

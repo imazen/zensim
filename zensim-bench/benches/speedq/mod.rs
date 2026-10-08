@@ -206,6 +206,13 @@ fn worker(arm: &str) {
         "model":model_info,"threads":std::env::var("RAYON_NUM_THREADS").unwrap(),
         "ssim2_rayon":cfg!(feature="ssim2-rayon"),"feature_values":*feature_values.borrow(),"actual_rayon_threads":actual_threads});
     if std::env::var_os("ZEN_S2_RSS_ONLY").is_some() {
+        // Explicit profiler-only repetitions reuse the serving action and its
+        // score-bit guard; normal parity/RSS and paired timing are unchanged.
+        if let Ok(calls) = std::env::var("ZEN_S2_PROFILE_CALLS") {
+            for _ in 0..calls.parse::<usize>().expect("profile call count") {
+                assert_eq!(action().to_bits(), bits, "profile score changed");
+            }
+        }
         println!("{ready}");
         return;
     }
