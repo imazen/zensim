@@ -141,8 +141,10 @@ fn forbidden_identity(value: &str) -> bool {
         || value.contains("terminal")
         || value.contains("_sealed")
         || value.starts_with("labels__")
-        || matches!(value.as_str(), "val" | "validation" | "test" | "t0")
-        || value.ends_with("_val") && value != "konfig_val"
+        || (value != "konfig_val"
+            && value
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|word| matches!(word, "val" | "validation" | "test" | "t0")))
 }
 fn forbidden_declaration(value: &Value) -> bool {
     match value {
