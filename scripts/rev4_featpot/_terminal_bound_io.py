@@ -3,6 +3,7 @@
 import errno
 import os
 import stat
+import re
 from pathlib import Path
 
 
@@ -22,8 +23,18 @@ def safe_path(path):
 
 def _protected_devices(roots):
     devices = set()
+    # A corpus can contain mounted subdirectories or individual bind-mounted
+    # files. Account for those devices without walking any corpus directory.
+    mounts = []
+    for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        fields = line.split()
+        major, minor = map(int, fields[2].split(":"))
+        name = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
+        mounts.append((Path(name), os.makedev(major, minor)))
     for root in roots:
         p = Path(root)
+        resolved = p.resolve()
+        devices.update(dev for mount, dev in mounts if mount.is_relative_to(resolved))
         # Missing stores still reserve their nearest existing filesystem.
         while True:
             try:

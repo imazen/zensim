@@ -104,6 +104,29 @@ class Hardening(unittest.TestCase):
             _zero_events(self, watch, "same-device-protected-sentinel-refusal")
         self.unspent()
 
+    def test_nested_protected_mount_device_refuses_before_payload_open(self):
+        # The store root has a different device, but a mounted child contains
+        # data on the preparation device. No real corpus traversal is needed.
+        dev = self.t.root.stat().st_dev
+        mounts = f"1 0 {os.major(dev)}:{os.minor(dev)} / /proc/nested-store rw - xfs synthetic rw\n"
+        read_text = Path.read_text
+
+        def kernel_inventory(path, *args, **kwargs):
+            return (
+                mounts
+                if path == Path("/proc/self/mountinfo")
+                else read_text(path, *args, **kwargs)
+            )
+
+        with (
+            _Watch(self.t.receipt) as watch,
+            patch.object(Path, "read_text", kernel_inventory),
+        ):
+            with self.assertRaisesRegex(ValueError, "separate filesystems"):
+                self.preflight()
+            _zero_events(self, watch, "nested-store-device-receipt-refusal")
+        self.unspent()
+
     def test_transient_single_link_report_cannot_admit_protected_inode(self):
         sentinel = self.sentinel()
         alias = self.t.root / "trusted-receipt.json"
