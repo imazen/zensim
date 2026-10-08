@@ -134,5 +134,31 @@
       }
     ],
     "log": "/home/lilith/tmp/zensim-paper/rev4/REV5PERF_mirror_retry.log"
+  },
+  "landfix": {
+    "base_commit": "6a37f4e45af4f15e8076b82e45d4e8d805cfe02a",
+    "rebased_runtime_source_commit": "e055911f97f543edde4afeaf442d15f5b1b2c519",
+    "runtime_source_unchanged_from_reviewed_tip": "8d6a7f8000f0e51e859bf6390f71c0bed19955ed",
+    "raw_root": "/mnt/v/output/zensim/rev5perf-2026-10-08/landfix",
+    "comparison_sha256": "6d4da1f08152317bfdcd831372a0eba7b0861b1d6429f1ebc5d2096bb9ae97a6",
+    "parity": {
+      "status": "PASS",
+      "strict_score_and_420_feature_checks": 384,
+      "all_revision_frozen_comparisons": 576,
+      "before_receipt": "/mnt/v/output/zensim/rev5perf-2026-10-08/before/parity/PARITY_STRICT_PASS.json",
+      "before_sha256": "1d826e5547145085e99cbd10260249275a07d50edd196655e01147eb286311f1",
+      "after_receipt": "/mnt/v/output/zensim/rev5perf-2026-10-08/landfix/parity/PARITY_STRICT_PASS.json",
+      "after_sha256": "237560d9997d4e0bc1180cdc026264f40ab4a395785baa3b5b30d28c176b5419"
+    },
+    "binary_sha256": "89b562e27567fe802fac794c5c3b68ff51a2753ad4c310e0d21d145270567d12",
+    "run_heavy": "run-heavy: done rc=0 248s | peak-RSS 1.57GiB | min-avail 43865MiB | peak-load 3.96",
+    "tests": [
+      "just --justfile benchmarks/rev5perf.just rev5perf-kernel-test",
+      "just --justfile benchmarks/rev5perf.just rev5perf-gate /mnt/v/output/zensim/rev5perf-2026-10-08/landfix /mnt/v/output/zensim/rev5perf-2026-10-08/before",
+      "just --justfile benchmarks/rev5perf.just rev5perf-validation /mnt/v/output/zensim/rev5perf-2026-10-08/landfix",
+      "python3 -m unittest discover -s scripts/demos -p test_speedq.py -v"
+    ],
+    "new_timing_cells": 0,
+    "median_column_semantics": "post paired-IQR removal from the 32 clean rounds"
   }
 }

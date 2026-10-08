@@ -1,4 +1,4 @@
-# Source 7647ffb7829a3a19b4c131b5a97064016dcb6d06; host dev; command just rev5perf-profile <frozen-binary> <fresh-root> perf. Counts include setup and repeated scoring; diagnostic, not gated latency.
+# Source 7647ffb7829a3a19b4c131b5a97064016dcb6d06; host dev; command just --justfile benchmarks/rev5perf.just rev5perf-profile <frozen-binary> <fresh-root> perf. Counts include setup and repeated scoring; diagnostic, not gated latency.
 cell	stage	revision	extra_profile_calls	cycles	instructions	branches	branch-misses	cache-misses
 scalar-t8-1920x1080	before	4	16	26017010379	91640492303	11276119474	5595536	64092239
 scalar-t8-1920x1080	before	5	16	32747729407	152355307101	23008879132	4876349	35327470

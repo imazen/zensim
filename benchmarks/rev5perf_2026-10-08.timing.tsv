@@ -1,5 +1,5 @@
-# Source 7647ffb7829a3a19b4c131b5a97064016dcb6d06; host dev; command just rev5perf-collect <fresh-root> <before-root> <analyzer>; paired within each build, not between builds. Units ns.
-cell	stage	r4_median_ns	r5_median_ns	r5_vs_r4_pct	r5_minus_r4_ci_lower_ns	r5_minus_r4_ci_upper_ns	clean_rounds	rounds_collected	rounds_excluded	iqr_outliers
+# Source 7647ffb7829a3a19b4c131b5a97064016dcb6d06; host dev; command just --justfile benchmarks/rev5perf.just rev5perf-collect <fresh-root> <before-root> <analyzer>; paired within each build, not between builds. Units ns; median columns are after paired-IQR removal from the 32 clean rounds.
+cell	stage	r4_post_iqr_median_ns	r5_post_iqr_median_ns	r5_vs_r4_pct	r5_minus_r4_ci_lower_ns	r5_minus_r4_ci_upper_ns	clean_rounds	rounds_collected	rounds_excluded	iqr_outliers
 scalar-t8-1920x1080	before	103238410.0	179821455.5	73.15674709120249	74790065.8125	77297879.4375	32	32	0	0
 scalar-t8-1920x1080	after	103729350.5	103729970.5	0.4791093663281138	-1208742.03125	2246456.65625	32	32	0	0
 v4-t2-64x64	before	419299.0	458903.5	8.52696329327519	23287.5	50821.346153846156	32	35	3	6
