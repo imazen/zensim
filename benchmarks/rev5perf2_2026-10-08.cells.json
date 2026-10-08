@@ -1,0 +1,258 @@
+{
+  "source": "/mnt/v/output/zensim/speedq2-2026-10-08/rev5_speedq2_2026-10-08.json",
+  "source_sha256": "19f996bd27869a9d9bebde4b65de4c5757a462463bd24a1e158f5b532195cc8f",
+  "cells": [
+    {
+      "tag": "v4x-t1-64x64",
+      "before_verdict": "slower",
+      "before_ci_ns": [
+        57800,
+        62018,
+        66225
+      ]
+    },
+    {
+      "tag": "v4x-t1-128x128",
+      "before_verdict": "slower",
+      "before_ci_ns": [
+        125856,
+        133155,
+        139735
+      ]
+    },
+    {
+      "tag": "v4x-t2-64x64",
+      "before_verdict": "slower",
+      "before_ci_ns": [
+        18817,
+        27108,
+        36263
+      ]
+    },
+    {
+      "tag": "v4x-t2-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -391871,
+        1204374,
+        2963930
+      ]
+    },
+    {
+      "tag": "v4x-t4-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -18477,
+        -1212,
+        18473
+      ]
+    },
+    {
+      "tag": "v4x-t4-128x128",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -22326,
+        -7252,
+        8592
+      ]
+    },
+    {
+      "tag": "v4x-t8-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -61242,
+        547,
+        61790
+      ]
+    },
+    {
+      "tag": "v4-t1-64x64",
+      "before_verdict": "slower",
+      "before_ci_ns": [
+        11635,
+        15857,
+        19871
+      ]
+    },
+    {
+      "tag": "v4-t1-128x128",
+      "before_verdict": "slower",
+      "before_ci_ns": [
+        50292,
+        55814,
+        61106
+      ]
+    },
+    {
+      "tag": "v4-t2-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -12357,
+        -2386,
+        9089
+      ]
+    },
+    {
+      "tag": "v4-t2-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -4896598,
+        -2021125,
+        813001
+      ]
+    },
+    {
+      "tag": "v4-t16-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -53271,
+        -26018,
+        1870
+      ]
+    },
+    {
+      "tag": "v4-t16-128x128",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -77477,
+        -39453,
+        1080
+      ]
+    },
+    {
+      "tag": "v3-t2-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -3263962,
+        -1488644,
+        254228
+      ]
+    },
+    {
+      "tag": "v3-t4-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -68569,
+        -17722,
+        32433
+      ]
+    },
+    {
+      "tag": "v3-t8-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -24864,
+        -5563,
+        16775
+      ]
+    },
+    {
+      "tag": "v3-t8-128x128",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -81727,
+        2436,
+        83309
+      ]
+    },
+    {
+      "tag": "v3-t32-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -395588,
+        175516,
+        717173
+      ]
+    },
+    {
+      "tag": "scalar-t4-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -31216,
+        6359,
+        49284
+      ]
+    },
+    {
+      "tag": "scalar-t4-128x128",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -80294,
+        -19134,
+        44883
+      ]
+    },
+    {
+      "tag": "scalar-t4-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -2695534,
+        -1138162,
+        546723
+      ]
+    },
+    {
+      "tag": "scalar-t8-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -26887,
+        11865,
+        51204
+      ]
+    },
+    {
+      "tag": "scalar-t8-128x128",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -131160,
+        -16428,
+        98571
+      ]
+    },
+    {
+      "tag": "scalar-t8-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -386768,
+        767466,
+        1901163
+      ]
+    },
+    {
+      "tag": "scalar-t16-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -80942,
+        -29275,
+        20855
+      ]
+    },
+    {
+      "tag": "scalar-t16-128x128",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -55397,
+        -23775,
+        9775
+      ]
+    },
+    {
+      "tag": "scalar-t32-64x64",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -53939,
+        -18385,
+        20079
+      ]
+    },
+    {
+      "tag": "scalar-t32-1920x1080",
+      "before_verdict": "inconclusive",
+      "before_ci_ns": [
+        -1680810,
+        -720760,
+        204262
+      ]
+    }
+  ]
+}
