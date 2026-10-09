@@ -460,3 +460,33 @@ TRAIN data, but no optional HDR, external or UPIQ report was opened. Those
 reports still require separate exposure authorization and a freeze. KADID
 TERMINAL remains unopened by this lane. The [exposure ledger](../docs/DATA_SPLITS.md#exposure-ledger--2026-10-09-completed-v40-sdr-assessments)
 records the assessed roles and counts.
+
+## 34. Landed 2026-10-09 and open owner decisions (main `cb5a6600`)
+
+All results below are on the frozen seed-0 production model `f803b74c` unless stated.
+
+- **Speed (SPEEDQ3, `462f7fe5`; then REV5PERF2 `c989a2d4`, REV5PERF3 `cb7e0777`, REV5PERF4 `cb5a6600`).** Full 192-cell
+  rerun: 171 faster, 0 slower, 21 inconclusive versus Rev4 (pointwise paired 95% CIs); the owner accepted "0 slower" as
+  meeting the speed requirement (2026-10-09). REV5PERF4 fixed multi-thread scaling: v4x 32 threads 1024² 14.06 → 7.55 ms,
+  4096² 213.6 → 138.6 ms (serving A 8.80 / 177.9, B 8.20 / 176.4). Every change is bit-identical (384/384 strict parity;
+  reviewer sweeps across tiers, thread counts and shapes). REV5PERF3 fixed a pre-existing panic on legally padded rows.
+  Cost: REV5PERF4 raises peak RSS at 4096² from 201 MB to 550 MB at 16–32 threads (width × min(threads, 16), no cap).
+- **Cost versus peers (COSTCMP, `713d2d73`).** v4x, 1 thread: 1 MP Rev5 22.4 ms, A 45.5, fast-ssim2 main (`09ec3e7c`,
+  0.9.0) 60.7; 4096² 332 / 709 / 1458. Peak RSS at 4096², 1 thread: Rev5 191,664 KiB, A 505,364, fast-ssim2 main
+  1,839,488. fast-ssim2 has no AVX-512 path. (Multi-thread comparisons predate REV5PERF4.)
+- **Steering (STEERFIX, `ed8eabbc`).** Of the seven G-STEER failures, four were a code defect (the packed spline floor erased
+  the signal; steering now uses pre-calibration sensitivities below the floor, and Rev5 defaults to neighbour replay) and three
+  are model limits (broad-206 b32/b64, dog-256-20). Served scores bit-identical (55,515/55,515); the served gate stays 128/135
+  because floor-tied scores cannot pass the rank bars.
+- **Near-identity (NEARID, `f1b82519`).** No changed image scores 98 or above for seed 0 (max 97.73), B (96.23) or A
+  (97.39); one changed pixel scores 88.69–97.67 for seed 0. Cause: the ten reference-only `pjnd_fragility` inputs enter
+  additively; neutralizing them puts all 24 identities at 99.81. The owner's design direction (2026-10-09): internal 0 means
+  no difference, reference-only inputs only scale differences, no anchors. Proposed E33 (registration pending owner approval):
+  `--nonneg-distance` at Rev5 without those ten inputs; a gated head only if needed; smooth monotone tail instead of the floor.
+- **zenpredict graphs (imazen/zenanalyze PR #89, Opus lane).** ZNPR v4 static op graphs; 0 mismatches against the old runtime
+  on 260 fixtures, the production bake and 504 Rev4 bakes; zensim suite passes; review MERGE-READY pending the owner's choice
+  of how `layers()` behaves on graph files. zenanalyze main also took the magetypes 0.9.30 migration (`a10e5581`, bit-identical).
+
+Open owner decisions: (1) zenpredict `layers()` option a/b/c; (2) V40 HDR-side reports (HDR VAL exposure); (3) E33
+registration; (4) zenanalyze scalar-tier feature bug and a batch of doc corrections (zenanalyze and zenpredict); (5) a byte
+budget for REV5PERF4's memory growth.
