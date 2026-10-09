@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-09 — Rev5 steering discards signal beneath the output floor. FIXED for prepared maps; served G-STEER remains OPEN (`40c797fa`).** Prepared steering recovers pre-calibration sensitivities for an isolated single bake when the active lower spline floor erases every served sensitivity. Serving scores and public served-score gradients are unchanged. Rev5 defaults to exact neighbour replay: across the frozen 135 engineering cases, M3f rises in 106, falls in 15 and is unchanged in 14; M2 is unchanged throughout. Largest drops are broad-220-b8 0.847 → 0.765 and broad-220-b16 0.887 → 0.802; none crosses .70. Served G-STEER stays 128/135 with the same seven failures: four tied floor cases and three model linearization limits. Exact feature replay does not guarantee better map ranking for every case. See [STEERFIX](benchmarks/steerfix_2026-10-09.md).
+
 * **2026-10-09 — V40 fleet placement blocked by empty caps. FIXED locally.**
   The packet inherited empty `hosts` maps and the launch gate checked equality
   with live caps without testing placement. The coordinator reports 147 resource

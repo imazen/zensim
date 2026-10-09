@@ -1,6 +1,16 @@
 # Steering correctness diagnostics; run under shared flock/run-heavy.
 set working-directory := '..'
 
+# Revalidate the reviewed chain after rebasing onto the landing base.
+[positional-arguments]
+steerfix-land-validate root:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo fmt -p zensim -- --check > "$1/fmt.log" 2>&1
+    cargo test -p zensim --all-features > "$1/all-features-test.log" 2>&1
+    just clippy > "$1/clippy.log" 2>&1
+    just lint-scripts > "$1/lint-scripts.log" 2>&1
+
 [positional-arguments]
 steerfix-baseline root:
     #!/usr/bin/env bash

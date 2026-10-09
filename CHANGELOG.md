@@ -32,6 +32,16 @@
 
 ### Changed
 
+- Rev5 attribution defaults to exact neighbour replay. Prepared steering
+  recovers pre-calibration sensitivities when an isolated single bake's lower
+  output floor erases all served sensitivity; serving scores and public
+  served-score gradients are unchanged (`40c797fa`). In the frozen 135-case
+  engineering roster, replay raises M3f in 106 cases, lowers it in 15 and leaves
+  14 unchanged; M2 is unchanged throughout. Largest drops: broad-220-b8
+  0.847 → 0.765 and broad-220-b16 0.887 → 0.802. None crosses the .70 bar;
+  served G-STEER remains 128/135 with the same seven failures. See
+  [STEERFIX](benchmarks/steerfix_2026-10-09.md).
+
 - Rev5 serving (`ee9e5b55`): four bit-identical performance fixes reuse scalar blur leaves, restore source/distorted conversion and row fan-out, vectorize complete horizontal edge blocks, and cache exact vertical pair-tree nodes; frozen scalar/SIMD kernel gates, 384/384 strict score/420-feature checks, 576/576 frozen comparisons and all-feature tests pass. Re-timed 4/192 cells (two faster, two inconclusive); 188/192 were not remeasured. `benchmarks/rev5perf_2026-10-08.md`.
 
 - E28 admission (`a06541fd`): validate frozen human manifests/populations and label-free row-key/source bindings before label-bearing payload reads; replace recursive preparation copy with an explicit approved inventory and pre-copy forbidden-directory refusal.
