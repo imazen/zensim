@@ -45,7 +45,15 @@ def freeze_binary(build_log, dest):
     source=Path(paths.pop());dest=Path(dest)
     with dest.open('xb') as out,source.open('rb') as inp: shutil.copyfileobj(inp,out)
     dest.chmod(source.stat().st_mode & 0o777)
-    dependencies={m['target']['name']:dict(package_id=m['package_id'],features=m['features']) for m in messages if m.get('reason')=='compiler-artifact' and m.get('target',{}).get('name') in ['fast_ssim2','butteraugli','ssimulacra2','archmage','rayon'] and m['target'].get('kind')==['lib']}
+    dependencies={}
+    for m in messages:
+        if m.get('reason')!='compiler-artifact' or m.get('target',{}).get('name') not in ['fast_ssim2','butteraugli','ssimulacra2','archmage','rayon'] or m['target'].get('kind')!=['lib']:
+            continue
+        name=m['target']['name']
+        if name=='fast_ssim2' and m['package_id'].startswith('git+'):
+            name='fast_ssim2_main'
+        assert name not in dependencies or dependencies[name]['package_id']==m['package_id'], 'distinct packages cannot share an artifact inventory name'
+        dependencies[name]=dict(package_id=m['package_id'],features=m['features'])
     write(dest.with_name(dest.name+'.artifact.json'),dict(cargo_artifact=str(source),build_log=str(build_log),binary_sha256=hashlib.sha256(dest.read_bytes()).hexdigest(),dependencies=dependencies))
     print(dest,flush=True)
 

@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 use zenpredict::Model;
 use zensim::{BakeScorer, RgbSlice, Zensim, ZensimProfile};
 
+#[cfg(feature = "costcmp")]
+mod costcmp;
+
 const SOURCE_SHA: &str = "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400";
 const ID_SHA: &str = "0a6a20dc356acef3bef9deffc411f03189813e8b924fddcf7b22f7efea6b9f17";
 const ID_BYTES: &str = include_str!("../../../benchmarks/costset2_2026-10-03.candidate_ids.json");
@@ -72,118 +75,127 @@ fn worker(arm: &str) {
         .iter()
         .map(|v| format!("{v:02x}"))
         .collect::<String>();
-    let src = Box::leak(src.into_boxed_slice());
-    let dst = Box::leak(dst.into_boxed_slice());
+    let src: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
+    let dst: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
     let mut model_info = Value::Null;
     let feature_values = Rc::new(RefCell::new(Vec::<f64>::new()));
     let keep_features = std::env::var_os("ZEN_S2_PARITY_FEATURES").is_some();
-    let mut action: Box<dyn FnMut() -> f64> = match arm {
-        "by_v2fy" => {
-            let path = std::env::var("ZEN_S2_SPEEDQ_BAKE").expect("pinned bake path");
-            let original = std::fs::read(path).unwrap();
-            assert_eq!(
-                digest(&original),
-                SOURCE_SHA,
-                "frozen production model changed"
-            );
-            let revision = std::env::var("ZENSIM_FORMULA_REV").unwrap();
-            assert!(matches!(revision.as_str(), "3" | "4" | "5"));
-            // Existing metadata owner preserves weight sections without requantization.
-            let bytes = zenpredict_bake::append_metadata_utf8(
-                &original,
-                "zentrain.formula_revision",
-                &revision,
-            )
-            .unwrap();
-            let stamped_sha = digest(&bytes);
-            let model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
-            assert_eq!(model.layers().next().unwrap().out_dim, 128, "H128 shape");
-            assert_eq!(model.n_outputs(), 1);
-            let mut scorer = BakeScorer::new(model).unwrap().with_parallel(true);
-            assert_eq!(digest(ID_BYTES.as_bytes()), ID_SHA);
-            let canonical: Value = serde_json::from_str(ID_BYTES).unwrap();
-            let expected: Vec<u16> = canonical["candidates"]["by_v2fy"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_u64().unwrap() as u16)
-                .collect();
-            assert_eq!(expected.len(), 420);
-            assert_eq!(scorer.consumed_feature_ids().unwrap(), expected);
-            model_info = json!({"source_sha256": SOURCE_SHA, "stamped_sha256": stamped_sha,
+    #[cfg(feature = "costcmp")]
+    let extra = costcmp::action(arm, src, dst, w, h);
+    #[cfg(not(feature = "costcmp"))]
+    let extra: Option<(Box<dyn FnMut() -> f64>, Value)> = None;
+    let mut action: Box<dyn FnMut() -> f64> = if let Some((action, info)) = extra {
+        model_info = info;
+        action
+    } else {
+        match arm {
+            "by_v2fy" => {
+                let path = std::env::var("ZEN_S2_SPEEDQ_BAKE").expect("pinned bake path");
+                let original = std::fs::read(path).unwrap();
+                assert_eq!(
+                    digest(&original),
+                    SOURCE_SHA,
+                    "frozen production model changed"
+                );
+                let revision = std::env::var("ZENSIM_FORMULA_REV").unwrap();
+                assert!(matches!(revision.as_str(), "3" | "4" | "5"));
+                // Existing metadata owner preserves weight sections without requantization.
+                let bytes = zenpredict_bake::append_metadata_utf8(
+                    &original,
+                    "zentrain.formula_revision",
+                    &revision,
+                )
+                .unwrap();
+                let stamped_sha = digest(&bytes);
+                let model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
+                assert_eq!(model.layers().next().unwrap().out_dim, 128, "H128 shape");
+                assert_eq!(model.n_outputs(), 1);
+                let mut scorer = BakeScorer::new(model).unwrap().with_parallel(true);
+                assert_eq!(digest(ID_BYTES.as_bytes()), ID_SHA);
+                let canonical: Value = serde_json::from_str(ID_BYTES).unwrap();
+                let expected: Vec<u16> = canonical["candidates"]["by_v2fy"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_u64().unwrap() as u16)
+                    .collect();
+                assert_eq!(expected.len(), 420);
+                assert_eq!(scorer.consumed_feature_ids().unwrap(), expected);
+                model_info = json!({"source_sha256": SOURCE_SHA, "stamped_sha256": stamped_sha,
                 "revision": revision, "hidden":128, "consumed_ids":expected,
                 "source_bytes":original.len(), "revision_metadata_only":true,
                 "scope":"frozen seed-0 packed f16 production weights; metadata-only revision comparison"});
-            let retained = Rc::clone(&feature_values);
-            Box::new(move || {
-                let result = scorer
-                    .compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h), None)
+                let retained = Rc::clone(&feature_values);
+                Box::new(move || {
+                    let result = scorer
+                        .compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h), None)
+                        .unwrap();
+                    if keep_features {
+                        *retained.borrow_mut() = expected
+                            .iter()
+                            .map(|id| result.features()[usize::from(*id)])
+                            .collect();
+                    }
+                    result.score()
+                })
+            }
+            "zensim_B" => {
+                assert_eq!(
+                    std::env::var("ZENSIM_FORMULA_REV").unwrap(),
+                    "1",
+                    "B is serving Rev1"
+                );
+                let z = Zensim::new(ZensimProfile::B).with_parallel(true);
+                Box::new(move || {
+                    z.compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h))
+                        .unwrap()
+                        .score()
+                })
+            }
+            "fast_ssim2" => Box::new(move || {
+                fast_ssim2::compute_ssimulacra2(
+                    imgref::Img::new(&*src, w, h),
+                    imgref::Img::new(&*dst, w, h),
+                )
+                .unwrap()
+            }),
+            "butteraugli" => Box::new(move || {
+                let rs: &[rgb::RGB8] = bytemuck::cast_slice(&*src);
+                let ds: &[rgb::RGB8] = bytemuck::cast_slice(&*dst);
+                butteraugli::butteraugli(
+                    imgref::Img::new(rs, w, h),
+                    imgref::Img::new(ds, w, h),
+                    &butteraugli::ButteraugliParams::default(),
+                )
+                .unwrap()
+                .score
+            }),
+            "ssimulacra2_rs" => {
+                // Same boundary as the existing peer: sRGB widening is untimed.
+                let rs = super::make_f32_srgb(src);
+                let ds = super::make_f32_srgb(dst);
+                Box::new(move || {
+                    let s = ssimulacra2::Rgb::new(
+                        rs.clone(),
+                        w,
+                        h,
+                        ssimulacra2::TransferCharacteristic::SRGB,
+                        ssimulacra2::ColorPrimaries::BT709,
+                    )
                     .unwrap();
-                if keep_features {
-                    *retained.borrow_mut() = expected
-                        .iter()
-                        .map(|id| result.features()[usize::from(*id)])
-                        .collect();
-                }
-                result.score()
-            })
+                    let d = ssimulacra2::Rgb::new(
+                        ds.clone(),
+                        w,
+                        h,
+                        ssimulacra2::TransferCharacteristic::SRGB,
+                        ssimulacra2::ColorPrimaries::BT709,
+                    )
+                    .unwrap();
+                    ssimulacra2::compute_frame_ssimulacra2(s, d).unwrap()
+                })
+            }
+            _ => panic!("unknown SPEEDQ arm"),
         }
-        "zensim_B" => {
-            assert_eq!(
-                std::env::var("ZENSIM_FORMULA_REV").unwrap(),
-                "1",
-                "B is serving Rev1"
-            );
-            let z = Zensim::new(ZensimProfile::B).with_parallel(true);
-            Box::new(move || {
-                z.compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h))
-                    .unwrap()
-                    .score()
-            })
-        }
-        "fast_ssim2" => Box::new(move || {
-            fast_ssim2::compute_ssimulacra2(
-                imgref::Img::new(&*src, w, h),
-                imgref::Img::new(&*dst, w, h),
-            )
-            .unwrap()
-        }),
-        "butteraugli" => Box::new(move || {
-            let rs: &[rgb::RGB8] = bytemuck::cast_slice(&*src);
-            let ds: &[rgb::RGB8] = bytemuck::cast_slice(&*dst);
-            butteraugli::butteraugli(
-                imgref::Img::new(rs, w, h),
-                imgref::Img::new(ds, w, h),
-                &butteraugli::ButteraugliParams::default(),
-            )
-            .unwrap()
-            .score
-        }),
-        "ssimulacra2_rs" => {
-            // Same boundary as the existing peer: sRGB widening is untimed.
-            let rs = super::make_f32_srgb(src);
-            let ds = super::make_f32_srgb(dst);
-            Box::new(move || {
-                let s = ssimulacra2::Rgb::new(
-                    rs.clone(),
-                    w,
-                    h,
-                    ssimulacra2::TransferCharacteristic::SRGB,
-                    ssimulacra2::ColorPrimaries::BT709,
-                )
-                .unwrap();
-                let d = ssimulacra2::Rgb::new(
-                    ds.clone(),
-                    w,
-                    h,
-                    ssimulacra2::TransferCharacteristic::SRGB,
-                    ssimulacra2::ColorPrimaries::BT709,
-                )
-                .unwrap();
-                ssimulacra2::compute_frame_ssimulacra2(s, d).unwrap()
-            })
-        }
-        _ => panic!("unknown SPEEDQ arm"),
     };
     let score = action();
     assert!(score.is_finite(), "nonfinite score");
@@ -293,6 +305,10 @@ pub(super) fn run() {
         ("fast_ssim2", "fast_ssim2", "1"),
         ("butteraugli", "butteraugli", "1"),
         ("ssimulacra2_rs", "ssimulacra2_rs", "1"),
+        #[cfg(feature = "costcmp")]
+        ("zensim_A", "zensim_A", "1"),
+        #[cfg(feature = "costcmp")]
+        ("fast_ssim2_main", "fast_ssim2_main", "1"),
     ];
     let only = std::env::var("ZEN_S2_ARMS").expect("explicit arm inventory");
     let mut owners = Vec::new();

@@ -48,3 +48,20 @@ speedq-freeze build_log dest:
 [positional-arguments]
 speedq-report *options:
     python3 scripts/demos/speed_matrix_report.py --speedq "$@"
+
+costcmp-build:
+    ZENSIM_BENCH_SKIP_CPP_FFI=1 cargo bench --no-run --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar --features costcmp --message-format=json-render-diagnostics
+
+costcmp-clippy:
+    ZENSIM_BENCH_SKIP_CPP_FFI=1 cargo clippy --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar --features costcmp -- -D warnings
+
+costcmp-test:
+    python3 -m unittest discover -s scripts/demos -p 'test_costcmp.py' -v
+
+[positional-arguments]
+costcmp-run *options:
+    python3 scripts/demos/costcmp_run.py "$@"
+
+[positional-arguments]
+costcmp-report *options:
+    python3 scripts/demos/speed_matrix_report.py --costcmp "$@"

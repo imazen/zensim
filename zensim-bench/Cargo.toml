@@ -15,6 +15,7 @@ publish = false
 [features]
 # Quiet-box measurement extension; no serving code or benchmark defaults change.
 speedq = ["dep:serde_json", "dep:sha2"]
+costcmp = ["speedq", "ssim2-rayon", "dep:fast-ssim2-main"]
 training = ["zensim/training"]
 
 # `benches/crates_io_speed_bar.rs`: the last crates.io release (0.2.7,
@@ -160,7 +161,9 @@ zensim027 = { package = "zensim", version = "=0.2.7", optional = true, default-f
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
-fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
+fast-ssim2 = { version = "=0.8.2", features = ["imgref"] }
+# COSTCMP alone prices the fetched main commit; production dependencies stay unchanged.
+fast-ssim2-main = { package = "fast-ssim2", git = "https://github.com/imazen/fast-ssim2", rev = "09ec3e7c78bd230b1545572a188e162313c59fda", features = ["imgref", "rayon"], optional = true }
 butteraugli = { version = "0.9", features = ["avx512"] }
 linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
 imgref = "1.12"

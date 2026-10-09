@@ -507,6 +507,7 @@ def speedq_report(args) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--speedq", action="store_true", help="report SPEEDQ parity and the admitted timing/RSS grid")
+    ap.add_argument("--costcmp", action="store_true", help="report the admitted COSTCMP grid through SPEEDQ owners")
     ap.add_argument("--raw-dir", required=True, type=Path)
     ap.add_argument("--out-json", required=True, type=Path)
     ap.add_argument("--out-md", required=True, type=Path)
@@ -521,6 +522,11 @@ def main() -> int:
         "edit to the generated .md is erased by the next run.",
     )
     args = ap.parse_args()
+    if args.costcmp:
+        if args.speedq or args.speedq_baseline or args.comparison_md:
+            ap.error('--costcmp cannot be combined with SPEEDQ comparison options')
+        from costcmp_report import report
+        return report(args)
     if args.speedq_baseline is not None or args.comparison_md is not None:
         if not args.speedq or args.speedq_baseline is None or args.comparison_md is None:
             ap.error('--speedq-baseline and --comparison-md must be supplied together with --speedq')
