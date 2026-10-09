@@ -74,8 +74,8 @@ use zensim_validate::parquet_loader;
 // the canonical home (the 2026-05-26 paper-correct OR + PWRC rewrite
 // only landed in panel.rs, so this binary's "panel" output was
 // silently the older proxy math until this commit). All call sites
-// route through `panel::compute_panel` now; only `ds_auc` below
-// remains bake_verdict-specific (no panel.rs equivalent yet).
+// route through `panel::compute_panel` now. DS-AUC lives in the shared
+// difference_auc module used by this binary and panel evaluate.
 // ============================================================================
 
 #[path = "../difference_auc.rs"]

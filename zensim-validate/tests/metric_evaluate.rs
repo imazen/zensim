@@ -13,7 +13,14 @@ impl Fixture {
     fn new() -> Self {
         let base = std::env::var_os("TMPDIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join("tmp"));
+            .unwrap_or_else(|| {
+                PathBuf::from(
+                    std::env::var_os("HOME")
+                        .or_else(|| std::env::var_os("USERPROFILE"))
+                        .expect("HOME or USERPROFILE"),
+                )
+                .join("tmp")
+            });
         let root = base.join(format!(
             "metric-evaluate-test-{}-{}",
             std::process::id(),
@@ -184,13 +191,22 @@ fn stale_instrument_is_failed_and_valid_bound_measurements_are_checked() {
     let mut v = f.manifest();
     assert!(f.run(&v, "initial").status.success());
     let binding = f.report("initial")["runs"][0]["binding"].clone();
-    let mut artifact = json!({"schema":"metric-instrument-v1","criterion":"targeting","metric_sha256":binding["metric_sha256"],"dataset_sha256":binding["dataset_sha256"],"n":6,"measurements":{"p95":2.0}});
+    let mut artifact = json!({"schema":"metric-instrument-v1","criterion":"targeting","metric_sha256":binding["metric_sha256"],"dataset_sha256":binding["dataset_sha256"],"dataset_contract_sha256":binding["dataset_contract_sha256"],"n":6,"measurements":{"p95":2.0}});
     f.write("instrument.json", &artifact.to_string());
     v["instruments"] = json!([{"metric":"good","dataset":"test","criterion":"targeting","kind":"artifact","path":"instrument.json","sha256":hash(&f.path("instrument.json"))}]);
     v["requirements"] = json!([{"metric":"good","dataset":"test","criterion":"targeting","pointer":"/p95","max":3}]);
     let o = f.run(&v, "valid");
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     assert_eq!(f.report("valid")["checks"][0]["state"], "pass");
+    v["datasets"][0]["target_direction"] = json!("lower");
+    assert_eq!(f.run(&v, "changed-contract").status.code(), Some(1));
+    assert!(
+        f.report("changed-contract")["runs"][0]["criteria"]["targeting"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("dataset_contract_sha256")
+    );
+    v["datasets"][0]["target_direction"] = json!("higher");
     artifact["metric_sha256"] = json!("wrong-model");
     f.write("instrument.json", &artifact.to_string());
     v["instruments"][0]["sha256"] = json!(hash(&f.path("instrument.json")));
@@ -376,5 +392,60 @@ fn paired_comparison_keeps_declared_direction() {
     assert_eq!(
         f.report("inverted")["comparisons"][0]["report"]["state"],
         "not_measured"
+    );
+}
+
+#[test]
+fn severity_ramps_report_partial_coverage_and_refuse_truncated_codes() {
+    let f = Fixture::new();
+    let mut v = f.manifest();
+    f.write(
+        "data.csv",
+        "id,score,ref,severity\na,5,r1,11\nb,4,r1,12\nc,3,r1,13\nd,2,r1,14\ne,1,r1,15\nf,5,r2,11\n",
+    );
+    v["datasets"][0]["sha256"] = json!(hash(&f.path("data.csv")));
+    v["datasets"][0]["columns"] =
+        json!({"id":"id","score":"score","reference_id":"ref","severity_code":"severity"});
+    let o = f.run(&v, "ramps");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let r = f.report("ramps");
+    let m = &r["runs"][0]["criteria"]["severity_ramp"]["measurements"];
+    assert_eq!(m["total_ramps"], 2);
+    assert_eq!(m["incomplete_ramps"], 1);
+    assert_eq!(m["monotone_fraction"], 1.0);
+    let path = f.path("data.csv");
+    fs::write(
+        &path,
+        fs::read_to_string(&path)
+            .unwrap()
+            .replace("r1,12", "r1,12.5"),
+    )
+    .unwrap();
+    v["datasets"][0]["sha256"] = json!(hash(&path));
+    let o = f.run(&v, "bad");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&o.stderr).contains("severity_code needs a nonnegative integer")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn modifying_image_inputs_fails_the_adapter() {
+    let f = Fixture::new();
+    let mut v = f.manifest();
+    f.write("image.dat", "original");
+    f.write("data.csv", "id,reference\na,image.dat\n");
+    v["datasets"][0]["sha256"] = json!(hash(&f.path("data.csv")));
+    v["datasets"][0]["columns"] = json!({"id":"id","reference":"reference"});
+    let path = executable(&f, "#!/bin/sh\nprintf x >> \"$1\"\nprintf '1\\n'\n");
+    v["metrics"][0]["source"] =
+        json!({"kind":"command","program":path,"args":["{reference}"],"timeout_seconds":2});
+    assert_eq!(f.run(&v, "mutated").status.code(), Some(1));
+    assert_eq!(f.report("mutated")["runs"][0]["score_failures"], 1);
+    assert!(
+        fs::read_to_string(f.path("mutated/test/good/scores.tsv"))
+            .unwrap()
+            .contains("image input changed")
     );
 }

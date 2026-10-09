@@ -413,6 +413,10 @@ fn instrument_report(
                     "dataset_sha256".into(),
                     binding["dataset_sha256"].as_str().unwrap().into(),
                 ),
+                (
+                    "dataset_contract_sha256".into(),
+                    binding["dataset_contract_sha256"].as_str().unwrap().into(),
+                ),
                 ("criterion".into(), i.criterion.clone()),
             ]);
             adapter::execute(command, base, &vars, out, "instrument")?
@@ -422,7 +426,7 @@ fn instrument_report(
         value["schema"] == "metric-instrument-v1" && value["criterion"] == i.criterion,
         "instrument schema/criterion mismatch"
     );
-    for key in ["metric_sha256", "dataset_sha256"] {
+    for key in ["metric_sha256", "dataset_sha256", "dataset_contract_sha256"] {
         ensure!(value[key] == binding[key], "instrument {key} mismatch");
     }
     ensure!(
@@ -471,7 +475,7 @@ fn run(cli: Cli) -> Result<bool> {
             let dir = dataset_dir.join(&m.id);
             fs::create_dir(&dir)?;
             let metric_identity = adapter::identity(m, base)?;
-            let binding = json!({"metric_sha256":sha(&serde_json::to_vec(&metric_identity)?), "dataset_sha256":d.sha256});
+            let binding = json!({"metric_sha256":sha(&serde_json::to_vec(&metric_identity)?), "dataset_sha256":d.sha256,"dataset_contract_sha256":sha(&serde_json::to_vec(d)?)});
             let scores = adapter::score(m, &table, base, &path, &dir)?;
             ensure!(
                 adapter::identity(m, base)? == metric_identity,

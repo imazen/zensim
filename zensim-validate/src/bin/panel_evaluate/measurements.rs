@@ -318,13 +318,37 @@ pub(super) fn evaluate(
     if table.has("severity_code") && table.has("reference_id") {
         let q = table.numbers("severity_code")?;
         let refs = table.strings("reference_id")?;
+        let mut ramps: BTreeMap<(&str, u32), BTreeSet<u32>> = BTreeMap::new();
+        for (reference, code) in refs.iter().zip(&q) {
+            ensure!(
+                !reference.is_empty()
+                    && *code >= 0.0
+                    && *code <= f64::from(u32::MAX)
+                    && code.fract() == 0.0,
+                "severity_code needs a nonnegative integer and a reference"
+            );
+            let code = *code as u32;
+            ensure!(
+                (1..=5).contains(&(code % 10)),
+                "severity_code level must be 1 through 5"
+            );
+            ensure!(
+                ramps
+                    .entry((reference, code / 10))
+                    .or_default()
+                    .insert(code % 10),
+                "duplicate severity level for reference/type"
+            );
+        }
+        let total_ramps = ramps.len();
+        let incomplete_ramps = ramps.values().filter(|levels| levels.len() != 5).count();
         let stats = zensim_validate::eval_report::severity_ramp(
             &refs,
             &q,
             &p,
             m.ladder_epsilon.unwrap_or(0.0),
         );
-        out.insert("severity_ramp".into(),if stats.n_ramps+stats.n_signed_arms==0 {missing("no complete registered five-level severity ramps")} else {measured(json!({"n_ramps":stats.n_ramps,"n_signed":stats.n_signed,"monotone_fraction":stats.pct_monotone,"strict_fraction":stats.pct_strict,"mean_worst_inversion":stats.mean_worst_inv,"signed_monotone_fraction":stats.pct_signed_monotone,"n_signed_arms":stats.n_signed_arms}))});
+        out.insert("severity_ramp".into(),if stats.n_ramps+stats.n_signed_arms==0 {missing("no complete registered five-level severity ramps")} else {measured(json!({"total_ramps":total_ramps,"incomplete_ramps":incomplete_ramps,"n_ramps":stats.n_ramps,"n_signed":stats.n_signed,"monotone_fraction":stats.pct_monotone,"strict_fraction":stats.pct_strict,"mean_worst_inversion":stats.mean_worst_inv,"signed_monotone_fraction":stats.pct_signed_monotone,"n_signed_arms":stats.n_signed_arms}))});
     }
     if table.has("corruption_label") {
         let labels = table.strings("corruption_label")?;

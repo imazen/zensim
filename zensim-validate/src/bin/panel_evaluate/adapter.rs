@@ -276,6 +276,12 @@ pub(super) fn score(
                 }
             }
             let (value, mut invocation) = execute(&spec, base, &vars, out, &format!("row-{i}"))?;
+            for input in &inputs {
+                ensure!(
+                    file_sha(Path::new(input["path"].as_str().unwrap()))? == input["sha256"],
+                    "image input changed during scoring"
+                );
+            }
             invocation["inputs"] = json!(inputs);
             provenance = invocation;
             let result = match &metric.source {

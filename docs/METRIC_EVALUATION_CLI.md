@@ -161,19 +161,22 @@ An `instruments` entry selects `metric`, `dataset`, `criterion`, and either:
 - `kind: "command"`, `command` (same executable protocol).
 
 An instrument command receives placeholders `{dataset}`, `{scores}`,
-`{metric_sha256}`, `{dataset_sha256}`, `{criterion}`. Its JSON must be:
+`{metric_sha256}`, `{dataset_sha256}`, `{dataset_contract_sha256}`, `{criterion}`. Its JSON must be:
 
 ```json
 {
   "schema":"metric-instrument-v1", "criterion":"targeting",
   "metric_sha256":"<run binding>", "dataset_sha256":"<run binding>",
+  "dataset_contract_sha256":"<run binding>",
   "n":100, "measurements":{"p95_absolute_error":2.3}
 }
 ```
 
 The binding is recorded in `report.json`. The metric hash covers its complete
 configuration, executable identity and declared dependencies. The dataset hash
-covers the exact input table; per-image input hashes accompany scored rows.
+covers the exact input table; the dataset-contract hash also binds mappings,
+direction, ranges and role. Per-image input hashes accompany scored rows;
+inputs are checked again after per-pair execution.
 Stale bindings refuse. Artifact hashes protect bytes, not the scientific validity
 of a claim: retain the measuring owner's underlying evidence and contract. A
 claimed `pass` field is never imported as a decision.
