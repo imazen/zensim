@@ -59,10 +59,18 @@ def report(args):
                 fits.append(dict(tier=tier,threads=n,arm=arm,alpha_ns=alpha,beta_ns_per_pixel=beta,r2=1-error/total,
                                  ms_per_mp_1024sq=medians[f'{tier}-t{n}-1024x1024'][arm]/1e6/(1024**2/1e6),
                                  ms_per_mp_4096sq=medians[f'{tier}-t{n}-4096x4096'][arm]/1e6/(4096**2/1e6)))
+    verdicts={}
+    for arm in cmp.ARMS[1:]:
+        counts=dict(production_faster=0,production_slower=0,inconclusive=0)
+        for analysis in analyses.values():
+            ci=analysis['comparisons'][arm]
+            label='production_faster' if ci['ci_lower']>0 and not ci['resolution_limited'] else ('production_slower' if ci['ci_upper']<0 and not ci['resolution_limited'] else 'inconclusive')
+            counts[label]+=1
+        verdicts[arm]=counts
     result=dict(status='MEASURED',timing_configurations=64,arm_timings=320,rss_observations=80,
                 axes=dict(tiers=cmp.TIERS,threads=cmp.THREADS,geometries=collection.GEOMETRIES,arms=cmp.ARMS),
                 binary_sha256=expected_sha,model_sha256=collection.SOURCE_SHA,fast_ssim2_main=cmp.FAST_MAIN,
-                medians_ns=medians,paired_analyses=analyses,round_selection=selections,validated_parent_batches=batches,paired_analysis_replays=len(replay),
+                medians_ns=medians,paired_analyses=analyses,pointwise_verdicts=verdicts,round_selection=selections,validated_parent_batches=batches,paired_analysis_replays=len(replay),
                 fits=fits,rss_kib=memories,raw_directory=str(root),peer_build=artifact['dependencies'],
                 statistics_owner='frozen zenbench paired_rounds analyzer; SHA and source recorded in metadata',
                 interval_scope='pointwise paired 95% CIs, candidate minus production Rev5; not simultaneous grid-wide intervals')
@@ -75,6 +83,18 @@ def report(args):
         'Each peer entry is its warm median ms, followed by the pointwise 95% interval for peer minus production ms. Positive bounds mean the peer costs more; negative bounds mean it costs less. Resolution-limited entries are marked `limited`.','',
         '| tier | threads | size | production ms | A ms [CI] | B ms [CI] | fast main ms [CI] | fast 0.8.2 ms [CI] |',
         '|---|---:|---|---:|---:|---:|---:|---:|']
+    at=lines.index('## Per-cell times and paired intervals')
+    summary=['## Favorite model versus A and fast main','',
+             'Warm median scoring times on v4x. Ratios are measured production time divided by the named peer time; below 1 means production costs less. The full paired intervals below determine which differences are resolved.','',
+             '| threads | size | production ms | A ms | production/A | fast main ms | production/fast main |',
+             '|---:|---|---:|---:|---:|---:|---:|']
+    for n in (1,32):
+        for g in ('1024x1024','4096x4096'):
+            m=medians[f'v4x-t{n}-{g}'];v=m[cmp.ARMS[0]];a=m['zensim_A'];f=m['fast_ssim2_main']
+            summary.append(f'| {n} | {g} | {v/1e6:.6f} | {a/1e6:.6f} | {v/a:.4f} | {f/1e6:.6f} | {v/f:.4f} |')
+    summary+=['','Pointwise classifications over 64 cells per peer (production faster / slower / inconclusive): '+
+               '; '.join(f"{a}: {v['production_faster']} / {v['production_slower']} / {v['inconclusive']}" for a,v in verdicts.items())+'.','']
+    lines[at:at]=summary
     for g,t,n in cmp.cells():
         k=f'{t}-t{n}-{g}';entries=[f'{medians[k][cmp.ARMS[0]]/1e6:.6f}']
         for a in cmp.ARMS[1:]:
