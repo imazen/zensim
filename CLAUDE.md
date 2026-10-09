@@ -540,6 +540,31 @@ because cleanup tests or a historical training reproduction pass.
   somewhere other than revision selection; re-open with the two scores and the
   bake sha256.
 
+## COSTCMP production scoring cost — 2026-10-09
+
+[The measured report](benchmarks/costcmp_2026-10-09.md) compares frozen seed-0
+production `f803b74c` at Rev5 on runtime `462f7fe5` with complete serving A/B
+at Rev1, fast-ssim2 main `09ec3e7c` (0.9.0), and registry 0.8.2. All 64
+configurations / 320 arm timings and 80 fresh-process RSS observations pass
+unchanged SPEEDQ gates. All 64 production score/420-feature records match
+across tiers/threads and match SPEEDQ3. The report validates 120 parent
+batches, retains 2,048 of 2,239 rounds with 191 flags excluded across every
+arm, and exactly replays 256 paired analyses.
+
+At 1024²/v4x/1T, production/A/main medians are 22.386163 / 45.486195 /
+60.736307 ms. At 32T they are 14.170276 / 9.1165755 / 28.848190 ms: A
+is cheaper there. Pointwise production faster/slower/inconclusive counts
+are A 20/36/8, B 16/47/1, main 52/10/2 and 0.8.2 55/7/2; no universal
+speed claim follows. Tiny 64²/1T also costs more for production than A/main.
+At 4096², production fresh-process peak RSS is 191,664 / 199,116 KiB at
+1T/32T, versus A 505,364 / 731,980 and main 1,839,488 / 2,595,520 KiB.
+Inputs are deterministic synthetic RGB8; this is scoring-cost evidence,
+not model-quality or corpus-wide qualification. Forty unconstrained OLS
+fits and measured 1024²/4096² ms/MP are in the report; the negative fitted
+intercepts are not physical startup costs. Pins, commands and large JSON
+are recorded in the adjacent metadata and pointer. Local review only;
+production dependencies are unchanged.
+
 ## SPEEDQ runtime evidence
 
 SPEEDQ3 uses fresh runtime `c989a2d4` and raw root `/mnt/v/output/zensim/speedq3-2026-10-08/`: 192 timing cells, 112 fresh-process RSS observations, 384 strict Rev4/Rev5 parity checks, and exact replay of every saved paired analysis. All six required timing arms have full coverage; optional Rust-av timing remains absent and all seven arms retain RSS. First-32-clean selection retains 6,144 of 6,474 rounds; 330 flagged rounds are excluded across all arms. All 314 parent batches validate, and 192 lock acquisitions/releases match. Quiet gates and frozen model are unchanged. [The report](benchmarks/rev5_speedq3_2026-10-08.md) and [SPEEDQ2 comparison](benchmarks/rev5_speedq3_vs_speedq2_2026-10-08.md) preserve the pointwise-CI limits; between-run median/RSS changes are descriptive.

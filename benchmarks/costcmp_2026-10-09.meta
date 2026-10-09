@@ -33,3 +33,19 @@ commands = raw_root/provenance/commands.json and full run-heavy logs
 provenance = raw_root/provenance includes Cargo JSON, Cargo.lock, source archives, toolchain, build flags and hardware observations
 ready_coordinates = explicit geometry/tier/thread binding, regression fix e95d6622; final reporter validates every collected record
 tier_cascade = verified archmage 0.9.29 V4 disable cascades to V4x; testable_dispatch feature is recorded in Cargo artifact receipt
+qualification = complete 64 configurations, 320 arm timings, 80 fresh RSS records, 40 OLS fits
+parent_batches_verified = 120
+paired_analysis_replays = 256 exact
+rounds = 2048 retained / 2239 observed; 191 flagged rounds excluded across all five arms
+attempts = 0 excluded/retried attempts
+checks = 7 COSTCMP tests, 26 SPEEDQ tests, 873 runnable scripts; scoped fmt and clippy with/without costcmp feature pass
+build_resources = run-heavy rc=0 39s | peak-RSS 0.87GiB | min-avail 41812MiB | peak-load 4.01
+preflight_resources = run-heavy rc=0 42s | peak-RSS 2.41GiB | min-avail 41222MiB | peak-load 2.44
+timing_resources = run-heavy rc=0 4035s | peak-RSS 3.59GiB | min-avail 38013MiB | peak-load 11.58
+rss_resources = run-heavy rc=0 88s | peak-RSS 2.48GiB | min-avail 41902MiB | peak-load 4.32
+final_verification_resources = run-heavy rc=0 3s | peak-RSS 0.54GiB | min-avail 43463MiB | peak-load 1.99
+resource_scope = whole command including quiet waits; individual admitted gates and clean rounds qualify each measured segment
+report_source_commit = 4ecaaaef417134cdf3bdc8885c5e18819e18799b
+report_source_sha256 = f867b30e4913bfc1b45d9b526952b7b882179eae85e0e0d1710a657f39c3e6af
+json_sha256 = 5e781566394851a8333db90689ec108faa60208097b61a22b05d4115a31df941
+push = none; all source and report changes remain local for review
