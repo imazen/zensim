@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import os
 
 import speedq_run as speedq
 
@@ -22,6 +23,7 @@ def main():
     ap.add_argument('--mode', choices=['perf', 'callgrind', 'phases', 'heaptrack'], required=True)
     ap.add_argument('--only', help='comma-separated production grid tags; defaults to the original four cells')
     ap.add_argument('--calls', type=int, help='explicit profiler-only extra scoring calls')
+    ap.add_argument('--cpuset', help='diagnostic affinity override; never a qualification receipt')
     args = ap.parse_args()
     cells = CELLS
     if args.only:
@@ -35,10 +37,17 @@ def main():
         cells = [grid[tag] for tag in tags]
     if args.calls is not None and args.calls < 0:
         ap.error('--calls must be nonnegative')
+    if args.cpuset:
+        cpus = set()
+        for item in args.cpuset.split(','):
+            bounds = item.split('-')
+            cpus.update(range(int(bounds[0]), int(bounds[-1]) + 1))
+        if not cpus or not cpus.issubset(os.sched_getaffinity(0)):
+            ap.error('--cpuset must be a nonempty subset of allowed CPUs')
     args.dest.mkdir(parents=True, exist_ok=False)
     manifest = dict(binary=str(args.binary.resolve()),
                     binary_sha256=hashlib.sha256(args.binary.read_bytes()).hexdigest(),
-                    mode=args.mode, cells=cells, extra_calls=args.calls, commands=[])
+                    mode=args.mode, cells=cells, extra_calls=args.calls, cpuset_override=args.cpuset, commands=[])
     try:
         for tier, threads, geometry, calls in cells:
             if args.mode == 'callgrind' and tier != 'scalar':
@@ -51,7 +60,7 @@ def main():
                            ZEN_S2_PROFILE_CALLS=str(args.calls if args.calls is not None else calls if args.mode == 'perf' else 0))
                 if args.mode == 'phases':
                     env['ZENSIM_FOLD_TIMING'] = '1'
-                worker = ['taskset', '-c', speedq.CPUSETS[threads], str(args.binary.resolve())]
+                worker = ['taskset', '-c', (args.cpuset or speedq.CPUSETS[threads]), str(args.binary.resolve())]
                 if args.mode == 'perf':
                     commands = [
                         ['perf', 'stat', '-e', 'cycles,instructions,branches,branch-misses,cache-misses',
@@ -62,7 +71,7 @@ def main():
                     commands = [['valgrind', '--tool=callgrind', '--trace-children=yes', '--dump-instr=yes',
                                  '--callgrind-out-file=' + str(args.dest / (tag + '.callgrind'))] + worker]
                 elif args.mode == 'heaptrack':
-                    commands = [['taskset', '-c', speedq.CPUSETS[threads],
+                    commands = [['taskset', '-c', (args.cpuset or speedq.CPUSETS[threads]),
                                  'heaptrack', '--record-only', '-o',
                                  str(args.dest / (tag + '.heaptrack')), str(args.binary.resolve())]]
                 else:

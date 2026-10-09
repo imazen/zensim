@@ -32,6 +32,12 @@
 
 ### Changed
 
+- Rev5 streaming batches bounded whole-strip jobs and merges the existing
+  kernel and individual basic-band partials in producer order; the 1–4-thread
+  route remains unchanged. Strict 384/384 parity and all-feature tests pass
+  (`d6001600`, `538bca48`). Measurement record:
+  [REV5PERF4](benchmarks/rev5perf4_2026-10-09.md).
+
 - Rev5 attribution defaults to exact neighbour replay. Prepared steering
   recovers pre-calibration sensitivities when an isolated single bake's lower
   output floor erases all served sensitivity; serving scores and public
