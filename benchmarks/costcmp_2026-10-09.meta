@@ -31,3 +31,5 @@ units = ns per scoring call; actual 1024-square and 4096-square medians divided 
 scope = deterministic synthetic RGB8 inputs, scoring cost; no model-quality or corpus-wide claim
 commands = raw_root/provenance/commands.json and full run-heavy logs
 provenance = raw_root/provenance includes Cargo JSON, Cargo.lock, source archives, toolchain, build flags and hardware observations
+ready_coordinates = explicit geometry/tier/thread binding, regression fix e95d6622; final reporter validates every collected record
+tier_cascade = verified archmage 0.9.29 V4 disable cascades to V4x; testable_dispatch feature is recorded in Cargo artifact receipt
