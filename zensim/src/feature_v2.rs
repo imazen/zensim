@@ -11732,7 +11732,7 @@ impl Rev5StripJob {
         self.ch = ch;
         let n = info.plane_w * info.wide_h();
         if n > self.sized_for {
-            self.scratch = ScratchV2Strip::new(n);
+            self.scratch = rev5_job_scratch(n);
             self.sized_for = n;
         }
         for (side, out) in [
@@ -11746,6 +11746,93 @@ impl Rev5StripJob {
             }
         }
     }
+}
+
+/// Rev5's basic hook reads vertical planes, so horizontal moments are dead
+/// after vertical blur. Reuse two of those planes as activity-chain temps;
+/// no append bs2 or separate activity temps are retained in queued jobs.
+#[cfg(feature = "threads")]
+fn rev5_job_scratch(n: usize) -> ScratchV2Strip {
+    let mut scratch = ScratchV2Strip::new_for(n, StripPlaneNeeds::NONE);
+    for plane in [
+        &mut scratch.mu1_h,
+        &mut scratch.mu2_h,
+        &mut scratch.ssq_h,
+        &mut scratch.s12_h,
+        &mut scratch.mu1,
+        &mut scratch.mu2,
+        &mut scratch.ssq,
+        &mut scratch.s12,
+        &mut scratch.activity,
+    ] {
+        plane.resize(n, 0.0);
+    }
+    crate::fold_timing::work(crate::fold_timing::Work::ScratchZeroElements, 9 * n);
+    scratch
+}
+
+#[cfg(feature = "threads")]
+fn rev5_job_blur(
+    info: &crate::feature_v2_stream::StripInfo,
+    scratch: &mut ScratchV2Strip,
+    revision: FormulaRevision,
+) {
+    let n = info.plane_w * info.wide_h();
+    let ScratchV2Strip {
+        src_wide,
+        dst_wide,
+        mu1_h,
+        mu2_h,
+        ssq_h,
+        s12_h,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        ..
+    } = scratch;
+    let start = crate::fold_timing::start();
+    fused_blur_h_ssim_banded(
+        &src_wide[..n],
+        &dst_wide[..n],
+        &mut mu1_h[..n],
+        &mut mu2_h[..n],
+        &mut ssq_h[..n],
+        &mut s12_h[..n],
+        info.plane_w,
+        info.wide_h(),
+        false,
+        revision,
+    );
+    crate::fold_timing::stop(start, crate::fold_timing::Phase::BlurHWall, info.scale);
+    let start = crate::fold_timing::start();
+    for (horizontal, vertical) in [
+        (&mu1_h[..n], &mut mu1[..n]),
+        (&mu2_h[..n], &mut mu2[..n]),
+        (&ssq_h[..n], &mut ssq[..n]),
+        (&s12_h[..n], &mut s12[..n]),
+    ] {
+        crate::blur::box_blur_v_from_copy(
+            horizontal,
+            vertical,
+            info.plane_w,
+            info.wide_h(),
+            BLUR_RADIUS,
+        );
+    }
+    crate::simd_ops::abs_diff_into(&src_wide[..n], &mu1[..n], &mut mu1_h[..n]);
+    crate::blur::box_blur_1pass_into(
+        &mu1_h[..n],
+        &mut activity[..n],
+        &mut mu2_h[..n],
+        info.plane_w,
+        info.wide_h(),
+        BLUR_RADIUS,
+    );
+    crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
+    crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
+    crate::fold_timing::stop(start, crate::fold_timing::Phase::PhaseAV2Planes, info.scale);
 }
 
 #[cfg(feature = "threads")]
@@ -11773,7 +11860,7 @@ fn rev5_run_jobs(
         };
         job.result.dense[scale] = DenseAccum::default();
         job.result.grad[scale] = GradientAccum::default();
-        run_blur_pass_strip(info.plane_w, info.wide_h(), &mut job.scratch);
+        rev5_job_blur(info, &mut job.scratch, compute.formula_revision);
         let n = info.plane_w * info.wide_h();
         stream_phase_b(
             &job.scratch,
@@ -14601,7 +14688,35 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let self_blur = fuse_channels && compute.self_blur_eligible();
     // Phase A is skipped WHOLE under self-blur bands, so its four fused-H
     // outputs are never written — `plane_needs` is where that is decided.
-    scratch.ensure_for(strip_max_n, compute.plane_needs(self_blur));
+    // Bounded strip queue: independent v2 cells retain their original 128-row
+    // kernels and strip partials. Basic bands and blockiness still merge in
+    // producer order. No image-sized pyramid or thread-dependent reduction.
+    #[cfg(feature = "threads")]
+    let batch_limit = if parallel
+        && compute.formula_revision >= FormulaRevision::Rev5
+        && retention.is_none()
+        && compute.v2_blocks
+        && !layout_append
+        && rayon::current_num_threads() >= 8
+        && h0 > STRIP_ROWS
+    {
+        rayon::current_num_threads().min(16)
+    } else {
+        0
+    };
+    let needs = compute.plane_needs(self_blur);
+    #[cfg(feature = "threads")]
+    let needs = if batch_limit > 0 {
+        // Only basic-only scale cells can reach the old phase A. They need
+        // horizontal planes; queued v2 cells own all their vertical planes.
+        StripPlaneNeeds {
+            h: needs.h && compute.v2_scales != ComputeSet::ALL_SCALES,
+            v2: false,
+        }
+    } else {
+        needs
+    };
+    scratch.ensure_for(strip_max_n, needs);
     let V2Scratch {
         strips: scratch_strips,
         stream_pool,
@@ -14646,22 +14761,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         !compute.full_res_xb,
     );
 
-    // Bounded strip queue: independent v2 cells retain their original 128-row
-    // kernels and strip partials. Basic bands and blockiness still merge in
-    // producer order. No image-sized pyramid or thread-dependent reduction.
-    #[cfg(feature = "threads")]
-    let batch_limit = if parallel
-        && compute.formula_revision >= FormulaRevision::Rev5
-        && retention.is_none()
-        && compute.v2_blocks
-        && !layout_append
-        && rayon::current_num_threads() >= 8
-        && h0 > STRIP_ROWS
-    {
-        rayon::current_num_threads().min(16)
-    } else {
-        0
-    };
     #[cfg(feature = "threads")]
     let mut queued = 0;
 

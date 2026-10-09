@@ -23,11 +23,12 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
             .build()
             .unwrap();
         let mut scratch = V2Scratch::new();
-        for (w, h, identity) in [
-            (257, 1025, false),
-            (511, 259, false),
-            (129, 513, true),
-            (65, 129, false),
+        for (w, h, identity, mask) in [
+            (257, 1025, false, ComputeSet::ALL_SCALES),
+            (511, 259, false, ComputeSet::ALL_SCALES),
+            (129, 513, true, ComputeSet::ALL_SCALES),
+            (65, 129, false, ComputeSet::ALL_SCALES),
+            (257, 513, false, 0b0101),
         ] {
             let src: Vec<[u8; 3]> = (0..w * h)
                 .map(|i| {
@@ -55,6 +56,8 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
                     }
                 })
                 .collect();
+            let mut compute = ComputeSet::from_toggles(toggles);
+            compute.v2_scales = mask;
             let expected = compute_folded720_streaming_impl(
                 &RgbSlice::new(&src, w, h),
                 &RgbSlice::new(&dst, w, h),
@@ -62,7 +65,7 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
                 false,
                 toggles,
                 &mut V2Scratch::new(),
-                None,
+                Some(compute),
             )
             .unwrap()
             .into_features();
@@ -89,7 +92,7 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
                         true,
                         toggles,
                         &mut scratch,
-                        None,
+                        Some(compute),
                     )
                 })
                 .unwrap()
@@ -103,7 +106,7 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
                 assert_eq!(
                     a.to_bits(),
                     b.to_bits(),
-                    "{threads}T {w}x{h} identity={identity} feature {i}"
+                    "{threads}T {w}x{h} identity={identity} scales={mask:b} feature {i}"
                 );
             }
         }
