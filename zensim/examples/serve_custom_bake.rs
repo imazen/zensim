@@ -66,6 +66,10 @@ use zensim::{BakeScorer, RgbSlice};
 #[path = "serve_custom_bake/prodqual.rs"]
 mod prodqual;
 
+#[cfg(feature = "feature-regime-v2")]
+#[path = "serve_custom_bake/nearid.rs"]
+mod nearid;
+
 fn load_rgb(path: &str) -> (Vec<[u8; 3]>, u32, u32) {
     let img = image::open(path)
         .unwrap_or_else(|e| panic!("open {path}: {e}"))
@@ -345,6 +349,16 @@ fn main() {
     #[cfg(feature = "feature-regime-v2")]
     if args.first().map(String::as_str) == Some("--prodqual") {
         prodqual::run(&args[1..]);
+        return;
+    }
+    #[cfg(feature = "feature-regime-v2")]
+    if args.first().map(String::as_str) == Some("--nearid-contact") {
+        nearid::contact(&args[1..]);
+        return;
+    }
+    #[cfg(feature = "feature-regime-v2")]
+    if args.first().map(String::as_str) == Some("--nearid") {
+        nearid::run(&args[1..]);
         return;
     }
     #[cfg(feature = "corruption-head")]
