@@ -241,7 +241,7 @@ def select_clean_rounds(inner, rounds=32):
 
 
 def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer, arms=ARMS,
-                baseline='by_v2fy_r4', ready_check=None):
+                baseline='by_v2fy_r4', ready_check=None, worker_binaries=None):
     tag=f'{tier}-t{threads}-{geometry}'
     dest=Path(root)/tag
     if (dest/'COMPLETE.json').exists(): return
@@ -254,12 +254,12 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
         try:
             for name in arms:
                 arm='by_v2fy' if name.startswith('by_v2fy_r') else name
-                revision=int(name[-1]) if arm=='by_v2fy' else 1
+                revision=(5 if name=='by_v2fy_r5_before' else int(name[-1])) if arm=='by_v2fy' else 1
                 socket=str(Path(ipc)/name)
                 sockets[name]=socket
                 log=(dest/f'{name}.worker.log').open('x');streams.append(log)
                 worker_env={**env,'ZEN_S2_SPEEDQ_WORKER':arm,'ZENSIM_FORMULA_REV':str(revision),'ZEN_S2_SOCKET':socket}
-                proc=subprocess.Popen(['taskset','-c',CPUSETS[threads],'nice','-n19','ionice','-c3',str(binary)],env=worker_env,stdout=subprocess.PIPE,stderr=log,text=True)
+                proc=subprocess.Popen(['taskset','-c',CPUSETS[threads],'nice','-n19','ionice','-c3',str((worker_binaries or {}).get(name,binary))],env=worker_env,stdout=subprocess.PIPE,stderr=log,text=True)
                 owners.append(proc)
                 line=proc.stdout.readline()
                 if not line: raise RuntimeError(f'{name} failed before READY: {dest}')
@@ -283,6 +283,8 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     'gate_trace':'ZENBENCH_GATE_TRACE' in env,
                     'model_source_sha256':SOURCE_SHA,
                     'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
+            if worker_binaries:
+                header['worker_binary_sha256']={name:hashlib.sha256(Path(worker_binaries.get(name,binary)).read_bytes()).hexdigest() for name in arms}
             write(dest/'header.json',header)
             raw=dest/'zenbench.json'
             bench_env={**env,'ZEN_S2_ARMS':','.join(arms),'ZEN_S2_ROUNDS':str(rounds),
@@ -346,7 +348,7 @@ def segment_lock(path):
 
 
 def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lock=None,
-           cells=None, parity_loader=None, baseline='by_v2fy_r4', ready_check=None):
+           cells=None, parity_loader=None, baseline='by_v2fy_r4', ready_check=None, worker_binaries=None):
     parity=(parity_loader or parity_receipt)(parity_path)
     grid=cells if cells is not None else [(g,t,n) for t in TIERS for n in THREADS for g in GEOMETRIES]
     pending=deque((g,t,n) for g,t,n in grid if not only or f'{t}-t{n}-{g}' in only)
@@ -356,6 +358,8 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lo
         try:
             with segment_lock(lock):
                 options={} if baseline=='by_v2fy_r4' and ready_check is None else dict(baseline=baseline,ready_check=ready_check)
+                if worker_binaries:
+                    options['worker_binaries']=worker_binaries
                 run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer,arms=arms,**options)
         except TimingNoise as exc:
             dest=Path(root)/tag
@@ -367,22 +371,24 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lo
             time.sleep(10)
 
 
-def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=None):
+def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=None,
+        geometries=None, thread_counts=None, worker_binaries=None):
     parity=(parity_loader or parity_receipt)(parity_path)
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
-    for geometry in GEOMETRIES:
-        for threads in [1,32]:
+    for geometry in (geometries if geometries is not None else GEOMETRIES):
+        for threads in (thread_counts if thread_counts is not None else [1,32]):
             for name in arms:
                 arm='by_v2fy' if name.startswith('by_v2fy_r') else name
-                revision=int(name[-1]) if arm=='by_v2fy' else 1
+                revision=(5 if name=='by_v2fy_r5_before' else int(name[-1])) if arm=='by_v2fy' else 1
                 tag=f'v4x-t{threads}-{geometry}-{name}'
                 if (root/f'{tag}.json').exists():continue
                 refresh_activity('quiet gate before RSS '+tag)
                 gate=quiet_gate(root/'quiet-waits.jsonl')
                 env=environment(geometry,'v4x',threads)
                 env.update(ZEN_S2_SPEEDQ_WORKER=arm,ZENSIM_FORMULA_REV=str(revision),ZEN_S2_RSS_ONLY='1')
+                executable=(worker_binaries or {}).get(name,binary)
                 with (root/f'{tag}.log').open('x') as log:
-                    out=subprocess.check_output(['/usr/bin/time','-v','taskset','-c',CPUSETS[threads],'nice','-n19','ionice','-c3',str(binary)],env=env,stderr=log,text=True)
+                    out=subprocess.check_output(['/usr/bin/time','-v','taskset','-c',CPUSETS[threads],'nice','-n19','ionice','-c3',str(executable)],env=env,stderr=log,text=True)
                 rec=json.loads(out)
                 if arm=='by_v2fy':
                     old=parity[(geometry,'v4x',threads,revision)]
@@ -391,7 +397,7 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
                 if ready_check is not None:
                     ready_check(name,geometry,'v4x',threads,rec)
                 maxrss=next(int(l.rsplit(':',1)[1]) for l in (root/f'{tag}.log').read_text().splitlines() if 'Maximum resident set size (kbytes)' in l)
-                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec,'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()})
+                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec,'binary_sha256':hashlib.sha256(Path(executable).read_bytes()).hexdigest()})
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
 
 

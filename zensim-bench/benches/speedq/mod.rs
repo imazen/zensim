@@ -301,6 +301,8 @@ pub(super) fn run() {
         ("by_v2fy_r3", "by_v2fy", "3"),
         ("by_v2fy_r4", "by_v2fy", "4"),
         ("by_v2fy_r5", "by_v2fy", "5"),
+        #[cfg(feature = "costcmp")]
+        ("by_v2fy_r5_before", "by_v2fy", "5"),
         ("zensim_B", "zensim_B", "1"),
         ("fast_ssim2", "fast_ssim2", "1"),
         ("butteraugli", "butteraugli", "1"),
