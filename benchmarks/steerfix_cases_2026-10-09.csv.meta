@@ -1,0 +1,25 @@
+{
+  "runtime_commit": "b9881bed07968cff95ed6e9b47a7aef09ff9262e",
+  "base": "462f7fe5",
+  "host": "dev",
+  "formula_revision": 5,
+  "grid": "all 135 original engineering cases; original block sizes; bin 1; serial scorer",
+  "bars": {
+    "m2": 0.99,
+    "m3f": 0.7
+  },
+  "raw_root": "/mnt/v/output/zensim/steerfix-2026-10-09",
+  "command": "just --justfile benchmarks/steerfix.just steerfix-packet <frozen-binary> <full-packet> <0-before-or-1-after>",
+  "roster_sha256": "47d04ecd9985994e89d4595c8bd3656af31baf2f3d94f170767ec6aa92845334",
+  "models": {
+    "seed0.bin": [
+      "/mnt/v/output/zensim/steerfix-2026-10-09/inputs/seed0.bin",
+      "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400"
+    ],
+    "dense.bin": [
+      "/mnt/v/output/zensim/steerfix-2026-10-09/inputs/dense.bin",
+      "e6995b1073de6022c31e012a104a50a1710488d4e520ee7fd016c649d924c4c4"
+    ]
+  },
+  "summary_sha256": "9285cecc02e3cba2d58f6dda084b3f80ad2459d2461bae3c374f6149352616ed"
+}

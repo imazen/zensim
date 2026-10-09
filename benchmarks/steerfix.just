@@ -17,6 +17,15 @@ steerfix-prepare root:
 steerfix-report root:
     python3 scripts/prodqual_label_free.py --steerfix-report "{{root}}"
 
+[positional-arguments]
+steerfix-finalize root:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo fmt -p zensim -- --check > "$1/provenance/fmt-current.log" 2>&1
+    just clippy > "$1/provenance/clippy-current.log" 2>&1
+    just lint-scripts > "$1/provenance/lint-scripts-current.log" 2>&1
+    just --justfile benchmarks/steerfix.just steerfix-report "$1" > "$1/provenance/report.log" 2>&1
+
 # Custom cfg makes external packet access explicitly caller-selected.
 steerfix-instrument-build:
     RUSTFLAGS='--cfg steerfix_instrument' cargo test -p zensim --all-features --release --lib --no-run --message-format=json-render-diagnostics

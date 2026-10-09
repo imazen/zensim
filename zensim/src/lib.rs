@@ -344,9 +344,10 @@ pub mod feature_v2;
 pub(crate) mod feature_v2_stream;
 
 // NEIGHSTEER (lane 2026-10-04): exact local refinement of the coarse-scale
-// v2 pooled features for prepared steering — crate-private, opt-in via
-// `ZENSIM_NEIGHBOUR_EXACT=1` (the switch is EXACTLY the string "1":
-// presence alone — `=0`, empty — leaves the frozen density whole).
+// v2 pooled features for steering — crate-private, default-on for Rev5.
+// Older revisions opt in via `ZENSIM_NEIGHBOUR_EXACT=1`. An explicit
+// override enables replay only on exactly "1"; =0 or empty leaves the
+// frozen density whole at every revision.
 // benchmarks/neighsteer_2026-10-04.md
 // The module is gated on `custom-profiles` too: its only caller is
 // `BakeScorer::compute_attribution_input` (`all(custom-profiles,

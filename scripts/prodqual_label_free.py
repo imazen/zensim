@@ -138,9 +138,12 @@ def report_steerfix(root):
     replay = read("engine.json")["rows"]
     before = read("full-before.json")["rows"]
     after = read("full.json")["rows"]
-    roster = [r["case"] for r in admitted["cases"]]
+    # Four mild-JPEG names occur in both owner/b32 and jpeg8/b8 panels.
+    # Retain both; the frozen admission key includes the block size.
+    roster = [(r["case"], r["block"]) for r in admitted["cases"]]
     assert len(roster) == 135 and len(set(roster)) == 135
-    assert [r["key"] for r in before] == roster == [r["key"] for r in after]
+    row_key = lambda r: (r["key"], r["blocks"][0]["bounds"][2])
+    assert [row_key(r) for r in before] == roster == [row_key(r) for r in after]
     assert len(diagnostic) == len(replay) == 28
     assert admitted["bars"] == {"m2": .99, "m3f": .7}
     packed = admitted["models"]["seed0.bin"][1]
@@ -211,13 +214,22 @@ def report_steerfix(root):
     with (root / "SUMMARY.json").open("x") as out:
         json.dump(summary, out, indent=2)
         out.write("\n")
-    with Path("benchmarks/steerfix_cases_2026-10-09.csv").open("w") as out:
+    with Path("benchmarks/steerfix_cases_2026-10-09.csv").open("x") as out:
         writer = csv.writer(out)
-        writer.writerow(["case", "before_m2", "before_m3f", "after_m2", "after_m3f", "pass", "sensitivity_objective",
+        writer.writerow(["case", "block", "before_m2", "before_m3f", "after_m2", "after_m3f", "pass", "sensitivity_objective",
                          "engine_feature_comparisons", "engine_feature_disagreements"])
         for a, b in zip(before, after, strict=True):
-            writer.writerow([a["key"], a["m2"], a["m3f"], b["m2"], b["m3f"], b["pass"], b["sensitivity_objective"],
+            writer.writerow([*row_key(a), a["m2"], a["m3f"], b["m2"], b["m3f"], b["pass"], b["sensitivity_objective"],
                              b["engine_feature_comparisons"], b["engine_feature_disagreements"]])
+    with Path("benchmarks/steerfix_cases_2026-10-09.csv.meta").open("x") as out:
+        json.dump({"runtime_commit": read("provenance/instrument-after.json")["runtime_commit"],
+                   "base": "462f7fe5", "host": "dev", "formula_revision": 5,
+                   "grid": "all 135 original engineering cases; original block sizes; bin 1; serial scorer",
+                   "bars": admitted["bars"], "raw_root": str(root),
+                   "command": "just --justfile benchmarks/steerfix.just steerfix-packet <frozen-binary> <full-packet> <0-before-or-1-after>",
+                   "roster_sha256": admitted["engineering_roster_sha256"],
+                   "models": admitted["models"], "summary_sha256": sha(root / "SUMMARY.json")}, out, indent=2)
+        out.write("\n")
     print(json.dumps(summary, indent=2))
 
 

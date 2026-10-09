@@ -112,8 +112,9 @@ struct ChPlanes {
 /// cascade's base), scales 1–3 pyramids, phase-A planes and exact pooled
 /// cells, per-scale mean gradients for [`idx::EDGE_WIDTH_CHANGE`], and the
 /// plan facts (`served` mask, toggle flags, revision) the finish depends
-/// on. Captured by the prepared-steering path when
-/// `ZENSIM_NEIGHBOUR_EXACT` opts in; see [`Self::capture`] for refusals.
+/// on. Rev5 attribution captures this by default; an explicit
+/// `ZENSIM_NEIGHBOUR_EXACT` value enables it only when exactly `"1"`.
+/// Older revisions require that opt-in. See [`Self::capture`] for refusals.
 ///
 /// Sparse-retention note: plans with `full_res_xb == false` leave scale-0
 /// X/B retention planes **zero-filled** (the walk only retains channels
@@ -505,8 +506,8 @@ impl LocalRefineSnapshot {
     }
 
     /// `Σ_k s_k · Δf_k` over every v2 pooled feature at scales `1..=3`, the
-    /// term [`crate::ScoredAttribution::refinement_gain`] adds under
-    /// `ZENSIM_NEIGHBOUR_EXACT`. `s` is the identity-indexed sensitivity row.
+    /// term [`crate::ScoredAttribution::refinement_gain`] adds when neighbour
+    /// replay is enabled. `s` is the identity-indexed sensitivity row.
     pub(crate) fn weighted_gain(
         &self,
         s: &[f64],
