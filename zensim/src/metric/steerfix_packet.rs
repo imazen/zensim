@@ -67,6 +67,8 @@ struct Job {
     cases: Vec<Case>,
     output: String,
     engine: bool,
+    #[serde(default)]
+    floor_recovery: bool,
 }
 #[derive(Deserialize)]
 struct Case {
@@ -143,6 +145,30 @@ fn engineering_packet() {
         let s = mapped.sensitivities();
         // Independent feature probes on the same served/diagnostic forward.
         let mut feature = owner(&model, case.objective);
+        let mut sensitivity_objective = case.objective;
+        if job.floor_recovery && case.objective == Objective::Served {
+            // Independent expectation: probe the raw head, test the declared
+            // spline's lower-tail crossing and check the served probes are
+            // all zero. Do not call the production recovery helper here.
+            let served_gradient = feature
+                .score_features_fd_gradient(f, w as u32, h as u32, None)
+                .unwrap();
+            let mut raw = owner(&model, Objective::PreFloor);
+            let output = raw.score_features(f, w as u32, h as u32, None).unwrap();
+            if let Some(spline) = feature.metadata.output_spline.as_ref() {
+                let span = spline.ys[spline.ys.len() - 1] - spline.ys[0];
+                let linear = spline.ys[0] + spline.derivs[0] * (output - spline.xs[0]);
+                if served_gradient.iter().all(|&s| s == 0.0)
+                    && span > 0.0
+                    && spline.derivs[0] > 0.0
+                    && output < spline.xs[0]
+                    && linear < spline.ys[0] - span
+                {
+                    feature = raw;
+                    sensitivity_objective = Objective::PreFloor;
+                }
+            }
+        }
         let mut probe = f.to_vec();
         for (k, &v) in f.iter().enumerate() {
             let eps = (v.abs() * 1e-3).max(1e-5);
@@ -238,6 +264,7 @@ fn engineering_packet() {
         let m2 = stats::spearman(&true_linear, &true_gain);
         let m3f = stats::spearman(&predicted, &true_gain);
         let report = json!({"key":case.key,"objective":format!("{:?}",case.objective),"model":case.model_sha256,
+            "sensitivity_objective":format!("{:?}",sensitivity_objective),
             "base_score":base.score(),"served_base_bits":served_base.score().to_bits(),"served_repair_bits":served_bits,
             "m2":m2,"m3f":m3f,"pass":m2>=0.99 && m3f>=0.70,"engine":job.engine,"blocks":blocks,
             "engine_feature_comparisons":compared,"engine_feature_disagreements":bad,"engine_max_abs_error":max_abs,

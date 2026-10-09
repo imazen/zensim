@@ -88,6 +88,12 @@ impl<'a> BakeScorer<'a> {
     /// and codec-level validation.
     /// `bin` is the grid spacing in source pixels; rectangle semantics match
     /// [`Self::compute_with_ref_and_attribution`]. Negative scores are preserved.
+    /// Rev5 maps use neighbour replay by default; an explicit
+    /// `ZENSIM_NEIGHBOUR_EXACT` value enables it only when exactly `"1"`.
+    /// Beneath a single bake's constant lower calibration floor, a zero
+    /// served gradient is replaced by pre-calibration sensitivities. Those
+    /// gains rank latent model improvements in network-score units; the
+    /// returned serving score, including its floor, stays unchanged.
     ///
     /// # Example
     /// ```no_run
@@ -623,6 +629,48 @@ impl<'a> BakeScorer<'a> {
             gradient[id] = value;
         }
         Ok(gradient)
+    }
+
+    // Prepared steering must retain model signal when the calibrated lower
+    // tail is constant. Keep the public served-score gradient unchanged and
+    // use the pre-calibration objective only for a single, undisposed bake
+    // whose entire served gradient is zero strictly beneath that floor.
+    // A composed/clamped score is a separate contract; do not reinterpret it.
+    #[cfg(feature = "feature-regime-v2")]
+    fn prepared_steering_gradient(
+        &mut self,
+        features: &[f64],
+        width: u32,
+        height: u32,
+        codec_hint: Option<&str>,
+    ) -> Result<Vec<f64>, ZensimError> {
+        let served = self.score_features_fd_gradient(features, width, height, codec_hint)?;
+        if served.iter().any(|&s| s != 0.0)
+            || !self.members.is_empty()
+            || self.weights.is_some()
+            || self.disposition.is_some()
+        {
+            return Ok(served);
+        }
+        let Some(spline) = self.metadata.output_spline.as_ref() else {
+            return Ok(served);
+        };
+        let span = spline.ys[spline.ys.len() - 1] - spline.ys[0];
+        if span <= 0.0 || spline.derivs[0] <= 0.0 {
+            return Ok(served);
+        }
+        // Independent buffers and detached Arc metadata leave the serving
+        // owner intact, including after an error and on session reuse.
+        let mut raw = Self::with_metadata(self.model, Arc::clone(&self.metadata))?
+            .without_output_calibration()
+            .with_parallel(self.parallel);
+        let output = raw.score_features(features, width, height, None)?;
+        let linear = spline.ys[0] + spline.derivs[0] * (output - spline.xs[0]);
+        if output < spline.xs[0] && linear < spline.ys[0] - span {
+            raw.score_features_fd_gradient(features, width, height, None)
+        } else {
+            Ok(served)
+        }
     }
 
     // Reuse the extraction planner's structural read proof, including input
@@ -1248,6 +1296,7 @@ impl<'a> BakeScorer<'a> {
         encoding: Option<crate::feature_v2::HdrEncoding>,
         serving_plan: Option<crate::feature_plan::Plan>,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
+        let prepared_steering = serving_plan.is_some();
         if bin == 0 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "attribution bin must be nonzero",
@@ -1352,25 +1401,41 @@ impl<'a> BakeScorer<'a> {
                 neighbour_exact: None,
             });
         }
-        let sensitivities = self.score_features_fd_gradient(
-            &features,
-            source.width() as u32,
-            source.height() as u32,
-            codec_hint,
-        )?;
+        let sensitivities = if prepared_steering {
+            self.prepared_steering_gradient(
+                &features,
+                source.width() as u32,
+                source.height() as u32,
+                codec_hint,
+            )?
+        } else {
+            self.score_features_fd_gradient(
+                &features,
+                source.width() as u32,
+                source.height() as u32,
+                codec_hint,
+            )?
+        };
         let (mut spatial, unsupported_feature_ids) =
             crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
-        // NEIGHSTEER (`ZENSIM_NEIGHBOUR_EXACT=1`, SDR v2 sessions only):
+        // Rev5 defaults to neighbour-exact replay. Older revisions require
+        // ZENSIM_NEIGHBOUR_EXACT=1; every explicit value other than "1"
+        // keeps the frozen-density diagnostic available at every revision.
         // retain the coarse-scale walk state the local-refinement engine
         // needs, and zero the frozen density it replaces — the v2 pooled
         // features at scales 1–3 (f459..f719) are added back as exact
         // finite deltas inside `ScoredAttribution::refinement_gain`.
         // Rev5 also captures HDR with the canonical PU conversion.
-        // The switch is EXACTLY `"1"`: presence alone (`=0`, empty) is
-        // off, matching the other `ZENSIM_*` gates in this module.
         // Capture refuses (and the density stays whole) for sampling
         // plans, v2-off plans, reflect-padded pairs and foreign dims.
-        let neighbour_exact = if std::env::var("ZENSIM_NEIGHBOUR_EXACT").as_deref() == Ok("1")
+        let neighbour_enabled = match std::env::var("ZENSIM_NEIGHBOUR_EXACT") {
+            Ok(value) => value == "1",
+            Err(std::env::VarError::NotPresent) => {
+                plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5
+            }
+            Err(std::env::VarError::NotUnicode(_)) => false,
+        };
+        let neighbour_exact = if neighbour_enabled
             && (encoding.is_none()
                 || plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5)
         {
@@ -1549,6 +1614,8 @@ fn check_deadband(t: f64) -> Result<(), ZensimError> {
 
 #[cfg(test)]
 mod revision_contract_tests {
+    #[cfg(feature = "feature-regime-v2")]
+    use super::{Arc, BakeScorer};
     use crate::feature_defs::FormulaRevision;
     use crate::ssim_form::SsimLumaForm;
     // Everything that scores PIXELS through a bake needs `feature-regime-v2`:
@@ -3220,6 +3287,171 @@ mod revision_contract_tests {
             );
             row[900] = 901.0 / 945.0;
         }
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn prepared_floor_recovery_preserves_serving_and_public_gradient() {
+        if !run_at_revision(
+            "5",
+            "metric::bake::revision_contract_tests::prepared_floor_recovery_preserves_serving_and_public_gradient",
+            "STEERFIX-FLOOR-RAN",
+        ) {
+            return;
+        }
+        let mut payload = 2u32.to_le_bytes().to_vec();
+        for value in [-10.0f32, -10.0, 100.0, 100.0] {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        let hex: String = payload.iter().map(|v| format!("{v:02x}")).collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8","text":"13"},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"5"},
+                {"key":"zentrain.output_calibration_spline","type":"bytes","hex":hex}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":[-1000.0],"biases":[-1000.0]}]
+        });
+        let blob = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = zenpredict::Model::from_bytes(&blob).unwrap();
+        for parallel in [false, true] {
+            let mut scorer = BakeScorer::new(&model).unwrap().with_parallel(parallel);
+            let metadata = Arc::clone(&scorer.metadata);
+            for value in [1.0, -1.05, 1.0] {
+                let mut row = vec![0.0; 720];
+                row[13] = value;
+                let before = scorer.score_features(&row, 96, 96, None).unwrap();
+                let served = scorer
+                    .score_features_fd_gradient(&row, 96, 96, None)
+                    .unwrap();
+                let steering = scorer
+                    .prepared_steering_gradient(&row, 96, 96, None)
+                    .unwrap();
+                if value == 1.0 {
+                    assert!(served.iter().all(|&s| s == 0.0));
+                    let mut raw = BakeScorer::new(&model)
+                        .unwrap()
+                        .without_output_calibration();
+                    let eps = value * 1e-3;
+                    row[13] = value + eps;
+                    let up = raw.score_features(&row, 96, 96, None).unwrap();
+                    row[13] = value - eps;
+                    let down = raw.score_features(&row, 96, 96, None).unwrap();
+                    row[13] = value;
+                    assert_eq!(steering[13], (up - down) / (2.0 * eps));
+                    assert!(steering[13] < 0.0);
+                    assert!(
+                        steering
+                            .iter()
+                            .enumerate()
+                            .all(|(i, &s)| i == 13 || s == 0.0)
+                    );
+                } else {
+                    assert_eq!(steering, served);
+                }
+                assert_eq!(
+                    scorer.score_features(&row, 96, 96, None).unwrap().to_bits(),
+                    before.to_bits()
+                );
+                assert_eq!(
+                    scorer
+                        .score_features_fd_gradient(&row, 96, 96, None)
+                        .unwrap(),
+                    served
+                );
+                assert!(Arc::ptr_eq(&metadata, &scorer.metadata));
+            }
+            let (src, dst) = pair(97, 131);
+            let rs = RgbSlice::new(&src, 97, 131);
+            let ds = RgbSlice::new(&dst, 97, 131);
+            let scalar = scorer.compute(&rs, &ds, None).unwrap();
+            let mut worker = scorer.prepare_steering(&rs, 1).unwrap();
+            for input in [&ds, &rs, &ds] {
+                let map = worker.compute(input, None).unwrap();
+                if map.result().is_identical() {
+                    assert_eq!(map.result().score(), 100.0);
+                    assert!(map.sensitivities().iter().all(|&s| s == 0.0));
+                    assert_eq!(map.refinement_gain(0, 0, 97, 131), 0.0);
+                } else {
+                    assert_eq!(map.result().score().to_bits(), scalar.score().to_bits());
+                    assert_eq!(map.result().features(), scalar.features());
+                    assert!(map.sensitivities()[13] < 0.0);
+                    assert_ne!(map.refinement_gain(0, 0, 97, 131), 0.0);
+                }
+            }
+            let mut row = vec![0.0; 720];
+            row[13] = f64::NAN;
+            assert!(
+                scorer
+                    .prepared_steering_gradient(&row, 96, 96, None)
+                    .is_err()
+            );
+        }
+        // No partial, uncalibrated reinterpretation of an ensemble.
+        let models = vec![zenpredict::Model::from_bytes(&blob).unwrap(), model];
+        let mut ensemble = BakeScorer::ensemble(&models, None).unwrap();
+        let row = vec![1.0; 720];
+        assert_eq!(
+            ensemble
+                .prepared_steering_gradient(&row, 96, 96, None)
+                .unwrap(),
+            ensemble
+                .score_features_fd_gradient(&row, 96, 96, None)
+                .unwrap()
+        );
+        println!("STEERFIX-FLOOR-RAN");
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn rev5_replay_defaults_without_environment_override() {
+        let path = "metric::bake::revision_contract_tests::rev5_replay_defaults_without_environment_override";
+        if std::env::var("STEERFIX_DEFAULT_CHILD").is_err() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([path, "--exact", "--nocapture", "--test-threads=1"])
+                .env("ZENSIM_FORMULA_REV", "5")
+                .env("STEERFIX_DEFAULT_CHILD", "1")
+                .env_remove("ZENSIM_NEIGHBOUR_EXACT")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(String::from_utf8_lossy(&out.stdout).contains("STEERFIX-DEFAULT-RAN"));
+            return;
+        }
+        let model = bake_over(&[372, 459, 546, 633]);
+        let mut owner = BakeScorer::new(&model).unwrap().with_parallel(false);
+        let (src, dst) = pair(137, 101);
+        let rs = RgbSlice::new(&src, 137, 101);
+        let ds = RgbSlice::new(&dst, 137, 101);
+        let scalar = owner.compute(&rs, &ds, None).unwrap();
+        let reference = owner.precompute_reference(&rs).unwrap();
+        let direct = owner
+            .compute_with_ref_and_attribution(
+                &rs,
+                &reference,
+                &ds,
+                None,
+                &mut crate::Fused944Session::new(),
+                1,
+            )
+            .unwrap();
+        let mut worker = owner.prepare_steering(&rs, 1).unwrap();
+        let map = worker.compute(&ds, None).unwrap();
+        assert!(map.neighbour_exact.is_some() && direct.neighbour_exact.is_some());
+        assert_eq!(map.result().score().to_bits(), scalar.score().to_bits());
+        assert_eq!(map.result().features(), scalar.features());
+        for (x0, y0, x1, y1) in [(0, 0, 8, 8), (3, 5, 26, 22), (129, 93, 137, 101)] {
+            assert_eq!(
+                map.refinement_gain(x0, y0, x1, y1).to_bits(),
+                direct.refinement_gain(x0, y0, x1, y1).to_bits()
+            );
+        }
+        println!("STEERFIX-DEFAULT-RAN");
     }
 
     /// A minimal one-input identity bake reading feature `id`, optionally

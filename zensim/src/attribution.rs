@@ -5746,8 +5746,9 @@ impl Fused944Session {
 
 /// A complete candidate comparison and its local spatial attribution.
 ///
-/// The candidate's declared feature plan and complete score produce the
-/// sensitivities used by the map. Attribution remains a local approximation
+/// The candidate's declared feature plan supplies the complete serving score.
+/// The map uses local sensitivities, with prepared lower-floor recovery as
+/// described in [`Self::sensitivities`]. Attribution remains a local approximation
 /// of finite pixel changes. [`Self::attribution`] supplies an additive density;
 /// [`Self::refinement_gain`] additionally includes finite max-signal removal.
 /// Inspect the corresponding coverage report and [`Self::has_corruption_gate`].
@@ -5762,10 +5763,10 @@ pub struct ScoredAttribution {
     pub(crate) max_removals: Vec<MaxRemoval>,
     pub(crate) moment_removals: Vec<MomentRemoval>,
     pub(crate) unsupported_refinement_feature_ids: Vec<usize>,
-    /// `ZENSIM_NEIGHBOUR_EXACT=1` (the switch is exactly `"1"`, read in
-    /// `compute_attribution_input`): the coarse-retention snapshot the
+    /// Rev5 defaults to replay; an explicit `ZENSIM_NEIGHBOUR_EXACT`
+    /// value enables it only when exactly `"1"`. The coarse-retention snapshot the
     /// local refinement engine queries in [`Self::refinement_gain`].
-    /// `None` when the variable is unset or the snapshot refused
+    /// `None` when replay is disabled or the snapshot refused
     /// (sampling plan, v2 off, reflect-padded input, foreign dims —
     /// never silently degraded). Boxed so `ScoredAttribution` does not
     /// grow inline by the snapshot's array fields when off.
@@ -5782,11 +5783,16 @@ impl ScoredAttribution {
     }
 
     /// Signed score-gain density for supported integrands.
+    /// With neighbour replay, coarse v2 contributions are supplied by
+    /// [`Self::refinement_gain`] and omitted here to avoid counting them twice.
     pub fn attribution(&self) -> &AttributionResult {
         &self.attribution
     }
 
     /// Complete finite sensitivities, including unsupported spatial terms.
+    /// Prepared steering below a single bake's constant lower spline floor
+    /// can return pre-calibration sensitivities in network-score units.
+    /// The [`Self::result`] score remains the complete serving score.
     pub fn sensitivities(&self) -> &[f64] {
         &self.sensitivities
     }
@@ -5815,6 +5821,11 @@ impl ScoredAttribution {
     /// change blurred neighborhoods and can create new maxima. Root curvature,
     /// model nonlinearity and corruption/clamp crossing remain approximations.
     /// Binning affects only the additive term, as in [`AttributionResult::query_rect`].
+    /// Rev5 defaults to exact neighbour replay for coarse v2 features at
+    /// scales 1–3; other frozen-signal and model-curvature limits remain.
+    /// Prepared steering beneath a constant lower calibration floor can
+    /// express gains in pre-calibration network-score units, while the
+    /// [`Self::result`] score keeps the serving floor.
     /// With [`BakeScorer::with_finite_moment_refinement`](crate::BakeScorer::with_finite_moment_refinement),
     /// this also adds finite L2/L4/L8 removal corrections from base-image
     /// binned moment integrals. Those corrections are non-additive and use
