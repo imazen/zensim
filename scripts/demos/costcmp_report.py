@@ -10,6 +10,9 @@ from speedq_report_support import verify_speedq_batches
 
 
 def report(args):
+    if getattr(args, 'scaling', False):
+        from costcmp_scaling_report import report as scaling_report
+        return scaling_report(args)
     from speed_matrix_report import least_squares
     root=args.raw_dir
     rows=cmp.receipt(root/'parity/PREFLIGHT_PASS.json')

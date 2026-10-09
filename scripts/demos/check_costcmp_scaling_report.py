@@ -1,0 +1,61 @@
+"""Exercise report refusal against complete, immutable REV5PERF4 evidence."""
+import argparse
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import costcmp_scaling_report as reporter
+import speedq_run as owner
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--raw-dir', type=Path, required=True)
+    ap.add_argument('--dest', type=Path, required=True)
+    args = ap.parse_args()
+    args.dest.mkdir(parents=True, exist_ok=False)
+    first = args.raw_dir / 'scaling/timing/v4x-t1-1024x1024'
+    reads = Path.read_text
+    controls = [
+        ('before_binary_pin', first / 'header.json',
+         lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_before', '0'*64)),
+        ('shared_round_alignment', first / 'COMPLETE.json',
+         lambda value: value['retained_indices'].reverse()),
+        ('complete_requested_grid', args.raw_dir / 'scaling/parity/PREFLIGHT_PASS.json',
+         lambda value: value['records'].pop()),
+        ('measured_rss_log', args.raw_dir / 'scaling/rss/v4x-t1-1024x1024-by_v2fy_r5.log', None),
+        ('exact_statistics_replay', None, None),
+    ]
+    refused = []
+    for label, target, mutate in controls:
+        out = SimpleNamespace(raw_dir=args.raw_dir, out_json=args.dest / (label+'.json'),
+                              out_md=args.dest / (label+'.md'))
+        def altered(path, *argv, **kwargs):
+            text = reads(path, *argv, **kwargs)
+            if path == target:
+                if mutate is None:
+                    return '\n'.join('Maximum resident set size (kbytes): 1' if
+                                     'Maximum resident set size (kbytes)' in line else line
+                                     for line in text.splitlines())
+                value = json.loads(text)
+                mutate(value)
+                return json.dumps(value)
+            return text
+        context = (patch.object(reporter.subprocess, 'check_output', return_value='[]')
+                   if target is None else patch.object(Path, 'read_text', altered))
+        with context:
+            try:
+                reporter.report(out)
+            except AssertionError:
+                refused.append(label)
+            else:
+                raise RuntimeError(f'report admitted corrupted evidence: {label}')
+        assert not out.out_json.exists() and not out.out_md.exists()
+    owner.write(args.dest / 'PASS.json', dict(status='PASS', refused=refused,
+                mutation_scope='in-memory reads; original evidence files unchanged'))
+    print(json.dumps(dict(status='PASS', refused=refused)), flush=True)
+
+
+if __name__ == '__main__':
+    main()

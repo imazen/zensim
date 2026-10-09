@@ -109,3 +109,14 @@ rev5perf4-qualify root:
 
 rev5perf4-report-controls root dest:
     python3 scripts/demos/check_costcmp_scaling_report.py --raw-dir "{{root}}" --dest "{{dest}}"
+
+rev5perf4-progress root:
+    python3 scripts/demos/costcmp_run.py status --scaling --before-binary "{{root}}/provenance/instrument-before" --dest "{{root}}/scaling"
+
+rev5perf4-archive root mirror:
+    python3 scripts/demos/rev5perf_archive.py "{{root}}" "{{mirror}}"
+
+rev5perf4-report-gates root:
+    just -f benchmarks/rev5perf4.just rev5perf4-report "{{root}}" "{{root}}/report.json" benchmarks/rev5perf4_scaling_2026-10-09.md
+    just -f benchmarks/rev5perf4.just rev5perf4-report-controls "{{root}}" "{{root}}/report-controls"
+    just -f benchmarks/rev5perf4.just rev5perf4-python-tests
