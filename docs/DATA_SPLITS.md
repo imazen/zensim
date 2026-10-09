@@ -1618,3 +1618,39 @@ upiq hdr file see online or mod date, ok to use either way. accept new keys. rem
   https://www.cl.cam.ac.uk/research/rainbow/projects/upiq/). The exact producer script was not recovered; the owner accepts the
   file either way, which satisfies E31's provenance clause. E31 may be fit.
 
+## Exposure ledger — 2026-10-09: completed V40 SDR assessments
+
+V40 postfit completed for the shared control (40 cells), E29 (40 hb4 + 40 hc4),
+E32 (40 palette), and E31 (40 uh4). The committed postfit owner runs the SDR
+assessment only. Each arm uses four leave-one-source-out folds and ten seed
+indices; the matched control fits are shared across assessments.
+
+| Assessment population | Observations per source panel | Source references | Role at read |
+|---|---:|---:|---|
+| KADID TRAIN+SELECT | 7,869 | 65 | D1 design-released-human; source withheld from the corresponding fit |
+| TID2013 full design source | 3,000 | 25 | D1 design-released-human; source withheld from the corresponding fit |
+| KonFiG TRAIN+VAL | 756 | 14 | D1 design-released-human; source withheld from the corresponding fit; design-grid label reconstruction caveat retained |
+| CID22-A(25) | 2,192 | 25 | D1 design-released-human; source withheld from the corresponding fit |
+
+E29, E32 and E31 each read these same four populations: 13,817 observations
+per four-source rotation, ten rotations per assessed model label. E29 emits
+120 source/seed prediction panels (control, hb4, hc4); E32 and E31 each emit
+80 (control plus one arm). These counts describe scored panels and admitted
+observations, not new independent participants or untouched test populations.
+The label-free W2 type bindings cover KADID TRAIN/SELECT and TID2013; they add
+no target population. The receipt and table/key/declaration byte pins for each
+assessment are in the [exact results record](../benchmarks/v40_result_summary_2026-10-09.json).
+E32 uses its admitted palette feature view with the same row keys and counts.
+
+No optional HDR, external or UPIQ report was opened by this postfit chain or
+this metadata-only results-record lane. The uh4 fit's UPIQ TRAIN use remains
+as previously disclosed; its SDR assessment does not open UPIQ labels.
+Separate exposure authorization and a freeze are required before optional
+report reads. AIC-family, KADID TERMINAL, protected/confirmation/T0 labels were
+not opened by this lane. These four design sources keep their D1 roles.
+
+Registered outcomes: hc4 AS-GOOD; hb4 NOT AS-GOOD (KonFiG source guard);
+palette NOT AS-GOOD (mean guard, all source deltas negative, adopt=false);
+uh4 AS-GOOD. This establishes SDR retention only, with no HDR claim or
+production composition change. See the [result summary](../benchmarks/v40_result_summary_2026-10-09.md)
+and [complete assessment artifact pins and verified tower mirror](../benchmarks/v40_results_2026-10-09.pointer.md).

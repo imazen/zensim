@@ -428,3 +428,35 @@ Both C5 and G-STEER dispositions await the owner.
   per-transaction locks, pinned acceptance inputs, reservation required before PASS. The read now requires the separate
   preparation/exposure filesystem layout written in the committed requirements; the current shared layout refuses.
 - Landing checks on the combined tip: zensim 902 passed (27 ignored), bake_verdict 50, releasegate tests 66, lint, clippy.
+
+## 33. V40 completed SDR results (2026-10-09)
+
+All four V40 jobsets completed postfit: control 40, E29 80, E32 40, E31 40.
+The 200 unique fits cover the shared control and four research arms, each
+with four D1 source folds and ten paired seed indices. The fresh matched
+V40 control is frozen; no E30 control substitution was made at assessment.
+
+- **hc4: AS-GOOD.** All registered SDR guards pass.
+- **hb4: NOT AS-GOOD.** KonFiG signed delta −0.008259966112729855 fails
+  the each-source ≥ −0.005 guard.
+- **palette: NOT AS-GOOD.** Signed delta −0.002956562407006813 fails
+  the mean ≥ −0.002 guard; all four source deltas are negative. The
+  registered improvement test records `adopt=false`.
+- **uh4: AS-GOOD.** All registered SDR guards pass.
+
+[Exact statistics and pins](v40_result_summary_2026-10-09.json) retain each
+original decision object, including SE, n, per-source and W2 deltas, guard
+outcomes, seed arrays, and E32's t/df/one-sided p. The [plain results record](v40_result_summary_2026-10-09.md)
+explains the registered tolerances. The [artifact pointer](v40_results_2026-10-09.pointer.md)
+records the complete decisions and tower mirror, with three randomly selected
+files verified by SHA-256.
+
+These are SDR results on already exposed four-source D1 design populations,
+with each assessed source excluded from its corresponding fit. AS-GOOD means
+registered SDR retention against the matched control; it does not establish
+HDR performance, an untouched external-test result, or an improvement that
+changes the frozen production composition. The uh4 fit used admitted UPIQ
+TRAIN data, but no optional HDR, external or UPIQ report was opened. Those
+reports still require separate exposure authorization and a freeze. KADID
+TERMINAL remains unopened by this lane. The [exposure ledger](../docs/DATA_SPLITS.md#exposure-ledger--2026-10-09-completed-v40-sdr-assessments)
+records the assessed roles and counts.
