@@ -16,6 +16,8 @@ use std::sync::Arc;
 /// with [`Self::with_score_disposition`]. This is model configuration; end users
 /// still control one target score.
 pub struct BakeScorer<'a> {
+    #[cfg(all(test, steerfix_instrument))]
+    diagnostic_objective: steerfix_packet::Objective,
     model: &'a crate::mlp::Model,
     predictor: crate::mlp::Predictor<'a>,
     metadata: Arc<ScoreMetadata>,
@@ -201,6 +203,8 @@ impl<'a> BakeScorer<'a> {
             });
         }
         Ok(Self {
+            #[cfg(all(test, steerfix_instrument))]
+            diagnostic_objective: steerfix_packet::Objective::Served,
             model,
             predictor: crate::mlp::Predictor::new(model),
             metadata,
@@ -446,6 +450,10 @@ impl<'a> BakeScorer<'a> {
         height: u32,
         codec_hint: Option<&str>,
     ) -> Result<f64, ZensimError> {
+        #[cfg(all(test, steerfix_instrument))]
+        if self.diagnostic_objective != steerfix_packet::Objective::Served {
+            return steerfix_packet::diagnostic_forward(self, features, width, height, codec_hint);
+        }
         let primary = if self.weights.as_ref().is_some_and(|w| w[0] == 0.0) {
             0.0
         } else {
@@ -4193,3 +4201,7 @@ mod revision_contract_tests {
         );
     }
 }
+
+#[cfg(all(test, steerfix_instrument))]
+#[path = "steerfix_packet.rs"]
+mod steerfix_packet;

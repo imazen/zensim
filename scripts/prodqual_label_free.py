@@ -60,12 +60,86 @@ def summarize(native, wasm):
             "geometries": native["geometries"], "dropped_bits": native["dropped_bits"], "seeds": results}
 
 
+def prepare_steerfix(root):
+    """Freeze the existing engineering roster, never a corpus/label reader."""
+    import hashlib
+    import shutil
+    prior = Path("/mnt/v/output/zensim/prodqual-b-2026-10-07")
+    adjudicate = Path("/mnt/v/output/zensim/adjudicate-2026-10-07")
+    sha = lambda data: hashlib.sha256(data).hexdigest()
+    source = prior / "STEERING_PREREAD.json"
+    roster = json.loads(source.read_text())
+    assert len(roster["cases"]) == 135 and roster["rules"] == {"m2": .99, "m3f": .7}
+    failures = json.loads((adjudicate / "STEERING.json").read_text())
+    keys = {r["case"] for r in failures if r["model"] == "seed0"}
+    assert len(keys) == 7
+    dest = root / "inputs"
+    dest.mkdir()
+    models = {}
+    pins = json.loads((adjudicate / "FINAL_PROVENANCE.json").read_text())["models"]
+    for name in ("seed0.bin", "dense.bin"):
+        blob = (adjudicate / "models" / name).read_bytes()
+        assert sha(blob) == pins[name]
+        (dest / name).write_bytes(blob)
+        models[name] = (str(dest / name), pins[name])
+    copied = {}
+    base = []
+    for row in roster["cases"]:
+        paths = []
+        for field, pin in (("ref_path", "reference_file_sha256"),
+                           ("dist_path", "distorted_file_sha256")):
+            path = Path(row[field])
+            assert path.parent.parent == Path("/var/tmp/shippath7/delivery")
+            digest = row[pin]
+            target = dest / (digest + ".png")
+            if digest not in copied:
+                blob = path.read_bytes()
+                assert sha(blob) == digest
+                target.write_bytes(blob)
+                copied[digest] = str(target)
+            paths.append(str(target))
+        base.append({"key": row["case"], "reference": paths[0], "distorted": paths[1],
+                     "reference_sha256": row["reference_file_sha256"],
+                     "distorted_sha256": row["distorted_file_sha256"],
+                     "reference_pixels_sha256": row["reference_pixels_sha256"],
+                     "distorted_pixels_sha256": row["distorted_pixels_sha256"],
+                     "block": row["block"]})
+    selected = [r for r in base if r["key"] in keys]
+    assert len(selected) == 7
+    diagnostic = []
+    for row in selected:
+        for objective in ("served", "pre-floor", "smooth-floor"):
+            model, pin = models["seed0.bin"]
+            diagnostic.append(dict(row, model=model, model_sha256=pin, objective=objective))
+        model, pin = models["dense.bin"]
+        diagnostic.append(dict(row, model=model, model_sha256=pin, objective="served"))
+    model, pin = models["seed0.bin"]
+    full = [dict(r, model=model, model_sha256=pin, objective="served") for r in base]
+    for name, rows, engine in (("diagnostic-before", diagnostic, False),
+                               ("engine", diagnostic, True),
+                               ("full-before", full, False), ("full", full, True)):
+        packet = {"cases": rows, "engine": engine, "output": str(root / (name + ".json"))}
+        (root / (name + "-packet.json")).write_text(json.dumps(packet, indent=2) + "\n")
+    receipt = {"engineering_roster_sha256": sha(source.read_bytes()), "models": models,
+               "input_file_hashes": copied, "cases": roster["cases"], "labels_read": False,
+               "case_exclusions": [], "bars": roster["rules"]}
+    (root / "INPUT_RECEIPT.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    print(f"STEERFIX: admitted 135 cases, seven failures, {len(copied)} pinned files")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--native", required=True, type=Path)
+    parser.add_argument("--native", type=Path)
+    parser.add_argument("--steerfix-prepare", type=Path)
     parser.add_argument("--wasm", type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.steerfix_prepare is not None:
+        assert args.native is None and args.output is None and args.wasm is None
+        prepare_steerfix(args.steerfix_prepare)
+        return
+    if args.native is None or args.output is None:
+        parser.error("--native and --output are required for summary")
     native = json.loads(args.native.read_text())
     wasm = json.loads(args.wasm.read_text()) if args.wasm else None
     if wasm is not None:
