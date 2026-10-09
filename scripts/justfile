@@ -19,8 +19,8 @@ v40-capsfix-tests:
     mkdir -p "$TMPDIR"
     export PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests
     python3 -m unittest scripts.tests.test_v40_launch scripts.tests.test_v40_caps_fix scripts.tests.test_v40_postfit_artifacts
-    ruff check scripts/rev4_featpot/v40_launch.py scripts/tests/v40_caps_fix.py scripts/tests/test_v40_caps_fix.py scripts/tests/test_v40_launch.py
-    ruff format --check scripts/rev4_featpot/v40_launch.py scripts/tests/v40_caps_fix.py scripts/tests/test_v40_caps_fix.py scripts/tests/test_v40_launch.py
+    ruff check scripts/rev4_featpot/v40_launch.py scripts/tests/v40_caps_fix.py scripts/tests/v40_caps_check.py scripts/tests/v40_package_freeze.py scripts/tests/test_v40_caps_fix.py scripts/tests/test_v40_launch.py
+    ruff format --check scripts/rev4_featpot/v40_launch.py scripts/tests/v40_caps_fix.py scripts/tests/v40_caps_check.py scripts/tests/test_v40_caps_fix.py scripts/tests/test_v40_launch.py
 
 v40-capsfix-amend bundle reference commit:
     cd "{{justfile_directory()}}/.." && PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 scripts/tests/v40_caps_fix.py --bundle {{bundle}} --reference-caps {{reference}} --reference-jobset fitv40-control-20261007 --source-commit {{commit}}
