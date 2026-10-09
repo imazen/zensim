@@ -35,7 +35,9 @@
 - Rev5 streaming batches bounded whole-strip jobs and merges the existing
   kernel and individual basic-band partials in producer order; the 1–4-thread
   route remains unchanged. Strict 384/384 parity and all-feature tests pass
-  (`d6001600`, `538bca48`). Measurement record:
+  (`d6001600`, `538bca48`). The paired grid resolves improvements in all
+  24 scaling cells and no regressions in 24 low-thread controls; queued
+  scratch increases peak RSS. Measurement record:
   [REV5PERF4](benchmarks/rev5perf4_2026-10-09.md).
 
 - Rev5 attribution defaults to exact neighbour replay. Prepared steering
