@@ -1,5 +1,6 @@
 """Admission negative controls for COSTCMP using the existing SPEEDQ owner."""
 import copy
+import hashlib
 import json
 import tempfile
 import unittest
@@ -57,12 +58,14 @@ class CostcmpTest(unittest.TestCase):
         root=Path(self.temp.name)/'raw';(root/'parity').mkdir(parents=True);(root/'provenance').mkdir();(root/'rss').mkdir()
         (root/'parity/PREFLIGHT_PASS.json').write_text(json.dumps(self.value))
         (root/'provenance/instrument.artifact.json').write_text(json.dumps(dict(binary_sha256='a'*64,dependencies={})))
+        (root/'provenance/paired-rounds-analyzer').write_bytes(b'fixture analyzer')
+        (root/'provenance/source.json').write_text(json.dumps(dict(paired_analyzer_sha256=hashlib.sha256(b'fixture analyzer').hexdigest())))
         rows=cmp.receipt(root/'parity/PREFLIGHT_PASS.json')
         for g,t,n in cmp.cells():
             w,h=map(int,g.split('x'));dest=root/'timing'/f'{t}-t{n}-{g}';dest.mkdir(parents=True)
             values={a:[1000.+(i+1)*w*h]*32 for i,a in enumerate(cmp.ARMS)}
             inner=dict(gate_clean=[True]*32,paired_rounds=values,zenbench_unreliable=False,
-                       workers={a:rows[(g,t,n,a)] for a in cmp.ARMS})
+                       workers={a:rows[(g,t,n,a)] for a in cmp.ARMS},timer_resolution_ns=1.)
             _,selection=owner.select_clean_rounds(inner)
             files={
                 'COMPLETE.json':dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True,**selection),
@@ -79,7 +82,9 @@ class CostcmpTest(unittest.TestCase):
                 for a in cmp.ARMS:
                     (root/'rss'/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(quiet_gate=dict(admitted=True,load1=1.),worker=rows[(g,'v4x',n,a)],max_rss_kib=1234)))
         return SimpleNamespace(raw_dir=root,out_json=Path(self.temp.name)/'out.json',out_md=Path(self.temp.name)/'out.md')
-    def test_report_validates_all_evidence_and_exact_measured_units(self):
+    @patch.object(costcmp_report.subprocess,'check_output')
+    def test_report_validates_all_evidence_and_exact_measured_units(self,analyzer):
+        analyzer.return_value=json.dumps([dict(n_samples=32,ci_lower=1.,ci_median=2.,ci_upper=3.,resolution_limited=False)]*256)
         args=self.report_fixture();costcmp_report.report(args);result=json.loads(args.out_json.read_text())
         self.assertEqual((result['timing_configurations'],result['arm_timings'],result['rss_observations']),(64,320,80))
         first=result['fits'][0];self.assertAlmostEqual(first['alpha_ns'],1000.);self.assertAlmostEqual(first['beta_ns_per_pixel'],1.)
@@ -89,6 +94,9 @@ class CostcmpTest(unittest.TestCase):
         bad.write_text(original)
         bad=args.raw_dir/'rss/v4x-t1-64x64-fast_ssim2_main.json';original=bad.read_text();value=json.loads(original);value['worker']['model']['commit']='wrong';bad.write_text(json.dumps(value))
         with self.assertRaises(AssertionError):costcmp_report.report(args)
+        bad.write_text(original)
+        bad=args.raw_dir/'timing/v4x-t1-64x64/paired_analysis.json';original=bad.read_text();value=json.loads(original);value['comparisons']['zensim_A']['ci_lower']=0.;bad.write_text(json.dumps(value))
+        with self.assertRaisesRegex(AssertionError,'replay'):costcmp_report.report(args)
         bad.write_text(original);(args.raw_dir/'timing/v4x-t1-64x64/COMPLETE.json').unlink()
         with self.assertRaises(FileNotFoundError):costcmp_report.report(args)
     def test_custom_grid_keeps_shared_lock_and_canonical_collector(self):

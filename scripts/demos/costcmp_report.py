@@ -2,6 +2,7 @@
 import hashlib
 import json
 import statistics
+import subprocess
 from pathlib import Path
 import costcmp_run as cmp
 import speedq_run as collection
@@ -14,7 +15,7 @@ def report(args):
     rows=cmp.receipt(root/'parity/PREFLIGHT_PASS.json')
     artifact=json.loads((root/'provenance/instrument.artifact.json').read_text())
     expected_sha=artifact['binary_sha256']
-    medians={};analyses={};selections={};batches=0;memories={}
+    medians={};analyses={};selections={};batches=0;memories={};packets=[];saved=[]
     for g,t,n in cmp.cells():
         p=root/'timing'/f'{t}-t{n}-{g}'
         done=json.loads((p/'COMPLETE.json').read_text());header=json.loads((p/'header.json').read_text())
@@ -31,7 +32,15 @@ def report(args):
         assert set(analysis['comparisons'])==set(cmp.ARMS[1:])
         for name,a in analysis['comparisons'].items():
             assert a['n_samples']==32 and a['ci_lower']<=a['ci_median']<=a['ci_upper']
+        for name in cmp.ARMS[1:]:
+            packets.append(dict(baseline=values[cmp.ARMS[0]],candidate=values[name],iterations=[1]*32,timer_resolution_ns=inner['timer_resolution_ns']))
+            saved.append(analysis['comparisons'][name])
         key=f'{t}-t{n}-{g}';medians[key]={a:statistics.median(v) for a,v in values.items()};analyses[key]=analysis;selections[key]=selection
+    analyzer=root/'provenance/paired-rounds-analyzer'
+    source=json.loads((root/'provenance/source.json').read_text())
+    assert hashlib.sha256(analyzer.read_bytes()).hexdigest()==source['paired_analyzer_sha256']
+    replay=json.loads(subprocess.check_output([str(analyzer)],input=json.dumps(packets),text=True))
+    assert replay==saved, 'paired statistics replay differs from saved analyses'
     for g in collection.GEOMETRIES:
         for n in (1,32):
             for arm in cmp.ARMS:
@@ -53,7 +62,7 @@ def report(args):
     result=dict(status='MEASURED',timing_configurations=64,arm_timings=320,rss_observations=80,
                 axes=dict(tiers=cmp.TIERS,threads=cmp.THREADS,geometries=collection.GEOMETRIES,arms=cmp.ARMS),
                 binary_sha256=expected_sha,model_sha256=collection.SOURCE_SHA,fast_ssim2_main=cmp.FAST_MAIN,
-                medians_ns=medians,paired_analyses=analyses,round_selection=selections,validated_parent_batches=batches,
+                medians_ns=medians,paired_analyses=analyses,round_selection=selections,validated_parent_batches=batches,paired_analysis_replays=len(replay),
                 fits=fits,rss_kib=memories,raw_directory=str(root),peer_build=artifact['dependencies'],
                 statistics_owner='frozen zenbench paired_rounds analyzer; SHA and source recorded in metadata',
                 interval_scope='pointwise paired 95% CIs, candidate minus production Rev5; not simultaneous grid-wide intervals')
