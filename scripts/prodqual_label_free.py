@@ -539,7 +539,7 @@ def nearid_plot(root, rows):
             if j == 0:
                 ax.set_ylabel("served score")
     handles = [plt.Line2D([], [], color=color, label=label) for label, color in colors.items()]
-    fig.legend(handles=handles, loc="upper center", ncol=3)
+    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(.5, .965), ncol=3)
     fig.suptitle("Near-identity TRAIN panel: scores at observed distortion rungs", y=.995)
     fig.tight_layout(rect=(0, 0, 1, .95))
     fig.savefig(root / "curves.svg")
