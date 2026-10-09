@@ -156,6 +156,12 @@ use zensim_validate::panel::{self, PanelStats};
 #[path = "../scatter_json.rs"]
 mod scatter_json;
 
+#[path = "../difference_auc.rs"]
+mod difference_auc;
+#[path = "../ladder_step.rs"]
+mod ladder_step;
+mod panel_evaluate;
+
 struct Args {
     /// Signed D2 correlations with a fixed higher-is-better quality direction.
     signed_quality: bool,
@@ -1255,6 +1261,9 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
 
 fn main() -> ExitCode {
     zensim_validate::tier_cap::apply_from_env();
+    if std::env::args().nth(1).as_deref() == Some("evaluate") {
+        return panel_evaluate::main();
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {

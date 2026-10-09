@@ -1,0 +1,55 @@
+{
+  "schema": "metric-evaluation-v1",
+  "datasets": [
+    {
+      "id": "synthetic",
+      "path": "scores.csv",
+      "sha256": "e1e941a11cc25cfea29e00ff1810627f46fb99119cc63813da2db90627aca2e0",
+      "role": "synthetic",
+      "target_kind": "synthetic",
+      "quality_direction": "higher",
+      "columns": {
+        "id": "id",
+        "reference_id": "reference_id",
+        "codec": "codec",
+        "quality": "quality",
+        "target": "target",
+        "score": "score",
+        "distance": "distance"
+      }
+    }
+  ],
+  "metrics": [
+    {
+      "id": "quality",
+      "direction": "higher",
+      "implementation": "synthetic-example-v1",
+      "input_contract": "synthetic numbers; not image quality evidence",
+      "ladder_epsilon": 0.5,
+      "source": {
+        "kind": "column",
+        "column": "score"
+      }
+    },
+    {
+      "id": "distance",
+      "direction": "lower",
+      "implementation": "synthetic-example-v1",
+      "input_contract": "synthetic numbers; not image quality evidence",
+      "ladder_epsilon": 0.5,
+      "source": {
+        "kind": "column",
+        "column": "distance"
+      }
+    }
+  ],
+  "requirements": [
+    {
+      "metric": "quality",
+      "dataset": "synthetic",
+      "criterion": "rank",
+      "pointer": "/srocc_signed",
+      "min": 0.9
+    }
+  ]
+}

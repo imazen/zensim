@@ -1,5 +1,25 @@
 # zensim dev commands
 
+# Dataset-independent evaluation CLI; tests use synthetic fixtures only.
+metric-evaluate-check:
+    cargo clippy -p zensim-validate --bin panel --bin bake_verdict -- -D warnings
+
+metric-evaluate-tests:
+    cargo test -p zensim-validate --bin panel --test metric_evaluate
+
+metric-evaluate-fmt:
+    cargo fmt -p zensim-validate
+
+# Explicit manifests only; put large runs under run-heavy.
+metric-evaluate manifest outdir:
+    target/debug/panel evaluate --manifest {{quote(manifest)}} --output {{quote(outdir)}}
+
+metric-dataset-tests:
+    python3 -m unittest discover -s scripts/tests -p test_inspect_metric_dataset.py
+
+metric-aic-suite root manifest:
+    python3 scripts/prepare_aic2026_evaluation.py {{quote(root)}} --output {{quote(manifest)}}
+
 # Synthetic D2 read only. Caller supplies a pinned canonical Rust panel.
 releasegate-tests:
     TMPDIR=$HOME/tmp python3 -m unittest discover -s scripts/tests -p 'test_kadid_terminal*.py' -v

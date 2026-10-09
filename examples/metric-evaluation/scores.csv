@@ -1,0 +1,7 @@
+id,reference_id,codec,quality,target,score,distance
+p1,a,jpeg,10,1,1,9
+p2,a,jpeg,20,2,2,8
+p3,a,jpeg,30,3,3,7
+p4,b,webp,10,4,4,6
+p5,b,webp,20,5,5,5
+p6,b,webp,30,6,6,4
