@@ -1,0 +1,17 @@
+task=REV5PERF4
+date=2026-10-09
+host=dev
+base_commit=2c5124b4096a93f2b68847a90e72092d092c9fbc
+runtime_commits=d6001600,538bca48
+collector_commit=945998c8
+report_commit=b1584bdb
+runtime_source_sha256=c9167e418bb8c75ef96682b4cb6c6b3ca63382e5b1aa6e33670f8bf4f9c39a90
+before_binary_sha256=c0cd29b86132f0d559aea1940f7afe6bfaa96b0c1ba40b5919f626a7acb108cf
+after_binary_sha256=a1d2ced7956e8a479a2b67d739994b123dec69428a422f30b423cbf2ed2bf115
+grid=v4x/v3 x 1/2/4/8/16/32 threads x 1024x1024/2048x2048/4096x4096/1920x1080; five arms
+root=/mnt/v/output/zensim/rev5perf4-2026-10-09
+timing_command=TMPDIR=$HOME/tmp ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- just -f benchmarks/rev5perf4.just rev5perf4-costcmp timing ROOT
+rss_command=TMPDIR=$HOME/tmp ~/work/claudehints/scripts/run-heavy --mem 16G --jobs 8 -- just -f benchmarks/rev5perf4.just rev5perf4-costcmp rss ROOT
+report_command=just -f benchmarks/rev5perf4.just rev5perf4-report-gates ROOT
+lock=timing/RSS recipes acquire shared heavy.lock internally
+round_rule=first 32 shared clean rounds from at most 64; unchanged COSTCMP/SPEEDQ admission
