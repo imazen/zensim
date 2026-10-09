@@ -112,6 +112,31 @@ class CostcmpTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError,'replay'):costcmp_report.report(args)
         bad.write_text(original);(args.raw_dir/'timing/v4x-t1-64x64/COMPLETE.json').unlink()
         with self.assertRaises(FileNotFoundError):costcmp_report.report(args)
+    def classifier_fixture(self,analyzer,interval):
+        args=self.report_fixture()
+        g,t,n=cmp.cells()[0]
+        path=args.raw_dir/'timing'/f'{t}-t{n}-{g}'/'paired_analysis.json'
+        value=json.loads(path.read_text());value['comparisons']['zensim_A'].update(interval)
+        path.write_text(json.dumps(value))
+        replay=[]
+        for g,t,n in cmp.cells():
+            value=json.loads((args.raw_dir/'timing'/f'{t}-t{n}-{g}'/'paired_analysis.json').read_text())
+            replay.extend(value['comparisons'][a] for a in cmp.ARMS[1:])
+        analyzer.return_value=json.dumps(replay)
+        costcmp_report.report(args)
+        return json.loads(args.out_json.read_text())['pointwise_verdicts']
+    @patch.object(costcmp_report.subprocess,'check_output')
+    def test_negative_interval_classifies_production_slower(self,analyzer):
+        verdicts=self.classifier_fixture(analyzer,dict(ci_lower=-3.,ci_median=-2.,ci_upper=-1.))
+        self.assertEqual(verdicts['zensim_A'],dict(production_faster=63,production_slower=1,inconclusive=0))
+        for a in cmp.ARMS[2:]:
+            self.assertEqual(verdicts[a],dict(production_faster=64,production_slower=0,inconclusive=0))
+    @patch.object(costcmp_report.subprocess,'check_output')
+    def test_resolution_limited_positive_interval_is_inconclusive(self,analyzer):
+        verdicts=self.classifier_fixture(analyzer,dict(resolution_limited=True))
+        self.assertEqual(verdicts['zensim_A'],dict(production_faster=63,production_slower=0,inconclusive=1))
+        for a in cmp.ARMS[2:]:
+            self.assertEqual(verdicts[a],dict(production_faster=64,production_slower=0,inconclusive=0))
     def test_custom_grid_keeps_shared_lock_and_canonical_collector(self):
         with patch.object(owner,'segment_lock') as lock,patch.object(owner,'run_segment') as segment:
             owner.timing('binary','root',32,'receipt','analyzer',arms=cmp.ARMS,lock='shared',cells=cmp.cells()[:2],parity_loader=lambda p:{},baseline=cmp.ARMS[0],ready_check='validator')

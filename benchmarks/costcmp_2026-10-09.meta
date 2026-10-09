@@ -24,7 +24,7 @@ preflight = 320 arm/configuration records; all 64 Rev5 score and 420-feature bit
 frozen_comparison = 64 production cells exactly match SPEEDQ3
 admission = original load1 < 2.0, no foreign cargo/rustc/training, same exclusive segment lock
 round_selection = first 32 clean of at most 64, common indices across all arms
-statistics = paired IQR/bootstrap owner; pointwise 95% intervals, candidate minus production
+statistics = existing owner; 10000-resample bootstrap CI of the mean IQR-filtered paired differences, candidate minus production; pointwise 95%
 setup_boundary = input/view/model setup untimed; each full scorer call and scoring allocations timed
 rss_boundary = fresh process, includes setup and input/model ownership
 units = ns per scoring call; actual 1024-square and 4096-square medians divided by exact decimal megapixels
@@ -49,3 +49,13 @@ report_source_commit = 4ecaaaef417134cdf3bdc8885c5e18819e18799b
 report_source_sha256 = f867b30e4913bfc1b45d9b526952b7b882179eae85e0e0d1710a657f39c3e6af
 json_sha256 = 5e781566394851a8333db90689ec108faa60208097b61a22b05d4115a31df941
 push = none; all source and report changes remain local for review
+fast_ssim2_tier_paths = both main and 0.8.2 have no AVX-512 path; v3 is highest x86 tier, v4x/v3 ceiling cells execute the same code
+production_metadata = frozen source already declares Rev5; stamped_sha256 equals source_sha256, nothing appended or requantized
+sibling_path_provenance = historical source commit pins absent for sibling path dependencies (zenpixels, zenstats, optional gmsd); Cargo versions alone do not reconstruct those checkouts
+lock_accounting = full timing 64 acquisitions/releases = 63 measured segments plus 1 no-op for completed smoke; smoke measured first cell under its own lock
+landing_review = P3-1 keep-both rebase resolution; P3-2/3/4/5/7 explicit report clarifications; P3-6 negative/resolution-limited classifier regressions
+landing_base = ed8eabbc (STEERFIX, observed main@origin 2026-10-09)
+landing_checks = 26 SPEEDQ tests, 9 COSTCMP tests, 919 runnable scripts, CI-exact just clippy all pass
+landing_check_resources = run-heavy rc=0 74s | peak-RSS 0.94GiB | min-avail 39744MiB | peak-load 14.05
+landing_measurements = numeric JSON remains byte-identical to the frozen original; no timing/RSS recollection
+landing_report_replay_resources = run-heavy rc=0 0s | peak-RSS 0.03GiB | min-avail 40345MiB | peak-load 14.40
