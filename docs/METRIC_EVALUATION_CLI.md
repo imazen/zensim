@@ -240,3 +240,7 @@ adapter. Invoke it through an explicit Python executable, with arguments
 It checks dimensions, accepts ImageMagick's differing-image exit status,
 and refuses infinite PSNR. It uses ImageMagick's default pixel interpretation;
 it does not reproduce AIC2026's supplied PSNR-Y implementation.
+
+The [AIC2026 verification record](../benchmarks/metric_evaluate_aic2026_2026-10-09.md)
+records the completed archive inventory, input hashes, measured examples and
+remaining capability gaps.

@@ -222,6 +222,7 @@ fn print_usage() {
         "panel — canonical IQA statistical-panel entry point (Mohammadi 2025)\n\
          \n\
          USAGE:\n\
+         \x20\x20panel evaluate --manifest <SUITE.json> --output <NEW_DIRECTORY>\n\
          \x20\x20panel --input <FILE.tsv|FILE.parquet> [--json] [column overrides]\n\
          \x20\x20panel --batch <FILE.tsv|-> [--stats full|srocc]\n\
          \n\
