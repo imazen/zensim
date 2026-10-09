@@ -62,7 +62,9 @@ class CostcmpTest(unittest.TestCase):
     def report_fixture(self):
         root=Path(self.temp.name)/'raw';(root/'parity').mkdir(parents=True);(root/'provenance').mkdir();(root/'rss').mkdir()
         (root/'parity/PREFLIGHT_PASS.json').write_text(json.dumps(self.value))
-        (root/'provenance/instrument.artifact.json').write_text(json.dumps(dict(binary_sha256='a'*64,dependencies={})))
+        (root/'provenance/instrument').write_bytes(b'fixture instrument')
+        binary_sha=hashlib.sha256(b'fixture instrument').hexdigest()
+        (root/'provenance/instrument.artifact.json').write_text(json.dumps(dict(binary_sha256=binary_sha,dependencies={})))
         (root/'provenance/paired-rounds-analyzer').write_bytes(b'fixture analyzer')
         (root/'provenance/source.json').write_text(json.dumps(dict(paired_analyzer_sha256=hashlib.sha256(b'fixture analyzer').hexdigest())))
         rows=cmp.receipt(root/'parity/PREFLIGHT_PASS.json')
@@ -74,7 +76,7 @@ class CostcmpTest(unittest.TestCase):
             _,selection=owner.select_clean_rounds(inner)
             files={
                 'COMPLETE.json':dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True,**selection),
-                'header.json':dict(quiet_gate=dict(admitted=True,load1=1.),gate_trace=False,binary_sha256='a'*64,arms=cmp.ARMS,round_cap=64,round_rule=owner.CLEAN_ROUND_RULE),
+                'header.json':dict(quiet_gate=dict(admitted=True,load1=1.),gate_trace=False,binary_sha256=binary_sha,arms=cmp.ARMS,round_cap=64,round_rule=owner.CLEAN_ROUND_RULE),
                 'interference.json':dict(admitted=True,foreign={}),
                 'zenbench.inner.json':inner,
                 'paired_analysis.json':dict(baseline_arm=cmp.ARMS[0],comparisons={a:dict(n_samples=32,ci_lower=1.,ci_median=2.,ci_upper=3.,resolution_limited=False) for a in cmp.ARMS[1:]}),
@@ -85,7 +87,8 @@ class CostcmpTest(unittest.TestCase):
         for g in owner.GEOMETRIES:
             for n in (1,32):
                 for a in cmp.ARMS:
-                    (root/'rss'/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(quiet_gate=dict(admitted=True,load1=1.),worker=rows[(g,'v4x',n,a)],max_rss_kib=1234)))
+                    (root/'rss'/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(quiet_gate=dict(admitted=True,load1=1.),worker=rows[(g,'v4x',n,a)],max_rss_kib=1234,binary_sha256=binary_sha)))
+                    (root/'rss'/f'v4x-t{n}-{g}-{a}.log').write_text('Maximum resident set size (kbytes): 1234\n')
         return SimpleNamespace(raw_dir=root,out_json=Path(self.temp.name)/'out.json',out_md=Path(self.temp.name)/'out.md')
     @patch.object(costcmp_report.subprocess,'check_output')
     def test_report_validates_all_evidence_and_exact_measured_units(self,analyzer):
@@ -96,6 +99,11 @@ class CostcmpTest(unittest.TestCase):
         self.assertAlmostEqual(first['ms_per_mp_1024sq'],(1000.+1024**2)/1024**2)
         bad=args.raw_dir/'timing/v4x-t1-64x64/header.json';original=bad.read_text();value=json.loads(original);value['quiet_gate']['load1']=2.;bad.write_text(json.dumps(value))
         with self.assertRaises(AssertionError):costcmp_report.report(args)
+        bad.write_text(original)
+        bad=args.raw_dir/'rss/v4x-t1-64x64-fast_ssim2_main.json';original=bad.read_text()
+        for field,value in [('max_rss_kib',1235),('binary_sha256','wrong')]:
+            row=json.loads(original);row[field]=value;bad.write_text(json.dumps(row))
+            with self.assertRaises(AssertionError):costcmp_report.report(args)
         bad.write_text(original)
         bad=args.raw_dir/'rss/v4x-t1-64x64-fast_ssim2_main.json';original=bad.read_text();value=json.loads(original);value['worker']['model']['commit']='wrong';bad.write_text(json.dumps(value))
         with self.assertRaises(AssertionError):costcmp_report.report(args)

@@ -391,7 +391,7 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
                 if ready_check is not None:
                     ready_check(name,geometry,'v4x',threads,rec)
                 maxrss=next(int(l.rsplit(':',1)[1]) for l in (root/f'{tag}.log').read_text().splitlines() if 'Maximum resident set size (kbytes)' in l)
-                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec})
+                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec,'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()})
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
 
 

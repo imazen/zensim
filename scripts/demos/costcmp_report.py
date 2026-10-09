@@ -15,6 +15,7 @@ def report(args):
     rows=cmp.receipt(root/'parity/PREFLIGHT_PASS.json')
     artifact=json.loads((root/'provenance/instrument.artifact.json').read_text())
     expected_sha=artifact['binary_sha256']
+    assert hashlib.sha256((root/'provenance/instrument').read_bytes()).hexdigest()==expected_sha
     medians={};analyses={};selections={};batches=0;memories={};packets=[];saved=[]
     for g,t,n in cmp.cells():
         p=root/'timing'/f'{t}-t{n}-{g}'
@@ -47,6 +48,10 @@ def report(args):
                 row=json.loads((root/'rss'/f'v4x-t{n}-{g}-{arm}.json').read_text())
                 assert row['quiet_gate']['admitted'] and row['quiet_gate']['load1']<2
                 cmp.validate_ready(rows,arm,g,'v4x',n,row['worker'])
+                assert row['binary_sha256']==expected_sha, 'RSS binary differs from frozen instrument'
+                log=(root/'rss'/f'v4x-t{n}-{g}-{arm}.log').read_text()
+                measured=next(int(line.rsplit(':',1)[1]) for line in log.splitlines() if 'Maximum resident set size (kbytes)' in line)
+                assert row['max_rss_kib']==measured, 'RSS record differs from time-v log'
                 memories[f'v4x-t{n}-{g}-{arm}']=row['max_rss_kib']
     fits=[]
     for tier in cmp.TIERS:
