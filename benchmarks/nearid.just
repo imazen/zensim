@@ -60,3 +60,17 @@ checks root:
 # NAS mirror + all-file verification + owned inactive Cargo target cleanup.
 archive:
     bash benchmarks/nearid_archive.sh
+
+# Rebase validation uses frozen scored rows only, preserving the original evidence.
+reproduce frozen out:
+    python3 scripts/reproduce_nearid_report.py {{frozen}} {{out}}
+
+land-validate root:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root='{{root}}'
+    cargo fmt -p zensim -- --check 2>&1 | tee "$root/fmt.log"
+    just --justfile benchmarks/nearid.just --working-directory . reproduce /mnt/v/output/zensim/nearid-2026-10-09 "$root/reproduced" 2>&1 | tee "$root/reproduce.log"
+    python3 -m unittest discover -s scripts -p test_prodqual_label_free.py 2>&1 | tee "$root/report-tests.log"
+    just lint-scripts 2>&1 | tee "$root/lint-scripts.log"
+    just clippy 2>&1 | tee "$root/clippy.log"
