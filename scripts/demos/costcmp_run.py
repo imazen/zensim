@@ -21,6 +21,7 @@ def signature(rec):
 
 def validate_ready(rows, name, geometry, tier, threads, rec):
     old = rows[(geometry, tier, threads, name)]
+    assert (f"{rec['width']}x{rec['height']}",rec['tier'],int(rec['threads'])) == (geometry,tier,threads), 'STOP: worker coordinates differ from COSTCMP grid cell'
     assert signature(rec) == signature(old), 'STOP: worker input/score/model differs from COSTCMP preflight'
     assert rec['arm'] == ('by_v2fy' if name == ARMS[0] else name)
     if name == ARMS[0]:

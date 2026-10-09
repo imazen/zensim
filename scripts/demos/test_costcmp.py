@@ -44,6 +44,11 @@ class CostcmpTest(unittest.TestCase):
         selected,selection=owner.select_clean_rounds(raw)
         self.assertEqual(selection['retained_indices'],list(range(1,33)))
         self.assertTrue(all(v==list(range(1,33)) for v in selected.values()))
+    def test_ready_coordinates_must_match_declared_grid_cell(self):
+        self.save(self.value);rows=cmp.receipt(self.path)
+        for field,value in [('width',128),('tier','v3'),('threads','32')]:
+            rec=copy.deepcopy(rows[(owner.GEOMETRIES[0],'v4x',1,'fast_ssim2_main')]);rec[field]=value
+            with self.assertRaises(AssertionError):cmp.validate_ready(rows,'fast_ssim2_main',owner.GEOMETRIES[0],'v4x',1,rec)
     def test_freeze_keeps_both_fast_ssim2_sources(self):
         root=Path(self.temp.name);binary=root/'binary';binary.write_bytes(b'instrument');binary.chmod(0o755)
         messages=[dict(reason='build-finished',success=True),dict(reason='compiler-artifact',executable=str(binary),target=dict(name='ssim2_speed_bar',kind=['bench']))]
