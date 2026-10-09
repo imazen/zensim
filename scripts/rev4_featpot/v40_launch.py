@@ -11,6 +11,24 @@ from shippath10_launch import sha
 JOBSETS = tuple(f"fitv40-{s}-20261007" for s in ("control", "e29", "e32", "e31"))
 
 
+def placement(entry):
+    """Require capacity on a registered fleet alias before queue insertion.
+
+    launch_v2.sh refuses hosts absent from the map. SSH-qualified aliases use
+    the same host identity here; private addresses remain in the local caps.
+    """
+    fleet = {"i265", "i270", "r3500", "r3800x", "tower"}
+    hosts = entry.get("hosts")
+    if not isinstance(hosts, dict) or not hosts:
+        raise ValueError("jobset placement refused: empty fleet host map")
+    if any(type(slots) is not int or slots <= 0 for slots in hosts.values()):
+        raise ValueError(
+            "jobset placement refused: positive integer host slots required"
+        )
+    if not any(host.rsplit("@", 1)[-1] in fleet for host in hosts):
+        raise ValueError("jobset placement refused: no registered fleet host")
+
+
 def gate(bundle, jobset):
     if jobset not in JOBSETS:
         raise PermissionError("unregistered V40 jobset")
@@ -51,6 +69,7 @@ def gate(bundle, jobset):
         != json.loads((bundle / "jobset_caps.json").read_text())[jobset]
     ):
         raise ValueError("live jobset cap differs from reviewed local entry")
+    placement(caps[jobset])
     # Use the existing complete E30 freeze owner; no label payload is read.
     from e30_four_source import completed_control_pins
 

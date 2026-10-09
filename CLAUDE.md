@@ -158,6 +158,16 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-09 — V40 fleet placement blocked by empty caps. FIXED locally.**
+  The packet inherited empty `hosts` maps and the launch gate checked equality
+  with live caps without testing placement. The coordinator reports 147 resource
+  envelope refusals and 0/40 control cells run before correcting live control
+  caps. The packet correction restores the approved standard map for all four
+  jobsets and refreshes authorization pins. Launch and freeze now refuse empty
+  maps, maps without a registered fleet alias, and invalid slot counts. Training
+  archives, cell identities and image remain unchanged; live caps are owned by
+  the coordinator. See `scripts/tests/test_v40_launch.py`.
+
 * **2026-10-08 — SPEEDQ3 universal speed claim remains unproven. OPEN.** Fresh runtime `c989a2d4` with frozen production model `f803b74c` measures 171 faster, 0 slower and 21 inconclusive of 192 cells. All five SPEEDQ2 slower cells now classify as faster. Inconclusive pointwise paired intervals still prevent the universal gate passing. All 384 Rev4/Rev5 score/420-feature bit checks pass and all 576 frozen comparisons against SPEEDQ2 match. See [SPEEDQ3](benchmarks/rev5_speedq3_2026-10-08.md).
 
 * **2026-10-08 — Frozen production Rev5 misses the universal Rev4 speed gate. SUPERSEDED by SPEEDQ3; the five slower cells were FIXED by REV5PERF2 (`37779f79`, `0bd3b412`) and are faster on `c989a2d4`; the universal claim stays OPEN in the SPEEDQ3 entry.** SPEEDQ2 on runtime `ee9e5b55` and packed seed-0 model `f803b74c` measures all 192 cells: 164 faster, 5 slower, 23 inconclusive using pointwise paired 95% CIs. Slower cells are v4x 1T 64²/128², v4x 2T 64², and v4 1T 64²/128². All 384 Rev4/Rev5 score and 420-consumed-feature bit checks pass. The first-32-clean rule and <2.0 load gate are unchanged. See [the full report](benchmarks/rev5_speedq2_2026-10-08.md) and [the 192-cell before/after comparison](benchmarks/rev5_speedq2_vs_speedq_2026-10-08.md).

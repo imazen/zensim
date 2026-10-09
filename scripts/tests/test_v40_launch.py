@@ -13,39 +13,120 @@ class Launch(unittest.TestCase):
     def fixture(self, root):
         payload = root / "pin.bin"
         payload.write_bytes(b"reviewed synthetic identity")
-        caps = {job: {"memory_gib": 6} for job in owner.JOBSETS}
+        caps = {job: {"memory": "6g", "hosts": {"i265": 3}} for job in owner.JOBSETS}
         (root / "jobset_caps.json").write_text(json.dumps(caps))
         ids = dict(program_sha="a" * 64, files={"pin.bin": owner.sha(payload)})
         for job in owner.JOBSETS:
             (root / f"AUTHORIZATION_REQUIRED-{job}.json").write_text(
-                json.dumps(dict(identities=ids)))
-            (root / f"LAUNCH_AUTHORIZATION-{job}.json").write_text(json.dumps(dict(
-                schema="v40-coordinator-launch-v1", coordinator_message="SYNTHETIC TEST ONLY",
-                source_landed=True, pins_pushed=True, reviewed=True,
-                E30_completed=True, control_choice_frozen=True, identities=ids)))
+                json.dumps(dict(identities=ids))
+            )
+            (root / f"LAUNCH_AUTHORIZATION-{job}.json").write_text(
+                json.dumps(
+                    dict(
+                        schema="v40-coordinator-launch-v1",
+                        coordinator_message="SYNTHETIC TEST ONLY",
+                        source_landed=True,
+                        pins_pushed=True,
+                        reviewed=True,
+                        E30_completed=True,
+                        control_choice_frozen=True,
+                        identities=ids,
+                    )
+                )
+            )
         return caps, ids
+
+    def test_unplaceable_matching_caps_refuse_before_any_fleet_or_prerequisite(self):
+        import e30_four_source
+        import v40_score
+
+        for hosts in ({}, {"not-a-fleet-host": 3}, {"i265": 0}, {"i265": True}):
+            with self.subTest(hosts=hosts), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                caps, _ = self.fixture(root)
+                for entry in caps.values():
+                    entry["hosts"] = hosts
+                (root / "jobset_caps.json").write_text(json.dumps(caps))
+                original_read = Path.read_text
+
+                def read(path, *args, **kwargs):
+                    if str(path) == "/var/tmp/fitv2/jobset_caps.json":
+                        return json.dumps(caps)
+                    return original_read(path, *args, **kwargs)
+
+                with (
+                    patch.object(Path, "read_text", read),
+                    patch.object(
+                        e30_four_source,
+                        "completed_control_pins",
+                        side_effect=AssertionError("prerequisite read"),
+                    ),
+                    patch.object(
+                        v40_score,
+                        "complete",
+                        side_effect=AssertionError("control read"),
+                    ),
+                    patch.object(
+                        owner.subprocess,
+                        "run",
+                        side_effect=AssertionError("fleet action"),
+                    ),
+                    patch.object(
+                        owner.subprocess,
+                        "check_output",
+                        side_effect=AssertionError("fleet read"),
+                    ),
+                ):
+                    for jobset in owner.JOBSETS:
+                        with self.assertRaisesRegex(
+                            ValueError, "jobset placement refused"
+                        ):
+                            owner.launch(root, jobset)
+
+    def test_ssh_qualified_fleet_alias_has_capacity(self):
+        owner.placement({"hosts": {"synthetic@i265": 3}})
 
     def test_positive_approval_reaches_real_installed_cells_path(self):
         import e30_four_source
         import v40_score
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             caps, ids = self.fixture(root)
             read_text = Path.read_text
+
             def read(path, *args, **kwargs):
                 if str(path) == "/var/tmp/fitv2/jobset_caps.json":
                     return json.dumps(caps)
                 return read_text(path, *args, **kwargs)
+
             def prerequisite(results, bundle):
-                self.assertEqual(results, Path("/var/tmp/rev4-featpot/e30-results/cells"))
-                self.assertEqual(bundle, Path("/mnt/v/output/zensim/shippath11-2026-10-07"))
+                self.assertEqual(
+                    results, Path("/var/tmp/rev4-featpot/e30-results/cells")
+                )
+                self.assertEqual(
+                    bundle, Path("/mnt/v/output/zensim/shippath11-2026-10-07")
+                )
                 return dict(cell_count=40)
+
             with (
                 patch.object(Path, "read_text", read),
-                patch.object(e30_four_source, "completed_control_pins", side_effect=prerequisite) as e30,
-                patch.object(v40_score, "complete", side_effect=ValueError("INCOMPLETE: missing control/kadid/s0")) as control,
-                patch.object(owner.subprocess, "run", side_effect=AssertionError("fleet action")),
-                patch.object(owner.subprocess, "check_output", side_effect=AssertionError("fleet read")),
+                patch.object(
+                    e30_four_source, "completed_control_pins", side_effect=prerequisite
+                ) as e30,
+                patch.object(
+                    v40_score,
+                    "complete",
+                    side_effect=ValueError("INCOMPLETE: missing control/kadid/s0"),
+                ) as control,
+                patch.object(
+                    owner.subprocess, "run", side_effect=AssertionError("fleet action")
+                ),
+                patch.object(
+                    owner.subprocess,
+                    "check_output",
+                    side_effect=AssertionError("fleet read"),
+                ),
             ):
                 self.assertEqual(owner.gate(root, owner.JOBSETS[0]), ids)
                 for job in owner.JOBSETS[1:]:
@@ -59,11 +140,26 @@ class Launch(unittest.TestCase):
                     for seed in range(10):
                         cell = root / "cells" / f"{fold}_s{seed}"
                         (cell / "refit").mkdir(parents=True)
-                        (cell / "result.json").write_text(json.dumps(dict(fold=fold, seed=seed)))
-                        (cell / "refit/last.bin").write_bytes(f"synthetic {fold} {seed}".encode())
+                        (cell / "result.json").write_text(
+                            json.dumps(dict(fold=fold, seed=seed))
+                        )
+                        (cell / "refit/last.bin").write_bytes(
+                            f"synthetic {fold} {seed}".encode()
+                        )
                         cells[fold, seed] = cell
-                        frozen[f"{fold}_s{seed}"] = dict(result_sha256=owner.sha(cell / "result.json"), bake_sha256=owner.sha(cell / "refit/last.bin"))
-                (root / "V40_CONTROL_PINS.json").write_text(json.dumps(dict(control_choice="fresh-matched-v40", program_sha=ids["program_sha"], cells=frozen)))
+                        frozen[f"{fold}_s{seed}"] = dict(
+                            result_sha256=owner.sha(cell / "result.json"),
+                            bake_sha256=owner.sha(cell / "refit/last.bin"),
+                        )
+                (root / "V40_CONTROL_PINS.json").write_text(
+                    json.dumps(
+                        dict(
+                            control_choice="fresh-matched-v40",
+                            program_sha=ids["program_sha"],
+                            cells=frozen,
+                        )
+                    )
+                )
                 control.side_effect = None
                 control.return_value = dict(control=cells)
                 for job in owner.JOBSETS[1:]:

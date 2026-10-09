@@ -9,3 +9,38 @@ lint-tests:
     ruff check scripts/lint_scripts.py scripts/test_lint_scripts_cross_repo.py
     ruff format --check scripts/test_lint_scripts_cross_repo.py
     just --justfile justfile lint-scripts
+
+# Synthetic launch/caps and postfit tests; no launch or production label read.
+v40-capsfix-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}/.."
+    export TMPDIR="${TMPDIR:-$HOME/tmp/v40-capsfix}"
+    mkdir -p "$TMPDIR"
+    export PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests
+    python3 -m unittest scripts.tests.test_v40_launch scripts.tests.test_v40_caps_fix scripts.tests.test_v40_postfit_artifacts
+    ruff check scripts/rev4_featpot/v40_launch.py scripts/tests/v40_caps_fix.py scripts/tests/test_v40_caps_fix.py scripts/tests/test_v40_launch.py
+    ruff format --check scripts/rev4_featpot/v40_launch.py scripts/tests/v40_caps_fix.py scripts/tests/test_v40_caps_fix.py scripts/tests/test_v40_launch.py
+
+v40-capsfix-amend bundle reference commit:
+    cd "{{justfile_directory()}}/.." && PYTHONPATH=scripts/rev4_featpot:scripts/tests python3 scripts/tests/v40_caps_fix.py --bundle {{bundle}} --reference-caps {{reference}} --reference-jobset fitv40-control-20261007 --source-commit {{commit}}
+
+v40-capsfix-check bundle dest:
+    cd "{{justfile_directory()}}/.." && python3 scripts/tests/v40_caps_check.py --bundle {{bundle}} --dest {{dest}}
+
+# The new refusal must fail on the shipped pre-fix owner, at the prerequisite tripwire.
+v40-capsfix-regression frozen:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}/.."
+    export PYTHONPATH={{frozen}}:scripts/tests
+    python3 - <<'PY'
+    from pathlib import Path
+    import unittest
+    import test_v40_launch as test
+    assert '/v40r4-2026-10-08/runtime/' in str(Path(test.owner.__file__).resolve())
+    result = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([test.Launch('test_unplaceable_matching_caps_refuse_before_any_fleet_or_prerequisite')]))
+    assert len(result.failures) == 4 and not result.errors
+    assert all('AssertionError: prerequisite read' in text for _, text in result.failures)
+    print('PASS: pre-fix shipped owner fails all four placement cases at the prerequisite tripwire')
+    PY

@@ -7,12 +7,18 @@ Run once against the already verified prepared bundle.
 import argparse
 import hashlib
 import io
+import importlib
 import json
 from pathlib import Path
 import tarfile
 import subprocess
+import sys
 
 from v40_binary_metadata import validate as validate_binary_metadata
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rev4_featpot"))
+launch_owner = importlib.import_module("v40_launch")
+JOBSETS, placement = launch_owner.JOBSETS, launch_owner.placement
 
 
 def sha(path):
@@ -127,6 +133,8 @@ def freeze(bundle, source, source_commit, metrics_commit):
         if sha(source / rel) != check["producer_sha256"] or not check["byte_equal"]:
             raise ValueError(f"trainer/admission source drift after build: {rel}")
     caps = json.loads((bundle / "jobset_caps.json").read_text())
+    for jobset in JOBSETS:
+        placement(caps[jobset])
     for entry in caps.values():
         entry["build_commit"] = source_commit
     (bundle / "jobset_caps.pre-freeze.json").write_bytes(
