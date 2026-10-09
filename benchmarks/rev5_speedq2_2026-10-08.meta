@@ -1,0 +1,177 @@
+{
+  "status": "MEASURED",
+  "base_commit": "079042fbe3fb2e00724066dc37bac68c5feed2e3",
+  "runtime_commit": "ee9e5b551759a495bfe1212c84645445877065d1",
+  "source_commit": "4ac8c5a3c7c8102f440b481a9ec183db79b7b862",
+  "build_pins": {
+    "base": "079042fb",
+    "runtime": "ee9e5b55",
+    "controller_commit": "79b2fc0a288bbdc6cea2e263c758c63853cb103d",
+    "binary_sha256": "cf5f85a7f6577a63fce313b10c97183e8647c1f9a28fd366e953452b18695b4b",
+    "analyzer_sha256": "798d938626e31c54e524da56687c468f7178d1629b4ee4f268692a290ccbba82",
+    "dependency_lock_sha256": "c89bfc9745ff8c21f7c7a57ed742d25153a8d05eaf352d206391eb5aac92075f"
+  },
+  "raw_directory": "/mnt/v/output/zensim/speedq2-2026-10-08",
+  "shared_heavy_lock": "/home/lilith/tmp/zensim-paper/rev4/heavy.lock",
+  "timing_arms": [
+    "by_v2fy_r3",
+    "by_v2fy_r4",
+    "by_v2fy_r5",
+    "zensim_B",
+    "fast_ssim2",
+    "butteraugli"
+  ],
+  "timing_rule": "first-32-clean-of-<=64 (owner 2026-10-08)",
+  "old_segments_reused": 0,
+  "rss_scope": "all seven arms, v4x only, 1 and 32 requested threads",
+  "before_json": "/mnt/v/output/zensim/speedq-2026-10-07/rev5_speedq_2026-10-07.json",
+  "before_json_sha256": "f43ed96f19de5670402547a219cc533b0cd80cfd2fe80866497d2983e03e13fb",
+  "frozen_cross_build_parity": "provenance/frozen-before-after-parity.json",
+  "build_resource": "rc0 39s peak-RSS 0.87GiB min-avail 44566MiB peak-load 2.76",
+  "clippy_resource": "rc0 15s peak-RSS 0.54GiB min-avail 45461MiB peak-load 2.89",
+  "parity_resource": "rc0 68s peak-RSS 0.27GiB min-avail 46142MiB peak-load 2.21",
+  "tests": "26/26 pass, including parent/worker gate flag and contiguous-offset negative controls (SPEEDQ2_batch_test.log, 0.789s)",
+  "script_lint": "868 runnable scripts",
+  "publish": "local only; no push",
+  "updated_utc": "2026-10-08T17:23:01.182088+00:00",
+  "reporter_commit": "4ac8c5a3c7c8102f440b481a9ec183db79b7b862",
+  "collection_start_source_commit": "c9ea5907f1b628f9cec9b8254fe1a5515e1359f7",
+  "timing_coverage": [
+    192,
+    192
+  ],
+  "rss_coverage": [
+    112,
+    112
+  ],
+  "verdict": {
+    "slower_cells": 5,
+    "faster_cells": 164,
+    "inconclusive_cells": 23,
+    "rev5_at_least_as_fast_everywhere": false
+  },
+  "per_tier_verdict": {
+    "v4x": {
+      "faster": 41,
+      "slower": 3,
+      "inconclusive": 4
+    },
+    "v4": {
+      "faster": 42,
+      "slower": 2,
+      "inconclusive": 4
+    },
+    "v3": {
+      "faster": 43,
+      "slower": 0,
+      "inconclusive": 5
+    },
+    "scalar": {
+      "faster": 38,
+      "slower": 0,
+      "inconclusive": 10
+    }
+  },
+  "model_source_path": "/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N/full_s0/refit/production-f16.bin",
+  "model_source_sha256": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+  "report_json": {
+    "path": "/mnt/v/output/zensim/speedq2-2026-10-08/rev5_speedq2_2026-10-08.json",
+    "bytes": 133598,
+    "sha256": "19f996bd27869a9d9bebde4b65de4c5757a462463bd24a1e158f5b532195cc8f"
+  },
+  "before_after_cells": 192,
+  "before_verdict": {
+    "slower_cells": 80,
+    "faster_cells": 94,
+    "inconclusive_cells": 18,
+    "rev5_at_least_as_fast_everywhere": false
+  },
+  "comparison_interpretation": "Each CI compares Rev5 minus Rev4 within its own run; median changes between runs are descriptive, not a paired between-build confidence interval.",
+  "parent_batch_validation": {
+    "segments": 192,
+    "batches": 308,
+    "worker_flags_equal_parent_flags": true
+  },
+  "round_counts": {
+    "retained": 6144,
+    "total": 6489,
+    "excluded": 345,
+    "whole_attempts_excluded": 0
+  },
+  "segment_lock_counts": {
+    "acquired": 192,
+    "released": 192
+  },
+  "paired_analysis_replay": "provenance/analysis-replay.json: all 192 analyses exactly reproduce from retained raw rounds",
+  "post_build_rust_source_changes": 0,
+  "parity": {
+    "strict_pass": 384,
+    "strict_required": 384,
+    "strict_feature_bits_pass": 384,
+    "consumed_features_per_cell": 420,
+    "rev3_cells": 192,
+    "rev3_tolerance_failed_cells": 48,
+    "rev3_max_abs_feature_difference": 3.6560852526013043e-06,
+    "rev3_max_tolerance_fraction": 3.428426473557622,
+    "rev3_max_abs_score_difference": 0.00017840957009696012
+  },
+  "peer_build": {
+    "archmage": {
+      "features": [
+        "avx512",
+        "default",
+        "macros",
+        "std",
+        "testable_dispatch"
+      ],
+      "package_id": "registry+https://github.com/rust-lang/crates.io-index#archmage@0.9.29"
+    },
+    "butteraugli": {
+      "features": [
+        "avx512",
+        "default",
+        "rayon"
+      ],
+      "package_id": "registry+https://github.com/rust-lang/crates.io-index#butteraugli@0.9.3"
+    },
+    "fast_ssim2": {
+      "features": [
+        "default",
+        "imgref",
+        "rayon"
+      ],
+      "package_id": "registry+https://github.com/rust-lang/crates.io-index#fast-ssim2@0.8.2"
+    },
+    "rayon": {
+      "features": [],
+      "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon@1.12.0"
+    },
+    "ssimulacra2": {
+      "features": [
+        "default",
+        "rayon"
+      ],
+      "package_id": "registry+https://github.com/rust-lang/crates.io-index#ssimulacra2@0.5.1"
+    }
+  },
+  "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28); LLVM 23.1.1; x86_64-unknown-linux-gnu",
+  "rustflags": "RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS/wrappers unset; no target-cpu=native; see provenance/environment.json and cargo-config-rustflags.json",
+  "build_target_directory": "/home/lilith/work/zen/zensim/zensim-bench/target",
+  "mirror_directory": "/mnt/tower/output/zensim/speedq2-2026-10-08",
+  "mirror_verification": "provenance/final-mirror-verification.json (recorded after mirror completes)",
+  "reporter_source_archive": "provenance/reporter-source-final.tar; sha256 88cca2a43ca4fb8c52fca18cd318c52f86d7469cf3846e1184ef0dbbd9259d89",
+  "collection_process_observation": "provenance/collector-process.json records observation time, PID/start ticks and argv; collection exit0; original PID no longer exists",
+  "statistics_owner": "zenbench e45822161a710acd013c572a98627e64663b1bcf; randomized paired rounds, 10K bootstrap, paired IQR filtering",
+  "core_alpha_beta_fits": 144,
+  "commands": {
+    "build": "TMPDIR=/home/lilith/tmp CARGO_TARGET_DIR=/home/lilith/work/zen/zensim/zensim-bench/target flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-build",
+    "freeze": "just speedq-freeze /mnt/v/output/zensim/speedq2-2026-10-08/provenance/build.log /mnt/v/output/zensim/speedq2-2026-10-08/provenance/production-instrument",
+    "clippy": "same TMPDIR/CARGO_TARGET_DIR/flock/run-heavy settings as build, with just speedq-clippy",
+    "parity": "flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-parity /mnt/v/output/zensim/speedq2-2026-10-08/provenance/production-instrument /mnt/v/output/zensim/speedq2-2026-10-08/full-parity --collect-legacy-failures",
+    "rss": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock just speedq-rss --binary /mnt/v/output/zensim/speedq2-2026-10-08/provenance/production-instrument --dest /mnt/v/output/zensim/speedq2-2026-10-08/rss --parity /mnt/v/output/zensim/speedq2-2026-10-08/full-parity/PARITY_STRICT_PASS.json",
+    "timing": "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq2-2026-10-08/provenance/production-instrument --dest /mnt/v/output/zensim/speedq2-2026-10-08/timing --parity /mnt/v/output/zensim/speedq2-2026-10-08/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq2-2026-10-08/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock",
+    "report": "just speedq-report --raw-dir /mnt/v/output/zensim/speedq2-2026-10-08 --out-json /mnt/v/output/zensim/speedq2-2026-10-08/rev5_speedq2_2026-10-08.json --out-md benchmarks/rev5_speedq2_2026-10-08.md --speedq-baseline /mnt/v/output/zensim/speedq-2026-10-07/rev5_speedq_2026-10-07.json --comparison-md benchmarks/rev5_speedq2_vs_speedq_2026-10-08.md",
+    "tests": "just speedq-test (26 pass); just lint-scripts (868 scripts runnable)",
+    "mirror": "flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-mirror /mnt/v/output/zensim/speedq2-2026-10-08 /mnt/tower/output/zensim/speedq2-2026-10-08"
+  }
+}

@@ -158,6 +158,10 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-08 — SPEEDQ3 universal speed claim remains unproven. OPEN.** Fresh runtime `c989a2d4` with frozen production model `f803b74c` measures 171 faster, 0 slower and 21 inconclusive of 192 cells. All five SPEEDQ2 slower cells now classify as faster. Inconclusive pointwise paired intervals still prevent the universal gate passing. All 384 Rev4/Rev5 score/420-feature bit checks pass and all 576 frozen comparisons against SPEEDQ2 match. See [SPEEDQ3](benchmarks/rev5_speedq3_2026-10-08.md).
+
+* **2026-10-08 — Frozen production Rev5 misses the universal Rev4 speed gate. SUPERSEDED by SPEEDQ3; the five slower cells were FIXED by REV5PERF2 (`37779f79`, `0bd3b412`) and are faster on `c989a2d4`; the universal claim stays OPEN in the SPEEDQ3 entry.** SPEEDQ2 on runtime `ee9e5b55` and packed seed-0 model `f803b74c` measures all 192 cells: 164 faster, 5 slower, 23 inconclusive using pointwise paired 95% CIs. Slower cells are v4x 1T 64²/128², v4x 2T 64², and v4 1T 64²/128². All 384 Rev4/Rev5 score and 420-consumed-feature bit checks pass. The first-32-clean rule and <2.0 load gate are unchanged. See [the full report](benchmarks/rev5_speedq2_2026-10-08.md) and [the 192-cell before/after comparison](benchmarks/rev5_speedq2_vs_speedq_2026-10-08.md).
+
 * **2026-10-07 — Three zensim integration tests failed on main. FIXED (stale test contracts; reviewed patch, no weakening).** Found by the PRODQUAL-A label-free gate
   run: `featcanon_rev4_contract::served_paths_serve_rev4` (1867 vs 1825 features) and
   `research_engine_parity::research_everything_agrees_with_the_production_walk` (production 1825 vs research 1867) most likely
@@ -446,6 +450,12 @@ because cleanup tests or a historical training reproduction pass.
   bake sha256.
 
 ## SPEEDQ runtime evidence
+
+SPEEDQ3 uses fresh runtime `c989a2d4` and raw root `/mnt/v/output/zensim/speedq3-2026-10-08/`: 192 timing cells, 112 fresh-process RSS observations, 384 strict Rev4/Rev5 parity checks, and exact replay of every saved paired analysis. All six required timing arms have full coverage; optional Rust-av timing remains absent and all seven arms retain RSS. First-32-clean selection retains 6,144 of 6,474 rounds; 330 flagged rounds are excluded across all arms. All 314 parent batches validate, and 192 lock acquisitions/releases match. Quiet gates and frozen model are unchanged. [The report](benchmarks/rev5_speedq3_2026-10-08.md) and [SPEEDQ2 comparison](benchmarks/rev5_speedq3_vs_speedq2_2026-10-08.md) preserve the pointwise-CI limits; between-run median/RSS changes are descriptive.
+
+New-rule reports also bind the worker gate vector to every saved parent batch: offsets, requested/completed counts, single-call iterations, arm inventory and original-once warmup must agree. A parent/worker flag mismatch refuses the report; raw flags and batches remain untouched.
+
+SPEEDQ2 reruns the full grid on landed runtime `ee9e5b55`, starting from `079042fb`, in fresh `/mnt/v/output/zensim/speedq2-2026-10-08/` evidence. Timing accepts `--lock <path>`: an exclusive flock covers each segment from its first quiet gate through the last round and worker cleanup; it releases before retry backoff and between segments. Quiet and round admission thresholds remain unchanged. Other cooperating heavy-work lanes use the same lock. `just speedq-test` exercises real lock contention, exception cleanup, gate/round coverage and acquisition between segments.
 
 The release timing/RSS qualification uses the frozen seed-0 packed f16 production model, source SHA256 `f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400`. Revision metadata is appended by the existing bake owner without requantizing weights; the production arm uses process revision 5. Model SHA bindings in parity, timing and RSS prevent the earlier research-weight run from qualifying this model. Research attempts remain archived separately.
 

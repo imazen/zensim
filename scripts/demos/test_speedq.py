@@ -253,6 +253,10 @@ class SpeedqTest(unittest.TestCase):
             with self.assertRaises(SystemExit):runner.main()
         timing.assert_not_called()
 
+
+
+
+
     def test_freeze_uses_cargo_receipt_and_refuses_ambiguous_artifacts(self):
         stale=self.root/'old';stale.write_bytes(b'old')
         current=self.root/'current';current.write_bytes(b'current');current.chmod(0o755)
@@ -353,102 +357,7 @@ class SpeedqTest(unittest.TestCase):
         (parity/'PARITY_STRICT_PASS.json').write_text(json.dumps(dict(status='PASS',strict_revisions=[4,5],records=rows)))
         with self.assertRaises(AssertionError): report.speedq_report(args)
 
-    def test_report_uses_clean_rounds_and_verifies_completion_indices(self):
-        self.full_report_parity_fixture()
-        dest=self.root/'timing/v4x-t1-64x64';dest.mkdir(parents=True)
-        flags=[True]*34;flags[1]=False;flags[4]=False
-        values={a:[100+i for i in range(34)] for a in runner.ARMS[:-1]}
-        for series in values.values():series[1]=series[4]=999999
-        inner=dict(zenbench_unreliable=False,gate_clean=flags,paired_rounds=values)
-        selected,selection=runner.select_clean_rounds(inner)
-        complete=dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True,**selection)
-        (dest/'COMPLETE.json').write_text(json.dumps(complete))
-        (dest/'interference.json').write_text(json.dumps(dict(admitted=True,foreign=[])))
-        (dest/'zenbench.inner.json').write_text(json.dumps(inner))
-        (dest/'header.json').write_text(json.dumps(dict(rounds=32,round_cap=64,round_rule=runner.CLEAN_ROUND_RULE,arms=runner.ARMS[:-1],model_source_sha256=runner.SOURCE_SHA,quiet_gate=dict(admitted=True,load1=1))))
-        (dest/'paired_analysis.json').write_text(json.dumps(dict(ci_lower=-1,ci_median=0,ci_upper=1,resolution_limited=False,pct_change=0)))
-        args=SimpleNamespace(raw_dir=self.root,out_json=self.root/'out.json',out_md=self.root/'out.md')
-        report.speedq_report(args);out=json.loads(args.out_json.read_text())
-        expected=__import__('statistics').median(selected['by_v2fy_r4'])
-        self.assertEqual(out['medians_ns'][0][0][1],expected)
-        self.assertNotEqual(expected,__import__('statistics').median(values['by_v2fy_r4']))
-        self.assertEqual(out['timing_round_selection'][0][0],selection)
-        self.assertEqual(out['timing_round_rule_counts'],{runner.LEGACY_ROUND_RULE:0,runner.CLEAN_ROUND_RULE:1})
-        self.assertIn('Owner-approved clean-round amendment (2026-10-08)',args.out_md.read_text())
-        complete['excluded_indices']=[0,4];(dest/'COMPLETE.json').write_text(json.dumps(complete))
-        with self.assertRaisesRegex(AssertionError,'selection differs'):
-            report.speedq_report(args)
 
-    def test_complete_report_maps_all_axes_and_does_not_call_uncertainty_equivalence(self):
-        self.full_report_parity_fixture()
-        provenance=self.root/'provenance';provenance.mkdir()
-        (provenance/'test.artifact.json').write_text(json.dumps(dict(binary_sha256='test',dependencies={'test':dict(package_id='synthetic fixture',features=[])})))
-        configs=[(t,n) for t in runner.TIERS for n in runner.THREADS]
-        for k,(tier,n) in enumerate(configs):
-            for g in runner.GEOMETRIES:
-                pixels=__import__('math').prod(map(int,g.split('x')))
-                dest=self.root/'timing'/f'{tier}-t{n}-{g}';dest.mkdir(parents=True)
-                (dest/'COMPLETE.json').write_text(json.dumps(dict(status='PASS',rounds=32,paired_alignment_verified=True,zenbench_gate_clean=True)))
-                (dest/'interference.json').write_text(json.dumps(dict(admitted=True,foreign=[])))
-                slopes=[1,3,2,4,5,6,7]
-                values={a:[1000*(k+1)+100*i+slopes[i]*pixels]*32 for i,a in enumerate(runner.ARMS)}
-                (dest/'zenbench.inner.json').write_text(json.dumps(dict(zenbench_unreliable=False,gate_clean=[True]*32,paired_rounds=values)))
-                (dest/'header.json').write_text(json.dumps(dict(rounds=32,binary_sha256='test',model_source_sha256=runner.SOURCE_SHA,quiet_gate=dict(admitted=True,load1=1))))
-                delta=values['by_v2fy_r5'][0]-values['by_v2fy_r4'][0]
-                (dest/'paired_analysis.json').write_text(json.dumps(dict(ci_lower=delta-1,ci_median=delta,ci_upper=delta+1,resolution_limited=False,pct_change=100*delta/values['by_v2fy_r4'][0])))
-        rss=self.root/'rss';rss.mkdir()
-        for g in runner.GEOMETRIES:
-            for n in [1,32]:
-                for a in runner.ARMS:
-                    (rss/f'v4x-t{n}-{g}-{a}.json').write_text(json.dumps(dict(max_rss_kib=12345,quiet_gate=dict(admitted=True),worker={'model':{'source_sha256':runner.SOURCE_SHA}})))
-        args=SimpleNamespace(raw_dir=self.root,out_json=self.root/'out.json',out_md=self.root/'out.md')
-        report.speedq_report(args)
-        out=json.loads(args.out_json.read_text())
-        self.assertEqual(out['status'],'MEASURED')
-        self.assertEqual(out['missing'],[])
-        self.assertEqual(out['alpha_ns_beta_ns_per_pixel_r2'][23][6],[24600,7,1])
-        self.assertEqual(out['medians_ns'][23][0][6],24600+7*64*64)
-        self.assertEqual(out['rss_coverage'],[112,112])
-        self.assertTrue(out['verdict']['rev5_at_least_as_fast_everywhere'])
-        self.assertIn('faster in all 192 cells',args.out_md.read_text())
-        # Explicitly omitted optional peer values must remain missing while
-        # required six-arm timing coverage, gates and round counts stay intact.
-        amended=self.root/'timing/scalar-t32-64x64'
-        inner=amended/'zenbench.inner.json';rec=json.loads(inner.read_text())
-        rec['paired_rounds'].pop('ssimulacra2_rs');inner.write_text(json.dumps(rec))
-        header=amended/'header.json';rec=json.loads(header.read_text());rec['arms']=runner.ARMS[:-1];header.write_text(json.dumps(rec))
-        report.speedq_report(args);out=json.loads(args.out_json.read_text())
-        self.assertEqual(out['status'],'MEASURED')
-        self.assertEqual(out['timing_coverage'],[192,192])
-        self.assertEqual(out['timing_arm_coverage']['ssimulacra2_rs'],191)
-        self.assertEqual(out['timing_arm_coverage']['by_v2fy_r5'],192)
-        self.assertEqual(out['timing_segment_arm_counts'],{'6':1,'7':191})
-        self.assertIsNone(out['medians_ns'][23][0][6])
-        self.assertIsNone(out['alpha_ns_beta_ns_per_pixel_r2'][23][6])
-        self.assertEqual(out['alpha_ns_beta_ns_per_pixel_r2'][23][2],[24200,2,1])
-        self.assertIn('not measured',args.out_md.read_text())
-        # Losing a core arm cannot be described as the coordinator amendment.
-        rec=json.loads(inner.read_text());rec['paired_rounds'].pop('by_v2fy_r3');inner.write_text(json.dumps(rec))
-        with self.assertRaises(AssertionError):report.speedq_report(args)
-        rec['paired_rounds']['by_v2fy_r3']=[24000+64*64]*32;inner.write_text(json.dumps(rec))
-        # One interval crossing zero makes the everywhere conclusion unproven.
-        path=self.root/'timing/scalar-t32-64x64/paired_analysis.json'
-        rec=json.loads(path.read_text());rec.update(ci_upper=1);path.write_text(json.dumps(rec))
-        report.speedq_report(args)
-        out=json.loads(args.out_json.read_text())
-        self.assertIsNone(out['verdict']['rev5_at_least_as_fast_everywhere'])
-        self.assertEqual(out['verdict']['inconclusive_cells'],1)
-        # A completion filename cannot certify failed alignment or interference.
-        complete=self.root/'timing/scalar-t32-64x64/COMPLETE.json'
-        rec=json.loads(complete.read_text());rec['paired_alignment_verified']=False;complete.write_text(json.dumps(rec))
-        with self.assertRaises(AssertionError): report.speedq_report(args)
-
-        # Traced rounds are diagnostics even if every gate happened to pass.
-        rec['paired_alignment_verified']=True;complete.write_text(json.dumps(rec))
-        header=complete.parent/'header.json'
-        rec=json.loads(header.read_text());rec['gate_trace']=True;header.write_text(json.dumps(rec))
-        with self.assertRaisesRegex(AssertionError,'diagnostic tracing'):
-            report.speedq_report(args)
 
 
 

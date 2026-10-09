@@ -16,7 +16,7 @@ speedq-parity binary dest *options:
     exec python3 scripts/demos/speedq_run.py parity --binary "$binary" --dest "$dest" "$@"
 
 speedq-test:
-    python3 -m unittest discover -s scripts/demos -p 'test_speedq.py' -v
+    python3 -m unittest discover -s scripts/demos -p 'test_speedq*.py' -v
 
 # Marker counts are progress only; the reporter validates qualification evidence.
 [positional-arguments]
@@ -43,3 +43,8 @@ speedq-rss *options:
 # Freeze the executable named by the successful Cargo JSON build receipt.
 speedq-freeze build_log dest:
     python3 scripts/demos/speedq_run.py freeze --build-log "{{build_log}}" --dest "{{dest}}"
+
+# Produce the qualification report and optional before/after table.
+[positional-arguments]
+speedq-report *options:
+    python3 scripts/demos/speed_matrix_report.py --speedq "$@"

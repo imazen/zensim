@@ -38,6 +38,7 @@ Four things this does NOT do, deliberately:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -310,38 +311,10 @@ def revision_tables(runs: dict[str, dict], labels: dict[str, tuple[str, int, int
 
 
 
-def speedq_stop_report(args) -> int:
-    """Render a real parity refusal; never invent timing or coverage."""
-    path = args.raw_dir / "full-parity/PARITY_FAILED.json"
-    if not path.exists(): path = args.raw_dir / "parity/PARITY_FAILED.json"
-    receipt = json.loads(path.read_text())
-    a, b = receipt["baseline"], receipt["different"]
-    assert receipt["status"] == "STOP_SCORE_PARITY_BUG" and not receipt["timing_started"]
-    assert a["revision"] == b["revision"]
-    assert a["score_bits"] != b["score_bits"] or a["input_sha256"] != b["input_sha256"]
-    historical = a["revision"] == 3
-    status = "HISTORICAL_REV3_BIT_REFUSAL" if historical else receipt["status"]
-    rows = [{k: r[k] for k in ("revision", "tier", "threads", "width", "height", "score", "score_bits")}
-            for r in receipt["checked"]]
-    missing = ["paired runtime and CIs", "alpha/beta fits", "MT scaling", "RSS", "B and peers", "remaining score-parity grid"]
-    out = {"status": status, "timing_started": False, "missing": missing,
-           "required_model_parity_cells": 576, "checked_model_parity_cells": len(rows),
-           "input_sha256": a["input_sha256"], "model": a["model"], "scores": rows,
-           "score_difference": b["score"] - a["score"], "raw_dir": str(args.raw_dir),
-           "timing": [], "fits": [], "scaling": [], "rss": [], "peers": []}
-    args.out_json.write_text(json.dumps(out, indent=2) + "\n")
-    lines = ["# Rev5 SPEEDQ — STOPPED at score parity", "", "MISSING: " + "; ".join(missing) + ".", "",
-             f"Checked {len(rows)} of 576 by_v2fy model parity cells; no timing segment started.",
-             "This is the 420-ID, H128, one-output model with a recorded source SHA, restamped through the metadata owner without requantizing its weights.",
-             "Different revisions may differ; this failure compares the same revision and input across dispatch ceilings.", "",
-             "| revision | tier | threads | size | score | f64 score bits |", "|---|---|---|---|---|---|"]
-    lines += [f"| {r['revision']} | {r['tier']} | {r['threads']} | {r['width']}x{r['height']} | {r['score']} | `{r['score_bits']}` |" for r in rows]
-    lines += ["", f"Rev{a['revision']} {b['tier']} minus {a['tier']}: {out['score_difference']} score units.", "",
-              "This archived Rev3 bitwise refusal predates the coordinator's amendment; Rev3 is now an admitted, tolerance-flagged timing baseline." if historical else "Strict Rev4/Rev5 parity or input identity failed. No timing was admitted.",
-              "No Rev5-versus-Rev4 speed verdict is available: there are no paired timing rounds, fits, scaling or RSS measurements.", "",
-              f"Raw evidence: `{args.raw_dir}`. Build and evidence pins are in the adjacent `.meta` file.", ""]
-    args.out_md.write_text("\n".join(lines))
-    return 0
+from speedq_report_support import (
+    speedq_stop_report, verify_speedq_batches, speedq_comparison, speedq_comparison_markdown,
+)
+
 
 def speedq_report(args) -> int:
     """The existing report owner, extended to the full paired SPEEDQ grid."""
@@ -356,7 +329,7 @@ def speedq_report(args) -> int:
     from speedq_run import parity_receipt, SOURCE_SHA, select_clean_rounds, CLEAN_ROUND_RULE, LEGACY_ROUND_RULE
     parity_receipt(receipt)
     parity = json.loads(receipt.read_text())
-    medians = {}; analyses = {}; headers = {}; memories = {}; selections = {}
+    medians = {}; analyses = {}; headers = {}; memories = {}; selections = {}; verified_batches = {}
     expected = [(t,n,g) for t in tiers for n in threads for g in sizes]
     for tier,n,geometry in expected:
         path = root/'timing'/f'{tier}-t{n}-{geometry}'
@@ -384,6 +357,7 @@ def speedq_report(args) -> int:
             assert header['round_cap']==64 and header['round_rule']==rule
             values, selection = select_clean_rounds(inner,complete['rounds'])
             assert all(complete[key]==value for key,value in selection.items()), 'completion round selection differs from raw flags'
+            verified_batches[(tier,n,geometry)]=verify_speedq_batches(path,inner)
         declared=header.get('arms',arms)
         assert len(set(declared))==len(declared) and set(declared) in (set(arms),set(arms[:-1])), 'only ssimulacra2_rs may be omitted'
         assert set(values) == set(declared) and all(len(v) == header['rounds'] for v in values.values())
@@ -433,6 +407,7 @@ def speedq_report(args) -> int:
     result={
         'status':'INCOMPLETE' if missing else 'MEASURED', 'missing':missing,
         'timing_coverage':[len(medians),192], 'rss_coverage':[len(memories),112],
+        'parent_batch_validation':{'segments':len(verified_batches),'batches':sum(verified_batches.values()),'worker_flags_equal_parent_flags':True},
         'axes':{'tiers':tiers,'threads':threads,'geometries':sizes,'arms':arms},
         'layout':'configuration = tier outer, threads inner; timing/CI rows = geometry order; fit rows = arm order; resolution flags 1=limited, 0=not limited, -=missing',
         'precision':'summary medians/intercepts in ns; CI bounds rounded outward to whole ns; beta/R2 eight significant digits; exact rounds/analyses retained in raw',
@@ -445,6 +420,7 @@ def speedq_report(args) -> int:
         'ssimulacra2_rs_scope':'Earlier seven-arm segments retain measured values; remaining segments omit this optional peer. Its peer table uses v4x rows only. Missing optional timings and fits are null, not inferred.',
         'r5_vs_r4_pct_change':[[compact(analyses[(t,n,g)]['pct_change']) if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
         'r5_vs_r4_resolution_limited':[[('1' if analyses[(t,n,g)]['resolution_limited'] else '0') if (t,n,g) in analyses else '-' for g in sizes] for t in tiers for n in threads],
+        'r5_vs_r4_cell_verdict':[[('slower' if analyses[(t,n,g)]['ci_lower']>0 and not analyses[(t,n,g)]['resolution_limited'] else ('faster' if analyses[(t,n,g)]['ci_upper']<0 and not analyses[(t,n,g)]['resolution_limited'] else 'inconclusive')) if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
         'r5_minus_r4_ci_ns':[[[math.floor(analyses[(t,n,g)]['ci_lower']),round(analyses[(t,n,g)]['ci_median']),math.ceil(analyses[(t,n,g)]['ci_upper'])] if (t,n,g) in analyses else None for g in sizes] for t in tiers for n in threads],
         'alpha_ns_beta_ns_per_pixel_r2':[[[round(fits[(t,n,a)][0]),compact(fits[(t,n,a)][1]),compact(fits[(t,n,a)][2])] if (t,n,a) in fits else None for a in arms] for t in tiers for n in threads],
         'rss_kib':[[[memories.get((g,n,a)) for a in arms] for n in [1,32]] for g in sizes],
@@ -457,6 +433,14 @@ def speedq_report(args) -> int:
         'peer_build':peer_build,
         'model_source_sha256':SOURCE_SHA,
     }
+    baseline_path=getattr(args,'speedq_baseline',None)
+    if baseline_path is not None:
+        baseline=json.loads(baseline_path.read_text())
+        comparison=speedq_comparison(baseline,result)
+        comparison['baseline_path']=str(baseline_path)
+        comparison['baseline_sha256']=hashlib.sha256(baseline_path.read_bytes()).hexdigest()
+        result['before_after']=comparison
+        args.comparison_md.write_text(speedq_comparison_markdown(comparison,baseline_path))
     args.out_json.write_text(json.dumps(result,separators=(',',':'))+'\n')
     lines=['# Rev5 SPEEDQ runtime qualification','']
     if missing: lines += ['MISSING: '+ '; '.join(missing)+'.','']
@@ -526,6 +510,8 @@ def main() -> int:
     ap.add_argument("--raw-dir", required=True, type=Path)
     ap.add_argument("--out-json", required=True, type=Path)
     ap.add_argument("--out-md", required=True, type=Path)
+    ap.add_argument("--speedq-baseline", type=Path, help="full earlier SPEEDQ JSON for a same-grid comparison")
+    ap.add_argument("--comparison-md", type=Path, help="separate before/after Markdown table")
     ap.add_argument(
         "--notes",
         type=Path,
@@ -535,6 +521,9 @@ def main() -> int:
         "edit to the generated .md is erased by the next run.",
     )
     args = ap.parse_args()
+    if args.speedq_baseline is not None or args.comparison_md is not None:
+        if not args.speedq or args.speedq_baseline is None or args.comparison_md is None:
+            ap.error('--speedq-baseline and --comparison-md must be supplied together with --speedq')
     if args.speedq:
         complete = any((args.raw_dir/"full-parity"/name).exists() for name in ["PARITY_STRICT_PASS.json","PARITY_PASS.json"])
         return speedq_report(args) if complete else speedq_stop_report(args)

@@ -1,0 +1,186 @@
+{
+  "status": "MEASURED",
+  "runtime_commit": "c989a2d46861da0957d701e8d0a389974047b4cf",
+  "source_commit": "89e5528cc6379987c0b917ffed4e05489e90e147",
+  "raw_directory": "/mnt/v/output/zensim/speedq3-2026-10-08",
+  "mirror_directory": "/mnt/tower/output/zensim/speedq3-2026-10-08",
+  "build_pins": {
+    "cargo_artifact": "/home/lilith/work/zen/zensim/zensim-bench/target/release/deps/ssim2_speed_bar-a15e6d28f011e4ee",
+    "build_log": "/mnt/v/output/zensim/speedq3-2026-10-08/provenance/build.log",
+    "binary_sha256": "066c965ac4330ba13c46cadd9db78eff84d67fbdfce1e6b884d964a8da6c9bd7",
+    "dependencies": {
+      "archmage": {
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#archmage@0.9.29",
+        "features": [
+          "avx512",
+          "default",
+          "macros",
+          "std",
+          "testable_dispatch"
+        ]
+      },
+      "rayon": {
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon@1.12.0",
+        "features": []
+      },
+      "ssimulacra2": {
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#ssimulacra2@0.5.1",
+        "features": [
+          "default",
+          "rayon"
+        ]
+      },
+      "fast_ssim2": {
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#fast-ssim2@0.8.2",
+        "features": [
+          "default",
+          "imgref",
+          "rayon"
+        ]
+      },
+      "butteraugli": {
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#butteraugli@0.9.3",
+        "features": [
+          "avx512",
+          "default",
+          "rayon"
+        ]
+      }
+    }
+  },
+  "model_source_sha256": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+  "analyzer_sha256": "798d938626e31c54e524da56687c468f7178d1629b4ee4f268692a290ccbba82",
+  "dependency_lock_sha256": "c89bfc9745ff8c21f7c7a57ed742d25153a8d05eaf352d206391eb5aac92075f",
+  "before_json": "/mnt/v/output/zensim/speedq2-2026-10-08/rev5_speedq2_2026-10-08.json",
+  "before_json_sha256": "19f996bd27869a9d9bebde4b65de4c5757a462463bd24a1e158f5b532195cc8f",
+  "timing_arms": [
+    "by_v2fy_r3",
+    "by_v2fy_r4",
+    "by_v2fy_r5",
+    "zensim_B",
+    "fast_ssim2",
+    "butteraugli"
+  ],
+  "timing_rule": "first-32-clean-of-<=64 (owner 2026-10-08)",
+  "shared_heavy_lock": "/home/lilith/tmp/zensim-paper/rev4/heavy.lock",
+  "old_segments_reused": 0,
+  "rss_scope": "all seven arms, v4x only, 1 and 32 requested threads",
+  "strict_parity": {
+    "status": "PASS",
+    "strict_score_and_420_feature_checks": 384,
+    "all_revision_frozen_comparisons": 576,
+    "before_receipt": "/mnt/v/output/zensim/speedq2-2026-10-08/full-parity/PARITY_STRICT_PASS.json",
+    "before_sha256": "270d101af299d22c7f9a80fec13bea2dbc1e076867d3048bca6a443df1a1e139",
+    "after_receipt": "/mnt/v/output/zensim/speedq3-2026-10-08/full-parity/PARITY_STRICT_PASS.json",
+    "after_sha256": "63bd5d300c34f93f627b2df01f14cf93e6d7566d806c4ca933f954e3925bf92c"
+  },
+  "tests": "26/26 pass",
+  "lint": "870 scripts runnable",
+  "publish": "local only; no push",
+  "build_resource": "run-heavy: done rc=0 31s | peak-RSS 0.87GiB | min-avail 45559MiB | peak-load 1.29",
+  "clippy_resource": "run-heavy: done rc=0 1s | peak-RSS 0.42GiB | min-avail 45928MiB | peak-load 0.95",
+  "parity_resource": "run-heavy: done rc=0 68s | peak-RSS 0.26GiB | min-avail 45887MiB | peak-load 1.78",
+  "updated_utc": "2026-10-08T23:15:45.223044+00:00",
+  "rss_coverage": [
+    112,
+    112
+  ],
+  "rss_before_after": "provenance/rss-before-after.json",
+  "rss_comparison_report": "benchmarks/rev5_speedq3_vs_speedq2_rss_2026-10-08.md",
+  "verdict": {
+    "slower_cells": 0,
+    "faster_cells": 171,
+    "inconclusive_cells": 21,
+    "rev5_at_least_as_fast_everywhere": null
+  },
+  "per_tier": {
+    "v4x": {
+      "faster": 46,
+      "slower": 0,
+      "inconclusive": 2
+    },
+    "v4": {
+      "faster": 46,
+      "slower": 0,
+      "inconclusive": 2
+    },
+    "v3": {
+      "faster": 43,
+      "slower": 0,
+      "inconclusive": 5
+    },
+    "scalar": {
+      "faster": 36,
+      "slower": 0,
+      "inconclusive": 12
+    }
+  },
+  "timing_coverage": [
+    192,
+    192
+  ],
+  "round_counts": {
+    "total": 6474,
+    "retained": 6144,
+    "flagged": 330
+  },
+  "parent_batch_validation": {
+    "segments": 192,
+    "batches": 314,
+    "worker_flags_equal_parent_flags": true
+  },
+  "lock_acquisitions": 192,
+  "lock_releases": 192,
+  "whole_attempts_excluded": 0,
+  "descriptive_ols_fits": 144,
+  "timing_arm_coverage": {
+    "by_v2fy_r3": 192,
+    "by_v2fy_r4": 192,
+    "by_v2fy_r5": 192,
+    "zensim_B": 192,
+    "fast_ssim2": 192,
+    "butteraugli": 192,
+    "ssimulacra2_rs": 0
+  },
+  "rev3_legacy_tolerance": {
+    "strict_pass": 384,
+    "strict_required": 384,
+    "strict_feature_bits_pass": 384,
+    "consumed_features_per_cell": 420,
+    "rev3_cells": 192,
+    "rev3_tolerance_failed_cells": 48,
+    "rev3_max_abs_feature_difference": 3.6560852526013043e-06,
+    "rev3_max_tolerance_fraction": 3.428426473557622,
+    "rev3_max_abs_score_difference": 0.00017840957009696012
+  },
+  "frozen_feature_comparison": "576/576 identical to SPEEDQ2, all revisions",
+  "report_json": {
+    "path": "/mnt/v/output/zensim/speedq3-2026-10-08/rev5_speedq3_2026-10-08.json",
+    "bytes": 133896,
+    "sha256": "67b01e4f1710eba670e4344ba6299a3cb607ffb90954e96ae666b963ebd21ee9"
+  },
+  "analysis_replay": "provenance/analysis-replay.json",
+  "analysis_replay_resource": "run-heavy: done rc=0 0s | peak-RSS 0.03GiB | min-avail 45205MiB | peak-load 1.07",
+  "collector_completion": "provenance/collector-completion-observation.json (exit code unavailable after daemon recovery; all 192 receipts validated)",
+  "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28), LLVM 23.1.1, x86_64-unknown-linux-gnu",
+  "compiler_flags": "RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS/wrappers unset; no target-cpu=native",
+  "hardware": "AMD Ryzen 9 9950X3D 16-Core Processor, 32 logical CPUs; provenance/hardware.json",
+  "source_archive": {
+    "path": "provenance/source.tar",
+    "sha256": "631170f9b637d3be1c670318e44c54d68ff6909e5f74b3f47a80de2e76a0dbdb"
+  },
+  "memory_boundary": "RSS uses individual /usr/bin/time -v fresh whole-process peaks; timing workers are nice 19 and ionice 3. Builds/clippy/parity/replay use run-heavy with 16G and 8 jobs.",
+  "comparison": "SPEEDQ3 versus SPEEDQ2; within-run pointwise paired CIs. Between-run median changes and RSS deltas are descriptive.",
+  "mirror_verification": "provenance/final-mirror-verification.json",
+  "validation": "provenance/final-qualification-validation.json",
+  "commands": [
+    "TMPDIR=/home/lilith/tmp flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-build",
+    "TMPDIR=/home/lilith/tmp flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-clippy",
+    "just speedq-test",
+    "just lint-scripts",
+    "TMPDIR=/home/lilith/tmp flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock /home/lilith/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- just speedq-parity /mnt/v/output/zensim/speedq3-2026-10-08/provenance/production-instrument /mnt/v/output/zensim/speedq3-2026-10-08/full-parity --collect-legacy-failures",
+    "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE just speedq-timing --binary /mnt/v/output/zensim/speedq3-2026-10-08/provenance/production-instrument --dest /mnt/v/output/zensim/speedq3-2026-10-08/timing --parity /mnt/v/output/zensim/speedq3-2026-10-08/full-parity/PARITY_STRICT_PASS.json --analyzer /mnt/v/output/zensim/speedq3-2026-10-08/provenance/paired-rounds-analyzer --rounds 32 --arms by_v2fy_r3 by_v2fy_r4 by_v2fy_r5 zensim_B fast_ssim2 butteraugli --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock",
+    "TMPDIR=/home/lilith/tmp env -u ZENBENCH_GATE_TRACE flock /home/lilith/tmp/zensim-paper/rev4/heavy.lock just speedq-rss --binary /mnt/v/output/zensim/speedq3-2026-10-08/provenance/production-instrument --dest /mnt/v/output/zensim/speedq3-2026-10-08/rss --parity /mnt/v/output/zensim/speedq3-2026-10-08/full-parity/PARITY_STRICT_PASS.json",
+    "just speedq-report --raw-dir /mnt/v/output/zensim/speedq3-2026-10-08 --out-json /mnt/v/output/zensim/speedq3-2026-10-08/rev5_speedq3_2026-10-08.json --out-md benchmarks/rev5_speedq3_2026-10-08.md --speedq-baseline /mnt/v/output/zensim/speedq2-2026-10-08/rev5_speedq2_2026-10-08.json --comparison-md benchmarks/rev5_speedq3_vs_speedq2_2026-10-08.md"
+  ]
+}
