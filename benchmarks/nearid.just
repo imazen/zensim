@@ -56,3 +56,7 @@ checks root:
     just clippy 2>&1 | tee "$root/clippy-source-policy.log"
     just lint-scripts 2>&1 | tee "$root/lint-source-policy.log"
     "$CARGO_TARGET_DIR/release/examples/serve_custom_bake" --nearid-contact "$root/PREREAD_FINAL.json" "$root/train-panel.png" 2>&1 | tee "$root/train-panel.log"
+
+# NAS mirror + all-file verification + owned inactive Cargo target cleanup.
+archive:
+    bash benchmarks/nearid_archive.sh
