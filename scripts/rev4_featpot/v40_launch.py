@@ -11,13 +11,17 @@ from shippath10_launch import sha
 JOBSETS = tuple(f"fitv40-{s}-20261007" for s in ("control", "e29", "e32", "e31"))
 
 
-def placement(entry):
-    """Require capacity on a registered fleet alias before queue insertion.
+def placement(entry, fleet_hosts=None):
+    """Require capacity on an exact registered placement key before queueing.
 
-    launch_v2.sh refuses hosts absent from the map. SSH-qualified aliases use
-    the same host identity here; private addresses remain in the local caps.
+    launch_v2.sh uses exact keys, including any SSH qualification. The local
+    amendment binds private fleet keys; fresh packages can use public aliases.
     """
-    fleet = {"i265", "i270", "r3500", "r3800x", "tower"}
+    fleet = (
+        {"i265", "i270", "r3500", "r3800x", "tower"}
+        if fleet_hosts is None
+        else set(fleet_hosts)
+    )
     hosts = entry.get("hosts")
     if not isinstance(hosts, dict) or not hosts:
         raise ValueError("jobset placement refused: empty fleet host map")
@@ -25,7 +29,7 @@ def placement(entry):
         raise ValueError(
             "jobset placement refused: positive integer host slots required"
         )
-    if not any(host.rsplit("@", 1)[-1] in fleet for host in hosts):
+    if not fleet.intersection(hosts):
         raise ValueError("jobset placement refused: no registered fleet host")
 
 
@@ -69,7 +73,12 @@ def gate(bundle, jobset):
         != json.loads((bundle / "jobset_caps.json").read_text())[jobset]
     ):
         raise ValueError("live jobset cap differs from reviewed local entry")
-    placement(caps[jobset])
+    fleet_hosts = None
+    if "CAPS_FIX.json" in ids["files"]:
+        fleet_hosts = json.loads((bundle / "CAPS_FIX.json").read_text())["fleet_hosts"]
+        if not isinstance(fleet_hosts, list) or not fleet_hosts:
+            raise ValueError("registered fleet placement keys required")
+    placement(caps[jobset], fleet_hosts)
     # Use the existing complete E30 freeze owner; no label payload is read.
     from e30_four_source import completed_control_pins
 

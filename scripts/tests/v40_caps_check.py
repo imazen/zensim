@@ -31,12 +31,31 @@ def main():
         str(runtime / "scripts"),
         str(runtime / "scripts/rev4_featpot"),
     ]
-    # Load the exact shipped wrapper/overlay, without entering its CLI.
-    owner = runpy.run_path(str(b / "launch.py"), run_name="capsfix_probe")
+    # Exercise the exact wrapper routing; suppress only the overlay's CLI entry.
+    original_run = runpy.run_path
+    routed = []
+
+    def load_overlay(path, **kwargs):
+        assert Path(path) == b / "launch-runtime/v40_launch.py"
+        assert kwargs == dict(run_name="__main__")
+        routed.append(path)
+        return original_run(path, run_name="capsfix_probe")
+
+    with patch.object(runpy, "run_path", load_overlay):
+        original_run(str(b / "launch.py"), run_name="capsfix_probe")
+    assert len(routed) == 1
+    owner = original_run(routed[0], run_name="capsfix_probe")
     import e30_four_source
     import v40_score
 
     caps = json.loads((b / "jobset_caps.json").read_bytes())
+    fleet_hosts = json.loads((b / "CAPS_FIX.json").read_bytes())["fleet_hosts"]
+    for jobset in owner["JOBSETS"]:
+        assert set(caps[jobset]["hosts"]) == set(fleet_hosts)
+        for host in fleet_hosts:
+            owner["placement"](
+                {"hosts": {host: caps[jobset]["hosts"][host]}}, fleet_hosts
+            )
     cells, pins = {}, {}
     for fold in ("kadid", "tid2013", "konfig", "cid22_a25"):
         for seed in range(10):
@@ -155,6 +174,7 @@ def main():
         launcher_sha256=owner["sha"](b / "launch-runtime/v40_launch.py"),
         gates=checks,
         harvest_caps_opens=0,
+        placement_keys_verified=len(fleet_hosts),
     )
     (args.dest / "CAPS_FIX_GATE.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

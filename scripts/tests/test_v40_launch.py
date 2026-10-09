@@ -83,8 +83,10 @@ class Launch(unittest.TestCase):
                         ):
                             owner.launch(root, jobset)
 
-    def test_ssh_qualified_fleet_alias_has_capacity(self):
-        owner.placement({"hosts": {"synthetic@i265": 3}})
+    def test_ssh_qualified_fleet_keys_require_exact_declared_identity(self):
+        owner.placement({"hosts": {"synthetic@i265": 3}}, ["synthetic@i265"])
+        with self.assertRaisesRegex(ValueError, "no registered fleet host"):
+            owner.placement({"hosts": {"synthetic@i265": 3}}, ["i265"])
 
     def test_positive_approval_reaches_real_installed_cells_path(self):
         import e30_four_source

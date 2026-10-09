@@ -70,6 +70,7 @@ class CapsFix(unittest.TestCase):
                 (bundle / name).write_bytes(b"unchanged " + name.encode())
             record = owner.amend(bundle, reference, "approved", "a" * 40)
             self.assertEqual(record["source_commit"], "a" * 40)
+            self.assertEqual(record["fleet_hosts"], ["i265", "r3500"])
             self.assertEqual(authority.read_bytes(), b"original coordinator authority")
             for name in untouched:
                 self.assertEqual(

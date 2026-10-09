@@ -59,6 +59,7 @@ def amend(bundle, reference_caps, reference_jobset, source_commit):
         source_commit=source_commit,
         reference_caps_sha256=digest(reference_raw),
         reference_jobset=reference_jobset,
+        fleet_hosts=sorted(reference["hosts"]),
         previous_caps_sha256=digest(caps_raw),
         corrected_caps_sha256=digest(encoded(caps)),
         launcher_sha256=digest(launcher),
