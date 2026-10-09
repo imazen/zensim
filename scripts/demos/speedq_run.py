@@ -232,7 +232,8 @@ def select_clean_rounds(inner, rounds=32):
     return {arm:[series[i] for i in retained] for arm,series in values.items()}, selection
 
 
-def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer, arms=ARMS):
+def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer, arms=ARMS,
+                baseline='by_v2fy_r4', ready_check=None):
     tag=f'{tier}-t{threads}-{geometry}'
     dest=Path(root)/tag
     if (dest/'COMPLETE.json').exists(): return
@@ -259,6 +260,8 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     old=parity[(geometry,tier,threads,revision)]
                     assert rec['model']['source_sha256']==old['model']['source_sha256']==SOURCE_SHA, 'STOP: worker model differs from production parity receipt'
                     assert rec['score_bits']==old['score_bits'] and rec['input_sha256']==old['input_sha256'], 'STOP: worker differs from parity receipt'
+                if ready_check is not None:
+                    ready_check(name,geometry,tier,threads,rec)
             # Warmup belongs to setup. Check the quiet gate again immediately
             # before measured rounds, when every declared owner is idle.
             gate=quiet_gate(dest/'quiet-waits.jsonl')
@@ -295,11 +298,14 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                 write(dest/'interference.json',{'foreign':foreign,'admitted':False})
                 raise
             write(dest/'interference.json',{'foreign':foreign,'admitted':True})
-            a=values['by_v2fy_r4'];b=values['by_v2fy_r5']
-            assert len(a)==len(b)==rounds
-            packet={'baseline':a,'candidate':b,'iterations':[1]*rounds,'timer_resolution_ns':inner['timer_resolution_ns']}
-            result=subprocess.check_output([str(analyzer)],input=json.dumps([packet]),text=True)
-            write(dest/'paired_analysis.json',json.loads(result)[0])
+            candidates=['by_v2fy_r5'] if baseline=='by_v2fy_r4' else [a for a in arms if a!=baseline]
+            packets=[{'baseline':values[baseline],'candidate':values[a],
+                      'iterations':[1]*rounds,'timer_resolution_ns':inner['timer_resolution_ns']}
+                     for a in candidates]
+            result=json.loads(subprocess.check_output([str(analyzer)],input=json.dumps(packets),text=True))
+            assert len(result)==len(candidates)
+            analysis=result[0] if baseline=='by_v2fy_r4' else dict(baseline_arm=baseline,comparisons=dict(zip(candidates,result)))
+            write(dest/'paired_analysis.json',analysis)
             write(dest/'COMPLETE.json',{'status':'PASS','rounds':rounds,'paired_alignment_verified':True,'zenbench_gate_clean':True,**selection})
         finally:
             for proc in owners:
@@ -331,16 +337,18 @@ def segment_lock(path):
             print(f'segment lock released: {path}', flush=True)
 
 
-def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lock=None):
-    parity=parity_receipt(parity_path)
-    pending=deque((geometry,tier,threads) for tier in TIERS for threads in THREADS for geometry in GEOMETRIES
-                  if not only or f'{tier}-t{threads}-{geometry}' in only)
+def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lock=None,
+           cells=None, parity_loader=None, baseline='by_v2fy_r4', ready_check=None):
+    parity=(parity_loader or parity_receipt)(parity_path)
+    grid=cells if cells is not None else [(g,t,n) for t in TIERS for n in THREADS for g in GEOMETRIES]
+    pending=deque((g,t,n) for g,t,n in grid if not only or f'{t}-t{n}-{g}' in only)
     while pending:
         geometry,tier,threads=pending.popleft()
         tag=f'{tier}-t{threads}-{geometry}'
         try:
             with segment_lock(lock):
-                run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer,arms=arms)
+                options={} if baseline=='by_v2fy_r4' and ready_check is None else dict(baseline=baseline,ready_check=ready_check)
+                run_segment(binary,root,geometry,tier,threads,rounds,parity,analyzer,arms=arms,**options)
         except TimingNoise as exc:
             dest=Path(root)/tag
             archived=dest.with_name(tag+f'.noise-{time.time_ns()}.bak')
@@ -351,12 +359,12 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lo
             time.sleep(10)
 
 
-def rss(binary, root, parity_path):
-    parity=parity_receipt(parity_path)
+def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=None):
+    parity=(parity_loader or parity_receipt)(parity_path)
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
     for geometry in GEOMETRIES:
         for threads in [1,32]:
-            for name in ARMS:
+            for name in arms:
                 arm='by_v2fy' if name.startswith('by_v2fy_r') else name
                 revision=int(name[-1]) if arm=='by_v2fy' else 1
                 tag=f'v4x-t{threads}-{geometry}-{name}'
@@ -372,12 +380,14 @@ def rss(binary, root, parity_path):
                     old=parity[(geometry,'v4x',threads,revision)]
                     assert rec['model']['source_sha256']==old['model']['source_sha256']==SOURCE_SHA, 'STOP: RSS model differs from production parity'
                     assert rec['score_bits']==old['score_bits'] and rec['input_sha256']==old['input_sha256'], 'STOP: RSS score/input differs from parity'
+                if ready_check is not None:
+                    ready_check(name,geometry,'v4x',threads,rec)
                 maxrss=next(int(l.rsplit(':',1)[1]) for l in (root/f'{tag}.log').read_text().splitlines() if 'Maximum resident set size (kbytes)' in l)
                 write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec})
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
 
 
-def collection_status(root):
+def collection_status(root, expected_timing=None, expected_rss=None):
     """Inspect collection markers and the most recent logged quiet check."""
     root=Path(root)
     if not root.is_dir():
@@ -391,9 +401,9 @@ def collection_status(root):
             break
     print(json.dumps({'raw_dir':str(root),
                       'timing_completion_markers':len(list(root.glob('timing/*/COMPLETE.json'))),
-                      'expected_timing_segments':len(TIERS)*len(THREADS)*len(GEOMETRIES),
+                      'expected_timing_segments':expected_timing if expected_timing is not None else len(TIERS)*len(THREADS)*len(GEOMETRIES),
                       'rss_records':len(list(root.glob('rss/v4x-*.json'))),
-                      'expected_rss_records':len(GEOMETRIES)*2*len(ARMS),
+                      'expected_rss_records':expected_rss if expected_rss is not None else len(GEOMETRIES)*2*len(ARMS),
                       'excluded_attempts':len(list(root.glob('timing/*.bak'))),
                       'latest_quiet_check':latest},indent=2))
 
