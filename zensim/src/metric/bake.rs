@@ -1464,27 +1464,27 @@ impl<'a> BakeScorer<'a> {
             }
             Err(std::env::VarError::NotUnicode(_)) => false,
         };
-        let neighbour_exact = if neighbour_enabled
+        // The snapshot takes the session's retained coarse planes, and the map
+        // pass allocates its own. Capturing AFTER the map pass keeps the two
+        // from coexisting, and moving the planes (rather than copying them)
+        // keeps the session and the snapshot from holding two copies. The map
+        // pass only reads `session.retention`, so the snapshot is byte-identical
+        // either way, and whether a capture succeeds is decided up front
+        // (`capture_admits`), so the frozen v2 density is zeroed for exactly
+        // the same calls as before.
+        let capture = neighbour_enabled
             && (encoding.is_none()
                 || plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5)
-        {
-            let snap = crate::local_refine::LocalRefineSnapshot::capture_with_encoding(
+            && crate::local_refine::LocalRefineSnapshot::capture_admits(
                 session.retention(),
                 &plan,
                 (source.width(), source.height()),
-                source,
-                distorted,
-                encoding,
             );
-            if snap.is_some() {
-                let lo = (372 + 87).min(spatial.len());
-                let hi = (372 + 348).min(spatial.len());
-                spatial[lo..hi].fill(0.0);
-            }
-            snap.map(Box::new)
-        } else {
-            None
-        };
+        if capture {
+            let lo = (372 + 87).min(spatial.len());
+            let hi = (372 + 348).min(spatial.len());
+            spatial[lo..hi].fill(0.0);
+        }
         let mut max_removals = Vec::new();
         let mut moment_removals = Vec::new();
         let (_, attribution) = Zensim::new(ZensimProfile::B)
@@ -1502,6 +1502,28 @@ impl<'a> BakeScorer<'a> {
                 bin,
                 Some(plan.compute.formula_revision),
             )?;
+        let neighbour_exact = if capture {
+            let snap = crate::local_refine::LocalRefineSnapshot::capture_taking(
+                session.retention_mut(),
+                &plan,
+                (source.width(), source.height()),
+                source,
+                distorted,
+                encoding,
+            );
+            // `capture_admits` is the capture's own refusal rule, so a refusal
+            // here is unreachable. The planes are already moved, so it cannot
+            // fall back to the old order; refuse loudly rather than serve a map.
+            let Some(snap) = snap else {
+                debug_assert!(false, "capture_admits admitted a refused capture");
+                return Err(ZensimError::ModelForwardFailed {
+                    reason: "steering snapshot refused after its admission check",
+                });
+            };
+            Some(Box::new(snap))
+        } else {
+            None
+        };
         let unsupported_refinement_feature_ids = crate::attribution::bind_max_removals(
             &mut max_removals,
             &features,

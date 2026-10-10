@@ -12157,6 +12157,26 @@ impl FoldRetention {
             && self.channels == channels
             && self.rev5 == rev5
         {
+            // A steering snapshot may have moved planes out
+            // (`LocalRefineSnapshot::capture_taking`); re-create exactly those.
+            // Every retaining walk rewrites each element before any read.
+            for (scale, &(w, h)) in dims.iter().enumerate() {
+                for ch in 0..3 {
+                    let n = if channels[scale][ch] { w * h } else { 0 };
+                    for side in [&mut self.pyr_src, &mut self.pyr_dst] {
+                        if side[scale][ch].len() != n {
+                            side[scale][ch] = vec![0.0; n];
+                        }
+                    }
+                    let p = &self.planes[scale][ch];
+                    if [&p.mu1, &p.mu2, &p.ssq, &p.s12, &p.act]
+                        .iter()
+                        .any(|v| v.len() != n)
+                    {
+                        self.planes[scale][ch] = AttrChPlanes::new_for(n, !rev5);
+                    }
+                }
+            }
             return;
         }
         self.dims = dims.to_vec();

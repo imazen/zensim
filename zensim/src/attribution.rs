@@ -5510,6 +5510,12 @@ impl Fused944Session {
         &self.retention
     }
 
+    /// Mutable retention, for a steering snapshot that moves planes out at
+    /// the end of a call (`LocalRefineSnapshot::capture_taking`).
+    pub(crate) fn retention_mut(&mut self) -> &mut crate::feature_v2::FoldRetention {
+        &mut self.retention
+    }
+
     /// The v1 attr-planes streaming walk: fills `self.basic` (retained
     /// planes, `result`) and returns the scored result. Shared by the
     /// basic-only plans and the v2-bearing plans (whose v1 block it serves).

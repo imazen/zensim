@@ -107,6 +107,49 @@ struct ChPlanes {
     act: Vec<f32>,
 }
 
+/// Convert `img` to positive XYB at scale 0 (the walk's conversion: HDR
+/// through `hdr_source_to_xyb`, SDR through `convert_source_to_xyb_into_slices`)
+/// and keep only the channels the walk did not retain (`!channel_active(0, ch)`).
+fn fill_inactive_scale0(
+    img: &impl crate::source::ImageSource,
+    encoding: Option<feature_v2::HdrEncoding>,
+    c: &crate::feature_v2::ComputeSet,
+    (w0, h0): (usize, usize),
+    out: &mut [Vec<f32>; 3],
+) {
+    let mut planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w0 * h0]);
+    if let Some(encoding) = encoding {
+        crate::feature_v2_stream::hdr_source_to_xyb(img, encoding, &mut planes, c.formula_revision);
+    } else {
+        let [p0, p1, p2] = &mut planes;
+        crate::streaming::convert_source_to_xyb_into_slices(
+            img,
+            p0,
+            p1,
+            p2,
+            w0,
+            false,
+            0,
+            c.formula_revision,
+        );
+    }
+    for ch in 0..3 {
+        if !c.channel_active(0, ch) {
+            out[ch] = core::mem::take(&mut planes[ch]);
+        }
+    }
+}
+
+/// The retained planes a snapshot keeps, copied from or moved out of a
+/// [`FoldRetention`].
+struct RetainedParts {
+    pyr_src0: [Vec<f32>; 3],
+    pyr_dst0: [Vec<f32>; 3],
+    pyr_src: [[Vec<f32>; 3]; LOCAL_SCALES],
+    pyr_dst: [[Vec<f32>; 3]; LOCAL_SCALES],
+    planes: [[ChPlanes; 3]; LOCAL_SCALES],
+}
+
 /// The coarse-scale slice of a walk's [`FoldRetention`] that exact local
 /// refinement needs: scale-0 source+distorted planes (the candidate
 /// cascade's base), scales 1–3 pyramids, phase-A planes and exact pooled
@@ -250,63 +293,95 @@ impl LocalRefineSnapshot {
         distorted: &impl crate::source::ImageSource,
         encoding: Option<feature_v2::HdrEncoding>,
     ) -> Option<Self> {
-        let c = &plan.compute;
-        if c.sampling.is_some()
-            || !c.v2_blocks
-            || ret.dims.len() != crate::NUM_SCALES
-            || ret.dims[0] != src_dims
-        {
+        if !Self::capture_admits(ret, plan, src_dims) {
             return None;
         }
+        let parts = RetainedParts {
+            pyr_src0: ret.pyr_src[0].clone(),
+            pyr_dst0: ret.pyr_dst[0].clone(),
+            pyr_src: std::array::from_fn(|s| ret.pyr_src[s + 1].clone()),
+            pyr_dst: std::array::from_fn(|s| ret.pyr_dst[s + 1].clone()),
+            planes: std::array::from_fn(|s| {
+                std::array::from_fn(|ch| {
+                    let p = &ret.planes[s + 1][ch];
+                    ChPlanes {
+                        mu1: p.mu1.clone(),
+                        mu2: p.mu2.clone(),
+                        ssq: p.ssq.clone(),
+                        s12: p.s12.clone(),
+                        act: p.act.clone(),
+                    }
+                })
+            }),
+        };
+        Self::capture_from_parts(ret, plan, src_dims, source, distorted, encoding, parts)
+    }
+
+    /// [`Self::capture_with_encoding`], but MOVING the planes out of `ret`
+    /// instead of copying them: the steering session's last use of its
+    /// retention in a call, so the snapshot and the session never hold two
+    /// copies. The moved values are the ones a copy would
+    /// hold, so the snapshot is byte-identical. `ret` keeps its dims and
+    /// metadata; `FoldRetention::ensure` re-creates exactly the moved buffers
+    /// on the next walk, which rewrites every element before any read.
+    pub(crate) fn capture_taking(
+        ret: &mut FoldRetention,
+        plan: &crate::feature_plan::Plan,
+        src_dims: (usize, usize),
+        source: &impl crate::source::ImageSource,
+        distorted: &impl crate::source::ImageSource,
+        encoding: Option<feature_v2::HdrEncoding>,
+    ) -> Option<Self> {
+        if !Self::capture_admits(ret, plan, src_dims) {
+            return None;
+        }
+        let take = core::mem::take::<Vec<f32>>;
+        let parts = RetainedParts {
+            pyr_src0: ret.pyr_src[0].each_mut().map(take),
+            pyr_dst0: ret.pyr_dst[0].each_mut().map(take),
+            pyr_src: std::array::from_fn(|s| ret.pyr_src[s + 1].each_mut().map(take)),
+            pyr_dst: std::array::from_fn(|s| ret.pyr_dst[s + 1].each_mut().map(take)),
+            planes: std::array::from_fn(|s| {
+                std::array::from_fn(|ch| {
+                    let p = &mut ret.planes[s + 1][ch];
+                    ChPlanes {
+                        mu1: take(&mut p.mu1),
+                        mu2: take(&mut p.mu2),
+                        ssq: take(&mut p.ssq),
+                        s12: take(&mut p.s12),
+                        act: take(&mut p.act),
+                    }
+                })
+            }),
+        };
+        Self::capture_from_parts(ret, plan, src_dims, source, distorted, encoding, parts)
+    }
+
+    /// The one capture body; `parts` are the retained planes, copied or moved.
+    fn capture_from_parts(
+        ret: &FoldRetention,
+        plan: &crate::feature_plan::Plan,
+        src_dims: (usize, usize),
+        source: &impl crate::source::ImageSource,
+        distorted: &impl crate::source::ImageSource,
+        encoding: Option<feature_v2::HdrEncoding>,
+        parts: RetainedParts,
+    ) -> Option<Self> {
+        let c = &plan.compute;
         let (w0, h0) = src_dims;
-        let mut pyr_src0 = ret.pyr_src[0].clone();
-        let mut pyr_dst0 = ret.pyr_dst[0].clone();
+        let RetainedParts {
+            mut pyr_src0,
+            mut pyr_dst0,
+            pyr_src,
+            pyr_dst,
+            planes,
+        } = parts;
         if (0..3).any(|ch| !c.channel_active(0, ch)) {
-            let mut s: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w0 * h0]);
-            let mut d: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; w0 * h0]);
-            if let Some(encoding) = encoding {
-                crate::feature_v2_stream::hdr_source_to_xyb(
-                    source,
-                    encoding,
-                    &mut s,
-                    c.formula_revision,
-                );
-                crate::feature_v2_stream::hdr_source_to_xyb(
-                    distorted,
-                    encoding,
-                    &mut d,
-                    c.formula_revision,
-                );
-            } else {
-                let [s0, s1, s2] = &mut s;
-                crate::streaming::convert_source_to_xyb_into_slices(
-                    source,
-                    s0,
-                    s1,
-                    s2,
-                    w0,
-                    false,
-                    0,
-                    c.formula_revision,
-                );
-                let [d0, d1, d2] = &mut d;
-                crate::streaming::convert_source_to_xyb_into_slices(
-                    distorted,
-                    d0,
-                    d1,
-                    d2,
-                    w0,
-                    false,
-                    0,
-                    c.formula_revision,
-                );
-            }
-            for ch in 0..3 {
-                if !c.channel_active(0, ch) {
-                    pyr_src0[ch] = core::mem::take(&mut s[ch]);
-                    pyr_dst0[ch] = core::mem::take(&mut d[ch]);
-                }
-            }
+            // One image at a time: each conversion fills all three channels
+            // but only the inactive ones are kept, so dropping one side's
+            // planes before converting the other halves the transient.
+            fill_inactive_scale0(source, encoding, c, (w0, h0), &mut pyr_src0);
+            fill_inactive_scale0(distorted, encoding, c, (w0, h0), &mut pyr_dst0);
         }
         let mut served = [[false; 3]; LOCAL_SCALES];
         let mut gradient_on = [false; LOCAL_SCALES];
@@ -324,20 +399,9 @@ impl LocalRefineSnapshot {
             dims: [ret.dims[1], ret.dims[2], ret.dims[3]],
             pyr_src0,
             pyr_dst0,
-            pyr_src: std::array::from_fn(|s| ret.pyr_src[s + 1].clone()),
-            pyr_dst: std::array::from_fn(|s| ret.pyr_dst[s + 1].clone()),
-            planes: std::array::from_fn(|s| {
-                std::array::from_fn(|ch| {
-                    let p = &ret.planes[s + 1][ch];
-                    ChPlanes {
-                        mu1: p.mu1.clone(),
-                        mu2: p.mu2.clone(),
-                        ssq: p.ssq.clone(),
-                        s12: p.s12.clone(),
-                        act: p.act.clone(),
-                    }
-                })
-            }),
+            pyr_src,
+            pyr_dst,
+            planes,
             cells: std::array::from_fn(|s| ret.cells[s + 1]),
             mg: std::array::from_fn(|s| ret.mg[s + 1]),
             served,
@@ -363,6 +427,32 @@ impl LocalRefineSnapshot {
             }
         }
         Some(this)
+    }
+
+    /// Whether [`Self::capture_with_encoding`] returns `Some` for this
+    /// retention, plan and source size. It is decided by the plan and the
+    /// retained pyramid dimensions alone, so a caller can know before capturing
+    /// (prepared steering zeroes the frozen v2 density only when a capture will
+    /// replace it, and captures after the map pass so the two never coexist).
+    /// The one owner of the refusal rule: the capture itself calls it, and
+    /// `rebuild_unretained_coarse`'s dimension test is the same halving check.
+    pub(crate) fn capture_admits(
+        ret: &FoldRetention,
+        plan: &crate::feature_plan::Plan,
+        src_dims: (usize, usize),
+    ) -> bool {
+        let c = &plan.compute;
+        if c.sampling.is_some()
+            || !c.v2_blocks
+            || ret.dims.len() != crate::NUM_SCALES
+            || ret.dims[0] != src_dims
+        {
+            return false;
+        }
+        (1..=LOCAL_SCALES).all(|s| {
+            let (pw, ph) = ret.dims[s - 1];
+            (pw / 2, ph / 2) == ret.dims[s]
+        })
     }
 
     /// Replay a production strip with retained reference planes and optional
