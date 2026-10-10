@@ -119,6 +119,30 @@ class BudgetAdmissionTest(unittest.TestCase):
                 cmp.main()
         self.assertEqual(result.exception.code, 2)
 
+    def test_budget_parity_binds_every_arm_and_refuses_one_flipped_bit(self):
+        import rev5perf5_candidate as candidate
+        (self.root/'budget/parity').mkdir(parents=True)
+        (self.root/'budget/parity/PREFLIGHT_PASS.json').write_text(json.dumps(self.value))
+        binary = self.root/'binary'
+        binary.write_bytes(b'frozen')
+        rows = {(f"{r['width']}x{r['height']}", r['tier'], int(r['threads'])): r for r in self.value['records']}
+        def run(flip):
+            def worker(_binary, arm, revision, g, t, n, log):
+                rec = copy.deepcopy(rows[(g, t, n)])
+                rec['threads'] = n
+                if flip and g == '8192x4096':
+                    rec['feature_values'][419] = .25000000000000006
+                return rec
+            return worker
+        with patch.object(owner, 'worker_run', side_effect=run(False)):
+            candidate.budget_parity(self.root, binary, 'ok')
+        result = json.loads((self.root/'budget/parity-ok/BUDGET_PARITY_PASS.json').read_text())
+        self.assertEqual(result['cells'], 9)
+        with patch.object(owner, 'worker_run', side_effect=run(True)):
+            with self.assertRaisesRegex(AssertionError, 'consumed feature bits differ'):
+                candidate.budget_parity(self.root, binary, 'flipped')
+        self.assertFalse((self.root/'budget/parity-flipped/BUDGET_PARITY_PASS.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

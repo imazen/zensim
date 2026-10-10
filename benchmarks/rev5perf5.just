@@ -73,6 +73,9 @@ rev5perf5-compare root mib:
 rev5perf5-inventory root:
     python3 scripts/demos/rev5perf5_candidate.py inventory --root "{{root}}"
 
+rev5perf5-budget-parity root binary label:
+    python3 scripts/demos/rev5perf5_candidate.py budget-parity --root "{{root}}" --binary "{{binary}}" --label "{{label}}"
+
 rev5perf5-select root mib:
     python3 scripts/demos/rev5perf5_candidate.py select --root "{{root}}" --mib {{mib}}
 

@@ -11737,9 +11737,17 @@ fn rev5_job_bytes(max_n: usize) -> Option<usize> {
         .checked_add(fixed)
 }
 
+// The original route runs a strip's three channels in parallel
+// (`fuse_channels`). A queue holding fewer slots would run fewer channel jobs
+// at once, so below this floor the walk keeps the original route. Both routes
+// produce identical bits; the floor changes scheduling only.
+#[cfg(feature = "threads")]
+const REV5_MIN_JOB_SLOTS: usize = 3;
+
 #[cfg(feature = "threads")]
 fn rev5_job_limit(max_n: usize, threads: usize, budget: usize) -> usize {
-    rev5_job_bytes(max_n).map_or(0, |bytes| threads.min(16).min(budget / bytes))
+    let limit = rev5_job_bytes(max_n).map_or(0, |bytes| threads.min(16).min(budget / bytes));
+    if limit < REV5_MIN_JOB_SLOTS { 0 } else { limit }
 }
 
 #[cfg(feature = "threads")]

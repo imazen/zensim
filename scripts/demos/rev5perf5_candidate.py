@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import re
+import struct
 import subprocess
 from pathlib import Path
 
@@ -14,12 +15,40 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def budget_parity(root, binary, label):
+    """Run one binary over the budget grid's cells; every arm must match it bit for bit."""
+    assert binary is not None and label
+    rows = cmp.receipt(root/'budget/parity/PREFLIGHT_PASS.json', budget=True)
+    dest = root/'budget'/f'parity-{label}'
+    dest.mkdir(parents=True, exist_ok=False)
+    records = []
+    for g, t, n in cmp.cells(budget=True):
+        rec = owner.worker_run(binary, 'by_v2fy', 5, g, t, n, dest/f'{t}-t{n}-{g}.log')
+        bits = b''.join(struct.pack('>d', v) for v in rec['feature_values'])
+        assert len(rec['feature_values']) == 420
+        for arm in cmp.BUDGET_ARMS:
+            cmp.validate_ready(rows, arm, g, t, n, rec)
+            old = b''.join(struct.pack('>d', v) for v in rows[(g, t, n, arm)]['feature_values'])
+            assert bits == old, f'STOP consumed feature bits differ from {arm}: {t}-t{n}-{g}'
+        records.append(dict(geometry=g, tier=t, threads=n, score_bits=rec['score_bits'],
+                            input_sha256=rec['input_sha256'], arms_matched=cmp.BUDGET_ARMS))
+        print(f'budget parity {t}-t{n}-{g}', flush=True)
+    owner.write(dest/'BUDGET_PARITY_PASS.json', dict(
+        status='PASS', binary=str(binary), binary_sha256=sha(binary), cells=len(records),
+        compared_against=str(root/'budget/parity/PREFLIGHT_PASS.json'), consumed_features=420, records=records))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['candidate', 'inventory', 'select'])
+    parser.add_argument('mode', choices=['candidate', 'inventory', 'select', 'budget-parity'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--mib', type=int, choices=[64, 128, 256])
+    parser.add_argument('--binary', type=Path, help='budget-parity: frozen executable to check')
+    parser.add_argument('--label', help='budget-parity: output name under budget/')
     args = parser.parse_args()
+    if args.mode == 'budget-parity':
+        budget_parity(args.root, args.binary, args.label)
+        return
     repo = Path(__file__).resolve().parents[2]
     runtime = repo / 'zensim/src/feature_v2.rs'
     provenance = args.root / 'provenance'

@@ -79,10 +79,16 @@ fn rev5_job_budget_handles_exact_fit_and_overflow() {
         rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, bytes - 1),
         0
     );
-    assert_eq!(
-        rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, bytes),
-        1
-    );
+    // One or two fitting jobs fall back to the original route (three fused
+    // channels); the queue starts at exactly REV5_MIN_JOB_SLOTS.
+    assert_eq!(REV5_MIN_JOB_SLOTS, 3);
+    for budget in [bytes, 2 * bytes, 3 * bytes - 1] {
+        assert_eq!(
+            rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, budget),
+            0,
+            "budget {budget} admits fewer than three jobs"
+        );
+    }
     assert_eq!(
         rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, 3 * bytes),
         3
@@ -252,6 +258,13 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
                                 "zero budget must use the old route"
                             );
                         }
+                        let per_job = rev5_job_bytes(w * (STRIP_ROWS + 2 * HALO_P)).unwrap();
+                        assert_eq!(
+                            scratch.rev5_jobs.is_empty(),
+                            // Literal, not the constant: the floor is the contract.
+                            budget / per_job < 3,
+                            "{w}x{h} budget {budget}: queue iff at least three jobs fit"
+                        );
                     }
                     assert_eq!(expected.len(), actual.len());
                     for (i, (a, b)) in expected.iter().zip(actual.iter()).enumerate() {
