@@ -1,6 +1,6 @@
 {
  "schema": "e33-registration-draft-v1",
- "status": "DRAFT — owner approval required; not registered, not authorized to launch",
+ "status": "REGISTERED 2026-10-09 by owner approval, before any E33 implementation, fit or data read; not yet authorized to launch",
  "drafted_utc": "2026-10-09",
  "base_commit": "ecc87ac0496a",
  "markdown": "benchmarks/e33_registration_2026-10-09.md",
@@ -693,12 +693,20 @@
   ],
   "v40": "benchmarks/v40_result_summary_2026-10-09.md"
  },
- "open_owner_choices": [
-  "N1/N2 bar 99.0",
-  "tail factor 2",
-  "runtime guard +2%",
-  "A preferred on ties",
-  "full-data seed 0 as the candidate (seeds 1-2 report-only)",
-  "G-STEER non-regression bar >= 128 (qualification still needs 135)"
- ]
+ "draft_commit": "919634b2eccd (rebased from local 24eaceef1cc1)",
+ "owner_approval": {
+  "date": "2026-10-09",
+  "verbatim": "approved, all of it",
+  "in_reply_to": "E33_DRAFT_DONE.md draft summary",
+  "approved_choices": {
+   "near_identity_bar": 99.0,
+   "tail_factor": 2,
+   "runtime_guard_pct": 2,
+   "ties": "A wins over C unless improvement test",
+   "candidate": "full-data seed 0; seeds 1-2 report-only",
+   "steering_nonregression_bar": 128,
+   "steering_qualification_bar": 135
+  },
+  "artifact_correction": "coordinator corrected the readiness artifact's plain-MLP claim"
+ }
 }

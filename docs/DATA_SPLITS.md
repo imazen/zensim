@@ -1713,3 +1713,16 @@ the brief, and no E31 HDR-VAL route exists in the frozen packet. Clarification
 was requested. UPIQ development, external panels, KADID TERMINAL, AIC-family,
 T0 and sealed data remain unopened by this lane. No new teacher run, fit,
 extraction, calibration, checkpoint selection or fleet action occurred.
+
+## Registration — 2026-10-09: E33 (reference-only inputs only as difference gain)
+
+[E33](../benchmarks/e33_registration_2026-10-09.md) is registered by owner
+approval, verbatim 2026-10-09: "approved, all of it". **No data was read for
+it.** No fit, extraction, calibration, prediction or label read has happened.
+When it runs it will read only already-exposed populations: the four D1 design
+sources for the E21 assessment (KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL,
+CID22-A(25), each withheld from its own fold), and TRAIN probes plus
+TRAIN/SELECT engineering cases for the label-free gates. It also uses the
+existing `cid22_fit` TRAIN calibration rows. It will not read KADID TERMINAL,
+the AIC family, CID22 gold/human, KonJND, sealed/T0, HDR VAL, UPIQ or external
+panels. The exposure receipt is added here at assessment time.

@@ -1,10 +1,30 @@
-# E33 — reference-only inputs may only scale differences (DRAFT registration)
+# E33 — reference-only inputs may only scale differences (registration)
 
-Status: **draft for owner approval; not registered, not authorized to launch.**
-Drafted 2026-10-09 on zensim `main@origin` `ecc87ac0496a`. No fit, fleet job,
-label read, protected-data read or push was made while drafting. The
+Status: **REGISTERED 2026-10-09 by owner approval, before any E33
+implementation, fit or data read. Not yet authorized to launch** (launch needs
+the implementation, smokes and freeze in §10). Drafted on zensim
+`main@origin` `ecc87ac0496a` (draft commit `919634b2eccd`, rebased from local `24eaceef1cc1`). The
 machine-readable form is
 [e33_registration_2026-10-09.json](e33_registration_2026-10-09.json).
+
+## 0. Owner approval (verbatim, 2026-10-09)
+
+> "approved, all of it"
+
+Given in reply to the draft summary (`E33_DRAFT_DONE.md`). It approves this
+registration as drafted, including every listed open choice:
+
+| Choice | Registered value |
+|---|---|
+| Near-identity bar (N1/N2) | 99.0 |
+| Tail length factor (§8 step 3) | 2 |
+| Runtime guard (§9.3) | no cell slower by a paired CI wholly above +2% |
+| Tie rule (§9.4) | A wins ties over C (C needs the improvement test) |
+| Candidate (§9.2) | full-data seed index 0; seeds 1–2 report-only |
+| Steering non-regression bar | ≥ 128 of 135 (qualification still needs 135) |
+
+The coordinator has corrected the readiness artifact's "plain MLP" claim
+(§2). The rules below are unchanged from the draft.
 
 ## 1. Owner decisions this rests on (verbatim, 2026-10-09)
 
