@@ -306,13 +306,70 @@ def train_fragility():
     print(json.dumps({k: round(v["pearson_f_f2"], 6) for k, v in out.items()}))
 
 
+def steer_diagnose(arm, neighbour):
+    """STEERFIX diagnostic arms for one candidate's seed-0 G-STEER failures (E33C_STEER brief).
+
+    Per failing case: packed served / pre-floor / smooth-floor and dense served, with neighbour replay off
+    (neighbour=0, engine off) or on (neighbour=1, engine on). Same instrument, same roster rows and blocks.
+    """
+    model, digest, cell = candidates(0)[arm]
+    r = json.loads((cell / "result.json").read_text())
+    dense = next((cell / "dense").glob("*.bin"))
+    if sha(dense) != r["dense_model_sha256"]:
+        raise ValueError("dense intermediate differs from the verified result")
+    failing = [row["key"] for row in json.loads((GATES / f"steer-s0-{arm}.json").read_text())["rows"] if not row["pass"]]
+    doc = json.loads(STEER_PACKET.read_text())
+    rows = []
+    for case in doc["cases"]:
+        if case["key"] not in failing:
+            continue
+        for objective in ("served", "pre-floor", "smooth-floor"):
+            rows.append(dict(case, model=str(model), model_sha256=digest, objective=objective))
+        rows.append(dict(case, model=str(dense), model_sha256=r["dense_model_sha256"], objective="served"))
+    assert len(rows) == 4 * len(failing), (len(rows), failing)
+    name = f"steerdiag-{arm}-{'engine' if neighbour else 'before'}"
+    out = GATES / f"{name}.json"
+    if done(out):
+        return
+    packet = GATES / f"{name}-packet.json"
+    with packet.open("x") as f:
+        f.write(json.dumps(dict(cases=rows, engine=bool(neighbour), floor_recovery=False, output=str(out)),
+                           indent=1) + "\n")
+    run([str(BIN / "steer_instrument"), "metric::bake::steerfix_packet::engineering_packet", "--exact",
+         "--nocapture"], GATES / f"{name}.log",
+        {"ZENSIM_FORMULA_REV": "5", "ZENSIM_NEIGHBOUR_EXACT": "1" if neighbour else "0", "STEERFIX_PACKET": str(packet)})
+
+
+def steer_dense(arm):
+    """Report-only: all 135 cases with the candidate's dense (pre-f16) model, served path as in G-STEER."""
+    model, digest, cell = candidates(0)[arm]
+    r = json.loads((cell / "result.json").read_text())
+    dense = next((cell / "dense").glob("*.bin"))
+    if sha(dense) != r["dense_model_sha256"]:
+        raise ValueError("dense intermediate differs from the verified result")
+    out = GATES / f"steer-s0-{arm}-dense.json"
+    if done(out):
+        return
+    doc = json.loads(STEER_PACKET.read_text())
+    for case in doc["cases"]:
+        case.update(model=str(dense), model_sha256=r["dense_model_sha256"])
+    doc["output"] = str(out)
+    packet = GATES / f"steer-s0-{arm}-dense-packet.json"
+    with packet.open("x") as f:
+        f.write(json.dumps(doc, indent=1) + "\n")
+    run([str(BIN / "steer_instrument"), "metric::bake::steerfix_packet::engineering_packet", "--exact",
+         "--nocapture"], GATES / f"steer-s0-{arm}-dense.log",
+        {"ZENSIM_FORMULA_REV": "5", "ZENSIM_NEIGHBOUR_EXACT": "1", "STEERFIX_PACKET": str(packet)})
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("candidates", "nearid", "verdict", "identity", "steer", "runtime-candidates",
-                                    "control-repack", "train-fragility", "summary"))
+                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "summary"))
     p.add_argument("--arm", choices=sorted(ARMS))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--grid", choices=("standard", "ladder"))
+    p.add_argument("--neighbour", type=int, choices=(0, 1))
     a = p.parse_args()
     if a.mode == "candidates":
         print(json.dumps({k: [str(v[0]), v[1]] for k, v in candidates(a.seed).items()}))
@@ -324,6 +381,10 @@ def main():
         identity(a.seed)
     elif a.mode == "steer":
         steer(a.arm, a.seed)
+    elif a.mode == "steer-dense":
+        steer_dense(a.arm)
+    elif a.mode == "steer-diagnose":
+        steer_diagnose(a.arm, a.neighbour)
     elif a.mode == "train-fragility":
         train_fragility()
     elif a.mode == "control-repack":
