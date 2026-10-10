@@ -41,3 +41,24 @@ Rust per-job accounting are in
 [the RSS record](rev5perf5_rss_2026-10-09.md). The selected source is exactly the
 qualified 128 MiB snapshot, with no kernel or merge changes. The RSS-only report
 contains no timing medians or confidence intervals.
+
+## Slot counts by width, and the open speed risk below three slots
+
+Computed from the accounting above (`per_job = 6,512 × width + 37,640` bytes,
+scale-0 width after sampling); not a measurement:
+
+| budget | ≥16 slots | ≥8 slots | ≥3 slots | ≥2 slots | ≥1 slot (else original route) |
+|---|---|---|---|---|---|
+| 64 MiB | width ≤ 638 | ≤ 1,282 | ≤ 3,429 | ≤ 5,146 | ≤ 10,299 |
+| 128 MiB | ≤ 1,282 | ≤ 2,570 | ≤ 6,864 | ≤ 10,299 | ≤ 20,605 |
+| 256 MiB | ≤ 2,570 | ≤ 5,146 | ≤ 13,734 | ≤ 20,605 | ≤ 41,215 |
+
+The original route (`fuse_channels`) runs a strip's three channels in
+parallel. The queued route runs at most `slots` channel jobs at once, so with
+one or two slots it has less v2 parallelism than the route it replaces. At
+128 MiB that is widths 6,865–20,605, including the 8192×4096 grid geometry
+(2 slots); at 64 MiB it is 3,430–10,299, including 4096² and 8192×4096
+(2 and 1 slots). This follows from reading the code and is **not measured**.
+The 4096² and 8192×4096 timing cells decide it; if they show a loss, the
+candidate fix is to fall back to the original route below three slots, which
+keeps bits by construction (both routes already pass strict parity).
