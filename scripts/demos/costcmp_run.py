@@ -255,6 +255,9 @@ def main():
     else:
         if args.lock is None:ap.error('--lock is required')
         with owner.segment_lock(args.lock):
+            if e33=='qual':  # baseline arms (inputs + model + scorer, no scoring) for incremental RSS
+                owner.rss(args.binary,args.dest,args.parity,arms=['e33_baseline_a','e33_baseline_c','e33_baseline_seed0'],
+                          parity_loader=loader,ready_check=None,geometries=QUAL_GEOMETRIES,thread_counts=[1])
             owner.rss(args.binary,args.dest,args.parity,
                       arms=QUAL_ARMS if e33=='qual' else E33_ARMS if e33 else (list(BUDGET_FLOOR_SLOTS) if args.floor_arm else arms) if args.budget_grid else (['by_v2fy_r5','by_v2fy_r5_before'] if args.scaling else ARMS),
                       parity_loader=loader,ready_check=check,

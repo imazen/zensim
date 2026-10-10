@@ -99,6 +99,25 @@ pub(super) fn action(
                 json!({"version":"0.8.2","surface":"compute_ssimulacra2 RGB8 one-shot","rayon":cfg!(feature="ssim2-rayon")}),
             ))
         }
+        "e33_baseline_a" | "e33_baseline_c" | "e33_baseline_seed0" => {
+            // RSS baseline for the scorecard's INCREMENTAL memory bar: the same process with inputs, model and
+            // scorer constructed, scoring nothing. Incremental RSS = an arm's peak minus this peak.
+            let label = arm.trim_start_matches("e33_baseline_").to_uppercase();
+            let path =
+                std::env::var(format!("ZEN_S2_E33_BAKE_{label}")).expect("pinned candidate path");
+            let expected =
+                std::env::var(format!("ZEN_S2_E33_SHA_{label}")).expect("pinned candidate SHA");
+            let bytes = std::fs::read(path).unwrap();
+            assert_eq!(super::digest(&bytes), expected, "candidate bytes changed");
+            let model: &'static Model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
+            let scorer = zensim::BakeScorer::new(model).unwrap().with_parallel(true);
+            let info = json!({"source_sha256":expected,"revision":"5","surface":"baseline: inputs + model + BakeScorer, no scoring"});
+            let action: Action = Box::new(move || {
+                std::hint::black_box(&scorer);
+                0.0
+            });
+            Some((action, info))
+        }
         "e33_a_map" | "e33_c_map" | "e33_seed0_map" => {
             // Scorecard spatial cost: cached-reference complete score + map. The reference is prepared
             // once, untimed (prepare_steering, map bin 1 as in G-STEER); each call scores and maps.

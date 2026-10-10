@@ -482,15 +482,37 @@ def inspect():
     found, rows = candidates(0), {}
     for name in sorted(found):
         r = subprocess.run([str(BIN / "inspect_qualified_checkpoint"), str(found[name][0])], capture_output=True, text=True)
+        report = json.loads(r.stdout) if r.returncode == 0 else None
         rows[name] = dict(model=str(found[name][0]), sha256=found[name][1], rc=r.returncode,
-                          stdout=r.stdout.strip()[-4000:], stderr=r.stderr.strip()[-2000:])
+                          qualified_provenance=bool(report and report.get("qualified_provenance")),
+                          checkpoint_epoch=report and report.get("checkpoint_epoch"),
+                          admitted_tables=report and report.get("admitted_tables"),
+                          formula_revision=report and report.get("formula_revision"),
+                          feature_set_id=report and report.get("feature_set_id"), stderr=r.stderr.strip()[-2000:])
     out.write_text(json.dumps(rows, indent=1) + "\n")
+
+
+def served_identity():
+    """Served pixel identity: every model through BakeScorer::compute on identical pairs (ref == dist) for the
+    62 E33 identity sources (38 identity probes + 24 NEARID references), via serve_custom_bake --pairs."""
+    out = GATES / "served-identity.tsv"
+    if done(out):
+        return
+    sources = json.loads((E / "E3_SOURCES.json").read_text())
+    paths = [s.get("ref_path") or s.get("path") for s in (sources["sources"] if isinstance(sources, dict) else sources)]
+    assert len(paths) == 62 and all(paths), len(paths)
+    pairs = GATES / "served-identity-pairs.tsv"
+    pairs.write_text("ref_path\tdist_path\n" + "".join(f"{p}\t{p}\n" for p in paths))
+    found = candidates(0)
+    with open(GATES / "served-identity.log", "x") as log, open(out, "x") as f:
+        subprocess.run([str(BIN / "serve_custom_bake"), "--pairs", str(pairs), *(str(found[a][0]) for a in sorted(found))],
+                       stdout=f, stderr=log, check=True, env={**os.environ, "ZENSIM_FORMULA_REV": "5"})
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("candidates", "nearid", "verdict", "identity", "steer", "runtime-candidates",
-                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "k4-full", "head-probe", "inspect", "summary"))
+                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "k4-full", "head-probe", "inspect", "served-identity", "summary"))
     p.add_argument("--arm")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--grid", choices=("standard", "ladder"))
@@ -525,6 +547,8 @@ def main():
         head_probe(a.head)
     elif a.mode == "inspect":
         inspect()
+    elif a.mode == "served-identity":
+        served_identity()
     elif a.mode == "k4-full":
         k4_full()
     elif a.mode == "steer-dense":
