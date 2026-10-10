@@ -92,12 +92,16 @@ def report(args):
         return rss_only_report(args)
     root = args.raw_dir
     budget = getattr(args, 'budget_grid', False)
+    floor = getattr(args, 'floor_arm', False)
     grid = 'budget' if budget else 'scaling'
-    tiers, threads, geometries, arms, _ = cmp.configuration(scaling=not budget, budget=budget)
+    tiers, threads, geometries, arms, _ = cmp.configuration(scaling=not budget, budget=budget, floor=floor)
     cells = cmp.cells(scaling=not budget, budget=budget)
-    rows = cmp.receipt(root / grid / 'parity/PREFLIGHT_PASS.json', scaling=not budget, budget=budget)
+    rows = cmp.receipt(root / grid / ('parity-v2' if floor else 'parity') / 'PREFLIGHT_PASS.json',
+                       scaling=not budget, budget=budget, floor=floor)
     from rev5perf_report import compare_bits
-    labels = ('uncapped', 'cap64', 'cap128', 'cap256') if budget else ('before', 'verified')
+    labels = (('uncapped', 'cap64', 'cap128', 'cap256') + (('floor3-timing',) if floor else ())
+              if budget else ('before', 'verified'))
+    parent = ('floor3-timing' if floor else 'cap128') if budget else 'verified'
     parity = ({label: compare_bits(root/'uncapped', root/label) for label in labels[1:]}
               if budget else compare_bits(root/'before', root/'verified'))
     builds = {label: json.loads((root / f'provenance/instrument-{label}.artifact.json').read_text())
@@ -107,7 +111,7 @@ def report(args):
         assert sha(root / f'provenance/instrument-{label}') == artifact['binary_sha256']
     medians = {}; analyses = {}; selections = {}; packets = []; saved = []; batches = 0
     if budget:
-        inventory = cmp.budget_inventory(root/'provenance/budget-binaries.json')
+        inventory = cmp.budget_inventory(root/'provenance'/('budget-binaries-v2.json' if floor else 'budget-binaries.json'), floor)
         expected_workers = {arm: sha(path) for arm,path in inventory.items()}
     else:
         expected_workers = {arm: builds['before' if arm == 'by_v2fy_r5_before' else 'verified']['binary_sha256'] for arm in arms}
@@ -121,7 +125,7 @@ def report(args):
         assert done['paired_alignment_verified'] and done['zenbench_gate_clean']
         assert header['quiet_gate']['admitted'] and header['quiet_gate']['load1'] < 2
         assert not header['gate_trace'] and header['cpuset'] == owner.CPUSETS[n]
-        assert header['binary_sha256'] == builds['cap128' if budget else 'verified']['binary_sha256']
+        assert header['binary_sha256'] == builds[parent]['binary_sha256']
         assert header['worker_binary_sha256'] == expected_workers
         assert header['arms'] == arms
         assert header['round_cap'] == 64 and header['round_rule'] == owner.CLEAN_ROUND_RULE
@@ -154,7 +158,8 @@ def report(args):
     replay = json.loads(subprocess.check_output([str(analyzer)], input=json.dumps(packets), text=True))
     assert replay == saved, 'saved paired analyses differ from exact replay'
     memories = {}
-    rss_arms = arms if budget else ('by_v2fy_r5', 'by_v2fy_r5_before')
+    # RSS stays the four measured budget arms; the floor arm is timing-only.
+    rss_arms = cmp.BUDGET_ARMS if budget else ('by_v2fy_r5', 'by_v2fy_r5_before')
     for g in geometries:
         for n in threads:
             for arm in rss_arms:
@@ -163,6 +168,8 @@ def report(args):
                 memories[tag] = measured
     if budget:
         pairs = [('by_v2fy_r5_b64','by_v2fy_r5_b128'), ('by_v2fy_r5_b64','by_v2fy_r5_b256'), ('by_v2fy_r5_b128','by_v2fy_r5_b256')]
+        if floor:
+            pairs.append(('by_v2fy_r5_b128', cmp.BUDGET_FLOOR_ARM))
         packets = []; coordinates = []
         for g,t,n in cells:
             tag = f'{t}-t{n}-{g}'
@@ -183,22 +190,31 @@ def report(args):
                       model_sha256=owner.SOURCE_SHA,raw_directory=str(root),
                       interval_scope='pointwise paired 95% CI, candidate minus baseline; not simultaneous grid-wide intervals')
         owner.write(args.out_json,result)
+        titles = {'by_v2fy_r5_b64': '64 MiB', 'by_v2fy_r5_b128': '128 MiB', 'by_v2fy_r5_b256': '256 MiB',
+                  cmp.BUDGET_FLOOR_ARM: '128 MiB + floor'}
         lines = ['# Rev5 byte-budget measurements', '',
-                 'Frozen 64/128/256 MiB candidates and an uncapped control share COSTCMP inputs, the exclusive lock, quiet gate and first 32 shared clean rounds from at most 64. All 27 saved comparisons replay through the frozen paired analyzer. Direct budget comparisons use that same analyzer and those same admitted rounds. Complete scoring calls include allocations; setup is untimed. Each build passes 384/384 strict parity against the uncapped control.', '',
-                 '| threads | size | uncapped ms | 64 MiB ms [95% CI] | 128 MiB ms [95% CI] | 256 MiB ms [95% CI] |',
-                 '|---:|---|---:|---:|---:|---:|']
+                 'Frozen 64/128/256 MiB candidates' + (', the 128 MiB source with the three-slot floor,' if floor else '') + f' and an uncapped control share COSTCMP inputs, the exclusive lock, quiet gate and first 32 shared clean rounds from at most 64. All {len(cells)*(len(arms)-1)} saved comparisons replay through the frozen paired analyzer. Direct budget comparisons use that same analyzer and those same admitted rounds. Complete scoring calls include allocations; setup is untimed. Each build passes 384/384 strict parity against the uncapped control.', '',
+                 '| threads | size | uncapped ms | ' + ' | '.join(titles[a]+' ms [95% CI]' for a in arms[1:]) + ' |',
+                 '|---:|---|---:|' + '---:|'*(len(arms)-1)]
         for g,t,n in cells:
             tag=f'{t}-t{n}-{g}';entries=[f'{medians[tag][arms[0]]/1e6:.6f}']
             for arm in arms[1:]:
                 ci=analyses[tag]['comparisons'][arm]
                 entries.append(f"{medians[tag][arm]/1e6:.6f} [{ci['ci_lower']/1e6:.6f}, {ci['ci_upper']/1e6:.6f}]" + (' limited' if ci['resolution_limited'] else ''))
             lines.append(f'| {n} | {g} | '+' | '.join(entries)+' |')
+        if floor:
+            lines += ['', '## 128 MiB with and without the three-slot floor', '',
+                      'Direct paired comparison on the same admitted rounds, floor minus frozen 128 MiB, in ms. At 128 MiB the two differ only at 8192×4096, where the frozen build queues two jobs and the floor takes the original route.', '',
+                      '| threads | size | 128 MiB ms | floor ms | floor − 128 MiB [95% CI] |', '|---:|---|---:|---:|---|']
+            for g,t,n in cells:
+                tag=f'{t}-t{n}-{g}';ci=direct_pairs[tag]['by_v2fy_r5_b128->'+cmp.BUDGET_FLOOR_ARM]
+                lines.append(f"| {n} | {g} | {medians[tag]['by_v2fy_r5_b128']/1e6:.6f} | {medians[tag][cmp.BUDGET_FLOOR_ARM]/1e6:.6f} | [{ci['ci_lower']/1e6:.6f}, {ci['ci_upper']/1e6:.6f}]" + (' limited' if ci['resolution_limited'] else '') + ' |')
         lines += ['', 'Intervals are pointwise paired bootstrap differences, candidate minus uncapped, in ms. Negative intervals mean the candidate costs less. Warm medians use all 32 admitted rounds; analyzer means use its original IQR rule. These synthetic inputs measure scoring cost, not corpus-wide quality or performance.', '',
                   '## Fresh-process peak RSS', '',
                   'KiB measured by `/usr/bin/time -v`, including identical model/input setup. The byte budget bounds queue-owned allocations, not allocator overhead or total process RSS.', '',
                   '| threads | size | uncapped KiB | 64 MiB KiB | 128 MiB KiB | 256 MiB KiB |', '|---:|---|---:|---:|---:|---:|']
         for g,t,n in cells:
-            lines.append(f'| {n} | {g} | '+' | '.join(str(memories[f'{t}-t{n}-{g}-{arm}']) for arm in arms)+' |')
+            lines.append(f'| {n} | {g} | '+' | '.join(str(memories[f'{t}-t{n}-{g}-{arm}']) for arm in rss_arms)+' |')
         lines += ['', f'Raw evidence: `{root}`. Model, binary/source pins, direct paired budget analyses, clean-round selections, full logs and strict receipts are preserved there.', '']
         args.out_md.write_text('\n'.join(lines))
         return 0

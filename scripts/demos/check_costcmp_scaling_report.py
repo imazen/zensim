@@ -15,7 +15,9 @@ def main():
     ap.add_argument('--dest', type=Path, required=True)
     ap.add_argument('--budget-grid', action='store_true')
     ap.add_argument('--rss-only', action='store_true')
+    ap.add_argument('--floor-arm', action='store_true')
     args = ap.parse_args()
+    assert args.budget_grid or not args.floor_arm
     args.dest.mkdir(parents=True, exist_ok=False)
     grid = 'budget' if args.budget_grid else 'scaling'
     first = args.raw_dir / (grid+'/timing/'+('v4x-t8-1024x1024' if args.budget_grid else 'v4x-t1-1024x1024'))
@@ -25,13 +27,16 @@ def main():
          lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_before', '0'*64)),
         ('shared_round_alignment', first / 'COMPLETE.json',
          lambda value: value['retained_indices'].reverse()),
-        ('complete_requested_grid', args.raw_dir / grid / 'parity/PREFLIGHT_PASS.json',
+        ('complete_requested_grid', args.raw_dir / grid / ('parity-v2' if args.floor_arm else 'parity') / 'PREFLIGHT_PASS.json',
          lambda value: value['records'].pop()),
         ('measured_rss_log', args.raw_dir / (grid+'/rss/'+('v4x-t8-1024x1024-by_v2fy_r5_b64.log' if args.budget_grid else 'v4x-t1-1024x1024-by_v2fy_r5.log')), None),
         ('exact_statistics_replay', None, None),
     ]
+    if args.floor_arm:
+        controls.append(('floor_binary_pin', first / 'header.json',
+                         lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_floor3', '0'*64)))
     if args.rss_only:
-        assert args.budget_grid
+        assert args.budget_grid and not args.floor_arm
         rss = args.raw_dir/'budget/rss/v4x-t8-1024x1024-by_v2fy_r5_b64'
         controls = [
             ('complete_requested_grid', args.raw_dir/'budget/parity/PREFLIGHT_PASS.json', lambda v:v['records'].pop()),
@@ -43,7 +48,8 @@ def main():
     refused = []
     for label, target, mutate in controls:
         out = SimpleNamespace(raw_dir=args.raw_dir, out_json=args.dest / (label+'.json'),
-                              out_md=args.dest / (label+'.md'), budget_grid=args.budget_grid,rss_only=args.rss_only)
+                              out_md=args.dest / (label+'.md'), budget_grid=args.budget_grid,rss_only=args.rss_only,
+                              floor_arm=args.floor_arm)
         def altered(path, *argv, **kwargs):
             text = reads(path, *argv, **kwargs)
             if path == target:

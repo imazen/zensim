@@ -38,9 +38,25 @@ def budget_parity(root, binary, label):
         compared_against=str(root/'budget/parity/PREFLIGHT_PASS.json'), consumed_features=420, records=records))
 
 
+def floor_inventory(root):
+    """Pin the four measured arms plus the floor timing build as the v2 budget inventory."""
+    provenance = root/'provenance'
+    v1 = json.loads((provenance/'budget-binaries.json').read_text())
+    cmp.budget_inventory(provenance/'budget-binaries.json')
+    binary = provenance/'instrument-floor3-timing'
+    source = provenance/'runtime-floor3.rs'
+    arms = dict(v1['arms'])
+    arms[cmp.BUDGET_FLOOR_ARM] = dict(binary=str(binary), artifact=str(provenance/(binary.name+'.artifact.json')),
+                                      binary_sha256=sha(binary), runtime_source=str(source),
+                                      runtime_source_sha256=sha(source))
+    owner.write(provenance/'budget-binaries-v2.json', dict(schema='rev5perf5-binaries-v2', arms=arms))
+    cmp.budget_inventory(provenance/'budget-binaries-v2.json', floor=True)
+    print('budget v2 inventory pinned: four measured arms plus the floor timing build', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['candidate', 'inventory', 'select', 'budget-parity'])
+    parser.add_argument('mode', choices=['candidate', 'inventory', 'select', 'budget-parity', 'floor-inventory'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--mib', type=int, choices=[64, 128, 256])
     parser.add_argument('--binary', type=Path, help='budget-parity: frozen executable to check')
@@ -48,6 +64,9 @@ def main():
     args = parser.parse_args()
     if args.mode == 'budget-parity':
         budget_parity(args.root, args.binary, args.label)
+        return
+    if args.mode == 'floor-inventory':
+        floor_inventory(args.root)
         return
     repo = Path(__file__).resolve().parents[2]
     runtime = repo / 'zensim/src/feature_v2.rs'
@@ -91,8 +110,8 @@ def main():
                 host=subprocess.check_output(['hostname'],text=True).strip(),
                 rustc=subprocess.check_output(['rustc','--version','--verbose'],text=True),
                 grid=dict(tiers=['v4x'],threads=cmp.BUDGET_THREADS,geometries=cmp.BUDGET_GEOMETRIES,budgets_mib=[64,128,256]),
-                commands=dict(timing='just -f benchmarks/rev5perf5.just rev5perf5-budget timing ROOT (internal --lock)',
-                              rss='just -f benchmarks/rev5perf5.just rev5perf5-budget rss ROOT (internal --lock)'),
+                commands=dict(timing='just -f benchmarks/rev5perf5.just rev5perf5-budget-timing ROOT (internal --lock)',
+                              rss='just -f benchmarks/rev5perf5.just rev5perf5-budget-rss ROOT (internal --lock)'),
                 target_cpu_native=False))
     for source, dest in [('Cargo.lock','workspace-Cargo.lock'),('zensim-bench/Cargo.lock','bench-Cargo.lock')]:
         with (provenance/dest).open('xb') as stream:

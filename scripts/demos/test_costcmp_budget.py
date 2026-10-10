@@ -143,6 +143,95 @@ class BudgetAdmissionTest(unittest.TestCase):
                 candidate.budget_parity(self.root, binary, 'flipped')
         self.assertFalse((self.root/'budget/parity-flipped/BUDGET_PARITY_PASS.json').exists())
 
+    def floor_manifest(self, floor_source=None, schema='rev5perf5-binaries-v2'):
+        """Five-arm v2 inventory: candidates differ only in the cap; the floor arm is cap128 plus the hunk."""
+        body = 'fn rev5_job_limit() -> usize {\n' + cmp.CAP_LIMIT + '}\n'
+        cap128 = 'const REV5_JOB_BUDGET_BYTES: usize = 128 * 1024 * 1024;\n' + body
+        if floor_source is None:
+            floor_source = cmp.FLOOR_BLOCK + cap128.replace(cmp.CAP_LIMIT, cmp.FLOOR_LIMIT)
+        arms = {}
+        for arm in cmp.BUDGET_FLOOR_ARMS:
+            binary = self.root / arm
+            binary.write_bytes(arm.encode())
+            artifact = self.root / (arm+'.json')
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            artifact.write_text(json.dumps(dict(binary_sha256=digest, dependencies={})))
+            source = self.root / (arm+'.rs')
+            source.write_text(floor_source if arm == cmp.BUDGET_FLOOR_ARM else '' if arm.endswith('_before') else
+                              'const REV5_JOB_BUDGET_BYTES: usize = '+arm.rsplit('b',1)[1]+' * 1024 * 1024;\n' + body)
+            arms[arm] = dict(binary=str(binary), artifact=str(artifact), binary_sha256=digest,
+                             runtime_source=str(source), runtime_source_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+        manifest = self.root / 'binaries-v2.json'
+        manifest.write_text(json.dumps(dict(schema=schema, arms=arms)))
+        return manifest, cap128
+
+    def test_floor_inventory_binds_cap128_plus_exactly_the_floor(self):
+        manifest, cap128 = self.floor_manifest()
+        self.assertEqual(set(cmp.budget_inventory(manifest, floor=True)), set(cmp.BUDGET_FLOOR_ARMS))
+        with self.assertRaises(AssertionError):
+            cmp.budget_inventory(manifest)  # a v2 inventory is not the four-arm v1 grid
+        floored = cmp.FLOOR_BLOCK + cap128.replace(cmp.CAP_LIMIT, cmp.FLOOR_LIMIT)
+        for label, source in [('extra change', floored + 'fn changed_kernel() {}\n'),
+                              ('floor of two', floored.replace('REV5_MIN_JOB_SLOTS: usize = 3', 'REV5_MIN_JOB_SLOTS: usize = 2')),
+                              ('256 MiB base', floored.replace('128 * 1024', '256 * 1024')),
+                              ('no floor', cap128)]:
+            with self.subTest(label):
+                manifest, _ = self.floor_manifest(source)
+                with self.assertRaises(AssertionError):
+                    cmp.budget_inventory(manifest, floor=True)
+        manifest, _ = self.floor_manifest(schema='rev5perf5-binaries-v1')
+        with self.assertRaises(AssertionError):
+            cmp.budget_inventory(manifest, floor=True)
+
+    def test_floor_receipt_requires_all_five_arms_bit_identical(self):
+        records = copy.deepcopy(self.value['records'])
+        for rec in self.value['records']:
+            if rec['name'] == 'by_v2fy_r5_b128':
+                records.append({**copy.deepcopy(rec), 'name': cmp.BUDGET_FLOOR_ARM})
+        v2 = dict(schema='costcmp-budget-preflight-v2', status='PASS', records=records)
+        self.path.write_text(json.dumps(v2))
+        self.assertEqual(len(cmp.receipt(self.path, budget=True, floor=True)), 45)
+        with self.assertRaises(AssertionError):
+            cmp.receipt(self.path, budget=True)
+        self.path.write_text(json.dumps(self.value))
+        with self.assertRaises(AssertionError):
+            cmp.receipt(self.path, budget=True, floor=True)
+        bad = copy.deepcopy(v2)
+        next(r for r in bad['records'] if r['name'] == cmp.BUDGET_FLOOR_ARM)['feature_values'][0] = .25000000000000006
+        self.path.write_text(json.dumps(bad))
+        with self.assertRaisesRegex(AssertionError, 'consumed-feature parity'):
+            cmp.receipt(self.path, budget=True, floor=True)
+
+    @patch.object(owner, 'timing')
+    def test_floor_cli_times_five_arms_against_uncapped_under_the_lock(self, timing):
+        manifest, _ = self.floor_manifest()
+        records = copy.deepcopy(self.value['records'])
+        for rec in self.value['records']:
+            if rec['name'] == 'by_v2fy_r5_b128':
+                records.append({**copy.deepcopy(rec), 'name': cmp.BUDGET_FLOOR_ARM})
+        self.path.write_text(json.dumps(dict(schema='costcmp-budget-preflight-v2', status='PASS', records=records)))
+        floor_binary = self.root / cmp.BUDGET_FLOOR_ARM
+        with patch('sys.argv', ['costcmp_run.py', 'timing', '--budget-grid', '--floor-arm',
+                                '--budget-binaries', str(manifest), '--binary', str(floor_binary),
+                                '--dest', str(self.root/'timing'), '--parity', str(self.path),
+                                '--analyzer', 'analyzer', '--lock', str(self.root/'heavy.lock')]):
+            cmp.main()
+        kwargs = timing.call_args.kwargs
+        self.assertEqual(kwargs['arms'], cmp.BUDGET_FLOOR_ARMS)
+        self.assertEqual(kwargs['baseline'], 'by_v2fy_r5_before')
+        self.assertEqual(kwargs['lock'], self.root/'heavy.lock')
+        self.assertEqual(kwargs['worker_binaries'][cmp.BUDGET_FLOOR_ARM], floor_binary)
+        self.assertEqual(len(kwargs['cells']), 9)
+        self.assertEqual(owner.worker_revision(cmp.BUDGET_FLOOR_ARM), 5)
+
+    def test_floor_arm_is_parity_and_timing_only(self):
+        for argv in [['rss', '--budget-grid', '--floor-arm'], ['timing', '--floor-arm']]:
+            with self.subTest(argv[0]):
+                with patch('sys.argv', ['costcmp_run.py', *argv, '--dest', str(self.root)]):
+                    with self.assertRaises(SystemExit) as result:
+                        cmp.main()
+                self.assertEqual(result.exception.code, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

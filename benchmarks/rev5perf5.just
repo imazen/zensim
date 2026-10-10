@@ -35,8 +35,21 @@ rev5perf5-checks:
     cargo check -p zensim --no-default-features --features feature-regime-v2
     just -f benchmarks/rev5perf5.just rev5perf5-tests
 
-rev5perf5-budget mode root:
-    python3 scripts/demos/costcmp_run.py {{mode}} --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --binary "{{root}}/provenance/instrument-cap128" --dest "{{root}}/budget/{{mode}}" --parity "{{root}}/budget/parity/PREFLIGHT_PASS.json" --analyzer "{{root}}/provenance/paired-rounds-analyzer" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
+# Timing runs five arms: the four frozen budget builds plus the 128 MiB source
+# with the three-slot floor (v2 inventory and preflight). Internal --lock.
+rev5perf5-budget-timing root:
+    python3 scripts/demos/costcmp_run.py timing --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v2.json" --binary "{{root}}/provenance/instrument-floor3-timing" --dest "{{root}}/budget/timing" --parity "{{root}}/budget/parity-v2/PREFLIGHT_PASS.json" --analyzer "{{root}}/provenance/paired-rounds-analyzer" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
+
+# Quiet-gated fresh-process RSS for the four measured arms (internal --lock).
+rev5perf5-budget-rss root:
+    python3 scripts/demos/costcmp_run.py rss --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --binary "{{root}}/provenance/instrument-cap128" --dest "{{root}}/budget/rss" --parity "{{root}}/budget/parity/PREFLIGHT_PASS.json" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
+
+rev5perf5-floor-preflight root:
+    just -f benchmarks/rev5perf5.just rev5perf5-build "{{root}}" floor3-timing
+    python3 scripts/demos/rev5perf5_candidate.py floor-inventory --root "{{root}}"
+    python3 scripts/demos/costcmp_run.py parity --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v2.json" --binary "{{root}}/provenance/instrument-floor3-timing" --dest "{{root}}/budget/parity-v2"
+    just -f benchmarks/rev5perf5.just rev5perf5-parity "{{root}}/provenance/instrument-floor3-timing" "{{root}}/floor3-timing/parity"
+    PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from rev5perf_report import compare_bits; from speedq_run import write; write(Path("{{root}}/provenance/parity-floor3-timing.json"), compare_bits(Path("{{root}}/uncapped"),Path("{{root}}/floor3-timing")))'
 
 rev5perf5-progress root:
     python3 scripts/demos/costcmp_run.py status --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --dest "{{root}}/budget"
@@ -53,8 +66,8 @@ rev5perf5-rss-report-gates root:
     just -f benchmarks/rev5perf5.just rev5perf5-python-tests
 
 rev5perf5-report-gates root:
-    PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from types import SimpleNamespace; import costcmp_report; costcmp_report.report(SimpleNamespace(raw_dir=Path("{{root}}"),out_json=Path("{{root}}/report.json"),out_md=Path("benchmarks/rev5perf5_scaling_2026-10-09.md"),budget_grid=True))'
-    python3 scripts/demos/check_costcmp_scaling_report.py --budget-grid --raw-dir "{{root}}" --dest "{{root}}/report-controls"
+    PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from types import SimpleNamespace; import costcmp_report; costcmp_report.report(SimpleNamespace(raw_dir=Path("{{root}}"),out_json=Path("{{root}}/report.json"),out_md=Path("benchmarks/rev5perf5_scaling_2026-10-09.md"),budget_grid=True,floor_arm=True))'
+    python3 scripts/demos/check_costcmp_scaling_report.py --budget-grid --floor-arm --raw-dir "{{root}}" --dest "{{root}}/report-controls"
     just -f benchmarks/rev5perf5.just rev5perf5-python-tests
 
 rev5perf5-archive root mirror:
