@@ -16,6 +16,11 @@
   --derived-inputs`, compact derived bakes with a bit-identity gate; `pack
   --identity-knot/--tail-extend` (the registered output stage). No public Rust
   items added. Record: `benchmarks/e33_implementation_2026-10-10.md`.
+  Review fixes: checkpoints carry `zentrain.derived_inputs_sha256`; the E33
+  output-stage refusal keeps its artifacts and exits deterministically;
+  positional diagnostics (`block_profile`, `bake_contrib`) refuse derived
+  bakes; `e33_predictor_parity.py` reproduces the 40 frozen V40 control
+  predictions byte for byte in score units.
 
 - Internal SPEEDQ extension to the existing speed matrix: isolated Rev3/Rev4/Rev5
   owners, strict Rev4/Rev5 parity, recorded Rev3 tolerance failures, quiet-gated
