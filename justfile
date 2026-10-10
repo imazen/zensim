@@ -823,3 +823,10 @@ v40-r4-checks bundle dest metrics:
     just v40-native-tests
     just v40-binary-metadata-tests
     just v40-r3-checks {{bundle}} {{dest}}/inherited {{metrics}}
+
+# Registered E31 reports only; this checks existing outputs and reads no datasets.
+v40-e31-report-evidence report exposure out:
+    python3 scripts/tests/v40_e31_report_evidence.py --report {{report}} --exposure {{exposure}} --out {{out}}
+
+v40-e31-report-evidence-tests:
+    PYTHONPATH=scripts/tests python3 -m unittest scripts.tests.test_v40_e31_report_evidence
