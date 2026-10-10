@@ -887,6 +887,19 @@ fn free_union(a: V1FreeExtras, b: V1FreeExtras) -> V1FreeExtras {
 /// contract moves.
 pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
     let reads = crate::fold_engine::caller_line_reads(model)?;
+    // E33 `fx1`: a derived-input bake's model positions are entries over its
+    // declared ids, not one id per position; a malformed declaration is
+    // unreadable rather than read positionally.
+    match crate::derived_inputs::from_model(model) {
+        Err(_) => return None,
+        Ok(Some(derived)) => {
+            let declared: Vec<usize> = crate::feature_layout::declared_ids(model)?
+                .iter_slots()
+                .collect();
+            return derived.read_slots(&declared, &reads);
+        }
+        Ok(None) => {}
+    }
     let declared = crate::declared_feature_ids(model);
     Some(SlotSet::from_slots(
         reads

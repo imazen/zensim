@@ -606,7 +606,9 @@ pub fn score_features_fd_gradient_with_profile(
         reason: "Model::from_bytes failed to parse the bake header or layer table",
     })?;
     let bundle = cached_bake_metadata(bytes, &model)?;
-    if bundle.minmax_head.is_some() {
+    // Derived-input bakes (E33 `fx1`) take the canonical per-probe forward,
+    // which owns their model-row construction.
+    if bundle.minmax_head.is_some() || bundle.derived_inputs.is_some() {
         return Ok(seq_fallback(&mut probe));
     }
     let n_inputs = model.caller_input_width();
@@ -4776,6 +4778,31 @@ fn forward_model_with_codec(
         layout.gather(features, gathered);
         gathered.as_slice()
     };
+
+    // E33 `fx1`: a derived-input bake's model row is built from its gathered
+    // declared layout (direct ids and same-cell f32 products). Load refused
+    // every head, transform and malformed declaration this cannot serve.
+    if let Some(derived) = bundle.derived_inputs.as_deref() {
+        if features.len() < layout.walk_width() {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "the bake declares feature ids this feature vector does not reach",
+            });
+        }
+        if layout.is_identity() {
+            layout.gather(features, gathered);
+        }
+        derived.fill_f32(gathered, f32_features);
+        return bake_dispatch_one(
+            predictor,
+            f32_features,
+            needs_transforms,
+            per_sample_alpha,
+            hybrid_head,
+            tanh_pin_scale,
+            output_spline,
+            per_codec_affine,
+        );
+    }
 
     // Min-max monotone head (Sill 1998): the score REPLACES the layer forward,
     // so bypass the Predictor entirely — read the bake's scaler + feature

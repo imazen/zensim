@@ -294,6 +294,19 @@ pub(crate) fn declared_layout(model: &crate::mlp::Model) -> Layout {
     {
         return Layout::dense(&slots);
     }
+    // E33 `fx1`: a derived-input bake's declared ids are its READ SET and its
+    // gather layout; the model's caller width counts derived entries instead.
+    // Validity (every id read, entry count == caller width) is checked where
+    // the bake is loaded (`bake_metadata::parse_bake_metadata`), which refuses
+    // a malformed declaration before any forward.
+    if model
+        .metadata()
+        .get(crate::derived_inputs::DERIVED_INPUTS_KEY)
+        .is_some()
+        && let Some(slots) = declared_ids(model)
+    {
+        return Layout::dense(&slots);
+    }
     let dense = model
         .metadata()
         .get_utf8("zentrain.feature_set_id")
