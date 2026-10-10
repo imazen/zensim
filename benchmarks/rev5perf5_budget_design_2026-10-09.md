@@ -34,8 +34,8 @@ Qualification: all three frozen budget builds pass 384/384 strict score and
 comparisons overall. Each passes native 8/16/32-thread invariance. All 36
 requested measurement-grid preflight records also agree bit for bit, including
 8192×4096. The extended report owner successfully replays the existing
-REV5PERF4 evidence. On 2026-10-09 the owner authorized fresh-process RSS under
-shared load, while keeping all timing admission rules unchanged. All 36 RSS
+REV5PERF4 evidence. On 2026-10-09 the coordinator instructed fresh-process RSS
+under shared load, keeping all timing admission rules unchanged. All 36 RSS
 observations are complete; timing remains queued. The measured table and actual
 Rust per-job accounting are in
 [the RSS record](rev5perf5_rss_2026-10-09.md). The selected source is exactly the

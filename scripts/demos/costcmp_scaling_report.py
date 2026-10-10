@@ -20,7 +20,7 @@ def rss_measurement(root, grid, tag, rows, arm, geometry, threads, expected_sha)
         assert row['quiet_gate']['admitted'] and row['quiet_gate']['load1'] < 2
     else:
         assert grid == 'budget'
-        assert row['rss_policy'] == 'owner-approved fresh-process RSS under shared load, 2026-10-09'
+        assert row['rss_policy'] in (owner.RSS_UNDER_LOAD_POLICY, owner.RSS_UNDER_LOAD_POLICY_RECORDED)
     assert row['binary_sha256'] == expected_sha
     assert (row['arm'],row['geometry'],row['tier'],row['threads']) == (arm,geometry,'v4x',threads)
     cmp.validate_ready(rows, arm, geometry, 'v4x', threads, row['worker'])
@@ -33,7 +33,7 @@ def rss_measurement(root, grid, tag, rows, arm, geometry, threads, expected_sha)
 
 
 def rss_only_report(args):
-    """Owner-authorized RSS result with no inferred timing or speed verdict."""
+    """Coordinator-instructed shared-load RSS result with no timing or speed verdict."""
     assert args.budget_grid
     root = args.raw_dir
     rows = cmp.receipt(root/'budget/parity/PREFLIGHT_PASS.json', budget=True)
@@ -64,10 +64,11 @@ def rss_only_report(args):
                   timing_completion_markers=len(list((root/'budget/timing').glob('*/COMPLETE.json'))),
                   binary_sha256={arm:sha(path) for arm,path in inventory.items()},
                   source_provenance=source, raw_directory=str(root),
-                  rss_scope='fresh-process time -v under owner-approved shared load; no speed inference')
+                  rss_scope='fresh-process time -v under coordinator-instructed shared load; no speed inference',
+                  rss_policy_note='the 36 records carry the tag '+repr(owner.RSS_UNDER_LOAD_POLICY_RECORDED)+'; the shared-load RSS run was the coordinator\'s instruction, not the owner\'s')
     owner.write(args.out_json,result)
     lines = ['# Rev5 byte-budget RSS (2026-10-09)', '',
-             '**Provisional default: 128 MiB; speed not yet measured.** This selects a bounded queue size from memory observations. It is not a throughput verdict. The owner authorized fresh-process RSS under shared load; timing still requires the unchanged load <2/no foreign build or training gate and 32 common clean rounds from at most 64. No timing medians or confidence intervals are reported.', '',
+             '**Provisional default: 128 MiB; speed not yet measured.** This selects a bounded queue size from memory observations. It is not a throughput verdict. Fresh-process RSS ran under shared load on the coordinator\'s instruction (the raw records\' `rss_policy` tag says "owner-approved"; that attribution is wrong). Timing still requires the unchanged load <2/no foreign build or training gate and 32 common clean rounds from at most 64. No timing medians or confidence intervals are reported.', '',
              'All three frozen candidates pass 384/384 strict parity and 576/576 comparisons overall. The full 36-record measurement preflight agrees in score and all 420 consumed feature bits.', '',
              '| threads | size | uncapped KiB | 64 MiB KiB | 128 MiB KiB | 256 MiB KiB |',
              '|---:|---|---:|---:|---:|---:|']

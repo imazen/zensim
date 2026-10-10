@@ -139,7 +139,7 @@ def main():
     ap.add_argument('--before-binary',type=Path)
     ap.add_argument('--budget-grid',action='store_true',help='64/128/256 MiB plus uncapped Rev5 at 8/16/32 threads and three geometries')
     ap.add_argument('--budget-binaries',type=Path,help='frozen executable/source inventory for the byte-budget grid')
-    ap.add_argument('--rss-under-load',action='store_true',help='owner-approved fresh-process RSS without a quiet wait; timing gates stay unchanged')
+    ap.add_argument('--rss-under-load',action='store_true',help='coordinator-instructed fresh-process RSS without a quiet wait; timing gates stay unchanged')
     args=ap.parse_args()
     if args.rss_under_load and (args.mode!='rss' or not args.budget_grid):ap.error('--rss-under-load applies only to budget-grid RSS')
     if args.scaling and args.budget_grid:ap.error('select one COSTCMP grid')

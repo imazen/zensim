@@ -379,6 +379,13 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lo
             time.sleep(10)
 
 
+# Shared-load RSS (no quiet wait) was the coordinator's instruction on 2026-10-09.
+# The 36 REV5PERF5 records written that day carry the earlier tag, which
+# misattributes it to the owner; readers accept it, writers never emit it.
+RSS_UNDER_LOAD_POLICY = 'coordinator-instructed fresh-process RSS under shared load, 2026-10-09'
+RSS_UNDER_LOAD_POLICY_RECORDED = 'owner-approved fresh-process RSS under shared load, 2026-10-09'
+
+
 def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=None,
         geometries=None, thread_counts=None, worker_binaries=None, require_quiet=True):
     parity=(parity_loader or parity_receipt)(parity_path)
@@ -405,7 +412,7 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
                 if ready_check is not None:
                     ready_check(name,geometry,'v4x',threads,rec)
                 maxrss=next(int(l.rsplit(':',1)[1]) for l in (root/f'{tag}.log').read_text().splitlines() if 'Maximum resident set size (kbytes)' in l)
-                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'quiet_required':require_quiet,'rss_policy':'quiet-gated' if require_quiet else 'owner-approved fresh-process RSS under shared load, 2026-10-09','worker':rec,'binary_sha256':hashlib.sha256(Path(executable).read_bytes()).hexdigest()})
+                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'quiet_required':require_quiet,'rss_policy':'quiet-gated' if require_quiet else RSS_UNDER_LOAD_POLICY,'worker':rec,'binary_sha256':hashlib.sha256(Path(executable).read_bytes()).hexdigest()})
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
 
 
