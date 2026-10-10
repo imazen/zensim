@@ -3879,6 +3879,8 @@ pub struct V2Scratch {
     stream_pool: Vec<Vec<f32>>,
     #[cfg(feature = "threads")]
     rev5_jobs: Vec<Rev5StripJob>,
+    #[cfg(all(test, feature = "threads"))]
+    rev5_job_budget: Option<usize>,
 }
 
 impl V2Scratch {
@@ -3895,6 +3897,8 @@ impl V2Scratch {
             stream_pool: Vec::new(),
             #[cfg(feature = "threads")]
             rev5_jobs: Vec::new(),
+            #[cfg(all(test, feature = "threads"))]
+            rev5_job_budget: None,
         }
     }
 
