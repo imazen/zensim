@@ -577,14 +577,17 @@ untouched-test, HDR or external claim follows.
   `feature-regime-v2`, and two `derived_inputs` tests panic. The fix is in progress in the same lane.
 - **C's steering failures are model limits.** All 8 are. The steering replay for derived inputs disagrees 0
   times in 931,248 comparisons, and its sensitivities equal finite differences.
-- **QUAL-A: A is not qualified.** The record is local and in review, so its numbers may change.
+- **QUAL-A: A is not qualified ([record](qual_a_2026-10-10.md), `19777db8`, reviewed at effort xhigh).**
   - A fails three release gates:
-    - G-STEER: 129/135, where qualification needs 135.
+    - G-STEER: 129/135 on the STEERFIX packet. The all-pass bar on 135 cases came from the coordinator's brief;
+      the release map defines the population as 143 cases (owner12 is 4 cases × 3 seeds; the packet has one seed).
+      The 8 extra owner cases have not been run. A fails either way.
     - Cached score+map spatial cost: 4.07× at 1024² and 3.15× at 2048², against ≤ 3×.
-    - Peak incremental memory with a map: 196,908 KiB against 196,608 at 1024², and 738,064 against 589,824 at
-      2048².
-  - C and seed 0 fail the spatial and memory gates the same way. That points to the shared prepared-steering
-    path, which an engineering lane is now working on, held to zero output-bit change.
+    - Peak incremental memory with a map: 738,064 KiB against 589,824 at 2048² (+25%). At 1024² A is 300 KiB
+      over 196,608, inside the run-to-run spread, so 2048² carries the conclusion.
+  - C and seed 0 fail the spatial and memory gates too (C is worse on spatial cost: 5.62× at 1024²), so these
+    failures are not specific to A's weights. The cost sits in the cached score+map path; an engineering lane is
+    working on it, held to zero output-bit change.
   - Steering is the model gap for every candidate. A fails 6 cases, C fails 8, seed 0 fails 7.
 - **dialviz (`947d3725..bf801c9a`).** A static site generator for the evaluation program. It covers each
   property wanted from an IQA dial, each gate and evaluation, and how scores combine, with readers over the
