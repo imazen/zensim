@@ -730,7 +730,7 @@ e33-identity sources model out:
     ZENSIM_FORMULA_REV=5 cargo run --release -p zensim --features custom-profiles,candidate-profiles --example serve_custom_bake -- --e33-identity {{sources}} scripts/rev4_featpot/e33_fx1_declaration.json {{model}} {{out}}
 
 e33-package-tests:
-    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e33_package scripts.tests.test_e33_launch scripts.tests.test_e33_score
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e33_package scripts.tests.test_e33_launch scripts.tests.test_e33_score scripts.tests.test_e33_verdict
 
 # E33 launch owner (coordinator authorization 2026-10-10): verify | caps | launch | placements | harvest.
 e33-launch mode packet *flags:
