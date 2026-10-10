@@ -9,7 +9,10 @@
 //! (`benchmarks/hdr944_bake_wave_2026-08-27.md`, "hdrfeat944 (944-regime,
 //! `zensim-foldapp2`, HdrEncoding::Linear arms)"). The PU entries must serve
 //! CHdr, every input layout must agree bit for bit, and the served features
-//! and score must equal that validation extraction.
+//! and score must equal today's build of that extraction. (The fleet-era
+//! build differed by at most 1.1e-5 at 320 of the 697 ids, 1.5e-4 points of
+//! score, from two later deliberate arithmetic changes:
+//! `benchmarks/chdr_pu_2026-10-10.md`.)
 #![cfg(feature = "candidate-profiles")]
 
 use zensim::feature_v2::{HdrEncoding, V2NewFeatureToggles, V2Scratch};
@@ -160,7 +163,7 @@ fn chdr_scores_through_the_pu_entries_and_matches_its_validation_extraction() {
             );
         }
 
-        // The validation extraction: zenmetrics `hdr_foldapp_features`.
+        // Today's build of the validation extraction (zenmetrics `hdr_foldapp_features`).
         let mut scratch = V2Scratch::new();
         let reference = z
             .compute_folded720_append2_features_hdr(
@@ -178,7 +181,7 @@ fn chdr_scores_through_the_pu_entries_and_matches_its_validation_extraction() {
             assert_eq!(
                 served.features()[id].to_bits(),
                 reference[id].to_bits(),
-                "{tag}: served f{id} {} vs validation extraction {}",
+                "{tag}: served f{id} {} vs the reference extraction {}",
                 served.features()[id],
                 reference[id]
             );
@@ -203,5 +206,140 @@ fn chdr_scores_through_the_pu_entries_and_matches_its_validation_extraction() {
                 .score(),
             100.0
         );
+    }
+}
+
+/// A live token that never fires: `may_stop()` is true, so `with_stop`
+/// installs it, and every check passes.
+struct NeverStop;
+
+impl zensim::Stop for NeverStop {
+    fn check(&self) -> Result<(), zensim::StopReason> {
+        Ok(())
+    }
+}
+
+/// A token that has already fired.
+struct Fired;
+
+impl zensim::Stop for Fired {
+    fn check(&self) -> Result<(), zensim::StopReason> {
+        Err(zensim::StopReason::Cancelled)
+    }
+}
+
+/// Below Rev5 the wide-plan PU route follows SDR `compute`'s cancellation
+/// contract (issue #48): the fold has no intra-walk stop hook, so a request
+/// carrying a live stop token stays on the buffered walk. For C and CHdr that
+/// walk cannot reach the declared ids, so the stoppable request is refused,
+/// with exactly the error SDR `compute` gives the same profile and token.
+/// Without a token both serve. A fired token returns `Cancelled` before any
+/// work, and B (legacy PU walk) keeps its bits under a never-firing token.
+#[test]
+fn a_stoppable_wide_plan_pu_request_follows_the_sdr_cancellation_contract() {
+    let (w, h) = (97usize, 65usize);
+    let (r, d) = pair(w, h, 0x1234_5678_9abc_def1);
+    let src: Vec<[u8; 3]> = (0..w * h)
+        .map(|i| [(i * 7) as u8, (i * 13) as u8, (i * 3) as u8])
+        .collect();
+    let dst: Vec<[u8; 3]> = src
+        .iter()
+        .map(|p| [p[0].wrapping_add(9), p[1], p[2]])
+        .collect();
+    let (s8, d8) = (
+        zensim::RgbSlice::new(&src, w, h),
+        zensim::RgbSlice::new(&dst, w, h),
+    );
+    for (name, profile) in [("CHdr", ZensimProfile::CHdr), ("C", ZensimProfile::C)] {
+        let plain = Zensim::new(profile);
+        assert!(
+            plain.compute_pu_linear(&r, &d, w, h, 3 * w, 3 * w).is_ok(),
+            "{name}"
+        );
+        assert!(plain.compute(&s8, &d8).is_ok(), "{name}");
+
+        let stoppable = Zensim::new(profile).with_stop(NeverStop);
+        let sdr = format!("{:?}", stoppable.compute(&s8, &d8).unwrap_err());
+        let pu = format!(
+            "{:?}",
+            stoppable
+                .compute_pu_linear(&r, &d, w, h, 3 * w, 3 * w)
+                .unwrap_err()
+        );
+        let (rp, dp) = (planes(&r, w, h, w), planes(&d, w, h, w));
+        let planar = format!(
+            "{:?}",
+            stoppable
+                .compute_pu_linear_planar(
+                    [&rp[0], &rp[1], &rp[2]],
+                    [&dp[0], &dp[1], &dp[2]],
+                    w,
+                    h,
+                    w
+                )
+                .unwrap_err()
+        );
+        let desc = format!(
+            "{:?}",
+            stoppable
+                .compute(&Nits::new(&r, w, h), &Nits::new(&d, w, h))
+                .unwrap_err()
+        );
+        assert!(
+            sdr.contains("does not reach"),
+            "{name}: SDR refusal changed: {sdr}"
+        );
+        for (entry, e) in [
+            ("interleaved", &pu),
+            ("planar", &planar),
+            ("descriptor", &desc),
+        ] {
+            assert_eq!(
+                e, &sdr,
+                "{name}: stoppable PU {entry} must refuse as SDR compute does"
+            );
+        }
+
+        let fired = Zensim::new(profile).with_stop(Fired);
+        assert!(
+            matches!(
+                fired.compute_pu_linear(&r, &d, w, h, 3 * w, 3 * w),
+                Err(zensim::ZensimError::Cancelled { .. })
+            ),
+            "{name}: a fired token must cancel before any work"
+        );
+    }
+    let b = Zensim::new(ZensimProfile::B);
+    let b_stoppable = Zensim::new(ZensimProfile::B).with_stop(NeverStop);
+    assert_eq!(
+        b.compute_pu_linear(&r, &d, w, h, 3 * w, 3 * w)
+            .unwrap()
+            .score()
+            .to_bits(),
+        b_stoppable
+            .compute_pu_linear(&r, &d, w, h, 3 * w, 3 * w)
+            .unwrap()
+            .score()
+            .to_bits()
+    );
+}
+
+/// Below Rev5 a wide-plan identity pair short-circuits as SDR `compute` does:
+/// exactly 100, with zeros at the plan width rather than a computed walk.
+#[test]
+fn wide_plan_pu_identity_matches_sdr_identity() {
+    let (w, h) = (64usize, 64usize);
+    let (r, _) = pair(w, h, 0x2545_f491_4f6c_dd1d);
+    let src: Vec<[u8; 3]> = (0..w * h)
+        .map(|i| [(i * 5) as u8, (i * 11) as u8, i as u8])
+        .collect();
+    let s8 = zensim::RgbSlice::new(&src, w, h);
+    for profile in [ZensimProfile::CHdr, ZensimProfile::C] {
+        let z = Zensim::new(profile);
+        let pu = z.compute_pu_linear(&r, &r, w, h, 3 * w, 3 * w).unwrap();
+        let sdr = z.compute(&s8, &s8).unwrap();
+        assert_eq!(pu.score(), 100.0);
+        assert_eq!(pu.features().len(), sdr.features().len());
+        assert!(pu.features().iter().all(|&v| v == 0.0));
     }
 }

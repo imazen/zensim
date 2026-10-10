@@ -1257,7 +1257,8 @@ pub(crate) fn mlp_bake_chdr_l1t1944() -> &'static [u8] {
 
 /// Generation-C HDR profile params — the PROFILE_C shape (folded-944
 /// contract, bake-carried dial spline, negative tail) over the
-/// aurora-anchor bytes. HDR feature extraction happens route-side.
+/// aurora-anchor bytes. HDR input scores through the PU-linear entries, which
+/// run the bake's planned `HdrEncoding::Linear` fold (`tests/chdr_pu.rs`).
 #[cfg(feature = "candidate-profiles")]
 static PROFILE_C_HDR: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,

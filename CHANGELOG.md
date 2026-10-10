@@ -398,6 +398,22 @@
 
 ### Fixed
 
+- **CHdr (and C) now score through the PU-linear HDR entries.** `compute_pu_linear`,
+  `compute_pu_linear_planar` and descriptor-HDR `compute` refused both with `ModelForwardFailed`
+  ("the bake declares feature ids this feature vector does not reach"): below Rev5 the PU entries ran
+  the legacy walk, which emits only the 372-wide v1 vector, while these bakes read 944-layout ids. Below
+  Rev5, a profile whose scoring plan reads past the legacy vector now takes the existing planned PU fold
+  (`HdrEncoding::Linear`, the plan's toggles) under SDR `compute`'s rule: only without a stop token
+  (with one, PU refuses exactly as SDR does), and identical pixels return 100 with zeros at the plan
+  width. The plan is cached per profile, so other profiles' PU calls pay no plan derivation. CHdr's
+  served features equal today's build of its validation extraction
+  (`compute_folded720_append2_features_hdr`, `HdrEncoding::Linear`, default toggles: the fleet's
+  `zensim-foldapp2` HDR route) bit for bit at all 697 declared ids, and the scores are equal. The
+  fleet-era build differed by at most 1.1e-5 at 320/697 ids, 1.5e-4 points, from two later deliberate
+  arithmetic changes (`7ee3cdce`, `515001dc`). At Rev2–Rev4, non-identity C/CHdr PU requests now refuse
+  with the revision-mismatch message instead of "does not reach"; SDR `compute` still serves them there
+  with its cross-revision warning. Other profiles' PU results are bit-identical on every path, tier and
+  revision (review census). Record: `benchmarks/chdr_pu_2026-10-10.md`.
 - Attribution maps at revision 3+: the fused pass-B scalar tail (columns past the last full 8-lane group at each pyramid
   scale) computed the v2 SSIM `d` with the covariance form on a plane that holds the direct error moment, so `d` left [0, 2]
   and the SSIM-deviation coefficients amplified it to 1e26 on near-lossless content. Maps only; no feature value or served

@@ -335,9 +335,9 @@ fn served_calls(w: usize, h: usize) -> Vec<(String, Result<String, String>)> {
                     .map_err(e),
             ));
         }
-        // CHdr is not servable through the PU v1 entry at any revision (it reads
-        // 944-walk ids: "the bake declares feature ids this feature vector does
-        // not reach", measured on main at the shipped revision); its HDR route is
+        // CHdr declares Rev1, so it has no place in this Rev4 served list. At
+        // its own revision it serves through the PU entries' planned fold
+        // (CHDR_PU, `tests/chdr_pu.rs`); here its HDR route is
         // `compute_folded720_features_hdr` below.
         if matches!(name, "A" | "B" | "BHdr") {
             out.push((

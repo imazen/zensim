@@ -1609,6 +1609,12 @@ impl Zensim {
     /// current scale; a fired token is detected within roughly one band's
     /// worth of work per rayon worker.
     ///
+    /// Below Rev5 a live token therefore keeps every scoring entry on the
+    /// buffered walk. A profile whose bake reads past that walk's width
+    /// (`C`, `CHdr`) is served through the fold only without a token; with
+    /// one, `compute`, `compute_pu_linear` and `compute_pu_linear_planar` all
+    /// refuse it with the same error, so one contract covers every entry.
+    ///
     /// ```no_run
     /// use zensim::{Zensim, ZensimProfile};
     /// # struct S(std::sync::Arc<std::sync::atomic::AtomicBool>);
@@ -2918,26 +2924,36 @@ impl Zensim {
         }
         let config = config_from_params(params, self.parallel);
         crate::ssim_form::check_route(&config)?;
+        // Identical inputs must score exactly 100.0 through the same
+        // `mark_identical` contract the SDR path uses (compares only the
+        // valid `3 * width` of each row, so stride padding is ignored here
+        // too).
+        let is_identical = || {
+            (0..height).all(|y| {
+                ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
+                    == dist_rgb[y * dist_stride..y * dist_stride + 3 * width]
+            })
+        };
         #[cfg(feature = "feature-regime-v2")]
-        if crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5
-            && crate::fold_engine::is_fold_backable(&config)
-        {
+        if let Some(route) = self.pu_fold_route(params, &config) {
+            if route.short_circuit_identity && is_identical() {
+                return self.pu_wide_identity(
+                    params,
+                    &config,
+                    route.plan.as_deref(),
+                    width,
+                    height,
+                );
+            }
             let r = nits_image(width, height, |x, y, ch| {
                 ref_rgb[y * ref_stride + x * 3 + ch]
             })?;
             let d = nits_image(width, height, |x, y, ch| {
                 dist_rgb[y * dist_stride + x * 3 + ch]
             })?;
-            return self.compute_pu_fold(&r, &d, params, &config);
+            return self.compute_pu_fold(&r, &d, params, &config, route.plan.as_deref());
         }
-        // Identical inputs must score exactly 100.0 through the same
-        // `mark_identical` contract the SDR path uses (compares only the
-        // valid `3 * width` of each row, so stride padding is ignored here
-        // too).
-        let identical = (0..height).all(|y| {
-            ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
-                == dist_rgb[y * dist_stride..y * dist_stride + 3 * width]
-        });
+        let identical = is_identical();
         let mut result = if identical {
             identical_result(&config)
         } else {
@@ -3015,7 +3031,8 @@ impl Zensim {
             let d = nits_image(width, height, |x, y, ch| {
                 dist_rgb[y * dist_stride + x * 3 + ch]
             })?;
-            return self.compute_pu_fold(&r, &d, params, &config);
+            let plan = cached_pu_plan(params, &config, true);
+            return self.compute_pu_fold(&r, &d, params, &config, plan.as_deref());
         }
         let identical = (0..height).all(|y| {
             ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
@@ -3080,20 +3097,30 @@ impl Zensim {
         }
         let config = config_from_params(params, self.parallel);
         crate::ssim_form::check_route(&config)?;
-        #[cfg(feature = "feature-regime-v2")]
-        if crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5
-            && crate::fold_engine::is_fold_backable(&config)
-        {
-            let r = nits_image(width, height, |x, y, ch| ref_planes[ch][y * stride + x])?;
-            let d = nits_image(width, height, |x, y, ch| dist_planes[ch][y * stride + x])?;
-            return self.compute_pu_fold(&r, &d, params, &config);
-        }
         // Same identity short-circuit as the interleaved entry (valid
         // `width` of each plane row only).
-        let identical = ref_planes.iter().zip(dist_planes.iter()).all(|(r, d)| {
-            (0..height)
-                .all(|y| r[y * stride..y * stride + width] == d[y * stride..y * stride + width])
-        });
+        let is_identical = || {
+            ref_planes.iter().zip(dist_planes.iter()).all(|(r, d)| {
+                (0..height)
+                    .all(|y| r[y * stride..y * stride + width] == d[y * stride..y * stride + width])
+            })
+        };
+        #[cfg(feature = "feature-regime-v2")]
+        if let Some(route) = self.pu_fold_route(params, &config) {
+            if route.short_circuit_identity && is_identical() {
+                return self.pu_wide_identity(
+                    params,
+                    &config,
+                    route.plan.as_deref(),
+                    width,
+                    height,
+                );
+            }
+            let r = nits_image(width, height, |x, y, ch| ref_planes[ch][y * stride + x])?;
+            let d = nits_image(width, height, |x, y, ch| dist_planes[ch][y * stride + x])?;
+            return self.compute_pu_fold(&r, &d, params, &config, route.plan.as_deref());
+        }
+        let identical = is_identical();
         let mut result = if identical {
             identical_result(&config)
         } else {
@@ -3114,7 +3141,73 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
-    /// Canonical Rev5 PU fold for the legacy planar/interleaved nits APIs.
+    /// Which walk a PU-linear scoring entry takes: `None` is the legacy
+    /// buffered PU walk; `Some` is [`Self::compute_pu_fold`] with the plan to
+    /// pass it.
+    ///
+    /// - **Rev5, fold-backable config:** the canonical fold, as before. Rev5
+    ///   identity features come from the same walk.
+    /// - **Below Rev5, a plan wider than the v1 vector, no stop token:** CHdr
+    ///   and C (944-layout bakes). The legacy walk emits only the v1 width,
+    ///   and the dense gather would refuse the bake. This is the rule SDR
+    ///   `compute` applies through `compute_with_config_inner`, including its
+    ///   two conditions: a live stop token keeps the request off the fold
+    ///   (issue #48: the fold has no intra-walk stop hook, so cancellation
+    ///   would degrade to the before/after checks), and identical pixels
+    ///   short-circuit to zeros at the plan width
+    ///   ([`Self::pu_wide_identity`]).
+    ///
+    /// The plan comes from [`cached_pu_plan`], so a profile the legacy walk
+    /// already reaches pays one map lookup per call, not a plan derivation,
+    /// and its PU path and output bits are unchanged. The fold's
+    /// `HdrEncoding::Linear` walk with the plan's toggles is today's build of
+    /// the extraction CHdr was trained and validated on
+    /// (`benchmarks/chdr_pu_2026-10-10.md`).
+    #[cfg(feature = "feature-regime-v2")]
+    fn pu_fold_route(
+        &self,
+        params: &'static ProfileParams,
+        config: &ZensimConfig,
+    ) -> Option<PuFoldRoute> {
+        if crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5
+            && crate::fold_engine::is_fold_backable(config)
+        {
+            return Some(PuFoldRoute {
+                plan: cached_pu_plan(params, config, true),
+                short_circuit_identity: false,
+            });
+        }
+        if self.stop.is_some() || !crate::fold_engine::is_fold_backable(config) {
+            return None;
+        }
+        let plan = cached_pu_plan(params, config, self.skip_unread_pools)?;
+        (plan.walk_width() > crate::fold_engine::v1_feature_width(config)).then_some(PuFoldRoute {
+            plan: Some(plan),
+            short_circuit_identity: true,
+        })
+    }
+
+    /// The below-Rev5 wide-plan identity result: exactly 100 with zeros at
+    /// the plan width, as SDR `compute` returns through
+    /// `identical_result_at` for the same profiles.
+    #[cfg(feature = "feature-regime-v2")]
+    fn pu_wide_identity(
+        &self,
+        params: &ProfileParams,
+        config: &ZensimConfig,
+        plan: Option<&crate::feature_plan::Plan>,
+        width: usize,
+        height: usize,
+    ) -> Result<ZensimResult, ZensimError> {
+        let mut result = identical_result_at(config, plan.map_or(0, |p| p.walk_width()));
+        self.check_stop()?;
+        apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
+        Ok(result.with_profile(self.profile))
+    }
+
+    /// Canonical PU fold for the planar/interleaved nits APIs, with the plan
+    /// [`Self::pu_fold_route`] resolved: every fold-backable config at Rev5,
+    /// and wide-plan bakes below Rev5 without a stop token.
     #[cfg(feature = "feature-regime-v2")]
     fn compute_pu_fold(
         &self,
@@ -3122,10 +3215,10 @@ impl Zensim {
         distorted: &impl ImageSource,
         params: &ProfileParams,
         config: &ZensimConfig,
+        plan: Option<&crate::feature_plan::Plan>,
     ) -> Result<ZensimResult, ZensimError> {
         self.check_stop()?;
-        let plan = self.scoring_plan(params, config);
-        let toggles = plan.as_ref().map_or_else(
+        let toggles = plan.map_or_else(
             || crate::feature_v2::V2NewFeatureToggles {
                 v1_only: true,
                 ..Default::default()
@@ -3143,13 +3236,13 @@ impl Zensim {
             toggles,
             &mut scratch,
             crate::feature_v2::FoldWalkExtras {
-                compute: plan.as_ref().map(|p| p.compute),
+                compute: plan.map(|p| p.compute),
                 mean_offset: Some(&mut mo),
                 ..Default::default()
             },
         )?
         .into_features();
-        if let Some(p) = &plan {
+        if let Some(p) = plan {
             p.check_emit_covered(features.len())
                 .map_err(|_| ZensimError::ModelLoadFailed {
                     reason: "Rev5 PU fold did not materialize the bake's declared reads",
@@ -4622,6 +4715,54 @@ fn forward_one_bake(
     height: u32,
 ) -> Result<f64, ZensimError> {
     forward_one_bake_with_codec(bytes, features, width, height, None)
+}
+
+/// The PU-linear route [`Zensim::pu_fold_route`] resolved for one call.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) struct PuFoldRoute {
+    plan: Option<std::sync::Arc<crate::feature_plan::Plan>>,
+    /// Below Rev5 a wide-plan pair of identical pixels returns 100 with zeros
+    /// at the plan width, without walking, as SDR `compute` does. At Rev5
+    /// identity features come from the canonical walk.
+    short_circuit_identity: bool,
+}
+
+/// [`crate::fold_engine::score_plan`] for a `&'static` profile, derived once
+/// per process.
+///
+/// The plan is a function of the profile's bakes, the v1 width of the config
+/// (extended/IW flags and scale count), the pool-skipping flag and the
+/// process formula revision, which is fixed for the process. Keying on the
+/// params address, the skip flag and the v1 width covers every input, so the
+/// PU entries no longer derive a plan (`Plan::for_bake`) on every call. The
+/// cache holds at most a few entries per shipped profile.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) fn cached_pu_plan(
+    params: &'static ProfileParams,
+    config: &ZensimConfig,
+    skip_unread: bool,
+) -> Option<std::sync::Arc<crate::feature_plan::Plan>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, OnceLock, RwLock};
+    type Key = (usize, bool, usize);
+    type Cache = RwLock<HashMap<Key, Option<Arc<crate::feature_plan::Plan>>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = (
+        params as *const ProfileParams as usize,
+        skip_unread,
+        crate::fold_engine::v1_feature_width(config),
+    );
+    if let Ok(read) = cache.read()
+        && let Some(plan) = read.get(&key)
+    {
+        return plan.clone();
+    }
+    let plan = crate::fold_engine::score_plan(params, config, skip_unread).map(Arc::new);
+    if let Ok(mut write) = cache.write() {
+        return write.entry(key).or_insert(plan).clone();
+    }
+    plan
 }
 
 /// The parsed [`crate::mlp::Model`] of a `&'static` profile bake, interned by
