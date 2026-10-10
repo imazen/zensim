@@ -101,7 +101,7 @@ def verdict(arm, seed, grid):
 def identity(seed):
     found = candidates(seed)
     out = GATES / f"identity-s{seed}.jsonl"
-    if done(GATES / f"identity-s{seed}.log") and len(out.read_text().splitlines()) == 620:
+    if done(GATES / f"identity-s{seed}.log") and len(identity_rows(out)[0]) == 620:
         return
     run([str(BIN / "serve_custom_bake"), "--e33-identity", str(E / "E3_SOURCES.json"),
          str(REPO / "scripts/rev4_featpot/e33_fx1_declaration.json"), str(PRODUCTION), str(out),
@@ -123,6 +123,16 @@ def steer(arm, seed):
     run([str(BIN / "steer_instrument"), "metric::bake::steerfix_packet::engineering_packet", "--exact",
          "--nocapture"], GATES / f"steer-s{seed}-{arm}.log",
         {"ZENSIM_FORMULA_REV": "5", "ZENSIM_NEIGHBOUR_EXACT": "1", "STEERFIX_PACKET": str(packet)})
+
+
+def identity_rows(path):
+    """(the 620 source x tier rows, the candidate list) of an --e33-identity output; its last line lists candidates."""
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    rows = [r for r in lines if "reference" in r]
+    tail = [r for r in lines if "candidates" in r]
+    if len(tail) != 1 or len(rows) + 1 != len(lines):
+        raise ValueError(f"unexpected identity output layout: {path}")
+    return rows, tail[0]["candidates"]
 
 
 def runtime_candidates():
@@ -198,10 +208,10 @@ def summary():
            "production": dict(sha256=PRODUCTION_SHA, model_bytes=PRODUCTION.stat().st_size), "arms": {}}
     import struct
     hundred = struct.unpack("<q", struct.pack("<d", 100.0))[0]
-    identity_rows = [json.loads(line) for line in (GATES / "identity-s0.jsonl").read_text().splitlines()]
-    if len(identity_rows) != 620:
-        raise ValueError(f"INCOMPLETE: identity proof has {len(identity_rows)} of 620 rows")
-    order = sorted(found)
+    id_rows, id_candidates = identity_rows(GATES / "identity-s0.jsonl")
+    if len(id_rows) != 620:
+        raise ValueError(f"INCOMPLETE: identity proof has {len(id_rows)} of 620 rows")
+    order = [c["sha256"] for c in id_candidates]
     for arm, (model, _, cell) in found.items():
         g = {}
         n = json.loads((GATES / "nearid-s0" / f"candidate-{arm}.GATES.json").read_text())
@@ -212,8 +222,8 @@ def summary():
         g["C2"] = dict(standard=std["checks"]["C2"]["measured"], ladder=lad["checks"]["C2"]["measured"],
                        pass_=std["checks"]["C2"]["measured"] <= 0.05 and lad["checks"]["C2"]["measured"] <= 0.05)
         g["C5"] = dict(rule="all 38 raw identities served at exactly 100.0 (section 7 E8, 8 K3), every SIMD tier",
-                       rows=len(identity_rows),
-                       pass_=all(r["candidate_score_bits"][order.index(arm)] == hundred for r in identity_rows),
+                       rows=len(id_rows),
+                       pass_=all(r["candidate_score_bits"][order.index(found[arm][1])] == hundred for r in id_rows),
                        band_report=std["checks"]["C5"])
         steer_rows = json.loads((GATES / f"steer-s0-{arm}.json").read_text())["rows"]
         passed = sum(r["pass"] for r in steer_rows)
