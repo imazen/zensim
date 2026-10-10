@@ -112,6 +112,38 @@ class Packet(unittest.TestCase):
             v2_lodo_mlp.train_command([], 1, 2, 1853, keep, "N", self.root / "out.bin",
                                       {"derived_inputs": "fx1"})
 
+    def test_freeze_refuses_a_mismatched_image_or_an_unverified_smoke(self):
+        b = self.root
+        for name in owner.FROZEN:
+            (b / name).write_text("{}")
+        (b / "build-meta.packer-input.json").write_text(json.dumps({
+            "zensim_source_commit": "z", "build_commit": "z", "zenmetrics_lane_commit": "m",
+            "image_recipe_sha256": "r"}))
+        (b / "e33-fit-contract.json").write_text(json.dumps({"variants": [
+            {"name": k, "wall_cap_sec": v} for k, v in owner.WALL_CAPS.items()]}))
+        program = v2_common.sha(b / "program.tar.gz")
+        (b / "IMAGE_ID.txt").write_text("sha256:x\n")
+        (b / "IMAGE_TAG.txt").write_text("ghcr.io/imazen/zenfleet-worker:fit-e33-000000000000-wabc\n")
+        with self.assertRaisesRegex(ValueError, "does not name program"):
+            owner.freeze(b, [], "test")
+        image = f"ghcr.io/imazen/zenfleet-worker:fit-e33-{program[:12]}-wabc"
+        (b / "IMAGE_TAG.txt").write_text(image + "\n")
+        for js in ("control", "a", "c", "full"):
+            (b / f"fit-spec-fite33-{js}-{owner.DATE}.json").write_text("{}")
+            (b / f"fit-manifest-fite33-{js}-{owner.DATE}.json").write_text(json.dumps([{}] * 2))
+            run = b / f"smoke-{js}-0-1"
+            run.mkdir()
+            (run / "EXECUTOR_SHORT_PATH_PASS.json").write_text(json.dumps({
+                "status": "PASS", "cell": js, "program_sha": program, "image": image,
+                "harvest": {"status": "VERIFIED" if js != "c" else "REFUSED"}}))
+        with self.assertRaisesRegex(ValueError, "smoke-c-0-1: smoke not PASS/VERIFIED"):
+            owner.freeze(b, [], "test")
+        (b / "smoke-c-0-1/EXECUTOR_SHORT_PATH_PASS.json").write_text(json.dumps({
+            "status": "PASS", "cell": "c", "program_sha": program, "image": image, "harvest": {"status": "VERIFIED"}}))
+        with self.assertRaisesRegex(ValueError, "packet shape differs"):
+            owner.freeze(b, [], "test")  # 8 declared cells, not the registered 126
+        self.assertFalse((b / "PACKET.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -723,6 +723,9 @@ v40-parity bundle e30 dest fold:
 e33-parity bundle v40results bindir dest fold="kadid":
     python3 scripts/tests/e33_control_parity.py --bundle {{bundle}} --v40-results {{v40results}} --bin-dir {{bindir}} --dest {{dest}} --fold {{fold}}
 
+e33-predictor-parity bundle v40results fitbin dest:
+    python3 scripts/tests/e33_predictor_parity.py --bundle {{bundle}} --v40-results {{v40results}} --fitbin {{fitbin}} --dest {{dest}}
+
 e33-identity sources model out:
     ZENSIM_FORMULA_REV=5 cargo run --release -p zensim --features custom-profiles,candidate-profiles --example serve_custom_bake -- --e33-identity {{sources}} scripts/rev4_featpot/e33_fx1_declaration.json {{model}} {{out}}
 

@@ -257,9 +257,64 @@ def rehearse(bundle, launcher, fleet_hosts, want=8):
     return report
 
 
+FROZEN = ("BUILD_LOG.txt", "PLACEMENT_REHEARSAL.json", "build-meta.packer-input.json", "e33-fit-contract.json",
+          "jobset_caps.json", "program.tar.gz")
+
+
+def freeze(bundle, superseded, status):
+    """Write PACKET.json, the packet's freeze inventory, from the bundle's own files.
+
+    Refuses unless every jobset has a declared manifest and a PASS executor smoke whose output the program's harvest
+    owner VERIFIED, and unless the image tag names this program archive.
+    """
+    meta = json.loads((bundle / "build-meta.packer-input.json").read_text())
+    program_sha = sha(bundle / "program.tar.gz")
+    image = (bundle / "IMAGE_TAG.txt").read_text().strip()
+    if f"fit-e33-{program_sha[:12]}-" not in image:
+        raise ValueError(f"image tag {image} does not name program {program_sha[:12]}")
+    files = {name: sha(bundle / name) for name in FROZEN}
+    jobsets, smokes_seen = {}, {}
+    for js in ("control", "a", "c", "full"):
+        for kind in ("spec", "manifest"):
+            path = next(bundle.glob(f"fit-{kind}-fite33-{js}-*.json"))
+            files[path.name] = sha(path)
+        manifest = json.loads(next(bundle.glob(f"fit-manifest-fite33-{js}-*.json")).read_text())
+        jobsets[f"fite33-{js}-{DATE}"] = len(manifest)
+        runs = sorted(bundle.glob(f"smoke-{js}-[0-9]*-[0-9]*"), key=lambda d: d.stat().st_mtime)
+        if not runs:
+            raise ValueError(f"no executor smoke for jobset {js}")
+        run = runs[-1]
+        receipt = next(run.glob("*_PATH_PASS.json"))
+        record = json.loads(receipt.read_text())
+        if record.get("status") != "PASS" or record.get("harvest", {}).get("status") != "VERIFIED":
+            raise ValueError(f"{run.name}: smoke not PASS/VERIFIED")
+        if record.get("program_sha") != program_sha or record.get("image") != image:
+            raise ValueError(f"{run.name}: smoke ran another program or image")
+        smokes_seen[run.name] = dict(cell=record["cell"], status=record["status"], harvest=record["harvest"],
+                                     memory_peak_bytes=record.get("memory_peak_bytes"),
+                                     receipt=str(receipt.relative_to(bundle)), sha256=sha(receipt))
+    caps_doc = json.loads((bundle / "jobset_caps.json").read_text())
+    contract = json.loads((bundle / "e33-fit-contract.json").read_text())
+    image_id = (bundle / "IMAGE_ID.txt").read_text().strip()
+    packet = dict(
+        schema="e33-fleet-packet-v1", registration="benchmarks/e33_registration_2026-10-09.md", status=status,
+        zensim_commit=meta["zensim_source_commit"], binaries_build_commit=meta["build_commit"],
+        zenmetrics_commit=meta["zenmetrics_lane_commit"], program_sha=program_sha, image=image, image_id=image_id,
+        image_recipe_sha256=meta["image_recipe_sha256"], data_sha=DATA_SHA,
+        data_file="e33-fit-data.tar.gz (hardlink of the V40 control archive)", jobsets=jobsets,
+        memory_caps={js.split("-")[1]: v.get("memory") for js, v in caps_doc.items() if js.startswith("fite33-")},
+        wall_caps_seconds={v["name"]: v["wall_cap_sec"] for v in contract["variants"]},
+        wall_cap_owner="program fit_cell_exec: per-cell kill at wall_cap_sec, deterministic failure, never retried",
+        executor_smokes=smokes_seen, files=files, superseded=list(superseded))
+    if sum(jobsets.values()) != 126 or packet["wall_caps_seconds"] != WALL_CAPS:
+        raise ValueError(f"packet shape differs from the registration: {jobsets} {packet['wall_caps_seconds']}")
+    (bundle / "PACKET.json").write_text(json.dumps(packet, indent=1, sort_keys=True) + "\n")
+    return packet
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("smokes", "contracts", "specs", "caps", "rehearse"))
+    p.add_argument("mode", choices=("smokes", "contracts", "specs", "caps", "rehearse", "freeze"))
     p.add_argument("--smoke-dir", type=Path)
     p.add_argument("--root", type=Path, help="local copy of the registered data root (smokes)")
     p.add_argument("--bin-dir", type=Path)
@@ -273,6 +328,8 @@ def main():
     p.add_argument("--memory-c", help="Arm C / full-data memory cap from the first-epoch smokes, e.g. 6g")
     p.add_argument("--launcher", type=Path, default=Path("/var/tmp/fitv2/launch_v2.sh"))
     p.add_argument("--fleet-hosts", type=Path, help="CAPS_FIX.json carrying the registered placement keys")
+    p.add_argument("--superseded", action="append", default=[], help="freeze: earlier packet attempt and why")
+    p.add_argument("--status", default="READY FOR COORDINATOR REVIEW; not launched, image not pushed")
     a = p.parse_args()
     if a.mode == "smokes":
         if not (a.smoke_dir and a.root and a.bin_dir):
@@ -290,6 +347,9 @@ def main():
         if not (a.approved_caps and a.memory_c):
             p.error("caps requires --approved-caps and --memory-c")
         caps(a.bundle, a.approved_caps, a.memory_c)
+    elif a.mode == "freeze":
+        packet = freeze(a.bundle, a.superseded, a.status)
+        print(json.dumps({k: v for k, v in packet.items() if k not in ("files", "executor_smokes")}, indent=1))
     else:
         if not a.fleet_hosts:
             p.error("rehearse requires --fleet-hosts")
