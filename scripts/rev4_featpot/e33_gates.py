@@ -259,10 +259,30 @@ def control_repack():
     print(json.dumps({k: (v["status"], v["dense_identical"], v["stage_line"]) for k, v in out.items()}, indent=1))
 
 
+def train_fragility():
+    """Report-only (registration 9.5): TRAIN correlation of each fragility factor f with f^2 (feature columns only)."""
+    import numpy as np
+    import pyarrow.parquet as pq
+    from v2_common import fx1_declaration
+    table = Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29/wide/main/real/safesyn_fit.parquet")
+    ids = sorted({b for _, b in fx1_declaration()["products"]})
+    cols = pq.read_table(table, columns=[f"f{i}" for i in ids])
+    out = {}
+    for i in ids:
+        f = cols[f"f{i}"].to_numpy(zero_copy_only=False).astype(np.float64)
+        f = f[np.isfinite(f)]
+        out[f"f{i}"] = dict(rows=int(f.size), min=float(f.min()), max=float(f.max()),
+                            pearson_f_f2=float(np.corrcoef(f, f * f)[0, 1]))
+    result = dict(schema="e33-train-fragility-v1", report_only=True, table=str(table), table_sha256=sha(table),
+                  columns_read=[f"f{i}" for i in ids], labels_read=False, ids=out)
+    (GATES / "TRAIN_FRAGILITY.json").write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps({k: round(v["pearson_f_f2"], 6) for k, v in out.items()}))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("candidates", "nearid", "verdict", "identity", "steer", "runtime-candidates",
-                                    "control-repack", "summary"))
+                                    "control-repack", "train-fragility", "summary"))
     p.add_argument("--arm", choices=sorted(ARMS))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--grid", choices=("standard", "ladder"))
@@ -277,6 +297,8 @@ def main():
         identity(a.seed)
     elif a.mode == "steer":
         steer(a.arm, a.seed)
+    elif a.mode == "train-fragility":
+        train_fragility()
     elif a.mode == "control-repack":
         control_repack()
     elif a.mode == "runtime-candidates":
