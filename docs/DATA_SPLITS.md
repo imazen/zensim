@@ -1726,3 +1726,46 @@ TRAIN/SELECT engineering cases for the label-free gates. It also uses the
 existing `cid22_fit` TRAIN calibration rows. It will not read KADID TERMINAL,
 the AIC family, CID22 gold/human, KonJND, sealed/T0, HDR VAL, UPIQ or external
 panels. The exposure receipt is added here at assessment time.
+
+### V40 E31 expanded HDR report approval and pre-read freeze — 2026-10-09
+
+Owner approval, verbatim (conveyed by the coordinator):
+
+> approved, all of it
+
+The approval answers: "E31 didn't run. Its registered HDR reports also read
+the UPIQ development rows and external HDR panels (HDR-VDC, AVT), not just
+the HDR validation data you approved... Approve those reads, or skip E31's
+HDR side." It expands the prior report-only scope for E31 uh4 against the
+frozen matched V40 control. KADID TERMINAL, AIC-family, T0 and sealed data
+remain excluded. There is no new selection, statistic, fit or calibration.
+
+Before any UPIQ payload hash/read, the exact population is frozen: UPIQ-380
+TRAIN fit, 330 observations, and TRAIN development, 50 observations.
+These retain their original training/development roles and cannot establish
+independent human HDR qualification. All forty final-119 uh4 models and
+forty frozen matched controls are reported, with registered pooled signed
+SROCC, per-study pooled signed SROCC, within-reference SROCC and raw scatter
+geometry. The packet's existing owner and template are used unchanged.
+
+Exposure freeze: [v40_e31_hdr_exposure_freeze_2026-10-09.json](../benchmarks/v40_e31_hdr_exposure_freeze_2026-10-09.json),
+SHA-256 `90f8403a7167a367afe9dc91362e820c3ba4e80f846bdf1d92890fc678c12809`.
+The record enumerates exact paths and SHA-256 pins for the two table
+declarations, two label-free key files, two feature/JOD tables and predictor.
+Payload pins come from the registered E31 round-two ingestion receipt and
+manifest; no payload has been opened in this lane at registration.
+Source root: `/mnt/v/output/zensim/upiq380-rev5-r2-2026-10-07/`.
+Shared control pins SHA-256:
+`4d7acfc887603b123f9631f38435df5477b6e628a372596cb8beb6128bddc84c`.
+
+The external approval names HDR-VDC (464 distorted condition observations,
+116 videos × four conditions, eight frames × five display configurations)
+and AVT-VQDB-UHD-1-HDR (195 videos, eight frames each). Their retained
+July tables have the historical 944-feature contract; the archived drivers
+and COMMANDS records explicitly delete decoded PNGs after extraction.
+The local and recorded tower mirrors contain feature CSVs and provenance
+records, with no retained decoded frames. No compatible Rev5/420 admission
+is established yet. Consequently no external feature or label payload is
+admitted or opened here. A compatible retained cache/frame archive is
+required before an exact external exposure freeze and scoring; historical
+features cannot be relabeled Rev5, and new ffmpeg extraction is excluded.
