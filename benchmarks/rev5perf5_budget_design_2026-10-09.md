@@ -53,29 +53,42 @@ scale-0 width after sampling); not a measurement:
 | 128 MiB | ≤ 1,282 | ≤ 2,570 | ≤ 6,864 | ≤ 10,299 | ≤ 20,605 |
 | 256 MiB | ≤ 2,570 | ≤ 5,146 | ≤ 13,734 | ≤ 20,605 | ≤ 41,215 |
 
-The original route (`fuse_channels`) runs a strip's three channels in
-parallel. The queued route runs at most `slots` channel jobs at once, so with
-one or two slots it would have less v2 parallelism than the route it replaces.
-**Safeguard (REV5PERF5, coordinator-requested):** `REV5_MIN_JOB_SLOTS = 3`.
-When fewer than three jobs fit, the walk takes the original route, exactly as
-when none fit. Live slots are therefore `min(threads, 16, floor(budget /
-per_job))`, or 0 (original route) when that is below 3. At the 128 MiB default
-the original route now serves widths 6,865 and up (8192×4096 included); the
-queue serves widths up to 6,864 with 3–16 slots. Both routes already pass
-strict parity, so the floor changes scheduling, not bits; the unit tests
-(1/2/8 MiB budgets) and the fresh-build parity runs check that.
+Widths here are the scale-0 width the walk uses. Inputs narrower than 64 px
+are reflect-padded to 64 first, so their per-job size uses 64.
 
-The frozen 64/128/256 MiB binaries measured for RSS predate the floor. Their
-1- and 2-slot cells (64 MiB at 4096² and 8192×4096, 128 MiB at 8192×4096)
-show the queued route's memory, not the route the source now takes. Whether
-the floor is faster than a 1–2-slot queue is still **not measured**.
+**The floor (`REV5_MIN_JOB_SLOTS = 3`).** When fewer than three jobs fit, the walk
+takes the original route, exactly as when none fit. Live slots are
+`min(threads, 16, floor(budget / per_job))`, or 0 (original route) when that is
+below 3. At 128 MiB, widths up to 6,864 queue with 3–16 slots, and widths from
+6,865 (8192×4096 included) take the original route. Both routes pass strict
+parity, so the floor changes scheduling, not bits.
 
-**Timing arms.** The queued timing grid (`rev5perf5-budget-timing`) times five
-arms: uncapped, the frozen 64/128/256 MiB builds, and `by_v2fy_r5_floor3`, the
-128 MiB source with the floor (`costcmp_run.py --floor-arm`). Its v2 inventory
-accepts the floor build only if removing the exact floor hunk gives back the
-frozen 128 MiB source byte for byte. The v2 preflight requires all five arms
-to agree in score and all 420 feature bits at every cell. The report adds a
-direct floor-versus-128 MiB paired comparison. At 128 MiB the two differ only at
-8192×4096. RSS stays on the four measured arms. The gate is unchanged: load1 < 2,
-no foreign build or training, and the first 32 clean rounds from at most 64.
+**Rationale, corrected after review.** The first rationale said a 1–2-slot queue
+runs fewer channel jobs at once than the original route's three. That
+undercounts the original route: it runs the three channels in parallel
+(`fuse_channels`) **and** each channel's v1 bands in parallel (`band_parallel`).
+That is up to 3 × 4 band tasks per strip, while a queued job runs its bands
+serially. A 3- or 4-slot queue is therefore not obviously faster than the
+original route either. A diagnostic on a loaded box (review, 2026-10-09) pointed
+the other way at 3 slots. The floor's value is decided by the timing below,
+not by this argument.
+
+**Floor grid (timing).** `rev5perf5-budget-timing` times six arms on 15 cells:
+- **Arms:** uncapped; the frozen 64/128/256 MiB builds; and the 128 MiB source
+  built with floor 3 (shipped) and with floor 17. Floor 17 never queues,
+  because the queue has at most 16 slots, so it is the original route.
+- **Inputs:** 1024², 4096², 4608×4096, 6144×4096 and 8192×4096 at 8, 16 and 32
+  threads. At 128 MiB the queue has 8–16, 5, 4, 3 and 2 slots there.
+- **Answer per cell:** frozen 128 MiB (the queue at that slot count) minus floor
+  17 (the original route), paired on the same admitted rounds. Floor 3 minus
+  floor 17 shows the shipped behaviour directly.
+- **Gate:** unchanged (load1 < 2, no foreign build or training, the first 32 clean
+  rounds from at most 64).
+- **Inventory check:** the v3 inventory admits each floor build only if removing
+  its exact floor hunk gives back the frozen 128 MiB source.
+- **RSS:** fresh-process RSS of both floor arms covers all 15 cells
+  (`rev5perf5-floor-rss`, quiet-gated). Records carry the worker's rayon pool size.
+
+The frozen 64/128/256 MiB binaries measured for RSS predate the floor. Their 1-
+and 2-slot cells (64 MiB at 4096² and 8192×4096, 128 MiB at 8192×4096) show
+the queued route's memory, not the route the source takes now.
