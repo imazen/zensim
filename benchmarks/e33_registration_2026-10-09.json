@@ -561,7 +561,7 @@
   ],
   "checks": {
    "K1": "stored PCHIP derivatives > 0 at every knot except possibly the identity knot (reported)",
-   "K2": "1e6 points log-spaced in g = pin - raw over [1e-6, pin - x_floor], plus g = 0 and knots +-1 ulp: served score strictly decreasing in g at f64",
+   "K2": "1e6 points log-spaced in g = pin - raw over [1e-6, pin - x_floor], plus g = 0 and knots +-1 ulp: served score strictly decreasing in g at f64 (clarified by amendment A1)",
    "K3": "spline(pin) == 100.0 and E8",
    "K4": "0 evaluated rows with raw <= x_floor over all E33 populations; report rows with raw < x0",
    "K5": "C1 >= .93, C3, C4, C6, G-DIAL (p5<=25, p95>=85, mono>=.93)"
@@ -708,5 +708,6 @@
    "steering_qualification_bar": 135
   },
   "artifact_correction": "coordinator corrected the readiness artifact's plain-MLP claim"
- }
+ },
+ "amendments": [{"id": "A1", "date": "2026-10-10", "by": "coordinator", "check": "K2", "verbatim": "coordinator 2026-10-10: strict decrease cannot be observed between probes one ulp apart, so ulp-adjacent probes must not increase and grid points must strictly decrease; a technical clarification of an unmeasurable condition, not a threshold change; acknowledged in E33_REVIEW_R2.md", "effect": "ulp-adjacent probe pairs must not increase; all other consecutive pairs (log-spaced grid, g = 0) must strictly decrease; probe set, populations and other checks unchanged", "threshold_change": false, "recorded_before_any_fit": true, "implementation": "dial_spline::check_identity_pinned (benchmarks/e33_implementation_2026-10-10.md)"}]
 }

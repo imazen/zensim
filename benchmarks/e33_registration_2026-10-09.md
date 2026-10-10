@@ -319,7 +319,7 @@ Checks on every E33 full-data candidate, all through the serving owner:
 | # | Check | Pass |
 |---|---|---|
 | K1 | stored PCHIP derivatives | `> 0` at every knot except possibly the identity knot; report `d_{n−1}` |
-| K2 | dense monotonicity | 10⁶ points log-spaced in `g = pin − raw` over `[1e-6, pin − x_floor]`, plus `g = 0` and each knot ± 1 ulp: served score strictly decreasing in `g` at f64 for every consecutive pair |
+| K2 | dense monotonicity | 10⁶ points log-spaced in `g = pin − raw` over `[1e-6, pin − x_floor]`, plus `g = 0` and each knot ± 1 ulp: served score strictly decreasing in `g` at f64 for every consecutive pair (clarified by amendment A1, §12) |
 | K3 | identity | `spline(pin) == 100.0` and E8 |
 | K4 | floor never engaged | 0 evaluated rows with `raw ≤ x_floor` across every E33 population (calibration rows, C2 grid, negative-tail probe, identity probe, NEARID, every G-STEER forward). Report the count with `raw < x_0` and `min raw` relative to `x_floor` |
 | K5 | existing guards | C1 mono ≥ .93, C3, C4, C6 and G-DIAL (p5 ≤ 25, p95 ≥ 85, mono ≥ .93) evaluated as in the release gate map |
@@ -525,3 +525,16 @@ D1 populations, plus label-free identity, near-identity, tie and steering
 properties on TRAIN probes. It does not establish perceptual accuracy at the
 top of the scale (no admitted near-lossless human data), HDR behaviour,
 untouched external generalization, or qualification.
+
+## 12. Amendments
+
+### A1 (2026-10-10): K2 at ulp-adjacent probes
+
+Verbatim: "coordinator 2026-10-10: strict decrease cannot be observed between probes one ulp apart, so ulp-adjacent probes must not increase and grid points must strictly decrease; a technical clarification of an unmeasurable condition, not a threshold change; acknowledged in E33_REVIEW_R2.md".
+
+What it changes: §8 K2's probe set includes each knot ± 1 ulp. A change of `slope × 1 ulp` is below f64
+resolution, so a strict decrease between probes one ulp apart cannot be observed. Under A1, ulp-adjacent probes must
+not increase, and every other consecutive pair (the 10⁶ log-spaced grid points, `g = 0`) must strictly decrease.
+The probe set, the population, K1, K3 and K4 are unchanged. The implementation already applies this rule
+(`dial_spline::check_identity_pinned`, `benchmarks/e33_implementation_2026-10-10.md`), and no E33 fit had run when
+it was recorded.
