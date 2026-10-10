@@ -256,6 +256,11 @@ pub fn bake_feature_set_ref(model: &Model, era: &str) -> Result<FeatureSetRef, S
     {
         let scorer = zensim::BakeScorer::new(model).map_err(|e| e.to_string())?;
         let ids = scorer.consumed_feature_ids().map_err(|e| e.to_string())?;
+        // The wire is the gathered declared read set, as for a dense bake. `caller_input_width()`
+        // counts model inputs (direct entries plus products) and is not a row width.
+        let declared = zensim::declared_feature_ids(model)
+            .ok_or("derived-input bake without zentrain.feature_ids")?
+            .len();
         let slots = SlotSet::from_slots(ids.into_iter().map(usize::from));
         let compute = compute_parts_for_slots(&slots);
         let id = FeatureSetId::from_slots(compute, era, &slots)
@@ -263,7 +268,7 @@ pub fn bake_feature_set_ref(model: &Model, era: &str) -> Result<FeatureSetRef, S
         return Ok(FeatureSetRef {
             id,
             slots,
-            layout: Some(width),
+            layout: Some(declared),
             source: "derived from bake bytes (zensim read set of a derived-input bake)".to_string(),
             inferred: false,
         });

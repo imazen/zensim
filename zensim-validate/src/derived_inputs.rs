@@ -564,6 +564,23 @@ mod tests {
         let r = crate::feature_set::bake_feature_set_ref(&m, "rev5_localwin").unwrap();
         assert_eq!(r.slots.iter_slots().collect::<Vec<_>>(), vec![13, 401, 422]);
         assert!(crate::block_profile::profile(&m).is_err());
+        // The wire is the gathered declared read set (like a dense bake), not the model's input
+        // width (direct inputs plus products), so a 720-wide table carries no layout shortfall.
+        let declared = zensim::declared_feature_ids(&m).unwrap().len();
+        assert!(m.caller_input_width() > declared);
+        assert_eq!(r.layout, Some(declared));
+        let table = crate::feature_set::FeatureSetRef {
+            id: r.id.clone(),
+            slots: r.slots.clone(),
+            layout: Some(720),
+            source: "test table".to_string(),
+            inferred: false,
+        };
+        assert!(
+            crate::feature_set::check(&r, &table)
+                .iter()
+                .all(|m| m.kind != crate::feature_set::MismatchKind::LayoutDiffers)
+        );
     }
 
     #[test]
