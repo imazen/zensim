@@ -17,7 +17,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f3132ee6f9c3
 # zenavif's own AV1 decode path uses; nothing else from zenavif is used.
 zenavif = { git = "https://github.com/imazen/zenavif", rev = "85dd0d2b609ba0d49ebf70330b6fcf4f337bbd67", default-features = false, features = ["_dev"] }
 zenresize = { git = "https://github.com/imazen/zenresize", rev = "e3975fb9d6d6b7baa96038a0eb8e27febb37c012" }
-zenpng = { git = "https://github.com/imazen/zenpng", rev = "37c942ed5cbe34d8fee8e1e768fef6b0f99ed374" }
+zenpng = "0.1.4"  # the published release zensim-validate decodes with (main needs unreleased zenflate)
 linear-srgb = { git = "https://github.com/imazen/linear-srgb", rev = "c56e7940f4a123fb653bc60593376cf2eaed3e70", features = ["transfer"] }
 imgref = "1.12.0"
 rgb = { version = "0.8.52", features = ["bytemuck"] }

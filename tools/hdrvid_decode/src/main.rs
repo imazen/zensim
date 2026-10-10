@@ -34,7 +34,7 @@ use zenresize::{Filter, PixelDescriptor, ResizeConfig, Resizer};
 const DEPENDENCY_PINS: &str = "rav1d-safe f3132ee6f9c37310291168b28751f2926ceedb8e; \
 zenavif 85dd0d2b609ba0d49ebf70330b6fcf4f337bbd67 (yuv_convert); \
 zenresize e3975fb9d6d6b7baa96038a0eb8e27febb37c012; \
-zenpng 37c942ed5cbe34d8fee8e1e768fef6b0f99ed374; \
+zenpng 0.1.4 (crates.io); \
 linear-srgb c56e7940f4a123fb653bc60593376cf2eaed3e70";
 
 /// One decoded 10-bit 4:2:0 frame, tightly packed.

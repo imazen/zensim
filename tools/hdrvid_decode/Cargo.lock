@@ -241,16 +241,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "errno"
-version = "0.3.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
-dependencies = [
- "libc",
- "windows-sys",
-]
-
-[[package]]
 name = "fallible_collections"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -418,12 +408,6 @@ dependencies = [
  "magetypes",
  "num-traits",
 ]
-
-[[package]]
-name = "linux-raw-sys"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "lock_api"
@@ -703,19 +687,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
-]
-
-[[package]]
-name = "rustix"
-version = "1.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
-dependencies = [
- "bitflags",
- "errno",
- "libc",
- "linux-raw-sys",
- "windows-sys",
 ]
 
 [[package]]
@@ -1126,12 +1097,13 @@ dependencies = [
 
 [[package]]
 name = "zenflate"
-version = "0.4.0"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6a6d1257350f0e4dbe68918130e9e32629dc6a0bdcf645825e54e4252396e01"
+checksum = "8409543ad469f954834da58409f0d9c463156f01cfaf8a8a03fe277c73b1e0f5"
 dependencies = [
  "archmage",
  "enough",
+ "libm",
 ]
 
 [[package]]
@@ -1168,8 +1140,9 @@ dependencies = [
 
 [[package]]
 name = "zenpng"
-version = "0.2.0"
-source = "git+https://github.com/imazen/zenpng?rev=37c942ed5cbe34d8fee8e1e768fef6b0f99ed374#37c942ed5cbe34d8fee8e1e768fef6b0f99ed374"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34ef0ff0cfac28ce74a9241dbe8ba3abe60f385819d55675c4daced1ac8ac4bd"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -1177,10 +1150,8 @@ dependencies = [
  "enough",
  "imgref",
  "linear-srgb 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "magetypes",
  "memchr",
  "rgb",
- "rustix",
  "safe_unaligned_simd",
  "thiserror",
  "whereat",
