@@ -16,6 +16,10 @@ produces is stored as a stimulus, feature or label.
       HDRVID frames: max/mean |difference| in 1/65535 units and the PQ
       luminance ratio distribution.
 
+  crosscheck.py features --out OUT --content NAME --july-dir DIR --extractor BIN --scratch DIR
+      The July 944 extractor (`hdrvdc_features_extract`, config A) on HDRVID
+      frames vs the July per-frame feature CSVs of the matching content.
+
 Results go to OUT/crosscheck/<command>.json.
 """
 
@@ -182,15 +186,87 @@ def chain(args):
                                                 indent=1) + "\n")
 
 
+def features(args):
+    """July 944 extractor on HDRVID frames vs the July per-frame feature CSVs.
+
+    Config A only (4K, Pq{1000}) for one HDR-VDC content. The July content id
+    is identified by nearest features over all candidate files (the label CSV,
+    which maps names to ids, is not opened)."""
+    import csv as _csv
+
+    out, scratch = Path(args.out), Path(args.scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    plan = json.loads((out / "DECODE_PLAN.json").read_text())
+    rows = [r for r in plan["rows"] if r["set"] == "hdrvdc" and r["content"] == args.content
+            and (r["role"] == "reference" or r["admitted"])]
+    ref = next(r for r in rows if r["role"] == "reference")
+    ref_frames = receipt(out, ref)["frames"]
+    manifest, keys = [], []
+    for row in rows:
+        if row["role"] == "reference":
+            continue
+        vp = f"{row['crf']}_{row['coded']}"
+        for f, rf in zip(receipt(out, row)["frames"], ref_frames):
+            keys.append((vp, f["j"]))
+            manifest.append(f"{vp}|f{f['j']}|A\t0\t1000\t{rf['png']}\t{f['png']}")
+    man = scratch / f"features-{args.content}.tsv"
+    man.write_text("\n".join(manifest) + "\n")
+    csv_out = scratch / f"features-{args.content}.csv"
+    csv_out.unlink(missing_ok=True)
+    subprocess.run([args.extractor, "--manifest", str(man), "--out", str(csv_out)], check=True)
+    ours = {}
+    with open(csv_out) as f:
+        for r in _csv.DictReader(f):
+            vp, j, _ = r["key"].split("|")
+            ours[(vp, int(j[1:]))] = (float(r["score228"]), np.array([float(r[f"f{i}"]) for i in range(944)]))
+    candidates = {}
+    for path in sorted(Path(args.july_dir).glob("content_*.csv")):
+        july = {}
+        with open(path) as f:
+            for r in _csv.DictReader(f):
+                cid, vp, j, tag = r["key"].split("|")
+                if tag == "A":
+                    july[(vp, int(j[1:]))] = (float(r["score228"]),
+                                              np.array([float(r[f"f{i}"]) for i in range(944)]))
+        if set(ours) <= set(july):
+            err = np.mean([np.abs(ours[k][1] - july[k][1]).sum() / (np.abs(july[k][1]).sum() + 1e-12) for k in ours])
+            candidates[path.name] = (err, july)
+    ranked = sorted(candidates.items(), key=lambda kv: kv[1][0])
+    name, (err, july) = ranked[0]
+    a = np.array([ours[k][0] for k in sorted(ours)])
+    b = np.array([july[k][0] for k in sorted(ours)])
+    fa = np.array([ours[k][1] for k in sorted(ours)])
+    fb = np.array([july[k][1] for k in sorted(ours)])
+    scale = np.maximum(np.abs(fb).max(axis=0), 1e-12)
+    rel = np.abs(fa - fb) / scale
+    from scipy.stats import spearmanr
+    result = dict(
+        schema="hdrvid-crosscheck-features-v1", content=args.content, config="A (4K, Pq{1000})",
+        extractor=dict(path=args.extractor, sha256=sha256(args.extractor)), pairs=len(ours),
+        july_file=name, match_error=err, runner_up=[(n, e) for n, (e, _) in ranked[1:3]],
+        score228=dict(ours_mean=float(a.mean()), july_mean=float(b.mean()), mean_abs_diff=float(np.abs(a - b).mean()),
+                      max_abs_diff=float(np.abs(a - b).max()), spearman_across_pairs=float(spearmanr(a, b)[0])),
+        features=dict(median_rel_to_column_max=float(np.median(rel)), p99_rel_to_column_max=float(np.percentile(rel, 99)),
+                      max_rel_to_column_max=float(rel.max())),
+    )
+    dest = out / "crosscheck"
+    dest.mkdir(exist_ok=True)
+    (dest / f"features-{args.content}.json").write_text(json.dumps(result, indent=1) + "\n")
+    print(json.dumps({k: result[k] for k in ("july_file", "match_error", "runner_up", "score228", "features")}, indent=1))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("command", choices=("decoders", "chain"))
+    p.add_argument("command", choices=("decoders", "chain", "features"))
+    p.add_argument("--content")
+    p.add_argument("--july-dir")
+    p.add_argument("--extractor")
     p.add_argument("--out", required=True)
-    p.add_argument("--sample", required=True)
+    p.add_argument("--sample", default="")
     p.add_argument("--scratch", required=True)
     p.add_argument("--ffmpeg", help="the pinned ffmpeg 8.1.3 (AV1 stream copy)")
     args = p.parse_args()
-    {"decoders": decoders, "chain": chain}[args.command](args)
+    {"decoders": decoders, "chain": chain, "features": features}[args.command](args)
 
 
 if __name__ == "__main__":

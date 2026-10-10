@@ -1,0 +1,71 @@
+{
+ "assessment_source_sha256": "ac71f2d4a24b302a736e564f40b4ba95b924697318c81791b0fe3c51d238bd2a",
+ "control_pins_sha256": "4d7acfc887603b123f9631f38435df5477b6e628a372596cb8beb6128bddc84c",
+ "coordinator_message": "Owner, verbatim 2026-10-10: \"do HDR-VDC with rav1d-safe now, and non-av1 videos with ffmpeg 8.1\". Earlier owner approval of E31's registered HDR-side reports including the external HDR-VDC and AVT panels, verbatim 2026-10-09: \"approved, all of it\". Scope: report-only E31 uh4 vs frozen matched V40 control on HDR-VDC (464 distorted condition observations; legs i/ii/iii over configs A-E) and AVT-VQDB-UHD-1-HDR (195 encoded videos); no KADID TERMINAL, AIC-family, T0 or sealed data; no new fit, calibration, selection or statistic.",
+ "label_read_authorized": true,
+ "mode": "e31video",
+ "objects": {
+  "avt-keys": {
+   "kind": "payload",
+   "path": "/mnt/v/output/zensim/hdrvid-2026-10-10/tables/avt.keys.parquet",
+   "sha256": "a5782893c0691af3861657cfafa9583c165d59d41573bcb5c5c1cf3d9c82fe47"
+  },
+  "avt-labels": {
+   "kind": "payload",
+   "path": "/mnt/v/datasets/avt-vqdb-uhd-1-hdr/subjective_scores/mos_ci.csv",
+   "sha256": "6b1e5bac20f183ffdfc14f2478492593324842fee0407f91368d7afe11cc1a53"
+  },
+  "avt-manifest": {
+   "kind": "metadata",
+   "path": "/mnt/v/output/zensim/hdrvid-2026-10-10/tables/avt.parquet.manifest.json",
+   "sha256": "5391ac6a4b99aa3b9dbe4b0f4746be7fccafe2ade746f5356d3a98d46e61cd11"
+  },
+  "avt-table": {
+   "kind": "payload",
+   "path": "/mnt/v/output/zensim/hdrvid-2026-10-10/tables/avt.parquet",
+   "sha256": "b58f5797ead736c2a3500b2c75ddd6efacb989f5ca662c72e47ae34fa7cc2081"
+  },
+  "hdrvdc-keys": {
+   "kind": "payload",
+   "path": "/mnt/v/output/zensim/hdrvid-2026-10-10/tables/hdrvdc.keys.parquet",
+   "sha256": "ee372a497ec81ba788dabb25a92331ad490f2e1e83af0dbe50a71a4148be2c9d"
+  },
+  "hdrvdc-labels": {
+   "kind": "payload",
+   "path": "/mnt/v/datasets/hdr-vdc/HDR_VDC_JOD_Scores.csv",
+   "sha256": "81484245b53b3d3726f1fefcf06905952a24d1418ef92278851b5d7ff1f6b917"
+  },
+  "hdrvdc-manifest": {
+   "kind": "metadata",
+   "path": "/mnt/v/output/zensim/hdrvid-2026-10-10/tables/hdrvdc.parquet.manifest.json",
+   "sha256": "3689044f51bb9df306689a4b81eb83534d2d188eb81bff737a5dd5bb3b9b172e"
+  },
+  "hdrvdc-table": {
+   "kind": "payload",
+   "path": "/mnt/v/output/zensim/hdrvid-2026-10-10/tables/hdrvdc.parquet",
+   "sha256": "d1c9025ad573086220ec04b6e031df60916c61648c4d4316b233def004e351ef"
+  },
+  "predictor": {
+   "kind": "tool",
+   "path": "/mnt/v/output/zensim/v40r4-2026-10-08/bin/predict_features_with_bake",
+   "sha256": "b549e923f66d0ff266a29b246bd7490e2837a4801affebda29d197707d09ee2d"
+  }
+ },
+ "program_sha256": "de44ea9b1ff85031265dfa1d60731de47f177d6816fb0880f85d28f38c405517",
+ "required_action": "Freeze exact assessment declarations/payload/tool pins after complete fits; no protected population is permitted.",
+ "schema": "v40-assessment-exposure-freeze-v1",
+ "tables": {
+  "avt": {
+   "keys": "avt-keys",
+   "labels": "avt-labels",
+   "manifest": "avt-manifest",
+   "table": "avt-table"
+  },
+  "hdrvdc": {
+   "keys": "hdrvdc-keys",
+   "labels": "hdrvdc-labels",
+   "manifest": "hdrvdc-manifest",
+   "table": "hdrvdc-table"
+  }
+ }
+}

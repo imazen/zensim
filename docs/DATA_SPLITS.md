@@ -1799,3 +1799,39 @@ hashing external payloads. Neither external labels nor features were read.
 This disposition closes the lane with approved UPIQ reports complete and
 explicit external blockers. KADID TERMINAL, AIC-family, T0 and sealed data
 remain unopened; no new fit, extraction, calibration or selection occurred.
+
+### HDRVID E31 external HDR video exposure freeze — 2026-10-10
+
+Owner, verbatim 2026-10-10: "do HDR-VDC with rav1d-safe now, and non-av1
+videos with ffmpeg 8.1". This lifts the 2026-10-09 external disposition
+(frames deleted, re-extraction excluded) for exactly the E31 report-only
+transfer reads that the owner approved on 2026-10-09 ("approved, all of it").
+Roles are unchanged: HDR-VDC and AVT-VQDB-UHD-1-HDR are external evaluation
+panels, never training, calibration, selection or tuning inputs.
+
+Stimuli were re-decoded label-free (`scripts/external_reads/hdrvid/`): every
+AV1 stream by rav1d-safe `f3132ee6` (ffmpeg 8.1.3 stream copy to IVF only);
+AVT HEVC, VVC and FFVHUFF sources by ffmpeg 8.1.3 native decoders built
+without swscale; YCbCr→R'G'B' by zenavif's recipe, Lanczos-3 display frames by
+zenresize, 16-bit PNGs. 332 videos, 2,656 kept frames, no decode failures; the
+16 HDR-VDC tests byte-identical to their references are excluded as the
+dataset README specifies. Rev5 by_v2fy-420 features (`hdrvid_extract`, build
+`17f6bf6e`) were mean-pooled over the eight frames per video and display
+configuration. The JOD CSV inside HDR-VDC.zip was deleted unread from the
+scratch extraction; no label file was opened before this freeze.
+
+Exact populations: HDR-VDC 464 distorted condition observations (116 videos ×
+four conditions; configs A–E; legs i/ii/iii as in the July registration) and
+AVT 195 encoded videos (config A). Models: all forty final-119 uh4 cells and
+the forty frozen matched V40 controls. Statistics: E31's registered report
+shape only (pooled, per-study, within-reference signed rank and raw scatter);
+no new statistic, fit, calibration, selection or adoption rule.
+
+Exposure freeze: [hdrvid_e31_exposure_freeze_2026-10-10.json](../benchmarks/hdrvid_e31_exposure_freeze_2026-10-10.json),
+SHA-256 `bd6d283527290269ed96a7a39a3d1889cb5268e851f63b56614a9ec65f35fe29`.
+It pins the two pooled tables (HDR-VDC `d1c9025a…`, AVT `b58f5797…`), their
+label-free keys and manifests, the label files by the hashes recorded in the
+zenpapers dataset pointers (HDR-VDC `81484245…`, AVT `6b1e5bac…`), the packet
+predictor `b549e923…`, assessment source `ac71f2d4…` (v40_panels.py with the
+`e31video` mode), packet program `de44ea9b…` and control pins `4d7acfc8…`.
+KADID TERMINAL, AIC-family, T0 and sealed data remain excluded.
