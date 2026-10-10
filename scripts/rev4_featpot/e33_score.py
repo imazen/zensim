@@ -108,6 +108,31 @@ def improvement(report):
                 source_seed_deltas=delta)
 
 
+def high_quality_slice(report, out):
+    """Report-only (registration 9.5): signed SROCC within the top 20% of human quality per source, arm vs control."""
+    import pandas as pd
+    import pyarrow.parquet as pq
+    from e13_teacher import spearman
+    receipt = json.loads((ROOT / "wide/main/real/receipt.json").read_text())
+    result = {}
+    for fold in PRODUCTION_SOURCES:
+        y = pq.read_table(ROOT / receipt["legs"][fold]["full"]["rel"], columns=["human_score"])["human_score"].to_numpy()
+        mask = y >= np.quantile(y, 0.8)
+        per = {}
+        for label in LABELS:
+            values = []
+            for seed in range(10):
+                pred = pd.read_csv(out / label / f"{fold}_s{seed}" / "pred.tsv", sep="\t").pred.to_numpy()
+                values.append(spearman(pred[mask], y[mask]))
+            per[label] = values
+        full_control = [report["panels"]["control"][f"{fold}_s{s}"]["signed"] for s in range(10)]
+        result[fold] = dict(slice_rows=int(mask.sum()), rows=len(y), quality_oriented=bool(min(full_control) > 0),
+                            control_mean=float(np.mean(per["control"])),
+                            **{f"{arm}_minus_control": float(np.mean(np.subtract(per[arm], per["control"])))
+                               for arm in ("a", "c")}, seeds=per)
+    return result
+
+
 def score(bundle, out):
     grids, full = complete(bundle)
     doc = json.loads((bundle / "PACKET.json").read_text())
@@ -119,6 +144,7 @@ def score(bundle, out):
                    as_good={arm: report["decisions"][arm]["as_good"] for arm in ("a", "c")},
                    decisions=report["decisions"], c_vs_a=improvement(report),
                    decision_sha256=sha(out / "decision.json"),
+                   report_only=dict(high_quality_slice=high_quality_slice(report, out)),
                    full_cells={f"{spec}__s{seed}": str(cell) for (spec, seed), cell in sorted(full.items())})
     (out / "e33_e21.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     print(json.dumps({k: summary[k] for k in ("as_good", "decision_sha256")} | {
