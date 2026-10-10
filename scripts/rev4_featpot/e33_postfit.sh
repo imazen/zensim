@@ -29,7 +29,11 @@ until grep -q '==== E33 ALL 126 CELLS VERIFIED AND INSTALLED' "$E/launch/harvest
 done
 cd "$repo"
 step e21
-"${heavy[@]}" python3 "$here/e33_score.py" e21 --out "$E/assessment-e33"
+if [[ -f $E/assessment-e33/e33_e21.json ]]; then
+    printf 'complete: %s\n' "$E/assessment-e33/e33_e21.json"
+else
+    "${heavy[@]}" python3 "$here/e33_score.py" e21 --out "$E/assessment-e33"
+fi
 step gates-seed0
 gates() {
     local seed=$1
@@ -46,13 +50,14 @@ gates 0
 step runtime
 candidates=$(python3 "$here/e33_gates.py" runtime-candidates)
 binary=$G/bin/costcmp_instrument
-"${heavy[@]}" python3 scripts/demos/costcmp_run.py parity --binary "$binary" --dest "$G/runtime/parity" --e33-grid "$candidates"
+[[ -f $G/runtime/parity/PREFLIGHT_PASS.json ]] || "${heavy[@]}" python3 scripts/demos/costcmp_run.py parity --binary "$binary" --dest "$G/runtime/parity" --e33-grid "$candidates"
 "${capped[@]}" python3 scripts/demos/costcmp_run.py timing --binary "$binary" --dest "$G/runtime/timing" \
     --parity "$G/runtime/parity/PREFLIGHT_PASS.json" --analyzer "$analyzer" --lock "$lock" --e33-grid "$candidates"
 "${capped[@]}" python3 scripts/demos/costcmp_run.py rss --binary "$binary" --dest "$G/runtime/rss" \
     --parity "$G/runtime/parity/PREFLIGHT_PASS.json" --lock "$lock" --e33-grid "$candidates"
 step summary
 python3 "$here/e33_gates.py" summary
+python3 "$here/e33_verdict.py" --e21 "$E/assessment-e33/e33_e21.json" --gates "$G/GATES.json" --out "$E/E33_VERDICT.json"
 step report-only-seeds-1-2
 gates 1
 gates 2

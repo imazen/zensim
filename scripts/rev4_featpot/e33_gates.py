@@ -66,9 +66,19 @@ def run(cmd, log, env=None):
         subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=True, env={**os.environ, **(env or {})})
 
 
+def done(path):
+    """Resumable post-fit: a step whose final output exists is complete; partial outputs refuse (run() opens with x)."""
+    if path.exists():
+        print(f"complete: {path}")
+        return True
+    return False
+
+
 def nearid(arm, seed):
     model, digest, _ = candidates(seed)[arm]
     root = GATES / f"nearid-s{seed}"
+    if done(root / f"candidate-{arm}.GATES.json"):
+        return
     root.mkdir(parents=True, exist_ok=True)
     run([str(BIN / "serve_custom_bake"), "--nearid", str(NEARID_PACKET), str(root), f"candidate-{arm}", str(model),
          digest], root / f"candidate-{arm}.run.log", {"ZENSIM_FORMULA_REV": "5"})
@@ -79,6 +89,8 @@ def nearid(arm, seed):
 def verdict(arm, seed, grid):
     model, _, _ = candidates(seed)[arm]
     out = GATES / f"verdict-s{seed}-{arm}" / grid
+    if done(out / "gaddr.json"):
+        return
     out.parent.mkdir(parents=True, exist_ok=True)
     run(["just", "--justfile", str(REPO / "benchmarks/adjudicate_land.just"), "--working-directory", str(REPO),
          "bake-verdict-engineering", str(BIN / "bake_verdict"), str(model), str(NO_HUMAN),
@@ -89,6 +101,8 @@ def verdict(arm, seed, grid):
 def identity(seed):
     found = candidates(seed)
     out = GATES / f"identity-s{seed}.jsonl"
+    if done(GATES / f"identity-s{seed}.log") and len(out.read_text().splitlines()) == 620:
+        return
     run([str(BIN / "serve_custom_bake"), "--e33-identity", str(E / "E3_SOURCES.json"),
          str(REPO / "scripts/rev4_featpot/e33_fx1_declaration.json"), str(PRODUCTION), str(out),
          *(str(found[a][0]) for a in sorted(found))], GATES / f"identity-s{seed}.log", {"ZENSIM_FORMULA_REV": "5"})
@@ -96,6 +110,8 @@ def identity(seed):
 
 def steer(arm, seed):
     model, digest, _ = candidates(seed)[arm]
+    if done(GATES / f"steer-s{seed}-{arm}.json"):
+        return
     doc = json.loads(STEER_PACKET.read_text())
     assert len(doc["cases"]) == 135 and all(c["model_sha256"] == PRODUCTION_SHA for c in doc["cases"])
     for case in doc["cases"]:
