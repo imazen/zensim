@@ -109,6 +109,14 @@ def environment(geometry, tier, threads):
             'ZENBENCH_NO_SAVE':'1','ZENBENCH_NO_CALIBRATE':'1'}
 
 
+def worker_revision(name):
+    if name.startswith('by_v2fy_r'):
+        revision = name.removeprefix('by_v2fy_r').split('_')[0]
+        assert revision in ('3', '4', '5'), 'unknown formula revision'
+        return int(revision)
+    return 1
+
+
 def worker_run(binary, arm, revision, geometry, tier, threads, log):
     env = environment(geometry,tier,threads)
     env.update(ZEN_S2_PARITY_FEATURES="1",ZEN_S2_SPEEDQ_WORKER=arm,ZENSIM_FORMULA_REV=str(revision),ZEN_S2_RSS_ONLY='1')
@@ -254,7 +262,7 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
         try:
             for name in arms:
                 arm='by_v2fy' if name.startswith('by_v2fy_r') else name
-                revision=(5 if name=='by_v2fy_r5_before' else int(name[-1])) if arm=='by_v2fy' else 1
+                revision=worker_revision(name)
                 socket=str(Path(ipc)/name)
                 sockets[name]=socket
                 log=(dest/f'{name}.worker.log').open('x');streams.append(log)
@@ -379,7 +387,7 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
         for threads in (thread_counts if thread_counts is not None else [1,32]):
             for name in arms:
                 arm='by_v2fy' if name.startswith('by_v2fy_r') else name
-                revision=(5 if name=='by_v2fy_r5_before' else int(name[-1])) if arm=='by_v2fy' else 1
+                revision=worker_revision(name)
                 tag=f'v4x-t{threads}-{geometry}-{name}'
                 if (root/f'{tag}.json').exists():continue
                 refresh_activity('quiet gate before RSS '+tag)
