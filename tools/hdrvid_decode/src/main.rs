@@ -212,7 +212,9 @@ fn decode_ivf(
             u: tight(p.u().ok_or("missing U plane")?),
             v: tight(p.v().ok_or("missing V plane")?),
         };
-        if (yuv.u.len(), yuv.v.len()) != (w.div_ceil(2) * h.div_ceil(2), w.div_ceil(2) * h.div_ceil(2)) {
+        if (yuv.u.len(), yuv.v.len())
+            != (w.div_ceil(2) * h.div_ceil(2), w.div_ceil(2) * h.div_ceil(2))
+        {
             return Err("unexpected chroma plane geometry".into());
         }
         yuv.check_range()?;
@@ -277,13 +279,18 @@ fn decode_raw(
             break;
         }
         if filled != buf.len() {
-            return Err(format!("partial raw frame ({filled} of {} bytes)", buf.len()));
+            return Err(format!(
+                "partial raw frame ({filled} of {} bytes)",
+                buf.len()
+            ));
         }
         stream.update(&buf);
         if keep(facts.decoded) {
             let s: Vec<u16> = buf
-                .chunks_exact(2)
-                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| u16::from_le_bytes(*b))
                 .collect();
             let yuv = Yuv {
                 w,
@@ -347,7 +354,7 @@ fn stats(display: &[f32]) -> serde_json::Value {
     let mut sum = [0f64; 3];
     let (mut under, mut over) = (0usize, 0usize);
     let mut nits: Vec<f32> = Vec::with_capacity(display.len() / 3);
-    for px in display.chunks_exact(3) {
+    for px in display.as_chunks::<3>().0 {
         for c in 0..3 {
             lo[c] = lo[c].min(px[c]);
             hi[c] = hi[c].max(px[c]);
@@ -355,8 +362,9 @@ fn stats(display: &[f32]) -> serde_json::Value {
             under += (px[c] < 0.0) as usize;
             over += (px[c] > 1.0) as usize;
         }
-        let lin: [f32; 3] =
-            core::array::from_fn(|c| linear_srgb::tf::pq_to_linear(px[c].clamp(0.0, 1.0)) * 10000.0);
+        let lin: [f32; 3] = core::array::from_fn(|c| {
+            linear_srgb::tf::pq_to_linear(px[c].clamp(0.0, 1.0)) * 10000.0
+        });
         nits.push(0.2627 * lin[0] + 0.6780 * lin[1] + 0.0593 * lin[2]);
     }
     let n = nits.len();
@@ -376,7 +384,9 @@ fn stats(display: &[f32]) -> serde_json::Value {
 /// Storage quantization: clamp to [0, 1], `round(v * 65535)`.
 fn quantize(frame: &[f32]) -> Vec<rgb::Rgb<u16>> {
     frame
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|p| {
             let q = |v: f32| (v.clamp(0.0, 1.0) * 65535.0).round() as u16;
             rgb::Rgb::new(q(p[0]), q(p[1]), q(p[2]))
@@ -456,7 +466,8 @@ fn run() -> Result<(), String> {
             let small = display_frame(codes, args.display.0, args.display.1, *far);
             let path = dir.join(format!("{}_f{j}.png", args.stem));
             let sha = write_png(&path, &quantize(&small), far.0, far.1)?;
-            record["far"] = serde_json::json!({"png": path, "png_sha256": sha, "display": [far.0, far.1]});
+            record["far"] =
+                serde_json::json!({"png": path, "png_sha256": sha, "display": [far.0, far.1]});
         }
         frames.push(record);
     }
@@ -524,7 +535,10 @@ mod tests {
         assert!(to_rgb_codes(&frame(64)).iter().all(|&v| v == 0.0));
         assert!(to_rgb_codes(&frame(940)).iter().all(|&v| v == 1.0));
         let mid = to_rgb_codes(&frame(502));
-        assert!(mid.windows(2).all(|w| w[0] == w[1]), "neutral chroma stays gray");
+        assert!(
+            mid.windows(2).all(|w| w[0] == w[1]),
+            "neutral chroma stays gray"
+        );
     }
 
     #[test]
@@ -533,6 +547,9 @@ mod tests {
         assert_eq!(display_frame(codes.clone(), 8, 6, (8, 6)), codes);
         let up = display_frame(codes, 8, 6, (16, 12));
         assert_eq!(up.len(), 16 * 12 * 3);
-        assert!(up.iter().all(|v| (v - 0.25).abs() < 1e-5), "flat stays flat");
+        assert!(
+            up.iter().all(|v| (v - 0.25).abs() < 1e-5),
+            "flat stays flat"
+        );
     }
 }

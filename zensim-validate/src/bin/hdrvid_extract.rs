@@ -122,7 +122,10 @@ fn validate(a: &Admission) -> Result<(), String> {
             || row.content.is_empty()
             || row.content.contains('/')
         {
-            return Err(format!("row {} / {}: member/config/frame mismatch", row.key, row.config));
+            return Err(format!(
+                "row {} / {}: member/config/frame mismatch",
+                row.key, row.config
+            ));
         }
         let (w, _, _, _) = config(&a.set, &row.config).expect("checked above");
         let dir = if w == 3840 { "frames" } else { "frames-1080" };
@@ -138,7 +141,10 @@ fn validate(a: &Admission) -> Result<(), String> {
                         .bytes()
                         .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
                 {
-                    return Err(format!("{}: frame path/hash outside the admission", row.key));
+                    return Err(format!(
+                        "{}: frame path/hash outside the admission",
+                        row.key
+                    ));
                 }
             }
             if f.reference.rel == f.distorted.rel {
@@ -187,7 +193,12 @@ fn dim(v: f32) -> f32 {
     linear_to_pq(pq_to_linear(v) / 8.0)
 }
 
-fn load(root: &Path, frame: &Frame, size: (usize, usize), dimmed: bool) -> Result<CodeImage, String> {
+fn load(
+    root: &Path,
+    frame: &Frame,
+    size: (usize, usize),
+    dimmed: bool,
+) -> Result<CodeImage, String> {
     let path = root.join(&frame.rel);
     let mut component = root.to_owned();
     for part in Path::new(&frame.rel).components() {
@@ -204,21 +215,28 @@ fn load(root: &Path, frame: &Frame, size: (usize, usize), dimmed: bool) -> Resul
     if digest(&bytes) != frame.sha256 {
         return Err(format!("frame bytes changed: {path:?}"));
     }
-    let decoded = zenpng::decode(&bytes, &zenpng::PngDecodeConfig::default(), &enough::Unstoppable)
-        .map_err(|e| format!("{path:?}: {e}"))?;
+    let decoded = zenpng::decode(
+        &bytes,
+        &zenpng::PngDecodeConfig::default(),
+        &enough::Unstoppable,
+    )
+    .map_err(|e| format!("{path:?}: {e}"))?;
     let pixels = decoded.pixels;
     let d = pixels.descriptor();
     if d.channel_type() != zenpixels::ChannelType::U16
         || d.layout() != zenpixels::ChannelLayout::Rgb
         || (pixels.width() as usize, pixels.height() as usize) != size
     {
-        return Err(format!("{path:?}: not a {}x{} RGB16 display frame ({d:?})", size.0, size.1));
+        return Err(format!(
+            "{path:?}: not a {}x{} RGB16 display frame ({d:?})",
+            size.0, size.1
+        ));
     }
     let (w, h) = size;
     let view = pixels.as_slice();
     let mut data = Vec::with_capacity(w * h);
     for y in 0..h {
-        for p in view.row(y as u32).chunks_exact(6) {
+        for p in view.row(y as u32).as_chunks::<6>().0 {
             let mut px = [1.0f32; 4];
             for c in 0..3 {
                 let v = u16::from_ne_bytes([p[2 * c], p[2 * c + 1]]) as f32 / 65535.0;
@@ -305,10 +323,13 @@ fn run(args: &[String]) -> Result<(), String> {
                 if requested && !value.is_finite() {
                     return Err(format!("{} {} f{j}: nonfinite f{id}", row.key, row.config));
                 }
-                line.push_str(&format!("\t{:?}", if requested { *value } else { f64::NAN }));
+                line.push_str(&format!(
+                    "\t{:?}",
+                    if requested { *value } else { f64::NAN }
+                ));
             }
             let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n % 50 == 0 {
+            if n.is_multiple_of(50) {
                 eprintln!("HDRVID {} Rev5 extraction: {n}/{}", a.set, jobs.len());
             }
             Ok(line)
@@ -339,7 +360,8 @@ fn run(args: &[String]) -> Result<(), String> {
         .write(true)
         .open(&out)
         .map_err(|e| e.to_string())?;
-    file.write_all(output.as_bytes()).map_err(|e| e.to_string())?;
+    file.write_all(output.as_bytes())
+        .map_err(|e| e.to_string())?;
     let file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -374,14 +396,22 @@ mod tests {
         for v in 0..videos {
             let content = format!("c{}", v % 5);
             for c in configs {
-                let dir = if matches!(*c, "D" | "E") { "frames-1080" } else { "frames" };
+                let dir = if matches!(*c, "D" | "E") {
+                    "frames-1080"
+                } else {
+                    "frames"
+                };
                 let frames: Vec<_> = (0..8)
-                    .map(|j| serde_json::json!({"j": j,
+                    .map(|j| {
+                        serde_json::json!({"j": j,
                         "reference": frame(set, dir, &content, &format!("{content}__ref"), j),
-                        "distorted": frame(set, dir, &content, &format!("v{v}"), j)}))
+                        "distorted": frame(set, dir, &content, &format!("v{v}"), j)})
+                    })
                     .collect();
-                rows.push(serde_json::json!({"key": format!("{set}/v{v}"), "content": content,
-                    "config": c, "frames": frames}));
+                rows.push(
+                    serde_json::json!({"key": format!("{set}/v{v}"), "content": content,
+                    "config": c, "frames": frames}),
+                );
             }
         }
         serde_json::json!({"schema": "hdrvid-extraction-admission-v1", "set": set,
@@ -406,7 +436,10 @@ mod tests {
             ("formula_revision", serde_json::json!(4)),
             ("input_contract", serde_json::json!("hdrvdc-944")),
             ("set", serde_json::json!("chug")),
-            ("requested_ids", serde_json::json!((0..420).collect::<Vec<_>>())),
+            (
+                "requested_ids",
+                serde_json::json!((0..420).collect::<Vec<_>>()),
+            ),
         ] {
             let mut v = fixture("avt");
             v[field] = value;
