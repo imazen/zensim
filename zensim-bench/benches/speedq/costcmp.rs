@@ -15,7 +15,7 @@ pub(super) fn action(
     h: usize,
 ) -> Option<(Action, Value)> {
     match arm {
-        "zensim_A" | "zensim_B" => {
+        "zensim_A" | "zensim_B" | "zensim_D" => {
             // These are the exact slots named by profile.rs and serving.rs.
             // Pin their bytes as metadata; scoring still calls Zensim::compute.
             let (profile, bytes, name): (ZensimProfile, &[u8], &str) = if arm == "zensim_A" {
@@ -25,6 +25,15 @@ pub(super) fn action(
                         "../../../zensim/weights/v47_strict_qat_native_byid_2026-09-06.bin"
                     ),
                     "A",
+                )
+            } else if arm == "zensim_D" {
+                // The scorecard's "frozen D" runtime comparator (MODEL_SELECTION_SCORECARD).
+                (
+                    ZensimProfile::D,
+                    include_bytes!(
+                        "../../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"
+                    ),
+                    "D",
                 )
             } else {
                 (
@@ -89,6 +98,41 @@ pub(super) fn action(
                 action,
                 json!({"version":"0.8.2","surface":"compute_ssimulacra2 RGB8 one-shot","rayon":cfg!(feature="ssim2-rayon")}),
             ))
+        }
+        "e33_a_map" | "e33_c_map" | "e33_seed0_map" => {
+            // Scorecard spatial cost: cached-reference complete score + map. The reference is prepared
+            // once, untimed (prepare_steering, map bin 1 as in G-STEER); each call scores and maps.
+            let label = arm
+                .trim_start_matches("e33_")
+                .trim_end_matches("_map")
+                .to_uppercase();
+            let path =
+                std::env::var(format!("ZEN_S2_E33_BAKE_{label}")).expect("pinned candidate path");
+            let expected =
+                std::env::var(format!("ZEN_S2_E33_SHA_{label}")).expect("pinned candidate SHA");
+            let bytes = std::fs::read(path).unwrap();
+            assert_eq!(super::digest(&bytes), expected, "candidate bytes changed");
+            assert_eq!(
+                std::env::var("ZENSIM_FORMULA_REV").unwrap(),
+                "5",
+                "candidates serve Rev5"
+            );
+            let model: &'static Model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
+            let scorer: &'static mut zensim::BakeScorer<'static> = Box::leak(Box::new(
+                zensim::BakeScorer::new(model).unwrap().with_parallel(true),
+            ));
+            let source: &'static RgbSlice<'static> = Box::leak(Box::new(RgbSlice::new(src, w, h)));
+            let mut session = scorer.prepare_steering(source, 1).unwrap();
+            let info = json!({"source_sha256":expected,"revision":"5","map_bin":1,"source_bytes":bytes.len(),
+                "surface":"BakeScorer::prepare_steering once, then SteeringSession::compute per call (score + map)"});
+            let action: Action = Box::new(move || {
+                session
+                    .compute(&RgbSlice::new(dst, w, h), None)
+                    .unwrap()
+                    .result()
+                    .score()
+            });
+            Some((action, info))
         }
         "e33_a" | "e33_c" => {
             // E33 section 9.3: a registered full-data seed-0 candidate, pinned by path and SHA from the caller,

@@ -34,8 +34,13 @@ REPO = Path(__file__).resolve().parents[2]
 ARMS = {"a": "sel:3b7bd5ebe929@h32:H128:cv16:cf98", "c": "sel:3b7bd5ebe929@h32:H128:cv16:cf98:fx1"}
 
 
+MODELS_OVERRIDE = None  # {name: (path, sha256, cell or None)} from --models: an explicit qualification model set
+
+
 def candidates(seed=0):
     """{arm: (packed model path, sha256, cell dir)} for full-data seed `seed`, from the verified install."""
+    if MODELS_OVERRIDE is not None:
+        return MODELS_OVERRIDE
     from e33_launch import packet, runtime, jobset
     bundle = E / "packet"
     doc = packet(bundle)
@@ -458,15 +463,54 @@ def k4_full():
                           for k, v in x["populations"].items()} for a, x in out["arms"].items()}, indent=1))
 
 
+def head_probe(head):
+    """Integrity companion compatibility: canonical ZCTH attachment probe for every model (serve_custom_bake)."""
+    out = GATES / "head-probe.tsv"
+    if done(out):
+        return
+    found = candidates(0)
+    with open(GATES / "head-probe.log", "x") as log, open(out, "x") as f:
+        subprocess.run([str(BIN / "serve_custom_bake"), "--head-probe", str(head), *(str(found[a][0]) for a in sorted(found))],
+                       stdout=f, stderr=log, check=True, env={**os.environ, "ZENSIM_FORMULA_REV": "5"})
+
+
+def inspect():
+    """Canonical qualified-checkpoint inspector on every final model."""
+    out = GATES / "inspect.json"
+    if done(out):
+        return
+    found, rows = candidates(0), {}
+    for name in sorted(found):
+        r = subprocess.run([str(BIN / "inspect_qualified_checkpoint"), str(found[name][0])], capture_output=True, text=True)
+        rows[name] = dict(model=str(found[name][0]), sha256=found[name][1], rc=r.returncode,
+                          stdout=r.stdout.strip()[-4000:], stderr=r.stderr.strip()[-2000:])
+    out.write_text(json.dumps(rows, indent=1) + "\n")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("candidates", "nearid", "verdict", "identity", "steer", "runtime-candidates",
-                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "k4-full", "summary"))
-    p.add_argument("--arm", choices=sorted(ARMS))
+                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "k4-full", "head-probe", "inspect", "summary"))
+    p.add_argument("--arm")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--grid", choices=("standard", "ladder"))
     p.add_argument("--neighbour", type=int, choices=(0, 1))
+    p.add_argument("--root", type=Path, help="output root (binaries under <root>/bin); default the E33 gates root")
+    p.add_argument("--models", type=Path, help='JSON {name: {"path", "sha256", "cell"|null}}: explicit model set')
+    p.add_argument("--head", type=Path, help="ZCTH companion for head-probe")
     a = p.parse_args()
+    global GATES, BIN, MODELS_OVERRIDE
+    if a.root is not None:
+        GATES, BIN = a.root, a.root / "bin"
+        GATES.mkdir(parents=True, exist_ok=True)
+    if a.models is not None:
+        MODELS_OVERRIDE = {}
+        for name, rec in json.loads(a.models.read_text()).items():
+            if sha(Path(rec["path"])) != rec["sha256"]:
+                raise ValueError(f"model {name} differs from its pin")
+            MODELS_OVERRIDE[name] = (Path(rec["path"]), rec["sha256"], Path(rec["cell"]) if rec.get("cell") else None)
+    if a.arm is not None and a.arm not in candidates(a.seed):
+        p.error(f"unknown model {a.arm}")
     if a.mode == "candidates":
         print(json.dumps({k: [str(v[0]), v[1]] for k, v in candidates(a.seed).items()}))
     elif a.mode == "nearid":
@@ -477,6 +521,10 @@ def main():
         identity(a.seed)
     elif a.mode == "steer":
         steer(a.arm, a.seed)
+    elif a.mode == "head-probe":
+        head_probe(a.head)
+    elif a.mode == "inspect":
+        inspect()
     elif a.mode == "k4-full":
         k4_full()
     elif a.mode == "steer-dense":

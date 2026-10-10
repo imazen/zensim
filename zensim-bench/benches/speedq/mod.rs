@@ -327,6 +327,14 @@ pub(super) fn run() {
         ("e33_a", "e33_a", "5"),
         #[cfg(feature = "costcmp")]
         ("e33_c", "e33_c", "5"),
+        #[cfg(feature = "costcmp")]
+        ("zensim_D", "zensim_D", "1"),
+        #[cfg(feature = "costcmp")]
+        ("e33_a_map", "e33_a_map", "5"),
+        #[cfg(feature = "costcmp")]
+        ("e33_c_map", "e33_c_map", "5"),
+        #[cfg(feature = "costcmp")]
+        ("e33_seed0_map", "e33_seed0_map", "5"),
     ];
     let only = std::env::var("ZEN_S2_ARMS").expect("explicit arm inventory");
     let mut owners = Vec::new();

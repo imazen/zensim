@@ -48,10 +48,18 @@ BUDGET_FLOOR_GEOMETRIES = ['1024x1024', '4096x4096', '4608x4096', '6144x4096', '
 # E33 registration section 9.3: candidates vs production seed 0, v4x and v3, one thread; RSS at 1024^2.
 E33_ARMS = ['by_v2fy_r5', 'e33_a', 'e33_c']
 E33_GEOMETRIES = ['64x64', '256x256', '1024x1024']
+# QUAL-A (MODEL_SELECTION_SCORECARD scalar performance + spatial/memory cost): one pinned worker on v4x, uncached
+# complete score at 1024^2 and 2048^2 against frozen D and fast-ssim2, plus cached-reference score+map arms.
+QUAL_ARMS = ['by_v2fy_r5', 'e33_a', 'e33_c', 'zensim_D', 'fast_ssim2', 'fast_ssim2_main',
+             'e33_a_map', 'e33_c_map', 'e33_seed0_map']
+QUAL_GEOMETRIES = ['1024x1024', '2048x2048']
 
 
 def configuration(scaling=False, budget=False, floor=False, e33=False):
     assert not (scaling and budget), 'select one COSTCMP grid'
+    if e33 == 'qual':
+        assert not (scaling or budget or floor), 'select one COSTCMP grid'
+        return ['v4x'], [1], QUAL_GEOMETRIES, QUAL_ARMS, 'costcmp-qual-preflight-v1'
     if e33:
         assert not (scaling or budget or floor), 'select one COSTCMP grid'
         return TIERS, [1], E33_GEOMETRIES, E33_ARMS, 'costcmp-e33-preflight-v1'
@@ -126,9 +134,10 @@ def validate_ready(rows, name, geometry, tier, threads, rec):
         assert rec['model']['source_sha256'] == owner.SOURCE_SHA
         assert rec['model']['revision'] == str(owner.worker_revision(name))
     elif name.startswith('e33_'):
-        assert rec['model']['source_sha256'] == os.environ[f"ZEN_S2_E33_SHA_{name[4:].upper()}"]
+        label = name[4:].removesuffix('_map').upper()
+        assert rec['model']['source_sha256'] == os.environ[f"ZEN_S2_E33_SHA_{label}"]
         assert rec['model']['revision'] == '5'
-    elif name in ('zensim_A', 'zensim_B'):
+    elif name in ('zensim_A', 'zensim_B', 'zensim_D'):
         assert rec['model']['revision'] == '1'
         assert len(rec['model']['source_sha256']) == 64
     elif name == 'fast_ssim2_main':
@@ -147,6 +156,10 @@ def receipt(path, scaling=False, budget=False, floor=False, e33=False):
         for g in geometries:
             for a in arms[1:]:
                 assert len({rows[(g,t,n,a)]['score_bits'] for t in tiers for n in threads}) == 1, f'strict {a} score parity differs'
+    if e33 == 'qual':  # the cached-reference map arm serves the same score as its model's uncached arm
+        for g,t,n in cells(scaling,budget,floor,e33):
+            for m,u in (('e33_a_map','e33_a'),('e33_c_map','e33_c'),('e33_seed0_map','by_v2fy_r5')):
+                assert rows[(g,t,n,m)]['score_bits'] == rows[(g,t,n,u)]['score_bits'], f'{m} score differs from {u}'
     groups = [arms] if budget else ([['by_v2fy_r5','by_v2fy_r5_before'], ['by_v2fy_r4']] if scaling else [[ARMS[0]]])
     for g in geometries:
         for group in groups:
@@ -200,12 +213,17 @@ def main():
     ap.add_argument('--rss-under-load',action='store_true',help='coordinator-instructed fresh-process RSS without a quiet wait; timing gates stay unchanged')
     ap.add_argument('--floor-arm',action='store_true',help='floor grid: add the floor-3 and floor-17 (original route) builds and the 3/4-slot widths (v3 inventory); RSS measures only the floor arms')
     ap.add_argument('--e33-grid',type=Path,metavar='CANDIDATES_JSON',help='E33 9.3 grid; JSON {"a":{"path","sha256"},"c":{...}} pins the candidate bakes')
+    ap.add_argument('--qual-grid',type=Path,metavar='CANDIDATES_JSON',help='QUAL-A scorecard runtime grid; JSON pins a, c and seed0')
     args=ap.parse_args()
-    e33=args.e33_grid is not None
+    if args.e33_grid is not None and args.qual_grid is not None:ap.error('select one COSTCMP grid')
+    e33='qual' if args.qual_grid is not None else args.e33_grid is not None
+    pins=args.qual_grid if args.qual_grid is not None else args.e33_grid
     if e33:
-        if args.scaling or args.budget_grid or args.floor_arm or args.rss_under_load:ap.error('--e33-grid is its own grid')
-        for label,rec in json.loads(args.e33_grid.read_text()).items():
-            assert label in ('a','c') and hashlib.sha256(Path(rec['path']).read_bytes()).hexdigest()==rec['sha256']
+        if args.scaling or args.budget_grid or args.floor_arm or args.rss_under_load:ap.error('--e33-grid/--qual-grid is its own grid')
+        labels=json.loads(pins.read_text())
+        assert set(labels)==({'a','c','seed0'} if e33=='qual' else {'a','c'})
+        for label,rec in labels.items():
+            assert hashlib.sha256(Path(rec['path']).read_bytes()).hexdigest()==rec['sha256']
             os.environ[f'ZEN_S2_E33_BAKE_{label.upper()}']=rec['path'];os.environ[f'ZEN_S2_E33_SHA_{label.upper()}']=rec['sha256']
     if args.floor_arm and not args.budget_grid:ap.error('--floor-arm applies only to the budget grid')
     if args.floor_arm and args.rss_under_load:ap.error('floor-arm RSS keeps the quiet gate')
@@ -215,8 +233,8 @@ def main():
     if args.budget_binaries is not None and not args.budget_grid:ap.error('--budget-binaries requires --budget-grid')
     if args.scaling and args.before_binary is None:ap.error('--scaling requires --before-binary')
     if args.mode=='status':
-        expected_timing = 6 if e33 else (15 if args.floor_arm else 9) if args.budget_grid else (48 if args.scaling else 64)
-        expected_rss = 3 if e33 else (36+30 if args.floor_arm else 36) if args.budget_grid else (48 if args.scaling else 80)
+        expected_timing = 2 if e33=='qual' else 6 if e33 else (15 if args.floor_arm else 9) if args.budget_grid else (48 if args.scaling else 64)
+        expected_rss = 2*len(QUAL_ARMS) if e33=='qual' else 3 if e33 else (36+30 if args.floor_arm else 36) if args.budget_grid else (48 if args.scaling else 80)
         owner.collection_status(args.dest,expected_timing=expected_timing,expected_rss=expected_rss);return
     if args.binary is None:ap.error('--binary is required')
     binaries = budget_inventory(args.budget_binaries,args.floor_arm) if args.budget_grid else ({'by_v2fy_r5_before':args.before_binary} if args.scaling else None)
@@ -238,9 +256,9 @@ def main():
         if args.lock is None:ap.error('--lock is required')
         with owner.segment_lock(args.lock):
             owner.rss(args.binary,args.dest,args.parity,
-                      arms=E33_ARMS if e33 else (list(BUDGET_FLOOR_SLOTS) if args.floor_arm else arms) if args.budget_grid else (['by_v2fy_r5','by_v2fy_r5_before'] if args.scaling else ARMS),
+                      arms=QUAL_ARMS if e33=='qual' else E33_ARMS if e33 else (list(BUDGET_FLOOR_SLOTS) if args.floor_arm else arms) if args.budget_grid else (['by_v2fy_r5','by_v2fy_r5_before'] if args.scaling else ARMS),
                       parity_loader=loader,ready_check=check,
-                      geometries=['1024x1024'] if e33 else (BUDGET_FLOOR_GEOMETRIES if args.floor_arm else BUDGET_GEOMETRIES) if args.budget_grid else (SCALING_GEOMETRIES if args.scaling else None),
+                      geometries=QUAL_GEOMETRIES if e33=='qual' else ['1024x1024'] if e33 else (BUDGET_FLOOR_GEOMETRIES if args.floor_arm else BUDGET_GEOMETRIES) if args.budget_grid else (SCALING_GEOMETRIES if args.scaling else None),
                       thread_counts=[1] if e33 else BUDGET_THREADS if args.budget_grid else (SCALING_THREADS if args.scaling else None),
                       worker_binaries=binaries,require_quiet=not args.rss_under_load)
 
