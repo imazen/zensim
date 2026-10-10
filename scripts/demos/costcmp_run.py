@@ -42,6 +42,7 @@ def budget_inventory(path):
     assert manifest['schema'] == 'rev5perf5-binaries-v1'
     assert set(manifest['arms']) == set(BUDGET_ARMS)
     dependencies = []
+    candidate_sources = []
     binaries = {}
     for arm, rec in manifest['arms'].items():
         binary = Path(rec['binary'])
@@ -54,8 +55,12 @@ def budget_inventory(path):
         caps = re.findall(rb'const REV5_JOB_BUDGET_BYTES: usize = (\d+) \* 1024 \* 1024;', source)
         expected = [] if arm.endswith('_before') else [arm.rsplit('b',1)[1].encode()]
         assert caps == expected, 'source byte cap does not match candidate identity'
+        if caps:
+            candidate_sources.append(re.sub(rb'const REV5_JOB_BUDGET_BYTES: usize = \d+ \* 1024 \* 1024;',
+                                            b'const REV5_JOB_BUDGET_BYTES: usize = CANDIDATE;', source))
         binaries[arm] = binary
     assert all(value == dependencies[0] for value in dependencies), 'candidate dependencies differ'
+    assert len(set(candidate_sources)) == 1, 'candidate source differs beyond the private byte cap'
     return binaries
 
 def signature(rec):

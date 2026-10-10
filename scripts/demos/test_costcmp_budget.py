@@ -61,6 +61,12 @@ class BudgetAdmissionTest(unittest.TestCase):
         manifest.write_text(json.dumps(dict(schema='rev5perf5-binaries-v1', arms=arms)))
         self.assertEqual(set(cmp.budget_inventory(manifest)), set(cmp.BUDGET_ARMS))
         arm = cmp.BUDGET_ARMS[1]
+        original = Path(arms[arm]['runtime_source']).read_text()
+        Path(arms[arm]['runtime_source']).write_text(original+'\nfn changed_kernel() {}')
+        arms[arm]['runtime_source_sha256'] = hashlib.sha256(Path(arms[arm]['runtime_source']).read_bytes()).hexdigest()
+        manifest.write_text(json.dumps(dict(schema='rev5perf5-binaries-v1', arms=arms)))
+        with self.assertRaisesRegex(AssertionError, 'beyond'):
+            cmp.budget_inventory(manifest)
         Path(arms[arm]['runtime_source']).write_text('const REV5_JOB_BUDGET_BYTES: usize = 128 * 1024 * 1024;')
         arms[arm]['runtime_source_sha256'] = hashlib.sha256(Path(arms[arm]['runtime_source']).read_bytes()).hexdigest()
         manifest.write_text(json.dumps(dict(schema='rev5perf5-binaries-v1', arms=arms)))
