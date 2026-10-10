@@ -33,8 +33,9 @@
 ### Changed
 
 - Rev5 ordered strip jobs now obey a private byte budget, including retained
-  queue allocations, and use the original route when no job fits. Strict
-  384/384 parity and thread invariance pass (`c3a90984`). The provisional
+  queue allocations, and use the original route when fewer than three jobs
+  fit (the original route runs three channels in parallel). Strict 384/384
+  parity and thread invariance pass (`c3a90984`, floor `d278c762`). The provisional
   default is 128 MiB; speed not yet measured. Fresh-process RSS and exact
   allocation accounting: [REV5PERF5](benchmarks/rev5perf5_rss_2026-10-09.md).
 

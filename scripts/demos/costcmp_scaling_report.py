@@ -76,7 +76,7 @@ def rss_only_report(args):
         values = [str(memories[f'{t}-t{n}-{g}-{arm}']) for arm in cmp.BUDGET_ARMS]
         lines.append(f'| {n} | {g} | '+' | '.join(values)+' |')
     lines += ['', 'Each observation is a separate `/usr/bin/time -v` process with identical model/input setup. These are single observations, not distributions. Queue budgets exclude allocator overhead, input pixels and producer scratch.', '',
-              'Actual x86_64 Rust `size_of` accounting: `per_job = 11 × width × (strip_rows + 2 × halo) × 4 + fixed_bytes`. Live slots are `min(threads, 16, floor(budget/per_job))`; zero slots use the original route.', '',
+              'Actual x86_64 Rust `size_of` accounting: `per_job = 11 × width × (strip_rows + 2 × halo) × 4 + fixed_bytes`. In the measured binaries live slots are `min(threads, 16, floor(budget/per_job))`, and zero slots use the original route. The source now also takes the original route when fewer than three jobs fit (`REV5_MIN_JOB_SLOTS`), so the 1- and 2-slot cells below show the queued route\'s memory in binaries that predate that floor.', '',
               '| width | strip rows | halo | fixed bytes | per-job bytes | 64 MiB slots (8/16/32T) | 128 MiB slots | 256 MiB slots |',
               '|---:|---:|---:|---:|---:|---|---|---|']
     for r in accounting:

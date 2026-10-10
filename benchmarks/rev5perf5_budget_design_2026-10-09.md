@@ -55,10 +55,18 @@ scale-0 width after sampling); not a measurement:
 
 The original route (`fuse_channels`) runs a strip's three channels in
 parallel. The queued route runs at most `slots` channel jobs at once, so with
-one or two slots it has less v2 parallelism than the route it replaces. At
-128 MiB that is widths 6,865–20,605, including the 8192×4096 grid geometry
-(2 slots); at 64 MiB it is 3,430–10,299, including 4096² and 8192×4096
-(2 and 1 slots). This follows from reading the code and is **not measured**.
-The 4096² and 8192×4096 timing cells decide it; if they show a loss, the
-candidate fix is to fall back to the original route below three slots, which
-keeps bits by construction (both routes already pass strict parity).
+one or two slots it would have less v2 parallelism than the route it replaces.
+**Safeguard (REV5PERF5, coordinator-requested):** `REV5_MIN_JOB_SLOTS = 3`.
+When fewer than three jobs fit, the walk takes the original route, exactly as
+when none fit. Live slots are therefore `min(threads, 16, floor(budget /
+per_job))`, or 0 (original route) when that is below 3. At the 128 MiB default
+the original route now serves widths 6,865 and up (8192×4096 included); the
+queue serves widths up to 6,864 with 3–16 slots. Both routes already pass
+strict parity, so the floor changes scheduling, not bits; the unit tests
+(1/2/8 MiB budgets) and the fresh-build parity runs check that.
+
+The frozen 64/128/256 MiB binaries measured for RSS predate the floor. Their
+1- and 2-slot cells (64 MiB at 4096² and 8192×4096, 128 MiB at 8192×4096)
+show the queued route's memory, not the route the source now takes. Whether
+the floor is faster than a 1–2-slot queue is still **not measured**; the
+queued timing grid covers those cells.
