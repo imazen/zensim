@@ -246,9 +246,59 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
         return report
 
 
+def open_cells(js, manifest):
+    """Unclaimed cells, as the filler's picker counts them: no claim object and no done/poison ledger row."""
+    import glob
+    import hashlib
+    import pyarrow.parquet as pq
+    endpoint = os.environ["EP"]
+    ids = subprocess.run([str(CTL), "ids", "--manifest", str(manifest)], capture_output=True, text=True,
+                         check=True).stdout.splitlines()
+    chunks = {hashlib.sha256((line.split("\t")[1] + "\n").encode()).hexdigest() for line in ids if line.strip()}
+    status = FITV2 / "status-e33" / js
+    status.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["s5cmd", "--endpoint-url", endpoint, "sync", f"s3://zentrain/jobs/{js}/ledger/*", str(status) + "/"],
+                   capture_output=True)
+    finished = {hashlib.sha256((r["job_id"] + "\n").encode()).hexdigest() for f in glob.glob(str(status / "*.parquet"))
+                for r in pq.read_table(f, columns=["job_id", "status"]).to_pylist() if r["status"] in ("done", "poison")}
+    ls = subprocess.run(["s5cmd", "--endpoint-url", endpoint, "ls", f"s3://zentrain/jobs/{js}/claims/*"],
+                        capture_output=True, text=True).stdout.splitlines()
+    claimed = {line.split()[-1][len("chunk-"):] for line in ls if line.strip() and line.split()[-1].startswith("chunk-")}
+    return len(chunks - finished - claimed)
+
+
+def tower_workers(js, host="root@tower"):
+    """Running containers of this jobset on tower (the host whose standing 40g cap bounds overlap)."""
+    out = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host,
+                          "docker ps -q --filter name=zen-score- | xargs -r docker inspect -f "
+                          "'{{range .Config.Env}}{{println .}}{{end}}'"], capture_output=True, text=True, check=True)
+    return sum(line == f"ZEN_RUN=jobs/{js}" for line in out.stdout.splitlines())
+
+
+def advance(bundle, queue=FITV2 / "fleet_queue"):
+    """Append the next E33 jobset once the previous has no unclaimed cells and at most one tower worker.
+
+    That bounds tower at 6 E33 cells (36g of 6g caps) under its standing 40g cap while one jobset drains.
+    """
+    names = queued(queue)
+    pending = [a for a in ORDER if jobset(a) not in names]
+    if not pending:
+        return dict(action="none", reason="all four E33 jobsets queued", time=now())
+    arm = pending[0]
+    prev = ORDER[ORDER.index(arm) - 1]
+    js = jobset(prev)
+    unclaimed = open_cells(js, bundle / f"fit-manifest-{js}.json")
+    tower = tower_workers(js)
+    if unclaimed or tower > 1:
+        return dict(action="wait", next=arm, previous=js, unclaimed=unclaimed, tower_workers=tower, time=now())
+    record = launch(bundle, arm, queue)
+    return dict(action="launched", next=arm, previous=js, unclaimed=unclaimed, tower_workers=tower,
+                queued=record["queued"], time=now())
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest"))
+    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance"))
     p.add_argument("--packet", type=Path, required=True)
     p.add_argument("--arm", choices=ORDER)
     p.add_argument("--install", action="store_true")
@@ -267,6 +317,9 @@ def main():
         out = launch(a.packet, a.arm)
     elif a.mode == "placements":
         out = placements(a.packet, a.arm)
+    elif a.mode == "advance":
+        packet(a.packet)
+        out = advance(a.packet)
     else:
         out = harvest(a.packet, a.arm, a.install, a.require_all, a.status)
     print(json.dumps(out))

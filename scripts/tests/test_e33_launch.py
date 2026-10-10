@@ -61,6 +61,21 @@ class Launch(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already queued"):
             owner.launch(self.bundle, "control", self.queue, self.live)
 
+    def test_advance_waits_for_drain_and_appends_in_order(self):
+        self.queue.write_text(self.queue.read_text() + f"{owner.jobset('control')} m img\n")
+        with mock.patch.object(owner, "open_cells", return_value=3), mock.patch.object(owner, "tower_workers", return_value=0):
+            self.assertEqual(owner.advance(self.bundle, self.queue)["action"], "wait")
+        with mock.patch.object(owner, "open_cells", return_value=0), mock.patch.object(owner, "tower_workers", return_value=2):
+            self.assertEqual(owner.advance(self.bundle, self.queue)["action"], "wait")
+        with mock.patch.object(owner, "open_cells", return_value=0), mock.patch.object(owner, "tower_workers", return_value=1), \
+                mock.patch.object(owner, "launch", return_value={"queued": "t"}) as launch:
+            out = owner.advance(self.bundle, self.queue)
+        self.assertEqual((out["action"], out["next"]), ("launched", "a"))
+        launch.assert_called_once()
+        for arm in ("a", "c", "full"):
+            self.queue.write_text(self.queue.read_text() + f"{owner.jobset(arm)} m img\n")
+        self.assertEqual(owner.advance(self.bundle, self.queue)["action"], "none")
+
 
 if __name__ == "__main__":
     unittest.main()
