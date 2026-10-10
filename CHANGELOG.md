@@ -58,6 +58,13 @@
   about 90 µs less per call at 64² for every bake, including production. With zenpredict's f16
   decode cache (zenanalyze, separate change, held: it slows the profile path's per-compare parse),
   arm C costs the same as production. Record: `E33C_RUNTIME`.
+- **zenpredict pin moves to zenanalyze `417cc785`** (from `05de3cbc`), for both `zenpredict` and
+  `zenpredict-bake`. zenpredict now decodes each f16 layer to f32 once at load and runs it through the f32
+  kernel, with the same loop, zero-skip and `fma` order, so score bits are unchanged
+  (`every_shipped_profile_scores_its_pinned_value` passes on the bumped build). It costs 4 bytes per f16
+  weight, resident for the life of a parsed model. The range also brings five unrelated zenpredict commits:
+  clippy refactors, docs, and the optional/dev-only arrow/parquet 59 and rand 0.10 bumps. Record:
+  `E33C_RUNTIME`.
 - **Shipped profiles parse their bake once per process, not on every compare.** `Zensim::compute`
   parsed each `&'static` profile bake up to three times per compare (`score_plan`, the output-spline
   disposition check, the forward pass). `cached_profile_model` interns one `Arc<Model>` per bake slice,
