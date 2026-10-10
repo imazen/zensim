@@ -490,3 +490,23 @@ All results below are on the frozen seed-0 production model `f803b74c` unless st
 Open owner decisions: (1) zenpredict `layers()` option a/b/c; (2) V40 HDR-side reports (HDR VAL exposure); (3) E33
 registration; (4) zenanalyze scalar-tier feature bug and a batch of doc corrections (zenanalyze and zenpredict); (5) a byte
 budget for REV5PERF4's memory growth.
+
+## 35. Owner-authorized V40 HDR validation (2026-10-09)
+
+The owner approved the registered HDR-side reports (verbatim “yes, to all 3
+still open”); the exact E29 population and six-object exposure freeze were
+committed before any validation payload read. E29 completed on the original
+3,900-row / 300-reference hdr_v3mix VAL bank against the frozen V40 control.
+**hc4 passes the registered both-teacher HDR improvement/retention gates
+and SDR guards; E29 selects hc4.** hb4 fails pooled CVVDP improvement and
+the previously recorded KonFiG SDR guard. [Exact decisions/statistics](v40_hdr_result_summary_2026-10-09.json),
+[descriptive Borda panels](v40_hdr_borda_report_2026-10-09.json), and
+[complete evidence/tower pins](v40_hdr_results_2026-10-09.pointer.md) retain
+the registered endpoints and ten-seed equal-four-fold reduction.
+
+This is synthetic HDR teacher agreement, not independent human HDR evidence
+or a production composition change. E31 remains unrun: its packet UPIQ
+fit/development and registered external-video routes exceed the approval;
+packet HDR mode supports E29 only. Clarification was requested. No UPIQ
+development, external, terminal, AIC-family, T0 or sealed data was opened.
+See the [exposure ledger](../docs/DATA_SPLITS.md#exposure-ledger--2026-10-09-owner-authorized-v40-hdr-validation-reports).

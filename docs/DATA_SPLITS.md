@@ -1690,3 +1690,26 @@ Status before read: E29 pending. E31 pending clarification: the packet has
 no E31 HDR-VAL command; its E31 UPIQ fit/development route and registered
 external video panels exceed this approval. Those populations remain
 unopened. No E31 statistic or decision rule is invented.
+
+### V40 HDR execution receipt — 2026-10-09
+
+E29 completed through the packet's registered HDR owner with the exposure
+freeze above. Actual read: exactly the declared 3,900-row VAL keys/teacher
+targets and corresponding native feature table. The owner validated all
+300 reference variants × 13 observations, VAL roles, ordered feature/key
+join, measured-ID/NaN contract, native proof and tool hashes. It emitted
+120 complete prediction panels (40 control, 40 hb4, 40 hc4), pooled and
+within-reference SROCC against each of two teachers, and the registered
+descriptive Borda panel. The source bank and VAL roles are unchanged.
+
+Registered decision: hc4 passes and is selected; hb4 fails. This is
+teacher-agreement research only, without production promotion or independent
+human HDR qualification. Exact statistics and output pins are in the
+[HDR result summary](../benchmarks/v40_hdr_result_summary_2026-10-09.json) and
+[artifact pointer](../benchmarks/v40_hdr_results_2026-10-09.pointer.md).
+
+E31 was not run: its available UPIQ development/external report routes exceed
+the brief, and no E31 HDR-VAL route exists in the frozen packet. Clarification
+was requested. UPIQ development, external panels, KADID TERMINAL, AIC-family,
+T0 and sealed data remain unopened by this lane. No new teacher run, fit,
+extraction, calibration, checkpoint selection or fleet action occurred.
