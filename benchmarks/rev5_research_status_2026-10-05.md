@@ -618,12 +618,15 @@ Open owner decisions:
   - D at 256² is a reproducible +1.4–1.8% that is still unexplained. It will be rechecked.
   - Score bits are unchanged in every cell and in the pinned-score test.
   - Reviewed at effort xhigh.
-- **CI.** The no-default-features loop's `none` and `deprecated-profiles` sets pass again. The `feature-regime-v2`
-  and `deprecated-profiles,candidate-profiles` sets still fail on steering code. That fix is in the STEERPATH
-  fix-up.
-- **STEERPATH_PERF (local, fix-up in progress).**
-  - Memory: the map memory gate passes for A, C and seed 0 at both sizes. At 2048² it is 575.5–576.0 MB against
-    589.8.
-  - Spatial cost: the gate passes only with zenpredict `417cc785`, which is now on `main`, at 2.63–2.79×.
-  - One new clippy failure in a CI feature set blocks landing.
+- **CI.** With STEERPATH's fix-up, every `ci.yml` feature set passes (27/27).
+- **STEERPATH landed (`41cfd432`, reviewed at effort xhigh).** It changes the order of steering retention and feeds
+  the walk from the prepared reference. Output bits are unchanged.
+  - On `main` with zenpredict `417cc785`, all 12 QUAL-A spatial and memory cells pass for A, C and seed 0.
+  - Spatial cost: 2.62–2.77× against ≤ 3×.
+  - Map memory: 156.1–156.4 MB at 1024² against 196.6, and 575.4–575.6 MB at 2048² against 589.8.
+  - The CI feature matrix is 27/27, and the suite passes (924).
+  - A's remaining model failure on the release gates is G-STEER (129/135). Every remaining steering failure is a
+    model limit; an E34 registration draft is in progress.
+- **Found: CHdr (and C) can't be scored through the PU-linear HDR entries.** It is pre-existing. A fix that
+  reproduces the fleet's HDR extraction is in review.
 
