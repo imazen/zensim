@@ -4628,8 +4628,11 @@ fn forward_one_bake(
 /// the bytes' data pointer and length — the same cache shape (and stability
 /// argument) as [`cached_bake_metadata`] and `fold_engine::cached_bake_pool_need`:
 /// profile bake slices come from `&'static` slots via `ProfileParams`, so the
-/// key is stable and unique per slot, and the cache is bounded by the number of
-/// profile bakes a process names. Parsing is deterministic, so a cached model is
+/// key is stable and unique per slot. The cache holds one entry per distinct
+/// `&'static` bake slice: the built-in profiles, plus any loaders a caller
+/// registers through `custom-profiles`. A loader that leaks a fresh slice on
+/// every call (already a leak) adds one parsed, decoded model per call.
+/// Parsing is deterministic, so a cached model is
 /// the model a fresh parse would return; the scoring arithmetic is unchanged.
 ///
 /// Without it every `Zensim::compute` of an MLP profile parsed its bake up to
