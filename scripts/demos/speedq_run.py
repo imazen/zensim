@@ -114,6 +114,8 @@ def worker_revision(name):
         revision = name.removeprefix('by_v2fy_r').split('_')[0]
         assert revision in ('3', '4', '5'), 'unknown formula revision'
         return int(revision)
+    if name.startswith('e33_'):  # E33 registered candidates are Rev5 bakes
+        return 5
     return 1
 
 

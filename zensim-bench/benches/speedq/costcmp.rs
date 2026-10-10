@@ -90,6 +90,41 @@ pub(super) fn action(
                 json!({"version":"0.8.2","surface":"compute_ssimulacra2 RGB8 one-shot","rayon":cfg!(feature="ssim2-rayon")}),
             ))
         }
+        "e33_a" | "e33_c" => {
+            // E33 section 9.3: a registered full-data seed-0 candidate, pinned by path and SHA from the caller,
+            // served through the same dynamic surface as production (BakeScorer, Rev5, Rayon enabled).
+            let label = arm.trim_start_matches("e33_").to_uppercase();
+            let path = std::env::var(format!("ZEN_S2_E33_BAKE_{label}"))
+                .expect("pinned E33 candidate path");
+            let expected =
+                std::env::var(format!("ZEN_S2_E33_SHA_{label}")).expect("pinned E33 candidate SHA");
+            let bytes = std::fs::read(path).unwrap();
+            assert_eq!(
+                super::digest(&bytes),
+                expected,
+                "E33 candidate bytes changed"
+            );
+            assert_eq!(
+                std::env::var("ZENSIM_FORMULA_REV").unwrap(),
+                "5",
+                "E33 candidates serve Rev5"
+            );
+            let model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
+            assert_eq!(model.layers().next().unwrap().out_dim, 128, "H128 shape");
+            assert_eq!(model.n_outputs(), 1);
+            let mut scorer = zensim::BakeScorer::new(model).unwrap().with_parallel(true);
+            let consumed = scorer.consumed_feature_ids().unwrap();
+            let info = json!({"source_sha256":expected,"revision":"5","hidden":128,
+                "consumed_ids":consumed.len(),"n_inputs":model.n_inputs(),"source_bytes":bytes.len(),
+                "surface":"BakeScorer::compute; E33 registered candidate"});
+            let action: Action = Box::new(move || {
+                scorer
+                    .compute(&RgbSlice::new(src, w, h), &RgbSlice::new(dst, w, h), None)
+                    .unwrap()
+                    .score()
+            });
+            Some((action, info))
+        }
         _ => None,
     }
 }

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import struct
 import re
 from pathlib import Path
@@ -44,10 +45,16 @@ CAP_LIMIT = '    rev5_job_bytes(max_n).map_or(0, |bytes| threads.min(16).min(bud
 BUDGET_THREADS = [8, 16, 32]
 BUDGET_GEOMETRIES = ['1024x1024', '4096x4096', '8192x4096']
 BUDGET_FLOOR_GEOMETRIES = ['1024x1024', '4096x4096', '4608x4096', '6144x4096', '8192x4096']
+# E33 registration section 9.3: candidates vs production seed 0, v4x and v3, one thread; RSS at 1024^2.
+E33_ARMS = ['by_v2fy_r5', 'e33_a', 'e33_c']
+E33_GEOMETRIES = ['64x64', '256x256', '1024x1024']
 
 
-def configuration(scaling=False, budget=False, floor=False):
+def configuration(scaling=False, budget=False, floor=False, e33=False):
     assert not (scaling and budget), 'select one COSTCMP grid'
+    if e33:
+        assert not (scaling or budget or floor), 'select one COSTCMP grid'
+        return TIERS, [1], E33_GEOMETRIES, E33_ARMS, 'costcmp-e33-preflight-v1'
     assert budget or not floor, 'the floor arm belongs to the budget grid'
     if budget:
         if floor:
@@ -59,8 +66,8 @@ def configuration(scaling=False, budget=False, floor=False):
             'costcmp-scaling-preflight-v1' if scaling else 'costcmp-preflight-v1')
 
 
-def cells(scaling=False, budget=False, floor=False):
-    tiers, threads, geometries, _, _ = configuration(scaling, budget, floor)
+def cells(scaling=False, budget=False, floor=False, e33=False):
+    tiers, threads, geometries, _, _ = configuration(scaling, budget, floor, e33)
     return [(g,t,n) for t in tiers for n in threads for g in geometries]
 
 
@@ -118,6 +125,9 @@ def validate_ready(rows, name, geometry, tier, threads, rec):
     if name.startswith('by_v2fy_r'):
         assert rec['model']['source_sha256'] == owner.SOURCE_SHA
         assert rec['model']['revision'] == str(owner.worker_revision(name))
+    elif name.startswith('e33_'):
+        assert rec['model']['source_sha256'] == os.environ[f"ZEN_S2_E33_SHA_{name[4:].upper()}"]
+        assert rec['model']['revision'] == '5'
     elif name in ('zensim_A', 'zensim_B'):
         assert rec['model']['revision'] == '1'
         assert len(rec['model']['source_sha256']) == 64
@@ -126,13 +136,17 @@ def validate_ready(rows, name, geometry, tier, threads, rec):
     else:
         assert rec['model']['version'] == '0.8.2'
 
-def receipt(path, scaling=False, budget=False, floor=False):
+def receipt(path, scaling=False, budget=False, floor=False, e33=False):
     value = json.loads(Path(path).read_text())
-    tiers, threads, geometries, arms, schema = configuration(scaling, budget, floor)
+    tiers, threads, geometries, arms, schema = configuration(scaling, budget, floor, e33)
     assert value['schema'] == schema and value['status'] == 'PASS'
     rows = {(f"{r['width']}x{r['height']}", r['tier'], int(r['threads']), r['name']): r for r in value['records']}
-    assert len(rows) == len(value['records']) == len(cells(scaling,budget,floor))*len(arms)
-    assert set(rows) == {(g,t,n,a) for g,t,n in cells(scaling,budget,floor) for a in arms}
+    assert len(rows) == len(value['records']) == len(cells(scaling,budget,floor,e33))*len(arms)
+    assert set(rows) == {(g,t,n,a) for g,t,n in cells(scaling,budget,floor,e33) for a in arms}
+    if e33:  # each candidate serves bit-identically across dispatch tiers, as production does
+        for g in geometries:
+            for a in arms[1:]:
+                assert len({rows[(g,t,n,a)]['score_bits'] for t in tiers for n in threads}) == 1, f'strict {a} score parity differs'
     groups = [arms] if budget else ([['by_v2fy_r5','by_v2fy_r5_before'], ['by_v2fy_r4']] if scaling else [[ARMS[0]]])
     for g in geometries:
         for group in groups:
@@ -154,10 +168,10 @@ def receipt(path, scaling=False, budget=False, floor=False):
 def production_rows(rows):
     return {(g,t,n,owner.worker_revision(a)):rec for (g,t,n,a),rec in rows.items() if a.startswith('by_v2fy_r')}
 
-def preflight(binary, dest, scaling=False, before_binary=None, budget=False, worker_binaries=None, floor=False):
+def preflight(binary, dest, scaling=False, before_binary=None, budget=False, worker_binaries=None, floor=False, e33=False):
     root=Path(dest);root.mkdir(parents=True,exist_ok=False);records=[]
-    _, _, _, arms, schema = configuration(scaling,budget,floor)
-    for g,t,n in cells(scaling,budget,floor):
+    _, _, _, arms, schema = configuration(scaling,budget,floor,e33)
+    for g,t,n in cells(scaling,budget,floor,e33):
         for name in arms:
             arm='by_v2fy' if name.startswith('by_v2fy_r') else name
             revision = owner.worker_revision(name)
@@ -166,9 +180,9 @@ def preflight(binary, dest, scaling=False, before_binary=None, budget=False, wor
             rec['name']=name;records.append(rec)
         print(f'preflight {t}-t{n}-{g}',flush=True)
     path=root/'PREFLIGHT_PASS.json'
-    owner.write(path,dict(schema=schema,status='PASS',records=records,strict_rev5_cells=len(cells(scaling,budget,floor)),consumed_features=420))
+    owner.write(path,dict(schema=schema,status='PASS',records=records,strict_rev5_cells=len(cells(scaling,budget,floor,e33)),consumed_features=420))
     try:
-        receipt(path,scaling,budget,floor)
+        receipt(path,scaling,budget,floor,e33)
     except Exception:
         path.rename(root/'PREFLIGHT_FAILED.json')
         raise
@@ -185,7 +199,14 @@ def main():
     ap.add_argument('--budget-binaries',type=Path,help='frozen executable/source inventory for the byte-budget grid')
     ap.add_argument('--rss-under-load',action='store_true',help='coordinator-instructed fresh-process RSS without a quiet wait; timing gates stay unchanged')
     ap.add_argument('--floor-arm',action='store_true',help='floor grid: add the floor-3 and floor-17 (original route) builds and the 3/4-slot widths (v3 inventory); RSS measures only the floor arms')
+    ap.add_argument('--e33-grid',type=Path,metavar='CANDIDATES_JSON',help='E33 9.3 grid; JSON {"a":{"path","sha256"},"c":{...}} pins the candidate bakes')
     args=ap.parse_args()
+    e33=args.e33_grid is not None
+    if e33:
+        if args.scaling or args.budget_grid or args.floor_arm or args.rss_under_load:ap.error('--e33-grid is its own grid')
+        for label,rec in json.loads(args.e33_grid.read_text()).items():
+            assert label in ('a','c') and hashlib.sha256(Path(rec['path']).read_bytes()).hexdigest()==rec['sha256']
+            os.environ[f'ZEN_S2_E33_BAKE_{label.upper()}']=rec['path'];os.environ[f'ZEN_S2_E33_SHA_{label.upper()}']=rec['sha256']
     if args.floor_arm and not args.budget_grid:ap.error('--floor-arm applies only to the budget grid')
     if args.floor_arm and args.rss_under_load:ap.error('floor-arm RSS keeps the quiet gate')
     if args.rss_under_load and (args.mode!='rss' or not args.budget_grid):ap.error('--rss-under-load applies only to budget-grid RSS')
@@ -194,21 +215,21 @@ def main():
     if args.budget_binaries is not None and not args.budget_grid:ap.error('--budget-binaries requires --budget-grid')
     if args.scaling and args.before_binary is None:ap.error('--scaling requires --before-binary')
     if args.mode=='status':
-        expected_timing = (15 if args.floor_arm else 9) if args.budget_grid else (48 if args.scaling else 64)
-        expected_rss = (36+30 if args.floor_arm else 36) if args.budget_grid else (48 if args.scaling else 80)
+        expected_timing = 6 if e33 else (15 if args.floor_arm else 9) if args.budget_grid else (48 if args.scaling else 64)
+        expected_rss = 3 if e33 else (36+30 if args.floor_arm else 36) if args.budget_grid else (48 if args.scaling else 80)
         owner.collection_status(args.dest,expected_timing=expected_timing,expected_rss=expected_rss);return
     if args.binary is None:ap.error('--binary is required')
     binaries = budget_inventory(args.budget_binaries,args.floor_arm) if args.budget_grid else ({'by_v2fy_r5_before':args.before_binary} if args.scaling else None)
     if args.budget_grid:assert args.binary.resolve() in {p.resolve() for p in binaries.values()}
-    if args.mode=='parity':preflight(args.binary,args.dest,args.scaling,args.before_binary,args.budget_grid,binaries,args.floor_arm);return
+    if args.mode=='parity':preflight(args.binary,args.dest,args.scaling,args.before_binary,args.budget_grid,binaries,args.floor_arm,e33);return
     if args.parity is None:ap.error('--parity is required')
-    rows=receipt(args.parity,args.scaling,args.budget_grid,args.floor_arm)
+    rows=receipt(args.parity,args.scaling,args.budget_grid,args.floor_arm,e33)
     check=lambda name,g,t,n,rec:validate_ready(rows,name,g,t,n,rec)
-    loader=lambda path:production_rows(receipt(path,args.scaling,args.budget_grid,args.floor_arm))
-    _, _, _, arms, _ = configuration(args.scaling,args.budget_grid,args.floor_arm)
+    loader=lambda path:production_rows(receipt(path,args.scaling,args.budget_grid,args.floor_arm,e33))
+    _, _, _, arms, _ = configuration(args.scaling,args.budget_grid,args.floor_arm,e33)
     if args.mode=='timing':
         if args.analyzer is None or args.lock is None:ap.error('--analyzer and --lock are required')
-        chosen=[c for c in cells(args.scaling,args.budget_grid,args.floor_arm) if args.only is None or f'{c[1]}-t{c[2]}-{c[0]}'==args.only]
+        chosen=[c for c in cells(args.scaling,args.budget_grid,args.floor_arm,e33) if args.only is None or f'{c[1]}-t{c[2]}-{c[0]}'==args.only]
         assert chosen,'unknown COSTCMP grid tag'
         owner.timing(args.binary,args.dest,32,args.parity,args.analyzer,arms=arms,lock=args.lock,
                      cells=chosen,parity_loader=loader,baseline=arms[0],ready_check=check,
@@ -217,10 +238,10 @@ def main():
         if args.lock is None:ap.error('--lock is required')
         with owner.segment_lock(args.lock):
             owner.rss(args.binary,args.dest,args.parity,
-                      arms=(list(BUDGET_FLOOR_SLOTS) if args.floor_arm else arms) if args.budget_grid else (['by_v2fy_r5','by_v2fy_r5_before'] if args.scaling else ARMS),
+                      arms=E33_ARMS if e33 else (list(BUDGET_FLOOR_SLOTS) if args.floor_arm else arms) if args.budget_grid else (['by_v2fy_r5','by_v2fy_r5_before'] if args.scaling else ARMS),
                       parity_loader=loader,ready_check=check,
-                      geometries=(BUDGET_FLOOR_GEOMETRIES if args.floor_arm else BUDGET_GEOMETRIES) if args.budget_grid else (SCALING_GEOMETRIES if args.scaling else None),
-                      thread_counts=BUDGET_THREADS if args.budget_grid else (SCALING_THREADS if args.scaling else None),
+                      geometries=['1024x1024'] if e33 else (BUDGET_FLOOR_GEOMETRIES if args.floor_arm else BUDGET_GEOMETRIES) if args.budget_grid else (SCALING_GEOMETRIES if args.scaling else None),
+                      thread_counts=[1] if e33 else BUDGET_THREADS if args.budget_grid else (SCALING_THREADS if args.scaling else None),
                       worker_binaries=binaries,require_quiet=not args.rss_under_load)
 
 if __name__=='__main__':main()
