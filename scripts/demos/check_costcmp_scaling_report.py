@@ -14,6 +14,7 @@ def main():
     ap.add_argument('--raw-dir', type=Path, required=True)
     ap.add_argument('--dest', type=Path, required=True)
     ap.add_argument('--budget-grid', action='store_true')
+    ap.add_argument('--rss-only', action='store_true')
     args = ap.parse_args()
     args.dest.mkdir(parents=True, exist_ok=False)
     grid = 'budget' if args.budget_grid else 'scaling'
@@ -29,14 +30,26 @@ def main():
         ('measured_rss_log', args.raw_dir / (grid+'/rss/'+('v4x-t8-1024x1024-by_v2fy_r5_b64.log' if args.budget_grid else 'v4x-t1-1024x1024-by_v2fy_r5.log')), None),
         ('exact_statistics_replay', None, None),
     ]
+    if args.rss_only:
+        assert args.budget_grid
+        rss = args.raw_dir/'budget/rss/v4x-t8-1024x1024-by_v2fy_r5_b64'
+        controls = [
+            ('complete_requested_grid', args.raw_dir/'budget/parity/PREFLIGHT_PASS.json', lambda v:v['records'].pop()),
+            ('rss_binary_pin', rss.with_suffix('.json'), lambda v:v.update(binary_sha256='0'*64)),
+            ('rss_authorization_scope', rss.with_suffix('.json'), lambda v:v.update(rss_policy='timing under load')),
+            ('measured_rss_log', rss.with_suffix('.log'), None),
+            ('actual_byte_accounting', args.raw_dir/'provenance/byte-accounting.log', None),
+        ]
     refused = []
     for label, target, mutate in controls:
         out = SimpleNamespace(raw_dir=args.raw_dir, out_json=args.dest / (label+'.json'),
-                              out_md=args.dest / (label+'.md'), budget_grid=args.budget_grid)
+                              out_md=args.dest / (label+'.md'), budget_grid=args.budget_grid,rss_only=args.rss_only)
         def altered(path, *argv, **kwargs):
             text = reads(path, *argv, **kwargs)
             if path == target:
                 if mutate is None:
+                    if label == 'actual_byte_accounting':
+                        return text.replace('"planes":11', '"planes":10')
                     return '\n'.join('Maximum resident set size (kbytes): 1' if
                                      'Maximum resident set size (kbytes)' in line else line
                                      for line in text.splitlines())

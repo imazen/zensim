@@ -64,6 +64,16 @@ fn retained_queue_bytes(jobs: &Vec<Rev5StripJob>) -> usize {
 
 #[test]
 fn rev5_job_budget_handles_exact_fit_and_overflow() {
+    for width in [1024, 4096, 8192] {
+        let max_n = width * (STRIP_ROWS + 2 * HALO_P);
+        let fixed = rev5_job_bytes(0).unwrap();
+        let per_job = rev5_job_bytes(max_n).unwrap();
+        assert_eq!(per_job, 11 * max_n * core::mem::size_of::<f32>() + fixed);
+        println!(
+            "REV5_JOB_ACCOUNTING {{\"width\":{width},\"strip_rows\":{STRIP_ROWS},\"halo\":{HALO_P},\"planes\":11,\"float_bytes\":{},\"fixed_bytes\":{fixed},\"per_job_bytes\":{per_job}}}",
+            core::mem::size_of::<f32>()
+        );
+    }
     let bytes = rev5_job_bytes(4096 * (STRIP_ROWS + 2 * HALO_P)).unwrap();
     assert_eq!(
         rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, bytes - 1),

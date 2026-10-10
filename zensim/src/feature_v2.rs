@@ -11715,7 +11715,7 @@ struct Rev5StripJob {
 // Private policy; candidate budgets are measured with frozen source builds.
 // This bounds owned queue payload, not allocator overhead or the whole score.
 #[cfg(feature = "threads")]
-const REV5_JOB_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+const REV5_JOB_BUDGET_BYTES: usize = 128 * 1024 * 1024;
 
 #[cfg(feature = "threads")]
 fn rev5_job_bytes(max_n: usize) -> Option<usize> {

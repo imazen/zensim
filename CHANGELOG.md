@@ -32,6 +32,12 @@
 
 ### Changed
 
+- Rev5 ordered strip jobs now obey a private byte budget, including retained
+  queue allocations, and use the original route when no job fits. Strict
+  384/384 parity and thread invariance pass (`b3cf2ca1`). The provisional
+  default is 128 MiB; speed not yet measured. Fresh-process RSS and exact
+  allocation accounting: [REV5PERF5](benchmarks/rev5perf5_rss_2026-10-09.md).
+
 - Rev5 streaming batches bounded whole-strip jobs and merges the existing
   kernel and individual basic-band partials in producer order; the 1–4-thread
   route remains unchanged. Strict 384/384 parity and all-feature tests pass

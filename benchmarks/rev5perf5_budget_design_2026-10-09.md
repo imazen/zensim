@@ -22,7 +22,7 @@ are separate assertions. Native 8/16/32-thread outputs match serial feature bits
 All-feature tests, formatting, clippy and no-default-feature checks pass at the
 initial 128 MiB candidate. Existing ignored tests and dependency warnings remain.
 
-The default is provisional until COSTCMP measures frozen 64/128/256 MiB builds
+The 128 MiB default is provisional: speed not yet measured. COSTCMP compares frozen 64/128/256 MiB builds
 against a fresh uncapped build at 1024×1024, 4096×4096 and 8192×4096, with
 8/16/32 threads on v4x. Each candidate requires strict 384/384 parity. Timing
 requires 32 common admitted rounds under the existing 64-round ceiling and
@@ -34,4 +34,10 @@ Qualification: all three frozen budget builds pass 384/384 strict score and
 comparisons overall. Each passes native 8/16/32-thread invariance. All 36
 requested measurement-grid preflight records also agree bit for bit, including
 8192×4096. The extended report owner successfully replays the existing
-REV5PERF4 evidence; new budget timing and RSS still require quiet admission.
+REV5PERF4 evidence. On 2026-10-09 the owner authorized fresh-process RSS under
+shared load, while keeping all timing admission rules unchanged. All 36 RSS
+observations are complete; timing remains queued. The measured table and actual
+Rust per-job accounting are in
+[the RSS record](rev5perf5_rss_2026-10-09.md). The selected source is exactly the
+qualified 128 MiB snapshot, with no kernel or merge changes. The RSS-only report
+contains no timing medians or confidence intervals.

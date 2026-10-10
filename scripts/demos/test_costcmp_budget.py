@@ -111,6 +111,13 @@ class BudgetAdmissionTest(unittest.TestCase):
         self.assertFalse(result['quiet_required'])
         self.assertEqual(result['max_rss_kib'], 12345)
 
+    def test_rss_authorization_cannot_disable_timing_gate(self):
+        with patch('sys.argv', ['costcmp_run.py','timing','--dest',str(self.root),
+                               '--budget-grid','--rss-under-load']):
+            with self.assertRaises(SystemExit) as result:
+                cmp.main()
+        self.assertEqual(result.exception.code, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

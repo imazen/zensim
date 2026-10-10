@@ -14,7 +14,81 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def rss_measurement(root, grid, tag, rows, arm, geometry, threads, expected_sha):
+    row = json.loads((root/grid/'rss'/(tag+'.json')).read_text())
+    if row.get('quiet_required', True):
+        assert row['quiet_gate']['admitted'] and row['quiet_gate']['load1'] < 2
+    else:
+        assert grid == 'budget'
+        assert row['rss_policy'] == 'owner-approved fresh-process RSS under shared load, 2026-10-09'
+    assert row['binary_sha256'] == expected_sha
+    assert (row['arm'],row['geometry'],row['tier'],row['threads']) == (arm,geometry,'v4x',threads)
+    cmp.validate_ready(rows, arm, geometry, 'v4x', threads, row['worker'])
+    log = (root/grid/'rss'/(tag+'.log')).read_text()
+    measured = next(int(line.rsplit(':',1)[1]) for line in log.splitlines()
+                    if 'Maximum resident set size (kbytes)' in line)
+    assert row['max_rss_kib'] == measured and measured > 0
+    assert any(line.strip() == 'Exit status: 0' for line in log.splitlines())
+    return measured
+
+
+def rss_only_report(args):
+    """Owner-authorized RSS result with no inferred timing or speed verdict."""
+    assert args.budget_grid
+    root = args.raw_dir
+    rows = cmp.receipt(root/'budget/parity/PREFLIGHT_PASS.json', budget=True)
+    inventory = cmp.budget_inventory(root/'provenance/budget-binaries.json')
+    from rev5perf_report import compare_bits
+    parity = {f'cap{mib}':compare_bits(root/'uncapped',root/f'cap{mib}') for mib in [64,128,256]}
+    source = json.loads((root/'provenance/budget-source.json').read_text())
+    assert sha(root/'provenance/paired-rounds-analyzer') == source['paired_analyzer_sha256']
+    assert sha(root/'provenance/production-f16.bin') == owner.SOURCE_SHA
+    accounting = [json.loads(line.split('REV5_JOB_ACCOUNTING ',1)[1]) for line in
+                  (root/'provenance/byte-accounting.log').read_text().splitlines()
+                  if line.startswith('REV5_JOB_ACCOUNTING ')]
+    assert len(accounting) == 3 and {r['width'] for r in accounting} == {1024,4096,8192}
+    for row in accounting:
+        assert row['planes'] == 11 and row['float_bytes'] == 4 and row['fixed_bytes'] > 0
+        assert row['per_job_bytes'] == row['width']*(row['strip_rows']+2*row['halo'])*11*4+row['fixed_bytes']
+        row['slots'] = {str(mib):{str(n):min(n,16,mib*1024*1024//row['per_job_bytes'])
+                                 for n in cmp.BUDGET_THREADS} for mib in [64,128,256]}
+    memories = {}
+    for g,t,n in cmp.cells(budget=True):
+        for arm in cmp.BUDGET_ARMS:
+            tag = f'{t}-t{n}-{g}-{arm}'
+            memories[tag] = rss_measurement(root,'budget',tag,rows,arm,g,n,sha(inventory[arm]))
+    result = dict(status='RSS_ONLY', speed='speed not yet measured', provisional_default_mib=128,
+                  strict_parity=parity, rss_observations=len(memories), rss_kib=memories,
+                  byte_accounting=accounting, required_timing_configurations=9,
+                  validated_timing_configurations=0, medians_ns={}, paired_analyses={},
+                  timing_completion_markers=len(list((root/'budget/timing').glob('*/COMPLETE.json'))),
+                  binary_sha256={arm:sha(path) for arm,path in inventory.items()},
+                  source_provenance=source, raw_directory=str(root),
+                  rss_scope='fresh-process time -v under owner-approved shared load; no speed inference')
+    owner.write(args.out_json,result)
+    lines = ['# Rev5 byte-budget RSS (2026-10-09)', '',
+             '**Provisional default: 128 MiB; speed not yet measured.** This selects a bounded queue size from memory observations. It is not a throughput verdict. The owner authorized fresh-process RSS under shared load; timing still requires the unchanged load <2/no foreign build or training gate and 32 common clean rounds from at most 64. No timing medians or confidence intervals are reported.', '',
+             'All three frozen candidates pass 384/384 strict parity and 576/576 comparisons overall. The full 36-record measurement preflight agrees in score and all 420 consumed feature bits.', '',
+             '| threads | size | uncapped KiB | 64 MiB KiB | 128 MiB KiB | 256 MiB KiB |',
+             '|---:|---|---:|---:|---:|---:|']
+    for g,t,n in cmp.cells(budget=True):
+        values = [str(memories[f'{t}-t{n}-{g}-{arm}']) for arm in cmp.BUDGET_ARMS]
+        lines.append(f'| {n} | {g} | '+' | '.join(values)+' |')
+    lines += ['', 'Each observation is a separate `/usr/bin/time -v` process with identical model/input setup. These are single observations, not distributions. Queue budgets exclude allocator overhead, input pixels and producer scratch.', '',
+              'Actual x86_64 Rust `size_of` accounting: `per_job = 11 × width × (strip_rows + 2 × halo) × 4 + fixed_bytes`. Live slots are `min(threads, 16, floor(budget/per_job))`; zero slots use the original route.', '',
+              '| width | strip rows | halo | fixed bytes | per-job bytes | 64 MiB slots (8/16/32T) | 128 MiB slots | 256 MiB slots |',
+              '|---:|---:|---:|---:|---:|---|---|---|']
+    for r in accounting:
+        slots = ['/'.join(str(r['slots'][str(m)][str(n)]) for n in cmp.BUDGET_THREADS) for m in [64,128,256]]
+        lines.append(f"| {r['width']} | {r['strip_rows']} | {r['halo']} | {r['fixed_bytes']} | {r['per_job_bytes']} | "+' | '.join(slots)+' |')
+    lines += ['', '128 MiB retains more jobs than 64 MiB while measuring lower peak RSS than 256 MiB on both large geometries. Its throughput tradeoff is unknown until the queued sweep qualifies. No source-informed speed threshold has been added.', '',
+              f'Raw evidence and binary/source/model pins: `{root}`. Full time-v logs and exact byte accounting are replayed by the report recipe. Timing measurements remain pending.', '']
+    args.out_md.write_text('\n'.join(lines))
+
+
 def report(args):
+    if getattr(args, 'rss_only', False):
+        return rss_only_report(args)
     root = args.raw_dir
     budget = getattr(args, 'budget_grid', False)
     grid = 'budget' if budget else 'scaling'
@@ -84,14 +158,7 @@ def report(args):
         for n in threads:
             for arm in rss_arms:
                 tag = f'v4x-t{n}-{g}-{arm}'
-                row = json.loads((root / grid / 'rss' / (tag + '.json')).read_text())
-                assert row['quiet_gate']['admitted'] and row['quiet_gate']['load1'] < 2
-                assert row['binary_sha256'] == expected_workers[arm]
-                cmp.validate_ready(rows, arm, g, 'v4x', n, row['worker'])
-                log = (root / grid / 'rss' / (tag + '.log')).read_text()
-                measured = next(int(line.rsplit(':', 1)[1]) for line in log.splitlines()
-                                if 'Maximum resident set size (kbytes)' in line)
-                assert row['max_rss_kib'] == measured
+                measured = rss_measurement(root,grid,tag,rows,arm,g,n,expected_workers[arm])
                 memories[tag] = measured
     if budget:
         pairs = [('by_v2fy_r5_b64','by_v2fy_r5_b128'), ('by_v2fy_r5_b64','by_v2fy_r5_b256'), ('by_v2fy_r5_b128','by_v2fy_r5_b256')]

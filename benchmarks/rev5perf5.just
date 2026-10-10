@@ -44,6 +44,14 @@ rev5perf5-progress root:
 rev5perf5-rss-under-load root:
     python3 scripts/demos/costcmp_run.py rss --rss-under-load --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --binary "{{root}}/provenance/instrument-cap128" --dest "{{root}}/budget/rss" --parity "{{root}}/budget/parity/PREFLIGHT_PASS.json" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
 
+rev5perf5-byte-accounting:
+    cargo test -p zensim --all-features rev5_job_budget_handles_exact_fit_and_overflow -- --nocapture
+
+rev5perf5-rss-report-gates root:
+    PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from types import SimpleNamespace; import costcmp_scaling_report; costcmp_scaling_report.report(SimpleNamespace(raw_dir=Path("{{root}}"),out_json=Path("{{root}}/rss-report.json"),out_md=Path("benchmarks/rev5perf5_rss_2026-10-09.md"),budget_grid=True,rss_only=True))'
+    python3 scripts/demos/check_costcmp_scaling_report.py --budget-grid --rss-only --raw-dir "{{root}}" --dest "{{root}}/rss-report-controls"
+    just -f benchmarks/rev5perf5.just rev5perf5-python-tests
+
 rev5perf5-report-gates root:
     PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from types import SimpleNamespace; import costcmp_report; costcmp_report.report(SimpleNamespace(raw_dir=Path("{{root}}"),out_json=Path("{{root}}/report.json"),out_md=Path("benchmarks/rev5perf5_scaling_2026-10-09.md"),budget_grid=True))'
     python3 scripts/demos/check_costcmp_scaling_report.py --budget-grid --raw-dir "{{root}}" --dest "{{root}}/report-controls"
