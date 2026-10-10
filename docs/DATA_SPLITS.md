@@ -1835,3 +1835,21 @@ zenpapers dataset pointers (HDR-VDC `81484245…`, AVT `6b1e5bac…`), the packe
 predictor `b549e923…`, assessment source `ac71f2d4…` (v40_panels.py with the
 `e31video` mode), packet program `de44ea9b…` and control pins `4d7acfc8…`.
 KADID TERMINAL, AIC-family, T0 and sealed data remain excluded.
+
+### HDRVID E31 external HDR video execution — 2026-10-10
+
+Run after the committed freeze (`498c9488`), through the frozen V40 packet
+runtime with the `e31video` report module. Actual reads were exactly the
+frozen objects: two pooled feature tables, their keys and manifests, the
+HDR-VDC JOD CSV (464 non-reference rows) and the AVT MOS CSV (195 encoded
+rows; five originals skipped), each re-verified against its pinned SHA-256.
+All forty uh4 and forty matched control cells reported every registered
+panel complete and finite, with identical raw target arrays/order across
+models. Report SHA-256
+`5ef1610940893ec5da193631f46723804c3c407ecb7bb781a31f019df350357f`.
+[Readout](../benchmarks/hdrvid_e31_video_results_2026-10-10.md),
+[summary](../benchmarks/hdrvid_e31_video_result_summary_2026-10-10.json),
+[evidence pins](../benchmarks/hdrvid_e31_video_2026-10-10.pointer.md).
+Exposure of these two external panels is now recorded for E31 uh4 and the V40
+control; any later read of them by these or derived models must disclose it.
+No fit, calibration, selection or adoption followed.

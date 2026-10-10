@@ -82,7 +82,16 @@ UPIQ freeze-bar note: §5's "UPIQ pooled > 0.7536" row is owned by
 a different pipeline from these 944 stored-table reads; both are canonical,
 see the audit's gate-owner table).
 
-## E31 Rev5 video-report availability (2026-10-09)
+## E31 Rev5 video-report availability (2026-10-09; superseded 2026-10-10)
+
+**Superseded:** the owner directed a re-decode on 2026-10-10 ("do HDR-VDC with
+rav1d-safe now, and non-av1 videos with ffmpeg 8.1"). Retained frames, Rev5
+tables and the completed E31 reports are documented in [hdrvid/](hdrvid/README.md)
+and [the results](../../benchmarks/hdrvid_e31_video_results_2026-10-10.md).
+The July stored 944 tables remain valid historical reads; the HDRVID
+cross-check found the July swscale conversion 0.0016–0.0023 code low per
+channel (common-mode). The original 2026-10-09 note follows.
+
 
 The registered [E31 HDR-video reports](../../benchmarks/e31_upiq380_registration_2026-10-07.md)
 cannot reuse these historical Rev2/944 feature tables for the Rev5 by_v2fy

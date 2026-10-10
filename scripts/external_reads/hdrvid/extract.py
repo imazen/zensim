@@ -157,7 +157,7 @@ def tables(args):
         feature_dtype="float64", absent_slots="NaN", aggregation="mean over the eight uniform frames per video, per feature",
         input_contract=CONTRACT,
         decoder_era="hdrvid-2026-10-10: rav1d-safe f3132ee6 (all AV1); ffmpeg 8.1.3 native hevc/vvc/ffvhuff decode only; "
-                    "zenavif 85dd0d2b yuv_convert; zenresize e3975fb9 Lanczos-3; zenpng 37c942ed 16-bit PNG",
+                    "zenavif 85dd0d2b yuv_convert; zenresize e3975fb9 Lanczos-3; zenpng 0.1.4 16-bit PNG",
         table_sha256=sha(path), keys_sha256=sha(key_path), row_keys_sha256=row_keys_sha(key_table),
         admission_sha256=sha(admission_path), extractor_manifest_sha256=sha(f"{features}.manifest.json"),
         features_tsv_sha256=sha(features), build_commit=args.build_commit, binary_sha256=sha(args.binary),

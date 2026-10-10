@@ -16,7 +16,7 @@ panels stay **external-eval, report-only**; nothing here is training data.
 | YCbCr → R'G'B' | zenavif `85dd0d2b` `yuv_convert` | BT.2020 NCL, limited → full, {9,3,3,1}/16 chroma, fixed point to 10-bit codes |
 | display frame | zenresize `e3975fb9` `Filter::Lanczos` (a=3) | on PQ code values; 3840×2160; display-size frames pass through |
 | far leg (HDR-VDC) | zenresize Lanczos-3 | 1920×1080 from the stored 16-bit 4K frame |
-| storage | zenpng `37c942ed` | 16-bit RGB PNG, `round(clamp(v,0,1)·65535)` |
+| storage | zenpng 0.1.4 (crates.io) | 16-bit RGB PNG, `round(clamp(v,0,1)·65535)` |
 | features | `zensim-validate` `hdrvid_extract` | `research::extract_hdr`, `HdrEncoding::Pq{peak}`, Rev5, by_v2fy 420 IDs, 1825-slot f64 transport |
 | tables | `extract.py tables` | per (video, config) mean of the eight frame vectors |
 | report | `run_e31video.py` → `v40_panels.py --mode e31video` | frozen V40 packet runtime, binaries, cells and control pins |
@@ -52,4 +52,29 @@ July used libdav1d / ffmpeg 4.4.2 and n7.1.5 decoders and swscale
 resampling, and f64 exact ST 2084 for dimming. HDRVID uses rav1d-safe,
 ffmpeg 8.1.3 decode-only, the zenavif recipe (10-bit RGB codes), zenresize
 Lanczos-3 in f32, and linear-srgb's f32 ST 2084. The cross-checks quantify
-these differences; see the results pointer.
+these differences
+([results](../../../benchmarks/hdrvid_e31_video_results_2026-10-10.md)):
+
+- 12 sampled streams (7 AV1, 2 HEVC, 2 VVC, 1 FFVHUFF) decode bit-identically
+  over their full length against dav1d 1.5.3 / ffmpeg 8.0.1 oracles.
+- The July swscale rgb48 conversion runs 0.0016–0.0023 code low per channel
+  against an exact float BT.2020 limited→full conversion (one 4K FFVHUFF frame,
+  channel means); HDRVID is within 1.3e-4. Replaying the July chain on six
+  videos: mean |Δ| 62–165 / 65535, median luminance ratio 1.013–1.021.
+- July 944 extractor on HDRVID frames vs the July per-frame table (Bistro,
+  config A, 40 pairs): score228 mean |Δ| 0.077, max 0.133, Spearman 1.0.
+
+## Running it
+
+```
+OUT=/mnt/v/output/zensim/hdrvid-2026-10-10   # bin/ holds every pinned binary
+decode.py plan|decode|verify --out $OUT ...   # frames + receipts (label-free)
+ZENSIM_FORMULA_REV=5 hdrvid_extract --admission A --admission-sha256 H --out T
+extract.py admit|tables --out $OUT --set hdrvdc|avt ...
+freeze.py --out $OUT --packet <v40 packet> --dest benchmarks/<freeze>.json   # commit before labels
+run_e31video.py --packet <v40 packet> -- --mode e31video ...
+crosscheck.py decoders|chain|features ...     # oracle comparisons
+```
+
+Every heavy step ran under `heavy.lock` + `run-heavy`; exact argv and logs
+are in `$OUT/logs/`.
