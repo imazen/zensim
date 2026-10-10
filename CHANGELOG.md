@@ -50,15 +50,15 @@
 
 - **Prepared steering (`SteeringSession::compute`) uses less memory and stops reconverting its
   source.** The local-refinement snapshot now moves the session's retained planes after the map pass
-  instead of cloning them before it (416b1e8f). The Rev5 walk and the snapshot take the source side
+  instead of cloning them before it (8967388c). The Rev5 walk and the snapshot take the source side
   from the prepared reference instead of converting and downscaling the source on every call
-  (d4a6864c). No output bit changes: G-STEER 135/135 rows byte-identical for A, C and seed 0, the
+  (0c1198fd). No output bit changes: G-STEER 135/135 rows byte-identical for A, C and seed 0, the
   QUAL-A gate cases identical in score, features, map, sensitivities and refinement gains, and a new
   feed-on/feed-refused gate. QUAL-A gate, A/C/seed 0: peak incremental map RSS 196,832–196,908 →
   155,936–156,416 KiB at 1024² and 737,820–738,100 → 575,312–575,976 KiB at 2048², under the
-  bars on zensim alone. The spatial-cost bar (≤ 3× uncached) passes only with zenpredict's f16
-  decode cache (zenanalyze `417cc785`, held): 2.63–2.79×, against 3.09–5.66× on the pinned
-  zenpredict. Record: `benchmarks/steerpath_perf_2026-10-10.md`.
+  bars on zensim alone. The spatial-cost bar (≤ 3× uncached) needs zenpredict's f16 decode cache:
+  3.09–5.66× on the old pin; on `main` with the `417cc785` pin, 2.62–2.77× for every cell (f44d7c02
+  fixes three CI feature sets). Record: `benchmarks/steerpath_perf_2026-10-10.md`.
 
 - **`BakeScorer` no longer rebuilds its model's extraction plan on every score.** Each scorer
   caches `Plan::for_bake(model)`, a pure function of the model and the process formula revision,

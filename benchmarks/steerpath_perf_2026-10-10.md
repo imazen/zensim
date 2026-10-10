@@ -42,7 +42,7 @@ Measured with `/usr/bin/time -v` (fresh process, model A, v4x, 1 thread) and `he
 
 ## Fixes (zensim, no public API change)
 
-1. **`416b1e8f` — the snapshot moves the retention after the map pass.**
+1. **`8967388c` — the snapshot moves the retention after the map pass.**
    - `LocalRefineSnapshot::capture_admits` is the single owner of the capture's refusal rule.
      `compute_attribution_input` decides up front whether a snapshot will replace the frozen v2
      density, runs the map pass, then captures with `capture_taking`.
@@ -50,7 +50,7 @@ Measured with `/usr/bin/time -v` (fresh process, model A, v4x, 1 thread) and `he
      `FoldRetention::ensure` re-creates exactly the moved buffers on the next walk, which rewrites
      every element before any read.
    - The unretained scale-0 channels are filled one image at a time.
-2. **`d4a6864c` — the walk and the snapshot take the source from the prepared reference.**
+2. **`0c1198fd` — the walk and the snapshot take the source from the prepared reference.**
    - `feature_v2::ref_feed_admits` is now the single admission test of the ref-cached feed (shared
      with `compute_folded_v1_372_with_ref_impl`). It also refuses plans with a restored-cut side pass
      (mapdev / z1max), where a ref-fed walk would assert.
@@ -70,7 +70,8 @@ path parses a bake per compare). This record measures both the pinned zenpredict
 - **Harness:** QUAL-A's own (`costcmp_run.py --qual-grid` parity → timing → fresh-process RSS, the
   QUAL-A runtime pins `runtime-candidates.json`, v4x, 1 thread), classified by
   `qual_a_report.runtime` with the report's spatial and memory bars.
-- **Tree:** `d4a6864c` (both fixes) on main `0f630e61`, built twice: against the pinned zenpredict
+- **Tree:** both fixes (then `d4a6864c`, before the rebase onto the zenpredict bump; the same code as `0c1198fd`)
+  on main `0f630e61`, built twice: against the pinned zenpredict
   `05de3cbc` (`instrument-gate-pinned`, `95054c9c…`) and against zenanalyze `417cc785` through a local,
   uncommitted path patch (`instrument-gate-f16`, `a9804ecf…`).
 - **Run quality:** quiet gate unchanged (load1 < 2, no foreign build or training); every cell kept its
@@ -118,6 +119,37 @@ included): the reference feed alone moved the map arm 62.1 → 58.6 ms at 1024²
 at 2048² with the f16 cache, and 275.9 → 265.3 ms at 2048² on the pinned zenpredict. Moving the
 retention instead of cloning it did not reduce time on its own (2048², pinned: QUAL-A 266.1 ms,
 moved-retention build 275.9 ms).
+
+## Landed state: main with zenpredict `417cc785`, no local patch
+
+After E33C_FIX and the zenpredict bump landed (main `ba19d54b`, pin `417cc785`), the two fixes were rebased onto
+it (`8967388c`, `0c1198fd`), with a CI fix-up `f44d7c02`: a needless struct update that failed clippy on the
+`custom-profiles,feature-regime-v2` set, and prepared-steering items gated on `custom-profiles`. The gate chain
+re-ran on that tip.
+- **Build:** `instrument-landed` (`50385f79…`), which links zenpredict from git `417cc785`. There is no
+  `.cargo` override.
+- **Harness and rules:** as above. Fresh root `/mnt/v/output/zensim/steerpath-fixup-2026-10-10/gate-landed/`.
+- **Run:** parity PASS; quiet gate admitted at load1 1.98 and 1.91; 32/32 rounds kept per cell, 0 excluded.
+  Timing `run-heavy: done rc=0 257s | peak-RSS 0.61GiB`; RSS `rc=0 16s | peak-RSS 0.61GiB`.
+
+| size | model | spatial, map p95 / uncached p95 | | map incremental RSS (KiB) | bar (KiB) | |
+|---|---|---:|---|---:|---:|---|
+| 1024² | A | 58.95 / 22.34 ms = 2.64× | PASS | 156,420 | 196,608 | PASS |
+| 1024² | C | 61.49 / 22.42 = 2.74× | PASS | 156,056 | 196,608 | PASS |
+| 1024² | seed 0 | 57.96 / 22.08 = 2.62× | PASS | 156,160 | 196,608 | PASS |
+| 2048² | A | 226.68 / 82.55 = 2.75× | PASS | 575,596 | 589,824 | PASS |
+| 2048² | C | 229.76 / 82.91 = 2.77× | PASS | 575,364 | 589,824 | PASS |
+| 2048² | seed 0 | 227.77 / 82.64 = 2.76× | PASS | 575,580 | 589,824 | PASS |
+
+**All 12 cells pass on `main` + STEERPATH.** At 2048² the spatial margin is about 8% below the 3× bar; the
+smallest memory margin is 14,228 KiB (2.4%).
+
+The tip (`f44d7c02`) also passes:
+- all 27 `ci.yml` feature-matrix sets (clippy `-D warnings`, then lib tests: 0 failures);
+- `cargo test -p zensim --all-features`, 924 passed, 0 failed;
+- CI-exact clippy and `cargo fmt --check`.
+
+Records: `ci-loop/CI_LOOP.tsv`, `GATE_SUMMARY.json` (`46d63827…`), `provenance/`.
 
 ## Bit identity
 
