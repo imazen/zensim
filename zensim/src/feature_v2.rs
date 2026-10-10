@@ -13774,22 +13774,10 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     pool_mode: Option<V1PoolsMode>,
     plan: Option<&crate::feature_plan::Plan>,
 ) -> Option<(Vec<f64>, [f64; 3])> {
-    if precomputed.sampling.is_some()
-        || plan.is_some_and(|p| {
-            p.compute.sampling.is_some()
-                || (p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
-        })
-        || distorted.is_hdr()
-    {
+    if !ref_feed_admits(precomputed, distorted, plan) {
         return None;
     }
     let (cw, ch) = (precomputed.scales[0].1, precomputed.scales[0].2);
-    if distorted.width() != cw || distorted.height() != ch {
-        return None;
-    }
-    if !cached_ref_feed_usable(&precomputed.scales, cw, ch) {
-        return None;
-    }
     let toggles = plan.map_or(
         V2NewFeatureToggles {
             v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
@@ -13819,6 +13807,113 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
         },
     );
     Some((res.into_features(), mo.finish()))
+}
+
+/// Whether `precomputed` can feed the source side of a fold walk over
+/// `distorted` under `plan` — the ref-cached form's admission test, shared by
+/// [`compute_folded_v1_372_with_ref_impl`] and the retaining
+/// [`compute_folded_with_ref_retained`].
+///
+/// Refuses a sampled cache or plan, a pre-Rev5 v2 plan, HDR input, a
+/// distorted image not at the cache's compute dims, a cache that fails
+/// [`cached_ref_feed_usable`], and a plan with a restored-cut side pass
+/// (`mapdev` / `z1max`): those rebuild both pyramids from the source pixels,
+/// which a ref-fed walk does not have (the walk asserts on that combination).
+pub(crate) fn ref_feed_admits(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    plan: Option<&crate::feature_plan::Plan>,
+) -> bool {
+    if precomputed.sampling.is_some()
+        || plan.is_some_and(|p| {
+            p.compute.sampling.is_some()
+                || (p.compute.v2_blocks && p.compute.formula_revision < FormulaRevision::Rev5)
+                || p.compute.mapdev
+                || p.compute.z1max
+        })
+        || distorted.is_hdr()
+    {
+        return false;
+    }
+    let Some(&(_, cw, ch)) = precomputed.scales.first() else {
+        return false;
+    };
+    distorted.width() == cw
+        && distorted.height() == ch
+        && cached_ref_feed_usable(&precomputed.scales, cw, ch)
+}
+
+#[cfg(all(test, feature = "custom-profiles"))]
+thread_local! {
+    /// Test-only: refuse the prepared-reference feed on this thread, so one
+    /// test can serve the same steering session both ways.
+    pub(crate) static REF_FEED_OFF: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+    /// Test-only: retaining walks served by the prepared-reference feed on
+    /// this thread.
+    pub(crate) static REF_FEED_HITS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+}
+
+/// Whether a RETAINING walk (prepared steering's) may take its source side
+/// from `precomputed`: [`ref_feed_admits`], plus a Rev5+ plan whose revision
+/// is the process revision. A steering reference is converted either at the
+/// plan's revision (`PrecomputedReference::for_candidate`) or at the process
+/// revision (`Zensim::precompute_reference`); requiring both to agree means the
+/// cached planes were converted with the walk's own arithmetic, and from Rev4
+/// on the conversion is per-pixel (no chunk or band length can move a byte,
+/// `streaming::tests::convert_chunk_rows_is_semantics_not_a_knob`), so the
+/// cached planes are the bytes the walk would have converted.
+#[cfg(feature = "custom-profiles")]
+pub(crate) fn retained_ref_feed_admits(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    plan: &crate::feature_plan::Plan,
+) -> bool {
+    #[cfg(test)]
+    if REF_FEED_OFF.with(core::cell::Cell::get) {
+        return false;
+    }
+    plan.compute.formula_revision >= FormulaRevision::Rev5
+        && crate::ssim_form::active_revision() == plan.compute.formula_revision
+        && ref_feed_admits(precomputed, distorted, Some(plan))
+}
+
+/// [`compute_folded_v1_372_streaming_impl`]'s unpadded walk with the source
+/// side copied from `precomputed` and the session's `retention` attached:
+/// prepared steering re-scores one reference against many reconstructions,
+/// so the reference's conversion and downscale chain run once per session
+/// instead of once per call. The caller checks [`retained_ref_feed_admits`].
+/// Bit-identical to the uncached walk (same producer over the same planes);
+/// `prepared_steering_ref_feed_is_bit_identical` is the gate.
+#[cfg(feature = "custom-profiles")]
+pub(crate) fn compute_folded_with_ref_retained(
+    source: &impl ImageSource,
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    parallel: bool,
+    scratch: &mut V2Scratch,
+    plan: &crate::feature_plan::Plan,
+    retention: Option<&mut FoldRetention>,
+) -> (Vec<f64>, [f64; 3]) {
+    debug_assert!(retained_ref_feed_admits(precomputed, distorted, plan));
+    #[cfg(test)]
+    REF_FEED_HITS.with(|hits| hits.set(hits.get() + 1));
+    let mut mo = MeanOffsetRows::new(source.width(), source.height());
+    let res = foldapp_streaming_walk(
+        source,
+        distorted,
+        parallel,
+        plan.toggles(),
+        crate::feature_v2_stream::FrontEnd::Sdr,
+        scratch,
+        FoldWalkExtras {
+            compute: Some(plan.compute),
+            mean_offset: Some(&mut mo),
+            retention,
+            ref_planes: Some(&precomputed.scales),
+            ..Default::default()
+        },
+    );
+    (res.into_features(), mo.finish())
 }
 
 /// The declared-HDR folded/append streaming entry (HDR_PLAN chunk 2):

@@ -1503,6 +1503,11 @@ impl<'a> BakeScorer<'a> {
                 Some(plan.compute.formula_revision),
             )?;
         let neighbour_exact = if capture {
+            // The walk took its source side from the prepared reference under
+            // this same test (`Fused944Session::planned_features`).
+            let cached_source0 = (encoding.is_none()
+                && crate::feature_v2::retained_ref_feed_admits(precomputed, distorted, &plan))
+            .then(|| &precomputed.scales[0].0);
             let snap = crate::local_refine::LocalRefineSnapshot::capture_taking(
                 session.retention_mut(),
                 &plan,
@@ -1510,6 +1515,7 @@ impl<'a> BakeScorer<'a> {
                 source,
                 distorted,
                 encoding,
+                cached_source0,
             );
             // `capture_admits` is the capture's own refusal rule, so a refusal
             // here is unreachable. The planes are already moved, so it cannot
@@ -2207,6 +2213,115 @@ mod revision_contract_tests {
         assert!(scored.attribution().density().iter().all(|&x| x == 0.0));
         assert_eq!(scored.refinement_gain(3, 5, 26, 22), 0.0);
         println!("REV5_COMPUTE_ENTRY_OK");
+    }
+
+    /// Prepared steering takes the walk's source side, and the snapshot's
+    /// unretained scale-0 source channels, from the prepared reference
+    /// (`feature_v2::retained_ref_feed_admits`). Serving the same session with
+    /// that feed refused must give the same bits for everything a call
+    /// returns: score, feature row, density map, sensitivities and local
+    /// refinement gains, over three consecutive calls (calls after the first
+    /// run on retention the previous snapshot moved out), serial and
+    /// parallel, at widths that are and are not multiples of the 8-lane
+    /// conversion chunk. The hit counter proves the feed actually served.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_steering_ref_feed_is_bit_identical() {
+        let name =
+            "metric::bake::revision_contract_tests::prepared_steering_ref_feed_is_bit_identical";
+        if !run_at_revision("5", name, "REV5_REF_FEED_OK") {
+            return;
+        }
+        use crate::feature_v2::{REF_FEED_HITS, REF_FEED_OFF};
+        let model = rev5_by_model();
+        for (w, h) in [(137, 301), (64, 64), (203, 97), (256, 136)] {
+            let src: Vec<[u8; 3]> = (0..w * h)
+                .map(|i| {
+                    let (x, y) = (i % w, i / w);
+                    let base = (x * 255 / w) as u8;
+                    let tex = (((x * 7 + y * 13) % 32) * 3) as u8;
+                    let edge = if (y / 16) % 2 == 0 { 40 } else { 0 };
+                    [
+                        base.wrapping_add(tex),
+                        base.wrapping_add(edge),
+                        (255 - base).wrapping_add(tex / 2),
+                    ]
+                })
+                .collect();
+            let recon = |k: u8| -> Vec<[u8; 3]> {
+                src.iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let q = |v: u8| (v / (10 + k)) * (10 + k);
+                        let mut d = [q(p[0]), q(p[1]), q(p[2])];
+                        if i % (5 + k as usize) == 0 {
+                            d[(i + k as usize) % 3] = d[(i + k as usize) % 3].saturating_add(17);
+                        }
+                        d
+                    })
+                    .collect()
+            };
+            let recons = [recon(0), recon(3), recon(0)];
+            let rs = RgbSlice::new(&src, w, h);
+            let mut rects = vec![(0, 0, w, h), (3, 5, 26, 22), (w - 9, h - 13, w, h)];
+            for y in (0..h - 7).step_by(8) {
+                for x in (0..w - 7).step_by(8) {
+                    rects.push((x, y, x + 8, y + 8));
+                }
+            }
+            for parallel in [false, true] {
+                let serve = |off: bool| {
+                    REF_FEED_OFF.with(|o| o.set(off));
+                    let before = REF_FEED_HITS.with(core::cell::Cell::get);
+                    let mut owner = crate::BakeScorer::new(&model)
+                        .unwrap()
+                        .with_parallel(parallel);
+                    let mut session = owner.prepare_steering(&rs, 1).unwrap();
+                    let mut calls = Vec::new();
+                    for d in &recons {
+                        let map = session.compute(&RgbSlice::new(d, w, h), None).unwrap();
+                        assert!(map.neighbour_exact.is_some(), "{w}x{h}: Rev5 replays");
+                        calls.push((
+                            map.result().score().to_bits(),
+                            map.result()
+                                .features()
+                                .iter()
+                                .map(|v| v.to_bits())
+                                .collect::<Vec<_>>(),
+                            map.attribution()
+                                .density()
+                                .iter()
+                                .map(|v| v.to_bits())
+                                .collect::<Vec<_>>(),
+                            map.sensitivities()
+                                .iter()
+                                .map(|v| v.to_bits())
+                                .collect::<Vec<_>>(),
+                            rects
+                                .iter()
+                                .map(|r| map.refinement_gain(r.0, r.1, r.2, r.3).to_bits())
+                                .collect::<Vec<_>>(),
+                        ));
+                    }
+                    let hits = REF_FEED_HITS.with(core::cell::Cell::get) - before;
+                    REF_FEED_OFF.with(|o| o.set(false));
+                    (calls, hits)
+                };
+                let (fed, fed_hits) = serve(false);
+                let (converted, converted_hits) = serve(true);
+                assert_eq!(
+                    fed_hits,
+                    recons.len(),
+                    "{w}x{h} par={parallel}: feed served"
+                );
+                assert_eq!(converted_hits, 0, "{w}x{h} par={parallel}: feed refused");
+                assert!(
+                    fed == converted,
+                    "{w}x{h} par={parallel}: the feed moved a bit"
+                );
+            }
+        }
+        println!("REV5_REF_FEED_OK");
     }
 
     #[test]

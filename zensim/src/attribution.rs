@@ -5738,6 +5738,20 @@ impl Fused944Session {
         // populate the v2 retention cells; they are reported as unsupported
         // below rather than read from stale/default accumulators.
         let retention = (!plan.toggles().v1_only).then_some(&mut self.retention);
+        // A prepared reference already holds the source's converted pyramid;
+        // feed it instead of converting and downscaling the source again.
+        #[cfg(feature = "custom-profiles")]
+        if crate::feature_v2::retained_ref_feed_admits(precomputed, distorted, plan) {
+            return Ok(crate::feature_v2::compute_folded_with_ref_retained(
+                source,
+                precomputed,
+                distorted,
+                parallel,
+                &mut self.scratch,
+                plan,
+                retention,
+            ));
+        }
         crate::feature_v2::compute_folded_v1_372_streaming_impl(
             source,
             distorted,

@@ -314,7 +314,9 @@ impl LocalRefineSnapshot {
                 })
             }),
         };
-        Self::capture_from_parts(ret, plan, src_dims, source, distorted, encoding, parts)
+        Self::capture_from_parts(
+            ret, plan, src_dims, source, distorted, encoding, parts, None,
+        )
     }
 
     /// [`Self::capture_with_encoding`], but MOVING the planes out of `ret`
@@ -324,6 +326,12 @@ impl LocalRefineSnapshot {
     /// hold, so the snapshot is byte-identical. `ret` keeps its dims and
     /// metadata; `FoldRetention::ensure` re-creates exactly the moved buffers
     /// on the next walk, which rewrites every element before any read.
+    ///
+    /// `cached_source0` is the source's scale-0 XYB from a prepared reference,
+    /// passed only when `feature_v2::retained_ref_feed_admits` holds: those
+    /// planes are the bytes the walk's conversion produces, so the source's
+    /// unretained channels are copied from it instead of converted again.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn capture_taking(
         ret: &mut FoldRetention,
         plan: &crate::feature_plan::Plan,
@@ -331,6 +339,7 @@ impl LocalRefineSnapshot {
         source: &impl crate::source::ImageSource,
         distorted: &impl crate::source::ImageSource,
         encoding: Option<feature_v2::HdrEncoding>,
+        cached_source0: Option<&[Vec<f32>; 3]>,
     ) -> Option<Self> {
         if !Self::capture_admits(ret, plan, src_dims) {
             return None;
@@ -354,10 +363,20 @@ impl LocalRefineSnapshot {
                 })
             }),
         };
-        Self::capture_from_parts(ret, plan, src_dims, source, distorted, encoding, parts)
+        Self::capture_from_parts(
+            ret,
+            plan,
+            src_dims,
+            source,
+            distorted,
+            encoding,
+            parts,
+            cached_source0,
+        )
     }
 
     /// The one capture body; `parts` are the retained planes, copied or moved.
+    #[allow(clippy::too_many_arguments)]
     fn capture_from_parts(
         ret: &FoldRetention,
         plan: &crate::feature_plan::Plan,
@@ -366,6 +385,7 @@ impl LocalRefineSnapshot {
         distorted: &impl crate::source::ImageSource,
         encoding: Option<feature_v2::HdrEncoding>,
         parts: RetainedParts,
+        cached_source0: Option<&[Vec<f32>; 3]>,
     ) -> Option<Self> {
         let c = &plan.compute;
         let (w0, h0) = src_dims;
@@ -380,7 +400,17 @@ impl LocalRefineSnapshot {
             // One image at a time: each conversion fills all three channels
             // but only the inactive ones are kept, so dropping one side's
             // planes before converting the other halves the transient.
-            fill_inactive_scale0(source, encoding, c, (w0, h0), &mut pyr_src0);
+            match cached_source0 {
+                Some(cached) => {
+                    for ch in 0..3 {
+                        if !c.channel_active(0, ch) {
+                            debug_assert_eq!(cached[ch].len(), w0 * h0);
+                            pyr_src0[ch] = cached[ch].clone();
+                        }
+                    }
+                }
+                None => fill_inactive_scale0(source, encoding, c, (w0, h0), &mut pyr_src0),
+            }
             fill_inactive_scale0(distorted, encoding, c, (w0, h0), &mut pyr_dst0);
         }
         let mut served = [[false; 3]; LOCAL_SCALES];
