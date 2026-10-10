@@ -1769,3 +1769,33 @@ is established yet. Consequently no external feature or label payload is
 admitted or opened here. A compatible retained cache/frame archive is
 required before an exact external exposure freeze and scoring; historical
 features cannot be relabeled Rev5, and new ffmpeg extraction is excluded.
+
+### V40 E31 HDR execution and external disposition — 2026-10-09
+
+UPIQ completed through the unchanged frozen packet owner under the committed
+expanded approval/freeze. Actual reads were exactly its two declared TRAIN
+populations: fit 330 observations / 26 reference identities (204 Korshunov,
+126 Narwaria) and development 50 / 4 (36 Korshunov, 14 Narwaria). Each
+population has all forty uh4 and forty matched control prediction panels,
+registered pooled signed SROCC, per-study pooled signed SROCC,
+within-reference SROCC and raw scatter geometry. Across all models the raw
+JOD arrays/order are identical; all registered groups are complete and finite,
+with zero dropped observations. TRAIN/development roles remain unchanged.
+There is no independent-test, shipping-adoption or new decision-rule claim.
+
+Full report SHA-256:
+`046b3d35146113f0461d1608d36c041b504b76dfdc13c433c3ebb3528fa6b367`.
+[Exact per-cell results](../benchmarks/v40_e31_hdr_result_summary_2026-10-09.json),
+[readout](../benchmarks/v40_e31_hdr_results_2026-10-09.md),
+and [complete evidence/tower pins](../benchmarks/v40_e31_hdr_results_2026-10-09.pointer.md).
+All 178 archived evidence files match the tower mirror by SHA-256.
+
+The coordinator's subsequent disposition confirms no newer Rev5 cache or
+stored decoded frames are known for HDR-VDC/AVT. Both reports are BLOCKED:
+only Rev2/944 tables remain, and decoded frames were deleted. Do not
+re-extract: running the frozen ffmpeg drivers requires fresh owner sign-off.
+The availability receipt lists all six recorded roots without opening or
+hashing external payloads. Neither external labels nor features were read.
+This disposition closes the lane with approved UPIQ reports complete and
+explicit external blockers. KADID TERMINAL, AIC-family, T0 and sealed data
+remain unopened; no new fit, extraction, calibration or selection occurred.

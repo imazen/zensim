@@ -81,3 +81,15 @@ UPIQ freeze-bar note: §5's "UPIQ pooled > 0.7536" row is owned by
 `scripts/hdr/upiq_panel.py` (372-feature dial-grid path, PU-linear features —
 a different pipeline from these 944 stored-table reads; both are canonical,
 see the audit's gate-owner table).
+
+## E31 Rev5 video-report availability (2026-10-09)
+
+The registered [E31 HDR-video reports](../../benchmarks/e31_upiq380_registration_2026-10-07.md)
+cannot reuse these historical Rev2/944 feature tables for the Rev5 by_v2fy
+420-ID contract. The archived HDR-VDC and AVT drivers delete decoded PNGs
+per content; the six recorded local/tower extraction roots retain feature
+CSVs and provenance, with no decoded frames or Rev5 admission declarations.
+The coordinator confirmed no newer compatible cache/frame archive is known.
+Reports are blocked on those inputs. New ffmpeg extraction needs fresh owner
+sign-off; no probe fit, column slicing or revision relabeling substitutes for
+compatible features. [Availability evidence and disposition](../../benchmarks/v40_e31_hdr_results_2026-10-09.pointer.md).

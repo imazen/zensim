@@ -510,3 +510,24 @@ fit/development and registered external-video routes exceed the approval;
 packet HDR mode supports E29 only. Clarification was requested. No UPIQ
 development, external, terminal, AIC-family, T0 or sealed data was opened.
 See the [exposure ledger](../docs/DATA_SPLITS.md#exposure-ledger--2026-10-09-owner-authorized-v40-hdr-validation-reports).
+
+## 36. E31 expanded owner-authorized HDR reports (2026-10-09)
+
+The owner approved E31's registered additional reads (verbatim “approved,
+all of it”). Approval and an exact seven-object freeze were committed
+before payload reads. UPIQ TRAIN fit (330 / 26 references) and TRAIN
+development (50 / 4) now have complete report-only panels for forty uh4
+models and forty matched controls each: pooled/study/reference signed ranks
+and raw scatter geometry. No new statistic, fit, selection or adoption rule.
+[Per-cell readout](v40_e31_hdr_results_2026-10-09.md),
+[exact summary](v40_e31_hdr_result_summary_2026-10-09.json),
+[evidence/tower pins](v40_e31_hdr_results_2026-10-09.pointer.md).
+All 178 archived files match the tower mirror. These are training/development
+reports, not independent human HDR qualification or a production change.
+
+HDR-VDC/AVT remain blocked: retained Rev2/944 tables are incompatible with
+Rev5/420, and the archived drivers deleted decoded frames. The coordinator
+confirmed no newer cache/archive is known and prohibited re-extraction
+without fresh owner sign-off. No external payloads/labels were opened.
+Terminal, AIC-family, T0 and sealed populations remain unopened. The
+four-source SDR result and the previously registered E29 outcome are unchanged.
