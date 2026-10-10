@@ -183,9 +183,9 @@ archmage = { version = "0.9.28", features = ["std", "testable_dispatch"] }
 # runtime that scores them (`caller_input_width` — i.e. dead-column
 # pruning — does not exist in the older pin, so a pruned bake could not
 # be forwarded at all).
-zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "417cc785b83bee0b3f827ae85c5203f5e104a308" }
 # Match the root metadata-splicing owner used by bake_stamp_revision.
-zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "417cc785b83bee0b3f827ae85c5203f5e104a308" }
 csv = "1"
 image = "0.25"
 rayon = "1.10"
