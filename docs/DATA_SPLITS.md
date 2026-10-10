@@ -1727,6 +1727,30 @@ existing `cid22_fit` TRAIN calibration rows. It will not read KADID TERMINAL,
 the AIC family, CID22 gold/human, KonJND, sealed/T0, HDR VAL, UPIQ or external
 panels. The exposure receipt is added here at assessment time.
 
+### E33 exposure receipt — 2026-10-10
+
+Launched under coordinator authorization on 2026-10-10: control, A and C (40 LODO cells each) and six
+full-data cells (A and C, seeds 0–2), 126 cells, all verified by the program's own harvest owner before any
+read below.
+
+| Read | Population | Rows | Role at read |
+|---|---|---:|---|
+| E21 (9.1) human labels | KADID TRAIN+SELECT | 7,869 | D1 design-released-human; withheld from its own fold |
+| | TID2013 | 3,000 | D1 design-released-human; withheld from its own fold |
+| | KonFiG TRAIN+VAL | 756 | D1 design-released-human; withheld from its own fold; design-grid label caveat |
+| | CID22-A(25) | 2,192 | D1 design-released-human; withheld from its own fold |
+| Label-free gates (9.2) | NEARID 24 TRAIN references; identity probe (38) + NEARID (24) sources | pixels only | TRAIN |
+| | instrument grids standard/ladder/negtail/identity (`--corpora none`) | features only | instrument diagnostic, `labels_read: false` |
+| | STEERFIX 135 engineering cases | pixels only | 96 TRAIN, 27 historical M3 fixtures, 12 KADID SELECT (previously exposed) |
+| Output stage | `cid22_fit` TRAIN calibration rows (in-cell pack, control re-pack) | 4 columns | TRAIN oracle calibration |
+| Report-only | `safesyn_fit` fragility feature columns | 141,054 | TRAIN, no label column read |
+
+E21 read each population once per model label (control, A, C): 13,817 observations per four-source rotation,
+ten rotations per label, 120 prediction panels. These are the same already-exposed populations V40's SDR
+assessments read; they add no new independent population. The E21 assessment ran once (no rerun). KADID
+TERMINAL, the AIC family, CID22 gold/human, KonJND, sealed/T0, HDR VAL, UPIQ and external panels were not
+read. Results: [E33 result summary](../benchmarks/e33_result_summary_2026-10-10.md).
+
 ### V40 E31 expanded HDR report approval and pre-read freeze — 2026-10-09
 
 Owner approval, verbatim (conveyed by the coordinator):

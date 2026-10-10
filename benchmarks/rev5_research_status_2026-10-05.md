@@ -531,3 +531,30 @@ confirmed no newer cache/archive is known and prohibited re-extraction
 without fresh owner sign-off. No external payloads/labels were opened.
 Terminal, AIC-family, T0 and sealed populations remain unopened. The
 four-source SDR result and the previously registered E29 outcome are unchanged.
+
+## 37. E33 registered results (2026-10-10)
+
+E33 ran exactly as registered (amendment A1 recorded before any fit): fresh 40-cell control, Arm A (410
+differences, no reference-only inputs) and Arm C (A plus 410 same-cell difference × fragility products),
+40 LODO cells each, plus full-data seeds 0–2 of A and C. All 126 cells completed on the home fleet with no
+wall-cap stop and no poisoned cell, and the program's own harvest owner verified every one.
+
+- **E21 (9.1): A and C are both AS-GOOD** against the fresh control. A: mean Δ −0.00089 (SE 0.00074);
+  C: mean Δ +0.00374 (SE 0.00126), every source positive. C beats A on the registered improvement test
+  (mean +0.00463, t = 3.98, df 9, one-sided p = 0.0016).
+- **Label-free gates (9.2), full-data seed 0:** both candidates pass N1, N2 and N3 (one-pixel rungs
+  ≥ 99.39 for A and ≥ 99.64 for C, where production seed 0 scores 88.69–97.67), C2 ties, C5 identity
+  (exactly 100.0 on all 620 source × tier rows) and the output stage (K1–K3 at pack, K4 0 of 14,665 rows at
+  the floor, C1/C3/C4/C6/G-DIAL). G-STEER: A 129/135 passes; **C 127/135 fails** the ≥ 128 bar.
+- **Runtime (9.3):** A is not slower in any cell. **C is slower** at 64² (+26–27%) and 256² (+6–7%) on
+  v4x and v3, so it fails the guard.
+- **Verdict (9.4.3): adopt A** as the next production candidate. That means full qualification, the KADID
+  TERMINAL decision and serving review; E33 qualifies nothing. C's E21 advantage does not apply because C
+  is ineligible. Owner, verbatim 2026-10-10: "i think it might matter, dont write off c". The registered
+  verdict stands; C stays under investigation (its steering failures are diagnosed with the STEERFIX method,
+  no threshold change). Report-only seeds 1–2 G-STEER: A 124 and 128, C 127 and 131.
+
+[Result summary](e33_result_summary_2026-10-10.md), [exact JSON](e33_result_summary_2026-10-10.json),
+[artifact pointer](e33_results_2026-10-10.pointer.md). Exposure: [DATA_SPLITS](../docs/DATA_SPLITS.md)
+(E33 exposure receipt). The populations are the same already-exposed D1 design sources V40 read; no
+untouched-test, HDR or external claim follows.
