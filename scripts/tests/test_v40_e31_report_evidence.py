@@ -2,6 +2,9 @@
 
 import copy
 import unittest
+from pathlib import Path
+import tempfile
+from unittest.mock import patch
 
 import v40_e31_report_evidence as owner
 
@@ -55,6 +58,24 @@ class Closure(unittest.TestCase):
         result = owner.verify(*fixture())
         self.assertEqual(result["pooled_signed_srocc"]["fit"]["uh4"]["kadid_s0"], -0.4)
         self.assertFalse(result["shipping_adoption_authorized"])
+
+    def test_protected_direct_and_symlink_report_refuse_before_open(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in ("holdout", "_sealed", "terminal", "aic3"):
+                protected = root / name
+                protected.mkdir()
+                sentinel = protected / "sentinel.json"
+                sentinel.write_text("{}")
+                alias = root / (name + "-alias")
+                alias.symlink_to(sentinel)
+                for path in (sentinel, alias):
+                    with patch(
+                        "v40_panels.os.open",
+                        side_effect=AssertionError("sentinel open"),
+                    ):
+                        with self.assertRaises(PermissionError):
+                            owner.bound_bytes(path)
 
     def test_missing_cell_refuses(self):
         report, exposure = fixture()

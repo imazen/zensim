@@ -9,6 +9,13 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import sys
+
+sys.path[:0] = [
+    str(Path(__file__).resolve().parents[1]),
+    str(Path(__file__).resolve().parents[1] / "rev4_featpot"),
+]
+from v40_panels import bound_bytes  # noqa: E402
 
 
 FOLDS = ("kadid", "tid2013", "konfig", "cid22_a25")
@@ -105,7 +112,7 @@ def main():
     args = parser.parse_args()
     if args.out.exists():
         raise ValueError("fresh evidence output required")
-    rb, eb = args.report.read_bytes(), args.exposure.read_bytes()
+    rb, eb = bound_bytes(args.report), bound_bytes(args.exposure)
     report = json.loads(rb)
     exposure = json.loads(eb)
     digest = hashlib.sha256(eb).hexdigest()
