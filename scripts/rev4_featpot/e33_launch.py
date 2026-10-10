@@ -98,6 +98,28 @@ def merge_caps(bundle, live=FITV2 / "jobset_caps.json"):
     return dict(backup=str(backup), added=sorted(set(mine) - set(current)))
 
 
+def expected_caps(bundle, js):
+    """The packet's caps entry plus coordinator amendments recorded in launch/CAPS_AMENDMENTS.json.
+
+    An amendment may only add hosts and restate the reason; memory and existing host slots stay as frozen.
+    """
+    entry = json.loads(json.dumps(json.loads((bundle / "jobset_caps.json").read_text())[js]))
+    path = bundle.parent / "launch" / "CAPS_AMENDMENTS.json"
+    if not path.exists():
+        return entry
+    for amendment in json.loads(path.read_text())["amendments"]:
+        change = amendment["jobsets"].get(js)
+        if change is None:
+            continue
+        if set(change) - {"added_hosts", "reason"} or set(change["added_hosts"]) & set(entry["hosts"]):
+            raise ValueError(f"amendment {amendment['id']} may only add hosts and restate the reason")
+        if any(type(v) is not int or v <= 0 for v in change["added_hosts"].values()):
+            raise ValueError(f"amendment {amendment['id']}: positive integer slots required")
+        entry["hosts"].update(change["added_hosts"])
+        entry["reason"] = change.get("reason", entry.get("reason"))
+    return entry
+
+
 def queued(queue):
     return [line.split()[0] for line in queue.read_text().splitlines() if line.split()]
 
@@ -111,8 +133,8 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
     if actual != doc["image_id"]:
         raise ValueError(f"local image id {actual} differs from the packet's {doc['image_id']}")
     entry = json.loads(live.read_text()).get(js)
-    if entry != json.loads((bundle / "jobset_caps.json").read_text())[js]:
-        raise ValueError("live jobset cap differs from the packet entry (run caps first)")
+    if entry != expected_caps(bundle, js):
+        raise ValueError("live jobset cap differs from the packet entry plus recorded amendments (run caps first)")
     placement(entry, fleet_hosts(bundle))
     names = queued(queue)
     if js in names:

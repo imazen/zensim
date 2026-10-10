@@ -20,7 +20,7 @@ from v40_package import PALETTE_SPEC, SPEC
 
 def sdr_decision(delta, w2, study):
     """Exactly ten equal-four-source seed units, plus paired two-source W2."""
-    if study not in ("e29", "e31", "e32"):
+    if study not in ("e29", "e31", "e32", "e33"):
         raise ValueError("unregistered statistic")
     signed = e29_seed_stat(delta)
     w2 = np.asarray(w2, dtype=np.float64)
@@ -409,13 +409,6 @@ def validate_artifacts(
 
 
 def score(bundle, study, results, control, root, tools, out, pins):
-    from v2_lodo_mlp import strict_training_groups, predict
-    from v2_teacher import key_path
-    from lib.zen_stats import panel_batch
-    import e13_teacher as e13
-    import pyarrow.parquet as pq
-    import pandas as pd
-
     cells = complete(bundle, study, results, control, tools)
     frozen = json.loads(pins.read_text())
     if frozen.get("control_choice") != "fresh-matched-v40" or frozen.get(
@@ -428,7 +421,34 @@ def score(bundle, study, results, control, root, tools, out, pins):
             "bake_sha256": sha(cell / "refit/last.bin"),
         }:
             raise ValueError("INCOMPLETE: frozen control changed")
-    refuse_immutable_output(out, (*admission_input_roots(root), results, control))
+    assess(
+        cells,
+        study,
+        root,
+        bundle / "W2_KEY_PINS.json",
+        out,
+        (results, control),
+        dict(
+            control_pins_sha256=sha(pins),
+            program_sha256=sha(bundle / "program.tar.gz"),
+        ),
+    )
+
+
+def assess(cells, study, root, w2_pins, out, protected, identity):
+    """Target-reading SDR panels and decisions for complete, verified cells (V40 and E33).
+
+    `cells` maps label -> {(fold, seed): cell dir}, with "control" present. Nothing reads a
+    human label before every cell, source population and distortion-type join is admitted.
+    """
+    from v2_lodo_mlp import strict_training_groups, predict
+    from v2_teacher import key_path
+    from lib.zen_stats import panel_batch
+    import e13_teacher as e13
+    import pyarrow.parquet as pq
+    import pandas as pd
+
+    refuse_immutable_output(out, (*admission_input_roots(root), *protected))
     if out.exists():
         raise ValueError("fresh assessment output required")
     receipt = json.loads((root / "wide/main/real/receipt.json").read_text())
@@ -442,7 +462,7 @@ def score(bundle, study, results, control, root, tools, out, pins):
     import hashlib
     import io
 
-    type_record = json.loads(bound_bytes(bundle / "W2_KEY_PINS.json"))
+    type_record = json.loads(bound_bytes(w2_pins))
     if type_record.get("schema") != "v40-w2-label-free-keys-v1" or set(
         type_record.get("members", {})
     ) != {"kadid_train", "kadid_select", "tid2013"}:
@@ -531,8 +551,7 @@ def score(bundle, study, results, control, root, tools, out, pins):
         panels={
             a: {f"{f}_s{s}": v for (f, s), v in p.items()} for a, p in panels.items()
         },
-        control_pins_sha256=sha(pins),
-        program_sha256=sha(bundle / "program.tar.gz"),
+        **identity,
         cells=_cell_pins(cells),
         observation_counts=observation_counts,
     )
@@ -548,6 +567,7 @@ def score(bundle, study, results, control, root, tools, out, pins):
         json.dumps(report, indent=2, allow_nan=False) + "\n"
     )
     print(json.dumps(decisions, allow_nan=False))
+    return report
 
 
 def main():

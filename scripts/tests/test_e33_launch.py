@@ -76,6 +76,21 @@ class Launch(unittest.TestCase):
             self.queue.write_text(self.queue.read_text() + f"{owner.jobset(arm)} m img\n")
         self.assertEqual(owner.advance(self.bundle, self.queue)["action"], "none")
 
+    def test_caps_amendments_only_add_hosts(self):
+        (self.root / "launch").mkdir()
+        js = owner.jobset("a")
+        path = self.root / "launch" / "CAPS_AMENDMENTS.json"
+        path.write_text(json.dumps({"amendments": [{"id": "loan", "jobsets": {js: {"added_hosts": {"r5600g": 2},
+                                                                                     "reason": "loan"}}}]}))
+        want = owner.expected_caps(self.bundle, js)
+        self.assertEqual(want["hosts"], {"i265": 3, "tower": 5, "r5600g": 2})
+        self.assertEqual((want["memory"], want["reason"]), ("6g", "loan"))
+        self.assertEqual(owner.expected_caps(self.bundle, owner.jobset("c")), self.mine[owner.jobset("c")])
+        for bad in ({"added_hosts": {"tower": 9}}, {"added_hosts": {}, "memory": "9g"}, {"added_hosts": {"x": 0}}):
+            path.write_text(json.dumps({"amendments": [{"id": "bad", "jobsets": {js: bad}}]}))
+            with self.assertRaises(ValueError):
+                owner.expected_caps(self.bundle, js)
+
 
 if __name__ == "__main__":
     unittest.main()
