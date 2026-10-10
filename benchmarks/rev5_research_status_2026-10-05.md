@@ -579,9 +579,9 @@ untouched-test, HDR or external claim follows.
   times in 931,248 comparisons, and its sensitivities equal finite differences.
 - **QUAL-A: A is not qualified ([record](qual_a_2026-10-10.md), `19777db8`, reviewed at effort xhigh).**
   - A fails three release gates:
-    - G-STEER: 129/135 on the STEERFIX packet. The all-pass bar on 135 cases came from the coordinator's brief;
-      the release map defines the population as 143 cases (owner12 is 4 cases × 3 seeds; the packet has one seed).
-      The 8 extra owner cases have not been run. A fails either way.
+    - G-STEER: 129/135. The population and per-case bars are PRODQUAL-B's registered G-STEER for a single-model
+      composition (135 cases). The gate map's "owner12 (4×3 seeds)" counts three trained seeds of a family; read
+      that way A's family is 137/143. A fails either way.
     - Cached score+map spatial cost: 4.07× at 1024² and 3.15× at 2048², against ≤ 3×.
     - Peak incremental memory with a map: 738,064 KiB against 589,824 at 2048² (+25%). At 1024² A is 300 KiB
       over 196,608, inside the run-to-run spread, so 2048² carries the conclusion.
@@ -597,3 +597,33 @@ Open owner decisions:
 1. Carry A or C forward. C is better on human data (+0.00463, t = 3.98, one-sided p = 0.0016). It is 127/135 on
    G-STEER, below the ≥ 128 bar, and its runtime pass needs the held zenpredict change.
 2. The zenpicker heuristic fallback (imazen/zenanalyze PR #90).
+
+## 39. E33C_FIX and the zenpredict pin landed (2026-10-10, main `ffd17c3b`)
+
+- **Profile models are parsed once per process.** `Zensim::compute` used to parse each shipped MLP profile's
+  bake up to three times per compare. `cached_profile_model` interns one parsed model per `&'static` bake slice.
+- **zenpredict moves to zenanalyze `417cc785`.** Each f16 layer is decoded once at load. It is on zenanalyze
+  `main`, and zensim pins it.
+- **Timing.** Per-compare medians on one thread against the previous `main`, with both changes:
+
+  | Profile | 64² | 256² |
+  |---|---:|---:|
+  | A | −38.8% | −3.3% |
+  | B | −9.45% | −0.15% |
+  | C | −35.4% | −4.4% |
+  | CHdr | −11.6% | −1.7% |
+  | D | −0.3% | +1.7% |
+
+  - No profile is slower under the registered +2% rule.
+  - D at 256² is a reproducible +1.4–1.8% that is still unexplained. It will be rechecked.
+  - Score bits are unchanged in every cell and in the pinned-score test.
+  - Reviewed at effort xhigh.
+- **CI.** The no-default-features loop's `none` and `deprecated-profiles` sets pass again. The `feature-regime-v2`
+  and `deprecated-profiles,candidate-profiles` sets still fail on steering code. That fix is in the STEERPATH
+  fix-up.
+- **STEERPATH_PERF (local, fix-up in progress).**
+  - Memory: the map memory gate passes for A, C and seed 0 at both sizes. At 2048² it is 575.5–576.0 MB against
+    589.8.
+  - Spatial cost: the gate passes only with zenpredict `417cc785`, which is now on `main`, at 2.63–2.79×.
+  - One new clippy failure in a CI feature set blocks landing.
+
