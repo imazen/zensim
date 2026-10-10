@@ -443,7 +443,25 @@ pub fn used_caller_lines(model: &Model) -> Result<Vec<usize>, String> {
     Ok((0..norms.len()).filter(|&i| norms[i] > near).collect())
 }
 
+/// Positional layer-0 diagnostics read caller position `j` as declared id `j`. A derived-input bake
+/// (`zensim.derived_inputs`, E33 `fx1`) breaks that: its 820 inputs are entries over 420 declared ids.
+/// Refuse rather than mislabel lines.
+pub fn refuse_derived_inputs(model: &Model, what: &str) -> Result<(), String> {
+    if model
+        .metadata()
+        .get(crate::derived_inputs::DERIVED_INPUTS_KEY)
+        .is_some()
+    {
+        return Err(format!(
+            "{what}: derived-input bake (zensim.derived_inputs) — its model inputs are not one declared id \
+             per position; positional line diagnostics would mislabel them"
+        ));
+    }
+    Ok(())
+}
+
 pub fn profile(model: &Model) -> Result<BlockProfile, String> {
+    refuse_derived_inputs(model, "block profile")?;
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
     // ONE derivation of the caller-line norms, shared with `used_caller_lines`.

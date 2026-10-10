@@ -193,9 +193,16 @@ impl<'a> BakeScorer<'a> {
     ) -> Result<Self, ZensimError> {
         crate::feature_layout::formula_revision(model)?;
         crate::sampling::Sampling::from_model(model)?;
+        // A derived-input bake declares its read set, not one id per input;
+        // `metadata` already validated its entries against that read set and
+        // the caller width (`derived_inputs::from_model`).
+        let declared_width = match metadata.derived_inputs.as_deref() {
+            Some(d) => d.gather_width(),
+            None => model.caller_input_width(),
+        };
         if model.metadata().get("zentrain.feature_ids").is_some()
             && crate::feature_layout::declared_ids(model)
-                .is_none_or(|ids| ids.len() != model.caller_input_width())
+                .is_none_or(|ids| ids.len() != declared_width)
         {
             return Err(ZensimError::ModelLoadFailed {
                 reason: "invalid zentrain.feature_ids declaration or input count",

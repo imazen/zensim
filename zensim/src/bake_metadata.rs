@@ -339,6 +339,8 @@ pub struct ScoreMetadata {
     pub tanh_pin_scale: Option<f64>,
     pub output_spline: Option<std::sync::Arc<OutputCalibrationSpline>>,
     pub(crate) per_codec_calibration: Option<std::sync::Arc<PerCodecCalibration>>,
+    /// E33 `fx1` model-input list (`zensim.derived_inputs`), when declared.
+    pub(crate) derived_inputs: Option<std::sync::Arc<crate::derived_inputs::DerivedInputs>>,
 }
 
 pub fn parse_bake_metadata(model: &crate::mlp::Model) -> Result<ScoreMetadata, ZensimError> {
@@ -386,6 +388,16 @@ pub fn parse_bake_metadata(model: &crate::mlp::Model) -> Result<ScoreMetadata, Z
         parse_per_codec_calibration,
     )?
     .map(Arc::new);
+    let derived_inputs = crate::derived_inputs::from_model(model)
+        .map_err(|reason| ZensimError::ModelLoadFailed { reason })?
+        .map(Arc::new);
+    if derived_inputs.is_some()
+        && (per_sample_alpha.is_some() || hybrid_head.is_some() || minmax_head.is_some())
+    {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "derived inputs are served only by the plain network head",
+        });
+    }
     Ok(ScoreMetadata {
         per_sample_alpha,
         hybrid_head,
@@ -393,6 +405,7 @@ pub fn parse_bake_metadata(model: &crate::mlp::Model) -> Result<ScoreMetadata, Z
         tanh_pin_scale,
         output_spline,
         per_codec_calibration,
+        derived_inputs,
     })
 }
 

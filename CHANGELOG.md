@@ -6,6 +6,22 @@
 
 ### Added
 
+- E33 derived model inputs (`zensim.derived_inputs`, registration
+  `benchmarks/e33_registration_2026-10-09.md`): a bake may list its model
+  inputs as declared ids (`in <id>`) and same-cell Difference × ReferenceOnly
+  f32 products (`product <a> <b>`); zensim validates the pairing against its
+  feature registry at load. Runtimes without this key refuse such bakes
+  (declared ids ≠ input width). Bakes without the key are served unchanged
+  (648/648 NEARID seed-0 rows bit-identical). Training side: `zensim_mlp_train
+  --derived-inputs`, compact derived bakes with a bit-identity gate; `pack
+  --identity-knot/--tail-extend` (the registered output stage). No public Rust
+  items added. Record: `benchmarks/e33_implementation_2026-10-10.md`.
+  Review fixes: checkpoints carry `zentrain.derived_inputs_sha256`; the E33
+  output-stage refusal keeps its artifacts and exits deterministically;
+  positional diagnostics (`block_profile`, `bake_contrib`) refuse derived
+  bakes; `e33_predictor_parity.py` reproduces the 40 frozen V40 control
+  predictions byte for byte in score units.
+
 - Internal SPEEDQ extension to the existing speed matrix: isolated Rev3/Rev4/Rev5
   owners, strict Rev4/Rev5 parity, recorded Rev3 tolerance failures, quiet-gated
   paired rounds, descriptive alpha/beta fits and separate fresh-process RSS.

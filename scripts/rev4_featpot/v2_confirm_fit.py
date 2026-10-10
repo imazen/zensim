@@ -55,6 +55,8 @@ def main() -> None:
     ap.add_argument("--strict-admission", action="store_true", help="strict Rev5 table admission; no historical replay")
     ap.add_argument("--data-role-decision", type=Path, help="coordinator's bound human-role decision JSON")
     ap.add_argument("--pack-production", action="store_true", help="densify and f16 pack, then calibrate on TRAIN cid22 oracle")
+    ap.add_argument("--e33-output-stage", action="store_true",
+                    help="E33 registration section 8: identity knot (pin, 100) and collinear tail (requires --pack-production)")
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake; no confirmatory predictions")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
@@ -65,6 +67,8 @@ def main() -> None:
             ap.error("local smoke requires strict training-only")
         from v2_smoke_contract import apply_smoke_budget
         apply_smoke_budget(args.local_smoke_budget, globals())
+    if args.e33_output_stage and not args.pack_production:
+        ap.error("--e33-output-stage requires --pack-production")
     if args.pack_production and not (args.strict_admission and args.train_only):
         ap.error("production packing requires strict admission and training-only")
     if args.strict_admission and (args.dest is None or not args.train_only):
@@ -134,7 +138,11 @@ def main() -> None:
         from v2_common import refuse_nonfinite_kept
         if args.strict_admission:
             strict_training_groups(groups, args.data_role_decision)
-        refuse_nonfinite_kept([g[1] for g in groups], keep)  # Rev5 tables mark absent slots NaN
+        read = keep
+        if recipe.get("derived_inputs") == "fx1":  # E33 Arm C: product factors are read too
+            from v2_common import fx1_declaration
+            read = sorted(set(keep) | {b for _, b in fx1_declaration()["products"]})
+        refuse_nonfinite_kept([g[1] for g in groups], read)  # Rev5 tables mark absent slots NaN
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
                                                   strict_admission=args.strict_admission,
                                                   data_role_decision=args.data_role_decision)
@@ -148,7 +156,22 @@ def main() -> None:
         packed = {}
         if args.pack_production:
             from v2_production_pack import pack_production
-            packed = pack_production(bake, dest, checked(legs["cid22"]["fit"]))
+            try:
+                packed = pack_production(bake, dest, checked(legs["cid22"]["fit"]),
+                                         e33_output_stage=args.e33_output_stage)
+            except RuntimeError as refusal:
+                if not args.e33_output_stage:
+                    raise
+                # E33 registration section 8: a K1-K4 refusal is an ineligibility RESULT. Keep the trained model,
+                # its dense form and the pack log in the cell, and report deterministically (fit_cell_exec does not
+                # retry this marker).
+                pack_log = dest / "pack.log"
+                tail = pack_log.read_text(errors="replace").splitlines()[-12:] if pack_log.is_file() else []
+                (dest / "E33_OUTPUT_STAGE_REFUSAL.json").write_text(json.dumps({
+                    "schema": "e33-output-stage-refusal-v1", "selected_bake": str(bake),
+                    "selected_bake_sha256": sha(bake), "pack_log_tail": tail, "error": str(refusal)}) + "\n")
+                print("E33 output-stage refusal: " + " | ".join(tail[-3:]), flush=True)
+                raise SystemExit(3)
         (dest / "result.json").write_text(json.dumps({"schema": "rev5-qualified-training-cell-v1" if args.strict_admission else "historical-training-only-v1",
             "training_only": True, "execution_contract": "local-smoke" if args.local_smoke_budget else "registered-fit", "selection": selection, "epochs": EPOCHS, "pairs_per_epoch": PAIRS_PER_EPOCH,
             "seed_index": args.seed_index, "width": width, "kept_features": len(keep),
@@ -157,7 +180,9 @@ def main() -> None:
             "data_role_decision_sha256": sha(args.data_role_decision) if args.strict_admission else None,
             "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
             "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
-            "train_weights": weights, "coverage_leg": coverage_record, **packed}) + "\n")
+            "train_weights": weights, "coverage_leg": coverage_record, **packed,
+            **({"derived_inputs": {"token": "fx1", "declaration_sha256": __import__("v2_common").FX1_SHA256}}
+               if recipe.get("derived_inputs") else {})}) + "\n")
         return
     predictions = {}
     for name, table in tables.items():

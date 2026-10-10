@@ -91,17 +91,10 @@ pub fn neg_tail_is_material(preds: &[f64], tgt: &[f64], n_edges: usize) -> Optio
     Some((kx_keep.len(), kx_dedup.len()))
 }
 
-/// Faithful port of `linear_projections_2026-07-03.py::fit_spline_knots`:
-/// percentile-EDGE bins (edges at `linspace(1,99,n_edges)` percentiles),
-/// per-bin median `(pred, target)` knots, a strictly-increasing-x /
-/// non-decreasing-y monotone filter, and the neg-tail dedup (keep only the
-/// last of any run of `y<=1e-6` knots).
-pub fn fit_spline_knots(
-    preds: &[f64],
-    tgt: &[f64],
-    n_edges: usize,
-    neg_tail: bool,
-) -> (Vec<f64>, Vec<f64>) {
+/// The percentile-edge binning shared by [`fit_spline_knots`] and
+/// [`fit_identity_pinned_knots`]: per-bin median `(pred, target)` candidates
+/// before any monotone filter. `None` for an unusable anchor.
+fn bin_knots(preds: &[f64], tgt: &[f64], n_edges: usize) -> Option<(Vec<f64>, Vec<f64>)> {
     // Invalid/empty anchors cannot produce a bake. Callers already refuse a
     // fit with fewer than two knots; do not panic indexing empty bins.
     if preds.len() != tgt.len()
@@ -109,7 +102,7 @@ pub fn fit_spline_knots(
         || n_edges < 2
         || preds.iter().chain(tgt).any(|v| !v.is_finite())
     {
-        return (Vec::new(), Vec::new());
+        return None;
     }
     let mut sorted = preds.to_vec();
     sorted.sort_by(f64::total_cmp);
@@ -136,8 +129,25 @@ pub fn fit_spline_knots(
     push_bin(&hi, preds, tgt, &mut kx, &mut ky);
 
     if kx.is_empty() {
-        return (Vec::new(), Vec::new());
+        return None;
     }
+    Some((kx, ky))
+}
+
+/// Faithful port of `linear_projections_2026-07-03.py::fit_spline_knots`:
+/// percentile-EDGE bins (edges at `linspace(1,99,n_edges)` percentiles),
+/// per-bin median `(pred, target)` knots, a strictly-increasing-x /
+/// non-decreasing-y monotone filter, and the neg-tail dedup (keep only the
+/// last of any run of `y<=1e-6` knots).
+pub fn fit_spline_knots(
+    preds: &[f64],
+    tgt: &[f64],
+    n_edges: usize,
+    neg_tail: bool,
+) -> (Vec<f64>, Vec<f64>) {
+    let Some((kx, ky)) = bin_knots(preds, tgt, n_edges) else {
+        return (Vec::new(), Vec::new());
+    };
 
     // strictly-increasing-x, non-decreasing-y monotone filter.
     let mut cx = vec![kx[0]];
@@ -183,6 +193,218 @@ pub fn fit_spline_knots(
         }
     }
     (cx, cy)
+}
+
+/// E33 registered output stage (`benchmarks/e33_registration_2026-10-09.md`
+/// §8), for a `--nonneg-distance` network whose raw output never exceeds
+/// `pin` and equals it exactly on a perfect copy.
+///
+/// 1. [`bin_knots`] candidates, filtered STRICTLY (`x > x_last + 1e-7` and
+///    `y > y_last + 1e-6`), so no interior segment is flat.
+/// 2. Identity knot `(pin, 100)` appended; refused unless the last fitted
+///    knot lies below it in both coordinates. The runtime's upper branch is
+///    then reached only at `raw == pin` and returns exactly 100.
+/// 3. Tail knot `(x_t, y_t)` prepended on the fitted bottom secant,
+///    `x_t = x_0 − tail_factor·(pin − x_0)`, so the first two segments are
+///    collinear and the PCHIP endpoint slope is that secant (> 0). Below
+///    `x_t` the score keeps falling linearly until the unchanged OOD floor.
+pub fn fit_identity_pinned_knots(
+    preds: &[f64],
+    tgt: &[f64],
+    n_edges: usize,
+    pin: f64,
+    tail_factor: f64,
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    if !(pin.is_finite() && tail_factor.is_finite() && tail_factor > 0.0) {
+        return Err(
+            "identity-pinned spline: pin and tail factor must be finite, factor > 0".into(),
+        );
+    }
+    let (kx, ky) = bin_knots(preds, tgt, n_edges)
+        .ok_or("identity-pinned spline: unusable calibration rows")?;
+    let mut cx = vec![kx[0]];
+    let mut cy = vec![ky[0]];
+    for i in 1..kx.len() {
+        if kx[i] > cx[cx.len() - 1] + 1e-7 && ky[i] > cy[cy.len() - 1] + 1e-6 {
+            cx.push(kx[i]);
+            cy.push(ky[i]);
+        }
+    }
+    if cx.len() < 2 {
+        return Err(format!(
+            "identity-pinned spline: only {} strictly increasing knot(s); the network does not \
+             rank the calibration rows in the target's direction",
+            cx.len()
+        ));
+    }
+    let (x_last, y_last) = (cx[cx.len() - 1], cy[cy.len() - 1]);
+    if !(x_last < pin && y_last < 100.0) {
+        return Err(format!(
+            "identity-pinned spline: last fitted knot ({x_last}, {y_last}) is not below the \
+             identity knot ({pin}, 100)"
+        ));
+    }
+    let s0 = (cy[1] - cy[0]) / (cx[1] - cx[0]);
+    let x_t = cx[0] - tail_factor * (pin - cx[0]);
+    let y_t = cy[0] - s0 * (cx[0] - x_t);
+    let mut xs = Vec::with_capacity(cx.len() + 2);
+    let mut ys = Vec::with_capacity(cx.len() + 2);
+    xs.push(x_t);
+    ys.push(y_t);
+    xs.extend_from_slice(&cx);
+    ys.extend_from_slice(&cy);
+    xs.push(pin);
+    ys.push(100.0);
+    Ok((xs, ys))
+}
+
+/// Measured properties of an identity-pinned spline (registration §8 K1–K3),
+/// evaluated on the f32-serialized knots through the serving owner.
+#[derive(Clone, Debug)]
+pub struct IdentityPinnedChecks {
+    /// Raw output below which the runtime's OOD floor engages.
+    pub x_floor: f64,
+    /// Score at the floor.
+    pub floor: f64,
+    /// PCHIP slope at the identity knot (reported, not gated).
+    pub identity_slope: f64,
+    /// Bottom fitted knot (the tail starts below it).
+    pub x0: f64,
+    /// Number of dense-grid points evaluated for K2.
+    pub k2_points: usize,
+}
+
+/// K1 (every stored derivative except the identity knot's is > 0), K2
+/// (served score strictly decreasing in `g = pin − raw` over 10⁶ log-spaced
+/// points on `[1e-6, pin − x_floor]`, plus `g = 0` and every knot ± 1 ulp;
+/// ulp-adjacent probes must not increase, since f64 cannot resolve a strict
+/// decrease of `slope · 1 ulp`)
+/// and K3 (`spline(pin) == 100.0`). Errors name the first failure.
+pub fn check_identity_pinned(payload: &[u8], pin: f64) -> Result<IdentityPinnedChecks, String> {
+    let sp = crate::output_calibration_spline::parse_payload(payload)
+        .ok_or("identity-pinned spline: payload does not parse")?;
+    let n = sp.xs.len();
+    if let Some(k) = (0..n - 1).find(|&k| sp.derivs[k] <= 0.0) {
+        return Err(format!(
+            "K1: PCHIP derivative at knot {k} (x = {}) is {} (must be > 0)",
+            sp.xs[k], sp.derivs[k]
+        ));
+    }
+    let apply = |x: f64| crate::output_calibration_spline::apply(x, &sp);
+    let at_pin = apply(pin);
+    if at_pin.to_bits() != 100.0f64.to_bits() {
+        return Err(format!("K3: spline(pin) = {at_pin:?}, not exactly 100"));
+    }
+    if (sp.xs[n - 1] - pin).abs() > 0.0 {
+        return Err(format!(
+            "K3: top knot x = {} is not the pin {pin}",
+            sp.xs[n - 1]
+        ));
+    }
+    let floor = sp.ys[0] - (sp.ys[n - 1] - sp.ys[0]);
+    let x_floor = sp.xs[0] - (sp.ys[0] - floor) / sp.derivs[0];
+    let span = pin - x_floor;
+    let mut gs: Vec<f64> = Vec::with_capacity(1_000_000 + 4 * n + 1);
+    gs.push(0.0);
+    const N: usize = 1_000_000;
+    let (lo, hi) = (1e-6f64.ln(), span.ln());
+    for i in 0..N {
+        gs.push((lo + (hi - lo) * i as f64 / (N - 1) as f64).exp());
+    }
+    for &x in &sp.xs {
+        for xx in [
+            x,
+            f64::from_bits(x.to_bits() + 1),
+            f64::from_bits(x.to_bits() - 1),
+        ] {
+            let g = pin - xx;
+            if (0.0..=span).contains(&g) {
+                gs.push(g);
+            }
+        }
+    }
+    gs.sort_by(f64::total_cmp);
+    gs.dedup();
+    // Strict decrease is required between points the f64 score can resolve:
+    // the log grid and every knot neighbourhood against its grid neighbours.
+    // Probes within a few ulps of each other (a knot and its ±1-ulp twins)
+    // must not INCREASE; a change of `slope · 1 ulp` is below the score's own
+    // f64 resolution, so equality there is not a flat segment.
+    let mut prev: Option<(f64, f64)> = None;
+    for &g in &gs {
+        let y = apply(pin - g);
+        if let Some((pg, py)) = prev {
+            let (x, px) = (pin - g, pin - pg);
+            let ulp_close = (x - px).abs() <= 4.0 * f64::EPSILON * x.abs().max(px.abs()).max(1.0);
+            let ok = if ulp_close { y <= py } else { y < py };
+            if !ok {
+                return Err(format!(
+                    "K2: served score not strictly decreasing between g = {pg} ({py}) and g = {g} ({y})"
+                ));
+            }
+        }
+        prev = Some((g, y));
+    }
+    Ok(IdentityPinnedChecks {
+        x_floor,
+        floor,
+        identity_slope: sp.derivs[n - 1],
+        x0: sp.xs[1],
+        k2_points: gs.len(),
+    })
+}
+
+#[cfg(test)]
+mod identity_pinned_tests {
+    use super::*;
+
+    fn anchor() -> (Vec<f64>, Vec<f64>) {
+        // A raw distribution that stays below the pin, ranked like the target.
+        let preds: Vec<f64> = (0..4000).map(|i| 15.0 + 77.0 * i as f64 / 4000.0).collect();
+        let tgt: Vec<f64> = preds
+            .iter()
+            .map(|p| 30.0 + 0.7 * (p - 15.0) + 3.0 * (p / 9.0).sin())
+            .collect();
+        (preds, tgt)
+    }
+
+    #[test]
+    fn identity_pinned_spline_passes_its_checks() {
+        let (p, t) = anchor();
+        let (xs, ys) = fit_identity_pinned_knots(&p, &t, 18, 100.0, 2.0).unwrap();
+        assert_eq!(*xs.last().unwrap(), 100.0);
+        assert_eq!(*ys.last().unwrap(), 100.0);
+        assert!(ys.windows(2).all(|w| w[1] > w[0]));
+        let payload = spline_payload(&xs, &ys);
+        let c = check_identity_pinned(&payload, 100.0).unwrap();
+        assert!(c.x_floor < xs[0]);
+        assert!(c.k2_points > 1_000_000);
+    }
+
+    #[test]
+    fn the_existing_fit_can_leave_a_zero_endpoint_slope_and_k1_catches_it() {
+        // Shallow first segment, steep second: pchip_endpoint clamps d0 to 0,
+        // which flattens the whole lower tail.
+        let xs = [10.0, 20.0, 21.0, 100.0];
+        let ys = [40.0, 40.5, 90.0, 100.0];
+        let payload = spline_payload(&xs, &ys);
+        assert!(
+            check_identity_pinned(&payload, 100.0)
+                .unwrap_err()
+                .starts_with("K1")
+        );
+    }
+
+    #[test]
+    fn refusals() {
+        let (p, t) = anchor();
+        // Pin below the calibration rows' top knot.
+        assert!(fit_identity_pinned_knots(&p, &t, 18, 50.0, 2.0).is_err());
+        // Anti-ranked network.
+        let rev: Vec<f64> = t.iter().map(|y| -y).collect();
+        assert!(fit_identity_pinned_knots(&p, &rev, 18, 100.0, 2.0).is_err());
+        assert!(fit_identity_pinned_knots(&p, &t, 18, 100.0, 0.0).is_err());
+    }
 }
 
 #[cfg(test)]

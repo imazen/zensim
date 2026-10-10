@@ -394,6 +394,12 @@ pub(crate) mod dvifm;
 // referenced it. Same-parent A/B, `benchmarks/dense_serving_ungate_2026-09-06.md`.
 pub(crate) mod feature_layout;
 
+// E33 `fx1`: explicit model-input lists (direct ids and same-cell
+// difference × reference-only products) declared in bake metadata. Not
+// feature-gated for the same reason as `feature_layout`: it changes which
+// values a declared bake is served.
+pub(crate) mod derived_inputs;
+
 // **The SERVABILITY census** — the roster of shipped profiles and the gate
 // that every one of them serves a real pair. Always compiled, deliberately:
 // it lived inside the `feature-regime-v2`-gated `feature_plan` until

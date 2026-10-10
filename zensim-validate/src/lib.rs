@@ -15,6 +15,7 @@ pub mod bake_runtime;
 pub mod bands;
 pub mod block_profile;
 pub mod content_clusters;
+pub mod derived_inputs;
 pub mod dial_addressability;
 pub mod dial_content;
 pub mod dial_spline;
