@@ -34,8 +34,8 @@
 
 - Rev5 ordered strip jobs now obey a private byte budget, including retained
   queue allocations, and use the original route when fewer than three jobs
-  fit (the original route runs three channels in parallel). Strict 384/384
-  parity and thread invariance pass (`ed0e06c6`, floor `ca0208e7`). Timing
+  fit (measured: below three slots the original route is faster). Strict 384/384
+  parity and thread invariance pass (`9bab143c`, floor `245a1445`, 256 MiB `3867a402`). Timing
   confirms the floor: the queue beats the original route at 3–16 slots and
   loses at 2. The default budget is 256 MiB (coordinator decision): at ≥4096-wide
   inputs on 16–32 threads it costs 1–22 % versus uncapped (128 MiB: 15–46 %),
