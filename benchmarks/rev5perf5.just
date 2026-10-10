@@ -35,21 +35,36 @@ rev5perf5-checks:
     cargo check -p zensim --no-default-features --features feature-regime-v2
     just -f benchmarks/rev5perf5.just rev5perf5-tests
 
-# Timing runs five arms: the four frozen budget builds plus the 128 MiB source
-# with the three-slot floor (v2 inventory and preflight). Internal --lock.
+# Floor grid: six arms (uncapped, frozen 64/128/256 MiB, 128 MiB with floor 3,
+# 128 MiB with floor 17 = original route) at 1024², 4096², 4608×4096,
+# 6144×4096 and 8192×4096 (16/5/4/3/2 slots at 128 MiB). Internal --lock;
+# the quiet gate and clean-round rule are unchanged.
 rev5perf5-budget-timing root:
-    python3 scripts/demos/costcmp_run.py timing --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v2.json" --binary "{{root}}/provenance/instrument-floor3-timing" --dest "{{root}}/budget/timing" --parity "{{root}}/budget/parity-v2/PREFLIGHT_PASS.json" --analyzer "{{root}}/provenance/paired-rounds-analyzer" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
+    python3 scripts/demos/costcmp_run.py timing --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v3.json" --binary "{{root}}/provenance/instrument-floor3-grid" --dest "{{root}}/budget/timing" --parity "{{root}}/budget/parity-v3/PREFLIGHT_PASS.json" --analyzer "{{root}}/provenance/paired-rounds-analyzer" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
+
+# Quiet-gated fresh-process RSS of the two floor arms over the floor grid.
+rev5perf5-floor-rss root:
+    python3 scripts/demos/costcmp_run.py rss --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v3.json" --binary "{{root}}/provenance/instrument-floor3-grid" --dest "{{root}}/budget/rss" --parity "{{root}}/budget/parity-v3/PREFLIGHT_PASS.json" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
 
 # Quiet-gated fresh-process RSS for the four measured arms (internal --lock).
 rev5perf5-budget-rss root:
     python3 scripts/demos/costcmp_run.py rss --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --binary "{{root}}/provenance/instrument-cap128" --dest "{{root}}/budget/rss" --parity "{{root}}/budget/parity/PREFLIGHT_PASS.json" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
 
 rev5perf5-floor-preflight root:
-    just -f benchmarks/rev5perf5.just rev5perf5-build "{{root}}" floor3-timing
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f zensim/src/feature_v2.rs
+    trap 'python3 scripts/demos/rev5perf5_candidate.py floor-source --root "{{root}}" --slots 3' EXIT
+    python3 scripts/demos/rev5perf5_candidate.py floor-source --root "{{root}}" --slots 17 --label floor17-grid
+    just -f benchmarks/rev5perf5.just rev5perf5-build "{{root}}" floor17-grid
+    python3 scripts/demos/rev5perf5_candidate.py floor-source --root "{{root}}" --slots 3 --label floor3-grid
+    just -f benchmarks/rev5perf5.just rev5perf5-build "{{root}}" floor3-grid
     python3 scripts/demos/rev5perf5_candidate.py floor-inventory --root "{{root}}"
-    python3 scripts/demos/costcmp_run.py parity --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v2.json" --binary "{{root}}/provenance/instrument-floor3-timing" --dest "{{root}}/budget/parity-v2"
-    just -f benchmarks/rev5perf5.just rev5perf5-parity "{{root}}/provenance/instrument-floor3-timing" "{{root}}/floor3-timing/parity"
-    PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from rev5perf_report import compare_bits; from speedq_run import write; write(Path("{{root}}/provenance/parity-floor3-timing.json"), compare_bits(Path("{{root}}/uncapped"),Path("{{root}}/floor3-timing")))'
+    python3 scripts/demos/costcmp_run.py parity --budget-grid --floor-arm --budget-binaries "{{root}}/provenance/budget-binaries-v3.json" --binary "{{root}}/provenance/instrument-floor3-grid" --dest "{{root}}/budget/parity-v3"
+    for slots in 3 17; do
+        just -f benchmarks/rev5perf5.just rev5perf5-parity "{{root}}/provenance/instrument-floor${slots}-grid" "{{root}}/floor${slots}-grid/parity"
+        PYTHONPATH=scripts/demos python3 -c 'import sys; from pathlib import Path; from rev5perf_report import compare_bits; from speedq_run import write; r=Path(sys.argv[1]); write(r/f"provenance/parity-floor{sys.argv[2]}-grid.json", compare_bits(r/"uncapped", r/f"floor{sys.argv[2]}-grid"))' "{{root}}" "$slots"
+    done
 
 rev5perf5-progress root:
     python3 scripts/demos/costcmp_run.py status --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --dest "{{root}}/budget"

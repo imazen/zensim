@@ -200,7 +200,9 @@ fn worker(arm: &str) {
     let score = action();
     assert!(score.is_finite(), "nonfinite score");
     let bits = score.to_bits();
-    let actual_threads = if std::env::var_os("ZEN_S2_RSS_ONLY").is_none() {
+    // RSS-only runs record the pool size too for by_v2fy, whose walk has
+    // already built the global pool; other arms keep the untouched pool.
+    let actual_threads = if std::env::var_os("ZEN_S2_RSS_ONLY").is_none() || arm == "by_v2fy" {
         let actual = rayon::current_num_threads();
         assert_eq!(
             actual,
@@ -311,6 +313,8 @@ pub(super) fn run() {
         ("by_v2fy_r5_b256", "by_v2fy", "5"),
         #[cfg(feature = "costcmp")]
         ("by_v2fy_r5_floor3", "by_v2fy", "5"),
+        #[cfg(feature = "costcmp")]
+        ("by_v2fy_r5_floor17", "by_v2fy", "5"),
         ("zensim_B", "zensim_B", "1"),
         ("fast_ssim2", "fast_ssim2", "1"),
         ("butteraugli", "butteraugli", "1"),

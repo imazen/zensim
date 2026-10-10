@@ -27,7 +27,7 @@ def main():
          lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_before', '0'*64)),
         ('shared_round_alignment', first / 'COMPLETE.json',
          lambda value: value['retained_indices'].reverse()),
-        ('complete_requested_grid', args.raw_dir / grid / ('parity-v2' if args.floor_arm else 'parity') / 'PREFLIGHT_PASS.json',
+        ('complete_requested_grid', args.raw_dir / grid / ('parity-v3' if args.floor_arm else 'parity') / 'PREFLIGHT_PASS.json',
          lambda value: value['records'].pop()),
         ('measured_rss_log', args.raw_dir / (grid+'/rss/'+('v4x-t8-1024x1024-by_v2fy_r5_b64.log' if args.budget_grid else 'v4x-t1-1024x1024-by_v2fy_r5.log')), None),
         ('exact_statistics_replay', None, None),
@@ -35,6 +35,10 @@ def main():
     if args.floor_arm:
         controls.append(('floor_binary_pin', first / 'header.json',
                          lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_floor3', '0'*64)))
+        controls.append(('original_route_binary_pin', first / 'header.json',
+                         lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_floor17', '0'*64)))
+        controls.append(('floor_rss_thread_proof', args.raw_dir / 'budget/rss/v4x-t8-6144x4096-by_v2fy_r5_floor3.json',
+                         lambda value: value['worker'].update(actual_rayon_threads=None)))
     if args.rss_only:
         assert args.budget_grid and not args.floor_arm
         rss = args.raw_dir/'budget/rss/v4x-t8-1024x1024-by_v2fy_r5_b64'

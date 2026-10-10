@@ -14,13 +14,23 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def rss_measurement(root, grid, tag, rows, arm, geometry, threads, expected_sha):
+def check_shared_load_policy(row):
+    """Shared-load RSS needs the coordinator tag; the misattributed one only on the original 36 records."""
+    if row['rss_policy'] == owner.RSS_UNDER_LOAD_POLICY_RECORDED:
+        assert row['quiet_gate']['utc'] < owner.RSS_UNDER_LOAD_POLICY_RECORDED_UNTIL, 'misattributed tag on a new record'
+    else:
+        assert row['rss_policy'] == owner.RSS_UNDER_LOAD_POLICY, 'unknown shared-load RSS policy'
+
+
+def rss_measurement(root, grid, tag, rows, arm, geometry, threads, expected_sha, require_threads=False):
     row = json.loads((root/grid/'rss'/(tag+'.json')).read_text())
+    if require_threads:
+        assert row['worker']['actual_rayon_threads'] == threads, 'RSS worker did not record its pool size'
     if row.get('quiet_required', True):
         assert row['quiet_gate']['admitted'] and row['quiet_gate']['load1'] < 2
     else:
         assert grid == 'budget'
-        assert row['rss_policy'] in (owner.RSS_UNDER_LOAD_POLICY, owner.RSS_UNDER_LOAD_POLICY_RECORDED)
+        check_shared_load_policy(row)
     assert row['binary_sha256'] == expected_sha
     assert (row['arm'],row['geometry'],row['tier'],row['threads']) == (arm,geometry,'v4x',threads)
     cmp.validate_ready(rows, arm, geometry, 'v4x', threads, row['worker'])
@@ -87,6 +97,33 @@ def rss_only_report(args):
     args.out_md.write_text('\n'.join(lines))
 
 
+def floor_decision(root, cells, medians, direct_pairs):
+    """Per cell: 128 MiB queue slots and the paired queue/floor-3 versus original-route intervals."""
+    accounting = [json.loads(line.split('REV5_JOB_ACCOUNTING ', 1)[1]) for line in
+                  (root/'provenance/byte-accounting.log').read_text().splitlines()
+                  if line.startswith('REV5_JOB_ACCOUNTING ')]
+    shape = {(r['strip_rows'], r['halo'], r['fixed_bytes']) for r in accounting}
+    assert len(shape) == 1
+    strip_rows, halo, fixed = shape.pop()
+    rows = []; by_slots = {}
+    for g, t, n in cells:
+        tag = f'{t}-t{n}-{g}'
+        width = int(g.split('x')[0])
+        per_job = width*(strip_rows+2*halo)*11*4+fixed
+        slots = min(n, 16, 128*1024*1024//per_job)
+        q = direct_pairs[tag][cmp.BUDGET_ORIGINAL_ARM+'->by_v2fy_r5_b128']
+        f = direct_pairs[tag][cmp.BUDGET_ORIGINAL_ARM+'->'+cmp.BUDGET_FLOOR_ARM]
+        verdict = ('queue_faster' if q['ci_upper'] < 0 and not q['resolution_limited'] else
+                   'queue_slower' if q['ci_lower'] > 0 and not q['resolution_limited'] else 'inconclusive')
+        by_slots.setdefault(slots, dict(queue_faster=0, queue_slower=0, inconclusive=0))[verdict] += 1
+        rows.append(dict(geometry=g, threads=n, slots=slots, queue_verdict=verdict,
+                         original_ms=medians[tag][cmp.BUDGET_ORIGINAL_ARM]/1e6, queue_ms=medians[tag]['by_v2fy_r5_b128']/1e6,
+                         floor3_ms=medians[tag][cmp.BUDGET_FLOOR_ARM]/1e6,
+                         queue_minus_original=q, floor3_minus_original=f))
+    return dict(cells=rows, by_slots={k: by_slots[k] for k in sorted(by_slots)},
+                rule='queue verdict from the paired 95% CI of frozen 128 MiB minus floor 17 (original route)')
+
+
 def report(args):
     if getattr(args, 'rss_only', False):
         return rss_only_report(args)
@@ -95,13 +132,13 @@ def report(args):
     floor = getattr(args, 'floor_arm', False)
     grid = 'budget' if budget else 'scaling'
     tiers, threads, geometries, arms, _ = cmp.configuration(scaling=not budget, budget=budget, floor=floor)
-    cells = cmp.cells(scaling=not budget, budget=budget)
-    rows = cmp.receipt(root / grid / ('parity-v2' if floor else 'parity') / 'PREFLIGHT_PASS.json',
+    cells = cmp.cells(scaling=not budget, budget=budget, floor=floor)
+    rows = cmp.receipt(root / grid / ('parity-v3' if floor else 'parity') / 'PREFLIGHT_PASS.json',
                        scaling=not budget, budget=budget, floor=floor)
     from rev5perf_report import compare_bits
-    labels = (('uncapped', 'cap64', 'cap128', 'cap256') + (('floor3-timing',) if floor else ())
+    labels = (('uncapped', 'cap64', 'cap128', 'cap256') + (('floor3-grid', 'floor17-grid') if floor else ())
               if budget else ('before', 'verified'))
-    parent = ('floor3-timing' if floor else 'cap128') if budget else 'verified'
+    parent = ('floor3-grid' if floor else 'cap128') if budget else 'verified'
     parity = ({label: compare_bits(root/'uncapped', root/label) for label in labels[1:]}
               if budget else compare_bits(root/'before', root/'verified'))
     builds = {label: json.loads((root / f'provenance/instrument-{label}.artifact.json').read_text())
@@ -111,7 +148,7 @@ def report(args):
         assert sha(root / f'provenance/instrument-{label}') == artifact['binary_sha256']
     medians = {}; analyses = {}; selections = {}; packets = []; saved = []; batches = 0
     if budget:
-        inventory = cmp.budget_inventory(root/'provenance'/('budget-binaries-v2.json' if floor else 'budget-binaries.json'), floor)
+        inventory = cmp.budget_inventory(root/'provenance'/('budget-binaries-v3.json' if floor else 'budget-binaries.json'), floor)
         expected_workers = {arm: sha(path) for arm,path in inventory.items()}
     else:
         expected_workers = {arm: builds['before' if arm == 'by_v2fy_r5_before' else 'verified']['binary_sha256'] for arm in arms}
@@ -158,18 +195,21 @@ def report(args):
     replay = json.loads(subprocess.check_output([str(analyzer)], input=json.dumps(packets), text=True))
     assert replay == saved, 'saved paired analyses differ from exact replay'
     memories = {}
-    # RSS stays the four measured budget arms; the floor arm is timing-only.
+    # RSS: the four measured budget arms on their three geometries, plus (floor
+    # grid) the two floor arms on every floor-grid geometry.
     rss_arms = cmp.BUDGET_ARMS if budget else ('by_v2fy_r5', 'by_v2fy_r5_before')
-    for g in geometries:
-        for n in threads:
-            for arm in rss_arms:
-                tag = f'v4x-t{n}-{g}-{arm}'
-                measured = rss_measurement(root,grid,tag,rows,arm,g,n,expected_workers[arm])
-                memories[tag] = measured
+    rss_cells = [(arm, g, n) for g in (cmp.BUDGET_GEOMETRIES if budget else geometries) for n in threads for arm in rss_arms]
+    if floor:
+        rss_cells += [(arm, g, n) for g in geometries for n in threads for arm in cmp.BUDGET_FLOOR_SLOTS]
+    for arm, g, n in rss_cells:
+        tag = f'v4x-t{n}-{g}-{arm}'
+        memories[tag] = rss_measurement(root,grid,tag,rows,arm,g,n,expected_workers[arm],
+                                        require_threads=arm in cmp.BUDGET_FLOOR_SLOTS)
     if budget:
         pairs = [('by_v2fy_r5_b64','by_v2fy_r5_b128'), ('by_v2fy_r5_b64','by_v2fy_r5_b256'), ('by_v2fy_r5_b128','by_v2fy_r5_b256')]
         if floor:
-            pairs.append(('by_v2fy_r5_b128', cmp.BUDGET_FLOOR_ARM))
+            pairs += [('by_v2fy_r5_b128', cmp.BUDGET_FLOOR_ARM), (cmp.BUDGET_ORIGINAL_ARM, 'by_v2fy_r5_b128'),
+                      (cmp.BUDGET_ORIGINAL_ARM, cmp.BUDGET_FLOOR_ARM)]
         packets = []; coordinates = []
         for g,t,n in cells:
             tag = f'{t}-t{n}-{g}'
@@ -182,7 +222,8 @@ def report(args):
         direct_pairs = {}
         for (tag,pair),analysis in zip(coordinates,direct):
             direct_pairs.setdefault(tag,{})[pair] = analysis
-        result = dict(status='MEASURED',strict_parity=parity,timing_configurations=len(cells),
+        decision = floor_decision(root, cells, medians, direct_pairs) if floor else None
+        result = dict(status='MEASURED',strict_parity=parity,floor_decision=decision,timing_configurations=len(cells),
                       arm_timings=len(cells)*len(arms),rss_observations=len(memories),medians_ns=medians,
                       paired_analyses=analyses,direct_budget_pairs=direct_pairs,round_selection=selections,
                       rss_kib=memories,validated_parent_batches=batches,paired_analysis_replays=len(replay),
@@ -191,9 +232,9 @@ def report(args):
                       interval_scope='pointwise paired 95% CI, candidate minus baseline; not simultaneous grid-wide intervals')
         owner.write(args.out_json,result)
         titles = {'by_v2fy_r5_b64': '64 MiB', 'by_v2fy_r5_b128': '128 MiB', 'by_v2fy_r5_b256': '256 MiB',
-                  cmp.BUDGET_FLOOR_ARM: '128 MiB + floor'}
+                  cmp.BUDGET_FLOOR_ARM: '128 MiB + floor 3', cmp.BUDGET_ORIGINAL_ARM: 'original route'}
         lines = ['# Rev5 byte-budget measurements', '',
-                 'Frozen 64/128/256 MiB candidates' + (', the 128 MiB source with the three-slot floor,' if floor else '') + f' and an uncapped control share COSTCMP inputs, the exclusive lock, quiet gate and first 32 shared clean rounds from at most 64. All {len(cells)*(len(arms)-1)} saved comparisons replay through the frozen paired analyzer. Direct budget comparisons use that same analyzer and those same admitted rounds. Complete scoring calls include allocations; setup is untimed. Each build passes 384/384 strict parity against the uncapped control.', '',
+                 'Frozen 64/128/256 MiB candidates' + (', the 128 MiB source with floor 3 (shipped) and floor 17 (never queues: the original route),' if floor else '') + f' and an uncapped control share COSTCMP inputs, the exclusive lock, quiet gate and first 32 shared clean rounds from at most 64. All {len(cells)*(len(arms)-1)} saved comparisons replay through the frozen paired analyzer. Direct budget comparisons use that same analyzer and those same admitted rounds. Complete scoring calls include allocations; setup is untimed. Each build passes 384/384 strict parity against the uncapped control.', '',
                  '| threads | size | uncapped ms | ' + ' | '.join(titles[a]+' ms [95% CI]' for a in arms[1:]) + ' |',
                  '|---:|---|---:|' + '---:|'*(len(arms)-1)]
         for g,t,n in cells:
@@ -203,18 +244,26 @@ def report(args):
                 entries.append(f"{medians[tag][arm]/1e6:.6f} [{ci['ci_lower']/1e6:.6f}, {ci['ci_upper']/1e6:.6f}]" + (' limited' if ci['resolution_limited'] else ''))
             lines.append(f'| {n} | {g} | '+' | '.join(entries)+' |')
         if floor:
-            lines += ['', '## 128 MiB with and without the three-slot floor', '',
-                      'Direct paired comparison on the same admitted rounds, floor minus frozen 128 MiB, in ms. At 128 MiB the two differ only at 8192×4096, where the frozen build queues two jobs and the floor takes the original route.', '',
-                      '| threads | size | 128 MiB ms | floor ms | floor − 128 MiB [95% CI] |', '|---:|---|---:|---:|---|']
-            for g,t,n in cells:
-                tag=f'{t}-t{n}-{g}';ci=direct_pairs[tag]['by_v2fy_r5_b128->'+cmp.BUDGET_FLOOR_ARM]
-                lines.append(f"| {n} | {g} | {medians[tag]['by_v2fy_r5_b128']/1e6:.6f} | {medians[tag][cmp.BUDGET_FLOOR_ARM]/1e6:.6f} | [{ci['ci_lower']/1e6:.6f}, {ci['ci_upper']/1e6:.6f}]" + (' limited' if ci['resolution_limited'] else '') + ' |')
+            lines += ['', '## Floor decision: 128 MiB queue against the original route', '',
+                      'Direct paired comparisons on the same admitted rounds, in ms: frozen 128 MiB (queue, no floor) minus the floor-17 build (original route), and the shipped floor-3 build minus the original route. Slots are the 128 MiB queue size at that width and thread count. Negative means the first build costs less.', '',
+                      '| threads | size | slots | original ms | queue ms | queue − original [95% CI] | queue verdict | floor 3 − original [95% CI] |',
+                      '|---:|---|---:|---:|---:|---|---|---|']
+            for row in decision['cells']:
+                q = row['queue_minus_original']; f = row['floor3_minus_original']
+                lines.append(f"| {row['threads']} | {row['geometry']} | {row['slots']} | {row['original_ms']:.6f} | {row['queue_ms']:.6f} | "
+                             f"[{q['ci_lower']/1e6:.6f}, {q['ci_upper']/1e6:.6f}]{' limited' if q['resolution_limited'] else ''} | {row['queue_verdict']} | "
+                             f"[{f['ci_lower']/1e6:.6f}, {f['ci_upper']/1e6:.6f}]{' limited' if f['resolution_limited'] else ''} |")
+            lines += ['', 'By slot count (all thread counts): ' + '; '.join(f"{k} slots: {v['queue_faster']} faster / {v['queue_slower']} slower / {v['inconclusive']} inconclusive" for k, v in decision['by_slots'].items()) + '.']
         lines += ['', 'Intervals are pointwise paired bootstrap differences, candidate minus uncapped, in ms. Negative intervals mean the candidate costs less. Warm medians use all 32 admitted rounds; analyzer means use its original IQR rule. These synthetic inputs measure scoring cost, not corpus-wide quality or performance.', '',
                   '## Fresh-process peak RSS', '',
                   'KiB measured by `/usr/bin/time -v`, including identical model/input setup. The byte budget bounds queue-owned allocations, not allocator overhead or total process RSS.', '',
                   '| threads | size | uncapped KiB | 64 MiB KiB | 128 MiB KiB | 256 MiB KiB |', '|---:|---|---:|---:|---:|---:|']
+        rss_columns = list(rss_arms) + (list(cmp.BUDGET_FLOOR_SLOTS) if floor else [])
+        if floor:
+            lines[-2:] = ['| threads | size | ' + ' | '.join(('uncapped' if a.endswith('_before') else titles[a])+' KiB' for a in rss_columns) + ' |',
+                          '|---:|---|' + '---:|'*len(rss_columns)]
         for g,t,n in cells:
-            lines.append(f'| {n} | {g} | '+' | '.join(str(memories[f'{t}-t{n}-{g}-{arm}']) for arm in rss_arms)+' |')
+            lines.append(f'| {n} | {g} | '+' | '.join(str(memories.get(f'{t}-t{n}-{g}-{arm}', '—')) for arm in rss_columns)+' |')
         lines += ['', f'Raw evidence: `{root}`. Model, binary/source pins, direct paired budget analyses, clean-round selections, full logs and strict receipts are preserved there.', '']
         args.out_md.write_text('\n'.join(lines))
         return 0

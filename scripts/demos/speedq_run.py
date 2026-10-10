@@ -384,6 +384,8 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lo
 # misattributes it to the owner; readers accept it, writers never emit it.
 RSS_UNDER_LOAD_POLICY = 'coordinator-instructed fresh-process RSS under shared load, 2026-10-09'
 RSS_UNDER_LOAD_POLICY_RECORDED = 'owner-approved fresh-process RSS under shared load, 2026-10-09'
+# Only the 36 records observed 2026-10-10T01:16:32Z..01:16:52Z may carry it.
+RSS_UNDER_LOAD_POLICY_RECORDED_UNTIL = '2026-10-10T01:17:00Z'
 
 
 def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=None,
@@ -405,6 +407,8 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
                 with (root/f'{tag}.log').open('x') as log:
                     out=subprocess.check_output(['/usr/bin/time','-v','taskset','-c',CPUSETS[threads],'nice','-n19','ionice','-c3',str(executable)],env=env,stderr=log,text=True)
                 rec=json.loads(out)
+                # Builds since REV5PERF5's floor grid report the pool size in RSS runs.
+                assert rec.get('actual_rayon_threads') in (None, threads), 'STOP: RSS worker thread count differs'
                 if arm=='by_v2fy':
                     old=parity[(geometry,'v4x',threads,revision)]
                     assert rec['model']['source_sha256']==old['model']['source_sha256']==SOURCE_SHA, 'STOP: RSS model differs from production parity'

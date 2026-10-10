@@ -38,32 +38,49 @@ def budget_parity(root, binary, label):
         compared_against=str(root/'budget/parity/PREFLIGHT_PASS.json'), consumed_features=420, records=records))
 
 
+def floor_source(root, slots, label):
+    """Set the private floor in the runtime source; with a label, also record that exact source."""
+    assert slots is not None and slots >= 1
+    runtime = Path(__file__).resolve().parents[2]/'zensim/src/feature_v2.rs'
+    text, count = re.subn(r'const REV5_MIN_JOB_SLOTS: usize = \d+;',
+                          f'const REV5_MIN_JOB_SLOTS: usize = {slots};', runtime.read_text())
+    assert count == 1, 'one private floor constant required'
+    runtime.write_text(text)
+    if label:
+        with (root/'provenance'/f'runtime-{label}.rs').open('x') as stream:
+            stream.write(text)
+    print(f'private queue floor: {slots} slots', flush=True)
+
+
 def floor_inventory(root):
-    """Pin the four measured arms plus the floor timing build as the v2 budget inventory."""
+    """Pin the four measured arms plus the floor-3 and floor-17 grid builds as the v3 inventory."""
     provenance = root/'provenance'
     v1 = json.loads((provenance/'budget-binaries.json').read_text())
     cmp.budget_inventory(provenance/'budget-binaries.json')
-    binary = provenance/'instrument-floor3-timing'
-    source = provenance/'runtime-floor3.rs'
     arms = dict(v1['arms'])
-    arms[cmp.BUDGET_FLOOR_ARM] = dict(binary=str(binary), artifact=str(provenance/(binary.name+'.artifact.json')),
-                                      binary_sha256=sha(binary), runtime_source=str(source),
-                                      runtime_source_sha256=sha(source))
-    owner.write(provenance/'budget-binaries-v2.json', dict(schema='rev5perf5-binaries-v2', arms=arms))
-    cmp.budget_inventory(provenance/'budget-binaries-v2.json', floor=True)
-    print('budget v2 inventory pinned: four measured arms plus the floor timing build', flush=True)
-
+    for arm, slots in cmp.BUDGET_FLOOR_SLOTS.items():
+        binary = provenance/f'instrument-floor{slots}-grid'
+        source = provenance/f'runtime-floor{slots}-grid.rs'
+        arms[arm] = dict(binary=str(binary), artifact=str(provenance/(binary.name+'.artifact.json')),
+                         binary_sha256=sha(binary), runtime_source=str(source), runtime_source_sha256=sha(source))
+    owner.write(provenance/'budget-binaries-v3.json', dict(schema='rev5perf5-binaries-v3', arms=arms))
+    cmp.budget_inventory(provenance/'budget-binaries-v3.json', floor=True)
+    print('budget v3 inventory pinned: four measured arms plus floor-3 and floor-17 builds', flush=True)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['candidate', 'inventory', 'select', 'budget-parity', 'floor-inventory'])
+    parser.add_argument('mode', choices=['candidate', 'inventory', 'select', 'budget-parity', 'floor-source', 'floor-inventory'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--mib', type=int, choices=[64, 128, 256])
     parser.add_argument('--binary', type=Path, help='budget-parity: frozen executable to check')
-    parser.add_argument('--label', help='budget-parity: output name under budget/')
+    parser.add_argument('--label', help='budget-parity: output name under budget/; floor-source: provenance record name')
+    parser.add_argument('--slots', type=int, help='floor-source: REV5_MIN_JOB_SLOTS to build')
     args = parser.parse_args()
     if args.mode == 'budget-parity':
         budget_parity(args.root, args.binary, args.label)
+        return
+    if args.mode == 'floor-source':
+        floor_source(args.root, args.slots, args.label)
         return
     if args.mode == 'floor-inventory':
         floor_inventory(args.root)
