@@ -35,6 +35,12 @@ pub struct BakeScorer<'a> {
     weights: Option<Vec<f64>>,
     #[cfg(feature = "corruption-head")]
     corruption: Option<Companion<'a>>,
+    /// `Plan::for_bake(self.model)`, built on first use. It depends only on
+    /// the model (and the process formula revision, fixed per process), and a
+    /// scorer's model never changes, so the cache needs no invalidation.
+    /// Composition (members, weights, companion) stays per call in [`Self::plan`].
+    #[cfg(feature = "feature-regime-v2")]
+    model_plan: std::sync::OnceLock<crate::feature_plan::Plan>,
 }
 
 #[cfg(feature = "corruption-head")]
@@ -235,6 +241,8 @@ impl<'a> BakeScorer<'a> {
             weights: None,
             #[cfg(feature = "corruption-head")]
             corruption: None,
+            #[cfg(feature = "feature-regime-v2")]
+            model_plan: std::sync::OnceLock::new(),
         })
     }
 
@@ -785,16 +793,11 @@ impl<'a> BakeScorer<'a> {
     fn plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
         use crate::feature_plan::Plan;
         let mut combined: Option<Plan> = None;
-        for (i, model) in std::iter::once(self.model)
-            .chain(self.members.iter().map(|m| m.model))
-            .enumerate()
-        {
+        for (i, scorer) in std::iter::once(self).chain(self.members.iter()).enumerate() {
             if self.weights.as_ref().is_some_and(|w| w[i] == 0.0) {
                 continue;
             }
-            let other = Plan::for_bake(model).map_err(|_| ZensimError::ModelLoadFailed {
-                reason: "bake reads features unavailable to the extraction plan",
-            })?;
+            let other = scorer.model_plan()?;
             combined = Some(match combined {
                 Some(plan) => {
                     if !plan.revisions_agree(&other)
@@ -880,6 +883,25 @@ impl<'a> BakeScorer<'a> {
             plan = Plan::widened_to_identity(&plan, plan.walk_width().max(width));
         }
         Ok(plan)
+    }
+
+    /// `Plan::for_bake(self.model)`, cached. Rebuilding it per call re-parsed
+    /// the bake's declarations and rescanned layer 0 on every score: for the
+    /// E33 `fx1` candidate (an 820-line `zensim.derived_inputs` declaration
+    /// over a 104,960-weight first layer) that was a fixed ~0.1 ms per call.
+    /// Only a successful plan is cached; an error is rebuilt and returned on
+    /// every call, exactly as before.
+    #[cfg(feature = "feature-regime-v2")]
+    fn model_plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
+        if let Some(plan) = self.model_plan.get() {
+            return Ok(plan.clone());
+        }
+        let plan = crate::feature_plan::Plan::for_bake(self.model).map_err(|_| {
+            ZensimError::ModelLoadFailed {
+                reason: "bake reads features unavailable to the extraction plan",
+            }
+        })?;
+        Ok(self.model_plan.get_or_init(|| plan).clone())
     }
 
     fn check_servable(&self) -> Result<(), ZensimError> {

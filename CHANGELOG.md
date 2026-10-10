@@ -48,6 +48,17 @@
 
 ### Changed
 
+- **`BakeScorer` no longer rebuilds its model's extraction plan on every score.** Each scorer
+  caches `Plan::for_bake(model)`, a pure function of the model and the process formula revision,
+  in a `OnceLock`. Composition (ensemble members, weights, the corruption companion) is still built
+  per call. On the E33 fx1 arm C bake, the per-call rebuild re-parsed an 820-line
+  `zensim.derived_inputs` declaration and rescanned a 104,960-weight first layer. Output bits are
+  unchanged: the E33 preflight matches the registered one 18/18, SPEEDQ strict parity is 384/384 +
+  576/576, and A/C score bits match the gate binary in 128/128 comparisons. Diagnostic, v3 1T:
+  about 90 µs less per call at 64² for every bake, including production. With zenpredict's f16
+  decode cache (zenanalyze, separate change), arm C costs the same as production. Record:
+  `E33C_RUNTIME`.
+
 - Rev5 ordered strip jobs now obey a private byte budget, including retained
   queue allocations, and use the original route when fewer than three jobs
   fit (measured: below three slots the original route is faster). Strict 384/384
