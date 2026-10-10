@@ -559,3 +559,38 @@ wall-cap stop and no poisoned cell, and the program's own harvest owner verified
 [artifact pointer](e33_results_2026-10-10.pointer.md). Exposure: [DATA_SPLITS](../docs/DATA_SPLITS.md)
 (E33 exposure receipt). The populations are the same already-exposed D1 design sources V40 read; no
 untouched-test, HDR or external claim follows.
+
+## 38. E33C runtime, A on the release gates, dialviz (2026-10-10, main `8796740d`)
+
+- **C's runtime failure has two causes ([E33C_RUNTIME](e33c_runtime_2026-10-10.md)).**
+  - `BakeScorer` rebuilt its extraction plan on every score. That was about 55% of C's extra cost: it re-parsed
+    the 820-line derived-input declaration and rescanned layer 0.
+  - zenpredict decoded each f16 weight on every call.
+  - With both fixes, no C cell is slower (before, 4 of 6 were), A is not slower anywhere, and every output bit is
+    unchanged. Both claims were reviewed independently.
+- **Only the plan cache is on `main` (`1b35a482`).** The zenpredict half (zenanalyze `417cc785`) is held.
+  - Shipped profiles reach it through `Zensim::compute`, which parses the bake on every compare. With the decode
+    at load, every compare decodes the whole layer.
+  - Measured by the review: profile C +29.7% at 64², profile A +13.9% at 64², score bits equal.
+  - In progress: cache the parsed profile model, then re-time profiles A, B, C, CHdr and D.
+- **Pre-existing CI defect.** The no-default-features loop fails on `main`: `read_slots` is dead without
+  `feature-regime-v2`, and two `derived_inputs` tests panic. The fix is in progress in the same lane.
+- **C's steering failures are model limits.** All 8 are. The steering replay for derived inputs disagrees 0
+  times in 931,248 comparisons, and its sensitivities equal finite differences.
+- **QUAL-A: A is not qualified.** The record is local and in review, so its numbers may change.
+  - A fails three release gates:
+    - G-STEER: 129/135, where qualification needs 135.
+    - Cached score+map spatial cost: 4.07× at 1024² and 3.15× at 2048², against ≤ 3×.
+    - Peak incremental memory with a map: 196,908 KiB against 196,608 at 1024², and 738,064 against 589,824 at
+      2048².
+  - C and seed 0 fail the spatial and memory gates the same way. That points to the shared prepared-steering
+    path, which an engineering lane is now working on, held to zero output-bit change.
+  - Steering is the model gap for every candidate. A fails 6 cases, C fails 8, seed 0 fails 7.
+- **dialviz (`947d3725..bf801c9a`).** A static site generator for the evaluation program. It covers each
+  property wanted from an IQA dial, each gate and evaluation, and how scores combine, with readers over the
+  records on `main` and 29 tests.
+
+Open owner decisions:
+1. Carry A or C forward. C is better on human data (+0.00463, t = 3.98, one-sided p = 0.0016). It is 127/135 on
+   G-STEER, below the ≥ 128 bar, and its runtime pass needs the held zenpredict change.
+2. The zenpicker heuristic fallback (imazen/zenanalyze PR #90).
