@@ -1744,6 +1744,7 @@ read below.
 | | STEERFIX 135 engineering cases | pixels only | 96 TRAIN, 27 historical M3 fixtures, 12 KADID SELECT (previously exposed) |
 | Output stage | `cid22_fit` TRAIN calibration rows (in-cell pack, control re-pack) | 4 columns | TRAIN oracle calibration |
 | Report-only | `safesyn_fit` fragility feature columns | 141,054 | TRAIN, no label column read |
+| K4 rescore (results review) | instrument probes, NEARID rows and STEERFIX pixels again, candidates with the spline stripped | features/pixels only | same roles as above; `cid22_fit` row count from metadata only |
 
 E21 read each population once per model label (control, A, C): 13,817 observations per four-source rotation,
 ten rotations per label, 120 prediction panels. These are the same already-exposed populations V40's SDR

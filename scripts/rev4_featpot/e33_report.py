@@ -83,8 +83,23 @@ def build(out_json, out_md):
         f"| C2 ties | ≤ 0.05 standard and ladder | {pf(a['C2'], g(a['C2']['standard'], 4) + ' / ' + g(a['C2']['ladder'], 4))} | {pf(cc['C2'], g(cc['C2']['standard'], 4) + ' / ' + g(cc['C2']['ladder'], 4))} | 0.0065 / 0.036 |",
         f"| C5 identity | 38 raw identities exactly 100.0 (620 source×tier rows) | {pf(a['C5'], str(a['C5']['rows']) + ' rows')} | {pf(cc['C5'], str(cc['C5']['rows']) + ' rows')} | fails 38/38 |",
         f"| G-STEER | ≥ 128/135 | {pf(a['G-STEER'], str(a['G-STEER']['passed']) + '/135')} | {pf(cc['G-STEER'], str(cc['G-STEER']['passed']) + '/135')} | 128/135 |",
-        f"| Output stage K1–K5 | K1–K3 at pack; K4 0 rows at floor; K5 C1/C3/C4/C6/G-DIAL | {pf(a['output_stage'], 'K4 ' + str(a['output_stage']['K4_rows_at_or_below_floor']) + '/' + str(a['output_stage']['K4_rows']))} | {pf(cc['output_stage'], 'K4 ' + str(cc['output_stage']['K4_rows_at_or_below_floor']) + '/' + str(cc['output_stage']['K4_rows']))} | n/a |",
+        f"| Output stage K1–K5 | K1–K3 at pack; K4 0 raw ≤ x_floor on every E33 population (table below); K5 C1/C3/C4/C6/G-DIAL | {pf(a['output_stage'], 'K4 ' + str(a['output_stage']['K4_rows_at_or_below_floor']) + ' at floor')} | {pf(cc['output_stage'], 'K4 ' + str(cc['output_stage']['K4_rows_at_or_below_floor']) + ' at floor')} | n/a |",
     ]
+    lines += ["", "K4 (section 8) per population, raw units (candidate with its output spline stripped, same owners): rows, "
+              "rows with raw ≤ x_floor, rows with raw < x0, and min raw − x_floor.", "",
+              "| Population | Rows | A at floor | A raw < x0 | A min raw − x_floor | C at floor | C raw < x0 | C min raw − x_floor |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    pa_, pc_ = a["output_stage"]["K4_populations"], cc["output_stage"]["K4_populations"]
+    for name in pa_:
+        x, y = pa_[name], pc_[name]
+        lines.append(f"| {name} | {x['rows']} | {x['at_or_below_floor']} | "
+                     f"{x['below_x0']} | {g(x['min_raw_minus_x_floor'], 5)} | {y['at_or_below_floor']} | {y['below_x0']} | "
+                     f"{g(y['min_raw_minus_x_floor'], 5)} |")
+    lines += ["", "The 620-row identity proof (C5) serves exactly 100.0 on every row, so none is near the floor. "
+              "The first results record counted K4 only on the standard and ladder grids and NEARID (14,665 served rows) "
+              "plus the calibration rows. The results review (E33RESULTS_REVIEW) checked the missing populations on "
+              "served scores and found 0 at the floor (served minima A/C: negative-tail −103.94/−122.57, identity 100.0, "
+              "G-STEER forwards −64.84/−78.55). This table counts every registered population in raw units."]
     for arm, x in (("A", a), ("C", cc)):
         if x["G-STEER"]["failing"]:
             lines.append("")

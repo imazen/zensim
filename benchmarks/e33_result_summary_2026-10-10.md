@@ -37,11 +37,25 @@ Populations per rotation: KADID 7,869, TID2013 3,000, KonFiG 756, CID22-A(25) 2,
 | C2 ties | ≤ 0.05 standard and ladder | PASS (0 / 0) | PASS (0 / 0) | 0.0065 / 0.036 |
 | C5 identity | 38 raw identities exactly 100.0 (620 source×tier rows) | PASS (620 rows) | PASS (620 rows) | fails 38/38 |
 | G-STEER | ≥ 128/135 | PASS (129/135) | FAIL (127/135) | 128/135 |
-| Output stage K1–K5 | K1–K3 at pack; K4 0 rows at floor; K5 C1/C3/C4/C6/G-DIAL | PASS (K4 0/14665) | PASS (K4 0/14665) | n/a |
+| Output stage K1–K5 | K1–K3 at pack; K4 0 raw ≤ x_floor on every E33 population (table below); K5 C1/C3/C4/C6/G-DIAL | PASS (K4 0 at floor) | PASS (K4 0 at floor) | n/a |
 
-A G-STEER failing cases: broad-10-b32, broad-10-b64, broad-76-b64, broad-136-b64, broad-220-b16, broad-157-b8.
+K4 (section 8) per population, raw units (candidate with its output spline stripped, same owners): rows, rows with raw ≤ x_floor, rows with raw < x0, and min raw − x_floor.
 
-C G-STEER failing cases: broad-31-b64, broad-34-b32, broad-34-b64, broad-136-b64, broad-202-b32, broad-202-b64, broad-157-b8, broad-160-b32.
+| Population | Rows | A at floor | A raw < x0 | A min raw − x_floor | C at floor | C raw < x0 | C min raw − x_floor |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| calibration rows (cid22_fit TRAIN, pack log) | 12163 | 0 | 61 | 300.7 | 0 | 61 | 317.73 |
+| negtail instrument (2000 rows) | 2000 | 0 | 1959 | 180.01 | 0 | 1945 | 179.03 |
+| identity instrument (38 rows) | 38 | 0 | 0 | 381.53 | 0 | 0 | 405.31 |
+| standard instrument (4424 rows) | 4424 | 0 | 491 | 221.98 | 0 | 492 | 244.01 |
+| ladder instrument (9593 rows) | 9593 | 0 | 2808 | 174.68 | 0 | 2807 | 209.86 |
+| NEARID (648 rows) | 648 | 0 | 1 | 315.29 | 0 | 1 | 280.06 |
+| G-STEER forwards (55515: base + every block repair, 135 cases) | 55515 | 0 | 17721 | 218.18 | 0 | 16654 | 222.47 |
+
+The 620-row identity proof (C5) serves exactly 100.0 on every row, so none is near the floor. The first results record counted K4 only on the standard and ladder grids and NEARID (14,665 served rows) plus the calibration rows. The results review (E33RESULTS_REVIEW) checked the missing populations on served scores and found 0 at the floor (served minima A/C: negative-tail −103.94/−122.57, identity 100.0, G-STEER forwards −64.84/−78.55). This table counts every registered population in raw units.
+
+A G-STEER failing cases: broad-10-b32 (block 32), broad-10-b64 (block 64), broad-76-b64 (block 64), broad-136-b64 (block 64), broad-220-b16 (block 16), broad-157-b8 (block 8).
+
+C G-STEER failing cases: broad-31-b64 (block 64), broad-34-b32 (block 32), broad-34-b64 (block 64), broad-136-b64 (block 64), broad-202-b32 (block 32), broad-202-b64 (block 64), broad-157-b8 (block 8), broad-160-b32 (block 32).
 
 ## Runtime (section 9.3)
 
@@ -85,6 +99,6 @@ Seeds 1–2 full-data gates (report-only, never used to choose):
 
 - `assessment-e33/e33_e21.json`: `4a3c58b53d6da2ff46c3ef504e78067bff55a8c7a8fb54a1d55c7aa045bf6bf2`
 - `assessment-e33/decision.json`: `e0e5e1a1689e59e9b380e003337aa44ef187cef985db9547136e8e8c816e7fef`
-- `gates/GATES.json`: `93a2b9bd791618d67803224d62747247ccc43e3580df536cdb3d8b7e16db5c54`
+- `gates/GATES.json`: `23baa2a1b5db9c0d456d5442790af93d7564c9de33038e189001b6b7e96c4b40`
 - `E33_VERDICT.json`: `c280f048a5b89e6c926a6bce7f7697327787252641f6c573f6a02f1f0f6baae6`
 - `packet/PACKET.json`: `3c96351e51ce6c8e0d214d53b84fcfba83d2f7286adcdd8e975d88340d249693`

@@ -544,8 +544,9 @@ wall-cap stop and no poisoned cell, and the program's own harvest owner verified
   (mean +0.00463, t = 3.98, df 9, one-sided p = 0.0016).
 - **Label-free gates (9.2), full-data seed 0:** both candidates pass N1, N2 and N3 (one-pixel rungs
   ≥ 99.39 for A and ≥ 99.64 for C, where production seed 0 scores 88.69–97.67), C2 ties, C5 identity
-  (exactly 100.0 on all 620 source × tier rows) and the output stage (K1–K3 at pack, K4 0 of 14,665 rows at
-  the floor, C1/C3/C4/C6/G-DIAL). G-STEER: A 129/135 passes; **C 127/135 fails** the ≥ 128 bar.
+  (exactly 100.0 on all 620 source × tier rows) and the output stage (K1–K3 at pack; K4 0 rows with raw ≤ x_floor on every registered population (calibration 12,163,
+  negative-tail 2,000, identity 38 plus the 620-row proof, standard 4,424, ladder 9,593, NEARID 648 and 55,515
+  G-STEER forwards); C1/C3/C4/C6/G-DIAL). G-STEER: A 129/135 passes; **C 127/135 fails** the ≥ 128 bar.
 - **Runtime (9.3):** A is not slower in any cell. **C is slower** at 64² (+26–27%) and 256² (+6–7%) on
   v4x and v3, so it fails the guard.
 - **Verdict (9.4.3): adopt A** as the next production candidate. That means full qualification, the KADID

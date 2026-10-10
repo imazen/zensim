@@ -229,15 +229,23 @@ def summary():
         steer_rows = json.loads((GATES / f"steer-s0-{arm}.json").read_text())["rows"]
         passed = sum(r["pass"] for r in steer_rows)
         g["G-STEER"] = dict(cases=len(steer_rows), passed=passed, pass_=len(steer_rows) == 135 and passed >= 128,
-                            failing=[r["key"] for r in steer_rows if not r["pass"]])
+                            failing=[f"{r['key']} (block {r['blocks'][0]['bounds'][2]})" for r in steer_rows
+                                     if not r["pass"]])
         pack = _pack(cell)
         served = (_served(GATES / f"verdict-s0-{arm}" / "standard") + _served(GATES / f"verdict-s0-{arm}" / "ladder")
                   + [json.loads(line)["served_score"] for line in
                      (GATES / "nearid-s0" / f"candidate-{arm}.jsonl").read_text().splitlines()])
         at_floor = sum(s <= pack["floor_score"] for s in served)
         k5 = all(std["checks"][c]["state"] == "pass" for c in ("C1", "C3", "C4", "C6")) and std["g_dial"]["pass"]
-        g["output_stage"] = dict(**pack, K4_rows_at_or_below_floor=at_floor, K4_rows=len(served),
-                                 K5_standard=std, K5_ladder=lad, pass_=at_floor == 0 and k5)
+        k4_path = GATES / "K4_FULL.json"
+        if not k4_path.exists():
+            raise ValueError("INCOMPLETE: K4 needs every E33 population (run k4-full)")
+        k4 = json.loads(k4_path.read_text())["arms"][arm]
+        assert k4["model_sha256"] == found[arm][1]
+        g["output_stage"] = dict(**pack, K4_populations=k4["populations"],
+                                 K4_rows_at_or_below_floor=sum(p["at_or_below_floor"] for p in k4["populations"].values()),
+                                 K4_served_rows_checked_at_summary=dict(rows=len(served), at_floor=at_floor),
+                                 K5_standard=std, K5_ladder=lad, pass_=k4["pass_"] and at_floor == 0 and k5)
         g["eligible_label_free_without_runtime"] = all(g[k]["pass" if k.startswith("N") else "pass_"]
                                                        for k in ("N1", "N2", "N3", "C2", "C5", "G-STEER",
                                                                  "output_stage"))
@@ -362,10 +370,98 @@ def steer_dense(arm):
         {"ZENSIM_FORMULA_REV": "5", "ZENSIM_NEIGHBOUR_EXACT": "1", "STEERFIX_PACKET": str(packet)})
 
 
+def k4_full():
+    """Registration 8 K4 on every E33 population, raw units (review E33RESULTS finding 1).
+
+    Raw = the candidate with its output spline stripped (`bake_dial_refit strip`), served through the same owners:
+    `predict --score-units` on the label-free instrument probes (each given a constant zero `human_score` column the
+    loader requires; the predictor reads features only), the STEERFIX instrument for every G-STEER forward, and
+    NEARID's recorded `precalibration_score`. Calibration rows come from the cell's pack log.
+    """
+    import re
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    root = GATES / "k4"
+    root.mkdir(exist_ok=True)
+    fitbin = E / "bin-final2/bake_dial_refit"
+    inputs = {}
+    for name in ("negtail", "identity", "standard", "ladder"):
+        src = INSTRUMENTS / f"{name}.parquet"
+        dst = root / f"{name}.scored-input.parquet"
+        if not dst.exists():
+            t = pq.read_table(src)
+            assert "human_score" not in t.column_names
+            codec = pq.ParquetFile(src).metadata.row_group(0).column(0).compression.lower()
+            pq.write_table(t.append_column("human_score", pa.array([0.0] * t.num_rows)), dst, compression=codec)
+        inputs[name] = dict(source=str(src), source_sha256=sha(src), rows=pq.ParquetFile(dst).metadata.num_rows)
+    out = {"schema": "e33-k4-full-v1", "registration": "8 K4: 0 evaluated rows with raw <= x_floor over every E33 "
+           "population; report rows with raw < x0 and min raw relative to x_floor", "inputs": inputs, "arms": {}}
+    import csv
+    for arm, (model, digest, cell) in candidates(0).items():
+        text = (cell / "pack.log").read_text()
+        m = re.search(r"x_floor (\S+) \(floor score (\S+)\).*?calibration rows: (\d+) at/below floor, (\d+) in the "
+                      r"linear tail \(< x0 (\S+)\), min raw (\S+)", text)
+        x_floor, x0 = float(m[1]), float(m[5])
+        stripped = root / f"{arm}-nospline.bin"
+        if not stripped.exists():
+            subprocess.run([str(fitbin), "strip", "--in", str(model), "--out", str(stripped)], check=True,
+                           capture_output=True)
+        calibration = Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29/wide/main/real/cid22_fit.parquet")
+        pops = {"calibration rows (cid22_fit TRAIN, pack log)": dict(
+            rows=pq.ParquetFile(calibration).metadata.num_rows, at_or_below_floor=int(m[3]), below_x0=int(m[4]),
+            min_raw=float(m[6]))}
+        for name in inputs:
+            pred = root / f"{arm}-{name}.raw.tsv"
+            if not pred.exists():
+                run([str(fitbin), "predict", "--bake", str(stripped), "--corpus",
+                     str(root / f"{name}.scored-input.parquet"), "--score-units", "--out", str(pred)],
+                    root / f"{arm}-{name}.raw.log", {"ZENSIM_FORMULA_REV": "5"})
+            with pred.open() as f:
+                raw = [float(r["pred"]) for r in csv.DictReader(f, delimiter="\t")]
+            assert len(raw) == inputs[name]["rows"]
+            pops[f"{name} instrument ({len(raw)} rows)"] = dict(rows=len(raw), raw=raw)
+        nearid = [json.loads(line)["precalibration_score"] for line in
+                  (GATES / "nearid-s0" / f"candidate-{arm}.jsonl").read_text().splitlines()]
+        pops[f"NEARID ({len(nearid)} rows)"] = dict(rows=len(nearid), raw=nearid)
+        steer = root / f"{arm}-steer-raw.json"
+        if not steer.exists():
+            doc = json.loads(STEER_PACKET.read_text())
+            for case in doc["cases"]:
+                case.update(model=str(stripped), model_sha256=sha(stripped))
+            doc["output"] = str(steer)
+            packet = root / f"{arm}-steer-raw-packet.json"
+            packet.write_text(json.dumps(doc, indent=1) + "\n")
+            run([str(BIN / "steer_instrument"), "metric::bake::steerfix_packet::engineering_packet", "--exact",
+                 "--nocapture"], root / f"{arm}-steer-raw.log",
+                {"ZENSIM_FORMULA_REV": "5", "ZENSIM_NEIGHBOUR_EXACT": "1", "STEERFIX_PACKET": str(packet)})
+        import struct
+        f64 = lambda bits: struct.unpack("<d", struct.pack("<Q", bits))[0]
+        forwards = [f64(b) for r in json.loads(steer.read_text())["rows"]
+                    for b in [r["served_base_bits"], *r["served_repair_bits"]]]
+        pops[f"G-STEER forwards ({len(forwards)}: base + every block repair, 135 cases)"] = dict(
+            rows=len(forwards), raw=forwards)
+        table = {}
+        for name, p in pops.items():
+            if "raw" in p:
+                raw = p.pop("raw")
+                p.update(at_or_below_floor=sum(v <= x_floor for v in raw), below_x0=sum(v < x0 for v in raw),
+                         min_raw=min(raw))
+            p["min_raw_minus_x_floor"] = p["min_raw"] - x_floor
+            table[name] = p
+        out["arms"][arm] = dict(model_sha256=digest, stripped_sha256=sha(stripped), x_floor=x_floor, x0=x0,
+                                populations=table,
+                                pass_=all(p["at_or_below_floor"] == 0 for p in table.values()))
+    if (GATES / "K4_FULL.json").exists():
+        (GATES / "K4_FULL.json").rename(GATES / "K4_FULL.json.superseded")
+    (GATES / "K4_FULL.json").write_text(json.dumps(out, indent=2) + "\n")
+    print(json.dumps({a: {k: (v["at_or_below_floor"], v["below_x0"], round(v["min_raw_minus_x_floor"], 3))
+                          for k, v in x["populations"].items()} for a, x in out["arms"].items()}, indent=1))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("candidates", "nearid", "verdict", "identity", "steer", "runtime-candidates",
-                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "summary"))
+                                    "control-repack", "train-fragility", "steer-diagnose", "steer-dense", "k4-full", "summary"))
     p.add_argument("--arm", choices=sorted(ARMS))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--grid", choices=("standard", "ladder"))
@@ -381,6 +477,8 @@ def main():
         identity(a.seed)
     elif a.mode == "steer":
         steer(a.arm, a.seed)
+    elif a.mode == "k4-full":
+        k4_full()
     elif a.mode == "steer-dense":
         steer_dense(a.arm)
     elif a.mode == "steer-diagnose":

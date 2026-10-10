@@ -683,12 +683,12 @@
      "passed": 129,
      "pass_": true,
      "failing": [
-      "broad-10-b32",
-      "broad-10-b64",
-      "broad-76-b64",
-      "broad-136-b64",
-      "broad-220-b16",
-      "broad-157-b8"
+      "broad-10-b32 (block 32)",
+      "broad-10-b64 (block 64)",
+      "broad-76-b64 (block 64)",
+      "broad-136-b64 (block 64)",
+      "broad-220-b16 (block 16)",
+      "broad-157-b8 (block 8)"
      ]
     },
     "output_stage": {
@@ -696,8 +696,62 @@
      "x_floor": -281.534,
      "floor_score": -288.3882,
      "calibration_rows_at_floor": 0,
+     "K4_populations": {
+      "calibration rows (cid22_fit TRAIN, pack log)": {
+       "rows": 12163,
+       "at_or_below_floor": 0,
+       "below_x0": 61,
+       "min_raw": 19.1652,
+       "min_raw_minus_x_floor": 300.6992
+      },
+      "negtail instrument (2000 rows)": {
+       "rows": 2000,
+       "at_or_below_floor": 0,
+       "below_x0": 1959,
+       "min_raw": -101.51917266845703,
+       "min_raw_minus_x_floor": 180.01482733154296
+      },
+      "identity instrument (38 rows)": {
+       "rows": 38,
+       "at_or_below_floor": 0,
+       "below_x0": 0,
+       "min_raw": 100.0,
+       "min_raw_minus_x_floor": 381.534
+      },
+      "standard instrument (4424 rows)": {
+       "rows": 4424,
+       "at_or_below_floor": 0,
+       "below_x0": 491,
+       "min_raw": -59.553985595703125,
+       "min_raw_minus_x_floor": 221.98001440429687
+      },
+      "ladder instrument (9593 rows)": {
+       "rows": 9593,
+       "at_or_below_floor": 0,
+       "below_x0": 2808,
+       "min_raw": -106.85192108154297,
+       "min_raw_minus_x_floor": 174.68207891845702
+      },
+      "NEARID (648 rows)": {
+       "rows": 648,
+       "at_or_below_floor": 0,
+       "below_x0": 1,
+       "min_raw": 33.755470275878906,
+       "min_raw_minus_x_floor": 315.2894702758789
+      },
+      "G-STEER forwards (55515: base + every block repair, 135 cases)": {
+       "rows": 55515,
+       "at_or_below_floor": 0,
+       "below_x0": 17721,
+       "min_raw": -63.35579299926758,
+       "min_raw_minus_x_floor": 218.1782070007324
+      }
+     },
      "K4_rows_at_or_below_floor": 0,
-     "K4_rows": 14665,
+     "K4_served_rows_checked_at_summary": {
+      "rows": 14665,
+      "at_floor": 0
+     },
      "K5_standard": {
       "checks": {
        "C1": {
@@ -829,14 +883,14 @@
      "passed": 127,
      "pass_": false,
      "failing": [
-      "broad-31-b64",
-      "broad-34-b32",
-      "broad-34-b64",
-      "broad-136-b64",
-      "broad-202-b32",
-      "broad-202-b64",
-      "broad-157-b8",
-      "broad-160-b32"
+      "broad-31-b64 (block 64)",
+      "broad-34-b32 (block 32)",
+      "broad-34-b64 (block 64)",
+      "broad-136-b64 (block 64)",
+      "broad-202-b32 (block 32)",
+      "broad-202-b64 (block 64)",
+      "broad-157-b8 (block 8)",
+      "broad-160-b32 (block 32)"
      ]
     },
     "output_stage": {
@@ -844,8 +898,62 @@
      "x_floor": -305.3071,
      "floor_score": -303.9948,
      "calibration_rows_at_floor": 0,
+     "K4_populations": {
+      "calibration rows (cid22_fit TRAIN, pack log)": {
+       "rows": 12163,
+       "at_or_below_floor": 0,
+       "below_x0": 61,
+       "min_raw": 12.4264,
+       "min_raw_minus_x_floor": 317.7335
+      },
+      "negtail instrument (2000 rows)": {
+       "rows": 2000,
+       "at_or_below_floor": 0,
+       "below_x0": 1945,
+       "min_raw": -126.27953338623047,
+       "min_raw_minus_x_floor": 179.02756661376952
+      },
+      "identity instrument (38 rows)": {
+       "rows": 38,
+       "at_or_below_floor": 0,
+       "below_x0": 0,
+       "min_raw": 100.0,
+       "min_raw_minus_x_floor": 405.3071
+      },
+      "standard instrument (4424 rows)": {
+       "rows": 4424,
+       "at_or_below_floor": 0,
+       "below_x0": 492,
+       "min_raw": -61.29514694213867,
+       "min_raw_minus_x_floor": 244.01195305786132
+      },
+      "ladder instrument (9593 rows)": {
+       "rows": 9593,
+       "at_or_below_floor": 0,
+       "below_x0": 2807,
+       "min_raw": -95.44495391845703,
+       "min_raw_minus_x_floor": 209.86214608154296
+      },
+      "NEARID (648 rows)": {
+       "rows": 648,
+       "at_or_below_floor": 0,
+       "below_x0": 1,
+       "min_raw": -25.24441909790039,
+       "min_raw_minus_x_floor": 280.0626809020996
+      },
+      "G-STEER forwards (55515: base + every block repair, 135 cases)": {
+       "rows": 55515,
+       "at_or_below_floor": 0,
+       "below_x0": 16654,
+       "min_raw": -82.84044647216797,
+       "min_raw_minus_x_floor": 222.46665352783202
+      }
+     },
      "K4_rows_at_or_below_floor": 0,
-     "K4_rows": 14665,
+     "K4_served_rows_checked_at_summary": {
+      "rows": 14665,
+      "at_floor": 0
+     },
      "K5_standard": {
       "checks": {
        "C1": {
@@ -1106,7 +1214,7 @@
  "artifact_sha256": {
   "assessment-e33/e33_e21.json": "4a3c58b53d6da2ff46c3ef504e78067bff55a8c7a8fb54a1d55c7aa045bf6bf2",
   "assessment-e33/decision.json": "e0e5e1a1689e59e9b380e003337aa44ef187cef985db9547136e8e8c816e7fef",
-  "gates/GATES.json": "93a2b9bd791618d67803224d62747247ccc43e3580df536cdb3d8b7e16db5c54",
+  "gates/GATES.json": "23baa2a1b5db9c0d456d5442790af93d7564c9de33038e189001b6b7e96c4b40",
   "E33_VERDICT.json": "c280f048a5b89e6c926a6bce7f7697327787252641f6c573f6a02f1f0f6baae6",
   "packet/PACKET.json": "3c96351e51ce6c8e0d214d53b84fcfba83d2f7286adcdd8e975d88340d249693"
  }
