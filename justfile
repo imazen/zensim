@@ -851,3 +851,12 @@ v40-e31-report-evidence report exposure out:
 
 v40-e31-report-evidence-tests:
     PYTHONPATH=scripts/tests python3 -m unittest scripts.tests.test_v40_e31_report_evidence
+
+# dialviz: static site explaining how zensim is evaluated (docs/DIALVIZ_DESIGN_2026-10-10.md).
+# Reads committed sources only; extra args pass through (e.g. --integrity-gates PATH).
+dialviz out="/mnt/v/output/zensim/dialviz" *args="":
+    python3 scripts/dialviz/build.py --out {{quote(out)}} {{args}}
+
+# Readers against live sources, cross-checks, negative controls and a link-checked build.
+dialviz-test:
+    TMPDIR=$HOME/tmp python3 -m unittest scripts.tests.test_dialviz -v
