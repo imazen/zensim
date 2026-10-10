@@ -15,6 +15,8 @@ capped=("$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 8 --)
 analyzer=/mnt/v/output/zensim/costcmp-2026-10-09/provenance/paired-rounds-analyzer
 export TMPDIR="${TMPDIR:-$HOME/tmp/e33}" MPLCONFIGDIR="$HOME/tmp/e33/mpl"
 export REV4_V2_BIN_DIR=$E/bin-final2 ZEN_PANEL_BIN=$E/bin-final2/panel
+# The runtime harness checks this lane's workspace lock line (.workongoing: "<ts> e33-opus <activity>").
+export SPEEDQ_LOCK_OWNER=e33-opus
 export PYTHONPATH="$repo/scripts:$repo/scripts/rev4_featpot:$repo/scripts/demos"
 mkdir -p "$TMPDIR" "$MPLCONFIGDIR"
 exec > >(tee -a "$log") 2>&1

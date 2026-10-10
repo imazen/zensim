@@ -201,10 +201,12 @@ def preflight(binary, dest, collect_legacy_failures=False):
 
 
 def refresh_activity(activity):
+    # The lane that owns the workspace lock; SPEEDQ's own lane by default (E33 runtime: SPEEDQ_LOCK_OWNER).
+    owner=os.environ.get('SPEEDQ_LOCK_OWNER','codex SPEEDQ')
     path=Path(__file__).resolve().parents[2]/'.workongoing'
-    if not path.exists() or ' codex SPEEDQ' not in path.read_text():
+    if not path.exists() or f' {owner}' not in path.read_text():
         raise RuntimeError('SPEEDQ workspace lock ownership changed')
-    path.write_text(datetime.now(timezone.utc).isoformat()+' codex SPEEDQ '+activity+'\n')
+    path.write_text(datetime.now(timezone.utc).isoformat()+f' {owner} '+activity+'\n')
 
 
 def parity_receipt(path):
