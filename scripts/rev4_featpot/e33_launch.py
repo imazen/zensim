@@ -289,8 +289,15 @@ def open_cells(js, manifest):
     return len(chunks - finished - claimed)
 
 
-def tower_workers(js, host="root@tower"):
-    """Running containers of this jobset on tower (the host whose standing 40g cap bounds overlap)."""
+def tower_workers(js, live=FITV2 / "jobset_caps.json"):
+    """Running containers of this jobset on tower (the host whose standing 40g cap bounds overlap).
+
+    The SSH placement key comes from the jobset's live caps map (the private fleet configuration).
+    """
+    hosts = [h for h in json.loads(live.read_text())[js]["hosts"] if h.rsplit("@", 1)[-1] == "tower"]
+    if len(hosts) != 1:
+        raise ValueError(f"{js}: expected exactly one tower placement key, found {hosts}")
+    host = hosts[0]
     out = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host,
                           "docker ps -q --filter name=zen-score- | xargs -r docker inspect -f "
                           "'{{range .Config.Env}}{{println .}}{{end}}'"], capture_output=True, text=True, check=True)
