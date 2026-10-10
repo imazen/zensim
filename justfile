@@ -719,6 +719,20 @@ v40-projection source palette out commit:
 v40-parity bundle e30 dest fold:
     python3 scripts/tests/e29_control_parity.py --bundle {{bundle}} --e30 {{e30}} --dest {{dest}} --fold {{fold}}
 
+# E33 (benchmarks/e33_registration_2026-10-09.md): parity pre-check, identity proof, packet, tests.
+e33-parity bundle v40results bindir dest fold="kadid":
+    python3 scripts/tests/e33_control_parity.py --bundle {{bundle}} --v40-results {{v40results}} --bin-dir {{bindir}} --dest {{dest}} --fold {{fold}}
+
+e33-identity sources model out:
+    ZENSIM_FORMULA_REV=5 cargo run --release -p zensim --features custom-profiles,candidate-profiles --example serve_custom_bake -- --e33-identity {{sources}} scripts/rev4_featpot/e33_fx1_declaration.json {{model}} {{out}}
+
+e33-package-tests:
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e33_package
+
+e33-rust-tests:
+    cargo test -p zensim --all-features --lib derived_inputs
+    cargo test -p zensim-validate --lib -- derived_inputs identity_pinned
+
 v40-executor-smoke bundle image arm mode attempt="1":
     python3 scripts/tests/v40_executor_smoke.py --bundle {{bundle}} --image {{image}} --arm {{arm}} --mode {{mode}} --attempt {{attempt}}
 

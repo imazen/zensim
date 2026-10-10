@@ -357,6 +357,11 @@ fn main() {
         return;
     }
     #[cfg(feature = "feature-regime-v2")]
+    if args.first().map(String::as_str) == Some("--e33-identity") {
+        nearid::e33_identity(&args[1..]);
+        return;
+    }
+    #[cfg(feature = "feature-regime-v2")]
     if args.first().map(String::as_str) == Some("--nearid") {
         nearid::run(&args[1..]);
         return;

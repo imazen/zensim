@@ -76,6 +76,18 @@ EPOCH_RULE = "last"  # amendment R4 (design log E5/E5b)
 PAIRS_PER_EPOCH = 50_000
 HIDDEN = 32
 HEADS = ("N", "F")
+# E33 Arm C (`fx1` recipe token): the registered product declaration (benchmarks/e33_registration_2026-10-09.md
+# section 5.1), pinned by content so a cell can never train against an edited copy.
+FX1_DECLARATION = Path(__file__).resolve().parent / "e33_fx1_declaration.json"
+FX1_SHA256 = "a97a5fa63937ed8fade3c56fd7470765a031d1d309afc36e631f371a1796e648"
+
+
+def fx1_declaration() -> dict:
+    """The pinned fx1 declaration; refuses a changed file."""
+    data = FX1_DECLARATION.read_bytes()
+    if hashlib.sha256(data).hexdigest() != FX1_SHA256:
+        raise ValueError(f"{FX1_DECLARATION}: content changed after registration pin")
+    return json.loads(data)
 
 CANDIDATES = ("c1", "c2", "c3", "c4", "all", "csfw", "c7", "p1", "p3", "b1", "b1s",
               "c8n", "rall", "a1", "a1m", "b2", "b2m")
@@ -244,6 +256,8 @@ def recipe_of(spec: str) -> dict:
             out["hdr_weight"] = float(tok[2:])
         elif tok[:2] in ("hp", "ha", "hb", "hc") and "hdr_weight" not in out and tok[2:] == "4":
             out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
+        elif tok == "fx1" and "derived_inputs" not in out:  # E33 Arm C: difference x same-cell fragility products
+            out["derived_inputs"] = "fx1"
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out

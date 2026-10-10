@@ -354,6 +354,245 @@ pub(super) fn run(args: &[String]) {
     }
 }
 
+/// One E33 identity source: the file and decoded-pixel pins come from the
+/// admitted instrument (the 38-row identity probe keys and NEARID's packet).
+#[derive(Deserialize)]
+struct E33Source {
+    ref_group: String,
+    ref_path: String,
+    file_sha256: String,
+    ref_pixels_sha256: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Fx1 {
+    schema: String,
+    direct: Vec<usize>,
+    products: Vec<[usize; 2]>,
+}
+
+/// A `--nonneg-distance`-shaped bake (zero hidden biases, ReLU, output
+/// weights <= 0, output bias = pin) over E33 Arm A (`products` empty) or Arm
+/// C, with deterministic positive first-layer weights. Its raw output is the
+/// pin exactly when every model input is ±0 (registration §7 E7).
+fn e33_nonneg_bake(fx1: &Fx1, products: bool, pin: f64) -> Vec<u8> {
+    let mut read: Vec<usize> = fx1.direct.clone();
+    let mut derived = String::from("zensim-derived-inputs v1\n");
+    for id in &fx1.direct {
+        derived.push_str(&format!("in {id}\n"));
+    }
+    if products {
+        for [a, b] in &fx1.products {
+            read.push(*b);
+            derived.push_str(&format!("product {a} {b}\n"));
+        }
+    }
+    read.sort_unstable();
+    read.dedup();
+    let width = fx1.direct.len() + if products { fx1.products.len() } else { 0 };
+    let hidden = 8;
+    let w1: Vec<f64> = (0..width * hidden)
+        .map(|i| 0.01 + 0.001 * ((i * 7919) % 97) as f64)
+        .collect();
+    let mut metadata = vec![
+        json!({"key":"zentrain.feature_ids","type":"utf8",
+               "text":read.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")}),
+        json!({"key":"zentrain.formula_revision","type":"utf8","text":"5"}),
+    ];
+    if products {
+        metadata.push(json!({"key":"zensim.derived_inputs","type":"utf8","text":derived}));
+    }
+    let recipe = json!({
+        "schema_hash": 33, "scaler_mean": vec![0.0; width],
+        "scaler_scale": (0..width).map(|i| 0.5 + (i % 5) as f64).collect::<Vec<_>>(),
+        "metadata": metadata,
+        "layers": [
+            {"in_dim":width,"out_dim":hidden,"activation":"relu","dtype":"f32",
+             "weights":w1,"biases":vec![0.0; hidden]},
+            {"in_dim":hidden,"out_dim":1,"activation":"identity","dtype":"f32",
+             "weights":(0..hidden).map(|h| -0.5 - 0.1 * h as f64).collect::<Vec<_>>(),
+             "biases":[pin]}]
+    });
+    zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap()
+}
+
+/// E33 registration §7 E1/E3/E4/E7: on every admitted identity source and
+/// every SIMD token permutation, the 410 direct (Difference) ids are exactly
+/// ±0 after the declared f32 storage round trip, each fragility factor is
+/// finite in (0, 1], each product is ±0, and nonneg A/C bakes over those
+/// vectors score exactly the pin. E1 is zensim's own registry check of the
+/// pairing (`BakeScorer::new` refuses a non-Difference or cross-cell pair).
+pub(super) fn e33_identity(args: &[String]) {
+    assert!(
+        args.len() >= 4,
+        "--e33-identity SOURCES.json FX1.json PRODUCTION_MODEL.bin OUTPUT.jsonl [CANDIDATE.bin ...]"
+    );
+    assert_eq!(std::env::var("ZENSIM_FORMULA_REV").unwrap(), "5");
+    let sources: Vec<E33Source> = serde_json::from_slice(&fs::read(&args[0]).unwrap()).unwrap();
+    let fx1_bytes = fs::read(&args[1]).unwrap();
+    let fx1: Fx1 = serde_json::from_slice(&fx1_bytes).unwrap();
+    assert_eq!(fx1.schema, "zensim-fx1-v1");
+    let bytes = fs::read(&args[2]).unwrap();
+    assert_eq!(
+        sha(&bytes),
+        "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+        "the production read set defines the extraction plan"
+    );
+    let request = zensim::research::Request::for_bake_bytes(&bytes).unwrap();
+    let want: Vec<usize> = request.want().iter_slots().collect();
+    let mut read: Vec<usize> = fx1.direct.clone();
+    read.extend(fx1.products.iter().map(|p| p[1]));
+    read.sort_unstable();
+    read.dedup();
+    assert_eq!(want, read, "production read set == fx1 read set (410 + 10)");
+    let mut frag_ids: Vec<usize> = fx1.products.iter().map(|p| p[1]).collect();
+    frag_ids.sort_unstable();
+    frag_ids.dedup();
+    assert_eq!(
+        frag_ids, FRAGILITY,
+        "fx1 reference factors are the ten fragility slots"
+    );
+    let pin = 100.0;
+    let bake_a = e33_nonneg_bake(&fx1, false, pin);
+    let bake_c = e33_nonneg_bake(&fx1, true, pin);
+    let model_a = zenpredict::Model::from_bytes(&bake_a).unwrap();
+    let model_c = zenpredict::Model::from_bytes(&bake_c).unwrap();
+    // E1: zensim validates every product pair against its own registry.
+    let mut scorer_a = BakeScorer::new(&model_a).unwrap().with_parallel(false);
+    let mut scorer_c = BakeScorer::new(&model_c).unwrap().with_parallel(false);
+    // E8: real candidate bakes (trainer outputs, packed bakes) must serve exactly 100 on every identity vector.
+    let extra_bytes: Vec<(String, Vec<u8>)> = args[4..]
+        .iter()
+        .map(|p| (p.clone(), fs::read(p).unwrap()))
+        .collect();
+    let extra_models: Vec<zenpredict::Model> = extra_bytes
+        .iter()
+        .map(|(_, b)| zenpredict::Model::from_bytes(b).unwrap())
+        .collect();
+    let mut extra: Vec<BakeScorer> = extra_models
+        .iter()
+        .map(|m| BakeScorer::new(m).unwrap().with_parallel(false))
+        .collect();
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&args[3])
+        .unwrap();
+    let mut decoded = Vec::new();
+    for source in &sources {
+        let original = fs::read(&source.ref_path).unwrap();
+        assert_eq!(
+            sha(&original),
+            source.file_sha256,
+            "source pin before decode"
+        );
+        let (pixels, w, h) = zen_io::decode_rgb8(Path::new(&source.ref_path));
+        if let Some(expected) = &source.ref_pixels_sha256 {
+            assert_eq!(&sha(bytemuck::cast_slice(&pixels)), expected, "pixel pin");
+        }
+        decoded.push((source.ref_group.clone(), pixels, w, h));
+    }
+    let mut reference: Vec<Option<Vec<u64>>> = vec![None; decoded.len()];
+    let mut perm_names = Vec::new();
+    let report = archmage::testing::for_each_token_permutation(
+        archmage::testing::CompileTimePolicy::WarnStderr,
+        |perm| {
+            perm_names.push(perm.to_string());
+            for (i, (group, pixels, w, h)) in decoded.iter().enumerate() {
+                let view = RgbSlice::new(pixels, *w, *h);
+                let canonical = zensim::research::extract(&request, &view, &view).unwrap();
+                let f: Vec<f64> = canonical
+                    .values()
+                    .iter()
+                    .map(|v| f64::from(*v as f32))
+                    .collect();
+                let mut nonzero_direct = Vec::new();
+                for &id in &fx1.direct {
+                    if f[id] != 0.0 {
+                        nonzero_direct.push((id, f[id]));
+                    }
+                }
+                let mut bad_fragility = Vec::new();
+                let mut nonzero_products = 0usize;
+                for &[a, b] in &fx1.products {
+                    let frag = f[b];
+                    if !(frag.is_finite() && frag > 0.0 && frag <= 1.0) {
+                        bad_fragility.push((b, frag));
+                    }
+                    let product = (f[a] as f32) * (frag as f32);
+                    if product != 0.0 {
+                        nonzero_products += 1;
+                    }
+                }
+                let score_a = scorer_a
+                    .score_features(&f, *w as u32, *h as u32, None)
+                    .unwrap();
+                let score_c = scorer_c
+                    .score_features(&f, *w as u32, *h as u32, None)
+                    .unwrap();
+                let extra_scores: Vec<f64> = extra
+                    .iter_mut()
+                    .map(|s| s.score_features(&f, *w as u32, *h as u32, None).unwrap())
+                    .collect();
+                let bits: Vec<u64> = want.iter().map(|&id| f[id].to_bits()).collect();
+                let tier_identical = match &reference[i] {
+                    None => {
+                        reference[i] = Some(bits.clone());
+                        true
+                    }
+                    Some(r) => *r == bits,
+                };
+                let row = json!({"permutation":perm.to_string(),"reference":group,"width":w,"height":h,
+                    "direct_ids":fx1.direct.len(),"nonzero_direct":nonzero_direct,
+                    "fragility_values":FRAGILITY.map(|id| f[id]),
+                    "bad_fragility":bad_fragility,"nonzero_products":nonzero_products,
+                    "nonneg_a_score_bits":score_a.to_bits(),"nonneg_c_score_bits":score_c.to_bits(),
+                    "pin_bits":pin.to_bits(),"read_set_bits_equal_first_permutation":tier_identical,
+                    "candidate_score_bits":extra_scores.iter().map(|v| v.to_bits()).collect::<Vec<_>>()});
+                writeln!(output, "{row}").unwrap();
+                assert!(
+                    nonzero_direct.is_empty(),
+                    "{group} {perm}: nonzero difference at identity"
+                );
+                assert!(
+                    bad_fragility.is_empty(),
+                    "{group} {perm}: fragility outside (0,1]"
+                );
+                assert_eq!(nonzero_products, 0, "{group} {perm}");
+                assert_eq!(
+                    score_a.to_bits(),
+                    pin.to_bits(),
+                    "{group} {perm}: A identity"
+                );
+                assert_eq!(
+                    score_c.to_bits(),
+                    pin.to_bits(),
+                    "{group} {perm}: C identity"
+                );
+                assert!(
+                    tier_identical,
+                    "{group} {perm}: read set differs across tiers"
+                );
+                for ((path, _), score) in extra_bytes.iter().zip(&extra_scores) {
+                    assert_eq!(
+                        score.to_bits(),
+                        pin.to_bits(),
+                        "{group} {perm}: {path} identity"
+                    );
+                }
+            }
+            eprintln!("e33-identity: {} sources pass at {perm}", decoded.len());
+        },
+    );
+    eprintln!("{report}");
+    let summary = json!({"summary":true,"sources":decoded.len(),"permutations":perm_names,
+        "fx1_sha256":sha(&fx1_bytes),"production_model_sha256":sha(&bytes),
+        "sources_sha256":sha(&fs::read(&args[0]).unwrap()),"rows":decoded.len()*perm_names.len(),
+        "candidates":extra_bytes.iter().map(|(p, b)| json!({"path":p,"sha256":sha(b)})).collect::<Vec<_>>()});
+    writeln!(output, "{summary}").unwrap();
+    output.flush().unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
