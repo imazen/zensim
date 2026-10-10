@@ -578,7 +578,7 @@ pub(crate) fn score_plan(
     let mut widest = 0usize;
     let mut union: Option<Plan> = None;
     for bytes in params.scoring_bake_bytes() {
-        let Ok(model) = crate::mlp::Model::from_bytes(bytes) else {
+        let Ok(model) = crate::metric::cached_profile_model(bytes) else {
             // An unparseable bake is not a planning input: the scoring path
             // reports it on its own terms. Assume the widest safe plan.
             return None;

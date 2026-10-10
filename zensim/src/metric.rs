@@ -591,7 +591,7 @@ pub fn score_features_fd_gradient_with_profile(
 
     // Fast path: single-bake MLP profiles (no ensemble classifier, no b3
     // secondary, no min-max head — those route through the fallback).
-    let fast_bytes: Option<&[u8]> = match (
+    let fast_bytes: Option<&'static [u8]> = match (
         params.mlp_bytes,
         params.ensemble_classifier_bytes,
         params.mlp_bytes_b3,
@@ -602,9 +602,7 @@ pub fn score_features_fd_gradient_with_profile(
     let Some(bytes) = fast_bytes else {
         return Ok(seq_fallback(&mut probe));
     };
-    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
-        reason: "Model::from_bytes failed to parse the bake header or layer table",
-    })?;
+    let model = cached_profile_model(bytes)?;
     let bundle = cached_bake_metadata(bytes, &model)?;
     // Derived-input bakes (E33 `fx1`) take the canonical per-probe forward,
     // which owns their model-row construction.
@@ -4567,8 +4565,8 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
 /// surface the real parse error with a better diagnostic than this guard
 /// could, and this helper must never turn a load problem into a
 /// configuration complaint.
-fn bake_carries_output_spline(bytes: &[u8]) -> bool {
-    crate::mlp::Model::from_bytes(bytes)
+fn bake_carries_output_spline(bytes: &'static [u8]) -> bool {
+    cached_profile_model(bytes)
         .map(|model| {
             model
                 .metadata()
@@ -4618,12 +4616,54 @@ fn check_score_disposition(
 }
 
 fn forward_one_bake(
-    bytes: &[u8],
+    bytes: &'static [u8],
     features: &[f64],
     width: u32,
     height: u32,
 ) -> Result<f64, ZensimError> {
     forward_one_bake_with_codec(bytes, features, width, height, None)
+}
+
+/// The parsed [`crate::mlp::Model`] of a `&'static` profile bake, interned by
+/// the bytes' data pointer and length — the same cache shape (and stability
+/// argument) as [`cached_bake_metadata`] and `fold_engine::cached_bake_pool_need`:
+/// profile bake slices come from `&'static` slots via `ProfileParams`, so the
+/// key is stable and unique per slot, and the cache is bounded by the number of
+/// profile bakes a process names. Parsing is deterministic, so a cached model is
+/// the model a fresh parse would return; the scoring arithmetic is unchanged.
+///
+/// Without it every `Zensim::compute` of an MLP profile parsed its bake up to
+/// three times (serving plan, disposition check, forward), which became the
+/// dominant small-image cost once a parse decodes f16 layers.
+///
+/// A parse failure is returned, never cached. Dynamically loaded bakes do not
+/// come through here; they own their `Model` through `BakeScorer`.
+pub(crate) fn cached_profile_model(
+    bytes: &'static [u8],
+) -> Result<std::sync::Arc<crate::mlp::Model>, ZensimError> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, OnceLock, RwLock};
+
+    type Cache = RwLock<HashMap<(usize, usize), Arc<crate::mlp::Model>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = (bytes.as_ptr() as usize, bytes.len());
+    if let Ok(read) = cache.read()
+        && let Some(model) = read.get(&key)
+    {
+        return Ok(Arc::clone(model));
+    }
+    let parsed = Arc::new(crate::mlp::Model::from_bytes(bytes).map_err(|_| {
+        ZensimError::ModelLoadFailed {
+            reason: "Model::from_bytes failed to parse the bake header or layer table",
+        }
+    })?);
+    if let Ok(mut write) = cache.write() {
+        // Another thread's parse of the same slot is equally valid; keep the first.
+        return Ok(Arc::clone(write.entry(key).or_insert(parsed)));
+    }
+    // Poisoned lock: serve the fresh parse uncached.
+    Ok(parsed)
 }
 
 /// Lookup the parsed metadata for `bytes` from the static interner,
@@ -4677,15 +4717,13 @@ fn cached_bake_metadata(
 /// PCHIP spline; otherwise the score is returned identical to the
 /// hint-less path.
 fn forward_one_bake_with_codec(
-    bytes: &[u8],
+    bytes: &'static [u8],
     features: &[f64],
     width: u32,
     height: u32,
     codec_hint: Option<&str>,
 ) -> Result<f64, ZensimError> {
-    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
-        reason: "Model::from_bytes failed to parse the bake header or layer table",
-    })?;
+    let model = cached_profile_model(bytes)?;
     // Legacy profiles do not bind their front end/reference cache to this
     // contract. Complete sampling candidates must use BakeScorer directly.
     if model.metadata().get(crate::sampling::KEY).is_some() {
@@ -5616,6 +5654,36 @@ pub(crate) fn combine_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One parse per `&'static` profile slot, and the cached model is the model a
+    /// fresh parse returns: identical forward bits on a fixed row. (Scores stay
+    /// pinned by `serving::tests::every_shipped_profile_scores_its_pinned_value`.)
+    #[test]
+    fn profile_model_cache_interns_one_parse_per_slot() {
+        let loader = crate::profile::ZensimProfile::B
+            .params()
+            .mlp_bytes
+            .expect("B scores through a bake");
+        let first = cached_profile_model(loader()).unwrap();
+        let second = cached_profile_model(loader()).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        let fresh = crate::mlp::Model::from_bytes(loader()).unwrap();
+        let row: Vec<f32> = (0..fresh.caller_input_width())
+            .map(|i| (i as f32 * 0.37).sin())
+            .collect();
+        let cached_out = crate::mlp::Predictor::new(&first)
+            .predict(&row)
+            .unwrap()
+            .to_vec();
+        let fresh_out = crate::mlp::Predictor::new(&fresh)
+            .predict(&row)
+            .unwrap()
+            .to_vec();
+        assert_eq!(
+            cached_out.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            fresh_out.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+    }
 
     /// **D9 (ADD156 ship audit, `benchmarks/add156_ship_audit_2026-08-31.md`).**
     /// A bake carrying `zentrain.output_calibration_spline` already emits a
