@@ -176,7 +176,8 @@ def _pack(cell):
 def runtime_summary(dest):
     """Registered guard: no cell slower, i.e. no paired CI wholly above +2% of production."""
     cells, slower = {}, []
-    for p in sorted((dest / "timing").iterdir()):
+    # Excluded attempts stay beside the cells as <cell>.noise-<ns>.bak / .interrupted-<ns>.bak; only cells count.
+    for p in sorted(q for q in (dest / "timing").iterdir() if q.is_dir() and "." not in q.name):
         done = json.loads((p / "COMPLETE.json").read_text())
         if done.get("status") != "PASS":
             raise ValueError(f"INCOMPLETE: timing {p.name}")
