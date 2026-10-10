@@ -139,7 +139,9 @@ def main():
     ap.add_argument('--before-binary',type=Path)
     ap.add_argument('--budget-grid',action='store_true',help='64/128/256 MiB plus uncapped Rev5 at 8/16/32 threads and three geometries')
     ap.add_argument('--budget-binaries',type=Path,help='frozen executable/source inventory for the byte-budget grid')
+    ap.add_argument('--rss-under-load',action='store_true',help='owner-approved fresh-process RSS without a quiet wait; timing gates stay unchanged')
     args=ap.parse_args()
+    if args.rss_under_load and (args.mode!='rss' or not args.budget_grid):ap.error('--rss-under-load applies only to budget-grid RSS')
     if args.scaling and args.budget_grid:ap.error('select one COSTCMP grid')
     if args.budget_grid and args.budget_binaries is None:ap.error('--budget-grid requires --budget-binaries')
     if args.budget_binaries is not None and not args.budget_grid:ap.error('--budget-binaries requires --budget-grid')
@@ -170,6 +172,6 @@ def main():
                       parity_loader=loader,ready_check=check,
                       geometries=BUDGET_GEOMETRIES if args.budget_grid else (SCALING_GEOMETRIES if args.scaling else None),
                       thread_counts=BUDGET_THREADS if args.budget_grid else (SCALING_THREADS if args.scaling else None),
-                      worker_binaries=binaries)
+                      worker_binaries=binaries,require_quiet=not args.rss_under_load)
 
 if __name__=='__main__':main()

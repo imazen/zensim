@@ -41,6 +41,9 @@ rev5perf5-budget mode root:
 rev5perf5-progress root:
     python3 scripts/demos/costcmp_run.py status --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --dest "{{root}}/budget"
 
+rev5perf5-rss-under-load root:
+    python3 scripts/demos/costcmp_run.py rss --rss-under-load --budget-grid --budget-binaries "{{root}}/provenance/budget-binaries.json" --binary "{{root}}/provenance/instrument-cap128" --dest "{{root}}/budget/rss" --parity "{{root}}/budget/parity/PREFLIGHT_PASS.json" --lock /home/lilith/tmp/zensim-paper/rev4/heavy.lock
+
 rev5perf5-report-gates root:
     PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from types import SimpleNamespace; import costcmp_report; costcmp_report.report(SimpleNamespace(raw_dir=Path("{{root}}"),out_json=Path("{{root}}/report.json"),out_md=Path("benchmarks/rev5perf5_scaling_2026-10-09.md"),budget_grid=True))'
     python3 scripts/demos/check_costcmp_scaling_report.py --budget-grid --raw-dir "{{root}}" --dest "{{root}}/report-controls"

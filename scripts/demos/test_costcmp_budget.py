@@ -89,6 +89,28 @@ class BudgetAdmissionTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             owner.worker_revision('by_v2fy_r9_b64')
 
+    def test_shared_load_rss_records_busy_observation_without_quiet_admission(self):
+        arm = cmp.BUDGET_ARMS[0]
+        rec = self.value['records'][0]
+        binary = self.root/'binary'
+        binary.write_bytes(b'frozen')
+        def measured(command, **kwargs):
+            kwargs['stderr'].write('Maximum resident set size (kbytes): 12345\n')
+            kwargs['stderr'].flush()
+            return json.dumps(rec)
+        busy = dict(admitted=False, load1=12., foreign=['cargo'])
+        with patch.object(owner, 'refresh_activity'), patch.object(owner, 'quiet_gate') as quiet, \
+                patch.object(owner, 'quiet_state', return_value=busy), \
+                patch.object(owner.subprocess, 'check_output', side_effect=measured):
+            owner.rss(binary, self.root/'rss', self.path, arms=[arm],
+                      parity_loader=lambda p: {('1024x1024','v4x',8,5):rec},
+                      geometries=['1024x1024'], thread_counts=[8], require_quiet=False)
+        quiet.assert_not_called()
+        result = json.loads(next((self.root/'rss').glob('*.json')).read_text())
+        self.assertEqual(result['quiet_gate'], busy)
+        self.assertFalse(result['quiet_required'])
+        self.assertEqual(result['max_rss_kib'], 12345)
+
 
 if __name__ == '__main__':
     unittest.main()

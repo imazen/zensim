@@ -380,7 +380,7 @@ def timing(binary, root, rounds, parity_path, analyzer, only=None, arms=ARMS, lo
 
 
 def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=None,
-        geometries=None, thread_counts=None, worker_binaries=None):
+        geometries=None, thread_counts=None, worker_binaries=None, require_quiet=True):
     parity=(parity_loader or parity_receipt)(parity_path)
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
     for geometry in (geometries if geometries is not None else GEOMETRIES):
@@ -391,7 +391,7 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
                 tag=f'v4x-t{threads}-{geometry}-{name}'
                 if (root/f'{tag}.json').exists():continue
                 refresh_activity('quiet gate before RSS '+tag)
-                gate=quiet_gate(root/'quiet-waits.jsonl')
+                gate=quiet_gate(root/'quiet-waits.jsonl') if require_quiet else quiet_state()
                 env=environment(geometry,'v4x',threads)
                 env.update(ZEN_S2_SPEEDQ_WORKER=arm,ZENSIM_FORMULA_REV=str(revision),ZEN_S2_RSS_ONLY='1')
                 executable=(worker_binaries or {}).get(name,binary)
@@ -405,7 +405,7 @@ def rss(binary, root, parity_path, arms=ARMS, parity_loader=None, ready_check=No
                 if ready_check is not None:
                     ready_check(name,geometry,'v4x',threads,rec)
                 maxrss=next(int(l.rsplit(':',1)[1]) for l in (root/f'{tag}.log').read_text().splitlines() if 'Maximum resident set size (kbytes)' in l)
-                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'worker':rec,'binary_sha256':hashlib.sha256(Path(executable).read_bytes()).hexdigest()})
+                write(root/f'{tag}.json',{'geometry':geometry,'arm':name,'tier':'v4x','threads':threads,'max_rss_kib':maxrss,'quiet_gate':gate,'quiet_required':require_quiet,'rss_policy':'quiet-gated' if require_quiet else 'owner-approved fresh-process RSS under shared load, 2026-10-09','worker':rec,'binary_sha256':hashlib.sha256(Path(executable).read_bytes()).hexdigest()})
                 print('RSS '+tag+' '+str(maxrss)+' KiB',flush=True)
 
 
