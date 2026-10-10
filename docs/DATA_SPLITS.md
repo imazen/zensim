@@ -1654,3 +1654,39 @@ palette NOT AS-GOOD (mean guard, all source deltas negative, adopt=false);
 uh4 AS-GOOD. This establishes SDR retention only, with no HDR claim or
 production composition change. See the [result summary](../benchmarks/v40_result_summary_2026-10-09.md)
 and [complete assessment artifact pins and verified tower mirror](../benchmarks/v40_results_2026-10-09.pointer.md).
+
+## Exposure ledger — 2026-10-09: owner-authorized V40 HDR validation reports
+
+Owner approval, verbatim (2026-10-09, conveyed by the coordinator):
+
+> yes, to all 3 still open
+
+Controlling scope: only the HDR-side reports registered for V40 E29 hb4/hc4
+and E31 uh4 against the frozen matched V40 control, using exact packet
+exposure freezes. This approval excludes UPIQ development rows, external
+panels, KADID TERMINAL, AIC-family, T0 and sealed data.
+
+Before any validation payload hash/read, E29's declared population is frozen:
+`hdr_v3mix` VAL, 3,900 observations / 300 reference variants / 13 observations
+per reference. The bank role remains VAL; labels are HDR-VDP-3 `q_jod` and
+historic CVVDP JOD. The already registered Borda consensus panel is
+descriptive only. No new teacher, pixel extraction, fitting or calibration
+is authorized. Native Rev5 by_v2fy 420-ID features, row order and proof
+retain their original pins. E29 assesses control/hb4/hc4 on this same
+population in four D1 folds × ten seed indices (40 predictions per arm).
+It uses the controlling amendment's ten-seed equal-four-fold reduction
+and both-teacher conjunctive rule; prior SDR decisions are frozen inputs.
+
+Exposure freeze: [v40_hdr_exposure_freeze_2026-10-09.json](../benchmarks/v40_hdr_exposure_freeze_2026-10-09.json),
+SHA-256 `2a55b8e05457b8fda2cac4f88ea4edfed8f98bdb49c9633961ce1d4b3be24b3b`. The record pins all six packet HDR objects
+(metadata declarations, native proof, SDR decision, keys, features, predictor).
+Payload hashes are taken from the existing admitted bank manifest; payloads
+have not been opened in this lane at registration. Execution will verify
+and parse retained bytes through the packet's no-follow owner. Original
+source bank: `/mnt/tower/output/zensim/e26-2026-10-05/native-bank/hdr_val/`.
+Shared V40 control pins: `4d7acfc887603b123f9631f38435df5477b6e628a372596cb8beb6128bddc84c`.
+
+Status before read: E29 pending. E31 pending clarification: the packet has
+no E31 HDR-VAL command; its E31 UPIQ fit/development route and registered
+external video panels exceed this approval. Those populations remain
+unopened. No E31 statistic or decision rule is invented.

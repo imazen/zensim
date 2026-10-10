@@ -1,0 +1,43 @@
+{
+  "assessment_source_sha256": "ad330933378af13b49b480321b84f60f1c889e1adffa0b5afafd74339328e8a5",
+  "control_pins_sha256": "4d7acfc887603b123f9631f38435df5477b6e628a372596cb8beb6128bddc84c",
+  "coordinator_message": "Owner approved (2026-10-09, verbatim \"yes, to all 3 still open\"): reading the HDR validation data for the registered V40 HDR-side reports. Scope ONLY E29 hb4/hc4 and E31 uh4 HDR-side reports against the frozen V40 control. No UPIQ development, external, KADID TERMINAL, AIC, T0 or sealed data.",
+  "label_read_authorized": true,
+  "mode": "hdr",
+  "objects": {
+    "_MANIFEST.json": {
+      "kind": "metadata",
+      "path": "/mnt/tower/output/zensim/e26-2026-10-05/native-bank/hdr_val/_MANIFEST.json",
+      "sha256": "93a13b49e772ed4550c3974c0c3c3285d63ffcbb16d142f75d8a8effc0c46bae"
+    },
+    "native-proof.json": {
+      "kind": "metadata",
+      "path": "/mnt/tower/output/zensim/e26-2026-10-05/serving-proof/VAL_NATIVE_CACHE_PARITY.json",
+      "sha256": "5a90ba18696c6d7649b9ad50d2304ecb2edaf4c6e2611893c41cddb0c7d95195"
+    },
+    "sdr.json": {
+      "kind": "metadata",
+      "path": "/mnt/v/output/zensim/v40r4-2026-10-08/assessment-e29/e29_sdr_decision.json",
+      "sha256": "3288070d0a5a0b8b657685938a65adc98c58c28e9d7c6a158b10031348d04adf"
+    },
+    "keys.parquet": {
+      "kind": "payload",
+      "path": "/mnt/tower/output/zensim/e26-2026-10-05/native-bank/hdr_val/keys.parquet",
+      "sha256": "89590be56be0fcf45ba885a5334190de34f1738fe24d24b069ca7acf4b57d367"
+    },
+    "features.parquet": {
+      "kind": "payload",
+      "path": "/mnt/tower/output/zensim/e26-2026-10-05/native-bank/hdr_val/features.parquet",
+      "sha256": "07b8a55de9c84f9f05b7ac963abd96e77c85f4dbae474ad477b3506e00a00862"
+    },
+    "predictor": {
+      "kind": "tool",
+      "path": "/mnt/tower/output/zensim/e26-2026-10-05/artifacts/bin/predict_features_with_bake",
+      "sha256": "e4a411209ff5c9fe221ab7a4fc04e506f210f06776ad68cf687bd62e5990928c"
+    }
+  },
+  "program_sha256": "de44ea9b1ff85031265dfa1d60731de47f177d6816fb0880f85d28f38c405517",
+  "required_action": "Freeze exact assessment declarations/payload/tool pins after complete fits; no protected population is permitted.",
+  "schema": "v40-assessment-exposure-freeze-v1",
+  "tables": {}
+}
