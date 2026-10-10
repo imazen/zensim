@@ -216,7 +216,7 @@
    }
   },
   "G-STEER (135-case STEERFIX packet)": {
-   "bar": "all 135 pass (M2 \u2265 .99, M3f \u2265 .70), per the coordinator's QUAL-A brief; the release map's population is 143",
+   "bar": "all 135 pass (M2 \u2265 .99, M3f \u2265 .70): PRODQUAL-B's registered population for a single-model composition",
    "a": {
     "state": "fail",
     "detail": "129/135; failing broad-10-b32 (b32), broad-10-b64 (b64), broad-76-b64 (b64), broad-136-b64 (b64), broad-220-b16 (b16), broad-157-b8 (b8)"

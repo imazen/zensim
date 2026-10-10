@@ -148,7 +148,7 @@ def build(root):
                  detail=f"one-pixel min {nearid[m]['N1']['one_pixel_score_range'][0]:.3f}, ladders "
                         f"{nearid[m]['N3']['monotone_ladders']}/144") for m in MODELS})
     row("G-STEER (135-case STEERFIX packet)",
-        "all 135 pass (M2 ≥ .99, M3f ≥ .70), per the coordinator's QUAL-A brief; the release map's population is 143",
+        "all 135 pass (M2 ≥ .99, M3f ≥ .70): PRODQUAL-B's registered population for a single-model composition",
         {m: dict(state=ok(sum(r["pass"] for r in steer[m]) == 135),
                  detail=f"{sum(r['pass'] for r in steer[m])}/135; failing "
                         + ", ".join(f"{r['key']} (b{r['blocks'][0]['bounds'][2]})" for r in steer[m] if not r["pass"]))
