@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import catalogue, experiments_src, feature_defs_src, featuresets_src, quotes, sources, zenanalyze_src
+from . import catalogue, experiments_src, feature_defs_src, featuresets_src, gitref, quotes, sources, zenanalyze_src
 from .mdparse import SourceShapeError, table_with_headers
 
 TERMINAL_OWNER = "scripts/rev4_featpot/_terminal_owner.py"
@@ -149,15 +149,17 @@ def integrity_gates(ctx, path: Path | None) -> dict | None:
     """Optional: the SHIPPATH6 ZCTH v4 TRAIN refit GATES.json, which lives outside the repository."""
     if path is None or not path.is_file():
         return None
-    rel = str(path)
+    # a stable label (parent dir + name), never the absolute local path
+    rel = f"{path.parent.name}/{path.name} (outside the repository)"
     data = path.read_bytes()
     import hashlib
-    ctx.read_log[rel] = {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "readers": ["integrity_gates"], "entities": 0}
+    sha = hashlib.sha256(data).hexdigest()
+    ctx.read_log[rel] = {"path": rel, "sha256": sha, "readers": ["integrity_gates"], "entities": 0}
     d = json.loads(data)
     if not isinstance(d.get("gates"), dict) or not all(isinstance(v, bool) for v in d["gates"].values()):
         raise SourceShapeError(f"{rel}: gates must be an object of booleans")
     ctx.read_log[rel]["entities"] = len(d["gates"])
-    return {"path": rel, "scope": d.get("scope"), "gates": d["gates"], "summary": d.get("summary", {})}
+    return {"path": rel, "sha256": sha, "scope": d.get("scope"), "gates": d["gates"], "summary": d.get("summary", {})}
 
 
 def git_head(repo: Path) -> str | None:
@@ -188,6 +190,14 @@ def build(ctx, integrity_path: Path | None = None) -> dict:
                "zenanalyze_commit": ctx.za_tree.commit if ctx.za_tree else git_head(ctx.zenanalyze),
                "zenanalyze_rev": ctx.zenanalyze_rev, "zenanalyze_date": ctx.za_tree.date if ctx.za_tree else None,
                "zenanalyze_checkout": git_head(ctx.zenanalyze), "dirty": dirty(ctx.repo)}
+    if ctx.za_tree is not None and m["zenanalyze_checkout"]:
+        t = ctx.za_tree
+        m["zenanalyze_checkout_behind"] = t.behind(m["zenanalyze_checkout"])
+        try:
+            m["zenanalyze_checkout_ahead"] = int(gitref._git(t.git_dir, "rev-list", "--count",
+                                                             f"{t.commit}..{m['zenanalyze_checkout']}").strip())
+        except SourceShapeError:
+            m["zenanalyze_checkout_ahead"] = None
     m["gates"] = sources.release_gates(ctx)
     m["scorecard"] = sources.scorecard(ctx)
     m["bugs"] = sources.known_bugs(ctx)
@@ -228,5 +238,6 @@ def build(ctx, integrity_path: Path | None = None) -> dict:
             if gid not in gate_ids:
                 raise SourceShapeError(f"catalogue property {p['id']} names unknown gate {gid}")
     m["evaluation"] = {k: quotes.resolve(ctx, loc) for k, loc in catalogue.EVALUATION.items()}
+    m["thresholds"] = {k: quotes.threshold(ctx, spec) for k, spec in catalogue.THRESHOLDS.items()}
     m["sources"] = sorted(ctx.read_log.values(), key=lambda e: e["path"])
     return m

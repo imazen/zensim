@@ -344,3 +344,17 @@ EVALUATION = {
     "split_clarification": {"quote": "docs/DATA_SPLITS.md", "match": r"^## September 14 clarification"},
     "ftest_floor": {"code": FC, "start": r"^mod balanced \{", "end": r"pub const M3A_GOLD"},
 }
+
+
+# Chart thresholds, each extracted at build time from the rule line that owns it
+# (quotes.threshold). `scale` converts a percentage to a rate.
+_RGM = "benchmarks/release_gate_map_2026-10-07.md"
+THRESHOLDS = {
+    "n1": {"path": E33MD, "line": r"^\| \*\*N1 near-identity", "value": r"serve ≥ (\d+(?:\.\d+)?)"},
+    "n3": {"path": E33MD, "line": r"^\| \*\*N3 ladder order", "value": r"ladders ≥ (\d+) of"},
+    "identity_band": {"path": _RGM, "line": r"^\| \*\*Negative tails / identity", "value": r"identity band\[(\d+(?:\.\d+)?),100\]"},
+    "m2": {"path": _RGM, "line": r"^\| \*\*G-STEER", "value": r"M2≥(\.\d+)"},
+    "m3": {"path": _RGM, "line": r"^\| \*\*G-STEER", "value": r"M3≥(\.\d+)"},
+    "integrity_detection": {"path": _RGM, "line": r"^\| \*\*Integrity", "value": r"unique detection≥(\d+)%", "scale": 0.01},
+    "integrity_overall": {"path": _RGM, "line": r"^\| \*\*Integrity", "value": r"overall≤(\d+)%", "scale": 0.01},
+}

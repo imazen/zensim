@@ -113,6 +113,17 @@ class LiveSources(unittest.TestCase):
             self.assertTrue(states <= {"current", "hash-changed", "missing"}, states)
 
 
+    def test_authored_definitions_agree_with_source_thresholds(self):
+        # catalogue prose repeats some rule numbers; each must equal the value read from its owning source line
+        th = {k: v["value"] for k, v in self.m["thresholds"].items()}
+        want = {"identity": [f'[{th["identity_band"]:g}, 100]'],
+                "near-identity": [f'≥ {th["n1"]:.1f} (N1)'],
+                "steering": [f'M2 ≥ {th["m2"]:.2f}', f'M3/M3f ≥ {th["m3"]:.2f}']}
+        defs = {p["id"]: p["definition"] for p in catalogue.WANTED}
+        for pid, needles in want.items():
+            for n in needles:
+                self.assertIn(n, defs[pid], pid)
+
     def test_every_result_file_is_read_or_excluded(self):
         mapped = {rel for rel, _ in experiments_src.RESULTS.values()} | set(experiments_src.RESULTS_EXCLUDED)
         on_disk = set(self.ctx.glob("benchmarks/**/*result_summary*.json")) | set(self.ctx.glob("benchmarks/**/*decision*.json"))
@@ -186,6 +197,15 @@ class NegativeControls(unittest.TestCase):
     def test_e33_result_shape_changed(self):
         rel = experiments_src.RESULTS["E33"][0]
         self.refuse(rel, sub_once(r'"decisions"', '"decision_by_arm"'), experiments_src.results)
+
+    def test_threshold_value_changed_shape(self):
+        spec = catalogue.THRESHOLDS["m2"]
+        self.refuse(spec["path"], sub_once(r"M2≥\.99", "M2 at least .99"), lambda c: quotes.threshold(c, spec))
+
+    def test_threshold_follows_the_source(self):
+        spec = catalogue.THRESHOLDS["n3"]
+        ctx = MutatedCtx(spec["path"], sub_once(r"ladders ≥ 122 of", "ladders ≥ 125 of"))
+        self.assertEqual(quotes.threshold(ctx, spec)["value"], 125)
 
     def test_catalogue_locator_missing(self):
         loc = catalogue.WANTED[1]["state"][0]

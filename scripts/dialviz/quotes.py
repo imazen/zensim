@@ -96,3 +96,16 @@ def _chip(loc: dict, text: str) -> dict:
     if "pass" in loc and re.search(loc["pass"], text):
         return {"status": "pass"}
     return {"status": "info"}
+
+
+def threshold(ctx, spec: dict) -> dict:
+    """A numeric rule value read from the one source line that states it."""
+    lines = ctx.text(spec["path"], "threshold").splitlines()
+    hits = [i for i, l in enumerate(lines) if re.search(spec["line"], l)]
+    if len(hits) != 1:
+        raise SourceShapeError(f"{spec['path']}: threshold line /{spec['line']}/ matched {len(hits)} lines, expected 1")
+    m = re.search(spec["value"], lines[hits[0]])
+    if not m:
+        raise SourceShapeError(f"{spec['path']}:{hits[0] + 1}: no value matching /{spec['value']}/")
+    v = float(m.group(1)) * spec.get("scale", 1)
+    return {"value": round(v, 10), "text": m.group(0), "path": spec["path"], "line": hits[0] + 1}

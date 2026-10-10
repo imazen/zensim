@@ -77,22 +77,42 @@ def _prop_status(p: dict, gates: dict) -> tuple[str, list[str]]:
 
 # --------------------------------------------------------------------------- charts from data
 
+def _th(m, key) -> float:
+    return m["thresholds"][key]["value"]
+
+
+def _th_cite(m, *keys) -> str:
+    """Where each chart threshold was read from."""
+    seen, parts = set(), []
+    for k in keys:
+        t = m["thresholds"][k]
+        if (t["path"], t["line"]) not in seen:
+            seen.add((t["path"], t["line"]))
+            parts.append(src_cite(t["path"], t["line"]))
+    return '<p class="small muted">Threshold lines read from ' + ", ".join(parts) + '.</p>'
+
+
+def _fmt_th(v: float) -> str:
+    return f"{v:g}" if v >= 1 else f"{v:.2f}".lstrip("0")
+
+
 def chart_nearid(m) -> str:
     rows = m["nearid"]["rows"]
+    n1, band, n3 = _th(m, "n1"), _th(m, "identity_band"), _th(m, "n3")
     items = [{"label": f'{r["model"]} highest nonidentical', "value": r["highest"],
               "tip": f'{r["model"]}\nhighest nonidentical {r["highest"]:.4f}\nper-ref gap {r["gap_lo"]:.3f}–{r["gap_hi"]:.3f}'}
              for r in rows]
     items += [{"label": f'{r["model"]} one-pixel ±1 min', "value": r["onepx_lo"], "color": "var(--s2)",
                "tip": f'{r["model"]}\none-pixel ±1 range {r["onepx_lo"]:.4f}–{r["onepx_hi"]:.4f}'} for r in rows]
-    ch = svg.hbars(items, xmin=85, xmax=100, thresholds=[(99.0, "N1/N2 99.0"), (97.5, "identity band 97.5")],
+    ch = svg.hbars(items, xmin=85, xmax=100, thresholds=[(n1, f"N1/N2 {n1:g}"), (band, f"identity band {band:g}")],
                    label_w=200, title="Near-identity served scores")
     lad = svg.hbars([{"label": r["model"], "value": r["ladders"],
                       "tip": f'{r["model"]}\n{r["ladders"]}/{r["ladders_of"]} nonincreasing ladders'} for r in rows],
-                    xmin=0, xmax=rows[0]["ladders_of"], thresholds=[(122, "N3 ≥ 122")], label_w=200,
+                    xmin=0, xmax=rows[0]["ladders_of"], thresholds=[(n3, f"N3 ≥ {n3:g}")], label_w=200,
                     title="Nonincreasing ladders")
     return (f'<h3>Near-identity panel (NEARID, 24 references × 27 rungs)</h3>{ch}'
             + svg.legend([("var(--s1)", "highest nonidentical score"), ("var(--s2)", "lowest one-pixel ±1 score")])
-            + f'<h3>Nonincreasing ladders (of {rows[0]["ladders_of"]})</h3>{lad}'
+            + f'<h3>Nonincreasing ladders (of {rows[0]["ladders_of"]})</h3>{lad}' + _th_cite(m, "n1", "identity_band", "n3")
             + f'<p class="small muted">Values from {src_cite(m["nearid"]["path"], m["nearid"]["line"])}. '
               f'seed0 is the frozen production seed-0 model; A and B are the named profiles.</p>')
 
@@ -161,16 +181,17 @@ def chart_gaddr_bars(m) -> str:
 
 def chart_steerfix(m) -> str:
     rows = m["steerfix"]["rows"]
-    items = [{"label": r["case"], "value": r["m2"], "state": "fail" if r["m2"] < 0.99 else "pass",
+    m2, m3 = _th(m, "m2"), _th(m, "m3")
+    items = [{"label": r["case"], "value": r["m2"], "state": "fail" if r["m2"] < m2 else "pass",
               "tip": f'{r["case"]} ({r["verdict"]})\nM2 {r["m2"]:.4f}\n{r["reason"]}'} for r in rows]
-    items3 = [{"label": r["case"], "value": r["m3f"], "state": "fail" if r["m3f"] < 0.70 else "pass",
+    items3 = [{"label": r["case"], "value": r["m3f"], "state": "fail" if r["m3f"] < m3 else "pass",
                "tip": f'{r["case"]} ({r["verdict"]})\nM3f {r["m3f"]:.4f}'} for r in rows]
     cnt = Counter(r["verdict"] for r in rows)
     return (f'<h3>The seven failing G-STEER cases, with the pre-floor replay diagnostic</h3>'
             f'<p class="small">Verdicts: ' + ", ".join(f"{v} {n}" for v, n in sorted(cnt.items())) +
             f'. These are diagnostic values with the spline floor removed, not served scores. Source {src_cite(m["steerfix"]["path"], m["steerfix"]["line"])}.</p>'
-            f'<div class="two"><div><h3>M2 (bar 0.99)</h3>{svg.dots_ci(items, thresholds=[(0.99, "M2 ≥ .99")], label_w=120, title="M2")}</div>'
-            f'<div><h3>M3f (bar 0.70)</h3>{svg.dots_ci(items3, thresholds=[(0.70, "M3f ≥ .70")], label_w=120, title="M3f", xmin=0.6, xmax=1.0)}</div></div>'
+            f'<div class="two"><div><h3>M2 (bar {_fmt_th(m2)})</h3>{svg.dots_ci(items, thresholds=[(m2, f"M2 ≥ {_fmt_th(m2)}")], label_w=120, title="M2")}</div>'
+            f'<div><h3>M3f (bar {_fmt_th(m3)})</h3>{svg.dots_ci(items3, thresholds=[(m3, f"M3f ≥ {_fmt_th(m3)}")], label_w=120, title="M3f", xmin=0.6, xmax=1.0)}</div></div>' + _th_cite(m, "m2", "m3")
             + svg.legend([("var(--good)", "meets the bar"), ("var(--crit)", "below the bar")]))
 
 
@@ -191,6 +212,7 @@ def chart_integrity(m) -> str:
     if not ig:
         return ('<p class="muted">The ZCTH v4 TRAIN-refit gate record (SHIPPATH6 <code>GATES.json</code>) lives outside the '
                 'repository and was not supplied to this build. Not shown.</p>')
+    det, ovr = _th(m, "integrity_detection"), _th(m, "integrity_overall")
     rows = [[esc(k.replace("_", " ")), chip("pass" if v else "fail")] for k, v in ig["gates"].items()]
     s = ig["summary"]
     rates = []
@@ -199,10 +221,11 @@ def chart_integrity(m) -> str:
             rates.append({"label": k.replace("_", " "), "value": s[k]["rate"],
                           "tip": f'{k}\n{s[k]["count"]} of {s[k]["n"]} = {s[k]["rate"]:.4f}'})
     return (f'<h3>ZCTH v4 TRAIN refit gates (not EVAL qualification)</h3><p class="small">Scope: {esc(ig["scope"])}. '
-            f'Source <span class="mono">{esc(ig["path"])}</span> (outside the repository).</p>'
+            f'Source <span class="mono">{esc(ig["path"])}</span> (outside the repository; SHA-256 '
+            f'<span class="mono">{esc(ig["sha256"][:16])}…</span>).</p>'
             + table(["Gate", "State"], rows, sortable=False)
-            + svg.hbars(rates, xmin=0, xmax=1, label_w=180, thresholds=[(0.95, "detection ≥ .95"), (0.01, "≤ 1%")],
-                        title="integrity rates"))
+            + svg.hbars(rates, xmin=0, xmax=1, label_w=180, thresholds=[(det, f"detection ≥ {_fmt_th(det)}"), (ovr, f"≤ {ovr * 100:g}%")],
+                        title="integrity rates") + _th_cite(m, "integrity_detection", "integrity_overall"))
 
 
 def chart_hdr_e27(m) -> str:
@@ -814,6 +837,23 @@ def _family_body(m, bl, by) -> str:
         table(["ID", "Name", "Scale", "Channel", "by_v2fy"], srows, tid="slots", numeric_cols=(0, 2))])
 
 
+def _za_provenance(m) -> str:
+    c = m.get("zenanalyze_commit") or "unknown"
+    if m.get("zenanalyze_rev") == "worktree":
+        return (f'<p class="small">{chip("open", "working copy")} Read from the zenanalyze working copy at <code>{esc(c[:8])}</code>, '
+                'not from a pushed commit; uncommitted edits there would show here.</p>')
+    behind, ahead = m.get("zenanalyze_checkout_behind"), m.get("zenanalyze_checkout_ahead")
+    co = m.get("zenanalyze_checkout")
+    lag = ""
+    if co and co != c:
+        lag = (f' The local zenanalyze checkout sits at <code>{esc(co[:8])}</code>'
+               + (f', {behind} commit{"s" if behind != 1 else ""} behind' if behind else "")
+               + (f' and {ahead} ahead' if ahead else "") + '; it was not read.')
+    return (f'<p class="small">{chip("pass", "pushed commit")} Read from zenanalyze <code>{esc(m.get("zenanalyze_rev"))}</code> = '
+            f'<a href="https://github.com/imazen/zenanalyze/commit/{esc(c)}"><code>{esc(c[:8])}</code></a> '
+            f'(committed {esc(m.get("zenanalyze_date") or "?")}), as last fetched on the build machine.{lag}</p>')
+
+
 def page_zenanalyze(m) -> str:
     za = m["za"]
     feats = za["features"]
@@ -850,12 +890,13 @@ def page_zenanalyze(m) -> str:
             detail += ("; " if detail else "") + "not in catalogue: " + ", ".join(x["name"] for x in other[:8]) + (" …" if len(other) > 8 else "")
         drift_rows.append([f'<span class="mono small">{esc(p["name"])}</span>', esc(p["kind"]), (str(len(p["pins"])), len(p["pins"])),
                            chip(st, {"fail": "drift", "pass": "current", "info": "names not in catalogue", "na": "no static list"}[st]),
-                           f'<span class="small mono">{esc(detail)}</span>', f'<span class="mono small">{esc(p["path"].split(":", 1)[1])}</span>'])
+                           f'<span class="small mono">{esc(detail)}</span>', src_cite(p["path"], p.get("line"), p["path"].split(":", 1)[1])])
     b = ['<h1>zenanalyze features</h1>',
          f'<p class="lede">zenanalyze extracts image features that pickers use to choose codecs and settings. Its catalogue is the '
          f'<code>features_table!</code> in <code>src/feature.rs</code>: {len(feats)} features with stable numeric IDs '
          f'(crate version {esc(za["version"])}, <code>FEATURE_DEFS_VERSION</code> {za["feature_defs_version"]}). Each feature '
          f'also has a versioned identity <code>name@hex8</code> whose hash changes when its values change.</p>',
+         _za_provenance(m),
          '<div class="statrow">'
          f'<div class="stat"><div class="v">{len(feats)}</div><div class="l">features</div></div>'
          f'<div class="stat"><div class="v">{sum(1 for f in feats if "hdr" in f["cfg"])}</div><div class="l">HDR-gated (cfg hdr)</div></div>'
