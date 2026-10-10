@@ -11712,10 +11712,12 @@ struct Rev5StripJob {
     bands: [V1BasicSums; V1_BANDS_PER_STRIP],
 }
 
-// Private policy; candidate budgets are measured with frozen source builds.
-// This bounds owned queue payload, not allocator overhead or the whole score.
+// Private policy, chosen by measurement (benchmarks/rev5perf5_budget_design_2026-10-09.md):
+// 256 MiB costs 0.7-21.9 % against uncapped at >=4096-wide inputs on 16-32 threads
+// (128 MiB: 15.5-46.0 %), at 0.48-0.72x uncapped peak RSS. This bounds owned queue
+// payload, not allocator overhead or the whole score.
 #[cfg(feature = "threads")]
-const REV5_JOB_BUDGET_BYTES: usize = 128 * 1024 * 1024;
+const REV5_JOB_BUDGET_BYTES: usize = 256 * 1024 * 1024;
 
 #[cfg(feature = "threads")]
 fn rev5_job_bytes(max_n: usize) -> Option<usize> {

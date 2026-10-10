@@ -133,8 +133,17 @@ Peak RSS (fresh process, KiB, 16 threads):
 | 4096² | 554,308 | 266,964 | 399,756 | 200,396 |
 | 8192×4096 | 1,095,752 | 395,288 | 530,068 | 393,788 |
 
-**Proposal:** raise the default to 256 MiB and keep floor 3. That recovers most of
-REV5PERF4's large-image speed while keeping peak RSS at 0.48–0.72× of uncapped
-on the measured large inputs. 128 MiB stays the choice if memory outranks
-speed. The constant stays 128 MiB until the coordinator or owner picks; both
-values are private and keep bits identical.
+**Decision (coordinator, 2026-10-10): the default is 256 MiB, with floor 3.**
+`REV5_JOB_BUDGET_BYTES` is 256 MiB. That recovers most of REV5PERF4's
+large-image speed while keeping peak RSS at 0.48–0.72× of uncapped on the
+measured large inputs.
+
+At 256 MiB:
+- widths up to 2,570 get 16 slots (at 16+ threads);
+- widths up to 13,734 queue with at least 3 slots, so 4096² gets 10,
+  4608×4096 gets 8, 6144×4096 gets 6 and 8192×4096 gets 5;
+- wider inputs take the original route.
+
+The frozen 256 MiB timing arm has no floor. Floor 3 does not change any
+measured cell, because each of them holds 5 or more slots. A fresh build of
+the final source passes strict parity, recorded in the pointer.

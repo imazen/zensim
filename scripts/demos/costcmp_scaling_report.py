@@ -78,7 +78,7 @@ def rss_only_report(args):
                   rss_policy_note='the 36 records carry the tag '+repr(owner.RSS_UNDER_LOAD_POLICY_RECORDED)+'; the shared-load RSS run was the coordinator\'s instruction, not the owner\'s')
     owner.write(args.out_json,result)
     lines = ['# Rev5 byte-budget RSS (2026-10-09)', '',
-             '**Provisional default: 128 MiB; speed not yet measured.** This selects a bounded queue size from memory observations. It is not a throughput verdict. Fresh-process RSS ran under shared load on the coordinator\'s instruction (the raw records\' `rss_policy` tag says "owner-approved"; that attribution is wrong). Timing still requires the unchanged load <2/no foreign build or training gate and 32 common clean rounds from at most 64. No timing medians or confidence intervals are reported.', '',
+             '**Memory record, written before timing.** 128 MiB was then the provisional default. The measured decision (256 MiB, floor 3) and the timing are in [the design note](rev5perf5_budget_design_2026-10-09.md) and [the timing report](rev5perf5_scaling_2026-10-09.md). Fresh-process RSS ran under shared load on the coordinator\'s instruction (the raw records\' `rss_policy` tag says "owner-approved"; that attribution is wrong). Timing still requires the unchanged load <2/no foreign build or training gate and 32 common clean rounds from at most 64. No timing medians or confidence intervals are reported.', '',
              'All three frozen candidates pass 384/384 strict parity and 576/576 comparisons overall. The full 36-record measurement preflight agrees in score and all 420 consumed feature bits.', '',
              '| threads | size | uncapped KiB | 64 MiB KiB | 128 MiB KiB | 256 MiB KiB |',
              '|---:|---|---:|---:|---:|---:|']
@@ -92,7 +92,7 @@ def rss_only_report(args):
     for r in accounting:
         slots = ['/'.join(str(r['slots'][str(m)][str(n)]) for n in cmp.BUDGET_THREADS) for m in [64,128,256]]
         lines.append(f"| {r['width']} | {r['strip_rows']} | {r['halo']} | {r['fixed_bytes']} | {r['per_job_bytes']} | "+' | '.join(slots)+' |')
-    lines += ['', '128 MiB retains more jobs than 64 MiB while measuring lower peak RSS than 256 MiB on both large geometries. Its throughput tradeoff is unknown until the queued sweep qualifies. No source-informed speed threshold has been added.', '',
+    lines += ['', '128 MiB retains more jobs than 64 MiB while measuring lower peak RSS than 256 MiB on both large geometries. The later timing chose 256 MiB for speed; see the design note.', '',
               f'Raw evidence and binary/source/model pins: `{root}`. Full time-v logs and exact byte accounting are replayed by the report recipe. Timing measurements remain pending.', '']
     args.out_md.write_text('\n'.join(lines))
 

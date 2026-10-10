@@ -37,8 +37,9 @@
   fit (the original route runs three channels in parallel). Strict 384/384
   parity and thread invariance pass (`ed0e06c6`, floor `ca0208e7`). Timing
   confirms the floor: the queue beats the original route at 3–16 slots and
-  loses at 2. The 128 MiB default costs 15–46 % at ≥4096-wide inputs on 16–32
-  threads versus uncapped (256 MiB: 1–22 %); the default is an open decision.
+  loses at 2. The default budget is 256 MiB (coordinator decision): at ≥4096-wide
+  inputs on 16–32 threads it costs 1–22 % versus uncapped (128 MiB: 15–46 %),
+  at 0.48–0.72× uncapped peak RSS.
   [Timing](benchmarks/rev5perf5_scaling_2026-10-09.md),
   [RSS and accounting](benchmarks/rev5perf5_rss_2026-10-09.md).
 
