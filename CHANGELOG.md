@@ -58,6 +58,15 @@
   about 90 µs less per call at 64² for every bake, including production. With zenpredict's f16
   decode cache (zenanalyze, separate change, held: it slows the profile path's per-compare parse),
   arm C costs the same as production. Record: `E33C_RUNTIME`.
+- **Shipped profiles parse their bake once per process, not on every compare.** `Zensim::compute`
+  parsed each `&'static` profile bake up to three times per compare (`score_plan`, the output-spline
+  disposition check, the forward pass). `cached_profile_model` interns one `Arc<Model>` per bake slice,
+  like `cached_bake_metadata`; non-static bakes still parse per call, and the cache is bounded by the
+  shipped profile count. Score bits are unchanged in all 10 timed cells and in
+  `every_shipped_profile_scores_its_pinned_value`. Per-compare medians, one thread, against `main`:
+  A −32.2% / C −15.8% / CHdr −7.9% at 64²; with zenanalyze `417cc785` (f16 layers decoded at load)
+  A −38.8% / C −35.4% at 64², no cell slower. This makes the zenpredict f16 decode cache landable.
+  Record: `benchmarks/e33c_runtime_2026-10-10.md` (E33C_FIX addendum).
 
 - Rev5 ordered strip jobs now obey a private byte budget, including retained
   queue allocations, and use the original route when fewer than three jobs
