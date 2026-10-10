@@ -368,8 +368,193 @@ def upiq(record, cells, out):
     )
 
 
+E31VIDEO = {
+    # set: (pooled rows, label rows, label file name, stored configurations)
+    "hdrvdc": (580, 464, "HDR_VDC_JOD_Scores.csv", ("A", "B", "C", "D", "E")),
+    "avt": (195, 195, "mos_ci.csv", ("A",)),
+}
+# The July HDR-VDC legs (asrun/hdrvdc/PROTOCOL.md; run_external_reads.py
+# HDRVDC_LEGS): condition -> display configuration.
+HDRVDC_LEGS = {
+    "i": {c: "A" for c in ("bright-near", "bright-far", "dim-near", "dim-far")},
+    "ii": {"bright-near": "B", "bright-far": "B", "dim-near": "C", "dim-far": "C"},
+    "iii": {"bright-near": "B", "bright-far": "D", "dim-near": "C", "dim-far": "E"},
+}
+
+
+def e31video_labels(name, data):
+    """Join the frozen label file to label-free video keys; no other use."""
+    import csv
+    import io
+    import re
+
+    rows = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"))))
+    out = []
+    if name == "hdrvdc":
+        pattern = re.compile(r"^(.+)_([HML])_(\d+x\d+)\.mp4$")
+        for r in rows:
+            if r["is_reference"] == "True":
+                continue
+            m = pattern.match(Path(r["test_path"]).name)
+            if not m or m[1] != r["content"]:
+                raise ValueError("HDR-VDC label row does not name a registered test video")
+            out.append(
+                dict(
+                    video=f"hdrvdc/{m[1]}/{m[2]}_{m[3]}",
+                    content=m[1],
+                    group=f"{r['luminance_level']}-{r['viewing_distance']}",
+                    human=float(r["jod"]),
+                )
+            )
+    else:
+        pattern = re.compile(r"^(\d+)_(\d+)_(\d+K)_(av1|hevc|vvc)_(.+)\.mkv$")
+        for r in rows:
+            m = pattern.match(r["stimuli_file"])
+            if not m:
+                if "_original_" not in r["stimuli_file"]:
+                    raise ValueError("unregistered AVT stimulus row")
+                continue
+            out.append(
+                dict(
+                    video=f"avt/{m[5]}/{m[4]}_{m[1]}x{m[2]}_{m[3]}",
+                    content=m[5],
+                    group=m[4],
+                    human=float(r["mos"]),
+                )
+            )
+    if len(out) != E31VIDEO[name][1]:
+        raise ValueError(f"{name}: label row census {len(out)}")
+    return out
+
+
+def e31video_report(pred, labels):
+    """E31 report shape on one external population: pooled, per-study
+    (HDR-VDC condition / AVT codec), within-reference (content) signed rank
+    panels and raw scatter. The UPIQ report's statistics, nothing added."""
+    target = np.array([r["human"] for r in labels])
+    if len(pred) != len(target) or not np.isfinite([pred, target]).all():
+        raise ValueError("INCOMPLETE: external video row/finite identity")
+
+    def panel(key, ix):
+        p = panel_batch([(key, pred[ix], target[ix])], stats="full")[0]
+        if p["n_dropped"] or not np.isfinite(p["srocc_signed"]):
+            raise ValueError("INCOMPLETE: undefined external video panel " + key)
+        return p
+
+    def groups(field):
+        out = {}
+        for i, r in enumerate(labels):
+            out.setdefault(r[field], []).append(i)
+        return {k: np.array(v) for k, v in sorted(out.items())}
+
+    return dict(
+        pooled=panel("pooled", np.arange(len(target))),
+        per_study={k: panel(k, ix) for k, ix in groups("group").items()},
+        within_reference={k: panel(k, ix) for k, ix in groups("content").items()},
+        scatter=dict(prediction=pred.tolist(), target=target.tolist()),
+    )
+
+
+def e31video(record, cells, out):
+    """Report-only E31 transfer reads on HDR-VDC and AVT (owner 2026-10-09/10)."""
+    entries = record.get("tables", {})
+    if set(entries) != set(E31VIDEO) or any(
+        set(e) != {"manifest", "keys", "table", "labels"} for e in entries.values()
+    ):
+        raise ValueError("both registered external HDR video populations required")
+    table_object_kinds(
+        record,
+        entries.values(),
+        (("predictor", "tool"), *((e["labels"], "payload") for e in entries.values())),
+    )
+    if set(cells) != {"control", "uh4"}:
+        raise ValueError("exact E31 arm/control required")
+    metadata = retain(record, {"metadata"})
+    for name, entry in entries.items():
+        m = json.loads(metadata[entry["manifest"]])
+        if (
+            m.get("data_role") != "assessment-only"
+            or m.get("set") != name
+            or m.get("formula_revision") != "Rev5"
+            or not m.get("decoder_era")
+            or m.get("requested_ids") != BASE_IDS
+            or m.get("rows") != E31VIDEO[name][0]
+            or tuple(m.get("configs", ())) != E31VIDEO[name][3]
+            or m.get("labels_read") is not False
+            or m.get("table_sha256") != record["objects"][entry["table"]]["sha256"]
+            or m.get("keys_sha256") != record["objects"][entry["keys"]]["sha256"]
+            or Path(record["objects"][entry["labels"]]["path"]).name != E31VIDEO[name][2]
+        ):
+            raise ValueError("unqualified external video feature/key declaration")
+    blobs = retain(record, {"payload", "tool"})
+    tool = out / "predict_features_with_bake"
+    tool.write_bytes(blobs["predictor"])
+    tool.chmod(0o500)
+    reports = {}
+    for name, entry in entries.items():
+        manifest = json.loads(metadata[entry["manifest"]])
+        keys = pq.read_table(pa.BufferReader(blobs[entry["keys"]]))
+        if row_keys_sha(keys) != manifest.get("row_keys_sha256"):
+            raise ValueError("external video ordered keys differ")
+        frame = keys.to_pandas().reset_index(drop=True)
+        table = pq.read_table(pa.BufferReader(blobs[entry["table"]]))
+        if table["pair_key"].to_pylist() != frame.pair_key.tolist():
+            raise ValueError("external video feature/key order differs")
+        labels = e31video_labels(name, blobs[entry["labels"]])
+        index = {(v, c): i for i, (v, c) in enumerate(zip(frame.video, frame.config))}
+        if {r["video"] for r in labels} != set(frame.video):
+            raise ValueError("labelled videos differ from the admitted video set")
+        legs = (
+            {leg: [index[(r["video"], m[r["group"]])] for r in labels] for leg, m in HDRVDC_LEGS.items()}
+            if name == "hdrvdc"
+            else {"single": [index[(r["video"], "A")] for r in labels]}
+        )
+        matrix = np.column_stack([table[f"f{i}"].to_numpy() for i in range(1825)]).astype("<f8")
+        if not np.isfinite(matrix[:, BASE_IDS]).all():
+            raise ValueError("external video requested features unmeasured")
+        wire = out / f"{name}.f64.wire"
+        wire.write_bytes(struct.pack("<II", 1825, len(frame)) + matrix.tobytes())
+        reports[name] = {}
+        for arm, grid in cells.items():
+            reports[name][arm] = {}
+            for (fold, seed), cell in grid.items():
+                dest = out / name / arm / f"{fold}_s{seed}"
+                dest.mkdir(parents=True)
+                dense = dense_bake(cell / "refit/last.bin", dest)
+                pred = np.array(
+                    [
+                        float(v)
+                        for v in subprocess.check_output(
+                            [
+                                str(tool),
+                                "--bake",
+                                str(dense),
+                                "--features-file",
+                                str(wire),
+                                "--f64-wire",
+                                "--production",
+                            ],
+                            text=True,
+                        ).split()
+                    ]
+                )
+                if len(pred) != len(frame):
+                    raise ValueError("INCOMPLETE: external video prediction count")
+                (dest / "pred.json").write_text(json.dumps(pred.tolist()) + "\n")
+                reports[name][arm][f"{fold}_s{seed}"] = {
+                    leg: e31video_report(pred[np.array(ix)], labels) for leg, ix in legs.items()
+                }
+    return dict(
+        schema="e31-v40-external-video-report-v1",
+        panels=reports,
+        report_only=True,
+        independent_test=False,
+        shipping_adoption_authorized=False,
+    )
+
+
 def run(args):
-    study = {"external": "e32", "upiq": "e31", "hdr": "e29"}[args.mode]
+    study = {"external": "e32", "upiq": "e31", "hdr": "e29", "e31video": "e31"}[args.mode]
     cells = complete(args.bundle, study, args.results, args.control, args.tools)
     frozen = json.loads(bound_bytes(args.control_pins))
     if frozen.get("control_choice") != "fresh-matched-v40" or frozen.get(
@@ -477,10 +662,8 @@ def run(args):
             + "\n"
         )
         return
-    report = (
-        external(record, cells, args.out)
-        if args.mode == "external"
-        else upiq(record, cells, args.out)
+    report = {"external": external, "upiq": upiq, "e31video": e31video}[args.mode](
+        record, cells, args.out
     )
     report.update(
         exposure_freeze_sha256=sha(args.exposure),
@@ -493,7 +676,9 @@ def run(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--mode", choices=("external", "upiq", "hdr"), required=True)
+    p.add_argument(
+        "--mode", choices=("external", "upiq", "hdr", "e31video"), required=True
+    )
     for name in (
         "bundle",
         "results",
