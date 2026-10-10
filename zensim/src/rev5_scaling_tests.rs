@@ -2,6 +2,92 @@
 use super::*;
 use crate::{PixelFormat, RgbSlice, StridedBytes};
 
+fn vector_bytes<T>(values: &Vec<T>) -> usize {
+    values.capacity() * core::mem::size_of::<T>()
+}
+
+fn retained_queue_bytes(jobs: &Vec<Rev5StripJob>) -> usize {
+    vector_bytes(jobs)
+        + jobs
+            .iter()
+            .map(|job| {
+                let s = &job.scratch;
+                let r = &job.result;
+                let planes = [
+                    &s.src_wide,
+                    &s.dst_wide,
+                    &s.mu1_h,
+                    &s.mu2_h,
+                    &s.ssq_h,
+                    &s.s12_h,
+                    &s.mu1,
+                    &s.mu2,
+                    &s.ssq,
+                    &s.s12,
+                    &s.abs_src,
+                    &s.activity_tmp,
+                    &s.activity,
+                    &s.bs2,
+                    &s.activity_dst,
+                ]
+                .iter()
+                .map(|p| vector_bytes(p))
+                .sum::<usize>();
+                let results = vector_bytes(&r.dense)
+                    + vector_bytes(&r.grad)
+                    + vector_bytes(&r.app)
+                    + vector_bytes(&r.v1)
+                    + vector_bytes(&r.block)
+                    + vector_bytes(&r.csfw)
+                    + vector_bytes(&r.rev4)
+                    + vector_bytes(&r.pool_scratch);
+                for pool in &r.pool_scratch {
+                    assert!(
+                        [
+                            &pool.stable_sd,
+                            &pool.mu1_v,
+                            &pool.mu2_v,
+                            &pool.act_raw,
+                            &pool.act,
+                            &pool.ssq_v,
+                            &pool.s12_v
+                        ]
+                        .iter()
+                        .all(|p| p.capacity() == 0)
+                    );
+                    assert!(pool.h.iter().all(|p| p.capacity() == 0));
+                }
+                planes + results
+            })
+            .sum::<usize>()
+}
+
+#[test]
+fn rev5_job_budget_handles_exact_fit_and_overflow() {
+    let bytes = rev5_job_bytes(4096 * (STRIP_ROWS + 2 * HALO_P)).unwrap();
+    assert_eq!(
+        rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, bytes - 1),
+        0
+    );
+    assert_eq!(
+        rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, bytes),
+        1
+    );
+    assert_eq!(
+        rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, 3 * bytes),
+        3
+    );
+    assert_eq!(
+        rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 32, 32 * bytes),
+        16
+    );
+    assert_eq!(
+        rev5_job_limit(4096 * (STRIP_ROWS + 2 * HALO_P), 8, 32 * bytes),
+        8
+    );
+    assert_eq!(rev5_job_limit(usize::MAX, 32, usize::MAX), 0);
+}
+
 #[test]
 fn ordered_batches_match_serial_with_reused_strided_scratch() {
     const SENTINEL: &str = "REV5_BATCH_PARITY_OK";
@@ -144,6 +230,11 @@ fn ordered_batches_match_serial_with_reused_strided_scratch() {
                         assert!(
                             plane_bytes <= budget,
                             "retained planes {plane_bytes} exceed budget {budget}"
+                        );
+                        let owned = retained_queue_bytes(&scratch.rev5_jobs);
+                        assert!(
+                            owned <= budget,
+                            "owned queue bytes {owned} exceed budget {budget}"
                         );
                         if budget == 0 {
                             assert!(

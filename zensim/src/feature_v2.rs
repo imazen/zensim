@@ -11712,6 +11712,55 @@ struct Rev5StripJob {
     bands: [V1BasicSums; V1_BANDS_PER_STRIP],
 }
 
+// Private policy; candidate budgets are measured with frozen source builds.
+// This bounds owned queue payload, not allocator overhead or the whole score.
+#[cfg(feature = "threads")]
+const REV5_JOB_BUDGET_BYTES: usize = 128 * 1024 * 1024;
+
+#[cfg(feature = "threads")]
+fn rev5_job_bytes(max_n: usize) -> Option<usize> {
+    use core::mem::size_of;
+    // Eleven float planes, the slot itself, and every fixed-length result
+    // vector allocated by StreamChannelAccums::new(NUM_SCALES, 1). Queued
+    // jobs never allocate the pool scratch's float planes.
+    let cell = size_of::<DenseAccum>()
+        + size_of::<GradientAccum>()
+        + size_of::<AppendAccum>()
+        + size_of::<V1BasicSums>()
+        + size_of::<(crate::featcanon::SumVar, crate::featcanon::SumVar)>()
+        + size_of::<CsfwAccum>()
+        + size_of::<Rev4CellAccum>();
+    let fixed = size_of::<Rev5StripJob>() + crate::NUM_SCALES * cell + size_of::<FoldPoolScratch>();
+    max_n
+        .checked_mul(11)?
+        .checked_mul(size_of::<f32>())?
+        .checked_add(fixed)
+}
+
+#[cfg(feature = "threads")]
+fn rev5_job_limit(max_n: usize, threads: usize, budget: usize) -> usize {
+    rev5_job_bytes(max_n).map_or(0, |bytes| threads.min(16).min(budget / bytes))
+}
+
+#[cfg(feature = "threads")]
+fn rev5_prepare_jobs(jobs: &mut Vec<Rev5StripJob>, limit: usize, max_n: usize) {
+    // Drop excess slots BEFORE growing parent scratch or new job planes.
+    // A narrower subsequent pair cannot keep oversized cached planes outside
+    // the current request's byte accounting.
+    jobs.truncate(limit);
+    for job in jobs.iter_mut() {
+        if job.sized_for > max_n {
+            job.scratch = ScratchV2Strip::new(0);
+            job.sized_for = 0;
+        }
+    }
+    if jobs.capacity() != limit {
+        let old = core::mem::take(jobs);
+        *jobs = Vec::with_capacity(limit);
+        jobs.extend(old);
+    }
+}
+
 #[cfg(feature = "threads")]
 impl Rev5StripJob {
     fn new(info: crate::feature_v2_stream::StripInfo, ch: usize) -> Self {
@@ -11736,6 +11785,10 @@ impl Rev5StripJob {
         self.ch = ch;
         let n = info.plane_w * info.wide_h();
         if n > self.sized_for {
+            // Release the previous allocation before constructing its larger
+            // replacement, so both plane sets never coexist inside the cap.
+            self.scratch = ScratchV2Strip::new(0);
+            self.sized_for = 0;
             self.scratch = rev5_job_scratch(n);
             self.sized_for = n;
         }
@@ -14696,6 +14749,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // kernels and strip partials. Basic bands and blockiness still merge in
     // producer order. No image-sized pyramid or thread-dependent reduction.
     #[cfg(feature = "threads")]
+    let job_budget = REV5_JOB_BUDGET_BYTES;
+    #[cfg(all(test, feature = "threads"))]
+    let job_budget = scratch.rev5_job_budget.unwrap_or(job_budget);
+    #[cfg(feature = "threads")]
     let batch_limit = if parallel
         && compute.formula_revision >= FormulaRevision::Rev5
         && retention.is_none()
@@ -14704,10 +14761,24 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         && rayon::current_num_threads() >= 8
         && h0 > STRIP_ROWS
     {
-        rayon::current_num_threads().min(16)
+        debug_assert!(
+            !compute.csfw
+                && !compute.dvifm
+                && !compute.dvifmgate
+                && !compute.append
+                && !compute.append2
+                && !compute.gridblk
+                && !compute.ringbasis
+                && !compute.tailhist
+                && !compute.arttype,
+            "queued merges cover only Rev5's supported families"
+        );
+        rev5_job_limit(strip_max_n, rayon::current_num_threads(), job_budget)
     } else {
         0
     };
+    #[cfg(feature = "threads")]
+    rev5_prepare_jobs(&mut scratch.rev5_jobs, batch_limit, strip_max_n);
     let needs = compute.plane_needs(self_blur);
     #[cfg(feature = "threads")]
     let needs = if batch_limit > 0 {
