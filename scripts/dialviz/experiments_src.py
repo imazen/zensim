@@ -240,9 +240,9 @@ def registry(ctx) -> list[dict]:
                 break
         reg = re.search(r"(\d{4}-\d{2}-\d{2})", title) or re.search(r"(\d{4}-\d{2}-\d{2})", path)
         status = None
-        sm = re.search(r"^Status:\s*(.*)$", txt, re.M)
+        sm = re.search(r"^Status:\s*((?:.+\n?)+?)(?:\n\s*\n|\Z)", txt + "\n\n", re.M)
         if sm:
-            status = sm.group(1).strip()
+            status = " ".join(sm.group(1).split())
         eid = m.group(1).replace(" ", "-")
         exps.append({"scheme": "featpot", "id": eid, "label": m.group(1), "title": re.sub(r"\s*\(registered[^)]*\)\s*$", "", m.group(2)),
                      "registration": path, "line": ln, "date": reg.group(1) if reg else None,

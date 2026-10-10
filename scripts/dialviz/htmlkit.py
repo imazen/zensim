@@ -90,12 +90,25 @@ def md_inline(text: str, src_path: str | None = None) -> str:
 
 
 def md_block(text: str, src_path: str | None = None) -> str:
-    """Paragraphs and bullet lists from a markdown excerpt."""
+    """Paragraphs, bullet lists and GFM tables from a markdown excerpt."""
+    from .mdparse import split_row
     out: list[str] = []
     para: list[str] = []
     items: list[str] = []
+    trows: list[str] = []
+
+    def flush_table():
+        if not trows:
+            return
+        rows = [split_row(r) for r in trows if not re.fullmatch(r"\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?", r.strip())]
+        head, body = rows[0], rows[1:]
+        out.append('<div class="tablewrap"><table><thead><tr>' + "".join(f"<th>{md_inline(c, src_path)}</th>" for c in head)
+                   + "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{md_inline(c, src_path)}</td>" for c in r) + "</tr>"
+                                                      for r in body) + "</tbody></table></div>")
+        trows.clear()
 
     def flush():
+        flush_table()
         if para:
             out.append("<p>" + md_inline(" ".join(para), src_path) + "</p>")
             para.clear()
@@ -105,6 +118,12 @@ def md_block(text: str, src_path: str | None = None) -> str:
 
     for line in text.splitlines():
         s = line.strip()
+        if s.startswith("|"):
+            if para or items:
+                flush()
+            trows.append(s)
+            continue
+        flush_table()
         m = re.match(r"^[-*]\s+(.*)", s)
         hm = re.match(r"^#{1,6}\s+(.*)", s)
         if hm:

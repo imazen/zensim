@@ -611,12 +611,14 @@ def page_experiments(m) -> dict:
 def _experiment_body(m, e, r, mean_floor, source_floor) -> str:
     b = [f'<h1>{esc(e["label"])} — {esc(_short(e["title"], 200))}</h1>',
          f'<p class="small">Registration: {src_cite(e["registration"], e.get("line"))}'
-         + (f' · status: {esc(e["status_text"])}' if e.get("status_text") else "") + '</p>']
+         + (f' · registration status: {md_inline(e["status_text"])}' if e.get("status_text") else "") + '</p>']
     if e.get("docstring"):
         b.append(f'<div class="panel">{md_block(e["docstring"][:3000], e["registration"])}</div>')
     if e.get("rule_text"):
-        b.append(f'<h2>Decision rule</h2><div class="panel">{md_block(e["rule_text"][:4000], e["registration"])}'
-                 f'<div class="small">{src_cite(e["registration"], e.get("rule_line") or e.get("line"))}</div></div>')
+        cut = len(e["rule_text"]) > 4000
+        b.append(f'<h2>Decision rule</h2><div class="panel">{md_block(e["rule_text"][:4000] + (" …" if cut else ""), e["registration"])}'
+                 + ('<p class="small muted">Excerpt; the section continues in the registration.</p>' if cut else '')
+                 + f'<div class="small">{src_cite(e["registration"], e.get("rule_line") or e.get("line"))}</div></div>')
     if r:
         adopted = r.get("adopted")
         b.append(f'<h2>Recorded outcome</h2><p class="small">Source {src_cite(r["path"])}'
@@ -666,8 +668,10 @@ def _experiment_body(m, e, r, mean_floor, source_floor) -> str:
             pal = {a: f"var(--s{i % 8 + 1})" for i, a in enumerate(arms_seen)}
             rows = [(f'{s["population"]}{"/" + s["leg"] if s["leg"] else ""} {s["arm"]}', s["values"], pal[s["arm"]])
                     for s in rep["series"]]
-            b.append('<p>Pooled signed SROCC per training seed, every recorded value (no rule; report only).</p>'
-                     f'<div class="panel">{svg.strips(rows, label_w=170, title="pooled signed SROCC per seed")}'
+            ncell = max(len(x["values"]) for x in rep["series"])
+            b.append(f'<p>Pooled signed SROCC, one point per recorded training cell ({ncell} per row: fold source × seed), '
+                     'every value drawn (no rule; report only).</p>'
+                     f'<div class="panel">{svg.strips(rows, label_w=170, title="pooled signed SROCC per training cell")}'
                      + svg.legend([(pal[a], a) for a in arms_seen]) + '</div>')
         if r["arms"]:
             b.append(f'<div class="panel">{arm_chart(r["arms"], mean_floor, source_floor)}</div>')

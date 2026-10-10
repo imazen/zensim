@@ -21,7 +21,15 @@ not a scorer, a statistics owner, a board or a qualification tool.
 - **No protected data.** The generator opens no Parquet, CSV or TSV table that
   holds labels, and nothing under KADID TERMINAL, sealed CID22-B, T0, AIC or
   HDR VAL payloads. It reads only repository markdown, JSON summaries and Rust
-  source, plus zenanalyze source in the sibling checkout.
+  source, plus zenanalyze source read from a commit of the sibling repository
+  (`--zenanalyze-rev`, default `origin/main`), never from its working copy.
+- **Permalinks.** Every GitHub link names a commit: zenanalyze links use the
+  commit read; zensim links use the newest pushed ancestor of the build when the
+  cited file is unchanged there (this lane's own unpushed files link to `main`).
+  A test checks that each linked path and line exists at its ref.
+- **Thresholds come from rule lines.** Chart bars (N1/N2, identity band, N3,
+  G-STEER M2/M3, integrity rates) are extracted from the one source line that
+  states each rule; nothing is typed into a chart.
 - **Missing is shown as missing.** A gate without evidence renders as "not
   measured" or "blocked", never as a pass. Each section reports its coverage as
   a fraction in `DIALVIZ_DONE` and on the Sources page.
@@ -82,7 +90,8 @@ changed schema string).
   `benchmarks/nearid_2026-10-09.md`, `benchmarks/steerfix_2026-10-09.md`,
   SPEEDQ3 and COSTCMP records for current measured state.
 - Integrity: `SHIPPATH6` `GATES.json` (seven boolean TRAIN gates) is outside
-  the repository; the site quotes the release-map row and links the record.
+  the repository; it is optional (`--integrity-gates`), shown by its
+  `SHIPPATH6_assets/GATES.json` label and SHA-256, never by local path.
 - Experiments: two numbering schemes are kept apart. The Rev4 program
   (`docs/REV4_EXPERIMENTS_2026-09-23.md`, E1–E6) and the featpot design log
   (E1–E33; E1–E24 registered in `scripts/rev4_featpot/e*.py` docstrings, E25
