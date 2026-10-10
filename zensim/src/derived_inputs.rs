@@ -142,6 +142,8 @@ impl DerivedInputs {
     /// The declared feature ids the LIVE model inputs read: a live `in` reads
     /// its id, a live `product` reads both factors. `declared` is the bake's
     /// ascending declared id list; `live` is indexed by model input.
+    /// Only the feature planner (`feature-regime-v2`) asks.
+    #[cfg(feature = "feature-regime-v2")]
     pub(crate) fn read_slots(&self, declared: &[usize], live: &[bool]) -> Option<SlotSet> {
         if live.len() != self.inputs.len() || declared.len() != self.gather_width {
             return None;
@@ -269,7 +271,10 @@ mod tests {
 
     const FX: &str = "zensim-derived-inputs v1\nin 13\nin 401\nproduct 13 422\nproduct 401 422\n";
 
+    // Serving a derived bake needs the feature planner: without
+    // `feature-regime-v2`, `BakeScorer::new` refuses it by design.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn served_score_is_the_declared_products_and_identity_is_the_pin() {
         let bytes = derived_bake(Some(FX));
         let model = zenpredict::Model::from_bytes(&bytes).unwrap();
@@ -303,6 +308,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn fd_sensitivity_follows_the_products() {
         let bytes = derived_bake(Some(FX));
         let model = zenpredict::Model::from_bytes(&bytes).unwrap();
