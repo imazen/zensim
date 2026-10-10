@@ -68,5 +68,14 @@ strict parity, so the floor changes scheduling, not bits; the unit tests
 The frozen 64/128/256 MiB binaries measured for RSS predate the floor. Their
 1- and 2-slot cells (64 MiB at 4096² and 8192×4096, 128 MiB at 8192×4096)
 show the queued route's memory, not the route the source now takes. Whether
-the floor is faster than a 1–2-slot queue is still **not measured**; the
-queued timing grid covers those cells.
+the floor is faster than a 1–2-slot queue is still **not measured**.
+
+**Timing arms.** The queued timing grid (`rev5perf5-budget-timing`) times five
+arms: uncapped, the frozen 64/128/256 MiB builds, and `by_v2fy_r5_floor3`, the
+128 MiB source with the floor (`costcmp_run.py --floor-arm`). Its v2 inventory
+accepts the floor build only if removing the exact floor hunk gives back the
+frozen 128 MiB source byte for byte. The v2 preflight requires all five arms
+to agree in score and all 420 feature bits at every cell. The report adds a
+direct floor-versus-128 MiB paired comparison. At 128 MiB the two differ only at
+8192×4096. RSS stays on the four measured arms. The gate is unchanged: load1 < 2,
+no foreign build or training, and the first 32 clean rounds from at most 64.
