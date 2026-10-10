@@ -227,10 +227,42 @@ def summary():
                       for a, g in out["arms"].items()}))
 
 
+def control_repack():
+    """Report-only (registration 9.5 / 8): frozen production s0-s2 re-packed with the E33 output stage."""
+    from v2_common import FITBIN
+    from v2_production_pack import pack_production
+    cells = Path("/var/tmp/rev4-featpot/d1-results/confirm/cells/sel:59f0bbc2f290@h32:H128:cv16:cf98__N")
+    anchor = Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29/wide/main/real/cid22_fit.parquet")
+    root = GATES / "control-repack"
+    if sha(FITBIN) != json.loads((E / "packet/build-meta.packer-input.json").read_text())[
+            "binary_mix"]["bake_dial_refit"]["sha256"]:
+        raise ValueError("bake_dial_refit is not the program's binary (set REV4_V2_BIN_DIR)")
+    out = {}
+    for seed in range(3):
+        cell = cells / f"full_s{seed}"
+        r = json.loads((cell / "result.json").read_text())
+        dest = root / f"s{seed}"
+        (dest / "refit").mkdir(parents=True)
+        try:
+            packed, status = pack_production(cell / "refit/last.bin", dest, anchor, e33_output_stage=True), "PACKED"
+        except Exception as e:  # a K refusal is the report-only result, not a crash
+            packed, status = {"error": str(e)}, "REFUSED"
+        log = (dest / "pack.log").read_text().splitlines()
+        out[f"s{seed}"] = dict(status=status, production_packed_sha256=r["packed_model_sha256"],
+                               production_dense_sha256=r["dense_model_sha256"],
+                               dense_identical=packed.get("dense_model_sha256") == r["dense_model_sha256"],
+                               stage_line=next((x for x in log if "identity-pinned spline" in x), log[-1] if log else None),
+                               **packed)
+    (root / "CONTROL_REPACK.json").write_text(json.dumps(dict(
+        schema="e33-control-repack-v1", report_only=True, anchor_sha256=sha(anchor), fitbin_sha256=sha(FITBIN),
+        seeds=out), indent=2) + "\n")
+    print(json.dumps({k: (v["status"], v["dense_identical"], v["stage_line"]) for k, v in out.items()}, indent=1))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("candidates", "nearid", "verdict", "identity", "steer", "runtime-candidates",
-                                    "summary"))
+                                    "control-repack", "summary"))
     p.add_argument("--arm", choices=sorted(ARMS))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--grid", choices=("standard", "ladder"))
@@ -245,6 +277,8 @@ def main():
         identity(a.seed)
     elif a.mode == "steer":
         steer(a.arm, a.seed)
+    elif a.mode == "control-repack":
+        control_repack()
     elif a.mode == "runtime-candidates":
         print(runtime_candidates())
     else:
