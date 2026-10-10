@@ -173,9 +173,19 @@ def git_head(repo: Path) -> str | None:
     return None
 
 
+def dirty(repo: Path) -> bool | None:
+    """True when the working copy holds changes beyond the reported commit."""
+    for cmd in (["jj", "diff", "--name-only"], ["git", "status", "--porcelain", "--untracked-files=no"]):
+        try:
+            return bool(subprocess.run(cmd, cwd=repo, capture_output=True, text=True, check=True).stdout.strip())
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    return None
+
+
 def build(ctx, integrity_path: Path | None = None) -> dict:
     m: dict = {"built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "commit": git_head(ctx.repo),
-               "zenanalyze_commit": git_head(ctx.zenanalyze)}
+               "zenanalyze_commit": git_head(ctx.zenanalyze), "dirty": dirty(ctx.repo)}
     m["gates"] = sources.release_gates(ctx)
     m["scorecard"] = sources.scorecard(ctx)
     m["bugs"] = sources.known_bugs(ctx)

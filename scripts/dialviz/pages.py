@@ -45,6 +45,7 @@ def _gate_link(g: dict, depth: int = 0) -> str:
 
 def _footer(m: dict) -> str:
     c = m["commit"][:12] if m["commit"] else "unknown"
+    c += " + working-copy changes" if m.get("dirty") else ""
     return (f'Built {esc(m["built_utc"])} from zensim <span class="mono">{esc(c)}</span> · {len(m["sources"])} source files · '
             f'every number on this site is read from a committed source; nothing here is a new measurement. '
             f'<a href="{{BASE}}sources.html">Sources and coverage</a>')
@@ -284,7 +285,7 @@ def seed_chart(arm: dict, mean_floor: float) -> str:
     if not arm["seed_deltas"]:
         return ""
     items = [{"label": f"seed {i}", "value": v, "tip": f"seed {i}\nΔ {v:+.5f}"} for i, v in enumerate(arm["seed_deltas"])]
-    return svg.dots_ci(items, thresholds=[(mean_floor, f"{mean_floor}")], label_w=70, title="seed deltas", row=16)
+    return svg.dots_ci(items, thresholds=[(mean_floor, f"{mean_floor}")], label_w=110, title="seed deltas", row=20)
 
 
 # --------------------------------------------------------------------------- pages
@@ -589,23 +590,27 @@ def _experiment_body(m, e, r, mean_floor, source_floor) -> str:
         b.append(f'<h2>Decision rule</h2><div class="panel">{md_block(e["rule_text"][:4000], e["registration"])}'
                  f'<div class="small">{src_cite(e["registration"], e.get("rule_line") or e.get("line"))}</div></div>')
     if r:
+        adopted = r.get("adopted")
         b.append(f'<h2>Recorded outcome</h2><p class="small">Source {src_cite(r["path"])}'
-                 + (f' · adopted: <strong>{esc(r.get("adopted"))}</strong>' if "adopted" in r else "") + '</p>')
+                 + (f' · adopted: <strong>{esc(adopted if adopted is not None else "none")}</strong>'
+                    + (f' (from {src_cite(r["adopted_from"])})' if r.get("adopted_from") else "") if "adopted" in r else "") + '</p>')
+        if e["id"] == "E29":
+            b.append(f'<div class="panel">{chart_v40_hdr(m)}</div><div class="panel">{chart_borda(m)}</div>')
         b.append(f'<div class="panel">{arm_chart(r["arms"], mean_floor, source_floor)}</div>')
         for a in r["arms"]:
             facts = [("signed Δ", f'{a["signed"]:+.6f}' if a["signed"] is not None else "—"),
                      ("SE", f'{a["se"]:.6f}' if a["se"] is not None else "—"),
                      ("W2", f'{a["w2"]:+.6f} ± {a["w2_se"]:.6f}' if a["w2"] is not None and a["w2_se"] is not None else "—"),
-                     ("as good", str(a.get("as_good"))), ("passes", str(a.get("passes")))]
+                     ("as good", "—" if a.get("as_good") is None else str(a["as_good"])),
+                     ("passes", "—" if a.get("passes") is None else str(a["passes"]))]
             if a.get("verdict"):
                 facts.append(("verdict", f'{a["verdict"]} — {a["reason"]}'))
             b.append(f'<div class="panel"><h3>{esc(a["arm"])}</h3>'
                      + (f'<p class="mono small">{esc(a["spec"])}</p>' if a.get("spec") else "")
                      + '<dl class="kv">' + "".join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in facts) + '</dl>'
-                     + ('<div class="two">' if a["seed_deltas"] else "<div>")
-                     + f'<div><h3>Per source</h3>{source_chart(a, source_floor)}</div>'
-                     + (f'<div><h3>Seed deltas</h3>{seed_chart(a, mean_floor)}</div>' if a["seed_deltas"] else "")
-                     + '</div></div>')
+                     + f'<h3>Per source</h3>{source_chart(a, source_floor)}'
+                     + (f'<h3>Seed deltas</h3>{seed_chart(a, mean_floor)}' if a["seed_deltas"] else "")
+                     + '</div>')
     return "\n".join(b)
 
 

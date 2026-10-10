@@ -27,6 +27,7 @@ RESULTS = {
     "E28": ("benchmarks/e28_result_summary_2026-10-07.json", "e28-decision-v1"),
     "E30": ("benchmarks/e30_result_summary_2026-10-07.json", "e30-result-summary-v1"),
     "V40": ("benchmarks/v40_result_summary_2026-10-09.json", None),
+    "V40HDR": ("benchmarks/v40_hdr_result_summary_2026-10-09.json", "v40-hdr-result-summary-v1"),
 }
 V40_STUDY = {"e29": "E29", "e31": "E31", "e32": "E32"}
 
@@ -110,6 +111,12 @@ def results(ctx) -> dict:
                            reason=a.get("reason"), seed_deltas=sg.get("seed_deltas"),
                            extra={"guards": rd.get("guards"), "adopt": rd.get("adopt")}, path=rel)
                 out.setdefault(exp, {"path": rel, "arms": [], "adopted": None, "guard_rules": d["guard_rules"]})["arms"].append(arm)
+        elif key == "V40HDR":
+            if d.get("study") not in (None, "e29") and "e29" not in str(d.get("study")):
+                raise SourceShapeError(f"{rel}: expected the E29 HDR study, got {d.get('study')!r}")
+            out.setdefault("E29", {"path": rel, "arms": [], "adopted": None})
+            out["E29"]["adopted"] = d.get("adopt")
+            out["E29"]["adopted_from"] = rel
         ctx.count(rel, len(arms) or len(d.get("arms", {})))
     return out
 
