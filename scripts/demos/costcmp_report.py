@@ -10,7 +10,7 @@ from speedq_report_support import verify_speedq_batches
 
 
 def report(args):
-    if getattr(args, 'scaling', False):
+    if getattr(args, 'scaling', False) or getattr(args, 'budget_grid', False):
         from costcmp_scaling_report import report as scaling_report
         return scaling_report(args)
     from speed_matrix_report import least_squares

@@ -64,3 +64,6 @@ rev5perf5-inventory root:
 
 rev5perf5-select root mib:
     python3 scripts/demos/rev5perf5_candidate.py select --root "{{root}}" --mib {{mib}}
+
+rev5perf5-legacy-report raw root:
+    PYTHONPATH=scripts/demos python3 -c 'from pathlib import Path; from types import SimpleNamespace; import costcmp_scaling_report; costcmp_scaling_report.report(SimpleNamespace(raw_dir=Path("{{raw}}"),out_json=Path("{{root}}/provenance/legacy-scaling-replay.json"),out_md=Path("{{root}}/provenance/legacy-scaling-replay.md"),budget_grid=False))'

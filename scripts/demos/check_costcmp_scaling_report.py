@@ -1,4 +1,4 @@
-"""Exercise report refusal against complete, immutable REV5PERF4 evidence."""
+"""Exercise report refusal against complete, immutable COSTCMP evidence."""
 import argparse
 import json
 from pathlib import Path
@@ -13,24 +13,26 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--raw-dir', type=Path, required=True)
     ap.add_argument('--dest', type=Path, required=True)
+    ap.add_argument('--budget-grid', action='store_true')
     args = ap.parse_args()
     args.dest.mkdir(parents=True, exist_ok=False)
-    first = args.raw_dir / 'scaling/timing/v4x-t1-1024x1024'
+    grid = 'budget' if args.budget_grid else 'scaling'
+    first = args.raw_dir / (grid+'/timing/'+('v4x-t8-1024x1024' if args.budget_grid else 'v4x-t1-1024x1024'))
     reads = Path.read_text
     controls = [
         ('before_binary_pin', first / 'header.json',
          lambda value: value['worker_binary_sha256'].__setitem__('by_v2fy_r5_before', '0'*64)),
         ('shared_round_alignment', first / 'COMPLETE.json',
          lambda value: value['retained_indices'].reverse()),
-        ('complete_requested_grid', args.raw_dir / 'scaling/parity/PREFLIGHT_PASS.json',
+        ('complete_requested_grid', args.raw_dir / grid / 'parity/PREFLIGHT_PASS.json',
          lambda value: value['records'].pop()),
-        ('measured_rss_log', args.raw_dir / 'scaling/rss/v4x-t1-1024x1024-by_v2fy_r5.log', None),
+        ('measured_rss_log', args.raw_dir / (grid+'/rss/'+('v4x-t8-1024x1024-by_v2fy_r5_b64.log' if args.budget_grid else 'v4x-t1-1024x1024-by_v2fy_r5.log')), None),
         ('exact_statistics_replay', None, None),
     ]
     refused = []
     for label, target, mutate in controls:
         out = SimpleNamespace(raw_dir=args.raw_dir, out_json=args.dest / (label+'.json'),
-                              out_md=args.dest / (label+'.md'))
+                              out_md=args.dest / (label+'.md'), budget_grid=args.budget_grid)
         def altered(path, *argv, **kwargs):
             text = reads(path, *argv, **kwargs)
             if path == target:
