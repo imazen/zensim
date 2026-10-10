@@ -13910,7 +13910,8 @@ pub(crate) fn compute_folded_with_ref_retained(
             mean_offset: Some(&mut mo),
             retention,
             ref_planes: Some(&precomputed.scales),
-            ..Default::default()
+            #[cfg(feature = "training")]
+            dvifm: None,
         },
     );
     (res.into_features(), mo.finish())

@@ -651,7 +651,7 @@ impl<'a> BakeScorer<'a> {
     // use the pre-calibration objective only for a single, undisposed bake
     // whose entire served gradient is zero strictly beneath that floor.
     // A composed/clamped score is a separate contract; do not reinterpret it.
-    #[cfg(feature = "feature-regime-v2")]
+    #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
     fn prepared_steering_gradient(
         &mut self,
         features: &[f64],
@@ -1671,8 +1671,10 @@ fn check_deadband(t: f64) -> Result<(), ZensimError> {
 
 #[cfg(test)]
 mod revision_contract_tests {
+    #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
+    use super::Arc;
     #[cfg(feature = "feature-regime-v2")]
-    use super::{Arc, BakeScorer};
+    use super::BakeScorer;
     use crate::feature_defs::FormulaRevision;
     use crate::ssim_form::SsimLumaForm;
     // Everything that scores PIXELS through a bake needs `feature-regime-v2`:
@@ -3456,7 +3458,7 @@ mod revision_contract_tests {
     }
 
     #[test]
-    #[cfg(feature = "feature-regime-v2")]
+    #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
     fn prepared_floor_recovery_preserves_serving_and_public_gradient() {
         if !run_at_revision(
             "5",
@@ -3570,7 +3572,7 @@ mod revision_contract_tests {
     }
 
     #[test]
-    #[cfg(feature = "feature-regime-v2")]
+    #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
     fn rev5_replay_defaults_without_environment_override() {
         let path = "metric::bake::revision_contract_tests::rev5_replay_defaults_without_environment_override";
         if std::env::var("STEERFIX_DEFAULT_CHILD").is_err() {
