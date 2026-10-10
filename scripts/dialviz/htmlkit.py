@@ -10,6 +10,22 @@ import re
 
 GITHUB_BLOB = "https://github.com/imazen/zensim/blob/main/"
 
+# Set by the build (gitref.Linker): maps a cited path and line to a GitHub permalink.
+_LINKER = None
+
+
+def set_linker(linker) -> None:
+    global _LINKER
+    _LINKER = linker
+
+
+def blob_url(path: str, line: int | None = None) -> str:
+    if _LINKER is not None:
+        return _LINKER(path, line)
+    if path.startswith("zenanalyze:"):
+        return "https://github.com/imazen/zenanalyze/blob/main/" + path.split(":", 1)[1] + (f"#L{line}" if line else "")
+    return GITHUB_BLOB + path + (f"#L{line}" if line else "")
+
 NAV = [
     ("index.html", "Overview"),
     ("properties.html", "Wanted properties"),
@@ -39,7 +55,8 @@ def repo_link(target: str, src_path: str | None) -> str:
         return target
     if src_path is None:
         return target
-    base = src_path.rsplit("/", 1)[0] if "/" in src_path else ""
+    sp = src_path.split(":", 1)[1] if src_path.startswith("zenanalyze:") else src_path
+    base = sp.rsplit("/", 1)[0] if "/" in sp else ""
     parts = (base + "/" + target).split("/") if base else target.split("/")
     out: list[str] = []
     for p in parts:
@@ -50,7 +67,8 @@ def repo_link(target: str, src_path: str | None) -> str:
                 out.pop()
             continue
         out.append(p)
-    return GITHUB_BLOB + "/".join(out)
+    prefix = "zenanalyze:" if src_path.startswith("zenanalyze:") else ""
+    return blob_url(prefix + "/".join(out))
 
 
 def md_inline(text: str, src_path: str | None = None) -> str:
@@ -121,9 +139,8 @@ def chip(state: str, label: str | None = None, tip: str | None = None) -> str:
 
 
 def src_cite(path: str, line: int | None = None, label: str | None = None) -> str:
-    frag = f"#L{line}" if line else ""
     shown = label or (f"{path}:{line}" if line else path)
-    return f'<a class="mono small" href="{esc(GITHUB_BLOB + path + frag)}">{esc(shown)}</a>'
+    return f'<a class="mono small" href="{esc(blob_url(path, line))}">{esc(shown)}</a>'
 
 
 def table(headers, rows, *, tid: str | None = None, sortable: bool = True, numeric_cols=(), cls: str = "") -> str:

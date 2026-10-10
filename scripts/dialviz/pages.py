@@ -4,8 +4,8 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from . import svg
-from .htmlkit import chip, esc, filterbar, md_block, md_inline, page, src_cite, table
+from . import svg, zenanalyze_src
+from .htmlkit import blob_url, chip, esc, filterbar, md_block, md_inline, page, src_cite, table
 
 GATE_STATE_ORDER = ["done", "ready", "blocked", "fail", "pass", "na"]
 
@@ -630,7 +630,7 @@ def page_splits(m) -> str:
          'the document\'s own registry table and ledger headings.</p>',
          _quote(m["evaluation"]["split_clarification"]),
          '<h2>Policy sections</h2><div class="toc">'
-         + "".join(f'<a href="{esc("https://github.com/imazen/zensim/blob/main/" + path + "#L" + str(p["line"]))}">'
+         + "".join(f'<a href="{esc(blob_url(path, p["line"]))}">'
                    f'{"&nbsp;&nbsp;" * (p["level"] - 2)}{md_inline(p["title"])}</a>' for p in sp["policy"]) + '</div>',
          f'<h2 id="registry">Per-dataset registry ({len(sp["datasets"])} datasets)</h2>',
          f'<p class="small">{src_cite(path, sp["registry_line"])}. Tier: T0 protected holdout, T1 integrity guard, T2 training, '
@@ -647,7 +647,7 @@ def page_splits(m) -> str:
          filterbar("ledger", "Filter ledger", [(1, "Kind", sorted({l["kind"] for l in sp["ledger"]}))]),
          table(["Date", "Kind", "Entry"],
                [[esc(l["date"]), esc(l["kind"]),
-                 f'<a href="{esc("https://github.com/imazen/zensim/blob/main/" + path + "#L" + str(l["line"]))}">{md_inline(l["title"])}</a>']
+                 f'<a href="{esc(blob_url(path, l["line"]))}">{md_inline(l["title"])}</a>']
                 for l in sp["ledger"]], tid="ledger")]
     return _render(m, title="Data roles", current="splits.html", body="\n".join(b))
 
@@ -778,7 +778,7 @@ def page_zenanalyze(m) -> str:
         rows.append([(str(f["id"]), f["id"]), f'<span class="mono">{esc(f["name"])}</span>', esc(f["ty"]),
                      esc(", ".join(t.replace("_FEATURES", "").lower() for t in f.get("tiers", []))),
                      esc("; ".join(flags)), f'<span class="mono small">{esc((f["qualified"] or "").split("@")[-1])}</span>',
-                     f'<span class="small">{md_inline(_short(f["doc"], 200))}</span>', src_cite("zenanalyze/src/feature.rs", f["line"], str(f["line"]))])
+                     f'<span class="small">{md_inline(_short(f["doc"], 200))}</span>', src_cite(zenanalyze_src.FEATURE_RS, f["line"], str(f["line"]))])
     on = {f["id"] for f in feats}
     tips = {f["id"]: f'#{f["id"]} {f["name"]}' for f in feats}
     for r in za["retired_ids"]:
@@ -812,7 +812,7 @@ def page_zenanalyze(m) -> str:
          f'<div class="stat"><div class="v">{sum(1 for f in feats if f["deprecated"])}</div><div class="l">deprecated</div></div>'
          f'<div class="stat"><div class="v">{len(za["retired_ids"])}</div><div class="l">retired IDs reserved</div></div></div>',
          f'<h2>ID space 0–{maxid - 1}</h2><p class="small">Highlighted: assigned IDs. Hover for names; retired IDs are listed in '
-         f'<code>RESERVED_RETIRED_IDS</code> ({src_cite("zenanalyze/src/feature.rs", za["retired_line"])}).</p>',
+         f'<code>RESERVED_RETIRED_IDS</code> ({src_cite(zenanalyze_src.FEATURE_RS, za["retired_line"])}).</p>',
          svg.id_layout(on, maxid, cols=32, title="zenanalyze ids", tips=tips),
          f'<h2 id="drift">Which pickers pin which features, and drift</h2>'
          f'<p>A picker records the features it was trained on. <strong>Drift</strong> means a pinned <code>name@hex8</code> no longer '

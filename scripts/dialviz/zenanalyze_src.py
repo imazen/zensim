@@ -165,24 +165,21 @@ def _drift(pins: list[str], cat: dict) -> list[dict]:
 
 
 def pickers(ctx, cat: dict) -> list[dict]:
-    za = ctx.zenanalyze
     out = []
-    for p in sorted((za / "zenpicker/benchmarks").glob("*.bin")):
-        rel = "zenanalyze:" + str(p.relative_to(za))
-        data = p.read_bytes()
-        ctx.read_log.setdefault(rel, {"path": rel, "sha256": hashlib.sha256(data).hexdigest(),
-                                      "readers": ["zenanalyze_pickers"], "entities": 0})
+    for rel in ctx.glob("zenanalyze:zenpicker/benchmarks/*.bin"):
+        stem = rel.rsplit("/", 1)[1].rsplit(".", 1)[0]
+        data = ctx.bytes(rel, "zenanalyze_pickers")
         try:
             cols = _znpr_utf8(data, "zentrain.feature_columns", rel).split("\n")
         except SourceShapeError as e:
-            out.append({"name": p.stem, "path": rel, "kind": "ZNPR router", "pins": [], "error": str(e)})
+            out.append({"name": stem, "path": rel, "kind": "ZNPR router", "pins": [], "error": str(e)})
             continue
         cols = [c for c in cols if c]
         ctx.count(rel, len(cols))
-        out.append({"name": p.stem, "path": rel, "kind": "ZNPR router (shipped via include_bytes!)",
+        out.append({"name": stem, "path": rel, "kind": "ZNPR router (shipped via include_bytes!)",
                     "pins": _drift(cols, cat)})
-    for p in sorted((za / "benchmarks").glob("metapicker_v1_feature_slots_*.tsv")):
-        rel = "zenanalyze:" + str(p.relative_to(za))
+    for rel in ctx.glob("zenanalyze:benchmarks/metapicker_v1_feature_slots_*.tsv"):
+        stem = rel.rsplit("/", 1)[1].rsplit(".", 1)[0]
         pins = []
         for line in ctx.text(rel, "zenanalyze_pickers").splitlines():
             if not line or line.startswith("#"):
@@ -195,22 +192,20 @@ def pickers(ctx, cat: dict) -> list[dict]:
             if parts[2] and parts[2] != "-":
                 pins.append(parts[2])
         ctx.count(rel, len(pins))
-        out.append({"name": p.stem, "path": rel, "kind": "metapicker slot map (bake off-git)", "pins": _drift(pins, cat)})
-    for p in sorted((za / "benchmarks").glob("*.manifest.json")):
-        rel = "zenanalyze:" + str(p.relative_to(za))
+        out.append({"name": stem, "path": rel, "kind": "metapicker slot map (bake off-git)", "pins": _drift(pins, cat)})
+    for rel in ctx.glob("zenanalyze:benchmarks/*.manifest.json"):
         d = ctx.json(rel, "zenanalyze_pickers")
         cols = d.get("feat_cols") or d.get("feature_columns")
         if not isinstance(cols, list):
             continue
         ctx.count(rel, len(cols))
-        out.append({"name": p.name.replace(".manifest.json", ""), "path": rel, "kind": "legacy picker manifest",
+        out.append({"name": rel.rsplit("/", 1)[1].replace(".manifest.json", ""), "path": rel, "kind": "legacy picker manifest",
                     "pins": _drift(cols, cat)})
     literal: dict[str, list[str]] = {}
     parsed: dict[str, tuple[str, ast.Module]] = {}
-    for p in sorted((za / "zentrain/examples").glob("*.py")):
-        rel = "zenanalyze:" + str(p.relative_to(za))
+    for rel in ctx.glob("zenanalyze:zentrain/examples/*.py"):
         try:
-            parsed[p.stem] = (rel, ast.parse(ctx.text(rel, "zenanalyze_pickers")))
+            parsed[rel.rsplit("/", 1)[1][:-3]] = (rel, ast.parse(ctx.text(rel, "zenanalyze_pickers")))
         except SyntaxError:
             continue
 
@@ -257,13 +252,12 @@ def pickers(ctx, cat: dict) -> list[dict]:
         if cols is not None:
             ctx.count(rel, len(cols))
         out.append({"name": stem, "path": rel, "kind": kind, "pins": _drift(cols, cat) if cols else [], "line": node.lineno})
-    for p in sorted((za / "zentrain/testdata").glob("*.manifest.json")):
-        rel = "zenanalyze:" + str(p.relative_to(za))
+    for rel in ctx.glob("zenanalyze:zentrain/testdata/*.manifest.json"):
         d = ctx.json(rel, "zenanalyze_pickers")
         cols = d.get("feat_cols") or d.get("feature_columns")
         if isinstance(cols, list):
             ctx.count(rel, len(cols))
-            out.append({"name": p.name.replace(".manifest.json", ""), "path": rel, "kind": "zentrain test manifest",
+            out.append({"name": rel.rsplit("/", 1)[1].replace(".manifest.json", ""), "path": rel, "kind": "zentrain test manifest",
                         "pins": _drift(cols, cat)})
     if not any(o["kind"].startswith("ZNPR") and o["pins"] for o in out):
         raise SourceShapeError("zenpicker routers: no ZNPR router with feature_columns found")

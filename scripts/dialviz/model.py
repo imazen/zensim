@@ -185,7 +185,9 @@ def dirty(repo: Path) -> bool | None:
 
 def build(ctx, integrity_path: Path | None = None) -> dict:
     m: dict = {"built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "commit": git_head(ctx.repo),
-               "zenanalyze_commit": git_head(ctx.zenanalyze), "dirty": dirty(ctx.repo)}
+               "zenanalyze_commit": ctx.za_tree.commit if ctx.za_tree else git_head(ctx.zenanalyze),
+               "zenanalyze_rev": ctx.zenanalyze_rev, "zenanalyze_date": ctx.za_tree.date if ctx.za_tree else None,
+               "zenanalyze_checkout": git_head(ctx.zenanalyze), "dirty": dirty(ctx.repo)}
     m["gates"] = sources.release_gates(ctx)
     m["scorecard"] = sources.scorecard(ctx)
     m["bugs"] = sources.known_bugs(ctx)

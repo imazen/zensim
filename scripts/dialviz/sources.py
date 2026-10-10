@@ -17,28 +17,55 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 class Ctx:
-    """Tracks every file read (path, sha256, reader, entity count) for the Sources page."""
+    """Tracks every file read (path, sha256, git blob id, reader, entity count) for the Sources page.
 
-    def __init__(self, repo: Path = REPO, zenanalyze: Path | None = None):
+    zensim paths are read from the checkout being built. `zenanalyze:` paths are
+    read from a git commit of the sibling repository (`zenanalyze_rev`, default
+    `origin/main`), never from whatever its working copy holds; pass
+    `zenanalyze_rev="worktree"` to read the working copy instead.
+    """
+
+    def __init__(self, repo: Path = REPO, zenanalyze: Path | None = None, zenanalyze_rev: str = "origin/main"):
         self.repo = repo
         self.zenanalyze = zenanalyze or (repo.parent / "zenanalyze")
+        self.zenanalyze_rev = zenanalyze_rev
+        self._za_tree = None
         self.read_log: dict[str, dict] = {}
+
+    @property
+    def za_tree(self):
+        """The zenanalyze commit being read (None when reading the working copy)."""
+        if self.zenanalyze_rev == "worktree":
+            return None
+        if self._za_tree is None:
+            from .gitref import GitTree, git_dir_of
+            self._za_tree = GitTree(git_dir_of(self.zenanalyze), self.zenanalyze_rev)
+        return self._za_tree
 
     def _abs(self, rel: str) -> Path:
         if rel.startswith("zenanalyze:"):
             return self.zenanalyze / rel.split(":", 1)[1]
         return self.repo / rel
 
-    def text(self, rel: str, reader: str) -> str:
+    def _raw(self, rel: str) -> bytes:
+        if rel.startswith("zenanalyze:") and self.za_tree is not None:
+            return self.za_tree.read(rel.split(":", 1)[1])
         p = self._abs(rel)
         if not p.is_file():
             raise SourceShapeError(f"missing source file {rel}")
-        data = p.read_bytes()
+        return p.read_bytes()
+
+    def bytes(self, rel: str, reader: str) -> bytes:
+        from .gitref import blob_id
+        data = self._raw(rel)
         ent = self.read_log.setdefault(rel, {"path": rel, "sha256": hashlib.sha256(data).hexdigest(),
-                                             "readers": [], "entities": 0})
+                                             "blob": blob_id(data), "readers": [], "entities": 0})
         if reader not in ent["readers"]:
             ent["readers"].append(reader)
-        return data.decode("utf-8")
+        return data
+
+    def text(self, rel: str, reader: str) -> str:
+        return self.bytes(rel, reader).decode("utf-8")
 
     def json(self, rel: str, reader: str):
         return json.loads(self.text(rel, reader))
@@ -47,9 +74,16 @@ class Ctx:
         self.read_log[rel]["entities"] += n
 
     def exists(self, rel: str) -> bool:
+        if rel.startswith("zenanalyze:") and self.za_tree is not None:
+            return self.za_tree.exists(rel.split(":", 1)[1])
         return self._abs(rel).exists()
 
     def glob(self, pattern: str) -> list[str]:
+        if pattern.startswith("zenanalyze:"):
+            pat = pattern.split(":", 1)[1]
+            if self.za_tree is not None:
+                return ["zenanalyze:" + p for p in self.za_tree.glob(pat)]
+            return sorted("zenanalyze:" + str(p.relative_to(self.zenanalyze)) for p in self.zenanalyze.glob(pat))
         return sorted(str(p.relative_to(self.repo)) for p in self.repo.glob(pattern))
 
 

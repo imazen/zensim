@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dialviz import model, pages  # noqa: E402
+from dialviz import gitref, htmlkit, model, pages  # noqa: E402
 from dialviz.mdparse import SourceShapeError  # noqa: E402
 from dialviz.sources import REPO, Ctx  # noqa: E402
 
@@ -129,14 +129,25 @@ def main(argv=None) -> int:
     ap.add_argument("--zenanalyze", type=Path, default=REPO.parent / "zenanalyze", help="zenanalyze checkout (read only)")
     ap.add_argument("--integrity-gates", type=Path, default=None,
                     help="optional ZCTH TRAIN-refit GATES.json (lives outside the repository)")
+    ap.add_argument("--zenanalyze-rev", default="origin/main",
+                    help="zenanalyze commit to read (default origin/main; 'worktree' reads its working copy)")
     args = ap.parse_args(argv)
-    ctx = Ctx(REPO, args.zenanalyze)
+    ctx = Ctx(REPO, args.zenanalyze, args.zenanalyze_rev)
     try:
         m = model.build(ctx, args.integrity_gates)
     except SourceShapeError as e:
         print(f"dialviz: source shape changed: {e}", file=sys.stderr)
         return 2
     cov = coverage(m)
+    try:
+        gd = gitref.git_dir_of(REPO)
+        base = gitref.pushed_base(gd, m["commit"]) if m.get("commit") else None
+        base_tree = gitref.GitTree(gd, base) if base else None
+    except SourceShapeError:
+        base_tree = None
+    m["zensim_link_base"] = base_tree.commit if base_tree else None
+    blobs = {e["path"]: e.get("blob") for e in m["sources"] if not e["path"].startswith("zenanalyze:")}
+    htmlkit.set_linker(gitref.Linker(base_tree, blobs, ctx.za_tree))
     files: dict[str, str] = {"index.html": pages.page_index(m), "evaluation.html": pages.page_evaluation(m),
                              "splits.html": pages.page_splits(m), "zenanalyze.html": pages.page_zenanalyze(m)}
     for f in (pages.page_properties, pages.page_gates, pages.page_experiments, pages.page_features):
