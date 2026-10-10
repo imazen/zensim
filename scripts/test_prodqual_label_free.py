@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from prodqual_label_free import nearid_summary
+from prodqual_label_free import nearid_candidate, nearid_summary
 
 
 def fixture(root):
@@ -63,6 +63,19 @@ class NearIdentityReport(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 nearid_summary(root)
             self.assertFalse((root / "SUMMARY.json").exists())
+
+    def test_candidate_gates_apply_the_registered_bars(self):
+        with tempfile.TemporaryDirectory(dir=self.scratch) as tmp:
+            root = Path(tmp)
+            fixture(root)
+            (root / "candidate-c.jsonl").write_text((root / "seed0.jsonl").read_text())
+            result = nearid_candidate(root, "c")
+            # Fixture one-pixel rungs score 97.0 (< 99): N1 fails on all 24; highest 99.5 passes N2;
+            # the fraction ladder reverses on every reference, so 120 of 144 ladders are nonincreasing.
+            self.assertEqual((result["N1"]["pass"], len(result["N1"]["failing"])), (False, 24))
+            self.assertTrue(result["N2"]["pass"])
+            self.assertEqual((result["N3"]["monotone_ladders"], result["N3"]["total_ladders"]), (120, 144))
+            self.assertFalse(result["N3"]["pass"])
 
 
 if __name__ == "__main__":

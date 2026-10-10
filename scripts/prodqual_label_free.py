@@ -317,6 +317,46 @@ def nearid_register(root):
     print("Frozen 24 TRAIN references; 16 recorded R2 URLs fetched and SHA256-verified; labels/features unread")
 
 
+def nearid_reference_report(model, reference, values):
+    """One model/reference NEARID panel: highest nonidentical score, one-pixel rungs and the six ladders."""
+    assert len(values) == 27
+    assert len({(v["ladder"], v["rung"]) for v in values}) == 27
+    anchor = next(v for v in values if v["ladder"] == "identity")
+    assert anchor["identical"] and anchor["served_score"] == 100
+    changed = [v for v in values if not v["identical"]]
+    assert changed
+    highest = max(changed, key=lambda v: v["served_score"])
+    ladders = {}
+    for ladder in ("one_pixel_1", "one_pixel_-1", "fraction", "noise", "zenjpeg444", "gaussian"):
+        sequence = [anchor] + [v for v in values if v["ladder"] == ladder]
+        reversals = [{"from": a["rung"], "to": b["rung"],
+                      "increase": b["served_score"] - a["served_score"]}
+                     for a, b in zip(sequence, sequence[1:])
+                     if b["served_score"] > a["served_score"]]
+        crossings = {}
+        for threshold in (99, 98, 95, 90):
+            below = [v for v in sequence if v["served_score"] < threshold]
+            transitions = [{"from": a["rung"], "to": b["rung"],
+                            "direction": "below" if b["served_score"] < threshold else "above"}
+                           for a, b in zip(sequence, sequence[1:])
+                           if (a["served_score"] < threshold) != (b["served_score"] < threshold)]
+            crossings[str(threshold)] = {
+                "first_below_rung": below[0]["rung"] if below else None,
+                "all_transitions": transitions}
+        ladders[ladder] = {"rungs": [v["rung"] for v in sequence],
+                           "scores": [v["served_score"] for v in sequence],
+                           "changed_pixels": [v["changed_pixels"] for v in sequence],
+                           "nonincreasing": not reversals, "reversals": reversals,
+                           "crossings": crossings}
+    return {"model": model, "reference": reference, "class": anchor["class"],
+            "highest_nonidentical_score": highest["served_score"],
+            "gap_to_100": 100 - highest["served_score"],
+            "highest_rung": {k: highest[k] for k in ("ladder", "rung", "changed_pixels")},
+            "one_pixel_scores": [v["served_score"] for v in values
+                                 if v["ladder"].startswith("one_pixel")],
+            "ladders": ladders}
+
+
 def nearid_summary(root):
     """Report observed discrete crossings and reversals; never interpolate."""
     import csv
@@ -331,44 +371,8 @@ def nearid_summary(root):
         assert math.isfinite(row["served_score"])
         groups[(row["model"], row["reference"])].append(row)
     assert len(groups) == 72
-    reports = []
-    for (model, reference), values in groups.items():
-        assert len(values) == 27
-        assert len({(v["ladder"], v["rung"]) for v in values}) == 27
-        anchor = next(v for v in values if v["ladder"] == "identity")
-        assert anchor["identical"] and anchor["served_score"] == 100
-        changed = [v for v in values if not v["identical"]]
-        assert changed
-        highest = max(changed, key=lambda v: v["served_score"])
-        ladders = {}
-        for ladder in ("one_pixel_1", "one_pixel_-1", "fraction", "noise", "zenjpeg444", "gaussian"):
-            sequence = [anchor] + [v for v in values if v["ladder"] == ladder]
-            reversals = [{"from": a["rung"], "to": b["rung"],
-                          "increase": b["served_score"] - a["served_score"]}
-                         for a, b in zip(sequence, sequence[1:])
-                         if b["served_score"] > a["served_score"]]
-            crossings = {}
-            for threshold in (99, 98, 95, 90):
-                below = [v for v in sequence if v["served_score"] < threshold]
-                transitions = [{"from": a["rung"], "to": b["rung"],
-                                "direction": "below" if b["served_score"] < threshold else "above"}
-                               for a, b in zip(sequence, sequence[1:])
-                               if (a["served_score"] < threshold) != (b["served_score"] < threshold)]
-                crossings[str(threshold)] = {
-                    "first_below_rung": below[0]["rung"] if below else None,
-                    "all_transitions": transitions}
-            ladders[ladder] = {"rungs": [v["rung"] for v in sequence],
-                               "scores": [v["served_score"] for v in sequence],
-                               "changed_pixels": [v["changed_pixels"] for v in sequence],
-                               "nonincreasing": not reversals, "reversals": reversals,
-                               "crossings": crossings}
-        reports.append({"model": model, "reference": reference, "class": anchor["class"],
-                        "highest_nonidentical_score": highest["served_score"],
-                        "gap_to_100": 100 - highest["served_score"],
-                        "highest_rung": {k: highest[k] for k in ("ladder", "rung", "changed_pixels")},
-                        "one_pixel_scores": [v["served_score"] for v in values
-                                             if v["ladder"].startswith("one_pixel")],
-                        "ladders": ladders})
+    reports = [nearid_reference_report(model, reference, values)
+               for (model, reference), values in groups.items()]
     aggregates = {}
     for model in ("seed0", "B", "A"):
         vals = [r for r in reports if r["model"] == model]
@@ -422,6 +426,35 @@ def nearid_summary(root):
     (root / "SUMMARY.md").write_text("\n".join(lines) + "\n")
     nearid_plot(root, rows)
     print(json.dumps({"aggregate": aggregates, "seed0_identity_diagnostics": diagnostics}, indent=2))
+
+
+def nearid_candidate(root, label):
+    """E33 section 9.2 N1-N3 for one candidate's NEARID rows, with every reversal and crossing retained."""
+    import math
+    from collections import defaultdict
+
+    rows = [json.loads(line) for line in (root / f"candidate-{label}.jsonl").read_text().splitlines()]
+    assert len(rows) == 24 * 27
+    groups = defaultdict(list)
+    for row in rows:
+        assert math.isfinite(row["served_score"])
+        groups[row["reference"]].append(row)
+    assert len(groups) == 24
+    reports = [nearid_reference_report(f"candidate-{label}", reference, values)
+               for reference, values in groups.items()]
+    n1 = [r["reference"] for r in reports if min(r["one_pixel_scores"]) < 99.0]
+    n2 = [r["reference"] for r in reports if r["highest_nonidentical_score"] < 99.0]
+    monotone = sum(v["nonincreasing"] for r in reports for v in r["ladders"].values())
+    return {"schema": "e33-nearid-gates-v1", "model": f"candidate-{label}", "rows": len(rows),
+            "N1": {"rule": "both one-pixel rungs >= 99.0 on all 24 references", "pass": not n1, "failing": n1,
+                   "one_pixel_score_range": [min(s for r in reports for s in r["one_pixel_scores"]),
+                                             max(s for r in reports for s in r["one_pixel_scores"])]},
+            "N2": {"rule": "highest nonidentical served score >= 99.0 on every reference", "pass": not n2,
+                   "failing": n2, "highest_nonidentical_range": [min(r["highest_nonidentical_score"] for r in reports),
+                                                                 max(r["highest_nonidentical_score"] for r in reports)]},
+            "N3": {"rule": "nonincreasing ladders >= 122 of 144", "pass": monotone >= 122,
+                   "monotone_ladders": monotone, "total_ladders": 6 * len(reports)},
+            "references": reports}
 
 
 def nearid_verify(root):
@@ -554,6 +587,14 @@ def main():
         return
     if len(sys.argv) == 3 and sys.argv[1] == "--nearid-register":
         nearid_register(Path(sys.argv[2]))
+        return
+    if len(sys.argv) == 4 and sys.argv[1] == "--nearid-candidate":
+        root = Path(sys.argv[2])
+        result = nearid_candidate(root, sys.argv[3])
+        with (root / f"candidate-{sys.argv[3]}.GATES.json").open("x") as f:
+            json.dump(result, f, indent=2)
+            f.write("\n")
+        print(json.dumps({k: v for k, v in result.items() if k != "references"}, indent=2))
         return
     if len(sys.argv) == 3 and sys.argv[1] == "--nearid-summary":
         nearid_summary(Path(sys.argv[2]))

@@ -117,11 +117,20 @@ pub(super) fn contact(args: &[String]) {
 }
 
 pub(super) fn run(args: &[String]) {
+    let name = &args[2];
+    // A registered candidate (E33 section 9.2) serves like seed0 at Rev5; its SHA is pinned by the caller.
+    let candidate = name.strip_prefix("candidate-").filter(|label| {
+        !label.is_empty()
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    });
     assert_eq!(
         args.len(),
-        4,
-        "--nearid PACKET.json OUTPUT_DIR seed0|B|A MODEL.bin"
+        if candidate.is_some() { 5 } else { 4 },
+        "--nearid PACKET.json OUTPUT_DIR seed0|B|A MODEL.bin, or candidate-<label> MODEL.bin SHA256"
     );
+    let dynamic = name == "seed0" || candidate.is_some();
     let packet: Packet = serde_json::from_slice(&fs::read(&args[0]).unwrap()).unwrap();
     assert_eq!(packet.sources.len(), 24);
     for class in ["photo", "screen", "line_art"] {
@@ -137,18 +146,17 @@ pub(super) fn run(args: &[String]) {
     assert!(packet.sources.iter().all(|s| s.role == "TRAIN"));
     let root = Path::new(&args[1]);
     fs::create_dir_all(root).unwrap();
-    let name = &args[2];
-    assert!(matches!(name.as_str(), "seed0" | "B" | "A"));
+    assert!(matches!(name.as_str(), "seed0" | "B" | "A") || candidate.is_some());
     assert_eq!(
         std::env::var("ZENSIM_FORMULA_REV").unwrap(),
-        if name == "seed0" { "5" } else { "1" }
+        if dynamic { "5" } else { "1" }
     );
     let bytes = fs::read(&args[3]).unwrap();
     let expected = match name.as_str() {
         "seed0" => "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
         "B" => "a96a5a66cd16282ded84580c37207b403334f1af069c924d9883346d23941276",
         "A" => "de0ddb3dc78b8b0a4fc99645f949acb73e7e08bec9ed4d86793605d882e9176a",
-        _ => unreachable!(),
+        _ => args[4].as_str(),
     };
     assert_eq!(sha(&bytes), expected, "frozen model bytes");
     let model = zenpredict::Model::from_bytes(&bytes).unwrap();
@@ -281,7 +289,7 @@ pub(super) fn run(args: &[String]) {
                 .filter(|(a, b)| a != b)
                 .count();
             let mut native_features = None;
-            let served = if name == "seed0" {
+            let served = if dynamic {
                 let result = scorer.compute(&source_view, &dest, None).unwrap();
                 native_features = Some(result.features().to_vec());
                 result.score()
@@ -295,7 +303,7 @@ pub(super) fn run(args: &[String]) {
                 "dist_pixels_sha256":sha(bytemuck::cast_slice(&distorted)),
                 "encoded_sha256":encoded_sha,"served_score":served,"served_bits":served.to_bits()});
             assert!(served.is_finite());
-            if name != "seed0" && index == 1 {
+            if !dynamic && index == 1 {
                 assert_eq!(
                     scorer
                         .compute(&source_view, &dest, None)
@@ -309,7 +317,7 @@ pub(super) fn run(args: &[String]) {
             if changed == 0 {
                 assert_eq!(served, 100.0);
             }
-            if name == "seed0" {
+            if dynamic {
                 let canonical = zensim::research::extract(&request, &source_view, &dest).unwrap();
                 let f = canonical.values();
                 let native = native_features.as_ref().unwrap();
