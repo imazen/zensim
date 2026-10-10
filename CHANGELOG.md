@@ -56,8 +56,8 @@
   unchanged: the E33 preflight matches the registered one 18/18, SPEEDQ strict parity is 384/384 +
   576/576, and A/C score bits match the gate binary in 128/128 comparisons. Diagnostic, v3 1T:
   about 90 µs less per call at 64² for every bake, including production. With zenpredict's f16
-  decode cache (zenanalyze, separate change), arm C costs the same as production. Record:
-  `E33C_RUNTIME`.
+  decode cache (zenanalyze, separate change, held: it slows the profile path's per-compare parse),
+  arm C costs the same as production. Record: `E33C_RUNTIME`.
 
 - Rev5 ordered strip jobs now obey a private byte budget, including retained
   queue allocations, and use the original route when fewer than three jobs
