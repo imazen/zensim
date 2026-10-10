@@ -63,6 +63,18 @@ def build(root):
     order = [c["sha256"] for c in cands]
     raw = {m: (len(rows) == 620 and all(r["candidate_score_bits"][order.index(shas[m]["sha256"])] == HUNDRED for r in rows))
            if shas[m]["sha256"] in order else None for m in MODELS}
+    # A model left out of the 620-row run (seed 0) was proved separately; that run panics at its first non-pin score.
+    failed_log = root / "identity-s0.failed-seed0.log"
+    seed0_proof = re.search(r"failed: (identity:\S+) .*?: (\S+) identity\n\s*left: (\d+)",
+                            failed_log.read_text()) if failed_log.exists() else None
+
+    def raw_detail(m):
+        if raw[m]:
+            return "620/620 exact"
+        if raw[m] is None and seed0_proof and seed0_proof.group(2) == shas[m]["path"]:
+            score = struct.unpack("<d", struct.pack("<Q", int(seed0_proof.group(3))))[0]
+            return f"ran separately and stopped at its first row ({seed0_proof.group(1)}): {score:.4f}, not exactly 100.0"
+        return "not exact" if raw[m] is False else "not run"
     served_lines = [line.split("\t") for line in (root / "served-identity.tsv").read_text().splitlines()]
     header, body = served_lines[0], served_lines[1:]
     col = {m: header.index(shas[m]["path"]) for m in MODELS}
@@ -97,7 +109,8 @@ def build(root):
                         f"{inspect[m]['admitted_tables']} tables") for m in MODELS})
     if native:
         seeds = {m: native["seeds"][i] for i, m in enumerate(MODELS)}
-        row("Rust surface: pixel/cache/feature parity, 28 synthetic pairs × 10 native dispatch permutations + WASM128",
+        row("Rust surface (model only; composed head and threshold not run): pixel/cache/feature parity, 28 synthetic "
+            "pairs × 10 native dispatch permutations + WASM128",
             "0 mismatches, finite, pixel identity exactly 100, no distortion above identity",
             {m: dict(state=ok(s["finite"] and s["pixel_cache_mismatches"] == 0 and s["consumed_feature_mismatches"] == 0
                               and s["cached_feature_mismatches"] == 0 and s["native_tier_row_mismatches"] == 0
@@ -126,9 +139,7 @@ def build(root):
                  detail=f"{st[m]['checks']['C5'][0]:.0f} of 38 outside the band") for m in MODELS})
     row("Identity, raw: exact 100.0 through the feature path on every dispatch tier (E33 proof)",
         "38 probes + 24 NEARID sources × 10 tiers = 620 rows, exact bits",
-        {m: dict(state="pass" if raw[m] else "fail" if raw[m] is False else "fail",
-                 detail="620/620 exact" if raw[m] else "not run: seed 0 fails C5 (raw identity 92.2-97.5)" if raw[m] is None
-                 else "not exact") for m in MODELS})
+        {m: dict(state="pass" if raw[m] else "fail", detail=raw_detail(m)) for m in MODELS})
     row("Identity, served: BakeScorer::compute on identical pixels", "62 sources (38 probes + 24 NEARID) serve 100",
         {m: dict(state=ok(pixel[m]), detail="62/62 at 100.000000000 (printed to 9 decimals)" if pixel[m] else "not 100")
          for m in MODELS})
@@ -136,7 +147,8 @@ def build(root):
         {m: dict(state=ok(nearid[m]["N1"]["pass"] and nearid[m]["N2"]["pass"] and nearid[m]["N3"]["pass"]),
                  detail=f"one-pixel min {nearid[m]['N1']['one_pixel_score_range'][0]:.3f}, ladders "
                         f"{nearid[m]['N3']['monotone_ladders']}/144") for m in MODELS})
-    row("G-STEER (135 cases)", "release qualification: all 135 pass (M2 ≥ .99, M3f ≥ .70)",
+    row("G-STEER (135-case STEERFIX packet)",
+        "all 135 pass (M2 ≥ .99, M3f ≥ .70), per the coordinator's QUAL-A brief; the release map's population is 143",
         {m: dict(state=ok(sum(r["pass"] for r in steer[m]) == 135),
                  detail=f"{sum(r['pass'] for r in steer[m])}/135; failing "
                         + ", ".join(f"{r['key']} (b{r['blocks'][0]['bounds'][2]})" for r in steer[m] if not r["pass"]))
@@ -147,7 +159,8 @@ def build(root):
         for cell, bar_ms, px in (("v4x-t1-1024x1024", 50, 1024 * 1024), ("v4x-t1-2048x2048", 200, 2048 * 2048)):
             c = rt["cells"][cell]
             d, fs, fm = c["zensim_D"]["p95_ms"], c["fast_ssim2"]["p95_ms"], c["fast_ssim2_main"]["p95_ms"]
-            row(f"Scalar performance {cell.split('-')[-1]} (uncached complete, one worker, p95)",
+            row(f"Scalar performance {cell.split('-')[-1]} (uncached complete, one worker, p95; v4x only, v3 and the "
+                "64²–4 MP size sweep not measured)",
                 f"≤ {bar_ms} ms, ≤ 1.25× frozen D, ≤ fast-ssim2",
                 {m: dict(state=ok(c[arm[m]]["p95_ms"] <= bar_ms and c[arm[m]]["p95_ms"] <= 1.25 * d
                                   and c[arm[m]]["p95_ms"] <= fs),

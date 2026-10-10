@@ -20,7 +20,7 @@
     "detail": "basic+peaks+v2@w1825/rev5_localwin#36c3f3af, epoch 119, 7 tables"
    }
   },
-  "Rust surface: pixel/cache/feature parity, 28 synthetic pairs \u00d7 10 native dispatch permutations + WASM128": {
+  "Rust surface (model only; composed head and threshold not run): pixel/cache/feature parity, 28 synthetic pairs \u00d7 10 native dispatch permutations + WASM128": {
    "bar": "0 mismatches, finite, pixel identity exactly 100, no distortion above identity",
    "a": {
     "state": "pass",
@@ -182,7 +182,7 @@
    },
    "seed0": {
     "state": "fail",
-    "detail": "not run: seed 0 fails C5 (raw identity 92.2-97.5)"
+    "detail": "ran separately and stopped at its first row (identity:00b13be94a4867dd_1022x818.png): 96.7466, not exactly 100.0"
    }
   },
   "Identity, served: BakeScorer::compute on identical pixels": {
@@ -215,8 +215,8 @@
     "detail": "one-pixel min 88.692, ladders 122/144"
    }
   },
-  "G-STEER (135 cases)": {
-   "bar": "release qualification: all 135 pass (M2 \u2265 .99, M3f \u2265 .70)",
+  "G-STEER (135-case STEERFIX packet)": {
+   "bar": "all 135 pass (M2 \u2265 .99, M3f \u2265 .70), per the coordinator's QUAL-A brief; the release map's population is 143",
    "a": {
     "state": "fail",
     "detail": "129/135; failing broad-10-b32 (b32), broad-10-b64 (b64), broad-76-b64 (b64), broad-136-b64 (b64), broad-220-b16 (b16), broad-157-b8 (b8)"
@@ -230,7 +230,7 @@
     "detail": "128/135; failing broad-206-b32 (b32), broad-206-b64 (b64), I01_10_05 (b8), I21_10_05 (b8), I41_10_05 (b8), I61_10_05 (b8), dog-256-20 (b32)"
    }
   },
-  "Scalar performance 1024x1024 (uncached complete, one worker, p95)": {
+  "Scalar performance 1024x1024 (uncached complete, one worker, p95; v4x only, v3 and the 64\u00b2\u20134 MP size sweep not measured)": {
    "bar": "\u2264 50 ms, \u2264 1.25\u00d7 frozen D, \u2264 fast-ssim2",
    "a": {
     "state": "pass",
@@ -275,7 +275,7 @@
     "detail": "score 23,176 KiB, score+map 196,832 KiB (192 B/pixel incl. the 64 MiB allowance)"
    }
   },
-  "Scalar performance 2048x2048 (uncached complete, one worker, p95)": {
+  "Scalar performance 2048x2048 (uncached complete, one worker, p95; v4x only, v3 and the 64\u00b2\u20134 MP size sweep not measured)": {
    "bar": "\u2264 200 ms, \u2264 1.25\u00d7 frozen D, \u2264 fast-ssim2",
    "a": {
     "state": "pass",
