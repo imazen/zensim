@@ -92,3 +92,49 @@ not by this argument.
 The frozen 64/128/256 MiB binaries measured for RSS predate the floor. Their 1-
 and 2-slot cells (64 MiB at 4096² and 8192×4096, 128 MiB at 8192×4096) show
 the queued route's memory, not the route the source takes now.
+
+## Measured verdict (floor grid, 2026-10-10)
+
+[The timing report](rev5perf5_scaling_2026-10-09.md) covers 15 cells × 6 arms.
+All 75 saved comparisons replay exactly. 480 of 506 rounds were retained by the
+first-32-clean rule, and the highest admitted load1 was 1.99.
+
+**The floor of 3 is confirmed by measurement.** The 128 MiB queue against the
+original route (paired, queue minus original):
+
+- **3, 4 and 5 slots:** the queue is faster in all 9 cells, by 27–49 ms (CI
+  bounds across 6144×4096, 4608×4096 and 4096² at 8/16/32 threads).
+- **8 and 16 slots:** faster in all 3 cells (1024²), by 4.6–7.2 ms.
+- **2 slots:** the queue is slower in all 3 cells (8192×4096), by 8.8–26.2 ms.
+
+So the original route wins only below three slots. That is exactly where
+`REV5_MIN_JOB_SLOTS = 3` sends it. The review's loaded-box diagnostic, which
+had 3 slots slower, does not reproduce under the quiet gate.
+
+**The 128 MiB default costs speed at large widths.** Measured against uncapped
+(16 slots), the paired 95% CI bounds in ms (candidate minus uncapped) are:
+
+| size | 128 MiB + floor 3 (shipped), 8 / 16 / 32 threads | 256 MiB, 8 / 16 / 32 threads |
+|---|---|---|
+| 4096² | 0.1 to 2.0 / 27.7 to 35.7 / 21.5 to 28.5 | -1.7 to 0.1 / 3.4 to 6.6 / 0.9 to 5.8 |
+| 4608×4096 | 9.1 to 11.3 / 44.3 to 49.8 / 29.5 to 39.7 | -0.6 to 1.8 / 11.0 to 17.2 / 5.0 to 12.1 |
+| 6144×4096 | 27.7 to 31.1 / 72.1 to 76.6 / 65.2 to 72.6 | 8.9 to 11.2 / 30.6 to 38.5 / 25.5 to 34.3 |
+| 8192×4096 | 87.7 to 91.8 / 130.3 to 136.7 / 135.3 to 139.0 | 26.2 to 28.4 / 52.1 to 62.3 / 59.1 to 66.1 |
+
+At 16–32 threads on inputs at least 4096 wide, that is 15.5–46.0 % of the
+uncapped time for the shipped 128 MiB + floor 3, against 0.7–21.9 % at 256 MiB
+(CI bounds relative to the uncapped median; computed from `report.json`). The 256 MiB build has no floor, but at these widths it holds
+5–10 slots, so floor 3 would not change it.
+
+Peak RSS (fresh process, KiB, 16 threads):
+
+| size | uncapped | 128 MiB + floor 3 | 256 MiB | original route |
+|---|---:|---:|---:|---:|
+| 4096² | 554,308 | 266,964 | 399,756 | 200,396 |
+| 8192×4096 | 1,095,752 | 395,288 | 530,068 | 393,788 |
+
+**Proposal:** raise the default to 256 MiB and keep floor 3. That recovers most of
+REV5PERF4's large-image speed while keeping peak RSS at 0.48–0.72× of uncapped
+on the measured large inputs. 128 MiB stays the choice if memory outranks
+speed. The constant stays 128 MiB until the coordinator or owner picks; both
+values are private and keep bits identical.
