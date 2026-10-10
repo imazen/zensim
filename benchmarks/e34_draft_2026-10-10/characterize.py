@@ -6,6 +6,9 @@ runs already wrote (steerfix_packet::engineering_packet): per block, the exact f
 M2 = Spearman(linearized_gain, score_delta) over a case's blocks; M3f = Spearman(refinement_gain, score_delta).
 
 usage: characterize.py OUT_DIR
+Writes per_case.{json,tsv} and summary.json. Every number the E34 draft quotes from stored rows comes from summary.json.
+Populations: SERVED = the seven served models (A, C seeds 0-2; production seed 0); dense bakes are excluded from every
+summary. "Failing" excludes production's four floor-tied KADID JPEG cases (M2 = 0) unless stated.
 """
 import json
 import math
@@ -102,7 +105,53 @@ def main(out):
         f.write('\t'.join(cols) + '\n')
         for r in recs:
             f.write('\t'.join(str(round(r[c], 6) if isinstance(r[c], float) else r[c]) for c in cols) + '\n')
+    (out / 'summary.json').write_text(json.dumps(summary(recs), indent=1) + '\n')
     print('runs', {k: str(v) for k, v in RUNS.items()})
+
+
+SERVED = ('A-s0', 'A-s1', 'A-s2', 'C-s0', 'C-s1', 'C-s2', 'P-s0')
+
+
+def summary(recs):
+    srv = [r for r in recs if r['model'] in SERVED]
+    floor = lambda r: r['panel'] == 'jpeg8' and r['m2'] == 0.0
+    fail = [r for r in srv if not r['passes']]
+    nonfloor = [r for r in fail if not floor(r)]
+    out = {'pass_counts': {m: sum(r['passes'] for r in recs if r['model'] == m) for m in RUNS},
+           'failures_served': len(fail), 'failures_nonfloor': len(nonfloor),
+           'ac_failures_all_m2': all(r['m2'] < 0.99 for r in fail if r['model'][0] in 'AC'),
+           'ac_failures': sum(1 for r in fail if r['model'][0] in 'AC')}
+    for key in ('block', 'panel', 'ref', 'level'):
+        tot = {}
+        bad = {}
+        for r in srv:
+            tot[str(r[key])] = tot.get(str(r[key]), 0) + 1
+        for r in fail:
+            bad[str(r[key])] = bad.get(str(r[key]), 0) + 1
+        out[f'fail_by_{key}'] = {k: [bad.get(k, 0), tot[k]] for k in sorted(tot)}
+    out['drop1_rescues_by_block'] = {str(b): [sum(1 for r in nonfloor if r['block'] == b and r['m2_drop1'] >= 0.99),
+                                             sum(1 for r in nonfloor if r['block'] == b)] for b in (8, 16, 32, 64)}
+    pairs = {}
+    for r in fail:
+        pairs.setdefault(f"{r['case']}@b{r['block']}", []).append(r['model'])
+    out['failing_pairs'] = len(pairs)
+    out['failing_pairs_in_2plus_models'] = sum(1 for v in pairs.values() if len(v) >= 2)
+    out['most_frequent_pair'] = max(pairs.items(), key=lambda kv: len(kv[1]))
+    rel = {}
+    for scope, keep in (('all_panels', lambda r: True), ('broad_only', lambda r: r['panel'] == 'broad')):
+        rel[scope] = {}
+        for b in (8, 16, 32, 64):
+            f_ = [r['rel_l2_lin_vs_true'] for r in nonfloor if r['block'] == b and keep(r)]
+            p_ = [r['rel_l2_lin_vs_true'] for r in srv if r['passes'] and r['block'] == b and keep(r)]
+            mf, mp = statistics.median(f_), statistics.median(p_)
+            rel[scope][str(b)] = dict(failing_median=mf, passing_median=mp, ratio=mf / mp, n_failing=len(f_), n_passing=len(p_))
+    out['rel_l2_by_block'] = rel
+    broad_pass = [r['base'] for r in srv if r['panel'] == 'broad' and r['passes']]
+    broad_fail = [r['base'] for r in fail if r['panel'] == 'broad']
+    out['broad_base_median'] = dict(passing=statistics.median(broad_pass), failing=statistics.median(broad_fail))
+    out['base_median_by_level_seed0'] = {lv: statistics.median(r['base'] for r in recs if r['model'] in ('A-s0', 'C-s0', 'P-s0') and r['level'] == lv)
+                                         for lv in ('10', '13', '17')}
+    return out
 
 
 if __name__ == '__main__':
