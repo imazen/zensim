@@ -12,7 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dialviz import build, catalogue, experiments_src, feature_defs_src, featuresets_src, model, quotes, sources, zenanalyze_src  # noqa: E402
+from dialviz import (build, catalogue, experiments_src, feature_defs_src, featuresets_src, gitref, model, quotes,  # noqa: E402
+                     sources, zenanalyze_src)
 from dialviz.mdparse import SourceShapeError  # noqa: E402
 from dialviz.sources import REPO, Ctx  # noqa: E402
 
@@ -112,6 +113,23 @@ class LiveSources(unittest.TestCase):
             self.assertTrue(states <= {"current", "hash-changed", "missing"}, states)
 
 
+    def test_every_result_file_is_read_or_excluded(self):
+        mapped = {rel for rel, _ in experiments_src.RESULTS.values()} | set(experiments_src.RESULTS_EXCLUDED)
+        on_disk = set(self.ctx.glob("benchmarks/**/*result_summary*.json")) | set(self.ctx.glob("benchmarks/**/*decision*.json"))
+        self.assertEqual(on_disk - mapped, set(), "result/decision JSON neither read nor listed in RESULTS_EXCLUDED")
+        self.assertEqual(mapped - on_disk, set(), "RESULTS names a file that is not in the tree")
+
+    def test_e33_verdict_is_shown(self):
+        r = self.m["results"]["E33"]
+        self.assertEqual(r["adopted"], "a")
+        self.assertEqual({a["arm"]: a["passes"] for a in r["arms"]}, {"a": True, "c": False})
+
+    def test_zenanalyze_is_read_from_a_commit(self):
+        self.assertEqual(self.ctx.zenanalyze_rev, "origin/main")
+        self.assertRegex(self.m["zenanalyze_commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(self.m["zenanalyze_commit"], self.ctx.za_tree.commit)
+
+
 class NegativeControls(unittest.TestCase):
     def refuse(self, path, mutation, reader):
         with self.assertRaises(SourceShapeError):
@@ -165,6 +183,10 @@ class NegativeControls(unittest.TestCase):
         rel = experiments_src.RESULTS["E28"][0]
         self.refuse(rel, sub_once(r'"e28-decision-v1"', '"e28-decision-v2"'), experiments_src.results)
 
+    def test_e33_result_shape_changed(self):
+        rel = experiments_src.RESULTS["E33"][0]
+        self.refuse(rel, sub_once(r'"decisions"', '"decision_by_arm"'), experiments_src.results)
+
     def test_catalogue_locator_missing(self):
         loc = catalogue.WANTED[1]["state"][0]
         self.refuse(loc["row"], lambda t: t.replace("N1 near-identity ceiling", "N1 ceiling"), lambda c: quotes.resolve(c, loc))
@@ -188,6 +210,37 @@ class SiteBuild(unittest.TestCase):
                         broken.append(f"{p.relative_to(out)} -> {href}")
             self.assertEqual(broken, [])
             self.assertTrue((out / "search.js").read_text().startswith("window.DIALVIZ_INDEX="))
+            self.check_github_links(pages)
+
+    def check_github_links(self, pages):
+        """Every GitHub link names a path that exists in that repository at that ref, with the anchored line in range.
+
+        A commit ref is checked against that commit's tree; `main` (this lane's unpushed files) against the checkout.
+        """
+        za_dir = gitref.git_dir_of(REPO.parent / "zenanalyze")
+        zs_dir = gitref.git_dir_of(REPO)
+        trees: dict[tuple[str, str], gitref.GitTree] = {}
+        bad, seen = [], set()
+        for p in pages:
+            for repo, ref, path, line in re.findall(
+                    r'href="https://github\.com/imazen/(zensim|zenanalyze)/blob/([^/"]+)/([^"#]+)(?:#L(\d+))?"', p.read_text()):
+                key = (repo, ref, path, line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if repo == "zensim" and ref == "main":
+                    f = REPO / path
+                    ok = f.exists() and (not line or (f.is_file() and int(line) <= f.read_bytes().count(b"\n") + 1))
+                else:
+                    self.assertRegex(ref, r"^[0-9a-f]{40}$", f"{repo} link is not a permalink: {ref}/{path}")
+                    t = trees.get((repo, ref))
+                    if t is None:
+                        t = trees[(repo, ref)] = gitref.GitTree(za_dir if repo == "zenanalyze" else zs_dir, ref)
+                    ok = t.exists(path) and (not line or (path in t.blobs and int(line) <= t.count_lines(path)))
+                if not ok:
+                    bad.append(f"{repo}@{ref[:8]}:{path}#L{line}")
+        self.assertGreater(len(seen), 100)
+        self.assertEqual(bad, [])
 
 
 if __name__ == "__main__":

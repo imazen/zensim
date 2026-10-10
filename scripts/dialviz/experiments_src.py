@@ -28,7 +28,15 @@ RESULTS = {
     "E30": ("benchmarks/e30_result_summary_2026-10-07.json", "e30-result-summary-v1"),
     "V40": ("benchmarks/v40_result_summary_2026-10-09.json", None),
     "V40HDR": ("benchmarks/v40_hdr_result_summary_2026-10-09.json", "v40-hdr-result-summary-v1"),
+    "E33": ("benchmarks/e33_result_summary_2026-10-10.json", "e33-result-summary-v1"),
+    "E31HDR": ("benchmarks/v40_e31_hdr_result_summary_2026-10-09.json", "v40-e31-hdr-report-evidence-v1"),
+    "E31VIDEO": ("benchmarks/hdrvid_e31_video_result_summary_2026-10-10.json", "hdrvid-e31-video-result-summary-v1"),
 }
+# Result/decision JSON files under benchmarks/ deliberately not read, with the reason.
+# A test requires every benchmarks/**/*result_summary*.json and *decision*.json to be in RESULTS or here.
+RESULTS_EXCLUDED: dict[str, str] = {}
+# Report-only E31 evidence: which per-population key holds the per-seed values.
+E31_REPORTS = ("E31HDR", "E31VIDEO")
 V40_STUDY = {"e29": "E29", "e31": "E31", "e32": "E32"}
 
 
@@ -117,6 +125,48 @@ def results(ctx) -> dict:
             out.setdefault("E29", {"path": rel, "arms": [], "adopted": None})
             out["E29"]["adopted"] = d.get("adopt")
             out["E29"]["adopted_from"] = rel
+        elif key == "E33":
+            v, e21, gates = d.get("verdict"), d.get("e21"), d.get("gates")
+            if not (isinstance(v, dict) and isinstance(e21, dict) and isinstance(gates, dict)
+                    and isinstance(v.get("arms"), dict) and isinstance(e21.get("decisions"), dict)):
+                raise SourceShapeError(f"{rel}: expected verdict.arms, e21.decisions and gates")
+            for n, rd in sorted(e21["decisions"].items()):
+                va = v["arms"].get(n)
+                if va is None:
+                    raise SourceShapeError(f"{rel}: e21 arm {n} has no verdict entry")
+                sg, w2 = rd.get("signed") or {}, rd.get("w2") or {}
+                failed = va.get("failed_gates") or []
+                arms.append(_arm("E33", n, signed=sg.get("delta"), se=sg.get("se"), per_source=rd.get("per_source"),
+                                 w2=w2.get("delta"), w2_se=w2.get("se"), as_good=rd.get("as_good"),
+                                 passes=va.get("eligible"), verdict="eligible" if va.get("eligible") else "not eligible",
+                                 reason=("failed gates: " + ", ".join(failed)) if failed else "no failed gates",
+                                 seed_deltas=sg.get("seed_deltas"),
+                                 extra={"guards": rd.get("guards"), "gates": (gates.get("arms") or {}).get(n)}, path=rel))
+            out["E33"] = {"path": rel, "arms": arms, "adopted": v.get("adopt"), "status": v.get("status"),
+                          "rule": v.get("rule"), "meaning": v.get("meaning"), "owner_note": d.get("owner_note"),
+                          "c_vs_a": e21.get("c_vs_a"), "slower": (gates.get("runtime") or {}).get("slower")}
+        elif key in E31_REPORTS:
+            if d.get("report_only") is not True or not isinstance(d.get("pooled_signed_srocc"), dict):
+                raise SourceShapeError(f"{rel}: expected report_only true and pooled_signed_srocc")
+            series = []
+            for pop, by_arm in d["pooled_signed_srocc"].items():
+                for arm, by_seed in by_arm.items():
+                    legs: dict[str, list[float]] = {}
+                    for seed, val in by_seed.items():
+                        if isinstance(val, dict):
+                            for leg, x in val.items():
+                                legs.setdefault(leg, []).append(float(x))
+                        else:
+                            legs.setdefault("", []).append(float(val))
+                    for leg, xs in legs.items():
+                        series.append({"population": pop, "leg": leg, "arm": arm, "values": xs})
+            rep = {"path": rel, "schema": d["schema"], "populations": d.get("populations"),
+                   "flags": {k: d.get(k) for k in ("report_only", "independent_test", "shipping_adoption_authorized")},
+                   "external_reports": d.get("external_reports"), "series": series}
+            out.setdefault("E31", {"path": rel, "arms": [], "adopted": None})
+            out["E31"].setdefault("reports", []).append(rep)
+            ctx.count(rel, sum(len(x["values"]) for x in series))
+            continue
         ctx.count(rel, len(arms) or len(d.get("arms", {})))
     return out
 
@@ -151,6 +201,25 @@ def registry(ctx) -> list[dict]:
         exps.append({"scheme": "featpot", "id": m.group(1).replace("′", "p").replace("″", "pp"), "label": m.group(1),
                      "title": doc.strip().split("\n\n")[0].replace("\n", " "), "registration": path, "line": 1,
                      "date": reg.group(1) if reg else None, "docstring": doc})
+    # design-log entries that exist only as `# Design log E<n>` comment blocks (E4, E16, E18, E19)
+    have = {e["id"] for e in exps if e["scheme"] == "featpot"}
+    for path in ctx.glob(f"{FEATPOT_DIR}/*.py"):
+        lines = ctx.text(path, "experiments").splitlines()
+        for i, line in enumerate(lines):
+            m = re.match(r"^# Design log (E\d+)(?: \(registered ([0-9-]+)[^)]*\))?:\s*(.*)$", line)
+            if not m or m.group(1) in have:
+                continue
+            block = [m.group(3)]
+            for nxt in lines[i + 1:]:
+                if not nxt.startswith("#") or nxt.startswith("# Design log"):
+                    break
+                block.append(nxt.lstrip("#").strip())
+            text = " ".join(x for x in block if x)
+            have.add(m.group(1))
+            exps.append({"scheme": "featpot", "id": m.group(1), "label": m.group(1), "title": text,
+                         "registration": path, "line": i + 1, "date": m.group(2),
+                         "docstring": text, "comment_only": True,
+                         "status_text": None if m.group(2) else "comment only: no registration text found"})
     # E25: Rev5 spec addendum D
     spec = "benchmarks/rev5_spec_2026-10-04.md"
     st = ctx.text(spec, "experiments")

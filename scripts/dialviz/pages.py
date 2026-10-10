@@ -565,10 +565,15 @@ def page_experiments(m) -> dict:
     for e in sorted(m["experiments"], key=lambda e: (e["scheme"], int(re.sub(r"\D", "", e["id"]) or 0), e["id"])):
         r = res.get(e["id"]) if e["scheme"] == "featpot" else None
         outcome = '<span class="muted">no recorded result file</span>'
-        if r:
+        if r and not r["arms"] and r.get("reports"):
+            outcome = chip("info", f'{len(r["reports"])} report-only result files')
+        elif r:
             outcome = " ".join(chip("pass" if a.get("as_good") else ("fail" if a.get("as_good") is False else "info"),
-                                    f'{a["arm"]}: ' + ("as good" if a.get("as_good") else ("not as good" if a.get("as_good") is False else "report")))
+                                    f'{a["arm"]}: ' + ("as good" if a.get("as_good") else ("not as good" if a.get("as_good") is False else "report"))
+                                    + (f', {a["verdict"]}' if (a.get("extra") or {}).get("gates") is not None else ""))
                                for a in r["arms"])
+            if r.get("adopted") and not isinstance(r["adopted"], (dict, list)):
+                outcome += " " + chip("done", f'adopted: {r["adopted"]}')
         rows.append([esc(e["label"]), esc(e["scheme"]), esc(e.get("date") or "—"),
                      f'<a href="experiment/{esc(e["scheme"])}-{esc(e["id"])}.html">{esc(_short(e["title"], 140))}</a>', outcome])
         out[f'experiment/{e["scheme"]}-{e["id"]}.html'] = _render(
@@ -596,7 +601,53 @@ def _experiment_body(m, e, r, mean_floor, source_floor) -> str:
                     + (f' (from {src_cite(r["adopted_from"])})' if r.get("adopted_from") else "") if "adopted" in r else "") + '</p>')
         if e["id"] == "E29":
             b.append(f'<div class="panel">{chart_v40_hdr(m)}</div><div class="panel">{chart_borda(m)}</div>')
-        b.append(f'<div class="panel">{arm_chart(r["arms"], mean_floor, source_floor)}</div>')
+        if r.get("status") or r.get("rule"):
+            b.append('<div class="panel"><dl class="kv">'
+                     + "".join(f'<dt>{esc(k)}</dt><dd>{md_inline(str(v))}</dd>' for k, v in
+                               (("status", r.get("status")), ("rule", r.get("rule")), ("meaning", r.get("meaning"))) if v)
+                     + '</dl></div>')
+        if r.get("owner_note"):
+            on = r["owner_note"]
+            b.append(f'<div class="panel"><h3>Owner note ({esc(on.get("date"))})</h3><blockquote>{esc(on.get("verbatim"))}'
+                     f'</blockquote><p class="small">{esc(on.get("effect"))}</p></div>')
+        if r.get("c_vs_a"):
+            cv = r["c_vs_a"]
+            sg = cv.get("signed") or {}
+            b.append(f'<div class="panel"><h3>C versus A (recorded)</h3><dl class="kv"><dt>signed Δ</dt><dd>{sg.get("delta", 0):+.6f} '
+                     f'± {sg.get("se", 0):.6f} (n {esc(sg.get("n"))})</dd><dt>t / df</dt><dd>{cv.get("t", 0):.3f} / {esc(cv.get("df"))}</dd>'
+                     f'<dt>one-sided p</dt><dd>{cv.get("p_one_sided", 0):.4g}</dd><dt>C beats A</dt><dd>{esc(cv.get("c_beats_a"))}</dd></dl></div>')
+        for a in r["arms"]:
+            g = (a.get("extra") or {}).get("gates")
+            if isinstance(g, dict):
+                grow = []
+                for gk, gv in g.items():
+                    if isinstance(gv, dict):
+                        ok = gv.get("pass", gv.get("pass_"))
+                        if ok is None and "K1_K3" in gv:
+                            ok = gv["K1_K3"] == "PASS"
+                        grow.append([esc(gk), chip("pass" if ok else "fail", "pass" if ok else "fail") if ok is not None else "—",
+                                     f'<span class="small">{esc(gv.get("rule", ""))}</span>'])
+                    elif isinstance(gv, bool):
+                        grow.append([esc(gk), chip("pass" if gv else "fail", str(gv).lower()), ""])
+                b.append(f'<h3>Label-free gates, arm {esc(a["arm"])}</h3>' + table(["Gate", "Result", "Rule"], grow, sortable=False))
+        if r.get("slower"):
+            b.append('<p class="small">Runtime cells recorded slower: '
+                     + ", ".join(f'<code>{esc(c)}</code> ({esc(arm)})' for c, arm in r["slower"]) + '</p>')
+        for rep in r.get("reports", []):
+            fl = rep["flags"]
+            b.append(f'<h2>Report-only evidence: <code>{esc(rep["schema"])}</code></h2><p class="small">Source {src_cite(rep["path"])} · '
+                     + " · ".join(f'{esc(k)}: <strong>{esc(v)}</strong>' for k, v in fl.items()) + '</p>')
+            if rep.get("external_reports"):
+                b.append('<ul>' + "".join(f'<li><code>{esc(k)}</code>: {esc(v)}</li>' for k, v in rep["external_reports"].items()) + '</ul>')
+            arms_seen = list(dict.fromkeys(s["arm"] for s in rep["series"]))
+            pal = {a: f"var(--s{i % 8 + 1})" for i, a in enumerate(arms_seen)}
+            rows = [(f'{s["population"]}{"/" + s["leg"] if s["leg"] else ""} {s["arm"]}', s["values"], pal[s["arm"]])
+                    for s in rep["series"]]
+            b.append('<p>Pooled signed SROCC per training seed, every recorded value (no rule; report only).</p>'
+                     f'<div class="panel">{svg.strips(rows, label_w=170, title="pooled signed SROCC per seed")}'
+                     + svg.legend([(pal[a], a) for a in arms_seen]) + '</div>')
+        if r["arms"]:
+            b.append(f'<div class="panel">{arm_chart(r["arms"], mean_floor, source_floor)}</div>')
         for a in r["arms"]:
             facts = [("signed Δ", f'{a["signed"]:+.6f}' if a["signed"] is not None else "—"),
                      ("SE", f'{a["se"]:.6f}' if a["se"] is not None else "—"),
