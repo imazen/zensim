@@ -245,8 +245,30 @@ pub fn check(consumer: &FeatureSetRef, producer: &FeatureSetRef) -> Vec<Mismatch
 /// in. LAYOUT = `Model::caller_input_width()` — never `n_inputs()`, which is
 /// the pruned internal width and is a third, different number.
 pub fn bake_feature_set_ref(model: &Model, era: &str) -> Result<FeatureSetRef, String> {
-    let used = crate::block_profile::used_caller_lines(model)?;
     let width = model.caller_input_width();
+    // E33 `fx1`: a derived-input bake's positions are entries over its declared ids, so the
+    // positional mapping below would mis-name its reads. zensim's read-set owner (the serving
+    // planner) answers directly: a live `in` reads its id, a live `product` reads both factors.
+    if model
+        .metadata()
+        .get(crate::derived_inputs::DERIVED_INPUTS_KEY)
+        .is_some()
+    {
+        let scorer = zensim::BakeScorer::new(model).map_err(|e| e.to_string())?;
+        let ids = scorer.consumed_feature_ids().map_err(|e| e.to_string())?;
+        let slots = SlotSet::from_slots(ids.into_iter().map(usize::from));
+        let compute = compute_parts_for_slots(&slots);
+        let id = FeatureSetId::from_slots(compute, era, &slots)
+            .ok_or_else(|| format!("invalid era token {era:?} (charset [a-z0-9_]+)"))?;
+        return Ok(FeatureSetRef {
+            id,
+            slots,
+            layout: Some(width),
+            source: "derived from bake bytes (zensim read set of a derived-input bake)".to_string(),
+            inferred: false,
+        });
+    }
+    let used = crate::block_profile::used_caller_lines(model)?;
     // `used_caller_lines` returns POSITIONS. For every identity-layout bake a
     // position IS a feature id, which is why this was sound for four months.
     // For a bake that DECLARES a dense read set it is not: under `dense95`,

@@ -343,6 +343,18 @@ struct Args {
     #[arg(long, value_name = "SPEC")]
     keep_features: Option<String>,
 
+    /// E33 `fx1` derived inputs: a `zensim-fx1-v1` JSON declaration of the
+    /// model's direct inputs and `difference × reference-only` products
+    /// (`benchmarks/e33_registration_2026-10-09.md` §5.1). The loader keeps
+    /// the read set, appends one f32 product column per declared product
+    /// after `--max-features`, and the written bake (and every checkpoint
+    /// dump) is rewritten into the compact form zensim serves
+    /// (`zentrain.feature_ids` = read set, `zensim.derived_inputs` = model
+    /// input list). `--keep-features` must list exactly the direct ids.
+    /// Plain head only; no feature transforms.
+    #[arg(long, value_name = "PATH")]
+    derived_inputs: Option<PathBuf>,
+
     /// GROUP-LASSO (group-L1 / ℓ2,1) strength over layer-1 input columns:
     /// penalty `λ · Σ_k ‖W1[k,:]‖₂`, applied as a DECOUPLED proximal
     /// block-soft-threshold after each Adam step (threshold `lr·λ`). Drives
@@ -2847,6 +2859,8 @@ fn stamp_checkpoint_metadata(
         "zentrain.formula_revision",
         "zentrain.feature_set_id",
         "zentrain.sampling",
+        // E33 `fx1`: the declaration hash, so the selected `last.bin` carries it too.
+        "zentrain.derived_inputs_sha256",
     ] {
         if let Ok(value) = metadata.get_utf8(key) {
             bytes = zenpredict_bake::append_metadata_utf8(&bytes, key, value)
@@ -2930,13 +2944,21 @@ fn stamp_emitted_checkpoints(
     final_bake: &[u8],
     repro_json: &str,
     coverage_for_epoch: impl Fn(usize) -> Option<String>,
+    derived: Option<(&zensim_validate::derived_inputs::Fx1Declaration, usize)>,
 ) -> std::io::Result<usize> {
     let written = emitted_checkpoint_paths(log);
     for (path, epoch) in &written {
         let bytes = std::fs::read(path)?;
         let coverage = coverage_for_epoch(*epoch);
-        let stamped =
+        let mut stamped =
             stamp_checkpoint_metadata(&bytes, final_bake, repro_json, *epoch, coverage.as_deref());
+        // E33 `fx1`: a dump is served exactly like the final bake, so it gets
+        // the same compact derived form (and the same bit-identity gate).
+        if let Some((decl, base)) = derived {
+            stamped = decl
+                .compact_bake(&stamped, base)
+                .map_err(std::io::Error::other)?;
+        }
         std::fs::write(path, stamped)?;
     }
     Ok(written.len())
@@ -3240,10 +3262,47 @@ fn main() {
             std::process::exit(2)
         })
     });
+    // E33 `fx1`: the declaration fixes the direct inputs (== --keep-features),
+    // the read set the loader keeps, and the product columns appended after
+    // `--max-features`. Refused with anything that is not the plain head.
+    let derived: Option<(zensim_validate::derived_inputs::Fx1Declaration, String)> =
+        args.derived_inputs.as_deref().map(|path| {
+            let (decl, sha) = zensim_validate::derived_inputs::Fx1Declaration::load(path)
+                .unwrap_or_else(|e| {
+                    eprintln!("--derived-inputs: {e}");
+                    std::process::exit(2)
+                });
+            let refused = [
+                (selected_ids.as_deref() != Some(decl.direct.as_slice()), "--keep-features must list exactly the declared direct ids"),
+                (!args.feature_transform.is_empty() || args.auto_transforms.is_some(), "feature transforms"),
+                (args.tv_pairs_file.is_some(), "--tv-pairs-file"),
+                (want_gpu, "the GPU runtime"),
+                (args.pool_head || args.hybrid_head || args.per_sample_alpha_head, "output heads"),
+                (args.skip_connection, "--skip-connection"),
+                (decl.read_set().iter().any(|&id| id >= args.max_features), "read-set ids past --max-features"),
+            ];
+            if let Some((_, why)) = refused.iter().find(|(bad, _)| *bad) {
+                eprintln!("--derived-inputs: refused with {why}");
+                std::process::exit(2);
+            }
+            println!(
+                "[derived-inputs] {} direct + {} products over read set {} (declaration sha256 {sha})",
+                decl.direct.len(),
+                decl.products.len(),
+                decl.read_set().len()
+            );
+            (decl, sha)
+        });
+    // Tables are admitted for every id the model READS, products' reference
+    // factors included.
+    let admitted_ids: Option<Vec<usize>> = match &derived {
+        Some((decl, _)) => Some(decl.read_set()),
+        None => selected_ids.clone(),
+    };
     group_admission::preflight(
         &group_modes,
         &args,
-        selected_ids.as_deref(),
+        admitted_ids.as_deref(),
         manifest_inputs
             .as_ref()
             .map_or(&[], |(inputs, _)| inputs.as_slice()),
@@ -3293,7 +3352,7 @@ fn main() {
         upiq_training::admit(
             &admission_paths,
             decision,
-            selected_ids.as_deref(),
+            admitted_ids.as_deref(),
             args.max_features,
             native,
         )
@@ -3301,7 +3360,7 @@ fn main() {
         zensim_validate::feature_set::admit_training_tables(
             &admission_paths,
             args.historical_replay.as_deref(),
-            selected_ids.as_deref(),
+            admitted_ids.as_deref(),
             Some(args.max_features),
         )
     }
@@ -3404,7 +3463,11 @@ fn main() {
                 && !args.hybrid_head
                 && !args.per_sample_alpha_head =>
         {
-            Some((ids.iter().map(|&i| i as u32).collect(), args.max_features))
+            let load: Vec<usize> = match &derived {
+                Some((decl, _)) => decl.load_ids(),
+                None => ids.to_vec(),
+            };
+            Some((load.iter().map(|&i| i as u32).collect(), args.max_features))
         }
         _ => None,
     };
@@ -3493,6 +3556,20 @@ fn main() {
             }
             g.feature_rows = narrowed;
             g.n_features = cap;
+        }
+        if let Some((decl, _)) = &derived {
+            let extended = match g.compact.as_mut() {
+                Some(c) => decl.extend_compact(c, cap),
+                None if g.n_features == cap => {
+                    decl.extend_dense(&mut g.feature_rows, g.human_scores.len(), cap)
+                }
+                None => Err(format!("{name}: {} features, expected {cap}", g.n_features)),
+            };
+            if let Err(e) = extended {
+                eprintln!("--derived-inputs: {e}");
+                std::process::exit(2);
+            }
+            g.n_features = cap + decl.products.len();
         }
         if n_features == 0 {
             n_features = g.n_features;
@@ -3728,15 +3805,24 @@ fn main() {
     let keep_mask: Option<Vec<bool>> = match selected_ids.as_deref() {
         None => None,
         Some(idx) => {
-            let mut mask = vec![false; args.max_features];
+            // E33 `fx1`: the logical width grows by the product columns, all kept.
+            let logical = match &derived {
+                Some((decl, _)) => args.max_features + decl.products.len(),
+                None => args.max_features,
+            };
+            let mut mask = vec![false; logical];
             for &i in idx {
                 mask[i] = true;
             }
+            if let Some((decl, _)) = &derived {
+                for c in &decl.kept_columns(args.max_features) {
+                    mask[*c] = true;
+                }
+            }
             let n_keep = mask.iter().filter(|&&k| k).count();
             println!(
-                "keep_features: {n_keep} of {} inputs kept ({} dropped)",
-                args.max_features,
-                args.max_features - n_keep
+                "keep_features: {n_keep} of {logical} inputs kept ({} dropped)",
+                logical - n_keep
             );
             for g in &mut loaded {
                 for row in g.feature_rows.chunks_mut(g.n_features) {
@@ -5021,6 +5107,25 @@ fn main() {
             }
         }
     };
+    // E33 `fx1`: record the declaration's hash, then rewrite the trainer's
+    // identity-width bake into the compact derived form zensim serves. The
+    // rewrite carries its own bit-identity gate.
+    let bake_bytes = match &derived {
+        Some((decl, sha)) => {
+            let stamped = zenpredict_bake::append_metadata_utf8(
+                &bake_bytes,
+                "zentrain.derived_inputs_sha256",
+                sha,
+            )
+            .expect("derived-input declaration hash metadata");
+            decl.compact_bake(&stamped, args.max_features)
+                .unwrap_or_else(|e| {
+                    eprintln!("FATAL: --derived-inputs: {e}");
+                    std::process::exit(4);
+                })
+        }
+        None => bake_bytes,
+    };
     std::fs::write(&out_path, &bake_bytes).unwrap_or_else(|e| {
         eprintln!("write {out_path:?}: {e}");
         std::process::exit(1);
@@ -5034,13 +5139,19 @@ fn main() {
     // invocation. Colocated inputs and late unrelated files are never scanned.
     // Failure is fatal, matching mandatory reproduction metadata.
     if args.dump_checkpoints_every > 0 {
-        let stamped_n = stamp_emitted_checkpoints(&log, &bake_bytes, &repro_json, |epoch| {
-            if epoch + 1 == hyperparams.n_epochs {
-                sample_coverage_json.clone()
-            } else {
-                sample_coverage_for_epochs(epoch + 1)
-            }
-        })
+        let stamped_n = stamp_emitted_checkpoints(
+            &log,
+            &bake_bytes,
+            &repro_json,
+            |epoch| {
+                if epoch + 1 == hyperparams.n_epochs {
+                    sample_coverage_json.clone()
+                } else {
+                    sample_coverage_for_epochs(epoch + 1)
+                }
+            },
+            derived.as_ref().map(|(decl, _)| (decl, args.max_features)),
+        )
         .unwrap_or_else(|e| {
             eprintln!("FATAL: stamp emitted checkpoints: {e}");
             std::process::exit(4);
@@ -5473,8 +5584,14 @@ mod checkpoint_admission_tests {
         )];
         assert_eq!(emitted_checkpoint_paths(&log), vec![(owned.clone(), 0)]);
         assert_eq!(
-            stamp_emitted_checkpoints(&log, &base, r#"{"init_seed":1103,"epochs":3}"#, |_| None)
-                .unwrap(),
+            stamp_emitted_checkpoints(
+                &log,
+                &base,
+                r#"{"init_seed":1103,"epochs":3}"#,
+                |_| None,
+                None
+            )
+            .unwrap(),
             1
         );
         let stamped = std::fs::read(&owned).unwrap();
@@ -5515,6 +5632,7 @@ mod checkpoint_admission_tests {
             &final_bake,
             r#"{"init_seed":1103,"epochs":3,"table_admission":{"qualified_provenance":true}}"#,
             |epoch| Some(format!("prefix-{}", epoch + 1)),
+            None,
         )
         .unwrap();
         assert_eq!(count, 2);

@@ -428,6 +428,10 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    if let Err(e) = zensim_validate::block_profile::refuse_derived_inputs(&model, "bake_contrib") {
+        eprintln!("{e}");
+        return ExitCode::from(2);
+    }
     if extract_minmax_head(&model).is_some() {
         eprintln!("min-max-head bakes are out of scope for bake_contrib (registered §C.1)");
         return ExitCode::from(2);

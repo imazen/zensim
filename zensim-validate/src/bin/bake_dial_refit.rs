@@ -1458,6 +1458,18 @@ struct PackArgs {
     /// only applies once class-2 bias folding is in play.
     #[arg(long, default_value_t = 1e-4)]
     prune_identity_tol: f64,
+    /// E33 output stage (`benchmarks/e33_registration_2026-10-09.md` §8) for
+    /// a `--nonneg-distance` bake: the raw pin. Knots are filtered strictly,
+    /// `(pin, 100)` is appended and a collinear tail knot is prepended
+    /// (`--tail-extend`), so a perfect copy serves exactly 100 and the score
+    /// falls strictly below it with no flat segment. Checks K1–K3 and the
+    /// calibration rows' floor count run on the final bytes; any failure
+    /// refuses the pack. Supersedes the `--neg-tail` choice.
+    #[arg(long, requires = "tail_extend")]
+    identity_knot: Option<f64>,
+    /// Tail length factor for `--identity-knot` (registered value: 2).
+    #[arg(long, requires = "identity_knot")]
+    tail_extend: Option<f64>,
 }
 
 /// One packed layer, owned (weights dequantized to f32).
@@ -1609,6 +1621,45 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
              densify does not round-trip those sections yet (extend emit_packed first)"
                 .into(),
         );
+    }
+
+    // E33 `fx1`: a derived-input bake is already dense — the trainer wrote it
+    // with exactly its model inputs and gated it bit for bit
+    // (`derived_inputs::Fx1Declaration::compact_bake`). Re-densifying would
+    // renumber inputs under `zensim.derived_inputs`, so it passes through
+    // unchanged once zensim accepts it.
+    if model
+        .metadata()
+        .get(zensim_validate::derived_inputs::DERIVED_INPUTS_KEY)
+        .is_some()
+    {
+        zensim::BakeScorer::new(&model)
+            .map_err(|e| format!("densify: zensim refuses the derived-input bake: {e}"))?;
+        eprintln!(
+            "densify {:?}: derived-input bake ({} model inputs over {} declared ids) is already \
+             dense; passed through unchanged",
+            a.input,
+            model.caller_input_width(),
+            zensim::declared_feature_ids(&model).map_or(0, |ids| ids.len())
+        );
+        if let Some(out) = &a.out
+            && !a.dry_run
+        {
+            std::fs::write(out, &bytes).map_err(|e| format!("write {out:?}: {e}"))?;
+            // The identity gate, in its exact form for a pass-through: the
+            // emitted bytes are the input bytes, so every prediction is too.
+            let written = std::fs::read(out).map_err(|e| format!("re-read {out:?}: {e}"))?;
+            if written != bytes {
+                return Err(format!(
+                    "densify: {out:?} differs from the input after a pass-through write"
+                ));
+            }
+            eprintln!(
+                "  identity gate: BIT-IDENTICAL — the derived-input bake was written byte for byte ({} B)",
+                written.len()
+            );
+        }
+        return Ok(());
     }
 
     // Layers VERBATIM, each keeping its own dtype — densify is a dispatch
@@ -2322,6 +2373,20 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         let p = prune::plan(&model, &l0, !a.no_prune_constants).map_err(|e| e.to_string())?;
         if p.is_noop() { None } else { Some(p) }
     };
+    // Pruning renumbers layer-0 inputs; a derived-input bake's input list
+    // (`zensim.derived_inputs`) would no longer match. Refuse loudly.
+    if plan.is_some()
+        && model
+            .metadata()
+            .get(zensim_validate::derived_inputs::DERIVED_INPUTS_KEY)
+            .is_some()
+    {
+        return Err(
+            "pack: derived-input bake has prunable layer-0 inputs; pruning would desync \
+             zensim.derived_inputs (pass --no-prune, or refit)"
+                .into(),
+        );
+    }
 
     if let Some(p) = &plan {
         // WeightDtype is #[non_exhaustive]; a future dtype falls back to
@@ -2390,6 +2455,7 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         zensim_validate::dial_spline::neg_tail_is_material(&preds, &tgt, 18)
         && !a.neg_tail
         && !a.no_neg_tail
+        && a.identity_knot.is_none()
     {
         return Err(format!(
             "the --neg-tail choice CHANGES this bake's spline ({n_flat} knots without the \
@@ -2405,7 +2471,12 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
              pre-2026-08-31 default byte-for-byte)."
         ));
     }
-    let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, a.neg_tail);
+    let (cx, cy) = match (a.identity_knot, a.tail_extend) {
+        (Some(pin), Some(factor)) => {
+            zensim_validate::dial_spline::fit_identity_pinned_knots(&preds, &tgt, 18, pin, factor)?
+        }
+        _ => fit_spline_knots(&preds, &tgt, 18, a.neg_tail),
+    };
     if cx.len() < 2 {
         // A one-knot fit almost never means "the anchor is too small"; it means
         // `fit_spline_knots` could not find an INCREASING map, because the
@@ -2472,6 +2543,27 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
         &packed,
         &md_final,
     );
+    if let Some(pin) = a.identity_knot {
+        let checks =
+            zensim_validate::dial_spline::check_identity_pinned(&spline_payload(&cx, &cy), pin)?;
+        // K4 on the calibration rows (the other registered populations are
+        // checked by their own gate runs).
+        let at_floor = preds.iter().filter(|&&p| p <= checks.x_floor).count();
+        let in_tail = preds.iter().filter(|&&p| p < checks.x0).count();
+        let min_raw = preds.iter().copied().fold(f64::INFINITY, f64::min);
+        eprintln!(
+            "identity-pinned spline: K1 K2 K3 PASS ({} grid points); x_floor {:.4} (floor score {:.4}), \
+             identity slope {:.6}; calibration rows: {at_floor} at/below floor, {in_tail} in the linear tail \
+             (< x0 {:.4}), min raw {min_raw:.4}",
+            checks.k2_points, checks.x_floor, checks.floor, checks.identity_slope, checks.x0
+        );
+        if at_floor > 0 {
+            return Err(format!(
+                "K4: {at_floor} calibration rows reach the OOD floor (raw <= {})",
+                checks.x_floor
+            ));
+        }
+    }
     std::fs::write(&a.out, &final_bytes).map_err(|e| format!("write {:?}: {e}", a.out))?;
     // D4 second half: the identity story must COVER THE DIAL TAIL. The prune
     // gate speaks only for the network on in-domain anchor rows; a run that
@@ -3752,6 +3844,17 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
             let wi = weights.as_ref().map(|w| w[mi]);
             if wi == Some(0.0) {
                 continue;
+            }
+            if model
+                .metadata()
+                .get(zensim_validate::derived_inputs::DERIVED_INPUTS_KEY)
+                .is_some()
+            {
+                return Err(
+                    "predict: raw units cannot serve a derived-input bake; pass --score-units \
+                     (zensim::BakeScorer builds its model row)"
+                        .into(),
+                );
             }
             let transformed = model.has_nontrivial_feature_transforms();
             let mut predictor = zenpredict::Predictor::new(model);
@@ -5853,6 +5956,8 @@ mod tests {
             no_prune: false,
             no_prune_constants: false,
             prune_identity_tol: 1e-4,
+            identity_knot: None,
+            tail_extend: None,
         };
         cmd_pack(&args).unwrap(); // Before the fix, the f2 declaration fails on two loaded columns.
         let bytes = std::fs::read(&args.out).unwrap();
