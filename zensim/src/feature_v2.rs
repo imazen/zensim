@@ -11737,10 +11737,12 @@ fn rev5_job_bytes(max_n: usize) -> Option<usize> {
         .checked_add(fixed)
 }
 
-// The original route runs a strip's three channels in parallel
-// (`fuse_channels`). A queue holding fewer slots would run fewer channel jobs
-// at once, so below this floor the walk keeps the original route. Both routes
-// produce identical bits; the floor changes scheduling only.
+// Below this many slots the walk keeps the original route. That route runs a
+// strip's three channels in parallel (`fuse_channels`) and each channel's v1
+// bands in parallel (`band_parallel`); a queued job runs its bands serially.
+// Which is faster at a given slot count is measured, not assumed: see
+// benchmarks/rev5perf5_budget_design_2026-10-09.md. Both routes produce
+// identical bits; the floor changes scheduling only.
 #[cfg(feature = "threads")]
 const REV5_MIN_JOB_SLOTS: usize = 3;
 
