@@ -1969,3 +1969,19 @@ corruption and per-pair-metric grids were pointed at an absent path.
 No fitting, selection, calibration or new model. Only the bootstrap interval
 summary of the shipped bake's scores changed between the two runs; every other
 statistic is byte-identical. Result: `benchmarks/stats_migration_2026-10-11.md`.
+
+## Exposure ledger — 2026-10-11: AIC2026 PTC crops scored by A, seed 0 and B (pixels only)
+
+Preparation for the registered score→JND calibration protocol
+(`benchmarks/jndcal_protocol_2026-10-11.md`). The JNDCAL lane scored the 840×944 PTC crops of the AIC2026 public
+cropped release (DaRUS doi:10.18419/DARUS-6156, zip sha256 `3c3bbc99…`), each against its source's
+`PTC_S{NN}_Ref_00` crop, with `score_pair_with_bake --bake-post raw` (zensim `c107f88f`, binary sha256
+`74f3a937…`).
+
+- **Models:** A `7cf4cfd9…` and seed 0 `f803b74c…` (formula revision 5), and B `a96a5a66…`. This is the first
+  AIC2026 read by these three models; the 2026-09-19 read used older models.
+- **Stimuli:** 3,417 PTC crops of the public cropped release: the readme's PTC study levels 03, 05, 08, 10, 13, 16
+  and 20 for all 490 source–codec assignments, with FTIC's 13 assignments (released at levels 01–06) contributing
+  every released level. 3,417 crops × 3 models = 10,251 scores, all finite. The scores are kept outside the repo.
+- **Pixels only.** This scoring read no labels, and nothing was fitted, selected or tuned.
+- **Unchanged:** `aic2026` stays in the protected-population guards, and its role (§3d) is unchanged.
