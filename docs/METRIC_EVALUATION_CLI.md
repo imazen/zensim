@@ -1,7 +1,8 @@
 # Evaluate metric implementations on explicit datasets
 
 `panel evaluate` runs dataset-independent diagnostics using the same statistics
-as `panel` and `bake_verdict`. It accepts stored scores, keyed score tables,
+as `panel` and `bake_verdict`, all owned by zenmetrics-stats (the `zenstats`
+dependency; zenmetrics `docs/EVALUATION_METHODS.md`). It accepts stored scores, keyed score tables,
 external executables, batch executables, and the `zenmetrics score` CLI. It
 writes JSON, Markdown, HTML, scored rows, and retained executable stdout/stderr.
 It neither fits a metric nor discovers or opens default corpora.
@@ -68,8 +69,8 @@ itself is hashed automatically. A wrapper must declare dependencies it uses.
 The canonical merged quality-band method needs explicit `target_range: [lo,hi]`.
 Its existing sample-size and target-span floors remain unchanged. The raw
 scatter diagnostic uses the complete population; no plotting sample determines
-tail statistics. `difference_threshold` optionally enables the existing DS-AUC
-proxy in target units; it is not a measured human JND threshold. That owner
+tail statistics. `difference_threshold` optionally enables the DS-AUC
+proxy (`zenstats::pairs::ds_auc`) in target units; it is not a measured human JND threshold. That owner
 retains its deterministic pair subsampling at large populations.
 
 `ladder_epsilon` belongs to each metric and is in that metric's native score
