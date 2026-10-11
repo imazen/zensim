@@ -1,0 +1,28 @@
+cells compared: 300
+cells whose agree counts or decision differ between rules: 0
+CI bounds that cross 0 between rules: 3
+  CROSS bake_compare_exmix3_vs_balanced | KADIK10k | B0 | or | lo | 0 | -0.0001106194690265426
+  CROSS bake_compare_exmix3_vs_persample | TID2013 | B0 | or | lo | 0 | -0.0024999999999998634
+  CROSS v24_ft_gentle_s4_vs_compression_ship_2026-05-18 | TID2013 | B5 | or | lo | 0 | -9.727626459143414e-05
+bound shift / CI width over 1781 intervals: lower median 0.0001 p99 0.0008 max 0.0250; upper median 0.0001 p99 0.0014 max 0.0041
+reproduction of recorded CID22 / AIC-3 aggregates (recorded vs re-run, order-statistic binary):
+  bake_compare_5grp_cvL05_vs_largeiwssim_2026-05-18 | CID22 | 0.8437 | 0.8437 | 0.8323 | 0.8323 | promising | PromisingNotDecisive
+  bake_compare_5grp_cvL05_vs_largeiwssim_2026-05-18 | AIC-3 CTC | 0.798 | 0.798 | 0.7831 | 0.7831 | promising | Tied
+  bake_compare_exmix3_vs_balanced | CID22 | 0.8642 | 0.8642 | 0.8323 | 0.8323 | A>>B | ADecisivelyBeatsB
+  bake_compare_exmix3_vs_balanced | AIC-3 CTC | 0.8048 | 0.8048 | 0.7831 | 0.7831 | A>>B | ADecisivelyBeatsB
+  bake_compare_exmix3_vs_persample | CID22 | 0.8642 | 0.8642 | 0.8641 | 0.8641 | tied | PromisingNotDecisive
+  bake_compare_exmix3_vs_persample | AIC-3 CTC | 0.8048 | 0.8048 | 0.8183 | 0.8183 | B>>A | BDecisivelyBeatsA
+  bake_compare_iwssim_persample_vs_balanced_2026-05-18 | CID22 | 0.8406 | 0.8406 | 0.8324 | 0.8324 | promising | PromisingNotDecisive
+  bake_compare_iwssim_persample_vs_balanced_2026-05-18 | AIC-3 CTC | 0.7929 | 0.7929 | 0.7845 | 0.7845 | tied | Tied
+  bake_compare_iwssim_persample_vs_compression_2026-05-18 | CID22 | 0.8406 | 0.8406 | 0.8641 | 0.8641 | B>>A | BDecisivelyBeatsA
+  bake_compare_iwssim_persample_vs_compression_2026-05-18 | AIC-3 CTC | 0.7929 | 0.7929 | 0.8183 | 0.8183 | B>>A | BDecisivelyBeatsA
+  bake_compare_v06_film_vs_balanced_2026-05-18 | CID22 | 0.8755 | 0.8755 | 0.8324 | 0.8324 | A>>B | ADecisivelyBeatsB
+  bake_compare_v06_film_vs_balanced_2026-05-18 | AIC-3 CTC | 0.7862 | 0.7862 | 0.7845 | 0.7845 | tied | Tied
+  bake_compare_v06_film_vs_compression_2026-05-18 | CID22 | 0.8755 | 0.8755 | 0.8641 | 0.8641 | A>>B | ADecisivelyBeatsB
+  bake_compare_v06_film_vs_compression_2026-05-18 | AIC-3 CTC | 0.7862 | 0.7862 | 0.8183 | 0.8183 | B>>A | BDecisivelyBeatsA
+  exp_v22_hybrid_vs_balanced_2026-05-18 | CID22 | 0.8657 | 0.8657 | 0.8324 | 0.8324 | A>>B | ADecisivelyBeatsB
+  exp_v22_hybrid_vs_balanced_2026-05-18 | AIC-3 CTC | 0.8034 | 0.8034 | 0.7845 | 0.7845 | A>>B | ADecisivelyBeatsB
+  exp_v22_hybrid_vs_compression_2026-05-18 | CID22 | 0.8657 | 0.8657 | 0.8641 | 0.8641 | tied | Tied
+  exp_v22_hybrid_vs_compression_2026-05-18 | AIC-3 CTC | 0.8034 | 0.8034 | 0.8183 | 0.8183 | B>>A | BDecisivelyBeatsA
+  v24_ft_gentle_s4_vs_compression_ship_2026-05-18 | CID22 | 0.8451 | 0.8451 | 0.8641 | 0.8641 | B>>A | BDecisivelyBeatsA
+  v24_ft_gentle_s4_vs_compression_ship_2026-05-18 | AIC-3 CTC | 0.8131 | 0.8131 | 0.8183 | 0.8183 | B>>A | BDecisivelyBeatsA

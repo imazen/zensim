@@ -1,0 +1,128 @@
+[
+ {
+  "report": "benchmarks/bake_compare_5grp_cvL05_vs_largeiwssim_2026-05-18.md",
+  "a": "/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v22_mix_cv40_konjnd_0_02_5grp_s3_h128_packed.bin",
+  "b": "/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v22_mix_cv40_konjnd_0_02_LARGE_iwssim_s3_h128.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v22_mix_cv40_konjnd_0_02_5grp_s3_h128_packed.bin",
+  "b_run": "/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v22_mix_cv40_konjnd_0_02_LARGE_iwssim_s3_h128.bin",
+  "a_src": "recorded",
+  "b_src": "recorded"
+ },
+ {
+  "report": "benchmarks/bake_compare_exmix3_vs_balanced.md",
+  "a": "/mnt/v/zen/zensim-eval/ex_mix3_2026-05-18/exmix3_cv30_iw40_sm30_s3_h128_packed.bin",
+  "b": "/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v22_mix_cv40_konjnd_0_02_LARGE_iwssim_s3_h128.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/ex_mix3_2026-05-18/exmix3_cv30_iw40_sm30_s3_h128_packed.bin",
+  "b_run": "/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v22_mix_cv40_konjnd_0_02_LARGE_iwssim_s3_h128.bin",
+  "a_src": "recorded",
+  "b_src": "recorded"
+ },
+ {
+  "report": "benchmarks/bake_compare_exmix3_vs_persample.md",
+  "a": "/mnt/v/zen/zensim-eval/ex_mix3_2026-05-18/exmix3_cv30_iw40_sm30_s3_h128_packed.bin",
+  "b": "/home/lilith/work/zen/zensim--persample-runtime/zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/ex_mix3_2026-05-18/exmix3_cv30_iw40_sm30_s3_h128_packed.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/bake_compare_iwssim_persample_vs_balanced_2026-05-18.md",
+  "a": "/mnt/v/zen/zensim-eval/exp_iwssim_persample_2026-05-18/iwssim_persample_s3_h128.bin",
+  "b": "zensim/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/exp_iwssim_persample_2026-05-18/iwssim_persample_s3_h128.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/bake_compare_iwssim_persample_vs_compression_2026-05-18.md",
+  "a": "/mnt/v/zen/zensim-eval/exp_iwssim_persample_2026-05-18/iwssim_persample_s3_h128.bin",
+  "b": "zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/exp_iwssim_persample_2026-05-18/iwssim_persample_s3_h128.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/bake_compare_v06_film_vs_balanced_2026-05-18.md",
+  "a": "/mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.bin",
+  "b": "zensim/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_run": "/mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/bake_compare_v06_film_vs_compression_2026-05-18.md",
+  "a": "/mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.bin",
+  "b": "zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": "/mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/exp_v22_hybrid_vs_balanced_2026-05-18.md",
+  "a": "/mnt/v/zen/zensim-eval/exp_v22_hybrid_2026-05-18/v22_hybrid_s3_h128_packed.bin",
+  "b": "/home/lilith/work/zen/zensim--exp-v22-hybrid/zensim/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/exp_v22_hybrid_2026-05-18/v22_hybrid_s3_h128_packed.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/exp_v22_hybrid_vs_compression_2026-05-18.md",
+  "a": "/mnt/v/zen/zensim-eval/exp_v22_hybrid_2026-05-18/v22_hybrid_s3_h128_packed.bin",
+  "b": "/home/lilith/work/zen/zensim--exp-v22-hybrid/zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/exp_v22_hybrid_2026-05-18/v22_hybrid_s3_h128_packed.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/v24_ft_gentle_s4_vs_compression_ship_2026-05-18.md",
+  "a": "/mnt/v/zen/zensim-eval/v24_persample_konjnd_finetune_v2_2026-05-18/persample_konjnd_gentle_seed4_packed.bin",
+  "b": "/home/lilith/work/zen/zensim--hybrid-runtime/zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": "/mnt/v/zen/zensim-eval/v24_persample_konjnd_finetune_v2_2026-05-18/persample_konjnd_gentle_seed4_packed.bin",
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "recorded",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/v24_hybrid_nin_s2_vs_balanced_2026-05-18.md",
+  "a": "/tmp/v24_hybrid_nin_s2_packed_f16.bin",
+  "b": "/home/lilith/work/zen/zensim--hybrid-runtime/zensim/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_run": null,
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_src": "missing",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/v24_hybrid_nin_s2_vs_compression_ship_2026-05-18.md",
+  "a": "/tmp/v24_hybrid_nin_s2_packed_f16.bin",
+  "b": "/home/lilith/work/zen/zensim--hybrid-runtime/zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": null,
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "missing",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/v24_hybrid_no_nin_s4_vs_balanced_2026-05-18.md",
+  "a": "/tmp/v24_hybrid_s4_packed_f16.bin",
+  "b": "/home/lilith/work/zen/zensim--hybrid-runtime/zensim/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_run": null,
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin",
+  "a_src": "missing",
+  "b_src": "zensim-experimental/weights (by basename)"
+ },
+ {
+  "report": "benchmarks/v24_hybrid_no_nin_s4_vs_compression_ship_2026-05-18.md",
+  "a": "/tmp/v24_hybrid_s4_packed_f16.bin",
+  "b": "/home/lilith/work/zen/zensim--hybrid-runtime/zensim/weights/v_compression_persample_2026-05-18.bin",
+  "a_run": null,
+  "b_run": "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_compression_persample_2026-05-18.bin",
+  "a_src": "missing",
+  "b_src": "zensim-experimental/weights (by basename)"
+ }
+]
