@@ -57,10 +57,10 @@ Two facts follow.
 **Sources:** QUAL-A `steer-s0-{a,c,seed0}.json`; E33 `gates/steer-s{1,2}-{a,c}.json` and `steer-s0-{a,c}-dense.json`.
 
 **Method:**
-- Every number in §1 that comes from stored rows is produced by the committed
-  `benchmarks/e34_draft_2026-10-10/characterize.py` into `summary.json`. It reads stored JSON only.
-- Populations: the seven served models (A and C seeds 0–2, production seed 0). Dense bakes appear only in the
-  pass-count table above.
+- Pass counts, failure counts by block/panel/reference/level, drop-one rescues, seed overlap and the Rel. L2 table
+  come from the committed `characterize.py` (`summary.json`; stored JSON only). The seed-0 table, the true > linear
+  counts (`steerdiag-{a,c}-*.json`) and the dense comparison came from the same files outside it (review-verified).
+- Populations: the seven served models (A, C seeds 0–2; production seed 0); dense bakes only in the table above.
 - Recomputed M2 matches the stored values within 2.6e-7.
 
 **Outputs** (`/mnt/v/output/zensim/e34-draft-2026-10-10/`):
@@ -116,9 +116,9 @@ by E33C_STEER's criteria.
   | Block | Failing (n) | Passing (n) | Ratio | Broad-only ratio |
   |---:|---:|---:|---:|---:|
   | 8 | .042 (6) | .013 (214) | 3.1× | 2.3× |
-  | 16 | .082 (6) | .018 (162) | 4.7× | 4.7× |
+  | 16 | .082 (6) | .017 (162) | 4.7× | 4.7× |
   | 32 | .160 (12) | .016 (373) | 10.0× | 8.9× |
-  | 64 | .126 (23) | .021 (145) | 5.9× | 5.9× |
+  | 64 | .125 (23) | .021 (145) | 5.9× | 5.9× |
 
   From `summary.json` (`rel_l2_by_block`); revision 1's "4–9×" table did not reproduce.
 - **Curvature, by analogy.**
@@ -263,7 +263,7 @@ conditions** (all 410 differences; C's products are nonnegative too), so with `b
 linear class at width 128 (review P1). A partial M (the May sign-safe subset, 97 of A's 130 v1 inputs) is not admitted
 either: that subset comes from a correlation census, not value signs; the v2 inputs have no census; and the prior
 record above shows rank costs with no measured steering benefit. **W takes M's place** as the second nonlinear
-intervention, with a cleaner mechanism and no new code.
+intervention, with no new code.
 
 ### 3.5 Fit packet and cost
 
@@ -295,11 +295,11 @@ intervention, with a cleaner mechanism and no new code.
 (i134 is an agent host since 10-10). Slot-proportional to the 15 home-fleet slots (tower, i265, i270, r3500, r3800x):
 7.99 per hour, so about **11.9 h**, or 15.6 h if K doubles. Unmeasured.
 
-**Caps and placement:** as E33 (3 × the smoke-implied maximum; V40 capsfix map; dry placement; artifacts verified
-after the first cell). zenfleet only, no cloud cost.
+**Caps and placement:** as E33 (3 × the smoke-implied maximum; V40 capsfix map; dry placement; artifacts checked
+after cell one). zenfleet only.
 
-**Local work:** augmentation and dev-panel extraction; G-STEER (135) on 21 full-data models and the dev panel on those
-21 plus the 6 pilots (about 7–8 min per model, from QUAL-A and E33 timestamps); E21; the label-free gates.
+**Local work:** augmentation and dev-panel extraction; G-STEER (135) on 21 full-data models; the dev panel on 26
+distinct models (21 full-data + 5 unchosen pilots); 7–8 min per model (QUAL-A, E33 timestamps); E21; gates.
 
 ## 4. Evaluation and decision rule (fixed before any fit)
 
@@ -390,12 +390,9 @@ P4 also reports whether SafeSyn's references include any of the 8 broad origins.
 **Augmentation construction:**
 - **References:** 128 eligible origins by k-means on reference-only features (k = 128, centroid-nearest, singletons
   kept), longest side 256.
-- **Distortions:** four teacher codecs (`moz`, `jxl`, `webp`, `avif`) × three qualities spanning q20–q80 on each
-  codec's scale.
-- **Repairs:** blocks 8/16/32/64, up to 16 per (image, size) by a fixed seed. That is 98,304 repair rows and 1,536
-  bases, extracted at v3.
-- **Cost:** at about 2.2 ms per 256² extraction (E33C_RUNTIME diagnostic), about 4 CPU-minutes.
-- No label exists for these rows.
+- **Distortions:** four teacher codecs (`moz`, `jxl`, `webp`, `avif`) × three qualities over q20–q80.
+- **Repairs:** blocks 8/16/32/64, up to 16 per (image, size), fixed seed: up to 98,304 repair rows, 1,536 bases, at v3.
+- **Cost:** about 2.2 ms per 256² extraction (E33C_RUNTIME diagnostic), so about 4 CPU-minutes. No labels exist.
 
 **Not read:** KADID TERMINAL, AIC-3/AIC-4/SDR25, CID22 gold and human, KonJND, sealed/T0, HDR VAL, UPIQ, external
 panels. The exposure-ledger entry is written at assessment time.
@@ -465,6 +462,6 @@ confirms the hypothesis for that family. L-A missing 135 (on M3f) means the gate
 
 ## 9. What E34 does not claim
 
-E34 tests three changes inside the one-hidden-layer `N` class against matched controls on already-exposed D1
-populations and label-free TRAIN probes. It does not qualify a model, measure human perception of steering, pick
-between A and C, show the whole class unlearnable, or change any threshold or rule.
+E34 tests three changes in the one-hidden-layer `N` class against matched controls on already-exposed D1 populations
+and label-free TRAIN probes. It doesn't qualify a model, measure perception of steering, pick A or C, show the class
+unlearnable, or change any threshold or rule.
