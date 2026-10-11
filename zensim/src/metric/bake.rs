@@ -1681,7 +1681,7 @@ mod revision_contract_tests {
     // `bake_declaring` fixes a v2 extraction requirement, so `BakeScorer::new`
     // refuses it without the feature and the pixel-path tests are gated.
     #[cfg(feature = "feature-regime-v2")]
-    use crate::ssim_form::run_at_revision;
+    use crate::ssim_form::{run_at_revision, run_in_own_process};
     #[cfg(feature = "feature-regime-v2")]
     use crate::{RgbSlice, ZensimError};
 
@@ -2739,7 +2739,8 @@ mod revision_contract_tests {
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn rev5_entry_sampling_plans() {
         let name = "metric::bake::revision_contract_tests::rev5_entry_sampling_plans";
-        if !run_at_revision("5", name, "REV5_SAMPLING_ENTRY_OK") {
+        // Toggles SIMD tiers: always alone in its own Rev5 process.
+        if !run_in_own_process(name, "REV5_SAMPLING_ENTRY_OK", Some("5")) {
             return;
         }
         let (w, h) = (137, 301);
@@ -2964,6 +2965,14 @@ mod revision_contract_tests {
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn prepared_session_second_v1_walk_removal_is_bit_identical() {
+        // Toggles SIMD tiers and the process-global LEGACY_V2_ROUTE: always alone in its own process.
+        if !run_in_own_process(
+            "metric::bake::revision_contract_tests::prepared_session_second_v1_walk_removal_is_bit_identical",
+            "PREPARED_SESSION_V1_REMOVAL_OK",
+            None,
+        ) {
+            return;
+        }
         use archmage::testing::{
             CompileTimePolicy, for_each_token_permutation, lock_token_testing,
         };
@@ -3047,6 +3056,7 @@ mod revision_contract_tests {
                 }
             }
         });
+        println!("PREPARED_SESSION_V1_REMOVAL_OK");
     }
 
     /// COSTSET2: v2-bearing plans over basic/peaks/v2 skip X/B work at scales whose chroma slots they never read
@@ -3893,10 +3903,11 @@ mod revision_contract_tests {
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn rev5_bake_serves_supported_reads_and_refuses_unsupported() {
-        if !run_at_revision(
-            "5",
+        // Toggles SIMD tiers: always alone in its own Rev5 process.
+        if !run_in_own_process(
             "metric::bake::revision_contract_tests::rev5_bake_serves_supported_reads_and_refuses_unsupported",
             "REV5-BAKE-RAN",
+            Some("5"),
         ) {
             return;
         }

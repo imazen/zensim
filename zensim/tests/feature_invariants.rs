@@ -753,14 +753,16 @@ fn free_extras_are_silently_inert_without_the_append_block_declaration() {
 #[test]
 fn rev5_identity_exact_on_every_tier() {
     const SENTINEL: &str = "REV5_IDENTITY_OK";
-    if std::env::var("ZENSIM_FORMULA_REV").as_deref() != Ok("5") {
+    // Toggles SIMD tiers: always alone in its own Rev5 process, even when this
+    // process is already at Rev5, so no other test in this binary sees a tier
+    // change.
+    const CHILD: &str = "ZENSIM_TIER_TOGGLER_CHILD";
+    const NAME: &str = "rev5_identity_exact_on_every_tier";
+    if std::env::var(CHILD).as_deref() != Ok(NAME) {
         let out = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "rev5_identity_exact_on_every_tier",
-                "--exact",
-                "--nocapture",
-            ])
+            .args([NAME, "--exact", "--nocapture", "--test-threads=1"])
             .env("ZENSIM_FORMULA_REV", "5")
+            .env(CHILD, NAME)
             .output()
             .unwrap();
         assert!(

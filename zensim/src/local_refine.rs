@@ -2142,27 +2142,11 @@ mod tests {
     fn cone_planes_bit_exact_scalar_tier() {
         const PATH: &str = "local_refine::tests::cone_planes_bit_exact_scalar_tier";
         const SENT: &str = "NEIGHSTEER-CONE-SCALAR-RAN";
-        let rev = std::env::var("ZENSIM_FORMULA_REV");
-        if !matches!(rev.as_deref(), Ok("3") | Ok("4")) {
-            // Parent: run the body at each revision in a child process.
-            for rev in ["3", "4"] {
-                let exe = std::env::current_exe().expect("test binary path");
-                let out = std::process::Command::new(exe)
-                    .args([PATH, "--exact", "--nocapture", "--test-threads=1"])
-                    .env("ZENSIM_FORMULA_REV", rev)
-                    .output()
-                    .expect("re-exec the test binary");
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                assert!(
-                    out.status.success(),
-                    "{PATH} failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
-                assert!(
-                    stdout.contains(SENT),
-                    "{PATH} exited 0 at REV={rev} but never ran the scalar body\n{stdout}"
-                );
-            }
+        // Disables SIMD tiers: always alone in its own process, once per revision,
+        // even when this process is already at Rev3/Rev4 (e.g. a revision child
+        // running many tests), so no other test in this binary sees the change.
+        if !crate::ssim_form::run_in_own_process(PATH, SENT, Some("3")) {
+            assert!(!crate::ssim_form::run_in_own_process(PATH, SENT, Some("4")));
             return;
         }
         let _token = archmage::testing::lock_token_testing();

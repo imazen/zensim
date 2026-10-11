@@ -2736,6 +2736,15 @@ mod dense_bake_flip_gate {
     #[cfg(all(feature = "candidate-profiles", feature = "deprecated-profiles"))]
     #[allow(deprecated)]
     fn dense_and_wide_agree_at_every_dispatch_tier() {
+        // Toggles SIMD tiers: always alone in its own process, so no other test in
+        // this binary can see a tier change.
+        if !crate::ssim_form::run_in_own_process(
+            "profile::dense_bake_flip_gate::dense_and_wide_agree_at_every_dispatch_tier",
+            "DENSE_WIDE_EVERY_TIER_OK",
+            None,
+        ) {
+            return;
+        }
         fn wide_c() -> &'static [u8] {
             include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
         }
@@ -2774,6 +2783,7 @@ mod dense_bake_flip_gate {
             },
         );
         assert!(report.permutations_run >= 1);
+        println!("DENSE_WIDE_EVERY_TIER_OK");
     }
 
     /// Every shipped scoring bake declares exactly its consumed input IDs.
