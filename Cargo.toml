@@ -85,7 +85,7 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "417cc78
 # zenstats — canonical IQA-stats home extracted on 2026-05-26 from the
 # pre-existing `zensim-validate/src/panel.rs`. Lives in the zenmetrics
 # repo as a self-contained workspace member (zenmetrics already depends
-# on zensim, so the dep direction is zensim → zenmetrics/crates/zenstats
+# on zensim, so the dep direction is zensim → zenmetrics/crates/zenmetrics-stats
 # only — no cycle, the zenmetrics workspace root is NOT pulled in).
 # Pinned to a specific git rev for CI portability (same contract as the
 # zenpredict pin above — fixes imazen/zensim#43, where the sibling path
@@ -93,8 +93,14 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "417cc78
 # developers wanting auto-sync with the sibling worktree add to their
 # personal `.cargo/config.toml`:
 #     [patch."https://github.com/imazen/zenmetrics"]
-#     zenstats = { path = "../zenmetrics/crates/zenstats" }
+#     zenmetrics-stats = { path = "../zenmetrics/crates/zenmetrics-stats" }
 # Bump the rev deliberately when a zenstats fix zensim needs lands.
 # 2026-07-15: bumped to 0ce69492 for `per_group_srocc` — the within-group rank
 # agreement that pooled SROCC structurally hides (bake_verdict's per-ref column).
-zenstats = { git = "https://github.com/imazen/zenmetrics", rev = "3e16cb4550a7b47e534774ba5d48f9c08c7fc6c9", default-features = false, features = ["parallel"] }
+# 2026-10-11: the crate is `zenmetrics-stats` (renamed in zenmetrics b41ac97f);
+# `package =` keeps the `zenstats` dependency key, so every `use zenstats::`
+# path is unchanged. Pinned to zenmetrics master 1e48c1ea for the evaluation
+# modules (`resample`, `pairs`, `forced_choice`, `jnd`, `multiple`). This rev
+# also switches `bootstrap_ci_delta` (and so `decisive`) from order-statistic
+# percentiles to Hyndman–Fan type 7, the crate's one percentile rule.
+zenstats = { package = "zenmetrics-stats", git = "https://github.com/imazen/zenmetrics", rev = "1e48c1eafcaa8afaa8b632c4f12d8181a971a248", default-features = false, features = ["parallel"] }

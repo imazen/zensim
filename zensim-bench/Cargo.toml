@@ -158,7 +158,7 @@ zensim = { path = "../zensim", default-features = false, features = ["threads", 
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
 zensim027 = { package = "zensim", version = "=0.2.7", optional = true, default-features = false, features = ["avx512", "threads", "training"] }
-zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
+zenstats = { package = "zenmetrics-stats", path = "../../zenmetrics/crates/zenmetrics-stats", default-features = false, features = ["parallel"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "=0.8.2", features = ["imgref"] }

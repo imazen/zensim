@@ -5650,6 +5650,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenmetrics-stats"
+version = "0.1.0"
+source = "git+https://github.com/imazen/zenmetrics?rev=1e48c1eafcaa8afaa8b632c4f12d8181a971a248#1e48c1eafcaa8afaa8b632c4f12d8181a971a248"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
 name = "zenpixels"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5859,6 +5867,7 @@ dependencies = [
  "zenbench",
  "zenexr",
  "zenflate 0.4.0",
+ "zenmetrics-stats",
  "zenpixels",
  "zenpixels-convert",
  "zenpng",
@@ -5869,7 +5878,6 @@ dependencies = [
  "zensim-experimental",
  "zensim-train-core",
  "zensim-train-gpu",
- "zenstats",
 ]
 
 [[package]]
@@ -5878,14 +5886,6 @@ version = "0.0.0"
 dependencies = [
  "zensim",
  "zensim-regress",
-]
-
-[[package]]
-name = "zenstats"
-version = "0.1.0"
-source = "git+https://github.com/imazen/zenmetrics?rev=3e16cb4550a7b47e534774ba5d48f9c08c7fc6c9#3e16cb4550a7b47e534774ba5d48f9c08c7fc6c9"
-dependencies = [
- "rayon",
 ]
 
 [[package]]
