@@ -1,26 +1,35 @@
-# E34 — linear-along-repair training for the model-limited G-STEER failures (registration DRAFT, revision 2)
+# E34 — linear-along-repair training for the model-limited G-STEER failures (registration DRAFT, revision 3)
 
-Status: **DRAFT revision 2, 2026-10-10. Not registered and not approved.** No fit, no fleet job and no label read was
-done for it. Drafted on zensim `main@origin` `41cfd432`.
-- Revision 2 answers the xhigh review `E34_DRAFT_REVIEW.md` (FIX-FIRST): arm M dropped (P1), P2-a–d fixed, the P3s
-  addressed.
-- Next: re-review, then the owner approves or rejects the whole registration and every open choice (§8).
+Status: **DRAFT revision 3, 2026-10-11. Not registered and not approved.** No fit, no fleet job and no label read was
+done for it. Base: zensim `main@origin` `cdaca0ee`. Tables and history: [appendix](e34_registration_draft_appendix_2026-10-11.md).
 
-## 0. Scope
+## 0. Scope and revision history
 
-G-STEER is the last model failure on the release gates.
-- **Population:** PRODQUAL-B's registered 135 cases (GSTEER143 ruling R1). Bars are M2 ≥ .99 and M3f ≥ .70;
-  qualification needs 135/135.
-- **Current counts** (QUAL-A, E33): A 129, C 127, production seed 0 128. Full-data seeds 1–2: A 124 / 128, C 127 / 131.
-- **Settled:** spatial cost and memory (QUAL-A, STEERPATH); exact code replay (STEERFIX, E33C_STEER).
+G-STEER is the last model failure on the release gates: PRODQUAL-B's registered 135 cases (GSTEER143 ruling R1),
+bars M2 ≥ .99 and M3f ≥ .70, qualification 135/135. Counts: A 129, C 127, production seed 0 128; full-data seeds 1–2:
+A 124 / 128, C 127 / 131. Spatial cost and memory (QUAL-A, STEERPATH) and exact code replay (STEERFIX, E33C_STEER)
+are settled.
 
 E34 asks: **can a training or architecture change inside the one-hidden-layer `N` model class make the served model
-linear enough along block repairs to pass G-STEER while retaining human rank?** It tests three points of that class,
-not the whole class (§6).
+linear enough along block repairs to pass G-STEER while retaining human rank?** It tests three points of that class.
 
-**Adaptive design, disclosed.** The arms were designed after characterizing these 135 cases (§1). No number is tuned
-on them (λ comes from a disjoint dev panel; W and L are fixed here; the 135 are read once per model, after all fits),
-but the design is informed by them. §4.5 therefore also reports every full-data model on the disjoint dev panel.
+- **Revision 2** (review FIX-FIRST → READY-FOR-OWNER): arm M dropped (it was the linear ceiling L), arm W added, P2/P3 fixed.
+- **Revision 3 adopts the owner's 2026-10-11 IQA evaluation guidance** (`IQA_EVAL_GUIDANCE_2026-10-11.md`). The
+  owner asked to wait for it before approving. What changed, and why:
+  - **Source-clustered intervals for every claim.** The characterization's comparative claims (§1.4) now carry
+    `zenmetrics-stats` intervals clustered by source picture, with the Student interval beside the percentile one
+    (G < 30). One claim, the distortion-level effect, no longer holds under the Student interval and is now descriptive.
+  - **The decision rule is restated as source-clustered tests with Holm** (§4). E21 as-good becomes a paired,
+    reference-clustered non-inferiority test at the E33 tolerance; the sequential-incumbent improvement tests become
+    paired reference-clustered tests; all nine form one Holm family fixed now. The seed-unit t test is reported, not used.
+  - **Pair classes** (same ladder, cross-codec, cross-source) are reported for every human-agreement comparison (§4.6).
+  - **One percentile rule** (Hyndman–Fan type 7) with B, seed and rule recorded; **all statistics from
+    `zenmetrics-stats`**, through zensim's owners after the pin bump (P7). E34 reads no raw forced-choice data (§5).
+  - **AIC2026 labels** join the never-read list.
+
+**Adaptive design, disclosed.** The arms were designed after characterizing these 135 cases. No number is tuned on
+them (λ comes from a disjoint dev panel; W and L are fixed here; the 135 are read once per model, after all fits), but
+the design is informed by them. §4.7 also reports every full-data model on the disjoint dev panel.
 
 ## 1. The failures, from existing evidence only
 
@@ -46,7 +55,7 @@ Two facts follow.
    - With an exact supergradient, `true ≤ linear` must hold on every block. The gap is the curvature collected where
      hidden units switch along the repair.
 
-### 1.2 Pass counts and the evidence script
+### 1.2 Pass counts and evidence
 
 | Model | Seed 0 | Seed 1 | Seed 2 | Dense seed 0 |
 |---|---:|---:|---:|---:|
@@ -54,122 +63,59 @@ Two facts follow.
 | C (`89cb4861…` and seeds) | 127 | 127 | 131 | 127 |
 | Production (`f803b74c…`) | 128 | — | — | — |
 
-**Sources:** QUAL-A `steer-s0-{a,c,seed0}.json`; E33 `gates/steer-s{1,2}-{a,c}.json` and `steer-s0-{a,c}-dense.json`.
+Sources: QUAL-A `steer-s0-{a,c,seed0}.json`; E33 `gates/steer-s{1,2}-{a,c}.json` and `steer-s0-{a,c}-dense.json`.
+`characterize.py` (stored JSON only) writes `per_case.json` `6a6ba56b…` and `summary.json` `81d18131…`: pass counts,
+failure counts by block, panel, reference and level, drop-one rescues, seed overlap and medians. The seed-0 failure
+table, the concavity counts and the dense comparison (appendix A1, A2) came from the same files outside it
+(review-verified). All 44 A/C failures are M2 misses, all "MODEL" by E33C_STEER; production's four floor-tied KADID
+JPEG failures are removed for A and C by E33's output stage.
 
-**Method:**
-- Pass counts, failure counts by block/panel/reference/level, drop-one rescues, seed overlap and the Rel. L2 table
-  come from the committed `characterize.py` (`summary.json`; stored JSON only). The seed-0 table, the true > linear
-  counts (`steerdiag-{a,c}-*.json`) and the dense comparison came from the same files outside it (review-verified).
-- Populations: the seven served models (A, C seeds 0–2; production seed 0); dense bakes only in the table above.
-- Recomputed M2 matches the stored values within 2.6e-7.
+### 1.3 Clustered intervals for the comparative claims
 
-**Outputs** (`/mnt/v/output/zensim/e34-draft-2026-10-10/`):
+Rows: the seven served models × 135 cases. Cluster: the source picture (8 broad origins, 3 M3 fixtures whose renditions
+are one picture, 4 KADID references; G = 15, or G = 8 on the broad panel alone). `zenmetrics-stats`
+`resample::cluster_bootstrap`, `Design::OneWay`, `weighted_mean` (rev `1e48c1ea`); B 10,000, seed 20261011,
+Hyndman–Fan type 7, level 0.95. Student interval `estimate ± t(G−1)·se·√(G/(G−1))`, t from scipy (the crate has no
+public t quantile; P7). Floor ties are excluded from every rate. Raw: `e34-rev3-2026-10-11/clustered.json`.
 
-| file | sha256 |
-|---|---|
-| `per_case.json` | `6a6ba56b…` |
-| `per_case.tsv` | `90f7f3da…` |
-| `summary.json` | `81d18131…` |
+| Claim | G | Estimate | Percentile 95% | Student 95% | Reading |
+|---|---:|---:|---|---|---|
+| failure rate b64 − b8–b32, all panels | 15 | +0.106 | [0.021, 0.197] | [0.007, 0.205] | holds |
+| same, broad panel | 8 | +0.095 | [0.002, 0.181] | [−0.020, 0.211] | descriptive |
+| failure rate level 10 − level 17, broad | 8 | +0.049 | [0.004, 0.094] | [−0.010, 0.109] | **descriptive; not established** |
+| Rel. L2 geometric-mean ratio failing / passing, b8 | 15 | 3.32× | [2.46, 7.44] | [1.63, 6.77] | holds (8,809 finite) |
+| same, b16 | 15 | 4.28× | [2.92, 7.49] | [2.54, 7.24] | holds |
+| same, b32 | 15 | 7.42× | [4.25, 12.86] | [4.00, 13.75] | holds |
+| same, b64 | 15 | 6.45× | [3.31, 15.86] | [2.65, 15.69] | holds |
 
-### 1.3 Seed-0 failures
+Ratios are exp of the clustered log-ratio statistic; draws with no failing case at a block size are dropped and counted.
+Revision 2's 3.1–10.0× were ratios of medians without intervals (appendix A2).
 
-Content labels are from the reference pixels (TRAIN).
-- **Without worst block:** M2 after dropping the block with the largest rank displacement.
-- **Rel. L2:** ‖linear − true‖ / ‖true‖ over the case's blocks, in served units.
-- **true > linear:** blocks breaking the concavity inequality in raw units (E33C_STEER's PreFloor rows; A and C only).
+### 1.4 What the failures share
 
-| Model | Case | Block | Image (origin) | Level | Blocks | M2 | M3f | Without worst block | Rel. L2 | true > linear | Base |
-|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| A | broad-157-b8 | 8 | 9380 product photo on white | 10 | 704 | .9795 | .9295 | .9814 | .037 | 277/704 | 92.8 |
-| A | broad-220-b16 | 16 | 8384 text screenshot | 10 | 192 | .9868 | .9522 | .9901 | .037 | 107/192 | 90.5 |
-| A | broad-10-b32 | 32 | 2010 dense photo | 10 | 56 | .9682 | .9699 | .9764 | .221 | 39/56 | 88.1 |
-| A | broad-10-b64 | 64 | 2010 dense photo | 10 | 16 | .9353 | .9324 | .9643 | .426 | 6/16 | 88.1 |
-| A | broad-136-b64 | 64 | 7066 line art | 10 | 16 | .9794 | .9794 | .9964 | .050 | 7/16 | 86.8 |
-| A | broad-76-b64 | 64 | 6068 text scan | 13 | 16 | .9882 | .9971 | .9964 | .230 | 0/16 | 81.8 |
-| C | broad-157-b8 | 8 | 9380 product photo on white | 10 | 704 | .9893 | .9030 | .9913 | .042 | 389/704 | 93.3 |
-| C | broad-160-b32 | 32 | 9380 product photo on white | 13 | 48 | .9843 | .9690 | .9996 | .034 | 32/48 | 83.8 |
-| C | broad-202-b32 | 32 | 8206 web screenshot, mostly white | 13 | 40 | .9662 | .9670 | .9820 | .165 | 29/40 | 84.9 |
-| C | broad-34-b32 | 32 | 1054 architecture photo, flat sky | 13 | 48 | .9502 | .9468 | .9562 | .360 | 8/48 | 79.0 |
-| C | broad-136-b64 | 64 | 7066 line art | 10 | 16 | .9882 | .9853 | .9964 | .022 | 16/16 | 88.2 |
-| C | broad-202-b64 | 64 | 8206 web screenshot | 13 | 12 | .8601 | .9371 | .9273 | .220 | 7/12 | 84.9 |
-| C | broad-31-b64 | 64 | 1054 architecture photo | 10 | 12 | .7273 | .7273 | .8182 | .351 | 0/12 | 90.6 |
-| C | broad-34-b64 | 64 | 1054 architecture photo | 13 | 12 | .9720 | .9720 | .9909 | .378 | 1/12 | 79.0 |
-| P | broad-206-b32 | 32 | 8206 web screenshot | 17 | 40 | .9698 | .9525 | .9826 | .114 | — | 57.5 |
-| P | broad-206-b64 | 64 | 8206 web screenshot | 17 | 12 | .9441 | .8531 | .9545 | .146 | — | 57.5 |
-| P | dog-256-20 | 32 | M3 fixture (dog, JPEG q20) | — | 64 | .9872 | .9857 | .9887 | .200 | — | 41.7 |
-| P | I01/I21/I41/I61_10_05 | 8 | KADID JPEG | — | 3,072 | 0 | 0 | — | — | — | −16.9 |
+- **Block size:** b64 fails more than b8–b32 (above). At b64 a case has 12–16 blocks, so M2 ≥ .99 allows one to three
+  adjacent swaps, and dropping one block rescues 12 of 23 b64 failures (A2).
+- **Curvature:** failing cases have 3.3–7.4× the linearization error of passing ones at every block size, with intervals
+  excluding 1 (above). R5STEER2 shows the same on `by_v2fy` bakes, by analogy (A3).
+- **Content (descriptive, 8 broad sources):** three references (line art, a mostly white screenshot, a product on
+  white) carry 28 of 44 broad failures (A2). This names pictures and claims nothing about new images.
+- **Distortion level:** milder JXL levels fail more often on the point estimate, but the Student interval includes
+  zero. Not established.
+- **Seeds:** failures move with seed and packing; 27 of 36 failing pairs fail in one model only (A2).
+- **Gradient estimate:** 12 of 14 seed-0 A/C failures have a block with true > linear in raw units, which a concave
+  network can't produce with an exact supergradient (A2).
+- **Training revision (by analogy):** Rev4-trained `by_v2fy` weights are far more linear than Rev5-trained ones under
+  one head (A3).
 
-Production's four KADID JPEG failures are floor ties (served −16.906; STEERFIX "CODE"), removed for A and C by E33's
-identity knot and tail. **All 44 A and C failures are M2 misses** (A seed 1 broad-76-b64 also misses M3f), all "MODEL"
-by E33C_STEER's criteria.
-
-### 1.4 What the failures share (51 failures over the seven served models; 47 excluding the floor ties)
-
-- **Block size.**
-  - Failures: b64 23/168, b32 12/385, b16 6/168, b8 10/224 (6 non-floor).
-  - At b64 a case has 12–16 blocks. M2 ≥ .99 allows Σd² ≤ 2.86 at n = 12 and ≤ 6.8 at n = 16, i.e. one or three
-    adjacent swaps.
-  - Dropping the most-displaced block lifts 12 of 23 b64 failures above .99, against 6 of 24 at b8–b32.
-- **But it is not only small n.** At every block size, failing cases (non-floor) have a higher median linearization
-  error (Rel. L2, served) than passing cases. The ratio ranges from 3.1× to 10.0× (all panels):
-
-  | Block | Failing (n) | Passing (n) | Ratio | Broad-only ratio |
-  |---:|---:|---:|---:|---:|
-  | 8 | .042 (6) | .013 (214) | 3.1× | 2.3× |
-  | 16 | .082 (6) | .017 (162) | 4.7× | 4.7× |
-  | 32 | .160 (12) | .016 (373) | 10.0× | 8.9× |
-  | 64 | .125 (23) | .021 (145) | 5.9× | 5.9× |
-
-  From `summary.json` (`rel_l2_by_block`); revision 1's "4–9×" table did not reproduce.
-- **Curvature, by analogy.**
-  - R5STEER2 measured curvature directly on the E24 `by_v2fy` Rev5 bakes, not on E33's A and C.
-  - Interpolating feature rows, 9 of 10 failing cases pass at 1% of the repair and fail at the full repair. The owner
-    case's relative L2 grows from .02 at 1% to .19 at 100%.
-- **Content.** Three of the eight broad references carry 28 of the 44 broad failures:
-
-  | Origin | Content | Failures |
-  |---|---|---:|
-  | 7066 | line art | 10/84 |
-  | 8206 | mostly white screenshot | 9/84 |
-  | 9380 | product on white | 9/84 |
-  | 6068 | uniform text scan | 2/84 |
-  | 8384 | text screenshot | 2/84 |
-
-  The failure-prone images mix large flat areas with concentrated detail.
-- **Distortion level.**
-  - Failures by JXL level: 10 → 21/224, 13 → 13/224, 17 → 10/224. Level 10 is the mildest.
-  - Median base score is 91.4 at level 10, 80.6 at 13 and 38.9 at 17 (seed-0 A, C and production).
-  - Failing broad cases have a median base of 85.3, against 80.4 for passing ones.
-- **Seeds.** 36 distinct (case, block) pairs fail somewhere; only 9 fail in two or more models (broad-136-b64 in 5 of
-  7). Counts range 124–131. Dense C passes two of packed C's failures and fails two others.
-- **Gradient estimate.**
-  - In 12 of 14 seed-0 A/C failures at least one block has true > linear in raw units. A concave network can't produce
-    that with an exact supergradient.
-  - It is not f32 rounding: the review measured the largest excess at 0.4–4.9% of each case's largest gain.
-  - So the central-difference sensitivities aren't supergradients there: units sit within one step of a kink.
-  - R5STEER2 saw it as step sensitivity, 2 of 10 cases.
-- **Training revision (by analogy, E24 `by_v2fy` bakes, uniform 3-seed ensembles, same `N` head and spec;
-  R5STEER2):**
-
-  | Weights | Arithmetic | Broad passes | Owner case (I61, seed index 2, b32) |
-  |---|---|---:|---|
-  | Rev4-trained | Rev4 | 92/96 | Rel. L2 .004 at full repair |
-  | Rev4-trained | Rev5 | 93/96 | M2 .9997 |
-  | Rev5-trained | Rev5 | 85/96 | Rel. L2 .19, M2 .888 |
-
-  Averaging three seeds did not fix the Rev5 weights. E33's A and C are Rev5-trained.
-- **Not a floor effect:** A/C bases are 79–93; C's floor is −304.
-
-**Not in existing evidence:** which inputs or hidden units drive each misranking. Stored rows hold per-block scores
-only. Preparation P3 (§7) measures it, report-only, after the arms are frozen.
+**Not in existing evidence:** which inputs or hidden units drive each misranking (P3).
 
 ## 2. Hypotheses
 
 | # | Hypothesis | For | Against |
 |---|---|---|---|
-| H1 | **Curvature:** uneven unit switching along repairs causes the misranking | Rel. L2 3.1–10.0× higher in failures at every block size; R5STEER2 1% vs full repair (by analogy); b64 (largest Δf) fails most | b8 cases fail too (n = 704) |
+| H1 | **Curvature:** uneven unit switching along repairs causes the misranking | Rel. L2 3.3–7.4× higher in failures at every block size, clustered intervals excluding 1; b64 fails more (+0.106, interval excludes 0); R5STEER2 (by analogy) | b8 cases fail too (n = 704) |
 | H2 | **Kinks near the base** make `s` a poor linearization | true > linear in 12/14 seed-0 A/C failures; R5STEER2 step sensitivity 2/10 | 8/10 R5STEER2 cases persist under both alternative steps |
-| H3 | **Content:** flat + concentrated-detail images with mild distortion expose H1 | 28/44 broad failures on 3/8 references; level 10 fails 2× level 17 | 3 references can't separate content from identity |
+| H3 | **Content:** flat + concentrated-detail images with mild distortion expose H1 | 28/44 broad failures on 3/8 references (descriptive) | 8 sources; the level effect's Student interval includes 0 |
 | H4 | **Gate discreteness at b64:** 12–16 blocks allow 1–3 adjacent swaps | 12/23 b64 failures pass with one block dropped | A gate property; E34 changes no threshold |
 | H5 | **Training data sets curvature** | `by_v2fy` analogy: Rev4 weights 93/96 vs Rev5 weights 85/96 at Rev5 arithmetic | Not shown on A/C; the cause inside the Rev5 tables is unknown |
 | H6 | **Seed noise near the bar:** a fix must shift the whole distribution | 27/36 failing pairs fail in one model only; counts 124–131 | — |
@@ -240,30 +186,16 @@ denominator use the same eight). `nonneg_project` is unchanged, so raw ≤ pin a
 - **What follows:** with `b1 = 0`, `w2 ≤ 0` and nonnegative inputs the one unit is always active, so
   `raw = pin − c·x`, `c ≥ 0`: linear on the nonnegative domain. **M2 = 1 up to finite-difference rounding** (f32
   forward, steps down to `1e-5`; P2 compares `s` with `c`). **M3f ≥ .70 is not guaranteed.**
-- **Role:** the anchor for how much human rank perfect linearity costs here. It is adoptable last (§4.4), or report-only
+- **Role:** the anchor for how much human rank perfect linearity costs here. It is adoptable last (§4.7), or report-only
   if the owner prefers (§8).
 
-**Prior evidence on sign-constrained and linear scores** (other heads, feature sets and populations, so not a
-prediction of E34's numbers):
+**Prior evidence** on sign-constrained and linear scores (V46b, V47-strict, min-max monotone, the May sign census) is in
+appendix A4. It is historical pooled SROCC, neither pair-class split nor clustered, so it is context, not evidence.
 
-| Record | Model | Result |
-|---|---|---|
-| `v46_v46b_monotone_cbc_pareto_2026-05-26.md` | V46b, `monotone_cbc` | CID22 −0.035, KADID −0.12 vs V39 (0.9251) |
-| `v47_masked_monotone_2026-05-27.md` | masked-strict | KADID 0.803 vs 0.925 |
-| `minmax_monotone_2026-07-16.md` | positive-weight `monotone_cbc` MLP | imazen-26 0.032 |
-| same | masked-monotone linear | imazen-26 0.862, "the empirical monotone ceiling for a linear score" |
-| May sign census (`feature_sign_mask_2026-05-26.tsv`) | 372 v1 features | 300 `pin_geq0`, 72 `free` (correlation sign flips across distortion types); 33 of A's 130 v1 inputs are `free` |
+### 3.4 Dropped: arm M
 
-L constrains those 33 too. That is its expected rank cost.
-
-### 3.4 Dropped: arm M (monotone in distortion)
-
-Revision 1's M projected W1 ≥ 0 on `HigherIsWorse` columns with nonnegative TRAIN minima. **Every input meets both
-conditions** (all 410 differences; C's products are nonnegative too), so with `b1 = 0` no unit could switch: M was L's
-linear class at width 128 (review P1). A partial M (the May sign-safe subset, 97 of A's 130 v1 inputs) is not admitted
-either: that subset comes from a correlation census, not value signs; the v2 inputs have no census; and the prior
-record above shows rank costs with no measured steering benefit. **W takes M's place** as the second nonlinear
-intervention, with no new code.
+Revision 1's M (W1 ≥ 0 on nonnegative `HigherIsWorse` columns) covered all 410 inputs, so it was L's linear class;
+a partial, sign-safe M is not admitted either. Reasons: appendix A5.
 
 ### 3.5 Fit packet and cost
 
@@ -303,70 +235,87 @@ distinct models (21 full-data + 5 unchosen pilots); 7–8 min per model (QUAL-A,
 
 ## 4. Evaluation and decision rule (fixed before any fit)
 
-### 4.1 Each arm against its own family's fresh control
+### 4.1 Statistics conventions
 
-- **Parity pre-check:** Control-A/C `kadid_s0` bit-identical to E33 A/C `kadid_s0` (one thread, v3); a mismatch is
-  recorded and the fresh controls still run.
-- **E21 as-good** (E33 §9.1 formulas and seed units, arm vs fresh family control, four D1 sources):
-  - Mean Δ ≥ −0.002;
-  - every source ≥ −0.005;
-  - W2 Δ > −2·SE.
-  - Missing or nonfinite: INCOMPLETE, which means not eligible.
+- **Owner:** every interval, p-value and Holm decision comes from `zenmetrics-stats` (rev ≥ `1e48c1ea`, pinned at
+  freeze) through zensim's owners after the pin bump (P7). Harness scripts compute none of them; the existing Python
+  E21 scorer is an independent reference only.
+- **Bootstrap:** `Design::OneWay(reference image)`, labels unique across datasets; B 10,000; seed 20261011 plus a
+  fixed per-statistic offset; Hyndman–Fan type 7; level 0.95. Every result records rule, B and seed.
+- **Few sources:** the Student interval `estimate ± t(G−1)·se·√(G/(G−1))` is reported beside the percentile one for
+  every statistic with G < 30 (TID2013 25, CID22-A 25 and KonFiG TRAIN+VAL's few sources; KADID TRAIN+SELECT has 65).
+- **Seeds** are not resampled. Each statistic averages seeds 0–9 inside every draw; E33's seed-unit t is reported beside it.
 
-### 4.2 G-STEER (primary), full-data seed 0
+### 4.2 E21 as-good: a paired, reference-clustered non-inferiority test
 
-- PRODQUAL-B's 135 cases, M2 ≥ .99 and M3f ≥ .70, no exclusions, served path, same instrument, settings and pins as
-  QUAL-A.
-- **Arm pass: 135/135.**
-- Seeds 1 and 2 are run. Each must be no lower than the family control's count for the same seed (ties pass).
-  - This guard is weak: control counts move 124–131.
-  - §8 offers the owner a stronger form: each ≥ max(the control's count, 133).
-- The 135 cases are read once per model, after every fit. They never choose λ, seeds, epochs or arms.
+- **Statistic:** `Δ` = the mean over the four D1 datasets (equal weights) of [mean over seeds 0–9 of the arm's signed
+  SROCC minus the paired fresh family control's], on each dataset's withheld-fold rows, recomputed on each draw's
+  copy-aware expanded rows (`panel::spearman`). A draw leaving a dataset with fewer than 3 references is non-finite
+  and dropped; `n_finite` is recorded.
+- **Hypothesis:** H0: Δ ≤ −0.002 (E33's tolerance as the margin). One-sided p from the bootstrap of `Δ + 0.002`:
+  `p_zero/2` if its estimate is > 0, else `1 − p_zero/2`.
+- **Guards** (point estimates, as E33, each reported with its clustered intervals): every dataset's Δ_d ≥ −0.005;
+  W2 Δ > −2·se, with se now the clustered bootstrap se of W2.
+- Missing or nonfinite results: INCOMPLETE, p = 1.
 
-### 4.3 Non-regression gates (full-data seed 0, as registered in QUAL-A / E33)
+### 4.3 Improvement tests
 
-- C1 mono ≥ .93, C2 ties ≤ .05, C3, C4, C5 exact 100 (E33 §7 E3–E8), C6;
-- G-DIAL p5 ≤ 25, p95 ≥ 85, mono ≥ .93;
-- N1 and N2 ≥ 99.0, N3 ≥ 122/144;
-- output stage K1–K5;
-- runtime: no cell slower than the family control by a paired CI wholly above +2% (SPEEDQ/COSTCMP; 64², 256², 1024²;
-  v4x and v3; 1 thread);
-- spatial cost ≤ 3× uncached; map memory ≤ 128 B/pixel + 64 MiB (QUAL-A chain, 1024² and 2048²).
+Paired, same statistic, arm minus the incumbent it would replace. H0: Δ ≤ 0; one-sided p as above. A replacement also
+needs the point estimate Δ > +0.002 (E33's practical bar).
 
-### 4.4 Verdict, per family: sequential incumbent
+### 4.4 One Holm family, fixed now
 
-1. An arm is **eligible** if it passes 4.1, 4.2 and every gate in 4.3.
-2. **Order: W, K, L.** That is fewest moving parts first: W changes one recipe value, K adds code and data, L changes
-   the model class.
-   - **Incumbent** := the first eligible arm in that order.
-   - Each later eligible arm **replaces the incumbent only if it passes the improvement test against the current
-     incumbent** over the same cells: Mean Δ > +0.002 and one-sided `p < 0.05`, Student t, df 9 (E32/E33).
-   - An arm that isn't eligible never becomes or displaces the incumbent.
-3. **No eligible arm:** the family keeps its E33 model. Every result is recorded.
-4. **A vs C:** E34 doesn't choose between the families. The owner's open choice from E33 stays open, with both
-   families' E34 outcomes attached.
-5. **Meaning of "adopt":** the next candidate for that family, entering full qualification (every release gate, the
-   KADID TERMINAL decision, serving review). E34 qualifies nothing.
+Nine hypotheses, all computed after every fit, whether or not the verdict consults them:
 
-Infrastructure failures rerun the same cell identity. There is no early stop and no post-result rule change.
+| # | Test | Family |
+|---|---|---|
+| 1–3 | E21 as-good: W, K, L | A |
+| 4–5 | E21 as-good: W, K | C |
+| 6–8 | improvement: K over W, L over W, L over K | A |
+| 9 | improvement: K over W | C |
 
-### 4.5 Report-only
+`multiple::holm_reject` at α = 0.05; adjusted p from `multiple::holm`. An INCOMPLETE entry enters with p = 1.
 
-Every arm's per-case M2, M3f, Rel. L2 and true > linear on the 135 cases, all seeds; **the dev panel on all 21
-full-data models** (the held-out steering read, §0); L's `s` vs exact coefficients (P2) and M3f; W's and K's Rel. L2
-change vs control; K's penalty and skipped-image count per epoch; the high-quality human slice (E33 §9.5); per-source
-deltas.
+### 4.5 G-STEER and non-regression gates (full-data seed 0)
+
+- **G-STEER:** PRODQUAL-B's 135 cases, M2 ≥ .99 and M3f ≥ .70, served path, QUAL-A's instrument and pins. **Pass:
+  135/135.** Seeds 1–2 each no lower than the control's same seed (ties pass; weak, §8). A count on a fixed panel, so
+  no interval decides it; the pass rate's clustered interval is reported. Read once per model, after all fits.
+- **Gates (registered bars, unchanged):** C1 mono ≥ .93, C2 ties ≤ .05, C3, C4, C5 exact 100 (E33 §7 E3–E8), C6;
+  G-DIAL p5 ≤ 25, p95 ≥ 85, mono ≥ .93; N1, N2 ≥ 99.0; N3 ≥ 122/144; K1–K5; spatial ≤ 3× uncached; map memory ≤ 128
+  B/pixel + 64 MiB. Runtime keeps its registered SPEEDQ/COSTCMP paired-round CI (timing rounds, not images): no cell
+  slower than the family control by a CI wholly above +2%.
+
+### 4.6 Pair classes (report-only)
+
+For every arm vs its control and dataset: sign agreement by pair class from `pairs::class_agreement`, with clustered
+intervals: **same ladder** (same reference, same distortion type or codec), **cross-codec** (same reference, other
+type or codec) and **cross-source**. Labels: KADID/TID2013 distortion type, KonFiG distortion, CID22-A codec. The
+pooled SROCC in 4.2 is mostly cross-source calibration; these classes show where an arm gains or loses. Whether a
+class should gate is an owner question (§8).
+
+### 4.7 Verdict, per family: sequential incumbent
+
+1. **Eligible** = Holm rejects its E21 H0 (4.2/4.4), the guards hold, G-STEER and every gate pass (4.5).
+2. **Order W, K, L.** Incumbent := the first eligible arm. A later eligible arm replaces the incumbent only if Holm
+   rejects that improvement H0 and its point Δ > +0.002. A non-eligible arm never enters.
+3. **None eligible:** the family keeps its E33 model. **A vs C:** not chosen here. **Adopt** = enter full
+   qualification. Infrastructure failures rerun the same cell; no early stop; no post-result rule change.
+4. **Report-only:** per-case M2, M3f, Rel. L2 and true > linear for every arm and seed; the dev panel on all 21
+   full-data models (the held-out steering read; G = 8, descriptive); L's `s` vs exact coefficients and M3f; W's and K's Rel. L2 ratio vs
+   control with clustered intervals; K's penalty log; the high-quality slice (E33 §9.5) with clustered intervals and pair classes;
+   per-dataset deltas.
 
 ## 5. Data exposure
 
 | Read | Population | Role | Purpose |
 |---|---|---|---|
 | Fit | D1 human (KADID TRAIN+SELECT, TID2013, KonFiG TRAIN+VAL, CID22-A(25)), SafeSyn and CID22-train teachers, KADIS coverage; archive `9c3eff1b…` | as E33 | training |
-| E21 | the same four D1 sources, each withheld from its fold | already exposed (E33, V40) | §4.1 |
+| E21 | the same four D1 sources, each withheld from its fold | already exposed (E33, V40) | §4.2 |
 | Steering augmentation (K) | imazen-26 origins passing the eligibility rule below; pixels and features only | TRAIN | §3.2 |
-| Steering dev panel | 8 more eligible origins, built by the broad recipe (longest side 256, JXL scalar 10/13/17, blocks 8/16/32/64; 96 cases) | TRAIN, pixels only | λ pilot; §4.5 |
-| G-STEER | PRODQUAL-B's 135 cases | as registered (96 TRAIN, 27 historical M3, 12 KADID SELECT) | §4.2, once |
-| Label-free gates | identity probe 38, NEARID 24, instrument grids, negtail probe | as E33 | §4.3 |
+| Steering dev panel | 8 more eligible origins, built by the broad recipe (longest side 256, JXL scalar 10/13/17, blocks 8/16/32/64; 96 cases) | TRAIN, pixels only | λ pilot; §4.7 |
+| G-STEER | PRODQUAL-B's 135 cases | as registered (96 TRAIN, 27 historical M3, 12 KADID SELECT) | §4.5, once |
+| Label-free gates | identity probe 38, NEARID 24, instrument grids, negtail probe | as E33 | §4.5 |
 | Census (L) | feature columns of the D1 fit rows | features only | §3.3 |
 
 **CID22-A(25)** is inherited from E33's archive. Per `docs/DATA_SPLITS.md` (2026-09-22), `844297.png` (CID22-A) is the
@@ -394,8 +343,12 @@ P4 also reports whether SafeSyn's references include any of the 8 broad origins.
 - **Repairs:** blocks 8/16/32/64, up to 16 per (image, size), fixed seed: up to 98,304 repair rows, 1,536 bases, at v3.
 - **Cost:** about 2.2 ms per 256² extraction (E33C_RUNTIME diagnostic), so about 4 CPU-minutes. No labels exist.
 
-**Not read:** KADID TERMINAL, AIC-3/AIC-4/SDR25, CID22 gold and human, KonJND, sealed/T0, HDR VAL, UPIQ, external
-panels. The exposure-ledger entry is written at assessment time.
+**Not read:** AIC2026 labels, KADID TERMINAL (and every TERMINAL segment), AIC-3/AIC-4/SDR25 labels, CID22 gold and
+human, KonJND, sealed/T0, HDR VAL, UPIQ, external panels. The exposure-ledger entry is written at assessment time.
+
+**No raw forced-choice data.** KonFiG's D1 labels are the authors' reconstructed JND scale from boosted triplets; E34
+reads only those values. The not-sure-as-half rule, the dataset's worker screening and `fit_observer_slope` apply to no
+E34 read. Any forced-choice read added later must apply them.
 
 ## 6. Falsification plan
 
@@ -407,9 +360,9 @@ and keeps rank". It is drawn when all of these hold:
 
 E34 tests three points of the one-hidden-layer `N` class. It cannot show the whole class unlearnable.
 
-**Interpretive criterion, reported beside the conjunction and not part of it:** whether W's or K's mean Rel. L2 on the
-135 cases is at least 30% below its family control's. It separates "the intervention made the model more linear but
-not enough" from "it didn't make it more linear".
+**Interpretive criterion, beside the conjunction and not part of it:** W's or K's geometric-mean Rel. L2 ratio to its
+family control on the 135 cases is ≤ 0.70 with both clustered upper bounds (percentile, Student; G = 15) below 1. It
+separates "more linear but not enough" from "not more linear".
 
 **What follows, each a separate registration:**
 - **(a)** a smooth-activation class: a C¹ hinge with `h(0) = 0` and `h ≥ 0`. This needs a zenpredict activation and a
@@ -444,6 +397,10 @@ confirms the hypothesis for that family. L-A missing 135 (on M3f) means the gate
     - the L projection keeps raw(0) = pin exact at f32 and f16;
     - refusal combinations;
     - default argv byte-identical.
+- **P7.** Statistics owners (guidance §4): bump zensim's `zenstats` pin to `zenmetrics-stats` ≥ `1e48c1ea` (the
+  migration lane); implement 4.2–4.6 on it in a Rust owner (`panel evaluate` clustered comparisons or `bake_verdict`),
+  with the existing Python E21 scorer as an independent reference reproducing E33's recorded seed-unit numbers. Ask
+  zenmetrics for a public Student-interval helper (the t quantile now comes from scipy) and a dataset-stratified design.
 - **P6.** L serving smoke: an `in×1×1` `N` bake at f16 passes identity (C5, E3–E8), the steering instrument and the
   served-path gates. Then smokes per arm and family on the slowest worker class, caps, dry placement, parity pre-check
   and the freeze record.
@@ -454,11 +411,17 @@ confirms the hypothesis for that family. L-A missing 135 (on M3f) means the gate
    1–2 each ≥ max(the control's count, 133)?
 2. **Families:** both (305 fits, about 95 cell-hours before K's overhead), or one? C costs about 2× per cell.
 3. **W:** keep it (as drafted), or drop it and run K alone as the only nonlinear intervention (saves 86 fits)?
-4. **L:** adoptable last (as drafted) or report-only, given the prior record of sign-constrained and linear scores (§3.3)?
+4. **L:** adoptable last (as drafted) or report-only, given the prior record of sign-constrained and linear scores (appendix A4)?
 5. **K's λ:** a pilot on the 8-origin dev panel, or one fixed λ?
 6. **Augmentation codecs:** all four teacher codecs, or JXL only like the broad panel?
 7. **The M2 bar at b64:** at 12 blocks it tolerates one adjacent swap. Intended?
 8. **Hosts:** is the r5600g loan available? That sets wall time (about 12 h on the five fleet hosts, unmeasured).
+9. **Margin and power (new):** clustered non-inferiority at −0.002 with Holm can fail an arm that truly equals its
+   control if the clustered se is large; E33's seed-unit SE was 0.00075, and the clustered se is unmeasured. Keep the
+   margin, widen it, or authorize one ledgered read of E33's stored E21 predictions (already exposed) to measure the
+   clustered se before freeze?
+10. **Pair classes (new):** report-only (as drafted), or should same-ladder and cross-codec agreement also gate?
+11. **Holm family (new):** one family of nine (as drafted), or separate families for eligibility and improvement?
 
 ## 9. What E34 does not claim
 

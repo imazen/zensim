@@ -1,0 +1,13 @@
+[package]
+name = "e34-clustered"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "E34 draft: source-clustered intervals for the stored-row characterization, all statistics from zenmetrics-stats"
+
+# Standalone: not a zensim workspace member (zensim still pins the pre-rename `zenstats`).
+[workspace]
+
+[dependencies]
+zenmetrics-stats = { git = "https://github.com/imazen/zenmetrics", rev = "1e48c1eafcaa8afaa8b632c4f12d8181a971a248", default-features = false }
+serde_json = "1.0.145"
