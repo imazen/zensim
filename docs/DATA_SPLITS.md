@@ -1916,3 +1916,33 @@ models. Report SHA-256
 Exposure of these two external panels is now recorded for E31 uh4 and the V40
 control; any later read of them by these or derived models must disclose it.
 No fit, calibration, selection or adoption followed.
+
+## Exposure ledger — 2026-10-11: percentile-rule re-run of recorded bake_compare decisions
+
+Owner decision (2026-10-11): zenstats switches `bootstrap_ci_delta` to the
+type 7 percentile rule; "re-run the recorded bake_compare and panel decisions
+once under both rules, mark any that flip as borderline". Owner choice for the
+data scope, verbatim option text: "Allowed subset only" — re-run the runnable
+comparisons on non-terminal rows for KADID/TID/KonJND, "plus CID22 and AIC-3
+with an exposure-ledger entry", and label all recorded decisions as not
+re-verified on the full tables.
+
+Scope as executed (narrower than the option, to open no file that holds
+TERMINAL rows): the 372-column root
+`/mnt/v/zen/zensim-training/2026-05-15-full-features` has SELECT and TERMINAL
+view files but no TRAIN view, so KADID, TID and KonJND are read **only from
+their SELECT views** (`kadid_select_372_2026-08-29.parquet` 3,125 rows,
+`tid_select_372_2026-08-29.parquet` 1,080, `konjnd_select_372_2026-08-29.parquet`
+807; sha256 as in `_MANIFEST_splitv2_views_372_2026-08-29.json`). The full
+KADID/TID/KonJND tables and every `*_terminal_*` file are not opened.
+CID22 (`cid22_features_372col_2026-05-15.parquet`, 4,292) and AIC-3
+(`aic3_features_372col_2026-05-15.parquet`, 600) are read in full, as in the
+recorded runs.
+
+Models: the 12 frozen 2026-05-18 bake pairs of the recorded `bake_compare`
+reports whose bakes still exist (the two reports with
+`/tmp/v24_hybrid_nin_s2_packed_f16.bin` cannot run). No fitting, selection,
+calibration or new model; the same bootstrap draws (B = 1000, seed 42) are
+summarised under the old order-statistic rule and the new type 7 rule, and
+only the agree counts and decisions are compared. Results and the borderline
+list: `benchmarks/percentile_rule_rerun_2026-10-11.md`.
