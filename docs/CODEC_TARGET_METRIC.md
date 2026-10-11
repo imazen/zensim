@@ -41,6 +41,11 @@ The intended score contract is:
 - A steering map must help the encoder improve the same scalar it targets.
   Its value is measured in real bytes, achieved quality and passes.
 
+- Planned (owner decision 2026-10-11): zensim reports a declared JND estimate
+  beside the dial now; once AIC2026 human labels arrive, a new profile puts the
+  dial at `100 − 10 · JND` (90 = 1 JND) above a smooth join to the lower range.
+  See [JND_DIAL_PLAN_2026-10-11.md](JND_DIAL_PLAN_2026-10-11.md).
+
 These are requirements, not a claim that every available profile meets them.
 In particular, **“60 = visually lossless/JND” is an old calibration convention,
 not a validated universal promise for the current profiles**. The current

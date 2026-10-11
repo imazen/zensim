@@ -45,6 +45,9 @@ with tanh_scale=30; future bakes must not regress it.
 > `DATA_SPLITS.md` §3d), and reports where 1 JND falls on the dial with its
 > uncertainty. The KonJND PJND location below stays as a different-protocol
 > check, reported separately and never merged with the JND anchor.
+> Plan (owner decision 2026-10-11): a JND side output now; the dial becomes
+> `100 − 10 · JND` above a smooth join once AIC2026 labels arrive.
+> See [JND_DIAL_PLAN_2026-10-11.md](JND_DIAL_PLAN_2026-10-11.md).
 
 The visually-lossless threshold (KonJND PJND mean) must land at
 a declared integer:
