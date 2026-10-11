@@ -2562,42 +2562,60 @@ mod dense_bake_flip_gate {
     /// One geometry: score both arms and compare the three shipped scalars at
     /// `to_bits()`. `mean_offset` is included because it is the one scalar a
     /// gather could move without moving the score.
+    ///
+    /// Holds `archmage::testing::lock_token_testing()` for the whole matrix:
+    /// token-permutation tests in this binary disable SIMD tiers process-wide,
+    /// and an unlocked run can score the two arms (or one call) at different
+    /// tiers. Per-tier scores legitimately differ; mixed-tier pairs then fail
+    /// here without any scoring defect (CI run 38104576912, macOS arm64).
+    /// [`dense_and_wide_agree_at_every_dispatch_tier`] covers the tiers.
     fn assert_same_on_cells(shipped: ZensimProfile, wide: ZensimProfile, label: &str) {
+        let _tiers = archmage::testing::lock_token_testing();
+        for &(w, h) in cells::CELLS {
+            assert_same_on_cell(shipped, wide, w, h, label);
+        }
+    }
+
+    fn assert_same_on_cell(
+        shipped: ZensimProfile,
+        wide: ZensimProfile,
+        w: usize,
+        h: usize,
+        label: &str,
+    ) {
         let zs = Zensim::new(shipped);
         let zw = Zensim::new(wide);
-        for &(w, h) in cells::CELLS {
-            let r = gens::gen_value_noise(w, h, 0xC0FFEE);
-            let d = gens::distort_block_artifacts(&r, w, h);
-            let rs = RgbSlice::new(&r, w, h);
-            let ds = RgbSlice::new(&d, w, h);
-            let a = zs
-                .compute(&rs, &ds)
-                .unwrap_or_else(|e| panic!("{label} dense {w}x{h}: {e}"));
-            let b = zw
-                .compute(&rs, &ds)
-                .unwrap_or_else(|e| panic!("{label} wide {w}x{h}: {e}"));
-            assert_eq!(
-                a.score().to_bits(),
-                b.score().to_bits(),
-                "{label} {w}x{h}: score {} (dense) != {} (wide)",
-                a.score(),
-                b.score()
-            );
-            assert_eq!(
-                a.raw_distance().to_bits(),
-                b.raw_distance().to_bits(),
-                "{label} {w}x{h}: raw_distance {} != {}",
-                a.raw_distance(),
-                b.raw_distance()
-            );
-            assert_eq!(
-                a.mean_offset().map(f64::to_bits),
-                b.mean_offset().map(f64::to_bits),
-                "{label} {w}x{h}: mean_offset {:?} != {:?}",
-                a.mean_offset(),
-                b.mean_offset()
-            );
-        }
+        let r = gens::gen_value_noise(w, h, 0xC0FFEE);
+        let d = gens::distort_block_artifacts(&r, w, h);
+        let rs = RgbSlice::new(&r, w, h);
+        let ds = RgbSlice::new(&d, w, h);
+        let a = zs
+            .compute(&rs, &ds)
+            .unwrap_or_else(|e| panic!("{label} dense {w}x{h}: {e}"));
+        let b = zw
+            .compute(&rs, &ds)
+            .unwrap_or_else(|e| panic!("{label} wide {w}x{h}: {e}"));
+        assert_eq!(
+            a.score().to_bits(),
+            b.score().to_bits(),
+            "{label} {w}x{h}: score {} (dense) != {} (wide)",
+            a.score(),
+            b.score()
+        );
+        assert_eq!(
+            a.raw_distance().to_bits(),
+            b.raw_distance().to_bits(),
+            "{label} {w}x{h}: raw_distance {} != {}",
+            a.raw_distance(),
+            b.raw_distance()
+        );
+        assert_eq!(
+            a.mean_offset().map(f64::to_bits),
+            b.mean_offset().map(f64::to_bits),
+            "{label} {w}x{h}: mean_offset {:?} != {:?}",
+            a.mean_offset(),
+            b.mean_offset()
+        );
     }
 
     /// A real declaration change is required; disk size need not shrink
@@ -2705,6 +2723,57 @@ mod dense_bake_flip_gate {
                 label,
             );
         }
+    }
+
+    /// Dense and wide twins agree bit for bit at EVERY dispatch tier the host
+    /// can reach, not only the native one. Per-tier scores differ from each
+    /// other (scalar against SIMD); what must hold is that both arms of each
+    /// pair land on the same bits within a tier. Cells: the 1153-wide
+    /// column-tile path and the geometries CI run 38104576912 failed on
+    /// (C 200×150 and A 126×93 on macOS arm64, D 577×80 on macOS Intel), for
+    /// all six flipped pairs.
+    #[test]
+    #[cfg(all(feature = "candidate-profiles", feature = "deprecated-profiles"))]
+    #[allow(deprecated)]
+    fn dense_and_wide_agree_at_every_dispatch_tier() {
+        fn wide_c() -> &'static [u8] {
+            include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
+        }
+        fn wide_chdr() -> &'static [u8] {
+            include_bytes!("../weights/c_hdr_l1t1944_2026-08-29.bin")
+        }
+        let pairs: Vec<(ZensimProfile, ZensimProfile, &str)> = [
+            (ZensimProfile::A, wide_a as fn() -> &'static [u8], "A"),
+            (ZensimProfile::B, wide_b, "B"),
+            (ZensimProfile::BHdr, wide_bhdr, "BHdr"),
+            (ZensimProfile::C, wide_c, "C"),
+            (ZensimProfile::CHdr, wide_chdr, "CHdr"),
+            (ZensimProfile::D, wide_d, "D"),
+        ]
+        .into_iter()
+        .map(|(p, wide, label)| {
+            let twin: &'static ProfileParams = Box::leak(Box::new(with_bake(p.params(), wide)));
+            (
+                p,
+                ZensimProfile::Custom {
+                    name: label,
+                    params: twin,
+                },
+                label,
+            )
+        })
+        .collect();
+        let report = archmage::testing::for_each_token_permutation(
+            archmage::testing::CompileTimePolicy::Warn,
+            |perm| {
+                for &(w, h) in &[(1153usize, 72usize), (200, 150), (126, 93), (577, 80)] {
+                    for &(shipped, wide, label) in &pairs {
+                        assert_same_on_cell(shipped, wide, w, h, &format!("{label} [{perm}]"));
+                    }
+                }
+            },
+        );
+        assert!(report.permutations_run >= 1);
     }
 
     /// Every shipped scoring bake declares exactly its consumed input IDs.
