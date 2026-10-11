@@ -156,8 +156,6 @@ use zensim_validate::panel::{self, PanelStats};
 #[path = "../scatter_json.rs"]
 mod scatter_json;
 
-#[path = "../difference_auc.rs"]
-mod difference_auc;
 #[path = "../ladder_step.rs"]
 mod ladder_step;
 mod panel_evaluate;

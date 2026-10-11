@@ -74,13 +74,13 @@ use zensim_validate::parquet_loader;
 // the canonical home (the 2026-05-26 paper-correct OR + PWRC rewrite
 // only landed in panel.rs, so this binary's "panel" output was
 // silently the older proxy math until this commit). All call sites
-// route through `panel::compute_panel` now. DS-AUC lives in the shared
-// difference_auc module used by this binary and panel evaluate.
+// route through `panel::compute_panel` now. DS-AUC is
+// `zenstats::pairs::ds_auc` (moved from zensim's difference_auc.rs on
+// 2026-10-11 with the same pair selection and arithmetic), shared with
+// panel evaluate.
 // ============================================================================
 
-#[path = "../difference_auc.rs"]
-mod difference_auc;
-use difference_auc::ds_auc;
+use zenstats::pairs::ds_auc;
 
 // ============================================================================
 // Bake scoring helpers — DEDUP-M (2026-05-26):
@@ -2134,7 +2134,7 @@ fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, 
     // forms (commit 83e7ff70). Every bake_verdict output before this
     // commit therefore reported the older proxy OR + PWRC despite the
     // `panel` binary's output being paper-correct on the same fixture.
-    // DS-AUC stays bake_verdict-local (no panel equivalent yet).
+    // DS-AUC is `zenstats::pairs::ds_auc`.
     let p = compute_panel(scores, humans);
     // DS-AUC threshold: 1 std of human scores marks "perceptually different".
     let h_mean: f64 = humans.iter().sum::<f64>() / humans.len().max(1) as f64;

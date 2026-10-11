@@ -268,7 +268,7 @@ pub(super) fn evaluate(
             out.get_mut("rank").unwrap()["measurements"]["target_kind"] = json!(d.target_kind);
             if let Some(threshold) = d.difference_threshold {
                 out.get_mut("rank").unwrap()["measurements"]["difference_auc"] =
-                    json!(super::super::difference_auc::ds_auc(&p, &t, threshold));
+                    json!(zenstats::pairs::ds_auc(&p, &t, threshold));
                 out.get_mut("rank").unwrap()["measurements"]["difference_threshold"] =
                     json!(threshold);
             }
