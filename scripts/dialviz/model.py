@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import catalogue, experiments_src, feature_defs_src, featuresets_src, gitref, quotes, sources, zenanalyze_src
+from . import catalogue, experiments_src, feature_defs_src, featuresets_src, gitref, quotes, readiness, sources, zenanalyze_src
 from .mdparse import SourceShapeError, table_with_headers
 
 TERMINAL_OWNER = "scripts/rev4_featpot/_terminal_owner.py"
@@ -210,6 +210,8 @@ def build(ctx, integrity_path: Path | None = None) -> dict:
     m["speedq3"] = speedq3_table(ctx)
     m["integrity"] = integrity_gates(ctx, integrity_path)
     m["v40_hdr"] = v40_hdr(ctx)
+    m["readiness"] = readiness.read(ctx)
+    m["readiness_bullets"] = readiness.bullets(m["readiness"])
     m["results"] = experiments_src.results(ctx)
     m["experiments"] = experiments_src.registry(ctx)
     m["features"] = feature_defs_src.read(ctx)

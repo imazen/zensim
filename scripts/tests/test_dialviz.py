@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dialviz import (build, catalogue, experiments_src, feature_defs_src, featuresets_src, gitref, model, quotes,  # noqa: E402
-                     sources, zenanalyze_src)
+                     readiness, sources, zenanalyze_src)
 from dialviz.mdparse import SourceShapeError  # noqa: E402
 from dialviz.sources import REPO, Ctx  # noqa: E402
 
@@ -124,6 +124,25 @@ class LiveSources(unittest.TestCase):
             for n in needles:
                 self.assertIn(n, defs[pid], pid)
 
+    def test_readiness_reads_measured_and_not_run_gates(self):
+        r = self.m["readiness"]
+        self.assertEqual(len(r["gates"]), 21)
+        self.assertGreaterEqual(len(r["not_run"]), 10)
+        self.assertTrue(all(n["causes"] for n in r["not_run"]))
+        # STEERPATH's landed-state rows replace QUAL-A's four spatial/memory rows, keeping the old value as "before"
+        sup = [g for g in r["gates"] if g["superseded_by"]]
+        self.assertEqual(len(sup), 4)
+        self.assertTrue(all(g["states"][mk].get("before") for g in sup for mk in readiness.MODELS))
+        # the drawn checks agree with each gate's recorded state: a passing gate passes every drawn check,
+        # and a failing gate fails at least one of them
+        by_gate = {}
+        for b in self.m["readiness_bullets"]:
+            by_gate.setdefault(b["gate"], []).append(b)
+        for gate, bs in by_gate.items():
+            for mk in readiness.MODELS:
+                checks = [b["states"][mk] == "pass" for b in bs]
+                self.assertEqual(all(checks), bs[0]["gate_states"][mk] == "pass", (gate, mk))
+
     def test_every_result_file_is_read_or_excluded(self):
         mapped = {rel for rel, _ in experiments_src.RESULTS.values()} | set(experiments_src.RESULTS_EXCLUDED)
         on_disk = set(self.ctx.glob("benchmarks/**/*result_summary*.json")) | set(self.ctx.glob("benchmarks/**/*decision*.json"))
@@ -206,6 +225,17 @@ class NegativeControls(unittest.TestCase):
         spec = catalogue.THRESHOLDS["n3"]
         ctx = MutatedCtx(spec["path"], sub_once(r"ladders ≥ 122 of", "ladders ≥ 125 of"))
         self.assertEqual(quotes.threshold(ctx, spec)["value"], 125)
+
+    def test_readiness_gate_state_unknown(self):
+        self.refuse(readiness.QUAL_A_JSON, sub_once(r'"state": "fail"', '"state": "maybe"'), readiness.read)
+
+    def test_readiness_not_run_gate_without_cause(self):
+        self.refuse(readiness.QUAL_A_MD, sub_once(r"^\| G-ADDR five codec floors \(A7r\) \| blocked \| .*$",
+                                                  "| G-ADDR five codec floors (A7r) | blocked | Something else entirely. |"),
+                    readiness.read)
+
+    def test_readiness_steerpath_table_changed(self):
+        self.refuse(readiness.STEERPATH, sub_once(r"^\| 1024² \| A \| 58\.95", "| 1024² | model A | 58.95"), readiness.read)
 
     def test_catalogue_locator_missing(self):
         loc = catalogue.WANTED[1]["state"][0]

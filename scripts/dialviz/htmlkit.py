@@ -28,6 +28,7 @@ def blob_url(path: str, line: int | None = None) -> str:
 
 NAV = [
     ("index.html", "Overview"),
+    ("readiness.html", "Readiness"),
     ("properties.html", "Wanted properties"),
     ("gates.html", "Gates and defects"),
     ("evaluation.html", "Evaluation and verdicts"),

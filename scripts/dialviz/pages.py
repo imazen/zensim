@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from . import svg, zenanalyze_src
+from . import readiness, svg, zenanalyze_src
 from .htmlkit import blob_url, chip, esc, filterbar, md_block, md_inline, page, src_cite, table
 
 GATE_STATE_ORDER = ["done", "ready", "blocked", "fail", "pass", "na"]
@@ -320,16 +320,17 @@ def page_index(m) -> str:
     pend = sum(1 for x in g["gates"] if x["rule_pending"])
     bugs = Counter(b["status"] for b in m["bugs"])
     exps = [a for r in m["results"].values() for a in r["arms"]]
+    rs = readiness_summary(m)
     body = [f'<h1>How zensim is evaluated</h1>',
             f'<p class="lede">zensim is a one-number image-quality dial: users pick a target score and codecs hit it. '
             f'This site walks through what the dial must do, what it must not do, the gates that check each, how '
             f'statistics combine into verdicts, and the features the models read. Every value is quoted or read from a '
             f'committed source and cited.</p>',
-            f'<div class="headline">{md_inline(g["headline"], g["path"])} '
-            f'<span class="small">{src_cite(g["path"], g["headline_line"])}</span></div>',
             '<div class="statrow">',
-            f'<div class="stat"><div class="v">{len(g["gates"])}</div><div class="l">release gates · {st.get("blocked", 0)} blocked, '
-            f'{st.get("ready", 0)} ready, {st.get("done", 0)} done; {pend} with a rule pending</div></div>',
+            f'<div class="stat"><div class="v">{rs["passed"]}/{rs["measured"]}</div><div class="l">measured release checks candidate A '
+            f'passes · fails: {esc(", ".join(_short_gate(x["name"]) for x in rs["failed"]) or "none")}</div></div>',
+            f'<div class="stat"><div class="v">{rs["not_run"]}</div><div class="l">gates not run yet, from '
+            f'{len(rs["causes"])} root causes</div></div>',
             f'<div class="stat"><div class="v">{len(m["wanted"])}</div><div class="l">wanted properties</div></div>',
             f'<div class="stat"><div class="v">{bugs.get("open", 0)}</div><div class="l">open Known Bugs of {len(m["bugs"])} recorded</div></div>',
             f'<div class="stat"><div class="v">{sum(1 for a in exps if a.get("as_good"))}/{sum(1 for a in exps if a.get("as_good") is not None)}</div>'
@@ -337,6 +338,13 @@ def page_index(m) -> str:
             f'<div class="stat"><div class="v">{m["features"]["full_width"]}</div><div class="l">zensim feature slots · '
             f'{len(m["za"]["features"])} zenanalyze features</div></div>',
             '</div>',
+            '<h2>Release readiness at a glance</h2>',
+            '<p>Candidate A on every release gate (QUAL-A with the STEERPATH landed-state re-measurement). '
+            '<a href="readiness.html">Full readiness page</a>: bars, per-model values and every blocker.</p>',
+            f'<div class="panel">{readiness_board(m)}</div>'
+            f'<div class="panel"><h3>What the not-run gates are waiting for</h3>{readiness_causes_chart(m)}</div>',
+            f'<div class="headline">The release gate map\'s own summary (snapshot of 2026-10-08, before QUAL-A): '
+            f'{md_inline(g["headline"], g["path"])} <span class="small">{src_cite(g["path"], g["headline_line"])}</span></div>',
             '<h2>The dial contract</h2>',
             '<p>Each card is one property the product needs. Chips show the production gate state from the release '
             'gate map and the latest recorded measurement on the frozen seed-0 model, where one exists.</p><div class="grid">']
@@ -347,7 +355,7 @@ def page_index(m) -> str:
                     f'<div class="chips">{"".join(chips)}</div></div>')
     body.append('</div>')
     # gate matrix
-    body.append('<h2>Release-gate matrix</h2><p>Rows are the release gates. Columns show the production state, whether an '
+    body.append('<h2>Release-gate matrix (gate map snapshot, 2026-10-08)</h2><p>Rows are the release gates. Columns show the production state, whether an '
                 'owner decision or rule is still missing, and which instruments check the same gate: the terminal-read '
                 'authorization list, <code>freeze_check --qualify</code>, and the September 8 production contract.</p>')
     body.append(svg.status_strip({k: st.get(k, 0) for k in GATE_STATE_ORDER}, title="release gate states"))
@@ -941,3 +949,127 @@ def page_sources(m, coverage: list[dict]) -> str:
          f'<h2>Files read ({len(rows)})</h2>', filterbar("srcs", "Filter files"),
          table(["Path", "SHA-256 (prefix)", "Readers", "Entities"], rows, tid="srcs", numeric_cols=(3,))]
     return _render(m, title="Sources", current="sources.html", body="\n".join(b))
+
+
+# --------------------------------------------------------------------------- release readiness
+
+READY_MODELS = [("a", "var(--s1)", "A", "circle"), ("c", "var(--s2)", "C", "diamond"), ("seed0", "var(--s3)", "seed 0", "square")]
+NOT_RUN_BANDS = [("blocked", "Not run: blocked"), ("rule_pending", "Not run: rule pending"),
+                 ("not_measured", "Not run: not measured"), ("forbidden", "Not run: forbidden in a qualification lane"),
+                 ("outstanding", "Not run: release mechanics")]
+
+
+def _short_gate(name: str) -> str:
+    return re.sub(r"\s*\(.*$", "", name).strip()
+
+
+def readiness_summary(m) -> dict:
+    r = m["readiness"]
+    a = [g["states"]["a"]["state"] for g in r["gates"]]
+    fails = [g for g in r["gates"] if g["states"]["a"]["state"] == "fail"]
+    causes = Counter(c["id"] for n in r["not_run"] for c in n["causes"])
+    return {"measured": len(a), "passed": a.count("pass"), "failed": fails, "not_run": len(r["not_run"]), "causes": causes}
+
+
+def _responsive(wide: str, narrow: str) -> str:
+    """The same chart laid out twice: the wide layout above 640 px, the narrow one on phones."""
+    return f'<div class="wide-only">{wide}</div><div class="narrow-only">{narrow}</div>'
+
+
+def readiness_board(m, model="a", depth=0) -> str:
+    r = m["readiness"]
+    pre = "../" * depth
+    groups = []
+    for fam, _ in readiness.FAMILIES:
+        tiles = []
+        for g in r["gates"]:
+            if g["family"] != fam:
+                continue
+            s = g["states"][model]
+            tip = f'{g["name"]}\nbar: {g["bar"]}\n{model}: {s["detail"]}' + (f'\n(before STEERPATH: {s["before"]})' if s.get("before") else "")
+            tiles.append({"label": _short_gate(g["name"]), "state": s["state"], "tip": tip, "href": f"{pre}readiness.html#measured"})
+        if tiles:
+            groups.append((fam, tiles))
+    for kind, band in NOT_RUN_BANDS:
+        tiles = [{"label": n["gate"].replace("`", ""), "state": kind,
+                  "tip": f'{n["gate"]}\n{n["state"]}\nneeds: {n["needs"][:300]}', "href": f"{pre}readiness.html#blockers"}
+                 for n in r["not_run"] if n["kind"] == kind]
+        if tiles:
+            groups.append((band, tiles))
+    return _responsive(svg.tile_board(groups, title="release readiness board"),
+                       svg.tile_board(groups, width=360, cols=2, title="release readiness board"))
+
+
+def readiness_causes_chart(m, depth=0) -> str:
+    r = m["readiness"]
+    pre = "../" * depth
+    colors = {c["id"]: f"var(--s{i + 1})" for i, c in enumerate(r["causes"])}
+    used = [c for c in r["causes"] if any(x["id"] == c["id"] for n in r["not_run"] for x in n["causes"])]
+    left = [{"id": i, "label": n["gate"].replace("`", ""), "state": n["kind"], "tip": f'{n["gate"]}\nneeds: {n["needs"][:300]}',
+             "href": f"{pre}readiness.html#blockers"} for i, n in enumerate(r["not_run"])]
+    right = [{"id": c["id"], "label": c["label"], "color": colors[c["id"]]} for c in used]
+    edges = [(i, x["id"], f'{n["gate"]} ← {x["label"]}\n“{x["evidence"]}”') for i, n in enumerate(r["not_run"]) for x in n["causes"]]
+    return _responsive(svg.bipartite(left, right, edges, title="what blocks the gates that have not run"),
+                       svg.bipartite(left, [dict(n, label=readiness.CAUSE_SHORT[n["id"]]) for n in right], edges,
+                                     width=360, lx=150, rx=205, label_chars=20,
+                                     title="what blocks the gates that have not run"))
+
+
+def page_readiness(m) -> str:
+    r = m["readiness"]
+    s = readiness_summary(m)
+    fails = ", ".join(f'{_short_gate(g["name"])} ({g["states"]["a"]["detail"].split(";")[0]})' for g in s["failed"])
+    gm = m["gates"]["gates"]
+    gm_blocked = sum(1 for g in gm if g["status"] == "blocked")
+    cause_rows = []
+    for c in r["causes"]:
+        hits = [(n, x) for n in r["not_run"] for x in n["causes"] if x["id"] == c["id"]]
+        if not hits:
+            continue
+        cause_rows.append([f'<strong>{esc(c["label"])}</strong>', (str(len(hits)), len(hits)),
+                           "<br>".join(f'{esc(n["gate"].replace("`", ""))}: <span class="small muted">“{esc(x["evidence"])}”</span>'
+                                       for n, x in hits)])
+    grid_rows = [{"label": _short_gate(g["name"]), "href": None,
+                  "cells": {mk: {"state": g["states"][mk]["state"], "tip": f'{g["name"]}\n{mk}: {g["states"][mk]["detail"]}'}
+                            for mk, *_ in READY_MODELS}} for g in r["gates"]]
+    sup = [g for g in r["gates"] if g["superseded_by"]]
+    b = ['<h1>Release readiness</h1>',
+         f'<p class="lede"><strong>Candidate A passes {s["passed"]} of {s["measured"]} measured release checks</strong> and fails '
+         f'{len(s["failed"])}: {esc(fails)}. {s["not_run"]} more gates have not run; they come down to the '
+         f'{len(s["causes"])} root causes charted below, most of them a frozen final model or an owner rule.</p>',
+         f'<p class="small">Measured: {src_cite(r["path"])} (QUAL-A, 2026-10-10), with the spatial-cost and memory rows taken from '
+         f'the later landed-state re-measurement in {src_cite(r["steerpath"])}. Not run: {src_cite(r["md"], r["not_run_line"])}.</p>',
+         '<h2 id="board">Candidate A, every gate</h2>',
+         '<p>One tile per gate. Hover for the bar and the recorded value; colour and icon both carry the state.</p>',
+         f'<div class="panel">{readiness_board(m)}</div>',
+         f'<h2 id="blockers">Why so many gates say “blocked”</h2>'
+         f'<p>The release gate map (written 2026-10-07, last edited 2026-10-08) marks {gm_blocked} of {len(gm)} gates blocked. '
+         f'Most of those words mean the same few things. Each line joins a gate that has not run to a root cause found in its '
+         f'“Needs” text; hover a line for the phrase that matched.</p>',
+         f'<div class="panel">{readiness_causes_chart(m)}</div>',
+         table(["Root cause", "Gates", "Gates and the matching phrase"], cause_rows, tid="causes", numeric_cols=(1,)),
+         '<p class="small muted">Root causes are assigned by fixed patterns over the “Needs” cell '
+         '(<code>scripts/dialviz/readiness.py</code> <code>CAUSES</code>); a gate that matches none stops the build.</p>',
+         '<h2 id="measured">Measured checks against their bars</h2>',
+         '<p>Each row has its own axis: the pass side is shaded green, the bar is the dashed line, and the markers are '
+         'A (circle), C (diamond) and production seed 0 (square). The text on the right is A against the bar.</p>',
+         f'<div class="panel">' + _responsive(svg.bullets(m["readiness_bullets"], models=READY_MODELS, title="measured checks"),
+                                               svg.bullets(m["readiness_bullets"], models=READY_MODELS, width=360, label_w=120,
+                                                           right_w=80, row=44, title="measured checks", bar_text=False))
+         + svg.legend([(c, l) for _, c, l, _ in READY_MODELS]) + '</div>',
+         '<h2>All measured gates for the three models</h2>',
+         '<div class="panel">' + _responsive(svg.state_grid(grid_rows, [(k, l) for k, _, l, _ in READY_MODELS], title="gate by model"),
+                                             svg.state_grid(grid_rows, [(k, l) for k, _, l, _ in READY_MODELS], width=360, cell_w=70,
+                                                            title="gate by model")) + '</div>']
+    if sup:
+        b.append('<h2>Superseded rows</h2><p>QUAL-A measured these before STEERPATH landed; the board uses the later landed-state '
+                 'values.</p>' + table(["Gate", "QUAL-A (A)", "Landed state (A)"],
+                                        [[esc(_short_gate(g["name"])), esc(g["states"]["a"]["before"]),
+                                          f'{chip(g["states"]["a"]["state"])} {esc(g["states"]["a"]["detail"])} '
+                                          f'{src_cite(g["states"]["a"]["source"], g["states"]["a"]["line"])}'] for g in sup],
+                                        sortable=False))
+    b.append('<h2>Not-run gates in full</h2>' + table(
+        ["Gate", "State", "Needs", "Root causes"],
+        [[esc(n["gate"].replace("`", "")), esc(n["state"]), f'<span class="small">{md_inline(n["needs"], r["md"])}</span>',
+          " ".join(chip("info", x["label"], x["evidence"]) for x in n["causes"])] for n in r["not_run"]], tid="notrun"))
+    return _render(m, title="Release readiness", current="readiness.html", body="\n".join(b))

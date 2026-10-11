@@ -149,7 +149,8 @@ def main(argv=None) -> int:
     blobs = {e["path"]: e.get("blob") for e in m["sources"] if not e["path"].startswith("zenanalyze:")}
     htmlkit.set_linker(gitref.Linker(base_tree, blobs, ctx.za_tree))
     files: dict[str, str] = {"index.html": pages.page_index(m), "evaluation.html": pages.page_evaluation(m),
-                             "splits.html": pages.page_splits(m), "zenanalyze.html": pages.page_zenanalyze(m)}
+                             "splits.html": pages.page_splits(m), "zenanalyze.html": pages.page_zenanalyze(m),
+                             "readiness.html": pages.page_readiness(m)}
     for f in (pages.page_properties, pages.page_gates, pages.page_experiments, pages.page_features):
         files.update(f(m))
     files["sources.html"] = pages.page_sources(m, cov)

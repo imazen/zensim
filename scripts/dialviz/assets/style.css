@@ -193,3 +193,10 @@ pre.code { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; o
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* charts laid out twice: wide above 640 px, narrow on phones */
+.narrow-only { display: none; }
+@media (max-width: 640px) {
+  .wide-only { display: none; }
+  .narrow-only { display: block; }
+}
