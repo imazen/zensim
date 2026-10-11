@@ -50,6 +50,8 @@
 
 ### Changed
 
+- **PU-linear routes profile C to CHdr, as it routes B to BHdr** (owner decision 2026-10-11). `Zensim::new(ZensimProfile::C)` fed absolute nits through `compute_pu_linear`, `compute_pu_linear_planar` or descriptor-HDR `compute` now returns CHdr's score and features bit for bit (result tagged `C`), and `compute_pu_linear_extended_features` refuses it exactly as it already refuses CHdr; before, those entries scored HDR input with C's SDR bake, outside its training domain. C's SDR path, CHdr itself and every other profile keep their output bits; A and D (no HDR twin) stay unrouted. Behaviour change for HDR scoring with C only; C has never been in a published release, so this is not a queued breaking change. Test: `tests/chdr_pu.rs::c_routes_to_chdr_through_every_pu_entry_bit_identically`.
+
 - **Prepared steering (`SteeringSession::compute`) uses less memory and stops reconverting its
   source.** The local-refinement snapshot now moves the session's retained planes after the map pass
   instead of cloning them before it (8967388c). The Rev5 walk and the snapshot take the source side

@@ -334,12 +334,122 @@ fn wide_plan_pu_identity_matches_sdr_identity() {
         .map(|i| [(i * 5) as u8, (i * 11) as u8, i as u8])
         .collect();
     let s8 = zensim::RgbSlice::new(&src, w, h);
-    for profile in [ZensimProfile::CHdr, ZensimProfile::C] {
-        let z = Zensim::new(profile);
-        let pu = z.compute_pu_linear(&r, &r, w, h, 3 * w, 3 * w).unwrap();
-        let sdr = z.compute(&s8, &s8).unwrap();
+    // C fed nits is served by CHdr's weights and plan (PU-linear routes C to
+    // CHdr since 2026-10-11), so its PU identity matches CHdr's SDR identity.
+    for (profile, served) in [
+        (ZensimProfile::CHdr, ZensimProfile::CHdr),
+        (ZensimProfile::C, ZensimProfile::CHdr),
+    ] {
+        let pu = Zensim::new(profile)
+            .compute_pu_linear(&r, &r, w, h, 3 * w, 3 * w)
+            .unwrap();
+        let sdr = Zensim::new(served).compute(&s8, &s8).unwrap();
         assert_eq!(pu.score(), 100.0);
         assert_eq!(pu.features().len(), sdr.features().len());
         assert!(pu.features().iter().all(|&v| v == 0.0));
     }
+}
+
+/// PU-linear maps built-in profile C to CHdr, as it maps B to BHdr (owner
+/// decision 2026-10-11): C fed nits through every PU-linear entry returns
+/// exactly CHdr's score and features through the same entry, tagged `C`.
+/// C's SDR path keeps C's own weights.
+#[test]
+fn c_routes_to_chdr_through_every_pu_entry_bit_identically() {
+    for (w, h, seed) in [
+        (17usize, 19usize, 0x9e37_79b9_7f4a_7c15u64),
+        (97, 65, 0x1234_5678_9abc_def1),
+        (256, 128, 0x0bad_c0de_dead_beef),
+    ] {
+        let tag = format!("{w}x{h}");
+        let (r, d) = pair(w, h, seed);
+        let (c, chdr) = (
+            Zensim::new(ZensimProfile::C),
+            Zensim::new(ZensimProfile::CHdr),
+        );
+        let (rs, ds) = (3 * w + 5, 3 * w + 5);
+        let (rp, dp) = (planes(&r, w, h, w), planes(&d, w, h, w));
+        type Entry<'a> = &'a dyn Fn(&Zensim) -> Result<zensim::ZensimResult, zensim::ZensimError>;
+        let entries: [(&str, bool, Entry); 5] = [
+            ("interleaved", true, &|z| {
+                z.compute_pu_linear(&r, &d, w, h, 3 * w, 3 * w)
+            }),
+            ("strided interleaved", true, &|z| {
+                z.compute_pu_linear(&padded(&r, w, h, rs), &padded(&d, w, h, ds), w, h, rs, ds)
+            }),
+            ("planar", true, &|z| {
+                z.compute_pu_linear_planar(
+                    [&rp[0], &rp[1], &rp[2]],
+                    [&dp[0], &dp[1], &dp[2]],
+                    w,
+                    h,
+                    w,
+                )
+            }),
+            ("extended features", false, &|z| {
+                z.compute_pu_linear_extended_features(&r, &d, w, h, 3 * w, 3 * w)
+            }),
+            ("descriptor-HDR compute", true, &|z| {
+                z.compute(&Nits::new(&r, w, h), &Nits::new(&d, w, h))
+            }),
+        ];
+        for (name, serves, entry) in entries {
+            let (got, want) = match (entry(&c), entry(&chdr)) {
+                (Ok(got), Ok(want)) => (got, want),
+                // CHdr's extended-features PU entry refuses (it predates this
+                // routing); C must refuse with exactly the same error.
+                (Err(got), Err(want)) if !serves => {
+                    assert_eq!(format!("{got:?}"), format!("{want:?}"), "{tag} {name}");
+                    continue;
+                }
+                (got, want) => panic!(
+                    "{tag} {name}: C {:?} vs CHdr {:?}",
+                    got.map(|r| r.score()),
+                    want.map(|r| r.score())
+                ),
+            };
+            assert!(
+                serves,
+                "{tag} {name}: CHdr now serves this entry; update the test"
+            );
+            assert_eq!(
+                got.score().to_bits(),
+                want.score().to_bits(),
+                "{tag} {name}: C {} vs CHdr {}",
+                got.score(),
+                want.score()
+            );
+            assert_eq!(got.features(), want.features(), "{tag} {name}: features");
+            assert!(
+                matches!(got.profile(), ZensimProfile::C),
+                "{tag} {name}: the result keeps the C tag"
+            );
+        }
+    }
+
+    // SDR input still scores with C's own weights, not CHdr's.
+    let (w, h) = (97usize, 65usize);
+    let src: Vec<[u8; 3]> = (0..w * h)
+        .map(|i| [(i * 7) as u8, (i * 13) as u8, (i * 3) as u8])
+        .collect();
+    let dst: Vec<[u8; 3]> = src
+        .iter()
+        .map(|p| [p[0].wrapping_add(9), p[1], p[2]])
+        .collect();
+    let (s8, d8) = (
+        zensim::RgbSlice::new(&src, w, h),
+        zensim::RgbSlice::new(&dst, w, h),
+    );
+    let c_sdr = Zensim::new(ZensimProfile::C).compute(&s8, &d8).unwrap();
+    let recomputed =
+        zensim::score_features_with_profile(ZensimProfile::C, c_sdr.features(), w as u32, h as u32)
+            .unwrap();
+    assert_eq!(c_sdr.score().to_bits(), recomputed.to_bits());
+    let chdr_sdr = Zensim::new(ZensimProfile::CHdr).compute(&s8, &d8).unwrap();
+    assert_ne!(
+        c_sdr.score().to_bits(),
+        chdr_sdr.score().to_bits(),
+        "C's SDR path must not route to CHdr"
+    );
+    assert_ne!(c_sdr.features().len(), chdr_sdr.features().len());
 }

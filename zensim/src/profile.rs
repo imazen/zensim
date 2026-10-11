@@ -142,8 +142,13 @@ pub enum ZensimProfile {
     /// rows can be scored with [`crate::score_features_with_profile`]. Both
     /// paths execute the same head and calibration. The candidate profile
     /// enables `feature-regime-v2` automatically.
-    /// **SDR content only** — callers select [`Self::CHdr`] or [`Self::BHdr`]
-    /// for HDR. Calling an HDR extractor does not validate an SDR model there.
+    /// **SDR model.** HDR (absolute-luminance) content fed through the
+    /// PU-linear entries ([`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear),
+    /// its planar variant and descriptor-HDR `compute`) routes to the
+    /// [`Self::CHdr`] weights automatically, as `B` routes to `BHdr` (since
+    /// 2026-10-11): one profile, two domains, results tagged `C`. Before
+    /// that, those entries scored HDR input with C's own SDR bake, outside its
+    /// training domain.
     ///
     /// Full provenance, training data shas, exact reproduction chain
     /// and verification gates: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`
@@ -156,7 +161,8 @@ pub enum ZensimProfile {
     /// judged; records: `benchmarks/hdr944_retrain_wave_2026-08-28.md`
     /// FREEZE EXECUTED). The September 7 dense bake declares 697 IDs.
     /// HDR feature extraction uses the same ID-derived plan; **HDR
-    /// content only** — SDR content routes to [`Self::C`]. The
+    /// content only** — SDR content routes to [`Self::C`], and `C` fed
+    /// nits through the PU-linear entries scores with these weights. The
     /// BHdr-parallel candidate slot: [`Self::BHdr`] remains the shipped
     /// HDR default; `CHdr` is the candidate-of-record.
     #[cfg(feature = "candidate-profiles")]
@@ -426,13 +432,17 @@ impl ZensimProfile {
     /// (e.g. peak-nits thresholds) would flip models across a threshold
     /// with ~5-10pt cross-model per-pair scatter — a visible seam
     /// (measured 2026-07-04, benchmarks/provenance_best_results doc).
-    /// `A`, `BHdr` and `C` are unrouted (A has one bake; BHdr is the
-    /// explicit HDR handle for callers who want no routing). `C` is an SDR
-    /// model and does not route automatically; callers must select the
-    /// appropriate HDR profile explicitly.
+    /// Generation-C routes the same way since 2026-10-11 (owner decision):
+    /// [`ZensimProfile::C`] fed nits scores with the `CHdr` weights, bit for
+    /// bit what `CHdr` returns through the same entry, while the result keeps
+    /// the `C` tag. `A`, `D`, `BHdr` and `CHdr` are unrouted (A and D have no
+    /// HDR twin; BHdr and CHdr are the explicit HDR handles for callers who
+    /// want no routing).
     pub(crate) fn params_pu_linear(&self) -> &'static ProfileParams {
         match self {
             Self::B => &PROFILE_B_HDR,
+            #[cfg(feature = "candidate-profiles")]
+            Self::C => &PROFILE_C_HDR,
             _ => self.params(),
         }
     }
