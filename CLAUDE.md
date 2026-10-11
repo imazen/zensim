@@ -313,11 +313,7 @@ because cleanup tests or a historical training reproduction pass.
 * **2026-10-07 — SHIPPATH7's by_v2fy projection producer broke three registry tests. All three FIXED** (`47a2e1d4` for the two zensim gates; the zensim-validate test now names the projection root and the research-only palette family as known partial producers, so it requires the missing basic coverage to be reported — owner left the call to the coordinator, 2026-10-07).
   `benchmarks/feature_sets_registry.json` registers `basic+v2@w720/rev5_localwin#62adfc93` as a producer whose recorded slots are the
   420 by_v2fy IDs (all other slots NaN). The zensim registry gates derived the full 504-slot `basic+v2` set and failed; the entry now
-  declares `slot_selection: by_v2fy_420`, which both gates apply exactly. Still failing:
-  `zensim-validate/tests/feature_set_match.rs::basic_only_bake_compatibility_respects_partial_producers`, which assumes every
-  ≥372-wide root populates basic slots (only the September sampling producers are exempt). The projection root correctly reports
-  unpopulated basic slots 0–12 and 26–38; making the test pass means changing its expected count for this entry (or registering the
-  projection differently), which needs the owner's OK.
+  declares `slot_selection: by_v2fy_420`, which both gates apply exactly.
 
 * **2026-10-07 — Palette revision declaration lacked its landed commit. FIXED.**
   The full library census rejected the temporary `"-"` marker for palette_v2.
