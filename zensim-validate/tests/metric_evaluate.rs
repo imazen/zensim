@@ -403,10 +403,34 @@ fn paired_comparison_keeps_declared_direction() {
         json!([{"dataset":"test","a":"good","b":"other","bootstrap_resamples":8,"seed":42}]);
     let o = f.run(&v, "same");
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    assert_eq!(
-        f.report("same")["comparisons"][0]["report"]["state"],
-        "measured"
+    let same = &f.report("same")["comparisons"][0]["report"];
+    assert_eq!(same["state"], "measured");
+    // Reference-clustered: the fixture's two references are the units, and
+    // identical metrics differ by exactly zero on every draw.
+    let m = &same["measurements"];
+    assert_eq!(m["bootstrap"]["unit"], "reference (one-way design)");
+    assert_eq!(m["bootstrap"]["references"], 2);
+    assert_eq!(m["bootstrap"]["resamples"], 8);
+    assert_eq!(m["bootstrap"]["seed"], 42);
+    assert_eq!(m["bootstrap"]["percentile_rule"], "Hyndman-Fan type 7");
+    assert_eq!(m["delta"].as_array().unwrap().len(), 6);
+    assert_eq!(m["delta"][0]["lo"], 0.0);
+    assert_eq!(m["delta"][0]["hi"], 0.0);
+    assert!(
+        m["legacy_row_bootstrap"]["label"]
+            .as_str()
+            .unwrap()
+            .contains("not a source cluster")
     );
+    let mut unclustered = v.clone();
+    unclustered["datasets"][0]["columns"]
+        .as_object_mut()
+        .unwrap()
+        .remove("reference_id");
+    assert!(f.run(&unclustered, "unclustered").status.success());
+    let r = &f.report("unclustered")["comparisons"][0]["report"];
+    assert_eq!(r["state"], "not_measured");
+    assert!(r["reason"].as_str().unwrap().contains("reference_id"));
     v["metrics"][1]["direction"] = json!("lower");
     assert!(f.run(&v, "inverted").status.success());
     assert_eq!(

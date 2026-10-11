@@ -195,10 +195,24 @@ requirements must retain their existing values; generic thresholds do not replac
 [the production contract](MODEL_SELECTION_SCORECARD.md).
 
 Optional `comparisons` entries name `dataset`, `a`, `b`, `bootstrap_resamples`
-and `seed`. They reuse the existing paired decisive-comparison owner. Its
-bootstrap unit is a row, not a source cluster; reports label that limitation.
-An inverted/undefined signed correlation refuses this polarity-tolerant legacy
-comparison rather than turning reversed quality into a competitive model.
+and `seed`. Since 2026-10-11 a comparison resamples **references**, not rows:
+`zenstats::resample::cluster_bootstrap` with `Design::OneWay(reference_id)` draws
+whole references with replacement (a reference drawn twice counts as two), and
+both metrics' panels are computed on the same draw. `delta` holds, in
+`delta_order`, A − B for each panel statistic with its percentile interval
+(Hyndman–Fan type 7), bootstrap standard error and two-sided `p_zero`;
+`bootstrap` records the unit, reference count, B, seed, level and rule. OR and
+Z-RMSE are lower-is-better. A dataset without `reference_id` reports the
+comparison as not measured. With fewer than about 30 references the percentile
+interval under-covers: read it as descriptive. For several metrics, apply Holm
+(`zenstats::multiple`) to the paired `p_zero` values.
+
+`legacy_row_bootstrap` keeps the § A.9 `decisive` rule (MRR tests plus a row
+bootstrap of the panel deltas) under that label. Its bootstrap unit is a row, so
+it is not confirmation; its bounds are type 7 percentiles since the
+zenmetrics-stats pin. An inverted/undefined signed correlation refuses the
+polarity-tolerant comparison rather than turning reversed quality into a
+competitive model.
 
 ## AIC2026 preliminary release
 

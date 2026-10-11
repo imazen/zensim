@@ -535,17 +535,12 @@ fn run(cli: Cli) -> Result<bool> {
                         missing(
                             "undefined or inverted rank: inspect signed panels; legacy decisive rule auto-aligns polarity",
                         )
-                    } else {
-                        let v = zensim_validate::panel::decisive(
-                            a,
-                            b,
-                            &t,
-                            c.bootstrap_resamples,
-                            c.seed,
-                        );
-                        measured(
-                            json!({"n":v.n_band,"decision":v.decision.as_str(),"h_srocc":v.h_srocc,"p_srocc":v.p_srocc,"h_z_rmse":v.h_z_rmse,"p_z_rmse":v.p_z_rmse,"pwrc_diff":v.pwrc_diff,"ci_delta":v.ci_delta,"ci_order":["srocc","plcc","krocc","or","pwrc","z_rmse"],"bootstrap_unit":"row; not source-cluster confirmation","agreement_a":v.agreement_a,"agreement_b":v.agreement_b}),
+                    } else if !table.has("reference_id") {
+                        missing(
+                            "comparison needs reference_id: its intervals resample references, not rows",
                         )
+                    } else {
+                        clustered_comparison(a, b, &t, &table.strings("reference_id")?, c)
                     }
                 }
             } else {
@@ -603,6 +598,56 @@ fn run(cli: Cli) -> Result<bool> {
     )?;
     println!("{}", out.join("report.json").display());
     Ok(pass)
+}
+
+/// Paired A-vs-B panel differences with reference-clustered bootstrap
+/// intervals (owner decision 2026-10-11: claims about new images resample
+/// sources). Each draw takes whole references with replacement, a reference
+/// drawn twice counting as two (`Draw::expand`), and both metrics' panels are
+/// computed on the same draw. The statistics and the resampling are
+/// `zenstats`'; this function only wires them. The § A.9 `decisive` rule, whose
+/// bootstrap resamples rows, is kept beside it as a labelled legacy field.
+fn clustered_comparison(a: &[f64], b: &[f64], t: &[f64], refs: &[String], c: &Comparison) -> Value {
+    use zenstats::resample::{BootstrapConfig, Design, cluster_bootstrap};
+    let mut ids: BTreeMap<&str, u32> = BTreeMap::new();
+    let labels: Vec<u32> = refs
+        .iter()
+        .map(|r| {
+            let next = ids.len() as u32;
+            *ids.entry(r.as_str()).or_insert(next)
+        })
+        .collect();
+    const LEVEL: f64 = 0.95;
+    let cfg = BootstrapConfig {
+        resamples: c.bootstrap_resamples,
+        seed: c.seed,
+        level: LEVEL,
+    };
+    let delta = cluster_bootstrap(a.len(), &Design::OneWay(&labels), &cfg, |d| {
+        let e = d.expand();
+        let pick = |v: &[f64]| -> Vec<f64> { e.rows.iter().map(|&i| v[i]).collect() };
+        let (xa, xb, xt) = (pick(a), pick(b), pick(t));
+        let pa = zensim_validate::panel::compute_panel(&xa, &xt).as_array();
+        let pb = zensim_validate::panel::compute_panel(&xb, &xt).as_array();
+        pa.iter().zip(pb).map(|(x, y)| x - y).collect()
+    });
+    let delta = match delta {
+        Ok(v) => v,
+        Err(e) => return missing(format!("reference-clustered bootstrap undefined: {e}")),
+    };
+    let legacy = zensim_validate::panel::decisive(a, b, t, c.bootstrap_resamples, c.seed);
+    measured(json!({
+        "n": a.len(),
+        "delta_order": ["srocc","plcc","krocc","or","pwrc","z_rmse"],
+        "delta": delta.iter().map(|i| json!({"estimate":i.estimate,"lo":i.lo,"hi":i.hi,"se":i.se,"p_zero":i.p_zero,"finite_resamples":i.n_finite})).collect::<Vec<_>>(),
+        "bootstrap": {"unit":"reference (one-way design)","references":ids.len(),"resamples":c.bootstrap_resamples,"seed":c.seed,"level":LEVEL,
+            "percentile_rule":"Hyndman-Fan type 7","owner":"zenstats::resample::cluster_bootstrap",
+            "note":"A minus B per panel statistic; OR and Z-RMSE are lower-is-better. With fewer than about 30 references the percentile interval under-covers; report it as descriptive."},
+        "legacy_row_bootstrap": {"label":"legacy § A.9 decisive rule; its bootstrap unit is a row, not a source cluster, and it is not confirmation",
+            "decision":legacy.decision.as_str(),"h_srocc":legacy.h_srocc,"p_srocc":legacy.p_srocc,"h_z_rmse":legacy.h_z_rmse,"p_z_rmse":legacy.p_z_rmse,
+            "pwrc_diff":legacy.pwrc_diff,"ci_delta":legacy.ci_delta,"agreement_a":legacy.agreement_a,"agreement_b":legacy.agreement_b,
+            "resamples":c.bootstrap_resamples,"seed":c.seed,"percentile_rule":"Hyndman-Fan type 7"},
+    }))
 }
 
 fn render(report: &Value) -> String {
