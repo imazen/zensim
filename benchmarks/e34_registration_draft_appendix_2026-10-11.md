@@ -1,4 +1,4 @@
-# E34 registration draft — appendix (revision 3, 2026-10-11)
+# E34 registration draft — appendix (revisions 3–4, 2026-10-11)
 
 Linked from [e34_registration_draft_2026-10-10.md](e34_registration_draft_2026-10-10.md). Everything here is
 label-free stored evidence or historical context. Nothing here is a rule.
@@ -37,7 +37,7 @@ and C. All 44 A/C failures are M2 misses (A seed 1 broad-76-b64 also misses M3f)
 
 ## A2. Descriptive counts (`summary.json`, seven served models)
 
-These are counts on a fixed engineering panel with few source pictures. §1.4 of the draft gives the clustered
+These are counts on a fixed engineering panel with few source pictures. §1.3 of the draft gives the clustered
 intervals for the comparative claims.
 
 | Item | Value |
@@ -92,8 +92,38 @@ A partial M (the May sign-safe subset) is not admitted either:
 | Step | Command | Output (sha256) |
 |---|---|---|
 | Stored-row characterization | `python3 benchmarks/e34_draft_2026-10-10/characterize.py <out>` | `per_case.json` `6a6ba56b…`, `summary.json` `81d18131…` |
-| Clustered intervals (zenmetrics-stats `1e48c1ea`, B 10,000, seed 20261011, type 7) | `cargo run --release --manifest-path benchmarks/e34_draft_2026-10-10/clustered/Cargo.toml -- <per_case.json> <clustered.json>` | `clustered.json` |
-| Student interval beside it | `python3 benchmarks/e34_draft_2026-10-10/student.py <clustered.json>` (scipy `t.ppf` for the constant only) | `clustered.json` (updated in place) |
+| Clustered intervals (zenmetrics-stats `1e48c1ea`, B 10,000, seed 20261011, type 7) | `cargo run --locked --release --manifest-path benchmarks/e34_draft_2026-10-10/clustered/Cargo.toml -- <per_case.json> <clustered.json>` | `clustered.json` |
+| Student interval beside it | `python3 benchmarks/e34_draft_2026-10-10/student.py <clustered.json>` (scipy `t.ppf` for the constant only) | `clustered.json` `c8a1ba8f…` (revision 4; updated in place) |
 
-Raw roots: `/mnt/v/output/zensim/e34-draft-2026-10-10/` and `/mnt/v/output/zensim/e34-rev3-2026-10-11/`, both
-mirrored to tower.
+Raw roots: `/mnt/v/output/zensim/e34-draft-2026-10-10/`, `/mnt/v/output/zensim/e34-rev3-2026-10-11/` and
+`/mnt/v/output/zensim/e34-rev4-2026-10-11/` (checked on dev), all mirrored to tower. Revision 4's tool reproduces
+revision 3's seven rows bit for bit and adds the picture counts, the within-case rows and A7's table.
+
+## A7. Between-picture contrasts, by picture (revision 4)
+
+Revision 3 read these as "holds" at G = 15. Like for like they are descriptive: the sides draw on different pictures.
+
+| Contrast (all panels, G = 15) | Pictures failing / passing | Estimate | Percentile 95% | Student 95% |
+|---|---|---:|---|---|
+| Rel. L2 ratio failing / passing, b8 | 2 / 12 | 3.32× | [2.46, 7.44] | [1.63, 6.77] |
+| b16 | 4 / 8 | 4.28× | [2.92, 7.49] | [2.54, 7.24] |
+| b32 | 8 / 15 | 7.42× | [4.25, 12.86] | [4.00, 13.75] |
+| b64 | 6 / 8 | 6.45× | [3.31, 15.86] | [2.65, 15.69] |
+
+At b8, 5 of the 6 non-floor failing rows are one picture (9380). Draws with no failing picture at a block size are
+dropped (b8 11.9%).
+
+**Failures at b64 and at b8–b32, per broad picture** (seven served models, floor ties excluded):
+
+| Picture | b8–b32 | b64 |
+|---|---:|---:|
+| 1054 | 1/63 | 3/21 |
+| 2010 | 1/63 | 3/21 |
+| 6068 | 0/63 | 2/21 |
+| 6610 | 2/63 | 2/21 |
+| 7066 | 3/63 | 7/21 |
+| 8206 | 3/63 | 6/21 |
+| 8384 | 2/63 | 0/21 |
+| 9380 | 9/63 | 0/21 |
+
+Six of eight pictures fail more at b64, and two fail less.
