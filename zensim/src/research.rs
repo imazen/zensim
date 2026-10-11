@@ -2389,6 +2389,9 @@ mod tests {
     #[cfg(feature = "training")]
     #[test]
     fn dvifm_input_plane_routes_match_whole_plane_oracle() {
+        // Token-permutation tests in this binary disable SIMD tiers process-wide; `base` and each
+        // `got` must be extracted at one tier (CI run 38104576912, macos-15-intel).
+        let _tiers = archmage::testing::lock_token_testing();
         let default_spec = || DvifmSpec {
             levels: crate::dvifm::DvifmParams::default()
                 .levels
