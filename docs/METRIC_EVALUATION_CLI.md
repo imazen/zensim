@@ -46,7 +46,7 @@ row order is preserved. Map arbitrary source headings to these names:
 | `quality`, `codec`, `reference_id` | Adjacent-rung dial diagnostics; dataset must declare `quality_direction` |
 | `reference`, `distorted` | Original files for per-pair executable adapters |
 | `pixel_sha256` | Optional known identical-pixel rungs; absence never means pixel equality |
-| `right_id`, `choice`, `preference_group`, optional `weight` | Preference responses; current row is left, `right_id` names the other row. `choice` names the **more distorted** side (`left` or `right`), matching the existing pairwise owner. Empty right/choice cells have no response. |
+| `right_id`, `choice`, `preference_group`, optional `weight` | Preference responses; current row is left, `right_id` names the other row. `choice` names the **more distorted** side (`left`, `right` or `notsure`), matching the forced-choice owner `zenstats::forced_choice` (zenmetrics-stats). `notsure` counts half for each side (owner decision 2026-10-11). The report adds the cross-fitted ceilings `ceiling_loo` and `observer_agreement` beside the in-sample `ceiling`. Empty right/choice cells have no response. |
 | `severity_code`, `reference_id` | Existing five-level KADIS ramp owner: `type*10+level`, including its signed-type folding. This is a specific instrument encoding, not a generic severity scale. |
 | `corruption_label` | Existing legacy corruption-ordering instrument: `ref__family__region__severity__corruption`, with corresponding `__q20` and `__q10` anchors. This is not an integrity detector qualification. |
 

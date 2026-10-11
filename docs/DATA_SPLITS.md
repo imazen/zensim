@@ -338,7 +338,8 @@ alone does not make unscreened responses consistent with the scale.
 / `aic4_all`, plus (APPENDIX A) **`iptc_native`** (130 stimuli, 900 triplets,
 35,044 decided responses) and the pooled **`native_all`** (175 stimuli, 1,080
 triplets, 41,973) — at all three live regimes, statistic
-`panel --pairwise` = `zensim_validate::pairwise::agreement`. Artifacts
+`panel --pairwise` = `zensim_validate::pairwise::agreement` (moved unchanged to
+`zenstats::forced_choice::agreement` on 2026-10-11). Artifacts
 `/mnt/v/output/zensim/hfhuman-2026-09-01/` (+ `…/iptc/`). The unboosted,
 native-scale leg is now 62,160 raw judgments rather than 10,290.
 

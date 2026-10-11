@@ -98,7 +98,7 @@ fn bands(d: &Dataset, p: &[f64], t: &[f64], limit: usize) -> Value {
 }
 
 fn pairwise(table: &Table, p: &[f64]) -> Result<Value> {
-    use zensim_validate::pairwise::{Choice, PairwiseRow, agreement};
+    use zenstats::forced_choice::{Choice, PairwiseRow, agreement};
     let lookup: BTreeMap<&str, usize> = table
         .rows
         .iter()
@@ -115,10 +115,12 @@ fn pairwise(table: &Table, p: &[f64]) -> Result<Value> {
         let right = lookup
             .get(row["right_id"].as_str())
             .context("unknown right_id in preference")?;
+        // "Not sure" counts half for each side (owner decision 2026-10-11).
         let choice = match row["choice"].as_str() {
             "left" => Choice::Left,
             "right" => Choice::Right,
-            other => bail!("choice must be left or right, got {other}"),
+            "notsure" | "not_sure" | "not sure" => Choice::NotSure,
+            other => bail!("choice must be left, right or notsure, got {other}"),
         };
         let key = row
             .get("preference_group")
@@ -161,7 +163,9 @@ fn pairwise(table: &Table, p: &[f64]) -> Result<Value> {
     }
     let s = agreement(&rows, groups.len());
     Ok(measured(
-        json!({"n_groups":s.n_groups,"n_responses":s.n_responses,"accuracy":s.acc_response,"tie_rate":s.tie_rate,"ceiling":s.ceiling_response,"normalized_accuracy":s.acc_norm,"group_majority_accuracy":s.acc_group_majority,"n_majority_groups":s.n_groups_majority}),
+        json!({"n_groups":s.n_groups,"n_responses":s.n_responses,"accuracy":s.acc_response,"tie_rate":s.tie_rate,"ceiling":s.ceiling_response,"normalized_accuracy":s.acc_norm,"group_majority_accuracy":s.acc_group_majority,"n_majority_groups":s.n_groups_majority,
+            "ceiling_loo":s.ceiling_loo,"observer_agreement":s.observer_agreement,"normalized_accuracy_loo":s.acc_norm_loo,
+            "not_sure":"counted half for each side","owner":"zenstats::forced_choice"}),
     ))
 }
 

@@ -184,7 +184,8 @@ struct Args {
     /// Pairwise mode: a TSV of weighted forced-choice rows
     /// (`group`, `s_left`, `s_right`, `choice`, optional `weight`) — the
     /// triplet-comparison statistic owned by
-    /// `zensim_validate::pairwise::agreement`. Mutually exclusive with
+    /// `zenstats::forced_choice::agreement` (zenmetrics-stats). `choice` may be
+    /// `notsure`, counted half for each side. Mutually exclusive with
     /// `--input` / `--batch`.
     pairwise: Option<PathBuf>,
     /// Optional cluster-bootstrap resample manifest for `--pairwise`:
@@ -249,7 +250,8 @@ fn print_usage() {
          \x20\x20--signed-quality        signed quality SROCC/KROCC/fitted PLCC (--input --json)\n\
          \x20\x20--per-group             + within-band SROCC summary (per_group_srocc)\n\
          \x20\x20--pairwise <PATH|->     forced-choice (2AFC / triplet) agreement:\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20TSV cols group,s_left,s_right,choice[,weight]\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20TSV cols group,s_left,s_right,choice[,weight];\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20choice left|right|notsure (not sure = half each)\n\
          \x20\x20--resample <PATH|->     cluster-bootstrap group-index manifest for\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20--pairwise ('LABEL<TAB>g-csv' or 'LABEL<TAB>*')\n\
          \n\
@@ -1126,11 +1128,14 @@ fn read_text(p: &Path) -> Result<String, String> {
     }
 }
 
-const PAIRWISE_HEADER: &str = "label\tn_groups\tn_responses\tacc_response\ttie_rate\tceiling_response\tacc_norm\tacc_group_majority\tn_groups_majority\n";
+/// The first nine columns are the pre-2026-10-11 contract, unchanged; the
+/// cross-fitted ceilings that came with the move to `zenstats::forced_choice`
+/// are appended so name- and position-based readers both keep working.
+const PAIRWISE_HEADER: &str = "label\tn_groups\tn_responses\tacc_response\ttie_rate\tceiling_response\tacc_norm\tacc_group_majority\tn_groups_majority\tceiling_loo\tobserver_agreement\tacc_norm_loo\n";
 
-fn pairwise_row(label: &str, s: &zensim_validate::pairwise::PairwiseStats) -> String {
+fn pairwise_row(label: &str, s: &zenstats::forced_choice::PairwiseStats) -> String {
     format!(
-        "{label}\t{}\t{:.0}\t{:.10}\t{:.10}\t{:.10}\t{:.10}\t{:.10}\t{}\n",
+        "{label}\t{}\t{:.0}\t{:.10}\t{:.10}\t{:.10}\t{:.10}\t{:.10}\t{}\t{:.10}\t{:.10}\t{:.10}\n",
         s.n_groups,
         s.n_responses,
         s.acc_response,
@@ -1138,16 +1143,19 @@ fn pairwise_row(label: &str, s: &zensim_validate::pairwise::PairwiseStats) -> St
         s.ceiling_response,
         s.acc_norm,
         s.acc_group_majority,
-        s.n_groups_majority
+        s.n_groups_majority,
+        s.ceiling_loo,
+        s.observer_agreement,
+        s.acc_norm_loo
     )
 }
 
 /// `--pairwise`: read weighted forced-choice rows, emit one stat row (or one
 /// per `--resample` line). No stat math here — every number comes from
-/// `zensim_validate::pairwise`.
+/// `zenstats::forced_choice`.
 fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> {
     use std::collections::HashMap;
-    use zensim_validate::pairwise::{
+    use zenstats::forced_choice::{
         Choice, PairwiseRow, agreement, agreement_by_group_index, index_rows_by_group,
     };
 
@@ -1185,7 +1193,7 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
         };
         let choice = Choice::parse(f[ic]).ok_or_else(|| {
             format!(
-                "--pairwise: line {}: choice must be left|right, got {:?}",
+                "--pairwise: line {}: choice must be left|right|notsure, got {:?}",
                 n + 2,
                 f[ic]
             )
@@ -1275,7 +1283,7 @@ fn main() -> ExitCode {
     };
 
     // Pairwise mode: forced-choice agreement, optionally over a caller's
-    // cluster-bootstrap resamples. See `zensim_validate::pairwise`.
+    // cluster-bootstrap resamples. See `zenstats::forced_choice`.
     if let Some(pw_path) = &args.pairwise {
         match run_pairwise(pw_path, args.resample.as_deref()) {
             Ok(out) => {
@@ -1765,6 +1773,44 @@ mod tests {
         let nocol = dir.join("nocol.tsv");
         std::fs::write(&nocol, "group\ts_left\tchoice\nA\t1\tleft\n").unwrap();
         assert!(run_pairwise(&nocol, None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pairwise_counts_not_sure_half_each_and_appends_cross_fitted_ceilings() {
+        // One triplet: humans 6 LEFT, 4 RIGHT, 2 not sure; the metric says
+        // LEFT is worse (60 < 90). Not sure adds 1 to each side: 7 vs 5.
+        let dir = std::env::temp_dir().join(format!("panel_pw_ns_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rows = dir.join("rows.tsv");
+        std::fs::write(
+            &rows,
+            "group\ts_left\ts_right\tchoice\tweight\n\
+             A\t60\t90\tleft\t6\n\
+             A\t60\t90\tright\t4\n\
+             A\t60\t90\tnotsure\t2\n",
+        )
+        .unwrap();
+        let out = run_pairwise(&rows, None).unwrap();
+        let header: Vec<&str> = out.lines().next().unwrap().split('\t').collect();
+        assert_eq!(
+            &header[9..],
+            &["ceiling_loo", "observer_agreement", "acc_norm_loo"]
+        );
+        let line: Vec<&str> = out.lines().nth(1).unwrap().split('\t').collect();
+        assert_eq!(line.len(), header.len());
+        assert_eq!(line[2], "12", "n_responses = 6+4+2");
+        let f = |i: usize| -> f64 { line[i].parse().unwrap() };
+        assert!((f(3) - 7.0 / 12.0).abs() < 1e-9, "acc = (6 + 2/2) / 12");
+        assert!((f(5) - 7.0 / 12.0).abs() < 1e-9, "ceiling = max(7, 5) / 12");
+        assert!((f(6) - 1.0).abs() < 1e-9, "acc_norm");
+        // leave one out: a left response sees 6 vs 5 (majority), a right one
+        // 7 vs 4 (minority), so 7/12
+        assert!((f(9) - 7.0 / 12.0).abs() < 1e-9, "ceiling_loo");
+        assert!(
+            (f(10) - (7.0 * 6.0 + 5.0 * 4.0) / (12.0 * 11.0)).abs() < 1e-9,
+            "observer agreement"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

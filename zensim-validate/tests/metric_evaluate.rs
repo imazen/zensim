@@ -373,6 +373,26 @@ fn preference_direction_and_weights_match_the_owner() {
 }
 
 #[test]
+fn preference_not_sure_counts_half_each() {
+    let f = Fixture::new();
+    let mut v = f.manifest();
+    f.write(
+        "data.csv",
+        "id,score,right,choice,group,weight\na,1,b,left,g1,3\nb,2,,,,\nc,1,b,notsure,g1,2\n",
+    );
+    v["datasets"][0]["sha256"] = json!(hash(&f.path("data.csv")));
+    v["datasets"][0]["columns"] = json!({"id":"id","score":"score","right_id":"right","choice":"choice","preference_group":"group","weight":"weight"});
+    let o = f.run(&v, "notsure");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let m = &f.report("notsure")["runs"][0]["criteria"]["pairwise"]["measurements"];
+    // metric says left is worse (1 < 2); 3 left + 2 not sure = 4 left, 1 right
+    assert_eq!(m["n_responses"], 5.0);
+    assert_eq!(m["accuracy"], 0.8);
+    assert_eq!(m["ceiling"], 0.8);
+    assert_eq!(m["not_sure"], "counted half for each side");
+}
+
+#[test]
 fn paired_comparison_keeps_declared_direction() {
     let f = Fixture::new();
     let mut v = f.manifest();

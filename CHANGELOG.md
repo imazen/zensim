@@ -50,6 +50,8 @@
 
 ### Changed
 
+- **Forced-choice scoring moved to `zenstats::forced_choice`** (zenmetrics-stats); zensim's copy `zensim_validate::pairwise` is deleted. `panel --pairwise` and `panel evaluate`'s `pairwise` criterion compute the same figures for left/right rows, now accept not-sure answers (`notsure`, counted half for each side, owner decision 2026-10-11), and add the cross-fitted ceilings: `panel --pairwise` appends `ceiling_loo`, `observer_agreement` and `acc_norm_loo` after its nine existing columns; `panel evaluate` adds `ceiling_loo`, `observer_agreement` and `normalized_accuracy_loo`.
+
 - **Evaluation statistics: zensim pins `zenmetrics-stats` (renamed from `zenstats`) at zenmetrics `1e48c1ea`.** The dependency key stays `zenstats` (`package = "zenmetrics-stats"`), so every `use zenstats::` path is unchanged. Effect: `bootstrap_ci_delta`, and so `decisive` (`bake_compare`, `panel evaluate` comparisons), switch their percentile bounds from order statistics to Hyndman–Fan type 7, the crate's one rule (owner decision 2026-10-11). No served score changes.
 
 - **The training-CSV loader parity tests no longer skip** (owner, 2026-10-11: "make it fail instead of skip"). `zensim_mlp_train`'s `csv_load_equivalence_tests` returned early with "SKIP" when the TID CSV on `/mnt/v` was missing, so CI never ran them. They now generate CSV fixtures in the real file's layout (2,600 rows over three parallel chunks; negatives, signed zeros, exponents, 17-digit values, subnormals, f64 extremes, `inf`/`nan`, CRLF, blank lines, the `feat_` prefix) and always run; a bad value must be refused at the same line by both loaders. The real TID CSV runs on request: `just csv-loader-parity-real [path]` sets `ZENSIM_TID_IWSSIM_CSV`, and a missing file fails.
