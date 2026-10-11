@@ -37,6 +37,15 @@ with tanh_scale=30; future bakes must not regress it.
 
 ## G2 — JND semantic anchor
 
+> **Correction 2026-10-11.** KonJND PJND is a per-observer threshold
+> distribution, not the JPEG AIC JND unit (1 JND = 75 % correct in a
+> forced-choice comparison). The JND anchor is now stated in the AIC unit:
+> zensim declares a monotone map from score to JND, fitted on a
+> calibration set (AIC2026 once its human labels are published; see
+> `DATA_SPLITS.md` §3d), and reports where 1 JND falls on the dial with its
+> uncertainty. The KonJND PJND location below stays as a different-protocol
+> check, reported separately and never merged with the JND anchor.
+
 The visually-lossless threshold (KonJND PJND mean) must land at
 a declared integer:
 
@@ -172,6 +181,17 @@ ssim2 vs other), input feature transforms, CID22-train subset
 weighting.
 
 ## G8 — Z-RMSE (σ-normalized prediction accuracy)
+
+> **Correction 2026-10-11: Z-RMSE is a diagnostic, not a ranking
+> criterion.** It weights each stimulus by 1/σᵢ². On JND data σ shrinks
+> toward zero distortion, so Z-RMSE mostly scores the near-threshold
+> stimuli; σ also shrinks as a study adds observers, so the same metric
+> error gives a larger Z-RMSE in a bigger study; and its ranking of metrics
+> moves with the mapping family. Headline accuracy is out-of-fold RMSE in
+> JND and τ̂ (error beyond measurement noise), with the map family declared
+> and fitted leave-one-source-out (zenmetrics `docs/EVALUATION_METHODS.md`, in review as zenmetrics PR #67;
+> `zenstats::jnd`). Z-RMSE stays as a goodness-of-fit check. The paragraph
+> below is the original rationale.
 
 Z-RMSE (Mohammadi 2025 § VIII, Equation 6) is:
 

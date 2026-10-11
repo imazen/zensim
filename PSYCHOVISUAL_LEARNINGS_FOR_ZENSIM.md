@@ -56,7 +56,7 @@ Combined with the JPEG **AIC-3 protocol** (Testolina/Saupe 2023, HDR extension J
 |---|---|---|
 | **Meng-Rosenthal-Rubin (MRR)** | Paired SROCC delta between metrics A and B sharing the same MOS targets | z-statistic + p-value (never just "p < 0.05") |
 | **Wilcoxon signed-rank on residuals** | Non-parametric companion to MRR | p-value + effect size `r = Z/√N` |
-| **Bootstrap 95 % CI**, 1000 resamples, percentile method | Required for every per-metric correlation AND every between-metric delta | CI half-width — AIC-3 standard is ≤ 0.27 JND at 1 JND nominal |
+| **Bootstrap 95 % CI**, 1000 resamples, percentile method | Required for every per-metric correlation AND every between-metric delta | CI half-width; resample source images, not rows (zenmetrics `docs/EVALUATION_METHODS.md`, in review as zenmetrics PR #67). The often-quoted 0.27 JND is the mean 95 % CI *width* at 1 JND in the AIC-HDR2025 study (arXiv:2506.12505), not an AIC-3 standard |
 
 A bare claim "metric A beats B on SROCC" is no longer publishable; you need the MRR delta with effect size and the CI overlap status.
 
@@ -347,7 +347,7 @@ This is the single most-cited *methodological* gap between zensim and the modern
 
 ### Findings — what's wrong with scalar MSE on a fixed target
 
-- **CID22 measures MOS (appeal); KonJND-1k measures PJND (imperceptibility threshold).** These are *different psychometric scales*: MOS is cardinal utility on `[1,5]`, PJND is a binary 75%-detection-probability threshold reconstructable to an ordinal `[-2.5, 0]` JND scale. A scalar MSE loss against ssim2 cannot align both at once.
+- **CID22 measures MOS (appeal); KonJND-1k measures PJND (imperceptibility threshold).** These are *different psychometric scales*: MOS is cardinal utility on `[1,5]`, PJND (picture-wise JND) is, per reference image and codec, the lowest compression level at which an observer notices a difference; a dataset reports its distribution over observers (for example the satisfied-user ratio). It is a different quantity from the JPEG AIC JND unit, which is a scale value where 1 JND means 75 % correct in a forced-choice comparison (0 = the source, larger = more distorted; Testolina et al. 2024, arXiv:2410.09501). Neither is a 75 %-detection threshold of the other. *(Corrected 2026-10-11; this line previously called PJND a 75 %-detection threshold on a `[-2.5, 0]` scale.)* A scalar MSE loss against ssim2 cannot align both at once.
 - **MOS is set-dependent and noisy.** Multiple papers (PieAPP, BAPPS) explicitly argue pairwise preferences are more stable per-subject and across labs.
 - **High-fidelity range (q ≥ 80) is where SSIM/PSNR saturate.** SSIMULACRA2, Butteraugli, CVVDP all explicitly target this range. The AIC-3 protocol exists *because* MOS variance at q≥80 makes it nearly useless without boosting (artifact amplification, 10 Hz flicker, 2× zoom).
 
@@ -357,7 +357,7 @@ This is the single most-cited *methodological* gap between zensim and the modern
 - Convert each labeled pair `(i, j) → P(i ≻ j)` into a likelihood under `Φ(d · (z_i − z_j))` where `Φ` is the standard-normal CDF.
 - The **canonical psychometric constant** is `d · Φ⁻¹(0.75) = 1` → `d ≈ 0.6745`. This is the conversion factor between *z-score units* and *1-JND units*.
 - Maximum likelihood gives `z_i` consistent across all paired comparisons (Mosteller / Thurstone 1927; reformulated by Bradley-Terry 1952 with a logistic instead of probit — equivalent in practice).
-- Multiple papers (PieAPP, AIC-3, KonJND) use this; the AIC-3 paper achieves **95 % CI width ≈ 0.27 JND at 1 JND nominal** with this approach.
+- Multiple papers (PieAPP, AIC-3, KonJND) use this; the AIC-HDR2025 study reports 95 % confidence intervals averaging **0.27 JND wide at 1 JND** with boosted triplets and this reconstruction (arXiv:2506.12505). *(Corrected 2026-10-11; previously attributed to the AIC-3 paper.)*
 
 ### What zensim could do
 
@@ -378,7 +378,7 @@ This is the single most-cited *methodological* gap between zensim and the modern
 |---|---|---|
 | Thurstone JND constant | `d ≈ 0.6745 = Φ⁻¹(0.75)` | AIC-3 §3 |
 | NVL JND range | `[-1, -2]` JND | AIC-3 dataset definition |
-| AIC-3 quality-range bounds | `[-2.5, 0]` JND | AIC-3 dataset definition |
+| AIC-3 quality-range bounds | `[-2.5, 0]` JND | AIC-3 dataset definition (QoMEX 2023 sign convention). Later JPEG AIC work uses 0 = source and positive JND for distortion (arXiv:2410.09501, the AIC-4 common test conditions) |
 | BAPPS pair construction | within-reference + cross-distortion, 64×64 patches | LPIPS / BAPPS paper |
 | Margin for MOS-derived pairs | `|ΔMOS| > 0.3` (typical) | inferred from PieAPP §4 |
 
