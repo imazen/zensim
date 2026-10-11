@@ -667,3 +667,47 @@ Open owner decisions:
   scores are unaffected. E34 is being revised to these rules before the owner's approval. The dial shape (a JND
   side output, or re-anchoring the top) stays open for the owner.
 
+## 41. JND dial plan, calibration protocol, statistics owner, E34 revision 4 (2026-10-11, main `c87a2007`)
+
+- **JND dial plan (owner decision, `docs/JND_DIAL_PLAN_2026-10-11.md`).**
+  - Phase A, now: the 0–100 dial is unchanged and zensim adds a declared JND side output. It returns an estimate,
+    an uncertainty and an `in_range` flag.
+  - Phase B, when AIC2026 labels are available: the dial becomes `100 − 10 · JND` near the top, joined smoothly to
+    the lower range.
+  - Phase A work has started. Its public API goes through a PR for the owner's review.
+- **Calibration protocol registered (`benchmarks/jndcal_protocol_2026-10-11.md`, `9f9d3359`).** It fixes every
+  choice before any AIC2026 label is seen:
+  - the knee-power map with the knee fixed at 100 (identity = 0 JND);
+  - leave-one-source-out fits;
+  - out-of-fold RMSE in JND and τ̂ as headlines;
+  - source-clustered intervals;
+  - pointwise and curve reconstructions reported separately;
+  - only the final labels can adopt a map, once.
+
+  On KonFiG TRAIN sources (interim; 3 sources, so descriptive), the out-of-fold error is 0.63 JND for A, 0.65 for
+  seed 0 and 0.79 for B. The fixed-knee family is in zenmetrics PR #68, awaiting the owner.
+- **Statistics owner.** zensim's evaluation statistics now come from `zenmetrics-stats` (`00679058`):
+  - forced choice counts "not sure" as half;
+  - DS-AUC is bit-identical;
+  - `srocc_ci` resamples references and is labelled, with stored readers keyed on the interval kind;
+  - percentiles are type 7, recorded with B and seed.
+
+  Served scores and the public API are unchanged.
+- **Also landed:**
+  - the dialviz readiness page (`d3a1a3a0`);
+  - PU-linear routing of built-in C to CHdr (`9d720d9d`);
+  - CSV loader parity tests that build their own fixtures and never skip (`ebbb4faf`);
+  - a pixels-only exposure entry for scoring the AIC2026 public crops (`8107edc3`).
+- **E34 revision 4 (`c87a2007`), a draft.** It adopts the IQA guidance:
+  - reference-clustered Student intervals;
+  - Holm over a pre-declared family;
+  - E21 as a paired non-inferiority test that keeps training-seed variance.
+
+  It passed four rounds of review at effort xhigh and awaits owner approval.
+
+Open owner decisions:
+1. Approve E34.
+2. zenmetrics PR #68.
+3. The G-STEER population: 135 cases or 143.
+4. zenanalyze PR #90.
+
