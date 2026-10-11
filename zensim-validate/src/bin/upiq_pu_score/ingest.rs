@@ -276,6 +276,15 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// An absolute root that must never be opened. Admission requires an
+    /// absolute `image_root`; on Windows an absolute path needs a drive (or
+    /// UNC) prefix, so `/nonexistent-…` is relative there and every fixture
+    /// would be refused for the wrong reason.
+    #[cfg(windows)]
+    const TRIPWIRE_ROOT: &str = r"C:\nonexistent-upiq-input-tripwire";
+    #[cfg(not(windows))]
+    const TRIPWIRE_ROOT: &str = "/nonexistent-upiq-input-tripwire";
+
     fn fixture() -> serde_json::Value {
         let mut rows = Vec::new();
         for (dataset, prefix, nc, nd, nl) in
@@ -295,7 +304,7 @@ mod tests {
         }
         serde_json::json!({"schema":"upiq380-extraction-admission-v1","role":"train","tier":"T2",
             "authority":"D3-2026-10-07","input_contract":"upiq-exr-bt709-nits-v1","formula_revision":5,
-            "image_root":"/nonexistent-upiq-input-tripwire","requested_ids":canonical_ids(),"rows":rows})
+            "image_root":TRIPWIRE_ROOT,"requested_ids":canonical_ids(),"rows":rows})
     }
 
     fn checked(value: serde_json::Value) -> Result<(), String> {
@@ -304,6 +313,8 @@ mod tests {
 
     #[test]
     fn complete_metadata_admits_without_opening_any_images() {
+        assert!(Path::new(TRIPWIRE_ROOT).is_absolute());
+        assert!(!Path::new(TRIPWIRE_ROOT).exists());
         assert!(checked(fixture()).is_ok());
     }
 

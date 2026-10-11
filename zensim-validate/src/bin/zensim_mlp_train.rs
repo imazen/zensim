@@ -5563,7 +5563,37 @@ mod checkpoint_admission_tests {
         )
     }
 
+    /// Receipts naming two valid non-UTF-8 Unix paths whose lossy display
+    /// forms collide parse back to exactly those native paths, without
+    /// touching the filesystem, so this half runs on Apple targets too.
     #[cfg(unix)]
+    #[test]
+    fn non_utf8_receipts_parse_to_exact_native_paths() {
+        use std::os::unix::ffi::OsStringExt;
+        let owned =
+            std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/r/epoch-\xff.bin".to_vec()));
+        let foreign =
+            std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/r/epoch-\xfe.bin".to_vec()));
+        assert_eq!(owned.to_string_lossy(), foreign.to_string_lossy());
+        let log: Vec<String> = [(&owned, 0), (&foreign, 1)]
+            .iter()
+            .map(|(path, epoch)| {
+                format!(
+                    "  checkpoint dump: {}",
+                    serde_json::json!({"path": path.as_os_str(), "epoch": epoch, "bytes": 3})
+                )
+            })
+            .collect();
+        assert_eq!(
+            emitted_checkpoint_paths(&log),
+            vec![(owned.clone(), 0), (foreign.clone(), 1)]
+        );
+    }
+
+    // End to end through real files. Apple filesystems (APFS, HFS+) refuse
+    // file names that are not valid UTF-8 (EILSEQ, os error 92), so these
+    // names cannot be created there; the receipt half above still runs.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     #[test]
     fn non_utf8_receipts_stamp_exact_native_path_only() {
         use std::os::unix::ffi::OsStringExt;
@@ -5604,6 +5634,16 @@ mod checkpoint_admission_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A checkpoint-name prefix that forces JSON escaping in the write
+    /// receipt. Windows reserves `"` and ASCII control characters in file
+    /// names (ERROR_INVALID_NAME, os error 123), so there the prefix uses a
+    /// non-ASCII character and relies on the drive path's `\` separators,
+    /// which JSON escapes too.
+    #[cfg(not(windows))]
+    const RECEIPT_ESCAPE_PREFIX: &str = "quoted \"dir\"\n";
+    #[cfg(windows)]
+    const RECEIPT_ESCAPE_PREFIX: &str = "quoted 'dir' \u{e9}";
+
     #[test]
     fn stamping_uses_write_receipts_and_leaves_a_late_foreign_dump_untouched() {
         let dir = std::env::temp_dir().join(format!("shippath4-receipts-{}", std::process::id()));
@@ -5611,7 +5651,7 @@ mod checkpoint_admission_tests {
         let mut log = vec!["epoch 0 | validation".to_string()];
         let base = fixture();
         for epoch in [0, 2] {
-            let path = dir.join(format!("quoted \"dir\"\nckpt_epoch{epoch:03}.bin"));
+            let path = dir.join(format!("{RECEIPT_ESCAPE_PREFIX}ckpt_epoch{epoch:03}.bin"));
             std::fs::write(&path, &base).unwrap();
             log.push(format!(
                 "  checkpoint dump: {}",

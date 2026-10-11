@@ -1048,6 +1048,13 @@ fn write_checkpoint_dump(
     log: &mut Vec<String>,
 ) {
     std::fs::write(path, bytes).expect("H-TRAJ checkpoint dump write failed");
+    let line = checkpoint_receipt_line(path, epoch, bytes.len());
+    eprintln!("{line}");
+    log.push(line);
+}
+
+/// The write receipt [`write_checkpoint_dump`] logs for one written dump.
+fn checkpoint_receipt_line(path: &std::path::Path, epoch: usize, len: usize) -> String {
     // Path's Serde implementation rejects valid non-UTF-8 native names.
     // Preserve the string format when possible; OsStr's tagged Unix bytes /
     // Windows code units are lossless and never use the display replacement.
@@ -1055,10 +1062,8 @@ fn write_checkpoint_dump(
         Some(path) => serde_json::json!(path),
         None => serde_json::json!(path.as_os_str()),
     };
-    let receipt = serde_json::json!({"path": receipt_path, "epoch": epoch, "bytes": bytes.len()});
-    let line = format!("  checkpoint dump: {receipt}");
-    eprintln!("{line}");
-    log.push(line);
+    let receipt = serde_json::json!({"path": receipt_path, "epoch": epoch, "bytes": len});
+    format!("  checkpoint dump: {receipt}")
 }
 
 /// Per-INPUT-FEATURE L2 multiplier on layer-1 rows (len = n_features), set by
@@ -12163,7 +12168,51 @@ mod group_l1_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Receipt paths for valid non-UTF-8 Unix names decode to the exact native
+    /// bytes, distinct even where the lossy display forms collide, without
+    /// touching the filesystem, so this half runs on Apple targets too.
     #[cfg(unix)]
+    #[test]
+    fn checkpoint_receipts_keep_non_utf8_native_paths_exact() {
+        use std::os::unix::ffi::OsStringExt;
+        let paths = [
+            std::path::PathBuf::from(std::ffi::OsString::from_vec(
+                b"/r/valid-unix-\xff/ckpt_epoch000.bin".to_vec(),
+            )),
+            std::path::PathBuf::from(std::ffi::OsString::from_vec(
+                b"/r/valid-unix-\xfe/ckpt_epoch000.bin".to_vec(),
+            )),
+            std::path::PathBuf::from("/r/valid-utf8/ckpt_epoch000.bin"),
+        ];
+        assert_eq!(paths[0].to_string_lossy(), paths[1].to_string_lossy());
+        let mut decoded = Vec::new();
+        for (i, path) in paths.iter().enumerate() {
+            let line = checkpoint_receipt_line(path, i, 17);
+            let receipt: serde_json::Value =
+                serde_json::from_str(line.strip_prefix("  checkpoint dump: ").unwrap()).unwrap();
+            assert_eq!(receipt["epoch"], i);
+            assert_eq!(receipt["bytes"], 17);
+            let back = match receipt["path"].as_str() {
+                Some(s) => std::path::PathBuf::from(s),
+                None => std::path::PathBuf::from(
+                    serde_json::from_value::<std::ffi::OsString>(receipt["path"].clone()).unwrap(),
+                ),
+            };
+            assert_eq!(back.as_os_str(), path.as_os_str());
+            decoded.push(back);
+        }
+        assert!(
+            paths[2].to_str().is_some()
+                && checkpoint_receipt_line(&paths[2], 2, 17).contains("\"/r/valid-utf8/")
+        );
+        assert_ne!(decoded[0], decoded[1]);
+    }
+
+    // End to end through real files. Apple filesystems (APFS, HFS+) refuse
+    // file names that are not valid UTF-8 (EILSEQ, os error 92), so these
+    // names cannot be created there; the receipt half above still runs.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     #[test]
     fn train_mlp_non_utf8_checkpoint_paths_are_lossless() {
         use std::os::unix::ffi::OsStringExt;

@@ -386,6 +386,15 @@ mod tests {
         serde_json::json!({"rel": format!("{dir}/{set}/{content}/{stem}_f{j}.png"), "sha256": "1".repeat(64)})
     }
 
+    /// An absolute root that must never be opened. Admission requires an
+    /// absolute `frame_root`; on Windows an absolute path needs a drive (or
+    /// UNC) prefix, so `/nonexistent-…` is relative there and every fixture
+    /// would be refused for the wrong reason.
+    #[cfg(windows)]
+    const TRIPWIRE_ROOT: &str = r"C:\nonexistent-hdrvid-tripwire";
+    #[cfg(not(windows))]
+    const TRIPWIRE_ROOT: &str = "/nonexistent-hdrvid-tripwire";
+
     fn fixture(set: &str) -> serde_json::Value {
         let (videos, configs): (usize, &[&str]) = if set == "hdrvdc" {
             (116, &["A", "B", "C", "D", "E"])
@@ -416,7 +425,7 @@ mod tests {
         }
         serde_json::json!({"schema": "hdrvid-extraction-admission-v1", "set": set,
             "role": "external-eval", "input_contract": CONTRACT, "formula_revision": 5,
-            "frame_root": "/nonexistent-hdrvid-tripwire", "requested_ids": canonical_ids(), "rows": rows})
+            "frame_root": TRIPWIRE_ROOT, "requested_ids": canonical_ids(), "rows": rows})
     }
 
     fn checked(v: serde_json::Value) -> Result<(), String> {
@@ -425,6 +434,8 @@ mod tests {
 
     #[test]
     fn complete_admissions_validate_without_frame_access() {
+        assert!(std::path::Path::new(TRIPWIRE_ROOT).is_absolute());
+        assert!(!std::path::Path::new(TRIPWIRE_ROOT).exists());
         assert!(checked(fixture("hdrvdc")).is_ok());
         assert!(checked(fixture("avt")).is_ok());
     }
