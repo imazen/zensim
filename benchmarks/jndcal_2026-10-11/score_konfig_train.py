@@ -34,7 +34,10 @@ def main():
 
     split = json.load(open(MANIFEST))["split"]["map"]
     train = sorted(s for s, role in split.items() if role == "train")
-    rows = [r for r in pq.read_table(FSCALE).to_pylist() if split[r["source"]] == "train"]
+    # filter at read time: VAL rows (labels included) are never materialised
+    rows = pq.read_table(FSCALE, filters=[("source", "in", train)]).to_pylist()
+    if {r["source"] for r in rows} != set(train):
+        raise SystemExit(f"TRAIN sources {train} not all present in {FSCALE}")
     models = []
     for spec in a.model:
         name, rest = spec.split("=", 1)
