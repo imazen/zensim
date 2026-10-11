@@ -181,7 +181,7 @@ Inputs:
   - Re-scored with the read-time TRAIN filter, the file is byte-identical.
 - **Revision 2 fits:** `/mnt/v/output/zensim/jndcal-2026-10-11/r2-fixed-knee/konfig_train_fit_{A,seed0,B}_{full,le4}.jsonl`,
   with SHA256SUMS beside them.
-  - Driver: zenmetrics `e4a8c5a5` (local, not yet pushed), `jnd_calibrate` binary sha256 `a4469e6f…`.
+  - Driver: zenmetrics `e4a8c5a5`, in imazen/zenmetrics PR #68 (head `1a49beb6`, to merge into `master` as a fast-forward so the hashes stay), `jnd_calibrate` binary sha256 `a4469e6f…`.
   - The six runs take 31 s on dev in total (`/usr/bin/time -v` max RSS 3,900 KB).
 - **Revision 1's fits** (fitted-knee primary, driver `204f5062`) stay in the parent directory as a record.
 
