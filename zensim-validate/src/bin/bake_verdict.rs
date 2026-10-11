@@ -1834,9 +1834,10 @@ struct CorpusResult {
     /// shows it for the MOS corpora; the abs form is reserved for the JND
     /// corpora whose target sign is genuinely ambiguous.
     srocc_signed: f64,
-    /// Marginal bootstrap 95% CI `(lo, hi)` of `|SROCC|` — makes a mid-cluster
-    /// ranking gap legible as real-or-noise (the bare point estimate cannot).
-    srocc_ci: (f64, f64),
+    /// Bootstrap 95% interval of SROCC, resampling references — makes a
+    /// mid-cluster ranking gap legible as real-or-noise (the bare point
+    /// estimate cannot). See [`bootstrap_srocc_ci`].
+    srocc_ci: SroccCi,
     /// Logistic-rescaled scores in [0,100] dial space (for G1 range check).
     rescaled_scores: Vec<f64>,
     /// Corpus key (lowercase, e.g. "cid22") for `--full-json` keying and the
@@ -2004,71 +2005,128 @@ fn nan_null(v: f64) -> Option<f64> {
     v.is_finite().then_some(v)
 }
 
-/// Marginal bootstrap 95% CI of |SROCC| for one corpus: resample the
-/// `(score, human)` PAIRS with replacement `N_BOOT` times, take |SROCC| of
-/// each resample, and return the (2.5th, 97.5th) percentiles.
+/// `srocc_ci` bootstrap settings, recorded with every interval
+/// (`srocc_ci_method` in `--full-json`, and the report line).
+const SROCC_CI_RESAMPLES: usize = 1000;
+const SROCC_CI_SEED: u64 = 0;
+const SROCC_CI_LEVEL: f64 = 0.95;
+
+/// A corpus' pooled-SROCC bootstrap interval and how it was drawn.
+#[derive(Clone, Copy, Debug)]
+struct SroccCi {
+    /// Interval of `sign(ρ̂)·ρ`: the `|SROCC|` interval the dashboard reads,
+    /// exact whenever the draws keep the point estimate's sign.
+    aligned: (f64, f64),
+    /// The owner's signed interval of ρ.
+    signed: zenstats::resample::Interval,
+    /// Resampled unit: `"one-way: reference"`, or `"rows"` for a corpus whose
+    /// table carries no reference ids (labelled, never silent).
+    design: &'static str,
+    /// Number of resampled units (references, or rows).
+    units: usize,
+}
+
+/// Bootstrap 95% interval of one corpus' pooled SROCC.
 ///
 /// **Why this exists.** The single-bake report prints SROCC to 3 decimals with
 /// no uncertainty, which silently invites reading a 0.882-vs-0.880 gap as an
-/// ordering. It usually isn't: at n≈4292 the 95% CI half-width is ≈0.006, so
-/// adjacent bakes in the mid-cluster are a statistical tie. The CI makes that
-/// visible (paired A-vs-B significance still lives in `bake_compare`; this is
-/// the marginal per-corpus band the dashboard renders as a tie-guide).
+/// ordering. The interval makes that visible (paired A-vs-B significance still
+/// lives in `bake_compare`; this is the marginal per-corpus band the dashboard
+/// renders as a tie-guide).
 ///
-/// The STATISTIC is `zenstats::panel::spearman` — only the resampling loop is
-/// here, so this is orchestration, not a duplicate stat (per the no-duplication
-/// rule). Deterministic: a fixed-seed SplitMix64/xorshift keyed off `n` so a
-/// bake's CI is reproducible run-to-run without a new `rand` dependency.
-fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64]) -> (f64, f64) {
-    fn xs(s: &mut u64) -> u64 {
-        *s ^= *s << 13;
-        *s ^= *s >> 7;
-        *s ^= *s << 17;
-        *s
-    }
+/// **What it resamples (2026-10-11).** References, not pairs: every distorted
+/// image of one reference shares its content, so a pair bootstrap treats 4,292
+/// CID22 pairs as 4,292 independent draws when they are 49 references. Measured
+/// 2026-10-11 for profile C: the reference-clustered interval is 3.9× as wide
+/// on CID22, 2.0× on KADID SELECT and 1.7× on TID SELECT
+/// (`benchmarks/stats_migration_2026-10-11.md`). The interval is
+/// `zenstats::resample::spearman_interval` with `Design::OneWay(reference)`:
+/// whole references are drawn with replacement, a reference drawn twice counts
+/// as two, and the percentile rule is Hyndman–Fan type 7. Until 2026-10-11 this
+/// function resampled pairs with its own xorshift stream; intervals from before
+/// that date are pair-bootstrap intervals and must not be compared with these
+/// without that label. A corpus without reference ids falls back to
+/// `Design::Rows` and says so in `design`.
+///
+/// Orchestration only: the resampling and the statistic are the owner's.
+fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64], ref_ids: Option<&[u32]>) -> SroccCi {
     let n = scores.len().min(humans.len());
-    if n < 8 {
-        return (f64::NAN, f64::NAN);
-    }
-    const N_BOOT: usize = 1000;
-    let mut state: u64 = 0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D);
-    // Draw every replicate's index set SEQUENTIALLY from the one xorshift
-    // stream — that is what makes the CI reproducible, and it is the only
-    // part that must stay serial. The `spearman` evaluations are independent
-    // per replicate, so they run on rayon and land back at their own index:
-    // same 1000 values, same order, same percentiles, bit-for-bit.
-    //
-    // Generated a BLOCK at a time so the index buffer stays ~5 MB instead of
-    // `N_BOOT × n` (45 MB on the largest corpus, ×12 corpora now that the
-    // corpus loop is parallel too).
-    const BOOT_BLOCK: usize = 128;
-    let mut rs: Vec<f64> = vec![0.0; N_BOOT];
-    let mut draws: Vec<u32> = vec![0; BOOT_BLOCK * n];
-    let mut done = 0usize;
-    while done < N_BOOT {
-        let this = BOOT_BLOCK.min(N_BOOT - done);
-        for slot in draws[..this * n].iter_mut() {
-            *slot = (xs(&mut state) % n as u64) as u32;
+    let (design, units) = match ref_ids {
+        Some(r) => {
+            let mut distinct = r.to_vec();
+            distinct.sort_unstable();
+            distinct.dedup();
+            ("one-way: reference", distinct.len())
         }
-        rs[done..done + this]
-            .par_iter_mut()
-            .zip(draws[..this * n].par_chunks(n))
-            .for_each(|(out, idxs)| {
-                let bs: Vec<f64> = idxs.iter().map(|&i| scores[i as usize]).collect();
-                let bh: Vec<f64> = idxs.iter().map(|&i| humans[i as usize]).collect();
-                *out = spearman(&bs, &bh).abs();
-            });
-        done += this;
-    }
-    rs.sort_by(f64::total_cmp);
-    let pct = |p: f64| -> f64 {
-        let pos = p * (N_BOOT as f64 - 1.0);
-        let lo = pos.floor() as usize;
-        let hi = (lo + 1).min(N_BOOT - 1);
-        let frac = pos - lo as f64;
-        rs[lo] * (1.0 - frac) + rs[hi] * frac
+        None => ("rows", n),
     };
-    (pct(0.025), pct(0.975))
+    let nan = zenstats::resample::Interval {
+        estimate: f64::NAN,
+        lo: f64::NAN,
+        hi: f64::NAN,
+        se: f64::NAN,
+        n_finite: 0,
+        p_zero: f64::NAN,
+    };
+    let undefined = SroccCi {
+        aligned: (f64::NAN, f64::NAN),
+        signed: nan,
+        design,
+        units,
+    };
+    if n < 8 {
+        return undefined;
+    }
+    let cfg = zenstats::resample::BootstrapConfig {
+        resamples: SROCC_CI_RESAMPLES,
+        seed: SROCC_CI_SEED,
+        level: SROCC_CI_LEVEL,
+    };
+    let result = match ref_ids {
+        Some(r) => zenstats::resample::spearman_interval(
+            &scores[..n],
+            &humans[..n],
+            &zenstats::resample::Design::OneWay(&r[..n]),
+            &cfg,
+        ),
+        None => zenstats::resample::spearman_interval(
+            &scores[..n],
+            &humans[..n],
+            &zenstats::resample::Design::Rows,
+            &cfg,
+        ),
+    };
+    let Ok(signed) = result else {
+        return undefined;
+    };
+    let aligned = if signed.estimate < 0.0 {
+        (-signed.hi, -signed.lo)
+    } else {
+        (signed.lo, signed.hi)
+    };
+    SroccCi {
+        aligned,
+        signed,
+        design,
+        units,
+    }
+}
+
+/// The `srocc_ci_method` block of `--full-json`.
+fn srocc_ci_method(ci: &SroccCi) -> serde_json::Value {
+    serde_json::json!({
+        "statistic": "pooled Spearman, bootstrap percentile interval",
+        "owner": "zenstats::resample::spearman_interval",
+        "design": ci.design,
+        "units": ci.units,
+        "resamples": SROCC_CI_RESAMPLES,
+        "finite_resamples": ci.signed.n_finite,
+        "seed": SROCC_CI_SEED,
+        "level": SROCC_CI_LEVEL,
+        "percentile_rule": "Hyndman-Fan type 7",
+        "aligned": "srocc_ci is the interval of sign(srocc_signed) * rho",
+        "superseded": "before 2026-10-11 srocc_ci was a pair (row) bootstrap; for profile C it was 3.9x narrower on CID22 (benchmarks/stats_migration_2026-10-11.md)",
+    })
 }
 
 /// Canonical PRODUCT-WEIGHTED ranking composite over the per-corpus results —
@@ -3798,13 +3856,14 @@ fn render_corpus(
             per_ref_orientation(corpus.name),
         )
     });
-    // Signed SROCC (polarity-preserving) + marginal bootstrap CI. `aggregate_panel`
-    // returns `|SROCC|`; a globally-inverted bake would hide behind that abs, so
-    // keep the sign here. The CI resolves whether a 3-decimal ranking gap is real.
+    // Signed SROCC (polarity-preserving) + reference-clustered bootstrap
+    // interval. `aggregate_panel` returns `|SROCC|`; a globally-inverted bake
+    // would hide behind that abs, so keep the sign here. The interval resolves
+    // whether a 3-decimal ranking gap is real.
     let srocc_signed = spearman(&scores, &humans);
     ct.mark("per-ref SROCC + signed SROCC");
-    let srocc_ci = bootstrap_srocc_ci(&scores, &humans);
-    ct.mark("bootstrap SROCC CI (1000 resamples)");
+    let srocc_ci = bootstrap_srocc_ci(&scores, &humans, ref_ids.as_deref());
+    ct.mark("bootstrap SROCC interval (reference-clustered, 1000 resamples)");
 
     let mut body = String::new();
     body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, n));
@@ -3815,6 +3874,23 @@ fn render_corpus(
         "| V_X bake | {srocc:.4} | {plcc:.4} | {krocc:.4} | {or_:.4} | {pw:.4} | {z:.3} | {ds:.4} |\n"
     ));
     body.push('\n');
+    body.push_str(&format!(
+        "_SROCC {:.0}% interval: [{:.4}, {:.4}] (signed [{:+.4}, {:+.4}], se {:.4}), bootstrap \
+resampling {} ({} units), {} resamples, seed {}, Hyndman–Fan type 7 percentiles \
+(`zenstats::resample::spearman_interval`). Until 2026-10-11 this interval resampled pairs, \
+which understates it (3.9× narrower on CID22 for profile C); compare only intervals with the same \
+design._\n\n",
+        SROCC_CI_LEVEL * 100.0,
+        srocc_ci.aligned.0,
+        srocc_ci.aligned.1,
+        srocc_ci.signed.lo,
+        srocc_ci.signed.hi,
+        srocc_ci.signed.se,
+        srocc_ci.design,
+        srocc_ci.units,
+        SROCC_CI_RESAMPLES,
+        SROCC_CI_SEED,
+    ));
     body.push_str(
         "_Z-RMSE + OR use corpus-wide σ. Per-stimulus observer σ is NOT in the eval \
 feature parquets, so `zenstats`' per-sample forms (`z_rmse_per_sample` / \
@@ -6595,8 +6671,12 @@ Run the dedicated q-sweep harness for those._\n",
                     // Signed (polarity-preserving) SROCC — a negative here means the
                     // bake is globally inverted, which `srocc` (abs) hides.
                     "srocc_signed": r.srocc_signed,
-                    // Marginal bootstrap 95% CI of |SROCC| → the dashboard tie-band.
-                    "srocc_ci": [r.srocc_ci.0, r.srocc_ci.1],
+                    // Bootstrap 95% interval of |SROCC| (reference-clustered since
+                    // 2026-10-11; `srocc_ci_method` says how) → the dashboard tie-band.
+                    "srocc_ci": [r.srocc_ci.aligned.0, r.srocc_ci.aligned.1],
+                    "srocc_ci_signed": [r.srocc_ci.signed.lo, r.srocc_ci.signed.hi],
+                    "srocc_ci_se": r.srocc_ci.signed.se,
+                    "srocc_ci_method": srocc_ci_method(&r.srocc_ci),
                     "plcc": r.plcc,
                     "krocc": r.krocc,
                     "or": r.or_ratio,
@@ -7836,6 +7916,51 @@ mod tests {
     fn provenance_reports_an_unhashable_bake_instead_of_panicking() {
         let prov = provenance_block(Path::new("/nonexistent/nope.bin"), &[]);
         assert!(prov.contains("UNHASHABLE"), "got:\n{prov}");
+    }
+
+    /// `srocc_ci` is the owner's reference-clustered interval, aligned to the
+    /// point estimate's sign, and labels a corpus without reference ids.
+    #[test]
+    fn srocc_ci_resamples_references_and_aligns_polarity() {
+        // 6 references x 4 rungs
+        let refs: Vec<u32> = (0..24).map(|i| i / 4).collect();
+        let humans: Vec<f64> = (0..24)
+            .map(|i| (i % 4) as f64 + (i / 4) as f64 * 0.3)
+            .collect();
+        let scores: Vec<f64> = humans
+            .iter()
+            .enumerate()
+            .map(|(i, h)| h + ((i * 7) % 5) as f64 * 0.2)
+            .collect();
+        let cfg = zenstats::resample::BootstrapConfig {
+            resamples: SROCC_CI_RESAMPLES,
+            seed: SROCC_CI_SEED,
+            level: SROCC_CI_LEVEL,
+        };
+        let ci = bootstrap_srocc_ci(&scores, &humans, Some(&refs));
+        assert_eq!(ci.design, "one-way: reference");
+        assert_eq!(ci.units, 6);
+        let want = zenstats::resample::spearman_interval(
+            &scores,
+            &humans,
+            &zenstats::resample::Design::OneWay(&refs),
+            &cfg,
+        )
+        .unwrap();
+        assert_eq!(ci.signed, want);
+        assert_eq!(ci.aligned, (want.lo, want.hi));
+        assert!(want.lo < want.hi && want.hi <= 1.0);
+
+        let inverted: Vec<f64> = scores.iter().map(|v| -v).collect();
+        let inv = bootstrap_srocc_ci(&inverted, &humans, Some(&refs));
+        assert!(inv.signed.estimate < 0.0);
+        assert_eq!(inv.aligned, (-inv.signed.hi, -inv.signed.lo));
+
+        let rows = bootstrap_srocc_ci(&scores, &humans, None);
+        assert_eq!((rows.design, rows.units), ("rows", 24));
+        assert!(rows.signed.n_finite > 0);
+        let short = bootstrap_srocc_ci(&scores[..7], &humans[..7], Some(&refs[..7]));
+        assert!(short.aligned.0.is_nan() && short.aligned.1.is_nan());
     }
 
     #[test]

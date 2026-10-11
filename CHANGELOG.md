@@ -50,6 +50,8 @@
 
 ### Changed
 
+- **`bake_verdict` `srocc_ci` now resamples references, not pairs** (`zenstats::resample::spearman_interval`, `Design::OneWay(reference)`, B = 1000, seed 0, type 7). **The intervals widen**: for profile C, CID22 3.9×, KADID SELECT 2.0×, TID SELECT 1.7× (`benchmarks/stats_migration_2026-10-11.md`). `--full-json` adds `srocc_ci_signed`, `srocc_ci_se` and `srocc_ci_method` (design, units, B, seed, level, percentile rule); `srocc_ci` keeps its shape, now the interval of sign(ρ̂)·ρ. The report prints a labelled interval line per corpus. A corpus without reference ids is resampled by rows and labelled `rows`. `srocc_ci` values from before this change are pair-bootstrap intervals and must not be compared with new ones without that label.
+
 - **DS-AUC moved to `zenstats::pairs::ds_auc`**; zensim's `zensim-validate/src/difference_auc.rs` is deleted. `bake_verdict` and `panel evaluate` call the owner. Same pair selection and arithmetic: `tests/ds_auc_parity.rs` checks bit identity against the removed implementation (kept there as a frozen oracle) on the existing fixtures and on subsampled tables with ties and non-finite rows.
 
 - **Forced-choice scoring moved to `zenstats::forced_choice`** (zenmetrics-stats); zensim's copy `zensim_validate::pairwise` is deleted. `panel --pairwise` and `panel evaluate`'s `pairwise` criterion compute the same figures for left/right rows, now accept not-sure answers (`notsure`, counted half for each side, owner decision 2026-10-11), and add the cross-fitted ceilings: `panel --pairwise` appends `ceiling_loo`, `observer_agreement` and `acc_norm_loo` after its nine existing columns; `panel evaluate` adds `ceiling_loo`, `observer_agreement` and `normalized_accuracy_loo`.

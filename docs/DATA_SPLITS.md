@@ -1947,3 +1947,25 @@ calibration or new model; the same bootstrap draws (B = 1000, seed 42) are
 summarised under the old order-statistic rule and the new type 7 rule, and
 only the agree counts and decisions are compared. Results and the borderline
 list: `benchmarks/percentile_rule_rerun_2026-10-11.md`.
+
+## Exposure ledger — 2026-10-11: before/after read for the zenmetrics-stats migration
+
+STATS_MIGRATION brief: "Show a before/after table on one real `bake_verdict` run
+over already-exposed validation data only (CID22 and the SELECT views; never
+TERMINAL, AIC2026, T0, AIC labels or HDR VAL)."
+
+Scope as executed: profile C's shipped bake
+(`zensim/weights/c_sdr_purity944_2026-08-29.bin`) through `bake_verdict`, before
+and after the `srocc_ci` change, on four files of the 944 root
+`/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01`: `ext_cid22val.parquet`
+(CID22 49-reference validation, 4,292 rows) and the SELECT views
+`ext_kadid_select_2026-08-29.parquet` (3,125), `ext_tid_select_2026-08-29.parquet`
+(1,080; TID is train-only, §8.1) and `ext_konjnd_jpeg_select_2026-08-29.parquet`
+(404), sha256 as in `_MANIFEST_splitv2_views_2026-08-29.json`. They were mounted
+under the corpus slot names in a scratch root; the full KADID/TID/KonJND tables,
+every `*_terminal_*` file, AIC/T0 sets and HDR sets were not opened, and the dial,
+corruption and per-pair-metric grids were pointed at an absent path.
+
+No fitting, selection, calibration or new model. Only the bootstrap interval
+summary of the shipped bake's scores changed between the two runs; every other
+statistic is byte-identical. Result: `benchmarks/stats_migration_2026-10-11.md`.
