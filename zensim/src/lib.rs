@@ -246,6 +246,7 @@ mod fused;
 /// `--no-default-features` build too.
 pub(crate) mod hf_gain_form;
 mod iw_pool;
+mod jnd;
 pub mod mapping;
 mod metric;
 // MLP runtime is internal — V0_4+ dispatch is exposed only through
@@ -545,6 +546,7 @@ pub mod __bench_stages {
     }
     pub use crate::simd_ops::{abs_diff_sum, mul_into, sq_diff_sum, sq_sum_into};
 }
+pub use jnd::{JndEstimate, JndMap};
 /// Classification API — requires `features = ["classification"]`.
 ///
 /// Exposes `classify()`, error categorization, and per-pixel delta statistics
