@@ -50,6 +50,8 @@
 
 ### Changed
 
+- **Readers of stored `srocc_ci` label the interval kind and never mix kinds.** `scripts/lib/srocc_ci.py` classifies each stored interval: `ref` (reference-clustered, `srocc_ci_method.design == "one-way: reference"`) or `pair` (pair bootstrap: every verdict before 2026-10-11, and the `rows` fallback). The gauntlet board splits "CID22 95%CI±" into a `ref` and a `pair` column (sorted and shaded only within a kind), labels every per-corpus ±CI, flags a table that mixes kinds, and rewords both legends. `speed_accuracy_page.py` draws `pair` bars dashed, names the kind in every tooltip and axis label, and flags a mixed chart. `analyze_wave.py` labels each CI half-width and refuses a CI-based call across kinds. Test: `scripts/tests/test_srocc_ci_kind.py`.
+
 - `bake_compare` records the percentile rule with its B and seed: the JSON adds `percentile_rule` ("Hyndman-Fan type 7") and `bootstrap_unit` ("row"), and the report states B, seed, per-band seed rule, percentile rule and that rows, not references, are resampled. `panel evaluate`'s legacy decisive block records the same. (e3c6be97)
 
 - **`panel evaluate` comparisons resample references** (`zenstats::resample::cluster_bootstrap`, `Design::OneWay(reference_id)`): each comparison reports A − B per panel statistic with its reference-clustered interval, se and `p_zero` (`delta`, `delta_order`) and a `bootstrap` block (unit, references, B, seed, level, type 7 rule). The row-bootstrap `decisive` result moves under `legacy_row_bootstrap`, labelled as not confirmation. A dataset without `reference_id` now reports the comparison as not measured. (eaee4e90)

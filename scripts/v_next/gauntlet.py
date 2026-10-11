@@ -48,6 +48,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from lib import srocc_ci  # noqa: E402
 
 # dataviz validated categorical palette (8 hues, light/dark), + chart ink. Validated by
 # scripts/validate_palette.js (light: all CVD/normal gates pass, 3 slots need the relief rule =
@@ -1059,6 +1060,18 @@ def compact_zones(dial):
             "classes": z.get("class_images") or {}, "scheme": z.get("scheme")}
 
 
+def stamp_srocc_ci_kinds(rank):
+    """Stamp `srocc_ci_kind` ("ref" / "pair", `scripts/lib/srocc_ci.py`) on every corpus
+    block that carries an `srocc_ci`, so the page labels each interval and never sorts,
+    shades or compares widths across the two kinds. Returns `rank`."""
+    for block in (rank or {}).values():
+        if isinstance(block, dict):
+            k = srocc_ci.kind(block)
+            if k is not None:
+                block["srocc_ci_kind"] = k
+    return rank
+
+
 def load_fulleval(fulleval_dir, best_per_day=None):
     """Read every *.fulleval.json; order by best_per_day date when available. Returns the list of
     bake dicts prepared for embedding (subsampled scatter points + fit lines + composite)."""
@@ -1114,6 +1127,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         name = o.get("name", f"bake{ci}")
         curated = name in CURATED
         rank = o.get("rank", {})
+        stamp_srocc_ci_kinds(rank)
         matched_ann = [e["id"] for e in ann_entries if "id" in e and _ann_matches(o, e)]
         fair = fairness_of(o, ann_entries, seed_groups, name_to_group)
         # Read the recorded instrument's composite; missing stays unmeasured.
@@ -1746,7 +1760,8 @@ const COL_FIELD={composite:'composite',cid22:'rank.cid22',nonphoto:'rank.nonphot
   konjnd:'rank.konjnd',aic3:'rank.aic3',live:'rank.live',csiq:'rank.csiq',
   hfnl:'rank.hfnlproxy.per_ref_mean',dial_mono:'dial.mono_pct',dial_tied:'dial.tied_pct',
   m3a:'m3a_coherence',m3:'m3_coherence',m3_mass:'m3_dropped_mass_pct',
-  cid22_ci:'rank.cid22.srocc_ci',cid22_bwd:'rank.cid22.frac_negative'};
+  cid22_ci_ref:'rank.cid22.srocc_ci',cid22_ci_pair:'rank.cid22.srocc_ci',
+  cid22_bwd:'rank.cid22.frac_negative'};
 // Segment-boundary prefix match — the exact rule freeze_check's ann_covers uses:
 // `rank.hfnlproxy` covers `rank.hfnlproxy.per_ref_mean`; `rank.hfnl` covers neither.
 const annCovers=(entryField,colField)=>colField===entryField
@@ -2572,7 +2587,10 @@ const COLS=[
   ['m3','M3-coh',false,b=>b.m3],
   ['m3_mass','M3 drop%',false,b=>b.m3_dropped_mass],
   ['corr','corr-passq20',false,b=>b.corruption&&b.corruption.pass_q20!=null?b.corruption.pass_q20:null],
-  ['cid22_ci','CID22 95%CI±',false,b=>{const r=b.rank.cid22;return r&&r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;}],
+  // Two interval kinds, two columns (srocc_ci_kind, stamped from srocc_ci_method):
+  // half-widths are sorted and shaded only against their own kind, never mixed.
+  ['cid22_ci_ref','CID22 95%CI± ref',false,b=>ciHalf(b.rank.cid22,'ref')],
+  ['cid22_ci_pair','CID22 95%CI± pair',false,b=>ciHalf(b.rank.cid22,'pair')],
   ['cid22_bwd','CID22 %bwd',false,b=>{const r=b.rank.cid22;return r&&r.frac_negative!=null?r.frac_negative:null;}],
   // G-ADDR (2026-09-04): pass/fail count over the six axes every cell already stores,
   // against the committed floor registry. The other nine axes are NOT MEASURED for
@@ -2615,6 +2633,12 @@ const NONRANK={
 // (benchmarks/sota944_campaign_2026-08-03.md REGISTERED APPENDIX F).
 const SIGN_ABS_CORPORA=JND_CORPORA;
 const rawSigned=r=>r?(r.srocc_signed!=null?r.srocc_signed:(r.srocc!=null?r.srocc:null)):null;
+// srocc_ci half-width of one interval kind ('ref' = reference-clustered, 'pair' = pair
+// bootstrap), or null for the other kind: the two are never compared.
+function ciHalf(r,kind){
+  if(!r||!r.srocc_ci||r.srocc_ci_kind!==kind)return null;
+  return (r.srocc_ci[1]-r.srocc_ci[0])/2;
+}
 const sgn=(c,r)=>{if(!r)return null;
   if(SIGN_ABS_CORPORA.has(c)){const v=rawSigned(r);return v!=null?Math.abs(v):null;}
   return rawSigned(r);};
@@ -2654,7 +2678,7 @@ function fmtCell(key,v,b){
   if(key==='dial_tied')return pct(v);
   if(key==='corr'||key==='dial_mono')return pct(v);
   if(key==='m3_mass')return v==null?'—':v.toFixed(1)+'%';
-  if(key==='cid22_ci')return v==null?'—':'±'+v.toFixed(3);
+  if(key==='cid22_ci_ref'||key==='cid22_ci_pair')return v==null?'—':'±'+v.toFixed(3);
   if(key==='loop2'||key==='loop3')return v==null?'—':v+'/'+ltN();
   if(key==='loop3err')return v==null?'—':(+v).toFixed(2);
   if(key&&key.startsWith('proxy_'))return v==null?'—':(+v).toFixed(2);
@@ -2676,7 +2700,10 @@ function renderTable(){
     +'cosmetically on the campaign verdicts (the flag shows in the bake-picker tooltip when it differs; for an '
     +'ens×k row the width is the anchor member’s). <b>composite</b> = the Rust <code>product_composite</code> (CID22·1.0 + '
     +'imazen26·0.5 + nonphoto·0.3 + KonJND·0.2 + AIC·0.15; KADID/TID excluded, train==val), READ from the JSON '
-    +'not re-derived. <b>CID22 95%CI±</b> = bootstrap half-width; bakes with overlapping CIs are a statistical '
+    +'not re-derived. <b>CID22 95%CI± ref / pair</b> = bootstrap half-width, one column per interval kind: '
+    +'<b>ref</b> resamples references (bake_verdict since 2026-10-11, <code>srocc_ci_method</code>), <b>pair</b> '
+    +'resamples pairs (every earlier verdict; 3.95× narrower on CID22 for profile C). Compare half-widths only '
+    +'within one column; within a column, bakes with overlapping CIs are a statistical '
     +'TIE, not an ordering. <b>CID22 %bwd</b> = share of reference ladders ranked BACKWARDS (no pooled stat sees '
     +'it). <b>M3a-attr</b> = the DEPLOYABLE attribution-density steering map vs \u0394S (exact integrands + SAT, task #67 \u2014 the map codecs query); <b>M3-coh</b> = the legacy signal fold, kept for the before/after story (the 128px fold inversion the attribution map cures). <b>M3 drop%</b> = f156-371 mass the FOLD cannot spatialize — read a low M3 against it (high drop% '
     +'= M3 structurally capped, not incoherent). An <b>em-dash in any cell means NOT MEASURED</b> — never a '
@@ -2832,7 +2859,7 @@ function renderTable(){
         const[lo,hi]=ranges[c[0]];let t=hi===lo?.5:(v-lo)/(hi-lo);
         // invert shading where lower is better (tied dead-zone, CI width,
         // backwards-ref share, dropped-mass — all "smaller is better")
-        if(c[0]==='dial_tied'||c[0]==='cid22_ci'||c[0]==='cid22_bwd'||c[0]==='m3_mass'||c[0]==='loop3err')t=1-t;
+        if(c[0]==='dial_tied'||c[0]==='cid22_ci_ref'||c[0]==='cid22_ci_pair'||c[0]==='cid22_bwd'||c[0]==='m3_mass'||c[0]==='loop3err')t=1-t;
         td.style.background='color-mix(in srgb, var(--seq-hi) '+Math.round(t*62)+'%, var(--surface-1))';
         if(t>.6)td.style.color='#fff';
       }
@@ -3124,6 +3151,10 @@ function renderMPanel(){
   const missing=bs.filter(b=>!b.rank[c]);
   host.append(el('div',{class:'cap',text:c.toUpperCase()+': measured for '+(bs.length-missing.length)+' of '+bs.length+' selected models.'
     +(missing.length?' No '+c+' result for: '+missing.map(b=>b.name).join(', '):'')}));
+  const ciKinds=new Set(bs.filter(b=>b.rank[c]&&b.rank[c].srocc_ci).map(b=>b.rank[c].srocc_ci_kind));
+  if(ciKinds.size)host.append(el('div',{class:'cap',text:'±CI kinds here: '+[...ciKinds].sort().join(' and ')
+    +'. ref = reference-clustered bootstrap (bake_verdict since 2026-10-11); pair = pair bootstrap (earlier verdicts, '
+    +'narrower: 3.95× on CID22 for profile C). '+(ciKinds.size>1?'This table MIXES the two kinds: compare ±CI only within one kind.':'')}));
   const tbl=el('table',{});
   const thead=el('tr',{});
   ['bake','n','SROCC ±CI','PLCC','KROCC','OR','PWRC','Z-RMSE','per-ref','%bwd'].forEach((h,i)=>
@@ -3135,12 +3166,14 @@ function renderMPanel(){
   rows.forEach(b=>{
     const r=b.rank[c];
     const sroccs=rawSigned(r);
-    const ciw=r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;
+    // Each interval is labelled with its kind (ref / pair); the two are never compared.
+    const ciKind=r.srocc_ci?r.srocc_ci_kind:null;
+    const ciw=ciKind?ciHalf(r,ciKind):null;
     const tr=el('tr',{});
     tr.append(nameInto(el('td',{class:'lbl'}),b));
     const cells=[
       r.n!=null?String(r.n):'—',
-      (sroccs!=null?(sroccs>=0?'+':'')+sroccs.toFixed(4):'—')+(ciw!=null?' ±'+ciw.toFixed(3):'')
+      (sroccs!=null?(sroccs>=0?'+':'')+sroccs.toFixed(4):'—')+(ciw!=null?' ±'+ciw.toFixed(3)+' '+ciKind:'')
         +(cJnd&&sroccs!=null&&sroccs<0?' (JND↓)':''),
       f3(r.plcc), f3(r.krocc), r.or!=null?r.or.toFixed(4):'—', f3(r.pwrc),
       r.z_rmse!=null?r.z_rmse.toFixed(3):'—',
@@ -4261,8 +4294,10 @@ function renderBeats(){
     +'1200/1200 rows) and '+(DATA.trainEqValAxes||[]).join(', ')+' (train==val integrity guards). '
     +'A cell is a <b>LOSS</b> when it is worse than peer_ssim2 by more than δ ('+f3(dlt('cid22'))
     +' pooled CID22, '+f3(dlt('csiq'))+' elsewhere — derived, §2.4). δ is a reference-clustered '
-    +'bootstrap half-width; <b>the board’s own srocc_ci understates it by ~2×</b> (4,292 CID22 pairs are 49 '
-    +'clusters, not 4,292 draws). W1–W7 are TRANSCRIBED verdicts — present only for the exam’s six scored '
+    +'bootstrap half-width. A board cell’s srocc_ci of kind <b>pair</b> (every verdict before 2026-10-11) '
+    +'understates it by ~2× (4,292 CID22 pairs are 49 clusters, not 4,292 draws); kind <b>ref</b> (later '
+    +'verdicts) resamples references as δ does, though it is the interval of one model’s SROCC, not of a '
+    +'difference. W1–W7 are TRANSCRIBED verdicts — present only for the exam’s six scored '
     +'candidates; every other row reads NOT MEASURED, never a fail. '+(EXAM?('<b>'+EXAM.headline+'</b>'):'')}));
   const t=el('table',{class:'tbl'});
   const hd=['bake','tier','n LOSS >δ'].concat(HELDOUT).concat(['W1','W2','W3','W4','W5','W6','W7']);

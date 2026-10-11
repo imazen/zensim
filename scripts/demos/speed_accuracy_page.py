@@ -59,6 +59,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
+from lib import srocc_ci  # noqa: E402  (labels each stored interval's kind)
 DEFAULT_SPEED = REPO / "benchmarks" / "speed_matrix_2026-09-18.json"
 DEFAULT_SPEED_MD = REPO / "benchmarks" / "speed_matrix_2026-09-18.md"
 DEFAULT_FULLEVAL = Path("/mnt/v/output/zensim/reports/fulleval")
@@ -381,6 +383,7 @@ def build(speed: dict, feval: Path, members: dict[str, set[str]]) -> dict:
                     "n": r.get("n"),
                     "per_ref_n": r.get("per_ref_n"),
                     "srocc_ci": r.get("srocc_ci"),
+                    "srocc_ci_kind": srocc_ci.kind(r),
                 }
             extra["composite"] = row.get("composite")
             extra["mono_pct"] = (row.get("dial") or {}).get("mono_pct")
@@ -422,6 +425,7 @@ def build(speed: dict, feval: Path, members: dict[str, set[str]]) -> dict:
                     "n": r.get("n"),
                     "per_ref_n": r.get("per_ref_n"),
                     "srocc_ci": r.get("srocc_ci"),
+                    "srocc_ci_kind": srocc_ci.kind(r),
                 }
         table_only.append(
             {
@@ -600,21 +604,28 @@ class Chart:
             self.out_of_bounds.append(f'{pt["label"]} at ({cx:.1f},{cy:.1f})')
         slot = CLASSES[pt["cls"]]["slot"]
         ci = pt.get("srocc_ci")
+        # Each bar carries its interval kind: solid = reference-clustered (`ci-ref`),
+        # dashed = pair bootstrap (`ci-pair`). The two are not comparable.
+        kind = stored_kind(pt) if ci else None
         if ci:
             ylo, yhi = self.y(ci[1]), self.y(ci[0])
             self.parts.append(
                 f'<line x1="{cx:.1f}" y1="{ylo:.1f}" x2="{cx:.1f}" '
-                f'y2="{yhi:.1f}" class="ci" stroke="var(--series-{slot})"/>'
+                f'y2="{yhi:.1f}" class="ci ci-{kind}" stroke="var(--series-{slot})"/>'
             )
             for yy in (ylo, yhi):
                 self.parts.append(
                     f'<line x1="{cx - 4:.1f}" y1="{yy:.1f}" x2="{cx + 4:.1f}" '
-                    f'y2="{yy:.1f}" class="ci" stroke="var(--series-{slot})"/>'
+                    f'y2="{yy:.1f}" class="ci ci-{kind}" stroke="var(--series-{slot})"/>'
                 )
+        ci_text = (
+            f", 95% CI ({srocc_ci.LABEL[kind]}) [{ci[0]:.4f}, {ci[1]:.4f}]"
+            if ci
+            else ", no interval in the row"
+        )
         tip = (
             f'{pt["label"]} — {pt["ms"]:.3f} ms, CID22 SROCC {pt["srocc"]:.4f}'
-            f'{", 95% CI " + f"[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else ", no interval in the row"}'
-            f', cv {pt["cv"]*100:.1f}%'
+            f"{ci_text}, cv {pt['cv']*100:.1f}%"
         )
         self.parts.append(f"<g><title>{html.escape(tip)}</title>")
         self.parts.append(
@@ -747,6 +758,26 @@ def fmt_ms(v: float) -> str:
     return f"{v:g}"
 
 
+def stored_kind(rec: dict) -> str:
+    """The interval kind of a joined accuracy record. Records joined before the kind was
+    recorded (2026-10-11) hold pair-bootstrap intervals, the only kind that existed."""
+    return rec.get("srocc_ci_kind", srocc_ci.PAIR)
+
+
+def ci_kind_note(kinds: list) -> str:
+    """Axis-label suffix naming the interval kinds a chart draws; says so when it mixes
+    them (`scripts/lib/srocc_ci.py`)."""
+    present = sorted({k for k in kinds if k is not None})
+    if not present:
+        return ""
+    if len(present) == 1:
+        return f" · 95% CI: {srocc_ci.LABEL[present[0]]}"
+    return (
+        " · 95% CI kinds MIXED: solid = reference-clustered, dashed = pair bootstrap;"
+        " compare intervals only within one kind"
+    )
+
+
 def make_chart(
     data: dict,
     size: str,
@@ -776,6 +807,7 @@ def make_chart(
         if acc and acc.get("srocc") is not None:
             rec["srocc"] = acc["srocc"]
             rec["srocc_ci"] = acc.get("srocc_ci")
+            rec["srocc_ci_kind"] = acc.get("srocc_ci_kind")
             scored.append(rec)
         else:
             rug.append(rec)
@@ -784,6 +816,7 @@ def make_chart(
     xs = [p["ms"] for p in scored + rug]
     ys = [p["srocc"] for p in scored]
     ys += [v for p in scored for v in (p.get("srocc_ci") or [])]
+    ylabel = ylabel + ci_kind_note([stored_kind(p) for p in scored if p.get("srocc_ci")])
     ch = Chart(xs, ys)
     ch.grid("single call, milliseconds (log)", ylabel)
     front = ch.pareto(scored)
@@ -834,6 +867,7 @@ svg.chart{display:block;width:100%;height:auto}
 .axis-label{fill:var(--text-secondary);font-size:12.5px}
 .dlabel{fill:var(--text-primary);font-size:12.5px}
 .ci{stroke-width:1.6;opacity:.55}
+.ci-pair{stroke-dasharray:3 2}
 .pareto{stroke:var(--muted);stroke-width:1.6;stroke-dasharray:5 4;opacity:.8}
 .pareto-label{fill:var(--muted);font-size:11.5px}
 .rug-base{stroke:var(--axis);stroke-width:1}
@@ -977,7 +1011,7 @@ def accuracy_table(data: dict) -> str:
                 f"n={a.get('n')}"
                 + (f", {a['per_ref_n']} refs" if a.get("per_ref_n") else "")
                 + (
-                    f", 95% CI [{ci[0]:.4f}, {ci[1]:.4f}]"
+                    f", 95% CI ({srocc_ci.LABEL[stored_kind(a)]}) [{ci[0]:.4f}, {ci[1]:.4f}]"
                     if ci
                     else ", no interval in this row"
                 )
@@ -1304,6 +1338,7 @@ text{font-family:sans-serif}
 .axis-label{fill:#52514e;font-size:12.5px}
 .dlabel{fill:#0b0b0b;font-size:12.5px}
 .ci{stroke-width:1.6;opacity:.55}
+.ci-pair{stroke-dasharray:3 2}
 .pareto{stroke:#898781;stroke-width:1.6;stroke-dasharray:5 4;opacity:.8}
 .pareto-label{fill:#898781;font-size:11.5px}
 .rug-base{stroke:#c3c2b7;stroke-width:1}
