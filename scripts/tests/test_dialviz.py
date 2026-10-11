@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dialviz import (build, catalogue, experiments_src, feature_defs_src, featuresets_src, gitref, model, quotes,  # noqa: E402
+from dialviz import (build, catalogue, pages, experiments_src, feature_defs_src, featuresets_src, gitref, model, quotes,  # noqa: E402
                      readiness, sources, zenanalyze_src)
 from dialviz.mdparse import SourceShapeError  # noqa: E402
 from dialviz.sources import REPO, Ctx  # noqa: E402
@@ -143,6 +143,43 @@ class LiveSources(unittest.TestCase):
                 checks = [b["states"][mk] == "pass" for b in bs]
                 self.assertEqual(all(checks), bs[0]["gate_states"][mk] == "pass", (gate, mk))
 
+    def test_readiness_citations_point_at_their_rows(self):
+        r = self.m["readiness"]
+        qual = self.ctx.text(readiness.QUAL_A_MD, "test").splitlines()
+        for n in r["not_run"]:
+            self.assertTrue(qual[n["line"] - 1].startswith(f'| {n["gate"]} |'), (n["gate"], n["line"], qual[n["line"] - 1]))
+        steer = self.ctx.text(readiness.STEERPATH, "test").splitlines()
+        label = {"a": "A", "c": "C", "seed0": "seed 0"}
+        cited = 0
+        for g in r["gates"]:
+            if not g["superseded_by"]:
+                continue
+            size = re.search(r"(\d+)x\1", g["name"]).group(1) + "²"
+            for mk in readiness.MODELS:
+                line = steer[g["states"][mk]["line"] - 1]
+                self.assertTrue(line.startswith(f"| {size} | {label[mk]} |"), (g["name"], mk, line))
+                cited += 1
+        self.assertEqual(cited, 12)
+
+    def test_every_gate_map_row_is_on_the_readiness_board(self):
+        cov = self.m["readiness_coverage"]
+        self.assertEqual([c["name"] for c in cov], [g["name"] for g in self.m["gates"]["gates"]])
+        board = pages.readiness_board(self.m)
+        map_only = [c for c in cov if not c["in_qual_a"]]
+        self.assertTrue(map_only, "expected gate-map rows QUAL-A does not cover")
+        self.assertIn(pages.MAP_ONLY_BAND, board)
+        for c in map_only:
+            self.assertIn(c["name"], board)
+        # every QUAL-A gate is reachable from some gate-map row
+        covered_m = {x for c in cov for x in c["measured"]}
+        covered_n = {x for c in cov for x in c["not_run"]}
+        self.assertEqual(covered_m, {g["name"] for g in self.m["readiness"]["gates"]})
+        qual_only = {n["gate"] for n in self.m["readiness"]["not_run"] if any(re.search(p, n["gate"]) for p in readiness.QUAL_A_ONLY)}
+        self.assertEqual(covered_n | qual_only, {n["gate"] for n in self.m["readiness"]["not_run"]})
+        # the blocked-section breakdown accounts for every blocked map row exactly once
+        bd = readiness.blocked_breakdown(cov)
+        self.assertEqual(len(bd["measured"]) + len(bd["not_run_only"]) + len(bd["not_in_qual_a"]), bd["blocked"])
+
     def test_every_result_file_is_read_or_excluded(self):
         mapped = {rel for rel, _ in experiments_src.RESULTS.values()} | set(experiments_src.RESULTS_EXCLUDED)
         on_disk = set(self.ctx.glob("benchmarks/**/*result_summary*.json")) | set(self.ctx.glob("benchmarks/**/*decision*.json"))
@@ -236,6 +273,23 @@ class NegativeControls(unittest.TestCase):
 
     def test_readiness_steerpath_table_changed(self):
         self.refuse(readiness.STEERPATH, sub_once(r"^\| 1024² \| A \| 58\.95", "| 1024² | model A | 58.95"), readiness.read)
+
+    def test_readiness_not_run_state_unrecognised(self):
+        for state in ("deferred", "blocked; pending"):
+            self.refuse(readiness.QUAL_A_MD, sub_once(r"^\| Release mechanics \| outstanding \|", f"| Release mechanics | {state} |"),
+                        readiness.read)
+
+    def test_readiness_steerpath_bar_differs_from_qual_a(self):
+        self.refuse(readiness.STEERPATH, sub_once(r"^(\| 1024² \| A \| .*?\| PASS \| 156,420 \| )196,608", r"\g<1>150,000"),
+                    readiness.read)
+
+    def test_gate_map_row_without_coverage(self):
+        self.refuse(sources.RELEASE_GATE_MAP, sub_once(r"^\| \*\*G-TARGET:\*\*", "| **G-AIM:**"),
+                    lambda c: readiness.coverage(readiness.read(c), sources.release_gates(c)))
+
+    def test_qual_a_gate_without_gate_map_row(self):
+        self.refuse(readiness.QUAL_A_MD, sub_once(r"^\| HDR scope \|", "| Display scope |"),
+                    lambda c: readiness.coverage(readiness.read(c), sources.release_gates(c)))
 
     def test_catalogue_locator_missing(self):
         loc = catalogue.WANTED[1]["state"][0]

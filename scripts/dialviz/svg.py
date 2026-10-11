@@ -232,6 +232,7 @@ STATE_STYLE = {
     "not_measured": ("var(--na)", "○", "not measured"),
     "forbidden": ("var(--na)", "⊘", "forbidden here"),
     "outstanding": ("var(--na)", "…", "outstanding"),
+    "map_only": ("var(--na)", "◇", "gate map only"),
 }
 
 

@@ -42,6 +42,24 @@ CAUSE_SHORT = {"owner": "Owner", "composition": "Final model", "data": "Human/EV
                "authorization": "Authorization", "release": "Release"}
 
 
+# The not-run "State" cell is a ';'-separated list of these words; anything else refuses the build.
+# A gate's band is the first listed kind it carries, in this order.
+NOT_RUN_STATES = [("forbidden", ("forbidden in this lane", "forbidden")), ("blocked", ("blocked",)),
+                  ("rule_pending", ("rule pending",)), ("not_measured", ("not measured",)), ("outstanding", ("outstanding",))]
+
+
+def _not_run_kind(state: str, gate: str) -> tuple[str, set]:
+    words = set()
+    for token in (t.strip().lower() for t in state.split(";")):
+        hit = next((k for k, spellings in NOT_RUN_STATES if token in spellings), None)
+        if hit is None:
+            raise SourceShapeError(f"{QUAL_A_MD}: not-run gate {gate!r} has unrecognised state {token!r}")
+        words.add(hit)
+    if not words:
+        raise SourceShapeError(f"{QUAL_A_MD}: not-run gate {gate!r} has an empty state")
+    return next(k for k, _ in NOT_RUN_STATES if k in words), words
+
+
 def _family(name: str) -> str:
     for fam, rx in FAMILIES:
         if re.search(rx, name):
@@ -60,7 +78,7 @@ def _steerpath(ctx) -> dict:
         if len(row) != 7 or row[1] not in names or row[3] not in ("PASS", "FAIL") or row[6] not in ("PASS", "FAIL"):
             raise SourceShapeError(f"{STEERPATH}: landed-state row {row!r} has an unexpected shape")
         out[(row[0], names[row[1]])] = {"spatial": row[2], "spatial_state": row[3].lower(), "rss": row[4],
-                                        "rss_bar": row[5], "rss_state": row[6].lower(), "line": ln + line - 1}
+                                        "rss_bar": row[5], "rss_state": row[6].lower(), "line": ln + line}
     if len(out) != 6:
         raise SourceShapeError(f"{STEERPATH}: expected 6 landed-state rows (2 sizes x 3 models), got {len(out)}")
     ctx.count(STEERPATH, len(out))
@@ -89,6 +107,10 @@ def read(ctx) -> dict:
                     states[mk] = {"state": r["spatial_state"], "detail": r["spatial"], "source": STEERPATH, "line": r["line"],
                                   "before": g[mk]["detail"]}
                 else:
+                    qbar = re.search(r"= ([\d,]+) KiB", g["bar"])
+                    if not qbar or qbar.group(1).replace(",", "") != r["rss_bar"].replace(",", ""):
+                        raise SourceShapeError(f"{STEERPATH}: {size} {mk} memory bar {r['rss_bar']!r} differs from "
+                                               f"QUAL-A's bar {g['bar']!r}")
                     states[mk] = {"state": r["rss_state"], "detail": f'score+map {r["rss"]} KiB (bar {r["rss_bar"]})',
                                   "source": STEERPATH, "line": r["line"], "before": g[mk]["detail"]}
             superseded = STEERPATH
@@ -110,16 +132,87 @@ def read(ctx) -> dict:
                 causes.append({"id": cid, "label": label, "evidence": hit.group(0).strip(" ,")})
         if not causes:
             raise SourceShapeError(f"{QUAL_A_MD}: not-run gate {gate!r} matches no root-cause pattern")
-        st = state.lower()
-        kind = ("forbidden" if "forbidden" in st else "rule_pending" if "rule pending" in st and "blocked" not in st
-                else "blocked" if "blocked" in st else "not_measured" if "not measured" in st else "outstanding")
-        not_run.append({"gate": gate, "state": state, "kind": kind, "rule_pending": "rule pending" in st, "needs": needs,
-                        "causes": causes, "line": ln + line - 1})
+        kind, words = _not_run_kind(state, gate)
+        not_run.append({"gate": gate, "state": state, "kind": kind, "rule_pending": "rule_pending" in words, "needs": needs,
+                        "causes": causes, "line": ln + line})
     if len(not_run) < 5:
         raise SourceShapeError(f"{QUAL_A_MD}: fewer than 5 not-run gates parsed")
     ctx.count(QUAL_A_MD, len(not_run))
     return {"path": QUAL_A_JSON, "md": QUAL_A_MD, "steerpath": STEERPATH, "models": d["models"], "gates": gates,
             "not_run": not_run, "not_run_line": ln, "causes": [{"id": c, "label": l} for c, l, _ in CAUSES]}
+
+
+# Every release-gate-map row (exact bold name) and the QUAL-A gates that cover it: (map row, measured-gate patterns,
+# not-run-gate patterns). A row with neither is shown on the board as "in the gate map, not in QUAL-A". The build
+# refuses an unknown map row, a missing map row, a pattern that matches nothing, or a QUAL-A gate no row covers.
+GATE_MAP_COVERAGE = [
+    ("E30 / D1 population", [], []),
+    ("Table provenance", [r"^Table provenance"], [r"^Table provenance"]),
+    ("Rust surface / final identity", [r"^Rust surface", r"^Identity"], []),
+    ("G-RANK / board axes", [], [r"^G-RANK"]),
+    ("G-DIAL", [r"^G-DIAL"], []),
+    ("G-ADDR / five codec floors", [], [r"^G-ADDR"]),
+    ("Negative tails / identity", [r"^Negative tails", r"^C\d", r"^Identity", r"^Near-identity"], []),
+    ("G-STEER", [r"^G-STEER"], []),
+    ("STEERCODEC / CHROMAQ", [], [r"^STEERCODEC"]),
+    ("G-RD / spatial value", [], [r"^G-RD"]),
+    ("G-TARGET", [], [r"^G-TARGET"]),
+    ("Integrity / ZCTH v4", [r"^ZCTH v4"], [r"^Integrity detection"]),
+    ("Rev5 correctness", [], []),
+    ("Runtime/memory / work census", [r"^(Scalar performance|Spatial cost|Memory)"], [r"^Runtime work census"]),
+    ("Input/serving / bake-format / API", [], []),
+    ("HDR scope", [], [r"^HDR scope"]),
+    ("KADID TERMINAL / D2", [], [r"^KADID TERMINAL"]),
+]
+
+# QUAL-A gates with no gate-map row at all (they stay on the board in their own band).
+QUAL_A_ONLY = [r"^Release mechanics"]
+
+
+def coverage(r: dict, gate_map: dict) -> list[dict]:
+    """Match every release-gate-map row to the QUAL-A gates that cover it (see GATE_MAP_COVERAGE)."""
+    rows = {g["name"]: g for g in gate_map["gates"]}
+    known = [name for name, _, _ in GATE_MAP_COVERAGE]
+    for name in rows:
+        if name not in known:
+            raise SourceShapeError(f"{gate_map['path']}: gate-map row {name!r} has no GATE_MAP_COVERAGE entry")
+    measured = [g["name"] for g in r["gates"]]
+    not_run = [n["gate"] for n in r["not_run"]]
+    used_m, used_n, out = set(), set(), []
+    for name, mpats, npats in GATE_MAP_COVERAGE:
+        if name not in rows:
+            raise SourceShapeError(f"{gate_map['path']}: GATE_MAP_COVERAGE names {name!r}, which the gate map no longer has")
+        hits_m, hits_n = [], []
+        for pats, pool, hits, used in ((mpats, measured, hits_m, used_m), (npats, not_run, hits_n, used_n)):
+            for pat in pats:
+                found = [x for x in pool if re.search(pat, x)]
+                if not found:
+                    raise SourceShapeError(f"GATE_MAP_COVERAGE {name!r}: pattern {pat!r} matches no QUAL-A gate")
+                hits.extend(x for x in found if x not in hits)
+                used.update(found)
+        g = rows[name]
+        out.append({"name": name, "line": g["line"], "map_status": g["status"], "status_text": g["status_text"],
+                    "measured": hits_m, "not_run": hits_n, "in_qual_a": bool(hits_m or hits_n)})
+    for pat in QUAL_A_ONLY:
+        found = [x for x in measured + not_run if re.search(pat, x)]
+        if not found:
+            raise SourceShapeError(f"QUAL_A_ONLY pattern {pat!r} matches no QUAL-A gate")
+        used_m.update(x for x in found if x in measured)
+        used_n.update(x for x in found if x in not_run)
+    for pool, used, what in ((measured, used_m, "measured"), (not_run, used_n, "not-run")):
+        for x in pool:
+            if x not in used:
+                raise SourceShapeError(f"QUAL-A {what} gate {x!r} is covered by no gate-map row in GATE_MAP_COVERAGE")
+    return out
+
+
+def blocked_breakdown(cov: list[dict]) -> dict:
+    """The gate map's blocked rows, by what QUAL-A now says about them."""
+    blocked = [c for c in cov if c["map_status"] == "blocked"]
+    return {"blocked": len(blocked),
+            "measured": [c["name"] for c in blocked if c["measured"]],
+            "not_run_only": [c["name"] for c in blocked if not c["measured"] and c["not_run"]],
+            "not_in_qual_a": [c["name"] for c in blocked if not c["in_qual_a"]]}
 
 
 # Numeric checks drawn as bullet rows: (gate name regex, label, value regex on the detail, bar regex on the bar text,

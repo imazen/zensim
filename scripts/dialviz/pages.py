@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 
 from . import readiness, svg, zenanalyze_src
 from .htmlkit import blob_url, chip, esc, filterbar, md_block, md_inline, page, src_cite, table
+from .mdparse import strip_md
 
 GATE_STATE_ORDER = ["done", "ready", "blocked", "fail", "pass", "na"]
 
@@ -339,7 +340,10 @@ def page_index(m) -> str:
             f'{len(m["za"]["features"])} zenanalyze features</div></div>',
             '</div>',
             '<h2>Release readiness at a glance</h2>',
-            '<p>Candidate A on every release gate (QUAL-A with the STEERPATH landed-state re-measurement). '
+            f'<p>Candidate A against the {len(m["readiness_coverage"])} release-gate-map rows: QUAL-A (with the STEERPATH '
+            f'landed-state re-measurement) measured or listed {sum(c["in_qual_a"] for c in m["readiness_coverage"])} of them; '
+            f'the other {sum(not c["in_qual_a"] for c in m["readiness_coverage"])} '
+            f'({esc(", ".join(c["name"] for c in m["readiness_coverage"] if not c["in_qual_a"]))}) are shown with the map\'s own state. '
             '<a href="readiness.html">Full readiness page</a>: bars, per-model values and every blocker.</p>',
             f'<div class="panel">{readiness_board(m)}</div>'
             f'<div class="panel"><h3>What the not-run gates are waiting for</h3>{readiness_causes_chart(m)}</div>',
@@ -956,7 +960,8 @@ def page_sources(m, coverage: list[dict]) -> str:
 READY_MODELS = [("a", "var(--s1)", "A", "circle"), ("c", "var(--s2)", "C", "diamond"), ("seed0", "var(--s3)", "seed 0", "square")]
 NOT_RUN_BANDS = [("blocked", "Not run: blocked"), ("rule_pending", "Not run: rule pending"),
                  ("not_measured", "Not run: not measured"), ("forbidden", "Not run: forbidden in a qualification lane"),
-                 ("outstanding", "Not run: release mechanics")]
+                 ("outstanding", "Not run: outstanding")]
+MAP_ONLY_BAND = "In the gate map, not in QUAL-A"
 
 
 def _short_gate(name: str) -> str:
@@ -996,6 +1001,14 @@ def readiness_board(m, model="a", depth=0) -> str:
                  for n in r["not_run"] if n["kind"] == kind]
         if tiles:
             groups.append((band, tiles))
+    ids = {g["name"]: g["id"] for g in m["gates"]["gates"]}
+    tiles = [{"label": c["name"], "state": "map_only",
+              "tip": f'{c["name"]}\nnot measured or listed by QUAL-A\ngate map ({c["map_status"]}): '
+                     f'{strip_md(c["status_text"])[:300]}',
+              "href": f'{pre}gate/{ids[c["name"]]}.html'}
+             for c in m["readiness_coverage"] if not c["in_qual_a"]]
+    if tiles:
+        groups.append((MAP_ONLY_BAND, tiles))
     return _responsive(svg.tile_board(groups, title="release readiness board"),
                        svg.tile_board(groups, width=360, cols=2, title="release readiness board"))
 
@@ -1021,6 +1034,9 @@ def page_readiness(m) -> str:
     fails = ", ".join(f'{_short_gate(g["name"])} ({g["states"]["a"]["detail"].split(";")[0]})' for g in s["failed"])
     gm = m["gates"]["gates"]
     gm_blocked = sum(1 for g in gm if g["status"] == "blocked")
+    cov = m["readiness_coverage"]
+    map_only = [c["name"] for c in cov if not c["in_qual_a"]]
+    bd = readiness.blocked_breakdown(cov)
     cause_rows = []
     for c in r["causes"]:
         hits = [(n, x) for n in r["not_run"] for x in n["causes"] if x["id"] == c["id"]]
@@ -1034,18 +1050,28 @@ def page_readiness(m) -> str:
                             for mk, *_ in READY_MODELS}} for g in r["gates"]]
     sup = [g for g in r["gates"] if g["superseded_by"]]
     b = ['<h1>Release readiness</h1>',
+         f'<p class="small">Candidate A is E33 arm A, model <span class="mono">{esc(r["models"]["a"][:12])}…</span> '
+         f'(<a href="experiment/featpot-E33.html">E33</a>); C is <span class="mono">{esc(r["models"]["c"][:12])}…</span> and '
+         f'production seed 0 is <span class="mono">{esc(r["models"]["seed0"][:12])}…</span>. These are not the built-in '
+         f'profiles A and C.</p>',
          f'<p class="lede"><strong>Candidate A passes {s["passed"]} of {s["measured"]} measured release checks</strong> and fails '
          f'{len(s["failed"])}: {esc(fails)}. {s["not_run"]} more gates have not run; they come down to the '
          f'{len(s["causes"])} root causes charted below, most of them a frozen final model or an owner rule.</p>',
          f'<p class="small">Measured: {src_cite(r["path"])} (QUAL-A, 2026-10-10), with the spatial-cost and memory rows taken from '
          f'the later landed-state re-measurement in {src_cite(r["steerpath"])}. Not run: {src_cite(r["md"], r["not_run_line"])}.</p>',
-         '<h2 id="board">Candidate A, every gate</h2>',
-         '<p>One tile per gate. Hover for the bar and the recorded value; colour and icon both carry the state.</p>',
+         '<h2 id="board">Candidate A, every release gate</h2>',
+         f'<p>One tile per gate. Hover for the bar and the recorded value; colour and icon both carry the state. '
+         f'QUAL-A measured or listed {len(cov) - len(map_only)} of the gate map\'s {len(cov)} rows; the last band holds the '
+         f'{len(map_only)} it did not cover ({esc(", ".join(map_only))}), with the map\'s own state.</p>',
          f'<div class="panel">{readiness_board(m)}</div>',
          f'<h2 id="blockers">Why so many gates say “blocked”</h2>'
-         f'<p>The release gate map (written 2026-10-07, last edited 2026-10-08) marks {gm_blocked} of {len(gm)} gates blocked. '
-         f'Most of those words mean the same few things. Each line joins a gate that has not run to a root cause found in its '
-         f'“Needs” text; hover a line for the phrase that matched.</p>',
+         f'<p>The release gate map (written 2026-10-07, last edited 2026-10-08, before QUAL-A) marks {gm_blocked} of '
+         f'{len(gm)} rows blocked. QUAL-A has since measured {len(bd["measured"])} of those {bd["blocked"]} fully or in part, '
+         f'lists {len(bd["not_run_only"])} as not run, and does not cover {len(bd["not_in_qual_a"])} '
+         f'({esc(", ".join(bd["not_in_qual_a"]))}). '
+         f'The chart below is about QUAL-A\'s own list of {s["not_run"]} gates that have not run, not the map\'s blocked rows: '
+         f'each line joins one of those gates to a root cause found in its “Needs” text; hover a line for the phrase that '
+         f'matched.</p>',
          f'<div class="panel">{readiness_causes_chart(m)}</div>',
          table(["Root cause", "Gates", "Gates and the matching phrase"], cause_rows, tid="causes", numeric_cols=(1,)),
          '<p class="small muted">Root causes are assigned by fixed patterns over the “Needs” cell '

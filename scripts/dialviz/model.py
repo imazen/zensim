@@ -212,6 +212,7 @@ def build(ctx, integrity_path: Path | None = None) -> dict:
     m["v40_hdr"] = v40_hdr(ctx)
     m["readiness"] = readiness.read(ctx)
     m["readiness_bullets"] = readiness.bullets(m["readiness"])
+    m["readiness_coverage"] = readiness.coverage(m["readiness"], m["gates"])
     m["results"] = experiments_src.results(ctx)
     m["experiments"] = experiments_src.registry(ctx)
     m["features"] = feature_defs_src.read(ctx)
