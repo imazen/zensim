@@ -637,3 +637,33 @@ Open owner decisions:
   - Open for the owner: whether the PU entries should switch built-in profile C to CHdr, as they switch B to
     BHdr.
 
+## 40. CI repaired, API snapshot, IQA evaluation guidance (2026-10-11, main `35162acd`)
+
+- **CI.** The first full CI run since 2026-10-04 failed on macOS, Windows and the API snapshot. Every failure was a
+  test problem, not a scoring defect.
+  - The dense/wide bit-identity failures came from a race. In-process SIMD-tier togglers, which disable tiers
+    process-wide, ran concurrently with comparison tests. Under a deliberate stress test about 80 lib tests and 4
+    integration tests could race.
+  - Every toggler now runs alone in a child process (`9a58efdf`, reviewed at effort xhigh in two rounds). NEON matches
+    x86 AVX2 bits everywhere measured; no served score changed.
+  - The macOS and Windows path tests were platform filesystem limits. They are now gated by `cfg`, with replacement
+    checks that run on those platforms.
+  - On the re-run every Test job that had finished was green; the two macOS Intel jobs were still running. The
+    only failure was the API snapshot, now regenerated.
+- **API snapshot (owner-approved).** `BakeScorer<'a>` no longer implements the unstable `Freeze` auto trait. The
+  cause is the plan cache's `OnceLock`; the snapshot records it (`35162acd`).
+- **IQA evaluation guidance.** These are owner decisions from 2026-10-11, recorded in `docs/DATA_SPLITS.md` §3d and
+  `docs/CODEC_TARGET_GOALS.md` G2/G8:
+  - AIC2026 becomes the JND calibration set once its labels are published; it is not training data.
+  - "Not sure" counts half for each side.
+  - Percentiles use Hyndman–Fan type 7.
+  - Z-RMSE is a diagnostic. Headline absolute accuracy is out-of-fold RMSE in JND plus τ̂, with the map declared
+    first.
+  - Every claim uses source-clustered intervals, with the Student interval below about 30 sources.
+  - Comparisons across many models use Holm over paired differences.
+  - Pair classes are reported separately.
+
+  The statistics live in `zenmetrics-stats` (zenmetrics PR #67). zensim's evaluation code is moving to it; served
+  scores are unaffected. E34 is being revised to these rules before the owner's approval. The dial shape (a JND
+  side output, or re-anchoring the top) stays open for the owner.
+
