@@ -50,6 +50,8 @@
 
 ### Changed
 
+- `bake_compare` records the percentile rule with its B and seed: the JSON adds `percentile_rule` ("Hyndman-Fan type 7") and `bootstrap_unit` ("row"), and the report states B, seed, per-band seed rule, percentile rule and that rows, not references, are resampled. `panel evaluate`'s legacy decisive block records the same.
+
 - **`panel evaluate` comparisons resample references** (`zenstats::resample::cluster_bootstrap`, `Design::OneWay(reference_id)`): each comparison reports A − B per panel statistic with its reference-clustered interval, se and `p_zero` (`delta`, `delta_order`) and a `bootstrap` block (unit, references, B, seed, level, type 7 rule). The row-bootstrap `decisive` result moves under `legacy_row_bootstrap`, labelled as not confirmation. A dataset without `reference_id` now reports the comparison as not measured.
 
 - **`bake_verdict` `srocc_ci` now resamples references, not pairs** (`zenstats::resample::spearman_interval`, `Design::OneWay(reference)`, B = 1000, seed 0, type 7). **The intervals widen**: for profile C, CID22 3.9×, KADID SELECT 2.0×, TID SELECT 1.7× (`benchmarks/stats_migration_2026-10-11.md`). `--full-json` adds `srocc_ci_signed`, `srocc_ci_se` and `srocc_ci_method` (design, units, B, seed, level, percentile rule); `srocc_ci` keeps its shape, now the interval of sign(ρ̂)·ρ. The report prints a labelled interval line per corpus. A corpus without reference ids is resampled by rows and labelled `rows`. `srocc_ci` values from before this change are pair-bootstrap intervals and must not be compared with new ones without that label.

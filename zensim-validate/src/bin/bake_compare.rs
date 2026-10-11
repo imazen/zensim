@@ -520,6 +520,12 @@ fn render_corpus(
         count panel stats (of 6) whose bootstrap CI excludes 0 in that \
         bake's favor; the rule needs ≥4 in the winner's favor._\n",
     );
+    body.push_str(&format!(
+        "_Bootstrap: {bootstrap_resamples} row resamples, seed {seed} (per band: seed XOR \
+        the band label's length), Hyndman–Fan type 7 percentiles (`zenstats::bootstrap_ci_delta`; \
+        order statistics before 2026-10-11). Rows, not references, are resampled, so the CIs are \
+        narrower than a source-clustered interval._\n",
+    ));
 
     // Per-band breakdown.
     let mut per_band: Vec<(BandSlice, DecisiveOutcome)> = Vec::new();
@@ -768,6 +774,11 @@ fn build_json_report(
         "  \"bootstrap_resamples\": {},\n  \"seed\": {},\n",
         args.bootstrap_resamples, args.seed
     ));
+    // The rule behind every `ci_delta` bound (zenstats::bootstrap_ci_delta):
+    // type 7 since the 2026-10-11 zenmetrics-stats pin, order statistics before.
+    out.push_str(
+        "  \"percentile_rule\": \"Hyndman-Fan type 7\",\n  \"bootstrap_unit\": \"row\",\n",
+    );
     out.push_str("  \"corpora\": [\n");
     for (i, r) in results.iter().enumerate() {
         out.push_str("    {\n");
