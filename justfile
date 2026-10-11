@@ -7,6 +7,12 @@ metric-evaluate-check:
 metric-evaluate-tests:
     cargo test -p zensim-validate --bin panel --test metric_evaluate
 
+# Parallel vs sequential training-CSV loader parity. The generated fixtures run in
+# every `cargo test`; this recipe adds the real TID CSV (`ZENSIM_TID_IWSSIM_CSV`),
+# which fails if the named file is missing.
+csv-loader-parity-real path="/mnt/v/zen/zensim-training/2026-05-16/v2/tid_features_iwssim_log_372col.csv":
+    ZENSIM_TID_IWSSIM_CSV="{{path}}" cargo test -p zensim-validate --bin zensim_mlp_train csv_load_equivalence_tests -- --nocapture
+
 metric-evaluate-fmt:
     cargo fmt -p zensim-validate
 

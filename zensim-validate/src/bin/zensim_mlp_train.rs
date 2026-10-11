@@ -5361,17 +5361,138 @@ mod csv_load_equivalence_tests {
     //! Equivalence tests for `load_csv` (parallel/mmap/fast-float)
     //! vs `load_csv_sequential` (BufReader + stdlib `f64::from_str`).
     //!
-    //! Verifies bit-identical output on a real training-corpus CSV
-    //! (the smaller TID file at /mnt/v with 3000 rows × 372 features).
-    //! Skipped at compile-time on environments without that path.
+    //! The fixtures are generated here, in the training-CSV layout of the
+    //! real TID file (`ref_basename,human_score,iwssim,f0..fN,iwssim_log_norm`),
+    //! so every run, CI included, checks bit identity. They span three
+    //! parallel chunks (`load_csv`'s CHUNK_SIZE is 1024 rows) and carry the
+    //! values a fast float parser can get wrong: negatives, signed zeros,
+    //! exponents of both signs and cases, 17 significant digits, subnormals,
+    //! the extremes of the f64 range, `inf`/`nan`, and integers.
+    //!
+    //! The real TID CSV is checked only on request: set
+    //! `ZENSIM_TID_IWSSIM_CSV=<path>` (`just csv-loader-parity-real <path>`).
+    //! A set variable naming a missing file fails.
     use super::{LoadedGroup, load_csv, load_csv_sequential};
+    use std::fmt::Write as _;
     use std::path::PathBuf;
 
-    fn tid_csv() -> Option<PathBuf> {
-        let p = PathBuf::from(
-            "/mnt/v/zen/zensim-training/2026-05-16/v2/tid_features_iwssim_log_372col.csv",
-        );
-        if p.exists() { Some(p) } else { None }
+    /// Rows in a generated fixture: three `load_csv` chunks, the last partial.
+    const ROWS: usize = 2_600;
+    /// Feature columns in a generated fixture.
+    const FEATURES: usize = 48;
+
+    /// Deterministic xorshift64 stream.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn unit(&mut self) -> f64 {
+            (self.next() >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    /// One CSV field. Most are full-precision values (`{:?}` prints the
+    /// shortest round-trip form, up to 17 digits); the rest are spellings a
+    /// training CSV can contain.
+    fn field(rng: &mut Rng) -> String {
+        const AWKWARD: &[&str] = &[
+            "0",
+            "-0",
+            "0.0",
+            "-0.0",
+            "1",
+            "-17",
+            "1e5",
+            "1E5",
+            "1e+05",
+            "-2.5e-07",
+            "3.25E-3",
+            "+4.75",
+            "6.02214076e23",
+            "-1.602176634e-19",
+            "4.9e-324",
+            "2.2250738585072014e-308",
+            "1.7976931348623157e308",
+            "-1.7976931348623157e308",
+            "0.1000000000000000055511151231257827",
+            "123456789012345678901234567890",
+            "inf",
+            "-inf",
+            "nan",
+            ".5",
+            "-.25",
+            "7.",
+            "1e-400",
+            "1e400",
+        ];
+        let r = rng.next();
+        match r % 8 {
+            0 => AWKWARD[(r >> 8) as usize % AWKWARD.len()].to_string(),
+            1 => format!("{:?}", -(rng.unit() * 1e-3)),
+            2 => format!("{:e}", (rng.unit() - 0.5) * 1e12),
+            3 => format!("{}", (r >> 16) as i32),
+            _ => format!("{:?}", (rng.unit() - 0.5) * 10f64.powi((r % 13) as i32 - 6)),
+        }
+    }
+
+    /// Write a fixture with the real file's column layout and return its
+    /// path. `prefix` is the feature-run prefix (`f` or `feat_`); `crlf`
+    /// switches line endings, and `blank_lines` inserts empty body lines and
+    /// drops the final newline.
+    fn fixture(tag: &str, seed: u64, prefix: &str, crlf: bool, blank_lines: bool) -> PathBuf {
+        let mut rng = Rng(seed);
+        let eol = if crlf { "\r\n" } else { "\n" };
+        let mut csv = String::from("ref_basename,human_score,iwssim");
+        for i in 0..FEATURES {
+            write!(csv, ",{prefix}{i}").unwrap();
+        }
+        csv.push_str(",iwssim_log_norm");
+        csv.push_str(eol);
+        for row in 0..ROWS {
+            if blank_lines && row % 701 == 350 {
+                csv.push_str(eol);
+            }
+            // `human_score` stays a plain finite value in [0, 1], as in the
+            // real file, so the `target_scale` multiply sees realistic input.
+            write!(csv, "I{:02},{:?},{}", row % 25, rng.unit(), field(&mut rng)).unwrap();
+            for _ in 0..FEATURES {
+                write!(csv, ",{}", field(&mut rng)).unwrap();
+            }
+            write!(csv, ",{}", field(&mut rng)).unwrap();
+            if !(blank_lines && row + 1 == ROWS) {
+                csv.push_str(eol);
+            }
+        }
+        let path = std::env::temp_dir().join(format!(
+            "zensim-csv-parity-{tag}-{}.csv",
+            std::process::id()
+        ));
+        std::fs::write(&path, csv).expect("write CSV fixture");
+        path
+    }
+
+    /// Load `path` with both loaders and require identical results: both
+    /// succeed with bit-identical groups of `expect_rows` rows, or both fail
+    /// with the same error.
+    fn check(path: &PathBuf, target: &str, scale: f64, expect_rows: Option<usize>) {
+        let par = load_csv(path, "tid", target, scale);
+        let seq = load_csv_sequential(path, "tid", target, scale);
+        match (par, seq) {
+            (Ok(par), Ok(seq)) => {
+                if let Some(n) = expect_rows {
+                    assert_eq!(par.human_scores.len(), n, "rows loaded");
+                    assert_eq!(par.n_features, FEATURES, "feature run");
+                }
+                assert_groups_eq(&par, &seq);
+            }
+            (Err(e1), Err(e2)) => assert_eq!(e1, e2, "errors must match"),
+            (Ok(_), Err(e)) => panic!("parallel succeeded but sequential errored: {e}"),
+            (Err(e), Ok(_)) => panic!("sequential succeeded but parallel errored: {e}"),
+        }
     }
 
     fn assert_groups_eq(par: &LoadedGroup, seq: &LoadedGroup) {
@@ -5432,47 +5553,69 @@ mod csv_load_equivalence_tests {
 
     #[test]
     fn parallel_matches_sequential_iwssim_log_target() {
-        let path = match tid_csv() {
-            Some(p) => p,
-            None => {
-                eprintln!(
-                    "SKIP: TID iwssim CSV not present (run on a workstation with /mnt/v mounted)"
-                );
-                return;
-            }
-        };
-        let par = load_csv(&path, "tid", "iwssim_log_norm", 1.0).expect("parallel loader");
-        let seq =
-            load_csv_sequential(&path, "tid", "iwssim_log_norm", 1.0).expect("sequential loader");
-        assert_groups_eq(&par, &seq);
+        // The target is the LAST column, after the feature run, as in the
+        // real file.
+        let path = fixture("iwssim", 0x9E37_79B9_7F4A_7C15, "f", false, false);
+        check(&path, "iwssim_log_norm", 1.0, Some(ROWS));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn parallel_matches_sequential_default_target_with_scale() {
-        // Exercises the `target_scale` multiplier path and a different
-        // target column (`human_score` is in [0, 1] in this corpus and
-        // typically multiplied by 100.0). fast-float and stdlib should
-        // still agree bit-for-bit.
-        let path = match tid_csv() {
-            Some(p) => p,
-            None => {
-                eprintln!("SKIP: TID iwssim CSV not present");
-                return;
-            }
-        };
-        // The 2026-05-16 v2 CSV's first metric column is iwssim_log_norm,
-        // but the file also carries a `human_score` column (per the
-        // training-CSV format documented at the top of this binary).
-        // If absent, the loader will error and the test fails loudly.
-        let target = "human_score";
-        let par_res = load_csv(&path, "tid", target, 100.0);
-        let seq_res = load_csv_sequential(&path, "tid", target, 100.0);
-        match (par_res, seq_res) {
-            (Ok(par), Ok(seq)) => assert_groups_eq(&par, &seq),
-            (Err(e1), Err(e2)) => assert_eq!(e1, e2, "errors must match"),
-            (Ok(_), Err(e)) => panic!("parallel succeeded but sequential errored: {e}"),
-            (Err(e), Ok(_)) => panic!("sequential succeeded but parallel errored: {e}"),
+        // Exercises the `target_scale` multiplier path and a target column
+        // before the feature run (`human_score` in [0, 1], multiplied by
+        // 100.0 as the trainer does).
+        let path = fixture("human", 0xD1B5_4A32_D192_ED03, "f", false, false);
+        check(&path, "human_score", 100.0, Some(ROWS));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn parallel_matches_sequential_on_crlf_blank_lines_and_feat_prefix() {
+        // CRLF endings, empty body lines, no final newline, `feat_` names.
+        let path = fixture("crlf", 0x2545_F491_4F6C_DD1D, "feat_", true, true);
+        check(&path, "human_score", 100.0, Some(ROWS));
+        check(&path, "iwssim_log_norm", 1.0, Some(ROWS));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn parallel_and_sequential_refuse_a_bad_value_the_same_way() {
+        let path = fixture("bad", 7, "f", false, false);
+        let text = std::fs::read_to_string(&path).unwrap();
+        // Corrupt one feature on a body line inside the second chunk.
+        let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let mut fields: Vec<String> = lines[1500].split(',').map(str::to_string).collect();
+        fields[3 + 5] = "1.2.3".to_string();
+        lines[1500] = fields.join(",");
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        let par = load_csv(&path, "tid", "human_score", 100.0).map(|_| ());
+        let seq = load_csv_sequential(&path, "tid", "human_score", 100.0).map(|_| ());
+        assert!(par.is_err(), "the corrupt value must be refused");
+        // The two parsers word their parse errors differently; both must
+        // name the same line and feature.
+        let (pe, se) = (par.unwrap_err(), seq.unwrap_err());
+        for e in [&pe, &se] {
+            assert!(e.contains("line 1501: bad f5"), "{e}");
         }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The real TID CSV, on request only: `ZENSIM_TID_IWSSIM_CSV=<path>`
+    /// (`just csv-loader-parity-real <path>`). Unset: not requested, nothing
+    /// to check. Set to a missing file: fail.
+    #[test]
+    fn parallel_matches_sequential_on_the_real_tid_csv_when_requested() {
+        let Some(path) = std::env::var_os("ZENSIM_TID_IWSSIM_CSV").map(PathBuf::from) else {
+            return;
+        };
+        assert!(
+            path.is_file(),
+            "ZENSIM_TID_IWSSIM_CSV names {path:?}, which does not exist"
+        );
+        println!("real-data CSV parity on {path:?}");
+        check(&path, "iwssim_log_norm", 1.0, None);
+        check(&path, "human_score", 100.0, None);
     }
 }
 

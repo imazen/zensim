@@ -50,6 +50,8 @@
 
 ### Changed
 
+- **The training-CSV loader parity tests no longer skip** (owner, 2026-10-11: "make it fail instead of skip"). `zensim_mlp_train`'s `csv_load_equivalence_tests` returned early with "SKIP" when the TID CSV on `/mnt/v` was missing, so CI never ran them. They now generate CSV fixtures in the real file's layout (2,600 rows over three parallel chunks; negatives, signed zeros, exponents, 17-digit values, subnormals, f64 extremes, `inf`/`nan`, CRLF, blank lines, the `feat_` prefix) and always run; a bad value must be refused at the same line by both loaders. The real TID CSV runs on request: `just csv-loader-parity-real [path]` sets `ZENSIM_TID_IWSSIM_CSV`, and a missing file fails.
+
 - **PU-linear routes profile C to CHdr, as it routes B to BHdr** (owner decision 2026-10-11). `Zensim::new(ZensimProfile::C)` fed absolute nits through `compute_pu_linear`, `compute_pu_linear_planar` or descriptor-HDR `compute` now returns CHdr's score and features bit for bit (result tagged `C`), and `compute_pu_linear_extended_features` refuses it exactly as it already refuses CHdr; before, those entries scored HDR input with C's SDR bake, outside its training domain. C's SDR path, CHdr itself and every other profile keep their output bits; A and D (no HDR twin) stay unrouted. Behaviour change for HDR scoring with C only; C has never been in a published release, so this is not a queued breaking change. Test: `tests/chdr_pu.rs::c_routes_to_chdr_through_every_pu_entry_bit_identically`.
 
 - **Prepared steering (`SteeringSession::compute`) uses less memory and stops reconverting its
