@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Docs: forced-choice figures recorded before 2026-10-11 (hfhuman 2026-09-01 arms, rev4_e1, rev4_e1b) are labelled "not-sure dropped" for raw agreement, ceilings, tie rate, counts and log-likelihood; `acc_norm` and per-group majority agreement are unchanged by the half/half split now used (zenstats `Choice::NotSure`). Rule: `docs/DATA_SPLITS.md` §3d.
+
 ### QUEUED BREAKING CHANGES
 
 ### Added

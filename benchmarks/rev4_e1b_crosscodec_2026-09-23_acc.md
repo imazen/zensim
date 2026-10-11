@@ -1,5 +1,7 @@
 # Rev4 E1b — accuracy per metric and pair class (point [95 % CI])
 
+> **Not-sure convention (labelled 2026-10-11).** The forced-choice figures here were computed with "not sure" answers **dropped**: raw agreement (`acc_response`), the majority ceiling, tie rate, response counts and any log-likelihood are "not-sure dropped". The current convention counts not-sure half for each side (zenstats `forced_choice::Choice::NotSure`; JPEG AIC scale construction). `acc_norm` and per-group majority agreement are unchanged by that split, so they keep their recorded values. See `docs/DATA_SPLITS.md` §3d.
+
 Companion to `benchmarks/rev4_e1b_crosscodec_2026-09-23.md`. Same run and conventions.
 
 **CID22-A(25)** — same: n = 9988, all-metrics-right 0.9552; mid: n = 14756, all-metrics-right 0.7493; cross: n = 70420, all-metrics-right 0.7269

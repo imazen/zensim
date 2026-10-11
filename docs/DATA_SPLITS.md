@@ -322,6 +322,17 @@ superseded entry `aic3-iptc-stimuli-not-reachable` is kept and points here.
 **These 130 crops are HOLDOUT members like every other member of this family**
 — they always were, being the same `PTC_*` pixels the rule already covered.
 
+**Not-sure convention (owner decision 2026-10-11).** Forced-choice reads count
+a "not sure" answer half for each side, the convention the JPEG AIC scale itself
+was built with (Testolina et al. 2024; Men et al. 2021). Every forced-choice
+figure recorded before this date (the six arms below, `rev4_e1`, `rev4_e1b`)
+dropped not-sure answers: their raw agreement, majority ceiling, tie rate,
+response counts and any log-likelihood are labelled **not-sure dropped**;
+`acc_norm` and per-group majority agreement are unchanged by the split and keep
+their values. New reads also apply the dataset's own worker screening (AIC-3:
+batches with at least 70 % correct on their 10 trap questions), since splitting
+alone does not make unscreened responses consistent with the scale.
+
 **EVAL axes built on it (2026-09-01, holdout-legal):** six arms over the
 **567,120** scoreable responses — `ptc_native` / `btc_displayed` / `btc_native`
 / `aic4_all`, plus (APPENDIX A) **`iptc_native`** (130 stimuli, 900 triplets,

@@ -1,5 +1,7 @@
 # Rev4 E1b — is zensim's human deficit a cross-codec ordering problem? (2026-09-23)
 
+> **Not-sure convention (labelled 2026-10-11).** The forced-choice figures here were computed with "not sure" answers **dropped**: raw agreement (`acc_response`), the majority ceiling, tie rate, response counts and any log-likelihood are "not-sure dropped". The current convention counts not-sure half for each side (zenstats `forced_choice::Choice::NotSure`; JPEG AIC scale construction). `acc_norm` and per-group majority agreement are unchanged by that split, so they keep their recorded values. See `docs/DATA_SPLITS.md` §3d.
+
 Preregistered: `benchmarks/rev4_e1b_prereg_2026-09-23.md`. Scripts: `benchmarks/rev4_e1b_2026-09-23/`. Full run `/var/tmp/rev4-e1b/e1b_full.json` (sha256 `1ac7fc97d24d8588…`), B = 2000, seed 20260923, reference-clustered (forced choice: source-image-clustered, 5 images). Every accuracy is `acc_response` from `panel --pairwise` (sha256 `f11857c2…`, E1's binary). `**` CI entirely < 0, `*` CI entirely > 0. Δ = zensim − best peer of that pair class.
 
 **This re-tests E1's exploratory lead on the same data it came from** (prereg §1). A confirmation here would mean the lead survives a fixed rule, not that it replicates.
