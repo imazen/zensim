@@ -378,7 +378,7 @@ fn preference_not_sure_counts_half_each() {
     let mut v = f.manifest();
     f.write(
         "data.csv",
-        "id,score,right,choice,group,weight\na,1,b,left,g1,3\nb,2,,,,\nc,1,b,notsure,g1,2\n",
+        "id,score,right,choice,group,weight\na,1,b,left,g1,3\nb,2,,,,\nc,1,b,not-sure,g1,2\n",
     );
     v["datasets"][0]["sha256"] = json!(hash(&f.path("data.csv")));
     v["datasets"][0]["columns"] = json!({"id":"id","score":"score","right_id":"right","choice":"choice","preference_group":"group","weight":"weight"});

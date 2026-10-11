@@ -115,12 +115,13 @@ fn pairwise(table: &Table, p: &[f64]) -> Result<Value> {
         let right = lookup
             .get(row["right_id"].as_str())
             .context("unknown right_id in preference")?;
-        // "Not sure" counts half for each side (owner decision 2026-10-11).
-        let choice = match row["choice"].as_str() {
-            "left" => Choice::Left,
-            "right" => Choice::Right,
-            "notsure" | "not_sure" | "not sure" => Choice::NotSure,
-            other => bail!("choice must be left, right or notsure, got {other}"),
+        // The owner's parser, so both entry points accept the same tokens; "not
+        // sure" counts half for each side (owner decision 2026-10-11).
+        let Some(choice) = Choice::parse(&row["choice"]) else {
+            bail!(
+                "choice must be left, right or notsure, got {}",
+                row["choice"]
+            );
         };
         let key = row
             .get("preference_group")

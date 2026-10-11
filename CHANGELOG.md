@@ -50,6 +50,8 @@
 
 ### Changed
 
+- `panel evaluate` parses preference choices with the owner's `Choice::parse`, so it accepts the same tokens as `panel --pairwise` (`not-sure`, `unsure`, `l`/`r`, …); METRIC_EVALUATION_CLI.md says preference rows must already be screened by the dataset's own rule.
+
 - **Readers of stored `srocc_ci` label the interval kind and never mix kinds.** `scripts/lib/srocc_ci.py` classifies each stored interval: `ref` (reference-clustered, `srocc_ci_method.design == "one-way: reference"`) or `pair` (pair bootstrap: every verdict before 2026-10-11, and the `rows` fallback). The gauntlet board splits "CID22 95%CI±" into a `ref` and a `pair` column (sorted and shaded only within a kind), labels every per-corpus ±CI, flags a table that mixes kinds, and rewords both legends. `speed_accuracy_page.py` draws `pair` bars dashed, names the kind in every tooltip and axis label, and flags a mixed chart. `analyze_wave.py` labels each CI half-width and refuses a CI-based call across kinds. Test: `scripts/tests/test_srocc_ci_kind.py`.
 
 - `bake_compare` records the percentile rule with its B and seed: the JSON adds `percentile_rule` ("Hyndman-Fan type 7") and `bootstrap_unit` ("row"), and the report states B, seed, per-band seed rule, percentile rule and that rows, not references, are resampled. `panel evaluate`'s legacy decisive block records the same. (e3c6be97)
