@@ -627,6 +627,13 @@ Open owner decisions:
   - The CI feature matrix is 27/27, and the suite passes (924).
   - A's remaining model failure on the release gates is G-STEER (129/135). Every remaining steering failure is a
     model limit; an E34 registration draft is in progress.
-- **Found: CHdr (and C) can't be scored through the PU-linear HDR entries.** It is pre-existing. A fix that
-  reproduces the fleet's HDR extraction is in review.
+- **CHdr and C now score through the PU-linear HDR entries (`ab5c14a1`, reviewed at effort xhigh in two rounds).**
+  Below Rev5 those entries ran the legacy walk, which emits only the v1 vector, so the wide-plan bakes were refused.
+  - Served CHdr scores equal a recomputation from today's build of the fleet HDR extraction in 880/880 cells.
+  - Every other profile is bit-identical on every path in 53,520/53,520 rows.
+  - The PU calls of other profiles are no slower than before (9/9 cells inside +2%).
+  - A cancellable C/CHdr request is refused below Rev5, as SDR `compute` refuses it.
+  - Follow-ups: imazen/zensim #66 (the Rev5 refusal message) and #67 (PU cells in the serving matrix).
+  - Open for the owner: whether the PU entries should switch built-in profile C to CHdr, as they switch B to
+    BHdr.
 
