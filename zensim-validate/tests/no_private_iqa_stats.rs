@@ -15,6 +15,10 @@
 //! Mutation-verified: adding `fn spearman(a: &[f64], b: &[f64]) -> f64` to
 //! any file under `src/` fails this test.
 //!
+//! 2026-10-11: the statistics zenmetrics-stats absorbed from zensim (DS-AUC,
+//! forced-choice agreement) and its interval and multiple-comparison owners are
+//! banned too, so the deleted copies cannot come back under their names.
+//!
 //! Deliberately NOT in the banned list: `fast_kendall` (`src/main.rs`) — an
 //! O(n log n) tau-b with an exact-tie predicate that `zenstats::kendall_tau`
 //! cannot reproduce, used as a training objective; its fate is an open
@@ -36,6 +40,16 @@ const BANNED_FN_NAMES: &[&str] = &[
     "plcc",
     "krocc",
     "kendall_tau",
+    // Moved to zenmetrics-stats on 2026-10-11 (`pairs::ds_auc`,
+    // `forced_choice`, `resample`, `multiple`); the zensim copies were deleted.
+    "ds_auc",
+    "agreement_by_group_index",
+    "index_rows_by_group",
+    "fit_observer_slope",
+    "spearman_interval",
+    "cluster_bootstrap",
+    "holm",
+    "holm_reject",
 ];
 
 fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
