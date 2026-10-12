@@ -56,7 +56,7 @@ codec-corpus = "1.0.3"
 zenbench = { version = "0.1.9", git = "https://github.com/imazen/zenbench", rev = "53941021fd20158bb52af6654df003ca6ead9caa" }
 # Current upstream main, fetched 2026-09-13; pin the filter-study implementation.
 zenresize = { git = "https://github.com/imazen/zenresize", rev = "e3975fb9d6d6b7baa96038a0eb8e27febb37c012", default-features = false, features = ["std"] }
-zenpng = { version = "0.1.4", default-features = false }
+zenpng = { version = ">=0.1.4, <0.3.0", default-features = false }
 zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }
 zenblend = "0.1.3"
 enough = { version = "0.4.2", default-features = false, features = ["std"] }
