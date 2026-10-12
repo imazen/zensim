@@ -30,24 +30,7 @@ its `score_all.sh` child (pid 51583) scored every arm end-to-end, exit 0
 (`end loadavg` logged 11:28:40Z). Idempotent `[ -f ]/[ -d ]` guards skip
 existing outputs.
 
-- A duplicate `score_all.sh` I launched outside the lock at 11:13:56Z was
-  killed ~90 s later to prevent log/output clobbering; its two spawned scoring
-  children ran to completion with the identical binary/args and produced
-  `probes_dvifmish/` (117×3), `ladder_dvifmish/` (9,593×3) and
-  `aic2026_crop_dvifmish/` (9,618×3) — all "0 failures" per their logs
-  (`/var/tmp/paper-gates/logs/*_dvifmish.log`).
-- scores → `/var/tmp/paper-gates/scores/{probes,ladder}_*.{parquet,tsv}` +
-  `*_dvifmish/` + `aic2026_{crop,full}_gmsd.parquet`; list coverage verified:
-  parquet rows 117 / 9,593 / 9,618, TSVs 118/9,594 lines incl. header.
-- representative sha256: `ladder_zensim.parquet` `31a6dad5…`,
-  `ladder_dvifmish/talk-faithful-luma.tsv` `1da29820…`,
-  `aic2026_crop_dvifmish/talk-faithful-luma.tsv` `1782afb4…`,
-  `ladder_cvvdp_fhd.tsv` `3d0c08ca…`, `ladder_fastssim2.tsv` `4d8282a4…`.
-- binaries (sha256): zenmetrics-sweep `319a9f2b881e4a3788d62dc112d31a048f9a013a4258feb332ff2b2ddc1900dc`,
-  dvifmish-49aaf667 `69cd2309b6a92cd31d02d77b5948d036a1154e31035d0e8a32173d40f5fbc3c8`,
-  score_pairs_tuner `4c5617f0a29f4b8586fd779e8915cc077d49667ff866799198abbfbd5d6a0c76`,
-  m3_fixture_gen `b642914c…`, peer_metric_pairs `8d8bffaa…`,
-  zenmetrics-cvvdpfix `ca154a6a…` (same binary as the cvvdp lane).
+
 
 ## 2026-09-23 11:3xZ — run_gates.py (first attempt) — FAILED
 
@@ -80,10 +63,7 @@ python3 scripts/paper_gates/aic2026_addendum.py \
   --out-json /var/tmp/paper-gates/bv/aic2026_addendum.json
 ```
 
-- output sha256 `53b424b6eab850a7438ab9912fdb47e3fd52f65b767ea2548d2125642f183736`.
-- headline lines (stdout): `ours:GMSD correct 0.9907 material 47/490`;
-  `ours:GMSD vs GMSD srocc 0.9999999795868816, max_abs_diff 2.27e-4`;
-  three DVIFM-ish presets 0.9833/0.9916/0.9938.
+
 
 ## 2026-09-23 11:5xZ — render.py — exit 0
 

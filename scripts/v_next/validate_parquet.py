@@ -56,7 +56,6 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
     names = pf.schema_arrow.names
     fcols, fidx = featcols(names)
     # Regime widths: v1 228/300/372, combined 720 (372++348), folded+append
-    # 924, folded+append2 944 (SOTA-944), +CSFW 956, +DVIFM 986 (w986,
     # registered 2026-09-19). (C2 predated the v2
     # regimes and silently failed every >372 leg — widened 2026-08-03.)
     declared_ids = contract.get("feature_ids") if contract else None

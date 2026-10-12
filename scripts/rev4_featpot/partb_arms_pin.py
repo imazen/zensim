@@ -17,7 +17,7 @@ OUT = Path("benchmarks/rev4_featpot_partb_arms_2026-09-25.json")
 RESTORE = json.loads(Path("benchmarks/rev4_featpot_restore_arms_2026-09-25.json").read_text())
 PIN_SETS = ("kadid_train", "tid2013", "konfig_train", "konjnd_bpg_train", "cid22_a25",
             "kadid_select", "konfig_val", "aic3", "konjnd_bpg_val")
-FILES = {"csfw_dvifm": ("features__csfw_dvifm.parquet", 944, 986),
+FILES = {"csfw": ("features__csfw.parquet", 944, 956),
          "c1c4": ("features__rev4c1c4.parquet", 986, 1322),
          "gmsbank": ("features__gmsbank.parquet", 1322, 1502)}
 
@@ -52,23 +52,17 @@ def main() -> None:
         entry["identical_keys"] = int(flags.sum())
         entry["identical_stimulus_rows"] = int(table.pixels_identical.astype(bool).sum())
         pins[name] = entry
-    c7 = list(range(956, 986))
-    c7_f1 = [956 + 6 * level for level in range(5)]
     c8 = list(range(1322, 1502))
     arms = {
         "c1": {"add": list(range(986, 1082))}, "c2": {"add": list(range(1082, 1154))},
         "c3": {"add": list(range(1154, 1298))}, "c4": {"add": list(range(1298, 1322))},
         "all": {"add": list(range(986, 1322)), "note": "C1-C4 together"},
-        "csfw": {"add": list(range(944, 956))}, "c7": {"add": c7},
+        "csfw": {"add": list(range(944, 956))},
         "p1": {"add": c8, "note": "gmsbank (C8, revised) f1322-1501"},
         "p3": {"add": c8, "peer": ["gmsd", "gmsm"], "note": "P1 plus the reviewed P2 peer columns"},
-        "b1": RESTORE["arms"]["B1"], "b1s": RESTORE["arms"]["B1s"],
-        "c8n": RESTORE["arms"]["C8n"], "rall": RESTORE["arms"]["ALL"],
+        "c8n": RESTORE["arms"]["C8n"],
     }
-    arms["b1"] = {"add": arms["b1"]["add"]}
-    arms["b1s"] = {"add": arms["b1s"]["add"], "replaced_f1": c7_f1}
     arms["c8n"] = {"add": arms["c8n"]["add"]}
-    arms["rall"] = {"add": arms["rall"]["add"], "note": "restore ALL = A1 + B2 + B1 + C8n additions"}
     out = {"schema": "rev4-featpot-partb-arms-v1", "label": "POTENTIAL — ceiling, not a model score",
            "amendment": "benchmarks/rev4_featpot_partb_arms_amendment_2026-09-25.md",
            "reads": "manifests, parquet schemas, file hashes and the pixels_identical flag; no label",

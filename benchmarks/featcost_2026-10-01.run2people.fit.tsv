@@ -3,9 +3,6 @@ people	alone:append	increment	69.9939	301.0503	4	64,256,1024,4096
 people	alone:append2	increment	92.4442	224.5175	4	64,256,1024,4096
 people	alone:arttype	increment	24.3599	789.8500	4	64,256,1024,4096
 people	alone:csfw	increment	47.7685	378.8971	4	64,256,1024,4096
-people	alone:dvifm	increment	74.1919	321.9730	4	64,256,1024,4096
-people	alone:dvifm+dvifmgate	increment	148.9454	903.7301	4	64,256,1024,4096
-people	alone:dvifmgate	increment	128.2226	888.2363	4	64,256,1024,4096
 people	alone:gmsbank	increment	88.5583	719.2452	4	64,256,1024,4096
 people	alone:gmsbank+gmsnative	increment	170.4715	1032.3033	4	64,256,1024,4096
 people	alone:gmsnative	increment	145.8711	842.2190	4	64,256,1024,4096
@@ -21,8 +18,6 @@ people	ladder:append	increment	67.0849	264.4719	4	64,256,1024,4096
 people	ladder:append2	increment	49.1152	332.9552	4	64,256,1024,4096
 people	ladder:arttype	increment	89.7357	675.1242	4	64,256,1024,4096
 people	ladder:csfw	increment	38.0880	391.5948	4	64,256,1024,4096
-people	ladder:dvifm	increment	45.9870	509.6484	4	64,256,1024,4096
-people	ladder:dvifmgate	increment	177.6862	1092.1032	4	64,256,1024,4096
 people	ladder:gmsbank	increment	62.3404	777.3445	4	64,256,1024,4096
 people	ladder:gmsnative	increment	150.3787	1105.0953	4	64,256,1024,4096
 people	ladder:gridblk	increment	81.3838	470.9425	4	64,256,1024,4096
@@ -38,8 +33,6 @@ people	step:append	increment	24.2596	23.8441	4	64,256,1024,4096
 people	step:append2	increment	-17.9698	68.4833	4	64,256,1024,4096
 people	step:arttype	increment	-10.8486	50.1025	4	64,256,1024,4096
 people	step:csfw	increment	-11.0271	58.6396	4	64,256,1024,4096
-people	step:dvifm	increment	7.8990	118.0535	4	64,256,1024,4096
-people	step:dvifmgate	increment	27.3075	-12.9921	4	64,256,1024,4096
 people	step:gmsbank	increment	-27.3953	102.2203	4	64,256,1024,4096
 people	step:gmsnative	increment	-86.4113	164.7018	4	64,256,1024,4096
 people	step:gridblk	increment	35.3968	-38.7058	4	64,256,1024,4096

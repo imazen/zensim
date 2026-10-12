@@ -337,11 +337,6 @@ required-features = ["gmsbank-peer"]
 name = "gmsbank_corpus_fixtures"
 required-features = ["zen-decode", "m3-fixtures"]
 
-# `dvifm_steer_study` uses the training-gated research API (DvifmFieldMap) and
-# decodes corpus pairs through the zen-decode owner; same gate as the extractor.
-[[example]]
-name = "dvifm_steer_study"
-required-features = ["training", "zen-decode"]
 
 # `verify_bitstream_decode` needs at least the JPEG decode path (verify-decode).
 [[example]]

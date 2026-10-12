@@ -11,7 +11,7 @@ for n in 256 1024 2048 4096; do
   for t in 1 8; do
     for arm in base cand; do
       if [ $arm = base ]; then bin=$ROOT/bin/extract_base; extra=(--full-gmsbank); else
-        bin=$ROOT/bin/extract_cand; extra=(--restore-cuts prefix,mapdev,z1max,gmsnative,dvifmgate); fi
+        bin=$ROOT/bin/extract_cand; extra=(--restore-cuts prefix,mapdev,z1max,gmsnative); fi
       csv=$ROOT/synth/mem_${arm}_${n}_$t.csv; rm -f "$csv" "$csv".*
       ht=$ROOT/synth/ht_${arm}_${n}_$t
       start=$(date +%s.%N)

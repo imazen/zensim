@@ -447,8 +447,8 @@ def zero_ids(src_table):
 
 PARTB_NAME = "features__rev4c1c4.parquet"
 PARTB_IDS = list(range(986, 1322))
-CSFW_IDS = list(range(944, 986))  # csfw f944-955 + DVIFM C7 f956-985 (coordinator add 2026-09-24)
-CSFW_NAME = "features__csfw_dvifm.parquet"
+CSFW_IDS = list(range(944, 956))  # csfw f944-955 (coordinator add 2026-09-24)
+CSFW_NAME = "features__csfw.parquet"
 GMS_IDS = list(range(1322, 1502))  # C8 gmsbank
 GMS_NAME = "features__gmsbank.parquet"
 
@@ -611,7 +611,7 @@ def bind_partb(set_name, csv_path, audit_path, binary, build_commit, limit):
         new_start = hdr.index("f986")
         x_start = hdr.index("f944")
         if [hdr.index(f"f{i}") for i in CSFW_IDS] != list(range(x_start, x_start + len(CSFW_IDS))):
-            raise SystemExit("csfw/dvifm feature columns are not contiguous")
+            raise SystemExit("csfw feature columns are not contiguous")
         old_pos = [hdr.index(f"f{i}") for i in POPULATED_IDS]
         for row in r:
             rid = int(row[rid_i])
@@ -626,10 +626,10 @@ def bind_partb(set_name, csv_path, audit_path, binary, build_commit, limit):
             xvals = np.fromiter((float(x) for x in row[x_start:x_start + len(CSFW_IDS)]),
                                 dtype=np.float64, count=len(CSFW_IDS))
             if not np.isfinite(xvals).all():
-                raise SystemExit(f"{set_name}: non-finite csfw/dvifm value at {rid}")
+                raise SystemExit(f"{set_name}: non-finite csfw value at {rid}")
             xnew[rid] = xvals.astype(np.float32)
             if not np.isfinite(xnew[rid]).all():
-                raise SystemExit(f"{set_name}: non-finite csfw/dvifm f32 value at {rid}")
+                raise SystemExit(f"{set_name}: non-finite csfw f32 value at {rid}")
             if not np.isfinite(new[rid]).all():
                 raise SystemExit(f"{set_name}: non-finite f32 value at {rid}")
             if rid in expected_old:
@@ -699,7 +699,7 @@ def bind_partb(set_name, csv_path, audit_path, binary, build_commit, limit):
         entry.pop(k)
     entry.update({"populated_feature_ids": CSFW_IDS, "live_cells_by_feature": x_live,
                   "identity_nonzero_cells": x_ident_nonzero,
-                  "note": "csfw f944-955 + DVIFM C7 f956-985; no stored bank baseline, so no old-f32 parity"})
+                  "note": "csfw f944-955; no stored bank baseline, so no old-f32 parity"})
     entry.pop("old_f32_checked_rows"); entry.pop("old_f32_mismatches")
     manifest["sidecars"][CSFW_NAME] = entry
     manifest["files"][CSFW_NAME] = {"sha256": sha256_file(xpath), "bytes": xpath.stat().st_size}

@@ -19,7 +19,7 @@ run() { # name binary extra-args...
 echo "GATE_START n=$N utc=$(date -u +%FT%TZ)"
 run base "$ROOT/bin/extract_base" --full-gmsbank
 run candoff "$ROOT/bin/extract_cand" --full-gmsbank
-run candall "$ROOT/bin/extract_cand" --restore-cuts prefix,mapdev,z1max,gmsnative,dvifmgate
+run candall "$ROOT/bin/extract_cand" --restore-cuts prefix,mapdev,z1max,gmsnative
 python3 "$REPO/scripts/restore_cuts/compare_prefix.py" "$ROOT/raw/gate_base.csv" "$ROOT/raw/gate_candoff.csv" 1502
 python3 "$REPO/scripts/restore_cuts/compare_prefix.py" "$ROOT/raw/gate_base.csv" "$ROOT/raw/gate_candall.csv" 1502
 sha256sum "$pairs" "$ROOT"/raw/gate_{base,candoff,candall}.csv "$ROOT/bin/extract_base" "$ROOT/bin/extract_cand"

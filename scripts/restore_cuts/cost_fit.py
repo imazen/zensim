@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 CHAIN = ['fold1502_gmsbank', 'fold1562_mapdev', 'fold1790_z1max',
-         'fold1820_gmsnative', 'fold1825_dvifmgate']
+         'fold1820_gmsnative']
 
 
 def analyze(path):

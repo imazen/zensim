@@ -134,10 +134,6 @@ pub(crate) enum Phase {
     /// only for the append block's sigma split, plus the optional
     /// BANDVIS dst-activity twin.
     PhaseAAppendPlanes = 20,
-    /// `dvifm_push_rows` — the f956+ DVIFM block-visibility pyramid pump
-    /// (scale-0 Y only, default off). Runs serially between `next_strip`
-    /// and the channel fan-out, like `MeanOffset`.
-    DvifmKernel = 21,
     /// REV4 kernels — `gridblk_strip_wide` inside phase B plus the
     /// `dst_y_edge_mask_strip` bleed-mask build (serial, pre-fan-out).
     /// Default-off families; zero counts when every rev4 flag is off.
@@ -316,7 +312,6 @@ fn dump(walks: u64) {
     row("  v2:gradient", Phase::GradKernel, None);
     row("  v2:append", Phase::AppendKernel, None);
     row("  v2:csfw", Phase::CsfwKernel, None);
-    row("  v2:dvifm", Phase::DvifmKernel, None);
     row("  v2:blockiness", Phase::BlockKernel, None);
     row("  v2:rev4", Phase::Rev4Kernel, None);
     row("  v2:planesA", Phase::PhaseAV2Planes, None);
@@ -329,7 +324,6 @@ fn dump(walks: u64) {
             Phase::GradKernel,
             Phase::AppendKernel,
             Phase::CsfwKernel,
-            Phase::DvifmKernel,
             Phase::BlockKernel,
             Phase::Rev4Kernel,
             Phase::PhaseAV2Planes,

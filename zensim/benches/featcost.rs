@@ -55,7 +55,6 @@ const CHAIN: &[T] = &[
     T::Append,
     T::Append2,
     T::Csfw,
-    T::Dvifm,
     T::Gridblk,
     T::Ringbasis,
     T::Tailhist,
@@ -64,14 +63,9 @@ const CHAIN: &[T] = &[
     T::Mapdev,
     T::Z1max,
     T::Gmsnative,
-    T::Dvifmgate,
 ];
 /// Pairs measured jointly (shared kernels) in addition to each alone.
-const PAIRS: &[(T, T)] = &[
-    (T::Dvifm, T::Dvifmgate),
-    (T::Gmsbank, T::Gmsnative),
-    (T::Mapdev, T::Z1max),
-];
+const PAIRS: &[(T, T)] = &[(T::Gmsbank, T::Gmsnative), (T::Mapdev, T::Z1max)];
 
 struct Variant {
     label: String,

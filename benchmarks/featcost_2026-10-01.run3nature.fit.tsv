@@ -3,9 +3,6 @@ nature	alone:append	increment	0.1054	135.8102	4	64,256,1024,4096
 nature	alone:append2	increment	0.4247	144.4650	4	64,256,1024,4096
 nature	alone:arttype	increment	4.4144	359.9951	4	64,256,1024,4096
 nature	alone:csfw	increment	0.0128	148.3433	4	64,256,1024,4096
-nature	alone:dvifm	increment	1.7191	180.9575	4	64,256,1024,4096
-nature	alone:dvifm+dvifmgate	increment	6.6581	501.9922	4	64,256,1024,4096
-nature	alone:dvifmgate	increment	3.7570	508.7365	4	64,256,1024,4096
 nature	alone:gmsbank	increment	5.7344	396.9190	4	64,256,1024,4096
 nature	alone:gmsbank+gmsnative	increment	7.1369	602.0656	4	64,256,1024,4096
 nature	alone:gmsnative	increment	5.1725	504.8088	4	64,256,1024,4096
@@ -21,8 +18,6 @@ nature	ladder:append	increment	0.1353	136.2084	4	64,256,1024,4096
 nature	ladder:append2	increment	-0.3471	142.4522	4	64,256,1024,4096
 nature	ladder:arttype	increment	4.3726	359.6461	4	64,256,1024,4096
 nature	ladder:csfw	increment	1.4098	146.7530	4	64,256,1024,4096
-nature	ladder:dvifm	increment	2.0424	218.1621	4	64,256,1024,4096
-nature	ladder:dvifmgate	increment	7.5416	602.3099	4	64,256,1024,4096
 nature	ladder:gmsbank	increment	4.7264	399.2090	4	64,256,1024,4096
 nature	ladder:gmsnative	increment	4.0981	608.9554	4	64,256,1024,4096
 nature	ladder:gridblk	increment	2.6667	239.2659	4	64,256,1024,4096
@@ -38,8 +33,6 @@ nature	step:append	increment	-0.1540	25.2711	4	64,256,1024,4096
 nature	step:append2	increment	-0.4824	6.2439	4	64,256,1024,4096
 nature	step:arttype	increment	0.3629	8.6221	4	64,256,1024,4096
 nature	step:csfw	increment	1.7569	4.3008	4	64,256,1024,4096
-nature	step:dvifm	increment	0.6327	71.4091	4	64,256,1024,4096
-nature	step:dvifmgate	increment	3.4435	-6.6455	4	64,256,1024,4096
 nature	step:gmsbank	increment	0.3538	39.5629	4	64,256,1024,4096
 nature	step:gmsnative	increment	-1.9258	35.2261	4	64,256,1024,4096
 nature	step:gridblk	increment	0.6242	21.1039	4	64,256,1024,4096

@@ -1,13 +1,6 @@
 # Restored-cut potential-arm preregistration proposal (2026-09-24)
 
-**Proposal only for the `featbank-potential` owner.** This lane (`restore-cuts`) reads no human labels and fits
-nothing. The coordinator must merge this into the potential preregistration BEFORE that owner reads labels for
-these arms. Inputs: the promoted f32 bank `/var/tmp/rev4-featbank/bank/` (R0 = the bank's existing-family
-columns; C7 f956..985 and the Part B C1..C4/C8 sidecars are joined the same way) plus this lane's sidecars
-`features__restore_{mapdev,z1max,gmsnative,dvifmgate}.parquet` (written under
-`/var/tmp/restore-cuts/bank/<set>/`, manifests `_MANIFEST_restore.json`), joined strictly by `pair_key`. Producer
-commit, binary sha256 and feature-set identity are in each manifest and must be pinned by the potential owner;
-a missing or duplicate join fails.
+
 
 The cost of a family is **measured and reported, never a gate** (user ruling 2026-09-24; the D5 clause "benefit
 pays its measured runtime" is superseded by the 09-24 amendment). Cost numbers: `benchmarks/restore-cuts_cost_2026-09-24.md`.
@@ -22,7 +15,6 @@ pays its measured runtime" is superseded by the 09-24 amendment). Cost numbers: 
 | A1w | width-matched replacement: R0 with 60 of its weakest-by-prereg-rule columns dropped, +`mapdev` | the same, permuted | the width-matched replacement arm the gmsd record skipped (the potential owner fixes the drop rule before reading labels) |
 | B2 | `z1max` f1562..1789 (228) | 228 permuted | ungated 5x5 block-max pooling as the two-surface hybrid: R0's global 228 surface + block-max 228 surface |
 | B2m | `z1max` block-locals {3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18} only (`edge_art_*` 5 + `edge_det_*` 5 + `mse` + `ssim_max` + `ssim_l8` = 13 per cell; 12 cells x 13 = 156 columns) | 156 permuted | tests whether the record's codec/human concentration survives a narrower block |
-| B1 | C7 f956..985 (curve, already in the bank) + `dvifmgate` f1820..1824 (5) | 5 permuted | curve vs gate form: the two forms share F2; only F1 differs |
 | B1s | C7 with its five F1 columns REPLACED by the five gate F1 columns (30 columns total) | 5 permuted replacements | pure form swap at equal width |
 | C8n | R0 + C8 (f1322..1501, revised) + `gmsnative` f1790..1819 (30) | 30 permuted | whether dropping native X/B gradient slots lost anything |
 | ALL | A1 + B2 + B1 + C8n additions | equal-width permuted control | complementarity |

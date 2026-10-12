@@ -205,7 +205,6 @@ with ≥1 diff; max rel vs v3):
 | append2 | clean | clean | 78 8pr 1.62e-4 |
 | arttype | clean | clean | 117 6pr 1.08e-2 |
 | csfw | clean | clean | 48 6pr 1.98e-4 |
-| dvifm | clean | clean | 180 6pr 4.72e-6 |
 | gmsbank | clean | clean | 1080 6pr 2.01e-5 |
 | gridblk | clean | clean | 519 6pr 4.28e-2 |
 | ringbasis | clean | clean | 401 6pr 2.68e-2 |
@@ -216,26 +215,7 @@ substantive max ≈ 0.67 (`tailhist_art_p99`/`append_texture_dissim`).
 
 Kernel attribution:
 
-- **v4/v4x (identical outputs — simd_ops has no v4x tier; blur's `+v4x`
-  variant produced bit-identical results to `+v4` on these inputs)**:
-  confined to SSIM-derived families. Responsible: generic `f32x16` bodies in
-  `zensim/src/simd_ops.rs` — `ssim_signal_inline_{both,mask,iw}` (lines
-  3300–3460, Rev3 retained-signal pools called at `ssim_form.rs:1674-1676`
-  and `fused.rs:4098`), `ssim_channel_inline_{both,mask,iw}`,
-  `edge_diff_channel_inline_both`, `build_inline_mse`. Mechanism:
-  `f32x16::reduce_add` = `_mm512_reduce_add_ps` on v4 vs `tree8+tree8` on v3 —
-  per-16-chunk sum order differs; `mul_add` is fused on both so element
-  values are identical. `basic_var_loss/tex_loss/contrast_*` additionally
-  ride the moment planes from `blur.rs` box_blur + `sq_sum_into`/`mul_into`.
-  Content-dependent: kadid/konfig (mildest distortions) showed 0 diffs.
-- **scalar (all 14 families)**: same reduce-order issue PLUS unfused generic
-  `mul_add` on `ScalarToken` (`a*b+c`, no fma) — changes element values in
-  every kernel that calls it (mask weights `1/(1+k·a)`, IW `1+k·a`, dissim
-  terms), so planes themselves differ and every downstream pool/stat shifts.
-  Dispatched sites involved: `simd_ops.rs` inline pools + `blur.rs`
-  `box_blur_{h,v}_*` (`incant! [v4x,v4,v3,neon,wasm128,scalar]`) +
-  `feature_v2.rs` `n_block_kernel*`/`#[magetypes]` pools +
-  `dvifm.rs` `dvifm_{push_rows,finish}_entry` + `streaming.rs` callers.
+
 
 Proposed fixes (NOT implemented — formula-revision decision required). Read the tradeoff on #1 before acting:
 the Rev4 feature bank was extracted on an AVX-512 host with `extract-native-admission` `7c7ffbbf` (uncapped), so it carries

@@ -19,7 +19,7 @@ SEED = 20260924
 N_SAMPLE = 200
 import os
 GMS = os.environ.get("PARTB_GMS") == "1"  # pass 2: raw CSV from /var/tmp/partb2, also compare f1322-f1501
-NEW_IDS = range(944, 1502 if GMS else 1322)  # csfw/dvifm f944-985 (features__csfw_dvifm) + C1-C4 f986-1321 (features__rev4c1c4)
+NEW_IDS = list(range(944, 956)) + list(range(986, 1502 if GMS else 1322))  # csfw f944-955 (features__csfw) + C1-C4 f986-1321 (features__rev4c1c4)
 
 
 def sha(path):
@@ -75,8 +75,8 @@ def verify():
     for name in sorted({r["set"] for r in records}):
         selected = [r for r in records if r["set"] == name]
         take = pa.array([r["bank_row"] for r in selected], type=pa.int64())
-        xt = pq.read_table(BANK / name / "features__csfw_dvifm.parquet",
-                           columns=[f"f{i}" for i in range(944, 986)]).take(take)
+        xt = pq.read_table(BANK / name / "features__csfw.parquet",
+                           columns=[f"f{i}" for i in range(944, 956)]).take(take)
         ct = pq.read_table(BANK / name / "features__rev4c1c4.parquet",
                            columns=[f"f{i}" for i in range(986, 1322)]).take(take)
         tabs = [xt, ct]

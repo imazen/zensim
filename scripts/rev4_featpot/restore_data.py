@@ -5,9 +5,9 @@ added columns are packed after f943 as f944+ (`candidate_data` delegates every a
 name below to this module). Two pinned sources, each hash-checked at every load:
 
 * restore-cuts sidecars (`rev4_featpot_restore_arms_2026-09-25.json`): mapdev, z1max,
-  gmsnative, dvifmgate (f1502-f1824);
+  gmsnative (f1502-f1819);
 * Part B sidecars in the promoted bank (`rev4_featpot_partb_arms_2026-09-25.json`):
-  csfw_dvifm (f944-f985), c1c4 (f986-f1321), gmsbank (f1322-f1501), plus the
+  csfw (f944-f985), c1c4 (f986-f1321), gmsbank (f1322-f1501), plus the
   reviewed P2 peer columns (gmsd, gmsm) for arm p3, negative canonical ids -1, -2.
 
 `side_join` reads no label; `load` adds role-allowed labels through the baseline
@@ -33,14 +33,14 @@ PARTB_JSON = REPO / "benchmarks/rev4_featpot_partb_arms_2026-09-25.json"
 PARTB_SHA256 = "9cfaecd402b628113e4f18115957e9d21b81b1f66ede7d19dd45ee3be1b302a9"
 # family -> (source, first id, end id)
 FAMILIES = {"mapdev": ("restore", 1502, 1562), "z1max": ("restore", 1562, 1790),
-            "gmsnative": ("restore", 1790, 1820), "dvifmgate": ("restore", 1820, 1825),
-            "csfw_dvifm": ("partb", 944, 986), "c1c4": ("partb", 986, 1322),
+            "gmsnative": ("restore", 1790, 1820),
+            "csfw": ("partb", 944, 956), "c1c4": ("partb", 986, 1322),
             "gmsbank": ("partb", 1322, 1502)}
 # arm name -> (json source, key in that JSON's "arms")
 ARM_KEYS = {"a1": ("restore", "A1"), "a1m": ("restore", "A1m"), "a1w": ("restore", "A1w"),
             "b2": ("restore", "B2"), "b2m": ("restore", "B2m"),
             **{name: ("partb", name) for name in
-               ("c1", "c2", "c3", "c4", "all", "csfw", "c7", "p1", "p3", "b1", "b1s", "c8n", "rall")}}
+               ("c1", "c2", "c3", "c4", "all", "csfw", "p1", "p3", "c8n")}}
 PEER_IDS = (-1, -2)  # canonical ids for the peer columns gmsd, gmsm
 
 

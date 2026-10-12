@@ -260,8 +260,6 @@ fn toggles_full() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
-/// f956 shape: append + append2 + CSFW on, DVIFM off — the DVIFM cost
-/// gate's OFF arm (the widest pre-DVIFM folded layout).
 fn toggles_csfw() -> zensim::feature_v2::V2NewFeatureToggles {
     zensim::feature_v2::V2NewFeatureToggles {
         csfw_block: true,
@@ -269,23 +267,14 @@ fn toggles_csfw() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
-/// f986 shape: everything on — the DVIFM cost gate's ON arm.
-fn toggles_dvifm() -> zensim::feature_v2::V2NewFeatureToggles {
-    zensim::feature_v2::V2NewFeatureToggles {
-        dvifm_block: true,
-        ..toggles_csfw()
-    }
-}
-
 /// f1322 shape: the rev4 feature-bank ON arm — all four families over the
-/// f986 DVIFM layout. The rev4 cost gate's full arm.
 fn toggles_rev4_all() -> zensim::feature_v2::V2NewFeatureToggles {
     zensim::feature_v2::V2NewFeatureToggles {
         rev4_gridblk: true,
         rev4_ringbasis: true,
         rev4_tailhist: true,
         rev4_arttype: true,
-        ..toggles_dvifm()
+        ..toggles_csfw()
     }
 }
 
@@ -326,7 +315,6 @@ fn toggles_restore(upto: usize) -> zensim::feature_v2::V2NewFeatureToggles {
         mapdev: upto >= 1,
         z1max: upto >= 2,
         gmsnative: upto >= 3,
-        dvifmgate: upto >= 4,
         ..toggles_gmsbank()
     }
 }
@@ -336,14 +324,12 @@ fn restore_arm(name: &str) -> Option<usize> {
         "fold1562_mapdev" => Some(1),
         "fold1790_z1max" => Some(2),
         "fold1820_gmsnative" => Some(3),
-        "fold1825_dvifmgate" => Some(4),
         _ => None,
     }
 }
 
-/// One rev4 family over the f986 DVIFM layout — the per-family cost arms.
 fn toggles_rev4_family(family: &str) -> zensim::feature_v2::V2NewFeatureToggles {
-    let mut t = toggles_dvifm();
+    let mut t = toggles_rev4_all();
     match family {
         "gridblk" => t.rev4_gridblk = true,
         "ringbasis" => t.rev4_ringbasis = true,
@@ -534,18 +520,13 @@ fn rss_mode(arm: &str) {
                     .expect("fold");
                 sink += v2.features()[943] as f64;
             }
-            "fold956_csfw" | "fold986_dvifm" => {
-                let t = if arm == "fold986_dvifm" {
-                    toggles_dvifm()
-                } else {
-                    toggles_csfw()
-                };
+            "fold956_csfw" => {
                 let rsv = RgbSlice::new(&src, w, h);
                 let dsv = RgbSlice::new(&dst, w, h);
                 let v2 = z
-                    .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
-                    .expect("fold dvifm");
-                sink += v2.features()[v2.features().len() - 1] as f64;
+                    .compute_folded720_features_streaming(&rsv, &dsv, toggles_csfw(), &mut scratch)
+                    .expect("fold csfw");
+                sink += v2.features()[v2.features().len() - 1];
             }
             "fold986_gridblk" | "fold986_ringbasis" | "fold986_tailhist" | "fold986_arttype"
             | "fold1322_rev4" | "fold1502_gmsbank" => {
@@ -1330,8 +1311,6 @@ fn main() {
                         zenbench::black_box((v2.features()[178], v2.features()[943]));
                     })
                 });
-                // DVIFM cost gate (2026-09-19): the OFF arm is the widest
-                // pre-DVIFM folded layout (956), the ON arm adds the flat
                 // 30-slot block (986). Same pixels, same process, paired.
                 bench_arm(group, "fold956_csfw", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
@@ -1345,20 +1324,7 @@ fn main() {
                         zenbench::black_box(v2.features()[955]);
                     })
                 });
-                bench_arm(group, "fold986_dvifm", move |b| {
-                    let mut scratch = zensim::feature_v2::V2Scratch::new();
-                    let t = toggles_dvifm();
-                    b.iter(move || {
-                        let rsv = RgbSlice::new(src_s, n, n);
-                        let dsv = RgbSlice::new(dst_s, n, n);
-                        let v2 = z
-                            .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
-                            .unwrap();
-                        zenbench::black_box(v2.features()[985]);
-                    })
-                });
                 // Rev4 feature-bank cost gate (2026-09-23): the OFF arm is
-                // fold986_dvifm above, the baseline anchor is fold944_full.
                 // Each family arm flips exactly one rev4 toggle; the full arm
                 // runs all four (f1322). Same pixels, same process, paired.
                 for (name, t) in [
@@ -1371,7 +1337,6 @@ fn main() {
                     ("fold1562_mapdev", toggles_restore(1)),
                     ("fold1790_z1max", toggles_restore(2)),
                     ("fold1820_gmsnative", toggles_restore(3)),
-                    ("fold1825_dvifmgate", toggles_restore(4)),
                 ] {
                     bench_arm(group, name, move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();

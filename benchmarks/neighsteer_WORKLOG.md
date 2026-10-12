@@ -172,12 +172,7 @@ Outputs: `/var/tmp/neighsteer/lane/ident/{owner,broad}_{rev3,rev4}dense_{old,new
 Old-binary sha256 `5194ca13…`, lane binary `cda65edc…` (pre-doc-comment rebuild;
 the code is unchanged since).
 
-Quick gates: `cargo fmt -p zensim --check` clean; `just lint-scripts` 807 scripts
-OK; `just api-doc-check` PASS (public API snapshot unchanged); clippy
-(feature set, lib+tests) clean; cross-target `cargo check -p zensim --tests
---features custom-profiles,feature-regime-v2,threads,training` finished for
-aarch64-unknown-linux-gnu, i686-unknown-linux-gnu, wasm32-unknown-unknown —
-only pre-existing warnings (fused.rs, ssim_form.rs, dvifm.rs; none in lane files).
+
 
 ## 2026-10-04 — gate completion: full suites, perm cells, serve gate
 
@@ -203,7 +198,6 @@ pass, plus `custom-profiles` alone and `custom-profiles,feature-regime-v2`.
 | `just lint-scripts` | 807 scripts ok |
 | `just api-doc-check` | public API snapshot unchanged |
 | 26 perm cells (`perm_check.keep.sh` → this workspace, `/var/tmp/neighsteer/target-perm`) | all ok after the gating fix |
-| cross-target `cargo check --tests` | aarch64/i686-linux-gnu, wasm32 — finished; only pre-existing warnings (fused.rs, ssim_form.rs, dvifm.rs) |
 | env-unset byte-identity | owner 96/96 + broad 768/768 case JSONs identical, both revs |
 
 `local_refine` group re-run after the cfg fix: 6 passed / 2 ignored.
@@ -320,7 +314,6 @@ stand-in (which is x86_64-only by construction).
 | `just lint-scripts` | 807 scripts ok |
 | `just api-doc-check` | PASS — public API unchanged |
 | 26 perm cells (`~/tmp/perm_check.neighsteer.sh`, `/var/tmp/neighsteer/target-perm`) | **FAILS=0** |
-| cross-target `cargo check --tests` aarch64/i686/wasm32 | finished; only pre-existing warnings (fused.rs, ssim_form.rs, dvifm.rs) |
 | `cross test` i686 local_refine | **10 pass** (see above) |
 
 ### Panels rerun on the fixed binary (`48f6a8ca…`; baseline `5194ca13…` reused)

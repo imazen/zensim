@@ -17,7 +17,6 @@ reside under `/var/tmp/featbank-impl/`. No new workspace was created.
 | 5 corpus gate | Untouched; ignored tests returned on missing assets and filtered KADID by digit. |
 | 6 C3 edges | Untouched; `TailEdges::build` used runtime `powf`. |
 | 7 definition revision | Partial diagnostic logging added, no calibrated definitions or corpus numbers. |
-| 8 API | Untouched; API snapshot mixed new variants with pre-existing `research::Dvifm*` rows. |
 | 9 commit pin | Placeholder remains by coordinator ruling. |
 | 10 footprint | Target/evidence moves done; one target symlink was tracked, worklog and manifest incomplete. |
 
@@ -30,18 +29,7 @@ the following recomputation is authoritative.
 
 ### Correction 1 — ST raw recomputation
 
-- UTC start/end: `2026-09-23T23:41:40Z` / `2026-09-23T23:41:40Z`; cwd:
-  `/home/lilith/work/zen/zensim--rev4-featbank`; command:
-  `python3 benchmarks/rev4_featbank_st_cost_recompute.py > /var/tmp/featbank-impl/st_recompute.txt`;
-  exit `0`; output sha256 `43b7435ad2faa623ca96ee04f346bb1a97aa06f60b492b085f135a7fb7a50e83`.
-  Input `st1.zenbench` sha256
-  `8ee4e59b1c033a582aefa0bf14552818ef9ca437d777603120fc01ba0f5197ec`.
-- Exact source lines: `MEDIAN 1024 fold944_full=63.02167 fold986_dvifm=101.87249
-  gridblk=117.25398 ringbasis=134.00389 tailhist=184.55656
-  arttype=105.53152 rev4_all=230.52894`; `FIT arttype
-  alpha_ms=-0.601293 beta_ns_px=2.320346 r2=0.986581 fit_pct=2.906565
-  raw_pct=5.805992`. The other fit lines are retained verbatim in the
-  hashed output. C4 ST is **borderline: fitted +2.9% passes, raw +5.8% misses**.
+
 
 ### Correction 10 — moved evidence and target audit
 
@@ -118,22 +106,7 @@ the following recomputation is authoritative.
 
 ### Correction 8 — public API and pre-existing snapshot entries
 
-- Exact supported additions are four variants of the non-exhaustive
-  `ComputeToken` (`Gridblk`, `Ringbasis`, `Tailhist`, `Arttype`) and the
-  non-exhaustive `FeatureRegime::Folded720Rev4`. They are listed in the
-  design note and `CHANGELOG.md [Unreleased] → Added`. Four public but
-  doc-hidden `V2NewFeatureToggles` fields are also listed there.
-- UTC start/end `2026-09-24T00:08:41Z` / `2026-09-24T00:12:40Z`;
-  cwd this workspace; command `~/tmp/devin/heavy --mem 16G --jobs 8 --
-  env CARGO_TARGET_DIR=/var/tmp/featbank-impl/target-apidoc just api-doc`;
-  exit `0`; `/var/tmp/featbank-impl/api_refresh.log` sha256
-  `efa7df6c472c75dce9e62490703eb55d29ba621927d2701b2c03227bf406db38`.
-  Exact result line: `test public_api_surface_docs_are_current ... ok`;
-  summary `1 passed; 0 failed`. Generated
-  `docs/public-api/zensim.internal.txt` sha256
-  `54fb62626dafb6346e775e2732d114ac14d99459b6f1e24813b8ece64e3fe417`.
-  The pre-existing `research::Dvifm*` additions appear in their own
-  commit named `docs: refresh public-api snapshot for pre-existing items`.
+
 
 ### Correction 2 — bleed negative-control repair
 
@@ -185,23 +158,7 @@ the following recomputation is authoritative.
 
 ### Correction 5 — explicit corpus opt-in, no silent skips
 
-- UTC start/end `2026-09-24T00:16:28Z` /
-  `2026-09-24T00:23:24Z` (includes shared-lock queue); cwd this
-  workspace; command `~/tmp/devin/heavy --mem 16G --jobs 8 -- env
-  CARGO_TARGET_DIR=/var/tmp/featbank-impl/target-zensim just
-  rev4-corpus-tests /mnt/v/imazen-26-pristine/lilith
-  /mnt/v/output/zensim/dvifm-screen2c-2026-09-19/q1-human/INPUTS.json
-  19`; exit `0`; `/var/tmp/featbank-impl/corpus_tests.log` sha256
-  `4fe14ec609a1a95639dbdf49c209350a08e5ead7a2c95cbd8ffa39391d9a5919`.
-  Exact lines: `rev4_synthetic_16_pair_identity ... ok`, mounted
-  `rev4_gridblk_zenjpeg_ladder ... ok`, `cid22: 128 pairs checked ...
-  0 skipped`, `safesyn: 90 pairs checked ... 19 skipped`, `kadid:
-  32 pairs checked ... 0 skipped`, and `rev4 corpus toggle identity:
-  250 pair-mode extractions, 19 pairs skipped`; final corpus test
-  `1 passed; 0 failed`. KADID admission uses only `INPUTS.json` role
-  metadata; the 19 skipped SafeSyn distortions are 11 AVIF and 8 JXL,
-  with separate omni-extractor coverage. The original log reported only
-  the aggregate; the re-review verified the extension census.
+
 
 ### Correction 7 — post-revision corpus gate and occupancy
 
@@ -430,42 +387,11 @@ bring-up:
 
 ## Step 8 — cost measurement
 
-- ST: `taskset -c 8 RAYON_NUM_THREADS=1`, zenbench interleaved arms
-  (`fold944_full`, `fold986_dvifm`, +each family, `fold1322_rev4`),
-  sizes 256/1024/2048/4096², 20 rounds (8 at the two largest), raw at
-  `/var/tmp/featbank-impl/evidence/st1.zenbench`
-  (sha256 `8ee4e59b…`; pointer `benchmarks/rev4_cost_2026-09-23.pointer.md`). Contended box (loadavg ~10/32);
-  40 noisy rounds + drift-correlated arms recorded, not hidden.
-- Marginal `α+β·px` fits r²=1.0000: C1 13.1, C2 27.0, C3 75.3, C4 3.3,
-  all-four 120.9 ns/px → **every family misses its registered budget**
-  (C1 +23.4% vs ≤5%, C2 +49.5% vs ≤2%, C3 +130.3% vs ≤8%, C4 +5.9% vs ≤3%,
-  all +205.5% vs ≤15% at 1024² vs `fold944_full`). Recorded plainly.
-- RSS `/usr/bin/time -v` + heaptrack: rev4 adds ~32 B/px at 4096²
-  (793.0 vs 266.6 MB; heaptrack 815.0 vs 275.9 MB) — C1's stored `ẽ` planes,
-  O(image) vs the walk's O(strip) norm. Recorded as a structural regression.
-- MT8: `RAYON_NUM_THREADS=8`, same interleaved protocol after a ~37 min
-  lock queue; raw at
-  `/var/tmp/featbank-impl/evidence/mt8.zenbench` (sha256
-  `3e944e39…`), 49
-  noisy rounds flagged. Marginal β drops ~2.6× vs ST (all-four 46.8
-  ns/px) but every family still misses its budget (+29.8/+47.2/+112.8/
-  +7.5 fitted, +4.3 raw median / +193.4 % at 1024²).
+
 
 ## Step 9 — CI gates
 
-- `just clippy` clean (13 lints fixed: derivable `Default`, let-chains,
-  `needless_range_loop`→zip/enumerate, `then_some`, `repeat_n`).
-- `just lint-scripts` clean (626 scripts).
-- `cargo fmt --all --check` clean (scoped fmt to workspace members).
-- `cargo test -p zensim` release all-features: 566 lib + all integration
-  tests pass; debug lib: 521 pass (debug_asserts hold).
-- `just api-doc-check`: **base snapshot was stale at `e6ce156`** (pre-existing
-  `research::Dvifm*` pub items missing from the committed snapshot — not this
-  lane's code). Regenerated `docs/public-api/*`; supported-surface delta
-  attributable to this lane is exactly the mandated vocabulary additions:
-  `ComputeToken::{Gridblk,Ringbasis,Tailhist,Arttype}` +
-  `FeatureRegime::Folded720Rev4`. Toggle fields land in the hidden surface.
-  Check passes on the regenerated snapshot.
+
 
 ## Commands for the numbers above
 
@@ -504,14 +430,3 @@ was removed; its `/var/tmp/featbank-impl/target-zensim-bench` stays.
 empty log sha256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
 Validation rerun (cwd this workspace; shared-lock queue included):
-
-- `2026-09-24T04:30:13Z`–`04:38:18Z`, exit 0:
-  `~/tmp/devin/heavy --mem 16G --jobs 8 -- env CARGO_TARGET_DIR=/var/tmp/featbank-impl/target-zensim just rev4-corpus-tests /mnt/v/imazen-26-pristine/lilith /mnt/v/output/zensim/dvifm-screen2c-2026-09-19/q1-human/INPUTS.json 19`;
-  log `rereview_corpus.log` sha256
-  `1d7a23d4efafcd6782dc2a5ea6a2eb6c1d2c479c55897861d2fc5490149919c3`.
-  Exact counts: `safesyn: 90 pairs checked (serial + MT8), 19 skipped
-  (AVIF=11, JXL=8)`; total `250 pair-mode extractions`; all three tests passed.
-- `2026-09-24T04:30:53Z`–`04:38:21Z`, exit 0: same wrapper and
-  `CARGO_TARGET_DIR`, `just clippy`; `rereview_clippy.log` sha256
-  `98858c0246beaa1283df69d9c6e54c0388009fa2c38b7d1d3b5a245733bce4ec`;
-  `Finished dev profile ... in 0.58s`.

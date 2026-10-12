@@ -48,8 +48,7 @@ OUT_DEFAULT = Path("/var/tmp/canontab/v2c")
 SCHEMA = "rev4-featpot-v2c-wide-v1"
 CONFIRM_SCHEMA = "rev4-featpot-v2c-confirm-v1"
 # What the re-extraction (REEXTRACT lane) pinned; every manifest is refused if it differs.
-CANON_FEATURE_SET_ID = ("basic+peaks+masked+iw+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype+gmsbank+"
-                        "mapdev+z1max+gmsnative+dvifmgate@w1825/tiercanon_c3negfold#d57e9571")
+CANON_FEATURE_SET_ID = None  # Historical producer identity is no longer admitted.
 CANON_ERA = "tiercanon_c3negfold"
 CANON_BINARY = "8c6f4c03695660fbb4fdce46e05859b40d9080497622cd726a7db75fd8323aa8"
 CANON_BUILD = "259045b0acc7045cb3d4804217b81a9bfa1cbbad"

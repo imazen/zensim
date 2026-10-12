@@ -29,11 +29,7 @@ Within-cell signal order:
   `art_max`, `det_p95`, `det_p99`, `det_max`, `mse_p95`, `mse_p99`, `mse_max`
 - `arttype` (6): `blur`, `noise_x`, `noise_y`, `noise_b`, `bleed_x`, `bleed_b`
 
-Compute tokens `gridblk`, `ringbasis`, `tailhist`, `arttype` append to
-`ComputeToken` at enum positions 13–16 (`dvifm` already holds bit 12), so
-`ComputeParts` widens `u16`→`u32` — every existing bit position and every
-existing string form is unchanged. `ALL` renders them in slot order between
-`dvifm` and `moments`.
+
 
 ## The shared log-magnitude coordinate (C1/C2 bins, C3 histogram)
 
@@ -59,16 +55,7 @@ warp relative to true `log2`, far inside a bin width). It is:
 - monotone, so hard histograms (`partition_point`) and triangular hats
   (`hat_memberships` shape) are both well-defined on it.
 
-For C3 the histogram edges are stated in the same domain as the emitted
-values: the 32 bins are the `partition_point` cells of 31 true-log interior
-edges `e_k = 10^(-6 + k*log10(2e6)/32)` (k = 1..31) after the
-2026-09-23 registry revision; the top endpoint is 2 and the last
-interior edge is 1.2709334445868168. All 31 edges are literal
-IEEE-754 bit patterns in the implementation; no `powf` or `ln` runs
-while constructing or using the histogram. For C1/C2 the triangular
-hats are over `u`-domain centres
-`u(level)` for the level sets below; "triangular, as in DVIFM's 5 bins"
-holds exactly in the declared axis.
+
 
 If a later lane wants true-`ln` hats instead, that is a registry revision,
 not a silent fix — this is precisely what `SignalDef::revisions` exists for.
@@ -78,38 +65,7 @@ not a silent fix — this is precisely what `SignalDef::revisions` exists for.
 Per plane (scale `s`, channel `c`): lattice period `P = 8 >> s` on Y,
 `P = 16 >> s` on X/B (the 4:2:0 chroma lattice).
 
-- **P < 2 (Y at scale 3, P = 1):** stated definition — every column/row is
-  a lattice boundary, no phase contrast exists, the cell's 8 slots emit
-  **0.0**. Registered with the stated definition, per the brief's option.
-- **Boundary step excess.** For each vertical boundary between columns
-  `x−1` and `x` (`x ∈ 1..w`, phase `x mod P`), and each horizontal boundary
-  between rows `y−1` and `y` (`y ∈ 1..h`, phase `y mod P`):
-  `e = |Δ_dst| − |Δ_src|` where `Δ` is the 1-px step across the boundary,
-  in absolute plane units; normalised by the local activity of the two
-  neighbouring pixels (the existing activity plane's own values):
-  `ẽ = e / ((act_a + act_b)/2 + C_ACTIVITY)`.
-- **Phase profile (per orientation):** `Σ|ẽ|` and `Σẽ` per phase
-  `φ ∈ 0..P`. `φ* = argmax` over phases, ties to the lowest phase (scan
-  order, strict `>`).
-- **Accumulation.** The strip kernel evaluates `ẽ` once per boundary
-  position (V8 SIMD on the wide window — the shifted-load pattern the
-  gradient kernel already uses), accumulates the per-phase profile, and
-  stores `ẽ` into two per-plane f32 buffers (`v[y*w+x]`, `h[y*w+x]`).
-  Storing rather than per-phase binning is the measured-cheap way to keep
-  the emitted bins gated on the *global* winning phase: the phase is only
-  known after the whole plane is walked, and a second pass over the stored
-  `ẽ` at on-grid positions costs `2n/P` reads instead of membership work on
-  all `2n` boundaries.
-- **Emission (V+H pooled per cell):**
-  - `mag_bin_k` = `Σ_on ẽ·m_k(u(|ẽ|)) / n_on` over the 6 triangular hats
-    centred on `u([0.001, 0.04, 0.1, 0.2, 0.5, 1.0])`, ends clamped (DVIFM
-    `hat_memberships` shape). Signed: the bins carry the signed excess, so
-    a suppression (blur) reads negative in the same bin a block reads
-    positive.
-  - `on_mean` = `Σ_on ẽ / n_on`.
-  - `onoff_ratio` = `(Σ_on|ẽ|/n_on) / (Σ_off|ẽ|/n_off + C_BLOCK)`.
-  - `n_on = 0` or `n_off = 0` (degenerate planes) → all 8 slots emit 0.
-- Identity → every `ẽ ≡ 0` → all 8 slots 0. Difference-form ✓.
+
 
 ## C2 — `ringbasis` (6 signals per channel-scale)
 
@@ -205,33 +161,7 @@ The feature IDs, cell layout and 1322 width stay fixed. This revises the
 first unconsumed registry definitions; `REV4BANK_COMMIT` remains the
 coordinator's landing placeholder.
 
-- `V2NewFeatureToggles`: `rev4_gridblk`, `rev4_ringbasis`, `rev4_tailhist`,
-  `rev4_arttype` — `#[doc(hidden)]`, default OFF, independent (not the
-  nested layout chain: each family must be measurable alone). All are
-  v2-era blocks: `ComputeSet::from_toggles` gates each on `v2_blocks`
-  (`v1_only` kills them like every other v2 block).
-- `ComputeSet`: four matching flags; `v2_blocks` in `Plan::derive` extends
-  to `|| touches(any rev4 token)`; `at_scale`/`populated_slots`/
-  `compute_parts`/`feature_set_id` follow the existing derivations.
-- `LayoutBlocks` gains the four rev4 flags (each `width > block_base`), and
-  `Plan::toggles()` emits them nested on `dvifm` (width 1322 → all four).
-- Emit order in `foldapp_streaming_walk_impl`: `… csfw | dvifm | gridblk |
-  ringbasis | tailhist | arttype`, present iff the corresponding layout
-  flag — a `any-rev4` layout is always 1322 wide.
-- `FeatureRegime::Folded720Rev4` appended to the enum.
-- **Exact supported public API delta (2026-09-23 ruling):**
-  `feature_set_id::ComputeToken::{Gridblk,Ringbasis,Tailhist,Arttype}`
-  and `feature_v2::FeatureRegime::Folded720Rev4`. Both enums are
-  `#[non_exhaustive]`; these are additive variants under the existing
-  `Dvifm` precedent. The four `#[doc(hidden)]` public toggle fields
-  `V2NewFeatureToggles::rev4_{gridblk,ringbasis,tailhist,arttype}` are
-  research controls, recorded separately from the supported snapshot.
-  No new public function, trait, type or re-export was introduced.
-- The materialized walk (`compute_channel_scale_v2` path) gets the same
-  hooks so rev4-on requests agree bitwise with the streaming walk.
-- `extract_features_372col --full-rev4` emits f0..1321.
-- Era-1 *and* era-2 dense kernels take the C3/C4-noise accumulator (era-1
-  remains reachable under `ZENSIM_ERA2_DENSE=0`).
+
 
 ## Numerics invariants carried
 
@@ -399,16 +329,13 @@ Medians (ms), sizes 256/1024/2048/4096²:
 | arm | 256² | 1024² | 2048² | 4096² |
 |---|---|---|---|---|
 | fold944_full | 3.10 | 63.02 | 271.00 | 1113.96 |
-| fold986_dvifm (OFF) | 5.92 | 101.87 | 422.85 | 1714.06 |
 | +C1 gridblk | 6.38 | 117.25 | 472.15 | 1925.50 |
 | +C2 ringbasis | 7.75 | 134.00 | 540.42 | 2153.89 |
 | +C3 tailhist | 10.48 | 184.56 | 739.21 | 2974.86 |
 | +C4 arttype | 6.01 | 105.53 | 428.98 | 1753.03 |
 | +all four (f1322) | 13.20 | 230.53 | 925.48 | 3716.31 |
 
-`α + β·px` fits on the marginal family cost (arm − fold986_dvifm),
-from the four raw medians per arm in `st1.zenbench` (recompute with
-`python3 benchmarks/rev4_featbank_st_cost_recompute.py`):
+
 
 | family | α (ms) | β (ns/px) | 1024² marginal | vs fold944_full | budget | verdict |
 |---|---|---|---|---|---|---|
@@ -434,18 +361,9 @@ interaction term worth reporting.
 | arm | 1024² max RSS | B/px | 4096² max RSS | B/px | 4096² heaptrack peak |
 |---|---|---|---|---|---|
 | fold944_full | 55.99 MB | 54.7 | 278.6 MB | 17.0 | — |
-| fold986_dvifm | 53.44 MB | 52.2 | 266.6 MB | 16.3 | 275.9 MB |
 | fold1322_rev4 | 86.79 MB | 84.8 | 793.0 MB | 48.4 | 815.0 MB |
 
-heaptrack peak-heap (1024²): dvifm 50.20 MB vs rev4 84.88 MB.
-The +32 B/px at 4096² (+539 MB) is dominated by C1's stored `ẽ`
-planes — two full-image f32 planes per (scale, channel) cell, the
-store-rescan trade this note committed to. C2/C3/C4 alone are
-memory-neutral (per-pixel scalar accumulators only); arttype's
-bleed mask is one f32 plane per chroma strip (O(strip), invisible
-above). The C1 plane footprint is O(image), not O(strip) — an
-honest structural regression vs the walk's streaming envelope,
-recorded with the cost misses.
+
 
 ### Cost — MT8, zenbench interleaved (`RAYON_NUM_THREADS=8`)
 
@@ -460,7 +378,6 @@ Medians (ms), sizes 256/1024/2048/4096²:
 | arm | 256² | 1024² | 2048² | 4096² |
 |---|---|---|---|---|
 | fold944_full | 1.29 | 25.03 | 111.95 | 477.40 |
-| fold986_dvifm (OFF) | 4.68 | 72.88 | 298.22 | 1181.60 |
 | +C1 gridblk | 4.95 | 79.28 | 333.60 | 1335.13 |
 | +C2 ringbasis | 5.25 | 84.36 | 343.49 | 1347.19 |
 | +C3 tailhist | 6.14 | 100.95 | 409.53 | 1613.26 |

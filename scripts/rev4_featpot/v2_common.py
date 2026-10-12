@@ -89,8 +89,8 @@ def fx1_declaration() -> dict:
         raise ValueError(f"{FX1_DECLARATION}: content changed after registration pin")
     return json.loads(data)
 
-CANDIDATES = ("c1", "c2", "c3", "c4", "all", "csfw", "c7", "p1", "p3", "b1", "b1s",
-              "c8n", "rall", "a1", "a1m", "b2", "b2m")
+CANDIDATES = ("c1", "c2", "c3", "c4", "all", "csfw", "p1", "p3",
+              "c8n", "a1", "a1m", "b2", "b2m")
 CALIBRATION = ("oracle_lo", "oracle_hi", "minus_basic")
 # Amendment R2.3: one all-columns model per family table (no permuted controls): screen_main = bank + every main-family candidate
 # column + every appended (extra) column; screen_aux = bank + gmsd + gmsm + gmsbank.
@@ -322,13 +322,13 @@ def block_spec(core: str) -> bool:
         return len(core) == 16 and all(c in "0123456789abcdef" for c in core[4:])
     if core.startswith("set:"):  # E9″: any groups, basic and peaks included, nothing exempt
         parts = core[4:].split("+")
-        ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")])
+        ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all")])
         return bool(core[4:]) and len(parts) == len(set(parts)) and all(x in ok for x in parts)
     if core.startswith("r0-"):
         return core[3:] in LEGACY_BLOCKS
     if core.startswith("core+"):
         parts = core[5:].split("+")
-        ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all", "rall")])
+        ok = (*LEGACY_BLOCKS, *[a for a in (*CANDIDATES, *extra_arms()["arms"]) if a not in ("all")])
         return len(parts) == len(set(parts)) and all(x in ok for x in parts)
     return False
 
@@ -367,7 +367,7 @@ def arm_columns(spec: str) -> tuple[str, str, list[int]]:
     if base.startswith("core+") or base.startswith("set:"):  # E9′ core + S + X; E9″ any set of groups, no exempt core
         cols, fams = (set(CORE), set()) if base.startswith("core+") else (set(), set())
         for x in base.partition("+")[2].split("+") if base.startswith("core+") else base[4:].split("+"):
-            if x in ("all", "rall"):
+            if x in ("all"):
                 raise ValueError(f"{spec}: unions are not lean-base arms")
             if x in LEGACY_BLOCKS:
                 cols |= set(LEGACY_BLOCKS[x])

@@ -28,7 +28,7 @@ done) &
 marker_pid=$!
 trap 'kill "$marker_pid" 2>/dev/null || true' EXIT
 /usr/bin/time -f 'WALL_SECONDS=%e MAXRSS_KB=%M' "$bin" --corpus pairs-tsv --path "$pairs" --out "$csv" \
-    --restore-cuts mapdev,z1max,gmsnative,dvifmgate --audit-jsonl "$audit" --input-contract legacy-rgb8
+    --restore-cuts mapdev,z1max,gmsnative --audit-jsonl "$audit" --input-contract legacy-rgb8
 if [[ -z $limit ]]; then
     python3 "$REPO/scripts/restore_cuts/bank_sidecar.py" bind --set "$set_name" --binary "$bin" \
         --build-meta "$ROOT/build_meta.json"

@@ -43,7 +43,7 @@ EXCLUDED_TYPES = frozenset({6, 9, 10, 15})
 BIN = Path("/var/tmp/reextract/target/release/examples/extract_features_372col")
 BIN_SHA = "8c6f4c03695660fbb4fdce46e05859b40d9080497622cd726a7db75fd8323aa8"
 ERA, WIDTH = "tiercanon_c3negfold", 1825
-EXTRACT_ARGS = ["--restore-cuts", "prefix,mapdev,z1max,gmsnative,dvifmgate", "--input-contract", "legacy-rgb8",
+EXTRACT_ARGS = ["--restore-cuts", "prefix,mapdev,z1max,gmsnative", "--input-contract", "legacy-rgb8",
                 "--era-label", ERA, "--force-tier", "native"]
 EXTRACT_ENV = {"ZENSIM_FORMULA_REV": "4", "ZENSIM_ROOT_FORM": "sqrt", "RAYON_NUM_THREADS": "8"}
 # Rev5 (spec rev5_spec_2026-10-04.md §6): the Rev5 extractor's build record, written when it is built; only basic + peaks + v2.
@@ -201,8 +201,7 @@ def cmd_table(args) -> int:
     out = work() / "kadis_ordinal.parquet"
     pq.write_table(pa.table(cols), out, compression="zstd", use_byte_stream_split=[f"f{i}" for i in range(wide)])
     Path(f"{out}.manifest.json").write_text(json.dumps({
-        "source_bank_feature_set_id": "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype"
-                                      "+gmsbank+mapdev+z1max+gmsnative+dvifmgate@w1825/tiercanon_c3negfold#d57e9571",
+        "source_bank_feature_set_id": None,  # Historical producer is no longer admitted.
         "composite": f"Rev4 POTENTIAL E14 KADIS ordinal ladders (f0-f1824 Rev4 bank arithmetic; f1825-f{wide - 1} NaN, not "
                      "extracted); diagnostic only", "formula_revision": 4}, indent=1) + "\n")
     keys = sel.loc[keep, ["source_id", "source_filename", "dist_type", "dist_name", "severity_level", "dist_param"]].copy()

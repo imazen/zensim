@@ -1,7 +1,7 @@
 """Pinned C1-C4 sidecar join for Rev4 POTENTIAL candidate arms.
 
 Canonical f986-f1321 are packed after bank f0-f943 for the diagnostic fit;
-the mapping is explicit and the intervening DVIFM f944-f985 are never read.
+The mapping is explicit; reserved slots are never read.
 No label is opened until the Part B completion report and a committed input
 pin have been verified. The baseline loader owns the role-allowed label read.
 """

@@ -32,15 +32,13 @@ const C8_END: usize = 1502;
 const MAPDEV: std::ops::Range<usize> = 1502..1562;
 const Z1MAX: std::ops::Range<usize> = 1562..1790;
 const GMSNATIVE: std::ops::Range<usize> = 1790..1820;
-const DVIFMGATE: std::ops::Range<usize> = 1820..1825;
-const FULL: usize = 1825;
+const FULL: usize = 1820;
 
 fn c8() -> V2NewFeatureToggles {
     V2NewFeatureToggles {
         append_block: true,
         append2_block: true,
         csfw_block: true,
-        dvifm_block: true,
         rev4_gridblk: true,
         rev4_ringbasis: true,
         rev4_tailhist: true,
@@ -54,12 +52,11 @@ fn c8() -> V2NewFeatureToggles {
 /// The three restored families, individually selectable. The layout flags are
 /// a nested chain, so a later family carries the earlier ones' layout; the
 /// COMPUTE plan is what `only` narrows.
-fn with(mapdev: bool, z1max: bool, gmsnative: bool, dvifmgate: bool) -> V2NewFeatureToggles {
+fn with(mapdev: bool, z1max: bool, gmsnative: bool) -> V2NewFeatureToggles {
     V2NewFeatureToggles {
         mapdev,
         z1max,
         gmsnative,
-        dvifmgate,
         ..c8()
     }
 }
@@ -175,7 +172,7 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
             let base = extract(&src, &dst, w, h, c8(), false);
             assert_eq!(base.len(), C8_END);
-            let all = extract(&src, &dst, w, h, with(true, true, true, true), false);
+            let all = extract(&src, &dst, w, h, with(true, true, true), false);
             assert_eq!(all.len(), FULL, "{w}x{h} full width");
             bits_eq(
                 &base,
@@ -190,7 +187,7 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
             // chain instead lets each family be requested at the NARROWEST
             // layout that reaches it. Its values must not depend on which
             // later families the layout also carries.
-            let m = extract(&src, &dst, w, h, with(true, false, false, false), false);
+            let m = extract(&src, &dst, w, h, with(true, false, false), false);
             assert_eq!(m.len(), MAPDEV.end);
             bits_eq(
                 &m,
@@ -198,7 +195,7 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
                 MAPDEV,
                 &format!("{w}x{h} {} mapdev@1562", perm.label),
             );
-            let z = extract(&src, &dst, w, h, with(true, true, false, false), false);
+            let z = extract(&src, &dst, w, h, with(true, true, false), false);
             assert_eq!(z.len(), Z1MAX.end);
             bits_eq(
                 &z,
@@ -206,7 +203,7 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
                 MAPDEV.start..Z1MAX.end,
                 &format!("{w}x{h} {} z1max@1790", perm.label),
             );
-            let n = extract(&src, &dst, w, h, with(true, true, true, false), false);
+            let n = extract(&src, &dst, w, h, with(true, true, true), false);
             assert_eq!(n.len(), GMSNATIVE.end);
             bits_eq(
                 &n,
@@ -221,7 +218,6 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
                 (ComputeToken::Mapdev, MAPDEV),
                 (ComputeToken::Z1max, Z1MAX),
                 (ComputeToken::Gmsnative, GMSNATIVE),
-                (ComputeToken::Dvifmgate, DVIFMGATE),
             ] {
                 let req = Request::for_slots(family_slots(fam), FULL);
                 let got =
@@ -244,22 +240,10 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
                 all[GMSNATIVE].iter().any(|&v| v > 0.0),
                 "{w}x{h} gmsnative dead"
             );
-            // The gate F1 counts only blocks whose local contrast is at or below
-            // the fitted knee, so on pure noise it may legitimately be all zero
-            // (see `dvifmgate_is_live_on_smooth_content` for the liveness gate).
-            // Gate F1 counts a block or not; the curve F1 weights every block
-            // by v <= 1, so per level gate >= 0 and both are bounded by
-            // mean(m^P): compare against C7's own F1 at f956 + 6*level.
-            for lvl in 0..5 {
-                let curve = all[956 + 6 * lvl];
-                let gate = all[DVIFMGATE.start + lvl];
-                assert!(gate.is_finite() && curve.is_finite());
-                assert!(gate >= 0.0 && curve >= 0.0);
-            }
             assert!(all[C8_END..].iter().all(|v| v.is_finite()));
 
             // Identity.
-            let same = extract(&src, &src, w, h, with(true, true, true, true), false);
+            let same = extract(&src, &src, w, h, with(true, true, true), false);
             for cell in 0..12 {
                 let o = MAPDEV.start + cell * 5;
                 assert_eq!(same[o], 0.0, "{w}x{h} {} mse_dev cell {cell}", perm.label);
@@ -290,19 +274,13 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
                 "{w}x{h} {} gmsnative identity",
                 perm.label
             );
-            assert!(
-                same[DVIFMGATE].iter().all(|&v| v == 0.0),
-                "{w}x{h} {} dvifmgate identity",
-                perm.label
-            );
 
             // Threads: MT8 == serial on every new slot.
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(8)
                 .build()
                 .expect("MT8");
-            let mt8 =
-                pool.install(|| extract(&src, &dst, w, h, with(true, true, true, true), true));
+            let mt8 = pool.install(|| extract(&src, &dst, w, h, with(true, true, true), true));
             bits_eq(
                 &all,
                 &mt8,
@@ -320,7 +298,7 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
             );
 
             // Stride: a padded, non-tight buffer gives the same bits.
-            let strided = extract_strided(&src, &dst, w, h, with(true, true, true, true));
+            let strided = extract_strided(&src, &dst, w, h, with(true, true, true));
             bits_eq(
                 &all,
                 &strided,
@@ -389,45 +367,5 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
         // bounded, and the within-tier / MT8 / strided identity above is exact.
         assert!(worst.0.is_finite() && worst_ssim.0.is_finite());
         assert!(report.permutations_run >= 3);
-    }
-}
-
-/// Smooth content with mild distortion: local contrast sits below the DVIFM
-/// knees, so the gate admits blocks and the family carries signal.
-#[test]
-fn dvifmgate_is_live_on_smooth_content() {
-    let (w, h) = (160usize, 120usize);
-    let src: Vec<[u8; 3]> = (0..w * h)
-        .map(|i| {
-            let (x, y) = (i % w, i / w);
-            [
-                (x * 255 / w) as u8,
-                (y * 255 / h) as u8,
-                ((x + y) * 255 / (w + h)) as u8,
-            ]
-        })
-        .collect();
-    let dst: Vec<[u8; 3]> = src
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            [
-                p[0].saturating_add(((i * 7 + i / w * 13) % 5) as u8),
-                p[1],
-                p[2],
-            ]
-        })
-        .collect();
-    let v = extract(&src, &dst, w, h, with(true, true, true, true), false);
-    assert!(
-        v[DVIFMGATE].iter().any(|&x| x > 0.0),
-        "dvifmgate dead on smooth content: {:?}",
-        &v[DVIFMGATE]
-    );
-    // The curve F1 (f956 + 6 l) weights every block by v <= 1, the gate weights
-    // by {0, 1}: both are finite and non-negative at every level.
-    for lvl in 0..5 {
-        assert!(v[956 + 6 * lvl].is_finite() && v[956 + 6 * lvl] >= 0.0);
-        assert!(v[DVIFMGATE.start + lvl].is_finite() && v[DVIFMGATE.start + lvl] >= 0.0);
     }
 }

@@ -866,3 +866,15 @@ dialviz out="/mnt/v/output/zensim/dialviz" *args="":
 # Readers against live sources, cross-checks, negative controls and a link-checked build.
 dialviz-test:
     TMPDIR=$HOME/tmp python3 -m unittest scripts.tests.test_dialviz -v
+
+# Research maintenance verification.
+tidy-check:
+    cargo test -p zensim --all-features --lib
+    cargo test -p zensim --all-features --test research_engine_parity --test rev4_featbank_parity --test restore_cuts_parity --test palette_research
+
+tidy-python-check:
+    TMPDIR=$HOME/tmp PYTHONPATH=scripts:scripts/lib:scripts/tests python3 -m unittest scripts.tests.test_feature_screen_splits
+
+tidy-tool-check:
+    cargo test -p zensim-validate --lib feature_set
+    cargo check --manifest-path zensim-bench/Cargo.toml --features training,zen-decode --example extract_features_372col

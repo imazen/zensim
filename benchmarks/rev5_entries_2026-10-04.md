@@ -16,7 +16,6 @@ Each row names a real behavior test; all use a revision-5 child or explicit proc
 | Zensim Custom by_v2fy: scalar, codec hint, training params, classification, reference, reference scratch, all four strip wrappers, generic diffmap, cached diffmap, linear-planar diffmap | rev5_entry_diffmaps_and_strip_variants |
 | Declared HDR BakeScorer score/identity/steering + exact PU channel rebuild, env off/on | rev5_entry_hdr_score_and_steering |
 | PU-linear interleaved, planar with row padding, descriptor auto-dispatch and computed identity | rev5_entry_raw_hdr_profiles |
-| Folded supported extraction and explicit append/append2/CSFW/DVIFM refusal, including streaming append; Linear/PQ/HLG HDR bake/session parity | rev5_entry_hdr_encodings_and_wide_layout_prefixes |
 | Full 576-slot extraction regardless of the bake's 420-slot serving subset; parity with independent research extraction | rev5_all_features_is_complete_independently_of_bake_reads |
 | Explicit unsupported raw family selectors, v1_only on/off, SDR/PU, pair/cache/streaming, masked/IW config and retained 944 | rev5_raw_family_toggles_refuse_before_narrowing |
 | Basic-only f22/basic/basic+peaks steering: zero metadata with scalar feature/score parity | rev5_basic_steering_uses_zero_mean_offset |

@@ -19,8 +19,8 @@ D1_SETS = ("kadid_train", "tid2013", "konfig_train", "konjnd_bpg_train",
 D2_HELDOUT = ("kadid_train", "tid2013", "konfig_train", "konjnd_bpg_train",
               "cid22_a25", "aic3", "kadid_select")
 # Suggested execution order (a planning suggestion, not part of the preregistration).
-ARM_ORDER = ("p1", "p3", "c7", "csfw", "a1", "a1w", "b2", "a1m", "b2m", "c1", "c2", "c3", "c4",
-             "all", "b1", "b1s", "c8n", "rall")
+ARM_ORDER = ("p1", "p3", "csfw", "a1", "a1w", "b2", "a1m", "b2m", "c1", "c2", "c3", "c4",
+             "all", "c8n")
 
 
 def cell(kind: str, argv: list[str], result: str, arm: str, hidden: int, extra: dict) -> dict:

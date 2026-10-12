@@ -14,8 +14,8 @@ from featbank_sets import BANK, POPULATED_IDS
 
 ROOT = Path("/var/tmp/partb")
 NAME = "features__rev4c1c4.parquet"
-XNAME = "features__csfw_dvifm.parquet"
-XIDS = list(range(944, 986))
+XNAME = "features__csfw.parquet"
+XIDS = list(range(944, 956))
 BASE = json.loads(Path("benchmarks/rev4_featbank_extract_2026-09-23.json").read_text())
 
 
@@ -103,7 +103,7 @@ def verify_set(name):
                 mismatches += mm
             checked += 1
     assert checked == len(chosen) and mismatches == 0, f"{name}: old parity {checked}, {mismatches}"
-    # csfw/dvifm sidecar: schema, key order, finite, manifest hash, and an independent CSV re-read
+    # csfw sidecar: schema, key order, finite, manifest hash, and an independent CSV re-read
     xside = manifest["sidecars"][XNAME]
     assert xside["build_commit"] == side["build_commit"] and xside["binary_sha256"] == side["binary_sha256"]
     xpath = d / XNAME

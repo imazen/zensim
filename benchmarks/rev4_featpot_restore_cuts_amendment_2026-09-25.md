@@ -11,9 +11,9 @@ Coordinator instruction, 2026-09-25: fold the restore-cuts families (landed on z
 | mapdev | f1502-f1561 (60) | 12 cells (scale*3+channel) x 5 signals: 0 mse_dev, 1 hfsq_src_dev, 2 hfsq_dst_dev, 3 hfabs_src_dev, 4 hfabs_dst_dev |
 | z1max | f1562-f1789 (228) | 12 cells x 19 signals: 0-12 the 13 BASIC (ssim_mean, ssim_4th, ssim_2nd, edge_art_{mean,4th,2nd}, edge_det_{mean,4th,2nd}, mse, var_loss, tex_loss, contrast_inc), 13-18 the 6 peaks (ssim_max, edge_art_max, edge_det_max, ssim_l8, edge_art_l8, edge_det_l8) |
 | gmsnative | f1790-f1819 (30) | X cell 15 signals (f1790-f1804), then B cell 15 (f1805-f1819) |
-| dvifmgate | f1820-f1824 (5) | f1gate_l0..l4 |
 
-Sidecars: `/var/tmp/restore-cuts/bank/<set>/features__restore_{mapdev,z1max,gmsnative,dvifmgate}.parquet` with `_MANIFEST_restore.json` (feature_set_id, build commit `ec5b1821a4c6`, binary sha256 `4ea8f3331fd585ae5e82e71b773a67f7a02dd8548d89ec1320c01298ee025ed5`), joined **strictly by `pair_key`**; a missing or duplicate key fails the arm. The exact per-set file hashes are pinned in `benchmarks/rev4_featpot_restore_arms_2026-09-25.json` (committed before any label read).
+
+
 
 ## Arms (each on the same R0 = Rev3 944 baseline; every arm has a size-matched permuted control)
 
@@ -24,8 +24,6 @@ Sidecars: `/var/tmp/restore-cuts/bank/<set>/features__restore_{mapdev,z1max,gmsn
 | A1w | R0 minus 60 columns chosen by the **drop rule below**, plus mapdev (60) | the same drop, plus the 60 mapdev columns permuted | none |
 | B2 | z1max f1562-1789 (228) | the same 228, permuted | none |
 | B2m | z1max block-locals {3,4,5,6,7,8,9,13,14,15,16,17,18} in all 12 cells (156): ids 1562+19c+l (the reviewed corrected set: edge_art x5, edge_det x5, mse, ssim_max, ssim_l8) | the same 156, permuted | none |
-| B1 | C7 f956-985 (30) + dvifmgate f1820-1824 (5) | the 5 gate columns permuted (C7 real) | C7 sidecar (Part B `features__csfw_dvifm.parquet`) |
-| B1s | C7 with its five F1 columns (f956, f962, f968, f974, f980; `level*6+0`) replaced by dvifmgate f1820-1824 (30 columns) | the 5 replacement columns permuted | C7 sidecar |
 | C8n | R0 + C8 (f1322-1501, revised) + gmsnative f1790-1819 (30) | the 30 gmsnative columns permuted (C8 real) | C8 sidecar (Part B) |
 | ALL | A1 + B2 + B1 + C8n additions | every added family permuted as its own block (equal total width) | C7 and C8 sidecars |
 

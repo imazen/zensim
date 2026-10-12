@@ -43,7 +43,6 @@ fn toggles_on() -> V2NewFeatureToggles {
         append_block: true,
         append2_block: true,
         csfw_block: true,
-        dvifm_block: true,
         rev4_gridblk: true,
         rev4_ringbasis: true,
         rev4_tailhist: true,
@@ -198,7 +197,9 @@ fn rev4_identity_and_segments_across_all_tiers() {
             let on = run(toggles_on());
             let off = run(toggles_off());
             // R4-A: f0..f985 identical within this tier.
-            for i in 0..REV4_BASE {
+            assert_eq!(off.len(), 956);
+            assert!(on[956..REV4_BASE].iter().all(|v| *v == 0.0));
+            for i in 0..956 {
                 assert_eq!(
                     on[i].to_bits(),
                     off[i].to_bits(),
@@ -427,7 +428,9 @@ fn rev4_synthetic_16_pair_identity() {
         let (src, dst) = pair(w, h);
         let on = extract(&src, &dst, w, h, toggles_on(), false);
         let off = extract(&src, &dst, w, h, toggles_off(), false);
-        for i in 0..REV4_BASE {
+        assert_eq!(off.len(), 956);
+        assert!(on[956..REV4_BASE].iter().all(|v| *v == 0.0));
+        for i in 0..956 {
             assert_eq!(on[i].to_bits(), off[i].to_bits(), "pair {n} f{i}");
         }
     }
@@ -646,7 +649,9 @@ fn rev4_corpus_toggle_identity() {
                         extract(&src, &dst, sw, sh, toggles_off(), false),
                     )
                 };
-                for i in 0..REV4_BASE {
+                assert_eq!(off.len(), 956);
+                assert!(on[956..REV4_BASE].iter().all(|v| *v == 0.0));
+                for i in 0..956 {
                     assert_eq!(
                         on[i].to_bits(),
                         off[i].to_bits(),

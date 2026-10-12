@@ -13,13 +13,9 @@ reported, never a gate.** No human label is read. Nothing is fitted or selected 
 |---|---|
 | `RESTORE_CUTS_brief.md` | `6d40e169199ff274474ad69e9e1bb1ec665c6550c005b050296a39326609dd0d` |
 | `COST_CUTS_AUDIT.md` | `63e2a7654c8bf9f04262a7ae896352cc8fec0e426e055397093cd96b994ce132` |
-| `research/2026-09-dvifm/gmsd/zgeom_gms_dev_map_dev.patch` | `5784ec8671a8292b3175cd45415a3e67de91f16a98db6289e885ca0e2e7bdd57` |
-| `research/2026-09-dvifm/reports/LANE_ZGEOM_DONE.md` | `d322c23ef8c49f80a47977ea839c8d7f2182cb099dfb90c5f0e952f37202f767` |
 | `benchmarks/gmsd_2026-09-22.md` | `e1627273753b0903a296fccee10f6f13ff08bcb5d76e8ec5b851614fc238d400` |
 
-Research code read (read-only, other workspaces): `zensim--transplant` @ `cf517c03`
-(`keep/transplant-zgeom-block5`): `feature_v2.rs::{v1_channel_maps_and_sums, block_pool_sums}`,
-`zgeom.rs`; `keep/dvifm3-int16` `943781e8`: `dvifm.rs::DvifmVis`.
+
 
 ## Families (append-only after f1501; all default OFF; f0..f1501 must stay bit-identical)
 
@@ -40,11 +36,7 @@ band kernel that pools the 228 surface (`mu1`, `mu2`, `sd` side outputs, kernel 
 **B2 hybrid.** The record's proposed block+global hybrid is the two-surface arm: the bank already
 carries the global 228 surface inside R0 (`f0..f227`), so `R0 + z1max` IS the hybrid (2 x 228).
 
-**B1 (DVIFM curve form).** Verified before any code: main's `dvifm.rs` computes C7 (f956..985) with
-the smooth curve `v(C) = (1+(C/C0)^(beta*sigma))^(-1/sigma)` (`visibility`); the two-state gate
-exists only on unlanded `943781e8`. So the curve form is already the C7 form. The missing arm is the
-gate form; it is added (item 3) as a default-off family `dvifmgate` carrying the per-level gate F1
-(F2 bins do not depend on `v`), appended after `gmsnative`.
+
 
 ## Pooling and numerics contract
 
@@ -73,14 +65,7 @@ cells only, so results cannot depend on thread count, SIMD tier or stride.
 
 ## Public API delta (repo CLAUDE.md: preregister the concrete caller and exact delta)
 
-Caller: `zensim-bench` extractor `extract_features_372col --restore-cuts <tokens>` and the plan
-owner (`feature_plan`), exactly as C8's `--full-gmsbank`. The brief authorises registering the
-families and adding an extractor flag; this is the same additive pattern the coordinator approved for
-C8 (`ComputeToken::Gmsbank`, `V2NewFeatureToggles::gmsbank`). Additive items only:
-`ComputeToken::{Mapdev, Z1max, Gmsnative, Dvifmgate}` (arms of the existing `#[non_exhaustive]`
-enum) and `V2NewFeatureToggles::{mapdev, z1max, gmsnative, dvifmgate}` (`#[doc(hidden)]` fields of the
-existing toggle struct). No new type, function, trait method or feature flag. Snapshots
-(`docs/public-api/*`) and `CHANGELOG.md` are updated in the same change.
+
 
 ## Decision rule
 
@@ -96,4 +81,3 @@ is decided there, on human-label bars, not here.
   Gate 4 was "measured, then asserted" within tier only.
 - Gate 7 (cost) as run deviates from this text: sizes 256/1024/2048/4096 on synthetic content, no 64 px size and no real
   TRAIN pair; contended; single thread and 8 threads.
-

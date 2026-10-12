@@ -433,136 +433,6 @@ impl AttributionResult {
             .sum::<f64>()
     }
 
-    /// Fractional-edge variant of [`query_rect`](Self::query_rect) — the
-    /// integral of the stored density over `[x0, x1) × [y0, y1)` with the
-    /// rectangle edges allowed to cut cells. Each cell's mass counts with
-    /// the fraction of its area the rectangle covers (the uniform-within-
-    /// cell reading); integer edges reproduce `query_rect` exactly, including the
-    /// lattice-step boundary terms a result may carry. This
-    /// is the stated cut-block rule for the DVIFM steering field's
-    /// rectangle queries — a rect clipped mid-block receives that block's
-    /// `ε_b` weighted by covered area.
-    ///
-    /// Coordinates clamp to the canvas; empty/inverted rects return `0.0`.
-    /// Unbinned maps integrate cell-wise at the stored `f32` density; binned
-    /// maps keep their uniform-mass-within-bin semantics via the
-    /// bilinear-SAT path.
-    // Callers: `research::DvifmLevelField` (`training` + `custom-profiles`, in the
-    // `feature-regime-v2` research module) and a `dvifm` unit test.
-    #[cfg(all(
-        feature = "feature-regime-v2",
-        any(test, all(feature = "training", feature = "custom-profiles"))
-    ))]
-    pub(crate) fn query_rect_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
-        let cells = self.query_rect_frac_cells(x0, y0, x1, y1);
-        if self.lattice.is_empty() {
-            return cells;
-        }
-        cells + self.lattice_correction_frac(x0, y0, x1, y1)
-    }
-
-    /// Lattice-step boundary terms for a fractional rectangle: exact for integer edges, and for fractional edges
-    /// the multilinear blend of the corrections at the surrounding integer edges (the same uniform-within-cell
-    /// reading the cell integral uses).
-    #[cfg(all(
-        feature = "feature-regime-v2",
-        any(test, all(feature = "training", feature = "custom-profiles"))
-    ))]
-    fn lattice_correction_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
-        let (x0, x1) = (
-            x0.clamp(0.0, self.width as f64),
-            x1.clamp(0.0, self.width as f64),
-        );
-        let (y0, y1) = (
-            y0.clamp(0.0, self.height as f64),
-            y1.clamp(0.0, self.height as f64),
-        );
-        if x0 >= x1 || y0 >= y1 {
-            return 0.0;
-        }
-        // (floor, ceil, weight of ceil) per edge.
-        let edge = |v: f64| (v.floor() as usize, v.ceil() as usize, v - v.floor());
-        let edges = [edge(x0), edge(y0), edge(x1), edge(y1)];
-        let mut total = 0.0;
-        for mask in 0..16u32 {
-            let mut weight = 1.0;
-            let mut at = [0usize; 4];
-            for (i, &(lo, hi, frac)) in edges.iter().enumerate() {
-                let up = mask >> i & 1 == 1;
-                weight *= if up { frac } else { 1.0 - frac };
-                at[i] = if up { hi } else { lo };
-            }
-            if weight != 0.0 {
-                total += weight * self.lattice_correction(at[0], at[1], at[2], at[3]);
-            }
-        }
-        total
-    }
-
-    #[cfg(all(
-        feature = "feature-regime-v2",
-        any(test, all(feature = "training", feature = "custom-profiles"))
-    ))]
-    fn query_rect_frac_cells(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
-        let (x0, x1) = (
-            x0.clamp(0.0, self.width as f64),
-            x1.clamp(0.0, self.width as f64),
-        );
-        let (y0, y1) = (
-            y0.clamp(0.0, self.height as f64),
-            y1.clamp(0.0, self.height as f64),
-        );
-        if x0 >= x1 || y0 >= y1 {
-            return 0.0;
-        }
-        if self.bin == 1 {
-            let mut acc = 0.0f64;
-            let r_hi = (y1.ceil() as usize).min(self.height);
-            for r in (y0.floor() as usize)..r_hi {
-                let wy = ((r + 1) as f64).min(y1) - (r as f64).max(y0);
-                if wy <= 0.0 {
-                    continue;
-                }
-                let row = &self.density[r * self.width..(r + 1) * self.width];
-                let c_hi = (x1.ceil() as usize).min(self.width);
-                for (c, &v) in row.iter().enumerate().take(c_hi).skip(x0.floor() as usize) {
-                    let wx = ((c + 1) as f64).min(x1) - (c as f64).max(x0);
-                    if wx > 0.0 {
-                        acc += wy * wx * v as f64;
-                    }
-                }
-            }
-            return acc;
-        }
-        let u0 = self.grid_coord_f(x0, self.width, self.grid_w);
-        let u1 = self.grid_coord_f(x1, self.width, self.grid_w);
-        let v0 = self.grid_coord_f(y0, self.height, self.grid_h);
-        let v1 = self.grid_coord_f(y1, self.height, self.grid_h);
-        self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
-    }
-
-    /// `f64` twin of [`grid_coord`](Self::grid_coord) for fractional-edge
-    /// queries — same "fraction measured against the cell's REAL pixel
-    /// extent" rule so edge-clamped queries stay exact.
-    // Callers: `research::DvifmLevelField` (`training` + `custom-profiles`, in the
-    // `feature-regime-v2` research module) and a `dvifm` unit test.
-    #[cfg(all(
-        feature = "feature-regime-v2",
-        any(test, all(feature = "training", feature = "custom-profiles"))
-    ))]
-    fn grid_coord_f(&self, x: f64, limit: usize, grid: usize) -> (usize, f64) {
-        if x >= limit as f64 {
-            return (grid, 0.0);
-        }
-        if x <= 0.0 {
-            return (0, 0.0);
-        }
-        let idx = (x / self.bin as f64).floor() as usize;
-        let start = idx * self.bin;
-        let real = self.bin.min(limit - start);
-        (idx, (x - start as f64) / real as f64)
-    }
-
     /// Pixel coordinate → (grid node index, fractional advance into the next
     /// cell). The fraction is measured against the cell's REAL pixel extent
     /// (edge cells are clipped), so `x == limit` lands exactly on the last
@@ -3537,38 +3407,6 @@ mod tests {
         assert_eq!((lw, lh), (35, 25));
     }
 
-    /// `query_rect_frac` carries the lattice terms: integer edges reproduce `query_rect` exactly, and a
-    /// fractional edge is the linear blend of the two surrounding integer rectangles.
-    #[cfg(feature = "feature-regime-v2")]
-    #[test]
-    fn query_rect_frac_includes_lattice_terms() {
-        let (w, h) = (64usize, 48usize);
-        let mut buffer = LatticeScale::new(0, w, h);
-        for y in 0..h {
-            buffer.add_vertical_step(16, y, 0.01 * (y as f64 + 1.0));
-        }
-        buffer.finalize();
-        let r =
-            AttributionResult::from_density(vec![0.001f32; w * h], w, h).with_lattice(vec![buffer]);
-        for (x0, y0, x1, y1) in [
-            (16usize, 0usize, 40usize, 20usize),
-            (0, 4, 16, 30),
-            (8, 8, 48, 40),
-        ] {
-            let a = r.query_rect(x0, y0, x1, y1);
-            let b = r.query_rect_frac(x0 as f64, y0 as f64, x1 as f64, y1 as f64);
-            assert!((a - b).abs() < 1e-9, "{a} vs {b}");
-        }
-        assert_ne!(
-            r.query_rect(16, 0, 40, 20),
-            r.query_rect(16, 0, 40, 20) - r.lattice_correction(16, 0, 40, 20)
-        );
-        let lo = r.query_rect_frac(16.0, 0.0, 40.0, 20.0);
-        let hi = r.query_rect_frac(16.0, 0.0, 41.0, 20.0);
-        let mid = r.query_rect_frac(16.0, 0.0, 40.5, 20.0);
-        assert!((mid - 0.5 * (lo + hi)).abs() < 1e-9);
-    }
-
     /// BLOCKINESS maps are exact for rectangle repairs through every pipeline (the 2026-10-02 v2spatial fix).
     ///
     /// For plane-aligned rectangles on an image whose scales all fit (256x192: scale-3 plane 32x24), the
@@ -5658,8 +5496,6 @@ impl Fused944Session {
                     retention: Some(&mut self.retention),
                     mean_offset: Some(&mut mean),
                     ref_planes: Some(&precomputed.scales),
-                    #[cfg(feature = "training")]
-                    dvifm: None,
                 },
             )?;
             return Ok((result.into_features(), mean.finish()));

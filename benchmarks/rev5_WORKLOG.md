@@ -497,16 +497,7 @@ slots zero; all-features f0 is zero versus full extraction
 [0,0,0]. The same failures occur on tiny/odd/multi-strip inputs. No review
 artifact or historical receipt was overwritten.
 
-Raw SDR/PU extraction now validates the actual requested families before
-scope narrowing. Append/append2/CSFW/DVIFM, all research banks, masked/IW or
-carrier pools, free extras and destination activity refuse explicitly at
-Rev5, including bounded-v2 pair/cache APIs and unplanned retained 944.
-Explicit masked/IW configuration APIs and SDR/PU extended extraction also
-refuse, rather than silently emitting missing measurements. Wider storage
-layouts remain valid for supported requested slots through a validated plan.
-Full training extraction now requests all 576 basic/peaks/v2 slots in a
-720 layout independently of the bake's read set. The retained basic walker
-uses the zero Rev5 mean-offset convention and skips the global pass.
+
 
 Tests replace the accepted zero-tail contract with behavioural refusal;
 exercise each family selector with v1_only on/off and each raw boundary;

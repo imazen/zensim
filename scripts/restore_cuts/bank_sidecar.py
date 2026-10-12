@@ -39,8 +39,7 @@ N_SAMPLE = 200
 FAMILIES = {
     "mapdev": ("features__restore_mapdev.parquet", 1502, 60),
     "z1max": ("features__restore_z1max.parquet", 1562, 228),
-    "gmsnative": ("features__restore_gmsnative.parquet", 1790, 30),
-    "dvifmgate": ("features__restore_dvifmgate.parquet", 1820, 5),
+    "gmsnative": ("features__restore_gmsnative.parquet", 1790, 30)
 }
 FULL_WIDTH = 1825
 # z1max cell-local slots whose registry form is Difference (exactly 0 on an identity pair).

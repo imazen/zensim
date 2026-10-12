@@ -1,6 +1,6 @@
 {
  "schema": "rev4-featpot-v2-teacher-pin-v1",
- "label": "POTENTIAL \u2014 ceiling, not a model score",
+ "label": "POTENTIAL — ceiling, not a model score",
  "note": "hashes only; no label value read when this pin was written",
  "r915_dedup_manifest_sha256": "8f10f902fbfa63c8f82815213c4f5fa5c1f245a74ae9e8766f9295b9c9e18060",
  "peer_manifest_sha256": "8d2799c8a9ebaa3f25fa7518b3d7591ee7742b696d7f5592b9ace9974d0d27fc",
@@ -25,10 +25,6 @@
      "path": "/var/tmp/rev4-featbank/bank/safesyn/labels__ssim2_oracle.parquet",
      "sha256": "4c56180ce673de063a2aefb67d3edaf9688e637fad185fc4a5d6b0404d14392a"
     },
-    "partb_csfw_dvifm": {
-     "path": "/var/tmp/rev4-featbank/bank/safesyn/features__csfw_dvifm.parquet",
-     "sha256": "0341648a88d654bb40c99266c1e9495b645497c0eb677508b0ec70d03bd4c454"
-    },
     "partb_c1c4": {
      "path": "/var/tmp/rev4-featbank/bank/safesyn/features__rev4c1c4.parquet",
      "sha256": "2d8762eeec3d6c3568ba5bbdef17023046778cddcf234340a97b7ae6148187b0"
@@ -52,10 +48,6 @@
     "restore_gmsnative": {
      "path": "/var/tmp/restore-cuts/bank/safesyn/features__restore_gmsnative.parquet",
      "sha256": "5d9f316bcfa7b654edfd71bff1957c5f992141b6864cb663a4a488aa37c1b467"
-    },
-    "restore_dvifmgate": {
-     "path": "/var/tmp/restore-cuts/bank/safesyn/features__restore_dvifmgate.parquet",
-     "sha256": "0726d13cdb86ce6986ba692cfd55217f3ef285621ce919de415eea3308e4cba6"
     },
     "peer": {
      "path": "/var/tmp/gmsbank/peer_gmsd/safesyn.parquet",
@@ -91,10 +83,6 @@
      "path": "/var/tmp/rev4-featbank/bank/cid22_train/labels__ssim2_oracle.parquet",
      "sha256": "df7a259b0403dfb0e251fa654f3c9c792682005ab3de04f7a777ae691f1ff4fc"
     },
-    "partb_csfw_dvifm": {
-     "path": "/var/tmp/rev4-featbank/bank/cid22_train/features__csfw_dvifm.parquet",
-     "sha256": "82183df876624735b9cef46ffcd6016f4717b42a4265cfc5698a9d5b9262f399"
-    },
     "partb_c1c4": {
      "path": "/var/tmp/rev4-featbank/bank/cid22_train/features__rev4c1c4.parquet",
      "sha256": "43d40e099a5805d5cdb6824179304a6305705917f067268030cca53595a20cfd"
@@ -118,10 +106,6 @@
     "restore_gmsnative": {
      "path": "/var/tmp/restore-cuts/bank/cid22_train/features__restore_gmsnative.parquet",
      "sha256": "e62250da4cc87754939c259c313a24a82747080a470f1bc09cdc853e5ba37026"
-    },
-    "restore_dvifmgate": {
-     "path": "/var/tmp/restore-cuts/bank/cid22_train/features__restore_dvifmgate.parquet",
-     "sha256": "c815e7590f5ff87eb18216a7b13d9e403f0cc3a20b6e1cca5fb3ae4ab4395e40"
     },
     "peer": {
      "path": "/var/tmp/gmsbank/peer_gmsd/cid22_train.parquet",

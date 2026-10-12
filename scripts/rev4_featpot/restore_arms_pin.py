@@ -26,8 +26,7 @@ D1_SETS = ("kadid_train", "tid2013", "konfig_train", "konjnd_bpg_train",
 D2_SOURCES = ("kadid_train", "tid2013", "konfig_train", "konjnd_bpg_train",
               "cid22_a25", "aic3", "kadid_select")
 PIN_SETS = D1_SETS + ("konjnd_bpg_val",)
-FAMILIES = {"mapdev": (1502, 60), "z1max": (1562, 228), "gmsnative": (1790, 30),
-            "dvifmgate": (1820, 5)}
+FAMILIES = {"mapdev": (1502, 60), "z1max": (1562, 228), "gmsnative": (1790, 30)}
 
 
 def sha(path: Path) -> str:
@@ -44,21 +43,13 @@ def arms() -> dict:
     a1m = [1502 + 5 * c + s for c in range(12) for s in (0, 1, 2)]
     b2m = [1562 + 19 * c + l for c in range(12)
            for l in (3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18)]
-    gate = list(range(1820, 1825))
-    c7_f1 = [956 + 6 * level for level in range(5)]
     assert (len(a1m), len(b2m)) == (36, 156)
     return {
         "A1": {"add": mapdev}, "A1m": {"add": a1m},
         "A1w": {"add": mapdev, "drop_rule": "label-free redundancy, see drop_lists"},
         "B2": {"add": z1max}, "B2m": {"add": b2m},
-        "B1": {"add": list(range(956, 986)) + gate, "needs": "C7 sidecar (Part B)"},
-        "B1s": {"add": [i for i in range(956, 986) if i not in c7_f1] + gate,
-                "replaced_f1": c7_f1, "needs": "C7 sidecar (Part B)"},
         "C8n": {"add": list(range(1322, 1502)) + list(range(1790, 1820)),
                 "needs": "C8 sidecar (Part B)"},
-        "ALL": {"add": mapdev + z1max + list(range(956, 986)) + gate
-                + list(range(1322, 1502)) + list(range(1790, 1820)),
-                "needs": "C7 and C8 sidecars (Part B)"},
     }
 
 

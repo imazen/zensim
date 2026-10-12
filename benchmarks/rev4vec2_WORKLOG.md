@@ -161,14 +161,7 @@ Drift anchors (base/new ratio, noise floor):
 - `fast_ssim2_st` (revision-independent): 0.951–1.018.
 - `D_current_revision`: 0.986–1.051.
 
-Every rev4 gain (1.25–1.30×) is ~6–30× the anchor noise and every new
-block beats every base block in all four cells — the speedup is real,
-not drift. The remaining rev4/rev3 gap ~1.6–1.7× is now in parts this
-lane did not touch (streaming `process_scale_bands`, `dvifm`,
-`append_block_kernel`, scalar `VWin::slide` remainder inside
-restore-cuts windows, residual libm `fma` in scalar tails, and the
-prepared session's second v1 walk — the latter owned by the concurrent
-steercheck lane, deliberately not touched here).
+
 
 Cumulative vs the pre-REV4VEC numbers recorded in `REV4VEC_DONE.md`
 (same rig, same bake): scalar 1 MP 1380 → 1209 → **1017 ms**

@@ -17,11 +17,7 @@ feature-path reads, on ladder (9,593 cells), probes (117: identity + 1-LSB),
 and AIC2026 cropped/full (9,618 rows). Everything the instrument asks is
 measured except:
 
-- **C3/C4 for all peer scorers** (marked NM): the negative-tail probe only has
-  registered reads for the mentor's own ssim2 table and the shipped bakes —
-  there is no owner-declared peer table for it, so no peer cells were invented.
-- **aic2026_full DVIFM-ish** (not in the run list): the three DVIFM-ish presets
-  were scored on the cropped set only, same as the AIC2026 record's own panel.
+
 
 
 ## §1 What was run
@@ -73,9 +69,6 @@ reading; `s100` is shown for everyone for symmetry.
 | `peer_cvvdp_standard_4k` | quality | 10 | 7.1914 .. 10.0000 | 2.8086 |
 | `peer_cvvdp_standard_fhd` | quality | 10 | 6.3579 .. 10.0000 | 3.6421 |
 | `peer_gmsd` | distance | 0 | -0.1521 .. -0.0000 | 0.1521 |
-| `peer_dvifmish_talk_faithful_luma` | distance | 0 | -0.1663 .. -0.0318 | 0.1345 |
-| `peer_dvifmish_serving_gate_ycbcr3` | distance | 0 | -0.0122 .. -0.0001 | 0.0121 |
-| `peer_dvifmish_ours_full_luma` | distance | 0 | -0.0208 .. -0.0003 | 0.0205 |
 | `zensim_v0_2` | quality | 100 | -31.8353 .. 97.5890 | 129.4243 |
 | `zensim_b` | quality | 100 | 5.5914 .. 95.2020 | 89.6105 |
 | `zensim_c` | quality | 100 | 12.6865 .. 100.0000 | 87.3135 |
@@ -99,9 +92,6 @@ reading; `s100` is shown for everyone for symmetry.
 | `peer_cvvdp_standard_4k` | 1.0000 ✓ | 0.0378 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 0 ✓ | 0.6923 / 0.6410 ✓ | 1.0000 / 1.0000 ✓ | 0.7436 / 0.6667 ✓ | 1.0000 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression PASS / contract FAIL |
 | `peer_cvvdp_standard_fhd` | 1.0000 ✓ | 0.0083 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 0 ✓ | 0.7179 / 0.6410 ✓ | 1.0000 / 1.0000 ✓ | 0.8205 / 0.6667 ✓ | 1.0000 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression PASS / contract FAIL |
 | `peer_gmsd` | 1.0000 ✓ | 0.0000 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 1 ✗ | 0.5385 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.7692 / 0.6667 ✓ | 0.9615 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract FAIL |
-| `peer_dvifmish_talk_faithful_luma` | 1.0000 ✓ | 0.0000 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 3 ✗ | 0.3333 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.6410 / 0.6667 ✗ | 0.9615 / 0.9615 ✓ | 0.9744 / 1.0000 ✗ | NOT SHIPPABLE — regression FAIL / contract FAIL |
-| `peer_dvifmish_serving_gate_ycbcr3` | 1.0000 ✓ | 0.0000 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 2 ✗ | 0.4615 / 0.6410 ✗ | 0.9487 / 1.0000 ✗ | 0.7436 / 0.6667 ✓ | 0.9615 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract FAIL |
-| `peer_dvifmish_ours_full_luma` | 1.0000 ✓ | 0.0000 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 2 ✗ | 0.3590 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.6667 / 0.6667 ✓ | 0.9231 / 0.9615 ✗ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract FAIL |
 | `zensim_v0_2` | 0.9946 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 1 ✗ | 0.6154 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.6667 / 0.6667 ✓ | 1.0000 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
 | `zensim_b` | 0.9787 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 5 ✗ | 0.1795 / 0.6410 ✗ | 0.4359 / 1.0000 ✗ | 0.5641 / 0.6667 ✗ | 0.4231 / 0.9615 ✗ | 0.9487 / 1.0000 ✗ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
 | `zensim_c` | 0.9846 ✓ | 0.0070 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 4 ✗ | 0.4872 / 0.6410 ✗ | 0.8974 / 1.0000 ✗ | 0.5385 / 0.6667 ✗ | 0.9231 / 0.9615 ✗ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
@@ -125,9 +115,6 @@ reading; `s100` is shown for everyone for symmetry.
 | `peer_cvvdp_standard_4k` | 0.9976 ✓ | 0.0378 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 0 ✓ | 0.6923 / 0.6410 ✓ | 1.0000 / 1.0000 ✓ | 0.7436 / 0.6667 ✓ | 1.0000 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression PASS / contract INCOMPLETE (not a pass) |
 | `peer_cvvdp_standard_fhd` | 0.9982 ✓ | 0.0083 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 0 ✓ | 0.7179 / 0.6410 ✓ | 1.0000 / 1.0000 ✓ | 0.8205 / 0.6667 ✓ | 1.0000 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression PASS / contract INCOMPLETE (not a pass) |
 | `peer_gmsd` | 0.9945 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 1 ✗ | 0.5385 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.7692 / 0.6667 ✓ | 0.9615 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
-| `peer_dvifmish_talk_faithful_luma` | 0.9832 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 3 ✗ | 0.3333 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.6410 / 0.6667 ✗ | 0.9615 / 0.9615 ✓ | 0.9744 / 1.0000 ✗ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
-| `peer_dvifmish_serving_gate_ycbcr3` | 0.9885 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 2 ✗ | 0.4615 / 0.6410 ✗ | 0.9487 / 1.0000 ✗ | 0.7436 / 0.6667 ✓ | 0.9615 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
-| `peer_dvifmish_ours_full_luma` | 0.9920 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 2 ✗ | 0.3590 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.6667 / 0.6667 ✓ | 0.9231 / 0.9615 ✗ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
 | `zensim_v0_2` | 0.9960 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 1 ✗ | 0.6154 / 0.6410 ✗ | 1.0000 / 1.0000 ✓ | 0.6667 / 0.6667 ✓ | 1.0000 / 0.9615 ✓ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
 | `zensim_b` | 0.9759 ✓ | 0.0000 ✓ | — NM | — NM | 0 ✓ | 0 ✓ | 5 ✗ | 0.1795 / 0.6410 ✗ | 0.4359 / 1.0000 ✗ | 0.5641 / 0.6667 ✗ | 0.4231 / 0.9615 ✗ | 0.9487 / 1.0000 ✗ | NOT SHIPPABLE — regression FAIL / contract INCOMPLETE (not a pass) |
 | `zensim_c` | 0.9829 ✓ | 0.0070 ✓ | — NM | — NM | 38 ✗ | 0 ✓ | 4 ✗ | 0.4872 / 0.6410 ✗ | 0.8974 / 1.0000 ✗ | 0.5385 / 0.6667 ✗ | 0.9231 / 0.9615 ✗ | 1.0000 / 1.0000 ✓ | NOT SHIPPABLE — regression FAIL / contract FAIL |
@@ -153,9 +140,6 @@ The full per-scorer A1–A6 native and s100 tables are in the SHA-pinned full re
 | `peer_cvvdp_standard_4k` | 0.8783 / 0.0387 / 0.0830 | 0.9912 / 0.0081 / 0.0006 | 0.9590 / 0.0231 / 0.0179 | 0.8951 / 0.0044 / 0.1005 | 0.9805 / 0.0190 / 0.0004 | 0.9408 / 0.0214 / 0.0378 | 0.0214 | 0 |
 | `peer_cvvdp_standard_fhd` | 0.9446 / 0.0277 / 0.0277 | 0.9950 / 0.0050 / 0.0000 | 0.9851 / 0.0149 / 0.0000 | 0.9895 / 0.0017 / 0.0087 | 0.9832 / 0.0168 / 0.0000 | 0.9763 / 0.0154 / 0.0083 | 0.0154 | 0 |
 | `peer_gmsd` | 0.9471 / 0.0529 / 0.0000 | 0.9950 / 0.0050 / 0.0000 | 0.9856 / 0.0144 / 0.0000 | 0.9939 / 0.0061 / 0.0000 | 0.9735 / 0.0265 / 0.0000 | 0.9752 / 0.0248 / 0.0000 | 0.0248 | 0 |
-| `peer_dvifmish_talk_faithful_luma` | 0.9214 / 0.0786 / 0.0000 | 0.9894 / 0.0106 / 0.0000 | 0.9559 / 0.0441 / 0.0000 | 0.9904 / 0.0096 / 0.0000 | 0.9341 / 0.0659 / 0.0000 | 0.9515 / 0.0485 / 0.0000 | 0.0485 | 0 |
-| `peer_dvifmish_serving_gate_ycbcr3` | 0.9341 / 0.0659 / 0.0000 | 0.9869 / 0.0131 / 0.0000 | 0.9672 / 0.0328 / 0.0000 | 0.9921 / 0.0079 / 0.0000 | 0.9699 / 0.0301 / 0.0000 | 0.9656 / 0.0344 / 0.0000 | 0.0344 | 0 |
-| `peer_dvifmish_ours_full_luma` | 0.9398 / 0.0602 / 0.0000 | 0.9956 / 0.0044 / 0.0000 | 0.9744 / 0.0256 / 0.0000 | 0.9948 / 0.0052 / 0.0000 | 0.9766 / 0.0234 / 0.0000 | 0.9719 / 0.0281 / 0.0000 | 0.0281 | 0 |
 | `zensim_v0_2` | 0.9752 / 0.0248 / 0.0000 | 0.9969 / 0.0031 / 0.0000 | 0.9672 / 0.0328 / 0.0000 | 0.9983 / 0.0017 / 0.0000 | 0.9770 / 0.0230 / 0.0000 | 0.9804 / 0.0196 / 0.0000 | 0.0196 | 16 |
 | `zensim_b` | 0.8787 / 0.1213 / 0.0000 | 0.9362 / 0.0638 / 0.0000 | 0.9292 / 0.0708 / 0.0000 | 0.9476 / 0.0524 / 0.0000 | 0.9138 / 0.0862 / 0.0000 | 0.9157 / 0.0843 / 0.0000 | 0.0843 | 11 |
 | `zensim_c` | 0.8978 / 0.0948 / 0.0073 | 0.9700 / 0.0300 / 0.0000 | 0.9313 / 0.0687 / 0.0000 | 0.9371 / 0.0210 / 0.0420 | 0.9483 / 0.0517 / 0.0000 | 0.9339 / 0.0591 / 0.0070 | 0.0591 | 6 |
@@ -178,9 +162,6 @@ The full per-scorer A1–A6 native and s100 tables are in the SHA-pinned full re
 | `peer_cvvdp_standard_4k` | 10 | 10 / 10 (39) | yes | 10 / 10 / 10 | 9.97571 / 9.9998 / 10 |
 | `peer_cvvdp_standard_fhd` | 10 | 10 / 10 (39) | yes | 10 / 10 / 10 | 9.97321 / 9.99933 / 10 |
 | `peer_gmsd` | 0 | 0 / 0 (39) | yes | 0 / 2.8851e-08 / 5.82353e-07 | 1.98072e-06 / 6.05538e-05 / 0.000787785 |
-| `peer_dvifmish_talk_faithful_luma` | 0 | 0 / 0 (39) | yes | 0.00143306 / 0.00251556 / 0.00335316 | 0.00719329 / 0.0119947 / 0.0393881 |
-| `peer_dvifmish_serving_gate_ycbcr3` | 0 | 0 / 0 (39) | yes | 8.69788e-09 / 3.74481e-08 / 1.55295e-07 | 3.07735e-07 / 1.47858e-05 / 0.000117398 |
-| `peer_dvifmish_ours_full_luma` | 0 | 0 / 0 (39) | yes | 1.17227e-08 / 3.674e-07 / 5.39455e-07 | 2.03722e-07 / 0.000232256 / 0.00059447 |
 | `zensim_v0_2` | 100 | 100 / 100 (39) | yes | 99.1089 / 99.3815 / 99.6654 | 94.4203 / 98.3296 / 98.757 |
 | `zensim_b` | 100 | 100 / 100 (39) | yes | 96.0653 / 96.1701 / 96.2398 | 92.0713 / 96.0117 / 96.1403 |
 | `zensim_c` | 100 | 100 / 100 (39) | yes | 100 / 100 / 100 | 90.1014 / 94.5391 / 95.9798 |
@@ -208,13 +189,7 @@ The full per-scorer A1–A6 native and s100 tables are in the SHA-pinned full re
 | column | orientation | correct steps | ladders w/ material inversion (rel.) |
 |---|---|--:|--:|
 | `ours:GMSD` | distortion | 0.9907 | 47/490 |
-| `ours:DVIFM-ish talk-faithful-luma` | distortion | 0.9833 | 81/490 |
-| `ours:DVIFM-ish serving-gate-ycbcr3` | distortion | 0.9916 | 40/490 |
-| `ours:DVIFM-ish ours-full-luma` | distortion | 0.9938 | 27/490 |
 | `GMSD` | distortion | 0.9907 | 47/490 |
-| `proposal-DVIFM` | distortion | 0.9534 | 133/490 |
-| `proposal-DVIFM-0.2` | distortion | 0.9853 | 49/490 |
-| `proposal-DVIFM-0.2-use_chroma` | distortion | 0.9877 | 38/490 |
 | `SSIMULACRA2` | quality | 0.9926 | 34/490 |
 | `DSSIM` | distortion | 0.9959 | 14/490 |
 | `IW-SSIM` | quality | 0.9926 | 30/490 |
@@ -222,30 +197,6 @@ The full per-scorer A1–A6 native and s100 tables are in the SHA-pinned full re
 | `ours:GMSD (full resolution)` | distortion | 0.9897 | 51/490 |
 | `GMSD (full resolution)` | distortion | 0.9897 | 51/490 |
 
-- ours:GMSD vs GMSD: srocc 1, mean_abs_diff 1e-06, max_abs_diff 0.000227, median_ratio_ours_over_theirs 1
-- ours:DVIFM-ish talk-faithful-luma vs proposal-DVIFM: srocc 0.5627
-- ours:DVIFM-ish talk-faithful-luma vs proposal-DVIFM-0.2: srocc 0.8832
-- ours:DVIFM-ish talk-faithful-luma vs proposal-DVIFM-0.2-use_chroma: srocc 0.9002
-- ours:DVIFM-ish serving-gate-ycbcr3 vs proposal-DVIFM: srocc 0.4616
-- ours:DVIFM-ish serving-gate-ycbcr3 vs proposal-DVIFM-0.2: srocc 0.7988
-- ours:DVIFM-ish serving-gate-ycbcr3 vs proposal-DVIFM-0.2-use_chroma: srocc 0.7087
-- ours:DVIFM-ish ours-full-luma vs proposal-DVIFM: srocc 0.5303
-- ours:DVIFM-ish ours-full-luma vs proposal-DVIFM-0.2: srocc 0.9172
-- ours:DVIFM-ish ours-full-luma vs proposal-DVIFM-0.2-use_chroma: srocc 0.8545
-- ours:GMSD vs GMSD (full resolution): srocc 1, mean_abs_diff 0
+
 
 ## §8 Provenance
-
-- score tables: `/var/tmp/paper-gates/scores/` (shards + merged), lists
-  `/var/tmp/paper-gates/lists/`; the pair lists are verified row-by-row against
-  the grid by `scripts/paper_gates/prep_lists.py` before scoring.
-- binaries (sha256): zenmetrics-sweep `319a9f2b…`, dvifmish-49aaf667
-  `69cd2309…`, score_pairs_tuner `4c5617f0…`, m3_fixture_gen `b642914c…`,
-  peer_metric_pairs `8d8bffaa…`, zenmetrics-cvvdpfix `ca154a6a…`,
-  bake_verdict `f8523c6e…` (full hashes in the lane WORKLOG + DONE file).
-- owner outputs: `/var/tmp/paper-gates/bv/` (`summary.json`, 44 `gaddr/*.json`,
-  `cells/*.tsv`, `logs/*.md|.log`), `bv/aic2026_addendum.json`,
-  `bv/tables_md.txt` (the rendered §2–§7 tables verbatim).
-- timing: this lane measures correctness, not speed; scoring ran outside the
-  heavy lock on cpus 16-31 and inside one lock acquisition (see WORKLOG).
-

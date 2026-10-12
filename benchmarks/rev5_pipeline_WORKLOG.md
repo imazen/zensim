@@ -14,9 +14,7 @@ Gate at Rev4 (extractor sha256 `8c6f4c03…`, build 259045b0, era `tiercanon_c3n
 4 threads): `verify-against /var/tmp/rev4-featbank-r4` → 576 requested slots, **0 differing** (bitwise f64), absent columns all
 NaN. So requesting the Rev5 subset does not change its values at Rev4.
 
-Finding for the lane (addendum appended to its brief): the same request's `feature_set_id` at Rev4 is
-`basic+peaks+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype+gmsbank+mapdev+z1max+gmsnative+dvifmgate…#f30d13cf`
-— the research plan computes families nobody asked for. At Rev5 that request has to compute and declare only basic + peaks + v2.
+
 
 ## 2026-10-04 11:40 — instrument tables and fitter accept Rev5 banks
 

@@ -8,7 +8,7 @@ Lane `restore-cuts`. Preregistration: `benchmarks/restore-cuts_prereg_2026-09-24
 | `mapdev` | f1502..1561 (60) | `mse_dev`, `hfsq_src_dev`, `hfsq_dst_dev`, `hfabs_src_dev`, `hfabs_dst_dev` | `PerChannel`, cell = `scale*3 + channel` |
 | `z1max` | f1562..1789 (228) | the 13 `BASIC` then 6 `PEAKS` v1 signals, pooled over block maxima | `PerChannel` |
 | `gmsnative` | f1790..1819 (30) | C8's `loss_k, gain_k, dev_k` for k = 0..4 (X cell, then B cell) at scale 0 | `NativeXb` (new replication) |
-| `dvifmgate` | f1820..1824 (5) | C7 F1 with the two-state gate, one per DVIFM level | `Flat` |
+
 
 ## Why a band-kernel side pass for mapdev and z1max
 
@@ -60,14 +60,9 @@ that gate's pinned counts and belongs to promotion, not to this optional researc
 per-channel stabilisers (`GMSBANK_X_C`, `GMSBANK_B_C`) and accumulators as the coarse X/B cells, emitted into their
 own block. No new arithmetic. The walk requires `full_res_xb` for it. Native joint chromaticity (CS) is not carried.
 
-## dvifmgate
 
-Verified before any code: main's `dvifm.rs` computes C7 (f956..985) with the smooth curve
-`v(C) = (1+(C/C0)^(beta*sigma))^(-1/sigma)`; the two-state gate exists only on unlanded `943781e8`
-(`DvifmVis::{Curve,Gate,Off}`). So the curve form already IS C7 (bank sidecar `features__csfw_dvifm.parquet`) and the
-missing arm is the gate. Only F1 depends on `v`; the F2 bins are independent of it, so the whole gate variant is one
-extra sum per level: `Sum v_gate * m^P / n`, `v_gate = max over sides of [C <= c0]` with the level's fitted `c0`,
-accumulated in `pool_block` next to `f1` in the same block order. It moves no existing value (asserted).
+
+
 
 ## Planner behaviour worth knowing (measured, not assumed)
 

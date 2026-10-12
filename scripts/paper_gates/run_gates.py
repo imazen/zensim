@@ -64,9 +64,6 @@ SCORERS = {
     "peer_cvvdp_standard_4k": ("{set}_cvvdp.parquet", "cvvdp_cpu_imazen_v0_1_0", +1, 10.0),
     "peer_cvvdp_standard_fhd": ("{set}_cvvdp_fhd.tsv", "cvvdp_cpu_imazen_v0_1_0_standard_fhd", +1, 10.0),
     "peer_gmsd": ("{set}_gmsd.parquet", "gmsd_cpu_imazen_v0_1_0", -1, 0.0),
-    "peer_dvifmish_talk_faithful_luma": ("{set}_dvifmish/talk-faithful-luma.tsv", "distortion", -1, 0.0),
-    "peer_dvifmish_serving_gate_ycbcr3": ("{set}_dvifmish/serving-gate-ycbcr3.tsv", "distortion", -1, 0.0),
-    "peer_dvifmish_ours_full_luma": ("{set}_dvifmish/ours-full-luma.tsv", "distortion", -1, 0.0),
     "zensim_v0_2": ("{set}_zensim.parquet", "score_v0_2", +1, 100.0),
     "zensim_b": ("{set}_zensim.parquet", "score_b", +1, 100.0),
     "zensim_c": ("{set}_zensim.parquet", "score_c", +1, 100.0),
@@ -86,15 +83,7 @@ def read_scores(stem: str, col: str, set_: str) -> pd.DataFrame:
         key = t["image_path"].astype(str) + "#" + t["q"].astype(str)
     else:
         t = pd.read_csv(path, sep="\t", dtype={"q": str}, keep_default_na=False)
-        if "row" in t.columns:  # dvifmish batch: row index into the input list
-            # numpy object arrays throughout: under pyarrow-backed strings `.iloc[..].values`
-            # is an ArrowStringArray, which has no `.values` for the index below.
-            rows = t["row"].astype(int).to_numpy()
-            key = pd.Series(lst["image_path"].to_numpy(dtype=object)[rows] + "#"
-                            + lst["q"].to_numpy(dtype=object)[rows])
-            if not (t["dist_path"].to_numpy(dtype=object) == lst["dist_path"].to_numpy(dtype=object)[rows]).all():
-                sys.exit(f"{path}: row index does not point at the same dist_path")
-        elif "image_path" in t.columns:
+        if "image_path" in t.columns:
             key = t["image_path"].astype(str) + "#" + t["q"].astype(str)
         else:  # zenmetrics batch TSV: (ref_path, dist_path) are unique on every list here
             if (lst["dist_path"] + "|" + lst["ref_path"]).duplicated().any():

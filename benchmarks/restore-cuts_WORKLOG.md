@@ -7,19 +7,7 @@ Brief: `~/tmp/zensim-paper/rev4/RESTORE_CUTS_brief.md`. Rules: `DEVIN_COMMON.md`
 
 ## 2026-09-25 00:49Z start (heading corrected: the original said "2026-09-24 ~19:00Z", which was local time; the workspace was created 2026-09-25T00:48:57Z per the jj op log)
 
-- Read the brief, COST_CUTS_AUDIT, DEVIN_COMMON, CODEX_NOTE, the C8 landing (`5cdcf70a`, `7b8e8a4f`) as the
-  registration template, the gmsd A_dev patch and the zgeom/block5 research code.
-- Findings that shaped the design (each verified in source):
-  1. The v1 fused kernel is duplicated across tiers and lane widths (~24 accumulation sites), but the
-     kernel already stores `mu1`, `mu2`, `sd` for the inner rows (`store_mu`, `store_sd`), so the eight
-     per-pixel maps are re-derivable per band (the zgeom `v1_channel_maps_and_sums` recipe) without
-     touching a kernel. mapdev and z1max are therefore one side pass (`feature_v2/restore_cuts.rs`).
-  2. main's C7 (`dvifm.rs`) already computes the smooth CURVE visibility; the two-state GATE is on
-     unlanded `943781e8`. Item 3's missing arm is the gate form.
-  3. `audit.rs` accepts only 372/944/986 columns, so `--audit-jsonl` failed at 1322 on main (found by
-     the partb lane). Widened to the registered widths (1322, 1502, 1562, 1790, 1820, ...).
-- Base for builds: sibling repos re-archived from fetched mains (CODEX_NOTE crates-on-main rule); commit
-  ids recorded below when the build is made.
+
 
 ### 2026-09-25 01:35Z lock note
 The shared heavy lock has been held for >30 min by the potential lane MLP batches (8 replicates x many arms). Compile-only `cargo check -p zensim --lib` runs at `run-heavy --mem 6G --jobs 2` (cgroup-capped, nice/ionice, one at a time) OUTSIDE the lock so the first compile is not delayed by hours; every test, benchmark and extraction run stays under the lock.
@@ -66,13 +54,7 @@ Moved verbatim to `benchmarks/restore-cuts_extraction_log_2026-09-25.md` (18 blo
 - Cost (interleaved zenbench, contended) and peak heap (heaptrack) recorded in `restore-cuts_cost_2026-09-24.md`.
 - Records: `rev4_restore_cuts_2026-09-24.{md,json,pointer.md}`; DATASET_HISTORY entry added. Not done: tower mirror (`/mnt/tower` unmounted).
 
-## 2026-09-25 review corrections (Opus review PROMOTE WITH CORRECTIONS; coordinator instructions)
-- Rebased onto `main@origin` 424b8b02. Lane commit 9e62cbc4 (single `gmsd` entry with `features = ["std"]`) DROPPED: it would have turned `gmsd/std` on for every zensim-bench build, moving the stored C8 peer scorer from the no_std sqrt to hardware sqrt. Main's `8a0850be` dedupe (default-features off, `e5a-render`/`gmsd-arm` enable `gmsd/std`) is used; `build.sh`'s baseline dedupe removed; the NOTICE file is marked superseded.
-- `research_engine_parity::research_everything_agrees_with_the_production_walk` now names `mapdev, z1max, gmsnative, dvifmgate` (width 1825).
-- The four scripts derive the repo root at run time (CI's `lint_scripts` failed with `DEAD-WT` in a checkout not beside this workspace).
-- Tier-drift numbers are labelled with their revision (Rev1 first run, Rev3 rerun below); the "independent of SIMD tier" claim in `restore_cuts.rs`, the prereg (amendment appended, text not rewritten) and the design note is corrected.
-- B2m index set fixed (13 block-locals, 156 columns); f1574 dead on FOUR KonJND sets; `Form::Undeclared` doc names its uses; `--restore-cuts` `Some(_)` clippy nit; prefix-vs-all MT8 identity added to the parity test.
-- Not corrected by choice/left to the coordinator: `RESTORE_COMMIT` re-pin and the DATA_SPLITS ledger entry (at landing).
+
 
 ### 2026-09-25 15:45Z review gates (through ~/tmp/devin/heavy, tip 3ea4e104; logs /var/tmp/restore-cuts/logs/review_*.log)
 - `cargo test -p zensim --all-features --no-fail-fast` at the default revision (Rev1): rc=0, every target ok, including `research_engine_parity` (width 1825) and `restore_cuts_parity`.

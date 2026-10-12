@@ -63,32 +63,7 @@ cf76d47ce45ab9f03e8a8f99d7d1abaa13685d10cbf16cf27ad204b3beae9a28  R915_y60_h32_s
 
 ## 2026-09-23 implementation session (generator)
 
-- UTC 11:15-11:55, cwd `/home/lilith/work/zen/zensim--e5a-render`
-- Created `zensim-bench/examples/m3_fixture_gen/render_pix.rs` (pixel helpers:
-  swizzle/quantize/edge-fill/parity-decimate/alpha-masks/dither + linear-light
-  composite via linear-srgb + zenblend SrcOver), `render_families.rs` (10
-  corruption families F01-F10 + benign-drift set, 44 corruption + ~35 benign
-  items per source), `render.rs` (driver: `corruption render --in256 --in512
-  --out --ref-id --seed --set`, hashed `_MANIFEST.json` + `COMPLETE.json`).
-- Wired: `m3_fixture_gen.rs` gains three `#[path]` mods; `corruption::run`
-  dispatches `render` subcommand before the catalog parser; `sha` and
-  `write_verified_png` promoted to `pub(super)`; `zensim-bench/Cargo.toml`
-  adds `dep:zenblend` to `m3-fixtures` (linear-srgb was already a direct dep).
-- Deviations applied while matching prereg table: F02 emits 4 defs x 3
-  backgrounds = 12 composited RGB items (alpha protocol); F03 6; F05a uses
-  `zenresize .crop` for the off-by-one; F10(b) +4096 u16 gain; benign names
-  follow prereg (`resize_streaming_vs_fullframe`, `resize_f32_vs_i16`,
-  `resize_u16_vs_f32_lin`, `srgb_lut_vs_poly`,
-  `quantize_round_half_even_vs_away` [expected inert: 65535=255*257 admits no
-  exact ties -> counted per drop rule], `quantize_dithered_vs_plain`,
-  `dither_phase`, `composite_f32_vs_u16`, `route_u8_vs_u8f32`,
-  `route_u8_vs_u8u16_lin`).
-- Generation script: `/home/lilith/tmp/devin/e5a_gen_all.sh` (12 TRAIN
-  sources, 256+512 rendition paths verified present on /mnt/v).
-- Build: `cargo check -p zensim-bench --features m3-fixtures --example
-  m3_fixture_gen` under `~/tmp/devin/heavy --mem 16G --jobs 8`, CARGO_TARGET_DIR
-  `/home/lilith/tmp/devin/target-e5a` — queued on heavy.lock behind sibling
-  lanes (cvvdp-safesyn zenmetrics build, gmsd_batch8, dvifmish).
+
 
 ## 2026-09-23 implementation session (scorer + analysis)
 

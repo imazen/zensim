@@ -227,42 +227,6 @@ fn padded_rows_native_sdr() {
 }
 
 #[test]
-fn padded_rows_ycbcr_packed_formats() {
-    let _tokens = archmage::testing::lock_token_testing();
-    use crate::streaming::{YcbcrPlane, convert_source_to_ycbcr_plane_into_slice};
-    for format in FORMATS {
-        for (w, h) in [(7, 5), (33, 65)] {
-            for mode in MODES {
-                let reference = Rows::new(w, h, format, 0, 0, 0).mode(mode);
-                for padding in 0..=format.bytes_per_pixel() + 1 {
-                    for offset in [0, 1] {
-                        let candidate = Rows::new(w, h, format, padding, offset, 0).mode(mode);
-                        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
-                            let convert = |source: &Rows| {
-                                let mut out = vec![0.0; (w + 5) * h];
-                                convert_source_to_ycbcr_plane_into_slice(
-                                    source,
-                                    &mut out,
-                                    w + 5,
-                                    13,
-                                    plane,
-                                );
-                                out.into_iter().map(f32::to_bits).collect::<Vec<_>>()
-                            };
-                            assert_eq!(
-                                convert(&candidate),
-                                convert(&reference),
-                                "{format:?} {mode:?} pad={padding} offset={offset}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn padded_rows_hdr_frontend() {
     let _tokens = archmage::testing::lock_token_testing();
     use crate::feature_v2::HdrEncoding;

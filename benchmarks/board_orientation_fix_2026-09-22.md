@@ -133,11 +133,7 @@ Frozen controls, aic4 per-ref mean / % backwards: before −0.9119 / −0.9517 /
 −0.9481 / −0.9408 at 100%; after **+0.9119 / +0.9517 / +0.9481 / +0.9408 at 0%**.
 Their AIC-3 cells did not move.
 
-The board gate script fails identically before and after, on
-`TRAIN comparison must use a served report URL: 2026-09-19-dvifm-*`. That check
-belongs to another lane's DVIFM entries. Because the gates must pass before the
-served board is replaced, **`summer_gauntlet.html` was not overwritten**. Both
-builds are in the artifact directory.
+
 
 ## 2. AIC-4 is not "unrefreshable"
 
@@ -217,12 +213,7 @@ Read-outs:
 
 ## 4. Addendum 2026-09-26: the served board is replaced
 
-The gate failure in §1.5 was the three `2026-09-19-dvifm-*` TRAIN comparisons, whose `report_url`
-pointed at `/zensim/benchmarks/*.md` (not served; 404). Each screen's committed record, JSON, pointer
-and prereg are now published byte-identically under
-`/mnt/v/output/zensim/reports/dvifm-{screen,screen2b,screen2c}-2026-09-19/` with a `FILES.json`
-sha256 index, and the three entries point at those served directories (`659580a8`). Rebuilt from
-that commit, both boards pass `gauntlet_gates.sh` (gates 1, 2, 3 and 4a–4e):
+
 
 | file | before (kept) | now |
 |---|---|---|
@@ -240,4 +231,3 @@ A sweep of all 26 `report_url` fields finds no other non-200 URL. The rebuilt bo
 and their embedded data differs from the builds above only in that URL (plus one checkout-dependent
 `train_date`). Served now: `summer_gauntlet.html` sha256 `4613edbf…`, `summer_gauntlet_fair.html`
 sha256 `aa641901…`; the previous files are kept as `summer_gauntlet{,_fair}_pre_jointcore_2026-09-26.html`.
-

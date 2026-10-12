@@ -4,7 +4,7 @@
 
 ## Authority and finding
 
-Coordinator decision (2026-09-25) on `REVIEW_PARTB.md` section 2. The bank's old-family (f0-f943) zeros on the 88 `pixels_identical` keys come from the product identity short-circuit (`BakeScorer::compute` returns score 100 and a zero vector); the research extractor computes the features instead. R0 + C1-C4, csfw/DVIFM and gmsbank are consistently all-zero on those rows. Restore-cuts `mapdev` is **not**: it is nonzero on identical rows (48 cells each; ReferenceOnly `hfsq_src_dev`/`hfabs_src_dev` and Undeclared `*_dst_dev`, max 0.12), so A1 and A1m would mix the two conventions with R0 on those rows. z1max, gmsnative and dvifmgate are 0 on identity.
+
 
 ## Decision (option b)
 

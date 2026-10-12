@@ -246,7 +246,6 @@ source_id % 10 == 9  → TEST    ( 14,000 sources /  70,000 cells)
 | **KonJND-1k** (1,008 refs; JPEG+BPG PJND) | T1 (semi) | train = konjnd-dense (20,160 rows, per-pair active-mix target) AND val = per-ref mean PJND — same 1,008 refs both sides → ref-level train==val; treat KonJND eval as guard+anchor, not holdout. **MEASURED 2026-08-04 (wave 6): the set is 504 JPEG refs ∪ 504 BPG refs, intersection 0**; the 944 eval leg `ext_konjnd_jpeg_val.parquet` is **exactly the JPEG 504**, and `konjnd-dense − eval` is **exactly the BPG 504**. So the ONLY reference-disjoint KonJND training mass is the BPG half. **CORRECTED + RESOLVED 2026-08-04 (wave 7, campaign amendment 7):** the "no BPG decoder ⇒ cannot be extracted" claim was wrong — the KonJND-1k distribution ships the BPG half **pre-decoded** (`KonJND-1k/bpg/` = 25,704 valid 640×480 RGB8 PNGs, 504 refs × 51 QPs, upstream 2021 mtimes; zero `.bpg` bitstreams exist on disk), the 372 dense build had already extracted those very pixels (10,080 BPG rows), and the dense build's pair list + target rule WERE recovered exactly from `konjnd_full_scored.csv` (20 rank-evenly-spaced picks/ref over the ssim2-sorted ladder; `human_score` = raw `gpu_ssimulacra2`; verified 1008/1008 refs <1e-9). The reference-disjoint 944 training leg now exists: `ext944-canonical-2026-08-01/konjnd_bpg_{train,val}_944.parquet` (403/101 refs, srcnum%10∈{8,9}→val, target = ssim2/100; `_MANIFEST_konjnd_bpg.json`) | Authors: whole-set JND benchmark, no split defined | — |
 | **AIC-3 CTC** (600 pairs, 10 refs) | T0 | Eval-only, never train | JPEG-AIC committee test set; Mohammadi 2025 evaluates metrics on it | Holdout by construction |
 | **AIC-4 sample** (300 pairs, 5 refs) | T0 | Eval-only, never train; do NOT recipe-search to win it (holdout-fishing ban, 2026-05-25 #10). **⚠ TARGET IS DISTORTION-ORIENTED** (`q_jnd`, same reconstruction family as SDR25): all 188 board fullevals report negative `srocc_signed`. Correct for a JND study; negate before any training use. **⚠ SDR25 ⊂ this corpus** — SDR25's 50 rows are the JPEG-AI subset of these same 300 rows / 5 crops (verified 50/50 on `ref_basename`+f0..f5), so scoring both is not two independent reads. See campaign Appendix I | The CfP keeps the larger set committee-hidden — public sample is eval-only for everyone | Holdout by construction |
-| **NNCD-IQA** (16 Kodak refs × 5 codecs × 4 rates = 320, MOS; registered 2026-09-22, zensim#62) | **EVAL-only** | Never trained, fitted, calibrated or selected on. Target quality-oriented (MOS). Local `/mnt/v/datasets/nncd-iqa/` (sha256 in `SHA256SUMS`) | Authors (Khan, Dardouri, Kaaniche, Dauphin, MTAP 2022): benchmark set; one of the five sets in the DVIFM talk's list | dHash vs 4,544 training sources: no duplicates (all flags adjudicated unrelated). **Not content-disjoint from TID2013: all 16 NNCD references contain an unscaled crop that is a TID2013 reference (16 of TID's 25; NCC 1.0000)** — any TID-trained model has seen NNCD's scenes. DATASET_HISTORY 2026-09-22 |
 | **JPEG-AI-SDR25** (5 src × 10 levels, 95k raw triplets) | **T0 (BUILT 2026-07-02)** | Eval-only. Reconstructed: `sdr25_jnd_reconstructed_2026-07-02.parquet` (116 stimuli, ordered-probit triplet MLE, `scripts/v_next/reconstruct_sdr25_jnd.py`; response = MORE-DISTORTED side, trap-verified). Scoreable subset = 5×10 JPEG-AI PTC crops (anchor codecs not in the **JPEG-AI** zip — but they ARE on disk in the AIC-3 package, `aic3-btc-ptc/test-images/{BTC,PTC}_images.zip`, 5 refs × {AVIF,JPEG-1,JPEG-2000,JPEG-XL,VVC} × 10 levels; corrected 2026-08-04). **⚠ TARGET IS DISTORTION-ORIENTED** — `human_score` = `q_jnd`, a JND *distance* from the original (rises with distortion). Verified three ways (source, raw ladder, and signed SROCC **−0.9757** vs 67,714 raw votes); all 171 board fullevals report negative `srocc_signed`. This is CORRECT for a JND study and **must NOT be flipped** (the seed-selection oracle consumes `\|SROCC\|`; flipping silently inverts it). **Negate before any training use.** Gated by `check_target_orientation.py` (declares `distortion`). **⚠ SDR25 ⊂ AIC-4**: all 50 rows are present in `ext_aic4.parquet` (300 rows, same 5 crops) — they are NOT independent eval corpora. **NOT TRAINABLE** — T0 + it is the seed-selection oracle (+0.752 → CID22 over 35 bakes) + 5 refs. Full determination: campaign **Appendix I**. Baseline: within-image SROCC A 0.998 / ssim2 1.000 (both ceiling); pooled A 0.904 vs ssim2 0.958 → A currently FAILS the "SDR25 ≥ ssim2" gate | Authors: subjective study behind the QoMEX'25 SVQA paper (arXiv:2504.06301), Jenadeleh/Sneyers/Jia/Mohammadi/Ascenso/Saupe — cite arXiv:2504.06301 | Postdates ssim2 tuning — honest holdout for both sides |
 | **JPEG AIC2026** (70 src × 17 codec configs × 20 levels = 9,618 distorted; full-res + 840×944 PTC/BTC crops; **NO human scores in this release**) | **T0-family, EVAL-ONLY (INGESTED 2026-09-19). Owner decision 2026-10-11: becomes the JND CALIBRATION set once human labels are published (§3d)** | Member of the registered holdout family `jpeg-aic-family-holdout-2026-09-01` (§3d) — **never a training input, membership by CONTENT**. It carries **no human labels at all**: the release ships 71 *objective* IQA-method score columns and nothing else, so every use is a **metric-agreement / ladder-behaviour panel**, never an accuracy-vs-humans measurement. It cannot produce a `rank.<corpus>` board axis in the human sense and must not be given a synthesised `human_score`. **Target orientation is per column and mixed**: the `JND_*` columns and the distance-like metrics (`proposal-Butteraugli`, `DSSIM`, `LPIPS-*`, `DISTS`, `GMSD`, `NLPD`, `CIEDE2000`, `WD_s*`, …) **RISE with distortion**; `SSIMULACRA2`, `CVVDP` (JOD), `PSNR*`, `SSIM`, `MS-SSIM`, `VMAF*`, `IW-SSIM`, `VIF`, `TOPIQ`, `HaarPSI`, `FSIM*`, `AHIQ`, `VSI`, `CW-SSIM` **FALL** — sign-normalise per column before any correlation. **Levels were PLACED using CVVDP**, so CVVDP is monotone-by-construction on these ladders and is not a fair contestant on the monotonicity axis. Local: `/mnt/v/datasets/aic2026/` | Authors: fine-grained high-fidelity benchmark for the JPEG AIC activity (Jenadeleh, Sneyers, Ascenso, Richter, Karabutov, Jia, Alshina, Watanabe, Pinheiro, Ebrahimi, Saupe), DaRUS doi:10.18419/DARUS-6156, arXiv:2607.22783, CC BY-SA 4.0. The subjective study over these stimuli was still pending at release | First read by any zensim model **2026-09-19**; all scored models were frozen before that date. dHash audit (`check_holdout_overlap`) run before first use — see `benchmarks/aic2026_2026-09-19.pointer.md` |
 | **KonFiG-IQA** (10 src × 7 dist × 12-30 levels over 3 JND; 1.7M triplets) | **T2 (INGESTED 2026-07-02; 944 LEG BUILT 2026-08-05)** | 944 leg: `ext944-canonical-2026-08-01/konfig_944.parquet` (1,090 rows, 85+24 per source, + native `q_jnd`; multiset-identical to the 372-era `konfig_train_2026-07-02.parquet`; builder `scripts/canonical_corpus/build_konfig_944.py`; campaign **Appendix L**, pre-reg `e93eba04`). human_score = 1−q_jnd/3.2 — **QUALITY-oriented, gated**: `check_target_orientation.py` declares `quality`, verified signed SROCC **+0.5645** vs the 75,519 raw EXP_III DCR votes (n=850 PartA; PartB shares the formula). Origin-split views `konfig_originsplit_{train,val,test}_944.parquet` (327/436/327; `split_of` on numeric src id) exist for any future within-KonFiG instrument; the registered probe leg is the FULL table (L.6 design decision — training on it forecloses those views as eval for those models). **F-condition (flicker-boosted) reconstructed JND scale for TRAIN+VAL sources (2026-10-07):** `/mnt/v/dataset/konfig-iqa/derived/konfig_fscale_trainval_2026-10.parquet` (+`.manifest.json`), 637 rows = 7 src × 7 dist × 13 levels, builder `scripts/canonical_corpus/konfig_fscale.py` (Python port of the authors' EXP_I MATLAB chain; Octave-fmincon oracle max abs diff 0.0050, bitwise deterministic, ssim2 τ = −0.7724 on the subset vs published 0.7668 Part A). Held-out test sources' raw responses were never parsed. **ssim2 tuned on it** → never a ssim2-comparison corpus | Authors: fine-grained JND-unit scales via boosted triplet comparisons (Men 2021) | 10 sources. **dHash spot-audit RUN 2026-08-05 (Appendix L G-L1/G-L2, commit `7ed6ac4b`): CLEAN PASS** — 0 exact hits + zero d≤10 flags vs KonJND-1008 / CID22-49 / CSIQ-30 / LIVE-29 / AIC3-10; global min d=17 (dHash is crop-blind — residual stated in L.11.8) |
@@ -664,20 +663,9 @@ target defect or a different label version. LIVE is EXCLUDED from
 cross-regime comparisons until audited (owner: canonical_corpus; annotate
 any cross-root live citation). Registered in `eval_annotations.json`.
 
-## Exposure ledger — 2026-09-19: CID22-49 A/B split (DVIFM Phase-2d)
 
-Per "Record each batch's exposure" above: the CID22 49-reference
-human-scored set was split into **A (25 refs, fit-allowed for the
-Phase-2d standalone-DVIFM constants fit only)** and **B (24 refs, sealed
-until one frozen descriptive read)** under recorded seed 20260919. The
-full ref lists, the user direction, what is fitted (≤~90 scalar constants
-+ per-domain affine; no MLP/feature-selection/checkpoint-selection), and
-the consequence (artefacts consuming A-derived constants quote CID22 only
-as `CID22-B(24)`) are recorded in
-`docs/DATASET_HISTORY.md` under 2026-09-19 and preregistered in
-`benchmarks/dvifm_screen2d_prereg_2026-09-19.md` §4–§5. The CID22 registry
-row above is otherwise unchanged: the 49-ref set remains holdout-only for
-every other purpose, and no zensim model fit consumes these labels.
+
+
 
 ## Exposure ledger — 2026-09-22: AIC-4 frozen read, crops + full resolution
 
@@ -789,13 +777,7 @@ It assigns no new role to any corpus: every source corpus keeps its
 registered role and the view only consumes rows already admissible for
 training.
 
-Composition (measured, `coverage_report.json`): mid band 55.9% /
-small 24.4% / tiny 19.7% (rung ≤1024 px); photography 81.6%; screen,
-document, line-art guards 5.6% each; AI-labelled 1.5%. Legs:
-fresh_imazen26 62.2% / cid22 14.2% / human 9.6% / fresh_safesyn 8.7% /
-hdr 4.7% / konfig 0.6%. HDR rows are PQ-regime features — stored under
-`features/hdr_pq/` with their own manifest, never column-mixed into SDR
-tables or SDR DVIFM caches.
+
 
 Selection: k-means (seed 17) centroid-nearest over each leg's `feat_*`
 embedding; singleton clusters kept whole; imazen-26 contributes TRAIN
@@ -863,66 +845,22 @@ only and needs no entry.
 
 ## Exposure ledger — 2026-09-25: restore-cuts families, pixels-only extraction, all 18 bank sets
 
-The restore-cuts lane ran the extractor `extract_features_372col` (source landed as `f3f021f6`, quarantine id
-`ec5b1821`; binary sha256 `4ea8f333…`; formula revision 3, root form sqrt, legacy-rgb8, `--restore-cuts`) over the
-**pixels only** of all 18 Rev4 bank sets (248,983 pixel keys, 249,227 stimulus rows), producing the default-off
-families `mapdev`, `z1max`, `gmsnative` and `dvifmgate` (f1502..f1824). That includes the held-out and confirmation
-sets under ruling D4: CID22-B, the AIC-4 sample, KonJND JPEG SELECT/TERMINAL, CSIQ, MCL-JCI and KADID TERMINAL. The
-pair TSVs carry `human_score=0`; **no label or `_sealed` file was opened and no statistic was computed on held-out
-labels.** Output: `/var/tmp/restore-cuts/bank/<set>/features__restore_*.parquet`, keyed by `pair_key`. Record:
-`benchmarks/rev4_restore_cuts_2026-09-24.md`.
 
-## Exposure ledger — 2026-09-22: CID22-49 duplicate, B(23) correction, full-set DVIFM fits, NNCD
+
+
 
 Recorded in `docs/DATASET_HISTORY.md` under 2026-09-22, committed before the
 reads they govern:
 
-- **CID22-A/B split leak.** `844297.png` (A) and `3316926_opo25u.png` (B) are
-  the same picture; CID22-B(24) → **CID22-B(23)** (2,011 pairs). The spent
-  2026-09-21 read was re-scored on 23 references from its own per-row scores —
-  a correction of the same read, not a second read; conclusions unchanged.
-- **Full CID22-49 human labels fitted** for the dvifmish "full CID22 human,
-  author-style" constants source (DVIFM constants + level/channel weights +
-  3-parameter output map only). Those presets carry zero held-out CID22 claim;
-  their CID22 numbers are fit-domain.
-- **CID22-A** additionally serves as the human selection leg of the dvifmish
-  variant screen (SafeSyn-fitted arms only); screen winners quote CID22 as
-  CID22-B(23).
-- **KonFiG-IQA `originsplit_val`** (436 pairs, 8 references; its registered
-  SELECT view) is the screen's second human selection leg. Recorded here on
-  2026-09-23 after the screen had used it (rounds 1 and 2); the use is the
-  view's registered purpose. Screen winners have no held-out KonFiG claim on
-  those references; `originsplit_test` was not read.
-- **NNCD-IQA** registered EVAL-only (row in §3). Not content-disjoint from
-  TID2013.
-- **CID22-B(23)** read a second time, by frozen dvifmish presets not fitted on
-  CID22-49 (September 14 rule; the 2026-09-21 read disclosed as prior exposure).
-- **AIC-4 public sample** (300 pairs; PTC crops and full resolution) read by
-  frozen dvifmish presets and frozen peers under the September 14 rule; target
-  distortion-oriented, |SROCC| reported; prior zensim exposure disclosed (SDR25
-  slice = seed-selection oracle). Nothing fitted, calibrated or selected on it.
 
-## Exposure ledger — 2026-09-23: NNCD-IQA first read by the frozen dvifmish presets and peers (reported 2026-09-25)
 
-The frozen peers (fast-ssim2, zensim B and D, R915 Rev3 ensembles) were scored on NNCD at 2026-09-23T03:50:26Z;
-another session's join audit saw their SROCCs around 05:10Z (before the dvifmish variant screen closed at
-06:19:34Z), and the dvifmish lane recomputed them at 05:14Z only to verify the corrected join. The 27 frozen
-dvifmish presets (frozen at dvifmish `f562c519`, 06:55:12Z) were first scored on NNCD at 09:50:17Z, inside the
-final repro run. Nothing was fitted, calibrated or selected on NNCD, and no preset changed after the read. NNCD is
-EVAL-only and **not content-disjoint from TID2013**: its 16 references contain the 16 TID2013 references as
-unscaled crops (NCC 1.0000), so a model fitted on TID2013 rows has seen NNCD's scenes. Detail: DATASET_HISTORY
-2026-09-22 NNCD entry and addenda; record `benchmarks/dvifmish_eval_2026-09-22.md`.
 
-## Exposure ledger — 2026-09-23: canonical corruption packet 2026-09-08 read by the dvifmish presets and peers (reported 2026-09-25)
 
-Both splits of the canonical corruption packet (validate 8 origins, train 12; imazen-26 origins at longest side
-256; 713 corruption attempts plus q10/q20 native JPEG anchors per origin and the accepted honest native supplement)
-were scored by the frozen dvifmish presets and the frozen peers with the owner protocol (`corruption_gate_eval.py`
-summarize, via `corruption_eval.py`). The packet carries no human labels; the only label read was its own
-`is_corruption` flag. Characterisation only (fraction below the honest q20/q10 anchors, detection at a matched
-honest false-positive rate); nothing was fitted, calibrated or selected on it. Peer scores were re-joined through
-the extractor's reference-sorted row order first (a positional join had been wrong). Record:
-`benchmarks/dvifmish_eval_2026-09-22.md` §6.
+
+
+
+
+
 
 ## Exposure ledger — 2026-09-24: fleet transport of Rev4 potential-fit inputs (ruling D1)
 

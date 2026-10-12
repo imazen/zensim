@@ -2071,10 +2071,6 @@ mod revision_contract_tests {
                 ..base
             },
             V2NewFeatureToggles {
-                dvifm_block: true,
-                ..base
-            },
-            V2NewFeatureToggles {
                 rev4_gridblk: true,
                 ..base
             },
@@ -2104,10 +2100,6 @@ mod revision_contract_tests {
             },
             V2NewFeatureToggles {
                 gmsnative: true,
-                ..base
-            },
-            V2NewFeatureToggles {
-                dvifmgate: true,
                 ..base
             },
             V2NewFeatureToggles {
@@ -2842,7 +2834,6 @@ mod revision_contract_tests {
             z.compute_folded720_append_features_streaming(&rs, &ds, toggles, &mut scratch),
             z.compute_folded720_append2_features(&rs, &ds),
             z.compute_folded720_csfw_features(&rs, &ds),
-            crate::feature_v2::compute_folded720_dvifm_impl(&rs, &ds, None, false, toggles),
         ] {
             assert_rev5_family_refused(refused);
         }
@@ -2899,15 +2890,6 @@ mod revision_contract_tests {
                 z.compute_folded720_append_features_hdr(&r, &d, encoding, toggles, &mut scratch),
                 z.compute_folded720_append2_features_hdr(&r, &d, encoding, toggles, &mut scratch),
                 z.compute_folded720_csfw_features_hdr(&r, &d, encoding, toggles, &mut scratch),
-                crate::feature_v2::compute_folded720_dvifm_hdr_streaming_impl(
-                    &r,
-                    &d,
-                    encoding,
-                    None,
-                    false,
-                    toggles,
-                    &mut scratch,
-                ),
             ] {
                 assert_rev5_family_refused(refused);
             }

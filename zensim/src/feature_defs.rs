@@ -32,9 +32,7 @@
 //!   [720, 924)  append   scale*3*17 + ch*17 + local
 //!   [924, 944)  append2  scale*5 + local     (Y-only: one cell per scale)
 //!   [944, 956)  csfw     scale*3 + local     (Y-only)
-//!   [956, 986)  dvifm    level*6 + local     (flat: one cell, no scale axis —
-//!                                            DVIFM runs its OWN 5-level
-//!                                            pyramid off the scale-0 Y rows)
+//!   [956, 986)  reserved; later IDs retain their original positions.
 //! ```
 //!
 //! ## Why the geometry constants are DERIVED here, not copied
@@ -317,8 +315,6 @@ pub(crate) enum KernelId {
     Append2,
     /// The CSFW tier-1 kernel.
     Csfw,
-    /// The DVIFM block-visibility pyramid pump (`dvifm.rs`).
-    Dvifm,
     /// The free raw-moment accumulator a v1-only walk finalizes.
     FreeRawMoments,
     /// The free bounded-error (class C) accumulator.
@@ -345,7 +341,6 @@ impl KernelId {
             KernelId::Append => "append",
             KernelId::Append2 => "append2",
             KernelId::Csfw => "csfw",
-            KernelId::Dvifm => "dvifm",
             KernelId::FreeRawMoments => "free_raw_moments",
             KernelId::FreeBoundedErr => "free_bounded_err",
             KernelId::Gridblk => "gridblk",
@@ -450,9 +445,7 @@ pub enum FormulaRevision {
     /// reduce. Measured, not proven: `research::extract`'s full 1825-slot
     /// SDR vector is bit-identical across x86 v4x/v4/v3/scalar and wasm32
     /// simd128/scalar on the measured pairs (wasm32: 6 pairs, 8×8 to
-    /// 512×384). Leaves outside the era still call the platform libm
-    /// (dvifm's `powf`/`ln`/`exp`), so cross-platform identity rests on libm
-    /// agreement.
+    /// 512×384).
     ///
     /// A Rev4 computation must run in a Rev4 process (and vice versa):
     /// `ssim_form::refuse_rev4_mix` refuses every cross-boundary mix because
@@ -828,15 +821,6 @@ const Z1MAX: &[Revision] = &[Revision {
            the same RootForm as v1's; they are deliberately NOT attached to the \
            v1detroot/F18 gates (pinned v1/v2 counts) until the family is \
            promoted from an optional research arm.",
-}];
-const DVIFMGATE: &[Revision] = &[Revision {
-    era: "dvifmgate",
-    commit: RESTORE_COMMIT,
-    status: RevisionStatus::Landed,
-    note: "append-only introduction of C7's per-level F1 under the two-state gate \
-           visibility (v = 1 iff contrast <= c0, max-merged across sides), \
-           f1820..1824. F2 is independent of v, so this is the whole gate-form \
-           variant. Restores COST_CUTS_AUDIT B1. No earlier slot moves.",
 }];
 const GMSNATIVE: &[Revision] = &[Revision {
     era: "gmsnative",
@@ -1229,7 +1213,6 @@ const REV_TIERCANON: Revision = Revision {
            11 audit pairs and the review's 12 probe pairs) and wasm32 \
            simd128/scalar (measured, 5 crops) - by \
            measurement, not by construction, since leaves outside this era \
-           still call the platform libm (e.g. dvifm's powf/ln/exp). Moves \
            837 of 1825 slots vs production v3 on the audit pairs (union), so \
            it is registered as moving every live slot. REV4SERVE made the \
            served, HDR, diffmap and attribution leaves canonical at Rev4 \
@@ -2369,69 +2352,6 @@ pub(crate) static CSFW: [SignalDef; 3] = {
     ]
 };
 
-/// The 30 DVIFM block-visibility signals — F1 plus five F2 bins for each of
-/// the family's OWN five pyramid levels (not the walk's scales; DVIFM is a
-/// [`Replication::Flat`] block fed by the scale-0 Y rows). Index-aligned
-/// with `dvifm::DVIFM_FEATURES`: `level*6 + local` where local 0 is the
-/// parametric visibility-weighted block error and locals 1..6 are the five
-/// triangular log-contrast bins.
-pub(crate) static DVIFM: [SignalDef; 30] = {
-    use ComputeToken::Dvifm as F;
-    use Direction::HigherIsWorse;
-    use Form::Difference;
-    use KernelId::Dvifm as K;
-    use Statistic::Mean;
-    const fn dv(block_local: u16, name: &'static str) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            block_local,
-            name,
-            statistic: Mean,
-            cost: CostClass::Expensive,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Difference,
-            direction: HigherIsWorse,
-            kernel: K,
-            deprecated: false,
-            defect: None,
-            revisions: NO_REV,
-        }
-    }
-    [
-        dv(0, "l0_f1"),
-        dv(1, "l0_f2b0"),
-        dv(2, "l0_f2b1"),
-        dv(3, "l0_f2b2"),
-        dv(4, "l0_f2b3"),
-        dv(5, "l0_f2b4"),
-        dv(6, "l1_f1"),
-        dv(7, "l1_f2b0"),
-        dv(8, "l1_f2b1"),
-        dv(9, "l1_f2b2"),
-        dv(10, "l1_f2b3"),
-        dv(11, "l1_f2b4"),
-        dv(12, "l2_f1"),
-        dv(13, "l2_f2b0"),
-        dv(14, "l2_f2b1"),
-        dv(15, "l2_f2b2"),
-        dv(16, "l2_f2b3"),
-        dv(17, "l2_f2b4"),
-        dv(18, "l3_f1"),
-        dv(19, "l3_f2b0"),
-        dv(20, "l3_f2b1"),
-        dv(21, "l3_f2b2"),
-        dv(22, "l3_f2b3"),
-        dv(23, "l3_f2b4"),
-        dv(24, "l4_f1"),
-        dv(25, "l4_f2b0"),
-        dv(26, "l4_f2b1"),
-        dv(27, "l4_f2b2"),
-        dv(28, "l4_f2b3"),
-        dv(29, "l4_f2b4"),
-    ]
-};
-
 // ============================================================================
 // Rev4 candidate feature bank (f986..1321 at 4 scales)
 // ============================================================================
@@ -2795,36 +2715,6 @@ pub(crate) static GMSNATIVE_SIGNALS: [SignalDef; 15] = {
     ]
 };
 
-/// B1 (restored): C7's F1 under the two-state gate visibility, one slot per
-/// DVIFM level (the family's own five pyramid levels).
-pub(crate) static DVIFMGATE_SIGNALS: [SignalDef; 5] = {
-    use ComputeToken::Dvifmgate as F;
-    const fn dg(block_local: u16, name: &'static str) -> SignalDef {
-        SignalDef {
-            family: Family::Supported(F),
-            block_local,
-            name,
-            statistic: Statistic::Mean,
-            cost: CostClass::Expensive,
-            tranche: Tranche::None,
-            placement: Placement::AllCells,
-            form: Form::Difference,
-            direction: Direction::HigherIsWorse,
-            kernel: KernelId::Dvifm,
-            deprecated: false,
-            defect: None,
-            revisions: DVIFMGATE,
-        }
-    }
-    [
-        dg(0, "f1gate_l0"),
-        dg(1, "f1gate_l1"),
-        dg(2, "f1gate_l2"),
-        dg(3, "f1gate_l3"),
-        dg(4, "f1gate_l4"),
-    ]
-};
-
 // Palette IDs are explicit N-major placements, with their own research semantics.
 const PALETTE_REVISION: &[Revision] = &[
     Revision {
@@ -2913,7 +2803,6 @@ pub(crate) enum Replication {
     PerChannel,
     /// One cell per scale (the Y-only blocks).
     PerScale,
-    /// One cell TOTAL — the signal table is the whole block (DVIFM: the
     /// family's own pyramid levels are its signal axis, not the walk's
     /// scales, so there is nothing to replicate). [`def_at`] reports
     /// `scale = 0, channel = Scalar` for every flat slot, which is also what
@@ -2979,11 +2868,6 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         replication: Replication::PerScale,
     },
     BlockDef {
-        family: Family::Supported(ComputeToken::Dvifm),
-        signals: &DVIFM,
-        replication: Replication::Flat,
-    },
-    BlockDef {
         family: Family::Supported(ComputeToken::Gridblk),
         signals: &GRIDBLK,
         replication: Replication::PerChannel,
@@ -3024,11 +2908,6 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         replication: Replication::NativeXb,
     },
     BlockDef {
-        family: Family::Supported(ComputeToken::Dvifmgate),
-        signals: &DVIFMGATE_SIGNALS,
-        replication: Replication::Flat,
-    },
-    BlockDef {
         family: Family::Palette,
         signals: &PALETTE_SIGNALS,
         replication: Replication::Flat,
@@ -3061,6 +2940,15 @@ impl BlockDef {
     }
 }
 
+/// Retired slots stay unassigned so later feature IDs keep their meaning.
+fn reserved_before(family: Family) -> usize {
+    match family {
+        Family::Supported(ComputeToken::Gridblk) => 30,
+        Family::Palette => 5,
+        _ => 0,
+    }
+}
+
 /// The base slot id of `family` at `n_scales`, and its block.
 pub(crate) fn block_base(
     family: impl Into<Family>,
@@ -3069,6 +2957,7 @@ pub(crate) fn block_base(
     let family = family.into();
     let mut base = 0usize;
     for b in BLOCKS {
+        base += reserved_before(b.family);
         if b.family == family {
             return Some((base, b));
         }
@@ -3091,7 +2980,6 @@ pub(crate) fn block_base(
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
 /// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
 /// Rev4 feature bank's full width 1322) plus C8's width 1502 and the restored-cut families' widths 1562 (mapdev),
-/// 1790 (z1max), 1820 (gmsnative) and 1825 (dvifmgate).
 /// `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
@@ -3102,7 +2990,10 @@ pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[
 
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
-    BLOCKS.iter().map(|b| b.width(n_scales)).sum()
+    BLOCKS
+        .iter()
+        .map(|b| reserved_before(b.family) + b.width(n_scales))
+        .sum()
 }
 
 /// The slot id of one signal placement.
@@ -3178,6 +3069,10 @@ pub(crate) fn slot_id(
 pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
     let mut base = 0usize;
     for block in BLOCKS {
+        base += reserved_before(block.family);
+        if id < base {
+            return None;
+        }
         let w = block.width(n_scales);
         if id < base + w {
             let off = id - base;
@@ -3675,7 +3570,10 @@ mod tests {
         );
         assert_eq!(w, 1867, "full registered width with palette");
         for id in 0..w {
-            let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
+            let Some(d) = def_at(id, NS) else {
+                assert!((956..986).contains(&id) || (1820..1825).contains(&id));
+                continue;
+            };
             let ch = match d.channel {
                 Channel::X => 0,
                 Channel::Y => 1,
@@ -3747,7 +3645,6 @@ mod tests {
             (Family::Supported(ComputeToken::Append), 720, 204),
             (Family::Supported(ComputeToken::Append2), 924, 20),
             (Family::Supported(ComputeToken::Csfw), 944, 12),
-            (Family::Supported(ComputeToken::Dvifm), 956, 30),
             (Family::Supported(ComputeToken::Gridblk), 986, 96),
             (Family::Supported(ComputeToken::Ringbasis), 1082, 72),
             (Family::Supported(ComputeToken::Tailhist), 1154, 144),
@@ -3756,7 +3653,6 @@ mod tests {
             (Family::Supported(ComputeToken::Mapdev), 1502, 60),
             (Family::Supported(ComputeToken::Z1max), 1562, 228),
             (Family::Supported(ComputeToken::Gmsnative), 1790, 30),
-            (Family::Supported(ComputeToken::Dvifmgate), 1820, 5),
             (Family::Palette, 1825, 42),
         ];
         for (family, base, width) in expect {
@@ -3772,14 +3668,18 @@ mod tests {
     fn names_are_unique_and_valid() {
         let mut seen = std::collections::BTreeSet::new();
         for id in 0..full_width(NS) {
-            let n = def_at(id, NS).expect("def").name();
+            let Some(def) = def_at(id, NS) else {
+                assert!((956..986).contains(&id) || (1820..1825).contains(&id));
+                continue;
+            };
+            let n = def.name();
             assert!(
                 crate::feature_set_id::is_valid_token(&n),
                 "slot {id} name {n:?} is not [a-z0-9_]+"
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 1867);
+        assert_eq!(seen.len(), 1832);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -3882,7 +3782,10 @@ mod tests {
         let mut ref_only = Vec::new();
         let mut fragility = Vec::new();
         for id in 0..w944 {
-            let d = def_at(id, NS).expect("def");
+            let Some(d) = def_at(id, NS) else {
+                assert!((956..986).contains(&id) || (1820..1825).contains(&id));
+                continue;
+            };
             if d.signal.name == "pjnd_fragility" {
                 fragility.push(id);
                 continue;
@@ -3924,7 +3827,7 @@ mod tests {
     fn registered_defects_cover_exactly_the_audited_slots() {
         let mut by_id: std::collections::BTreeMap<&str, Vec<usize>> = Default::default();
         for id in 0..full_width(NS) {
-            if let Some(d) = def_at(id, NS).expect("def").signal.defect {
+            if let Some(d) = def_at(id, NS).and_then(|def| def.signal.defect) {
                 by_id.entry(d.id).or_default().push(id);
             }
         }
@@ -3973,15 +3876,13 @@ mod tests {
         let detroot: std::collections::BTreeSet<usize> = (0..full_width(NS))
             .filter(|&id| {
                 def_at(id, NS)
-                    .expect("def")
-                    .signal
-                    .revisions
-                    .iter()
-                    .any(|r| r.era == "v1detroot")
+                    .is_some_and(|d| d.signal.revisions.iter().any(|r| r.era == "v1detroot"))
             })
             .collect();
         let l4l8: std::collections::BTreeSet<usize> = (0..full_width(NS))
-            .filter(|&id| super::uses_pooled_root(def_at(id, NS).expect("def").signal.statistic))
+            .filter(|&id| {
+                def_at(id, NS).is_some_and(|d| super::uses_pooled_root(d.signal.statistic))
+            })
             .collect();
         assert_eq!(
             detroot, l4l8,
@@ -4002,7 +3903,10 @@ mod tests {
             assert!(by_id["F17"].contains(&id), "F17 must cover f{id}");
         }
         for id in 0..full_width(NS) {
-            let d = def_at(id, NS).expect("def");
+            let Some(d) = def_at(id, NS) else {
+                assert!((956..986).contains(&id) || (1820..1825).contains(&id));
+                continue;
+            };
             if d.signal.name == "var_loss" || d.signal.name == "tex_loss" {
                 assert!(
                     d.signal.defect.is_none(),
@@ -4215,7 +4119,6 @@ mod owner_gates {
             append2: false,
             append2_dst_activity: false,
             csfw: false,
-            dvifm: false,
             gridblk: false,
             ringbasis: false,
             tailhist: false,
@@ -4224,11 +4127,10 @@ mod owner_gates {
             mapdev: false,
             z1max: false,
             gmsnative: false,
-            dvifmgate: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 19] = [
+        let cases: [(T, ComputeSet); 17] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -4265,7 +4167,6 @@ mod owner_gates {
                 },
             ),
             (T::Csfw, ComputeSet { csfw: true, ..off }),
-            (T::Dvifm, ComputeSet { dvifm: true, ..off }),
             (
                 T::Gridblk,
                 ComputeSet {
@@ -4313,13 +4214,6 @@ mod owner_gates {
                 T::Gmsnative,
                 ComputeSet {
                     gmsnative: true,
-                    ..off
-                },
-            ),
-            (
-                T::Dvifmgate,
-                ComputeSet {
-                    dvifmgate: true,
                     ..off
                 },
             ),

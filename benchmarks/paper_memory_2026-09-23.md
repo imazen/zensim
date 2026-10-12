@@ -38,10 +38,7 @@ uncontended claims).
 | IW-SSIM (zenmetrics port) | 147.5 MB (140.7 B/px); RSS 161 MiB | 147.5 MB (140.7 B/px); RSS 161 MiB | 2,367.8 MB (141.1 B/px); RSS 2,446 MiB | 2,367.8 MB (141.1 B/px); RSS 2,446 MiB | 5,661.1 MB (141.2 B/px); RSS 5,681 MiB | 5,661.1 MB (141.2 B/px); RSS 5,680 MiB |
 | CVVDP CPU port, standard_4k display | 222.4 MB (212.1 B/px); RSS 223 MiB | 222.6 MB (212.3 B/px); RSS 222 MiB | 3,557.0 MB (212.0 B/px); RSS 3,493 MiB | 3,557.4 MB (212.0 B/px); RSS 3,493 MiB | 8,500.7 MB (212.0 B/px); RSS 8,341 MiB | 8,500.8 MB (212.0 B/px); RSS 8,342 MiB |
 | CVVDP CPU port, standard_fhd display (JPEG AIC) | 222.4 MB (212.1 B/px); RSS 223 MiB | 222.5 MB (212.2 B/px); RSS 222 MiB | 3,557.0 MB (212.0 B/px); RSS 3,493 MiB | 3,557.4 MB (212.0 B/px); RSS 3,493 MiB | 8,500.7 MB (212.0 B/px); RSS 8,341 MiB | 8,500.7 MB (212.0 B/px); RSS 8,342 MiB |
-| DVIFM-ish talk-faithful-luma, float | 46.2 MB (44.1 B/px); RSS 58 MiB | 46.2 MB (44.1 B/px); RSS 58 MiB | 738.3 MB (44.0 B/px); RSS 748 MiB | 738.3 MB (44.0 B/px); RSS 748 MiB | 1,764.3 MB (44.0 B/px); RSS 1,774 MiB | 1,764.3 MB (44.0 B/px); RSS 1,774 MiB |
-| DVIFM-ish talk-faithful-luma, integer | 13.9 MB (13.2 B/px); RSS 26 MiB | 13.9 MB (13.2 B/px); RSS 26 MiB | 220.9 MB (13.2 B/px); RSS 338 MiB | 220.9 MB (13.2 B/px); RSS 338 MiB | 527.9 MB (13.2 B/px); RSS 743 MiB | 527.9 MB (13.2 B/px); RSS 743 MiB |
-| DVIFM-ish serving-gate-ycbcr3, float | 46.2 MB (44.1 B/px); RSS 64 MiB | 46.2 MB (44.1 B/px); RSS 64 MiB | 738.3 MB (44.0 B/px); RSS 812 MiB | 738.3 MB (44.0 B/px); RSS 812 MiB | 1,764.3 MB (44.0 B/px); RSS 1,945 MiB | 1,764.3 MB (44.0 B/px); RSS 1,945 MiB |
-| DVIFM-ish serving-gate-ycbcr3, integer | 16.0 MB (15.2 B/px); RSS 28 MiB | 16.0 MB (15.2 B/px); RSS 28 MiB | 254.5 MB (15.2 B/px); RSS 366 MiB | 254.5 MB (15.2 B/px); RSS 365 MiB | 608.1 MB (15.2 B/px); RSS 825 MiB | 608.1 MB (15.2 B/px); RSS 825 MiB |
+
 
 ### Map path
 
@@ -57,8 +54,7 @@ uncontended claims).
 | DSSIM (dssim-core) | 117.5 MB (112.1 B/px); RSS 137 MiB | 126.2 MB (120.4 B/px); RSS 156 MiB | 1,878.7 MB (112.0 B/px); RSS 1,904 MiB | 2,134.7 MB (127.2 B/px); RSS 2,096 MiB | 4,489.9 MB (112.0 B/px); RSS 4,531 MiB | 5,100.8 MB (127.2 B/px); RSS 4,808 MiB |
 | CVVDP CPU port, standard_4k display | 311.9 MB (297.5 B/px); RSS 308 MiB | 312.0 MB (297.5 B/px); RSS 312 MiB | 4,988.6 MB (297.3 B/px); RSS 4,858 MiB | 4,988.7 MB (297.3 B/px); RSS 4,907 MiB | 11,922.1 MB (297.3 B/px); RSS 11,604 MiB | 11,922.2 MB (297.3 B/px); RSS 11,633 MiB |
 | CVVDP CPU port, standard_fhd display (JPEG AIC) | 299.3 MB (285.4 B/px); RSS 296 MiB | 299.4 MB (285.5 B/px); RSS 300 MiB | 4,787.2 MB (285.3 B/px); RSS 4,667 MiB | 4,787.3 MB (285.3 B/px); RSS 4,714 MiB | 11,440.8 MB (285.3 B/px); RSS 11,145 MiB | 11,440.9 MB (285.3 B/px); RSS 11,174 MiB |
-| DVIFM-ish talk-faithful-luma, float | 46.2 MB (44.1 B/px); RSS 58 MiB | 46.2 MB (44.1 B/px); RSS 58 MiB | 738.3 MB (44.0 B/px); RSS 748 MiB | 738.3 MB (44.0 B/px); RSS 748 MiB | 1,764.3 MB (44.0 B/px); RSS 1,774 MiB | 1,764.3 MB (44.0 B/px); RSS 1,774 MiB |
-| DVIFM-ish serving-gate-ycbcr3, float | 47.1 MB (44.9 B/px); RSS 65 MiB | 47.1 MB (44.9 B/px); RSS 65 MiB | 752.6 MB (44.9 B/px); RSS 859 MiB | 752.6 MB (44.9 B/px); RSS 859 MiB | 1,798.5 MB (44.9 B/px); RSS 1,977 MiB | 1,798.5 MB (44.9 B/px); RSS 1,977 MiB |
+
 
 ### Bounded-memory (strip / stream) path
 
@@ -72,8 +68,7 @@ uncontended claims).
 
 | metric | 1 MP 1T | 1 MP 8T | 16 MP 1T | 16 MP 8T | 40 MP 1T | 40 MP 8T |
 |---|---:|---:|---:|---:|---:|---:|
-| DVIFM-ish talk-faithful-luma, integer | 0.708 MB (0.7 B/px); RSS 10 MiB | 0.708 MB (0.7 B/px); RSS 11 MiB | 2.5 MB (0.1 B/px); RSS 102 MiB | 2.5 MB (0.1 B/px); RSS 102 MiB | 3.5 MB (0.1 B/px); RSS 237 MiB | 3.5 MB (0.1 B/px); RSS 236 MiB |
-| DVIFM-ish serving-gate-ycbcr3, integer | 2.0 MB (1.9 B/px); RSS 12 MiB | 2.0 MB (1.9 B/px); RSS 12 MiB | 7.6 MB (0.5 B/px); RSS 107 MiB | 7.6 MB (0.5 B/px); RSS 107 MiB | 11.1 MB (0.3 B/px); RSS 244 MiB | 11.1 MB (0.3 B/px); RSS 244 MiB |
+
 
 ### Cached reference and per-worker increment (heap)
 
@@ -112,10 +107,7 @@ uncontended claims).
 | IW-SSIM (zenmetrics port) | — | 147.5 MB (140.7 B/px); RSS 160 MiB | — | — | — | — |
 | CVVDP CPU port, standard_4k display | — | 222.5 MB (212.2 B/px); RSS 222 MiB | — | — | — | — |
 | CVVDP CPU port, standard_fhd display (JPEG AIC) | — | 222.5 MB (212.2 B/px); RSS 222 MiB | — | — | — | — |
-| DVIFM-ish talk-faithful-luma, float | — | 46.2 MB (44.1 B/px); RSS 58 MiB | — | — | — | — |
-| DVIFM-ish talk-faithful-luma, integer | — | 13.9 MB (13.2 B/px); RSS 26 MiB | — | — | — | — |
-| DVIFM-ish serving-gate-ycbcr3, float | — | 46.2 MB (44.1 B/px); RSS 64 MiB | — | — | — | — |
-| DVIFM-ish serving-gate-ycbcr3, integer | — | 16.0 MB (15.2 B/px); RSS 27 MiB | — | — | — | — |
+
 
 ### N independent single-threaded processes
 
@@ -198,15 +190,7 @@ uncontended claims).
 
 ### One binary, every arm
 
-All three measurements run through zenmetrics' single-call heaptrack driver
-`benchmarks/heaptrack/drivers/cpu_profile` (`cpu-profile <metric> <mode> W H`, one
-metric call per process — the driver the GMSD lane's heaptrack matrix used). This lane
-extended it (zenmetrics workspace `paper-memory`, `src/paper.rs`, private to the
-driver, not pushed) with: the zensim profiles PreviewV0_2 / B / D, the two frozen Rev3
-ensembles, the CVVDP display presets, DVIFM-ish, a real-pair input, and the `map`,
-`ref_only`, `warm_ref`, `workers<K>`, `stream`, `rep_n<K>` and `rep_t<S>` modes. Every
-arm is timed or allocated from the same interleaved sRGB8 pair buffers, so no arm pays
-a conversion another is spared, and the cold path decodes the same PNGs for every arm.
+
 
 | arm | implementation and configuration |
 |---|---|
@@ -218,20 +202,11 @@ a conversion another is spared, and the cold path decodes the same PNGs for ever
 | IW-SSIM | zenmetrics `iwssim` port, with its `parallel` feature (zenmetrics' consumers build it `std`-only; the driver used to as well) |
 | CVVDP | zenmetrics CPU `cvvdp` port with its `parallel` feature, at BOTH `standard_4k` (the board's display) and `standard_fhd` (the JPEG AIC display) — photometry and geometry from the vendored `display_models.json` |
 | GMSD | zenmetrics `crates/gmsd` at `212603c6` (the GMSD-opt lane's integer sRGB8 luma + fused decimation, bit-exact to libgmsd per that lane's parity gate), feature `parallel` |
-| DVIFM-ish | our reimplementation of the DVIFM configuration described in a public talk (not the author's code), dvifmish commit `49aaf667` — the commit of that lane's final scoring binary `dvifmish-49aaf667` (sha256 `69cd2309…`), read through git so the lane's uncommitted working copy is not compiled. Presets `talk-faithful-luma` (the CLI default) and `serving-gate-ycbcr3` (three planes), float and integer arithmetic |
+
 
 ### Inputs
 
-One real photographic pair (the dvifmish speed fixtures `ref_6048x4032.png` /
-`dist_6048x4032.png`), cut to size by the driver's `pair-fixtures`: 256×256,
-1024×1024 (1 MP) and 4096×4096 (16 MP) are identical centre crops of both images;
-7000×5728 (40 MP) exceeds the 24 MP source, so the centre window is extended by
-reflect-101 mirroring at the edges (the dvifmish `speed_fixtures` construction),
-applied to reference and distorted alike so the distortion is carried along — no
-resampling at any size. Sizes by measurement: memory at 1, 16 and 40 MP; throughput at 1 and
-16 MP; cold/warm latency at 256×256, 1 MP and 16 MP. Each size is written both as
-PNG (for the cold path) and as raw interleaved `.rgb` (for every other path, so no
-decode is inside a measured loop). File hashes are in the pointer file's `SHA256SUMS`.
+
 
 ### Peak memory (`memory_matrix.py`)
 
@@ -246,15 +221,7 @@ shape). Two instruments per cell, in separate processes:
 * **`/usr/bin/time -v`**, un-instrumented — whole-process maximum resident set size,
   wall, user and system time.
 
-Modes: `full` (one score), `map` (score plus the metric's per-pixel map, where it has
-one), `ref_only` / `warm_ref` (reference-side precompute, and one comparison against
-it), `strip` / `stream` (the peers' own bounded-memory walkers, zensim B's strip path,
-and DVIFM-ish's integer streaming form), and `workers<K>` (K = 1, 4, 8). `full`, `map` and
-`strip` cells run at 1 thread (pinned to cpu 2) and 8 threads (cpus 0–7). A content
-control repeats every `full` arm at 1 MP / 8 threads on the GMSD lane's synthetic pair.
-1-min loadavg is recorded
-before and after every cell. Memory is measured at every listed size; no size is
-derived from another.
+
 
 ### N-process throughput (`nproc_throughput.py`)
 

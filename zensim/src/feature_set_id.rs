@@ -102,18 +102,10 @@ pub enum ComputeToken {
     /// (`V1FreeExtras::RawMomentsPlusBoundedErr`) — 24 scattered slots.
     ClassC,
     /// RESERVED for the future HDR block. Append-only; its enum position
-    /// (and so its `bit()`) predates `Dvifm` and must not move.
     Hdr,
-    /// DVIFM block-visibility pyramid, `f956..985`.
-    ///
-    /// Declared after `Hdr` so every existing variant's `bit()` stays put;
-    /// `ALL` renders it in slot order (between `csfw` and `moments`).
-    Dvifm,
     /// Rev4 grid-aligned blocking phase profile, `f986..1081`.
     ///
-    /// Declared after `Dvifm` so every existing variant's `bit()` stays put;
-    /// `ALL` renders it in slot order (between `dvifm` and `moments`).
-    Gridblk,
+    Gridblk = 13,
     /// Rev4 ringing-magnitude basis histogram, `f1082..1153`.
     Ringbasis,
     /// Rev4 tail histograms of the dense per-pixel maps, `f1154..1297`.
@@ -131,10 +123,6 @@ pub enum ComputeToken {
     /// Restored cut (COST_CUTS_AUDIT Ambiguous 7): C8's X/B gradient
     /// loss/gain/deviation bank at native scale, `f1790..1819`.
     Gmsnative,
-    /// Restored cut (COST_CUTS_AUDIT B1): C7's F1 with the two-state gate
-    /// visibility instead of the smooth curve, one slot per level,
-    /// `f1790+30..`.
-    Dvifmgate,
 }
 
 impl ComputeToken {
@@ -149,7 +137,6 @@ impl ComputeToken {
         ComputeToken::Append,
         ComputeToken::Append2,
         ComputeToken::Csfw,
-        ComputeToken::Dvifm,
         ComputeToken::Gridblk,
         ComputeToken::Ringbasis,
         ComputeToken::Tailhist,
@@ -158,7 +145,6 @@ impl ComputeToken {
         ComputeToken::Mapdev,
         ComputeToken::Z1max,
         ComputeToken::Gmsnative,
-        ComputeToken::Dvifmgate,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -178,7 +164,6 @@ impl ComputeToken {
             ComputeToken::Append => "append",
             ComputeToken::Append2 => "append2",
             ComputeToken::Csfw => "csfw",
-            ComputeToken::Dvifm => "dvifm",
             ComputeToken::Gridblk => "gridblk",
             ComputeToken::Ringbasis => "ringbasis",
             ComputeToken::Tailhist => "tailhist",
@@ -187,7 +172,6 @@ impl ComputeToken {
             ComputeToken::Mapdev => "mapdev",
             ComputeToken::Z1max => "z1max",
             ComputeToken::Gmsnative => "gmsnative",
-            ComputeToken::Dvifmgate => "dvifmgate",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",

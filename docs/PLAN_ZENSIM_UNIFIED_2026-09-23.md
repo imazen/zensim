@@ -52,8 +52,7 @@ Evidence for each row lives in the paper's claim registry and harvest notes. P# 
 
 ## Order of work (compute-aware)
 
-The machine is shared with the DVIFM-ish wave, and `/home` has only a few GB free. Heavy steps use the lab
-lock. Execution goes to Devin swe-2 lanes; Opus is used only for rulings and final judgment.
+
 
 1. **U0 — pick the single feature contract** (TRAIN only, uses existing caches). Decide between basic228 and
    Y60 as the one set, or register a smaller set that removes real work, using P2's first screen as the

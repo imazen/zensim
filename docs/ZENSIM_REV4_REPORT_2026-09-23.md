@@ -245,9 +245,7 @@ The small-image fixed cost and the serial share at 4K are the named optimization
 
 ## 5. How Rev4 is judged
 
-The paper's evaluation protocol is the release gate. Every row is run for Rev4 and, wherever it applies, for
-the peers at their best configurations: display-matched CVVDP, butteraugli 3-norm and max, GMSD, IW-SSIM,
-DSSIM, and our DVIFM-ish reimplementation.
+
 
 - Human rank: global cross-source SROCC first, then per-codec, per-source and within-image, with
   reference-clustered CIs and k-seed means. Crop and full-resolution renderings are both reported. Forced

@@ -111,7 +111,6 @@ const MAP_HFSD: usize = 5;
 const MAP_HFAS: usize = 6;
 const MAP_HFAD: usize = 7;
 
-/// Block edge of the z1max lattice (`dvifm::DVIFM_BLOCK`'s convention).
 const Z1_GRID: usize = 5;
 
 /// Streaming block-max pooling state for one cell.
@@ -743,9 +742,7 @@ fn restore_cuts_plane_dump() {
     for i in 0..30 {
         write!(csv, ",gmsnative{i}").unwrap();
     }
-    for i in 0..5 {
-        write!(csv, ",dvifmgate{i}").unwrap();
-    }
+    for i in 0..5 {}
     writeln!(csv).unwrap();
     for &(w, h) in &[(64usize, 64usize), (97, 73), (200, 150), (333, 257)] {
         let mut state = 0x9E37_79B9u32 ^ (w as u32 * 31 + h as u32);
@@ -805,7 +802,6 @@ fn restore_cuts_plane_dump() {
             append_block: true,
             append2_block: true,
             csfw_block: true,
-            dvifm_block: true,
             rev4_gridblk: true,
             rev4_ringbasis: true,
             rev4_tailhist: true,
@@ -814,7 +810,6 @@ fn restore_cuts_plane_dump() {
             mapdev: true,
             z1max: true,
             gmsnative: true,
-            dvifmgate: true,
             v1_pools: super::V1PoolsMode::Full,
             ..Default::default()
         };

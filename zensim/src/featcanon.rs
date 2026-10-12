@@ -138,7 +138,6 @@ pub(crate) fn mode(revision: FormulaRevision) -> Mode {
 /// `Off` regardless. The refusal is enforced at the walk's own entry
 /// (`validate_wide_revision`) before any leaf runs.
 #[inline]
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 pub(crate) fn compute_mode() -> Mode {
     mode(crate::ssim_form::active_revision())
 }
@@ -200,7 +199,6 @@ pub(crate) fn bench_set_measurement(mode: Option<Mode>, blur: Option<BlurMode>) 
 
 /// featacc D2: the measurement override, `Off` when unset — for kernels
 /// whose production arithmetic is NOT canon-dispatched (dense era-1/era-2,
-/// gradient, append, gridblk, blockiness, dvifm, restore-cuts). Unlike
 /// [`mode`], this never synthesises `Canon32`, so it cannot move a product
 /// Rev4 byte: with no `ZENSIM_FEATCANON` in the environment it returns
 /// `Off` and every kernel that consults it runs its shipped body verbatim.
@@ -377,7 +375,6 @@ pub(crate) fn tap_mirror(j: isize, n: usize) -> usize {
 /// kernel), because the canonical leaves compile in every build and
 /// `feature_v2` exists only with `feature-regime-v2`.
 #[inline(always)]
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 pub(crate) fn era2_reduce8(a: [f32; 8]) -> f64 {
     (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) as f64
 }
@@ -653,7 +650,6 @@ impl Pool for Neum64 {
 }
 
 /// Sequential f64 accumulation as a `Pool` — the production shape of the
-/// f64-native kernels (dvifm pools, blockiness, the restore-cuts block
 /// pools). `add(lane, v)` ignores `lane` and adds in arrival order, so a
 /// `Pool`-generic kernel body instantiated at `f64` replays the shipped
 /// sequence exactly.
@@ -695,7 +691,6 @@ impl Pool for f64 {
 /// just the accumulation order (that would conflate the two axes the lane
 /// exists to separate).
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 pub(crate) enum SumVar {
     /// Sequential f64 — production accumulation.
     Seq(f64),
@@ -711,7 +706,6 @@ pub(crate) enum SumVar {
     Neum(Neum64),
 }
 
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 impl SumVar {
     /// Variant for kernels whose summed terms are f32-representable —
     /// the `c32` arm; under the `c64` canon f32-element pools ride the same
@@ -822,7 +816,6 @@ impl SumVar {
 ///
 /// rev4canon: `Lanes` is the Rev4 canon; `Neum` stays measurement-only.
 #[derive(Clone, Copy)]
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 pub(crate) enum WelfordVar {
     /// Production: sequential Welford in f64.
     Seq(WelfordCell),
@@ -835,14 +828,12 @@ pub(crate) enum WelfordVar {
 
 /// Plain f64 Welford triple — the production cell shape.
 #[derive(Clone, Copy, Default)]
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 pub(crate) struct WelfordCell {
     pub(crate) n: u64,
     pub(crate) mean: f64,
     pub(crate) m2: f64,
 }
 
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 impl WelfordCell {
     /// One sample. `recip_n1` is `1.0 / (n + 1)` — precomputed by callers
     /// that fold a whole row (the mapdev idiom); `0` here means "compute".
@@ -871,7 +862,6 @@ impl WelfordCell {
     }
 }
 
-#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // used by the v2 walk (feature_v2, dvifm, restore_cuts)
 impl WelfordVar {
     pub(crate) fn for_mode(mode: Mode) -> Self {
         match mode {

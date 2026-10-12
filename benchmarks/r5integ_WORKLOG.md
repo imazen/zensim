@@ -162,19 +162,7 @@ bake is a copy stamped by the existing bake_stamp_revision owner; its weights
 are Rev4 byv2fy s0, not a new Rev5 fit. Reviewed catastrophic/recoverable labels
 are missing. No default, release, head or profile promoted.
 
-Final checks: 29 corruption-head tests, three Rev5 full-vector parity tests,
-10 admission tests, seven synthetic format/parity cases (512 rows each; legacy
-bytes unchanged; invalid0/6/native5 refused), just clippy, standalone extractor
-Clippy, and just lint-scripts (811 scripts) pass. Targeted cargo fmt for zensim
-and rustfmt for the extractor pass. The broad standalone fmt check reports
-pre-existing differences in untouched bench examples; none were rewritten.
-Standalone Clippy initially exposed four pre-existing extractor diagnostics;
-mechanical fixes preserve NaN handling, checked division and private manifest
-arity. The exact measured extractor binary is retained separately; these later
-changes affect only unrequested DVIFM histogram code and a lint annotation.
-Trainer hashes embedded in fitted heads pin fit-time source; subsequent early
-admission/report guards and factoring identical calibration bars do not change
-the numerical recipe. Existing saved SCREEN results equal the factored owner.
+
 
 Replay extends the scripts above with attach_matrix.py, refresh_reports.py,
 probe_heads.py and make_summary.py. Revision env is process-pinned; commands,

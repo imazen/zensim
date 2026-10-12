@@ -62,17 +62,8 @@ def validate_recipe(recipe):
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("spatial eval manifest needs a pinned SHA256")
     width = recipe.get("feature_width", 944)
-    if width not in (944, 986):
-        raise ValueError("feature_width must be a registered producer width (944 or 986)")
-    if width == 986:
-        spec = recipe.get("dvifm_spec")
-        if not isinstance(spec, dict) or not spec.get("path") or len(spec.get("sha256", "")) != 64:
-            raise ValueError("a w986 recipe needs dvifm_spec {path, sha256}")
-        allowed_path(spec["path"])
-    elif recipe.get("dvifm_spec") or recipe.get("dvifm_block_stats"):
-        raise ValueError("dvifm_spec/dvifm_block_stats require feature_width 986")
-    if recipe.get("dvifm_block_stats") and Path(recipe["dvifm_block_stats"]).name != recipe["dvifm_block_stats"]:
-        raise ValueError("dvifm_block_stats must be an output basename, not a path")
+    if width != 944:
+        raise ValueError("feature_width must be a registered producer width (944)")
     # --- phase-2b matrix extensions (all optional; absent = phase-2 shape) ---
     epochs_list = recipe.get("epochs_list")
     if epochs_list is not None:
@@ -93,24 +84,6 @@ def validate_recipe(recipe):
         cols = spec.get("columns")
         if not cols or not isinstance(spec.get("seed"), int) or any(c not in ids for c in cols):
             raise ValueError("permuted arm needs {columns: [ids present in arm], seed: int}")
-    s2c = recipe.get("screen2c")
-    if s2c is not None:
-        if s2c.get("question") not in {"q1_substitution", "q2_codec"}:
-            raise ValueError("screen2c question must be q1_substitution or q2_codec")
-        if len(recipe.get("tasks", [])) != 1:
-            raise ValueError("screen2c recipes run exactly one task")
-        for pair in s2c.get("pairs", []):
-            if len(pair) != 2 or any(p not in recipe.get("arms", {}) for p in pair):
-                raise ValueError("screen2c pairs must name two existing arms")
-        sub = s2c.get("substitute", {})
-        for key in ("base", "added", "target"):
-            if sub.get(key) not in recipe.get("arms", {}):
-                raise ValueError(f"screen2c substitute.{key} must name an arm")
-        if s2c["question"] == "q1_substitution" and sub.get("perm") not in recipe.get("arms", {}):
-            raise ValueError("q1 substitute needs a permuted control arm")
-        for arm in s2c.get("reuse_arms", []):
-            if arm not in recipe.get("arms", {}):
-                raise ValueError("screen2c reuse_arms must name existing arms")
 
 
 def admitted_segment(segment):
@@ -425,13 +398,6 @@ def execute(args, recipe):
         extract_args = [bins["extractor"], f"--full-{feature_width}"]
         if feature_width == 944:
             extract_args += ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
-        else:
-            spec = recipe["dvifm_spec"]
-            if sha(allowed_path(spec["path"])) != spec["sha256"]:
-                raise ValueError("dvifm spec bytes changed since preregistration")
-            extract_args += ["--dvifm-spec", spec["path"]]
-            if recipe.get("dvifm_block_stats"):
-                extract_args += ["--dvifm-block-stats", str(out / recipe["dvifm_block_stats"])]
         extract_args += ["--corpus", "pairs-tsv", "--path", pairs, "--out", raw]
         run("extract", extract_args)
         import pyarrow.csv as pc
@@ -454,13 +420,6 @@ def execute(args, recipe):
         manifest["decoder_era"] = "canonical native decode; extractor binary and original input bytes pinned"
         manifest["files"] = {}
         manifest["split_policy"] = SPLIT_POLICY
-        if recipe.get("dvifm_block_stats"):
-            # Pin the training-only block cache and its row index alongside
-            # the tables; the extractor's manifest carries the producer
-            # surface, spec hash and per-level grids.
-            for suffix in ("", ".index.jsonl"):
-                name = recipe["dvifm_block_stats"] + suffix
-                manifest["files"][name] = {"sha256": sha(out / name)}
         result["tables"] = {}
         perm_arms = recipe.get("permuted_arms", {})
         perm_cols = sorted({c for s in perm_arms.values() for c in s["columns"]})
@@ -773,63 +732,6 @@ def execute(args, recipe):
                 result["arms"][name]["cell_sha256"] = sha(cell)
                 save_result()
 
-    # Phase-2c Q1: reuse a prior run's cells when the cell is byte-identical —
-    # same arm ids, same seed grid, same trainer binary, and identical input
-    # tables proven by the two runs' manifests. Reused cells are recorded and
-    # never retrained; their eval legs still run inline in this run.
-    s2c = recipe.get("screen2c") or {}
-    reuse_from = s2c.get("reuse_from")
-    if reuse_from and not result.get("reuse"):
-        src = Path(reuse_from)
-        src_manifest = json.loads((src / "_MANIFEST.json").read_text())
-        src_result = json.loads((src / "RESULT.json").read_text())
-        src_recipe_path = src.parent / "recipe.json"
-        src_recipe = json.loads(src_recipe_path.read_text())
-        if (src_result.get("identity", {}).get("binaries", {}).get("trainer")
-                != result.get("identity", {}).get("binaries", {}).get("trainer")):
-            raise ValueError("reuse refused: trainer binary differs")
-        needed = {f"{t}_train.parquet" for t in tasks}
-        for t in tasks:
-            for l in recipe.get("eval_legs", ["dev"]):
-                needed.add(f"{t}.features.bin" if l == "dev" else f"{t}_{l}.features.bin")
-        shared = {f: (manifest["files"].get(f), src_manifest["files"].get(f))
-                  for f in needed}
-        mismatched = {f: pair for f, pair in shared.items()
-                      if pair[0] is None or pair[0] != pair[1]}
-        if mismatched:
-            raise ValueError(f"reuse refused: input tables differ {sorted(mismatched)}")
-        reused = {}
-        for arm in s2c.get("reuse_arms", []):
-            if recipe["arms"].get(arm) != src_recipe.get("arms", {}).get(arm):
-                raise ValueError(f"reuse refused: arm ids differ for {arm}")
-            for e in recipe["epochs_list"]:
-                for seed in recipe["seeds"]:
-                    name = cell_name("human", arm, recipe["hidden"], "full", e, seed)
-                    src_bake = src / (name + ".bin")
-                    src_entry = src_result.get("arms", {}).get(name)
-                    if not src_bake.exists() or not src_entry:
-                        raise ValueError(f"reuse refused: missing prior cell {name}")
-                    if sha(src_bake) != src_entry["bake_sha256"]:
-                        raise ValueError(f"reuse refused: prior bake hash drift on {name}")
-                    dst_bake = out / (name + ".bin")
-                    if not dst_bake.exists():
-                        shutil.copyfile(src_bake, dst_bake)
-                    src_log = src / (name + "-train.log")
-                    dst_log = out / (name + "-train.log")
-                    if src_log.exists() and not dst_log.exists():
-                        shutil.copyfile(src_log, dst_log)
-                    entry = dict(src_entry)
-                    entry["reused_from"] = str(src_bake)
-                    entry["reuse_verified"] = {"trainer": "identical",
-                                               "tables": sorted(needed),
-                                               "source_recipe_sha256": sha(src_recipe_path)}
-                    result["arms"][name] = entry
-                    reused[name] = src_entry["bake_sha256"]
-        result["reuse"] = {"from": str(src), "cells": reused,
-                           "verified_tables": sorted(needed),
-                           "source_recipe_sha256": sha(src_recipe_path)}
-        save_result()
-
     jobs = [(task, arm, hidden, fraction, epochs, seed)
             for arm, hidden, fraction, epochs in specs
             for task in tasks for seed in recipe["seeds"]]
@@ -882,11 +784,6 @@ def bounded_audit(args, recipe):
     env = dict(os.environ, ZENSIM_FORMULA_REV="3", RAYON_NUM_THREADS="1")
     feature_width = recipe.get("feature_width", 944)
     extract_args = [extractor, f"--full-{feature_width}"]
-    if feature_width == 986:
-        spec = recipe["dvifm_spec"]
-        if sha(allowed_path(spec["path"])) != spec["sha256"]:
-            raise ValueError("dvifm spec bytes changed since fitting")
-        extract_args += ["--dvifm-spec", spec["path"]]
 
     def one(item):
         name, fit = item
@@ -1026,11 +923,6 @@ def audit(args, recipe):
         extract_args = [extractor, f"--full-{feature_width}"]
         if feature_width == 944:
             extract_args += ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
-        else:
-            spec = recipe["dvifm_spec"]
-            if sha(allowed_path(spec["path"])) != spec["sha256"]:
-                raise ValueError("dvifm spec bytes changed since fitting")
-            extract_args += ["--dvifm-spec", spec["path"]]
         call([*extract_args, "--corpus", "pairs-tsv", "--path", pairs,
               "--out", dst / (name + ".csv"), "--audit-jsonl", records_path,
               "--audit-bake", bake], dst / (name + ".log"))
@@ -1111,415 +1003,8 @@ def sha_string(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def report2b(args, recipe):
-    """Phase-2b aggregation: per-cell metrics from cells/*.json, paired deltas,
-    the preregistered decision rule, the paired reference bootstrap and the
-    learning-curve table. All statistics are the Rust owners' outputs; this
-    only groups and differences them."""
-    import random
-    import statistics
-    validate_recipe(recipe)
-    root = args.out.resolve()
-    fits = json.loads((root / "RESULT.json").read_text())
-    audits_p = root / "audits/RESULT.json"
-    audits = json.loads(audits_p.read_text()) if audits_p.exists() else {"status": "MISSING", "pixel": {}}
-    if fits["status"] != "FITS_COMPLETE_UNQUALIFIED" or fits["identity"]["recipe_sha256"] != sha(args.recipe):
-        raise ValueError("report requires completed matching fits")
-    epochs_list = sorted(recipe.get("epochs_list") or [recipe["epochs"]])
-    sizes = sorted((recipe.get("data_scales") or {}).get("sizes", []))
-    fractions = ["full"] + [f"scale{n}" for n in sizes]
-    seeds = recipe["seeds"]
-    arms = list(recipe["arms"])
-    cells = {}
-    # cell files are {name}.json; per-leg side artifacts ({name}.{leg}.*) are
-    # excluded by the single-suffix rule
-    for p in sorted((root / "cells").glob("*.json")):
-        if len(p.suffixes) != 1:
-            continue
-        cells[p.stem] = json.loads(p.read_text())
-    expected = len(arms) * len(fractions) * len(epochs_list) * len(seeds)
-    if len(cells) != expected:
-        raise ValueError(f"incomplete campaign: {len(cells)} cells, expected {expected}")
-    legs = recipe.get("eval_legs", ["dev"])
-    # m[arm][fraction][epochs][metric][leg][seed] -> float
-    def collect(metric, leg="dev"):
-        out = {}
-        for arm in arms:
-            for frac in fractions:
-                for e in epochs_list:
-                    vals = []
-                    for s in seeds:
-                        tag = f"human-{arm}-h{recipe['hidden']}-{frac}"
-                        if len(epochs_list) > 1 or epochs_list[0] != recipe["epochs"]:
-                            tag += f"-e{e}"
-                        tag += f"-s{s}"
-                        cell = cells.get(tag)
-                        if cell is None:
-                            raise ValueError(f"missing cell {tag}")
-                        if metric == "per_ref_mean":
-                            v = float(cell["legs"][leg]["per_group"]["mean"])
-                        elif metric == "pooled":
-                            v = float(cell["legs"][leg]["pooled_srocc_signed"])
-                        elif metric == "frac_negative":
-                            v = float(cell["legs"][leg]["per_group"]["frac_negative"])
-                        elif metric == "fit_srocc":
-                            v = float(cell["train"]["group_srocc"]["fit"])
-                        elif metric == "train_loss":
-                            v = float(cell["train"]["loss"])
-                        else:
-                            raise ValueError(metric)
-                        vals.append(v)
-                    out.setdefault(arm, {}).setdefault(frac, {})[e] = vals
-        return out
-    prm = collect("per_ref_mean")
-    pooled = collect("pooled")
-    fit_srocc = collect("fit_srocc")
-    train_loss = collect("train_loss")
-    dev2_prm = collect("per_ref_mean", "dev2") if "dev2" in legs else None
-    dev2_pooled = collect("pooled", "dev2") if "dev2" in legs else None
-
-    def paired(a, b, metric_table, frac, e):
-        va, vb = metric_table[a][frac][e], metric_table[b][frac][e]
-        diffs = [x - y for x, y in zip(vb, va)]
-        sd = statistics.stdev(diffs) if len(diffs) > 1 else 0.0
-        return {"mean": statistics.mean(diffs), "sd": sd,
-                "se": sd / math.sqrt(len(diffs)), "values": diffs,
-                "sign_plus": sum(d > 0 for d in diffs),
-                "sign_minus": sum(d < 0 for d in diffs)}
-
-    n_frac, e_dec = "full", max(epochs_list)
-    decision = {}
-    for metric_name, table in (("per_ref_mean", prm), ("pooled", pooled)):
-        decision[metric_name] = {
-            "B-A": paired("basic228", "basic228dvifm", table, n_frac, e_dec),
-            "B-C": paired("basic228perm30", "basic228dvifm", table, n_frac, e_dec),
-            "D-A": paired("basic228", "y60", table, n_frac, e_dec)}
-    primary, secondary = decision["per_ref_mean"], decision["pooled"]
-    crit = 2 * primary["B-A"]["se"]
-    incomplete = None
-    for arm in arms:
-        v50, v100 = prm[arm][n_frac][epochs_list[0]], prm[arm][n_frac][e_dec]
-        diffs = [b - a for a, b in zip(v50, v100)]
-        sd = statistics.stdev(diffs)
-        if statistics.mean(diffs) > sd / math.sqrt(len(diffs)):
-            incomplete = arm
-    if incomplete is not None:
-        verdict = "INCOMPLETE"
-    elif primary["B-A"]["mean"] > crit and primary["B-C"]["mean"] > 0 \
-            and secondary["B-A"]["mean"] >= -secondary["B-A"]["se"]:
-        verdict = "ADVANCE"
-    elif primary["B-C"]["mean"] > 2 * primary["B-C"]["se"]:
-        verdict = "INFO-NOT-USEFUL"
-    elif abs(primary["B-C"]["mean"]) <= 2 * primary["B-C"]["se"]:
-        verdict = "NEGATIVE"
-    else:
-        verdict = "UNRESOLVED"
-
-    # Paired bootstrap over dev references: resample per-ref SROCCs (paired
-    # across arms), recompute the per-ref mean delta per resample.
-    boot = {}
-    rng = random.Random(recipe.get("bootstrap_seed", 8819))
-    for pair in (("basic228", "basic228dvifm"), ("basic228perm30", "basic228dvifm")):
-        a, b = pair
-        deltas = []
-        for s in seeds:
-            tag = f"human-{b}-h{recipe['hidden']}-full-e{e_dec}-s{s}" if len(epochs_list) > 1 else f"human-{b}-h{recipe['hidden']}-full-s{s}"
-            tb = cells[tag]["legs"]["dev"]["per_ref_srocc"]
-            ta = cells[tag.replace(f"-{b}-", f"-{a}-")]["legs"]["dev"]["per_ref_srocc"]
-            deltas.append({k: tb[k] - ta[k] for k in tb})
-        refs = sorted(deltas[0])
-        res = []
-        for _ in range(10000):
-            pick = [refs[rng.randrange(len(refs))] for _ in refs]
-            res.append(statistics.mean(
-                statistics.mean(d[r] for d in deltas) for r in pick))
-        res.sort()
-        boot[f"{b}-{a}"] = {"n_resamples": 10000, "n_refs": len(refs),
-            "q025": res[250], "median": res[5000], "q975": res[9750],
-            "frac_positive": sum(x > 0 for x in res) / len(res)}
-
-    n_train = fits.get("tables", {}).get("human", {}).get("train", {}).get("rows")
-    curve = {}
-    for frac in fractions:
-        n_fit = int(frac[5:]) if frac.startswith("scale") else n_train
-        curve[frac] = {"n_fit_rows": n_fit,
-            "B-A_per_ref_mean": paired("basic228", "basic228dvifm", prm, frac, e_dec),
-            "B-C_per_ref_mean": paired("basic228perm30", "basic228dvifm", prm, frac, e_dec),
-            "B-A_pooled": paired("basic228", "basic228dvifm", pooled, frac, e_dec),
-            "B-C_pooled": paired("basic228perm30", "basic228dvifm", pooled, frac, e_dec)}
-    summary = {"schema": "zensim-feature-screen2b-summary-v1",
-               "status": "COMPLETE_UNQUALIFIED", "model_qualified": False,
-               "verdict": verdict, "incomplete_arm": incomplete,
-               "decision_point": {"fraction": n_frac, "epochs": e_dec, "seeds": seeds},
-               "decision": decision, "bootstrap_refs": boot, "learning_curve": curve,
-               "per_cell": {name: {"dev": c["legs"].get("dev"), "dev2": c["legs"].get("dev2"),
-                                   "train": c["train"], "bake_sha256": c["bake_sha256"]}
-                            for name, c in cells.items()},
-               "dev2": {"per_ref_mean": dev2_prm, "pooled": dev2_pooled} if dev2_prm else None,
-               "fit_srocc": fit_srocc, "train_loss": train_loss,
-               "bounded_pixel_audit": audits.get("pixel"),
-               "artifact_hashes": {p.name: sha(p) for p in
-                   (root / "RESULT.json", root / "INPUTS.json", root / "_MANIFEST.json")
-                   if p.exists()}}
-    write_json(root / "SUMMARY.json", summary)
-    lines = ["# DVIFM screen 2b — powered control-arm within-image screen", "",
-             f"Verdict: **{verdict}** at N_max / E={e_dec} over {len(seeds)} paired seeds.", "",
-             "| arm | frac | E | per-ref mean SROCC (dev) | pooled SROCC (dev) | fit SROCC | loss |",
-             "|---|---|---:|---:|---:|---:|---:|"]
-    for arm in arms:
-        for frac in fractions:
-            for e in epochs_list:
-                lines.append(f"| {arm} | {frac} | {e} | "
-                             f"{statistics.mean(prm[arm][frac][e]):.4f} | "
-                             f"{statistics.mean(pooled[arm][frac][e]):.4f} | "
-                             f"{statistics.mean(fit_srocc[arm][frac][e]):.4f} | "
-                             f"{statistics.mean(train_loss[arm][frac][e]):.4f} |")
-    lines += ["", "Development evidence only; no model is qualified.",
-              "Per-cell evidence: cells/*.json; aggregation: SUMMARY.json."]
-    (root / "REPORT.md").write_text("\n".join(lines) + "\n")
-
-
-def report2c(args, recipe):
-    """Phase-2c aggregation: same owners as report2b, but the arm pairs,
-    the substitute rule and (for the codec question) the per-family panels
-    come from the preregistered `screen2c` recipe block."""
-    import random
-    import statistics
-    validate_recipe(recipe)
-    s2c = recipe["screen2c"]
-    task = recipe["tasks"][0]
-    root = args.out.resolve()
-    fits = json.loads((root / "RESULT.json").read_text())
-    audits_p = root / "audits/RESULT.json"
-    audits = json.loads(audits_p.read_text()) if audits_p.exists() else {"status": "MISSING", "pixel": {}}
-    if fits["status"] != "FITS_COMPLETE_UNQUALIFIED" or fits["identity"]["recipe_sha256"] != sha(args.recipe):
-        raise ValueError("report requires completed matching fits")
-    epochs_list = sorted(recipe.get("epochs_list") or [recipe["epochs"]])
-    fractions = ["full"]
-    seeds = recipe["seeds"]
-    arms = list(recipe["arms"])
-    cells = {}
-    for p in sorted((root / "cells").glob("*.json")):
-        if len(p.suffixes) != 1:
-            continue
-        cells[p.stem] = json.loads(p.read_text())
-    expected = len(arms) * len(fractions) * len(epochs_list) * len(seeds)
-    if len(cells) != expected:
-        raise ValueError(f"incomplete campaign: {len(cells)} cells, expected {expected}")
-    legs = recipe.get("eval_legs", ["dev"])
-
-    def tag(arm, e, s):
-        t = f"{task}-{arm}-h{recipe['hidden']}-full"
-        if len(epochs_list) > 1 or epochs_list[0] != recipe["epochs"]:
-            t += f"-e{e}"
-        return t + f"-s{s}"
-
-    def collect(metric, leg="dev"):
-        out = {}
-        for arm in arms:
-            for e in epochs_list:
-                vals = []
-                for s in seeds:
-                    cell = cells.get(tag(arm, e, s))
-                    if cell is None:
-                        raise ValueError(f"missing cell {tag(arm, e, s)}")
-                    if metric == "per_ref_mean":
-                        v = float(cell["legs"][leg]["per_group"]["mean"])
-                    elif metric == "pooled":
-                        v = float(cell["legs"][leg]["pooled_srocc_signed"])
-                    elif metric == "fit_srocc":
-                        v = float(cell["train"]["group_srocc"]["fit"])
-                    elif metric == "train_loss":
-                        v = float(cell["train"]["loss"])
-                    else:
-                        raise ValueError(metric)
-                    vals.append(v)
-                out.setdefault(arm, {})[e] = vals
-        return out
-
-    prm = collect("per_ref_mean")
-    pooled = collect("pooled")
-    fit_srocc = collect("fit_srocc")
-    train_loss = collect("train_loss")
-    dev2_prm = collect("per_ref_mean", "dev2") if "dev2" in legs else None
-    dev2_pooled = collect("pooled", "dev2") if "dev2" in legs else None
-
-    def paired(a, b, metric_table, e):
-        va, vb = metric_table[a][e], metric_table[b][e]
-        diffs = [x - y for x, y in zip(vb, va)]
-        sd = statistics.stdev(diffs) if len(diffs) > 1 else 0.0
-        return {"pair": [a, b], "mean": statistics.mean(diffs), "sd": sd,
-                "se": sd / math.sqrt(len(diffs)), "values": diffs,
-                "sign_plus": sum(d > 0 for d in diffs),
-                "sign_minus": sum(d < 0 for d in diffs)}
-
-    e_dec = max(epochs_list)
-    decision = {}
-    for metric_name, table in (("per_ref_mean", prm), ("pooled", pooled)):
-        decision[metric_name] = {f"{b}-{a}": paired(a, b, table, e_dec)
-                                 for a, b in s2c["pairs"]}
-    primary, secondary = decision["per_ref_mean"], decision["pooled"]
-
-    incomplete = None
-    incomplete_arms = []
-    for arm in arms:
-        v50, v100 = prm[arm][epochs_list[0]], prm[arm][e_dec]
-        diffs = [b - a for a, b in zip(v50, v100)]
-        sd = statistics.stdev(diffs)
-        if statistics.mean(diffs) > sd / math.sqrt(len(diffs)):
-            incomplete = arm
-            incomplete_arms.append(arm)
-
-    sub = s2c["substitute"]
-    # paired(base, x) yields x − base regardless of how the pair was declared.
-    d_added = paired(sub["base"], sub["added"], prm, e_dec)
-    d_added_p = paired(sub["base"], sub["added"], pooled, e_dec)
-    d_target = paired(sub["base"], sub["target"], prm, e_dec)
-    d_target_p = paired(sub["base"], sub["target"], pooled, e_dec)
-    gap_closed = {
-        "per_ref_mean": (d_added["mean"] / d_target["mean"]
-                         if d_target["mean"] else None),
-        "pooled": (d_added_p["mean"] / d_target_p["mean"]
-                   if d_target_p["mean"] else None),
-        "denominator_per_ref_mean": d_target["mean"],
-        "denominator_pooled": d_target_p["mean"],
-        "note": "near-zero denominators are stated, not smoothed"}
-
-    if s2c["question"] == "q1_substitution":
-        # Prereg Q1 rule is binary (else NOT-A-SUBSTITUTE); the E-escalation
-        # clause lives under Q2. The incomplete flag is recorded as a
-        # diagnostic on the arm, not a verdict override.
-        d_perm = paired(sub["perm"], sub["added"], prm, e_dec)
-        verdict = ("SUBSTITUTE-CANDIDATE"
-                   if (d_added["mean"] > 2 * d_added["se"]
-                       and d_perm["mean"] > 2 * d_perm["se"])
-                   else "NOT-A-SUBSTITUTE")
-        decision_arms_rising = sorted(set(incomplete_arms) &
-                                      {sub["base"], sub["added"], sub["perm"]})
-        question_verdict = {"q1_substitution": verdict,
-                            "d_added": d_added, "d_perm": d_perm,
-                            "incomplete_arms": incomplete_arms,
-                            "decision_arms_still_rising": decision_arms_rising}
-    else:
-        d_ba = paired("basic228", "basic228dvifm", prm, e_dec)
-        d_ba_p = paired("basic228", "basic228dvifm", pooled, e_dec)
-        d_bc = paired("basic228perm30", "basic228dvifm", prm, e_dec)
-        if incomplete is not None:
-            codec_verdict = "INCOMPLETE"
-        elif d_ba["mean"] > 2 * d_ba["se"] and d_bc["mean"] > 0 \
-                and d_ba_p["mean"] >= -d_ba_p["se"]:
-            codec_verdict = "ADVANCE"
-        elif d_bc["mean"] > 2 * d_bc["se"]:
-            codec_verdict = "INFO-NOT-USEFUL"
-        elif abs(d_bc["mean"]) <= 2 * d_bc["se"]:
-            codec_verdict = "NEGATIVE"
-        else:
-            codec_verdict = "UNRESOLVED"
-        sub_on_codec = ("SUBSTITUTE-CANDIDATE"
-                        if d_added["mean"] > 2 * d_added["se"] else "NOT-A-SUBSTITUTE")
-        question_verdict = {"q2_codec": codec_verdict,
-                            "q1_rule_on_codec_y60_pair": sub_on_codec,
-                            "d_added": d_added, "d_ba": d_ba, "d_bc": d_bc,
-                            "y60_perm_note": "the codec panel has no y60perm30 arm; "
-                                             "the permuted-block control is basic228perm30"}
-
-    rng = random.Random(recipe.get("bootstrap_seed", 8819))
-    boot = {}
-    for a, b in s2c["pairs"]:
-        deltas = []
-        for s in seeds:
-            tb = cells[tag(b, e_dec, s)]["legs"]["dev"]["per_ref_srocc"]
-            ta = cells[tag(a, e_dec, s)]["legs"]["dev"]["per_ref_srocc"]
-            deltas.append({k: tb[k] - ta[k] for k in tb})
-        refs = sorted(deltas[0])
-        res = []
-        for _ in range(10000):
-            pick = [refs[rng.randrange(len(refs))] for _ in refs]
-            res.append(statistics.mean(
-                statistics.mean(d[r] for d in deltas) for r in pick))
-        res.sort()
-        boot[f"{b}-{a}"] = {"n_resamples": 10000, "n_refs": len(refs),
-            "q025": res[250], "median": res[5000], "q975": res[9750],
-            "frac_positive": sum(x > 0 for x in res) / len(res)}
-
-    # Per-codec panels (Q2): pooled per-family SROCC and within-ladder
-    # (origin|codec band) means, plus paired deltas per codec.
-    per_codec = None
-    if recipe.get("per_family_panels"):
-        fams = sorted({f for c in cells.values() for f in
-                       c["legs"]["dev"].get("per_family_srocc", {})})
-        per_codec = {}
-        for fam in fams:
-            pooled_fam, ladder_fam = {}, {}
-            for arm in arms:
-                pooled_fam[arm] = [cells[tag(arm, e_dec, s)]["legs"]["dev"]
-                                   ["per_family_srocc"][fam] for s in seeds]
-                per_seed = []
-                for s in seeds:
-                    lad = cells[tag(arm, e_dec, s)]["legs"]["dev"]["per_ladder_srocc"]
-                    per_seed.append(statistics.mean(v for k, v in lad.items()
-                                                    if k.endswith("|" + fam)))
-                ladder_fam[arm] = per_seed
-            fam_pairs = {}
-            for a, b in s2c["pairs"]:
-                fam_pairs[f"{b}-{a}"] = {
-                    "ladder_mean": paired(a, b, {x: {e_dec: ladder_fam[x]} for x in arms}, e_dec),
-                    "pooled": paired(a, b, {x: {e_dec: pooled_fam[x]} for x in arms}, e_dec)}
-            per_codec[fam] = {"n_refs": len({k.split("|")[0] for c in cells.values()
-                              for k in c["legs"]["dev"].get("per_ladder_srocc", {})
-                              if k.endswith("|" + fam)}),
-                              "pooled_srocc": {a: statistics.mean(v) for a, v in pooled_fam.items()},
-                              "ladder_mean_srocc": {a: statistics.mean(v) for a, v in ladder_fam.items()},
-                              "pairs": fam_pairs}
-
-    summary = {"schema": "zensim-feature-screen2c-summary-v1",
-               "status": "COMPLETE_UNQUALIFIED", "model_qualified": False,
-               "question": s2c["question"], "verdicts": question_verdict,
-               "incomplete_arm": incomplete,
-               "decision_point": {"fraction": "full", "epochs": e_dec, "seeds": seeds},
-               "decision": decision, "gap_closed": gap_closed,
-               "bootstrap_refs": boot, "per_codec": per_codec,
-               "reuse": fits.get("reuse"),
-               "per_cell": {name: {"dev": c["legs"].get("dev"), "dev2": c["legs"].get("dev2"),
-                                   "train": c["train"], "bake_sha256": c["bake_sha256"],
-                                   "reused_from": c.get("reused_from")}
-                            for name, c in cells.items()},
-               "dev2": {"per_ref_mean": dev2_prm, "pooled": dev2_pooled} if dev2_prm else None,
-               "fit_srocc": fit_srocc, "train_loss": train_loss,
-               "bounded_pixel_audit": audits.get("pixel"),
-               "artifact_hashes": {p.name: sha(p) for p in
-                   (root / "RESULT.json", root / "INPUTS.json", root / "_MANIFEST.json")
-                   if p.exists()}}
-    write_json(root / "SUMMARY.json", summary)
-    lines = [f"# DVIFM screen 2c — {s2c['question']}", "",
-             f"Verdicts: {question_verdict} at E={e_dec} over {len(seeds)} paired seeds.", "",
-             "| arm | E | per-ref mean SROCC (dev) | pooled SROCC (dev) | fit SROCC | loss |",
-             "|---|---:|---:|---:|---:|---:|"]
-    for arm in arms:
-        for e in epochs_list:
-            lines.append(f"| {arm} | {e} | "
-                         f"{statistics.mean(prm[arm][e]):.4f} | "
-                         f"{statistics.mean(pooled[arm][e]):.4f} | "
-                         f"{statistics.mean(fit_srocc[arm][e]):.4f} | "
-                         f"{statistics.mean(train_loss[arm][e]):.4f} |")
-    if per_codec:
-        lines += ["", "| codec | arm | pooled SROCC | within-ladder mean |",
-                  "|---|---|---:|---:|"]
-        for fam, block in per_codec.items():
-            for arm in arms:
-                lines.append(f"| {fam} | {arm} | {block['pooled_srocc'][arm]:.4f} | "
-                             f"{block['ladder_mean_srocc'][arm]:.4f} |")
-    lines += ["", "Development evidence only; no model is qualified.",
-              "Per-cell evidence: cells/*.json; aggregation: SUMMARY.json."]
-    (root / "REPORT.md").write_text("\n".join(lines) + "\n")
-
-
 def report(args, recipe):
     """Aggregate stored Rust measurements; seed spans are not confidence intervals."""
-    if recipe.get("screen2c"):
-        return report2c(args, recipe)
-    if recipe.get("inline_eval"):
-        return report2b(args, recipe)
     validate_recipe(recipe)
     import statistics
     root = args.out.resolve()

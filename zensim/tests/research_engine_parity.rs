@@ -120,10 +120,7 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
 
 /// **G2.1, the COMPLETE half** — the full registered width agrees
 /// bit-exactly with the production walk at the widest registered regime
-/// (1825 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
-/// feature-bank families + C8 `gmsbank` + the four restored cuts `mapdev`,
-/// `z1max`, `gmsnative`, `dvifmgate`; the DVIFM tail is itself
-/// bit-identical to the whole-plane oracle per the dvifm gates). The
+/// feature-bank families + C8 and the three retained restored cuts.
 /// production toggles must name every registered block: a block left off
 /// here makes the two widths differ.
 #[test]
@@ -131,7 +128,7 @@ fn research_everything_agrees_with_the_production_walk() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
     let full = research::full_width();
     // The production walk excludes the research-only palette tail.
-    let served_width = 1825;
+    let served_width = 1820;
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     for &(w, h) in CELLS {
@@ -144,7 +141,6 @@ fn research_everything_agrees_with_the_production_walk() {
                 V2NewFeatureToggles {
                     append2_block: true,
                     csfw_block: true,
-                    dvifm_block: true,
                     rev4_gridblk: true,
                     rev4_ringbasis: true,
                     rev4_tailhist: true,
@@ -153,7 +149,6 @@ fn research_everything_agrees_with_the_production_walk() {
                     mapdev: true,
                     z1max: true,
                     gmsnative: true,
-                    dvifmgate: true,
                     v1_pools: V1PoolsMode::Full,
                     ..V2NewFeatureToggles::default()
                 },
@@ -217,7 +212,7 @@ fn research_output_is_thread_invariant() {
 #[test]
 fn dropping_a_family_perturbs_only_its_own_slots() {
     let full_w = research::full_width();
-    let all = SlotSet::from_ranges([(0, full_w)]);
+    let all = SlotSet::from_ranges([(0, 956), (986, 1820), (1825, full_w)]);
     for &(w, h) in CELLS {
         let (s, d) = pair(w, h);
         let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));

@@ -16,15 +16,7 @@ Read in full or by section: `docs/REV4_EXPERIMENTS_2026-09-23.md`, `FEATURE_SYST
 `REV3_OPTIMIZATION_AND_COLOR_PLAN.md`, `DATA_SPLITS.md` (header, §3, §8, the exposure ledgers),
 `WAVE_PLAYBOOK.md` step 4.
 
-Benchmarks:
-- `feature_ceiling_2026-09-13.md`, `complete_feature_audit_2026-09-14.md`, `scale_selective_944_2026-09-13.md`,
-  `baseline_recovery_2026-09-14.md`, `dvifm_faithful_2026-09-22.md`, `dvifm_verdict_2026-09-20.md`;
-- `feature_cost_frontier_2026-08-31.md` lines 150-180 and 286-296;
-- `sota944_campaign_2026-08-03.md` Appendix H and H.R;
-- sibling workspaces: `zensim--transplant/benchmarks/block5_2026-09-22.md`,
-  `zensim--gmsd/benchmarks/gmsd_2026-09-22.md`;
-- `~/tmp/devin/LANE_ZGEOM_DONE.md` and `LANE_GEOMETRY_DONE.md`;
-- `../zenpapers/docs/zensim-720-feature-gaps-2026-07-26.md` lines 24-28 and 248-272.
+
 
 Three read-only sonnet sub-agents summarised, with file:line citations:
 - (a) `feature_cost_frontier`, `free_features*`, `linear_projections_2026-07-03.md` and

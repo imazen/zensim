@@ -123,7 +123,8 @@ fn superseded_palette_revision_refuses() {
 #[test]
 fn private_palette_identity_preserves_supported_token_vocabulary() {
     use zensim::feature_set_id::{ComputeParts, ComputeToken, FeatureSetId};
-    assert_eq!(ComputeToken::ALL.len(), 22);
+    assert_eq!(ComputeToken::ALL.len(), 20);
+    assert_eq!(ComputeToken::Gridblk as u32, 13);
     assert_eq!(ComputeToken::parse("palette"), None);
     let id = FeatureSetId::parse("palette@w1867/palette_v2#30b09cd1").unwrap();
     assert_eq!(id.compute().to_string(), "palette");
@@ -146,5 +147,4 @@ fn private_palette_identity_preserves_supported_token_vocabulary() {
         supported.iter().collect::<Vec<_>>()
     );
     assert_eq!(ComputeParts::parse(&mixed.to_string()), Some(mixed));
-    assert!(mixed.to_string().contains("dvifmgate+palette+moments"));
 }

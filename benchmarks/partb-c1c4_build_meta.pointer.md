@@ -2,7 +2,7 @@
 
 Both extractor binaries were built from clean `git archive` snapshots of fetched main/master (no sibling working copy), with `CARGO_HOME` and target under `/var/tmp/`. Neither is a stock main build: each carries a scratch 2-line `audit.rs` width-gate patch (pass 1 adds 1322; pass 2 adds 1322 and 1502). Main superseded that gate in `384d15e1` and REVIEW_PARTB (2026-09-25) shows unpatched main `abe694a0` reproduces every sidecar bit for bit, so the patches are not part of the landing. Cargo ran without `--offline`/`--locked` (git pins fetched); `cargo metadata` reports 0 git-source packages. `corruption-corpus` is a `[patch]` path to a `git archive` of codec-corpus `8e10d4d7`.
 
-## Pass 1: `--full-rev4`, sidecars `features__rev4c1c4` + `features__csfw_dvifm`
+
 
 - Binary `/var/tmp/partb/target/release/examples/extract_features_372col` sha256 `dd4db2eea31a27ab54315ea841793aa23bf76f6f4c871c22d8f5c8f9ee4434d3`.
 - Build meta v2 `/var/tmp/partb/build_meta.json` sha256 `407e5f054981a008bd1974e53c04beed74ee137d67b01d532ce9367a96083768`; Cargo.lock `bf1130b4d9d50e7ee90772c2a8c9e0f264901c52b60a2b558fe8970d40e53080`; overlaid `zensim-bench/Cargo.toml` `55f7e43c46e140f618e1e88273373aefc4327cfa0477d53cef16d9d74216dace`; `rustc 1.98.1 (48a229cea 2026-09-01)`.

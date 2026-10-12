@@ -24,61 +24,11 @@ Every measurement is `research::extract(Request::everything())` at
 
 ## What was added (all `#[cfg(oracle)]`-gated or `Seq`-identity in product)
 
-- `featcanon.rs`: `SumVar` (Seq|LanesF32|LanesF64|Neum64 per accumulator;
-  `f32_elems`/`f64_elems` split element precision from accumulation order,
-  `merge_from`, `fin`), `WelfordVar` (mapdev/GmsBankCell), `Pool for f64`,
-  `BlurMode`/`blur_axis`, `tap_mirror`, `measurement_mode()`,
-  `bench_set_measurement` (RwLock cells — in-process mode switching for
-  zenbench interleaving; OnceLock would pin one mode per process).
-- `blur.rs`: `box_blur_v_axis`/`box_blur_h_axis`/`box_blur_h_into_abs_diff`
-  axis dispatch — f32 sliding (rec, shipped), f64 sliding (rec64), f64
-  per-position window (fresh). `fused_blur_h_ssim_canon` gained a `Fresh`
-  arm; same for the mu/abs-diff fused H kernels.
-- `fused.rs`: `VWin`/`VWinPlanes` window-state generic (Rec32/Rec64/Fresh64)
-  — `fused_vblur_ssim_canon`/`_exact`, `fused_vblur_edge_canon`/`_exact`
-  share it.
-- `feature_v2.rs`: `dense_block_kernel_canon<P>` scalar mirror of the era-2
-  `terms!`/`ssim_d_local_v`/`pools!` order + `dense_block_kernel_exact`
-  (f64 terms + Neum64); `gradient_block_kernel_canon<P>`/`_exact` with
-  `GmsBankCellVar` (bank+chroma Welford-var cells, row→strip lane-aligned
-  merge); `append_block_kernel_canon<P>`/`_exact` covering all 4
-  (cross×bins) instantiations; `gridblk_strip_wide_canon<P>`/`_exact`
-  (exact adds f64 shadow planes for the winning-phase rescan);
-  `V1BasicSums`, `FlatAccum`, `RingAccum`, `BleedAccum` → `SumVar`;
-  `blockiness_sparse_strip_wide` `(f64,f64)` → `(SumVar,SumVar)`;
-  Rev4 hooks `rev4_dense_pixel`/`rev4_grad_pixel` take a lane index.
-  Dispatch sites gate on `measurement_active()` (env override only —
-  production Rev4 is `mode()`-driven only on the featcanon-shipped kernels;
-  the new sites never move a product byte because `measurement_mode()`
-  without the env is `Off` → `Seq`).
-- `dvifm.rs`: `LevelSums` fields → `SumVar` (f64-native terms), `pool_block`
-  takes `bx & 7` (block-column lane — same index for streaming pump,
-  whole-plane and cached replay), `level_out`/`gate_f1` read `.fin()`.
-- `restore_cuts.rs`: `Z1Acc` maps widened to f64 (exact arm), z1max block
-  pooling through `V1BasicSums::meas_f32()` + lane-aware `accumulate_block`,
-  mapdev `Welford`→`WelfordVar`.
-- `tier_audit_features.rs`: reviewer `label grid crop ref dst…` TSV
-  (mosaic tile + crop decode) alongside the legacy format; dump tag folds
-  in `ZENSIM_FEATCANON_BLUR`/`TIER_AUDIT_TAG`.
-- `benches/featacc_extract_ab.rs`: zenbench whole-extract A/B, in-process
-  candidate interleave via `bench_featcanon`.
+
 
 ## Verification before measurement
 
-- `cargo test -p zensim --features …,oracle`: 48 relevant tests pass
-  (dvifm whole-vs-pump bit-identity, strip-size identity, restore-cuts
-  Welford merge, gridblk corpus gates).
-- **Product build bit-stable**: `tier_audit_features` without
-  `featcanon-oracle`, `prod` mode — 0/1825 slots differ vs the oracle
-  build's `prod` on both probe pairs; and `prod` (v3, Rev4) is **bitwise
-  identical to the featcanon reviewer's `vec_review_fix_rev4_v3` dumps**
-  (pre-change `13587bed` binaries) on all 12 pairs — 21,900 slot-values, 0
-  differences.
-- **Tier parity**: c64/neum/exact v3 ≡ v4x ≡ scalar bitwise (2 pairs × 1825).
-- **Coverage check**: prod-vs-c32 slot diffs — 0 on csfw/basic/peaks/masked/
-  iw/dvifm/dvifmgate/tailhist (shipped canon ⊇ those) but nonzero on
-  append/append2/v2/gridblk/ringbasis/gmsbank/mapdev/z1max/gmsnative/arttype
-  — candidates now genuinely vary the 13 previously-unvaried families.
+
 
 ## Corpus (reviewer probe set, `/var/tmp/review-featcanon/probe/pairs.tsv`)
 

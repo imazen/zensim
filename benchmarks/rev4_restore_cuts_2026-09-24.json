@@ -1,7 +1,6 @@
 {
  "lane": "restore-cuts",
  "date": "2026-09-25",
- "feature_set_id": "basic+v2+append+append2+csfw+dvifm+gridblk+ringbasis+tailhist+arttype+gmsbank+mapdev+z1max+gmsnative+dvifmgate@w1825/unknown#eb217aec",
  "binary_sha256": "4ea8f3331fd585ae5e82e71b773a67f7a02dd8548d89ec1320c01298ee025ed5",
  "build_commit": "ec5b1821a4c60056744e8e1b56d24c276d7e9e60",
  "build_meta_sha256": "2c4114d00bb6e91e1ec54dcd0ee392ded5ff26f1f8f1aec627669b0a2f842495",
@@ -31,11 +30,6 @@
      "sha256": "379089df17ccd44807e73b582429cba952415f90707737db026e87958f96a373",
      "bytes": 86039,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "1939487460793f6d0fa93d0c8b819bf915f90fed0583740579124a9164f03d5e",
-     "bytes": 32434,
-     "dead_columns": []
     }
    }
   },
@@ -59,11 +53,6 @@
     "gmsnative": {
      "sha256": "23c6a40b2abab7c964919c8e4f0a83361c47b90df7c1c68b7d9ecdfca9213456",
      "bytes": 47029,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "1d9372bf75d7316cc42d076d3011e98a33110a53ec2e60fce59102225c913945",
-     "bytes": 17072,
      "dead_columns": []
     }
    }
@@ -89,11 +78,6 @@
      "sha256": "c024d87c0ce998db4101f30d8210f70c5a79a1a242016d0d0a99b20b96491e7e",
      "bytes": 301940,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "1aabb514be62c34d9c4944f48143011c7596cf5c902b924ba903cde4efc3b819",
-     "bytes": 116196,
-     "dead_columns": []
     }
    }
   },
@@ -117,11 +101,6 @@
     "gmsnative": {
      "sha256": "9c01960f54f91e824558dd3db0ab6bfe3f0bf9bcd0eb1edbcc4484645d76042b",
      "bytes": 290840,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "bb6d47de123751ad2de49caba8b17f34c5485911bd66e95d1ecaf3c0eadcb017",
-     "bytes": 113847,
      "dead_columns": []
     }
    }
@@ -147,11 +126,6 @@
      "sha256": "e62250da4cc87754939c259c313a24a82747080a470f1bc09cdc853e5ba37026",
      "bytes": 2285066,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "c815e7590f5ff87eb18216a7b13d9e403f0cc3a20b6e1cca5fb3ae4ab4395e40",
-     "bytes": 877876,
-     "dead_columns": []
     }
    }
   },
@@ -175,11 +149,6 @@
     "gmsnative": {
      "sha256": "08551ad812e0ce5cb3564a051374e39aa7d2d34d412e4dd3e06af2c1119188b7",
      "bytes": 125877,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "6d1557958513b125c278e0cb6f948c2dfb97becb5ee6b5b467ee5de2d8003ec3",
-     "bytes": 44519,
      "dead_columns": []
     }
    }
@@ -205,11 +174,6 @@
      "sha256": "54ec9aec6c3a0b53dfd6e4ef8bfa79c56f8718bc0a53be86e3ebfbfc335f430f",
      "bytes": 429019,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "a8d0ce82cb393472faf04657d366d95f09d2f138db9568b5d2a740e476c741f5",
-     "bytes": 158340,
-     "dead_columns": []
     }
    }
   },
@@ -233,11 +197,6 @@
     "gmsnative": {
      "sha256": "72d1e5a6b0ba98c05c0cc4b59f05bbe9d789d3d99d2a305943b9176fb1262ff5",
      "bytes": 278393,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "b7c7e61d33f52aa0b9a6c1d4f129a648a18b0ec30e4d8b15a0a84c2bffd811fc",
-     "bytes": 100920,
      "dead_columns": []
     }
    }
@@ -263,11 +222,6 @@
      "sha256": "22e124677ffacc6c4fd50d62c0f3a0a53c6ccf8172e39e5be647f5ffdb4973d5",
      "bytes": 665133,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "aeb1c8dcb395e6a7409f2701f45871f3ab10eff0a685f47c9af5bfc969ab71d6",
-     "bytes": 239164,
-     "dead_columns": []
     }
    }
   },
@@ -292,11 +246,6 @@
      "sha256": "743529e0606c688608f6d0e3dbb09e125d3ebf8816b1afefb5232591e375f486",
      "bytes": 51635,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "70845ab3cc7c62885053cca696284ccbdd92d91dd6394115999ca329f2985ce8",
-     "bytes": 16171,
-     "dead_columns": []
     }
    }
   },
@@ -320,11 +269,6 @@
     "gmsnative": {
      "sha256": "ce8eabbcb74429592b28fa1c45810ac6a6b3e57f2b5407a87e7059bcdd3c0590",
      "bytes": 66025,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "76ae78d4911b71a5b3c519b678fef901ad62302b7ebfb170bca553d245d05c1c",
-     "bytes": 23570,
      "dead_columns": []
     }
    }
@@ -352,11 +296,6 @@
      "sha256": "d52c264964e953490a751481dcb48c1428bb948958b297f6605f5ebe1c45abea",
      "bytes": 1053748,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "2b188d1db20a0d71825568db0a36517dde7eb21bcbee7a0b9dd73d03ce49f8b5",
-     "bytes": 410967,
-     "dead_columns": []
     }
    }
   },
@@ -383,11 +322,6 @@
      "sha256": "cd8147028f8bf8e1b28e04c8f1eb1928aaff4d7002692ce9893a31d5243a5d58",
      "bytes": 275825,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "c373730096c0e358fda012d99cbc8520b1c0a616dc7edd524ac02ca59887fe44",
-     "bytes": 110055,
-     "dead_columns": []
     }
    }
   },
@@ -413,11 +347,6 @@
     "gmsnative": {
      "sha256": "a13d2c5e94ee1974dd5a67c8790273bd0d90a0b27ab4cf98f64253efa9ec44a2",
      "bytes": 63601,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "f34e4e9cf099f0ae0d6ea48dd864bf0109a7048fe551998b329c5f878d754020",
-     "bytes": 22974,
      "dead_columns": []
     }
    }
@@ -447,11 +376,6 @@
      "sha256": "c1631819c7e25d1fa3c82fb95fda7b76859f3c0a6b083bf37c5602c76a951793",
      "bytes": 21920,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "37e48f5dd78849272838063f8d085dca65134f07b3f396d56848ed52343a709e",
-     "bytes": 7312,
-     "dead_columns": []
     }
    }
   },
@@ -475,11 +399,6 @@
     "gmsnative": {
      "sha256": "1c7c35159632cb40e9f62ad83f84babb8d47e9b2dbb761436f29fa711f810c00",
      "bytes": 644087,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "ae946ca89b7d5523ab723481862d481dd162336e9291f533fe08e726e413e317",
-     "bytes": 255762,
      "dead_columns": []
     }
    }
@@ -505,11 +424,6 @@
      "sha256": "5d9f316bcfa7b654edfd71bff1957c5f992141b6864cb663a4a488aa37c1b467",
      "bytes": 25986734,
      "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "0726d13cdb86ce6986ba692cfd55217f3ef285621ce919de415eea3308e4cba6",
-     "bytes": 9930067,
-     "dead_columns": []
     }
    }
   },
@@ -533,11 +447,6 @@
     "gmsnative": {
      "sha256": "6aa0ffca0720d94acdf8c54f1f2c09db94d278df102fbcfd5c70e165d4d025c0",
      "bytes": 423268,
-     "dead_columns": []
-    },
-    "dvifmgate": {
-     "sha256": "f438fa33a427f225a015b88307ac42a77acbb3ff4846da8ea4a4d27c2f82499e",
-     "bytes": 153132,
      "dead_columns": []
     }
    }

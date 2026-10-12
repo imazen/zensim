@@ -51,7 +51,7 @@ are pre-Rev3 era-1 720 tables; [SS] rows are Rev3.
 | `append` f720-923 | luminance-bin error, MSCN, contrast gain/loss, texture, GMS/ART/DET deviation, GLOBAL_* moments | v2 + append marginal +7.4/+38.9/+159.3 ms [FC :346] | class-C 24 slots cost ~1.3-1.5% (`free_features_classC_2026-09-04.md`) | **F5**: raw-moment slots fail route parity, 9.12% of cells over 2e-5, worst 3.63e-3 (catastrophic cancellation). Deviation pooling on the 228 surface: −0.0039, 0/5 seeds (`zensim--gmsd` `benchmarks/gmsd_2026-09-22.md`) | **fix** F5 before any bake reads those slots; keep the rest |
 | `append2` BANDVIS f924-943 | curvature band-pass banding visibility + LUMA_MEAN_REF + HDR highlight bins | +1.79% (`append2_bandvis_gates_2026-07-27.md`) | LOO Σ −0.069 PASS (`bandvis_loo_944_2026-07-28.md`); LOSS s3 SROCC −0.447 on LIVE-YT-Banding | GAIN weak; dst-activity toggle falsified (`bandvis_dst_activity_2026-08-02.md`) | **keep**, dst-activity OFF |
 | `csfw` f944-955 | luminance-CSF-weighted GLOBAL_* | ≤ +1.39% | cross-route SROCC 0.8497 → 0.9520 (`csf_tier1_gates_2026-07-28.md`) | LOO Σ **+0.061**, FAIL (`csfw_g6_loo_2026-07-29.md`) | **drop** from new read sets; the potential run re-tests it (cheap; the LOO was no-refit) |
-| `dvifm` f956-985 | parametric visibility-weighted 5×5 block error + 5 log-contrast bins, 5 levels, luma | i16 serving kernel 0.94× of baseline at 1024² 1T (`LANE_GEOMETRY_DONE.md`) | JPEG/JP2K per-type in-sample rank 0.921/0.944 (`dvifm_faithful_2026-09-22.md` probes); edge-discount +0.055 KADID-nt, +0.037 CID22-A | standalone below fast-ssim2 on real labels (`dvifm_verdict_2026-09-20.md`); in-sample ceiling 0.792 on TID | **keep** (the DVIFM-ish components) |
+
 
 ### 1.1 Candidate additions (IDs from 986, append-only; next free = 986, `feature_defs.rs:2172`)
 
@@ -59,21 +59,7 @@ Each candidate answers a measured failure or a peer's measured strength. The zen
 W7 "blockiness cannot see phase-shifted (re-cropped) lattices" and W6 pooling gaps (lines 248-272). All candidates are Y **and** X/B
 unless stated, 4 scales, and difference-form (0 on identity).
 
-- **C1 — grid-phase blocking with a magnitude basis.** *Failure:* E1b. C over-rates JPEG in 484 of 510 wrong
-  CID22-A pairs, while every zensim model under-rates JPEG on AIC-3 (C 85/94) and the AIC-4 crop (162/162)
-  (`rev4_e1b_crosscodec_2026-09-23.md`). That is the flat-response signature. *Mechanistic hypothesis, to test
-  and not assume:* the contrast-invariant ratio above cannot express "invisible faint grid" vs "visible
-  strong grid". *Definition:*
-  - per scale `s`, the grid period `P_s = 8/2^s` for luma (8, 4, 2; not defined at scale 3) and `16/2^s` for
-    the 4:2:0 chroma lattice on X/B;
-  - the phase is estimated from the reference-vs-distorted step-energy profile over the P phases (argmax;
-    ties go to phase 0), so crops and shifts are handled;
-  - boundary step excess `e = |Δd| − |Δs|` is compared **on grid vs off grid** (phase contrast removes blur
-    and noise that raise steps everywhere);
-  - `e` is normalised by the local activity of the two neighbouring blocks (divisive masking, the existing
-    `C_ACTIVITY` saturator), in absolute Y units, not relative to the step;
-  - output = **6 fixed log-magnitude bins** (triangular, as in DVIFM's 5 bins) + on-grid mean + on/off ratio
-    = 8 signals per channel per scale.
+
 
   The bins give lasso and the linear projection a piecewise basis to *learn* the response shape. That is the
   difference from block5 and zgeom: those changed the *pooling* (5×5 lattice, p90, gates, softmax) of
@@ -101,20 +87,7 @@ unless stated, 4 scales, and difference-form (0 on identity).
   - **colour bleeding** (new): X/B gradient energy displaced from luma edges. It is `dst` chroma-edge energy
     outside a ±1-px luma-edge mask, relative to `src`.
 
-  *Target:* E1b's cross-codec deficit of C on CID22-A (−0.0089 [−0.0130, −0.0049]). Only colour
-  bleeding is new arithmetic. Cost goal ≤ 3%.
-- **C5 — visibility in cycles/degree.** No new extraction for the linear part. At a declared ppd, pyramid
-  scale `s` covers roughly `ppd/2^(s+1)` cpd, so a CSF weight per scale is a *reparameterised linear
-  projection* of the per-scale features already in the bank. The potential run fits it as a constrained
-  projection at E2a's documented geometries: CID22 46.9, KonJND 24.3, UPIQ-SDR ~51-57 ppd
-  (`rev4_e2a_cvvdp_display_2026-09-23.md`). A nonlinear post-CSF masking stage stays with E3, now a side
-  experiment. Status: candidate, bank-free.
-- **C6 — chroma coverage: no separate family.** zensim computes X/B throughout, and GMSD's colour blindness
-  is a peer weakness (`gmsd_2026-09-22.md`). The chroma wave was *refuted* validation-first (Y-only matched
-  full-944 on chroma-distortion MOS; `../zenpapers/docs/zensim-720-feature-gaps-2026-07-26.md` line 28), so
-  C1's chroma lattice and C4's colour bleeding are **low prior**, included only because they are near-free.
-- **C7 — DVIFM-ish components.** Already registered (f956-985, `--full-986 --dvifm-spec`). They enter the
-  bank as a family; nothing new to build.
+
 
 **Rev3 numerics every candidate inherits** (`PLAN_FEATURE_REV3_2026-09-09.md`, `FEATURE_DEFECTS_AUDIT_2026-09-05.md`):
 - `ZENSIM_FORMULA_REV=3` fused stable SSIM, `ZENSIM_ROOT_FORM=sqrt`, the era-2 reduction (F9);
@@ -191,14 +164,7 @@ Also reusable (Rev3 944, fresh native decode, `~/work/zensim-validation-2026-09-
 | HDR `hdr_v3mix` train | 7,410 | phase 2, separate era (`hdr-common-primaries-v2`) | TRAIN |
 | MCL-JCI | tbd | after the `datasets` lane proposes a role | USER DECISION |
 
-**Held-out (potential and 3b only; labels in a sealed directory, read only through the ledgered admission):**
-- CID22-A(25) (already fit-exposed for DVIFM constants, 2026-09-19);
-- AIC-3 CTC 600;
-- AIC-4 sample 300 (crop and full resolution separately);
-- KonJND JPEG SELECT 404;
-- CSIQ 866;
-- KonFiG `originsplit_val`;
-- KADID SELECT 3,125.
+
 
 **Never:** CID22-B(24), KonJND TERMINAL, KADID TERMINAL, `originsplit_test`, any secret holdout, and LIVE
 (target defect §8.2 until audited).
@@ -255,10 +221,7 @@ optimisation targets, not gates. Cost is reported, never used to reject a family
 - all four together ≤ +15% ST;
 - speed below 512² does not gate (REV4 user direction).
 
-**Reuse:** the fold/streaming engine (`fold_engine`, strip walk), the per-scale planner (`feature_plan`,
-scale-selective dispatch, [SS]), `incant!` tiers with `#[rite]` helpers, and the DVIFM histogram precedent.
-A scalar research kernel's cost is an upper bound only (the geometry lane measured 1.43× call-per-op vs 1.04×
-fair).
+
 
 **Wall time:**
 - measured today: SafeSyn full944 took 4,347.6 s at 8 threads and CID22 TRAIN 134.7 s

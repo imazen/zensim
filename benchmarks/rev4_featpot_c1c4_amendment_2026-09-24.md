@@ -31,13 +31,7 @@ the order is a compute schedule, not a selection rule. The registered five
 families and all human-set D5 tests remain mandatory regardless of early
 results. The in-progress P0/P2 grid does not block starting a candidate arm.
 
-The registered widths are C1 `gridblk` f986–f1081 (96), C2 `ringbasis`
-f1082–f1153 (72), C3 `tailhist` f1154–f1297 (144), C4 `arttype` f1298–f1321
-(24), and all C f986–f1321 (336). The diagnostic model packs each added arm's
-canonical IDs after f0–f943, so packed f944+j maps to that arm's ordered
-canonical ID j. DVIFM f944–f985 is absent and never read; every result must
-record the mapping. This makes a 1040, 968, 1016, 1088, or 1280-column
-diagnostic fit, respectively.
+
 
 ## BVLS direction and mask, fixed before fitting
 

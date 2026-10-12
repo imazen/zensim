@@ -81,20 +81,7 @@ Tier-stable already (verified by code reading; elementwise or plain-seq f64):
 `box_spread_*`, `compute_xyb_mean_offset`. era-2 dense kernel is canon by
 design (`dense_block_kernel_era2`, default-on via ZENSIM_ERA2_DENSE != 0).
 
-Still to canonicalize (Rev3-path walk leaves + restore families):
-- `feature_v2.rs` block kernels: `gradient_block_kernel` 6 entry variants,
-  `append_block_kernel` 3 variants, `csfw_block_kernel`, `gridblk_strip_wide`,
-  `dst_y_edge_mask`, `n::*` families (ringbasis/tailhist/arttype via `n::run`
-  + `finish_n_cell`), `gmsbank` (gradient `_gmsbank` variants), restore-cuts
-  `mapdev`/`z1max`/`gmsnative`/`dvifmgate` (restore_maps kernel).
-- `dvifm.rs`: `dvifm_push_rows_*`, `dvifm_finish_*`.
-- `simd_ops.rs` ssim_signal_inline_*/ssim_channel_*: only on the Rev1 walk arm
-  (`!fused_ext`); NOT reachable under Rev3+ — canon rev sits on Rev3 → skip.
-- Dense: under exact mode route `dense_block_kernel` → exact oracle
-  (`feature_v2::oracle::dense_reference` or f64 sibling of era2 body incl.
-  `r4` extras — CHECK r4 coverage in oracle).
-- Check for any other incant leaves reachable: `attr_pass_b_*` (attribution —
-  verify whether everything() calls it).
+
 
 ## Revision plumbing (NOT yet done)
 
@@ -131,13 +118,7 @@ With ONLY opsin-XYB + fused_blur_h_ssim + fused_vblur_{ssim,edge} canonicalized:
 - v4x: 0/1825 diffs; v4: 0/1825 diffs (both pairs)
 - scalar: 8/1825 diffs — ALL `csfw_w_global_*` slots (worst rel 3.3e-5)
 
-Interpretation: every other block kernel (gradient, append, n::*,
-restore-cuts, gridblk, dst_y_edge, dvifm) is already tier-stable once its
-INPUT PLANES are canonical — their divergences were inherited from XYB/blur/
-fused-vblur. The only divergent leaf left is `csfw_block_kernel` (Horner
-`w` via unfused scalar mul_add + f32 lanes + an f64-formula scalar tail).
-Canonical csfw body written (`csfw_block_kernel_canon` + `csfw_row_canon<P>`,
-exact arm in-line) — pending verification.
+
 
 Note: canon mode NOT yet wired to a revision; all hooks gate on
 `ZENSIM_FEATCANON` only.
@@ -224,26 +205,3 @@ raw dumps (now `/var/tmp/featcanon/lane-scratch/vecs`, symlinked from `~/tmp/dev
 
     scripts/featcanon_error_table.py --vecs /var/tmp/featcanon/lane-scratch/vecs table basic,csfw,tailhist,append
     scripts/featcanon_error_table.py --vecs /var/tmp/featcanon/lane-scratch/vecs split
-
-- **"accumulation choice moves nothing measurable" / "IDENTICAL profiles" — holds only for the fused-V-blur pools**
-  (basic, peaks, masked, iw): f32-lane accumulation error A32 = |c32−c64|/|exact| is 10⁻⁹–10⁻⁴ relative (basic:
-  median 8.38e-10, max 1.72e-04) against element error E = |c64−exact|/|exact| (basic: median 8.52e-07).
-  - csfw is the counter-case: c64/neum max_rel 7.630e-05 vs c32 1.378e-03 (18× lower), medians 5.717e-08 vs
-    5.408e-07; A32 > E on 44.7 % of csfw cells.
-  - 13 of 18 families were never varied: c32 ≡ c64 bitwise (A32 = 0) in v2, append, append2, dvifm, gridblk,
-    ringbasis, tailhist, arttype, gmsbank, mapdev, z1max, gmsnative and dvifmgate. The exact arm replaces only XYB,
-    the H/V blurs, the fused-V-blur pools and csfw, so those families' own accumulation error is unmeasured.
-  - All candidates keep f32 H/V sliding-window recurrences; the exact arm runs them in f64. Part of the "element"
-    error is therefore sequential accumulation; the split was not isolated.
-- **"max ABSOLUTE error ≤ ~1.9e-3 everywhere" is false**: tailhist max_abs = 1.232e-02 (production and candidates).
-- **"9 real TRAIN" pairs** — actually 2 TRAIN, 3 SELECT, 6 T0 (five AIC-3 CTC pairs + the AIC-3 mosaic); two pairs
-  (`kadid512x384`, `konfig384x512`) are pixel-identical. See the `docs/DATA_SPLITS.md` ledger entry
-  "2026-09-25/26: featcanon tier-parity audit and its fix". Scalar baseline divergence is 125–1615 slots/pair
-  (non-identity minimum 1523), not "~300–1614" / "~400–1600".
-- **"tier-identity is structural"** — measured, not structural: dvifm still calls the platform libm.
-- **Revision plumbing** (above: "`featcanon::mode()`: env override else Rev4→Canon32"; "hooks gate on
-  `featcanon::active()`") was process-keyed and silently mixed revisions in both directions. featcanon-fix derives
-  the mode from each computation's revision (`featcanon::mode(revision)`), refuses Rev4 on every served/HDR entry
-  and any Rev4 mix, gates `ZENSIM_FEATCANON` and the exact bodies behind the `oracle` feature, registers
-  `tiercanon` (`feature_defs::ARITHMETIC_REVISIONS`), and retires `featcanon_audit` into
-  `tier_audit_features` (`--features featcanon-oracle` for the measurement modes).

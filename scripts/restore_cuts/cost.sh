@@ -12,7 +12,7 @@ for threads in 1 8; do
     out=$ROOT/cost_${tag}_mt${threads}.zenbench
     rm -f "$out"
     flock /home/lilith/tmp/devin/heavy.lock env \
-        ZEN_XP_ARMS=fold1502_gmsbank,fold1562_mapdev,fold1790_z1max,fold1820_gmsnative,fold1825_dvifmgate \
+        ZEN_XP_ARMS=fold1502_gmsbank,fold1562_mapdev,fold1790_z1max,fold1820_gmsnative \
         ZEN_XP_SIZES=256,1024,2048,4096 ZEN_XP_ROUNDS=8 ZEN_XP_MIN_ROUNDS=8 ZEN_XP_WALL_S=180 \
         ZENSIM_FORMULA_REV=3 ZENSIM_ROOT_FORM=sqrt RAYON_NUM_THREADS=$threads ZENBENCH_RESULT_PATH="$out" \
         "$exe" 2>&1 | tail -80

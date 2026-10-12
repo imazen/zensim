@@ -32,11 +32,11 @@ from v2_common import (AUX_ADDED, AUX_GMSBANK, AUX_ORACLE, AUX_PEERS, FAMILIES, 
                        ORACLE_SIGMA, PERM_SEED_BASE, R915_TABLES, SOURCE_ORDER, SOURCES, TEACHER_PIN,
                        TEACHERS, V2, VARIANTS, WIDTH, human_dev, sha)
 
-RESEARCH_IDS = list(range(944, WIDTH))
+RESEARCH_IDS = [i for i in range(944, WIDTH) if not (956 <= i < 986 or 1820 <= i < 1825)]
 RESTORE_BANK = Path("/var/tmp/restore-cuts/bank")
-PARTB_FILES = {"csfw_dvifm": "features__csfw_dvifm.parquet", "c1c4": "features__rev4c1c4.parquet",
+PARTB_FILES = {"csfw": "features__csfw.parquet", "c1c4": "features__rev4c1c4.parquet",
                "gmsbank": "features__gmsbank.parquet"}
-RESTORE_FILES = {f: f"features__restore_{f}.parquet" for f in ("mapdev", "z1max", "gmsnative", "dvifmgate")}
+RESTORE_FILES = {f: f"features__restore_{f}.parquet" for f in ("mapdev", "z1max", "gmsnative")}
 FEATURES = [f"f{i}" for i in range(WIDTH)]
 BANK_ID = "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#b782e349"
 
@@ -124,6 +124,8 @@ def teacher_set(leg: str) -> pd.DataFrame:
         out = out.merge(side, on="pair_key", how="left", sort=False, validate="many_to_one")  # joinsafety-ok: pair_key-keyed sidecar join, coverage asserted below
     peer = pq.read_table(files["peer"], columns=["pair_key", "gmsd", "gmsm"]).to_pandas().drop_duplicates("pair_key")
     out = out.merge(peer, on="pair_key", how="left", sort=False, validate="many_to_one")  # joinsafety-ok: pair_key-keyed peer join, coverage asserted below
+    for i in (*range(956, 986), *range(1820, 1825)):
+        out[f"f{i}"] = np.float32(0.0)
     need = [f"f{i}" for i in range(WIDTH)] + ["gmsd", "gmsm"]
     if out[need].isna().any().any() or not np.isfinite(out[need].to_numpy(np.float32)).all():
         raise ValueError(f"{leg}: missing or nonfinite feature after joins")

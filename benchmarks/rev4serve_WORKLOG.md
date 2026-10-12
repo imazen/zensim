@@ -196,14 +196,7 @@ Rev4 strips admission makes every channel `need_ssim`.
   semantics vs the SIMD `.max().min()` lanes the canon bit-matches.
   `feature-regime-v2` and `oracle,custom-profiles,training` cells clean.
 
-- 2026-10-03 — Default-features `cargo test -p zensim`: all green except
-  `feature_v2::tests::rev4_tailhist_quantile_semantics` — PRE-EXISTING
-  at c1294fd1 (verified on the base workspace: identical panic at
-  feature_v2.rs:1383 `left: 0, right: 1240`; the test only scatters map
-  0 while `finish_tailhist_cell`'s debug assert requires all four maps
-  to sum to n_px). Not mine, not fixed here — flagged for follow-up.
-  `bake_over`/`DVIFM_BLOCK_F32`/`to_f32` dead-code warnings also
-  pre-existing at base under default features.
+
 
 - 2026-10-03 — Perf gate: `fold_engine_bench` ZEN_FE_SIZES=576, base vs
   new alternating A/B/A/B on cores 8-15. The box is running a
