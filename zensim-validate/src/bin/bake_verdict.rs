@@ -2319,6 +2319,135 @@ const ZONE_LABELS: [&str; 3] = ["q<50", "q50-85", "q>=85"];
 /// negated to quality orientation) reads the same as it would on a 0..100
 /// dial. `correct (non-decreasing)` = forward + tie, the convention of the
 /// AIC2026 ladder panel (`scripts/aic2026_agreement.py`).
+/// Dial points at which the JND side output is reported: "the
+/// targeting-relevant dial points (90, 80, 70 in today's units)", Phase A of
+/// `docs/JND_DIAL_PLAN_2026-10-11.md`.
+const JND_DIAL_POINTS: [f64; 3] = [90.0, 80.0, 70.0];
+
+/// sha256 of the bake embedded as `ZensimProfile::B`
+/// (`zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin`).
+const PROFILE_B_BAKE_SHA256: &str =
+    "a96a5a66cd16282ded84580c37207b403334f1af069c924d9883346d23941276";
+
+/// The declared JND map that applies to the scored surface, with the profile
+/// name it belongs to, or the reason none applies. A map is calibrated on one
+/// profile's served score, so it applies only when the surface IS that
+/// profile: one member whose bytes are the profile's bake, no corruption head,
+/// and the dial panel scored that member rather than a peer's stored scores.
+fn jnd_map_for_surface(
+    member_sha256: &[String],
+    corruption_head: bool,
+    peer: bool,
+) -> Result<(&'static str, zensim::JndMap), String> {
+    if peer {
+        return Err("the dial panel describes a peer's stored scores, not `--bake`".into());
+    }
+    if corruption_head {
+        return Err("a corruption head composes the scored surface; no profile serves it".into());
+    }
+    match member_sha256 {
+        [one] if one == PROFILE_B_BAKE_SHA256 => {
+            let profile = zensim::ZensimProfile::B;
+            profile
+                .jnd_map()
+                .map(|m| (profile.name(), m))
+                .ok_or_else(|| "profile B declares no JND map".into())
+        }
+        [_] => Err("the bake is not a served profile's bake; no declared JND map applies".into()),
+        _ => Err("an ensemble is not a served profile; no declared JND map applies".into()),
+    }
+}
+
+/// One JND estimate as a JSON object.
+fn jnd_estimate_json(e: zensim::JndEstimate) -> serde_json::Value {
+    serde_json::json!({"in_range": e.in_range(), "jnd": e.jnd(), "uncertainty": e.uncertainty()})
+}
+
+/// The grid point of one codec curve whose median dial is nearest `target`:
+/// `(q, p25, median, p75)`. `None` for an empty curve.
+fn nearest_curve_point(curve: &CodecCurve, target: f64) -> Option<(f64, f64, f64, f64)> {
+    curve
+        .pts
+        .iter()
+        .copied()
+        .filter(|p| p.2.is_finite())
+        .min_by(|a, b| (a.2 - target).abs().total_cmp(&(b.2 - target).abs()))
+}
+
+/// The JND side-output section: markdown and its JSON twin. Report-only; it
+/// reads the dial panel's per-codec curves and changes nothing about the dial.
+fn jnd_side_output(
+    map: &Result<(&'static str, zensim::JndMap), String>,
+    curves: &[CodecCurve],
+) -> (String, serde_json::Value) {
+    let mut s = String::from("\n## JND side output (dial plan Phase A, report-only)\n\n");
+    let (name, map) = match map {
+        Ok(m) => *m,
+        Err(reason) => {
+            s.push_str(&format!("No declared JND map: {reason}.\n"));
+            return (
+                s,
+                serde_json::json!({"map": null, "reason": reason, "points": [], "per_codec": []}),
+            );
+        }
+    };
+    let max = map.max_jnd();
+    s.push_str(&format!(
+        "Map: `{name}` (`ZensimProfile::jnd_map`), `J(s) = a·max(0, 100 − s)^c`, calibrated on the \
+         KonFiG-IQA F-scale TRAIN sources (F-scale JND), SDR, native pixels with no display model \
+         (`benchmarks/jnd_phase_a_2026-10-11.md`). Supported maximum: {}. Beyond the supported range \
+         the map reports \"beyond JND range\", never a number. The dial is unchanged.\n\n",
+        match max {
+            Some(m) => format!("{m} JND"),
+            None => "none — the calibration supports no range above identity".into(),
+        }
+    ));
+    let points: Vec<_> = JND_DIAL_POINTS
+        .iter()
+        .map(|&d| (d, map.estimate(d)))
+        .collect();
+    s.push_str("| dial | J |\n|--:|---|\n");
+    for (d, e) in &points {
+        s.push_str(&format!("| {d:.0} | {e} |\n"));
+    }
+    s.push_str(
+        "\nPer codec, at the grid setting whose median dial is nearest each point (J at that \
+         setting's p75 / median / p25 dial across image ladders; a higher dial is a smaller J):\n\n\
+         | codec | dial point | q | median dial | J @p75 | J @median | J @p25 |\n\
+         |---|--:|--:|--:|---|---|---|\n",
+    );
+    let mut per_codec = Vec::new();
+    for curve in curves {
+        for &d in &JND_DIAL_POINTS {
+            let Some((q, p25, med, p75)) = nearest_curve_point(curve, d) else {
+                continue;
+            };
+            let (j75, j50, j25) = (map.estimate(p75), map.estimate(med), map.estimate(p25));
+            s.push_str(&format!(
+                "| {} | {d:.0} | {q} | {med:.2} | {j75} | {j50} | {j25} |\n",
+                curve.codec
+            ));
+            per_codec.push(serde_json::json!({
+                "codec": curve.codec, "dial_point": d, "q": q,
+                "dial_p25": p25, "dial_median": med, "dial_p75": p75,
+                "jnd_at_p75": jnd_estimate_json(j75),
+                "jnd_at_median": jnd_estimate_json(j50),
+                "jnd_at_p25": jnd_estimate_json(j25),
+            }));
+        }
+    }
+    let json = serde_json::json!({
+        "map": name,
+        "reason": null,
+        "max_jnd": max,
+        "points": points.iter().map(|(d, e)| serde_json::json!({
+            "dial": d, "estimate": jnd_estimate_json(*e),
+        })).collect::<Vec<_>>(),
+        "per_codec": per_codec,
+    });
+    (s, json)
+}
+
 fn per_codec_strict_markdown(counts: &std::collections::BTreeMap<String, [usize; 3]>) -> String {
     let mut s = String::from(
         "\nPer-codec scale-free steps (order only, \\|Δ\\| > 1e-9; reported, not gated):\n\n\
@@ -5039,6 +5168,7 @@ fn main() -> ExitCode {
         args.ensemble.clone()
     };
     let mut models: Vec<Model> = Vec::with_capacity(members.len());
+    let mut member_sha256: Vec<String> = Vec::with_capacity(members.len());
     for p in &members {
         let bytes = match std::fs::read(p) {
             Ok(b) => b,
@@ -5047,6 +5177,13 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
         };
+        match zensim_validate::train_manifest::sha256_file(p) {
+            Ok(h) => member_sha256.push(h),
+            Err(e) => {
+                eprintln!("bake_verdict: failed to hash bake {}: {e}", p.display());
+                return ExitCode::from(1);
+            }
+        }
         match Model::from_bytes(&bytes) {
             Ok(m) => models.push(m),
             Err(e) => {
@@ -6155,6 +6292,15 @@ Run the dedicated q-sweep harness for those._\n",
     );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
+    let (jnd_md, jnd_json) = jnd_side_output(
+        &jnd_map_for_surface(
+            &member_sha256,
+            ens.corruption_head.is_some(),
+            args.dial_peer_scores.is_some(),
+        ),
+        &dial_metrics.curves,
+    );
+    buf.push_str(&jnd_md);
 
     if let Some(path) = args.gaddr_json.as_ref() {
         match dial_metrics.addr.as_ref() {
@@ -6809,6 +6955,9 @@ Run the dedicated q-sweep harness for those._\n",
                 c.codec.clone(),
                 c.pts.iter().map(|&(q, p25, med, p75)| vec![q, p25, med, p75]).collect::<Vec<_>>(),
             )).collect::<std::collections::BTreeMap<_, _>>(),
+            // jnd: the declared JND side output at dial 90/80/70 (dial plan
+            // Phase A); `map: null` with the reason when no map applies.
+            "jnd": jnd_json,
             // zones: ladder inversions split by codec x quality zone and by
             // reviewed content class x quality zone — the WHERE behind
             // `mono_pct`. Same events, same MATERIAL threshold, so the
@@ -7227,6 +7376,60 @@ Run the dedicated q-sweep harness for those._\n",
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn profile_b_bake_hash_is_the_embedded_bake() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin");
+        assert_eq!(
+            zensim_validate::train_manifest::sha256_file(&path).unwrap(),
+            super::PROFILE_B_BAKE_SHA256
+        );
+    }
+
+    #[test]
+    fn jnd_map_applies_only_to_the_profile_surface_itself() {
+        let b = super::PROFILE_B_BAKE_SHA256.to_string();
+        let (name, map) =
+            super::jnd_map_for_surface(std::slice::from_ref(&b), false, false).unwrap();
+        assert_eq!(name, "zensim-b");
+        assert_eq!(Some(map), zensim::ZensimProfile::B.jnd_map());
+        let other = "0".repeat(64);
+        assert!(super::jnd_map_for_surface(&[other], false, false).is_err());
+        assert!(super::jnd_map_for_surface(&[b.clone(), b.clone()], false, false).is_err());
+        assert!(super::jnd_map_for_surface(std::slice::from_ref(&b), true, false).is_err());
+        assert!(super::jnd_map_for_surface(std::slice::from_ref(&b), false, true).is_err());
+    }
+
+    #[test]
+    fn jnd_section_reports_no_number_beyond_range_and_names_a_missing_map() {
+        let curve = super::CodecCurve {
+            codec: "jpeg".into(),
+            pts: vec![
+                (50.0, 60.0, 65.0, 70.0),
+                (80.0, 84.0, 88.0, 91.0),
+                (95.0, 95.0, 97.0, 99.0),
+            ],
+        };
+        let b = super::PROFILE_B_BAKE_SHA256.to_string();
+        let map = super::jnd_map_for_surface(std::slice::from_ref(&b), false, false);
+        let (md, json) = super::jnd_side_output(&map, std::slice::from_ref(&curve));
+        assert!(md.contains("Supported maximum: none"));
+        // dial 90 → the q=80 point (median 88); 70 → q=50 (median 65)
+        assert!(md.contains(
+            "| jpeg | 90 | 80 | 88.00 | beyond JND range | beyond JND range | beyond JND range |"
+        ));
+        assert_eq!(json["map"], "zensim-b");
+        assert_eq!(json["per_codec"].as_array().unwrap().len(), 3);
+        for row in json["per_codec"].as_array().unwrap() {
+            assert_eq!(row["jnd_at_median"]["in_range"], false);
+            assert!(row["jnd_at_median"]["jnd"].is_null());
+        }
+        let none: Result<(&'static str, zensim::JndMap), String> = Err("an ensemble".into());
+        let (md, json) = super::jnd_side_output(&none, std::slice::from_ref(&curve));
+        assert!(md.contains("No declared JND map: an ensemble."));
+        assert!(json["map"].is_null());
+    }
+
     use super::load_peer_dial_scores;
     use zensim_validate::parquet_loader::DialGrid;
 

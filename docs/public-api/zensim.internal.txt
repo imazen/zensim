@@ -16,7 +16,7 @@
 #   inherent methods                          170
 #   struct fields                             114
 #   enum variants                              34
-#   trait roster entries (type × trait)       121
+#   trait roster entries (type × trait)       123
 #   auto-trait-complete types                  24
 #
 # per-module pub lines:
@@ -432,7 +432,7 @@ pub score_math::PerSampleAlphaParams::reducer_b: f32
 pub score_math::PerSampleAlphaParams::reducer_w: [f32; 4]
 pub score_math::PerSampleAlphaParams::w_alpha: &'a [f32]
 
-## trait impls (52 types)
+## trait impls (54 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -441,6 +441,8 @@ DownscaleFilter: TrivialClone
 ErrorCategory: TrivialClone
 IwWeightConfig: TrivialClone
 IwWeightKind: TrivialClone
+JndEstimate: TrivialClone
+JndMap: TrivialClone
 UnsupportedFormat: TrivialClone
 ZensimConfig: TrivialClone
 ZensimError: TrivialClone

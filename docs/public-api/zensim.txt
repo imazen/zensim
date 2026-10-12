@@ -6,31 +6,31 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 569 lines (supported surface) | zensim.features.txt 183 added (features: avx512,candidate-profiles,classification,corruption-head,cross-revision-diagnostic,custom-profiles,deprecated-profiles,feature-regime-v2,imgref,iw-diagnostics,oracle,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 448 lines (700 hidden + 0 excluded-feature)
+# files: zensim.txt 584 lines (supported surface) | zensim.features.txt 183 added (features: avx512,candidate-profiles,classification,corruption-head,cross-revision-diagnostic,custom-profiles,deprecated-profiles,feature-regime-v2,imgref,iw-diagnostics,oracle,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 450 lines (702 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                10
-#   pub types (struct/enum/trait/alias)        42
+#   pub types (struct/enum/trait/alias)        44
 #   pub consts/statics                        112
 #   free functions                             20
-#   inherent methods                          226
-#   struct fields                              34
-#   enum variants                              97
+#   inherent methods                          233
+#   struct fields                              36
+#   enum variants                              99
 #   re-exports                                  3
-#   trait roster entries (type × trait)       136
-#   auto-trait-complete types                  30
+#   trait roster entries (type × trait)       145
+#   auto-trait-complete types                  32
 #   auto-trait exceptions                       2
 #
 # per-module pub lines:
-#   (root)                          195
+#   (root)                          206
 #   feature_set_id                   61
 #   feature_v2                      187
 #   mapping                          12
-#   profile                          30
+#   profile                          32
 #   source                           59
 
-## items (533 lines)
+## items (546 lines)
 
 pub mod zensim
 pub use Stop
@@ -313,6 +313,7 @@ pub profile::ZensimProfile::D
 pub profile::ZensimProfile::PreviewV0_1
 pub profile::ZensimProfile::PreviewV0_2
 pub const fn profile::ZensimProfile::codec_target() -> Self [also: (root)]
+pub fn profile::ZensimProfile::jnd_map(&self) -> core::option::Option<JndMap>
 pub fn profile::ZensimProfile::latest() -> Self
 pub const fn profile::ZensimProfile::latest_preview() -> Self [also: (root)]
 pub fn profile::ZensimProfile::name(&self) -> &'static str
@@ -386,6 +387,14 @@ pub DiffmapWeighting::Trained
 #[non_exhaustive] pub enum GamutMapping [also: source]
 pub GamutMapping::Clip
 pub GamutMapping::Preserve
+#[non_exhaustive] pub enum JndEstimate
+pub JndEstimate::BeyondRange
+pub JndEstimate::InRange
+pub JndEstimate::InRange::jnd: f64
+pub JndEstimate::InRange::uncertainty: f64
+pub fn JndEstimate::in_range(&self) -> bool
+pub fn JndEstimate::jnd(&self) -> core::option::Option<f64>
+pub fn JndEstimate::uncertainty(&self) -> core::option::Option<f64>
 #[non_exhaustive] pub enum PixelFormat [also: source]
 pub PixelFormat::LinearF32Rgba
 pub PixelFormat::Srgb16Rgba
@@ -419,6 +428,7 @@ pub ZensimProfile::CHdr
 pub ZensimProfile::D
 pub ZensimProfile::PreviewV0_1
 pub ZensimProfile::PreviewV0_2
+pub fn profile::ZensimProfile::jnd_map(&self) -> core::option::Option<JndMap>
 pub fn profile::ZensimProfile::latest() -> Self
 pub fn profile::ZensimProfile::name(&self) -> &'static str
 pub struct BakeScorer<'a>
@@ -478,6 +488,9 @@ pub fn FeatureView<'a>::ssim_4th(&self, usize, usize) -> f64
 pub fn FeatureView<'a>::ssim_l8(&self, usize, usize) -> core::option::Option<f64>
 pub fn FeatureView<'a>::ssim_max(&self, usize, usize) -> core::option::Option<f64>
 pub fn FeatureView<'a>::ssim_mean(&self, usize, usize) -> f64
+pub struct JndMap
+pub fn JndMap::estimate(&self, f64) -> JndEstimate
+pub fn JndMap::max_jnd(&self) -> core::option::Option<f64>
 pub struct PrecomputedReference
 pub fn PrecomputedReference::height(&self) -> usize
 pub fn PrecomputedReference::width(&self) -> usize
@@ -566,11 +579,13 @@ pub fn score_features_with_profile(profile::ZensimProfile, &[f64], u32, u32) -> 
 pub fn score_features_with_profile_and_codec(profile::ZensimProfile, &[f64], u32, u32, core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
 pub fn score_to_dissimilarity(f64) -> f64
 
-## trait impls (33 types)
+## trait impls (35 types)
 
 DiffmapOptions: Clone, Copy, Debug, Default, From<DiffmapWeighting>
 DiffmapWeighting: Clone, Copy, Debug, Default
 FeatureView<'a>: Clone, Debug
+JndEstimate: Clone, Copy, Debug, Display, PartialEq
+JndMap: Clone, Copy, Debug, PartialEq
 Zensim: Clone, Debug
 ZensimError: Clone, Copy, Debug, Display, Eq, Error, From<enough::reason::StopReason>, PartialEq
 ZensimResult: Clone, Debug
@@ -604,6 +619,6 @@ source::StridedBytes<'a>: Clone, Copy, Debug
 
 ## auto traits
 
-30 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+32 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 BakeScorer<'a>: !Freeze
 Zensim: !RefUnwindSafe !UnwindSafe

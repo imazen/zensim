@@ -8,6 +8,20 @@
 
 ### Added
 
+- `zensim` **JND side output (dial plan Phase A, new public API; PR for owner
+  review):** `ZensimProfile::jnd_map() -> Option<JndMap>`,
+  `JndMap::{estimate, max_jnd}` and `JndEstimate` (`InRange { jnd,
+  uncertainty }` / `BeyondRange`, with `in_range`, `jnd`, `uncertainty` and
+  `Display` "beyond JND range"). `Some` only for `B`: fixed-knee map
+  `J(s) = 0.012653·max(0, 100 − s)^1.3174` on B's served score over KonFiG-IQA
+  F-scale TRAIN, out-of-fold RMSE 1.427 F-scale JND; the registered join-point
+  rule finds no supported bin, so every score below 100 reports "beyond JND
+  range". Served scores, the dial and its gates are unchanged.
+  `zensim-validate` `bake_verdict` gains a "JND side output" section and
+  `dial.jnd` in `--full-json` (dial 90/80/70 per codec), attached only when the
+  scored surface is profile B's bake. `score_konfig_train.py --served` scores a
+  served-profile scorer. Record: `benchmarks/jnd_phase_a_2026-10-11.md`.
+
 - E33 derived model inputs (`zensim.derived_inputs`, registration
   `benchmarks/e33_registration_2026-10-09.md`): a bake may list its model
   inputs as declared ids (`in <id>`) and same-cell Difference × ReferenceOnly

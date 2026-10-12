@@ -396,6 +396,27 @@ impl ZensimProfile {
         Self::B
     }
 
+    /// The profile's declared JND side output, if it has one.
+    ///
+    /// Maps this profile's served [`score`](crate::ZensimResult::score) to a
+    /// [`JndEstimate`](crate::JndEstimate) (Phase A of
+    /// `docs/JND_DIAL_PLAN_2026-10-11.md`); the score itself is unchanged.
+    /// `Some` only for [`ZensimProfile::B`]; every other profile returns
+    /// `None`. B's map is calibrated on SDR input at native pixels, and its
+    /// calibration supports no range above identity, so every score short of
+    /// 100 reports "beyond JND range" (`benchmarks/jnd_phase_a_2026-10-11.md`).
+    ///
+    /// ```
+    /// use zensim::ZensimProfile;
+    /// let map = ZensimProfile::B.jnd_map().unwrap();
+    /// assert_eq!(map.estimate(100.0).jnd(), Some(0.0));
+    /// assert!(!map.estimate(90.0).in_range());
+    /// assert!(ZensimProfile::BHdr.jnd_map().is_none());
+    /// ```
+    pub fn jnd_map(&self) -> Option<crate::JndMap> {
+        matches!(self, Self::B).then_some(crate::jnd::PROFILE_B_JND)
+    }
+
     /// Canonical name string, e.g. `"zensim-b"`.
     #[allow(deprecated)] // matches the deprecated `A` arm when the feature is on
     pub fn name(&self) -> &'static str {
