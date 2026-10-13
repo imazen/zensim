@@ -1,5 +1,13 @@
 # zensim dev commands
 
+# Existing trainer Parquet loaders on the pinned 699,999-row Float32 table.
+# Run the study recipe under run-heavy; its output directory must be new.
+trainer-parquet-load-build:
+    cargo build --release -p zensim-validate --bin parquet_load_bench
+
+trainer-parquet-load-study output:
+    bash benchmarks/trainer_parquet_load_2026-10-13/run.sh {{quote(output)}}
+
 # Dataset-independent evaluation CLI; tests use synthetic fixtures only.
 metric-evaluate-check:
     cargo clippy -p zensim-validate --bin panel --bin bake_verdict -- -D warnings
