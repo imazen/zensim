@@ -28,7 +28,7 @@ use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use archmage::autoversion;
 #[cfg(feature = "threads")]
 use rayon::prelude::*;
-#[cfg(feature = "threads")]
+#[cfg(all(feature = "threads", not(target_arch = "wasm32")))]
 use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
@@ -342,19 +342,19 @@ fn redistribute_pow2x_guided_add(
 }
 
 /// Track background deallocation thread to prevent accumulation on repeated calls.
-#[cfg(feature = "threads")]
+#[cfg(all(feature = "threads", not(target_arch = "wasm32")))]
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 /// Total bytes below which we drop synchronously instead of spawning a
 /// background thread. Empirically, thread spawn + atomic-bookkeeping cost
 /// (~20 µs) exceeds the cost of freeing a small allocation. We only pay
 /// the spawn for working sets large enough to justify async munmap.
-#[cfg(feature = "threads")]
+#[cfg(all(feature = "threads", not(target_arch = "wasm32")))]
 const DEALLOC_THREAD_THRESHOLD_BYTES: usize = 4 * 1024 * 1024;
 
 /// Drop one or two `[Vec<f32>; 3]` working buffers, choosing between
 /// synchronous drop (small) and a background thread (large).
-#[cfg(feature = "threads")]
+#[cfg(all(feature = "threads", not(target_arch = "wasm32")))]
 fn dealloc_planes(p1: [Vec<f32>; 3], p2: Option<[Vec<f32>; 3]>) {
     let bytes = p1
         .iter()
@@ -380,6 +380,14 @@ fn dealloc_planes(p1: [Vec<f32>; 3], p2: Option<[Vec<f32>; 3]>) {
         drop(p1);
         drop(p2);
     }));
+}
+
+// Browser Rayon workers execute compute kernels, but std::thread::spawn is
+// unavailable on wasm32-unknown-unknown. Release buffers on the caller instead.
+#[cfg(all(feature = "threads", target_arch = "wasm32"))]
+fn dealloc_planes(p1: [Vec<f32>; 3], p2: Option<[Vec<f32>; 3]>) {
+    drop(p1);
+    drop(p2);
 }
 
 /// Per-scale feature accumulators. Collects raw sums across strips,

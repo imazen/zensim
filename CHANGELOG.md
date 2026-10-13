@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Browser WASM releases large streaming buffers without spawning unsupported native threads; Rayon metric computation is retained.
+
 ### Changed
 
 - Removed obsolete research assets; retired feature slots remain unassigned.
