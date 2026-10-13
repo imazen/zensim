@@ -35,7 +35,18 @@ for trial in 1 2 3; do
         fi
         printf 'trial=%s mode=%s\n' "$trial" "$mode" >&2
         /usr/bin/time -v -o "$out/$mode-$trial.time" \
-            "$binary" "${args[@]}" > "$out/$mode-$trial.json"
+            "$binary" "${args[@]}" > "$out/$mode-$trial.stdout"
+        python3 - "$out/$mode-$trial.stdout" "$out/$mode-$trial.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+lines = Path(sys.argv[1]).read_text().splitlines()
+if len(lines) != 2 or not lines[0].startswith("  bench: loaded "):
+    raise SystemExit("unexpected trainer-loader or benchmark output")
+record = json.loads(lines[1])
+Path(sys.argv[2]).write_text(json.dumps(record, sort_keys=True) + "\n")
+PY
         jq -e --arg mode "$mode" '
             .mode == $mode and .rows == 699999 and .logical_features == 944 and
             .stored_values == (if $mode == "flat64" then 660799056 else 44799936 end) and
