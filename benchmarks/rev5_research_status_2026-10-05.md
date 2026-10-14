@@ -711,3 +711,18 @@ Open owner decisions:
 3. The G-STEER population: 135 cases or 143.
 4. zenanalyze PR #90.
 
+## 42. JND side output, Phase A, merged (2026-10-12, main `22329a40`)
+
+- **zensim PR #68 is merged by the owner.** It adds `ZensimProfile::jnd_map`, `JndMap` and `JndEstimate`, plus a JND
+  section in `bake_verdict`. zenmetrics PR #68 (`KneePowerFixed`, `Interval::student`, `jnd_calibrate`) was merged
+  as a fast-forward, so the hashes cited in the protocol stand.
+- **Only the shipped profile B gets a map.** Under the registered rule (protocol §7), B has no supported range on
+  KonFiG TRAIN:
+  - the lowest 0.5-JND bin's out-of-fold RMSE is 1.47 JND against the 0.75 bar;
+  - B's side output therefore reports "beyond JND range" below 100 and 0 JND at 100;
+  - B has no KonFiG training leg, and the F scale is boosted.
+
+  Candidates A and seed 0 support up to 1.5 JND (report-only); they aren't served profiles yet.
+- **The dial and every served score are unchanged.** Phase B, with AIC2026 labels, provides the calibration that
+  turns on real numbers.
+
