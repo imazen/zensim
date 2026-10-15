@@ -29,7 +29,7 @@
 
 ### Changed
 
-- Steering maps and the G-STEER instrument use the exact loaded-network gradient, including derived inputs and calibration derivatives (owner D12); ordinary score output is unchanged.
+- Steering maps and the G-STEER instrument use the exact loaded-network gradient, including derived inputs and calibration derivatives (owner D12, `0d63ba5c`); ordinary score output is unchanged.
 
 - Removed obsolete research assets; retired feature slots remain unassigned.
 

@@ -179,7 +179,12 @@ def d12_summarize(root):
                 assert r['sensitivity_bits']==s['sensitivity_bits']
                 tier_pairs+=1
     result['synthetic_score_parity']=dict(model_tier_geometry_ladder_rows=comparisons,gradient_tier_row_pairs=tier_pairs,score_feature_bits_unchanged=True,gradient_bits_tier_equal=True)
-    result['gradient_reference']=json.loads((root/'gradient-reference.json').read_text())
+    result['gradient_reference']=json.loads((root/'gradient-reference-final.json').read_text())
+    result['artifact_hashes']={name:sha(root/name) for name in [
+        'before-timing.jsonl','after-timing.jsonl','before-prodqual.json',
+        'after-prodqual.json','gradient-reference-final.json','reference-job-final.json']}
+    result['part4_model_packet_sha256']=sha(root.parent/'part4/full-job.json')
+
     import re
     logs=Path('/home/lilith/tmp/e34prep')
     result['resource_receipts']={}
@@ -191,12 +196,131 @@ def d12_summarize(root):
     print(json.dumps({k:v for k,v in result.items() if k not in ['timings','gradient_reference']},indent=2))
 
 
+
+def d12_documents(root):
+    data=json.loads((root/'summary.json').read_text())
+    repo=Path(__file__).resolve().parents[2]
+    receipt=repo/'benchmarks/e34_d12_2026-10-15.json'
+    assert not receipt.exists()
+    receipt.write_text(json.dumps(data,indent=2,allow_nan=False)+'\n')
+    amendment="""### D12 amendment — 2026-10-15, before freeze
+
+G-STEER sensitivity is the exact loaded-network gradient, chosen by the owner
+in D12. Both the encoder-facing prepared steering map and the packet's linear
+gain use the same existing scorer owner: stored weights/scales, active units,
+chain rule through derived inputs, PCHIP derivative and existing clamp/floor
+handling. Prepared lower-floor recovery remains the registered policy for an
+isolated bake. Ordinary score arithmetic is unchanged.
+
+The same pinned 135 cases and four fixed models (A, C, production seed 0
+and the part-3 L smoke) give these new controls:
+
+| Control | Previous joint | Exact M2 | Exact M3f | Exact joint |
+|---|---:|---:|---:|---:|
+"""
+    for name,m in data['models'].items():
+        amendment+=f"| {name} | {m['before_pass']}/135 | {m['m2_pass']}/135 | {m['m3f_pass']}/135 | {m['after_pass']}/135 |\n"
+    amendment+="""
+Decision rule otherwise unchanged: M2 ≥ .99 and M3f ≥ .70 on every case,
+qualification 135/135. The eligibility, non-inferiority, Holm, seed, guards,
+label/split protections and all other registered numbers remain unchanged.
+Historical finite-difference results in the retained revision-4 text below
+remain historical evidence. No model is adopted by this amendment, and the
+remaining worker/image/jobset/source-closure qualifications still prevent freeze.
+
+The new baseline recomputes maps, exact derivatives, native scores and local
+replay using the immutable native repair feature captures. Hash-bound capture
+admission checks pixel-file identity and current native consumed base features;
+all original repair score bits agree. Every original output field on the 107
+completed full-pixel A cases agrees with this feature reuse. The
+[measured receipt](e34_d12_2026-10-15.json) binds the packets and result hashes.
+"""
+    freeze=repo/'benchmarks/e34_registration_freeze_draft_2026-10-15.md'
+    text=freeze.read_text();assert '### D12 amendment' not in text
+    freeze.write_text(text.replace('\n---\n', '\n'+amendment+'\n---\n',1))
+    report="""# E34 part 6 — exact-gradient preparation, 2026-10-15
+
+Owner D12 is implemented in the served steering map and G-STEER instrument.
+The historical public method name `score_features_fd_gradient` is retained for
+source compatibility; its map path now differentiates analytically. The old
+production finite-difference helper was removed. Ordinary forward scoring is
+unchanged. This is a local preparation receipt, with no push or fleet execution.
+
+"""+amendment+"""
+## Derivative and score checks
+
+The independent part-4 f64 reference checks all 720 feature coordinates on all
+135 base rows for each model, tolerance `1e-10*(1+abs(reference))`. Independent
+f64 central differences use `h=1e-6*(1+abs(x))`, halved up to 20 times to avoid
+ReLU/floor/cap crossings, tolerance `1e-7*(1+abs(fd))`. The excluded crossing
+coordinates are reported, not counted as passes.
+
+| Model | Analytic coordinates | FD coordinates | Crossing exclusions | Max analytic abs error | Max FD abs error |
+|---|---:|---:|---:|---:|---:|
+"""
+    for m in data['gradient_reference']['models']:
+        report+=f"| {m['model']} | {m['analytic_coordinates']} | {m['f64_fd_coordinates']} | {m['crossing_coordinates_excluded']} | {m['max_analytic_error']:.17g} | {m['max_f64_fd_error']:.17g} |\n"
+    report+="""
+FD tolerance scales with the derivative; the largest absolute FD error is not
+an absolute-only tolerance failure. Each model also passes 1,350 base-row/tier
+checks. The paired synthetic probe preserves score/feature bits in 1,120 rows
+and exact gradient bits in 1,008 tier comparisons. The registered packet's
+base and every repair score bit remain identical for all four models.
+
+Loaded f32/f16/i8 derivatives, transforms, pool heads, per-sample gates,
+PCHIP/floor/cap boundaries, ensembles, defaults, refusal cases, strided SDR,
+and the existing strided/native HDR owners pass local tests. Existing dense
+layout, revision, feature and score cross-tier parity suites pass unchanged.
+A new dispatch test initially raced unrelated pixel tests; isolating token
+overrides in a child process fixed the unchanged equality assertion. The custom-profile owner suite passes 36 tests with one pre-existing external
+artifact audit ignored; the corruption-head owner suite passes 42 with three
+pre-existing external artifact audits ignored. No ignore was added.
+A corruption-companion floor-recovery regression failed before the fix and
+passes afterward. Strict clippy and formatting pass. The no-default-features build passes with
+eight dead-code warnings in the unchanged feature-canonicalization module.
+ARM/WASM execution was
+not performed in this local lane; only host-supported permutations were run.
+
+## Paired prepared-map times
+
+Milliseconds, median of three calls after one reference preparation; bin 8,
+x86 v3, single-threaded Rev5, deterministic synthetic integer texture.
+Preparation times and every sample are retained in the JSON receipt. These
+are descriptive shared-host measurements without a quiet-host speed claim.
+
+| Model | Square side | Before ms | After ms |
+|---|---:|---:|---:|
+"""
+    for t in data['timings']:
+        report+=f"| {t['model']} | {t['side']} | {1000*t['before_median_seconds']:.3f} | {1000*t['after_median_seconds']:.3f} |\n"
+    report+='\n## Resource receipts and artifacts\n\n'
+    for name,lines in data['resource_receipts'].items():
+        report+=f"- `{name}`: "+'; '.join(f'`{line}`' for line in lines)+'\n'
+    report+="""
+
+The initial full-pixel A attempt was intentionally terminated after 107 cases;
+its partial outputs remain immutable and form the cache-equivalence check.
+Early compile/test/lint failures and their full logs are retained: the removed
+read-marker helper was restored because consumed-feature admission still uses it;
+a toy singular-root test was corrected to use a fresh tape; two lint findings
+were corrected. The old finite-difference equality fixture now checks exact
+known linear coefficients, as required by D12. No threshold
+or expected score was relaxed. Generated data, binaries and full logs live at
+`/mnt/v/output/zensim/e34-prep-2026-10-15/part6/`, mirrored to the corresponding
+output directory on the archive store. The feature captures remain in part 4.
+The [JSON receipt](e34_d12_2026-10-15.json) contains input/output hashes; the
+[freeze draft](e34_registration_freeze_draft_2026-10-15.md) carries D12.
+"""
+    (repo/'benchmarks/e34_part6_2026-10-15.md').write_text(report)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode', choices=['prepare', 'summarize', 'progress','d12-summarize','d12-prodqual-before','d12-prodqual-after'])
+    p.add_argument('mode', choices=['prepare', 'summarize', 'progress','d12-summarize','d12-prodqual-before','d12-prodqual-after','d12-documents'])
     p.add_argument('--root', required=True, type=Path)
     a=p.parse_args()
-    if a.mode=='d12-summarize': d12_summarize(a.root)
+    if a.mode=='d12-documents': d12_documents(a.root)
+    elif a.mode=='d12-summarize': d12_summarize(a.root)
     elif a.mode.startswith('d12-prodqual-'):d12_prodqual(a.root,a.mode.removeprefix('d12-prodqual-'))
     elif a.mode=='prepare': prepare(a.root)
     elif a.mode=='summarize': summarize(a.root)

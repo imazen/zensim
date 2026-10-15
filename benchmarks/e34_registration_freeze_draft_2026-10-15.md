@@ -2,7 +2,7 @@
 
 This candidate retains revision 4 below. The owner approved its defaults as
 recorded in the preparation brief. It cannot be frozen until the pending
-receipts and qualifications listed here exist. No registered gate is changed.
+receipts and qualifications listed here exist. No registered gate threshold is changed.
 
 | Binding | SHA-256 or state |
 |---|---|
@@ -17,17 +17,19 @@ receipts and qualifications listed here exist. No registered gate is changed.
 | Origin split owner capture | `58e992526d501596c6912d3163df7f5c7ef6d2b0e215fb00d928b5de9866e700` |
 | P4 source preflight | `45e6c65c9b6c474504db37ea38cb08909f6c9b939090f6f3d41e58756e0b1ac5` |
 | P4 eligibility, dHash, SafeSyn intersection, selection and builds | `BUILT — D11 inventory 1,016; eligible 913; augmentation 128 origins / 1,536 bases; disjoint dev 8 origins / 96 cases; source-closure limitation for existing encoder recorded in part-5 evidence` |
-| G-STEER sensitivity method | `pending owner decision D12` — retain the current instrument and served map until the owner decides |
+| G-STEER sensitivity method | `exact loaded-network gradient — owner D12, 2026-10-15`; the served map and instrument share this owner |
 | P5 complete augmentation-builder validation | `PASS local — 94,128 sampled / 88,106 retained repairs; all 1,536 bases; native parity 651,840/651,840 consumed f32 values; explicit archive-layout embedding` |
 | P6 local first-epoch smokes | `7/7 local: base A/C, W A/C, L A and K A/C; 1 epoch, 49,999 rank pairs; K uses fixed smoke lambda 0.1, no lambda selection` — part-3 receipt `8149a8c93789313818eb11f97f1d901ca263d221cd8007124a48a2bf1c1bbca6`; K receipt `c36141a31b5017bc3197da807ef0371289455e2725d85eee051114289ff1e309` |
-| P6 L serving smoke | `FAIL G-STEER 134/135; C5/E3–E8, C1–C6/G-DIAL, N1–N3 and native served-path checks pass` — receipt `cb6f88c65a72a629ff573cf298e4b69192aa70772ce56b1a938704aa113ca16e` |
+| P6 L serving smoke before D12 | `FAIL G-STEER 134/135; C5/E3–E8, C1–C6/G-DIAL, N1–N3 and native served-path checks pass` — receipt `cb6f88c65a72a629ff573cf298e4b69192aa70772ce56b1a938704aa113ca16e` |
 | E34 worker smokes, image/jobset and remaining qualification | `PENDING — local smoke does not establish fleet caps or full qualification` |
 | P7 statistics implementation and parity | `PASS — approved helper pin 48665c8f; Python/Rust E33 seed-unit parity max error 8.881784197001252e-16` |
 | One-time E33 noise exposure and measured SEs | `READ ONCE — result SHA-256 f5e097f91913a22334d2f61bdc9c62137e10689116c35b6aa6b482cb25d01717; two-way SE A 0.0019019482837346158, C 0.0016920753183515028` |
 
 P2 now binds the fitted first-epoch L smoke; it does not establish exact
-`s = -c`. L passes the measured identity and native served-path checks but
-fails G-STEER (134/135), so P6 qualification remains open. No model is adopted.
+`s = -c`. L passed the measured identity and native served-path checks but the pre-D12
+finite-difference baseline failed G-STEER (134/135). The D12 amendment below
+supersedes that sensitivity-method baseline. Full P6 qualification remains
+open; no model is adopted.
 See [part-3 evidence](e34_part3_2026-10-15.md) and
 [preparation evidence](e34_preparation_2026-10-15.md).
 
@@ -35,7 +37,41 @@ Owner decision D11 (2026-10-15): exclude origins **1444 and 1458** from E34
 augmentation and development selection. Their pinned sources are DNG files
 without official SDR renditions. Compatibility thumbnails are not substitutes.
 This named exclusion precedes the P4 build. D10 admits zenmetrics-stats merge
-`48665c8fb1bb3de5c99d792ae4ed4f3f1e854629`; D12 remains pending before freeze.
+`48665c8fb1bb3de5c99d792ae4ed4f3f1e854629`. D12 (2026-10-15) chooses the
+exact gradient in both the served steering map and G-STEER instrument.
+
+### D12 amendment — 2026-10-15, before freeze
+
+G-STEER sensitivity is the exact loaded-network gradient, chosen by the owner
+in D12. Both the encoder-facing prepared steering map and the packet's linear
+gain use the same existing scorer owner: stored weights/scales, active units,
+chain rule through derived inputs, PCHIP derivative and existing clamp/floor
+handling. Prepared lower-floor recovery remains the registered policy for an
+isolated bake. Ordinary score arithmetic is unchanged.
+
+The same pinned 135 cases and four fixed models (A, C, production seed 0
+and the part-3 L smoke) give these new controls:
+
+| Control | Previous joint | Exact M2 | Exact M3f | Exact joint |
+|---|---:|---:|---:|---:|
+| a | 129/135 | 131/135 | 135/135 | 131/135 |
+| c | 127/135 | 130/135 | 135/135 | 130/135 |
+| seed0 | 128/135 | 128/135 | 131/135 | 128/135 |
+| l | 134/135 | 135/135 | 135/135 | 135/135 |
+
+Decision rule otherwise unchanged: M2 ≥ .99 and M3f ≥ .70 on every case,
+qualification 135/135. The eligibility, non-inferiority, Holm, seed, guards,
+label/split protections and all other registered numbers remain unchanged.
+Historical finite-difference results in the retained revision-4 text below
+remain historical evidence. No model is adopted by this amendment, and the
+remaining worker/image/jobset/source-closure qualifications still prevent freeze.
+
+The new baseline recomputes maps, exact derivatives, native scores and local
+replay using the immutable native repair feature captures. Hash-bound capture
+admission checks pixel-file identity and current native consumed base features;
+all original repair score bits agree. Every original output field on the 107
+completed full-pixel A cases agrees with this feature reuse. The
+[measured receipt](e34_d12_2026-10-15.json) binds the packets and result hashes.
 
 ---
 

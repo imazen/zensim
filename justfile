@@ -1197,3 +1197,13 @@ e34-d12-paired-probes:
 e34-d12-build-probes:
     just e34-d12-clippy
     just e34-d12-bench-build
+
+e34-d12-final-feature-checks:
+    cargo test -p zensim --lib --features custom-profiles,corruption-head metric::bake::
+    cargo check -p zensim --no-default-features
+    cargo clippy -p zensim --lib --tests --features custom-profiles,corruption-head -- -D warnings
+    cargo fmt -p zensim --check
+
+e34-d12-no-default-check:
+    cargo check -p zensim --no-default-features
+    cargo fmt -p zensim --check

@@ -2048,3 +2048,18 @@ is authorized here. Synthetic-texture timing covers 64/256/1024/4096 squares
 before and after, using the existing serving probe and explicit model pins.
 Outputs are fresh under `/mnt/v/output/zensim/e34-prep-2026-10-15/part6/`;
 part-4/part-5 evidence stays immutable.
+
+Part 6 explicitly reuses the immutable, SHA-256-bound part-4 native f64 base
+and repaired feature captures. Cache admission binds source/distorted file
+hashes, geometry, block order, feature width, producer model and read coverage;
+the current native pixel base must agree on every consumed feature bit and
+score bit. Maps, derivatives, all repair scores and local replay predictions
+are computed anew. All result fields on the 107 completed full-pixel A cases
+match the cached-feature rerun exactly; the added field identifies the cache.
+This reuse reads no labels and makes no population or threshold selection.
+
+The completed D12 baseline has joint passes A 131/135, C 130/135,
+production seed 0 128/135 and L smoke 135/135. The four fixed models each
+preserve all 55,515 registered base/repair score bits. No additional E33
+prediction read or new fitting occurred. See [part-6 evidence](../benchmarks/e34_part6_2026-10-15.md)
+and the [measured receipt](../benchmarks/e34_d12_2026-10-15.json).
