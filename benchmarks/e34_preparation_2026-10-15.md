@@ -102,3 +102,42 @@ upstream commit for `crates/zenmetrics-stats/src/{lib,resample,special}.rs`.
 No sibling repository was patched and no dependency pin changed. The E33
 stored prediction/label read remains unused, with no noise numbers or Q9
 measurement claimed. Add its ledger reservation before that future read.
+
+## Continuation evidence (2026-10-15)
+
+The plain N trainer now shares the existing monotone projection, accepts H1,
+and retains raw(0) = 100 at f32 and f16 in the trainer tests. K adds the exact
+repair-direction residual and its parameter gradient, a separate sampling
+stream, detached per-image denominator, and strict label-free table admission.
+Both fit drivers expose these options; default recipes retain their prior argv.
+The final trainer regression passed 107 tests and targeted Clippy.
+
+P2's 135-case run used an unfitted deterministic H1 fixture. No case had a
+negative consumed input or an engine-feature disagreement. Seventy cases had
+all-zero finite-difference sensitivities; the maximum absolute discrepancy
+between the measured sensitivity and the negative exact coefficient was
+0.37946972646750504. This is instrument evidence, not L qualification. The
+fixture's weak slopes make f32 score resolution material. See the committed
+P2 CSV and metadata for the command, hashes and resource measurements.
+
+P4 is blocked: the pinned split map has 1,018 origins assigned TRAIN by both
+owners. Origins 1444 and 1458 have DNG sources and no official SDR renditions;
+the owner confirmed that none have been made yet. The inventory refuses to
+drop these origins. Existing compatibility thumbnails are not admitted as
+canonical replacements. No k-means selection, augmentation table or dev panel
+has been completed. The native pixel preparation helper builds and passes
+Clippy, but its complete augmentation/extractor-parity receipt remains pending.
+
+P6 corpus smokes and serving qualification have not run. P7 and the one-time
+noise read remain pending the statistics API review; the noise read has not
+been consumed. No fleet job or full fit was launched.
+
+Validation logs: `/home/lilith/tmp/e34prep/`. Resource receipts:
+
+```text
+p2-packet: rc=0 759s | peak-RSS 0.18GiB | min-avail 37046MiB | peak-load 20.89
+p5-k-final-regression: rc=0 5s | peak-RSS 0.34GiB | min-avail 39507MiB | peak-load 17.25
+p4-build: rc=0 66s | peak-RSS 0.84GiB | min-avail 37188MiB | peak-load 16.50
+p4-clippy: rc=0 5s | peak-RSS 0.54GiB | min-avail 40406MiB | peak-load 17.46
+p4-inventory-refusal: rc=1 0s | peak-RSS 0.06GiB | min-avail 41457MiB | peak-load 17.95
+```
