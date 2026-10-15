@@ -1021,3 +1021,10 @@ e34-stats-tests:
 
 e34-noise mode:
     python3 scripts/rev4_featpot/e34_noise.py {{mode}} --out /mnt/v/output/zensim/e34-prep-2026-10-15/part5 --panel {{justfile_directory()}}/target/debug/panel
+
+# Approved D11 uses fresh receipts; earlier failed preflight remains intact.
+e34-part5-inventory name="p4-inventory":
+    python3 scripts/rev4_featpot/e34_augmentation.py inventory --out /mnt/v/output/zensim/e34-prep-2026-10-15/part5/{{name}} --split-owner /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inputs/origin_split.py --family-map /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inputs/split_map_family.tsv --pixels /mnt/v/output/imazen-26-png-v3 --identity /mnt/v/output/zensim/e33-impl-2026-10-09/E3_SOURCES.json --packet /mnt/v/output/zensim/steerfix-2026-10-09/full-packet.json --bank /var/tmp/rev4-featbank/bank --instrument-keys /var/tmp/shippath7/verified/instruments/ladder.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/broad.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/negtail.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/jpeg8.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/identity.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/m3.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/owner.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/standard.keys.parquet
+
+e34-admission-tests:
+    python3 scripts/tests/test_e34_admission.py

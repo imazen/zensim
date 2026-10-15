@@ -9,10 +9,12 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 
 import pyarrow.parquet as pq
 
 BROAD = {'1054', '2010', '6068', '6610', '7066', '8206', '8384', '9380'}
+D11 = {'1444', '1458'}
 
 
 def sha(path):
@@ -31,7 +33,12 @@ def write(path, value):
 
 def admitted(path):
     p = Path(path).resolve(strict=True)
-    if any(x in str(p).lower() for x in ('_sealed', 'terminal', '/t0/')):
+    # Population names are path components, not words appearing in an image's
+    # subject (the admitted corpus includes terminal-window screenshots).
+    parts = p.parts[:-1] if p.suffix.lower() in {'.png', '.jpg', '.jpeg', '.bmp'} else p.parts
+    if '_sealed' in str(p).lower() or any(
+            token in {'terminal', 't0'} for part in parts
+            for token in re.split(r'[_\-.]', part.lower())):
         raise ValueError(f'protected source: {p}')
     return p
 
@@ -57,15 +64,24 @@ def inventory(a):
                 paths[oid] = min((paths[oid], p), key=lambda x: (len(x.parts), str(x)))
             else:
                 paths[oid] = p
-    eligible = [r for r in split_rows if owner.split_of(r['id']) == 'train' and r['split'] == 'train']
+    dual_train = [r for r in split_rows if owner.split_of(r['id']) == 'train' and r['split'] == 'train']
+    assert len(dual_train) == 1018
+    assert D11 <= {r['id'] for r in dual_train}
+    eligible = [r for r in dual_train if r['id'] not in D11]
+    assert len(eligible) == 1016
     missing = [r for r in eligible if r['id'] not in paths]
-    write(out / 'source-preflight.json', dict(labels_read=False, dual_train=len(eligible),
+    named_exclusions = dict(owner='owner', date='2026-10-15', decision='D11',
+        origins=sorted(D11), reason='DNG sources without official SDR renditions; no compatibility thumbnails')
+    write(out / 'source-preflight.json', dict(labels_read=False, dual_train=len(dual_train),
+          after_named_exclusions=len(eligible), named_exclusions=named_exclusions,
           missing_sdr=missing, complete=not missing))
     if missing:
         raise ValueError('missing registered SDR origins: ' + ', '.join(r['id'] for r in missing))
     origins = []
     for r in split_rows:
         oid = r['id']
+        if oid in D11:
+            continue
         if owner.split_of(oid) != 'train' or r['split'] != 'train':
             continue
         p = admitted(paths[oid])
@@ -121,7 +137,8 @@ def inventory(a):
           corpus_revision='187fbf338ce08e8e6654db7f04ddae58d5263da2',
           family_map=dict(path=a.family_map, sha256=sha(a.family_map)),
           split_owner=dict(path=a.split_owner, sha256=sha(a.split_owner)),
-          keys_bindings=keys_bindings, origins=origins, exclusions=list(refs.values()),
+          keys_bindings=keys_bindings, named_exclusions=named_exclusions,
+          origins=origins, exclusions=list(refs.values()),
           safesyn_sources=safe, audit_sources=len(sources), audit_references=len(refs)))
     print(json.dumps(dict(dual_train_origins=len(origins), audit_sources=len(sources),
                          audit_references=len(refs), safesyn_references=len(safe))))
