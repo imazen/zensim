@@ -23,12 +23,16 @@ def main():
     p.add_argument("--jobset", required=True)
     p.add_argument("--campaign", choices=("e33", "e34"), default="e33")
     p.add_argument("--mode", choices=("bounded", "first-epoch", "registered"), default="bounded")
+    p.add_argument("--verify-preserved", help="existing smoke key; verify without refitting")
     p.add_argument("--index", type=int, default=0)
     p.add_argument("--budget", default="2:128")
     p.add_argument("--inspector", type=Path, required=True)
     p.add_argument("--attempt", type=int, default=1)
     a = p.parse_args()
     b = a.bundle
+    if a.verify_preserved:
+        verify_preserved(b, a.image, a.verify_preserved)
+        return
     spec_doc = json.loads(next(b.glob(f"fit-spec-fit{a.campaign}-{a.jobset}-*.json")).read_text())
     cell = dict(spec_doc["cells"][a.index])
     argv = list(cell["argv"])
@@ -69,10 +73,18 @@ def main():
         record.update(image=a.image)
         receipt.write_text(json.dumps(record, indent=2) + "\n")
         return
+    verify_preserved(b, a.image, key)
+
+def verify_preserved(b, image, key):
+    """Run the same archive verifier on an already completed smoke; never refit."""
+    job = b / f"smoke-job-{key}.json"
+    out = b / f"smoke-{key}"
+    receipt = next(out.glob("*_PATH_PASS.json"))
+    scratch = b / f"container-scratch-{key.rsplit('-', 1)[1]}"
     blob = next(out.glob("*_OUTPUT.tar.gz"))
     # Use the image's pinned Python/native dependencies for harvest as well as
     # fitting. The host needs Docker and stdlib Python only; no boot installs.
-    stage = b / f"smoke-harvest-{key}"
+    stage = b / f"smoke-harvest-{key}-image"
     stage.mkdir()
     verify_code = """
 import json, sys
@@ -90,13 +102,14 @@ print(json.dumps({'execution_contract':result.get('execution_contract')}))
         "docker", "run", "--rm", "--network=none", "--user", f"{os.getuid()}:{os.getgid()}",
         "--cpus=1", "--memory=6g", "--memory-swap=6g", "--entrypoint", "python3",
         "-e", "TMPDIR=/scratch/tmp", "-v", f"{b}:/e33", "-v", f"{scratch}:/scratch",
-        a.image, "-c", verify_code, f"/e33/{job.name}",
+        image, "-c", verify_code, f"/e33/{job.name}",
         f"/e33/{blob.relative_to(b)}", f"/e33/{stage.name}"], text=True))
     record = json.loads(receipt.read_text())
-    record.update(image=a.image, harvest=dict(status="VERIFIED", execution_contract=verified.get("execution_contract"),
+    record.update(image=image, image_id=subprocess.check_output(["docker", "image", "inspect", "-f", "{{.Id}}", image], text=True).strip(), harvest=dict(status="VERIFIED", execution_contract=verified.get("execution_contract"),
                                               owner="program-archive harvest_fit_cells.verify_blob"))
     receipt.write_text(json.dumps(record, indent=2) + "\n")
     print(json.dumps({k: record[k] for k in ("status", "cell", "program_sha", "memory_peak_bytes", "harvest")}))
+
 
 
 if __name__ == "__main__":

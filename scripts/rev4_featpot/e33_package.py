@@ -388,9 +388,78 @@ def e34_specs(bundle, program, data, ctl, contract):
     return plan
 
 
+def e34_freeze(bundle):
+    """Freeze the existing 305-cell conditional plan after real-entry gates."""
+    plan=json.loads((bundle/'E34_JOB_PLAN.json').read_text())
+    cap=json.loads((bundle/'FIRST_EPOCH_CAPS.json').read_text())
+    parity=json.loads((bundle/'CONTROL_PARITY.json').read_text())
+    if not parity['weights_bit_identical']:
+        raise ValueError('Control-A parity pre-check is not bit-identical')
+    image=(bundle/'IMAGE_TAG.txt').read_text().strip()
+    image_id=(bundle/'IMAGE_ID.txt').read_text().strip()
+    digest=(bundle/'IMAGE_DIGEST.txt').read_text().strip()
+    if not digest.startswith('sha256:') or len(digest)!=71:
+        raise ValueError('registry image digest missing')
+    if sha(bundle/'e33-fit-data.tar.gz')!=DATA_SHA or plan['total_executed_cells']!=305:
+        raise ValueError('registered data/grid differs')
+    program_sha=sha(bundle/'program.tar.gz')
+    meta=json.loads((bundle/'build-meta.packer-input.json').read_text())
+    contract=json.loads((bundle/'e34-fit-contract.json').read_text())
+    caps_doc=json.loads((bundle/'jobset_caps.json').read_text())
+    allowed={'tower','r3500','r3800x','i270','i134','r5600g'}
+    if set(caps_doc)!=set(plan['manifests']) or any(set(c['hosts'])!=allowed for c in caps_doc.values()):
+        raise ValueError('only six approved hosts may have slots')
+    receipts={}
+    for variant in contract['variants']:
+        full=variant['name'].startswith('full-')
+        arm=variant['name'].removeprefix('full-')
+        route='pilot' if full and arm.startswith('k') else 'full' if full else 'lodo'
+        runs=list(bundle.glob(f'smoke-{arm}-{route}-0-201/*_PATH_PASS.json'))
+        if len(runs)!=1:raise ValueError(f'missing smoke for {variant["name"]}')
+        path=runs[0];r=json.loads(path.read_text())
+        if (r['status']!='PASS' or r.get('harvest',{}).get('status')!='VERIFIED'
+                or r['program_sha']!=program_sha or r['image']!=image
+                or r['harvest']['execution_contract']!='local-smoke'):
+            raise ValueError(f'smoke not PASS/VERIFIED: {path}')
+        receipts[variant['name']]=dict(receipt=str(path.relative_to(bundle)),sha256=sha(path),
+                                      memory_peak_bytes=r['memory_peak_bytes'])
+        if variant['wall_cap_sec']!=cap['wall_cap_sec']:
+            raise ValueError('wall cap differs from registered smoke rule')
+    for js,pin in plan['manifests'].items():
+        if sha(bundle/f'fit-manifest-{js}.json')!=pin:
+            raise ValueError('declared conditional manifest changed')
+    frozen=['program.tar.gz','build-meta.packer-input.json','source-pins.json','e34-fit-contract.json',
+            'E34_JOB_PLAN.json','jobset_caps.json','PLACEMENT_REHEARSAL.json','FIRST_EPOCH_CAPS.json',
+            'CONTROL_PARITY.json','DEVELOPMENT_BINDING.json','LAUNCH_CONTROL.json','BUILD_LOG.txt']
+    frozen += [p.name for p in bundle.glob('fit-spec-*.json')]+[p.name for p in bundle.glob('fit-manifest-*.json')]
+    frozen += [r['receipt'] for r in receipts.values()]
+    frozen += [str(p.relative_to(bundle)) for p in bundle.glob('smoke-*-0-201/*_TIME.txt')]
+    costs={}
+    for r in cap['records']:
+        name=Path(r['receipt']).parts[0].split('-')[1]
+        costs[name]=max(costs.get(name,0),r['epoch_seconds_upper'])
+    for family in ['a','c']:
+        for k in ['k01','k1']:costs[k+family]=costs['k10'+family]
+    doc=dict(schema='e34-fleet-packet-v1',registration='benchmarks/e34_registration_freeze_draft_2026-10-15.md',
+             revision=5,margin_a=0.0065,margin_c=0.0065,zensim_commit=meta['zensim_source_commit'],
+             zenmetrics_commit=meta['zenmetrics_lane_commit'],program_sha=program_sha,data_sha=DATA_SHA,
+             image=image,image_id=image_id,image_digest=digest,image_ref=image+'@'+digest,
+             image_recipe_sha256=meta['image_recipe_sha256'],
+             jobsets={js:len(json.loads((bundle/f'fit-manifest-{js}.json').read_text())) for js in plan['manifests']},
+             scientific_cells=305,conditional_plan_sha256=sha(bundle/'E34_JOB_PLAN.json'),
+             wall_caps_seconds={v['name']:v['wall_cap_sec'] for v in contract['variants']},
+             executor_smokes=receipts,smoke_epoch_seconds=costs,
+             persistence=dict(hosts=['i134','r5600g','i270'],interval_seconds=60,optimizer_resume=False,
+                 shorter_first=True,no_cutoff=True,
+                 snapshot_root='/mnt/tower/output/zensim/e34-launch-2026-10-15/loan-persistence'),
+             files={n:sha(bundle/n) for n in sorted(frozen)})
+    (bundle/'PACKET.json').write_text(json.dumps(doc,indent=1,sort_keys=True)+'\n')
+    return doc
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("smokes", "contracts", "specs", "caps", "rehearse", "freeze", "e34-contracts", "e34-specs"))
+    p.add_argument("mode", choices=("smokes", "contracts", "specs", "caps", "rehearse", "freeze", "e34-contracts", "e34-specs", "e34-freeze"))
     p.add_argument("--template", type=Path)
     p.add_argument("--wall-caps", type=Path)
     p.add_argument("--smoke-dir", type=Path)
@@ -409,7 +478,9 @@ def main():
     p.add_argument("--superseded", action="append", default=[], help="freeze: earlier packet attempt and why")
     p.add_argument("--status", default="READY FOR COORDINATOR REVIEW; not launched, image not pushed")
     a = p.parse_args()
-    if a.mode == "e34-contracts":
+    if a.mode == "e34-freeze":
+        print(json.dumps(e34_freeze(a.bundle),indent=1))
+    elif a.mode == "e34-contracts":
         variants=e34_variants(a.template,json.loads(a.wall_caps.read_text()))
         (a.bundle/"e34-fit-contract.json").write_text(json.dumps(dict(schema="e34-research-fit-package-v1",variants=variants),indent=2,sort_keys=True)+"\n")
     elif a.mode == "e34-specs":

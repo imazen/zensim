@@ -92,5 +92,21 @@ class Launch(unittest.TestCase):
                 owner.expected_caps(self.bundle, js)
 
 
+    def test_e34_unselected_branch_refuses_before_upload_or_queue(self):
+        js='fite34-k1a-lodo-20261015'
+        (self.bundle/'E34_JOB_PLAN.json').write_text(json.dumps({'unconditional':[]}))
+        (self.root/'launch').mkdir()
+        (self.root/'launch/LAMBDA_SELECTION.json').write_text(json.dumps({'selected_branches':
+            {'a':'fite34-k01a-lodo-20261015','c':'fite34-k10c-lodo-20261015'}}))
+        entry={'memory':'6g','hosts':{'tower':1}}
+        (self.bundle/'jobset_caps.json').write_text(json.dumps({js:entry}))
+        self.live.write_text(json.dumps({js:entry}))
+        with mock.patch.object(owner,'packet',return_value={'schema':'e34-fleet-packet-v1',
+                    'jobsets':{js:42},'image':'img','image_id':'sha256:x'}):
+            with self.assertRaisesRegex(ValueError,'not selected'):
+                owner.launch(self.bundle,js,self.queue,self.live)
+        self.assertNotIn(js,self.queue.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

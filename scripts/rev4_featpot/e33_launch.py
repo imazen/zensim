@@ -168,7 +168,7 @@ s5cmd --endpoint-url "$EP" cp "$4" "s3://zentrain/jobs/$2/inputs/$5"
     queue.with_name(f"fleet_queue.{js}.before").write_bytes(queue.read_bytes())
     staging = queue.with_name(f"fleet_queue.{js}.new")
     manifest = bundle / f"fit-manifest-{js}.json"
-    staging.write_text(queue.read_text().rstrip() + f"\n{js} {manifest} {doc['image']}\n")
+    staging.write_text(queue.read_text().rstrip() + f"\n{js} {manifest} {doc.get('image_ref', doc['image'])}\n")
     os.replace(staging, queue)
     record["queued"] = now()
     (rt / f"LAUNCH_RECORD-{js}.json").write_text(json.dumps(record, indent=1) + "\n")
@@ -350,7 +350,7 @@ def persist_loan_artifacts(bundle):
         source=f'tmp/fitv2-shared/fit-cell/{doc["data_sha"]}/rev4-featpot/'
         exists=subprocess.run(['ssh','-n','-o','BatchMode=yes',host,'test -d '+source],capture_output=True)
         if exists.returncode:
-            reports.append(dict(host=host,state='INPUT_ROOT_NOT_CREATED',returncode=exists.returncode))
+            reports.append(dict(host=host,state='HOST_UNREACHABLE' if exists.returncode==255 else 'INPUT_ROOT_NOT_CREATED',returncode=exists.returncode))
             continue
         dest=root/host/stamp
         dest.mkdir(parents=True,exist_ok=False)
@@ -384,14 +384,78 @@ def shorter_queue(bundle, queue, out):
     return dict(queue=str(out),order=[row[0] for row in rows])
 
 
+def lambda_pilot(bundle, instrument):
+    """Registered label-free dev96 selection; all score/gain work uses Rust."""
+    doc=packet(bundle)
+    binding=json.loads((bundle/'DEVELOPMENT_BINDING.json').read_text())
+    inputs=Path(binding['assessment_inputs'])
+    if sha(inputs)!=binding['assessment_inputs_sha256'] or sha(instrument)!=binding['instrument_sha256']:
+        raise ValueError('development packet/instrument differs from freeze')
+    panel=json.loads(inputs.read_text())
+    if panel.get('labels_read') is not False or len(panel['cases'])!=96 or len({r['origin'] for r in panel['cases']})!=8:
+        raise ValueError('registered eight-origin/96-case label-free panel required')
+    rt,tools,_=runtime(bundle,doc)
+    sys.path.insert(0,str(tools))
+    import harvest_fit_cells as hfc
+    reports=[];selected={}
+    for family in ['a','c']:
+        choices=[]
+        for arm,lam in [('k01',0.1),('k1',1.),('k10',10.)]:
+            name=arm+family;js=f'fite34-{name}-pilot-20261015'
+            jobs=json.loads((bundle/f'fit-manifest-{js}.json').read_text())
+            if len(jobs)!=1 or not installed(hfc,jobs[0]):
+                raise ValueError('pilot artifact has not been verified and installed: '+js)
+            cell=Path(jobs[0]['kind']['argv'][jobs[0]['kind']['argv'].index('--dest')+1])
+            result=json.loads((cell/'result.json').read_text())
+            model=Path(result['packed_model'])
+            if sha(model)!=result['packed_model_sha256']:
+                raise ValueError('packed pilot model differs from result receipt')
+            work=rt/'lambda-pilot'/name;work.mkdir(parents=True,exist_ok=True)
+            output=work/'dev96.json';jobpath=work/'job.json'
+            cases=[{**r,'model':str(model),'model_sha256':sha(model)} for r in panel['cases']]
+            job=dict(cases=cases,output=str(output),engine=False,floor_recovery=True,
+                     linear_probe=False,labels_read=False,sensitivity_method='exact-gradient-d12')
+            data=json.dumps(job,indent=2)+'\n'
+            if jobpath.exists() and jobpath.read_text()!=data:
+                raise ValueError('pilot job differs from existing immutable assessment')
+            if not jobpath.exists():jobpath.write_text(data)
+            if not output.exists():
+                env=dict(os.environ,ZENSIM_FORMULA_REV='5',ZENSIM_MAX_TIER='v3',
+                         RAYON_NUM_THREADS='1',STEERFIX_PACKET=str(jobpath),ZENSIM_NEIGHBOUR_EXACT='0')
+                with (work/'native.log').open('w') as log:
+                    subprocess.run([str(instrument),'metric::bake::steerfix_packet::engineering_packet',
+                                    '--exact','--nocapture'],env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+            assessment=json.loads(output.read_text());rows=assessment['rows']
+            if (assessment['packet_sha256']!=sha(jobpath) or len(rows)!=96
+                    or {r['key'] for r in rows}!={r['key'] for r in panel['cases']}
+                    or any(r['model']!=sha(model) or r['sensitivity_method']!='exact-gradient-d12' for r in rows)):
+                raise ValueError('native development assessment identity/coverage mismatch')
+            passed=sum(r['m2'] is not None and r['m3f'] is not None and r['m2']>=.99 and r['m3f']>=.70 for r in rows)
+            record=dict(family=family,lambda_value=lam,passing_cases=passed,total_cases=96,model=str(model),
+                        model_sha256=sha(model),assessment_sha256=sha(output),assessment=str(output),jobset=js)
+            reports.append(record);choices.append(record)
+            print(json.dumps(record),flush=True)
+        winner=sorted(choices,key=lambda r:(-r['passing_cases'],r['lambda_value']))[0]
+        selected[family]=winner['jobset'].replace('-pilot-','-lodo-')
+    selection=dict(schema='e34-registered-lambda-selection-v1',packet_sha256=PACKET_SHA,
+                   assessment_inputs_sha256=binding['assessment_inputs_sha256'],labels_read=False,
+                   sensitivity_method='exact-gradient-d12',reports=reports,selected_branches=selected,
+                   rule='max joint(M2>=.99,M3f>=.70) dev96; tie smaller lambda; selected pilot is full seed0')
+    path=rt/'LAMBDA_SELECTION.json'
+    if path.exists():raise ValueError('selection already exists; never overwrite a release record')
+    path.write_text(json.dumps(selection,indent=2)+'\n')
+    return selection
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance", "persist", "shorter-queue"))
+    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance", "persist", "shorter-queue", "lambda-pilot"))
     p.add_argument("--packet", type=Path, required=True)
     p.add_argument("--arm")
     p.add_argument("--packet-sha", help="explicit frozen E34 PACKET.json pin")
     p.add_argument("--queue", type=Path, default=FITV2/"fleet_queue")
     p.add_argument("--out-queue", type=Path)
+    p.add_argument("--instrument", type=Path)
     p.add_argument("--install", action="store_true")
     p.add_argument("--require-all", action="store_true")
     p.add_argument("--status", action="store_true")
@@ -405,7 +469,10 @@ def main():
         p.error("E34 requires the frozen --packet-sha")
     if a.mode in ("launch", "placements", "harvest") and not a.arm:
         p.error(f"{a.mode} requires --arm")
-    if a.mode == "persist":
+    if a.mode == "lambda-pilot":
+        if not a.instrument:p.error("lambda-pilot requires --instrument")
+        out=lambda_pilot(a.packet,a.instrument)
+    elif a.mode == "persist":
         out=persist_loan_artifacts(a.packet)
     elif a.mode == "shorter-queue":
         if not a.out_queue:p.error("shorter-queue requires --out-queue")

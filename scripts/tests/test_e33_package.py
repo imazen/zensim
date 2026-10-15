@@ -145,5 +145,41 @@ class Packet(unittest.TestCase):
         self.assertFalse((b / "PACKET.json").exists())
 
 
+class E34ConditionalPlan(unittest.TestCase):
+    def test_selected_pilot_is_seed_zero_and_only_two_42_cell_branches_run(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as tmp:
+            root=Path(tmp);template=root/'template.json';data=root/'data';program=root/'program'
+            data.write_bytes(b'registered rank archive placeholder');program.write_bytes(b'program')
+            direct=v2_common.fx1_declaration()['direct']
+            template.write_text(json.dumps({'variants':[{'name':prefix+family,'columns':direct,
+                'routes':{'production':[]} if prefix else {f:[] for f in owner.PRODUCTION_SOURCES}}
+                for family in ['a','c'] for prefix in ['', 'full-']]}))
+            names=['controla','controlc','wa','wc','la','k01a','k1a','k10a','k01c','k1c','k10c']
+            variants=owner.e34_variants(template,{n:5000 for n in names})
+            contract=root/'e34-fit-contract.json';contract.write_text(json.dumps({'variants':variants}))
+            def declare(cmd,**kwargs):
+                spec=json.loads(Path(cmd[cmd.index('--spec')+1]).read_text())
+                Path(cmd[cmd.index('--out')+1]).write_text(json.dumps(spec['cells']))
+            def digest(path):return owner.DATA_SHA if Path(path)==data else v2_common.sha(path)
+            with patch.object(owner,'sha',side_effect=digest),patch.object(owner.subprocess,'run',side_effect=declare):
+                plan=owner.e34_specs(root,program,data,Path('ctl'),contract)
+            self.assertEqual(plan['initial_cells']+2*42,305)
+            self.assertEqual(len(plan['conditional']),6)
+            for name,js in plan['conditional'].items():
+                cells=json.loads((root/f'fit-manifest-{js}.json').read_text())
+                self.assertEqual(len(cells),42)
+                full=[c for c in cells if c['argv'][0]=='v2_confirm_fit.py']
+                self.assertEqual([c['argv'][c['argv'].index('--seed-index')+1] for c in full],['1','2'])
+                pilot=json.loads((root/f"fit-manifest-{js.replace('-lodo-','-pilot-')}.json").read_text())
+                self.assertEqual(len(pilot),1)
+                self.assertEqual(pilot[0]['argv'][pilot[0]['argv'].index('--seed-index')+1],'0')
+            control=next(v for v in variants if v['name']=='controla')
+            tangent=next(v for v in variants if v['name']=='k01a')
+            self.assertEqual(control['spec'],tangent['spec'])
+            self.assertIsNone(control['e34_flags']['--steer-pairs'])
+            self.assertEqual(tangent['e34_flags']['--steer-lambda'],'0.1')
+
+
 if __name__ == "__main__":
     unittest.main()
