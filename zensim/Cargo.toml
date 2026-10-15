@@ -457,3 +457,7 @@ required-features = ["training", "feature-regime-v2", "custom-profiles"]
 [[example]]
 name = "libc_feature_dump"
 required-features = ["training"]
+
+[[example]]
+name = "e34_pixels"
+required-features = ["custom-profiles", "feature-regime-v2"]

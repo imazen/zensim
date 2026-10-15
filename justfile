@@ -907,3 +907,11 @@ e34-trainer-tests:
 e34-trainer-regression:
     cargo test -p zensim-validate --lib mlp_train::
     cargo clippy -p zensim-validate --lib --bin zensim_mlp_train -- -D warnings
+
+e34-preparation-build:
+    cargo build -p zensim --example e34_pixels --features custom-profiles
+    cargo build -p zensim-validate --bin check_holdout_overlap --bin zensim_mlp_train
+
+# Label-free inventory for the explicitly registered E34 sources.
+e34-preparation-inventory:
+    python3 scripts/rev4_featpot/e34_augmentation.py inventory --out /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inventory --split-owner /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inputs/origin_split.py --family-map /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inputs/split_map_family.tsv --pixels /mnt/v/output/imazen-26-png-v3 --identity /mnt/v/output/zensim/e33-impl-2026-10-09/E3_SOURCES.json --packet /mnt/v/output/zensim/steerfix-2026-10-09/full-packet.json --bank /var/tmp/rev4-featbank/bank --instrument-keys /var/tmp/shippath7/verified/instruments/ladder.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/broad.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/negtail.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/jpeg8.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/identity.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/m3.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/owner.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/standard.keys.parquet

@@ -1937,3 +1937,15 @@ and stored E21 predictions were not decoded. This is a feature-domain census,
 not an E21 assessment or new training run. No protected or sealed population
 was opened. The separately authorized E33 noise read remains pending and
 requires its own preread ledger entry after the statistics owner is ready.
+
+### E34 preparation: label-free exposure inventory (2026-10-15)
+
+The E34 preparation lane reads the pinned imazen-26 family map and canonical
+origin split owner, SDR reference pixels, E33 identity/NEARID source receipts,
+the registered 135-case steering packet's reference pixels, and reference-only
+columns of the existing D1 human, SafeSyn and instrument key tables. These
+reads construct eligibility and exclusion receipts and a native dHash screen.
+No human targets, predictions or held-out labels are decoded by this inventory.
+The separately approved E33 noise read remains pending; this entry does not
+consume that read. Generated receipts live under
+`/mnt/v/output/zensim/e34-prep-2026-10-15/` and are not yet an admission decision.
