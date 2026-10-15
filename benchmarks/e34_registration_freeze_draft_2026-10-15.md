@@ -10,6 +10,7 @@ receipts and qualifications listed here exist. No registered gate is changed.
 | Appendix | `aeac526d454d8130e75e09294d5382111dff23aaf9e24095068d7a42dd54389a` |
 | E33 fit contract | `3bb4705b8a07307b3dec3956f43d99ae649ea333b6c95817ac389167713ec4d7` |
 | E33 data archive | `9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008` |
+| P2 fitted L smoke coefficient comparison | `30a89117e01fbd52e8ae1f9eceaa489b293ab1d1a19ebf7704f3450b2ce2ab48` — 135 cases, max abs(s+c) `0.4817685172203939`, negative-input cases `[]` |
 | P1 feature census | `747149eeb7e1175cf7e3b61d2c1bb7f2e1ad87c04cbc530c289952ae592f77c3` |
 | Original 135-case packet | `b2af8465520139da6ebeede71c0c73c688d0d579e52e512cbf53f8181aec5ed9` |
 | Family map capture | `9d07a0f63ef5fa167c5333535010f44b4ab9a087f04e560521b6d1aa1961820c` |
@@ -17,13 +18,17 @@ receipts and qualifications listed here exist. No registered gate is changed.
 | P4 source preflight | `45e6c65c9b6c474504db37ea38cb08909f6c9b939090f6f3d41e58756e0b1ac5` |
 | P4 eligibility, dHash, SafeSyn intersection, selection and builds | `PENDING — official SDR origins 1444 and 1458 absent` |
 | P5 complete augmentation-builder validation | `PENDING` |
-| P6 first-epoch and serving gates; E34 worker image/jobset | `PENDING` |
+| P6 local first-epoch smokes | `5/7: base A/C, W A/C, L A; 1 epoch, 49,999 pairs; K A/C pending` — receipt `8149a8c93789313818eb11f97f1d901ca263d221cd8007124a48a2bf1c1bbca6` |
+| P6 L serving smoke | `FAIL G-STEER 134/135; C5/E3–E8, C1–C6/G-DIAL, N1–N3 and native served-path checks pass` — receipt `cb6f88c65a72a629ff573cf298e4b69192aa70772ce56b1a938704aa113ca16e` |
+| E34 worker smokes, image/jobset and remaining qualification | `PENDING — local smoke does not establish fleet caps or full qualification` |
 | P7 statistics implementation and parity | `PENDING — public helper review` |
 | One-time E33 noise exposure and measured SEs | `PENDING — NOT READ` |
 
-P2 currently binds an unfitted engineering fixture, not an adopted or qualified
-L bake. The definitive L coefficient comparison and serving gates remain open.
-See [preparation evidence](e34_preparation_2026-10-15.md).
+P2 now binds the fitted first-epoch L smoke; it does not establish exact
+`s = -c`. L passes the measured identity and native served-path checks but
+fails G-STEER (134/135), so P6 qualification remains open. No model is adopted.
+See [part-3 evidence](e34_part3_2026-10-15.md) and
+[preparation evidence](e34_preparation_2026-10-15.md).
 
 ---
 

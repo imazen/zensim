@@ -950,3 +950,21 @@ e34-part3-receipt mode root output:
 
 e34-packet-progress path:
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d if isinstance(d,list) else d["rows"]; p=[x["linear_probe"] for x in r if x["linear_probe"]]; print(dict(cases=len(r), passed=sum(x["pass"] for x in r), last=r[-1]["key"], max_abs_s_plus_c=max((x["max_abs_s_plus_c"] for x in p),default=None), negative_cases=sum(bool(x["negative_input_rows"]) for x in p)))' {{path}}
+
+e34-part3-backup:
+    mkdir -p /mnt/tower/output/zensim/e34-prep-2026-10-15/part3
+    rsync -rt --ignore-existing --exclude=bin/ /mnt/v/output/zensim/e34-prep-2026-10-15/part3/ /mnt/tower/output/zensim/e34-prep-2026-10-15/part3/
+
+e34-part3-backup-check:
+    #!/usr/bin/env python3
+    import hashlib
+    from pathlib import Path
+    source = Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part3')
+    target = Path('/mnt/tower/output/zensim/e34-prep-2026-10-15/part3')
+    files = sorted(p for p in source.rglob('*') if p.is_file() and not p.is_symlink())
+    def digest(p):
+        with p.open('rb') as f:
+            return hashlib.file_digest(f, 'sha256').hexdigest()
+    for p in files:
+        assert digest(p) == digest(target / p.relative_to(source)), p
+    print(f'SHA-256 matches for all {len(files)} regular artifact files; executable symlinks excluded')

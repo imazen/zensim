@@ -149,3 +149,18 @@ The branch tip was verified as `1c33d560410022b7307d2c1b16f7a0ca0015e293`.
 It is not merged and zensim's statistics pin has not changed. After review,
 P7 still needs the Rust evaluation integration and independent E33 parity;
 only then may the separately ledgered noise read run.
+
+## Part 3 local smoke results (2026-10-15)
+
+Five of seven local arm/family smokes completed (base A/C, W A/C, L A);
+K A/C still require the admitted augmentation table. Each smoke used one
+epoch and 49,999 rank pairs through the strict TRAIN owner. L passes the
+measured identity and native serving checks but fails G-STEER: 134/135,
+with `broad-199-b64` below the M2 bar. P2 on the fitted packed smoke covers
+135 cases and 55,515 base/repair rows: no negative rows, no all-zero
+sensitivity cases, maximum `|s+c| = 0.4817685172203939`.
+
+See [part-3 evidence](e34_part3_2026-10-15.md), its per-case CSV and
+hash-pinned serving/resource receipts. The freeze draft records these
+measured states and remains incomplete. D10/D11, P4, K smokes, statistics
+integration, the noise read and worker qualification remain pending.
