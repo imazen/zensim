@@ -1,0 +1,21 @@
+[package]
+name = "e34-reference-features"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Independent tool graph: the pinned analyzer requires magetypes 0.9.30;
+# E34's frozen model/extractor graph retains its existing SIMD versions.
+[workspace]
+
+[dependencies]
+zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "417cc785b83bee0b3f827ae85c5203f5e104a308", default-features = false }
+zenpng = "=0.1.4"
+enough = "0.4.5"
+archmage = { version = "0.9.30", features = ["testable_dispatch", "avx512"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+
+[profile.dev]
+opt-level = 2
+debug = 0

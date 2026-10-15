@@ -1,0 +1,26 @@
+[package]
+name = "e34-jxl-scalar"
+version = "0.1.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+archmage = "=0.9.28"
+archmage-macros = "=0.9.28"
+magetypes = "=0.9.28"
+jxl-encoder = { git = "https://github.com/imazen/jxl-encoder", rev = "6ad2bd5165479dfae2bda393b2bb330bf2401a2a", default-features = false, features = ["std", "butteraugli-loop", "zensim-loop"] }
+zenjxl-decoder = { git = "https://github.com/imazen/zenjxl-decoder", rev = "17dc3030732da1d53bdfdbf3e6585843976c2f3f" }
+zenpng = "=0.1.4"
+zenpixels = "=0.2.16"
+zenpixels-convert = "=0.2.16"
+enough = "0.4.5"
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+[patch.crates-io]
+# The historical scalar config names the Zensim metric, with zero map updates.
+# The optional library must still resolve; this is the task's local runtime.
+zensim = { path = "../../zensim" }
+butteraugli = { git = "https://github.com/imazen/butteraugli", rev = "0e397e5e716cd70ca40605ad93d68df590869dda" }
+[profile.dev]
+opt-level = 2
+debug = 0
