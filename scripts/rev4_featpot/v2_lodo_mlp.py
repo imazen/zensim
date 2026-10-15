@@ -143,7 +143,25 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
         if head != "N" or recipe.get("derived_inputs") or recipe.get("hidden") != 1:
             raise ValueError("E34 L requires A's plain N H1 recipe")
         cmd.append("--monotone-cbc")
+    if recipe.get("steer_pairs") is not None or recipe.get("steer_lambda", 0) != 0:
+        import math
+        weight = recipe.get("steer_lambda", 0)
+        if (head != "N" or recipe.get("monotone_cbc") or not recipe.get("steer_pairs")
+                or not math.isfinite(weight) or weight <= 0):
+            raise ValueError("E34 K requires N, pairs and positive finite lambda; no L projection")
+        cmd += ["--steer-pairs", str(recipe["steer_pairs"]), "--steer-lambda", repr(weight)]
     return cmd
+
+
+def e34_options(args, recipe):
+    """Explicit E34 options leave every legacy recipe dictionary unchanged."""
+    recipe = dict(recipe)
+    if args.monotone_cbc:
+        recipe["monotone_cbc"] = True
+    if args.steer_pairs is not None or args.steer_lambda != 0:
+        recipe.update(steer_pairs=str(args.steer_pairs) if args.steer_pairs else None,
+                      steer_lambda=args.steer_lambda)
+    return recipe
 
 
 def strict_training_groups(groups: list, data_role_decision: Path | None = None,
@@ -351,6 +369,8 @@ def main() -> None:
     ap.add_argument("--dest", type=Path, help="strict route output directory outside frozen inputs")
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake, without human assessment")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
+    ap.add_argument("--steer-pairs", type=Path, help="E34 K label-free repair table")
+    ap.add_argument("--steer-lambda", type=float, default=0.0, help="E34 K residual weight")
     ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
@@ -409,9 +429,7 @@ def main() -> None:
             raise ValueError("wide receipt is not the admitted frozen one")
     if any(not 0 <= c < width for c in keep):
         raise ValueError(f"{core_spec}: kept columns outside 0..{width}")
-    recipe = recipe_of(args.spec)
-    if args.monotone_cbc:
-        recipe["monotone_cbc"] = True
+    recipe = e34_options(args, recipe_of(args.spec))
     if "research_palette" in receipt:
         from e32_palette import admit_recipe
         admit_recipe(receipt, recipe, keep, args.head, args.strict_admission, args.train_only)
@@ -428,9 +446,7 @@ def main() -> None:
     keep_file = dest / "keep_features.txt"
     keep_file.write_text("\n".join(map(str, keep)) + "\n")
     legs = receipt["legs"]
-    recipe = recipe_of(args.spec)
-    if args.monotone_cbc:
-        recipe["monotone_cbc"] = True
+    recipe = e34_options(args, recipe_of(args.spec))
     groups = []  # (name, path, train_weight, val_weight, mode)
     weights = {}
     curated, teacher_record, curated_extra = None, None, None

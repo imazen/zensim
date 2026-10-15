@@ -23,7 +23,7 @@ import numpy as np
 
 from v2_common import (load_frozen, recipe_of, EPOCHS, FITBIN, HEADS, HIDDEN, HUMAN_VAL_WEIGHT, NOMINAL_WEIGHT, PANEL, PAIRS_PER_EPOCH, TEACHERS,
                        TRAINER, V2, WIDTH, acceptance_weight, confirm_seeds, parse_spec, sha, split_weight, table_path)
-from v2_lodo_mlp import WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select, strict_training_groups, strict_output_preflight
+from v2_lodo_mlp import e34_options, WIDE_SCHEMAS, checked, predict, refs_of, resolve_keep, train_and_select, strict_training_groups, strict_output_preflight
 
 CONFIRM_SCHEMA = "rev4-featpot-v2c-confirm-v1"
 RESULT_SCHEMA = "rev4-featpot-v2c-confirm-cell-v1"
@@ -60,6 +60,8 @@ def main() -> None:
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake; no confirmatory predictions")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
+    ap.add_argument("--steer-pairs", type=Path, help="E34 K label-free repair table")
+    ap.add_argument("--steer-lambda", type=float, default=0.0, help="E34 K residual weight")
     ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
@@ -115,9 +117,7 @@ def main() -> None:
         fit, dev = checked(legs[leg]["fit"]), checked(legs[leg]["dev"])
         weights[leg] = acceptance_weight(NOMINAL_WEIGHT[leg], refs_of(fit))
         groups += [(leg, fit, weights[leg], 0, "withinref,both"), (f"{leg}_development", dev, 0, val_w, "withinref,both")]
-    recipe = recipe_of(args.spec)
-    if args.monotone_cbc:
-        recipe["monotone_cbc"] = True
+    recipe = e34_options(args, recipe_of(args.spec))
     if "hdr_weight" in recipe:
         raise ValueError("E26 is registered for LODO cells only; no HDR confirmation fit")
     coverage_record, curated_extra = None, None

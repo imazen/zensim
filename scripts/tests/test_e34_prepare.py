@@ -64,6 +64,18 @@ class RecipeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "plain N H1"):
                 train_command(*args, recipe=recipe)
 
+    def test_k_options_and_unchanged_defaults(self):
+        from v2_lodo_mlp import train_command
+        args = ([], 1101, 101, 1853, Path("keep"), "N", Path("model"))
+        base = train_command(*args)
+        self.assertEqual(base, train_command(*args, recipe={"steer_lambda": 0}))
+        k = train_command(*args, recipe={"steer_pairs": "/pairs.parquet", "steer_lambda": 0.1})
+        self.assertEqual(k, base + ["--steer-pairs", "/pairs.parquet", "--steer-lambda", "0.1"])
+        for r in ({"steer_lambda": 1}, {"steer_pairs": "/pairs.parquet"},
+                  {"steer_pairs": "/pairs.parquet", "steer_lambda": float("nan")}):
+            with self.assertRaisesRegex(ValueError, "E34 K requires"):
+                train_command(*args, recipe=r)
+
 
 if __name__ == "__main__":
     unittest.main()
