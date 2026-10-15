@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- E34 fleet launch (`2bf1a840`, freeze `bc9be24a`): archive-bound image harvest, conditional305-cell plan, verified first-artifact admission, six-host controls, label-free pilot selection and immutable temporary-host snapshots.
+- CI: remove macOS Intel matrix entries under the owner's ARM-only policy; keep macOS ARM64, Windows ARM64 and i686 coverage.
+
+
 - E34: bind owner D13's eligibility margin 0.0065 for both families in the registration and statistics owner; preserve all point/dataset guards. Fit binaries remain pinned to 83b13003 (`d015f004`).
 
 
