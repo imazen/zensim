@@ -139,6 +139,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
         cmd += ["--derived-inputs", str(FX1_DECLARATION)]
     if head == "N":
         cmd.append("--nonneg-distance")
+    if recipe.get("monotone_cbc"):
+        if head != "N" or recipe.get("derived_inputs") or recipe.get("hidden") != 1:
+            raise ValueError("E34 L requires A's plain N H1 recipe")
+        cmd.append("--monotone-cbc")
     return cmd
 
 
@@ -347,6 +351,7 @@ def main() -> None:
     ap.add_argument("--dest", type=Path, help="strict route output directory outside frozen inputs")
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake, without human assessment")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (E9′ method 2 refits)")
+    ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
     if args.local_smoke_budget:
@@ -405,6 +410,8 @@ def main() -> None:
     if any(not 0 <= c < width for c in keep):
         raise ValueError(f"{core_spec}: kept columns outside 0..{width}")
     recipe = recipe_of(args.spec)
+    if args.monotone_cbc:
+        recipe["monotone_cbc"] = True
     if "research_palette" in receipt:
         from e32_palette import admit_recipe
         admit_recipe(receipt, recipe, keep, args.head, args.strict_admission, args.train_only)
@@ -422,6 +429,8 @@ def main() -> None:
     keep_file.write_text("\n".join(map(str, keep)) + "\n")
     legs = receipt["legs"]
     recipe = recipe_of(args.spec)
+    if args.monotone_cbc:
+        recipe["monotone_cbc"] = True
     groups = []  # (name, path, train_weight, val_weight, mode)
     weights = {}
     curated, teacher_record, curated_extra = None, None, None

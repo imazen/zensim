@@ -48,5 +48,22 @@ class CensusTests(unittest.TestCase):
             self.assertEqual((full[13]["min"], full[13]["n"]), (-9., 3))
 
 
+class RecipeTests(unittest.TestCase):
+    def test_h1_and_l_refusals(self):
+        from v2_common import recipe_of
+        from v2_lodo_mlp import train_command
+        self.assertEqual(recipe_of("r0@h32:H1"), {"hidden": 1})
+        args = ([], 1101, 101, 1853, Path("keep"), "N", Path("model"))
+        base = train_command(*args)
+        self.assertEqual(base, train_command(*args, recipe={}))
+        l = train_command(*args, recipe={"hidden": 1, "monotone_cbc": True})
+        self.assertEqual(l[-1], "--monotone-cbc")
+        self.assertEqual(l[l.index("--hidden") + 1], "1")
+        for recipe in ({"hidden": 32, "monotone_cbc": True},
+                       {"hidden": 1, "monotone_cbc": True, "derived_inputs": "other"}):
+            with self.assertRaisesRegex(ValueError, "plain N H1"):
+                train_command(*args, recipe=recipe)
+
+
 if __name__ == "__main__":
     unittest.main()

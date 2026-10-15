@@ -60,6 +60,7 @@ def main() -> None:
     ap.add_argument("--train-only", action="store_true", help="stop after selected bake; no confirmatory predictions")
     ap.add_argument("--root", help="instrument root (default: the Rev3 v2 root); read by v2_common from argv")
     ap.add_argument("--columns", help="comma-separated sorted wide columns of a sel:<id> spec (as v2_lodo_mlp)")
+    ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
     args = ap.parse_args()
     if args.local_smoke_budget:
@@ -115,6 +116,8 @@ def main() -> None:
         weights[leg] = acceptance_weight(NOMINAL_WEIGHT[leg], refs_of(fit))
         groups += [(leg, fit, weights[leg], 0, "withinref,both"), (f"{leg}_development", dev, 0, val_w, "withinref,both")]
     recipe = recipe_of(args.spec)
+    if args.monotone_cbc:
+        recipe["monotone_cbc"] = True
     if "hdr_weight" in recipe:
         raise ValueError("E26 is registered for LODO cells only; no HDR confirmation fit")
     coverage_record, curated_extra = None, None

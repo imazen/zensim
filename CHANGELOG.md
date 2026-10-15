@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Extend the existing masked monotone projection to plain N, including H1 recipe and f32/f16 identity checks.
+
+
 - Add an engineering-only E34 L coefficient/input-domain probe and deterministic H1 fixture preparation.
 
 

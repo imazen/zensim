@@ -290,7 +290,6 @@ pub fn validate_training_capabilities(
             hyperparams.tanh_output_head_scale > 0.0,
         ),
         ("--sigma-weighted-mse", hyperparams.sigma_weighted_mse),
-        ("--monotone-cbc", hyperparams.monotone_cbc),
         (
             "--qat-fine-tune-epochs",
             hyperparams.qat_fine_tune_epochs > 0,
@@ -302,6 +301,16 @@ pub fn validate_training_capabilities(
             "{flag} is only wired on --per-sample-alpha-head; the requested behavior would be ignored"
         );
     }
+    assert!(
+        hyperparams.n_hidden > 0,
+        "hidden width must be positive (H1 is supported)"
+    );
+    assert!(
+        !hyperparams.monotone_cbc
+            || hyperparams.per_sample_alpha_head
+            || hyperparams.nonneg_distance,
+        "--monotone-cbc requires --per-sample-alpha-head or plain --nonneg-distance"
+    );
     assert!(
         hyperparams.monotone_cbc
             || !(hyperparams.monotone_strict

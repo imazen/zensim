@@ -897,3 +897,13 @@ e34-steering-build:
 
 e34-linear-probe *args:
     python3 scripts/rev4_featpot/e34_linear_probe.py {{args}}
+
+# Synthetic trainer contracts and the frozen default argv (no corpus labels).
+e34-trainer-tests:
+    cargo test -p zensim-validate --lib e34_
+    python3 scripts/tests/test_e34_prepare.py
+    python3 scripts/tests/test_v2c.py TrainRecipe
+
+e34-trainer-regression:
+    cargo test -p zensim-validate --lib mlp_train::
+    cargo clippy -p zensim-validate --lib --bin zensim_mlp_train -- -D warnings
