@@ -69,6 +69,8 @@ struct Job {
     engine: bool,
     #[serde(default)]
     floor_recovery: bool,
+    #[serde(default)]
+    linear_probe: bool,
 }
 #[derive(Deserialize)]
 struct Case {
@@ -143,6 +145,17 @@ fn engineering_packet() {
         assert_eq!(mapped.result().features(), base.features());
         let f = base.features();
         let s = mapped.sensitivities();
+        let coefficients = job
+            .linear_probe
+            .then(|| linear_coefficients(&model, f.len()));
+        let mut negative_rows = Vec::new();
+        if let Some(c) = &coefficients {
+            let ids = crate::feature_layout::declared_ids(&model).unwrap();
+            if ids.iter_slots().any(|id| f[id] < 0.0) {
+                negative_rows.push(json!({"row":"base"}));
+            }
+            assert_eq!(c.len(), s.len());
+        }
         // Independent feature probes on the same served/diagnostic forward.
         let mut feature = owner(&model, case.objective);
         let mut sensitivity_objective = case.objective;
@@ -212,6 +225,12 @@ fn engineering_packet() {
                 let repaired = pixel.compute(&rs, &input, None).unwrap();
                 let complete = served.compute(&rs, &input, None).unwrap();
                 assert_eq!(repaired.features(), complete.features());
+                if coefficients.is_some() {
+                    let ids = crate::feature_layout::declared_ids(&model).unwrap();
+                    if ids.iter_slots().any(|id| repaired.features()[id] < 0.0) {
+                        negative_rows.push(json!({"row":"repair", "bounds":[x0,y0,x1,y1]}));
+                    }
+                }
                 let df: Vec<_> = repaired
                     .features()
                     .iter()
@@ -264,6 +283,10 @@ fn engineering_packet() {
         let m2 = stats::spearman(&true_linear, &true_gain);
         let m3f = stats::spearman(&predicted, &true_gain);
         let report = json!({"key":case.key,"objective":format!("{:?}",case.objective),"model":case.model_sha256,
+            "linear_probe":coefficients.as_ref().map(|c| json!({
+                "coefficient_convention":"raw = pin - dot(c,x); compare s to -c",
+                "max_abs_s_plus_c":s.iter().zip(c).map(|(s,c)|(s+c).abs()).fold(0.0_f64,f64::max),
+                "s":s,"c":c,"negative_input_rows":negative_rows})),
             "sensitivity_objective":format!("{:?}",sensitivity_objective),
             "base_score":base.score(),"served_base_bits":served_base.score().to_bits(),"served_repair_bits":served_bits,
             "m2":m2,"m3f":m3f,"pass":m2>=0.99 && m3f>=0.70,"engine":job.engine,"blocks":blocks,
@@ -287,4 +310,60 @@ fn engineering_packet() {
         serde_json::to_vec(&json!({"packet_sha256":sha(&bytes),"rows":summary})).unwrap(),
     )
     .unwrap();
+}
+
+// Test-owned inspection of the loaded, quantized L bake. No inferred weights,
+// finite-difference coefficients, or changes to the serving implementation.
+fn linear_coefficients(model: &crate::mlp::Model, width: usize) -> Vec<f64> {
+    use zenpredict::{Activation, WeightStorage};
+    fn weights(storage: WeightStorage<'_>) -> Vec<f64> {
+        match storage {
+            WeightStorage::F32(w) => w.iter().map(|&w| f64::from(w)).collect(),
+            WeightStorage::F16(w) => w
+                .iter()
+                .map(|&w| f64::from(zenpredict::f16_bits_to_f32(w)))
+                .collect(),
+            WeightStorage::I8 { .. } => panic!("L probe supports f32/f16 only"),
+        }
+    }
+    assert_eq!(model.n_layers(), 2);
+    let first = model.layer(0);
+    let last = model.layer(1);
+    assert_eq!((first.out_dim, last.in_dim, last.out_dim), (1, 1, 1));
+    assert_eq!(first.activation, Activation::Relu);
+    assert_eq!(last.activation, Activation::Identity);
+    assert_eq!(first.biases, &[0.0]);
+    assert!(model.scaler_mean().iter().all(|&x| x == 0.0));
+    let w1 = weights(first.weights);
+    let w2 = weights(last.weights)[0];
+    assert!(w1.iter().all(|&w| w >= 0.0) && w2 <= 0.0);
+    let ids = crate::feature_layout::declared_ids(model).unwrap();
+    assert_eq!(ids.len(), w1.len());
+    let mut c = vec![0.0; width];
+    for ((id, w), &scale) in ids.iter_slots().zip(w1).zip(model.scaler_scale()) {
+        assert!(scale > 0.0);
+        c[id] = -w2 * w / f64::from(scale);
+    }
+    c
+}
+
+#[test]
+fn e34_linear_fixture() {
+    let path = std::env::var("E34_LINEAR_FIXTURE").expect("explicit fixture recipe");
+    let recipe: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let output = recipe["output"].as_str().unwrap();
+    assert!(!std::path::Path::new(output).exists());
+    let blob = zenpredict_bake::bake_from_json_str(&recipe["model"].to_string()).unwrap();
+    let model = crate::mlp::Model::from_bytes(&blob).unwrap();
+    let coefficients = linear_coefficients(
+        &model,
+        crate::feature_layout::declared_ids(&model)
+            .unwrap()
+            .iter_slots()
+            .max()
+            .unwrap()
+            + 1,
+    );
+    assert!(coefficients.iter().any(|&c| c > 0.0));
+    std::fs::write(output, blob).unwrap();
 }

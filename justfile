@@ -890,3 +890,10 @@ tidy-tool-check:
 # E34 P1: explicit registered fit root; decodes features and row keys only.
 e34-feature-census root contract output:
     python3 scripts/rev4_featpot/e34_prepare.py --root '{{root}}' --contract '{{contract}}' --output '{{output}}'
+
+# Explicit engineering-only builds and P2 packet/fixture preparation.
+e34-steering-build:
+    RUSTFLAGS='--cfg steerfix_instrument' cargo test -p zensim --lib --features custom-profiles --no-run
+
+e34-linear-probe *args:
+    python3 scripts/rev4_featpot/e34_linear_probe.py {{args}}

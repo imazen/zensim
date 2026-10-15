@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Add an engineering-only E34 L coefficient/input-domain probe and deterministic H1 fixture preparation.
+
+
 ### Fixed
 
 - Browser WASM releases large streaming buffers without spawning unsupported native threads; Rayon metric computation is retained.
