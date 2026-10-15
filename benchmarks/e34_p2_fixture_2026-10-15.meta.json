@@ -1,0 +1,17 @@
+{
+  "purpose": "Unfitted deterministic H1 f32 fixture; instrument/input-domain diagnostic, not an L qualification result",
+  "source_commit": "2b056cf0",
+  "packet": "/mnt/v/output/zensim/e34-prep-2026-10-15/p2-packet-f32.json",
+  "packet_sha256": "ec94dd4c23ff391e8528570efd7bdc964d3680f6d7e3e878f1cc71f93a79efa9",
+  "result": "/mnt/v/output/zensim/e34-prep-2026-10-15/p2-f32.json",
+  "result_sha256": "b08117a8ae7bff86ed54162cb570d6239db0465630f5920d0ee59777233a5cbf",
+  "binary_sha256": "710081cc99eead38d2b231376a3395cd73e7524d22705569a26280db360c8048",
+  "summary_sha256": "2e8fd284c31779e6adfa3953d25e642fc600f69ee306ac98b763b95cf3437b25",
+  "cases": 135,
+  "negative_input_cases": 0,
+  "engine_disagreements": 0,
+  "zero_s_cases": 70,
+  "max_abs_s_plus_c": 0.37946972646750504,
+  "command": "TMPDIR=$HOME/tmp/e34prep ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 ZENSIM_NEIGHBOUR_EXACT=1 STEERFIX_PACKET=/mnt/v/output/zensim/e34-prep-2026-10-15/p2-packet-f32.json ~/work/claudehints/scripts/run-heavy --mem 24G --jobs 8 -- target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::engineering_packet --exact --nocapture",
+  "resource": "run-heavy: done rc=0 759s | peak-RSS 0.18GiB | min-avail 37046MiB | peak-load 20.89"
+}
