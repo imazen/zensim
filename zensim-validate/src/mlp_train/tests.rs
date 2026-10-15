@@ -3889,3 +3889,15 @@ fn e34_k_refuses_incomplete_or_incompatible_options() {
         assert!(std::panic::catch_unwind(|| validate_training_capabilities(&hp, true, 0)).is_err());
     }
 }
+
+#[test]
+fn e34_l_refuses_feature_transforms_for_identity_contract() {
+    let hp = MlpHyperparams {
+        n_hidden: 1,
+        nonneg_distance: true,
+        monotone_cbc: true,
+        feature_transforms: Some(vec![zenpredict::FeatureTransform::Identity]),
+        ..Default::default()
+    };
+    assert!(std::panic::catch_unwind(|| validate_training_capabilities(&hp, true, 0)).is_err());
+}

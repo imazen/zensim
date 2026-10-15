@@ -2628,6 +2628,12 @@ fn apply_manifest_to_args(
 /// CLI-only capabilities (data sources and the GPU adapter). Shared head/loss
 /// checks live in mlp_train::validate_training_capabilities.
 fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu: bool) {
+    if args.nonneg_distance && args.monotone_cbc {
+        assert!(
+            args.feature_transform.is_empty() && args.auto_transforms.is_none(),
+            "plain monotone N refuses feature transforms (E34 L identity contract)"
+        );
+    }
     if args.steer_pairs.is_some() {
         assert!(
             !want_gpu

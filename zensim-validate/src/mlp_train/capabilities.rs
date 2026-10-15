@@ -150,6 +150,14 @@ pub fn validate_training_capabilities(
         );
     }
 
+    // E34 L inherits E33 E5: its linear/identity proof declares no transforms.
+    if hyperparams.nonneg_distance && hyperparams.monotone_cbc {
+        assert!(
+            hyperparams.feature_transforms.is_none(),
+            "plain monotone N refuses feature transforms (E34 L identity contract)"
+        );
+    }
+
     // The pool and hybrid heads implement NO absolute term — they read
     // `g.loss_mode` only to log it. Before the polarity owner that was merely a
     // silent discard; with it, a `:mse`/`:both` group would flip their RankNet

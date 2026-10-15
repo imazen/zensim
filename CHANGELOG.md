@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Refuse feature transforms for plain monotone N before CLI data loading and in library validation, preserving E34 L’s identity contract.
+
 - Add native label-free E34 pixel preparation and source inventory with strict missing-source refusal.
 
 - Add opt-in E34 K exact-gradient repair loss, independent sampling and label-free table admission to the plain N trainer.
