@@ -1964,3 +1964,13 @@ synthetic served-path probes and the registered 135 steering cases. P2 uses
 those same steering pixels with the diagnostic raw objective. This does not
 start P4, consume the noise read, or authorize a full fit. Receipts are under
 `/mnt/v/output/zensim/e34-prep-2026-10-15/part3/`.
+
+### E34 part 4: report-only gate sensitivity precision (2026-10-15)
+
+The part-4 brief authorizes a diagnostic on the already-exposed 135 registered
+G-STEER pixel cases with frozen A/C/production seed-0 bakes and the part-3 L
+smoke. It compares registered f32 finite differences, f64 finite differences
+and analytic loaded-network gradients. No labels, model choice, fitting,
+threshold change or replacement of registered results is authorized. Stored
+engineering results are read only as replay oracles; all new results go under
+`/mnt/v/output/zensim/e34-prep-2026-10-15/part4/`.

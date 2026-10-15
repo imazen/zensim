@@ -968,3 +968,15 @@ e34-part3-backup-check:
     for p in files:
         assert digest(p) == digest(target / p.relative_to(source)), p
     print(f'SHA-256 matches for all {len(files)} regular artifact files; executable symlinks excluded')
+
+e34-precision-contracts:
+    target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::precision::reference_contracts --exact --nocapture
+
+e34-precision-clippy:
+    RUSTFLAGS='--cfg steerfix_instrument' cargo clippy -p zensim --lib --tests --features custom-profiles -- -D warnings
+
+e34-precision-run run:
+    ZENSIM_FORMULA_REV=5 ZENSIM_NEIGHBOUR_EXACT=1 RAYON_NUM_THREADS=1 E34_PRECISION_PACKET=/mnt/v/output/zensim/e34-prep-2026-10-15/part4/{{run}}-job.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::precision::gate_precision_packet --exact --nocapture
+
+e34-precision mode:
+    python3 scripts/rev4_featpot/e34_precision.py {{mode}} --root /mnt/v/output/zensim/e34-prep-2026-10-15/part4

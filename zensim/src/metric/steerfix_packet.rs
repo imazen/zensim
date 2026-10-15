@@ -5,6 +5,9 @@ use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+#[path = "steerfix_precision.rs"]
+mod precision;
+
 mod stats {
     include!("../../examples/support/coherence_stats.rs");
 }
