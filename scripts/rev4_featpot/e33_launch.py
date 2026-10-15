@@ -212,7 +212,7 @@ def installed(hfc, c):
 
 def sync_ledger(endpoint, js, status):
     """Retry transport only; an empty/missing prefix is never a successful harvest."""
-    command = ["s5cmd", "--endpoint-url", endpoint, "sync",
+    command = ["s5cmd", "--json", "--endpoint-url", endpoint, "sync",
                f"s3://zentrain/jobs/{js}/ledger/*", str(status) + "/"]
     failures = []
     for attempt, delay in enumerate((0, 1, 3), 1):
@@ -220,7 +220,19 @@ def sync_ledger(endpoint, js, status):
             time.sleep(delay)
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
+            errors = []
+            for line in (result.stdout + "\n" + result.stderr).splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                    if not isinstance(event, dict) or event.get("error") or event.get("success") is False:
+                        errors.append(line)
+                except ValueError:
+                    errors.append(line)
+            # s5cmd 2.3 can print a structured error (including an empty prefix)
+            # and still exit zero. Require both exit success and error-free events.
+            if result.returncode == 0 and not errors:
                 if failures:
                     print(f"ledger sync recovered {js} attempt={attempt}", flush=True)
                 return

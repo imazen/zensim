@@ -170,6 +170,19 @@ class HarvestRecovery(unittest.TestCase):
                 owner.sync_ledger("fixture", "pilot", self.root)
             self.assertEqual(run.call_count, 3)
 
+    def test_zero_exit_with_json_error_is_not_success(self):
+        import subprocess
+        for diagnostic in ['{"operation":"sync","error":"no object found"}',
+                           '{"operation":"sync","error":"AccessDenied"}',
+                           '{"success":false}', 'unstructured failure']:
+            with self.subTest(diagnostic=diagnostic), \
+                 mock.patch.object(owner.subprocess, "run", return_value=
+                                   subprocess.CompletedProcess([], 0, "", diagnostic)) as run, \
+                 mock.patch.object(owner.time, "sleep"):
+                with self.assertRaises(RuntimeError):
+                    owner.sync_ledger("fixture", "pilot", self.root)
+                self.assertEqual(run.call_count, 3)
+
     def cycle(self, failed=None, subset=False):
         import types
         bundle = self.root / "packet"
