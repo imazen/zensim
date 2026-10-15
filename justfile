@@ -1249,6 +1249,16 @@ e34-harvest-supervised status:
 e34-harvest-tests:
     PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e33_launch
 
+# Registered E34 assessment; the committed exposure ledger precedes capture.
+e34-eval-capture:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py capture
+
+e34-eval-statistics:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- target/release/panel e34 evaluate --input /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/panel-input.json --output /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/statistics.json
+
+e34-eval-progress:
+    tail -n 8 ~/tmp/e34-eval/capture.log ~/tmp/e34-eval/statistics.log
+
 # Reproduce the E34 CI failures on a chosen source revision.
 cifix-e34-targets:
     cargo test -p zensim -p zensim-validate --no-fail-fast --test featcanon_rev4_contract --test featcanon_tier_parity --test palette_legacy_vectors --test bake_surface -- --nocapture
