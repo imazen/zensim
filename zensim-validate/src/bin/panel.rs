@@ -158,8 +158,8 @@ mod scatter_json;
 
 #[path = "../ladder_step.rs"]
 mod ladder_step;
-mod panel_evaluate;
 mod panel_e34;
+mod panel_evaluate;
 
 struct Args {
     /// Signed D2 correlations with a fixed higher-is-better quality direction.

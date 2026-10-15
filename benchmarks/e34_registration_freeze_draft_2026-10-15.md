@@ -67,8 +67,10 @@ and its historical §8 question 1 below. For example, paired control 128/135
 requires at least 133/135, so candidate 129/135 fails.
 
 The eligibility, non-inferiority, Holm, guards, label/split protections and
-other registered numbers remain unchanged. The margin stays **0.002**;
-owner decision D13 remains open.
+other registered numbers remain unchanged. Owner decision D13 (saved 2026-10-15 08:42 MDT) fixes the non-inferiority
+margin at **0.0065 for both A and C** before any E34 evaluation output is read.
+D13 is resolved. This supersedes the historical revision-4 margin 0.002
+wherever it occurs below; every other registered numerical gate is unchanged.
 Historical finite-difference results in the retained revision-4 text below
 remain historical evidence. No model is adopted by this amendment, and the
 remaining worker/image/jobset/source-closure qualifications still prevent freeze.

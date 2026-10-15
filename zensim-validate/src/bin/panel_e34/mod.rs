@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use zenstats::resample::{BootstrapConfig, Design, Draw, Interval, cluster_bootstrap};
 
+// Owner D13, saved 2026-10-15 08:42 MDT; both model families.
+const ELIGIBILITY_MARGIN: f64 = 0.0065;
+
 const DATASETS: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 #[derive(Parser)]
 struct Cli {
@@ -480,7 +483,11 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
             continue;
         }
         eprintln!("E34 test {} {} vs {}", t.index, t.arm, t.control);
-        let margin = if t.eligibility { 0.002 } else { 0. };
+        let margin = if t.eligibility {
+            ELIGIBILITY_MARGIN
+        } else {
+            0.
+        };
         let primary = input.interval(t, &[0, 1, 2, 3], 100 * t.index, false, false, margin)?;
         let reference = input.interval(t, &[0, 1, 2, 3], 100 * t.index + 6, true, false, 0.)?;
         let mut p = decision(&primary, 10);
@@ -490,8 +497,8 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
             .map(|(step, alpha)| {
                 let critical = zenstats::student_t_quantile(1. - alpha, 9.);
                 json!({"holm_step":step,"alpha":alpha,"t_critical":critical,
-                "equal_arm_max_two_way_se":0.002/(critical*(10_f64/9.).sqrt()),
-                "required_delta_at_measured_se":critical*primary.se*(10_f64/9.).sqrt()-0.002})
+                "equal_arm_max_two_way_se":ELIGIBILITY_MARGIN/(critical*(10_f64/9.).sqrt()),
+                "required_delta_at_measured_se":critical*primary.se*(10_f64/9.).sqrt()-ELIGIBILITY_MARGIN})
             })
             .collect();
         let mut guards = Vec::new();
@@ -538,7 +545,7 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
             "improvement_point_guard":primary.estimate>0.002}));
     }
     Ok(
-        json!({"schema":"e34-statistics-v1","report_only":noise,"resamples":10000,"level":0.95,
+        json!({"eligibility_margin":ELIGIBILITY_MARGIN,"schema":"e34-statistics-v1","report_only":noise,"resamples":10000,"level":0.95,
         "percentile":"Hyndman-Fan type 7","base_seed":20261011,"tests":out,
         "holm_adjusted":if noise {Value::Null}else{json!(zenstats::multiple::holm(&ps))},
         "holm_reject":if noise {Value::Null}else{json!(zenstats::multiple::holm_reject(&ps,0.05))}}),
