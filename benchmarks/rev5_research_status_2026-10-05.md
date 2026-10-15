@@ -794,3 +794,20 @@ Open owner decisions:
   - worker-class smokes, caps and dry placement.
 
   Then freeze and one fleet lane on tower, r3500, r3800x, i270, i134 and r5600g.
+
+## 45. E34 launched; CI green (2026-10-15, main `53d8855d`)
+
+- **E34 is running.** The frozen revision 5 is `bc9be24a`: 305 cells, margin 0.0065 for both families (owner
+  decision), steering measured with the exact gradient.
+  - All 305 cells (18 jobsets) are released on tower, r3500, r3800x, i270, i134 and r5600g, 19 containers at launch.
+  - The image is digest-pinned: `sha256:1cc5ab66…`.
+  - 22 of 22 final-image smokes passed, and the first two cells were harvested and verified before scale-out.
+  - Arm K's λ was chosen by the registered rule on the 8-origin dev panel, with no labels read.
+  - The loaned hosts keep working past their loan time and snapshot in-flight artifacts off-host.
+- **CI is green.** Run 38768811217 passed 19 of 19 jobs on `53d8855d`.
+  - The earlier failures were partly pre-existing (Rev4 legacy-slot reads, dead code with no default features) and
+    partly from the E34 chain (a format slip, three test oracles that assumed finite differences).
+  - The owner approved the test-contract changes for exact derivatives. No tolerance was loosened, and no ignore or
+    skip was added.
+  - The macOS Intel jobs are gone from CI. Windows x64/ARM64, macOS ARM64, Ubuntu x64/ARM64 and the i686 cross job
+    remain.
