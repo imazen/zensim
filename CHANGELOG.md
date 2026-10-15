@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Pin zenmetrics-stats to the approved E34 Student/directional-bootstrap helpers and migrate the undefined Interval literal.
+
 - Refuse feature transforms for plain monotone N before CLI data loading and in library validation, preserving E34 L’s identity contract.
 
 - Add native label-free E34 pixel preparation and source inventory with strict missing-source refusal.

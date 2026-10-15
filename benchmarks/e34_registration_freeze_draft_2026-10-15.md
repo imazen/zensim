@@ -16,7 +16,8 @@ receipts and qualifications listed here exist. No registered gate is changed.
 | Family map capture | `9d07a0f63ef5fa167c5333535010f44b4ab9a087f04e560521b6d1aa1961820c` |
 | Origin split owner capture | `58e992526d501596c6912d3163df7f5c7ef6d2b0e215fb00d928b5de9866e700` |
 | P4 source preflight | `45e6c65c9b6c474504db37ea38cb08909f6c9b939090f6f3d41e58756e0b1ac5` |
-| P4 eligibility, dHash, SafeSyn intersection, selection and builds | `PENDING — official SDR origins 1444 and 1458 absent` |
+| P4 eligibility, dHash, SafeSyn intersection, selection and builds | `PENDING — D11 excludes 1444 and 1458; 1,016 remaining dual-TRAIN origins` |
+| G-STEER sensitivity method | `pending owner decision D12` — retain the current instrument and served map until the owner decides |
 | P5 complete augmentation-builder validation | `PENDING` |
 | P6 local first-epoch smokes | `5/7: base A/C, W A/C, L A; 1 epoch, 49,999 pairs; K A/C pending` — receipt `8149a8c93789313818eb11f97f1d901ca263d221cd8007124a48a2bf1c1bbca6` |
 | P6 L serving smoke | `FAIL G-STEER 134/135; C5/E3–E8, C1–C6/G-DIAL, N1–N3 and native served-path checks pass` — receipt `cb6f88c65a72a629ff573cf298e4b69192aa70772ce56b1a938704aa113ca16e` |
@@ -29,6 +30,12 @@ P2 now binds the fitted first-epoch L smoke; it does not establish exact
 fails G-STEER (134/135), so P6 qualification remains open. No model is adopted.
 See [part-3 evidence](e34_part3_2026-10-15.md) and
 [preparation evidence](e34_preparation_2026-10-15.md).
+
+Owner decision D11 (2026-10-15): exclude origins **1444 and 1458** from E34
+augmentation and development selection. Their pinned sources are DNG files
+without official SDR renditions. Compatibility thumbnails are not substitutes.
+This named exclusion precedes the P4 build. D10 admits zenmetrics-stats merge
+`48665c8fb1bb3de5c99d792ae4ed4f3f1e854629`; D12 remains pending before freeze.
 
 ---
 

@@ -2067,6 +2067,7 @@ fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64], ref_ids: Option<&[u32]>) -
         se: f64::NAN,
         n_finite: 0,
         p_zero: f64::NAN,
+        p_nonpositive: f64::NAN,
     };
     let undefined = SroccCi {
         aligned: (f64::NAN, f64::NAN),

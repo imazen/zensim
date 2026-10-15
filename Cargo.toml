@@ -103,4 +103,5 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "417cc78
 # modules (`resample`, `pairs`, `forced_choice`, `jnd`, `multiple`). This rev
 # also switches `bootstrap_ci_delta` (and so `decisive`) from order-statistic
 # percentiles to Hyndman–Fan type 7, the crate's one percentile rule.
-zenstats = { package = "zenmetrics-stats", git = "https://github.com/imazen/zenmetrics", rev = "1e48c1eafcaa8afaa8b632c4f12d8181a971a248", default-features = false, features = ["parallel"] }
+# E34 P7: directional bootstrap probability and public Student helpers (PR 82).
+zenstats = { package = "zenmetrics-stats", git = "https://github.com/imazen/zenmetrics", rev = "48665c8fb1bb3de5c99d792ae4ed4f3f1e854629", default-features = false, features = ["parallel"] }
