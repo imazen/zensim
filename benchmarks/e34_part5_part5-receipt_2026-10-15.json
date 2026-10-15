@@ -1,0 +1,101 @@
+{
+  "source_revision": "7a1c5633f4342ba78aeac58ddba060c9a4748249",
+  "schema": "e34-preparation-part5-v1",
+  "labels_read": "one authorized original E33 E21 capture; P4 pixels/features only; K smokes retain strict TRAIN",
+  "bindings": {
+    "python-seed-parity.json": {
+      "bytes": 2430,
+      "sha256": "177173bcc738a6306da8f105f8086cf86fb65314cf2c7a60415fa0e140d65aa4"
+    },
+    "rust-seed-parity.json": {
+      "bytes": 2430,
+      "sha256": "fc876757909f92b51ae220a58f83f1d4679eba503d6b08c1e1b401cfab9aa2e0"
+    },
+    "rust-seed-parity-final.json": {
+      "bytes": 2430,
+      "sha256": "fc876757909f92b51ae220a58f83f1d4679eba503d6b08c1e1b401cfab9aa2e0"
+    },
+    "bin/archive.json": {
+      "bytes": 1369,
+      "sha256": "23477c0f23234808bc716123450acb3d83f15322ba30cf78ee86ec9507933720"
+    },
+    "seed-parity-check.json": {
+      "bytes": 137,
+      "sha256": "fb52cf7bae114e904a6a1d0b40a331b0f120ed5c81a10e005c28db8981e6f751"
+    },
+    "noise-capture.json": {
+      "bytes": 26493,
+      "sha256": "a957312f2d1c481007e4e2c8084e13d1bf961eb9b4164c3d865502701b00e2b1"
+    },
+    "noise-result.json": {
+      "bytes": 5149,
+      "sha256": "f5e097f91913a22334d2f61bdc9c62137e10689116c35b6aa6b482cb25d01717"
+    },
+    "p4-inventory-r2/inventory.json": {
+      "bytes": 1033757,
+      "sha256": "1203e88458fafa6038dde4ba6e7faaeb635d0ebb6907c41bf210664892a1d7bd"
+    },
+    "p4-inventory-r2/eligibility.json": {
+      "bytes": 370119,
+      "sha256": "1719d22dfc466feadd2eb3093aec2e568dd2d63f57871d969a6ca165c393ee88"
+    },
+    "p4-inventory-r2/selection.json": {
+      "bytes": 14852,
+      "sha256": "bcfad0651f8ee936dd987afb2a230b1e2201bfcab951e4b9158d75579097d9a9"
+    },
+    "p4-inventory-r2/encodes/tools.json": {
+      "bytes": 655,
+      "sha256": "41db26838679ffe769ca62442817f634fbf5942106887d38892dbbcae646334a"
+    },
+    "p4-inventory-r2/encodes/augmentation/bases.json": {
+      "bytes": 1256097,
+      "sha256": "f7ead9a3adf919582fe73f733ac1b0aa17cf4be483a2dd482bba24928fd7b317"
+    },
+    "p4-inventory-r2/encodes/scalar-canary/comparison.json": {
+      "bytes": 247,
+      "sha256": "ee88cfe2daa77d20561c1403c81b119fe2ae1e0b634aa5ce7548fe47a9dd1ff8"
+    },
+    "p4-inventory-r2/development/panel.json": {
+      "bytes": 85752,
+      "sha256": "6baf72997d596ec356b357f0fb23fb117b738dbdc2d97a5ebc88bb1e3b0d26bb"
+    },
+    "p4-inventory-r2/development/assessment-inputs.json": {
+      "bytes": 71426,
+      "sha256": "e4378dd318f5ad689c7389b594da09ea5775100f665c98f46b8a1dc4190d1ad3"
+    },
+    "p4-inventory-r2/repairs/augmentation.parquet.manifest.json": {
+      "bytes": 780,
+      "sha256": "a1c73bb167085f897b083136e4f7703ffb17ad0102dbef415e4b9955b5e323f8"
+    },
+    "p4-inventory-r2/parity/comparison.json": {
+      "bytes": 834,
+      "sha256": "046326b9f4e38cf425741e506c0121accc648157f300b251bcb605ec3bf8a389"
+    },
+    "p4-inventory-r2/repairs/rank-inputs/augmentation.parquet.manifest.json": {
+      "bytes": 5395,
+      "sha256": "4d2d74570bd3b8168d4b1d0cc5575ee7fb871f34222f015e21a2c51a737b96a5"
+    },
+    "smokes/complete/k-a.smoke.json": {
+      "bytes": 3129,
+      "sha256": "a00ecb74ede42a7751e56f584f5d142d38bfb13969d60855f7ad3ad8c7c0d466"
+    },
+    "smokes/complete/k-c.smoke.json": {
+      "bytes": 3132,
+      "sha256": "0cac1ec412b956d99081d83309da2ff896fc1dd86ef79b340496648dbafcb4b4"
+    },
+    "smokes/k-a.smoke.json": {
+      "bytes": 3021,
+      "sha256": "8a55fb534dd594240c3c86d09de16e7c996f555b041bd23a17d203cd7564615d"
+    },
+    "resources.json": {
+      "bytes": 17077,
+      "sha256": "5699ce715778e18f5326e24ec915d716e606e6e3b2429f578b9f0009edfa113b"
+    }
+  },
+  "source_limit": "existing byte-pinned zenmetrics executable source closure was not recovered",
+  "not_qualified": [
+    "D12 sensitivity decision pending",
+    "fleet smokes/caps and image/jobset pending",
+    "no full fit, lambda selection, new E21 assessment or model adoption"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schema": "e34-steer-pairs-v1",
+  "formula_revision": 5,
+  "tier": "v3",
+  "labels_read": false,
+  "build_complete": true,
+  "base_images": 1536,
+  "origins": 128,
+  "width": 1825,
+  "repair_rows": 88106,
+  "sampled_rows": 94128,
+  "bit_identical_dropped": 6022,
+  "represented_bases": 1536,
+  "eligibility_receipt_sha256": "1719d22dfc466feadd2eb3093aec2e568dd2d63f57871d969a6ca165c393ee88",
+  "extractor_sha256": "cd4f4c9a9b3f0566f3f52ad2539ac8431a5881262c91ffe7dc84b20f8e080414",
+  "build_commit": "a30882e3d686",
+  "table_sha256": "89e208f61792cdac78dc58ffb91b8ac5aa68b66119f967d01ab80218d143d1ba",
+  "job_sha256": "6705b5a87fbcaab5cdb1aa6669f65eea21b58be32c6433750c4a528a10d321fe",
+  "features_sha256": "a1f1b7eeb309a84df63d46a8f90db42464bafcae95cfaf4d56120b326291e123"
+}

@@ -2007,3 +2007,31 @@ KADID has three repeated image-pair keys; every one of its 7,869 distinct
 physical member/source-row observations was retained. Two-way SEs: A
 `0.0019019482837346158`, C `0.0016920753183515028`; original margin unchanged.
 Full noise results: [measured receipt](../benchmarks/e34_noise_2026-10-15.json).
+
+### E34 part 5: admitted augmentation and dev pixels (2026-10-15)
+
+After D11's named exclusions, the complete 1,016-origin inventory was screened
+against every registered excluded-reference population, including E21 reference
+pixels. The native dHash audit covers 4,221 source and 1,113 exclusion paths.
+Broad families, dHash <=10 matches and family closure leave 913 eligible
+origins. Reference-only native features select 128 augmentation origins and
+eight development origins by k-means; their families are disjoint. This reads
+pixels and features only. Four-codec q20/50/80 outputs retain all 1,536 encoded
+bases and native decoded PNGs. The separate scalar JXL recipe produces 24 dev
+bases / 96 block-size cases, with no model assessment or lambda choice.
+
+The SafeSyn intersection screen found no exact-file matches to the eight broad
+references. Its four dHash candidates are different pictures on direct visual
+inspection; unknown parent/crop lineage is not recovered. Native extractor
+parity covers all 1,536 augmentation bases and 16 repairs across four codecs
+and four block sizes, with 651,840 consumed f32 values matching bit for bit.
+The final table and local K smoke receipts are linked from
+[part-5 evidence](../benchmarks/e34_part5_2026-10-15.md). D12 remains pending;
+this build does not change G-STEER, the served steering map or any gate.
+
+The first K-A attempt stopped at layout admission before an epoch. The final
+rank-input view appends 28 explicit unused structural-zero slots to the native
+1,825-wide rows to match the hash-pinned 1,853-wide rank archive. All original
+f32 bits and retained-row counts are unchanged. A/C K smokes passed on this
+view through the same strict TRAIN route as part 3, one 49,999-pair epoch,
+fixed smoke lambda 0.1. No E21/dev-panel assessment or lambda selection ran.

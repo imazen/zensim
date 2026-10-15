@@ -1028,3 +1028,131 @@ e34-part5-inventory name="p4-inventory":
 
 e34-admission-tests:
     python3 scripts/tests/test_e34_admission.py
+
+
+e34-p4-normalize:
+    target/debug/examples/e34_pixels /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/normalize.json
+
+e34-p4-audit:
+    target/debug/check_holdout_overlap --native-png --max-decode-pixels 120000000 --cid22-refs /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/excluded-png --training-csv /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/audit.csv --threshold 10 --expected-training 4221 --expected-holdout 1113 --out-tsv /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/audit.tsv
+
+e34-reference-build:
+    cargo build --manifest-path tools/e34-reference-features/Cargo.toml
+
+e34-moz-source:
+    mkdir -p /mnt/v/output/zensim/e34-prep-2026-10-15/part5/encoder-source
+    jj git clone https://github.com/imazen/mozjpeg /mnt/v/output/zensim/e34-prep-2026-10-15/part5/encoder-source/mozjpeg
+
+e34-p4-eligibility:
+    python3 scripts/rev4_featpot/e34_augmentation.py audit --root /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2 --context-review /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/safesyn-context-review.json
+
+e34-p4-resize:
+    target/debug/examples/e34_pixels /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/resize.json
+
+e34-p4-reference-job:
+    python3 scripts/rev4_featpot/e34_augmentation.py reference-job --root /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2
+
+e34-p4-reference-features:
+    ZENSIM_MAX_TIER=v3 tools/e34-reference-features/target/debug/e34-reference-features /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/reference-features-job.json
+
+e34-p4-selection:
+    python3 scripts/rev4_featpot/e34_augmentation.py select --root /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2
+
+e34-moz-build:
+    cmake -S /mnt/v/output/zensim/e34-prep-2026-10-15/part5/encoder-source/mozjpeg -B /mnt/v/output/zensim/e34-prep-2026-10-15/part5/encoder-build/mozjpeg -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWITH_SIMD=ON -DPNG_SUPPORTED=ON
+    cmake --build /mnt/v/output/zensim/e34-prep-2026-10-15/part5/encoder-build/mozjpeg --parallel 8 --target cjpeg-static
+
+e34-p4-encode mode:
+    python3 scripts/rev4_featpot/e34_encode.py {{mode}} --root /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2
+
+e34-jxl-build:
+    python3 scripts/rev4_featpot/e34_jxl_build.py
+
+
+e34-p4-finish mode:
+    python3 scripts/rev4_featpot/e34_p4_finish.py {{mode}}
+
+e34-p4-repairs:
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 target/debug/examples/e34_pixels /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/repairs/job.json
+
+
+e34-k-smoke arm attempt="complete":
+    python3 scripts/rev4_featpot/e34_smoke.py --arm {{arm}} --root /mnt/v/output/zensim/e33-impl-2026-10-09/packet/container-scratch-1/fit-cell/9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008/rev4-featpot/v2e29 --dest /mnt/v/output/zensim/e34-prep-2026-10-15/part5/smokes/{{attempt}}/{{arm}} --bin-dir {{justfile_directory()}}/target/debug --steer-pairs /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/repairs/rank-inputs/augmentation.parquet --steer-lambda 0.1
+
+e34-p4-probe-build:
+    cargo build -p zensim --example e34_pixels --features custom-profiles
+
+e34-p4-probe-pixels:
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 target/debug/examples/e34_pixels /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/parity/probe-job.json
+
+e34-p4-native-parity:
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 /var/tmp/rev5-extract/target/release/examples/extract_features_372col --corpus pairs --path /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/parity/pairs.tsv --out /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/parity/native-paired.csv --restore-cuts basic,peaks,v2 --force-tier v3
+
+
+e34-p4-parity-check:
+    python3 scripts/rev4_featpot/e34_native_parity.py
+
+
+e34-part5-status:
+    wc -l /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/repairs/features.jsonl
+    ps -C e34_pixels,zensim_mlp_train,cargo,rustc -o pid,etime,%cpu,rss
+    df -h /home
+
+e34-part5-receipts:
+    python3 scripts/rev4_featpot/e34_part5_receipts.py
+
+e34-part5-backup:
+    mkdir -p /mnt/tower/output/zensim/e34-prep-2026-10-15/part5
+    rsync -rt --ignore-existing --exclude='.git/' --exclude='.jj/' /mnt/v/output/zensim/e34-prep-2026-10-15/part5/ /mnt/tower/output/zensim/e34-prep-2026-10-15/part5/
+
+e34-part5-backup-check:
+    #!/usr/bin/env python3
+    import hashlib,json
+    from pathlib import Path
+    source=Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part5')
+    target=Path('/mnt/tower/output/zensim/e34-prep-2026-10-15/part5')
+    files=sorted(p for p in source.rglob('*') if p.is_file() and not p.is_symlink() and '.git' not in p.relative_to(source).parts and '.jj' not in p.relative_to(source).parts)
+    def digest(p):
+        with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+    for p in files:assert digest(p)==digest(target/p.relative_to(source)),p
+    receipt=dict(files=len(files),all_sha256_equal=True,excluded=['input symlinks','source clone .git/.jj internal history'],source=str(source),mirror=str(target))
+    print(json.dumps(receipt))
+
+e34-rank-layout:
+    python3 scripts/rev4_featpot/e34_rank_layout.py
+
+e34-part5-archive-binaries:
+    #!/usr/bin/env python3
+    import hashlib,json,shutil
+    from pathlib import Path
+    dest=Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part5/bin')
+    paths={
+      'panel-noise':Path('target/debug/panel'),
+      'e34-pixels-probes':Path('target/debug/examples/e34_pixels'),
+      'zensim-mlp-train-smokes':Path('target/debug/zensim_mlp_train'),
+      'e34-reference-features':Path('tools/e34-reference-features/target/debug/e34-reference-features'),
+      'e34-jxl-scalar':Path('tools/e34-jxl-scalar/target/debug/e34-jxl-scalar'),
+      'native-rev5-extractor':Path('/var/tmp/rev5-extract/target/release/examples/extract_features_372col')}
+    records={}
+    for name,p in paths.items():
+        target=dest/name
+        assert not target.exists()
+        shutil.copy2(p,target)
+        with target.open('rb') as f:digest=hashlib.file_digest(f,'sha256').hexdigest()
+        records[name]=dict(source=str(p.resolve()),sha256=digest,bytes=target.stat().st_size)
+    with (dest/'archive.json').open('x') as f:json.dump(records,f,indent=2)
+
+e34-part5-checks:
+    just lint-scripts
+    python3 scripts/tests/test_e34_prepare.py
+    python3 scripts/tests/test_e34_admission.py
+    cargo test -p zensim-validate --bin panel panel_e34::
+    cargo clippy -p zensim-validate --bin panel --bin bake_verdict -- -D warnings
+    cargo clippy -p zensim --example e34_pixels --features custom-profiles -- -D warnings
+    cargo clippy --manifest-path tools/e34-reference-features/Cargo.toml -- -D warnings
+    cargo clippy --manifest-path tools/e34-jxl-scalar/Cargo.toml --config /mnt/v/output/zensim/e34-prep-2026-10-15/part5/jxl-build-patch.toml -- -D warnings
+    rustfmt --check --edition 2024 tools/e34-reference-features/src/main.rs tools/e34-jxl-scalar/src/main.rs zensim/examples/e34_pixels.rs zensim-validate/src/bin/panel_e34/mod.rs
+
+e34-final-parity:
+    target/debug/panel e34 seed-parity --input /mnt/v/output/zensim/e33-impl-2026-10-09/assessment-e33/e33_e21.json --output /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity-final.json
+    cmp /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity.json /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity-final.json

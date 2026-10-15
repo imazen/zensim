@@ -1,0 +1,18 @@
+{
+  "schema": "e34-native-extractor-parity-v1",
+  "labels_read": false,
+  "formula_revision": 5,
+  "tier": "v3",
+  "bases": 1536,
+  "repair_probes": 16,
+  "columns": 420,
+  "f32_comparisons": 651840,
+  "exact_f32": true,
+  "mismatches": [],
+  "native_binary_sha256": "c649e810f2c3e1d2811e623adc5c7600e952229a7a14db7db9d71ebd9cbbde8b",
+  "prepared_extractor_sha256": "cd4f4c9a9b3f0566f3f52ad2539ac8431a5881262c91ffe7dc84b20f8e080414",
+  "probe_extractor_sha256": "073a123ba390a766318a98399d143b6d164d09a968e5591fe2f36dddc67cd5d3",
+  "native_csv_sha256": "0d5336a1ca9a4cf3d30340be3db0a1110f8bcaeeba02953d303202f9adf5256c",
+  "pairs_sha256": "995001898ab5c391795dc1afaf8fd7ba60213260fe180b24bf64e2ff37f736b1",
+  "scope": "all augmentation base rows; 16 sampled repairs (four codecs x four sizes), no claim of exhaustive repair parity"
+}

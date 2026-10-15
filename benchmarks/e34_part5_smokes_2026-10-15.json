@@ -1,0 +1,24 @@
+[
+  {
+    "arm": "k-a",
+    "returncode": 0,
+    "wall_seconds": 14.706144594121724,
+    "trainer_sha256": "4f6a581f6269e78566c047e7f39e6dcc2f118f7fa03faba0221eb8254dc55c7f",
+    "steer_pairs_sha256": "2579a2255e0c9c9494f74a77431f94b010cf69d87e199e25a1365e0bfa004f71",
+    "steer_lambda": 0.1,
+    "lambda_selection": false,
+    "result_sha256": "d37df06566aa0a37f9b59619dc90ba50dea590e9fb9baf71dda9c3f75182df55",
+    "k_epoch": "E34 K epoch=0 images=512 pairs=4096 skipped_denominator_lt_1e-10=0 loss=0.00048565879501073 blocks_8_16_32_64=[1031, 1079, 1068, 918]"
+  },
+  {
+    "arm": "k-c",
+    "returncode": 0,
+    "wall_seconds": 19.40477335685864,
+    "trainer_sha256": "4f6a581f6269e78566c047e7f39e6dcc2f118f7fa03faba0221eb8254dc55c7f",
+    "steer_pairs_sha256": "2579a2255e0c9c9494f74a77431f94b010cf69d87e199e25a1365e0bfa004f71",
+    "steer_lambda": 0.1,
+    "lambda_selection": false,
+    "result_sha256": "b107c5995536b2c4e1328d6c4302cbed9177e9a72a9dfb79baddf43854939bdb",
+    "k_epoch": "E34 K epoch=0 images=512 pairs=4096 skipped_denominator_lt_1e-10=0 loss=0.00029461688610948 blocks_8_16_32_64=[1031, 1079, 1068, 918]"
+  }
+]

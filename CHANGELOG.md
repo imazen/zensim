@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Build the label-free E34 four-codec augmentation and disjoint scalar JXL development pixels, with approved exclusions, native source admission and reproducible reference clustering.
+
 - Allow explicit trusted-corpus PNG decode resource budgets in the native overlap audit and E34 pixel preparation; retain existing defaults and dHash bars.
 
 - Add the E34 paired reference-by-seed statistical owner to `panel`, retaining the nine-test family, Student and directional-bootstrap decisions, report-only pair classes and E33 summary parity.
