@@ -141,3 +141,11 @@ p4-build: rc=0 66s | peak-RSS 0.84GiB | min-avail 37188MiB | peak-load 16.50
 p4-clippy: rc=0 5s | peak-RSS 0.54GiB | min-avail 40406MiB | peak-load 17.46
 p4-inventory-refusal: rc=1 0s | peak-RSS 0.06GiB | min-avail 41457MiB | peak-load 17.95
 ```
+
+The statistics-owner change is available for review in
+[zenmetrics PR 82](https://github.com/imazen/zenmetrics/pull/82), with public
+`student_t_quantile`, `student_t_upper_tail` and `Interval::p_nonpositive`.
+The branch tip was verified as `1c33d560410022b7307d2c1b16f7a0ca0015e293`.
+It is not merged and zensim's statistics pin has not changed. After review,
+P7 still needs the Rust evaluation integration and independent E33 parity;
+only then may the separately ledgered noise read run.
