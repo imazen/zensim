@@ -60,8 +60,15 @@ and the part-3 L smoke) give these new controls:
 | l | 134/135 | 135/135 | 135/135 | 135/135 |
 
 Decision rule otherwise unchanged: M2 ≥ .99 and M3f ≥ .70 on every case,
-qualification 135/135. The eligibility, non-inferiority, Holm, seed, guards,
-label/split protections and all other registered numbers remain unchanged.
+qualification 135/135 at seed 0. The approved revision-5 seed rule requires
+seeds 1 and 2 each to reach at least `max(paired control count, 133)` on the
+same 135-case panel. This supersedes revision 4 §4.5's weaker seed wording
+and its historical §8 question 1 below. For example, paired control 128/135
+requires at least 133/135, so candidate 129/135 fails.
+
+The eligibility, non-inferiority, Holm, guards, label/split protections and
+other registered numbers remain unchanged. The margin stays **0.002**;
+owner decision D13 remains open.
 Historical finite-difference results in the retained revision-4 text below
 remain historical evidence. No model is adopted by this amendment, and the
 remaining worker/image/jobset/source-closure qualifications still prevent freeze.
@@ -387,6 +394,10 @@ Nine hypotheses, all computed after every fit, whether or not the verdict consul
 
 ### 4.5 G-STEER and non-regression gates (full-data seed 0)
 
+**Historical revision 4 seed text below is superseded by the approved
+revision-5 seed rule in the D12 amendment above:** seed 0 passes 135/135;
+seeds 1 and 2 each reach at least `max(paired control count, 133)`.
+
 - **G-STEER:** PRODQUAL-B's 135 cases, M2 ≥ .99 and M3f ≥ .70, served path, QUAL-A's instrument and pins. **Pass:
   135/135.** Seeds 1–2 each no lower than the control's same seed (ties pass; weak, §8). A count on a fixed panel, so
   no interval decides it; the pass rate's clustered interval is reported. Read once per model, after all fits.
@@ -522,7 +533,7 @@ confirms the hypothesis for that family. L-A missing 135 (on M3f) means the gate
 
 ## 8. Open questions for the owner
 
-1. **G-STEER bar:** 135 at seed 0 with seeds 1–2 non-inferior (as drafted; weak), 135 on all three seeds, or seeds
+1. **G-STEER bar (historical question, resolved and superseded by revision 5 above):** 135 at seed 0 with seeds 1–2 non-inferior (as drafted; weak), 135 on all three seeds, or seeds
    1–2 each ≥ max(the control's count, 133)?
 2. **Families:** both (305 fits, about 95 cell-hours before K's overhead), or one? C costs about 2× per cell.
 3. **W:** keep it (as drafted), or drop it and run K alone as the only nonlinear intervention (saves 86 fits)?

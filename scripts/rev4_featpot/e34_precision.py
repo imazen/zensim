@@ -222,8 +222,15 @@ and the part-3 L smoke) give these new controls:
         amendment+=f"| {name} | {m['before_pass']}/135 | {m['m2_pass']}/135 | {m['m3f_pass']}/135 | {m['after_pass']}/135 |\n"
     amendment+="""
 Decision rule otherwise unchanged: M2 ≥ .99 and M3f ≥ .70 on every case,
-qualification 135/135. The eligibility, non-inferiority, Holm, seed, guards,
-label/split protections and all other registered numbers remain unchanged.
+qualification 135/135 at seed 0. The approved revision-5 seed rule requires
+seeds 1 and 2 each to reach at least `max(paired control count, 133)` on the
+same 135-case panel. This supersedes revision 4 §4.5's weaker seed wording
+and its historical §8 question 1 below. For example, paired control 128/135
+requires at least 133/135, so candidate 129/135 fails.
+
+The eligibility, non-inferiority, Holm, guards, label/split protections and
+other registered numbers remain unchanged. The margin stays **0.002**;
+owner decision D13 remains open.
 Historical finite-difference results in the retained revision-4 text below
 remain historical evidence. No model is adopted by this amendment, and the
 remaining worker/image/jobset/source-closure qualifications still prevent freeze.
