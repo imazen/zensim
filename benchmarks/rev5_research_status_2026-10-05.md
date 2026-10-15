@@ -726,3 +726,35 @@ Open owner decisions:
 - **The dial and every served score are unchanged.** Phase B, with AIC2026 labels, provides the calibration that
   turns on real numbers.
 
+
+## 43. Owner decisions of 2026-10-14 (main `1afc8ebf`)
+
+- **E34 is approved with the coordinator defaults.** The draft is revision 4, `c87a2007`.
+  - **Steering bar:** seed 0 must pass 135 of 135. Seeds 1 and 2 must each reach at least max(control's count, 133).
+  - **Families and arms:** both model families (A and C). Arm W is kept. Arm L may be adopted, but is tried last.
+  - **K's setup:** K's λ comes from a pilot. K's repair edits use all four teacher codecs.
+  - **Gates:** the 64 px steering cases stay as registered. Pair-class agreement is report-only. Holm runs over one
+    family of nine tests.
+  - **Noise first:** before freeze, one logged read of E33's stored E21 predictions (already exposed) measures the
+    two-way standard error.
+  - **Machines:** tower, r3500, r3800x and i270, plus loaned i134 and r5600g. i265 and the other agent hosts are not
+    used.
+  - **Next:** §7 preparation, with no fit:
+    - K's trainer code and augmentation table;
+    - first-epoch smokes that replace the cost projection;
+    - the noise read.
+
+    Then freeze and one fleet lane.
+- **The steering population stays at 135 cases.** That is PRODQUAL-B's registered single-model population.
+- **zenanalyze PR #90 is merged** (`ce209bfb`). zenpicker's `default_route` now reports a heuristic fallback instead
+  of returning `None`.
+- **The dial plan now says the knee is fixed at 100** (`1afc8ebf`). `b` is not fitted.
+- **Data roles:** the coordinator drafts `DATA_SPLITS.md` roles for twelve modern labelled compression datasets, as
+  one amendment for the owner's OK:
+  - jnd-mid-ma;
+  - CLIC 2021, 2022 and 2024 perceptual;
+  - ciqa-google, mucped23, midd-cap, midd-gar, nncd-iqa, fidelity-lic-vcip2023, vlic-cambridge and flickervidset.
+
+  mucped23's 49 sources are CID22's, so it can't be training data.
+- **After E34:** one registered experiment adds palette-quantization ladders from zenquant and zenpng to the synthetic
+  training pairs, plus an additional subjective JND training leg. Its registration is drafted while E34 runs.
