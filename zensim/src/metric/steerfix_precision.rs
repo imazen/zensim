@@ -264,6 +264,77 @@ struct PrecisionJob {
 }
 
 #[test]
+fn cached_tail_probe() {
+    let job: PrecisionJob = serde_json::from_slice(
+        &std::fs::read(std::env::var("E34_PRECISION_PACKET").unwrap()).unwrap(),
+    )
+    .unwrap();
+    let out = std::path::Path::new(&job.output_dir);
+    let mut worst = (0.0, serde_json::Value::Null, 0);
+    for i in 0..135 {
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_slice(&std::fs::read(out.join(format!("case-{i:03}.json"))).unwrap())
+                .unwrap();
+        let row = &rows[0];
+        assert_eq!(row["model"], "a");
+        for (j, e) in row["raw_gradient_errors"][1]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let e = e.as_f64().unwrap();
+            if e > worst.0 {
+                worst = (e, row.clone(), j);
+            }
+        }
+    }
+    let bytes = std::fs::read(&job.models[0].path).unwrap();
+    assert_eq!(sha(&bytes), job.models[0].sha256);
+    let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
+    let reference = Reference::new(&model);
+    let bytes = std::fs::read(worst.1["feature_file"].as_str().unwrap()).unwrap();
+    assert_eq!(sha(&bytes), worst.1["feature_sha256"].as_str().unwrap());
+    let width = worst.1["feature_width"].as_u64().unwrap() as usize;
+    let row: Vec<f64> = bytes[..width * 8]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|b| f64::from_le_bytes(*b))
+        .collect();
+    let slot = worst.1["gradient_ids"][worst.2].as_u64().unwrap() as usize;
+    let h = (row[slot].abs() * 1e-3).max(1e-5);
+    let mut probe = row.clone();
+    probe[slot] += h;
+    let up = reference.hidden(&probe);
+    probe[slot] = row[slot] - h;
+    let down = reference.hidden(&probe);
+    let base = reference.hidden(&row);
+    let crossings: Vec<_> = (0..base.len()).filter(|&i| (up[i] > 0.0) != (down[i] > 0.0))
+        .map(|i| json!({"unit":i,"base":base[i],"up":up[i],"down":down[i],"output_weight":reference.w2[i]})).collect();
+    assert!(!crossings.is_empty());
+    let fd = reference.fd(&row, true)[slot];
+    let exact = reference.exact(&row, true)[slot];
+    assert_eq!((fd - exact).abs(), worst.0);
+    let result = json!({"model":"a","key":worst.1["key"],"block":worst.1["block"],
+        "slot":slot,"feature":row[slot],"h":h,"raw_fd64":fd,"raw_exact":exact,
+        "absolute_error":worst.0,"crossing_units":crossings});
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(
+            out.parent()
+                .unwrap()
+                .join(std::env::var("E34_PRECISION_TAIL_OUT").unwrap()),
+        )
+        .unwrap();
+    file.write_all(serde_json::to_string_pretty(&result).unwrap().as_bytes())
+        .unwrap();
+    eprintln!("{result}");
+}
+
+#[test]
 fn gate_precision_packet() {
     assert_eq!(std::env::var("ZENSIM_FORMULA_REV").as_deref(), Ok("5"));
     let _token = archmage::testing::lock_token_testing();

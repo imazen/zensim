@@ -2,8 +2,10 @@
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 import statistics
+import struct
 
 from v2_common import sha
 from e34_linear_probe import PACKET_SHA
@@ -72,9 +74,29 @@ def summarize(root):
             hidden_exact_kinks=sum(r['hidden_exact_kinks'] for r in panel),
             max_score_f64_vs_f32_error=max(r['max_score_f64_vs_f32_error'] for r in panel),
             errors=errors, flips=flips)
+    run = json.loads((root/'run-provenance.json').read_text())
     result['provenance'] = dict(full_job_sha256=sha(root/'full-job.json'), complete_sha256=sha(root/'full/complete.json'),
                                 replay=complete['registered_replay'],
-                                binary_sha256=sha(Path('target/debug/deps/zensim-6fc55070ad1b5213')))
+                                binary_sha256=run['binary_sha256'])
+    # Explain the specific P2 discrepancy from measured sensitivities and the
+    # retained native feature row. No new probe step or model choice is made.
+    p2_path = root.parent/'part3/p2-l.json'
+    assert sha(p2_path) == '5ef8003f241b01116904b5e2f080e03f4b6f38132f6f39d392a1da5f05e3d3ef'
+    old = next(r for r in json.loads(p2_path.read_text())['rows']
+               if r['key'] == 'I41_10_05' and r['blocks'][0]['bounds'][2] == 8)
+    current = next(r for r in rows if r['model']=='l' and r['key']=='I41_10_05' and r['block']==8)
+    slot = 632
+    with Path(current['feature_file']).open('rb') as f:
+        f.seek(slot*8); x = struct.unpack('<d', f.read(8))[0]
+    h=max(abs(x)*1e-3, 1e-5)
+    s=old['linear_probe']['s'][slot]; c=old['linear_probe']['c'][slot]
+    assert abs(s+c) == current['raw_gradient_errors'][0][current['gradient_ids'].index(slot)]
+    ulp=math.ldexp(1.0, math.frexp(abs(old['base_score']))[1]-24)
+    result['rounding_example'] = dict(key=old['key'], block=8, slot=slot, feature=x, h=h,
+        raw_base_score=old['base_score'], f32_ulp_at_base=ulp, s_fd=s, s_exact=-c,
+        fd_numerator_implied=s*2*h, fd_numerator_in_ulps=s*2*h/ulp,
+        algebraic_linear_numerator=-c*2*h, algebraic_numerator_in_ulps=-c*2*h/ulp,
+        source_p2_sha256=sha(p2_path))
     with (root/'summary.json').open('x') as f:
         json.dump(result, f, indent=2, allow_nan=False);f.write('\n')
     with (root/'cases.csv').open('x', newline='') as f:

@@ -980,3 +980,24 @@ e34-precision-run run:
 
 e34-precision mode:
     python3 scripts/rev4_featpot/e34_precision.py {{mode}} --root /mnt/v/output/zensim/e34-prep-2026-10-15/part4
+
+e34-precision-tail output="a-tail.json":
+    E34_PRECISION_TAIL_OUT={{output}} E34_PRECISION_PACKET=/mnt/v/output/zensim/e34-prep-2026-10-15/part4/full-job.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::precision::cached_tail_probe --exact --nocapture
+
+e34-part4-backup:
+    mkdir -p /mnt/tower/output/zensim/e34-prep-2026-10-15/part4
+    rsync -rt --ignore-existing /mnt/v/output/zensim/e34-prep-2026-10-15/part4/ /mnt/tower/output/zensim/e34-prep-2026-10-15/part4/
+
+e34-part4-backup-check:
+    #!/usr/bin/env python3
+    import hashlib
+    from pathlib import Path
+    source = Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part4')
+    target = Path('/mnt/tower/output/zensim/e34-prep-2026-10-15/part4')
+    files = sorted(p for p in source.rglob('*') if p.is_file())
+    def digest(p):
+        with p.open('rb') as f:
+            return hashlib.file_digest(f, 'sha256').hexdigest()
+    for p in files:
+        assert digest(p) == digest(target / p.relative_to(source)), p
+    print(f'SHA-256 matches for all {len(files)} artifact files')
