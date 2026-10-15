@@ -2000,3 +2000,10 @@ and development selection: DNG sources without official SDR renditions.
 Compatibility thumbnails are not substitutes. P4 starts from the remaining
 1,016 dual-TRAIN origins, then applies all registered contextual/family and
 dHash exclusions. This authorizes pixels/features only, never new labels.
+
+Part-5 noise capture completed once: 120 prediction payloads, 13,817 rows and
+122 picture IDs. The initial preflight stopped before payload access because
+KADID has three repeated image-pair keys; every one of its 7,869 distinct
+physical member/source-row observations was retained. Two-way SEs: A
+`0.0019019482837346158`, C `0.0016920753183515028`; original margin unchanged.
+Full noise results: [measured receipt](../benchmarks/e34_noise_2026-10-15.json).

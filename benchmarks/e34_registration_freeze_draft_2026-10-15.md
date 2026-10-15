@@ -22,8 +22,8 @@ receipts and qualifications listed here exist. No registered gate is changed.
 | P6 local first-epoch smokes | `5/7: base A/C, W A/C, L A; 1 epoch, 49,999 pairs; K A/C pending` — receipt `8149a8c93789313818eb11f97f1d901ca263d221cd8007124a48a2bf1c1bbca6` |
 | P6 L serving smoke | `FAIL G-STEER 134/135; C5/E3–E8, C1–C6/G-DIAL, N1–N3 and native served-path checks pass` — receipt `cb6f88c65a72a629ff573cf298e4b69192aa70772ce56b1a938704aa113ca16e` |
 | E34 worker smokes, image/jobset and remaining qualification | `PENDING — local smoke does not establish fleet caps or full qualification` |
-| P7 statistics implementation and parity | `PENDING — public helper review` |
-| One-time E33 noise exposure and measured SEs | `PENDING — NOT READ` |
+| P7 statistics implementation and parity | `PASS — approved helper pin 48665c8f; Python/Rust E33 seed-unit parity max error 8.881784197001252e-16` |
+| One-time E33 noise exposure and measured SEs | `READ ONCE — result SHA-256 f5e097f91913a22334d2f61bdc9c62137e10689116c35b6aa6b482cb25d01717; two-way SE A 0.0019019482837346158, C 0.0016920753183515028` |
 
 P2 now binds the fitted first-epoch L smoke; it does not establish exact
 `s = -c`. L passes the measured identity and native served-path checks but
