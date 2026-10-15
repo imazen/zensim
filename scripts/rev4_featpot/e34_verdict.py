@@ -22,7 +22,7 @@ def steer_rule(candidate, control):
                 pass_=all(a >= b for a, b in zip(candidate, required, strict=True)))
 
 
-def verdict(statistics, gates):
+def verdict(statistics, gates, *, mean_guard_decisive=False):
     assert statistics['eligibility_margin'] == .0065
     assert statistics['resamples'] == 10000 and statistics['level'] == .95
     assert statistics['percentile'] == 'Hyndman-Fan type 7'
@@ -51,6 +51,8 @@ def verdict(statistics, gates):
             failed.extend(f'dataset {d["dataset"]}' for d in t['dataset_guards'] if not d['point_guard'])
             if not t['w2']['point_guard']:
                 failed.append('two-way W2 point guard')
+            if mean_guard_decisive and not t['e33_mean_point_guard']:
+                failed.append('NON-decisive sensitivity: mean delta >= -0.002')
             for name, entry in gates[arm].items():
                 if not entry['pass_']:
                     failed.append(name)
@@ -73,3 +75,23 @@ def verdict(statistics, gates):
         families[family] = dict(arms=arms, incumbent=incumbent or f'base-{family}', steps=steps,
                                 meaning='enter full qualification only; production adoption is separate')
     return dict(state='COMPLETE', families=families, production_changed=False)
+
+
+def mean_guard_sensitivity(statistics, gates):
+    """Counterfactual only; leave the registered nine tests and verdict intact."""
+    registered = verdict(statistics, gates)
+    counterfactual = verdict(statistics, gates, mean_guard_decisive=True)
+    assert registered['state'] == counterfactual['state'] == 'COMPLETE'
+    changes = []
+    families = {}
+    for family, names in ARMS.items():
+        before = registered['families'][family]
+        after = counterfactual['families'][family]
+        changes.extend(arm for arm in names
+                       if before['arms'][arm]['eligible'] != after['arms'][arm]['eligible'])
+        families[family] = dict(registered=before['incumbent'],
+                                counterfactual=after['incumbent'],
+                                changed=before['incumbent'] != after['incumbent'])
+    return dict(label='NON-decisive sensitivity', rule='mean delta >= -0.002 decisive',
+                changed_arm_eligibility=changes, families=families,
+                counterfactual_verdict=counterfactual)

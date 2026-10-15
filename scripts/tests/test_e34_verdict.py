@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'rev4_featpot'))
-from e34_verdict import GATE_KEYS, steer_rule, verdict
+from e34_verdict import GATE_KEYS, mean_guard_sensitivity, steer_rule, verdict
 
 
 class E34VerdictTest(unittest.TestCase):
@@ -59,6 +59,23 @@ class E34VerdictTest(unittest.TestCase):
         stats, gates=self.fixture()
         del gates['k-a']['K4']
         self.assertEqual(verdict(stats,gates)['state'],'INCOMPLETE')
+
+    def test_mean_sensitivity_replays_the_incumbent_without_changing_registration(self):
+        stats, gates = self.fixture()
+        stats['tests'][0]['e33_mean_point_guard'] = False
+        stats['holm_reject'][5] = False  # K cannot replace W under the registration.
+        stats['holm_reject'][6] = False  # L cannot replace W either.
+        stats['holm_reject'][7] = False  # L cannot replace K in the sensitivity.
+        before = copy.deepcopy(stats)
+        sensitivity = mean_guard_sensitivity(stats, gates)
+        self.assertEqual(sensitivity['changed_arm_eligibility'], ['w-a'])
+        self.assertEqual(sensitivity['families']['a'],
+                         dict(registered='w-a', counterfactual='k-a', changed=True))
+        self.assertFalse(sensitivity['families']['c']['changed'])
+        self.assertEqual(stats, before)
+        self.assertTrue(verdict(stats, gates)['families']['a']['arms']['w-a']['eligible'])
+        gates['w-a']['G-STEER']['pass_'] = False
+        self.assertEqual(mean_guard_sensitivity(stats, gates)['changed_arm_eligibility'], [])
 
 
 if __name__ == '__main__':
