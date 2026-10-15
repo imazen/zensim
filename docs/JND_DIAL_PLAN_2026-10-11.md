@@ -35,8 +35,8 @@ exact delta.
 - Family: knee power, `J(s) = a · max(0, b − s)^c` with `a ≥ 0`, `c > 0`
   (zenmetrics-stats `jnd::MapFamily::KneePower(Shape::Quality)`).
 - The knee `b` is **fixed at 100**: a score of 100 is pixel identity, which is
-  0 JND by definition. This needs a fixed-knee variant in zenmetrics-stats, a
-  small addition; until it exists, fit `b` and report it.
+  0 JND by definition. zenmetrics-stats has the fixed-knee variant (`039eb247`),
+  so `b` is not fitted.
 - Diagnostics, not the served map: the out-of-fold isotonic map and a
   first-order map, so the family's share of the error is visible.
 
