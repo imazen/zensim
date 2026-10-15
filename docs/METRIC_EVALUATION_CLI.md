@@ -259,3 +259,36 @@ it does not reproduce AIC2026's supplied PSNR-Y implementation.
 The [AIC2026 verification record](../benchmarks/metric_evaluate_aic2026_2026-10-09.md)
 records the completed archive inventory, input hashes, measured examples and
 remaining capability gaps.
+
+## E34 paired seed comparisons
+
+`panel e34 seed-parity --input <E33_SUMMARY.json> --output <NEW.json>`
+recomputes the historical ten-seed means, sample SEs and C-vs-A Student tail
+from the hash-pinned summary without prediction reads. The independent Python
+check is `just e34-stats-reference`, followed by `just e34-stats-parity` and
+`just e34-stats-check` (fresh receipt destinations).
+
+`panel e34 evaluate --input <PAIRED.json> --output <NEW.json>` owns the E34
+nine-test family. Schema `e34-paired-seed-v1` supplies four ordered datasets
+(`kadid`, `tid2013`, `konfig`, `cid22_a25`), aligned target/reference/codec
+vectors, fixed orientation (+1 or -1), and ten prediction vectors per model.
+Reference IDs are namespaced by dataset; a shared seed factor resamples the
+arm and control at the same index. The statistic recomputes signed SROCC per
+seed copy and dataset using expanded rows, then averages seeds and datasets.
+The frozen E33 KonFiG keys distinguish parta/partb; both views of one source
+must receive the same reference ID (seven pictures, not fourteen views).
+
+The owner uses zenmetrics-stats `Design::TwoWay`, B=10,000, base seed
+20261011, registered offsets and type-7 intervals. It reports reference-only
+and historical seed-unit components, the directional bootstrap p, corrected
+Student p at df 9 and their maximum, dataset/W2 guards, and one Holm family
+of nine including p=1 for incomplete entries. Test order and model names are
+fixed in the owner. Eligibility-only pair classes use `PairTable` under
+`OneWay(reference)`, fixed orientation, target tie zero, no family labels;
+seed means, seed-unit SE and excluded target ties are reported.
+
+`panel e34 noise` accepts the two pre-freeze A/C-vs-control comparisons and
+reports Q9 arithmetic without a Holm or adoption verdict. These commands do
+not grant data access: callers must admit and ledger their explicit input
+before opening prediction/target payloads. They do not replace the separate
+registered label-free/serving gate owners or qualify a model.

@@ -159,6 +159,7 @@ mod scatter_json;
 #[path = "../ladder_step.rs"]
 mod ladder_step;
 mod panel_evaluate;
+mod panel_e34;
 
 struct Args {
     /// Signed D2 correlations with a fixed higher-is-better quality direction.
@@ -1268,6 +1269,9 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
 
 fn main() -> ExitCode {
     zensim_validate::tier_cap::apply_from_env();
+    if std::env::args().nth(1).as_deref() == Some("e34") {
+        return panel_e34::main();
+    }
     if std::env::args().nth(1).as_deref() == Some("evaluate") {
         return panel_evaluate::main();
     }

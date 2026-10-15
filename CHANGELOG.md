@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add the E34 paired reference-by-seed statistical owner to `panel`, retaining the nine-test family, Student and directional-bootstrap decisions, report-only pair classes and E33 summary parity.
+
 - Pin zenmetrics-stats to the approved E34 Student/directional-bootstrap helpers and migrate the undefined Interval literal.
 
 - Refuse feature transforms for plain monotone N before CLI data loading and in library validation, preserving E34 L’s identity contract.

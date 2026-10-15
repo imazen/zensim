@@ -268,3 +268,10 @@ proves preservation of a competitive historical ranker. It also retains known
 identity/floor failures. The [paired controls](../benchmarks/cleanup_scientific_controls_2026-09-07.md)
 answer separate data/constraint/target-loop questions; none inherit a pass from
 the reproduction. Keep measurement claims bounded to the actual experiment.
+
+E34's paired reference × seed comparisons run through `panel e34` and the
+approved zenmetrics-stats pin. Its [input and statistical contract](METRIC_EVALUATION_CLI.md#e34-paired-seed-comparisons)
+keeps seed pairing, two-way/reference/seed components, directional and Student
+p-values, all nine Holm entries and report-only pair classes in the Rust
+owner. The summary-only E33 parity precedes the separately ledgered one-time
+noise read. D12 still controls any future steering-sensitivity amendment.

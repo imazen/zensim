@@ -1001,3 +1001,23 @@ e34-part4-backup-check:
     for p in files:
         assert digest(p) == digest(target / p.relative_to(source)), p
     print(f'SHA-256 matches for all {len(files)} artifact files')
+
+# Part 5 begins with summary-only parity; no prediction payload is read here.
+e34-stats-reference:
+    python3 scripts/rev4_featpot/e34_stats_reference.py --output /mnt/v/output/zensim/e34-prep-2026-10-15/part5/python-seed-parity.json
+
+e34-stats-build:
+    cargo build -p zensim-validate --bin panel --bin bake_verdict
+
+e34-stats-parity:
+    target/debug/panel e34 seed-parity --input /mnt/v/output/zensim/e33-impl-2026-10-09/assessment-e33/e33_e21.json --output /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity.json
+
+e34-stats-check:
+    python3 scripts/rev4_featpot/e34_stats_parity.py
+
+e34-stats-tests:
+    cargo test -p zensim-validate --bin panel panel_e34::
+    cargo clippy -p zensim-validate --bin panel --bin bake_verdict -- -D warnings
+
+e34-noise mode:
+    python3 scripts/rev4_featpot/e34_noise.py {{mode}} --out /mnt/v/output/zensim/e34-prep-2026-10-15/part5 --panel {{justfile_directory()}}/target/debug/panel
