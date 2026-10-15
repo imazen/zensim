@@ -1,0 +1,43 @@
+{
+  "scope": "report-only; no model choice or qualification change",
+  "full_run": {
+    "source_commit": "ec1517caca434e425e28492d1ae4a19cb9745acb",
+    "binary": "/home/lilith/work/zen/zensim--e34prep/target/debug/deps/zensim-6fc55070ad1b5213",
+    "binary_sha256": "8bd300bcee72acf77b8cfcd5cf99849544a1c83333c70c42fd94c0c3ac001a3a",
+    "command": "just e34-precision-run full",
+    "mode": "report-only; no qualification or model choice"
+  },
+  "tail_run": {
+    "source_commit": "d69a660d1c54b2f45385c5b4ff5d049d84a1b4a8",
+    "binary_sha256": "5eac27b50a7a032eaa281d112374afc83f909ce7c2b913d6c8bc871e4c12cdef",
+    "command": "just e34-precision-tail a-tail-final.json",
+    "output_sha256": "f5ab28b5cb5e9538293e874b983f7b612c217f46735c14e5901173a9023dfa44"
+  },
+  "artifacts": {
+    "full-job.json": {
+      "path": "/mnt/v/output/zensim/e34-prep-2026-10-15/part4/full-job.json",
+      "sha256": "08339a8df41ec3489eb4efbacdfb6c1e9834c4a326336a648a07985f3ff2a341",
+      "bytes": 1945
+    },
+    "complete.json": {
+      "path": "/mnt/v/output/zensim/e34-prep-2026-10-15/part4/full/complete.json",
+      "sha256": "3fb50e392644eeff15944ea630233f9df1cc662f7f9a669c2d8613fdcf4f78e8",
+      "bytes": 310
+    },
+    "summary.json": {
+      "path": "/mnt/v/output/zensim/e34-prep-2026-10-15/part4/summary.json",
+      "sha256": "f1319f00393d36e21695b922ec5f1f4f8d8a4f3881877431ec20931245b34aad",
+      "bytes": 9499
+    },
+    "cases.csv": {
+      "path": "/mnt/v/output/zensim/e34-prep-2026-10-15/part4/cases.csv",
+      "sha256": "bb2f1afa79ed02d174f7555f27d042fbcfd398cb04bc2e5de0003dde66f18752",
+      "bytes": 77916
+    },
+    "a-tail-final.json": {
+      "path": "/mnt/v/output/zensim/e34-prep-2026-10-15/part4/a-tail-final.json",
+      "sha256": "f5ab28b5cb5e9538293e874b983f7b612c217f46735c14e5901173a9023dfa44",
+      "bytes": 441
+    }
+  }
+}

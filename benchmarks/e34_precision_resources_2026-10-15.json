@@ -1,0 +1,122 @@
+[
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-build-final.log",
+    "sha256": "ce72ff0b67e5f8a700416596b0cf565f56b87ae3eb3a010741b8b4be0fbfaf91",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38681MiB :: just e34-steering-build",
+    "result": "run-heavy: done rc=0 9s | peak-RSS 1.20GiB | min-avail 37580MiB | peak-load 17.99"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-build-tail-fixed.log",
+    "sha256": "5a60fea67d89f0c6e8c6e8d459770e1617bcfc7ec90ae54440ca314e55f16ece",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36143MiB :: just e34-steering-build",
+    "result": "run-heavy: done rc=0 10s | peak-RSS 1.21GiB | min-avail 34728MiB | peak-load 17.89"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-build-tail.log",
+    "sha256": "236cedd11834b540ccc7288819006ddeaa35c805700e7f7d5cf4cfcca002b1ac",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36560MiB :: just e34-steering-build",
+    "result": "run-heavy: done rc=0 10s | peak-RSS 1.30GiB | min-avail 35084MiB | peak-load 18.06"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-build-toy-fixed.log",
+    "sha256": "91e4f8023a34e4a3ff95bc23be357a9d5029aeb5c26451b5c8a4dec12eebfcee",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=39134MiB :: just e34-steering-build",
+    "result": "run-heavy: done rc=0 8s | peak-RSS 1.19GiB | min-avail 37858MiB | peak-load 17.82"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-build.log",
+    "sha256": "397d73d3a4143e9d15021fd0b1d15502162319ca09f4e946974d0a184f89040c",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=39087MiB :: just e34-steering-build",
+    "result": "run-heavy: done rc=0 14s | peak-RSS 1.56GiB | min-avail 37338MiB | peak-load 18.23"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-clippy-tail-fixed.log",
+    "sha256": "e03d4d63beccb2a7581df2a03ca3743635416a0c10eddfa2fa7f84edc4a5cd13",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36320MiB :: just e34-precision-clippy",
+    "result": "run-heavy: done rc=0 2s | peak-RSS 0.62GiB | min-avail 36320MiB | peak-load 17.17"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-clippy-tail.log",
+    "sha256": "1180c6ab9763aa8a55754815b836547c44021277e86b4ed92c6525d690a005fd",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36643MiB :: just e34-precision-clippy",
+    "result": "run-heavy: done rc=101 1s | peak-RSS 0.62GiB | min-avail 36642MiB | peak-load 17.47"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-clippy.log",
+    "sha256": "97a6839d1d3c05ad3635355875bb7c8b7a889122e563870e5934ea2f0917bca8",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38912MiB :: just e34-precision-clippy",
+    "result": "run-heavy: done rc=0 11s | peak-RSS 0.87GiB | min-avail 37464MiB | peak-load 17.31"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-contracts-final.log",
+    "sha256": "d2b40875a98f68bc5d81d14426e5518589ca84e6f0facb2b67a6825ab853d8b5",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38546MiB :: just e34-precision-contracts",
+    "result": "run-heavy: done rc=0 0s | peak-RSS 0.03GiB | min-avail 38545MiB | peak-load 17.83"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-contracts-fixed.log",
+    "sha256": "bcafee431e62fdc320eedd1794e16c449b18e54d6dcf06fe7d40e7d77b32aaa6",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=39125MiB :: just e34-precision-contracts",
+    "result": "run-heavy: done rc=0 0s | peak-RSS 0.03GiB | min-avail 39121MiB | peak-load 17.34"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-contracts.log",
+    "sha256": "a02adc038e81ba99ec6e72a6c867a60e7aa64b42cc9e08046e3afba828c3be41",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38994MiB :: just e34-precision-contracts",
+    "result": "run-heavy: done rc=101 0s | peak-RSS 0.03GiB | min-avail 38994MiB | peak-load 16.91"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-full.log",
+    "sha256": "46a4cb78b02897e4e9d0c6192f0cbc6e3e1ee829571dc44faacbc898d26ff849",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38890MiB :: just e34-precision-run full",
+    "result": "run-heavy: done rc=0 332s | peak-RSS 0.36GiB | min-avail 36871MiB | peak-load 21.69"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-lint-scripts-final.log",
+    "sha256": "2a08c53f668510e66cb79a790b6a13b97580ead45a72e7ee2486dd36963165fe",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=35943MiB :: just lint-scripts",
+    "result": "run-heavy: done rc=0 14s | peak-RSS 0.03GiB | min-avail 35825MiB | peak-load 17.95"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-lint-scripts.log",
+    "sha256": "28ad0353e08b490a9701b4b9d18fc6ca70381a623c0e4219fcdf73c2d4d46832",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36558MiB :: just lint-scripts",
+    "result": "run-heavy: done rc=0 14s | peak-RSS 0.03GiB | min-avail 36510MiB | peak-load 17.49"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-pilot.log",
+    "sha256": "df023f2bde1c80aed8c91b2644c9f1bcf2c22445aa1450f27196c473a5268c00",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=39173MiB :: just e34-precision-run pilot",
+    "result": "run-heavy: done rc=0 2s | peak-RSS 0.25GiB | min-avail 38889MiB | peak-load 17.28"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-summary.log",
+    "sha256": "3fec14d9198d771bc43d4ad26c3c97b87928540454f36ed3f11f42dc4b4f8b38",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37955MiB :: just e34-precision summarize",
+    "result": "run-heavy: done rc=0 1s | peak-RSS 0.20GiB | min-avail 37955MiB | peak-load 19.66"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-tail-final.log",
+    "sha256": "d8d1e13219fad2c50c2f2460481fd9d6a927c202828d5e45cb641e7eb5db67c1",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36021MiB :: just e34-precision-tail a-tail-final.json",
+    "result": "run-heavy: done rc=0 0s | peak-RSS 0.02GiB | min-avail 36021MiB | peak-load 17.68"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-tail.log",
+    "sha256": "b18aeb5d97d805863799c2085ff7990ebb4b1aa15d819c0e3f58d2de3aad16ac",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36529MiB :: just e34-precision-tail",
+    "result": "run-heavy: done rc=0 1s | peak-RSS 0.02GiB | min-avail 36529MiB | peak-load 17.74"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-backup.log",
+    "sha256": "79fd9cd8ca12d60c491e603c158abf371bd7b6a3ccbbfac62eba0de1a40ab8f2",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=35839MiB :: just e34-part4-backup",
+    "result": "run-heavy: done rc=0 81s | peak-RSS 0.03GiB | min-avail 35121MiB | peak-load 18.16"
+  },
+  {
+    "log": "/home/lilith/tmp/e34prep/p4-backup-check.log",
+    "sha256": "12b2b53189b9c44be35f2cd68fb586e87222875636d1f84f61bece248997dee1",
+    "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=36195MiB :: just e34-part4-backup-check",
+    "result": "run-heavy: done rc=0 19s | peak-RSS 0.03GiB | min-avail 35348MiB | peak-load 18.31"
+  }
+]
