@@ -346,6 +346,39 @@ fn seed_component(input: &Input, t: &Test) -> Result<Value> {
     Ok(seed_stat(&matrix).unwrap_or_else(|e| json!({"state":"INCOMPLETE","reason":e.to_string()})))
 }
 
+fn w2_seed_component(input: &Input, t: &Test) -> Result<Value> {
+    let mut matrix = Vec::new();
+    for seed in 0..10 {
+        let mut datasets = Vec::new();
+        for d in &input.datasets[..2] {
+            let mut types: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+            for (i, codec) in d.codec.iter().enumerate() {
+                types.entry(*codec).or_default().push(i);
+            }
+            let score = |model: &str| -> Result<f64> {
+                let mut values: Vec<_> = types
+                    .values()
+                    .map(|idx| {
+                        let p: Vec<_> =
+                            idx.iter().map(|&i| d.predictions[model][seed][i]).collect();
+                        let y: Vec<_> = idx.iter().map(|&i| d.target[i]).collect();
+                        d.orientation * zenstats::spearman(&p, &y)
+                    })
+                    .collect();
+                ensure!(
+                    values.len() >= 3 && values.iter().all(|x| x.is_finite()),
+                    "undefined W2 seed statistic"
+                );
+                values.sort_by(f64::total_cmp);
+                Ok(values[..3].iter().sum::<f64>() / 3.)
+            };
+            datasets.push(score(&t.arm)? - score(&t.control)?);
+        }
+        matrix.push(vec![(datasets[0] + datasets[1]) / 2.; 4]);
+    }
+    seed_stat(&matrix)
+}
+
 fn pair_classes(input: &Input, t: &Test) -> Result<Value> {
     use zenstats::pairs::{PairClass, PairInput, PairTable};
     use zenstats::panel::Orientation;
@@ -450,7 +483,7 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
         let margin = if t.eligibility { 0.002 } else { 0. };
         let primary = input.interval(t, &[0, 1, 2, 3], 100 * t.index, false, false, margin)?;
         let reference = input.interval(t, &[0, 1, 2, 3], 100 * t.index + 6, true, false, 0.)?;
-        let p = decision(&primary, 10);
+        let mut p = decision(&primary, 10);
         let seed_component = seed_component(input, t)?;
         let q9: Vec<_> = [(1, 0.05 / 9.), (5, 0.05 / 5.), (9, 0.05)]
             .into_iter()
@@ -461,7 +494,6 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
                 "required_delta_at_measured_se":critical*primary.se*(10_f64/9.).sqrt()-0.002})
             })
             .collect();
-        ps.push(p["decision"].as_f64().unwrap());
         let mut guards = Vec::new();
         if !noise {
             for (di, name) in DATASETS.iter().enumerate() {
@@ -473,17 +505,35 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
                     .collect::<BTreeSet<_>>()
                     .len()
                     .min(10);
-                guards.push(json!({"dataset":name,"interval":interval_json(&iv,n),"point_guard":iv.estimate>= -0.005}));
+                guards.push(json!({"dataset":name,"interval":interval_json(&iv,n),"point_guard":iv.estimate>= -0.005,"seed":20261011+100*t.index+di as u64+1}));
             }
         }
         let w2 = if noise {
             Value::Null
         } else {
             let iv = input.interval(t, &[0, 1], 100 * t.index + 5, false, true, 0.)?;
-            json!({"interval":interval_json(&iv,10),"point_guard":iv.estimate> -2.*iv.se})
+            let seed = w2_seed_component(input, t)
+                .unwrap_or_else(|e| json!({"state":"INCOMPLETE","reason":e.to_string()}));
+            let old_guard = seed["delta"]
+                .as_f64()
+                .zip(seed["se"].as_f64())
+                .map(|(delta, se)| delta > -2. * se);
+            json!({"interval":interval_json(&iv,10),"point_guard":iv.estimate> -2.*iv.se,
+                "seed_unit":seed,"e33_seed_unit_point_guard":old_guard,"seed":20261011+100*t.index+5})
         };
-        out.push(json!({"test":t.index,"arm":t.arm,"control":t.control,"margin":margin,
-            "theta":interval_json(&primary,10),"seed_unit":seed_component,"q9":q9,"reference_only":interval_json(&reference,10),"p":p,"dataset_guards":guards,"w2":w2,
+        if !noise
+            && (guards.iter().any(|g| {
+                g["interval"]["estimate"].as_f64().is_none()
+                    || g["interval"]["se"].as_f64().is_none()
+            }) || w2["interval"]["estimate"].as_f64().is_none()
+                || w2["interval"]["se"].as_f64().is_none())
+        {
+            p["complete"] = json!(false);
+            p["decision"] = json!(1.);
+        }
+        ps.push(p["decision"].as_f64().unwrap());
+        out.push(json!({"test":t.index,"arm":t.arm,"control":t.control,"margin":margin,"state":if p["complete"]==true {"COMPLETE"} else {"INCOMPLETE"},
+            "theta":interval_json(&primary,10),"seed":20261011+100*t.index,"e33_mean_point_guard":primary.estimate-margin>= -0.002,"seed_unit":seed_component,"q9":q9,"reference_only":interval_json(&reference,input.rows(&[0,1,2,3]).reference.iter().collect::<BTreeSet<_>>().len()),"reference_only_seed":20261011+100*t.index+6,"p":p,"dataset_guards":guards,"w2":w2,
             "pair_classes":if noise || !t.eligibility {Value::Null}else{pair_classes(input,t)?},
             "improvement_point_guard":primary.estimate>0.002}));
     }
@@ -626,6 +676,16 @@ mod tests {
         assert_eq!(decision(&missing, 10)["decision"], 1.);
         let nine = vec![0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 1.];
         assert!(!zenstats::multiple::holm_reject(&nine, 0.05)[8]);
+    }
+    #[test]
+    fn w2_seed_report_preserves_paired_seed_variation() {
+        let mut input = toy();
+        for d in &mut input.datasets {
+            d.predictions.insert("b".into(), vec![d.target.clone(); 10]);
+        }
+        let report = w2_seed_component(&input, &input.tests[0]).unwrap();
+        assert_eq!(report["delta"], -1.);
+        assert!((report["se"].as_f64().unwrap() - 1. / 3.).abs() < 1e-15);
     }
     #[test]
     fn sample_seed_se_closed_form_and_input_refusals() {

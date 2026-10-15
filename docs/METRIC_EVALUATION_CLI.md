@@ -292,3 +292,8 @@ reports Q9 arithmetic without a Holm or adoption verdict. These commands do
 not grant data access: callers must admit and ledger their explicit input
 before opening prediction/target payloads. They do not replace the separate
 registered label-free/serving gate owners or qualify a model.
+
+E34 reports the inherited E33 mean-delta and seed-unit W2 point guards beside
+the registered two-way guards. Primary, dataset, W2 and reference-only results
+record their explicit bootstrap seed. Reference-only Student intervals use the
+reference level count; the pooled two-way decision retains G=10 and df=9.
