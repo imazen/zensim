@@ -1211,3 +1211,17 @@ e34-d12-no-default-check:
 # E34 review fixes: public loaded-model shape and transform contracts.
 e34-fix1-target filter="":
     cargo test --locked -p zensim --features custom-profiles,corruption-head --test exact_gradient_contract {{filter}} -- --nocapture
+
+e34-fix1-checks:
+    just e34-fix1-target
+    cargo test --locked -p zensim --lib --features custom-profiles,corruption-head metric::bake::
+    just e34-d12-parity
+    just api-doc-check
+    just clippy
+    just lint-scripts
+    cargo fmt -p zensim --check
+    just e34-d12-bench-build
+
+e34-fix1-score-parity:
+    python3 scripts/rev4_featpot/e34_precision.py d12-prodqual-after --root /mnt/v/output/zensim/e34-prep-2026-10-15/fix1
+    cmp /mnt/v/output/zensim/e34-prep-2026-10-15/part6/after-prodqual.json /mnt/v/output/zensim/e34-prep-2026-10-15/fix1/after-prodqual.json

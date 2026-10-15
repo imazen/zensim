@@ -1,0 +1,72 @@
+{
+  "base": "b062b16b6f5daf57a3b8460b579278d999366555",
+  "fix_commits": [
+    "bdd799b67baef1c2d7eb4dbd26d5c907d74c17b5",
+    "b4f5bcad4fb87fb6968a6757cae7789d05c797b0",
+    "9bf9828e42fc131ef907dbd49088d10050bf1806"
+  ],
+  "public_contract_tests": {
+    "passed": 4,
+    "failed": 0
+  },
+  "corruption_scorer_suite": {
+    "passed": 42,
+    "preexisting_ignored": 3
+  },
+  "scorer_suite": {
+    "passed": 36,
+    "preexisting_ignored": 1
+  },
+  "parity_suites": {
+    "attribution_cross_tier": 1,
+    "cross_tier": 2,
+    "dense_layout_round_trip": 6,
+    "featcanon_rev5_parity": 3,
+    "per_bake_revision": 2
+  },
+  "api_doc_check_passed": 1,
+  "strict_workspace_clippy_pass": true,
+  "script_lint_pass": true,
+  "format_pass": true,
+  "synthetic_parity": {
+    "models": 4,
+    "model_tier_geometry_ladder_rows": 1120,
+    "full_json_bytes_identical": true,
+    "baseline_sha256": "7910fbd4b6506a8bd62c3eb44c34bf3d68344427cb45d774cacee174b8ec029f",
+    "current_sha256": "7910fbd4b6506a8bd62c3eb44c34bf3d68344427cb45d774cacee174b8ec029f"
+  },
+  "forward_sources_byte_identical_to_base": {
+    "zensim/src/metric.rs": "08119e6738ab1850a5c8b68cffb45e82845c936c54afba56966c1664f5cbd486",
+    "zensim/src/metric/bake.rs": "26824ffd571ddd1e7c3b036832e13c8c9d6e67407924604347a884b582a13668"
+  },
+  "reviewer_probe_sha256": "86ee6f60f99afaa78367b2d5faedf72759d1f08de7727c69e45396cebadc454d",
+  "source_sha256": {
+    "zensim/src/metric/bake_gradient.rs": "457b88011b6a4578e9c9d9bf23c2720c41f4e6d2b9453b926be0034d58ff38bd",
+    "zensim/tests/exact_gradient_contract.rs": "5ad3890a76567d27b42b609c807e992f959a5e51626dcdad76699694e3b56041",
+    "benchmarks/e34_registration_freeze_draft_2026-10-15.md": "d79b2f8520414e0b907eec39597665a0c104f11c3922872a16d9887d302f7d81",
+    "scripts/rev4_featpot/e34_precision.py": "78722937cf39db1576ffb255fea81ba206a9d84306f6f89e378550dcf908942f"
+  },
+  "resource_receipts": {
+    "contracts-after.log": [
+      "run-heavy: done rc=0 6s | peak-RSS 0.61GiB | min-avail 40317MiB | peak-load 2.88"
+    ],
+    "final-checks.log": [
+      "run-heavy: done rc=0 96s | peak-RSS 2.04GiB | min-avail 38926MiB | peak-load 4.81"
+    ],
+    "score-parity.log": [
+      "run-heavy: done rc=0 7s | peak-RSS 0.09GiB | min-avail 40742MiB | peak-load 3.42"
+    ],
+    "size-after.log": [
+      "run-heavy: done rc=0 6s | peak-RSS 0.66GiB | min-avail 40116MiB | peak-load 6.00"
+    ],
+    "size-before.log": [
+      "run-heavy: done rc=101 12s | peak-RSS 1.05GiB | min-avail 39846MiB | peak-load 8.41"
+    ],
+    "winsor-before.log": [
+      "run-heavy: done rc=101 1s | peak-RSS 0.17GiB | min-avail 40865MiB | peak-load 3.43"
+    ]
+  },
+  "full_gate_reextraction": false,
+  "pushes": false,
+  "fleet_jobs": false
+}
