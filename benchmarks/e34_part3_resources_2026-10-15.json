@@ -1,0 +1,140 @@
+{
+  "logs": [
+    {
+      "log": "p3-e5-before.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=40284MiB :: cargo test -p zensim-validate --lib e34_l_refuses_feature_transforms_for_identity_contract",
+      "resource": "run-heavy: done rc=101 4s | peak-RSS 0.56GiB | min-avail 39109MiB | peak-load 28.65"
+    },
+    {
+      "log": "p3-e5-cli-fixed.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=35821MiB :: just e34-e5-cli-check",
+      "resource": "run-heavy: done rc=0 2s | peak-RSS 0.08GiB | min-avail 35821MiB | peak-load 32.87"
+    },
+    {
+      "log": "p3-e5-cli.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38583MiB :: just e34-e5-cli-check",
+      "resource": "run-heavy: done rc=1 6s | peak-RSS 0.42GiB | min-avail 37583MiB | peak-load 21.74"
+    },
+    {
+      "log": "p3-e5-fixed.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38388MiB :: just e34-trainer-regression",
+      "resource": "run-heavy: done rc=0 7s | peak-RSS 0.53GiB | min-avail 38205MiB | peak-load 24.33"
+    },
+    {
+      "log": "p3-instrument-build-fixed.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38195MiB :: just e34-steering-build",
+      "resource": "run-heavy: done rc=0 7s | peak-RSS 1.01GiB | min-avail 37145MiB | peak-load 27.25"
+    },
+    {
+      "log": "p3-instrument-build.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37455MiB :: just e34-steering-build",
+      "resource": "run-heavy: done rc=101 2s | peak-RSS 0.68GiB | min-avail 37198MiB | peak-load 35.22"
+    },
+    {
+      "log": "p3-l-contract.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=35204MiB :: just e34-l-model-contract",
+      "resource": "run-heavy: done rc=0 0s | peak-RSS 0.03GiB | min-avail 35151MiB | peak-load 23.65"
+    },
+    {
+      "log": "p3-l-identity.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=35813MiB :: just e34-l-gate identity",
+      "resource": "run-heavy: done rc=0 32s | peak-RSS 0.10GiB | min-avail 33454MiB | peak-load 27.65"
+    },
+    {
+      "log": "p3-l-nearid.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37855MiB :: just e34-l-gate nearid",
+      "resource": "run-heavy: done rc=0 14s | peak-RSS 0.05GiB | min-avail 37804MiB | peak-load 19.37"
+    },
+    {
+      "log": "p3-l-p2.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=44839MiB :: just e34-l-p2",
+      "resource": "run-heavy: done rc=0 791s | peak-RSS 0.21GiB | min-avail 39543MiB | peak-load 21.74"
+    },
+    {
+      "log": "p3-l-pack.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=38336MiB :: just e34-l-gate pack",
+      "resource": "run-heavy: done rc=0 1s | peak-RSS 0.28GiB | min-avail 38336MiB | peak-load 28.50"
+    },
+    {
+      "log": "p3-l-prodqual.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37676MiB :: just e34-l-gate prodqual",
+      "resource": "run-heavy: done rc=0 2s | peak-RSS 0.03GiB | min-avail 37661MiB | peak-load 20.62"
+    },
+    {
+      "log": "p3-l-served-identity.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37726MiB :: just e34-l-gate served-identity",
+      "resource": "run-heavy: done rc=0 2s | peak-RSS 0.05GiB | min-avail 37723MiB | peak-load 21.81"
+    },
+    {
+      "log": "p3-l-steer.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37291MiB :: just e34-l-gate steer",
+      "resource": "run-heavy: done rc=0 824s | peak-RSS 0.17GiB | min-avail 37235MiB | peak-load 38.11"
+    },
+    {
+      "log": "p3-l-verdict-ladder.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37747MiB :: just e34-l-gate verdict-ladder",
+      "resource": "run-heavy: done rc=0 1s | peak-RSS 0.15GiB | min-avail 37747MiB | peak-load 19.37"
+    },
+    {
+      "log": "p3-l-verdict-standard.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=37743MiB :: just e34-l-gate verdict-standard",
+      "resource": "run-heavy: done rc=0 1s | peak-RSS 0.10GiB | min-avail 37743MiB | peak-load 19.37"
+    },
+    {
+      "log": "p3-serving-build.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=32671MiB :: just e34-serving-build",
+      "resource": "run-heavy: done rc=0 13s | peak-RSS 0.48GiB | min-avail 32030MiB | peak-load 34.05"
+    },
+    {
+      "log": "p3-smoke-base-a.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=41865MiB :: just e34-first-epoch base-a",
+      "resource": "run-heavy: done rc=0 21s | peak-RSS 0.91GiB | min-avail 40549MiB | peak-load 33.42"
+    },
+    {
+      "log": "p3-smoke-base-c.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=41484MiB :: just e34-first-epoch base-c",
+      "resource": "run-heavy: done rc=0 26s | peak-RSS 0.94GiB | min-avail 39591MiB | peak-load 32.18"
+    },
+    {
+      "log": "p3-smoke-l-a.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=40384MiB :: just e34-first-epoch l-a",
+      "resource": "run-heavy: done rc=0 15s | peak-RSS 0.96GiB | min-avail 39969MiB | peak-load 29.72"
+    },
+    {
+      "log": "p3-smoke-w-a.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=40036MiB :: just e34-first-epoch w-a",
+      "resource": "run-heavy: done rc=0 21s | peak-RSS 0.94GiB | min-avail 39889MiB | peak-load 32.90"
+    },
+    {
+      "log": "p3-smoke-w-c.log",
+      "command": "run-heavy: mem-cap=24G (cgroup, hard) jobs=8/32 avail=40917MiB :: just e34-first-epoch w-c",
+      "resource": "run-heavy: done rc=0 16s | peak-RSS 1.01GiB | min-avail 38716MiB | peak-load 32.46"
+    }
+  ],
+  "scope": "local first-epoch smoke, not a full fit or release qualification",
+  "source_root": "/home/lilith/tmp/e34prep",
+  "artifact_sha256": {
+    "p3-e5-before.log": "b2cf8d8272b498ccf8ff4bee568e568a0eeaeb52b1a56324a8e316643e0b2f44",
+    "p3-e5-cli-fixed.log": "0a5127a2b0e798cfea53b0213dfd859ff031fcf44294b8b3256b72ef5faef95c",
+    "p3-e5-cli.log": "31557cb821daee5a0a7207ac345193e80ce301ef499aefe68c19650d3ed22c23",
+    "p3-e5-fixed.log": "abcb677d61c8b239a7292d86d0e4da03325f867dba951b659d71b4921b66a87f",
+    "p3-instrument-build-fixed.log": "cae394b7620d30b18ab9411c92e5c7ea560d05458fa7980b5068fdacff4b619b",
+    "p3-instrument-build.log": "7d4ed69ac829614b545f5d9fa98bc21b6d8a12386213a829c5ef4d17a6eb4407",
+    "p3-l-contract.log": "f7111510c26be078d7986ce88ebc11463dfd3c4d2f185229c09ef653a7d57697",
+    "p3-l-identity.log": "a82593f03955a14fb20e08f1f709951e73f0ce4d092f44b8d984f35425aa6d97",
+    "p3-l-nearid.log": "7f308195407e3a2c430cab951fb6ab160ebc6435ab5aa5306e2bf833737daa9c",
+    "p3-l-p2.log": "8c5ca07de21daabf80cc6928e16f146b99a3bbd7f4da02cae1a716d1701e71ed",
+    "p3-l-pack.log": "659718ed153448e00d6888bf4376eb35052bf74e92a7a5dd2304c866200d11d6",
+    "p3-l-prodqual.log": "01943a62314f2d5dfa6f55f561d50a04db5d28bd11339caffae6c4e906fc1b75",
+    "p3-l-served-identity.log": "51e5859ad488c214e7bef1aef3411b37c134745d128daec8abbf4642a8f5f7f8",
+    "p3-l-steer.log": "083b1f3c4b9348384fa56e9b9d4dcf77f65f30e1f81ee2f8bc7c95ec68ef90f2",
+    "p3-l-verdict-ladder.log": "d5afe3dbf8b4b69cc4d154b12ddc15c6a29d072cd3e294981fb2caa193449809",
+    "p3-l-verdict-standard.log": "e72fb4001b2af0954d632b904849dade31c5d1259abca727896a3d98f2777554",
+    "p3-serving-build.log": "5e2ba5d05c91d9b0d1ee1807a949772e243bf823b24e1a6efd607eba3d1b5e7a",
+    "p3-smoke-base-a.log": "e13fe71a942ff4145b26eaa67d15156dba624008a75fdb02ad88642be4627a9d",
+    "p3-smoke-base-c.log": "6649204b25bad1e167af4d0176cb90afeb39d5d6e6c4f8097a3b74598854ec72",
+    "p3-smoke-l-a.log": "facfd6ace99fa13595fa916dd40bbb98d95c546be367adae7ca623d4235c59fb",
+    "p3-smoke-w-a.log": "c2a1e0b0a9d1d9b24048336df0a9032797e5488a89b961f2f2c1eeee5b73b7f2",
+    "p3-smoke-w-c.log": "a9e9ae0d27341dc2e205657b9738e4ec96e28f113af743b37db96bd8e9dcbce8"
+  }
+}

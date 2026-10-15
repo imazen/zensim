@@ -1,0 +1,34 @@
+{
+  "cases": 135,
+  "passed": 134,
+  "failures": [
+    {
+      "key": "broad-199-b64",
+      "block": 64,
+      "m2": 0.9860139860139792,
+      "m3f": 0.9790209790209722
+    }
+  ],
+  "independent_sensitivities_exact": true,
+  "feature_comparisons": 14454180,
+  "feature_disagreements": 0,
+  "model_sha256": "8ed80a9934573271bdf078f097aa73f890127c73bbda46a8be1e55aff9f4e70d",
+  "input_rows_checked": 55515,
+  "negative_input_rows": 0,
+  "max_abs_s_plus_c": 0.4817685172203939,
+  "largest_error": {
+    "key": "I41_10_05",
+    "block": 8,
+    "slot": 632,
+    "s": -0.57220458984375,
+    "c": 0.09043607262335611
+  },
+  "all_zero_sensitivity_cases": 0,
+  "negative_input_cases": [],
+  "scope": "local first-epoch smoke, not a full fit or release qualification",
+  "source_root": "/mnt/v/output/zensim/e34-prep-2026-10-15/part3",
+  "artifact_sha256": {
+    "p2-l.json": "5ef8003f241b01116904b5e2f080e03f4b6f38132f6f39d392a1da5f05e3d3ef",
+    "p2-l-packet.json": "519d51e103266baf091c6242163bd197a0411036621797e938b838a0da65ca11"
+  }
+}

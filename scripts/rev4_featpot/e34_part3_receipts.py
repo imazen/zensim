@@ -21,7 +21,7 @@ def steering(data):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode', choices=['serving', 'p2'])
+    p.add_argument('mode', choices=['serving', 'p2', 'resources'])
     p.add_argument('--root', required=True, type=Path)
     p.add_argument('--output', required=True, type=Path)
     a = p.parse_args()
@@ -63,13 +63,24 @@ def main():
                                 ['serve_custom_bake', 'bake_verdict', 'steer_instrument']},
                       steering=steering(read('steer-s0-l.json')),
                       unmeasured=['full K4 populations', 'ARM', 'WASM', 'runtime guard', 'worker image/jobset'])
-    else:
+    elif a.mode == 'p2':
         data = read('p2-l.json')
         rows = data['rows']
         result = steering(data)
+        packet = read('p2-l-packet.json')
+        assert data['packet_sha256'] == files['p2-l-packet.json']
+        assert [(r['key'], r['blocks'][0]['bounds'][2]) for r in rows] == [
+            (r['key'], r['block']) for r in packet['cases']]
         assert all(r['objective'] == 'PreFloor' and r['linear_probe'] for r in rows)
+        worst = max(rows, key=lambda r: r['linear_probe']['max_abs_s_plus_c'])
+        probe = worst['linear_probe']
+        slot = max(range(len(probe['s'])), key=lambda i: abs(probe['s'][i] + probe['c'][i]))
         result.update(model_sha256=rows[0]['model'],
+                      input_rows_checked=sum(1 + len(r['blocks']) for r in rows),
+                      negative_input_rows=sum(len(r['linear_probe']['negative_input_rows']) for r in rows),
                       max_abs_s_plus_c=max(r['linear_probe']['max_abs_s_plus_c'] for r in rows),
+                      largest_error=dict(key=worst['key'], block=worst['blocks'][0]['bounds'][2],
+                                         slot=slot, s=probe['s'][slot], c=probe['c'][slot]),
                       all_zero_sensitivity_cases=sum(all(s == 0 for s in r['linear_probe']['s']) for r in rows),
                       negative_input_cases=[dict(key=r['key'], block=r['blocks'][0]['bounds'][2],
                                                  rows=r['linear_probe']['negative_input_rows'])
@@ -83,6 +94,19 @@ def main():
                 writer.writerow([r['key'], r['blocks'][0]['bounds'][2], probe['max_abs_s_plus_c'],
                                  all(s == 0 for s in probe['s']), len(probe['negative_input_rows']),
                                  r['m2'], r['m3f'], r['pass']])
+    else:
+        logs = []
+        for path in sorted(a.root.glob('p3-*.log')):
+            lines = path.read_text().splitlines()
+            starts = [line for line in lines if line.startswith('run-heavy: mem-cap=')]
+            if not starts:
+                continue
+            finishes = [line for line in lines if line.startswith('run-heavy: done')]
+            assert len(starts) == len(finishes) == 1, f'incomplete or ambiguous log: {path}'
+            files[path.name] = sha(path)
+            logs.append(dict(log=path.name, command=starts[0], resource=finishes[0]))
+        assert logs, 'no completed run-heavy logs'
+        result = dict(logs=logs)
     result.update(scope='local first-epoch smoke, not a full fit or release qualification',
                   source_root=str(a.root), artifact_sha256=files)
     with a.output.open('x') as stream:

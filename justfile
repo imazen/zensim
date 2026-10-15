@@ -947,3 +947,6 @@ e34-l-p2:
 
 e34-part3-receipt mode root output:
     python3 scripts/rev4_featpot/e34_part3_receipts.py {{mode}} --root {{root}} --output {{output}}
+
+e34-packet-progress path:
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d if isinstance(d,list) else d["rows"]; p=[x["linear_probe"] for x in r if x["linear_probe"]]; print(dict(cases=len(r), passed=sum(x["pass"] for x in r), last=r[-1]["key"], max_abs_s_plus_c=max((x["max_abs_s_plus_c"] for x in p),default=None), negative_cases=sum(bool(x["negative_input_rows"]) for x in p)))' {{path}}
