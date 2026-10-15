@@ -1,8 +1,19 @@
-# E34 freeze preparation — revision 5, INCOMPLETE / NOT FROZEN
+# E34 — frozen registration revision 5, 2026-10-15
 
-This candidate retains revision 4 below. The owner approved its defaults as
-recorded in the preparation brief. It cannot be frozen until the pending
-receipts and qualifications listed here exist. No registered gate threshold is changed.
+Frozen before the first registered E34 fleet fit. The retained revision-4
+text is historical; the operative revision-5 amendments and the
+[launch binding](e34_frozen_launch_2026-10-15.json) control. This freezes the
+fitting and selection plan; post-fit model qualification and adoption remain
+unread. D13 fixes the eligibility margin at **0.0065 for both families**.
+The mean-point guard −0.002, improvement-point guard 0.002, dataset guards,
+Holm family and every other registered gate are unchanged.
+
+The exact83 fit image is precompiled and pinned by registry digest. Its
+`panel` is a fit auxiliary; future E34 statistical evaluation must use the
+D13-amended owner, commit `d015f004`, rather than the old-margin image binary.
+No E21 assessment, 135-case E34 qualification or Holm output is read by this
+launch. The registered label-free 8-origin/96-case lambda pilot is allowed.
+
 
 | Binding | SHA-256 or state |
 |---|---|
@@ -21,15 +32,15 @@ receipts and qualifications listed here exist. No registered gate threshold is c
 | P5 complete augmentation-builder validation | `PASS local — 94,128 sampled / 88,106 retained repairs; all 1,536 bases; native parity 651,840/651,840 consumed f32 values; explicit archive-layout embedding` |
 | P6 local first-epoch smokes | `7/7 local: base A/C, W A/C, L A and K A/C; 1 epoch, 49,999 rank pairs; K uses fixed smoke lambda 0.1, no lambda selection` — part-3 receipt `8149a8c93789313818eb11f97f1d901ca263d221cd8007124a48a2bf1c1bbca6`; K receipt `c36141a31b5017bc3197da807ef0371289455e2725d85eee051114289ff1e309` |
 | P6 L serving smoke before D12 | `FAIL G-STEER 134/135; C5/E3–E8, C1–C6/G-DIAL, N1–N3 and native served-path checks pass` — receipt `cb6f88c65a72a629ff573cf298e4b69192aa70772ce56b1a938704aa113ca16e` |
-| E34 worker smokes, image/jobset and remaining qualification | `PENDING — local smoke does not establish fleet caps or full qualification` |
+| E34 worker/image launch admission | `PASS — 14 first epochs and 22 final-image executor/harvest routes on r3500; parity bit-identical; bindings below` |
 | P7 statistics implementation and parity | `PASS — approved helper pin 48665c8f; Python/Rust E33 seed-unit parity max error 8.881784197001252e-16` |
 | One-time E33 noise exposure and measured SEs | `READ ONCE — result SHA-256 f5e097f91913a22334d2f61bdc9c62137e10689116c35b6aa6b482cb25d01717; two-way SE A 0.0019019482837346158, C 0.0016920753183515028` |
 
 P2 now binds the fitted first-epoch L smoke; it does not establish exact
 `s = -c`. L passed the measured identity and native served-path checks but the pre-D12
 finite-difference baseline failed G-STEER (134/135). The D12 amendment below
-supersedes that sensitivity-method baseline. Full P6 qualification remains
-open; no model is adopted.
+supersedes that sensitivity-method baseline. Full post-fit model qualification remains
+unread; no model is adopted.
 See [part-3 evidence](e34_part3_2026-10-15.md) and
 [preparation evidence](e34_preparation_2026-10-15.md).
 
@@ -73,7 +84,8 @@ D13 is resolved. This supersedes the historical revision-4 margin 0.002
 wherever it occurs below; every other registered numerical gate is unchanged.
 Historical finite-difference results in the retained revision-4 text below
 remain historical evidence. No model is adopted by this amendment, and the
-remaining worker/image/jobset/source-closure qualifications still prevent freeze.
+worker/image/jobset launch receipts below satisfy fit admission. The archived
+encoder source-closure gap is retained as the explicit known limitation below.
 
 The new baseline recomputes maps, exact derivatives, native scores and local
 replay using the immutable native repair feature captures. Hash-bound capture
@@ -81,6 +93,71 @@ admission checks pixel-file identity and current native consumed base features;
 all original repair score bits agree. Every original output field on the 107
 completed full-pixel A cases agrees with this feature reuse. The
 [measured receipt](e34_d12_2026-10-15.json) binds the packets and result hashes.
+
+### Frozen launch bindings
+
+| Binding | Value |
+|---|---|
+| Fit source | `83b130033bbca4bbf83a6476ad51a4fd5aacc9c7` |
+| Frozen packet SHA-256 | `f21735ca6402126133eff241464f5f2ab1dfbe0c73c0a910b513d1a941358d31` |
+| Conditional job-plan SHA-256 | `655eaa4a3ac02075f0838f2c420bc3ce9b822be65016cd980d3674587b7bb473` |
+| Program SHA-256 | `3c45506693f5985266de29c31db12c66400daa655f5db60048c8875f56c41653` |
+| Image | `ghcr.io/imazen/zenfleet-worker:fit-e34-3c45506693f5-w1d41a0313bec` |
+| Registry digest | `sha256:1cc5ab665d53025d320e5d15cd6a833c53afb395775583334f7c8e07c122efd0` |
+| Local image config ID | `sha256:1cc5ab665d53025d320e5d15cd6a833c53afb395775583334f7c8e07c122efd0` |
+| Jobset caps SHA-256 | `60b4dc197a172eacec810c09b93e262c112695caf69577c7be67c5cf00f1499f` |
+| First-epoch measurements SHA-256 | `a4c5a7c729392812aa10a38ee58f19db38a996a19d355c1e1c09eef987d15e3f` |
+| Control parity SHA-256 | `7ab66cad52049196758c9cb5fd71c97cef635463bc3bbcbe8b2fc6ef728540e7` |
+| Development-pilot binding SHA-256 | `ae4effb602e6e5d79a7249e73b06fb7c8b4f0040e8f172fccec92789934acf82` |
+| Frozen launch-control SHA-256 | `4bbe1bf499ea1ae5fa64d0ca454a4369b11da6c77b5f99c038e27ed642b03523` |
+
+Exactly **305 cells execute**: 221 unconditional cells, including the six
+full-data seed-0 lambda pilots, followed by one selected 42-cell K branch per
+family (40 LODO plus full-data seeds 1–2). All six possible K branch
+manifests are frozen before launch. Their 473 possible cell definitions are
+conditional alternatives, not extra fits. Only the registered dev96 rule
+releases one branch per family: most cases jointly meeting M2 ≥ .99 and
+M3f ≥ .70; tie chooses smaller lambda. The selected pilot is K full-data
+seed 0 and is never refit.
+
+The shared wall cap is **4,929 seconds**: ceil(3 × maximum across the 14
+r3500 smokes of elapsed-to-first-epoch + 119 × (printed epoch seconds + 0.1)).
+The +0.1 bounds one-decimal printing. Each worker has 6 GiB and no swap.
+Targets across all E34 jobsets are tower3, r3500 1, r3800x1, i2704, i1344,
+r5600g6. The existing feeder also requires 12 GiB available on tower and
+4 GiB elsewhere after admission; tower uses CPUs0–23 and low CPU shares.
+These are maxima, not a claim that all slots remain available.
+
+The 22 final-image bounded fits and their archive-bound harvest checks all
+pass. The full-budget Control-A pre-check verifies as registered-fit, with
+final119 normalized weight SHA
+`709feeb524e591b0b8f7c3b32d7f09790c788969f751d716619285457d0b5ec5`,
+bit-identical to the stored E33-A matched cell. An initial host-Python
+harvest import failure is retained in the launch status; the coordinator
+approved running the unchanged verifier/native inspector in the pinned
+image, and that verification passed. No gate was changed.
+
+Owner amendment: **no 15:20/16:00 cutoff and no Windows reboot**. i134,
+r5600g and i270 continue claiming. Their existing-picker queues prefer
+shorter measured cells. Completed cells persist immediately through the
+canonical blob/ledger route. In-flight logs and existing best/epoch bakes
+are copied to immutable off-host generations every60 seconds, including
+after16:00. There is no optimizer resume; snapshots are explicitly
+unverified in-flight artifacts and cannot substitute for a completed fit.
+
+**Known reproducibility limitation:** the existing archived zenmetrics
+encoder executable has SHA-256
+`7a5518efe8d6f453f835c94f63e165c9fbc66f0532baec4e979c307a0b12531a`;
+its source closure remains unrecovered. The executable, encoded bytes,
+decoded pixels, augmentation and development packet are pinned. This gap
+is recorded, not represented as recovered source provenance.
+
+Artifacts on dev: `/mnt/v/output/zensim/e34-launch-2026-10-15/`, mirrored
+to `/mnt/tower/output/zensim/e34-launch-2026-10-15/`. Generated manifests,
+program archive and full smoke receipts remain outside git; the small
+[launch binding](e34_frozen_launch_2026-10-15.json) pins them. D11 excludes
+1444/1458, D12 uses exact gradients in both places, seed0 requires135/135,
+and seeds1/2 each require max(paired control count,133), as stated above.
 
 ---
 
