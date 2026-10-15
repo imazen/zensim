@@ -1237,3 +1237,7 @@ e34-launch-smoke bundle image jobset inspector mode="bounded" attempt="1":
 
 e34-launch-backup:
     ~/work/zen/scripts/run-heavy --mem 24G --jobs 1 -- rsync -a --no-owner --no-group /mnt/v/output/zensim/e34-launch-2026-10-15/ /mnt/tower/output/zensim/e34-launch-2026-10-15/
+
+# Registered label-free dev96 only; explicit partial mode never releases K early.
+e34-launch-pilot partial="--partial":
+    ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/rev4_featpot/e33_launch.py lambda-pilot --packet /mnt/v/output/zensim/e34-launch-2026-10-15/packet --packet-sha f21735ca6402126133eff241464f5f2ab1dfbe0c73c0a910b513d1a941358d31 --instrument /mnt/v/output/zensim/e34-launch-2026-10-15/bin/dev96-instrument-83b13003 {{partial}}

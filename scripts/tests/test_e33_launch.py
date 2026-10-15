@@ -108,5 +108,28 @@ class Launch(unittest.TestCase):
         self.assertNotIn(js,self.queue.read_text())
 
 
+    def test_explicit_partial_pilot_never_selects_with_pending_artifacts(self):
+        import types
+        instrument=self.root/'instrument';instrument.write_bytes(b'fixture tool')
+        inputs=self.root/'dev96.json';inputs.write_text(json.dumps({'labels_read':False,
+            'cases':[{'key':str(i),'origin':str(i//12)} for i in range(96)]}))
+        (self.bundle/'DEVELOPMENT_BINDING.json').write_text(json.dumps({
+            'assessment_inputs':str(inputs),'assessment_inputs_sha256':owner.sha(inputs),
+            'instrument_sha256':owner.sha(instrument)}))
+        for family in ['a','c']:
+            for arm in ['k01','k1','k10']:
+                (self.bundle/f'fit-manifest-fite34-{arm}{family}-pilot-20261015.json').write_text('[{}]')
+        rt=self.root/'launch';rt.mkdir()
+        with mock.patch.object(owner,'runtime',return_value=(rt,self.root,instrument)), \
+             mock.patch.object(owner,'installed',return_value=False), \
+             mock.patch.dict('sys.modules',{'harvest_fit_cells':types.SimpleNamespace()}):
+            out=owner.lambda_pilot(self.bundle,instrument,partial=True)
+            self.assertEqual((out['state'],len(out['pending_artifacts'])),('WAIT',6))
+            self.assertEqual(out['completed_assessments'],[])
+            self.assertFalse((rt/'LAMBDA_SELECTION.json').exists())
+            with self.assertRaisesRegex(ValueError,'not been verified'):
+                owner.lambda_pilot(self.bundle,instrument)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -358,12 +358,27 @@ def persist_loan_artifacts(bundle):
         cmd=['rsync','-a','--no-owner','--no-group','--delay-updates','--prune-empty-dirs',
              '--include=/e34-*-results/***','--exclude=*']
         if latest.exists():cmd += ['--link-dest='+str(root/host/latest.read_text().strip())]
-        proc=subprocess.run([*cmd,host+':'+source,str(dest)+'/'],capture_output=True,text=True)
-        if proc.returncode not in (0,24):
-            raise RuntimeError(f'{host}: snapshot failed rc={proc.returncode}: {proc.stderr}')
+        rsync_available=subprocess.run(['ssh','-n','-o','BatchMode=yes',host,'command -v rsync'],
+                                       capture_output=True).returncode==0
+        transport='rsync' if rsync_available else 'ssh-tar'
+        if rsync_available:
+            proc=subprocess.run([*cmd,host+':'+source,str(dest)+'/'],capture_output=True,text=True,
+                                env={**os.environ,'RSYNC_RSH':'ssh -o BatchMode=yes -o ConnectTimeout=8'})
+            if proc.returncode not in (0,24):
+                raise RuntimeError(f'{host}: snapshot failed rc={proc.returncode}: {proc.stderr}')
+        else:
+            # A host needs only its existing tar; retain a whole immutable raw
+            # in-flight archive. It is never admitted as a completed fit.
+            archive=dest/'INFLIGHT.tar.gz'
+            command='cd '+source+' && set -- e34-*-results; if [ -e "$1" ]; then nice -n19 ionice -c3 tar -czf - -- "$@"; else tar -czf - --files-from /dev/null; fi'
+            with archive.open('wb') as stream:
+                proc=subprocess.run(['ssh','-n','-o','BatchMode=yes','-o','ConnectTimeout=8',host,command],
+                                    stdout=stream,stderr=subprocess.PIPE)
+            if proc.returncode not in (0,1):
+                raise RuntimeError(f'{host}: raw snapshot failed rc={proc.returncode}: {proc.stderr!r}')
         files={str(p.relative_to(dest)):sha(p) for p in dest.rglob('*') if p.is_file()}
         record=dict(host=host,time=now(),state='COPIED_UNVERIFIED_INFLIGHT',optimizer_resume=False,
-                    rsync_returncode=proc.returncode,files=files)
+                    transport=transport,copy_returncode=proc.returncode,files=files)
         (dest/'SNAPSHOT.json').write_text(json.dumps(record,indent=2)+'\n')
         latest.write_text(stamp+'\n')
         reports.append(dict(host=host,state=record['state'],files=len(files),snapshot=str(dest)))
@@ -384,7 +399,7 @@ def shorter_queue(bundle, queue, out):
     return dict(queue=str(out),order=[row[0] for row in rows])
 
 
-def lambda_pilot(bundle, instrument):
+def lambda_pilot(bundle, instrument, partial=False):
     """Registered label-free dev96 selection; all score/gain work uses Rust."""
     doc=packet(bundle)
     binding=json.loads((bundle/'DEVELOPMENT_BINDING.json').read_text())
@@ -397,13 +412,16 @@ def lambda_pilot(bundle, instrument):
     rt,tools,_=runtime(bundle,doc)
     sys.path.insert(0,str(tools))
     import harvest_fit_cells as hfc
-    reports=[];selected={}
+    reports=[];selected={};pending=[]
     for family in ['a','c']:
         choices=[]
         for arm,lam in [('k01',0.1),('k1',1.),('k10',10.)]:
             name=arm+family;js=f'fite34-{name}-pilot-20261015'
             jobs=json.loads((bundle/f'fit-manifest-{js}.json').read_text())
             if len(jobs)!=1 or not installed(hfc,jobs[0]):
+                if partial:
+                    pending.append(js)
+                    continue
                 raise ValueError('pilot artifact has not been verified and installed: '+js)
             cell=Path(jobs[0]['kind']['argv'][jobs[0]['kind']['argv'].index('--dest')+1])
             result=json.loads((cell/'result.json').read_text())
@@ -435,8 +453,14 @@ def lambda_pilot(bundle, instrument):
                         model_sha256=sha(model),assessment_sha256=sha(output),assessment=str(output),jobset=js)
             reports.append(record);choices.append(record)
             print(json.dumps(record),flush=True)
+        if len(choices)!=3:
+            continue
         winner=sorted(choices,key=lambda r:(-r['passing_cases'],r['lambda_value']))[0]
         selected[family]=winner['jobset'].replace('-pilot-','-lodo-')
+    if pending:
+        return dict(state='WAIT',completed_assessments=reports,pending_artifacts=pending,labels_read=False)
+    if len(reports)!=6 or len(selected)!=2:
+        raise ValueError('all six completed dev96 assessments required for selection')
     selection=dict(schema='e34-registered-lambda-selection-v1',packet_sha256=PACKET_SHA,
                    assessment_inputs_sha256=binding['assessment_inputs_sha256'],labels_read=False,
                    sensitivity_method='exact-gradient-d12',reports=reports,selected_branches=selected,
@@ -447,15 +471,33 @@ def lambda_pilot(bundle, instrument):
     return selection
 
 
+def release_initial(bundle, queue):
+    """Release exactly the frozen unconditional cells after first-artifact admission."""
+    doc=packet(bundle)
+    proof=json.loads((bundle.parent/'launch/FIRST_CELL_ADMITTED.json').read_text())
+    dest=Path(proof['dest'])
+    if (proof['verified'] is not True or proof['packet_sha256']!=PACKET_SHA
+            or sha(dest/'result.json')!=proof['result_sha256']
+            or sha(dest/'fleet_receipt.json')!=proof['receipt_sha256']):
+        raise ValueError('first registered cell has not been admitted')
+    plan=json.loads((bundle/'E34_JOB_PLAN.json').read_text())
+    order=sorted(plan['unconditional'],key=lambda js:(not '-pilot-' in js, js))
+    for js in order:
+        if js not in queued(queue):
+            print(json.dumps(launch(bundle,js,queue)),flush=True)
+    return dict(released=order,unconditional_cells=plan['initial_cells'])
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance", "persist", "shorter-queue", "lambda-pilot"))
+    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance", "persist", "shorter-queue", "lambda-pilot", "release-initial"))
     p.add_argument("--packet", type=Path, required=True)
     p.add_argument("--arm")
     p.add_argument("--packet-sha", help="explicit frozen E34 PACKET.json pin")
     p.add_argument("--queue", type=Path, default=FITV2/"fleet_queue")
     p.add_argument("--out-queue", type=Path)
     p.add_argument("--instrument", type=Path)
+    p.add_argument("--partial", action="store_true", help="pilot: explicitly assess available artifacts, never select until all6")
     p.add_argument("--install", action="store_true")
     p.add_argument("--require-all", action="store_true")
     p.add_argument("--status", action="store_true")
@@ -469,9 +511,11 @@ def main():
         p.error("E34 requires the frozen --packet-sha")
     if a.mode in ("launch", "placements", "harvest") and not a.arm:
         p.error(f"{a.mode} requires --arm")
-    if a.mode == "lambda-pilot":
+    if a.mode == "release-initial":
+        out=release_initial(a.packet,a.queue)
+    elif a.mode == "lambda-pilot":
         if not a.instrument:p.error("lambda-pilot requires --instrument")
-        out=lambda_pilot(a.packet,a.instrument)
+        out=lambda_pilot(a.packet,a.instrument,a.partial)
     elif a.mode == "persist":
         out=persist_loan_artifacts(a.packet)
     elif a.mode == "shorter-queue":
