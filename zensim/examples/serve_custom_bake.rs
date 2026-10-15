@@ -347,6 +347,12 @@ fn main() {
     #[allow(unused_mut)]
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(feature = "feature-regime-v2")]
+    if args.first().map(String::as_str) == Some("--steering-timing") {
+        assert_eq!(args.len(), 3, "--steering-timing MODELS.json OUTPUT.jsonl");
+        prodqual::timing(&args[1], &args[2]);
+        return;
+    }
+    #[cfg(feature = "feature-regime-v2")]
     if args.first().map(String::as_str) == Some("--prodqual") {
         prodqual::run(&args[1..]);
         return;

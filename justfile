@@ -1128,3 +1128,10 @@ e34-part5-checks:
 e34-final-parity:
     target/debug/panel e34 seed-parity --input /mnt/v/output/zensim/e33-impl-2026-10-09/assessment-e33/e33_e21.json --output /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity-final.json
     cmp /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity.json /mnt/v/output/zensim/e34-prep-2026-10-15/part5/rust-seed-parity-final.json
+
+
+e34-d12-bench-build:
+    cargo build -p zensim --example serve_custom_bake --features custom-profiles
+
+e34-d12-timing stage:
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 ZENSIM_NEIGHBOUR_EXACT=1 RAYON_NUM_THREADS=1 target/debug/examples/serve_custom_bake --steering-timing /mnt/v/output/zensim/e34-prep-2026-10-15/part4/full-job.json /mnt/v/output/zensim/e34-prep-2026-10-15/part6/{{stage}}-timing.jsonl

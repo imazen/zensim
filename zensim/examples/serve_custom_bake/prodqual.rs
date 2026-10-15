@@ -140,3 +140,61 @@ pub(super) fn run(paths: &[String]) {
         "geometries":GEOMETRIES, "dropped_bits":DROPPED_BITS, "seeds":seeds})
     );
 }
+
+// D12 measures the same prepared-map owner before and after the gradient change.
+// Explicit model packet and output; synthetic texture only, no corpus discovery.
+pub(super) fn timing(packet: &str, output: &str) {
+    use std::io::Write;
+    use std::time::Instant;
+    assert_eq!(std::env::var("ZENSIM_FORMULA_REV").as_deref(), Ok("5"));
+    archmage::X64V4xToken::dangerously_disable_token_process_wide(true).unwrap();
+    archmage::X64V4Token::dangerously_disable_token_process_wide(true).unwrap();
+    let packet: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(packet).unwrap()).unwrap();
+    let mut out = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(output)
+        .unwrap();
+    for m in packet["models"].as_array().unwrap() {
+        let bytes = std::fs::read(m["path"].as_str().unwrap()).unwrap();
+        use sha2::{Digest, Sha256};
+        let digest: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(digest, m["sha256"].as_str().unwrap());
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        for side in [64, 256, 1024, 4096] {
+            let pixels = reference(side, side);
+            let distorted: Vec<_> = pixels.iter().map(|p| p.map(|x| x & 248)).collect();
+            let src = RgbSlice::new(&pixels, side, side);
+            let dst = RgbSlice::new(&distorted, side, side);
+            let mut scorer = BakeScorer::new(&model).unwrap().with_parallel(false);
+            let t = Instant::now();
+            let mut worker = scorer.prepare_steering(&src, 8).unwrap();
+            let prepare_seconds = t.elapsed().as_secs_f64();
+            let mut samples = Vec::new();
+            for repeat in 0..3 {
+                let t = Instant::now();
+                let result = worker.compute(&dst, None).unwrap();
+                let seconds = t.elapsed().as_secs_f64();
+                let feature_bits: Vec<_> = result
+                    .result()
+                    .features()
+                    .iter()
+                    .flat_map(|x| x.to_bits().to_le_bytes())
+                    .collect();
+                let feature_sha: String = Sha256::digest(&feature_bits)
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                samples.push(json!({"repeat":repeat,"seconds":seconds,"score_bits":result.result().score().to_bits(),"features_sha256":feature_sha,"gain":std::hint::black_box(result.refinement_gain(0,0,32,32))}));
+            }
+            let record = json!({"model":m["name"],"model_sha256":digest,"side":side,"tier":"v3","bin":8,"prepare_seconds":prepare_seconds,"samples":samples});
+            writeln!(out, "{record}").unwrap();
+            out.flush().unwrap();
+            eprintln!("D12 map timing {} {side} complete", m["name"]);
+        }
+    }
+}
