@@ -32,7 +32,7 @@
 
 ### Fixed
 
-- Isolate E34 harvest jobset errors, retain bounded ledger-sync diagnostics and retries, and persist per-jobset installed counts without admitting failed verification (`harvest-cycle` owner).
+- Isolate E34 harvest jobset errors, retain bounded ledger-sync diagnostics and retries, and persist per-jobset installed counts without admitting failed verification (`d9bd4953`, `0dddffd5`).
 
 - Minimal feature builds gate v2 accumulator helpers with their callers; oracle-only builds retain their reduction helper (`83ca5a6d`).
 
