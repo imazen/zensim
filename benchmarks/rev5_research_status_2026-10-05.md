@@ -758,3 +758,39 @@ Open owner decisions:
   mucped23's 49 sources are CID22's, so it can't be training data.
 - **After E34:** one registered experiment adds palette-quantization ladders from zenquant and zenpng to the synthetic
   training pairs, plus an additional subjective JND training leg. Its registration is drafted while E34 runs.
+
+## 44. E34 preparation landed (2026-10-15, main `d3922855`)
+
+- **40 commits are reviewed and landed.** An independent review lane found two defects in the new gradient code and a
+  weaker seed-rule wording in the freeze draft. All three were fixed with regression tests, and the re-review verdict
+  was LAND.
+- **Steering uses the exact gradient (owner decision).** The served steering map and the G-STEER instrument now take
+  the network's exact gradient instead of f32 central differences with step `max(|f|·1e-3, 1e-5)`.
+  - **Why:** a report-only check found that step added rounding noise of up to 17.6 (median 0.11–0.15 per input).
+  - **Scores:** bits are unchanged (55,515 comparisons per model).
+  - **Public API:** `score_features_fd_gradient` keeps its name, as documented.
+  - **Speed:** map timings are descriptive, from a shared host: 5–10× faster at 64 px, 1.4–2.4× at 256 px, about
+    10–13 % at 1024 px and 6–7 % at 4096 px.
+- **New steering baselines** (135 cases, exact gradient): candidate A 131, candidate C 130, production seed 0 128, and
+  the linear smoke model 135. Before: 129, 127, 128 and 134.
+- **Statistics:** `panel e34` runs E34's two-way reference × seed test on zenmetrics-stats `48665c8f` (PR #82). It
+  reproduces E33's 68 recorded numbers to 9·10⁻¹⁶.
+- **Noise, measured once from E33's stored predictions:** the two-way standard error is 0.0019 (A) and 0.0017 (C). At
+  the registered 0.002 margin, an arm must beat its control by +0.0044 (A) or +0.0037 (C) to pass Holm's first step.
+  The margin is an open owner decision.
+- **Trainer:**
+  - arm K: an exact-gradient penalty along repairs;
+  - arm L: the shared monotone projection and the `H1` recipe;
+  - default argv byte-identical.
+- **E34 data:**
+  - 913 eligible training origins after duplicate and family exclusion; two origins without official SDR
+    renditions are excluded by owner decision;
+  - 128 augmentation and 8 dev origins, by k-means;
+  - 1,536 encoded bases (4 codecs × 3 qualities) and 88,106 block repairs.
+- **Before freeze:**
+  - the margin decision;
+  - the source closure of one archived encoder binary;
+  - the worker image and the 305-cell jobset;
+  - worker-class smokes, caps and dry placement.
+
+  Then freeze and one fleet lane on tower, r3500, r3800x, i270, i134 and r5600g.
