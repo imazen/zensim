@@ -1923,3 +1923,17 @@ cropped release (DaRUS doi:10.18419/DARUS-6156, zip sha256 `3c3bbc99…`), each 
   every released level. 3,417 crops × 3 models = 10,251 scores, all finite. The scores are kept outside the repo.
 - **Pixels only.** This scoring read no labels, and nothing was fitted, selected or tuned.
 - **Unchanged:** `aic2026` stays in the protected-population guards, and its role (§3d) is unchanged.
+
+## Exposure receipt — 2026-10-15: E34 P1 feature-only preparation
+
+[E34 preparation](../benchmarks/e34_preparation_2026-10-15.md) read only the
+410 registered difference columns of the frozen E33 positive-weight fit
+inputs: SafeSyn, CID22 teacher, human full-data and four LODO subsets, and
+cf98 KADIS coverage. The full-data legs contain 182,247 rows; visiting the
+LODO subsets as well gives 216,537 rows with repetition. No target column
+was decoded. Coverage row keys selected the exact registered cf98 subset;
+its feature pool was decoded before applying that mask. Development tables
+and stored E21 predictions were not decoded. This is a feature-domain census,
+not an E21 assessment or new training run. No protected or sealed population
+was opened. The separately authorized E33 noise read remains pending and
+requires its own preread ledger entry after the statistics owner is ready.
