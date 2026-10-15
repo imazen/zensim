@@ -915,3 +915,12 @@ e34-preparation-build:
 # Label-free inventory for the explicitly registered E34 sources.
 e34-preparation-inventory:
     python3 scripts/rev4_featpot/e34_augmentation.py inventory --out /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inventory --split-owner /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inputs/origin_split.py --family-map /mnt/v/output/zensim/e34-prep-2026-10-15/p4-inputs/split_map_family.tsv --pixels /mnt/v/output/imazen-26-png-v3 --identity /mnt/v/output/zensim/e33-impl-2026-10-09/E3_SOURCES.json --packet /mnt/v/output/zensim/steerfix-2026-10-09/full-packet.json --bank /var/tmp/rev4-featbank/bank --instrument-keys /var/tmp/shippath7/verified/instruments/ladder.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/broad.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/negtail.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/jpeg8.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/identity.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/m3.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/owner.keys.parquet --instrument-keys /var/tmp/shippath7/verified/instruments/standard.keys.parquet
+
+# Part 3 uses the current native pack and serving owners.
+e34-serving-build:
+    cargo build -p zensim-validate --bin bake_dial_refit --bin bake_verdict
+    cargo build -p zensim --example serve_custom_bake --features custom-profiles
+
+# Run each arm separately under run-heavy so it has its own resource receipt.
+e34-first-epoch arm:
+    python3 scripts/rev4_featpot/e34_smoke.py --arm {{arm}} --root /mnt/v/output/zensim/e33-impl-2026-10-09/packet/container-scratch-1/fit-cell/9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008/rev4-featpot/v2e29 --dest /mnt/v/output/zensim/e34-prep-2026-10-15/part3/smokes/{{arm}} --bin-dir {{justfile_directory()}}/target/debug

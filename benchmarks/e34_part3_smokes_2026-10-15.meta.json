@@ -1,0 +1,10 @@
+{
+  "schema": "e34-smoke-receipts-v1",
+  "source_commit": "cdf7a19f",
+  "command": "just e34-first-epoch ARM (each under run-heavy --mem 24G --jobs 8)",
+  "artifact_root": "/mnt/v/output/zensim/e34-prep-2026-10-15/part3/smokes",
+  "epochs": 1,
+  "rank_pairs_per_epoch": 49999,
+  "execution_contract": "local-smoke",
+  "no_assessment": true
+}
