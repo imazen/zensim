@@ -648,6 +648,7 @@ impl<'a> BakeScorer<'a> {
     // Reuse the extraction planner's structural read proof, including input
     // transforms and dense IDs. An observed zero gradient is never a proof.
     // Unknown contracts conservatively retain every declared input.
+    #[cfg(feature = "feature-regime-v2")]
     fn mark_feature_reads(&self, reads: &mut [bool]) {
         if self.weights.as_ref().is_none_or(|w| w[0] != 0.0) {
             #[cfg(feature = "feature-regime-v2")]
