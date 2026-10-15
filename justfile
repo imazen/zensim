@@ -1261,3 +1261,12 @@ cifix-e34-refusals:
 # Isolate the real-bake attribution/session contract without filtering a pass.
 cifix-e34-attribution:
     cargo test -p zensim-validate --test bake_surface candidate_attribution_matches_served_features_scores_and_reuses_sessions -- --nocapture
+
+# Match CI's backend split: hosted GPU tests execute the CubeCL CPU backend.
+cifix-e34-all-features:
+    cargo test --workspace --no-fail-fast --all-features --exclude zensim-wasm-tests --exclude zensim-validate --exclude zensim-train-gpu -- --nocapture
+    cargo test --no-fail-fast -p zensim-validate -p zensim-train-gpu --features zensim-validate/gpu-cpu,zensim-train-gpu/gpu-cpu -- --nocapture
+
+# Reusable CI polling without waiting for the slower jobs to hide a failure.
+cifix-e34-ci-status run:
+    gh run view {{run}} -R imazen/zensim --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[] | {name,status,conclusion,databaseId}]}'
