@@ -53,6 +53,8 @@ use crate::adam_simd;
 // docs for the exact formula and gradient derivation.
 mod loss_norm_in_norm;
 mod loss_pearson;
+mod loss_steer;
+mod steer_data;
 
 mod goals;
 
@@ -63,6 +65,12 @@ pub use goals::{ValidationPolicy, compute_goal_scores};
 /// architecture (228 → 32 → 1) with `Min` validation gating.
 #[derive(Clone, Debug)]
 pub struct MlpHyperparams {
+    /// E34 K label-free repair table; absent leaves the training stream unchanged.
+    pub steer_pairs: Option<std::path::PathBuf>,
+    /// Detached per-image squared relative repair residual weight.
+    pub steer_lambda: f64,
+    /// Same fx1 declaration used by the rank-table loader, when C is selected.
+    pub steer_derived_inputs: Option<std::path::PathBuf>,
     /// Opt-in dataset names for within-leg pooled objective; empty preserves every legacy path.
     pub pooled_legs: Vec<String>,
     /// Share of an opted-in leg's within-reference draws replaced with pooled rows.
@@ -931,6 +939,9 @@ pub struct MlpHyperparams {
 impl Default for MlpHyperparams {
     fn default() -> Self {
         Self {
+            steer_pairs: None,
+            steer_lambda: 0.0,
+            steer_derived_inputs: None,
             pooled_legs: Vec::new(),
             pooled_rank_share: 0.0,
             pooled_pearson_weight: 0.0,
@@ -2572,6 +2583,28 @@ pub fn train_mlp_strategy_pairs(
     //    Group g's standardized features live in std_features[g], shape
     //    (n_pairs[g] × n_features).
     let std_features = StdFeatures::build(groups, n_features, &scaler_mean, &scaler_scale);
+    let steer_images = hyperparams.steer_pairs.as_deref().map(|path| {
+        assert!(
+            tv.is_none()
+                && anchor.is_none()
+                && equiv.is_none()
+                && pjnd_anchor.is_none()
+                && konjnd_agg.is_none()
+                && triplets.is_none(),
+            "K requires the plain rank/MSE inputs only"
+        );
+        steer_data::load(
+            path,
+            hyperparams.steer_derived_inputs.as_deref(),
+            n_features,
+            &scaler_mean,
+            &scaler_scale,
+        )
+        .unwrap_or_else(|e| panic!("--steer-pairs: {e}"))
+    });
+    let mut steer_rng = SplitMix64::new(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed) ^ 0xe340_7374_6565_7200,
+    );
 
     // Standardize TV-regularizer features using the same scaler, in
     // their flat (n_rows × n_features) form. The TV pairs reference
@@ -3648,6 +3681,27 @@ pub fn train_mlp_strategy_pairs(
                     project_plain(&mut w1, &mut w2, &mut b1, &mut b2, nonneg, hyperparams);
                 }
             }
+        }
+
+        if let Some(images) = &steer_images {
+            let (loss, skipped, sizes) = loss_steer::epoch(
+                images,
+                &mut steer_rng,
+                &mut w1,
+                &mut b1,
+                &mut w2,
+                &mut b2,
+                hyperparams.steer_lambda,
+                lr,
+                hyperparams.nonneg_pin,
+                &mut adam,
+            );
+            log_line(
+                &format!(
+                    "E34 K epoch={epoch} images=512 pairs=4096 skipped_denominator_lt_1e-10={skipped} loss={loss:.17} blocks_8_16_32_64={sizes:?}"
+                ),
+                log,
+            );
         }
 
         let avg_loss = if n_steps > 0 {

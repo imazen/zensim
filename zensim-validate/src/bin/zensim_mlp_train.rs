@@ -842,6 +842,14 @@ struct Args {
     #[arg(long, default_value_t = false)]
     nonneg_distance: bool,
 
+    /// E34 K: label-free base/repair feature pairs (registered Rev5/v3 Parquet).
+    #[arg(long)]
+    steer_pairs: Option<PathBuf>,
+
+    /// E34 K per-image detached squared relative residual weight.
+    #[arg(long, default_value_t = 0.0)]
+    steer_lambda: f64,
+
     /// The pinned raw output at the identity input under `--nonneg-distance`.
     /// `100.0` matches the dial contract's identity band `[97.5, 100]`.
     #[arg(long, default_value_t = 100.0, value_name = "FLOAT")]
@@ -2620,6 +2628,19 @@ fn apply_manifest_to_args(
 /// CLI-only capabilities (data sources and the GPU adapter). Shared head/loss
 /// checks live in mlp_train::validate_training_capabilities.
 fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu: bool) {
+    if args.steer_pairs.is_some() {
+        assert!(
+            !want_gpu
+                && args.feature_transform.is_empty()
+                && args.auto_transforms.is_none()
+                && args.tv_pairs_file.is_none()
+                && args.coarse_decay == 0.0
+                && args.coarse_l2_mult == 1.0
+                && args.group_l1 == 0.0
+                && args.rank_pair_list.is_empty(),
+            "K requires the plain CPU recipe without feature transforms, TV, extra penalties or pair lists"
+        );
+    }
     assert!(
         args.monotone_feature_mask.is_none() || args.monotone_cbc,
         "--monotone-feature-mask requires --monotone-cbc"
@@ -2861,6 +2882,7 @@ fn stamp_checkpoint_metadata(
         "zentrain.sampling",
         // E33 `fx1`: the declaration hash, so the selected `last.bin` carries it too.
         "zentrain.derived_inputs_sha256",
+        "zentrain.steer_pairs",
     ] {
         if let Ok(value) = metadata.get_utf8(key) {
             bytes = zenpredict_bake::append_metadata_utf8(&bytes, key, value)
@@ -3155,6 +3177,9 @@ fn main() {
         }
     };
     let mut hyperparams = MlpHyperparams {
+        steer_pairs: args.steer_pairs.clone(),
+        steer_lambda: args.steer_lambda,
+        steer_derived_inputs: args.derived_inputs.clone(),
         pooled_legs: args.pooled_leg.clone(),
         pooled_rank_share: args.pooled_rank_share,
         pooled_pearson_weight: args.pooled_pearson_weight,
@@ -5125,6 +5150,20 @@ fn main() {
                 })
         }
         None => bake_bytes,
+    };
+    let bake_bytes = if let Some(path) = &args.steer_pairs {
+        let record = serde_json::json!({"table_sha256": train_manifest::sha256_file(path).expect("K table digest"),
+            "manifest_sha256": train_manifest::sha256_file(&path.with_extension("parquet.manifest.json")).expect("K receipt digest"),
+            "lambda":args.steer_lambda, "images_per_epoch":512, "repairs_per_image":8,
+            "rng_salt":"e340737465657200", "schedule":"after rank epoch; one Adam update per image; lambda/512"});
+        zenpredict_bake::append_metadata_utf8(
+            &bake_bytes,
+            "zentrain.steer_pairs",
+            &record.to_string(),
+        )
+        .expect("K provenance")
+    } else {
+        bake_bytes
     };
     std::fs::write(&out_path, &bake_bytes).unwrap_or_else(|e| {
         eprintln!("write {out_path:?}: {e}");

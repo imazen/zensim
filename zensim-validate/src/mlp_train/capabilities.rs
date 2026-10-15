@@ -9,6 +9,26 @@ pub fn validate_training_capabilities(
     triplet_rows: usize,
 ) -> MlpHyperparams {
     assert!(
+        hyperparams.steer_lambda.is_finite() && hyperparams.steer_lambda >= 0.0,
+        "--steer-lambda must be finite and nonnegative"
+    );
+    assert_eq!(
+        hyperparams.steer_pairs.is_some(),
+        hyperparams.steer_lambda > 0.0,
+        "--steer-pairs and a positive --steer-lambda must be supplied together"
+    );
+    if hyperparams.steer_pairs.is_some() {
+        assert!(
+            hyperparams.nonneg_distance
+                && !hyperparams.monotone_cbc
+                && hyperparams.minibatch_size == 1
+                && hyperparams.feature_transforms.is_none()
+                && hyperparams.pooled_legs.is_empty()
+                && hyperparams.pair_sampling == super::PairSampling::Uniform,
+            "K requires plain N, uniform sampling, minibatch 1, no transforms/pooled loss/monotone projection"
+        );
+    }
+    assert!(
         hyperparams.pooled_rank_share.is_finite()
             && (0.0..=1.0).contains(&hyperparams.pooled_rank_share),
         "--pooled-rank-share must be in [0,1]"

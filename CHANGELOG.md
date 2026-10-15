@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Add opt-in E34 K exact-gradient repair loss, independent sampling and label-free table admission to the plain N trainer.
+
+
 - Extend the existing masked monotone projection to plain N, including H1 recipe and f32/f16 identity checks.
 
 

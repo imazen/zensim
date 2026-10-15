@@ -265,6 +265,24 @@ fn inventory(
     args: &Args,
     inputs: &[train_manifest::ManifestInput],
 ) -> Result<(), String> {
+    // K's feature-only receipt is admitted before any training payload read.
+    if let Some(path) = &args.steer_pairs {
+        safe(path)?;
+        let m = json(&path.with_extension("parquet.manifest.json"))?;
+        if m["schema"] != "e34-steer-pairs-v1"
+            || m["labels_read"] != false
+            || m["build_complete"] != true
+            || m["formula_revision"] != 5
+            || m["tier"] != "v3"
+            || m["base_images"] != 1536
+            || m["origins"] != 128
+            || !pin(&m["table_sha256"])
+            || !pin(&m["eligibility_receipt_sha256"])
+            || !pin(&m["extractor_sha256"])
+        {
+            return Err("K augmentation receipt is not admitted".into());
+        }
+    }
     let auxiliary = [
         ("--anchor-parquet", &args.anchor_parquet),
         ("--cross-codec-eq-parquet", &args.cross_codec_eq_parquet),

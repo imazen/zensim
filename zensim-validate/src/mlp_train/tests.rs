@@ -3842,3 +3842,50 @@ fn e34_plain_monotone_refusals() {
         assert!(std::panic::catch_unwind(|| validate_training_capabilities(&hp, true, 0)).is_err());
     }
 }
+
+#[test]
+fn e34_k_refuses_incomplete_or_incompatible_options() {
+    let enabled = MlpHyperparams {
+        steer_pairs: Some("not-read.parquet".into()),
+        steer_lambda: 1.,
+        nonneg_distance: true,
+        ..Default::default()
+    };
+    validate_training_capabilities(&enabled, true, 0);
+    for hp in [
+        MlpHyperparams {
+            steer_lambda: 0.,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            steer_pairs: None,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            steer_lambda: f64::NAN,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            steer_lambda: f64::INFINITY,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            nonneg_distance: false,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            monotone_cbc: true,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            minibatch_size: 2,
+            ..enabled.clone()
+        },
+        MlpHyperparams {
+            feature_transforms: Some(vec![]),
+            ..enabled.clone()
+        },
+    ] {
+        assert!(std::panic::catch_unwind(|| validate_training_capabilities(&hp, true, 0)).is_err());
+    }
+}
