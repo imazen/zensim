@@ -4,6 +4,9 @@
 use super::*;
 use std::sync::Arc;
 
+#[path = "bake_gradient.rs"]
+mod gradient;
+
 /// A loaded bake's reusable scoring state.
 ///
 /// The caller owns the parsed model; no bytes are leaked or installed into a
@@ -557,28 +560,22 @@ impl<'a> BakeScorer<'a> {
         }
     }
 
-    /// Local feature sensitivities of this complete candidate's served score.
+    /// Exact local feature derivative of the complete served score.
     ///
-    /// The result uses the input row's identity layout, including zero
-    /// sensitivity for unread IDs. Each component is the central difference
-    /// of [`Self::score_features`] with step `max(abs(feature) * 1e-3, 1e-5)`.
-    /// Predictor buffers are reused within each worker. Unread IDs skip their
-    /// forwards; threaded builds evaluate large read sets in independent
-    /// column groups with unchanged per-forward arithmetic. All heads,
-    /// splines, codec calibration, ensemble members, final disposition and
-    /// corruption gates participate; negative scores are preserved.
+    /// The historical method name is retained for source compatibility. This
+    /// now differentiates the loaded network, transforms, heads, calibration
+    /// and composition analytically in a fixed scalar f64 order. Unread IDs
+    /// have zero sensitivity. Rounded score arithmetic is not differentiated;
+    /// ordinary served score bits are unchanged. ReLU ties use the inactive
+    /// branch; clamp boundaries use zero, and min/max ties choose the first
+    /// branch. A tree gate is locally constant.
     ///
-    /// These are local finite secants. A tree boundary, clamp or other
-    /// nonsmooth head need not have a derivative, and a zero local sensitivity
-    /// does not prove that a finite pixel intervention has no effect. Pixel
-    /// attribution must also account for the feature integrands it supports.
-    /// Dimensions and codec hint stay fixed for all probes. The pixel-identity
-    /// override belongs to [`Self::compute`], not an arbitrary feature row.
+    /// Dimensions and codec hints stay fixed. Pixel identity overrides belong
+    /// to [`Self::compute`]. A local derivative does not promise the outcome
+    /// of a finite pixel edit or an intervention across a nonsmooth boundary.
     ///
     /// # Errors
-    /// Rejects a nonfinite row, base score, perturbed input or probe result,
-    /// and propagates model/feature-layout errors without replacing them with
-    /// zero sensitivities.
+    /// Rejects invalid input/layouts and nonfinite scores or derivatives.
     pub fn score_features_fd_gradient(
         &mut self,
         features: &[f64],
@@ -586,68 +583,24 @@ impl<'a> BakeScorer<'a> {
         height: u32,
         codec_hint: Option<&str>,
     ) -> Result<Vec<f64>, ZensimError> {
-        let invalid = || ZensimError::ModelForwardFailed {
-            reason: "candidate sensitivity requires finite inputs, scores and probes",
-        };
-        if features.iter().any(|f| !f.is_finite())
-            || !self
-                .score_features(features, width, height, codec_hint)?
-                .is_finite()
-        {
-            return Err(invalid());
-        }
-        // Validate every requested perturbation before skipping an unread ID.
-        // The shortcut cannot hide overflow in an otherwise unused column.
-        for &value in features {
-            let eps = (value.abs() * 1e-3).max(1e-5);
-            if !(value + eps).is_finite() || !(value - eps).is_finite() {
-                return Err(invalid());
+        if features.iter().any(|f| {
+            !f.is_finite() || {
+                let step = (f.abs() * 1e-3).max(1e-5);
+                !(f + step).is_finite() || !(f - step).is_finite()
             }
-        }
-        let mut reads = vec![false; features.len()];
-        self.mark_feature_reads(&mut reads);
-        let indices: Vec<usize> = reads
-            .iter()
-            .enumerate()
-            .filter_map(|(i, read)| read.then_some(i))
-            .collect();
-        let mut values = vec![0.0; indices.len()];
-        #[cfg(feature = "threads")]
-        let parallel = if self.parallel && indices.len() >= 128 && rayon::current_num_threads() > 1
+        }) || !self
+            .score_features(features, width, height, codec_hint)?
+            .is_finite()
         {
-            use rayon::prelude::*;
-            let chunk = indices.len().div_ceil(rayon::current_num_threads().min(8));
-            values
-                .par_chunks_mut(chunk)
-                .enumerate()
-                .try_for_each(|(i, out)| {
-                    let mut worker = self.fork_predictor_state()?;
-                    worker.fd_gradient_into(
-                        features,
-                        &indices[i * chunk..i * chunk + out.len()],
-                        out,
-                        (width, height),
-                        codec_hint,
-                    )
-                })?;
-            true
-        } else {
-            false
-        };
-        #[cfg(not(feature = "threads"))]
-        let parallel = false;
-        if !parallel {
-            self.fd_gradient_into(features, &indices, &mut values, (width, height), codec_hint)?;
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "candidate sensitivity requires finite inputs and scores",
+            });
         }
-        let mut gradient = vec![0.0; features.len()];
-        for (id, value) in indices.into_iter().zip(values) {
-            gradient[id] = value;
-        }
-        Ok(gradient)
+        gradient::gradient(self, features, (width, height), codec_hint)
     }
 
     // Prepared steering must retain model signal when the calibrated lower
-    // tail is constant. Keep the public served-score gradient unchanged and
+    // tail is constant. Keep the served-score derivative calibrated and
     // use the pre-calibration objective only for a single, undisposed bake
     // whose entire served gradient is zero strictly beneath that floor.
     // A composed/clamped score is a separate contract; do not reinterpret it.
@@ -733,60 +686,6 @@ impl<'a> BakeScorer<'a> {
                 Companion::Linear(h, _) => h.mark_feature_reads(reads),
             }
         }
-    }
-
-    // Each parallel column group owns its predictor buffers. Model bytes and
-    // parsed metadata stay shared; no pixel scratch or stale numeric state is
-    // copied. Reconstruct the whole composition, including its disposition.
-    #[cfg(feature = "threads")]
-    fn fork_predictor_state(&self) -> Result<Self, ZensimError> {
-        let mut fork = Self::with_metadata(self.model, Arc::clone(&self.metadata))?;
-        fork.disposition = self.disposition;
-        fork.weights = self.weights.clone();
-        fork.members = self
-            .members
-            .iter()
-            .map(Self::fork_predictor_state)
-            .collect::<Result<_, _>>()?;
-        #[cfg(feature = "corruption-head")]
-        {
-            fork.corruption = match &self.corruption {
-                Some(Companion::Tree(h, t)) => Some(Companion::Tree(h, *t)),
-                Some(Companion::Linear(h, t)) => {
-                    Some(Companion::Linear(Box::new(h.fork_predictor_state()?), *t))
-                }
-                None => None,
-            };
-        }
-        Ok(fork)
-    }
-
-    fn fd_gradient_into(
-        &mut self,
-        features: &[f64],
-        indices: &[usize],
-        output: &mut [f64],
-        dimensions: (u32, u32),
-        codec_hint: Option<&str>,
-    ) -> Result<(), ZensimError> {
-        let mut probe = features.to_vec();
-        for (&k, result) in indices.iter().zip(output) {
-            let value = features[k];
-            let eps = (value.abs() * 1e-3).max(1e-5);
-            probe[k] = value + eps;
-            let up = self.score_features(&probe, dimensions.0, dimensions.1, codec_hint)?;
-            probe[k] = value - eps;
-            let down = self.score_features(&probe, dimensions.0, dimensions.1, codec_hint)?;
-            probe[k] = value;
-            let sensitivity = (up - down) / (2.0 * eps);
-            if !up.is_finite() || !down.is_finite() || !sensitivity.is_finite() {
-                return Err(ZensimError::ModelForwardFailed {
-                    reason: "candidate sensitivity requires finite inputs, scores and probes",
-                });
-            }
-            *result = sensitivity;
-        }
-        Ok(())
     }
 
     #[cfg(feature = "feature-regime-v2")]
@@ -3394,7 +3293,7 @@ mod revision_contract_tests {
 
     #[test]
     #[cfg(feature = "feature-regime-v2")]
-    fn structurally_skipped_gradient_matches_exhaustive_probes() {
+    fn exact_gradient_matches_weighted_linear_coefficients() {
         let mut weights = vec![0.0; 944];
         weights[13] = -0.7;
         weights[52] = -1.3;
@@ -3427,11 +3326,11 @@ mod revision_contract_tests {
                 reads.iter().filter(|v| **v).count(),
                 if weights == Some([0.0, 1.0]) { 1 } else { 3 }
             );
-            let ids: Vec<_> = (0..944).collect();
-            let mut exhaustive = vec![0.0; 944];
-            scorer
-                .fd_gradient_into(&row, &ids, &mut exhaustive, (96, 96), Some("jxl"))
-                .unwrap();
+            let mut exhaustive = vec![0.; 944];
+            let w = weights.map_or([0.5, 0.5], |w| w);
+            exhaustive[13] = w[0] * f64::from(-0.7_f32);
+            exhaustive[52] = w[0] * f64::from(-1.3_f32);
+            exhaustive[91] = w[1];
             for parallel in [false, true] {
                 scorer.parallel = parallel;
                 let skipped = scorer

@@ -129,6 +129,11 @@ impl DerivedInputs {
         })
     }
 
+    /// Validated input positions for the exact score chain rule.
+    pub(crate) fn entries(&self) -> &[DerivedInput] {
+        &self.inputs
+    }
+
     /// Model (caller) input width: one per entry.
     pub(crate) fn model_width(&self) -> usize {
         self.inputs.len()
