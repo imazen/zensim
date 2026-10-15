@@ -886,3 +886,7 @@ tidy-python-check:
 tidy-tool-check:
     cargo test -p zensim-validate --lib feature_set
     cargo check --manifest-path zensim-bench/Cargo.toml --features training,zen-decode --example extract_features_372col
+
+# E34 P1: explicit registered fit root; decodes features and row keys only.
+e34-feature-census root contract output:
+    python3 scripts/rev4_featpot/e34_prepare.py --root '{{root}}' --contract '{{contract}}' --output '{{output}}'

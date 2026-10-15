@@ -109,13 +109,15 @@ def _is_structural_zero(idx: int) -> bool:
 # Per-column statistics. Read in blocks so peak memory is
 # COLUMN_BLOCK * n_rows * 8 bytes, never the whole table.
 # ---------------------------------------------------------------------------
-def column_stats(path: str, feats: list[tuple[int, str]]) -> dict[int, dict]:
+def column_stats(path: str, feats: list[tuple[int, str]], *, row_mask=None) -> dict[int, dict]:
     stats: dict[int, dict] = {}
     for i in range(0, len(feats), COLUMN_BLOCK):
         block = feats[i : i + COLUMN_BLOCK]
         tbl = pq.read_table(path, columns=[nm for _, nm in block])
         for idx, nm in block:
             a = tbl[nm].to_numpy(zero_copy_only=False).astype(np.float64, copy=False)
+            if row_mask is not None:
+                a = a[row_mask]
             n_nan = int(np.isnan(a).sum())
             n_inf = int(np.isinf(a).sum())
             fin = a[np.isfinite(a)]

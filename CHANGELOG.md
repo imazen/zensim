@@ -18,6 +18,10 @@
 
 ### Added
 
+- E34 preparation feature census binds the frozen E33 fit contract and reads only
+  its 410 difference columns. The existing table-integrity owner accepts an
+  explicit row mask for the registered coverage subset; labels stay unread.
+
 - `zensim` **JND side output (dial plan Phase A, new public API; PR for owner
   review):** `ZensimProfile::jnd_map() -> Option<JndMap>`,
   `JndMap::{estimate, max_jnd}` and `JndEstimate` (`InRange { jnd,
