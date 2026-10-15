@@ -69,6 +69,10 @@ struct Args {
     #[arg(long, group = "native_mode", conflicts_with = "native_linear")]
     native_png: bool,
 
+    /// Explicit trusted-corpus decode resource budget; PNG's default stays unchanged.
+    #[arg(long, requires = "native_png")]
+    max_decode_pixels: Option<u64>,
+
     /// Exposure-normalized linear-luminance PNG/EXR audit, a separate hash era.
     #[arg(long, group = "native_mode", conflicts_with = "native_png")]
     native_linear: bool,

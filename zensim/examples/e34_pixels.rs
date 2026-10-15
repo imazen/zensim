@@ -22,7 +22,7 @@ fn read(v: &Value, key: &str) -> (Vec<[u8; 3]>, usize, usize) {
         sha(&fs::read(path).unwrap()),
         text(v, &format!("{key}_sha256"))
     );
-    zen_io::decode_rgb8(path)
+    zen_io::decode_rgb8_with_max_pixels(path, v.get("max_decode_pixels").and_then(Value::as_u64))
 }
 fn fresh(path: &str) -> fs::File {
     fs::OpenOptions::new()

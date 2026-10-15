@@ -17,6 +17,14 @@ use enough::Unstoppable;
 /// Decode a PNG or JPEG file (by extension) to packed RGB8 + dimensions.
 /// Alpha (if present) is dropped -- all phase-2 tooling here works in RGB8.
 pub fn decode_rgb8(path: &std::path::Path) -> (Vec<[u8; 3]>, usize, usize) {
+    decode_rgb8_with_max_pixels(path, None)
+}
+
+/// Explicit decode resource budget for trusted corpus preparation.
+pub fn decode_rgb8_with_max_pixels(
+    path: &std::path::Path,
+    max_pixels: Option<u64>,
+) -> (Vec<[u8; 3]>, usize, usize) {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
     let ext = path
         .extension()
@@ -24,7 +32,7 @@ pub fn decode_rgb8(path: &std::path::Path) -> (Vec<[u8; 3]>, usize, usize) {
         .unwrap_or("")
         .to_ascii_lowercase();
     match ext.as_str() {
-        "png" => decode_png_rgb8(&bytes),
+        "png" => decode_png_rgb8(&bytes, max_pixels),
         "jpg" | "jpeg" => decode_jpeg_rgb8(&bytes),
         "bmp" => decode_bmp_rgb8(&bytes),
         other => panic!("unsupported extension {other:?} for {path:?}"),
@@ -45,9 +53,12 @@ fn decode_bmp_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
     (rgb, w as usize, h as usize)
 }
 
-fn decode_png_rgb8(bytes: &[u8]) -> (Vec<[u8; 3]>, usize, usize) {
+fn decode_png_rgb8(bytes: &[u8], max_pixels: Option<u64>) -> (Vec<[u8; 3]>, usize, usize) {
     use zenpixels::ChannelType;
-    let cfg = zenpng::PngDecodeConfig::default();
+    let mut cfg = zenpng::PngDecodeConfig::default();
+    if let Some(max_pixels) = max_pixels {
+        cfg = cfg.with_max_pixels(max_pixels);
+    }
     let out = zenpng::decode(bytes, &cfg, &Unstoppable).expect("zenpng decode");
     let (w, h) = (out.info.width as usize, out.info.height as usize);
     let desc = out.pixels.descriptor();

@@ -12,14 +12,15 @@ use zenpixels_convert::PixelBufferConvertTypedExt;
 
 use super::dhash_bits;
 
-fn fingerprint(path: &Path) -> Result<Value> {
+fn fingerprint(path: &Path, max_pixels: Option<u64>) -> Result<Value> {
     let bytes = fs::read(path).with_context(|| path.display().to_string())?;
-    let decoded = zenpng::decode(
-        &bytes,
-        &zenpng::PngDecodeConfig::default(),
-        &enough::Unstoppable,
-    )
-    .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    let mut config = zenpng::PngDecodeConfig::default();
+    if let Some(max_pixels) = max_pixels {
+        ensure!(max_pixels > 0, "pixel resource budget must be positive");
+        config = config.with_max_pixels(max_pixels);
+    }
+    let decoded = zenpng::decode(&bytes, &config, &enough::Unstoppable)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
     let (width, height) = (decoded.info.width, decoded.info.height);
     ensure!(
         width >= 9 && height >= 8,
@@ -90,7 +91,7 @@ pub(super) fn run(args: &Args) -> Result<()> {
         if args.native_linear {
             super::native_linear::fingerprint(path, args.assume_untagged_srgb)
         } else {
-            fingerprint(path)
+            fingerprint(path, args.max_decode_pixels)
         }
     };
     let training = sources

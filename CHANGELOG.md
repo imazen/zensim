@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Allow explicit trusted-corpus PNG decode resource budgets in the native overlap audit and E34 pixel preparation; retain existing defaults and dHash bars.
+
 - Add the E34 paired reference-by-seed statistical owner to `panel`, retaining the nine-test family, Student and directional-bootstrap decisions, report-only pair classes and E33 summary parity.
 
 - Pin zenmetrics-stats to the approved E34 Student/directional-bootstrap helpers and migrate the undefined Interval literal.
