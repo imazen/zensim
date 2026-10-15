@@ -2063,3 +2063,48 @@ production seed 0 128/135 and L smoke 135/135. The four fixed models each
 preserve all 55,515 registered base/repair score bits. No additional E33
 prediction read or new fitting occurred. See [part-6 evidence](../benchmarks/e34_part6_2026-10-15.md)
 and the [measured receipt](../benchmarks/e34_d12_2026-10-15.json).
+
+### E34 registered evaluation preread — 2026-10-15
+
+The owner authorizes the post-harvest assessment of the revision-5 freeze
+`bc9be24a77a3bda0f710274d36ca03b3b94d5076`, after the supervised harvest
+reports 305/305 installed across all 18 released jobsets. Before any assessment
+label read, all 305 installed result/model and fleet-receipt hashes match;
+the frozen packet and every listed payload also match. The immutable preread
+inventory binds each selected model, full-data packed model, fold and seed:
+`/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/preread.json`, SHA-256
+`e3aae632f8cc4537bb91c48c3de88ce039b4c691c8bd0e77c7025715590d1909`.
+It binds the completed harvest and the already-completed dev96 lambda choice
+(A lambda 1; C lambda 10); selection is final before this exposure.
+
+The only human targets admitted are E33's four already-exposed D1 withheld-fold
+populations: KADID TRAIN+SELECT 7,869 rows/65 references, TID2013 3,000/25,
+KonFiG 756/7, and CID22-A(25) 2,192/25. All physical observations are retained,
+including KADID's repeated image-pair keys. References and distortion/codec keys
+come from the existing label-free source authorities. The seven ten-seed LODO
+model grids are base-A, base-C, W-A, W-C, selected K-A, selected K-C and L-A.
+No raw forced-choice responses are read.
+
+The single registered assessment uses the D13-amended `panel e34` owner:
+margin 0.0065 in both families; paired two-way reference x seed bootstrap,
+10,000 draws, type 7, seed 20261011 with the registered offsets, max of
+bootstrap and Student p, and Holm over the fixed nine hypotheses. Dataset and
+W2 point guards, E33 point-form context, source-clustered pair classes and the
+registered high-quality slice remain as frozen. No fitting, checkpoint search,
+calibration, new lambda selection or adaptive tuning follows this read.
+
+Pixel-only qualification admits exactly the frozen 135 G-STEER cases and
+96-case development panel, the frozen identity/NEARID/instrument/negative-tail
+probes, and registered runtime/spatial/memory checks. D12 exact gradients apply
+in both places. Seed 0 requires 135/135; seeds 1 and 2 each require
+max(paired control count, 133). D11 excludes origins 1444 and 1458. Verdicts
+follow W then K then L separately per family; L exists only in A. Every
+registered result and failure is retained. Any uncomputable registered
+calculation stops the assessment rather than substituting a different rule.
+
+No TERMINAL segment, AIC2026/AIC-3/AIC-4/SDR25 labels, CID22 gold, KonJND,
+sealed/T0, HDR VAL, UPIQ or external panel is admitted. This reuses already
+exposed assessment populations and is not fresh independent confirmation.
+Production adoption remains an owner decision; served models and defaults
+are unchanged. Results are recorded in
+[e34_results_2026-10-15.md](../benchmarks/e34_results_2026-10-15.md).
