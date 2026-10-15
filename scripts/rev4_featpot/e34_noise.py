@@ -47,8 +47,11 @@ def capture(out):
         assert sha(Path(str(p)+'.manifest.json'))==rec['manifest_sha256']
         keys=p.with_suffix('.keys.parquet');kb=keys.read_bytes()
         assert hashlib.sha256(kb).hexdigest()==rec['keys_sha256']
-        k=pq.read_table(io.BytesIO(kb),columns=['ref_basename','pair_key'])
-        assert len(k)==n and len(set(k['pair_key'].to_pylist()))==n
+        k=pq.read_table(io.BytesIO(kb),columns=['ref_basename','pair_key','member_set','source_row_id'])
+        # E33 retains 7,869 KADID observations, including three repeated
+        # image-pair keys. The frozen physical row is the observation identity.
+        physical=list(zip(k['member_set'].to_pylist(),k['source_row_id'].to_pylist(),strict=True))
+        assert len(k)==n and len(set(physical))==n
         names=k['ref_basename'].to_pylist()
         if fold=='konfig':names=[x.removesuffix('_parta').removesuffix('_partb') for x in names]
         ids={name:i for i,name in enumerate(sorted(set(names)))}
