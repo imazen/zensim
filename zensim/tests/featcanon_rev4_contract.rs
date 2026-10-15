@@ -438,15 +438,9 @@ fn served_paths_serve_rev4() {
         assert_eq!(x.values().len(), research::full_width());
         // Palette belongs to the comprehensive research request only.
         // The explicit pre-palette scope keeps its original width and bits.
-        let legacy = research::extract(
-            &Request::for_slots(
-                zensim::feature_set_id::SlotSet::from_ranges([(0, 1825)]),
-                1825,
-            ),
-            &s,
-            &d,
-        )
-        .expect("pre-palette research extraction at Rev4");
+        let legacy_slots = Request::everything().want().clipped_to(1825);
+        let legacy = research::extract(&Request::for_slots(legacy_slots, 1825), &s, &d)
+            .expect("pre-palette research extraction at Rev4");
         assert_eq!(legacy.values().len(), 1825);
         for (id, (a, b)) in legacy.values().iter().zip(x.values()).enumerate() {
             assert_eq!(a.to_bits(), b.to_bits(), "legacy f{id} changed");

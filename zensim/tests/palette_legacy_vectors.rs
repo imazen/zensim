@@ -11,7 +11,7 @@ fn palette_legacy_vectors() {
     let want = if rev == "5" {
         SlotSet::from_ranges([(0, 228), (372, 720)])
     } else {
-        SlotSet::from_ranges([(0, 1825)])
+        Request::everything().want().clipped_to(1825)
     };
     let req = Request::for_slots(want, 1825);
     let mut bytes = Vec::new();

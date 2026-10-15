@@ -150,16 +150,24 @@ fn candidate_sensitivities_include_ensemble_and_corruption_discontinuities() {
             .unwrap(),
         &[2., 3.],
     );
-    // Exactly at the deadband, central probes straddle a score jump. Return
-    // the finite secant, visibly unlike the ungated gradient; do not silently
-    // ignore the companion or label this an analytic derivative.
+    // At the deadband the exact derivative follows the inactive companion
+    // branch. A finite secant straddles the jump and is a different quantity.
     let crossing = gated
         .score_features_fd_gradient(&[5., 5.], 64, 64, None)
         .unwrap();
-    // Up-probe: head >= 20, inactive, ensemble 25.01; down-probe: head 19.99
-    // active, min(24.99, 19.99). (25.01 - 19.99) / 0.01 = 502, likewise 503.
-    assert!((crossing[0] - 502.).abs() < 0.002);
-    assert!((crossing[1] - 503.).abs() < 0.002);
+    assert_eq!(crossing, [2., 3.]);
+    // Keep the independent score-jump checks: the derivative must not hide
+    // or change the served forward's corruption boundary.
+    for (axis, expected_secant) in [(0, 502.), (1, 503.)] {
+        let mut up = [5., 5.];
+        let mut down = up;
+        up[axis] += 0.005;
+        down[axis] -= 0.005;
+        let secant = (gated.score_features(&up, 64, 64, None).unwrap()
+            - gated.score_features(&down, 64, 64, None).unwrap())
+            / 0.01;
+        assert!((secant - expected_secant).abs() < 0.002);
+    }
 }
 
 #[test]
@@ -650,6 +658,7 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
         include_bytes!("../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"),
     ];
     // Reuse across candidates and geometries, including C -> peaks F -> basic D.
+    let (mut finite_cases, mut singular_cases) = (0, 0);
     let mut session = zensim::Fused944Session::new();
     for (w, h) in [(96, 80), (71, 65), (31, 47), (1, 1)] {
         let (src, dst) = spatial_pair(w, h);
@@ -660,89 +669,138 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
             let mut scorer = BakeScorer::new(&model).unwrap();
             let expected = scorer.compute(&rs, &ds, Some("jpeg")).unwrap();
             let pre = scorer.precompute_reference(&rs).unwrap();
-            let full = scorer
-                .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 1)
-                .unwrap();
-            let binned = scorer
-                .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 8)
-                .unwrap();
-            for result in [&full, &binned] {
-                assert_eq!(
-                    result.result().score().to_bits(),
-                    expected.score().to_bits(),
-                    "bake {i}, {w}x{h}"
-                );
-                assert_eq!(
-                    result.result().features(),
+            let full = scorer.compute_with_ref_and_attribution(
+                &rs,
+                &pre,
+                &ds,
+                Some("jpeg"),
+                &mut session,
+                1,
+            );
+            let binned = scorer.compute_with_ref_and_attribution(
+                &rs,
+                &pre,
+                &ds,
+                Some("jpeg"),
+                &mut session,
+                8,
+            );
+            // Owner-approved exact-derivative contract: these four frozen
+            // real-bake rows contain active singular root transforms at zero.
+            // Both map sizes and session reuse must refuse by the exact reason.
+            if matches!((i, w, h), (0, 96, 80) | (0, 31, 47) | (0, 1, 1) | (3, 1, 1)) {
+                singular_cases += 1;
+                fn assert_singular<T>(result: Result<T, zensim::ZensimError>) {
+                    match result {
+                        Err(zensim::ZensimError::ModelForwardFailed { reason }) => {
+                            assert_eq!(reason, "exact sensitivity is nonfinite at this input");
+                        }
+                        Err(e) => panic!("unexpected singular-case refusal: {e:?}"),
+                        Ok(_) => panic!("singular exact derivative must refuse"),
+                    }
+                }
+                assert_singular(scorer.score_features_fd_gradient(
                     expected.features(),
-                    "bake {i}, {w}x{h}"
+                    w as u32,
+                    h as u32,
+                    Some("jpeg"),
+                ));
+                assert_singular(full);
+                assert_singular(binned);
+                assert_singular(scorer.compute_with_ref_and_attribution(
+                    &rs,
+                    &pre,
+                    &ds,
+                    Some("jpeg"),
+                    &mut session,
+                    8,
+                ));
+            } else {
+                finite_cases += 1;
+                let full = full.unwrap_or_else(|e| panic!("bake {i}, {w}x{h}: {e:?}"));
+                let binned = binned.unwrap();
+                for result in [&full, &binned] {
+                    assert_eq!(
+                        result.result().score().to_bits(),
+                        expected.score().to_bits(),
+                        "bake {i}, {w}x{h}"
+                    );
+                    assert_eq!(
+                        result.result().features(),
+                        expected.features(),
+                        "bake {i}, {w}x{h}"
+                    );
+                    assert_eq!(
+                        result.result().raw_distance().to_bits(),
+                        expected.raw_distance().to_bits()
+                    );
+                    assert!(!result.has_corruption_gate());
+                    if i >= 2 {
+                        assert!(
+                            result.unsupported_refinement_feature_ids().is_empty(),
+                            "bake {i}: {:?}",
+                            result.unsupported_refinement_feature_ids()
+                        );
+                    }
+                    if i == 2 || i == 4 {
+                        assert!(
+                            result.unsupported_feature_ids().is_empty(),
+                            "bake {i}: {:?}",
+                            result.unsupported_feature_ids()
+                        );
+                    }
+                    assert!(
+                        result
+                            .unsupported_feature_ids()
+                            .iter()
+                            .all(|id| { !(156..228).contains(id) || (id - 156) % 6 < 3 })
+                    );
+                    if i == 3 {
+                        let expected: Vec<usize> = (156..228)
+                            .filter(|id| (id - 156) % 6 < 3 && result.sensitivities()[*id] != 0.0)
+                            .collect();
+                        assert_eq!(result.unsupported_feature_ids(), expected);
+                    }
+                    assert!(result.attribution().density().iter().all(|x| x.is_finite()));
+                }
+                for y in (0..h).step_by(8) {
+                    for x in (0..w).step_by(8) {
+                        let a = full
+                            .attribution()
+                            .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
+                        let qfull = full.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                        let qbin = binned.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                        assert!((qfull - qbin).abs() <= 1e-5 * a.abs().max(1e-6));
+                        let b =
+                            binned
+                                .attribution()
+                                .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
+                        assert!(
+                            (a - b).abs() <= 1e-5 * a.abs().max(1e-6),
+                            "bake {i}, {w}x{h} bin {x},{y}: {a} vs {b}"
+                        );
+                    }
+                }
+                let repeat = scorer
+                    .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 8)
+                    .unwrap();
+                assert_eq!(
+                    repeat.attribution().density(),
+                    binned.attribution().density()
+                );
+                assert_eq!(repeat.sensitivities(), binned.sensitivities());
+                assert_eq!(
+                    repeat.refinement_gain(0, 0, w, h),
+                    binned.refinement_gain(0, 0, w, h)
                 );
                 assert_eq!(
-                    result.result().raw_distance().to_bits(),
-                    expected.raw_distance().to_bits()
+                    repeat.unsupported_refinement_feature_ids(),
+                    binned.unsupported_refinement_feature_ids()
                 );
-                assert!(!result.has_corruption_gate());
-                if i >= 2 {
-                    assert!(
-                        result.unsupported_refinement_feature_ids().is_empty(),
-                        "bake {i}: {:?}",
-                        result.unsupported_refinement_feature_ids()
-                    );
-                }
-                if i == 2 || i == 4 {
-                    assert!(
-                        result.unsupported_feature_ids().is_empty(),
-                        "bake {i}: {:?}",
-                        result.unsupported_feature_ids()
-                    );
-                }
-                assert!(
-                    result
-                        .unsupported_feature_ids()
-                        .iter()
-                        .all(|id| { !(156..228).contains(id) || (id - 156) % 6 < 3 })
-                );
-                if i == 3 {
-                    let expected: Vec<usize> = (156..228)
-                        .filter(|id| (id - 156) % 6 < 3 && result.sensitivities()[*id] != 0.0)
-                        .collect();
-                    assert_eq!(result.unsupported_feature_ids(), expected);
-                }
-                assert!(result.attribution().density().iter().all(|x| x.is_finite()));
             }
-            for y in (0..h).step_by(8) {
-                for x in (0..w).step_by(8) {
-                    let a = full
-                        .attribution()
-                        .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
-                    let qfull = full.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
-                    let qbin = binned.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
-                    assert!((qfull - qbin).abs() <= 1e-5 * a.abs().max(1e-6));
-                    let b = binned
-                        .attribution()
-                        .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
-                    assert!(
-                        (a - b).abs() <= 1e-5 * a.abs().max(1e-6),
-                        "bake {i}, {w}x{h} bin {x},{y}: {a} vs {b}"
-                    );
-                }
-            }
-            let repeat = scorer
-                .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 8)
-                .unwrap();
-            assert_eq!(
-                repeat.attribution().density(),
-                binned.attribution().density()
-            );
-            assert_eq!(repeat.sensitivities(), binned.sensitivities());
-            assert_eq!(
-                repeat.refinement_gain(0, 0, w, h),
-                binned.refinement_gain(0, 0, w, h)
-            );
-            assert_eq!(
-                repeat.unsupported_refinement_feature_ids(),
-                binned.unsupported_refinement_feature_ids()
-            );
+            let after = scorer.compute(&rs, &ds, Some("jpeg")).unwrap();
+            assert_eq!(after.score().to_bits(), expected.score().to_bits());
+            assert_eq!(after.features(), expected.features());
             let identity = scorer
                 .compute_with_ref_and_attribution(&rs, &pre, &rs, None, &mut session, 8)
                 .unwrap();
@@ -755,6 +813,7 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
             assert!(identity.sensitivities().iter().all(|x| *x == 0.));
         }
     }
+    assert_eq!((finite_cases, singular_cases), (16, 4));
 }
 
 #[test]
@@ -828,7 +887,7 @@ fn candidate_attribution_reports_unsupported_terms_and_complete_gating() {
 }
 
 #[test]
-fn accelerated_candidate_sensitivities_match_sequential_complete_surface() {
+fn exact_candidate_sensitivities_are_thread_invariant_and_follow_composition() {
     let models = [
         Model::from_bytes(include_bytes!(
             "../../zensim/weights/c_sdr_purity944_byid_2026-09-07.bin"
@@ -850,20 +909,12 @@ fn accelerated_candidate_sensitivities_match_sequential_complete_surface() {
         .unwrap()
         .features()
         .to_vec();
-    fn check(scorer: &mut BakeScorer<'_>, row: &[f64]) {
-        // Deliberately call the public scalar surface twice for EVERY ID,
-        // including unread ones. This is the unoptimized independent oracle.
-        let mut expected = vec![0.; row.len()];
-        for (i, out) in expected.iter_mut().enumerate() {
-            let eps = (row[i].abs() * 1e-3).max(1e-5);
-            let mut up = row.to_vec();
-            let mut down = row.to_vec();
-            up[i] += eps;
-            down[i] -= eps;
-            *out = (scorer.score_features(&up, 96, 80, Some("jpeg")).unwrap()
-                - scorer.score_features(&down, 96, 80, Some("jpeg")).unwrap())
-                / (2. * eps);
-        }
+    fn check(scorer: &mut BakeScorer<'_>, row: &[f64], expected: &[f64]) {
+        assert_eq!(expected.len(), row.len());
+        let before = scorer
+            .score_features(row, 96, 80, Some("jpeg"))
+            .unwrap()
+            .to_bits();
         for threads in [1, 4] {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
@@ -872,19 +923,59 @@ fn accelerated_candidate_sensitivities_match_sequential_complete_surface() {
             let actual = pool
                 .install(|| scorer.score_features_fd_gradient(row, 96, 80, Some("jpeg")))
                 .unwrap();
-            for (i, (a, b)) in actual.iter().zip(&expected).enumerate() {
+            for (i, (a, b)) in actual.iter().zip(expected).enumerate() {
                 assert_eq!(
                     a.to_bits(),
                     b.to_bits(),
                     "thread count {threads}, feature {i}"
                 );
             }
+            assert_eq!(
+                scorer
+                    .score_features(row, 96, 80, Some("jpeg"))
+                    .unwrap()
+                    .to_bits(),
+                before,
+                "gradient evaluation changed the score"
+            );
         }
     }
-    check(&mut scorer, &row);
+    // Real loaded C/D bakes retain whole-vector bit identity across threads.
+    // Independent closed-form composition checks below exercise the numeric
+    // contract; rounded f32 score secants are not an exact-derivative oracle.
+    let expected = scorer
+        .score_features_fd_gradient(&row, 96, 80, Some("jpeg"))
+        .unwrap();
+    check(&mut scorer, &row, &expected);
     let head = linear(json!([]));
     let mut gated = scorer.with_linear_corruption_head(&head, 20.).unwrap();
-    check(&mut gated, &row);
+    let expected = gated
+        .score_features_fd_gradient(&row, 96, 80, Some("jpeg"))
+        .unwrap();
+    check(&mut gated, &row, &expected);
+
+    // y = 3*relu(2*x-1) - 4*relu(1-y) + 5, mixed 3:1 with
+    // the linear 2*x+3*y-5. Both active sets have exact dyadic derivatives.
+    let spec = json!({
+        "schema_hash": 1,
+        "scaler_mean": [0., 0.], "scaler_scale": [1., 1.],
+        "layers": [
+            {"in_dim":2,"out_dim":2,"activation":"relu","dtype":"f32",
+             "weights":[2.,0.,0.,-1.],"biases":[-1.,1.]},
+            {"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f32",
+             "weights":[3.,-4.],"biases":[5.]}
+        ]
+    });
+    let nonlinear =
+        Model::from_bytes(&zenpredict_bake::bake_from_json_str(&spec.to_string()).unwrap())
+            .unwrap();
+    let models = [nonlinear, linear(json!([]))];
+    let mut composed = BakeScorer::ensemble(&models, Some(&[0.75, 0.25])).unwrap();
+    check(&mut composed, &[2., 3., 99.], &[5., 0.75, 0.]);
+    check(&mut composed, &[0., 0., 99.], &[0.5, 3.75, 0.]);
+    let mut composed = composed.with_linear_corruption_head(&head, 0.).unwrap();
+    check(&mut composed, &[2., 3., 99.], &[5., 0.75, 0.]);
+    check(&mut composed, &[0., 0., 99.], &[2., 3., 0.]);
 }
 
 #[test]
