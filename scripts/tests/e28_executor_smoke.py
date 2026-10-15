@@ -74,7 +74,7 @@ def main():
     target = Path("/scratch/fit-cell") / job["kind"]["data_sha"] / "rev4-featpot"
     assert link.is_symlink() and link.resolve() == target.resolve()
     assert (target.parent / ".verified").read_text().strip() == job["kind"]["data_sha"]
-    record = dict(status="PASS", mode=args.mode, arm=arm, actual_entry="/usr/local/bin/fit-cell-exec", declared_argv=job["kind"]["argv"], argv_sha=job["kind"]["argv_sha"], cell=job["cell"]["image_path"], program_sha=job["kind"]["program_sha"], data_sha=job["kind"]["data_sha"], fit_root_link=str(link), verified_extraction_target=str(target), extraction_verified=True, bounded_constants=args.mode == "bounded", first_epoch_line=first, stopped_after_first_epoch=bool(first), child_returncode=code, memory_peak_bytes=int(Path("/sys/fs/cgroup/memory.peak").read_text()))
+    record = dict(elapsed_seconds=time.monotonic()-started, status="PASS", mode=args.mode, arm=arm, actual_entry="/usr/local/bin/fit-cell-exec", declared_argv=job["kind"]["argv"], argv_sha=job["kind"]["argv_sha"], cell=job["cell"]["image_path"], program_sha=job["kind"]["program_sha"], data_sha=job["kind"]["data_sha"], fit_root_link=str(link), verified_extraction_target=str(target), extraction_verified=True, bounded_constants=args.mode == "bounded", first_epoch_line=first, stopped_after_first_epoch=bool(first), child_returncode=code, memory_peak_bytes=int(Path("/sys/fs/cgroup/memory.peak").read_text()))
     (out / (name + "_PATH_PASS.json")).write_text(json.dumps(record, indent=2) + "\n")
     print(json.dumps({key: value for key, value in record.items() if key != "declared_argv"}, indent=2), flush=True)
 

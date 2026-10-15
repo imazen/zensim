@@ -20,14 +20,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--bundle", type=Path, required=True)
     p.add_argument("--image", required=True)
-    p.add_argument("--jobset", choices=("control", "a", "c", "full"), required=True)
+    p.add_argument("--jobset", required=True)
+    p.add_argument("--campaign", choices=("e33", "e34"), default="e33")
+    p.add_argument("--mode", choices=("bounded", "first-epoch", "registered"), default="bounded")
     p.add_argument("--index", type=int, default=0)
     p.add_argument("--budget", default="2:128")
     p.add_argument("--inspector", type=Path, required=True)
     p.add_argument("--attempt", type=int, default=1)
     a = p.parse_args()
     b = a.bundle
-    spec_doc = json.loads(next(b.glob(f"fit-spec-fite33-{a.jobset}-*.json")).read_text())
+    spec_doc = json.loads(next(b.glob(f"fit-spec-fit{a.campaign}-{a.jobset}-*.json")).read_text())
     cell = dict(spec_doc["cells"][a.index])
     argv = list(cell["argv"])
     key = f"{a.jobset}-{a.index}-{a.attempt}"
@@ -35,7 +37,8 @@ def main():
     dest = Path(argv[argv.index("--dest") + 1])
     rel = dest.relative_to("/var/tmp/rev4-featpot")
     argv[argv.index("--dest") + 1] = str(Path("/var/tmp/rev4-featpot", f"e33-smoke-{key}", *rel.parts[1:]))
-    argv += ["--local-smoke-budget", a.budget]
+    if a.mode == "bounded":
+        argv += ["--local-smoke-budget", a.budget]
     spec_path = b / f"smoke-spec-{key}.json"
     with spec_path.open("x") as f:
         f.write(json.dumps({**spec_doc, "cells": [dict(name=cell["name"], argv=argv)]}, indent=2) + "\n")
@@ -58,23 +61,37 @@ def main():
                     "-e", "ZENSIM_SAMPLE_DIGEST=1", "-e", "ZEN_FIT_DATA_LOCAL=/e33-data.tar.gz",
                     "-v", f"{(b / 'e33-fit-data.tar.gz').resolve()}:/e33-data.tar.gz:ro",
                     "-v", f"{b}:/e33", "-v", f"{scratch}:/scratch", "-v", "/usr/bin/time:/e28-time:ro",
-                    "-v", f"{driver}:/e33-driver.py:ro", a.image, "/e33-driver.py", "--mode", "bounded",
+                    "-v", f"{driver}:/e33-driver.py:ro", a.image, "/e33-driver.py", "--mode", "first-epoch" if a.mode == "first-epoch" else "bounded",
                     "--job", f"/e33/{job.name}", "--out", f"/e33/{out.name}", "--deadline", "900"], check=True)
     receipt = next(out.glob("*_PATH_PASS.json"))
+    if a.mode == "first-epoch":
+        record = json.loads(receipt.read_text())
+        record.update(image=a.image)
+        receipt.write_text(json.dumps(record, indent=2) + "\n")
+        return
     blob = next(out.glob("*_OUTPUT.tar.gz"))
-    # Harvest with the program archive's own owner, exactly as the fleet harvester would.
-    runtime = b / f"smoke-runtime-{key}"
-    runtime.mkdir()
-    with tarfile.open(b / "program.tar.gz") as tar:
-        for name in ("harvest_fit_cells.py", "qualified_fit_contract.py", "fit_paths.py"):
-            (runtime / name).write_bytes(tar.extractfile(name).read())
-    sys.path.insert(0, str(runtime))
-    from harvest_fit_cells import verify_blob
+    # Use the image's pinned Python/native dependencies for harvest as well as
+    # fitting. The host needs Docker and stdlib Python only; no boot installs.
     stage = b / f"smoke-harvest-{key}"
     stage.mkdir()
-    verified = verify_blob(blob, stage, jobs[0]["cell"]["image_path"], jobs[0]["kind"],
-                           program_archive=b / "program.tar.gz", checkpoint_inspector=a.inspector,
-                           allow_local_smoke=True)
+    verify_code = """
+import json, sys
+from pathlib import Path
+sys.path.insert(0, '/opt/fleet-fits/program')
+from harvest_fit_cells import verify_blob
+job=json.loads(Path(sys.argv[1]).read_text())
+result=verify_blob(Path(sys.argv[2]),Path(sys.argv[3]),job['cell']['image_path'],job['kind'],
+    program_archive=Path('/e33/program.tar.gz'),
+    checkpoint_inspector=Path('/opt/fleet-fits/program/bin/inspect_qualified_checkpoint'),
+    allow_local_smoke=True)
+print(json.dumps({'execution_contract':result.get('execution_contract')}))
+"""
+    verified = json.loads(subprocess.check_output([
+        "docker", "run", "--rm", "--network=none", "--user", f"{os.getuid()}:{os.getgid()}",
+        "--cpus=1", "--memory=6g", "--memory-swap=6g", "--entrypoint", "python3",
+        "-e", "TMPDIR=/scratch/tmp", "-v", f"{b}:/e33", "-v", f"{scratch}:/scratch",
+        a.image, "-c", verify_code, f"/e33/{job.name}",
+        f"/e33/{blob.relative_to(b)}", f"/e33/{stage.name}"], text=True))
     record = json.loads(receipt.read_text())
     record.update(image=a.image, harvest=dict(status="VERIFIED", execution_contract=verified.get("execution_contract"),
                                               owner="program-archive harvest_fit_cells.verify_blob"))

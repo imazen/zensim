@@ -38,7 +38,7 @@ def now():
 
 
 def jobset(arm):
-    return f"fite33-{arm}-20261010"
+    return arm if arm.startswith("fite34-") else f"fite33-{arm}-20261010"
 
 
 def packet(bundle):
@@ -68,7 +68,7 @@ def runtime(bundle, doc):
             if path.read_bytes() != data:
                 raise ValueError(f"committed verifier differs from the program: {name}")
     meta = json.loads((bundle / "build-meta.packer-input.json").read_text())
-    inspector = bundle.parent / "bin-final2/inspect_qualified_checkpoint"
+    inspector = bundle.parent / ("bin" if doc.get("schema") == "e34-fleet-packet-v1" else "bin-final2") / "inspect_qualified_checkpoint"
     if sha(inspector) != meta["binary_mix"]["inspect_qualified_checkpoint"]["sha256"]:
         raise ValueError("inspector differs from the program's binary pin")
     return rt, tools, inspector
@@ -139,7 +139,14 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
     names = queued(queue)
     if js in names:
         raise ValueError(f"{js} already queued")
-    earlier = ORDER[: ORDER.index(arm)]
+    earlier = () if doc.get("schema") == "e34-fleet-packet-v1" else ORDER[: ORDER.index(arm)]
+    if doc.get("schema") == "e34-fleet-packet-v1":
+        plan=json.loads((bundle/"E34_JOB_PLAN.json").read_text())
+        if js not in plan["unconditional"]:
+            chosen=json.loads((bundle.parent/"launch/LAMBDA_SELECTION.json").read_text())
+            selected=chosen["selected_branches"]
+            if js not in selected.values() or len(selected) != 2:
+                raise ValueError("K branch is not selected by the registered pilot")
     if any(jobset(a) not in names for a in earlier):
         raise ValueError("registered sequence: queue the earlier E33 jobsets first")
     rt, _, _ = runtime(bundle, doc)
@@ -148,7 +155,7 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
     record["push_tail"] = push.stdout.strip().splitlines()[-1:]
     control = rt / f"control-{js}.json"
     control.write_text(json.dumps(dict(paused=False, drain=False,
-                                       note="E33; coordinator authorization 2026-10-10")) + "\n")
+                                       note="Frozen registered fit; coordinator authorization")) + "\n")
     subprocess.run(["bash", "-c", """set -euo pipefail
 . ~/.config/zen/s3env.sh >/dev/null 2>&1
 s5cmd --endpoint-url "$EP" cp "$1" "s3://zentrain/jobs/$2/manifest.json"
@@ -216,8 +223,8 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
             raise ValueError("requires a registered full-budget strict E33 cell")
         if POT / hfc.blob_root(k) / name != Path(argv[argv.index("--dest") + 1]):
             raise ValueError("manifest destination and harvest install root differ")
-    work = FITV2 / "harvest-e33" / js
-    status = FITV2 / "status-e33" / js
+    work = FITV2 / ("harvest-e34" if js.startswith("fite34-") else "harvest-e33") / js
+    status = FITV2 / ("status-e34" if js.startswith("fite34-") else "status-e33") / js
     work.mkdir(parents=True, exist_ok=True)
     status.mkdir(parents=True, exist_ok=True)
     with (work / "driver.lock").open("a") as lock:
@@ -277,7 +284,7 @@ def open_cells(js, manifest):
     ids = subprocess.run([str(CTL), "ids", "--manifest", str(manifest)], capture_output=True, text=True,
                          check=True).stdout.splitlines()
     chunks = {hashlib.sha256((line.split("\t")[1] + "\n").encode()).hexdigest() for line in ids if line.strip()}
-    status = FITV2 / "status-e33" / js
+    status = FITV2 / ("status-e34" if js.startswith("fite34-") else "status-e33") / js
     status.mkdir(parents=True, exist_ok=True)
     subprocess.run(["s5cmd", "--endpoint-url", endpoint, "sync", f"s3://zentrain/jobs/{js}/ledger/*", str(status) + "/"],
                    capture_output=True)
@@ -325,25 +332,92 @@ def advance(bundle, queue=FITV2 / "fleet_queue"):
                 queued=record["queued"], time=now())
 
 
+def persist_loan_artifacts(bundle):
+    """Copy existing in-flight artifacts off temporary hosts; never resume or admit them.
+
+    Completed cells already persist immediately through the worker's canonical
+    blob/ledger path. These immutable generations retain best/epoch bakes and
+    logs between completions without changing the exact83 training recipe.
+    """
+    doc = packet(bundle)
+    policy = doc['persistence']
+    root = Path(policy['snapshot_root'])
+    stamp = now().replace(':', '')
+    reports=[]
+    for host in policy['hosts']:
+        if host not in ['i134','r5600g','i270']:
+            raise ValueError('unregistered temporary host')
+        source=f'tmp/fitv2-shared/fit-cell/{doc["data_sha"]}/rev4-featpot/'
+        exists=subprocess.run(['ssh','-n','-o','BatchMode=yes',host,'test -d '+source],capture_output=True)
+        if exists.returncode:
+            reports.append(dict(host=host,state='INPUT_ROOT_NOT_CREATED',returncode=exists.returncode))
+            continue
+        dest=root/host/stamp
+        dest.mkdir(parents=True,exist_ok=False)
+        latest=root/host/'LATEST'
+        cmd=['rsync','-a','--no-owner','--no-group','--delay-updates','--prune-empty-dirs',
+             '--include=/e34-*-results/***','--exclude=*']
+        if latest.exists():cmd += ['--link-dest='+str(root/host/latest.read_text().strip())]
+        proc=subprocess.run([*cmd,host+':'+source,str(dest)+'/'],capture_output=True,text=True)
+        if proc.returncode not in (0,24):
+            raise RuntimeError(f'{host}: snapshot failed rc={proc.returncode}: {proc.stderr}')
+        files={str(p.relative_to(dest)):sha(p) for p in dest.rglob('*') if p.is_file()}
+        record=dict(host=host,time=now(),state='COPIED_UNVERIFIED_INFLIGHT',optimizer_resume=False,
+                    rsync_returncode=proc.returncode,files=files)
+        (dest/'SNAPSHOT.json').write_text(json.dumps(record,indent=2)+'\n')
+        latest.write_text(stamp+'\n')
+        reports.append(dict(host=host,state=record['state'],files=len(files),snapshot=str(dest)))
+    return dict(time=now(),snapshots=reports)
+
+
+def shorter_queue(bundle, queue, out):
+    """Order the canonical picker's queue by measured first-epoch cell cost."""
+    doc=packet(bundle)
+    costs=doc['smoke_epoch_seconds']
+    rows=[line.split() for line in queue.read_text().splitlines() if line.strip()]
+    if any(row[0] not in doc['jobsets'] for row in rows):
+        raise ValueError('queue contains a jobset outside the frozen packet')
+    rows.sort(key=lambda row:costs[row[0].split('-')[1]])
+    stage=out.with_name(out.name+'.new')
+    stage.write_text(''.join(' '.join(row)+'\n' for row in rows))
+    os.replace(stage,out)
+    return dict(queue=str(out),order=[row[0] for row in rows])
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance"))
+    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance", "persist", "shorter-queue"))
     p.add_argument("--packet", type=Path, required=True)
-    p.add_argument("--arm", choices=ORDER)
+    p.add_argument("--arm")
+    p.add_argument("--packet-sha", help="explicit frozen E34 PACKET.json pin")
+    p.add_argument("--queue", type=Path, default=FITV2/"fleet_queue")
+    p.add_argument("--out-queue", type=Path)
     p.add_argument("--install", action="store_true")
     p.add_argument("--require-all", action="store_true")
     p.add_argument("--status", action="store_true")
     a = p.parse_args()
+    if a.packet_sha:
+        global PACKET_SHA
+        if len(a.packet_sha) != 64:
+            p.error("--packet-sha requires a full SHA-256")
+        PACKET_SHA=a.packet_sha
+    elif a.arm and a.arm.startswith("fite34-"):
+        p.error("E34 requires the frozen --packet-sha")
     if a.mode in ("launch", "placements", "harvest") and not a.arm:
         p.error(f"{a.mode} requires --arm")
-    if a.mode == "verify":
+    if a.mode == "persist":
+        out=persist_loan_artifacts(a.packet)
+    elif a.mode == "shorter-queue":
+        if not a.out_queue:p.error("shorter-queue requires --out-queue")
+        out=shorter_queue(a.packet,a.queue,a.out_queue)
+    elif a.mode == "verify":
         doc = packet(a.packet)
         runtime(a.packet, doc)
         out = dict(packet_sha=PACKET_SHA, program_sha=doc["program_sha"], image=doc["image"], jobsets=doc["jobsets"])
     elif a.mode == "caps":
         out = merge_caps(a.packet)
     elif a.mode == "launch":
-        out = launch(a.packet, a.arm)
+        out = launch(a.packet, a.arm, a.queue)
     elif a.mode == "placements":
         out = placements(a.packet, a.arm)
     elif a.mode == "advance":

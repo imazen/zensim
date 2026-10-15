@@ -312,9 +312,87 @@ def freeze(bundle, superseded, status):
     return packet
 
 
+# E34 uses the same declaration, archive and placement owners as E33. Conditional
+# K branches are pinned before launch; exactly one branch per family is released.
+def e34_variants(template_path, wall_caps):
+    import copy
+    old = json.loads(template_path.read_text())
+    variants = []
+    for family in ('a', 'c'):
+        for arm, hidden in [('control', 128), ('w', 32), *([('l', 1)] if family == 'a' else []),
+                            ('k01', 128), ('k1', 128), ('k10', 128)]:
+            lam = {'k01':'0.1', 'k1':'1.0', 'k10':'10.0'}.get(arm)
+            name = f'{arm}{family}'
+            flags = {'--monotone-cbc': arm == 'l',
+                     '--steer-pairs': '/opt/fleet-fits/program/data/e34/augmentation.parquet' if lam else None,
+                     '--steer-lambda': lam}
+            spec = f'sel:3b7bd5ebe929@h32:H{hidden}:cv16:cf98' + (':fx1' if family == 'c' else '')
+            for full in (False, True):
+                c = copy.deepcopy(next(v for v in old['variants'] if v['name'] == ('full-' if full else '') + family))
+                c.update(schema='e34-research-fit-contract-v1', name=('full-' if full else '') + name,
+                         spec=spec, specs=[spec], hidden=hidden, e34_flags=flags,
+                         wall_cap_sec=wall_caps[name])
+                variants.append(c)
+    return variants
+
+
+def e34_specs(bundle, program, data, ctl, contract):
+    if sha(data) != DATA_SHA:
+        raise ValueError('E34 rank archive differs from registered E33 bytes')
+    variants = json.loads(contract.read_text())['variants']
+    plans, unconditional, branches = {}, [], {}
+    for c in variants:
+        full = c['name'].startswith('full-')
+        name = c['name'].removeprefix('full-')
+        is_k = name.startswith('k')
+        js = f'fite34-{name}-' + ('pilot' if full and is_k else 'full' if full else 'lodo') + '-20261015'
+        seeds = [0] if full and is_k else range(3) if full else range(10)
+        cells = []
+        for route in (['production'] if full else PRODUCTION_SOURCES):
+            for seed in seeds:
+                cell = f"{c['spec']}__N/" + (f'full_s{seed}' if full else f'without_{route}_s{seed}')
+                extra = ['--pack-production','--e33-output-stage'] if full else ['--heldout', route]
+                for flag, value in c['e34_flags'].items():
+                    if value is True: extra.append(flag)
+                    elif isinstance(value, str): extra += [flag, value]
+                dest = f'/var/tmp/rev4-featpot/e34-{name}-results/' + ('confirm/' if full else '') + f'cells/{cell}'
+                cells.append(dict(name=cell, argv=cell_argv('v2_confirm_fit.py' if full else 'v2_lodo_mlp.py',
+                                                          c['spec'], c['columns'], seed, dest, extra)))
+        plans[js] = cells
+        if not is_k or full:
+            unconditional.append(js)
+        else:
+            # Full seeds 1/2 join each conditional branch. Seed 0 is the pilot.
+            full_c = next(v for v in variants if v['name'] == 'full-' + name)
+            for seed in (1, 2):
+                cell = f"{c['spec']}__N/full_s{seed}"
+                extra = ['--pack-production','--e33-output-stage']
+                for flag,value in full_c['e34_flags'].items():
+                    if value is True: extra.append(flag)
+                    elif isinstance(value,str): extra += [flag,value]
+                cells.append(dict(name=cell, argv=cell_argv('v2_confirm_fit.py',c['spec'],c['columns'],seed,
+                                  f'/var/tmp/rev4-featpot/e34-{name}-results/confirm/cells/{cell}',extra)))
+            branches[name] = js
+    for js,cells in plans.items():
+        path = bundle / f'fit-spec-{js}.json'
+        path.write_text(json.dumps(dict(program_sha=sha(program),data_sha=DATA_SHA,cells=cells),indent=2)+'\n')
+        subprocess.run([str(ctl),'declare-fits','--spec',str(path),'--out',str(bundle/f'fit-manifest-{js}.json')],check=True)
+    initial = sum(len(plans[js]) for js in unconditional)
+    assert initial == 221 and all(len(plans[js]) == 42 for js in branches.values())
+    plan = dict(schema='e34-conditional-305-cell-plan-v1', unconditional=unconditional,
+                conditional=branches, initial_cells=initial, selected_main_cells=84,total_executed_cells=305,
+                rule='For each family maximize dev96 joint(M2>=.99,M3f>=.70); ties choose smaller lambda; reuse selected pilot as full seed0',
+                branches_per_family=1, margin_a=0.0065,margin_c=0.0065,
+                manifests={js:sha(bundle/f'fit-manifest-{js}.json') for js in plans})
+    (bundle/'E34_JOB_PLAN.json').write_text(json.dumps(plan,indent=2,sort_keys=True)+'\n')
+    return plan
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("smokes", "contracts", "specs", "caps", "rehearse", "freeze"))
+    p.add_argument("mode", choices=("smokes", "contracts", "specs", "caps", "rehearse", "freeze", "e34-contracts", "e34-specs"))
+    p.add_argument("--template", type=Path)
+    p.add_argument("--wall-caps", type=Path)
     p.add_argument("--smoke-dir", type=Path)
     p.add_argument("--root", type=Path, help="local copy of the registered data root (smokes)")
     p.add_argument("--bin-dir", type=Path)
@@ -331,7 +409,12 @@ def main():
     p.add_argument("--superseded", action="append", default=[], help="freeze: earlier packet attempt and why")
     p.add_argument("--status", default="READY FOR COORDINATOR REVIEW; not launched, image not pushed")
     a = p.parse_args()
-    if a.mode == "smokes":
+    if a.mode == "e34-contracts":
+        variants=e34_variants(a.template,json.loads(a.wall_caps.read_text()))
+        (a.bundle/"e34-fit-contract.json").write_text(json.dumps(dict(schema="e34-research-fit-package-v1",variants=variants),indent=2,sort_keys=True)+"\n")
+    elif a.mode == "e34-specs":
+        e34_specs(a.bundle,a.program,a.data,a.ctl,a.bundle/"e34-fit-contract.json")
+    elif a.mode == "smokes":
         if not (a.smoke_dir and a.root and a.bin_dir):
             p.error("smokes requires --smoke-dir, --root and --bin-dir")
         smokes(a.smoke_dir, a.root, a.bin_dir)

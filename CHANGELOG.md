@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- E34: bind owner D13's eligibility margin 0.0065 for both families in the registration and statistics owner; preserve all point/dataset guards. Fit binaries remain pinned to 83b13003.
+- E34: bind owner D13's eligibility margin 0.0065 for both families in the registration and statistics owner; preserve all point/dataset guards. Fit binaries remain pinned to 83b13003 (`d015f004`).
 
 
 - Build the label-free E34 four-codec augmentation and disjoint scalar JXL development pixels, with approved exclusions, native source admission and reproducible reference clustering.

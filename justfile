@@ -1225,3 +1225,15 @@ e34-fix1-checks:
 e34-fix1-score-parity:
     python3 scripts/rev4_featpot/e34_precision.py d12-prodqual-after --root /mnt/v/output/zensim/e34-prep-2026-10-15/fix1
     cmp /mnt/v/output/zensim/e34-prep-2026-10-15/part6/after-prodqual.json /mnt/v/output/zensim/e34-prep-2026-10-15/fix1/after-prodqual.json
+
+# E34 launch binaries use the authorized main snapshot; fleet work stays off this host.
+e34-launch-build:
+    cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin panel --bin predict_features_with_bake --example inspect_qualified_checkpoint
+    cargo build --locked --release -p zensim --example serve_custom_bake --features custom-profiles
+
+# Existing executor smoke owner, explicit E34 campaign (run on an allowed worker).
+e34-launch-smoke bundle image jobset inspector mode="bounded" attempt="1":
+    python3 scripts/tests/e33_executor_smoke.py --campaign e34 --bundle {{bundle}} --image {{image}} --jobset {{jobset}} --inspector {{inspector}} --mode {{mode}} --attempt {{attempt}}
+
+e34-launch-backup:
+    ~/work/zen/scripts/run-heavy --mem 24G --jobs 1 -- rsync -a --no-owner --no-group /mnt/v/output/zensim/e34-launch-2026-10-15/ /mnt/tower/output/zensim/e34-launch-2026-10-15/
