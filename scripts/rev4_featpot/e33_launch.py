@@ -317,8 +317,11 @@ def harvest_attempt(command, log, timeout):
         proc = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
         try:
             return proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGTERM)
+        except BaseException:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -376,7 +379,13 @@ def harvest_cycle(bundle, queue, status_file=None, jobset_timeout=300):
                 with log.open("a") as stream:
                     traceback.print_exc(file=stream)
             # Count after installation, including on an error; never admit a failed jobset as complete.
-            entry.update(installed=sum(installed(hfc, cell) for cell in jobs), time=now())
+            try:
+                entry["installed"] = sum(installed(hfc, cell) for cell in jobs)
+            except Exception as exc:
+                entry.update(state="ERROR", installed=None, error=f"installed-count check failed: {exc}")
+                with log.open("a") as stream:
+                    traceback.print_exc(file=stream)
+            entry["time"] = now()
             state["jobsets"][js] = entry
             state["updated_at"] = now()
             stage = rt / "HARVEST_STATUS.json.new"
@@ -388,7 +397,8 @@ def harvest_cycle(bundle, queue, status_file=None, jobset_timeout=300):
                     stream.write(f"\n{entry['time']} — HARVEST {js}: {entry['state']}; "
                                  f"installed {entry['installed']}/{entry['total']}; ledger DONE {entry['done']}; "
                                  f"attempt log {log}" + (f"; {entry['error']}" if entry.get("error") else "") + "\n")
-        state.update(installed=sum(v["installed"] for v in state["jobsets"].values()),
+        state.update(installed=sum(v["installed"] or 0 for v in state["jobsets"].values()),
+                     installed_count_unknown=[js for js, v in state["jobsets"].items() if v["installed"] is None],
                      queued_cells=sum(v["total"] for v in state["jobsets"].values()),
                      errors=[js for js, v in state["jobsets"].items() if v["state"] == "ERROR"])
         target = plan["total_executed_cells"]

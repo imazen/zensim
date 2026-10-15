@@ -183,7 +183,7 @@ class HarvestRecovery(unittest.TestCase):
                     owner.sync_ledger("fixture", "pilot", self.root)
                 self.assertEqual(run.call_count, 3)
 
-    def cycle(self, failed=None, subset=False):
+    def cycle(self, failed=None, subset=False, count_failure=False):
         import types
         bundle = self.root / "packet"
         bundle.mkdir(exist_ok=True)
@@ -210,7 +210,9 @@ class HarvestRecovery(unittest.TestCase):
         with mock.patch.object(owner, "packet", return_value={"schema": "e34-fleet-packet-v1"}), \
              mock.patch.object(owner, "runtime", return_value=(runtime, self.root, self.root)), \
              mock.patch.object(owner, "harvest_attempt", side_effect=attempt), \
-             mock.patch.object(owner, "installed", return_value=True), \
+             mock.patch.object(owner, "installed", side_effect=
+                               [RuntimeError("bad installed metadata"), True, True] if count_failure else None,
+                               return_value=True), \
              mock.patch.dict("sys.modules", {"harvest_fit_cells": types.SimpleNamespace()}):
             result = owner.harvest_cycle(bundle, queue, self.root / "status.md")
         return result, seen
@@ -232,6 +234,14 @@ class HarvestRecovery(unittest.TestCase):
         result, _ = self.cycle(subset=True)
         self.assertEqual((result["state"], result["installed"]), ("PROGRESS", 2))
 
+    def test_count_failure_is_unknown_and_does_not_stop_other_jobsets(self):
+        result, seen = self.cycle(count_failure=True)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(result["state"], "DEGRADED")
+        self.assertEqual(result["installed_count_unknown"], [seen[0]])
+        self.assertIsNone(result["jobsets"][seen[0]]["installed"])
+        self.assertEqual(result["jobsets"][seen[-1]]["state"], "OK")
+
     def test_real_harvest_child_timeout_is_reaped(self):
         import subprocess
         import sys
@@ -240,6 +250,16 @@ class HarvestRecovery(unittest.TestCase):
             owner.harvest_attempt([sys.executable, "-c", "import time; print('started',flush=True); time.sleep(10)"],
                                   log, 0.2)
         self.assertIn("started", log.read_text())
+
+    def test_interruption_cleans_up_owned_verifier_group(self):
+        import signal
+        proc = mock.Mock(pid=12345)
+        proc.wait.side_effect = [KeyboardInterrupt(), 0]
+        with mock.patch.object(owner.subprocess, "Popen", return_value=proc), \
+             mock.patch.object(owner.os, "killpg") as kill:
+            with self.assertRaises(KeyboardInterrupt):
+                owner.harvest_attempt(["fixture"], self.root / "interrupted.log", 300)
+        kill.assert_called_once_with(12345, signal.SIGTERM)
 
 
 if __name__ == "__main__":
