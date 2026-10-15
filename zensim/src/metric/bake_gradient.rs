@@ -54,7 +54,7 @@ impl Tape {
     }
     fn sigmoid(&mut self, x: Node, limit: f64) -> Node {
         let x = self.clamp(x, -limit, limit);
-        let v = 1. / (1. + (-self.value(x)).exp());
+        let v = 1. / (1. + (-self.value(x)).det_exp(active_pow_form()));
         self.unary(x, v, v * (1. - v))
     }
     fn reverse(&self, output: Node, n: usize) -> Result<Vec<f64>, ZensimError> {
@@ -80,7 +80,7 @@ fn error(reason: &'static str) -> ZensimError {
 }
 
 // At a ReLU kink use the inactive branch; at clamp boundaries use zero.
-// Singular root transforms at zero use zero, the same inactive convention.
+// Singular root transforms at zero refuse when their derivative is active.
 fn transform(
     t: &mut Tape,
     x: Node,
@@ -213,8 +213,16 @@ fn transform(
                         (1. - v).powf(1. - l),
                     )
                 };
-                // Match the transform owner's f32 overflow-to-identity guard.
-                if !(value as f32).is_finite() {
+                // Match the transform owner's intermediate f32 overflow guard,
+                // including a power that overflows before division by lambda.
+                let power = if v >= 0. && l.abs() >= 1e-7 {
+                    (1_f32 + v as f32).powf(l as f32)
+                } else if v < 0. && (l - 2.).abs() >= 1e-7 {
+                    (1_f32 - v as f32).powf((2. - l) as f32)
+                } else {
+                    1.
+                };
+                if !power.is_finite() || !(value as f32).is_finite() {
                     (v, 1.)
                 } else {
                     (value, slope)
@@ -303,6 +311,7 @@ fn scaled_inputs(
     Ok(inputs)
 }
 
+#[allow(clippy::too_many_arguments)] // Mirrors the two loaded pool-head parameter records.
 fn pool(
     t: &mut Tape,
     h: &[Node],
@@ -322,8 +331,12 @@ fn pool(
         .reduce(|a, b| if t.value(b) > t.value(a) { b } else { a })
         .unwrap();
     let p = f64::from(p);
-    let moment = h.iter().map(|&x| t.value(x).abs().powf(p)).sum::<f64>() / n;
-    let norm = moment.powf(1. / p);
+    let moment = h
+        .iter()
+        .map(|&x| t.value(x).abs().det_powf(p, active_pow_form()))
+        .sum::<f64>()
+        / n;
+    let norm = moment.det_powf(1. / p, active_pow_form());
     let alpha = t.value(gate);
     let rank = t.affine(
         h,
@@ -551,7 +564,7 @@ fn score(
         if !p.extrapolate_score {
             if p.soft_clamp_score {
                 let x = t.unary(y, (t.value(y) - 50.) / 20., 1. / 20.);
-                let v = 1. / (1. + (-t.value(x)).exp());
+                let v = 1. / (1. + (-t.value(x)).det_exp(active_pow_form()));
                 let z = t.unary(x, v, v * (1. - v));
                 y = t.unary(z, 100. * t.value(z), 100.);
             } else {
@@ -634,6 +647,13 @@ mod tests {
     use super::*;
     #[test]
     fn f32_f16_i8_storage_and_dispatch_have_exact_derivatives() {
+        if !crate::ssim_form::run_in_own_process(
+            "metric::bake::gradient::tests::f32_f16_i8_storage_and_dispatch_have_exact_derivatives",
+            "D12_STORAGE_DISPATCH_OK",
+            None,
+        ) {
+            return;
+        }
         let _lock = archmage::testing::lock_token_testing();
         for dtype in ["f32", "f16", "i8"] {
             let spec = serde_json::json!({"schema_hash":1,"scaler_mean":[0.,0.],"scaler_scale":[2.,4.],
@@ -672,6 +692,7 @@ mod tests {
             );
             assert!(report.permutations_run > 0);
         }
+        println!("D12_STORAGE_DISPATCH_OK");
     }
     #[test]
     fn transform_derivatives_match_independent_closed_forms_and_boundaries() {
@@ -710,6 +731,7 @@ mod tests {
             (FeatureTransform::QuantileBins, 2., vec![1., 3.], 0.),
             (FeatureTransform::YeoJohnson, 3., vec![0.], 0.25),
             (FeatureTransform::YeoJohnson, -3., vec![2.], 0.25),
+            (FeatureTransform::YeoJohnson, 1e-6, vec![1e8], 1.),
         ];
         for (tf, x, p, expected) in cases {
             let mut t = Tape::default();
@@ -737,6 +759,52 @@ mod tests {
             t.reverse(y, 1).is_err(),
             "a singular active derivative must not be fabricated"
         );
+    }
+    #[test]
+    #[cfg(all(
+        feature = "corruption-head",
+        feature = "feature-regime-v2",
+        feature = "custom-profiles"
+    ))]
+    fn floor_recovery_never_detaches_an_active_corruption_companion() {
+        let mut payload = 2_u32.to_le_bytes().to_vec();
+        for value in [-10_f32, -10., 100., 100.] {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        let hex: String = payload.iter().map(|x| format!("{x:02x}")).collect();
+        let spec = serde_json::json!({"schema_hash":1,"scaler_mean":[0.],"scaler_scale":[1.],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"13"},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"5"},
+                {"key":"zentrain.output_calibration_spline","type":"bytes","hex":hex}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32","weights":[-1000.],"biases":[-1000.]}]});
+        let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).unwrap();
+        let base = crate::mlp::Model::from_bytes(&bytes).unwrap();
+        let mut spec = spec;
+        spec["metadata"].as_array_mut().unwrap().pop();
+        spec["layers"][0]["weights"] = serde_json::json!([0.]);
+        spec["layers"][0]["biases"] = serde_json::json!([-10000.]);
+        let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).unwrap();
+        let head = crate::mlp::Model::from_bytes(&bytes).unwrap();
+        let mut s = BakeScorer::new(&base)
+            .unwrap()
+            .with_linear_corruption_head(&head, 0.)
+            .unwrap();
+        let mut f = vec![0.; 720];
+        f[13] = 1.;
+        assert_eq!(s.score_features(&f, 96, 96, None).unwrap(), -10000.);
+        assert!(
+            s.score_features_fd_gradient(&f, 96, 96, None)
+                .unwrap()
+                .iter()
+                .all(|&x| x == 0.)
+        );
+        assert!(
+            s.prepared_steering_gradient(&f, 96, 96, None)
+                .unwrap()
+                .iter()
+                .all(|&x| x == 0.)
+        );
+        assert_eq!(s.score_features(&f, 96, 96, None).unwrap(), -10000.);
     }
     #[test]
     fn per_sample_gate_chain_rule_and_spline_caps_are_exact() {

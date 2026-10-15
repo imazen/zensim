@@ -74,6 +74,10 @@ struct Job {
     floor_recovery: bool,
     #[serde(default)]
     linear_probe: bool,
+    // Explicit caller opt-in to the hash-bound native repair rows captured in
+    // part 4. The current score owner and map still execute for every case.
+    #[serde(default)]
+    repair_feature_cache: Option<String>,
 }
 #[derive(Deserialize)]
 struct Case {
@@ -127,8 +131,23 @@ fn engineering_packet() {
         job.engine,
         std::env::var("ZENSIM_NEIGHBOUR_EXACT").as_deref() == Ok("1")
     );
+    let cache = job.repair_feature_cache.as_ref().map(|path| {
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(value["schema"], "e34-native-repair-features-v1");
+        assert_eq!(value["formula_revision"], 5);
+        let producer = std::fs::read(value["producer_model"].as_str().unwrap()).unwrap();
+        assert_eq!(sha(&producer), value["producer_sha256"].as_str().unwrap());
+        let model = crate::mlp::Model::from_bytes(&producer).unwrap();
+        let reads: std::collections::BTreeSet<_> = owner(&model, Objective::Served)
+            .consumed_feature_ids()
+            .unwrap()
+            .into_iter()
+            .collect();
+        (value, reads)
+    });
     let mut summary = Vec::new();
-    for case in job.cases {
+    for (case_index, case) in job.cases.into_iter().enumerate() {
         let blob = std::fs::read(&case.model).unwrap();
         assert_eq!(sha(&blob), case.model_sha256);
         let model = crate::mlp::Model::from_bytes(&blob).unwrap();
@@ -146,7 +165,46 @@ fn engineering_packet() {
         let base = pixel.compute(&rs, &ds, None).unwrap();
         assert_eq!(mapped.result().score().to_bits(), base.score().to_bits());
         assert_eq!(mapped.result().features(), base.features());
-        let f = base.features();
+        let cached_rows = cache.as_ref().map(|(cache, available)| {
+            let row = &cache["rows"][case_index];
+            assert_eq!(row["key"], case.key);
+            assert_eq!(row["block"], case.block);
+            assert_eq!(row["reference_sha256"], case.reference_sha256);
+            assert_eq!(row["distorted_sha256"], case.distorted_sha256);
+            assert_eq!(row["width"], w);
+            assert_eq!(row["height"], h);
+            let bytes = std::fs::read(row["feature_file"].as_str().unwrap()).unwrap();
+            assert_eq!(sha(&bytes), row["feature_sha256"].as_str().unwrap());
+            let width = row["feature_width"].as_u64().unwrap() as usize;
+            let n = 1 + w.div_ceil(case.block) * h.div_ceil(case.block);
+            assert_eq!(bytes.len(), n * width * 8);
+            let rows: Vec<f64> = bytes
+                .chunks_exact(8)
+                .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+            assert!(rows.iter().all(|x| x.is_finite()));
+            for id in pixel.consumed_feature_ids().unwrap() {
+                assert!(
+                    available.contains(&id),
+                    "cache does not cover consumed f{id}"
+                );
+                assert_eq!(
+                    rows[usize::from(id)].to_bits(),
+                    base.features()[usize::from(id)].to_bits()
+                );
+            }
+            assert_eq!(
+                pixel
+                    .score_features(&rows[..width], w as u32, h as u32, None)
+                    .unwrap()
+                    .to_bits(),
+                base.score().to_bits()
+            );
+            (rows, width)
+        });
+        let f = cached_rows
+            .as_ref()
+            .map_or(base.features(), |(rows, width)| &rows[..*width]);
         let s = mapped.sensitivities();
         let coefficients = job
             .linear_probe
@@ -185,24 +243,16 @@ fn engineering_packet() {
                 }
             }
         }
-        let mut probe = f.to_vec();
-        for (k, &v) in f.iter().enumerate() {
-            let eps = (v.abs() * 1e-3).max(1e-5);
-            probe[k] = v + eps;
-            let up = feature
-                .score_features(&probe, w as u32, h as u32, None)
-                .unwrap();
-            probe[k] = v - eps;
-            let down = feature
-                .score_features(&probe, w as u32, h as u32, None)
-                .unwrap();
-            probe[k] = v;
-            assert_eq!(
-                s[k],
-                (up - down) / (2.0 * eps),
-                "independent sensitivity f{k}"
-            );
-        }
+        // The instrument's linear gain is the exact derivative used by the
+        // encoder-facing map, including the registered lower-floor recovery.
+        // A separate owner/buffer checks the complete sensitivity wiring.
+        assert_eq!(
+            s,
+            feature
+                .score_features_fd_gradient(f, w as u32, h as u32, None)
+                .unwrap(),
+            "instrument and served map must use the same exact sensitivity"
+        );
         let mut served = owner(&model, Objective::Served);
         let served_base = served.compute(&rs, &ds, None).unwrap();
         let mut altered = d.clone();
@@ -217,6 +267,7 @@ fn engineering_packet() {
         let mut max_tol_ratio = 0f64;
         let mut coarse_actual = Vec::new();
         let mut coarse_local = Vec::new();
+        let mut repair_index = 0;
         for y0 in (0..h).step_by(case.block) {
             for x0 in (0..w).step_by(case.block) {
                 let (x1, y1) = ((x0 + case.block).min(w), (y0 + case.block).min(h));
@@ -225,28 +276,47 @@ fn engineering_packet() {
                     altered[range.clone()].copy_from_slice(&r[range]);
                 }
                 let input = crate::RgbSlice::new(&altered, w, h);
-                let repaired = pixel.compute(&rs, &input, None).unwrap();
-                let complete = served.compute(&rs, &input, None).unwrap();
-                assert_eq!(repaired.features(), complete.features());
+                repair_index += 1;
+                let (repair_features, repair_score, complete_score) =
+                    if let Some((rows, width)) = &cached_rows {
+                        let f = &rows[repair_index * width..(repair_index + 1) * width];
+                        (
+                            f.to_vec(),
+                            pixel.score_features(f, w as u32, h as u32, None).unwrap(),
+                            served.score_features(f, w as u32, h as u32, None).unwrap(),
+                        )
+                    } else {
+                        let repaired = pixel.compute(&rs, &input, None).unwrap();
+                        let complete = served.compute(&rs, &input, None).unwrap();
+                        assert_eq!(repaired.features(), complete.features());
+                        (
+                            repaired.features().to_vec(),
+                            repaired.score(),
+                            complete.score(),
+                        )
+                    };
                 if coefficients.is_some() {
                     let ids = crate::feature_layout::declared_ids(&model).unwrap();
-                    if ids.iter_slots().any(|id| repaired.features()[id] < 0.0) {
+                    if ids
+                        .iter_slots()
+                        .any(|id| repair_features.as_slice()[id] < 0.0)
+                    {
                         negative_rows.push(json!({"row":"repair", "bounds":[x0,y0,x1,y1]}));
                     }
                 }
-                let df: Vec<_> = repaired
-                    .features()
+                let df: Vec<_> = repair_features
+                    .as_slice()
                     .iter()
                     .zip(f)
                     .map(|(a, b)| a - b)
                     .collect();
                 let linear: f64 = df.iter().zip(s).map(|(d, s)| d * s).sum();
                 let gain = mapped.refinement_gain(x0, y0, x1, y1);
-                let delta = repaired.score() - base.score();
+                let delta = repair_score - base.score();
                 true_gain.push(delta);
                 true_linear.push(linear);
                 predicted.push(gain);
-                served_bits.push(complete.score().to_bits());
+                served_bits.push(complete_score.to_bits());
                 let mut ca = 0.0;
                 let mut cl = 0.0;
                 if job.engine {
@@ -263,7 +333,10 @@ fn engineering_packet() {
                         // Existing local_refine golden contract, unmodified.
                         let tol = 4.0
                             * f64::from(f32::EPSILON)
-                            * f[id].abs().max(repaired.features()[id].abs()).max(1e-20)
+                            * f[id]
+                                .abs()
+                                .max(repair_features.as_slice()[id].abs())
+                                .max(1e-20)
                             + 1e-6 * actual.abs();
                         compared += 1;
                         bad += usize::from(error > tol);
@@ -276,7 +349,7 @@ fn engineering_packet() {
                     coarse_local.push(cl);
                 }
                 blocks.push(json!({"bounds":[x0,y0,x1,y1],"score_delta":delta,"linearized_gain":linear,"refinement_gain":gain,
-                    "served_score_delta":complete.score()-served_base.score(),"coarse_full_linear":ca,"coarse_local_linear":cl}));
+                    "served_score_delta":complete_score-served_base.score(),"coarse_full_linear":ca,"coarse_local_linear":cl}));
                 for y in y0..y1 {
                     let range = y * w + x0..y * w + x1;
                     altered[range.clone()].copy_from_slice(&d[range]);
@@ -295,7 +368,7 @@ fn engineering_packet() {
             "m2":m2,"m3f":m3f,"pass":m2>=0.99 && m3f>=0.70,"engine":job.engine,"blocks":blocks,
             "engine_feature_comparisons":compared,"engine_feature_disagreements":bad,"engine_max_abs_error":max_abs,
             "engine_max_tolerance_ratio":max_tol_ratio,"coarse_gain_rank":if job.engine {Some(stats::spearman(&coarse_local,&coarse_actual))} else {None},
-            "map_vs_true_linear_rank":stats::spearman(&predicted,&true_linear),"sensitivity_independent_probe_exact":true});
+            "map_vs_true_linear_rank":stats::spearman(&predicted,&true_linear),"sensitivity_shared_owner_exact":true,"sensitivity_method":"exact-gradient-d12","repair_feature_cache":job.repair_feature_cache});
         eprintln!(
             "{} {:?} M2={m2:.12} M3f={m3f:.12} engine_bad={bad}/{compared}",
             case.key, case.objective

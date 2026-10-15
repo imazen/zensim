@@ -620,6 +620,10 @@ impl<'a> BakeScorer<'a> {
         {
             return Ok(served);
         }
+        #[cfg(feature = "corruption-head")]
+        if self.corruption.is_some() {
+            return Ok(served);
+        }
         let Some(spline) = self.metadata.output_spline.as_ref() else {
             return Ok(served);
         };
@@ -1514,7 +1518,7 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         codec_hint: Option<&str>,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
         // Preserve every companion read and its caller width at every revision.
-        // Finite-difference probes still evaluate only the detached perceptual
+        // Exact sensitivities evaluate only the detached perceptual
         // branch; the companion evaluates this complete extracted row afterward.
         let serving_plan = Some(self.scorer.plan()?);
         // The head is evaluated on the exact extracted row, once per actual
@@ -1729,6 +1733,50 @@ mod revision_contract_tests {
         row[91] = 5.0;
         assert_eq!(scorer.score_features(&row, 96, 96, None).unwrap(), 5.0);
         assert_eq!(scorer.consumed_feature_ids().unwrap(), [13, 91]);
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_exact_map_accepts_strided_sdr_without_padding_reads() {
+        use crate::source::{PixelFormat, StridedBytes};
+        let (w, h, stride) = (97, 83, 97 * 3 + 17);
+        let (src, dst) = pair(w, h);
+        let pad = |pixels: &[[u8; 3]]| {
+            let mut bytes = vec![231u8; stride * h];
+            for y in 0..h {
+                for x in 0..w {
+                    bytes[y * stride + x * 3..y * stride + x * 3 + 3]
+                        .copy_from_slice(&pixels[y * w + x]);
+                }
+            }
+            bytes
+        };
+        let (rp, dp) = (pad(&src), pad(&dst));
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let strided_r = StridedBytes::new(&rp, w, h, stride, PixelFormat::Srgb8Rgb);
+        let strided_d = StridedBytes::new(&dp, w, h, stride, PixelFormat::Srgb8Rgb);
+        let model = bake_over(&[13, 52, 91]);
+        let mut packed = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let mut padded = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let a = packed
+            .prepare_steering(&rs, 8)
+            .unwrap()
+            .compute(&ds, None)
+            .unwrap();
+        let b = padded
+            .prepare_steering(&strided_r, 8)
+            .unwrap()
+            .compute(&strided_d, None)
+            .unwrap();
+        assert_eq!(a.result().score().to_bits(), b.result().score().to_bits());
+        assert_eq!(a.result().features(), b.result().features());
+        assert_eq!(a.sensitivities(), b.sensitivities());
+        assert_eq!(a.attribution().density(), b.attribution().density());
+        assert_eq!(
+            a.refinement_gain(8, 8, 24, 24),
+            b.refinement_gain(8, 8, 24, 24)
+        );
     }
 
     /// A bake over the given feature IDs with small deterministic negative weights (declared revision = the
@@ -3327,7 +3375,7 @@ mod revision_contract_tests {
                 if weights == Some([0.0, 1.0]) { 1 } else { 3 }
             );
             let mut exhaustive = vec![0.; 944];
-            let w = weights.map_or([0.5, 0.5], |w| w);
+            let w = weights.unwrap_or([0.5, 0.5]);
             exhaustive[13] = w[0] * f64::from(-0.7_f32);
             exhaustive[52] = w[0] * f64::from(-1.3_f32);
             exhaustive[91] = w[1];

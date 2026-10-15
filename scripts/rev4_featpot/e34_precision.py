@@ -104,12 +104,101 @@ def summarize(root):
     print(json.dumps(result, indent=2))
 
 
+def d12_prodqual(root,stage):
+    import os
+    import subprocess
+    models=json.loads((root.parent/'part4/full-job.json').read_text())['models']
+    binary=root/'serve-before' if stage=='before' else Path(__file__).resolve().parents[2]/'target/debug/examples/serve_custom_bake'
+    paths=[m['path'] for m in models]
+    env=dict(os.environ,ZENSIM_FORMULA_REV='5',ZENSIM_NEIGHBOUR_EXACT='1',RAYON_NUM_THREADS='1',OMP_NUM_THREADS='1')
+    env.pop('ZENSIM_MAX_TIER',None)
+    with (root/f'{stage}-prodqual.json').open('x') as out,(root/f'{stage}-prodqual.log').open('x') as log:
+        subprocess.run([str(binary),'--prodqual',*paths],env=env,stdout=out,stderr=log,check=True)
+    with (root/f'{stage}-prodqual-provenance.json').open('x') as f:
+        json.dump(dict(binary=str(binary),binary_sha256=sha(binary),models=models),f,indent=2)
+
+
+def d12_summarize(root):
+    models=json.loads((root.parent/'part4/full-job.json').read_text())['models']
+    result=dict(schema='e34-d12-exact-gradient-v1',method='exact-gradient-d12',bars=dict(m2=.99,m3f=.70,cases=135),models={})
+    for model in models:
+        path=root/f'cached-gate-{model["name"]}/result.json'
+        current=json.loads(path.read_text())['rows']
+        assert sha(Path(model['oracle']))==model['oracle_sha256']
+        old=json.loads(Path(model['oracle']).read_text())['rows']
+        job=json.loads((path.parent/'job.json').read_text())
+        assert len(current)==len(old)==len(job['cases'])==135
+        flips=[];score_comparisons=0
+        for i,(a,b,c) in enumerate(zip(old,current,job['cases'],strict=True)):
+            assert a['key']==b['key']==c['key']
+            assert b['model']==model['sha256']
+            assert b['sensitivity_method']=='exact-gradient-d12' and b['sensitivity_shared_owner_exact']
+            assert a['served_base_bits']==b['served_base_bits'],(model['name'],i,'base')
+            assert a['served_repair_bits']==b['served_repair_bits'],(model['name'],i,'repairs')
+            score_comparisons+=1+len(b['served_repair_bits'])
+            assert b['pass']==(b['m2']>=.99 and b['m3f']>=.70)
+            assert b['engine_feature_disagreements']==0
+            if a['pass']!=b['pass']:flips.append(dict(key=b['key'],block=c['block'],before=a['pass'],after=b['pass'],m2_before=a['m2'],m2_after=b['m2'],m3f_before=a['m3f'],m3f_after=b['m3f']))
+        result['models'][model['name']]=dict(model_sha256=model['sha256'],cases=135,before_pass=sum(r['pass'] for r in old),after_pass=sum(r['pass'] for r in current),m2_pass=sum(r['m2']>=.99 for r in current),m3f_pass=sum(r['m3f']>=.70 for r in current),score_bits_compared=score_comparisons,scores_bit_identical=True,flips=flips,result_sha256=sha(path),packet_sha256=sha(path.parent/'job.json'))
+    native=json.loads((root/'gate-a/result.json.partial').read_text())
+    cached=json.loads((root/'cached-gate-a/result.json').read_text())['rows']
+    assert len(native)==107
+    for i,(a,b) in enumerate(zip(native,cached)):
+        assert all(a[k]==b[k] for k in a), ('native repair cache disagreement', i, [k for k in a if a[k]!=b[k]])
+    result['repair_cache_validation']=dict(full_pixel_exact_rows=len(native),total_rows=135,
+        every_output_field_equal=True,cache_sha256=sha(root/'native-repair-cache.json'),
+        native_partial_sha256=sha(root/'gate-a/result.json.partial'))
+    before=[json.loads(x) for x in (root/'before-timing.jsonl').read_text().splitlines()]
+    after=[json.loads(x) for x in (root/'after-timing.jsonl').read_text().splitlines()]
+    assert len(before)==len(after)==16
+    timings=[]
+    for a,b in zip(before,after,strict=True):
+        assert (a['model'],a['side'],a['model_sha256'],a['bin'],a['tier'])==(b['model'],b['side'],b['model_sha256'],b['bin'],b['tier'])
+        for x,y in zip(a['samples'],b['samples'],strict=True):
+            assert x['score_bits']==y['score_bits'] and x['features_sha256']==y['features_sha256']
+        timings.append(dict(model=a['model'],side=a['side'],before_median_seconds=statistics.median(x['seconds'] for x in a['samples']),after_median_seconds=statistics.median(x['seconds'] for x in b['samples']),before_prepare_seconds=a['prepare_seconds'],after_prepare_seconds=b['prepare_seconds'],repeats=3))
+    result['timings']=timings
+    a=json.loads((root/'before-prodqual.json').read_text());b=json.loads((root/'after-prodqual.json').read_text())
+    comparisons=0;tier_pairs=0
+    assert len(a['seeds'])==len(b['seeds'])==4
+    for x,y in zip(a['seeds'],b['seeds'],strict=True):
+        assert x['model']==y['model'] and len(x['permutations'])==len(y['permutations'])
+        for p,q in zip(x['permutations'],y['permutations'],strict=True):
+            assert p['label']==q['label'] and len(p['rows'])==len(q['rows'])
+            for r,s in zip(p['rows'],q['rows'],strict=True):
+                for field in ['pixel_bits','cached_bits','feature_bits','identity_aware_bits','read_bits','feature_mismatches','cached_feature_mismatches']:
+                    assert r[field]==s[field],(x['model'],p['label'],field)
+                assert s['finite'] and not s['feature_mismatches'] and not s['cached_feature_mismatches']
+                comparisons+=1
+        # Features have the existing tier parity promise; map gradients must
+        # agree bit for bit on the same extracted rows at all permutations.
+        base=y['permutations'][0]['rows']
+        for permutation in y['permutations'][1:]:
+            for r,s in zip(base,permutation['rows'],strict=True):
+                assert r['read_bits']==s['read_bits']
+                assert r['sensitivity_bits']==s['sensitivity_bits']
+                tier_pairs+=1
+    result['synthetic_score_parity']=dict(model_tier_geometry_ladder_rows=comparisons,gradient_tier_row_pairs=tier_pairs,score_feature_bits_unchanged=True,gradient_bits_tier_equal=True)
+    result['gradient_reference']=json.loads((root/'gradient-reference.json').read_text())
+    import re
+    logs=Path('/home/lilith/tmp/e34prep')
+    result['resource_receipts']={}
+    for path in sorted(logs.glob('p6-*.log')):
+        receipts=re.findall(r'run-heavy: done[^\n]+',path.read_text(errors='replace'))
+        if receipts:result['resource_receipts'][path.name]=receipts
+
+    with (root/'summary.json').open('x') as f:json.dump(result,f,indent=2,allow_nan=False);f.write('\n')
+    print(json.dumps({k:v for k,v in result.items() if k not in ['timings','gradient_reference']},indent=2))
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode', choices=['prepare', 'summarize', 'progress'])
+    p.add_argument('mode', choices=['prepare', 'summarize', 'progress','d12-summarize','d12-prodqual-before','d12-prodqual-after'])
     p.add_argument('--root', required=True, type=Path)
     a=p.parse_args()
-    if a.mode=='prepare': prepare(a.root)
+    if a.mode=='d12-summarize': d12_summarize(a.root)
+    elif a.mode.startswith('d12-prodqual-'):d12_prodqual(a.root,a.mode.removeprefix('d12-prodqual-'))
+    elif a.mode=='prepare': prepare(a.root)
     elif a.mode=='summarize': summarize(a.root)
     else: print((a.root/'full/progress.json').read_text())
 

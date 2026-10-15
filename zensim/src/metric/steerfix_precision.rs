@@ -596,3 +596,133 @@ fn gate_precision_packet() {
     }
     std::fs::write(out.join("complete.json"),serde_json::to_vec(&json!({"job_sha256":sha(&job_bytes),"packet_sha256":job.packet_sha256,"cases":job.case_limit,"model_cases":result.len(),"methods":["registered_f32_fd","f64_fd","analytic"],"registered_replay":"all base/repair score bits and M2 matched"})).unwrap()).unwrap();
 }
+
+// D12's independent f64 finite-difference reference uses the already captured
+// label-free base feature rows. No pixel/label discovery and no gate selection.
+#[test]
+fn d12_exact_gradient_reference_packet() {
+    let _guard = archmage::testing::lock_token_testing();
+    let job: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            std::env::var("E34_D12_REFERENCE_JOB").expect("explicit D12 reference packet"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let mut summaries = Vec::new();
+    for m in job["models"].as_array().unwrap() {
+        let bytes = std::fs::read(m["path"].as_str().unwrap()).unwrap();
+        assert_eq!(sha(&bytes), m["sha256"].as_str().unwrap());
+        let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
+        let reference = Reference::new(&model);
+        let mut analytic_checks = 0;
+        let mut fd_checks = 0;
+        let mut excluded = 0;
+        let mut maximum = 0_f64;
+        let mut fd_maximum = 0_f64;
+        let mut tier_checks = 0;
+        for (case_index, row) in job["rows"].as_array().unwrap().iter().enumerate() {
+            let width = row["feature_width"].as_u64().unwrap() as usize;
+            let whole = std::fs::read(row["feature_file"].as_str().unwrap()).unwrap();
+            assert_eq!(sha(&whole), row["feature_sha256"].as_str().unwrap());
+            let bytes = &whole[..8 * width];
+            let (w, h) = (
+                row["width"].as_u64().unwrap() as u32,
+                row["height"].as_u64().unwrap() as u32,
+            );
+            let f: Vec<f64> = bytes
+                .chunks_exact(8)
+                .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+            let mut scorer = owner(&model, Objective::Served);
+            let score_bits = scorer.score_features(&f, w, h, None).unwrap().to_bits();
+            let actual = scorer.score_features_fd_gradient(&f, w, h, None).unwrap();
+            assert_eq!(
+                score_bits,
+                scorer.score_features(&f, w, h, None).unwrap().to_bits()
+            );
+            let expected = reference.exact(&f, false);
+            for (&a, &b) in actual.iter().zip(&expected) {
+                let error = (a - b).abs();
+                maximum = maximum.max(error);
+                assert!(
+                    error <= 1e-10 * (1. + b.abs()),
+                    "{} case {case_index} analytic {a} vs reference {b}",
+                    m["name"]
+                );
+                analytic_checks += 1;
+            }
+            let base_hidden = reference.hidden(&f);
+            let branches = |row: &[f64]| {
+                let hidden: Vec<_> = reference.hidden(row).iter().map(|&x| x > 0.).collect();
+                let y = reference.score(row, false);
+                let floor = reference
+                    .spline
+                    .as_ref()
+                    .map_or(f64::NEG_INFINITY, |s| 2. * s.ys[0] - s.ys[s.ys.len() - 1]);
+                (hidden, y >= 100., y <= floor)
+            };
+            let base_branch = branches(&f);
+            let mut probe = f.clone();
+            for &id in &reference.ids {
+                let x = f[id];
+                let mut h = 1e-6 * (1. + x.abs());
+                let mut finite = None;
+                for _ in 0..20 {
+                    probe[id] = x + h;
+                    let upper_branch = branches(&probe);
+                    let up = reference.score(&probe, false);
+                    probe[id] = x - h;
+                    let lower_branch = branches(&probe);
+                    let down = reference.score(&probe, false);
+                    probe[id] = x;
+                    if upper_branch == base_branch && lower_branch == base_branch {
+                        finite = Some((up - down) / (2. * h));
+                        break;
+                    }
+                    h *= 0.5;
+                }
+                if let Some(fd) = finite {
+                    let error = (actual[id] - fd).abs();
+                    fd_maximum = fd_maximum.max(error);
+                    assert!(
+                        error <= 1e-7 * (1. + fd.abs()),
+                        "{} case {case_index} f{id}: analytic {} vs f64 FD {fd}, h={h}",
+                        m["name"],
+                        actual[id]
+                    );
+                    fd_checks += 1;
+                } else {
+                    excluded += 1;
+                }
+            }
+            assert_eq!(base_hidden, reference.hidden(&f));
+            // The derivative has one fixed scalar order at every dispatch tier.
+            let expected_bits: Vec<_> = actual.iter().map(|x| x.to_bits()).collect();
+            let report = archmage::testing::for_each_token_permutation(
+                archmage::testing::CompileTimePolicy::Warn,
+                |_| {
+                    let g = owner(&model, Objective::Served)
+                        .score_features_fd_gradient(&f, w, h, None)
+                        .unwrap();
+                    assert_eq!(
+                        g.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                        expected_bits
+                    );
+                },
+            );
+            tier_checks += report.permutations_run;
+        }
+        assert!(fd_checks > 0);
+        let summary = json!({"model":m["name"],"cases":job["rows"].as_array().unwrap().len(),"analytic_coordinates":analytic_checks,"f64_fd_coordinates":fd_checks,"crossing_coordinates_excluded":excluded,"tier_checks":tier_checks,"max_analytic_error":maximum,"max_f64_fd_error":fd_maximum,"analytic_tolerance":"1e-10*(1+abs(reference))","f64_fd_tolerance":"1e-7*(1+abs(fd))"});
+        eprintln!("D12 reference {summary}");
+        summaries.push(summary);
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(job["output"].as_str().unwrap())
+        .unwrap();
+    use std::io::Write;
+    writeln!(file,"{}",json!({"models":summaries,"scores_unchanged_by_gradient":true,"all_tier_gradient_bits_equal":true})).unwrap();
+}

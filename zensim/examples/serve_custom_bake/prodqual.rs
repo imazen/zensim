@@ -122,6 +122,7 @@ pub(super) fn run(paths: &[String]) {
                         "feature_mismatches":mismatches,
                         "cached_feature_mismatches":cached_mismatches, "read_bits":read_bits,
                         "density_cells":cached.attribution().density().len(),
+                        "sensitivity_bits":cached.sensitivities().iter().map(|x|x.to_bits()).collect::<Vec<_>>(),
                     }));
                 }
             }
@@ -147,8 +148,13 @@ pub(super) fn timing(packet: &str, output: &str) {
     use std::io::Write;
     use std::time::Instant;
     assert_eq!(std::env::var("ZENSIM_FORMULA_REV").as_deref(), Ok("5"));
-    archmage::X64V4xToken::dangerously_disable_token_process_wide(true).unwrap();
-    archmage::X64V4Token::dangerously_disable_token_process_wide(true).unwrap();
+    #[cfg(not(target_arch = "x86_64"))]
+    panic!("paired timing is registered for x86 v3");
+    #[cfg(target_arch = "x86_64")]
+    {
+        archmage::X64V4xToken::dangerously_disable_token_process_wide(true).unwrap();
+        archmage::X64V4Token::dangerously_disable_token_process_wide(true).unwrap();
+    }
     let packet: serde_json::Value =
         serde_json::from_slice(&std::fs::read(packet).unwrap()).unwrap();
     let mut out = std::fs::OpenOptions::new()

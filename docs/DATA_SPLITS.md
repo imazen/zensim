@@ -2035,3 +2035,16 @@ rank-input view appends 28 explicit unused structural-zero slots to the native
 f32 bits and retained-row counts are unchanged. A/C K smokes passed on this
 view through the same strict TRAIN route as part 3, one 49,999-pair epoch,
 fixed smoke lambda 0.1. No E21/dev-panel assessment or lambda selection ran.
+
+### E34 part 6: approved exact-gradient method re-baseline (2026-10-15)
+
+Owner D12 authorizes the exact network gradient in both the served steering
+map and the G-STEER instrument before freeze. The four fixed models (A, C,
+production seed 0 and the existing L smoke) are re-read on the same registered
+135-case pixel-only population to re-baseline M2 and M3f under that method.
+An independent f64 reference checks derivatives only on rows without ReLU
+crossings. No model choice, new label read, gate-threshold change or fitting
+is authorized here. Synthetic-texture timing covers 64/256/1024/4096 squares
+before and after, using the existing serving probe and explicit model pins.
+Outputs are fresh under `/mnt/v/output/zensim/e34-prep-2026-10-15/part6/`;
+part-4/part-5 evidence stays immutable.

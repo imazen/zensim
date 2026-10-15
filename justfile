@@ -1135,3 +1135,65 @@ e34-d12-bench-build:
 
 e34-d12-timing stage:
     ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 ZENSIM_NEIGHBOUR_EXACT=1 RAYON_NUM_THREADS=1 target/debug/examples/serve_custom_bake --steering-timing /mnt/v/output/zensim/e34-prep-2026-10-15/part4/full-job.json /mnt/v/output/zensim/e34-prep-2026-10-15/part6/{{stage}}-timing.jsonl
+
+
+e34-d12-owner-tests:
+    cargo test -p zensim --lib --features custom-profiles metric::bake::
+
+e34-d12-clippy:
+    cargo clippy -p zensim --lib --tests --example serve_custom_bake --features custom-profiles -- -D warnings
+
+e34-d12-gradient-tests:
+    cargo test -p zensim --lib --features custom-profiles gradient::tests
+
+e34-d12-reference:
+    ZENSIM_FORMULA_REV=5 E34_D12_REFERENCE_JOB=/mnt/v/output/zensim/e34-prep-2026-10-15/part6/reference-job-v2.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::precision::d12_exact_gradient_reference_packet --exact --nocapture
+
+e34-d12-gate model:
+    ZENSIM_FORMULA_REV=5 ZENSIM_NEIGHBOUR_EXACT=1 RAYON_NUM_THREADS=1 STEERFIX_PACKET=/mnt/v/output/zensim/e34-prep-2026-10-15/part6/gate-{{model}}/job.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::engineering_packet --exact --nocapture
+
+e34-d12-validation-build:
+    just e34-d12-gradient-tests
+    just e34-steering-build
+
+e34-d12-companion-regression:
+    cargo test -p zensim --lib --features custom-profiles,corruption-head metric::bake::gradient::tests::floor_recovery_never_detaches_an_active_corruption_companion -- --exact
+
+e34-d12-report mode:
+    python3 scripts/rev4_featpot/e34_precision.py {{mode}} --root /mnt/v/output/zensim/e34-prep-2026-10-15/part6
+
+e34-d12-cached-gate model:
+    ZENSIM_FORMULA_REV=5 ZENSIM_NEIGHBOUR_EXACT=1 RAYON_NUM_THREADS=1 STEERFIX_PACKET=/mnt/v/output/zensim/e34-prep-2026-10-15/part6/cached-gate-{{model}}/job.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::engineering_packet --exact --nocapture
+
+e34-d12-edge-checks:
+    just e34-d12-companion-regression
+    cargo test -p zensim --lib --features custom-profiles,corruption-head gradient::tests
+    just e34-steering-build
+
+# D12 existing score/feature parity gates plus the prepared-stride regression.
+e34-d12-parity:
+    cargo test -p zensim --lib --features custom-profiles metric::bake::
+    cargo test -p zensim --features custom-profiles,training --test dense_layout_round_trip --test per_bake_revision --test featcanon_rev5_parity --test cross_tier --test attribution_cross_tier
+
+e34-d12-final-local:
+    just e34-d12-gradient-tests
+    just e34-d12-parity
+    just e34-d12-clippy
+    just e34-d12-bench-build
+
+
+e34-d12-fresh-controls:
+    just e34-steering-build
+    ZENSIM_FORMULA_REV=5 E34_D12_REFERENCE_JOB=/mnt/v/output/zensim/e34-prep-2026-10-15/part6/reference-job-final.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::precision::d12_exact_gradient_reference_packet --exact --nocapture
+    just e34-d12-cached-gate c
+    just e34-d12-cached-gate seed0
+    just e34-d12-cached-gate l
+
+e34-d12-paired-probes:
+    just e34-d12-timing after
+    just e34-d12-report d12-prodqual-before
+    just e34-d12-report d12-prodqual-after
+
+e34-d12-build-probes:
+    just e34-d12-clippy
+    just e34-d12-bench-build

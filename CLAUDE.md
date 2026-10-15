@@ -158,6 +158,10 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-15 — D12 dispatch test raced unrelated pixel tests. FIXED locally.** The new storage/dispatch test changed process-wide token overrides while a prepared-session test compared two pixel extractions. The unchanged pixel assertion failed in the parallel suite. The override test now uses the existing separate-process helper; the same prepared-session assertions pass.
+
+* **2026-10-15 — lower-floor recovery could detach a corruption companion. FIXED in D12 preparation.** A reproduced active constant corruption gate gave a zero served derivative while prepared recovery returned the base network derivative. Recovery now remains limited to an isolated bake with no companion; the regression asserts the served score and zero map derivative. No gate threshold or score arithmetic changed.
+
 * **2026-10-15 — steering sensitivities are precision-sensitive at the registered FD step. OPEN, report-only.** On the frozen 135 G-STEER cases, replacing only gradient evaluation in a diagnostic recovers two A cases, three C cases and the sole part-3 L smoke failure with both f64 FD and analytic gradients; production stays 128/135. The prepared served map consumes the same native f32 FD sensitivities. A also has a measured ReLU crossing at the unchanged step, so rounding does not explain every discrepancy. Registered results and serving arithmetic remain unchanged. See [E34 precision diagnostic](benchmarks/e34_precision_2026-10-15.md).
 
 * **2026-10-15 — E34 L accepted feature-transform metadata. FIXED locally.** Plain monotone N now refuses explicit or automatic feature transforms before CLI payload loading and in shared library validation. A negative test failed before the fix and passes afterward. The registered L smoke had no transforms, so its existing weights are unchanged. This enforces the E5 identity contract; it does not change the projection or fit arithmetic.
