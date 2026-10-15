@@ -250,13 +250,21 @@ fn scaled_inputs(
     roots: &[Node],
     dimensions: (u32, u32),
 ) -> Result<Vec<Node>, ZensimError> {
-    let gathered: Vec<_> = (0..s.layout.width())
-        .map(|i| {
-            s.layout
-                .slot_at(i)
-                .map_or_else(|| t.constant(0.), |id| roots[usize::from(id)])
-        })
-        .collect();
+    // Identity inputs follow the forward owner's exact/prefix/+4 sizing.
+    // Their layout may include size axes that have no feature root.
+    let gathered: Vec<_> = if !s.layout.is_identity() || s.metadata.derived_inputs.is_some() {
+        (0..s.layout.width())
+            .map(|i| match s.layout.slot_at(i) {
+                Some(id) => roots
+                    .get(usize::from(id))
+                    .copied()
+                    .ok_or_else(|| error("exact sensitivity input shape mismatch")),
+                None => Ok(t.constant(0.)),
+            })
+            .collect::<Result<_, _>>()?
+    } else {
+        Vec::new()
+    };
     let mut inputs = if let Some(d) = s.metadata.derived_inputs.as_deref() {
         d.entries()
             .iter()

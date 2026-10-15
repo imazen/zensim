@@ -1207,3 +1207,7 @@ e34-d12-final-feature-checks:
 e34-d12-no-default-check:
     cargo check -p zensim --no-default-features
     cargo fmt -p zensim --check
+
+# E34 review fixes: public loaded-model shape and transform contracts.
+e34-fix1-target filter="":
+    cargo test --locked -p zensim --features custom-profiles,corruption-head --test exact_gradient_contract {{filter}} -- --nocapture
