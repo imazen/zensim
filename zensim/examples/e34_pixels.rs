@@ -117,6 +117,12 @@ fn main() {
                         let range = yy * w + x..yy * w + (x + size).min(w);
                         repaired[range.clone()].copy_from_slice(&r[range]);
                     }
+                    if let Some(path) = row.get("parity_png").and_then(Value::as_str) {
+                        assert_eq!(row["blocks"].as_array().unwrap().len(), 1);
+                        fresh(path)
+                            .write_all(&zen_io::encode_png_rgb8(&repaired, w, h))
+                            .unwrap();
+                    }
                     let features = extract(
                         scorer
                             .compute(&rs, &RgbSlice::new(&repaired, w, h), None)
