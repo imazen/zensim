@@ -18,9 +18,12 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tarfile
+import time
+import traceback
 
 from shippath10_launch import sha
 from v40_launch import placement
@@ -207,6 +210,28 @@ def installed(hfc, c):
         return False
 
 
+def sync_ledger(endpoint, js, status):
+    """Retry transport only; an empty/missing prefix is never a successful harvest."""
+    command = ["s5cmd", "--endpoint-url", endpoint, "sync",
+               f"s3://zentrain/jobs/{js}/ledger/*", str(status) + "/"]
+    failures = []
+    for attempt, delay in enumerate((0, 1, 3), 1):
+        if delay:
+            time.sleep(delay)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                if failures:
+                    print(f"ledger sync recovered {js} attempt={attempt}", flush=True)
+                return
+            detail = f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+        except subprocess.TimeoutExpired as exc:
+            detail = f"timeout=30 stdout={exc.stdout!r} stderr={exc.stderr!r}"
+        failures.append(f"attempt={attempt} {detail}")
+        print(f"ledger sync ERROR {js} {failures[-1]}", file=sys.stderr, flush=True)
+    raise RuntimeError(f"ledger sync failed for {js}: " + "; ".join(failures))
+
+
 def harvest(bundle, arm, install=False, require_all=False, status_only=False):
     doc = packet(bundle)
     js = jobset(arm)
@@ -230,8 +255,7 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
     with (work / "driver.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         endpoint = os.environ["EP"]
-        subprocess.run(["s5cmd", "--endpoint-url", endpoint, "sync", f"s3://zentrain/jobs/{js}/ledger/*",
-                        str(status) + "/"], check=True, capture_output=True)
+        sync_ledger(endpoint, js, status)
         ids = subprocess.check_output([str(CTL), "ids", "--manifest", str(manifest)], text=True)
         (work / "full-ids.tsv").write_text(ids)
         pairs = hfc.read_ids(work / "full-ids.tsv")
@@ -273,6 +297,94 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
         if install and require_all and not all(installed(hfc, c) for c in jobs):
             raise ValueError("installed cell identity/checkpoint check failed")
         return report
+
+
+def harvest_attempt(command, log, timeout):
+    """Bound one jobset and terminate its whole verifier process group on timeout."""
+    with log.open("w") as stream:
+        proc = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            return proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+            raise
+
+
+def harvest_cycle(bundle, queue, status_file=None, jobset_timeout=300):
+    """Attempt every queued E34 jobset, keeping failures explicit and independent."""
+    doc = packet(bundle)
+    if doc.get("schema") != "e34-fleet-packet-v1":
+        raise ValueError("supervised cycle requires E34")
+    rt, tools, _ = runtime(bundle, doc)
+    sys.path.insert(0, str(tools))
+    import harvest_fit_cells as hfc
+    plan = json.loads((bundle / "E34_JOB_PLAN.json").read_text())
+    allowed = set(plan["unconditional"])
+    selection = rt / "LAMBDA_SELECTION.json"
+    if selection.exists():
+        selected = json.loads(selection.read_text())
+        if selected["packet_sha256"] != PACKET_SHA or len(selected["selected_branches"]) != 2:
+            raise ValueError("selection binding differs from frozen packet")
+        allowed.update(selected["selected_branches"].values())
+    names = queued(queue)
+    if len(names) != len(set(names)) or not names or set(names) - allowed:
+        raise ValueError("queue duplicates or contains an unreleased jobset")
+    with (rt / "harvest-cycle.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        stamp = str(time.time_ns())
+        attempts = rt / "harvest-attempts"
+        attempts.mkdir(exist_ok=True)
+        state = dict(time=now(), cycle=stamp, state="RUNNING", packet_sha256=PACKET_SHA, jobsets={})
+        for js in names:
+            log = attempts / f"{stamp}-{js}.log"
+            jobs = json.loads((bundle / f"fit-manifest-{js}.json").read_text())
+            entry = dict(jobset=js, total=len(jobs), done=None, attempt_log=str(log))
+            try:
+                command = [sys.executable, str(Path(__file__).resolve()), "harvest", "--packet", str(bundle),
+                           "--packet-sha", PACKET_SHA, "--arm", js, "--install"]
+                rc = harvest_attempt(command, log, jobset_timeout)
+                if rc:
+                    raise RuntimeError(f"harvest exited {rc}; see {log}")
+                reports = []
+                for line in log.read_text().splitlines():
+                    if line.startswith('{"jobset"'):
+                        value = json.loads(line)
+                        if value.get("jobset") == js:
+                            reports.append(value)
+                if not reports or reports[-1]["total"] != len(jobs):
+                    raise ValueError("harvest returned no matching manifest-count report")
+                entry.update(state="OK", done=reports[-1]["done"], ledger=reports[-1]["ledger"])
+            except Exception as exc:
+                entry.update(state="ERROR", error=str(exc))
+                with log.open("a") as stream:
+                    traceback.print_exc(file=stream)
+            # Count after installation, including on an error; never admit a failed jobset as complete.
+            entry.update(installed=sum(installed(hfc, cell) for cell in jobs), time=now())
+            state["jobsets"][js] = entry
+            state["updated_at"] = now()
+            stage = rt / "HARVEST_STATUS.json.new"
+            stage.write_text(json.dumps(state, indent=2) + "\n")
+            os.replace(stage, rt / "HARVEST_STATUS.json")
+            print(json.dumps(entry), flush=True)
+            if status_file:
+                with status_file.open("a") as stream:
+                    stream.write(f"\n{entry['time']} — HARVEST {js}: {entry['state']}; "
+                                 f"installed {entry['installed']}/{entry['total']}; ledger DONE {entry['done']}; "
+                                 f"attempt log {log}" + (f"; {entry['error']}" if entry.get("error") else "") + "\n")
+        state.update(installed=sum(v["installed"] for v in state["jobsets"].values()),
+                     queued_cells=sum(v["total"] for v in state["jobsets"].values()),
+                     errors=[js for js, v in state["jobsets"].items() if v["state"] == "ERROR"])
+        target = plan["total_executed_cells"]
+        state["state"] = ("DEGRADED" if state["errors"] else "COMPLETE"
+                          if state["installed"] == state["queued_cells"] == target else "PROGRESS")
+        stage.write_text(json.dumps(state, indent=2) + "\n")
+        os.replace(stage, rt / "HARVEST_STATUS.json")
+        return state
 
 
 def open_cells(js, manifest):
@@ -490,13 +602,14 @@ def release_initial(bundle, queue):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "advance", "persist", "shorter-queue", "lambda-pilot", "release-initial"))
+    p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "harvest-cycle", "advance", "persist", "shorter-queue", "lambda-pilot", "release-initial"))
     p.add_argument("--packet", type=Path, required=True)
     p.add_argument("--arm")
     p.add_argument("--packet-sha", help="explicit frozen E34 PACKET.json pin")
     p.add_argument("--queue", type=Path, default=FITV2/"fleet_queue")
     p.add_argument("--out-queue", type=Path)
     p.add_argument("--instrument", type=Path)
+    p.add_argument("--status-file", type=Path, help="append per-jobset harvest counts and errors")
     p.add_argument("--partial", action="store_true", help="pilot: explicitly assess available artifacts, never select until all6")
     p.add_argument("--install", action="store_true")
     p.add_argument("--require-all", action="store_true")
@@ -511,7 +624,11 @@ def main():
         p.error("E34 requires the frozen --packet-sha")
     if a.mode in ("launch", "placements", "harvest") and not a.arm:
         p.error(f"{a.mode} requires --arm")
-    if a.mode == "release-initial":
+    if a.mode == "harvest-cycle":
+        out = harvest_cycle(a.packet, a.queue, a.status_file)
+        print(json.dumps(out))
+        sys.exit(0 if out["state"] == "COMPLETE" else 4 if out["state"] == "DEGRADED" else 3)
+    elif a.mode == "release-initial":
         out=release_initial(a.packet,a.queue)
     elif a.mode == "lambda-pilot":
         if not a.instrument:p.error("lambda-pilot requires --instrument")
@@ -542,6 +659,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as exc:
+    except (ValueError, OSError, KeyError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"E33 REFUSED: {exc}", file=sys.stderr)
         sys.exit(1)

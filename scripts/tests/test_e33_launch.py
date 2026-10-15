@@ -131,5 +131,103 @@ class Launch(unittest.TestCase):
                 owner.lambda_pilot(self.bundle,instrument)
 
 
+class HarvestRecovery(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=Path.home() / "tmp")
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_sync_retries_transport_then_requires_success(self):
+        import subprocess
+        replies = [subprocess.CompletedProcess([], 2, "", "connection reset"),
+                   subprocess.CompletedProcess([], 0, "", "")]
+        with mock.patch.object(owner.subprocess, "run", side_effect=replies) as run, \
+             mock.patch.object(owner.time, "sleep"):
+            owner.sync_ledger("fixture", "pilot", self.root)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.kwargs["timeout"], 30)
+
+    def test_missing_and_denied_ledgers_remain_failures_even_with_cached_files(self):
+        import subprocess
+        (self.root / "cached.parquet").write_bytes(b"cached evidence is not a successful sync")
+        for error in ["no object found", "AccessDenied"]:
+            with self.subTest(error=error), \
+                 mock.patch.object(owner.subprocess, "run", return_value=
+                                   subprocess.CompletedProcess([], 2, "", error)) as run, \
+                 mock.patch.object(owner.time, "sleep"):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    owner.sync_ledger("fixture", "pilot", self.root)
+                self.assertEqual(run.call_count, 3)
+
+    def test_sync_timeouts_are_bounded_and_visible(self):
+        import subprocess
+        with mock.patch.object(owner.subprocess, "run", side_effect=
+                               subprocess.TimeoutExpired("s5cmd", 30, stderr=b"slow store")) as run, \
+             mock.patch.object(owner.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "slow store"):
+                owner.sync_ledger("fixture", "pilot", self.root)
+            self.assertEqual(run.call_count, 3)
+
+    def cycle(self, failed=None, subset=False):
+        import types
+        bundle = self.root / "packet"
+        bundle.mkdir(exist_ok=True)
+        runtime = self.root / "launch"
+        runtime.mkdir(exist_ok=True)
+        names = ["fite34-la-lodo-20261015", "fite34-k01a-pilot-20261015", "fite34-wa-lodo-20261015"]
+        (bundle / "E34_JOB_PLAN.json").write_text(json.dumps({"unconditional": names,
+                                                            "total_executed_cells": 3}))
+        for name in names:
+            (bundle / f"fit-manifest-{name}.json").write_text('[{}]')
+        queue = self.root / "queue"
+        queue.write_text("".join(f"{name} manifest image\n" for name in (names[:2] if subset else names)))
+        seen = []
+
+        def attempt(command, log, timeout):
+            name = command[command.index("--arm") + 1]
+            seen.append(name)
+            if name == failed:
+                log.write_text("ledger sync ERROR AccessDenied\n")
+                return 1
+            log.write_text(json.dumps(dict(jobset=name, total=1, done=1, installed=0, ledger={"done": 1})) + "\n")
+            return 0
+
+        with mock.patch.object(owner, "packet", return_value={"schema": "e34-fleet-packet-v1"}), \
+             mock.patch.object(owner, "runtime", return_value=(runtime, self.root, self.root)), \
+             mock.patch.object(owner, "harvest_attempt", side_effect=attempt), \
+             mock.patch.object(owner, "installed", return_value=True), \
+             mock.patch.dict("sys.modules", {"harvest_fit_cells": types.SimpleNamespace()}):
+            result = owner.harvest_cycle(bundle, queue, self.root / "status.md")
+        return result, seen
+
+    def test_jobset_failure_continues_later_jobsets_and_is_not_completion(self):
+        failed = "fite34-k01a-pilot-20261015"
+        result, seen = self.cycle(failed)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(seen[-1], "fite34-wa-lodo-20261015")
+        self.assertEqual(result["installed"], 3)
+        self.assertEqual((result["state"], result["errors"]), ("DEGRADED", [failed]))
+        self.assertIn("AccessDenied", Path(result["jobsets"][failed]["attempt_log"]).read_text())
+        self.assertIn("ERROR; installed 1/1", (self.root / "status.md").read_text())
+        recovered, seen = self.cycle()
+        self.assertEqual((recovered["state"], recovered["errors"]), ("COMPLETE", []))
+        self.assertEqual(len(seen), 3)
+
+    def test_incomplete_release_is_progress_not_complete(self):
+        result, _ = self.cycle(subset=True)
+        self.assertEqual((result["state"], result["installed"]), ("PROGRESS", 2))
+
+    def test_real_harvest_child_timeout_is_reaped(self):
+        import subprocess
+        import sys
+        log = self.root / "timeout.log"
+        with self.assertRaises(subprocess.TimeoutExpired):
+            owner.harvest_attempt([sys.executable, "-c", "import time; print('started',flush=True); time.sleep(10)"],
+                                  log, 0.2)
+        self.assertIn("started", log.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

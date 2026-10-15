@@ -32,6 +32,8 @@
 
 ### Fixed
 
+- Isolate E34 harvest jobset errors, retain bounded ledger-sync diagnostics and retries, and persist per-jobset installed counts without admitting failed verification (`harvest-cycle` owner).
+
 - Minimal feature builds gate v2 accumulator helpers with their callers; oracle-only builds retain their reduction helper (`83ca5a6d`).
 
 - Exact WinsorP99 gradients respect a single supplied lower bound and the existing zero-gradient clamp-boundary convention; forward scores and stacked-transform fallbacks are unchanged.

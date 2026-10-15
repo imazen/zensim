@@ -19,22 +19,24 @@ if [[ $campaign == e34-fleet-packet-v1 ]]; then
     python3 "$here/e33_launch.py" verify --packet "$packet" --packet-sha "$pin" >/dev/null
     . "$HOME/.config/zen/s3env.sh" >/dev/null 2>&1
     export EP
+    exec 9>"$packet/../launch/harvest-supervisor.lock"
+    flock -n 9 || { echo 'E34 harvest supervisor already running'; exit 1; }
     exec > >(tee -a "$log") 2>&1
+    status_args=()
+    if [[ -n ${E34_STATUS_FILE:-} ]]; then
+        status_args=(--status-file "$E34_STATUS_FILE")
+    fi
     while true; do
-        complete=0
-        while read -r js manifest image; do
-            [[ -n $js ]] || continue
-            out=$(nice -n19 ionice -c3 python3 "$here/e33_launch.py" harvest --packet "$packet" --packet-sha "$pin" --arm "$js" --install) || { echo "E34 HARVEST FAILED $js"; exit 1; }
-            line=$(printf '%s\n' "$out" | grep -m1 '^{"jobset"')
-            printf '%s %s\n' "$(date -u +%FT%TZ)" "$line"
-            n=$(printf '%s' "$line" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r["installed"])')
-            complete=$((complete+n))
-        done < "$queue"
-        if [[ $complete == 305 ]]; then
+        if nice -n19 ionice -c3 python3 "$here/e33_launch.py" harvest-cycle --packet "$packet" --packet-sha "$pin" --queue "$queue" "${status_args[@]}"; then
             echo "E34 ALL305 REGISTERED CELLS VERIFIED AND INSTALLED $(date -u +%FT%TZ)"
             exit 0
+        else
+            rc=$?
+            echo "$(date -u +%FT%TZ) E34 supervised cycle rc=$rc (3=progress,4=jobset errors); retrying in60s"
+            if [[ $rc != 3 && $rc != 4 && -n ${E34_STATUS_FILE:-} ]]; then
+                printf '\n%s — HARVEST SUPERVISOR cycle failed rc=%s; see %s; retry in60s\n' "$(date -u +%FT%TZ)" "$rc" "$log" >> "$E34_STATUS_FILE"
+            fi
         fi
-        echo "E34 installed $complete/305; conditional branches remain held until registered pilot selection"
         sleep 60
     done
 fi

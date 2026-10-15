@@ -1242,6 +1242,13 @@ e34-launch-backup:
 e34-launch-pilot partial="--partial":
     ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/rev4_featpot/e33_launch.py lambda-pilot --packet /mnt/v/output/zensim/e34-launch-2026-10-15/packet --packet-sha f21735ca6402126133eff241464f5f2ab1dfbe0c73c0a910b513d1a941358d31 --instrument /mnt/v/output/zensim/e34-launch-2026-10-15/bin/dev96-instrument-83b13003 {{partial}}
 
+# Run in the existing visible harvest tab; status path is supplied explicitly by the operator.
+e34-harvest-supervised status:
+    E34_STATUS_FILE={{quote(status)}} ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- bash scripts/rev4_featpot/e33_harvest_chain.sh /mnt/v/output/zensim/e34-launch-2026-10-15/packet f21735ca6402126133eff241464f5f2ab1dfbe0c73c0a910b513d1a941358d31 /var/tmp/fitv2/e34_queue
+
+e34-harvest-tests:
+    PYTHONPATH=scripts:scripts/rev4_featpot:scripts/tests python3 -m unittest scripts.tests.test_e33_launch
+
 # Reproduce the E34 CI failures on a chosen source revision.
 cifix-e34-targets:
     cargo test -p zensim -p zensim-validate --no-fail-fast --test featcanon_rev4_contract --test featcanon_tier_parity --test palette_legacy_vectors --test bake_surface -- --nocapture
