@@ -144,7 +144,12 @@ fn transform(
             } else {
                 v
             };
-            let inside = p.len() < 2 || (v > lo && v < hi);
+            let inside = if tf == WinsorP99 || p.len() >= 2 {
+                v > lo && v < hi
+            } else {
+                // Stacked transforms ignore incomplete clamp parameters.
+                true
+            };
             let (value, slope) = match tf {
                 WinsorThenLog => (bounded.ln(), 1. / bounded),
                 WinsorThenLog1p => (bounded.ln_1p(), 1. / (1. + bounded)),

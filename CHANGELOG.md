@@ -25,6 +25,8 @@
 
 ### Fixed
 
+- Exact WinsorP99 gradients respect a single supplied lower bound and the existing zero-gradient clamp-boundary convention; forward scores and stacked-transform fallbacks are unchanged.
+
 - Exact feature gradients accept identity models with appended constant size axes and return errors for short inputs, preserving forward scores.
 
 - Browser WASM releases large streaming buffers without spawning unsupported native threads; Rayon metric computation is retained.

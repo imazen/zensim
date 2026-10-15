@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-15 — a lower-only WinsorP99 clamp kept a nonzero exact derivative in its flat region. FIXED in E34 fix 1.** The loaded one-bound metadata reproduced score 2 at −0.01/0/+0.01 but gradient 2 at zero. Activity now uses the actual default/supplied bounds; flat regions and clamp boundaries return zero. Public tests cover zero/one/two bounds and retain stacked WinsorThen transforms’ incomplete-parameter fallback. Forward score arithmetic is unchanged.
+
 * **2026-10-15 — exact-gradient identity size axes indexed past feature roots. FIXED in E34 fix 1.** The public 5-input bake with one supplied feature and four implicit size axes reproduced a panic. Identity inputs now use the forward owner’s exact/prefix/+4 shape rules before any gather; dense/derived gathers check root bounds. Public regressions preserve scores 28/28/30 and verify gradients, zero prefix-tail sensitivity and rejected short inputs.
 
 * **2026-10-15 — D12 dispatch test raced unrelated pixel tests. FIXED locally.** The new storage/dispatch test changed process-wide token overrides while a prepared-session test compared two pixel extractions. The unchanged pixel assertion failed in the parallel suite. The override test now uses the existing separate-process helper; the same prepared-session assertions pass.
