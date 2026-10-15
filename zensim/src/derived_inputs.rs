@@ -274,6 +274,7 @@ mod tests {
         zenpredict_bake::bake_from_json_str(&recipe.to_string()).expect("bake the recipe")
     }
 
+    #[cfg(feature = "feature-regime-v2")]
     const FX: &str = "zensim-derived-inputs v1\nin 13\nin 401\nproduct 13 422\nproduct 401 422\n";
 
     // Serving a derived bake needs the feature planner: without

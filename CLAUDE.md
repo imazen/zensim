@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-15 — minimal-feature CI compiled v2-only accumulator helpers. FIXED in CIFIX E34.** The no-default-features Clippy invocation reproduced eight dead-code errors on both `a2012f53` and current main. Internal accumulators and the oracle measurement setter now compile with their callers; the legacy reduction also remains available to oracle-only builds. The v2-only derived-input test fixture follows its tests' feature gate. No score arithmetic or test expectation changes. Reproduction: `just cifix-e34-minimal`.
+
 * **2026-10-15 — E34 freeze amendment omitted the approved secondary-seed floor. FIXED in E34 fix 1.** The draft retained revision 4’s control-only seed wording. Revision 5 now explicitly requires seed 0 at 135/135 and seeds 1 and 2 each at `max(paired control count, 133)`, marks the historical wording as superseded, and preserved the then-open D13 state. The owner subsequently chose margin 0.0065 for both families (2026-10-15 08:42 MDT); the frozen record and statistics owner bind that decision. No qualification used the weaker draft rule.
 
 * **2026-10-15 — a lower-only WinsorP99 clamp kept a nonzero exact derivative in its flat region. FIXED in E34 fix 1.** The loaded one-bound metadata reproduced score 2 at −0.01/0/+0.01 but gradient 2 at zero. Activity now uses the actual default/supplied bounds; flat regions and clamp boundaries return zero. Public tests cover zero/one/two bounds and retain stacked WinsorThen transforms’ incomplete-parameter fallback. Forward score arithmetic is unchanged.

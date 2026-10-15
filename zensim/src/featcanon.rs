@@ -137,6 +137,7 @@ pub(crate) fn mode(revision: FormulaRevision) -> Mode {
 /// revisions coincide exactly when either is Rev4; below Rev4 `mode` is
 /// `Off` regardless. The refusal is enforced at the walk's own entry
 /// (`validate_wide_revision`) before any leaf runs.
+#[cfg(feature = "feature-regime-v2")]
 #[inline]
 pub(crate) fn compute_mode() -> Mode {
     mode(crate::ssim_form::active_revision())
@@ -189,7 +190,7 @@ fn blur_cell() -> &'static std::sync::RwLock<Option<BlurMode>> {
 /// blur axis) in-process so a zenbench group can interleave candidates
 /// instead of paying a process restart per mode. `None` restores "env
 /// unset". Measurement-only: exists solely under `oracle`.
-#[cfg(feature = "oracle")]
+#[cfg(all(feature = "oracle", feature = "feature-regime-v2"))]
 pub(crate) fn bench_set_measurement(mode: Option<Mode>, blur: Option<BlurMode>) {
     *override_cell().write().unwrap_or_else(|e| e.into_inner()) = mode;
     if let Some(b) = blur {
@@ -374,6 +375,7 @@ pub(crate) fn tap_mirror(j: isize, n: usize) -> usize {
 /// Owned here, not in `feature_v2` (which re-exports it for the era-2 dense
 /// kernel), because the canonical leaves compile in every build and
 /// `feature_v2` exists only with `feature-regime-v2`.
+#[cfg(any(feature = "feature-regime-v2", feature = "oracle"))]
 #[inline(always)]
 pub(crate) fn era2_reduce8(a: [f32; 8]) -> f64 {
     (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) as f64
@@ -690,6 +692,7 @@ impl Pool for f64 {
 /// sequential form since f32 lanes would change the ELEMENT precision, not
 /// just the accumulation order (that would conflate the two axes the lane
 /// exists to separate).
+#[cfg(feature = "feature-regime-v2")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SumVar {
     /// Sequential f64 — production accumulation.
@@ -706,6 +709,7 @@ pub(crate) enum SumVar {
     Neum(Neum64),
 }
 
+#[cfg(feature = "feature-regime-v2")]
 impl SumVar {
     /// Variant for kernels whose summed terms are f32-representable —
     /// the `c32` arm; under the `c64` canon f32-element pools ride the same
@@ -815,6 +819,7 @@ impl SumVar {
 /// pairwise Chan-merged), `neum`/`exact` the compensated form.
 ///
 /// rev4canon: `Lanes` is the Rev4 canon; `Neum` stays measurement-only.
+#[cfg(feature = "feature-regime-v2")]
 #[derive(Clone, Copy)]
 pub(crate) enum WelfordVar {
     /// Production: sequential Welford in f64.
@@ -827,6 +832,7 @@ pub(crate) enum WelfordVar {
 }
 
 /// Plain f64 Welford triple — the production cell shape.
+#[cfg(feature = "feature-regime-v2")]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct WelfordCell {
     pub(crate) n: u64,
@@ -834,6 +840,7 @@ pub(crate) struct WelfordCell {
     pub(crate) m2: f64,
 }
 
+#[cfg(feature = "feature-regime-v2")]
 impl WelfordCell {
     /// One sample. `recip_n1` is `1.0 / (n + 1)` — precomputed by callers
     /// that fold a whole row (the mapdev idiom); `0` here means "compute".
@@ -862,6 +869,7 @@ impl WelfordCell {
     }
 }
 
+#[cfg(feature = "feature-regime-v2")]
 impl WelfordVar {
     pub(crate) fn for_mode(mode: Mode) -> Self {
         match mode {

@@ -1241,3 +1241,23 @@ e34-launch-backup:
 # Registered label-free dev96 only; explicit partial mode never releases K early.
 e34-launch-pilot partial="--partial":
     ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/rev4_featpot/e33_launch.py lambda-pilot --packet /mnt/v/output/zensim/e34-launch-2026-10-15/packet --packet-sha f21735ca6402126133eff241464f5f2ab1dfbe0c73c0a910b513d1a941358d31 --instrument /mnt/v/output/zensim/e34-launch-2026-10-15/bin/dev96-instrument-83b13003 {{partial}}
+
+# Reproduce the E34 CI failures on a chosen source revision.
+cifix-e34-targets:
+    cargo test -p zensim -p zensim-validate --no-fail-fast --test featcanon_rev4_contract --test featcanon_tier_parity --test palette_legacy_vectors --test bake_surface -- --nocapture
+
+# The minimal build must not compile accumulators whose only callers are v2.
+cifix-e34-minimal:
+    cargo clippy -p zensim --no-default-features --lib -- -D warnings
+    cargo clippy -p zensim --no-default-features --features oracle --lib -- -D warnings
+    cargo test -p zensim --no-default-features --lib -- --nocapture
+
+# Panic messages in these controls are expected refusals, not failures.
+cifix-e34-refusals:
+    cargo test -p zensim-validate --lib -- strategy_knobs_fail_loud_when_unreachable e34_k_refuses_incomplete_or_incompatible_options --nocapture
+    cargo test -p zensim-validate --bin zensim_mlp_train capability_preflight_tests::gpu_refuses_unimplemented_recipes_before_opening_data -- --nocapture
+    cargo test -p zensim-validate --test nonneg_distance unrepresentable_leaky_alpha_fails_loud -- --nocapture
+
+# Isolate the real-bake attribution/session contract without filtering a pass.
+cifix-e34-attribution:
+    cargo test -p zensim-validate --test bake_surface candidate_attribution_matches_served_features_scores_and_reuses_sessions -- --nocapture
