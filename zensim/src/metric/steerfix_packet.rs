@@ -367,3 +367,65 @@ fn e34_linear_fixture() {
     assert!(coefficients.iter().any(|&c| c > 0.0));
     std::fs::write(output, blob).unwrap();
 }
+
+#[test]
+fn e34_linear_model_contract() {
+    let path = std::env::var("E34_LINEAR_MODEL_CONTRACT").expect("explicit model-contract job");
+    let job: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let blob = std::fs::read(job["model"].as_str().unwrap()).unwrap();
+    assert_eq!(sha(&blob), job["model_sha256"].as_str().unwrap());
+    let model = crate::mlp::Model::from_bytes(&blob).unwrap();
+    let width = crate::feature_layout::declared_ids(&model)
+        .unwrap()
+        .iter_slots()
+        .max()
+        .unwrap()
+        + 1;
+    let c = linear_coefficients(&model, width);
+    assert!(matches!(
+        model.layer(0).weights,
+        zenpredict::WeightStorage::F16(_)
+    ));
+    assert!(matches!(
+        model.layer(1).weights,
+        zenpredict::WeightStorage::F32(_)
+    ));
+    assert!(
+        model
+            .scaler_scale()
+            .iter()
+            .all(|&s| s >= 1e-8 && s.is_finite())
+    );
+    assert!(
+        model
+            .metadata()
+            .get("zentrain.feature_transforms")
+            .is_none()
+    );
+    assert!(model.metadata().get("zensim.derived_inputs").is_none());
+    let zeros = vec![0.0; width];
+    let raw = owner(&model, Objective::PreFloor)
+        .score_features(&zeros, 256, 256, None)
+        .unwrap();
+    let served = owner(&model, Objective::Served)
+        .score_features(&zeros, 256, 256, None)
+        .unwrap();
+    assert_eq!(raw.to_bits(), 100.0_f64.to_bits());
+    assert_eq!(served.to_bits(), 100.0_f64.to_bits());
+    let report = json!({"model_sha256":sha(&blob),"input_width":model.layer(0).in_dim,
+        "hidden_width":1,"output_width":1,"first_dtype":"f16","last_dtype":"f32",
+        "nonzero_coefficients":c.iter().filter(|&&x| x>0.0).count(),
+        "coefficient_min":c.iter().copied().fold(f64::INFINITY,f64::min),
+        "coefficient_max":c.iter().copied().fold(f64::NEG_INFINITY,f64::max),
+        "scaler_mean_zero":true,"scaler_scale_min":model.scaler_scale().iter().copied().fold(f32::INFINITY,f32::min),
+        "hidden_bias_zero":true,"raw_zero_bits":raw.to_bits(),"served_zero_bits":served.to_bits(),
+        "feature_transforms":false,"derived_inputs":false});
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(job["output"].as_str().unwrap())
+        .unwrap()
+        .write_all(&serde_json::to_vec_pretty(&report).unwrap())
+        .unwrap();
+}

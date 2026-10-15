@@ -1,0 +1,334 @@
+{
+  "model_contract": {
+    "coefficient_max": 153.0334006515481,
+    "coefficient_min": 0.0,
+    "derived_inputs": false,
+    "feature_transforms": false,
+    "first_dtype": "f16",
+    "hidden_bias_zero": true,
+    "hidden_width": 1,
+    "input_width": 397,
+    "last_dtype": "f32",
+    "model_sha256": "8ed80a9934573271bdf078f097aa73f890127c73bbda46a8be1e55aff9f4e70d",
+    "nonzero_coefficients": 397,
+    "output_width": 1,
+    "raw_zero_bits": 4636737291354636288,
+    "scaler_mean_zero": true,
+    "scaler_scale_min": 0.0008225850760936737,
+    "served_zero_bits": 4636737291354636288
+  },
+  "identity": {
+    "candidates": [
+      {
+        "path": "/mnt/v/output/zensim/e34-prep-2026-10-15/part3/l-gates/packed/refit/production-f16.bin",
+        "sha256": "8ed80a9934573271bdf078f097aa73f890127c73bbda46a8be1e55aff9f4e70d"
+      }
+    ],
+    "fx1_sha256": "a97a5fa63937ed8fade3c56fd7470765a031d1d309afc36e631f371a1796e648",
+    "permutations": [
+      "all enabled",
+      "x86-64-v4x disabled",
+      "x86-64-v3 Crypto, x86-64-v4x disabled",
+      "AVX-512, x86-64-v4x disabled",
+      "x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+      "x86-64 Crypto, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+      "x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+      "x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+      "x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+      "x86-64-v1, x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled"
+    ],
+    "production_model_sha256": "f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400",
+    "rows": 620,
+    "sources": 62,
+    "sources_sha256": "c15211539fc36f783ff351c23073df78d3cc172a53221def27834a7585891d88",
+    "summary": true
+  },
+  "served_identity": {
+    "rows": 62,
+    "exact_100": true
+  },
+  "native_serving": {
+    "schema": 2,
+    "scope": "one E34 L first-epoch smoke; label-free synthetic SDR only",
+    "geometries": [
+      [
+        64,
+        64
+      ],
+      [
+        97,
+        63
+      ],
+      [
+        131,
+        65
+      ],
+      [
+        255,
+        129
+      ]
+    ],
+    "dropped_bits": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "seeds": [
+      {
+        "seed": 0,
+        "caller_width": 397,
+        "declared_reads": 397,
+        "pairs_per_permutation": 28,
+        "permutations": [
+          "all enabled",
+          "x86-64-v4x disabled",
+          "x86-64-v3 Crypto, x86-64-v4x disabled",
+          "AVX-512, x86-64-v4x disabled",
+          "x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+          "x86-64 Crypto, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+          "x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+          "x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+          "x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled",
+          "x86-64-v1, x86-64-v2, x86-64 Crypto, x86-64-v3, x86-64-v3 Crypto, AVX-512, x86-64-v4x disabled"
+        ],
+        "finite": true,
+        "pixel_cache_mismatches": 0,
+        "pixel_identity_aware_feature_mismatches": 0,
+        "consumed_feature_mismatches": 0,
+        "cached_feature_mismatches": 0,
+        "native_tier_row_mismatches": 0,
+        "wasm_row_mismatches": null,
+        "wasm_finite": null,
+        "wasm_consumed_feature_mismatches": null,
+        "wasm_cached_feature_mismatches": null,
+        "pixel_identity_exact_100": true,
+        "feature_identity_scores": [
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        "feature_identity_band_97_5_to_100": true,
+        "no_distortion_above_identity": true,
+        "ladders_report_only": [
+          {
+            "width": 64,
+            "height": 64,
+            "scores": [
+              100.0,
+              98.43575037249843,
+              95.87550937811791,
+              91.99237523472439,
+              86.09205273022334,
+              74.00656870241322,
+              52.18114001015023
+            ],
+            "nonincreasing": true
+          },
+          {
+            "width": 97,
+            "height": 63,
+            "scores": [
+              100.0,
+              98.39117224485105,
+              95.79478669337803,
+              91.78189177199151,
+              85.97256434925934,
+              74.31216148320631,
+              52.23286179663381
+            ],
+            "nonincreasing": true
+          },
+          {
+            "width": 131,
+            "height": 65,
+            "scores": [
+              100.0,
+              98.45356292781281,
+              95.79405912401151,
+              91.8499719570376,
+              86.21839973799064,
+              74.35461533548418,
+              53.47251350172296
+            ],
+            "nonincreasing": true
+          },
+          {
+            "width": 255,
+            "height": 129,
+            "scores": [
+              100.0,
+              98.4254532477036,
+              95.6750387265337,
+              91.7404071944978,
+              86.1718669133622,
+              73.977037755636,
+              53.463318584212146
+            ],
+            "nonincreasing": true
+          }
+        ]
+      }
+    ]
+  },
+  "nearid": {
+    "rows": 648,
+    "N1": {
+      "rule": "both one-pixel rungs >= 99.0 on all 24 references",
+      "pass": true,
+      "failing": [],
+      "one_pixel_score_range": [
+        99.92411696089586,
+        99.99720044004218
+      ]
+    },
+    "N2": {
+      "rule": "highest nonidentical served score >= 99.0 on every reference",
+      "pass": true,
+      "failing": [],
+      "highest_nonidentical_range": [
+        99.92442860899182,
+        99.99720044004218
+      ]
+    },
+    "N3": {
+      "rule": "nonincreasing ladders >= 122 of 144",
+      "pass": true,
+      "monotone_ladders": 139,
+      "total_ladders": 144
+    }
+  },
+  "verdicts": {
+    "standard": {
+      "checks": {
+        "C1": {
+          "measured": 0.9972209356183418,
+          "state": "pass",
+          "bar": 0.93
+        },
+        "C2": {
+          "measured": 0.0,
+          "state": "pass",
+          "bar": 0.05
+        },
+        "C3": {
+          "measured": 0.726,
+          "state": "pass",
+          "bar": 0.0
+        },
+        "C4": {
+          "measured": -266.92637634277344,
+          "state": "pass",
+          "bar": 0.0
+        },
+        "C5": {
+          "measured": 0.0,
+          "state": "pass",
+          "bar": 0.0
+        },
+        "C6": {
+          "measured": 0.0,
+          "state": "pass",
+          "bar": 0.0
+        }
+      },
+      "g_dial": {
+        "p5": 16.899901465258946,
+        "p95": 97.41929707149949,
+        "mono": 0.9972209356183418,
+        "pass": true
+      }
+    },
+    "ladder": {
+      "checks": {
+        "C1": {
+          "measured": 0.9914993093188822,
+          "state": "pass",
+          "bar": 0.93
+        },
+        "C2": {
+          "measured": 0.0,
+          "state": "pass",
+          "bar": 0.05
+        },
+        "C3": {
+          "measured": 0.726,
+          "state": "pass",
+          "bar": 0.0
+        },
+        "C4": {
+          "measured": -266.92637634277344,
+          "state": "pass",
+          "bar": 0.0
+        },
+        "C5": {
+          "measured": 0.0,
+          "state": "pass",
+          "bar": 0.0
+        },
+        "C6": {
+          "measured": 0.0,
+          "state": "pass",
+          "bar": 0.0
+        }
+      },
+      "g_dial": {
+        "p5": -5.344728227248482,
+        "p95": 94.57958650940446,
+        "mono": 0.9914993093188822,
+        "pass": true
+      }
+    }
+  },
+  "packing": {
+    "K1_K3": "PASS",
+    "x_floor": -276.4985,
+    "floor_score": -266.9264,
+    "calibration_rows_at_floor": 0
+  },
+  "model_sha256": "8ed80a9934573271bdf078f097aa73f890127c73bbda46a8be1e55aff9f4e70d",
+  "binaries": {
+    "serve_custom_bake": "ff0b4d08334937c1c6cf139b970ba87b8f0dcb8f7c40fe47dce783cf1b9f2133",
+    "bake_verdict": "b3312ed16b039ddd87e95fca55f884204018347d18890bddfcd5f11c716af072",
+    "steer_instrument": "f2a199bfaea7a3c48e59808c1fb7797879c2bd89906376070fa955f86188d0f3"
+  },
+  "steering": {
+    "cases": 135,
+    "passed": 134,
+    "failures": [
+      {
+        "key": "broad-199-b64",
+        "block": 64,
+        "m2": 0.9860139860139792,
+        "m3f": 0.9790209790209722
+      }
+    ],
+    "independent_sensitivities_exact": true,
+    "feature_comparisons": 14454180,
+    "feature_disagreements": 0
+  },
+  "unmeasured": [
+    "full K4 populations",
+    "ARM",
+    "WASM",
+    "runtime guard",
+    "worker image/jobset"
+  ],
+  "scope": "local first-epoch smoke, not a full fit or release qualification",
+  "source_root": "/mnt/v/output/zensim/e34-prep-2026-10-15/part3/l-gates",
+  "artifact_sha256": {
+    "prodqual.json": "3d205b97c4711f6df1b516892a9f518f6d45a7a3d37b11aa4b0510f44871ef3a",
+    "identity-s0.jsonl": "cd2d20caae15d656c3c4e98e9230301e80e1707d4c810b6d1c70f9c7b3c91c96",
+    "served-identity.tsv": "cfc6302f5794c23fc1ff20276d10c64d9ffe3f56ccfb2df433c5de13f107a071",
+    "nearid-s0/candidate-l.GATES.json": "148cbcd26833a748623e000d8242ada9434c5bd48ca801ea97d12225b143c287",
+    "verdict-s0-l/standard/gaddr.json": "47f92f2407a28b5683a1108ea5db073a3ddef6f8c69de4e76e05657556e47245",
+    "verdict-s0-l/ladder/gaddr.json": "8002d203805abaef30ec3df2a746067ebedb5076b56bfccece133a0a73b622da",
+    "packing.json": "9ea96b88a89f5846529fa67f0ca9a247b9a5aec773e3277aed662970afae4cfe",
+    "model-contract.json": "418f20dd51c50765208ec38192ea1192448617f7a0b1894bcd45a6c87f0bbd5a",
+    "steer-s0-l.json": "5afffb5174ff2a0cf6cedadd1d847f0707b493fac01a09c92cdb2b1603adabab"
+  }
+}

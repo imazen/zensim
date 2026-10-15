@@ -1949,3 +1949,18 @@ No human targets, predictions or held-out labels are decoded by this inventory.
 The separately approved E33 noise read remains pending; this entry does not
 consume that read. Generated receipts live under
 `/mnt/v/output/zensim/e34-prep-2026-10-15/` and are not yet an admission decision.
+
+### E34 part 3: bounded TRAIN smokes and label-free L serving (2026-10-15)
+
+The part-3 preparation instruction authorizes one local smoke each for base A/C,
+W A/C and L A through the existing strict TRAIN fit owner and its admitted
+TRAIN development legs. Each uses the existing local-smoke budget: one epoch,
+49,999 rank pairs, seed index 0. L's packing uses only the admitted CID22 TRAIN
+calibration table. No E21 assessment or stored prediction read occurs.
+
+The packed L smoke is checked on the already-exposed 62 identity references,
+24-source NEARID packet, standard/ladder/negative-tail engineering grids,
+synthetic served-path probes and the registered 135 steering cases. P2 uses
+those same steering pixels with the diagnostic raw objective. This does not
+start P4, consume the noise read, or authorize a full fit. Receipts are under
+`/mnt/v/output/zensim/e34-prep-2026-10-15/part3/`.

@@ -924,3 +924,26 @@ e34-serving-build:
 # Run each arm separately under run-heavy so it has its own resource receipt.
 e34-first-epoch arm:
     python3 scripts/rev4_featpot/e34_smoke.py --arm {{arm}} --root /mnt/v/output/zensim/e33-impl-2026-10-09/packet/container-scratch-1/fit-cell/9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008/rev4-featpot/v2e29 --dest /mnt/v/output/zensim/e34-prep-2026-10-15/part3/smokes/{{arm}} --bin-dir {{justfile_directory()}}/target/debug
+
+e34-l-gate mode:
+    REV4_V2_BIN_DIR={{justfile_directory()}}/target/debug ZENSIM_FORMULA_REV=5 RAYON_NUM_THREADS=1 python3 scripts/rev4_featpot/e34_l_gates.py {{mode}} --smoke /mnt/v/output/zensim/e34-prep-2026-10-15/part3/smokes/l-a --out /mnt/v/output/zensim/e34-prep-2026-10-15/part3/l-gates --root /mnt/v/output/zensim/e33-impl-2026-10-09/packet/container-scratch-1/fit-cell/9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008/rev4-featpot/v2e29 --bin-dir {{justfile_directory()}}/target/debug
+
+e34-e5-cli-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -p zensim-validate --bin zensim_mlp_train
+    log="$HOME/tmp/e34prep/p3-e5-cli-refusal.log"
+    if target/debug/zensim_mlp_train --group "unused:$HOME/tmp/e34prep/e5-must-not-be-read.parquet:1:0:withinref,rank" --nonneg-distance --monotone-cbc --hidden 1 --feature-transform identity:13 --out "$HOME/tmp/e34prep/e5-must-not-exist.bin" > "$log" 2>&1; then
+        exit 1
+    fi
+    rg -q 'plain monotone N refuses feature transforms' "$log"
+    test ! -e "$HOME/tmp/e34prep/e5-must-not-exist.bin"
+
+e34-l-model-contract:
+    ZENSIM_FORMULA_REV=5 E34_LINEAR_MODEL_CONTRACT=/mnt/v/output/zensim/e34-prep-2026-10-15/part3/l-gates/model-contract-job.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::e34_linear_model_contract --exact --nocapture
+
+e34-l-p2:
+    ZENSIM_FORMULA_REV=5 ZENSIM_NEIGHBOUR_EXACT=1 RAYON_NUM_THREADS=1 STEERFIX_PACKET=/mnt/v/output/zensim/e34-prep-2026-10-15/part3/p2-l-packet.json target/debug/deps/zensim-6fc55070ad1b5213 metric::bake::steerfix_packet::engineering_packet --exact --nocapture
+
+e34-part3-receipt mode root output:
+    python3 scripts/rev4_featpot/e34_part3_receipts.py {{mode}} --root {{root}} --output {{output}}
