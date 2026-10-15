@@ -1974,3 +1974,29 @@ and analytic loaded-network gradients. No labels, model choice, fitting,
 threshold change or replacement of registered results is authorized. Stored
 engineering results are read only as replay oracles; all new results go under
 `/mnt/v/output/zensim/e34-prep-2026-10-15/part4/`.
+
+### E34 part 5: one-time E33 noise read (authorized before read, 2026-10-15)
+
+The owner-approved part-5 brief authorizes one logged capture of E33's stored
+E21 predictions after P7 seed-unit parity. The Python reference and the Rust
+owner reproduce the pinned E33 summary (maximum difference 8.88e-16).
+The capture admits exactly A, C and control, seeds 0–9, on E33's four complete
+withheld-fold panels: KADID TRAIN+SELECT (7,869), TID2013 (3,000), KonFiG
+(756), CID22-A(25) (2,192). It reads the 120 stored prediction TSVs and the
+matching four already-exposed `human_score` columns, with label-free keys
+for reference identity. KonFiG parta/partb views share seven picture IDs.
+No raw forced-choice data or other label population is admitted.
+
+The Rust owner reports the two-way reference × seed SE, reference-only SE,
+E33 seed-unit SE and Q9 arithmetic under the fixed 0.002 margin. This is
+pre-freeze noise characterization, with no model choice or Holm/adoption
+verdict. An exclusive started marker precedes payload access. Original
+prediction payloads are captured once; subsequent computation uses the
+hash-bound captured panel. Receipts live under
+`/mnt/v/output/zensim/e34-prep-2026-10-15/part5/noise-*`.
+
+Owner D11 (2026-10-15) excludes origins 1444 and 1458 from E34 augmentation
+and development selection: DNG sources without official SDR renditions.
+Compatibility thumbnails are not substitutes. P4 starts from the remaining
+1,016 dual-TRAIN origins, then applies all registered contextual/family and
+dHash exclusions. This authorizes pixels/features only, never new labels.
