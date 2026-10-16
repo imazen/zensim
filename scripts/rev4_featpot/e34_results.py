@@ -6,6 +6,7 @@ thresholds and the sequential verdict are exactly the frozen registration.
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import struct
@@ -32,6 +33,32 @@ def write(path, value):
     with Path(path).open('x') as f:
         json.dump(value, f, indent=2, allow_nan=False)
         f.write('\n')
+
+
+def validate_statistical_reports(stats):
+    """A complete decision never substitutes for an undefined required report."""
+    def finite(value):
+        return type(value) in (int, float) and math.isfinite(value)
+
+    for test in stats['tests']:
+        name = f'test {test["test"]}'
+        for label, record in [('seed-unit', test['seed_unit']),
+                              ('W2 seed-unit', test['w2']['seed_unit'])]:
+            assert all(finite(record.get(k)) for k in ['delta', 'se']), (
+                f'{name}: registered {label} report undefined; stop without substitution')
+            assert record['n'] == 10
+        intervals = [test['theta'], test['reference_only'], test['w2']['interval']]
+        intervals += [r['interval'] for r in test['dataset_guards']]
+        for row in test['pair_classes'] or []:
+            assert finite(row['seed_unit_se']), f'{name}: pair-class seed SE undefined'
+            intervals.append(row['interval'])
+        for interval in intervals:
+            assert all(finite(interval.get(k)) for k in ['estimate', 'lo', 'hi', 'se']), (
+                f'{name}: registered report interval undefined; stop without substitution')
+            assert interval['n_finite'] > 0
+            student = interval['student_interval']
+            assert student is not None and len(student) == 2 and all(map(finite, student)), (
+                f'{name}: registered Student interval undefined; stop without substitution')
 
 
 def penalties():
@@ -125,6 +152,7 @@ def build():
     assert stats['input_sha256'] == binding['input_sha256'] == sha(ROOT / 'panel-input.json')
     assert sha(binding['panel']) == binding['panel_sha256']
     assert all(t['state']=='COMPLETE' for t in stats['tests']), 'registered hypothesis incomplete'
+    validate_statistical_reports(stats)
     report = read(ROOT / 'reports.json')
     assert report['input_sha256'] == sha(ROOT / 'report-input.json')
     models = read(ROOT / 'full-models.json')

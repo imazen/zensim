@@ -1299,6 +1299,10 @@ e34-eval-check:
     python3 -m py_compile scripts/rev4_featpot/e34_evaluate.py scripts/rev4_featpot/e34_fleet.py scripts/rev4_featpot/e34_runtime.py scripts/rev4_featpot/e34_results.py scripts/rev4_featpot/e33_gates.py
     python3 scripts/tests/test_e34_verdict.py
     python3 scripts/tests/test_e34_fleet.py
+    python3 scripts/tests/test_e34_results.py
+
+e34-eval-results-tests:
+    python3 scripts/tests/test_e34_results.py
 
 e34-eval-pack-check:
     ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/panel-reports e34 pack-check --input /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/full-models.json --output /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/pack-checks.json
