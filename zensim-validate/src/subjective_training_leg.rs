@@ -1,0 +1,335 @@
+//! Private binary module: receipt-bound unnamed subjective ingress.
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use zensim_validate::{mlp_train::GroupLossMode, train_manifest};
+
+type Group = (String, PathBuf, f64, f64, bool, GroupLossMode);
+
+fn safe(path: &Path) -> Result<(), String> {
+    super::group_admission::safe(path)
+}
+fn hash(path: &Path) -> Result<String, String> {
+    safe(path)?;
+    train_manifest::sha256_file(path).map_err(|e| e.to_string())
+}
+fn json(path: &Path, pin: &str) -> Result<Value, String> {
+    if pin.len() != 64
+        || !pin
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err("independently pinned subjective authority required".into());
+    }
+    if hash(path)? != pin {
+        return Err("subjective metadata/key pin changed".into());
+    }
+    serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+fn string<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> {
+    v[key]
+        .as_str()
+        .ok_or_else(|| format!("subjective {key} required"))
+}
+
+pub(super) fn admit(
+    authority_path: &Path,
+    authority_pin: &str,
+    cell: &str,
+    groups: &[Group],
+    selected: &[usize],
+) -> Result<BTreeMap<String, Value>, String> {
+    let a = json(authority_path, authority_pin)?;
+    if a["schema"] != "subjective-training-authority-v1"
+        || a["state"] != "approved"
+        || a["artifact_visibility"] != "private"
+        || a["selection"] != "fixed-final-epoch"
+    {
+        return Err("subjective authority not admitted".into());
+    }
+    let c = &a["cells"][cell];
+    let ids: Vec<usize> =
+        serde_json::from_value(c["feature_ids"].clone()).map_err(|e| e.to_string())?;
+    if ids != selected || c["formula_revision"] != 5 || c["tier"] != "v3" {
+        return Err("subjective feature/producer contract differs".into());
+    }
+    let records = c["groups"]
+        .as_array()
+        .ok_or("subjective group inventory required")?;
+    let names: BTreeSet<_> = groups.iter().map(|g| g.0.as_str()).collect();
+    let expected: BTreeSet<_> = records
+        .iter()
+        .map(|r| string(r, "name"))
+        .collect::<Result<_, _>>()?;
+    if names != expected || groups.len() != names.len() || records.len() != names.len() {
+        return Err("complete unique cell group inventory required".into());
+    }
+    let mut pending = Vec::new();
+    for g in groups {
+        let r = records.iter().find(|r| r["name"] == g.0).unwrap();
+        let path = PathBuf::from(string(r, "path")?);
+        safe(&path)?;
+        safe(&g.1)?;
+        let resolved = |p: &Path| p.canonicalize().map_err(|e| e.to_string());
+        if resolved(&path)? != resolved(&g.1)?
+            || !g.2.is_finite()
+            || !g.3.is_finite()
+            || r["train_weight"].as_f64() != Some(g.2)
+            || r["val_weight"].as_f64() != Some(g.3)
+        {
+            return Err("subjective cell group path/weight mismatch".into());
+        }
+        let mode = if g.4 { "withinref," } else { "" }.to_string()
+            + match g.5 {
+                GroupLossMode::Rank => "rank",
+                GroupLossMode::Both => "both",
+                GroupLossMode::Mse => "mse",
+            };
+        if r["mode"] != mode {
+            return Err("subjective cell loss mode mismatch".into());
+        }
+        let manifest = PathBuf::from(format!("{}.manifest.json", g.1.display()));
+        safe(&manifest)?;
+        safe(Path::new(string(r, "keys_path")?))?;
+        pending.push((r, manifest));
+    }
+    let declarations: Vec<_> = pending
+        .iter()
+        .map(|(r, p)| Ok((*r, json(p, string(r, "manifest_sha256")?)?)))
+        .collect::<Result<_, String>>()?;
+    let mut admitted = BTreeMap::new();
+    for (r, d) in &declarations {
+        if r["subjective"] != true {
+            continue;
+        }
+        if d["schema"] != "subjective-training-leg-v1"
+            || d["loss"] != "within-source-rank"
+            || d["nominal_weight"] != 8
+            || d["target_orientation"] != "quality"
+            || d["target_transform"] != "negate-pointwise"
+            || d["target_column"] != "human_score"
+            || d["selection"] != "fixed-final-epoch"
+            || d["formula_revision"] != 5
+            || d["tier"] != "v3"
+            || d["feature_ids"] != c["feature_ids"]
+            || d["producer_commit"] != c["producer_commit"]
+            || r["mode"] != "withinref,rank"
+            || r["val_weight"].as_f64() != Some(0.)
+            || r["train_weight"].as_f64().is_none_or(|v| v <= 0.)
+            || d["table_sha256"] != r["table_sha256"]
+        {
+            return Err("subjective role/loss/producer/target binding differs".into());
+        }
+        admitted.insert(string(r, "name")?.to_owned(), d.clone());
+    }
+    if admitted.len() != 1 {
+        return Err("authority requires one aggregated unnamed subjective leg".into());
+    }
+    for (r, d) in &declarations {
+        if r["subjective"] != true {
+            continue;
+        }
+        let keys = json(
+            Path::new(string(r, "keys_path")?),
+            string(r, "keys_sha256")?,
+        )?;
+        let keys = keys.as_array().ok_or("subjective ordered keys required")?;
+        if keys.is_empty()
+            || r["rows"].as_u64() != Some(keys.len() as u64)
+            || d["rows"] != r["rows"]
+        {
+            return Err("subjective ordered key count differs".into());
+        }
+        let sources = c["sources"]
+            .as_array()
+            .ok_or("subjective source inventory required")?;
+        let excluded = c["excluded_families"]
+            .as_array()
+            .ok_or("subjective exclusions required")?;
+        let mut observations = BTreeSet::new();
+        let mut counts = BTreeMap::<&str, usize>::new();
+        let mut references = BTreeMap::new();
+        let allowed: BTreeSet<_> = [
+            "observation",
+            "source",
+            "family",
+            "reference",
+            "role",
+            "tier",
+            "row",
+        ]
+        .into_iter()
+        .collect();
+        for (i, k) in keys.iter().enumerate() {
+            let fields: BTreeSet<_> = k
+                .as_object()
+                .ok_or("subjective key object required")?
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let source = string(k, "source")?;
+            let reference = string(k, "reference")?;
+            if fields != allowed
+                || k["row"].as_u64() != Some(i as u64)
+                || k["role"] != "fit"
+                || k["tier"] != "T2"
+                || !sources.contains(&k["source"])
+                || excluded.contains(&k["family"])
+                || !observations.insert(string(k, "observation")?)
+                || reference.is_empty()
+                || ["source", "family", "observation"]
+                    .iter()
+                    .any(|f| !string(k, f).is_ok_and(|s| !s.is_empty()))
+            {
+                return Err("subjective source/observation/order/role mismatch".into());
+            }
+            if references
+                .insert(source, reference)
+                .is_some_and(|old| old != reference)
+            {
+                return Err("subjective source must have one pairing reference".into());
+            }
+            *counts.entry(source).or_default() += 1;
+        }
+        if serde_json::to_value(&counts).map_err(|e| e.to_string())? != r["source_counts"]
+            || counts.values().any(|&n| n < 2)
+            || counts.keys().copied().collect::<BTreeSet<_>>()
+                != sources.iter().filter_map(Value::as_str).collect()
+            || references.values().copied().collect::<BTreeSet<_>>().len() != references.len()
+        {
+            return Err("subjective source population differs from authority".into());
+        }
+        let corrected =
+            8. / (counts.values().map(|&n| 1. - 1. / n as f64).sum::<f64>() / counts.len() as f64);
+        if r["train_weight"].as_f64() != Some(corrected) {
+            return Err("subjective nominal-eight acceptance correction differs".into());
+        }
+    }
+    Ok(admitted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    struct Fixture {
+        root: PathBuf,
+        table: PathBuf,
+        keys: Value,
+        declaration: Value,
+        authority: Value,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "subjective-fixture-{}-{}",
+                std::process::id(),
+                SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&root).unwrap();
+            let table = root.join("invented.parquet");
+            std::fs::write(
+                &table,
+                b"not parquet; metadata phase must not parse or hash targets",
+            )
+            .unwrap();
+            let keys = json!([
+                {"observation":"o0","source":"s","family":"f","reference":"r","role":"fit","tier":"T2","row":0},
+                {"observation":"o1","source":"s","family":"f","reference":"r","role":"fit","tier":"T2","row":1}]);
+            let declaration = json!({"schema":"subjective-training-leg-v1","loss":"within-source-rank","nominal_weight":8,
+                "target_orientation":"quality","target_transform":"negate-pointwise","target_column":"human_score",
+                "selection":"fixed-final-epoch","formula_revision":5,"tier":"v3","feature_ids":[0,1],
+                "producer_commit":"invented-producer","table_sha256":"f".repeat(64),"rows":2});
+            let authority = json!({"schema":"subjective-training-authority-v1","state":"approved","artifact_visibility":"private",
+                "selection":"fixed-final-epoch","cells":{"cell":{"feature_ids":[0,1],"formula_revision":5,"tier":"v3",
+                    "producer_commit":"invented-producer","sources":["s"],"excluded_families":[],"groups":[{
+                        "name":"subjective","path":table,"train_weight":16.,"val_weight":0.,"mode":"withinref,rank",
+                        "subjective":true,"table_sha256":"f".repeat(64),"keys_path":root.join("keys.json"),"rows":2,"source_counts":{"s":2}}]}}});
+            Self {
+                root,
+                table,
+                keys,
+                declaration,
+                authority,
+            }
+        }
+        fn call(&mut self) -> Result<BTreeMap<String, Value>, String> {
+            let keys = self.root.join("keys.json");
+            let declaration = PathBuf::from(format!("{}.manifest.json", self.table.display()));
+            std::fs::write(&keys, serde_json::to_vec(&self.keys).unwrap()).unwrap();
+            std::fs::write(&declaration, serde_json::to_vec(&self.declaration).unwrap()).unwrap();
+            self.authority["cells"]["cell"]["groups"][0]["manifest_sha256"] =
+                json!(hash(&declaration).unwrap());
+            self.authority["cells"]["cell"]["groups"][0]["keys_sha256"] =
+                json!(hash(&keys).unwrap());
+            let authority = self.root.join("authority.json");
+            std::fs::write(&authority, serde_json::to_vec(&self.authority).unwrap()).unwrap();
+            admit(
+                &authority,
+                &hash(&authority).unwrap(),
+                "cell",
+                &[(
+                    "subjective".into(),
+                    self.table.clone(),
+                    16.,
+                    0.,
+                    true,
+                    GroupLossMode::Rank,
+                )],
+                &[0, 1],
+            )
+        }
+    }
+    #[test]
+    fn subjective_native_metadata_never_hashes_or_parses_targets() {
+        let mut f = Fixture::new();
+        // Intentionally false table pin, and no parquet header. Admission must
+        // still succeed here; payload verification is a distinct later phase.
+        assert_eq!(f.call().unwrap().len(), 1);
+    }
+    #[test]
+    fn subjective_native_rejects_roles_order_producer_and_leaks() {
+        let mut f = Fixture::new();
+        for (field, value) in [
+            ("role", json!("dev")),
+            ("row", json!(5)),
+            ("source", json!("late")),
+            ("observation", json!("o0")),
+        ] {
+            let old = f.keys[1][field].clone();
+            f.keys[1][field] = value;
+            assert!(f.call().unwrap_err().contains("mismatch"));
+            f.keys[1][field] = old;
+        }
+        f.declaration["producer_commit"] = json!("wrong-producer");
+        assert!(f.call().unwrap_err().contains("producer"));
+        f.declaration["producer_commit"] = json!("invented-producer");
+        f.authority["cells"]["cell"]["excluded_families"] = json!(["f"]);
+        assert!(f.call().unwrap_err().contains("mismatch"));
+    }
+    #[test]
+    fn subjective_native_rejects_added_group_and_wrong_weight() {
+        let mut f = Fixture::new();
+        let mut late = f.authority["cells"]["cell"]["groups"][0].clone();
+        late["name"] = json!("late");
+        f.authority["cells"]["cell"]["groups"]
+            .as_array_mut()
+            .unwrap()
+            .push(late);
+        assert!(f.call().unwrap_err().contains("inventory"));
+        f.authority["cells"]["cell"]["groups"]
+            .as_array_mut()
+            .unwrap()
+            .pop();
+        f.authority["cells"]["cell"]["groups"][0]["val_weight"] = json!(1.);
+        assert!(f.call().unwrap_err().contains("weight"));
+    }
+}

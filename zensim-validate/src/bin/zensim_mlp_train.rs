@@ -99,6 +99,8 @@ use zensim_validate::train_manifest;
 #[path = "../contamination_guard.rs"]
 mod contamination_guard;
 
+#[path = "../subjective_training_leg.rs"]
+mod subjective_training_leg;
 #[path = "zensim_mlp_train/upiq_training.rs"]
 mod upiq_training;
 
@@ -144,6 +146,14 @@ struct Args {
     /// Bound owner disposition for the registered E31 UPIQ fit ingress.
     #[arg(long, conflicts_with = "historical_replay")]
     upiq_label_disposition: Option<PathBuf>,
+
+    /// Independently frozen private authority for the unnamed training leg.
+    #[arg(long, requires_all = ["subjective_authority_sha256", "subjective_cell"], conflicts_with_all = ["historical_replay", "upiq_label_disposition", "hdr_consensus_research"])]
+    subjective_authority: Option<PathBuf>,
+    #[arg(long, requires = "subjective_authority")]
+    subjective_authority_sha256: Option<String>,
+    #[arg(long, requires = "subjective_authority")]
+    subjective_cell: Option<String>,
 
     /// Do not launch the sibling bake_verdict after fitting. Development
     /// screens evaluate explicit T2 inputs through the final BakeScorer and
@@ -3342,6 +3352,38 @@ fn main() {
         eprintln!("native group admission: {e}");
         std::process::exit(2)
     });
+    let subjective_admission = if let Some(path) = &args.subjective_authority {
+        if args.target_column != "human_score" || args.target_scale != 1.0 {
+            eprintln!("subjective leg requires stored quality targets at scale one");
+            std::process::exit(2);
+        }
+        subjective_training_leg::admit(
+            path,
+            args.subjective_authority_sha256.as_deref().unwrap(),
+            args.subjective_cell.as_deref().unwrap(),
+            &group_modes,
+            admitted_ids.as_deref().unwrap_or(&[]),
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("subjective admission: {e}");
+            std::process::exit(2)
+        })
+    } else {
+        std::collections::BTreeMap::new()
+    };
+    // Every ordinary and new declaration/key has passed before payload hashes.
+    for g in &group_modes {
+        if let Some(d) = subjective_admission.get(&g.0) {
+            let pin = train_manifest::sha256_file(&g.1).unwrap_or_else(|e| {
+                eprintln!("subjective input: {e}");
+                std::process::exit(2)
+            });
+            if d["table_sha256"] != pin {
+                eprintln!("subjective payload pin changed");
+                std::process::exit(2);
+            }
+        }
+    }
     // The complete group, manifest and auxiliary inventory is admitted before
     // any payload hash/read. A digest or zero auxiliary weight grants no role.
     if let Some((inputs, manifest_path)) = &manifest_inputs {
@@ -3533,6 +3575,20 @@ fn main() {
             eprintln!("{e}");
             std::process::exit(1);
         });
+        if subjective_admission.contains_key(&name) {
+            let bad_features = if let Some(c) = &g.compact {
+                c.data.iter().any(|v| !v.is_finite())
+            } else {
+                let ids = admitted_ids.as_deref().unwrap();
+                g.feature_rows
+                    .chunks_exact(g.n_features)
+                    .any(|row| ids.iter().any(|&id| !row[id].is_finite()))
+            };
+            if bad_features || g.human_scores.iter().any(|v| !v.is_finite()) {
+                eprintln!("subjective selected feature/target is nonfinite");
+                std::process::exit(2);
+            }
+        }
         if table_admission["upiq380"]["path"].as_str() == Some(path.to_string_lossy().as_ref()) {
             upiq_training::pad_native(&mut g.feature_rows, g.n_features, args.max_features)
                 .unwrap_or_else(|e| {

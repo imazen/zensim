@@ -1383,6 +1383,11 @@ steer-exact-check:
 palette-pairs-check:
     python3 -m unittest scripts/tests/test_palette_training_pairs.py
 
+subjective-admission-check:
+    python3 -m unittest scripts/tests/test_subjective_training_leg.py scripts/tests/test_shippath2_admission.py scripts/tests/test_rev5_teacher_admission.py scripts/tests/test_e34_admission.py
+    cargo test -p zensim-validate --bin zensim_mlp_train subjective_native
+    cargo clippy -p zensim-validate --bin zensim_mlp_train -- -D warnings
+
 # Canonical STEER/E34 statistics on invented data only; no corpus discovery.
 steer-statistics-check:
     cargo test -p zensim-validate --bin panel panel_e34:: -- --nocapture

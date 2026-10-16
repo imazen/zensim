@@ -89,11 +89,12 @@ def strict_group_input_roots(groups: list) -> tuple[Path, ...]:
 def train_command(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
                   out: Path, recipe: dict | None = None, *, strict_admission: bool = False,
                   data_role_decision: Path | None = None,
-                  upiq_label_disposition: Path | None = None) -> list[str]:
+                  upiq_label_disposition: Path | None = None,
+                  subjective_authority: tuple | None = None) -> list[str]:
     """The trainer argv of one v2 cell; `groups` = (name, path, train_weight, val_weight, mode). Shared with
     v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
     if strict_admission:
-        strict_training_groups(groups, data_role_decision, upiq_label_disposition)
+        strict_training_groups(groups, data_role_decision, upiq_label_disposition, subjective_authority)
         from v2_common import refuse_immutable_output
         roots = strict_group_input_roots(groups)
         for path in (out, keep_file):
@@ -107,6 +108,12 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
         if not strict_admission:
             raise ValueError("E31 requires strict admission")
         cmd += ["--upiq-label-disposition", str(upiq_label_disposition)]
+    if subjective_authority is not None:
+        if not strict_admission:
+            raise ValueError("unnamed subjective leg requires strict admission")
+        authority, pin, cell, _ = subjective_authority
+        cmd += ["--subjective-authority", str(authority), "--subjective-authority-sha256", pin,
+                "--subjective-cell", cell]
     for name, path, tw, vw, mode in groups:
         cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
     recipe = recipe or {}
@@ -165,7 +172,8 @@ def e34_options(args, recipe):
 
 
 def strict_training_groups(groups: list, data_role_decision: Path | None = None,
-                  upiq_label_disposition: Path | None = None) -> list[dict]:
+                  upiq_label_disposition: Path | None = None,
+                  subjective_authority: tuple | None = None) -> list[dict]:
     """Require declared full provenance and a separately supplied human-role decision.
 
     This checks metadata/label-free keys before returning trainer argv. The
@@ -179,12 +187,22 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None,
     if data_role_decision is not None:
         raw = json.loads(safe_path(data_role_decision).read_text())
         decision = decision_record(data_role_decision, raw.get("source_receipt_sha256"))
+    subjective = {}
+    if subjective_authority is not None:
+        from subjective_training_leg import admit
+        authority, pin, cell, selected = subjective_authority
+        subjective = admit(authority, pin, cell, groups, selected)
     records = []
     checked_metadata = []
     for name, path, train_w, val_w, _ in groups:
         path = safe_path(path)
         sp = Path(f"{path}.manifest.json")
         d = json.loads(sp.read_text())
+        if d.get("schema") == "subjective-training-leg-v1":
+            if subjective.get(name) != d:
+                raise ValueError("unnamed leg requires independently pinned authority")
+            records.append(dict(name=name, manifest=d, manifest_sha256=sha(sp)))
+            continue
         if name == "upiq380":
             from e31_training import fit_metadata
             from e21_cheap_recipe import columns
@@ -247,6 +265,9 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None,
                         "keys_sha256": d["keys_sha256"], "row_keys_sha256": d["row_keys_sha256"],
                         "row_selection_sha256": d["row_selection_sha256"],
                         "data_role_decision_sha256": sha(data_role_decision) if d.get("data_role_decision_required") else None})
+    if subjective:
+        from subjective_training_leg import payloads
+        payloads(subjective, groups)
     if not records:
         raise ValueError("strict admission needs at least one training/development table")
     return records
@@ -255,7 +276,8 @@ def strict_training_groups(groups: list, data_role_decision: Path | None = None,
 def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int, keep_file: Path, head: str,
                      dest: Path, recipe: dict | None = None, *, strict_admission: bool = False,
                      data_role_decision: Path | None = None,
-                  upiq_label_disposition: Path | None = None) -> tuple[Path, dict[int, float], dict]:
+                  upiq_label_disposition: Path | None = None,
+                     subjective_authority: tuple | None = None) -> tuple[Path, dict[int, float], dict]:
     """Train one cell and return (selected bake, dev curve, selection record) under EPOCH_RULE.
 
     best_dev: the trainer's own best-validation bake (refit/best.bin); the recorded epoch is the argmax of the log's
@@ -272,7 +294,8 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
     # Admission precedes output creation and the Rust trainer's payload reads.
     cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe,
                         strict_admission=strict_admission, data_role_decision=data_role_decision,
-                        upiq_label_disposition=upiq_label_disposition)
+                        upiq_label_disposition=upiq_label_disposition,
+                        subjective_authority=subjective_authority)
     (dest / "refit").mkdir(exist_ok=True)
     ckpt = dest / "ckpt"
     if EPOCH_RULE == "last":
@@ -297,7 +320,7 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
         bake, selected = dest / "refit" / "best.bin", best
     selection = {"epoch_rule": EPOCH_RULE, "selected_epoch": selected, "best_epoch_by_curve": best}
     if strict_admission:
-        selection["strict_table_admission"] = strict_training_groups(groups, data_role_decision, upiq_label_disposition)
+        selection["strict_table_admission"] = strict_training_groups(groups, data_role_decision, upiq_label_disposition, subjective_authority)
     return bake, curve, selection
 
 

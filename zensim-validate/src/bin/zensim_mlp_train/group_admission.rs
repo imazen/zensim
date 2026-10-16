@@ -378,6 +378,21 @@ pub(super) fn preflight(
     {
         return Err("E29 declared target/CLI transform mismatch".into());
     }
+    let subjective = if let Some(path) = &args.subjective_authority {
+        super::subjective_training_leg::admit(
+            path,
+            args.subjective_authority_sha256
+                .as_deref()
+                .ok_or("subjective authority pin required")?,
+            args.subjective_cell
+                .as_deref()
+                .ok_or("subjective cell required")?,
+            groups,
+            selected.ok_or("subjective explicit feature IDs required")?,
+        )?
+    } else {
+        std::collections::BTreeMap::new()
+    };
     // Collect ALL declarations and label-free recipe bindings first.
     let mut declarations = Vec::new();
     let mut receipts = Vec::new();
@@ -424,6 +439,17 @@ pub(super) fn preflight(
             if d["row_selection_sha256"] != digest {
                 return Err("declared ordered row selection pin changed".into());
             }
+        }
+        if d["schema"] == "subjective-training-leg-v1" {
+            if subjective.get(&g.0) != Some(d) {
+                return Err("unnamed leg has no independently pinned authority".into());
+            }
+            phases.push((
+                "subjective",
+                d["rows"].as_u64().ok_or("subjective rows required")? as usize,
+                None,
+            ));
+            continue;
         }
         if d["study"] == "E29" {
             if !args.hdr_consensus_research
@@ -608,6 +634,9 @@ pub(super) fn preflight(
     }
     // Only label-free keys below. No ordinary header/hash/read until ALL pass.
     for ((g, _, d), (phase, count, _)) in declarations.iter().zip(phases) {
+        if phase == "subjective" {
+            continue;
+        } // Private owner verified ordered label-free keys.
         if phase == "hdr" {
             e29_hdr_admission::admit_keys(
                 &g.1,
