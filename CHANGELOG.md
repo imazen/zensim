@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Bind label-free ship-gate dispatch to frozen native codec owners and exact corruption-companion feature sets; retain explicit missing-detector outcomes.
+
 - Refuse unqualified matte conversion in the private source-preparation tool; preserve exact opaque-crop output and the earlier failed diagnostic.
 
 - Supervise bounded STEER allocations through the frozen LAN launcher, with native/NAS transition gates and operator pause interlocks.

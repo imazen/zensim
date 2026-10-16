@@ -137,3 +137,23 @@ iters, effort default; decoded outputs judged by independent ssim2 + butteraugli
   encoder and "quickly" fails).
 - The MLP-vs-additive steer question (coherence 0.759 vs 0.849, rank 0.894 vs 0.863) is settled
   HERE, in bytes and passes — not by another coherence proxy.
+
+## October 16 SHIPGATES adapters
+
+The label-free dispatchers `scripts/rev4_featpot/shipgates.py` and
+`shipgates_codec_rd.py` bind frozen candidate bytes to the native codec owners.
+Run either script with `--help` for explicit inputs. They retain every encoded
+artifact, actual steering field, independent-decode receipt and work record.
+The fixed three-judge tool lives in `tools/shipgates-judge`; source bootstrap
+remains in the existing Rust statistics owner. Scalar-only SSIMULACRA2 is the
+coordinator-approved map exception. These wrappers do not fit models or heads.
+
+Corruption dispatch requires the native feature-binding receipt and permits
+only the authorized frozen head at its baked threshold with exact declared
+feature-ID equality. Incompatible candidates receive an explicit missing-detector
+verdict. Historical unauthorized head composition is excluded by the reporter.
+
+The [current engineering report](../benchmarks/shipgates_2026-10-16.md) records
+coverage, failed bars, input/decoder findings and the limits of the runtime
+collector. A completed development probe does not qualify full size/mode or HDR
+coverage. Protected human-ranking evaluation remains a separate authorization.
