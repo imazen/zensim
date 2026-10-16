@@ -245,6 +245,8 @@ def build():
         p3_build_sources=read(ROOT / 'p3-build-sources.json'),
         report_order_sha256=sha(ROOT / 'report-order.json'),
         mean_interpretation_sha256=sha(ROOT / 'mean-guard-clarification.json'),
+        nearid_label_mapping=dict(path=str(ROOT / 'gates/nearid-labels.json'),
+                                  sha256=sha(ROOT / 'gates/nearid-labels.json')),
         full_models_sha256=sha(ROOT / 'full-models.json'),
         capture_receipt=read(ROOT / 'capture-complete.json'),
         development_binding=read(ROOT.parent / 'packet/DEVELOPMENT_BINDING.json'),
@@ -492,6 +494,10 @@ def render():
         'with the same preserved D13 binary and draw seeds; only thread count/memory scheduling '
         'changed. All native gates, builds and statistical jobs were serialized under run-heavy. '
         'Raw outputs and interrupted logs are preserved.', '',
+        'The first NearID dispatch was refused by the canonical owner’s alphanumeric label '
+        'grammar before any model/packet read or scored row. An injective artifact-label mapping '
+        'then ran the same seven seed-0 models through the unchanged owner and gates; the '
+        'failed log and mapping are retained.', '',
         'The archived augmentation encoder executable and decoded bytes remain pinned; its '
         'source closure is still unrecovered, as disclosed before launch. No new source-provenance '
         'claim is made. No sealed labels, production profiles or default bakes were changed.', '',

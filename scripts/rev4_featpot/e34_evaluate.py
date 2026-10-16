@@ -213,8 +213,20 @@ def gates():
              for name, r in models.items() if name.endswith('-s0')}
     assert len(found) == 7
     owner.MODELS_OVERRIDE = found
+    labels = {name: name.replace('-', '') for name in found}
+    assert len(set(labels.values())) == len(found)
+    write(owner.GATES / 'nearid-labels.json', dict(
+        scope='artifact labels only; native owner accepts lowercase alphanumeric candidate labels',
+        labels={name: dict(native_label=labels[name], model_sha256=found[name][1]) for name in found}))
     for name in found:
-        owner.nearid(name, 0)
+        # Preserve the canonical owner's label grammar and all score/gate code.
+        label = labels[name]
+        owner.MODELS_OVERRIDE = {label: found[name]}
+        owner.nearid(label, 0)
+        owner.MODELS_OVERRIDE = found
+        near = owner.GATES / 'nearid-s0'
+        for suffix in ['jsonl', 'metadata.json', 'GATES.json']:
+            (near / f'candidate-{name}.{suffix}').symlink_to(f'candidate-{label}.{suffix}')
         for grid in ['standard', 'ladder']:
             owner.verdict(name, 0, grid)
         print(f'C/N grids complete {name}', flush=True)
