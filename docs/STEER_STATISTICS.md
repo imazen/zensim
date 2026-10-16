@@ -61,3 +61,15 @@ seed_stat and Holm owners, then connects them to the S-only verdict. Set
 STEER_FIX2_RESULT to a fresh explicit receipt path. No statistical values are
 injected into the primary bootstrap; the receipt labels the diagnostic/guard
 mutations at the packet-completion boundary.
+
+`just steer-freeze-check` repeats these owners with fresh explicit
+STEER_INVENTED_RESULT, STEER_FIX2_RESULT and STEER_A7_RESULT paths. The A7 replay
+checks eligible S and all four exact aliases, each missing numeric guard on
+each slot, declaration/source/type refusal, the strict W2 equality boundary,
+nonrejecting hypotheses, every missing slot/pair and required diagnostic gate,
+and no diagnostic fallback. Post-computation boundary mutations are named in
+the receipt; primary numbers otherwise come from the real bootstrap owners.
+The twelve-model name validator also rejects missing seeds, serving aliases and
+the legacy E34 inventory before opening model bytes. Recipe tests bind all40
+fold-rotated seed pairs and the three unrotated full-data pairs. These checks
+do not freeze a registration or authorize any fit or scientific assessment.

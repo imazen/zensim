@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Complete canonical STEER A7 pre-freeze boundary replay and twelve-model inventory refusal checks; preserve the registered state machine and numerical gates.
+
 - Add opt-in fixed smooth hinge N research training and exact loaded/reference derivatives against the merged zenpredict activation format (zenanalyze f0903489).
 
 - Add a label-free exact-steering geometry/cost probe for explicitly hashed control models, with native complete-repair parity receipts.

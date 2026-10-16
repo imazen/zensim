@@ -105,5 +105,47 @@ def canonical_fix2_receipt_test():
     print('PASS FIX2 canonical Rust primary/guards/seed_stat/Holm -> real S-only verdict: nested diagnostic refusals nonfatal; invalid improvement guards fatal; finite false guards nondecisive')
 
 
+def canonical_a7_receipt_test():
+    """Real-owner receipts plus explicit post-computation boundary mutations."""
+    receipt = json.loads(Path(os.environ['STEER_A7_RESULT']).read_text())
+    assert receipt['scope'] == 'INVENTED_CANONICAL_A7_BOUNDARIES'
+    _, gates = fixture()
+    cases = receipt['cases']
+    baseline = cases['eligible_s_exact_aliases']
+    v = steer_verdict(baseline, gates)
+    assert v['state'] == 'COMPLETE_FOR_S' and all(f['eligible'] for f in v['families'].values()), v
+    for name, stats in cases.items():
+        if name.startswith(('missing_', 'invalid_')):
+            result = steer_verdict(stats, gates)
+            assert result['state'] == 'INCOMPLETE' and 'families' not in result, (name, result)
+    v = steer_verdict(cases['ordinary_nonrejecting'], gates)
+    assert v['state'] == 'COMPLETE_FOR_S' and not any(f['eligible'] for f in v['families'].values()), v
+    v = steer_verdict(cases['strict_w2_boundary'], gates)
+    assert not v['families']['a']['eligible'] and v['families']['c']['eligible'], v
+    # Every slot/pair and required diagnostic gate is checked independently.
+    for i in range(12):
+        for defect in ('absent', 'pair'):
+            stats = copy.deepcopy(baseline)
+            if defect == 'absent':
+                stats['tests'].pop(i)
+            else:
+                stats['tests'][i]['control'] = 'wrong-pair'
+            assert steer_verdict(stats, gates)['state'] == 'INCOMPLETE', (i, defect)
+    for arm in ('r-a', 'sr-a', 'r-c', 'sr-c'):
+        for gate in GATE_KEYS:
+            missing = copy.deepcopy(gates)
+            missing[arm].pop(gate)
+            assert steer_verdict(baseline, missing)['state'] == 'INCOMPLETE', (arm, gate)
+            failed = copy.deepcopy(gates)
+            failed[arm][gate]['pass_'] = False
+            assert all(f['eligible'] for f in steer_verdict(baseline, failed)['families'].values())
+    failed = copy.deepcopy(gates)
+    failed['s-a']['G-STEER']['pass_'] = False
+    failed['s-c']['G-STEER']['pass_'] = False
+    v = steer_verdict(baseline, failed)
+    assert all(v['families'][f]['incumbent'] == f'base-{f}' for f in ('a', 'c')), v
+    print('PASS A7 real Rust statistics/guards/Holm -> S-only verdict: eligible aliases, all-slot evidence, strict W2, no rejection/fallback, diagnostic gate completeness')
+
+
 if __name__=='__main__':
     unittest.main()

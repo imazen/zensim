@@ -341,18 +341,23 @@ fn finish_packet(mut tests: Vec<Value>, policy: &str) -> Value {
         "tests":tests,"holm_adjusted":zenstats::multiple::holm(&ps),"holm_reject":zenstats::multiple::holm_reject(&ps,0.05)})
 }
 
+fn validate_model_names(models: &BTreeMap<String, Value>) -> Result<()> {
+    let expected: BTreeSet<_> = ["base-a", "base-c", "s-a", "s-c"]
+        .into_iter()
+        .flat_map(|a| (0..3).map(move |s| format!("{a}-s{s}")))
+        .collect();
+    ensure!(
+        models.keys().cloned().collect::<BTreeSet<_>>() == expected,
+        "twelve exact full-data model names required"
+    );
+    Ok(())
+}
+
 pub(super) fn run(cli: Cli) -> Result<()> {
     if cli.mode == "steer-pack-check" {
         let bytes = fs::read(&cli.input)?;
         let models: BTreeMap<String, Value> = serde_json::from_slice(&bytes)?;
-        let expected: BTreeSet<_> = ["base-a", "base-c", "s-a", "s-c"]
-            .into_iter()
-            .flat_map(|a| (0..3).map(move |s| format!("{a}-s{s}")))
-            .collect();
-        ensure!(
-            models.keys().cloned().collect::<BTreeSet<_>>() == expected,
-            "twelve exact full-data model names required"
-        );
+        validate_model_names(&models)?;
         return save(
             &cli.output,
             &reports::pack_inventory(&bytes, 12, "steer-pack-checks-v1")?,
@@ -397,6 +402,106 @@ mod tests {
             fits: 172,
             tau: 0.125,
             data_sha256: DATA_SHA.into(),
+        }
+    }
+
+    #[test]
+    fn steer_full_model_names_refuse_e34_and_serving_aliases() {
+        let models: BTreeMap<_, _> = ["base-a", "base-c", "s-a", "s-c"]
+            .into_iter()
+            .flat_map(|a| (0..3).map(move |s| (format!("{a}-s{s}"), Value::Null)))
+            .collect();
+        validate_model_names(&models).unwrap();
+        for name in models.keys() {
+            let mut missing = models.clone();
+            missing.remove(name);
+            assert!(validate_model_names(&missing).is_err());
+        }
+        let mut renamed = models.clone();
+        renamed.remove("s-a-s0");
+        renamed.insert("r-a-s0".into(), Value::Null);
+        assert!(validate_model_names(&renamed).is_err());
+        let mut e34 = models;
+        for i in 0..9 {
+            e34.insert(format!("extra-{i}"), Value::Null);
+        }
+        assert!(validate_model_names(&e34).is_err());
+    }
+
+    #[test]
+    fn steer_a7_pre_freeze_canonical_boundaries() {
+        let input = invented();
+        let reg = registration("q12-a-v1");
+        let baseline = evaluate(&input, &reg);
+        assert_eq!(baseline["state"], "COMPLETE_FOR_S");
+        let tests = || baseline["tests"].as_array().unwrap().clone();
+        let mut cases = BTreeMap::new();
+        cases.insert("eligible_s_exact_aliases".to_string(), baseline.clone());
+        // Mutations below are explicitly at the canonical completion boundary,
+        // after real bootstrap/Student/guard computation, never scientific data.
+        for index in 0..12 {
+            for field in ["dataset", "w2"] {
+                let mut missing = tests();
+                if field == "dataset" {
+                    missing[index]["dataset_guards"] = json!([]);
+                } else {
+                    missing[index]["w2"]["interval"]["se"] = Value::Null;
+                }
+                let result = finish_packet(missing, "q12-a-v1");
+                assert_eq!(result["state"], "INCOMPLETE");
+                assert_eq!(result["tests"][index]["p"]["decision"], 1.);
+                assert_eq!(result["holm_reject"].as_array().unwrap().len(), 12);
+                cases.insert(format!("missing_{field}_slot_{}", index + 1), result);
+            }
+        }
+        let mut nonrejecting = tests();
+        for t in &mut nonrejecting {
+            if t["state"] == "COMPLETE" {
+                t["p"]["decision"] = json!(0.2);
+            }
+        }
+        let result = finish_packet(nonrejecting, "q12-a-v1");
+        assert_eq!(result["state"], "COMPLETE_FOR_S");
+        assert!(
+            result["holm_reject"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|v| v == false)
+        );
+        cases.insert("ordinary_nonrejecting".into(), result);
+        let mut strict = tests();
+        strict[0]["w2"]["interval"]["estimate"] = json!(-0.002);
+        strict[0]["w2"]["interval"]["se"] = json!(0.001);
+        strict[0]["w2"]["point_guard"] = json!(w2_guard(-0.002, 0.001));
+        let result = finish_packet(strict, "q12-a-v1");
+        assert_eq!(result["state"], "COMPLETE_FOR_S");
+        assert_eq!(result["tests"][0]["w2"]["point_guard"], false);
+        cases.insert("strict_w2_boundary".into(), result);
+        assert!(seed_stat(&vec![vec![0.; 3]; 10]).is_err());
+        for defect in ["declaration", "source", "type", "constant_prediction"] {
+            let mut reg = registration("q12-a-v1");
+            let mut bad = invented();
+            match defect {
+                "declaration" => reg.identical_tests.pop().map(|_| ()).unwrap(),
+                "source" => bad.datasets[0].reference.fill(0),
+                "type" => bad.datasets[0].codec.fill(0),
+                "constant_prediction" => {
+                    bad.datasets[0].predictions.get_mut("s-a").unwrap()[0].fill(0.)
+                }
+                _ => unreachable!(),
+            }
+            let result = evaluate(&bad, &reg);
+            assert_eq!(result["state"], "INCOMPLETE", "{defect}");
+            assert_eq!(result["tests"].as_array().unwrap().len(), 12);
+            cases.insert(format!("invalid_{defect}"), result);
+        }
+        if let Ok(path) = std::env::var("STEER_A7_RESULT") {
+            save(Path::new(&path), &json!({
+                "scope":"INVENTED_CANONICAL_A7_BOUNDARIES",
+                "boundary_mutations":["numeric guard omission", "decision p=0.2", "strict W2 equality"],
+                "cases":cases
+            })).unwrap();
         }
     }
     fn invented() -> Input {

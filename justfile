@@ -1440,6 +1440,15 @@ steer-fix2-check:
     just steer-verdict-tests
     python3 -c 'from scripts.tests.test_steer_verdict import canonical_fix2_receipt_test; canonical_fix2_receipt_test()'
 
+# Explicit fresh invented receipts; never discovers model or corpus payloads.
+steer-freeze-check:
+    cargo fmt -p zensim-validate --check
+    just steer-statistics-check
+    just steer-verdict-tests
+    just steer-s-recipe-tests
+    just steer-statistics-verdict-integration
+    python3 -c 'from scripts.tests.test_steer_verdict import canonical_fix2_receipt_test, canonical_a7_receipt_test; canonical_fix2_receipt_test(); canonical_a7_receipt_test()'
+
 # Build the bounded control/R engineering payload; no corpus or label opens.
 steer-smoke-build:
     cargo fmt -p zensim-validate --check
