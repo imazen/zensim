@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use zenstats::resample::{BootstrapConfig, Design, Draw, Interval, cluster_bootstrap};
 
+mod map_cost;
+mod peers;
 mod registered;
 mod reports;
 mod steer;
@@ -22,7 +24,7 @@ const ELIGIBILITY_MARGIN: f64 = 0.0065;
 const DATASETS: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 #[derive(Parser)]
 struct Cli {
-    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check", "registered-evaluate", "registered-owner-parity"])]
+    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check", "registered-evaluate", "registered-owner-parity", "peer-compare", "map-cost"])]
     mode: String,
     #[arg(long)]
     registration: Option<PathBuf>,
@@ -573,7 +575,11 @@ fn run(cli: Cli) -> Result<()> {
         return steer::run(cli);
     }
     let bytes = fs::read(&cli.input)?;
-    let mut result = if cli.mode == "pack-check" {
+    let mut result = if cli.mode == "map-cost" {
+        map_cost::run(&bytes)?
+    } else if cli.mode == "peer-compare" {
+        peers::run(&bytes)?
+    } else if cli.mode == "pack-check" {
         reports::packs(&bytes)?
     } else if cli.mode == "reports" {
         reports::run(&bytes)?

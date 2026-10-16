@@ -1021,6 +1021,16 @@ impl FloorMeasure {
             })
             .count();
 
+        // Opt-in engineering evidence from the gate's actual selected rungs.
+        // This records decisions without introducing another floor ruler.
+        let mut trace = std::env::var_os("ZENSIM_GADDR_LADDER_TRACE").map(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .expect("open requested G-ADDR ladder trace")
+        });
+
         // Per-codec accumulation, in a stable (sorted) codec order.
         let mut order: Vec<String> = Vec::new();
         #[derive(Default)]
@@ -1034,7 +1044,7 @@ impl FloorMeasure {
             steps: Vec<Vec<f64>>,
         }
         let mut acc: std::collections::HashMap<String, Acc> = std::collections::HashMap::new();
-        for ((_, c), cells) in &ladders {
+        for ((image, c), cells) in &ladders {
             let e = acc.entry(c.clone()).or_insert_with(|| {
                 order.push(c.clone());
                 Acc {
@@ -1084,6 +1094,34 @@ impl FloorMeasure {
             let clamp_upper = k.min(vals.len());
             let clamped = !sole_min_holder
                 && (0..clamp_upper).any(|j| (vals[j] - grid_min).abs() <= frule.clamp_eps);
+            if let Some(file) = trace.as_mut() {
+                use std::io::Write as _;
+                let selected: Vec<_> = win
+                    .iter()
+                    .map(|&i| {
+                        serde_json::json!({"position":i,"q":cells[i].0,
+                            "candidate":cells[i].1,"mentor":cells[i].2,
+                            "at_grid_min":(cells[i].1-grid_min).abs()<=frule.clamp_eps})
+                    })
+                    .collect();
+                let edges: Vec<_> = win
+                    .windows(2)
+                    .map(|pair| {
+                        let delta = cells[pair[1]].1 - cells[pair[0]].1;
+                        serde_json::json!({"from_position":pair[0],"to_position":pair[1],
+                            "delta":delta,"cause":if delta==0.0 {"exact_tie"}
+                                else if delta<0.0 {"inversion"} else {"increasing"},
+                            "sub_material":delta.abs()<ENCODER_SSIM2_MARGIN_PT})
+                    })
+                    .collect();
+                let record = serde_json::json!({"schema":"gaddr-floor-rung-trace-v1",
+                    "instrument":instrument,"image_id":image,"codec":c,"rule":rule.tag(),
+                    "bottom_k":k,"clamp_eps":frule.clamp_eps,"grid_min":grid_min,
+                    "n_ladders_at_min":n_ladders_at_min,"sole_min_holder":sole_min_holder,
+                    "selected":selected,"edges":edges,"ordered":ordered,"clamped":clamped,
+                    "represented":ordered && !clamped});
+                writeln!(file, "{record}").expect("write requested G-ADDR ladder trace");
+            }
             if ordered && !clamped {
                 e.rep += 1;
             } else {
