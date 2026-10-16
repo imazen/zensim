@@ -49,6 +49,10 @@ def interp_bytes(frontier, score):
         return None
     for (s0, b0), (s1, b1) in zip(pts, pts[1:]):
         if s0 <= score <= s1:
+            if score == s0:
+                return b0
+            if score == s1:
+                return b1
             if s1 == s0:
                 return b0
             t = (score - s0) / (s1 - s0)
@@ -102,6 +106,7 @@ def target_loop_main():
     from pathlib import Path
     ap = argparse.ArgumentParser()
     ap.add_argument("--target-loop", type=Path, required=True)
+    ap.add_argument("--target-only", action="store_true", help="Validate target gates without requesting independent-judge RD analysis")
     ap.add_argument("--baseline", default="B")
     ap.add_argument("--screen-source", action="append", type=int, default=[])
     args = ap.parse_args()
@@ -111,7 +116,7 @@ def target_loop_main():
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     inp = json.loads((root / "INPUTS.json").read_text())
     if inp.get("schema") in ("native-jxl-target-v1", "native-codec-target-v1"):
-        return native_target_summary(root, inp, rows)
+        return native_target_summary(root, inp, rows, args.target_only)
     if inp.get("schema") == "reachable-target-v1":
         return reachable_target_summary(root, inp, rows)
     expected = len(inp["sources"]) * len(inp["codecs"]) * len(inp["targets"]) * (2 + len(inp["bakes"]))
@@ -269,7 +274,7 @@ def reachable_target_summary(root, inp, rows):
     for b in bounds:
         for r in b["requests"]:
             coverage[(b["codec"],b["model"])][r["status"]] += 1
-    result = {"schema":inp["schema"],"cells":len(rows),"bound_cells":len(bounds),
+    result = {"schema":inp["schema"],"target_only":target_only,"cells":len(rows),"bound_cells":len(bounds),
               "input_sha256":hashlib.sha256((root/"INPUTS.json").read_bytes()).hexdigest(),
               "measurement_sha256":hashlib.sha256((root/"measurements.jsonl").read_bytes()).hexdigest(),
               "bounds_sha256":hashlib.sha256((root/"bounds.jsonl").read_bytes()).hexdigest(),
@@ -291,7 +296,7 @@ def reachable_target_summary(root, inp, rows):
     print("\n".join(text))
 
 
-def native_target_summary(root, inp, rows):
+def native_target_summary(root, inp, rows, target_only=False):
     """Validate native work accounting and reuse matched-judge interpolation.
 
     These are descriptive family-paired development measurements. Sparse
@@ -416,6 +421,7 @@ def native_target_summary(root, inp, rows):
                 "median_abs_error":st.median(errors), "p95_abs_error":errors[math.ceil(.95*len(errors))-1],
                 "worst_abs_error":max(errors), "hits":{str(t):sum(e <= t for e in errors) for t in (.25,.5,1.,2.)},
                 "undershoots_beyond_tolerance":sum(r["signed_error"] < -tol for r in group),
+                "undershoot_counts":{str(limit):sum(r["signed_error"] < -limit for r in group) for limit in (8,3,1)},
                 "mean_full_encodes":st.mean(r["full_encodes"] for r in group),
                 "median_total_ms":1000*st.median(r["total_seconds"] for r in group),
                 "median_bytes":st.median(r["bytes"] for r in group),
@@ -436,6 +442,20 @@ def native_target_summary(root, inp, rows):
         classes[(*key, r["class"])].append(r)
     summary = [{"arm":a,"policy":p,"budget":k,**stats(g)} for (a,p,k),g in sorted(groups.items())]
     by_class = [{"arm":a,"policy":p,"budget":k,"class":c,**stats(g)} for (a,p,k,c),g in sorted(classes.items())]
+    for row in summary + by_class:
+        budget = row["budget"]
+        median_bar, p95_bar, undershoot_bar = {1:(2.,8.,.05),2:(1.,3.,.05),3:(.5,1.,.01)}[budget]
+        count = row["undershoot_counts"][str(int(p95_bar))]
+        fraction = count / row["n"]
+        checks = dict(median=row["median_abs_error"] <= median_bar,
+                      p95=row["p95_abs_error"] <= p95_bar,
+                      undershoot=fraction <= undershoot_bar)
+        if budget == 3:
+            checks["maximum"] = row["worst_abs_error"] <= 3.
+        row["registered_gate"] = dict(median_bar=median_bar,p95_bar=p95_bar,
+            undershoot_fraction=fraction,undershoot_fraction_bar=undershoot_bar,
+            third_shot_maximum_bar=3. if budget==3 else None,checks=checks,
+            verdict="PASS" if all(checks.values()) else "FAIL")
     index = dict(zip(keys, rows))
     paired = []
     for base in ("scalar", "neutral"):
@@ -450,8 +470,9 @@ def native_target_summary(root, inp, rows):
                       for (origin, arm), ladder in ladders.items() for i, _ in enumerate(ladder)}
     expected_pairs.update({str(root / r["decoded"]): sources[r["origin"]]["path"] for r in rows})
     judges = {}
-    for name, file, col, sign in (("ssim2","judge_ssim2.tsv","ssim2",1),
-                                  ("butter","judge_butteraugli.tsv","butteraugli_pnorm3",-1)):
+    judge_specs = [] if target_only else (("ssim2","judge_ssim2.tsv","ssim2",1),
+                                  ("butter","judge_butteraugli.tsv","butteraugli_pnorm3",-1))
+    for name, file, col, sign in judge_specs:
         if not (root / file).exists():
             continue
         seen_pairs = set()
@@ -533,12 +554,14 @@ def interventions_main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--interventions", type=Path, required=True)
-    root = ap.parse_args().interventions.resolve()
+    ap.add_argument("--fixed-judges", type=Path)
+    args = ap.parse_args()
+    root = args.interventions.resolve()
     if not __debug__:
         raise SystemExit("intervention validation requires Python assertions enabled")
     inp = json.loads((root / "INPUTS.json").read_text())
     done = json.loads((root / "COMPLETE.json").read_text())
-    assert inp["schema"] in ("native-jxl-interventions-v1", "native-jxl-interventions-v2", "native-jxl-allocation-v1")
+    assert inp["schema"] in ("native-jxl-interventions-v1", "native-jxl-interventions-v2", "native-jxl-interventions-v3", "native-jxl-allocation-v1")
     native_png = inp["schema"] != "native-jxl-interventions-v1"
     policy = inp["schema"] == "native-jxl-allocation-v1"
     coarse = native_png and inp["region_mode"] in ("coarse4", "coarse-policy")
@@ -551,7 +574,17 @@ def interventions_main():
     else:
         # Historical v1 artifacts only. New runs never use foreign image IO.
         from PIL import Image
-    assert inp["model_sha256"] == "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6"
+    if inp["schema"] == "native-jxl-interventions-v3":
+        assert inp["formula_revision"] == "5"
+        assert inp["map_provider"] in ("zensim", "butteraugli")
+        assert inp["map_kind"] == ("D12-refinement-gain" if inp["map_provider"] == "zensim" else "butteraugli-pixel-integral")
+        assert inp["model_sha256"] in (
+            "f73059ff8f67ff177265d35dfd5ff5db61d8fc825a6b519cf6925dc8fc1d5e2a",
+            "89cb4861e2651ff8d4a98bb879feed83a0f9eb3f22b83e644e42eb2291d74b2e",
+            "7cf4cfd92bb8824405db3ed27287bbec973a01eaeadf09b7ad037db92ab9a275")
+        assert inp["region_mode"] == "coarse4"
+    else:
+        assert inp["model_sha256"] == "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6"
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     assert len(rows) == done["full_encodes"] == done["independent_decodes"] == done["ordinary_scalar_pixel_comparisons"]
     sources = {s["origin"]: s for s in inp["sources"]}
@@ -620,7 +653,12 @@ def interventions_main():
                        for r in rows if r["origin"] == origin)
             assert math.isfinite(record["source_decode_seconds"]) and record["source_decode_seconds"] >= 0
     compatibility = json.loads((root / "COMPATIBILITY.json").read_text())
-    assert compatibility["version_stdout"].startswith("djxl v0.12.")
+    if inp["schema"] == "native-jxl-interventions-v3":
+        import re
+        version = compatibility["version_stdout"] + "\n" + compatibility["version_stderr"]
+        assert re.search(r"^(?:djxl|JPEG XL decoder) v0\.12\.",version,re.M)
+    else:
+        assert compatibility["version_stdout"].startswith("djxl v0.12.")
     expected_compatibility = {(o, d, n) for o, d in groups
                               for n in (("baseline", "neutral", "active") if policy else ("baseline", "r0-down", "r0-up"))}
     assert len(compatibility["decodes"]) == done["libjxl_compatibility_decodes"] == len(expected_compatibility)
@@ -656,16 +694,36 @@ def interventions_main():
     assert len(pairs) == len(expected_pairs) and len({p["dist_path"] for p in pairs}) == len(pairs)
     assert all(p == expected_pairs[p["dist_path"]] for p in pairs)
     judges = {}
-    for metric, column, sign in [("ssim2", "ssim2", 1), ("butteraugli", "butteraugli_pnorm3", -1)]:
-        with (root / f"judge_{metric}.tsv").open() as f:
-            panel = list(csv.DictReader(f, delimiter="\t"))
-        assert len(panel) == len(rows) and len({r["dist_path"] for r in panel}) == len(rows)
+    if args.fixed_judges:
+        assert inp["schema"] == "native-jxl-interventions-v3"
+        panel = [json.loads(line) for line in (args.fixed_judges / "judges.jsonl").read_text().splitlines()]
+        assert json.loads((args.fixed_judges / "COMPLETE.json").read_text())["pairs"] == len(panel) == len(rows)
         assert {r["dist_path"] for r in panel} == set(expected_pairs)
+        assert len({r["dist_path"] for r in panel}) == len(rows)
+        checked = set()
         for r in panel:
-            assert all(r[k] == v for k, v in expected_pairs[r["dist_path"]].items())
-            assert math.isfinite(float(r[column]))
-        judges[metric] = {r["dist_path"]: sign * float(r[column]) for r in panel}
-
+            expected = expected_pairs[r["dist_path"]]
+            assert r["input"] == expected
+            assert r["ref_path"] == expected["ref_path"]
+            assert r["ssim2_map_policy"] == "scalar-only"
+            assert {m["metric_id"].split(";")[0] for m in r["maps"]} == {"butteraugli","zensim-B-default-diffmap"}
+            for m in r["maps"]:
+                if m["path"] not in checked:
+                    assert sha(Path(m["path"]).read_bytes()) == m["map_sha256"]
+                    checked.add(m["path"])
+        for metric,column,sign in [("ssim2","ssim2",1),("butteraugli","butteraugli_pnorm3",-1),("fixed_zensim","fixed_zensim",1)]:
+            assert all(math.isfinite(r[column]) for r in panel)
+            judges[metric] = {r["dist_path"]: sign*r[column] for r in panel}
+    else:
+        for metric, column, sign in [("ssim2", "ssim2", 1), ("butteraugli", "butteraugli_pnorm3", -1)]:
+            with (root / f"judge_{metric}.tsv").open() as f:
+                panel = list(csv.DictReader(f, delimiter="\t"))
+            assert len(panel) == len(rows) and len({r["dist_path"] for r in panel}) == len(rows)
+            assert {r["dist_path"] for r in panel} == set(expected_pairs)
+            for r in panel:
+                assert all(r[k] == v for k, v in expected_pairs[r["dist_path"]].items())
+                assert math.isfinite(float(r[column]))
+            judges[metric] = {r["dist_path"]: sign * float(r[column]) for r in panel}
     def corr(xs, ys):
         if len(xs) < 3 or len(set(xs)) < 2 or len(set(ys)) < 2:
             return None
@@ -857,7 +915,7 @@ def interventions_main():
             if span > 1e-12:
                 derivative = {"region_index":index,"map_mass":region["map_mass"],"map_density":region["map_density"],
                     **{field: (pair["up"][field]-pair["down"][field])/span for field in
-                       ["native_score_delta","byte_delta","ssim2_quality_delta","butteraugli_quality_delta"]}}
+                       ["native_score_delta","byte_delta"]+[m+"_quality_delta" for m in judges]}}
                 central.append(derivative)
         summary = {"origin":key[0],"class":sources[key[0]]["content_class"],"distance":key[1],
             "interventions":len(cell_samples),"central_samples":len(central),
@@ -870,7 +928,7 @@ def interventions_main():
             "pixel_changes_outside_region":sum(s["pixels_changed_outside"] > 0 for s in cell_samples),
             "nonpositive_central_byte_derivatives":sum(c["byte_delta"] <= 0 for c in central),
             "rank_associations":{},"direction":{}}
-        for metric in ["native_score_delta","ssim2_quality_delta","butteraugli_quality_delta"]:
+        for metric in ["native_score_delta"]+[m+"_quality_delta" for m in judges]:
             signs = [s[metric] * (1 if s["mean_log_actual_q_change"] > 0 else -1)
                      for s in cell_samples if abs(s["mean_log_actual_q_change"]) > 1e-12]
             eps = 1e-5 if metric == "native_score_delta" else 1e-6
@@ -1084,7 +1142,185 @@ def model_preferences_main():
     print("\n".join(text))
 
 
+def rd_frontier(points):
+    """Measured Pareto frontier; higher quality with fewer bytes dominates."""
+    best = {}
+    for quality, size in points:
+        if not math.isfinite(quality) or size <= 0:
+            raise ValueError("nonfinite quality or nonpositive byte count")
+        best[quality] = min(size, best.get(quality, math.inf))
+    frontier, minimum = [], math.inf
+    for quality, size in sorted(best.items(), reverse=True):
+        if size < minimum:
+            frontier.append((quality,size))
+            minimum = size
+    return list(reversed(frontier))
+
+
+def shipgates_rd_main():
+    """Matched engineering curves; bootstrap stays in the Rust stats owner."""
+    import argparse, hashlib, json, subprocess
+    from pathlib import Path
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--shipgates-rd", type=Path, required=True)
+    ap.add_argument("--judge-dir", type=Path, required=True)
+    ap.add_argument("--sources", type=Path, required=True)
+    ap.add_argument("--panel", type=Path, required=True)
+    ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument("--metrics", default="ssim2,butter,zensim")
+    args = ap.parse_args()
+    root = args.shipgates_rd
+    def digest(path):
+        with path.open("rb") as stream:
+            return hashlib.file_digest(stream,"sha256").hexdigest()
+    design = json.loads((root / "DESIGN.json").read_text())
+    done = json.loads((root / "COMPLETE.json").read_text())
+    manifest = json.loads(args.sources.read_text())
+    assert digest(args.sources) == design["source_manifest_sha256"]
+    sources = {s["name"]:s for s in manifest["sources"]}
+    models = list(design["models"])
+    native_codec = design.get("schema") == "shipgates-codec-native-rd-v1"
+    assert not design.get("smoke_only", False), "smoke cells cannot qualify RD"
+    arms = (["none"] + [a for m in models for a in [m,m+"-neutral",m+"-scalar",m+"-butteraugli"]]
+            if native_codec else models + [m+"-neutral" for m in models] + ["butteraugli","none"])
+    cases = []
+    for i in range(len(sources)):
+        part = root / f"source-{i:02d}"
+        expected_count = (len(design["qualities"]) + len(models)*len(design["targets"])*4 if native_codec else 21*8)
+        assert json.loads((part / "COMPLETE.json").read_text())["cells"] == expected_count
+        cases.extend(json.loads(line) for line in (part / "cells.jsonl").read_text().splitlines())
+    if native_codec:
+        assert design["source_ids"] == list(range(len(sources)))
+        expected = {(s,"none",f"q{q:02d}") for s in sources for q in range(len(design["qualities"]))}
+        expected |= {(s,a,"t"+str(float(t))) for s in sources for a in arms if a != "none" for t in design["targets"]}
+    else:
+        expected = {(s,a,q) for s in sources for a in arms for q in range(21)}
+    keys = [(r["source"],r["arm"],r["quality_index"]) for r in cases]
+    assert len(keys) == len(expected) == done["cells"] and set(keys) == expected
+    by_case = {r["case"]:r for r in cases}
+    assert len(by_case) == len(cases)
+    for r in cases:
+        assert r["content_class"] == sources[r["source"]]["content_class"]
+        assert r["source_family"] == sources[r["source"]]["source_family"]
+        assert r["source_sha256"] == sources[r["source"]]["sha256"]
+        assert digest(Path(r["encoded"])) == r["encoded_sha256"]
+        assert Path(r["encoded"]).stat().st_size == r["bytes"]
+        assert digest(Path(r["decoded"])) == r["decoded_png_sha256"]
+        if native_codec:
+            for artifact in r["encoded_artifacts"] + r["driver_fields"]:
+                assert digest(Path(artifact["path"])) == artifact["sha256"]
+        else:
+            for artifact in r["map_records"]:
+                assert digest(Path(r["case"])/"maps"/(artifact["sha256"]+".zmap")) == artifact["sha256"]
+    requested = set(args.metrics.split(","))
+    assert requested and requested <= {"ssim2","butter","zensim"}
+    columns = {"ssim2":("ssim2",1),"butter":("butteraugli_pnorm3",-1),"zensim":("fixed_zensim",1)}
+    judges = [json.loads(line) for line in (args.judge_dir / "judges.jsonl").read_text().splitlines()]
+    assert json.loads((args.judge_dir / "COMPLETE.json").read_text())["pairs"] == len(judges) == len(cases)
+    lookup, reference_pixels, decoded_pixels, checked_maps = {}, {}, {}, set()
+    for row in judges:
+        case_id = row["input"]["case_id"]
+        assert case_id in by_case and case_id not in lookup
+        case = by_case[case_id]
+        assert (row["ref_path"],row["dist_path"]) == (case["reference"],case["decoded"])
+        for metric in requested:
+            col,_ = columns[metric]
+            assert isinstance(row[col],(int,float)) and math.isfinite(row[col])
+        map_metrics = {m["metric_id"].split(";")[0] for m in row["maps"]}
+        assert ("butteraugli" in map_metrics) == ("butter" in requested)
+        assert ("zensim-B-default-diffmap" in map_metrics) == ("zensim" in requested)
+        for artifact in row["maps"]:
+            key = artifact["path"], artifact["map_sha256"]
+            if key not in checked_maps:
+                assert digest(Path(artifact["path"])) == artifact["map_sha256"]
+                checked_maps.add(key)
+        previous = reference_pixels.setdefault(case["source"],row["reference_pixels_sha256"])
+        assert previous == row["reference_pixels_sha256"]
+        previous = decoded_pixels.setdefault(case["encoded_sha256"],row["distorted_pixels_sha256"])
+        assert previous == row["distorted_pixels_sha256"]
+        lookup[case_id] = row
+    assert set(lookup) == set(by_case)
+    group, cohorts = defaultdict(list), {}
+    for case in cases:
+        for metric in requested:
+            col,sign = columns[metric]
+            group[(case["source"],metric,case["arm"])].append((sign*lookup[case["case"]][col],case["bytes"]))
+    observations, series = [], defaultdict(list)
+    family_ids = {f:i for i,f in enumerate(sorted({r["source_family"] for r in sources.values()}))}
+    ids = {s:family_ids[r["source_family"]] for s,r in sources.items()}
+    pixel_families = {}
+    for name,pixel_hash in reference_pixels.items():
+        family = sources[name]["source_family"]
+        assert pixel_families.setdefault(pixel_hash,family) == family, "exact reference pixels occur across declared families"
+    for source, record in sorted(sources.items()):
+        for metric in sorted(requested):
+            curves = {a:rd_frontier(group[(source,metric,a)]) for a in arms}
+            assert all(curves.values())
+            low = max(c[0][0] for c in curves.values())
+            high = min(c[-1][0] for c in curves.values())
+            qualities = [q for q,_ in curves["none"] if low <= q <= high]
+            assert qualities, f"no common measured quality support: {source}/{metric}"
+            sizes = {a:[interp_bytes(curves[a],q) for q in qualities] for a in arms}
+            assert all(v is not None and v > 0 for values in sizes.values() for v in values)
+            for arm in arms:
+                for baseline in (["none"]+[m+"-butteraugli" for m in models] if native_codec else ["none","butteraugli"]):
+                    logs = [math.log(size/base) for size,base in zip(sizes[arm],sizes[baseline])]
+                    value = st.mean(logs)
+                    if arm == baseline:
+                        assert value == 0.
+                    observations.append(dict(source=source,source_family=record["source_family"],
+                        content_class=record["content_class"],metric=metric,arm=arm,baseline=baseline,
+                        common_quality_points=len(qualities),baseline_frontier_points=len(curves["none"]),
+                        quality_min=low,quality_max=high,mean_log_ratio=value,ratio=math.exp(value)))
+                    for cohort in ["all",record["content_class"]]:
+                        name=f"{baseline}/{metric}/{arm}/{cohort}"
+                        series[name].append((ids[source],value))
+                        cohorts[name] = dict(baseline=baseline,metric=metric,arm=arm,content_class=cohort)
+    args.output.mkdir(parents=True,exist_ok=False)
+    job = dict(schema="engineering-source-series-v1",series=[dict(name=name,reference=[i for i,_ in data],
+        values=[v for _,v in data],exp=True) for name,data in sorted(series.items())])
+    (args.output / "SOURCE_SERIES.json").write_text(json.dumps(job,indent=2,allow_nan=False)+"\n")
+    command=[str(args.panel),"e34","source-series","--input",str(args.output / "SOURCE_SERIES.json"),
+             "--output",str(args.output / "SOURCE_INTERVALS.json")]
+    subprocess.run(command,check=True)
+    intervals=json.loads((args.output / "SOURCE_INTERVALS.json").read_text())
+    summaries=[]
+    for row in intervals["series"]:
+        iv=row["interval"]
+        summaries.append(dict(**cohorts[row["name"]],sources=row["sources"],ratio=iv["estimate"],
+            saving=1-iv["estimate"],saving_ci95=[1-iv["hi"],1-iv["lo"]],seed=row["seed"]))
+    numeric_gates = {}
+    classes = sorted({r["content_class"] for r in sources.values()})
+    for model in models:
+        overall = [r for r in summaries if r["arm"]==model and r["baseline"]=="none" and r["content_class"]=="all"]
+        per_class = [r for r in summaries if r["arm"]==model and r["baseline"]=="none" and r["content_class"]!="all"]
+        nonnegative = all(r["saving"] >= 0. for r in overall)
+        class_nonnegative = all(r["saving"] >= 0. for r in per_class)
+        one_percent = any(r["saving"] >= .01 for r in overall)
+        minimum_sources = all(r["sources"] >= 12 for r in per_class)
+        complete_judges = requested == set(columns)
+        verdict = ("FAIL" if not nonnegative or not class_nonnegative else
+                   "INCOMPLETE" if not complete_judges or not minimum_sources else
+                   "PASS" if one_percent else "FAIL")
+        numeric_gates[model] = dict(verdict=verdict,scope="numeric RD bars only; intervention validation separate",
+            all_judges_nonnegative=nonnegative,at_least_one_judge_saves_one_percent=one_percent,
+            no_content_class_regression=class_nonnegative,minimum12_source_families_per_class=minimum_sources,
+            all_three_judges_measured=complete_judges,declared_content_classes=classes)
+    result=dict(schema="shipgates-rd-judged-v1",scope="development probe; intervention/control qualification separate",
+        source_weighting="equal weight per source; mean log ratio across common measured baseline quality points; bootstrap clusters are declared source families",
+        bootstrap="canonical zenstats source-cluster bootstrap; 10000 resamples",
+        requested_judges=sorted(requested),all_three_judges_measured=requested==set(columns),
+        sources=len(sources),cases=len(cases),per_source=observations,summary=summaries,numeric_gates=numeric_gates,
+        source_manifest_sha256=digest(args.sources),judge_results_sha256=digest(args.judge_dir / "judges.jsonl"),
+        panel_sha256=digest(args.panel),encoder_design_sha256=digest(root / "DESIGN.json"),
+        status="REPORT_ONLY; final gate requires complete intervention evidence")
+    (args.output / "RESULT.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+    print(json.dumps({k:v for k,v in result.items() if k not in ["per_source","summary"]},indent=2))
+
+
 def main():
+    if "--shipgates-rd" in sys.argv:
+        return shipgates_rd_main()
     if "--model-preferences" in sys.argv:
         return model_preferences_main()
     if "--interventions" in sys.argv:
