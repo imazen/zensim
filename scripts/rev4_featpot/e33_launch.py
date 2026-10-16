@@ -41,7 +41,27 @@ def now():
 
 
 def jobset(arm):
-    return arm if arm.startswith("fite34-") else f"fite33-{arm}-20261010"
+    return arm if arm.startswith(("fite34-", "fitsteer-")) else f"fite33-{arm}-20261010"
+
+
+def steer_plan(bundle, doc):
+    plan = json.loads((bundle / 'STEER_JOB_PLAN.json').read_text())
+    if (plan.get('schema') != 'steer-job-plan-v1' or len(plan['order']) != 8
+            or len(set(plan['order'])) != 8 or set(plan['order']) != set(doc['jobsets'])
+            or set(plan['unconditional']) != set(plan['order'])
+            or sum(doc['jobsets'].values()) != 172):
+        raise ValueError('fixed STEER172-cell/eight-jobset inventory differs')
+    return plan
+
+
+def first_steer_admission(bundle):
+    proof = json.loads((bundle.parent / 'launch/FIRST_CELL_ADMITTED.json').read_text())
+    if (proof.get('packet_sha256') != PACKET_SHA or proof.get('verified') is not True
+            or proof.get('inside_pinned_image') is not True or proof.get('worker_drained') is not True
+            or sha(Path(proof['dest'])/'result.json') != proof['result_sha256']
+            or sha(Path(proof['dest'])/'fleet_receipt.json') != proof['receipt_sha256']):
+        raise ValueError('first STEER cell persistence/native-image admission incomplete')
+    return proof
 
 
 def packet(bundle):
@@ -71,7 +91,7 @@ def runtime(bundle, doc):
             if path.read_bytes() != data:
                 raise ValueError(f"committed verifier differs from the program: {name}")
     meta = json.loads((bundle / "build-meta.packer-input.json").read_text())
-    inspector = bundle.parent / ("bin" if doc.get("schema") == "e34-fleet-packet-v1" else "bin-final2") / "inspect_qualified_checkpoint"
+    inspector = bundle.parent / ("bin" if doc.get("schema") in ("e34-fleet-packet-v1", "steer-fleet-packet-v1") else "bin-final2") / "inspect_qualified_checkpoint"
     if sha(inspector) != meta["binary_mix"]["inspect_qualified_checkpoint"]["sha256"]:
         raise ValueError("inspector differs from the program's binary pin")
     return rt, tools, inspector
@@ -127,7 +147,7 @@ def queued(queue):
     return [line.split()[0] for line in queue.read_text().splitlines() if line.split()]
 
 
-def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.json"):
+def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.json", *, first_cell=False):
     doc = packet(bundle)
     js = jobset(arm)
     if js not in doc["jobsets"]:
@@ -142,7 +162,22 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
     names = queued(queue)
     if js in names:
         raise ValueError(f"{js} already queued")
-    earlier = () if doc.get("schema") == "e34-fleet-packet-v1" else ORDER[: ORDER.index(arm)]
+    manifest = bundle / f"fit-manifest-{js}.json"
+    if doc.get('schema') == 'steer-fleet-packet-v1':
+        plan = steer_plan(bundle, doc)
+        earlier = plan['order'][:plan['order'].index(js)]
+        if first_cell:
+            if js != plan['order'][0] or names:
+                raise ValueError('first STEER admission requires the first jobset and an empty dedicated queue')
+            manifest = bundle / 'FIRST_CELL_MANIFEST.json'
+            if json.loads(manifest.read_text()) != json.loads((bundle/f'fit-manifest-{js}.json').read_text())[:1]:
+                raise ValueError('first STEER manifest must be the exact first registered cell')
+        else:
+            first_steer_admission(bundle)
+    else:
+        if first_cell:
+            raise ValueError('first-cell mode is STEER only')
+        earlier = () if doc.get("schema") == "e34-fleet-packet-v1" else ORDER[: ORDER.index(arm)]
     if doc.get("schema") == "e34-fleet-packet-v1":
         plan=json.loads((bundle/"E34_JOB_PLAN.json").read_text())
         if js not in plan["unconditional"]:
@@ -154,8 +189,13 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
         raise ValueError("registered sequence: queue the earlier E33 jobsets first")
     rt, _, _ = runtime(bundle, doc)
     record = dict(jobset=js, packet_sha=PACKET_SHA, image=doc["image"], image_id=actual, started=now())
-    push = subprocess.run(["docker", "push", doc["image"]], capture_output=True, text=True, check=True)
-    record["push_tail"] = push.stdout.strip().splitlines()[-1:]
+    if doc.get('schema') == 'steer-fleet-packet-v1':
+        if '@sha256:' not in doc['image'] or doc['image_ref'] != doc['image']:
+            raise ValueError('STEER requires the published immutable image reference')
+        record['published_image'] = doc['image']
+    else:
+        push = subprocess.run(["docker", "push", doc["image"]], capture_output=True, text=True, check=True)
+        record["push_tail"] = push.stdout.strip().splitlines()[-1:]
     control = rt / f"control-{js}.json"
     control.write_text(json.dumps(dict(paused=False, drain=False,
                                        note="Frozen registered fit; coordinator authorization")) + "\n")
@@ -164,13 +204,12 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
 s5cmd --endpoint-url "$EP" cp "$1" "s3://zentrain/jobs/$2/manifest.json"
 s5cmd --endpoint-url "$EP" cp "$3" "s3://zentrain/jobs/$2/control.json"
 s5cmd --endpoint-url "$EP" cp "$4" "s3://zentrain/jobs/$2/inputs/$5"
-""", "--", str(next(bundle.glob(f"fit-manifest-{js}.json"))), js, str(control),
+""", "--", str(manifest), js, str(control),
                     str(bundle / "e33-fit-data.tar.gz"), doc["data_sha"]], check=True)
     log = FITV2 / "host_filler.log"
     record["filler_log_offset"] = log.stat().st_size if log.exists() else 0
     queue.with_name(f"fleet_queue.{js}.before").write_bytes(queue.read_bytes())
     staging = queue.with_name(f"fleet_queue.{js}.new")
-    manifest = bundle / f"fit-manifest-{js}.json"
     staging.write_text(queue.read_text().rstrip() + f"\n{js} {manifest} {doc.get('image_ref', doc['image'])}\n")
     os.replace(staging, queue)
     record["queued"] = now()
@@ -260,8 +299,9 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
             raise ValueError("requires a registered full-budget strict E33 cell")
         if POT / hfc.blob_root(k) / name != Path(argv[argv.index("--dest") + 1]):
             raise ValueError("manifest destination and harvest install root differ")
-    work = FITV2 / ("harvest-e34" if js.startswith("fite34-") else "harvest-e33") / js
-    status = FITV2 / ("status-e34" if js.startswith("fite34-") else "status-e33") / js
+    suffix = 'steer' if js.startswith('fitsteer-') else 'e34' if js.startswith('fite34-') else 'e33'
+    work = FITV2 / ('harvest-'+suffix) / js
+    status = FITV2 / ('status-'+suffix) / js
     work.mkdir(parents=True, exist_ok=True)
     status.mkdir(parents=True, exist_ok=True)
     with (work / "driver.lock").open("a") as lock:
@@ -305,6 +345,17 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
                    "--checkpoint-inspector", str(inspector)]
             if install:
                 cmd += ["--install", "--rescue-root", str(FITV2 / "original-era-e33" / js)]
+            if doc.get('schema') == 'steer-fleet-packet-v1' and os.environ.get('STEER_HARVEST_IMAGE') != doc['image_ref']:
+                scratch = bundle.parent/'launch/harvest-scratch'
+                scratch.mkdir(parents=True,exist_ok=True)
+                cmd = ['docker','run','--rm','--network','host','--memory','6g','--memory-swap','6g',
+                       '--entrypoint','/usr/bin/nice','-e','AWS_ACCESS_KEY_ID','-e','AWS_SECRET_ACCESS_KEY',
+                       '-e','TMPDIR=/scratch/tmp','-v',str(bundle.parent)+':'+str(bundle.parent)+':ro',
+                       '-v',str(FITV2)+':'+str(FITV2),'-v',str(POT)+':'+str(POT),
+                       '-v',str(scratch)+':/scratch',doc['image_ref'],'-n19','ionice','-c3',
+                       'python3','/opt/fleet-fits/program/harvest_fit_cells.py',*cmd[2:]]
+                inspector_index=cmd.index('--checkpoint-inspector')+1
+                cmd[inspector_index]='/opt/fleet-fits/program/bin/inspect_qualified_checkpoint'
             subprocess.run(cmd, check=True)
         if install and require_all and not all(installed(hfc, c) for c in jobs):
             raise ValueError("installed cell identity/checkpoint check failed")
@@ -333,15 +384,15 @@ def harvest_attempt(command, log, timeout):
 def harvest_cycle(bundle, queue, status_file=None, jobset_timeout=300):
     """Attempt every queued E34 jobset, keeping failures explicit and independent."""
     doc = packet(bundle)
-    if doc.get("schema") != "e34-fleet-packet-v1":
-        raise ValueError("supervised cycle requires E34")
+    if doc.get("schema") not in ("e34-fleet-packet-v1", "steer-fleet-packet-v1"):
+        raise ValueError("supervised cycle requires E34 or STEER")
     rt, tools, _ = runtime(bundle, doc)
     sys.path.insert(0, str(tools))
     import harvest_fit_cells as hfc
-    plan = json.loads((bundle / "E34_JOB_PLAN.json").read_text())
+    plan = steer_plan(bundle,doc) if doc.get('schema') == 'steer-fleet-packet-v1' else json.loads((bundle / "E34_JOB_PLAN.json").read_text())
     allowed = set(plan["unconditional"])
     selection = rt / "LAMBDA_SELECTION.json"
-    if selection.exists():
+    if doc.get('schema') == 'e34-fleet-packet-v1' and selection.exists():
         selected = json.loads(selection.read_text())
         if selected["packet_sha256"] != PACKET_SHA or len(selected["selected_branches"]) != 2:
             raise ValueError("selection binding differs from frozen packet")
@@ -489,8 +540,9 @@ def persist_loan_artifacts(bundle):
         dest=root/host/stamp
         dest.mkdir(parents=True,exist_ok=False)
         latest=root/host/'LATEST'
+        pattern = 'steer-*-results' if doc.get('schema') == 'steer-fleet-packet-v1' else 'e34-*-results'
         cmd=['rsync','-a','--no-owner','--no-group','--delay-updates','--prune-empty-dirs',
-             '--include=/e34-*-results/***','--exclude=*']
+             '--include=/'+pattern+'/***','--exclude=*']
         if latest.exists():cmd += ['--link-dest='+str(root/host/latest.read_text().strip())]
         rsync_available=subprocess.run(['ssh','-n','-o','BatchMode=yes',host,'command -v rsync'],
                                        capture_output=True).returncode==0
@@ -504,7 +556,7 @@ def persist_loan_artifacts(bundle):
             # A host needs only its existing tar; retain a whole immutable raw
             # in-flight archive. It is never admitted as a completed fit.
             archive=dest/'INFLIGHT.tar.gz'
-            command='cd '+source+' && set -- e34-*-results; if [ -e "$1" ]; then nice -n19 ionice -c3 tar -czf - -- "$@"; else tar -czf - --files-from /dev/null; fi'
+            command='cd '+source+' && set -- '+pattern+'; if [ -e "$1" ]; then nice -n19 ionice -c3 tar -czf - -- "$@"; else tar -czf - --files-from /dev/null; fi'
             with archive.open('wb') as stream:
                 proc=subprocess.run(['ssh','-n','-o','BatchMode=yes','-o','ConnectTimeout=8',host,command],
                                     stdout=stream,stderr=subprocess.PIPE)
@@ -608,6 +660,22 @@ def lambda_pilot(bundle, instrument, partial=False):
 def release_initial(bundle, queue):
     """Release exactly the frozen unconditional cells after first-artifact admission."""
     doc=packet(bundle)
+    if doc.get('schema') == 'steer-fleet-packet-v1':
+        first_steer_admission(bundle)
+        plan=steer_plan(bundle,doc)
+        first=plan['order'][0]
+        rows=[line.split() for line in queue.read_text().splitlines() if line.strip()]
+        if [row[0] for row in rows] != [first]:
+            raise ValueError('STEER expansion requires only the admitted first jobset queued')
+        manifest=bundle/f'fit-manifest-{first}.json'
+        subprocess.run(['bash','-c','set -euo pipefail\n. ~/.config/zen/s3env.sh >/dev/null 2>&1\ns5cmd --endpoint-url "$EP" cp "$1" "s3://zentrain/jobs/$2/manifest.json"',
+                        '--',str(manifest),first],check=True)
+        rows[0][1]=str(manifest)
+        stage=queue.with_name(queue.name+'.steer-expand')
+        stage.write_text(''.join(' '.join(row)+'\n' for row in rows));os.replace(stage,queue)
+        for js in plan['order'][1:]:
+            launch(bundle,js,queue)
+        return dict(released=plan['order'],unconditional_cells=172)
     proof=json.loads((bundle.parent/'launch/FIRST_CELL_ADMITTED.json').read_text())
     dest=Path(proof['dest'])
     if (proof['verified'] is not True or proof['packet_sha256']!=PACKET_SHA
@@ -622,6 +690,21 @@ def release_initial(bundle, queue):
     return dict(released=order,unconditional_cells=plan['initial_cells'])
 
 
+def steer_harvest_command(bundle, doc, arguments):
+    """Run the complete ledger reader and archive verifier with baked pyarrow and inspector."""
+    repo = Path(__file__).resolve().parents[2]
+    scratch = bundle.parent / 'launch/harvest-scratch'
+    scratch.mkdir(parents=True, exist_ok=True)
+    command = ['docker', 'run', '--rm', '--network', 'host', '--memory', '6g', '--memory-swap', '6g',
+               '--entrypoint', '/usr/bin/nice', '-e', 'AWS_ACCESS_KEY_ID', '-e', 'AWS_SECRET_ACCESS_KEY',
+               '-e', 'EP', '-e', 'TMPDIR=/scratch/tmp', '-e', 'STEER_HARVEST_IMAGE='+doc['image_ref']]
+    for path, mode in [(repo, ':ro'), (bundle.parent, ''), (FITV2, ''), (POT, ''), (CTL.parent, ':ro')]:
+        command += ['-v', str(path)+':'+str(path)+mode]
+    command += ['-v', str(scratch)+':/scratch', doc['image_ref'], '-n19', 'ionice', '-c3',
+                'python3', str(Path(__file__).resolve()), *arguments]
+    return command
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("mode", choices=("verify", "caps", "launch", "placements", "harvest", "harvest-cycle", "advance", "persist", "shorter-queue", "lambda-pilot", "release-initial"))
@@ -634,6 +717,7 @@ def main():
     p.add_argument("--status-file", type=Path, help="append per-jobset harvest counts and errors")
     p.add_argument("--partial", action="store_true", help="pilot: explicitly assess available artifacts, never select until all6")
     p.add_argument("--install", action="store_true")
+    p.add_argument("--first-cell", action="store_true", help="STEER: release only the pinned first cell before persistence admission")
     p.add_argument("--require-all", action="store_true")
     p.add_argument("--status", action="store_true")
     a = p.parse_args()
@@ -642,10 +726,18 @@ def main():
         if len(a.packet_sha) != 64:
             p.error("--packet-sha requires a full SHA-256")
         PACKET_SHA=a.packet_sha
-    elif a.arm and a.arm.startswith("fite34-"):
-        p.error("E34 requires the frozen --packet-sha")
+    elif a.arm and a.arm.startswith(("fite34-", "fitsteer-")):
+        p.error("E34/STEER requires the frozen --packet-sha")
     if a.mode in ("launch", "placements", "harvest") and not a.arm:
         p.error(f"{a.mode} requires --arm")
+    if a.mode in ('harvest', 'harvest-cycle'):
+        doc = packet(a.packet)
+        if doc.get('schema') == 'steer-fleet-packet-v1':
+            marker = os.environ.get('STEER_HARVEST_IMAGE')
+            if marker is None:
+                sys.exit(subprocess.run(steer_harvest_command(a.packet, doc, sys.argv[1:])).returncode)
+            if marker != doc['image_ref']:
+                raise ValueError('STEER harvest image differs from frozen digest')
     if a.mode == "harvest-cycle":
         out = harvest_cycle(a.packet, a.queue, a.status_file)
         print(json.dumps(out))
@@ -667,7 +759,7 @@ def main():
     elif a.mode == "caps":
         out = merge_caps(a.packet)
     elif a.mode == "launch":
-        out = launch(a.packet, a.arm, a.queue)
+        out = launch(a.packet, a.arm, a.queue, first_cell=a.first_cell)
     elif a.mode == "placements":
         out = placements(a.packet, a.arm)
     elif a.mode == "advance":

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Bind the STEER first-cell admission, immutable-image launch and supervised image-contained harvest paths.
+
+
 - Bind the assessment-only runtime build to the merged smooth activation and extend the native synthetic probe with matched-control score-bit parity.
 
 - Complete canonical STEER A7 pre-freeze boundary replay and twelve-model inventory refusal checks; preserve the registered state machine and numerical gates.

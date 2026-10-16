@@ -35,3 +35,5 @@ wrapper. External GNU time supplies process peak RSS; build timings are not
 serving measurements. The smoke policy is separate from registered fit caps.
 
 `--compare-bake PATH --compare-sha256 SHA` additionally compares native ordinary and repaired-score bits against a hash-bound matched control on the same procedural pixels. The receipt exposes only parity flags/counts and hashes; it is an engineering replay check, with no targets or quality statistic.
+
+The scientific launch owner `e33_launch.py` accepts the versioned STEER packet and fixed eight-jobset inventory. Its first-cell mode refuses expansion until a hash-bound native-image persistence receipt records a drained worker. `harvest` and `harvest-cycle` enter the pinned image before importing the archive verifier or reading ledgers. A failed jobset remains explicit while the cycle attempts the others. Preparation alone does not authorize queueing.

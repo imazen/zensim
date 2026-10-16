@@ -34,6 +34,68 @@ class Launch(unittest.TestCase):
             p.stop()
         self.tmp.cleanup()
 
+    def steer_fixture(self):
+        order = [f'fitsteer-{arm}-{route}-20261016' for route in ['lodo', 'full']
+                 for arm in ['basea', 'basec', 'sa', 'sc']]
+        doc = {'schema': 'steer-fleet-packet-v1', 'image': 'img', 'image_ref': 'img@sha256:x',
+               'image_id': 'sha256:x', 'jobsets': {js: 40 if '-lodo-' in js else 3 for js in order}}
+        plan = {'schema': 'steer-job-plan-v1', 'order': order, 'unconditional': order}
+        (self.bundle/'STEER_JOB_PLAN.json').write_text(json.dumps(plan))
+        entry = {'memory': '6g', 'hosts': {'tower': 1}}
+        (self.bundle/'jobset_caps.json').write_text(json.dumps({js: entry for js in order}))
+        self.live.write_text(json.dumps({js: entry for js in order}))
+        return doc, plan
+
+    def test_steer_inventory_refuses_missing_duplicate_and_wrong_total(self):
+        doc, plan = self.steer_fixture()
+        self.assertEqual(owner.steer_plan(self.bundle, doc), plan)
+        for order in [plan['order'][:-1], [plan['order'][0]]*8]:
+            (self.bundle/'STEER_JOB_PLAN.json').write_text(json.dumps(dict(plan, order=order)))
+            with self.assertRaises(ValueError):
+                owner.steer_plan(self.bundle, doc)
+        (self.bundle/'STEER_JOB_PLAN.json').write_text(json.dumps(plan))
+        doc['jobsets'][plan['order'][0]] -= 1
+        with self.assertRaises(ValueError):
+            owner.steer_plan(self.bundle, doc)
+
+    def test_steer_first_cell_refuses_nonempty_queue_and_modified_subset(self):
+        doc, plan = self.steer_fixture()
+        with mock.patch.object(owner, 'packet', return_value=doc):
+            with self.assertRaisesRegex(ValueError, 'empty dedicated queue'):
+                owner.launch(self.bundle, plan['order'][0], self.queue, self.live, first_cell=True)
+            self.queue.write_text('')
+            (self.bundle/f"fit-manifest-{plan['order'][0]}.json").write_text('[{"cell":1},{"cell":2}]')
+            (self.bundle/'FIRST_CELL_MANIFEST.json').write_text('[{"cell":2}]')
+            with self.assertRaisesRegex(ValueError, 'exact first registered cell'):
+                owner.launch(self.bundle, plan['order'][0], self.queue, self.live, first_cell=True)
+            with self.assertRaises(FileNotFoundError):
+                owner.launch(self.bundle, plan['order'][1], self.queue, self.live)
+
+    def test_steer_first_admission_requires_drained_native_image_proof(self):
+        (self.root/'launch').mkdir()
+        dest=self.root/'cell';dest.mkdir()
+        (dest/'result.json').write_text('{}');(dest/'fleet_receipt.json').write_text('{}')
+        proof=dict(packet_sha256=owner.PACKET_SHA, verified=True, inside_pinned_image=True,
+                   worker_drained=True, dest=str(dest), result_sha256=owner.sha(dest/'result.json'),
+                   receipt_sha256=owner.sha(dest/'fleet_receipt.json'))
+        path=self.root/'launch/FIRST_CELL_ADMITTED.json'
+        path.write_text(json.dumps(proof))
+        self.assertEqual(owner.first_steer_admission(self.bundle), proof)
+        for key in ['verified', 'inside_pinned_image', 'worker_drained']:
+            path.write_text(json.dumps(dict(proof, **{key:False})))
+            with self.assertRaises(ValueError):owner.first_steer_admission(self.bundle)
+        path.write_text(json.dumps(proof));(dest/'result.json').write_text('{"changed":true}')
+        with self.assertRaises(ValueError):owner.first_steer_admission(self.bundle)
+
+    def test_steer_complete_harvest_reader_uses_pinned_image(self):
+        doc, _ = self.steer_fixture()
+        args=['harvest-cycle','--packet',str(self.bundle),'--packet-sha',owner.PACKET_SHA]
+        command=owner.steer_harvest_command(self.bundle, doc, args)
+        self.assertIn('STEER_HARVEST_IMAGE='+doc['image_ref'], command)
+        self.assertIn(doc['image_ref'], command)
+        self.assertIn('AWS_SECRET_ACCESS_KEY', command)
+        self.assertEqual(command[-len(args):], args)
+
     def test_caps_merge_keeps_other_entries_and_backs_up(self):
         out = owner.merge_caps(self.bundle, self.live)
         live = json.loads(self.live.read_text())
