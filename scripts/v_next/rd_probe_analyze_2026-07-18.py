@@ -1206,6 +1206,12 @@ def shipgates_rd_main():
         assert digest(Path(r["encoded"])) == r["encoded_sha256"]
         assert Path(r["encoded"]).stat().st_size == r["bytes"]
         assert digest(Path(r["decoded"])) == r["decoded_png_sha256"]
+        for path_key,sha_key in [("reference","reference_png_sha256"),("native_reference","native_reference_png_sha256"),
+                                 ("native_decoded","native_decoded_png_sha256"),("png8_recipe","png8_recipe_sha256")]:
+            if sha_key in r:
+                assert digest(Path(r[path_key])) == r[sha_key]
+        if "png8_binary_sha256" in r:
+            assert r["png8_binary_sha256"] == design["png8_binary_sha256"]
         if native_codec:
             for artifact in r["encoded_artifacts"] + r["driver_fields"]:
                 assert digest(Path(artifact["path"])) == artifact["sha256"]

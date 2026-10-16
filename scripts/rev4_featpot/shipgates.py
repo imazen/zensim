@@ -330,6 +330,7 @@ def rd_licenses(args):
 
 def jxl_rd_source(args):
     """Encode one frozen source, retaining all actual driver artifacts."""
+    from shipgates_png import canonical_pair
     import math
     import struct
     from datetime import datetime, timezone
@@ -340,6 +341,7 @@ def jxl_rd_source(args):
     assert sha(source["path"]) == source["sha256"]
     models = json.loads(args.models.read_text())
     assert sha(args.binary) == design["binary_sha256"] and sha(args.oracle) == design["oracle_sha256"]
+    assert sha(args.png8_binary) == design["png8_binary_sha256"]
     arms = [(label,"zensim",2,"10",record) for label,record in models.items()]
     arms += [(label+"-neutral","zensim",2,"0",record) for label,record in models.items()]
     fixed = next(iter(models.values()))
@@ -384,10 +386,12 @@ def jxl_rd_source(args):
                 assert sha(path) == item["sha256"]
             decoded = list((dest / "decoded").glob("*.png"))
             assert len(decoded) == 1
+            reference,decoded_path,png_metadata = canonical_pair(source["path"],
+                dest / "ref" / (source["name"]+".png"),decoded[0],dest,args.png8_binary)
             record = dict(source=source["name"],source_family=source["source_family"],content_class=source["content_class"],
                 source_sha256=source["sha256"],arm=label,codec="jxl",quality_index=qi,distance_f32=distance,
-                reference=str(dest / "ref" / (source["name"]+".png")),decoded=str(decoded[0]),
-                decoded_png_sha256=sha(decoded[0]),encoded=str(encoded),encoded_sha256=encoded.stem,
+                reference=str(reference),decoded=str(decoded_path),
+                decoded_png_sha256=sha(decoded_path),**png_metadata,encoded=str(encoded),encoded_sha256=encoded.stem,
                 bytes=encoded.stat().st_size,map_records=items,case=str(dest),model_sha256=model["sha256"],
                 independent_decoder="libjxl0.12-success")
             write(dest / "CELL.json",record)
@@ -409,17 +413,29 @@ def jxl_rd(args):
     import math
     import struct
     import sys
+    admission=json.loads((args.inputs/"ADMISSION.json").read_text())
+    assert admission["source_manifest_sha256"]==sha(args.inputs/"SOURCE_MANIFEST.json")
+    assert admission["png8_binary_sha256"]==sha(args.png8_binary)
+    assert admission["sources"]==24 and sha(admission["receipt"])==admission["receipt_sha256"]
     args.output.mkdir(parents=True, exist_ok=False)
     sources = json.loads((args.inputs / "SOURCE_MANIFEST.json").read_text())["sources"]
     distances = [struct.unpack("<f",struct.pack("<f",math.exp(math.log(.01)+i*(math.log(25.)-math.log(.01))/20)))[0] for i in range(21)]
     design = dict(schema="shipgates-jxl-rd-encodes-v1",models=json.loads(args.models.read_text()),
-        binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),
+        binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),
+        png8_binary_sha256=sha(args.png8_binary),source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),
         distances_f32=distances,arms=8,iterations=2,threads=1,judges="separate; not yet scored",
         sources=len(sources),neutral_rule="every candidate-neutral byte-identical to none at every cell")
+    if args.resume_encodes_root:
+        previous=json.loads((args.resume_encodes_root/"DESIGN.json").read_text())
+        assert previous["binary_sha256"]==design["binary_sha256"] and previous["oracle_sha256"]==design["oracle_sha256"]
+        assert previous["distances_f32"]==design["distances_f32"] and previous["iterations"]==design["iterations"]
+        assert {k:v["sha256"] for k,v in previous["models"].items()}=={k:v["sha256"] for k,v in design["models"].items()}
     write(args.output / "DESIGN.json",design)
     runner = args.output / "runner.py"
     runner.write_bytes(Path(__file__).read_bytes())
-    write(args.output / "RUNNER.json",dict(sha256=sha(runner)))
+    png_adapter=args.output / "shipgates_png.py"
+    png_adapter.write_bytes(Path(__file__).with_name("shipgates_png.py").read_bytes())
+    write(args.output / "RUNNER.json",dict(sha256=sha(runner),png_adapter_sha256=sha(png_adapter)))
     for i, source in enumerate(sources):
         dest = args.output / f"source-{i:02d}"
         dest.mkdir()
@@ -452,7 +468,7 @@ def jxl_rd(args):
             else:
                 command = ["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","16G","--jobs","1","--",
                     sys.executable,str(runner),"jxl-rd-source","--models",str(args.models),"--binary",str(args.binary),
-                    "--inputs",str(args.inputs),"--oracle",str(args.oracle),"--design",str(args.output / "DESIGN.json"),
+                    "--inputs",str(args.inputs),"--oracle",str(args.oracle),"--png8-binary",str(args.png8_binary),"--design",str(args.output / "DESIGN.json"),
                     "--source-id",str(i),"--quality-index",str(qi),"--output",str(phase)]
                 write(dest / f"quality-{qi:02d}-command.json",command)
                 print(f"JXL RD source{i:02d} {source['name']} quality{qi:02d}: queued",flush=True)
@@ -606,8 +622,8 @@ def main():
                         ("corruption-results", ["inputs", "audits", "bindings"]),
                         ("rd-sources", ["inputs", "tree"]),
                         ("rd-licenses", ["tree"]),
-                        ("jxl-rd", ["inputs", "oracle", "heavy-lock", "run-heavy"]),
-                        ("jxl-rd-source", ["inputs", "oracle", "design", "source-id"])]:
+                        ("jxl-rd", ["inputs", "oracle", "heavy-lock", "run-heavy", "png8-binary"]),
+                        ("jxl-rd-source", ["inputs", "oracle", "design", "source-id", "png8-binary"])]:
         command = sub.add_parser(mode)
         common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses"] else ["models", "binary", "output"]
         for name in common + names:

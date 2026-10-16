@@ -32,6 +32,7 @@ def store(root, kind, path):
 
 
 def cell(args):
+    from shipgates_png import canonical_pair
     design = json.loads(args.design.read_text())
     source = design["sources"][args.source_id]
     models = design["models"]
@@ -168,9 +169,12 @@ def cell(args):
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         if args.codec != "avif":
             assert output.is_file() and output.stat().st_size > 0
+    png8_binary=Path(design["png8_binary"])
+    assert sha(png8_binary)==design["png8_binary_sha256"]
+    reference,decoded,png_metadata=canonical_pair(source["path"],source["path"],decoded,args.output,png8_binary)
     record = dict(codec=args.codec, source=source["name"], source_family=source["source_family"],
                   content_class=source["content_class"], source_sha256=source["sha256"],
-                  reference=source["path"], decoded=str(decoded),
+                  reference=str(reference), decoded=str(decoded), **png_metadata,
                   decoded_png_sha256=sha(decoded),
                   encoded=retained[0]["path"], encoded_sha256=retained[0]["sha256"],
                   bytes=result["bytes"], quality=args.quality, target=args.target,
@@ -224,10 +228,13 @@ def phase():
 def matrix():
     p = argparse.ArgumentParser()
     p.add_argument("--codec", choices=["jpeg", "webp", "avif"], required=True)
-    for name in ["binary", "oracle", "models", "sources", "output", "heavy-lock", "run-heavy"]:
+    for name in ["binary", "oracle", "models", "sources", "output", "heavy-lock", "run-heavy", "png8-binary"]:
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--smoke-only", action="store_true")
     args = p.parse_args(sys.argv[2:])
+    admission=json.loads((args.sources.parent/"ADMISSION.json").read_text())
+    assert admission["source_manifest_sha256"]==sha(args.sources) and admission["png8_binary_sha256"]==sha(args.png8_binary)
+    assert admission["sources"]==24 and sha(admission["receipt"])==admission["receipt_sha256"]
     args.output.mkdir(parents=True, exist_ok=False)
     sources = json.loads(args.sources.read_text())["sources"]
     models = json.loads(args.models.read_text())
@@ -242,6 +249,7 @@ def matrix():
     source_ids = [22] if args.smoke_only else list(range(24))
     design = dict(schema="shipgates-codec-native-rd-v1", codec=args.codec,
         binary=str(args.binary), binary_sha256=sha(args.binary), oracle=str(args.oracle),
+        png8_binary=str(args.png8_binary),png8_binary_sha256=sha(args.png8_binary),
         oracle_sha256=sha(args.oracle), models=models, sources=sources, source_ids=source_ids,
         source_manifest_sha256=sha(args.sources), qualities=qualities, targets=targets,
         map_arms=["scalar", "neutral", "active", "butteraugli"],
@@ -256,7 +264,9 @@ def matrix():
     runner.write_bytes(Path(__file__).read_bytes())
     helper = args.output / "shipgates.py"
     helper.write_bytes(Path(__file__).with_name("shipgates.py").read_bytes())
-    write(args.output / "RUNNER.json", {str(p): sha(p) for p in [runner, helper]})
+    png_helper=args.output / "shipgates_png.py"
+    png_helper.write_bytes(Path(__file__).with_name("shipgates_png.py").read_bytes())
+    write(args.output / "RUNNER.json", {str(p): sha(p) for p in [runner, helper,png_helper]})
     count = 0
     for source_id in source_ids:
         source_dir = args.output / f"source-{source_id:02d}"
