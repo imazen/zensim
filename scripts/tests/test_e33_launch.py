@@ -96,6 +96,24 @@ class Launch(unittest.TestCase):
         self.assertIn('AWS_SECRET_ACCESS_KEY', command)
         self.assertEqual(command[-len(args):], args)
 
+    def test_steer_first_manifest_starts_paused_and_queues_one_cell(self):
+        import types
+        doc, plan = self.steer_fixture()
+        doc['image'] = doc['image_ref']
+        doc['data_sha'] = 'fixture-data'
+        self.queue.write_text('')
+        rt=self.root/'launch';rt.mkdir()
+        jobs=[{'cell':1},{'cell':2}]
+        (self.bundle/f"fit-manifest-{plan['order'][0]}.json").write_text(json.dumps(jobs))
+        (self.bundle/'FIRST_CELL_MANIFEST.json').write_text(json.dumps(jobs[:1]))
+        with mock.patch.object(owner, 'packet', return_value=doc), \
+             mock.patch.object(owner, 'runtime', return_value=(rt,self.root,self.root)), \
+             mock.patch.object(owner.subprocess, 'run', return_value=types.SimpleNamespace(stdout='')) as run:
+            owner.launch(self.bundle, plan['order'][0], self.queue, self.live, first_cell=True)
+        self.assertTrue(json.loads((rt/f"control-{plan['order'][0]}.json").read_text())['paused'])
+        self.assertEqual(owner.queued(self.queue), [plan['order'][0]])
+        self.assertIn(str(self.bundle/'FIRST_CELL_MANIFEST.json'), run.call_args.args[0])
+
     def test_caps_merge_keeps_other_entries_and_backs_up(self):
         out = owner.merge_caps(self.bundle, self.live)
         live = json.loads(self.live.read_text())
