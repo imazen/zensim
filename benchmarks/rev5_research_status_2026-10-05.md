@@ -811,3 +811,26 @@ Open owner decisions:
     skip was added.
   - The macOS Intel jobs are gone from CI. Windows x64/ARM64, macOS ARM64, Ubuntu x64/ARM64 and the i686 cross job
     remain.
+
+## 46. E34 evaluated: no arm eligible (2026-10-15, main `3af52903`)
+
+- **Verdict.** No arm is eligible in either family, so none enters full qualification. No production model, profile
+  or default changed. The registered falsification conjunction is true; it covers the tested W, K and L training
+  choices only, not every model in the class. Readout: `benchmarks/e34_results_2026-10-15.md`.
+- **Accuracy** (E21 statistic, margin 0.0065, Holm over nine tests). W and K are non-inferior in both families:
+  family A (410 differences, `7cf4cfd9`) W −0.0003, K +0.0002; family C (A plus 410 difference×fragility products,
+  `89cb4861`) W +0.0021, K −0.0007. L-A loses 0.0226 and fails Holm plus the KADID, TID2013 and KonFiG point guards.
+  None of the four improvement tests rejects.
+- **G-STEER** (135 cases; seed 0 needs 135, seeds 1 and 2 need max(control, 133)). Seeds 0/1/2: control A
+  131/130/128, W-A 132/130/132, K-A 130/130/131, L-A 135/135/135; control C 130/130/133, W-C 133/132/130,
+  K-C 129/131/131.
+- **Engineering gates.** C1–C6, G-DIAL, N1–N3, K1–K5 and memory pass for every arm. Runtime fails for W-A (+2.7% at
+  v3 1024², bar +2%). Spatial (complete cached map p95 ≤ 3× uncached score p95) fails narrowly for W-A, K-A, L-A and
+  K-C (3.03–3.13×); W-C passes.
+- **Runtime host.** By owner direction, runtime and RSS were measured on r7900x, recorded before any timing or p-value
+  read. No dev timing is claimed.
+- **Wrap-up.** Final CI run 38845795760 passed 19 of 19 jobs on `3af52903`. The fleet feeders stopped without
+  reboots.
+- **Reading.** Within these choices, steering and accuracy trade off: the width-1 monotone arm steers perfectly but
+  loses accuracy, while W and K keep accuracy and miss steering. No candidate yet meets the G-STEER bar. The next
+  step is the owner's call.
