@@ -2,6 +2,9 @@
 //! Deliberately separate from engineering_packet and its registered arithmetic.
 use super::*;
 
+#[path = "steerfix_p3.rs"]
+mod p3;
+
 #[derive(Clone, Copy)]
 enum Input {
     Direct(usize),
@@ -631,8 +634,10 @@ fn d12_exact_gradient_reference_packet() {
                 row["height"].as_u64().unwrap() as u32,
             );
             let f: Vec<f64> = bytes
-                .chunks_exact(8)
-                .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|b| f64::from_le_bytes(*b))
                 .collect();
             let mut scorer = owner(&model, Objective::Served);
             let score_bits = scorer.score_features(&f, w, h, None).unwrap().to_bits();

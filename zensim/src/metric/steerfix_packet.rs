@@ -179,8 +179,10 @@ fn engineering_packet() {
             let n = 1 + w.div_ceil(case.block) * h.div_ceil(case.block);
             assert_eq!(bytes.len(), n * width * 8);
             let rows: Vec<f64> = bytes
-                .chunks_exact(8)
-                .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|b| f64::from_le_bytes(*b))
                 .collect();
             assert!(rows.iter().all(|x| x.is_finite()));
             for id in pixel.consumed_feature_ids().unwrap() {
