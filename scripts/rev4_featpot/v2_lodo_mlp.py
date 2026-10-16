@@ -121,6 +121,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
     for name, path, tw, vw, mode in groups:
         cmd += ["--group", f"{name}:{path}:{tw!r}:{vw!r}:{mode}"]
     recipe = recipe or {}
+    if recipe.get("smooth_hinge"):
+        if head != "N":
+            raise ValueError("sh1 requires the plain N head")
+        cmd += ["--smooth-hinge"]
     cmd += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(recipe.get("hidden", HIDDEN)),
             "--epochs", str(EPOCHS), "--pairs-per-epoch", str(PAIRS_PER_EPOCH),
             "--init-seed", str(init_seed), "--sample-seed", str(sample_seed),

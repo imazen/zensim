@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add opt-in fixed smooth hinge N research training and exact loaded/reference derivatives against the merged zenpredict activation format (zenanalyze f0903489).
+
 - Add a label-free exact-steering geometry/cost probe for explicitly hashed control models, with native complete-repair parity receipts.
 
 - Restore STEER completeness parity: seed-only diagnostic refusals are nonfatal; numeric dataset/W2 evidence is required on all twelve comparisons.

@@ -8,6 +8,20 @@ pub fn validate_training_capabilities(
     has_absolute_group: bool,
     triplet_rows: usize,
 ) -> MlpHyperparams {
+    if hyperparams.smooth_hinge {
+        assert!(
+            hyperparams.nonneg_distance
+                && hyperparams.n_hidden_layers == 1
+                && !hyperparams.monotone_cbc
+                && hyperparams.steer_pairs.is_none()
+                && hyperparams.feature_transforms.is_none()
+                && hyperparams.pooled_legs.is_empty()
+                && hyperparams.minibatch_size == 1
+                && hyperparams.norm_in_norm_weight == 0.0
+                && hyperparams.pair_sampling == super::PairSampling::Uniform,
+            "smooth hinge requires plain one-layer N, uniform/minibatch1, no transforms, pooled objectives or K penalty"
+        );
+    }
     assert!(
         hyperparams.steer_lambda.is_finite() && hyperparams.steer_lambda >= 0.0,
         "--steer-lambda must be finite and nonnegative"

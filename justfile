@@ -1450,3 +1450,28 @@ steer-smoke-build:
 steer-pending-policy-check:
     cargo test --locked -p zensim-validate --bin panel --no-run --message-format=json > "$HOME/tmp/zensim-steer-pending-build.jsonl"
     python3 -c 'import json,os,pathlib,subprocess; rows=[json.loads(l) for l in pathlib.Path.home().joinpath("tmp/zensim-steer-pending-build.jsonl").read_text().splitlines()]; binary=next(r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="panel" and r.get("executable")); env=dict(os.environ); env.pop("TMPDIR",None); subprocess.run([binary,"panel_e34::steer::tests::steer_pending_policy_does_not_open_input","--exact","--nocapture"],env=env,check=True)'
+
+# Fixed smooth hinge checks against the merged, pinned zenpredict dependency.
+steer-s-check:
+    cargo test --locked -p zensim-validate --lib steer_hinge -- --nocapture
+    cargo test --locked -p zensim-validate --bin bake_dial_refit steer_hinge -- --nocapture
+    cargo test --locked -p zensim-validate --bin zensim_mlp_train steer_hinge -- --nocapture
+    cargo clippy --locked -p zensim-validate --lib --bin zensim_mlp_train --bin bake_dial_refit -- -D warnings
+
+steer-s-reference-check:
+    RUSTFLAGS="--cfg steerfix_instrument" cargo test --locked -p zensim --lib --features custom-profiles steer_smooth_ -- --nocapture
+
+steer-s-recipe-tests:
+    python3 -m unittest scripts.tests.test_steer_recipe
+
+steer-s-native-check:
+    cargo test --locked -p zensim --lib --features custom-profiles steer_smooth_native_tier_stride_parity -- --nocapture
+
+steer-s-final-check:
+    cargo fmt -p zensim -p zensim-validate --check
+    just steer-s-recipe-tests
+    just steer-s-check
+    cargo clippy --locked -p zensim --lib --features custom-profiles -- -D warnings
+    cargo test --locked -p zensim --lib --features custom-profiles
+    cargo test --locked -p zensim-validate --lib compact_rows_train_identically_to_zero_masked_dense
+    just steer-s-reference-check

@@ -88,6 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{}",
         serde_json::json!({"status":"PASS", "formula_revision":5,
             "qualified_provenance":true, "feature_set_id":declared.to_string(),
+            "hidden_activation":format!("{:?}", model.layer(0).activation),
             "checkpoint_epoch":repro["checkpoint_epoch"],
             "pair_sampling":repro["pair_sampling"],
             "admitted_tables":repro["table_admission"]["tables"].as_array().unwrap().len(),

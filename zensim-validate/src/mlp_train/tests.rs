@@ -3901,3 +3901,86 @@ fn e34_l_refuses_feature_transforms_for_identity_contract() {
     };
     assert!(std::panic::catch_unwind(|| validate_training_capabilities(&hp, true, 0)).is_err());
 }
+
+#[test]
+fn steer_hinge_trains_and_packs_with_exact_identity() {
+    let rows: Vec<Vec<f64>> = (0..32)
+        .map(|i| vec![i as f64 / 31., (i % 7) as f64 / 6.])
+        .collect();
+    let refs: Vec<_> = rows.iter().map(Vec::as_slice).collect();
+    let scores: Vec<_> = rows
+        .iter()
+        .map(|x| 100. - 30. * x[0] - 10. * x[1])
+        .collect();
+    for dtype in [WeightDtype::F32, WeightDtype::F16] {
+        let hp = MlpHyperparams {
+            smooth_hinge: true,
+            nonneg_distance: true,
+            n_hidden: 8,
+            n_epochs: 2,
+            pairs_per_epoch: 32,
+            minibatch_size: 1,
+            seed: 42,
+            out_dtype: dtype,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let group = TrainingGroup {
+            name: "invented".into(),
+            human_scores: &scores,
+            features: FeatureRows::Borrowed(&refs),
+            metric_sigmas: None,
+            train_weight: 1.,
+            validation_weight: 1.,
+            ref_ids: None,
+            loss_mode: GroupLossMode::Both,
+        };
+        let bytes = train_mlp(&mut [group], 2, &hp, &mut Vec::new());
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        assert_eq!(model.layer(0).activation, Activation::SmoothHinge);
+        assert!(model.scaler_mean().iter().all(|x| *x == 0.));
+        assert!(model.layer(0).biases.iter().all(|b| *b == 0.));
+        let mut predictor = zenpredict::Predictor::new(&model);
+        assert_eq!(predictor.predict(&[0., 0.]).unwrap()[0], 100.);
+        assert!(predictor.predict(&[1., 1.]).unwrap()[0] < 100.);
+    }
+}
+
+#[test]
+fn steer_hinge_unsupported_modes_refuse() {
+    for hp in [
+        MlpHyperparams {
+            smooth_hinge: true,
+            ..Default::default()
+        },
+        MlpHyperparams {
+            smooth_hinge: true,
+            nonneg_distance: true,
+            n_hidden_layers: 2,
+            ..Default::default()
+        },
+        MlpHyperparams {
+            smooth_hinge: true,
+            nonneg_distance: true,
+            pool_head: true,
+            ..Default::default()
+        },
+        MlpHyperparams {
+            smooth_hinge: true,
+            nonneg_distance: true,
+            minibatch_size: 2,
+            ..Default::default()
+        },
+        MlpHyperparams {
+            smooth_hinge: true,
+            nonneg_distance: true,
+            monotone_cbc: true,
+            ..Default::default()
+        },
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| capabilities::validate_training_capabilities(&hp, true, 0))
+                .is_err()
+        );
+    }
+}

@@ -453,6 +453,23 @@ fn primary(
                 let v = t.value(x);
                 out.push(match layer.activation {
                     Activation::Identity => x,
+                    Activation::SmoothHinge => t.unary(
+                        x,
+                        if v <= 0. {
+                            0.
+                        } else if v < 0.125 {
+                            (4. * v) * v
+                        } else {
+                            v - 0.0625
+                        },
+                        if v <= 0. {
+                            0.
+                        } else if v < 0.125 {
+                            8. * v
+                        } else {
+                            1.
+                        },
+                    ),
                     Activation::Relu => t.unary(x, v.max(0.), if v > 0. { 1. } else { 0. }),
                     Activation::LeakyRelu => t.unary(
                         x,

@@ -55,6 +55,7 @@ use crate::adam_simd;
 mod loss_norm_in_norm;
 mod loss_pearson;
 mod loss_steer;
+mod smooth_hinge;
 mod steer_data;
 
 mod goals;
@@ -66,6 +67,8 @@ pub use goals::{ValidationPolicy, compute_goal_scores};
 /// architecture (228 → 32 → 1) with `Min` validation gating.
 #[derive(Clone, Debug)]
 pub struct MlpHyperparams {
+    /// Fixed tau1/8 C1 activation, admitted only on the plain N path.
+    pub smooth_hinge: bool,
     /// E34 K label-free repair table; absent leaves the training stream unchanged.
     pub steer_pairs: Option<std::path::PathBuf>,
     /// Detached per-image squared relative repair residual weight.
@@ -940,6 +943,7 @@ pub struct MlpHyperparams {
 impl Default for MlpHyperparams {
     fn default() -> Self {
         Self {
+            smooth_hinge: false,
             steer_pairs: None,
             steer_lambda: 0.0,
             steer_derived_inputs: None,
@@ -2525,14 +2529,24 @@ pub fn train_mlp_strategy_pairs(
         log,
     );
 
-    log_line(
-        &format!(
-            "MLP train: arch=[{n_features} → {n_hidden} (LeakyReLU α={alpha}) → 1], val_policy={:?}",
-            hyperparams.validation_policy,
-            alpha = hyperparams.leaky_alpha,
-        ),
-        log,
-    );
+    if hyperparams.smooth_hinge {
+        log_line(
+            &format!(
+                "MLP train: arch=[{n_features} → {n_hidden} (SmoothHinge tau=1/8) → 1], val_policy={:?}",
+                hyperparams.validation_policy
+            ),
+            log,
+        );
+    } else {
+        log_line(
+            &format!(
+                "MLP train: arch=[{n_features} → {n_hidden} (LeakyReLU α={alpha}) → 1], val_policy={:?}",
+                hyperparams.validation_policy,
+                alpha = hyperparams.leaky_alpha,
+            ),
+            log,
+        );
+    }
     for (i, g) in groups.iter().enumerate() {
         let role = match (g.train_weight > 0.0, g.validation_weight > 0.0) {
             (true, true) => "train+val",
@@ -2569,12 +2583,19 @@ pub fn train_mlp_strategy_pairs(
         for m in scaler_mean.iter_mut() {
             *m = 0.0;
         }
-        log_line(
-            "MLP train: --nonneg-distance — scaler_mean zeroed (scale-only \
+        if hyperparams.smooth_hinge {
+            log_line(
+                "MLP train: --nonneg-distance — scale-only, zero hidden biases, SmoothHinge tau=1/8, output weights <= 0, output bias at pin",
+                log,
+            );
+        } else {
+            log_line(
+                "MLP train: --nonneg-distance — scaler_mean zeroed (scale-only \
              standardization), hidden biases frozen at 0, hidden activation ReLU, \
              output weights projected <= 0, output bias frozen at the pin",
-            log,
-        );
+                log,
+            );
+        }
     }
     let scaler_mean = scaler_mean;
 
@@ -2665,7 +2686,11 @@ pub fn train_mlp_strategy_pairs(
     // Derived ONCE, here, so the activation that gets baked is a function of the
     // slope that was trained with — and so an unrepresentable slope fails before
     // 200 epochs of fitting rather than after.
-    let hidden_activation = hidden_activation_for(hyperparams.leaky_alpha);
+    let hidden_activation = if hyperparams.smooth_hinge {
+        Activation::SmoothHinge
+    } else {
+        hidden_activation_for(hyperparams.leaky_alpha)
+    };
 
     // Feature-subset pinning (`--keep-features`): zero the layer-1 rows of
     // dropped inputs once. Their standardized values are exactly 0.0 (the bin
@@ -2975,7 +3000,7 @@ pub fn train_mlp_strategy_pairs(
             let mut scratch = Vec::new();
             for &row in &rows {
                 let x = std_features.row(gi, row, &mut scratch).to_vec();
-                let (y, hp, h) = forward(
+                let (y, hp, h) = smooth_hinge::forward(
                     &x,
                     &w1,
                     &b1,
@@ -2984,6 +3009,7 @@ pub fn train_mlp_strategy_pairs(
                     n_features,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
                 predictions.push(-ladder_sign * y);
                 targets.push(groups[gi].human_scores[row]);
@@ -3188,19 +3214,21 @@ pub fn train_mlp_strategy_pairs(
                     hpa,
                     hpb,
                 } = lf;
-                let (ya, ha) = crate::simd_mlp::forward_finish(
+                let (ya, ha) = smooth_hinge::forward_finish(
                     &hpa,
                     &w2,
                     &b2,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
-                let (yb, hb) = crate::simd_mlp::forward_finish(
+                let (yb, hb) = smooth_hinge::forward_finish(
                     &hpb,
                     &w2,
                     &b2,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
                 la_rows = Some((cxa, cxb));
                 let (ra, rb) = la_rows.as_ref().unwrap();
@@ -3208,7 +3236,7 @@ pub fn train_mlp_strategy_pairs(
             } else {
                 let xa = std_features.row(g_idx, ia, &mut scratch_a);
                 let xb = std_features.row(g_idx, ib, &mut scratch_b);
-                let (ya, hpa, ha, yb, hpb, hb) = forward_pair(
+                let (ya, hpa, ha, yb, hpb, hb) = smooth_hinge::forward_pair(
                     xa,
                     xb,
                     &w1,
@@ -3218,6 +3246,7 @@ pub fn train_mlp_strategy_pairs(
                     n_features,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
                 (xa, xb, ya, hpa, ha, yb, hpb, hb)
             };
@@ -3317,7 +3346,7 @@ pub fn train_mlp_strategy_pairs(
                 // vectors and the gw2/gb1/gb2 accumulations come from
                 // `backprop_grad_head`, which is `backprop_step` minus the
                 // gw1 sweep — identical arithmetic, gw1 never round-trips.
-                crate::simd_mlp::backprop_grad_head(
+                smooth_hinge::backprop_grad_head(
                     &ha_pre,
                     &ha,
                     dl_dya,
@@ -3328,8 +3357,9 @@ pub fn train_mlp_strategy_pairs(
                     &mut adam.gb2,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
-                crate::simd_mlp::backprop_grad_head(
+                smooth_hinge::backprop_grad_head(
                     &hb_pre,
                     &hb,
                     dl_dyb,
@@ -3340,6 +3370,7 @@ pub fn train_mlp_strategy_pairs(
                     &mut adam.gb2,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
                 if hyperparams.l2_lambda > 0.0 {
                     for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
@@ -3444,7 +3475,7 @@ pub fn train_mlp_strategy_pairs(
                 }
                 steps_since_adam = 0;
             } else {
-                backprop_step(
+                smooth_hinge::backprop_step(
                     xa,
                     &ha_pre,
                     &ha,
@@ -3458,8 +3489,9 @@ pub fn train_mlp_strategy_pairs(
                     n_features,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
-                backprop_step(
+                smooth_hinge::backprop_step(
                     xb,
                     &hb_pre,
                     &hb,
@@ -3473,6 +3505,7 @@ pub fn train_mlp_strategy_pairs(
                     n_features,
                     n_hidden,
                     hyperparams.leaky_alpha,
+                    hyperparams.smooth_hinge,
                 );
 
                 if hyperparams.l2_lambda > 0.0 {
@@ -3525,7 +3558,7 @@ pub fn train_mlp_strategy_pairs(
                     };
                     let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
                     let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
-                    let (y_lo, h_lo_pre, h_lo, y_hi, h_hi_pre, h_hi) = forward_pair(
+                    let (y_lo, h_lo_pre, h_lo, y_hi, h_hi_pre, h_hi) = smooth_hinge::forward_pair(
                         xlo,
                         xhi,
                         &w1,
@@ -3535,6 +3568,7 @@ pub fn train_mlp_strategy_pairs(
                         n_features,
                         n_hidden,
                         hyperparams.leaky_alpha,
+                        hyperparams.smooth_hinge,
                     );
                     // Violation, in the run's declared convention (2026-09-06):
                     // `ladder_sign · (y_better − y_worse) + margin`. `hi` is the
@@ -3551,7 +3585,7 @@ pub fn train_mlp_strategy_pairs(
                     }
                     // d_loss/d_y_hi = +scale·ladder_sign ; d_loss/d_y_lo = -scale·ladder_sign
                     let scale = scale * ladder_sign;
-                    backprop_step(
+                    smooth_hinge::backprop_step(
                         xhi,
                         &h_hi_pre,
                         &h_hi,
@@ -3565,8 +3599,9 @@ pub fn train_mlp_strategy_pairs(
                         n_features,
                         n_hidden,
                         hyperparams.leaky_alpha,
+                        hyperparams.smooth_hinge,
                     );
-                    backprop_step(
+                    smooth_hinge::backprop_step(
                         xlo,
                         &h_lo_pre,
                         &h_lo,
@@ -3580,6 +3615,7 @@ pub fn train_mlp_strategy_pairs(
                         n_features,
                         n_hidden,
                         hyperparams.leaky_alpha,
+                        hyperparams.smooth_hinge,
                     );
                     tv_steps_since_adam += 1;
                     // T8.1 mirror: in K=1 mode, step per TV pair (legacy
@@ -3765,6 +3801,7 @@ pub fn train_mlp_strategy_pairs(
                         &b2,
                         n_hidden,
                         hyperparams.leaky_alpha,
+                        hyperparams.smooth_hinge,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
                     crate::panel::compute_light_panel_subsampled(&neg_preds, g.human_scores)
@@ -6687,8 +6724,18 @@ impl StdFeatures {
         b2: &[f64],
         n_hidden: usize,
         alpha: f64,
+        smooth: bool,
     ) -> Vec<f64> {
         let nf = self.n_features;
+        if smooth {
+            let mut scratch = Vec::new();
+            return (0..n_pairs)
+                .map(|i| {
+                    let row = self.row(gi, i, &mut scratch);
+                    smooth_hinge::forward(row, w1, b1, w2, b2, nf, n_hidden, alpha, true).0
+                })
+                .collect();
+        }
         let StdGroup::Dense(buf) = &self.groups[gi] else {
             let mut out = vec![0.0f64; n_pairs];
             const MIN_ROWS: usize = 2048;

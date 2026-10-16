@@ -6625,3 +6625,44 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod steer_hinge_pack_tests {
+    use super::*;
+    #[test]
+    fn steer_hinge_pack_refit_preserves_activation_and_identity() {
+        let bytes = zenpredict_bake::bake_from_json_str(r#"{
+            "schema_hash":123,"scaler_mean":[0],"scaler_scale":[1],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"smooth_hinge","dtype":"f32","weights":[1],"biases":[0]},
+            {"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32","weights":[-1],"biases":[100]}]}"#).unwrap();
+        let model = Model::from_bytes(&bytes).unwrap();
+        for dtype in [WeightDtype::F32, WeightDtype::F16] {
+            let (layers, _) = pack_layers(&model, dtype, 0., true).unwrap();
+            let raw = emit_packed(
+                model.schema_hash(),
+                model.scaler_mean(),
+                model.scaler_scale(),
+                &layers,
+                &clone_metadata(&model),
+            );
+            let packed = Model::from_bytes(&raw).unwrap();
+            assert_eq!(packed.layer(0).activation, Activation::SmoothHinge);
+            let feats: Vec<Vec<f64>> = (0..33).map(|i| vec![i as f64 / 32.]).collect();
+            let pred = forward_scored_6dec(&raw, &feats).unwrap();
+            assert_eq!(pred[0], 100.);
+            let (x, y) = fit_spline_knots(&pred, &pred, 18, false);
+            let md = metadata_with_spline(&packed, &spline_payload(&x, &y));
+            let calibrated = emit_packed(
+                packed.schema_hash(),
+                packed.scaler_mean(),
+                packed.scaler_scale(),
+                &verbatim_layers(&packed).unwrap(),
+                &md,
+            );
+            let loaded = Model::from_bytes(&calibrated).unwrap();
+            assert_eq!(loaded.layer(0).activation, Activation::SmoothHinge);
+            assert_eq!(forward_scored_6dec(&calibrated, &feats).unwrap(), pred);
+            assert_eq!(loaded.schema_hash(), 123);
+        }
+    }
+}

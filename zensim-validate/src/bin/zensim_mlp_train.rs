@@ -852,6 +852,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     nonneg_distance: bool,
 
+    /// STEER S: fixed tau1/8 C1 convex hinge; plain N only.
+    #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
+    smooth_hinge: bool,
+
     /// E34 K: label-free base/repair feature pairs (registered Rev5/v3 Parquet).
     #[arg(long)]
     steer_pairs: Option<PathBuf>,
@@ -2638,6 +2642,18 @@ fn apply_manifest_to_args(
 /// CLI-only capabilities (data sources and the GPU adapter). Shared head/loss
 /// checks live in mlp_train::validate_training_capabilities.
 fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu: bool) {
+    if args.smooth_hinge {
+        assert!(
+            !want_gpu
+                && args.n_hidden_layers == 1
+                && args.feature_transform.is_empty()
+                && args.auto_transforms.is_none()
+                && args.minibatch_size == 1
+                && args.norm_in_norm_weight == 0.0
+                && args.pair_sampling == "uniform",
+            "smooth hinge requires plain CPU N, one hidden layer, uniform/minibatch1 and no feature transforms or pooled objectives"
+        );
+    }
     if args.nonneg_distance && args.monotone_cbc {
         assert!(
             args.feature_transform.is_empty() && args.auto_transforms.is_none(),
@@ -3193,6 +3209,7 @@ fn main() {
         }
     };
     let mut hyperparams = MlpHyperparams {
+        smooth_hinge: args.smooth_hinge,
         steer_pairs: args.steer_pairs.clone(),
         steer_lambda: args.steer_lambda,
         steer_derived_inputs: args.derived_inputs.clone(),
@@ -5747,6 +5764,33 @@ mod capability_preflight_tests {
         argv.extend_from_slice(extra);
         let matches = Args::command().try_get_matches_from(argv).unwrap();
         (Args::from_arg_matches(&matches).unwrap(), matches)
+    }
+
+    #[test]
+    fn steer_hinge_cli_refuses_before_opening_data() {
+        for extra in [
+            vec!["--minibatch-size", "2"],
+            vec!["--n-hidden-layers", "2"],
+            vec!["--feature-transform", "signed_cbrt:0"],
+        ] {
+            let mut cli = vec!["--nonneg-distance", "--smooth-hinge"];
+            cli.extend(extra);
+            let (a, m) = args(&cli);
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    preflight_cli_capabilities(&a, &m, false)
+                }))
+                .is_err()
+            );
+        }
+        let (a, m) = args(&["--nonneg-distance", "--smooth-hinge"]);
+        preflight_cli_capabilities(&a, &m, false);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| preflight_cli_capabilities(
+                &a, &m, true
+            )))
+            .is_err()
+        );
     }
 
     #[test]

@@ -12,6 +12,7 @@ enum Input {
 }
 
 struct Reference {
+    smooth_hinge: bool,
     inputs: Vec<Input>,
     ids: Vec<usize>,
     means: Vec<f64>,
@@ -48,7 +49,10 @@ impl Reference {
         assert_eq!(model.n_layers(), 2);
         let first = model.layer(0);
         let last = model.layer(1);
-        assert_eq!(first.activation, Activation::Relu);
+        assert!(matches!(
+            first.activation,
+            Activation::Relu | Activation::SmoothHinge
+        ));
         assert_eq!(last.activation, Activation::Identity);
         assert_eq!(last.in_dim, first.out_dim);
         assert_eq!(last.out_dim, 1);
@@ -75,6 +79,7 @@ impl Reference {
             ids.iter().copied().map(Input::Direct).collect()
         };
         let result = Self {
+            smooth_hinge: first.activation == Activation::SmoothHinge,
             inputs,
             ids,
             means: model.scaler_mean().iter().map(|&x| f64::from(x)).collect(),
@@ -115,7 +120,20 @@ impl Reference {
         self.hidden(row)
             .iter()
             .zip(&self.w2)
-            .fold(self.b2, |y, (&h, &w)| y + h.max(0.0) * w)
+            .fold(self.b2, |y, (&h, &w)| {
+                let h = if self.smooth_hinge {
+                    if h <= 0. {
+                        0.
+                    } else if h < 0.125 {
+                        4. * h * h
+                    } else {
+                        h - 0.0625
+                    }
+                } else {
+                    h.max(0.0)
+                };
+                y + h * w
+            })
     }
 
     fn score(&self, row: &[f64], raw: bool) -> f64 {
@@ -145,7 +163,14 @@ impl Reference {
                 .zip(&self.w2)
                 .enumerate()
                 .filter(|(_, (h, _))| **h > 0.0)
-                .map(|(j, (_, w))| w * self.w1[i * hidden.len() + j])
+                .map(|(j, (h, w))| {
+                    let derivative = if self.smooth_hinge && *h < 0.125 {
+                        8. * *h
+                    } else {
+                        1.
+                    };
+                    w * self.w1[i * hidden.len() + j] * derivative
+                })
                 .sum::<f64>()
                 / self.scales[i]
                 * slope;
@@ -211,6 +236,7 @@ fn reference_contracts() {
     // A two-unit network with one active and one inactive unit; product chain
     // rule and nontrivial scales. Closed-form y=100 - 3*(x0/2 + x0*x1/4).
     let r = Reference {
+        smooth_hinge: false,
         inputs: vec![Input::Direct(0), Input::Product(0, 1)],
         ids: vec![0, 1],
         means: vec![0.0; 2],
@@ -730,4 +756,85 @@ fn d12_exact_gradient_reference_packet() {
         .unwrap();
     use std::io::Write;
     writeln!(file,"{}",json!({"models":summaries,"scores_unchanged_by_gradient":true,"all_tier_gradient_bits_equal":true})).unwrap();
+}
+
+#[test]
+fn steer_smooth_exact_loaded_reference() {
+    for dtype in ["f32", "f16"] {
+        let recipe = serde_json::json!({"schema_hash":1,"scaler_mean":[0.],"scaler_scale":[1.],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"13"},
+            {"key":"zentrain.formula_revision","type":"utf8","text":"5"}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"smooth_hinge","dtype":dtype,"weights":[1.],"biases":[0.]},
+            {"in_dim":1,"out_dim":1,"activation":"identity","dtype":dtype,"weights":[-1.],"biases":[100.]}]});
+        let model = crate::mlp::Model::from_bytes(
+            &zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap(),
+        )
+        .unwrap();
+        let reference = Reference::new(&model);
+        let mut scorer = owner(&model, Objective::Served);
+        for (z, h, d) in [
+            (-1., 0., 0.),
+            (0., 0., 0.),
+            (0.03125, 0.00390625, 0.25),
+            (0.0625, 0.015625, 0.5),
+            (0.125, 0.0625, 1.),
+            (1., 0.9375, 1.),
+        ] {
+            let mut row = vec![0.; 944];
+            row[13] = z;
+            assert_eq!(scorer.score_features(&row, 64, 64, None).unwrap(), 100. - h);
+            let gradient = scorer
+                .score_features_fd_gradient(&row, 64, 64, None)
+                .unwrap();
+            assert_eq!(gradient[13], -d);
+            assert_eq!(gradient, reference.exact(&row, true));
+            assert_eq!(reference.raw(&row), 100. - h);
+        }
+    }
+}
+
+#[test]
+fn steer_smooth_product_spline_loaded_reference() {
+    let mut payload = 2u32.to_le_bytes().to_vec();
+    // Binary-exact knot coordinates keep this composed derivative oracle exact.
+    for (x, y) in [(99f32, 98f32), (100f32, 100f32)] {
+        payload.extend(x.to_le_bytes());
+        payload.extend(y.to_le_bytes());
+    }
+    let hex = payload
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    for dtype in ["f32", "f16"] {
+        let recipe = serde_json::json!({"schema_hash":1,"scaler_mean":[0.,0.],"scaler_scale":[1.,1.],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"13 422"},
+            {"key":"zentrain.formula_revision","type":"utf8","text":"5"},
+            {"key":"zensim.derived_inputs","type":"utf8","text":"zensim-derived-inputs v1\nin 13\nproduct 13 422\n"},
+            {"key":"zentrain.output_calibration_spline","type":"bytes","hex":hex}],
+            "layers":[{"in_dim":2,"out_dim":1,"activation":"smooth_hinge","dtype":dtype,"weights":[0.,1.],"biases":[0.]},
+            {"in_dim":1,"out_dim":1,"activation":"identity","dtype":dtype,"weights":[-1.],"biases":[100.]}]});
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
+        let reference = Reference::new(&model);
+        let mut scorer = owner(&model, Objective::Served);
+        for (x, f, dx, df) in [
+            (0.0625, 1., -1., -0.0625),
+            (0.125, 1., -2., -0.25),
+            (0.25, 1., -2., -0.5),
+        ] {
+            let mut row = vec![0.; 944];
+            row[13] = x;
+            row[422] = f;
+            let gradient = scorer
+                .score_features_fd_gradient(&row, 64, 64, None)
+                .unwrap();
+            assert_eq!(gradient[13], dx);
+            assert_eq!(gradient[422], df);
+            assert_eq!(gradient, reference.exact(&row, false));
+            assert_eq!(
+                scorer.score_features(&row, 64, 64, None).unwrap(),
+                reference.raw(&row) * 2. - 100.
+            );
+        }
+    }
 }

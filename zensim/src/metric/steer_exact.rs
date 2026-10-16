@@ -116,6 +116,44 @@ mod tests {
     use crate::source::StridedBytes;
 
     #[test]
+    fn steer_smooth_native_tier_stride_parity() {
+        let mut receipts = Vec::new();
+        for tier in ["native", "v3", "scalar"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "metric::bake::steer_exact::tests::r_exact_native_parity",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env("STEER_EXACT_TEST_CHILD", "1")
+                .env("STEER_SMOOTH_TEST_TIER", tier)
+                .env("ZENSIM_FORMULA_REV", "5")
+                .env("ZENSIM_STEER_EXACT", "all-blocks-v1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let receipt = stdout
+                .lines()
+                .find_map(|l| l.strip_prefix("STEER_SMOOTH_BITS "))
+                .unwrap()
+                .to_string();
+            receipts.push(receipt);
+            println!("STEER_SMOOTH_NATIVE tier={tier} rectangles=91 stride=true identity=true");
+        }
+        assert_eq!(receipts[0], receipts[1], "native versus v3 score/features");
+        assert_eq!(
+            receipts[0], receipts[2],
+            "native versus scalar score/features"
+        );
+    }
+
+    #[test]
     fn r_exact_native_parity() {
         const PATH: &str = "metric::bake::steer_exact::tests::r_exact_native_parity";
         if std::env::var("STEER_EXACT_TEST_CHILD").as_deref() != Ok("1") {
@@ -137,11 +175,28 @@ mod tests {
             print!("{stdout}");
             return;
         }
-        let bytes = zenpredict_bake::bake_from_json_str(r#"{
+        let smooth = std::env::var("STEER_SMOOTH_TEST_TIER").ok();
+        #[cfg(target_arch = "x86_64")]
+        match smooth.as_deref() {
+            Some("v3") => {
+                archmage::X64V4Token::dangerously_disable_token_process_wide(true).unwrap();
+            }
+            Some("scalar") => {
+                archmage::X64V2Token::dangerously_disable_token_process_wide(true).unwrap();
+            }
+            _ => (),
+        }
+        let json = r#"{
             "schema_hash":1,"scaler_mean":[0,0],"scaler_scale":[1,1],
             "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"13 459"},{"key":"zentrain.formula_revision","type":"utf8","text":"5"}],
             "layers":[{"in_dim":2,"out_dim":2,"activation":"relu","dtype":"f16","weights":[0.5,-0.25,-0.125,0.5],"biases":[0,0]},
-            {"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f16","weights":[-0.5,-0.25],"biases":[100]}] }"#).unwrap();
+            {"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f16","weights":[-0.5,-0.25],"biases":[100]}] }"#;
+        let json = if smooth.is_some() {
+            json.replace("\"relu\"", "\"smooth_hinge\"")
+        } else {
+            json.to_string()
+        };
+        let bytes = zenpredict_bake::bake_from_json_str(&json).unwrap();
         let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
         let (w, h) = (65, 49);
         let r: Vec<[u8; 3]> = (0..w * h)
@@ -177,6 +232,18 @@ mod tests {
         let base = oracle.compute(&source, &distorted, None).unwrap();
         assert_eq!(mapped.result().score().to_bits(), base.score().to_bits());
         assert_eq!(mapped.result().features(), base.features());
+        if smooth.is_some() {
+            println!(
+                "STEER_SMOOTH_BITS {:?}",
+                (
+                    base.score().to_bits(),
+                    base.features()
+                        .iter()
+                        .map(|f| f.to_bits())
+                        .collect::<Vec<_>>()
+                )
+            );
+        }
         let stride = w * 3 + 11;
         let mut rp = vec![239; stride * h];
         let mut dp = rp.clone();
@@ -195,7 +262,31 @@ mod tests {
             .compute(&sd, None)
             .unwrap();
         assert_eq!(padded_map.result().features(), base.features());
+        assert_eq!(
+            padded_map.result().score().to_bits(),
+            base.score().to_bits()
+        );
         let table = mapped.exact_refinement.as_ref().unwrap();
+        assert_eq!(table.len(), 91, "complete four-grid inventory for 65x49");
+        // Different grids can produce the same clipped edge rectangle. Check
+        // the full multiset, retaining each grid's required occurrence.
+        let mut required = Vec::new();
+        for side in [8usize, 16, 32, 64] {
+            for row in 0..h.div_ceil(side) {
+                for column in 0..w.div_ceil(side) {
+                    required.push([
+                        column * side,
+                        row * side,
+                        ((column + 1) * side).min(w),
+                        ((row + 1) * side).min(h),
+                    ]);
+                }
+            }
+        }
+        let mut observed: Vec<_> = table.iter().map(|(rect, _)| *rect).collect();
+        observed.sort_unstable();
+        required.sort_unstable();
+        assert_eq!(observed, required, "complete four-grid rectangle multiset");
         for &(rect, gain) in table {
             let [x0, y0, x1, y1] = rect;
             let mut edit = d.clone();

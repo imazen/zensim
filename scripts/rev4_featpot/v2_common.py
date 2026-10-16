@@ -256,6 +256,8 @@ def recipe_of(spec: str) -> dict:
             out["hdr_weight"] = float(tok[2:])
         elif tok[:2] in ("hp", "ha", "hb", "hc") and "hdr_weight" not in out and tok[2:] == "4":
             out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
+        elif tok == "sh1" and "smooth_hinge" not in out:
+            out["smooth_hinge"] = True
         elif tok == "fx1" and "derived_inputs" not in out:  # E33 Arm C: difference x same-cell fragility products
             out["derived_inputs"] = "fx1"
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
