@@ -217,3 +217,83 @@ pub(super) fn run(bytes: &[u8]) -> Result<Value> {
         "high_quality":high_quality}),
     )
 }
+
+/// Explicit label-free engineering series. No discovery or paired-label input.
+pub(super) fn source_series(bytes: &[u8]) -> Result<Value> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Input {
+        schema: String,
+        series: Vec<Series>,
+    }
+    let input: Input = serde_json::from_slice(bytes)?;
+    ensure!(
+        input.schema == "engineering-source-series-v1",
+        "source-series schema"
+    );
+    ensure!(!input.series.is_empty(), "empty engineering series");
+    let mut names = BTreeSet::new();
+    let mut output = Vec::new();
+    for (offset, s) in input.series.into_iter().enumerate() {
+        ensure!(names.insert(s.name.clone()), "duplicate series name");
+        ensure!(
+            s.values.len() == s.reference.len()
+                && !s.values.is_empty()
+                && s.values.iter().all(|v| v.is_finite()),
+            "finite aligned series required"
+        );
+        let groups = s.reference.iter().collect::<BTreeSet<_>>().len();
+        ensure!(groups >= 2, "at least two source groups required");
+        let config = cfg(10000 + offset as u64);
+        let iv = cluster_bootstrap(
+            s.values.len(),
+            &Design::OneWay(&s.reference),
+            &config,
+            |draw| {
+                vec![zenstats::resample::weighted_mean(
+                    &s.values,
+                    draw.row_weights(),
+                )]
+            },
+        )?
+        .remove(0);
+        ensure!(
+            iv.estimate.is_finite() && iv.n_finite == config.resamples,
+            "all registered bootstrap resamples must be finite"
+        );
+        let interval = if s.exp {
+            json!({"estimate":iv.estimate.exp(),
+            "lo":iv.lo.exp(), "hi":iv.hi.exp(), "log_interval":interval_json(&iv,groups)})
+        } else {
+            interval_json(&iv, groups)
+        };
+        output.push(json!({"name":s.name,"sources":groups,"rows":s.values.len(),
+            "exp":s.exp,"seed":config.seed,"interval":interval}));
+    }
+    Ok(
+        json!({"schema":"engineering-source-series-results-v1", "resamples":10000,
+        "level":0.95,"method":"zenstats::resample::cluster_bootstrap OneWay", "series":output}),
+    )
+}
+
+#[cfg(test)]
+mod engineering_tests {
+    use super::*;
+    #[test]
+    fn source_series_uses_registered_clusters_and_refuses_unbound_fields() {
+        let job = json!({"schema":"engineering-source-series-v1","series":[
+            {"name":"constant-ratio","reference":[1,1,2,2],
+             "values":[2f64.ln(),2f64.ln(),2f64.ln(),2f64.ln()],"exp":true}]});
+        let output = source_series(&serde_json::to_vec(&job).unwrap()).unwrap();
+        assert_eq!(output["series"][0]["sources"], 2);
+        assert_eq!(output["series"][0]["interval"]["estimate"], 2.);
+        assert_eq!(output["series"][0]["interval"]["lo"], 2.);
+        assert_eq!(output["series"][0]["interval"]["hi"], 2.);
+        let mut invalid = job.clone();
+        invalid["paired_input"] = json!("forbidden-discovery");
+        assert!(source_series(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        invalid = job.clone();
+        invalid["series"][0]["reference"] = json!([1, 1, 1, 1]);
+        assert!(source_series(&serde_json::to_vec(&invalid).unwrap()).is_err());
+    }
+}

@@ -24,7 +24,7 @@ const ELIGIBILITY_MARGIN: f64 = 0.0065;
 const DATASETS: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 #[derive(Parser)]
 struct Cli {
-    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check", "registered-evaluate", "registered-owner-parity", "peer-compare", "map-cost"])]
+    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check", "registered-evaluate", "registered-owner-parity", "peer-compare", "map-cost", "source-series"])]
     mode: String,
     #[arg(long)]
     registration: Option<PathBuf>,
@@ -581,6 +581,8 @@ fn run(cli: Cli) -> Result<()> {
         peers::run(&bytes)?
     } else if cli.mode == "pack-check" {
         reports::packs(&bytes)?
+    } else if cli.mode == "source-series" {
+        reports::source_series(&bytes)?
     } else if cli.mode == "reports" {
         reports::run(&bytes)?
     } else if cli.mode == "seed-parity" {
