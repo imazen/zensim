@@ -12,13 +12,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use zenstats::resample::{BootstrapConfig, Design, Draw, Interval, cluster_bootstrap};
 
+mod reports;
+
 // Owner D13, saved 2026-10-15 08:42 MDT; both model families.
 const ELIGIBILITY_MARGIN: f64 = 0.0065;
 
 const DATASETS: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 #[derive(Parser)]
 struct Cli {
-    #[arg(value_parser = ["seed-parity", "noise", "evaluate"])]
+    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check"])]
     mode: String,
     #[arg(long)]
     input: PathBuf,
@@ -383,6 +385,10 @@ fn w2_seed_component(input: &Input, t: &Test) -> Result<Value> {
 }
 
 fn pair_classes(input: &Input, t: &Test) -> Result<Value> {
+    pair_classes_at(input, t, |c| 1000 + 10 * t.index + c)
+}
+
+fn pair_classes_at(input: &Input, t: &Test, mut offset: impl FnMut(u64) -> u64) -> Result<Value> {
     use zenstats::pairs::{PairClass, PairInput, PairTable};
     use zenstats::panel::Orientation;
     let mut output = Vec::new();
@@ -421,7 +427,7 @@ fn pair_classes(input: &Input, t: &Test) -> Result<Value> {
         ] {
             let cfg = BootstrapConfig {
                 resamples: 10000,
-                seed: 20261011 + 1000 + 10 * t.index + c,
+                seed: 20261011 + offset(c),
                 level: 0.95,
             };
             let iv = cluster_bootstrap(d.target.len(), &design, &cfg, |draw| {
@@ -554,7 +560,11 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
 fn run(cli: Cli) -> Result<()> {
     ensure!(!cli.output.exists(), "fresh output required");
     let bytes = fs::read(&cli.input)?;
-    let mut result = if cli.mode == "seed-parity" {
+    let mut result = if cli.mode == "pack-check" {
+        reports::packs(&bytes)?
+    } else if cli.mode == "reports" {
+        reports::run(&bytes)?
+    } else if cli.mode == "seed-parity" {
         seed_parity(&bytes)?
     } else {
         evaluate(&serde_json::from_slice(&bytes)?, cli.mode == "noise")?
