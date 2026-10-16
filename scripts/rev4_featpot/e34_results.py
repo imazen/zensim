@@ -265,6 +265,17 @@ def build():
                                   sha256=sha(ROOT / 'penalty-logs.json'))
     assert read(ROOT / 'penalty-logs.json')['cells'] == 90
     output['p3'] = dict(path=str(ROOT / 'p3-switches.json'),sha256=sha(ROOT / 'p3-switches.json'))
+    log_root = Path.home() / 'tmp/e34-eval'
+    resource_logs = ['statistics', 'steering', 'development', 'gates', 'p3', 'reports-r7900x']
+    resource_logs += [f'r7900x-{arm}-{mode}' for arm in ['w-a','k-a','l-a','w-c','k-c']
+                      for mode in ['rss', 'timing']]
+    output['execution_resources'] = {}
+    for name in resource_logs:
+        path = log_root / f'{name}.log'
+        summaries = [line for line in path.read_text().splitlines()
+                     if line.startswith('run-heavy: done rc=0 ')]
+        assert len(summaries) == 1, f'completed resource receipt required: {path}'
+        output['execution_resources'][name] = dict(path=str(path),sha256=sha(path),summary=summaries[0])
     p3 = read(ROOT / 'p3-switches.json')
     assert len(p3['cases']) == 14 and p3['job_sha256'] == sha(ROOT / 'p3-job.json')
     output['linearity_interpretation'] = {s['name']: dict(
@@ -484,6 +495,14 @@ def render():
             lines.append(f'| {h["arm"]} | {row["dataset"]} | {row["class"]} | {interval(row["interval"])} |')
     full=ROOT / 'result.json'
     penalties=read(ROOT / 'penalty-logs.json')
+    lines += ['', '## Execution resources', '',
+        'Exact run-heavy summaries below describe the collectors, including their quiet waits '
+        'and retries. Peak load is not a retained-round admission measurement; the unchanged '
+        'quiet and clean-round receipts decide admission. Fresh-process scoring/map peaks '
+        'come from /usr/bin/time -v as reported above.', '',
+        '| Measurement | run-heavy resource receipt |', '|---|---|']
+    for name, receipt in doc['execution_resources'].items():
+        lines.append(f'| {name} | `{receipt["summary"]}` |')
     lines += ['', '## Audit and limits', '',
         f'All 305/305 installed cells across 18 jobsets were inventoried before the exposure entry '
         'was pushed (`02cba876`), before label access. The selected K pilot was reused as full-data '
