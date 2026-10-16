@@ -197,7 +197,7 @@ def launch(bundle, arm, queue=FITV2 / "fleet_queue", live=FITV2 / "jobset_caps.j
         push = subprocess.run(["docker", "push", doc["image"]], capture_output=True, text=True, check=True)
         record["push_tail"] = push.stdout.strip().splitlines()[-1:]
     control = rt / f"control-{js}.json"
-    control.write_text(json.dumps(dict(paused=False, drain=False,
+    control.write_text(json.dumps(dict(paused=first_cell, drain=False,
                                        note="Frozen registered fit; coordinator authorization")) + "\n")
     subprocess.run(["bash", "-c", """set -euo pipefail
 . ~/.config/zen/s3env.sh >/dev/null 2>&1
