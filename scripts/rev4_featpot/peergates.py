@@ -35,6 +35,11 @@ def progress(message):
     print(message, flush=True)
 
 
+def case_id(row):
+    b=row['blocks'][0]['bounds']
+    return row['key'], max(b[2]-b[0], b[3]-b[1])
+
+
 def inputs():
     import pyarrow.parquet as pq
     p6 = Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part6')
@@ -45,11 +50,12 @@ def inputs():
     for m in ['a', 'c']:
         p = p6 / f'cached-gate-{m}/result.json'
         assert sha(p) == receipts['models'][m]['result_sha256']
-        rows[m] = {r['key']: r for r in read(p)['rows']}
+        rows[m] = {case_id(r): r for r in read(p)['rows']}
+        assert len(rows[m])==135
         pins[m] = dict(path=str(p), sha256=sha(p), model=receipts['models'][m]['model_sha256'])
     assert len(packet['cases']) == 135
     for c in packet['cases']:
-        ar, cr = rows['a'][c['key']], rows['c'][c['key']]
+        ar, cr = rows['a'][c['key'],c['block']], rows['c'][c['key'],c['block']]
         assert len(ar['blocks']) == len(cr['blocks'])
         c['candidate_blocks'] = []
         for a, b in zip(ar['blocks'], cr['blocks'], strict=True):
@@ -84,9 +90,8 @@ def inputs():
 
 
 def steering_report():
-    path = ROOT/'steering/results.jsonl'
-    rows=[json.loads(l) for l in path.read_text().splitlines()]
-    assert len(rows)==135 and len({r['key'] for r in rows})==135
+    rows=steering_rows()
+    assert len(rows)==135 and len({case_id(r) for r in rows})==135
     result=dict(cases=135,forwards=sum(len(r['blocks'])+1 for r in rows),matrix={},own={})
     assert result['forwards']==55515
     for m in ['diff410','diff_frag820','butter','ssim2']:
@@ -97,8 +102,8 @@ def steering_report():
             result['matrix'][m][j]=dict(passed=sum(x>=.70 for x in finite),total=135,
                 undefined=135-len(finite),mean=statistics.mean(finite),median=statistics.median(finite),minimum=min(finite))
     for m in ['butter','ssim2']:
-        result['own'][m]=dict(result['matrix'][m][m],failures=[dict(key=r['key'],rho=r[f'{m}_rho'])
-            for r in rows if r[f'{m}_rho'] is None or r[f'{m}_rho']<.70],m2='N/A: exact peer gradient unavailable')
+        result['own'][m]=dict(result['matrix'][m][m],failures=[dict(key=r['key'],block=case_id(r)[1],rho=r[f'{m}_rho'])
+                for r in rows if r[f'{m}_rho'] is None or r[f'{m}_rho']<.70],m2='N/A: exact peer gradient unavailable')
     write(ROOT/'steering-summary.json',result)
     progress('Steering complete: '+ '; '.join(f"{m} own-maprho>=.70 {result['own'][m]['passed']}/135" for m in ['butter','ssim2'])+'. Cross-judge3×4 matrix saved; candidates exact M2 remains a separate requirement.')
     print(json.dumps(result,indent=1))
@@ -129,12 +134,36 @@ def quiet():
     print(json.dumps(state))
 
 
+def steering_rows():
+    paths=[ROOT/'steering/results.jsonl',ROOT/'steering-remaining/results.jsonl']
+    return [json.loads(l) for p in paths if p.exists() for l in p.read_text().splitlines() if l.endswith('}')]
+
+
+def repair_transport():
+    old=read(ROOT/'steering-input.json')
+    p6=Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part6')
+    captures={m:{case_id(r):r for r in read(p6/f'cached-gate-{m}/result.json')['rows']} for m in ['a','c']}
+    for m in captures:assert len(captures[m])==135
+    for c in old['cases']:
+        a=captures['a'][c['key'],c['block']]['blocks'];b=captures['c'][c['key'],c['block']]['blocks']
+        assert len(a)==len(b)
+        c['candidate_blocks']=[dict(bounds=x['bounds'],a_map=x['refinement_gain'],c_map=y['refinement_gain'],a_gain=x['score_delta']) for x,y in zip(a,b,strict=True)]
+        assert all(x['bounds']==y['bounds'] for x,y in zip(a,b,strict=True))
+    complete=steering_rows();assert len(complete)==96
+    original=read(ROOT/'steering-input.json')
+    assert old['cases'][:96]==original['cases'][:96]
+    assert [case_id(r) for r in complete]==[(c['key'],c['block']) for c in old['cases'][:96]]
+    write(ROOT/'steering-input-v2.json',old)
+    write(ROOT/'steering-remaining-input.json',dict(cases=old['cases'][96:]))
+    write(ROOT/'TRANSPORT_CORRECTION.json',dict(reason='case names repeat at several block sizes; join on (key, block)',completed_preserved=96,remaining=39,original_sha256=sha(ROOT/'steering-input.json'),corrected_sha256=sha(ROOT/'steering-input-v2.json'),completed_inputs_identical=True,thresholds_changed=False))
+    progress('Steering transport corrected: exact(key,block) joins135/135captures; first96inputs byte-equivalent,96completed cases preserved;39remaining queued. Failed attempt/maps/log retained. No numerical threshold or case changed.')
+
+
 def landed():
     """Append each completed case once; a partial last line is not a result."""
-    path=ROOT/'steering/results.jsonl'
     state=ROOT/'progress-cases.json'
     seen=read(state)['cases'] if state.exists() else 0
-    rows=[json.loads(l) for l in path.read_text().splitlines() if l.endswith('}')]
+    rows=steering_rows()
     for r in rows[seen:]:
         progress(f"G-STEER case {r['key']}: butter rho={r['butter_rho']}, SSIM2 rho={r['ssim2_rho']}; bar .70; {len(r['blocks'])} independent block repairs. Partial panel, not qualification.")
     state.write_text(json.dumps(dict(cases=len(rows)))+'\n')
@@ -146,19 +175,20 @@ def watch():
     while True:
         if landed()==135:
             return
-        log=(ROOT/'steering.log').read_text()
+        log=(ROOT/'steering-remaining.log').read_text() if (ROOT/'steering-remaining.log').exists() else (ROOT/'steering.log').read_text()
         if 'run-heavy: done rc=' in log:
             raise RuntimeError('steering ended without135results; inspect retained log')
         time.sleep(2)
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['inputs','steering-report','peer-tables','quiet','landed','watch']);p.add_argument('--grid',choices=['standard','ladder','negtail','identity']);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['inputs','steering-report','peer-tables','quiet','landed','watch','repair-transport']);p.add_argument('--grid',choices=['standard','ladder','negtail','identity']);a=p.parse_args()
     if a.mode=='inputs':inputs()
     elif a.mode=='steering-report':steering_report()
     elif a.mode=='peer-tables':peer_tables(a.grid)
     elif a.mode=='quiet':quiet()
     elif a.mode=='watch':watch()
+    elif a.mode=='repair-transport':repair_transport()
     else:landed()
 
 
