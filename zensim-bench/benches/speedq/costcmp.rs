@@ -15,7 +15,94 @@ pub(super) fn action(
     h: usize,
 ) -> Option<(Action, Value)> {
     match arm {
-        "e34_control" | "e34_candidate" | "e34_candidate_map" | "e34_candidate_baseline" => {
+        "e34_butter_parity" => {
+            let params = butteraugli::ButteraugliParams::default().with_compute_diffmap(true);
+            let source: &'static [u8] = bytemuck::cast_slice(src);
+            let distorted: &'static [u8] = bytemuck::cast_slice(dst);
+            let cached = butteraugli::ButteraugliReference::new(source, w, h, params.clone())
+                .unwrap()
+                .compare(distorted)
+                .unwrap();
+            let direct = butteraugli::butteraugli(
+                imgref::Img::new(bytemuck::cast_slice::<[u8; 3], rgb::RGB8>(src), w, h),
+                imgref::Img::new(bytemuck::cast_slice::<[u8; 3], rgb::RGB8>(dst), w, h),
+                &params,
+            )
+            .unwrap();
+            let score_delta = (cached.pnorm_3 - direct.pnorm_3).abs();
+            let cm = cached.diffmap.as_ref().unwrap();
+            let dm = direct.diffmap.as_ref().unwrap();
+            assert_eq!((cm.width(), cm.height()), (w, h));
+            assert_eq!((dm.width(), dm.height()), (w, h));
+            let map_delta = cm
+                .buf()
+                .iter()
+                .zip(dm.buf())
+                .map(|(a, b)| f64::from((a - b).abs()))
+                .fold(0.0_f64, f64::max);
+            assert!(
+                score_delta < 1e-10 && map_delta < 1e-6,
+                "published FIR cache parity bounds"
+            );
+            let score = cached.pnorm_3;
+            Some((
+                Box::new(move || score),
+                json!({"score_abs_delta":score_delta,
+                "map_max_abs_delta":map_delta,"score_tolerance":1e-10,"map_tolerance":1e-6,
+                "kind":"setup-only parity oracle; never timed or RSS-measured"}),
+            ))
+        }
+        "e34_butter_scalar" | "e34_butter_map" | "e34_butter_baseline" => {
+            let params = butteraugli::ButteraugliParams::default();
+            let source: &'static [u8] = bytemuck::cast_slice(src);
+            let distorted: &'static [u8] = bytemuck::cast_slice(dst);
+            let info = json!({"revision":"5","peer":"butteraugli0.9.3",
+                "vcs":"6e3a7bd27ef247e6bc285d9473a691facdb984f8",
+                "source_sha256":"914c4086ea33acfef5c3ea38393c6f5c0ec99d32155377818f1723ec1bd565e3",
+                "kind":"reference_metric",
+                "score":"pnorm3","map_bin":1,"surface":arm,
+                "output_retention":"complete native result until call return"});
+            let action: Action = match arm {
+                "e34_butter_baseline" => Box::new(move || {
+                    std::hint::black_box((source, distorted));
+                    0.0
+                }),
+                "e34_butter_map" => {
+                    let reference = butteraugli::ButteraugliReference::new(
+                        source,
+                        w,
+                        h,
+                        params.with_compute_diffmap(true),
+                    )
+                    .unwrap();
+                    Box::new(move || {
+                        let result = reference.compare(distorted).unwrap();
+                        assert_eq!(result.diffmap.as_ref().unwrap().width(), w);
+                        assert_eq!(result.diffmap.as_ref().unwrap().height(), h);
+                        let score = result.pnorm_3;
+                        std::hint::black_box(result);
+                        score
+                    })
+                }
+                _ => Box::new(move || {
+                    let result = butteraugli::butteraugli(
+                        imgref::Img::new(bytemuck::cast_slice::<[u8; 3], rgb::RGB8>(src), w, h),
+                        imgref::Img::new(bytemuck::cast_slice::<[u8; 3], rgb::RGB8>(dst), w, h),
+                        &params,
+                    )
+                    .unwrap();
+                    let score = result.pnorm_3;
+                    std::hint::black_box(result);
+                    score
+                }),
+            };
+            Some((action, info))
+        }
+        "e34_control"
+        | "e34_candidate"
+        | "e34_candidate_map"
+        | "e34_candidate_baseline"
+        | "e34_candidate_map_retained" => {
             // E34's registered widths are explicit caller bindings. Keep the E33
             // H128 admission below unchanged; all E34 measurements use these
             // same serving surfaces and SPEEDQ's existing paired-round owner.
@@ -59,6 +146,15 @@ pub(super) fn action(
                             .unwrap()
                             .result()
                             .score()
+                    })
+                }
+                "e34_candidate_map_retained" => {
+                    let mut session = scorer.prepare_steering(source, 1).unwrap();
+                    Box::new(move || {
+                        let result = session.compute(&RgbSlice::new(dst, w, h), None).unwrap();
+                        let score = result.result().score();
+                        std::hint::black_box(result);
+                        score
                     })
                 }
                 _ => Box::new(move || {
