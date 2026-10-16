@@ -154,11 +154,15 @@ def steer_verdict(statistics, gates):
             return incomplete
         if any(type(entry.get('pass_')) is not bool for entry in measured.values()):
             return incomplete
-    for i in range(6):
+    for i in range(12):
         t = tests[i]
         if [d.get('dataset') for d in t.get('dataset_guards', [])] != ['kadid', 'tid2013', 'konfig', 'cid22_a25']:
             return incomplete
         if any(type(d.get('point_guard')) is not bool for d in t['dataset_guards']) or type(t.get('w2', {}).get('point_guard')) is not bool:
+            return incomplete
+        from math import isfinite
+        intervals = [d.get('interval', {}) for d in t['dataset_guards']] + [t.get('w2', {}).get('interval', {})]
+        if any(type(iv.get(k)) not in (int, float) or not isfinite(iv[k]) for iv in intervals for k in ('estimate','se')):
             return incomplete
     # The strict R W2 false result is expected, never waived by alias admission.
     if any(tests[i]['w2']['point_guard'] for i in (1, 4)):

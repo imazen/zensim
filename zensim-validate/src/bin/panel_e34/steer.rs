@@ -222,9 +222,10 @@ fn slot(input: &Input, t: &Test, policy: &str) -> Result<Value> {
     } else {
         decision(&primary, 10)
     };
-    let mut complete = p["complete"] == true && seed["state"] != "INCOMPLETE";
+    // Seed-only refusals are nested report diagnostics, as in frozen E34.
+    let complete = p["complete"] == true;
     let mut guards = Vec::new();
-    let w2 = if t.eligibility {
+    let w2 = {
         for (di, name) in DATASETS.iter().enumerate() {
             let iv = input.interval(t, &[di], 100 * t.index + di as u64 + 1, false, false, 0.)?;
             admitted_interval(&iv)?;
@@ -253,10 +254,7 @@ fn slot(input: &Input, t: &Test, policy: &str) -> Result<Value> {
         if alias {
             ensure!(iv.estimate == 0. && iv.se == 0., "nonzero alias W2 guard");
         }
-        complete &= ws["state"] != "INCOMPLETE";
         json!({"interval":reported(&iv,10,alias),"point_guard":w2_guard(iv.estimate, iv.se),"seed_unit":ws})
-    } else {
-        json!({"state":"NOT_REQUIRED_BY_MANIFEST"})
     };
     if !complete {
         p["complete"] = json!(false);
@@ -279,7 +277,7 @@ fn slot(input: &Input, t: &Test, policy: &str) -> Result<Value> {
         "label":if alias {"identical by construction, p = 1"}else{"ordinary"},
         "theta":theta,"delta":delta,
         "seed_unit":seed,"reference_only":reported(&reference,input.rows(&[0,1,2,3]).reference.iter().collect::<BTreeSet<_>>().len(),alias),
-        "p":p,"dataset_guards":if t.eligibility {json!(guards)}else{json!({"state":"NOT_REQUIRED_BY_MANIFEST"})},"w2":w2,
+        "p":p,"dataset_guards":guards,"w2":w2,
         "e33_mean_point_guard":delta>=-0.002,"improvement_point_guard":delta>0.002}),
     )
 }
@@ -295,19 +293,50 @@ fn evaluate(input: &Input, reg: &Registration) -> Value {
         return failure(&e.to_string(), &reg.alias_policy);
     }
     let mut tests = Vec::new();
-    let mut ps = Vec::new();
-    let mut complete = true;
     for t in &input.tests {
         let result=slot(input,t,&reg.alias_policy).unwrap_or_else(|e|json!({"test":t.index,"arm":t.arm,"control":t.control,"state":"INCOMPLETE","reason":e.to_string(),"p":{"decision":1.}}));
+        tests.push(result);
+    }
+    finish_packet(tests, &reg.alias_policy)
+}
+
+// Completeness applies to every comparison's required numeric guard evidence.
+// A finite false point guard is evidence, and seed-only diagnostic states are
+// deliberately not read here. Only the S eligibility slots use guard booleans.
+fn guard_evidence_complete(t: &Value) -> bool {
+    let valid = |iv: &Value| {
+        ["estimate", "se"]
+            .iter()
+            .all(|key| iv[*key].as_f64().is_some_and(f64::is_finite))
+    };
+    t["dataset_guards"].as_array().is_some_and(|guards| {
+        guards.len() == DATASETS.len()
+            && guards.iter().zip(DATASETS).all(|(g, name)| {
+                g["dataset"] == name && valid(&g["interval"]) && g["point_guard"].is_boolean()
+            })
+    }) && valid(&t["w2"]["interval"])
+        && t["w2"]["point_guard"].is_boolean()
+}
+
+fn finish_packet(mut tests: Vec<Value>, policy: &str) -> Value {
+    let mut ps = Vec::new();
+    let mut complete = tests.len() == INVENTORY.len();
+    for result in &mut tests {
+        if !guard_evidence_complete(result) {
+            result["state"] = json!("INCOMPLETE");
+            result["guard_evidence_reason"] =
+                json!("missing/nonfinite required dataset or W2 evidence");
+            result["p"]["complete"] = json!(false);
+            result["p"]["decision"] = json!(1.);
+        }
         complete &= matches!(
             result["state"].as_str(),
             Some("COMPLETE" | "IDENTICAL_BY_CONSTRUCTION")
         );
         ps.push(result["p"]["decision"].as_f64().unwrap_or(1.));
-        tests.push(result);
     }
     json!({"schema":"steer-statistics-v1","state":if complete {"COMPLETE_FOR_S"}else{"INCOMPLETE"},
-        "alias_policy":reg.alias_policy,"scope":if reg.alias_policy=="q12-a-v1" {"S_ONLY"}else{"DIAGNOSTIC_ONLY"},
+        "alias_policy":policy,"scope":if policy=="q12-a-v1" {"S_ONLY"}else{"DIAGNOSTIC_ONLY"},
         "eligibility_margin":ELIGIBILITY_MARGIN,"resamples":10000,"level":0.95,"percentile":"Hyndman-Fan type 7","base_seed":20261011,
         "tests":tests,"holm_adjusted":zenstats::multiple::holm(&ps),"holm_reject":zenstats::multiple::holm_reject(&ps,0.05)})
 }
@@ -462,6 +491,155 @@ mod tests {
         }
     }
     #[test]
+    fn steer_fix2_canonical_completeness_boundaries() {
+        // Primary/guard numbers come from the actual 10,000-draw owners above,
+        // not injected statistics. Only the four reviewed boundary mutations
+        // below are injected after computation, at the real completion owner.
+        let baseline = evaluate(&invented(), &registration("q12-a-v1"));
+        assert_eq!(baseline["state"], "COMPLETE_FOR_S");
+        let zero = vec![vec![0.; 4]; 10];
+        let refusal = seed_stat(&zero).unwrap_err();
+        assert_eq!(refusal.to_string(), "undefined seed SE");
+        let nested = json!({"state":"INCOMPLETE","reason":refusal.to_string()});
+        let tests = || baseline["tests"].as_array().unwrap().clone();
+        let mut primary_seed = tests();
+        primary_seed[0]["seed_unit"] = nested.clone();
+        let primary_seed = finish_packet(primary_seed, "q12-a-v1");
+        let mut w2_seed = tests();
+        w2_seed[0]["w2"]["seed_unit"] = nested;
+        let w2_seed = finish_packet(w2_seed, "q12-a-v1");
+        for result in [&primary_seed, &w2_seed] {
+            assert_eq!(result["state"], "COMPLETE_FOR_S");
+            assert_eq!(result["tests"][0]["state"], "COMPLETE");
+            assert_eq!(result["holm_reject"], baseline["holm_reject"]);
+            assert_eq!(result["tests"][0]["p"], baseline["tests"][0]["p"]);
+        }
+        assert_eq!(primary_seed["tests"][0]["seed_unit"]["state"], "INCOMPLETE");
+        assert_eq!(
+            w2_seed["tests"][0]["w2"]["seed_unit"]["state"],
+            "INCOMPLETE"
+        );
+        let mut invalid = tests();
+        invalid[6]["dataset_guards"] = json!([]);
+        // JSON represents a nonfinite estimate/SE as null. This must not be
+        // confused with a finite false diagnostic point guard.
+        invalid[6]["w2"]["interval"]["se"] = json!(f64::NAN);
+        let invalid = finish_packet(invalid, "q12-a-v1");
+        assert_eq!(invalid["state"], "INCOMPLETE");
+        assert_eq!(invalid["tests"][6]["state"], "INCOMPLETE");
+        assert_eq!(invalid["tests"][6]["p"]["decision"], 1.);
+        assert_eq!(invalid["holm_reject"].as_array().unwrap().len(), 12);
+        let mut finite_false = tests();
+        for g in finite_false[6]["dataset_guards"].as_array_mut().unwrap() {
+            g["interval"]["estimate"] = json!(-0.01);
+            g["point_guard"] = json!(false);
+        }
+        finite_false[6]["w2"]["interval"]["estimate"] = json!(-0.01);
+        finite_false[6]["w2"]["interval"]["se"] = json!(0.001);
+        finite_false[6]["w2"]["point_guard"] = json!(false);
+        let finite_false = finish_packet(finite_false, "q12-a-v1");
+        assert_eq!(finite_false["state"], "COMPLETE_FOR_S");
+        assert_eq!(finite_false["holm_reject"], baseline["holm_reject"]);
+        for i in [7, 10] {
+            let alias = &baseline["tests"][i];
+            assert_eq!(alias["dataset_guards"].as_array().unwrap().len(), 4);
+            assert_eq!(alias["w2"]["interval"]["estimate"], 0.);
+            assert_eq!(alias["w2"]["interval"]["se"], 0.);
+            assert_eq!(alias["w2"]["point_guard"], false);
+            assert_eq!(
+                alias["w2"]["seed_unit"]["state"],
+                "IDENTICAL_BY_CONSTRUCTION"
+            );
+        }
+        // Prove the actual guard interval admission rejects a nonfinite SE.
+        let input = invented();
+        let mut iv = input
+            .interval(&input.tests[6], &[0, 1], 705, false, true, 0.)
+            .unwrap();
+        admitted_interval(&iv).unwrap();
+        iv.se = f64::NAN;
+        assert!(admitted_interval(&iv).is_err());
+        if let Ok(path) = std::env::var("STEER_FIX2_RESULT") {
+            save(
+                Path::new(&path),
+                &json!({"scope":"INVENTED_CANONICAL_OWNER_BOUNDARIES",
+                "baseline":baseline,"primary_seed_zero":primary_seed,"w2_seed_zero":w2_seed,
+                "test7_invalid_guards":invalid,"test7_finite_false_guards":finite_false}),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn steer_fix2_actual_seed_diagnostic_refusals_are_nonfatal() {
+        let mut primary = invented();
+        let permutation = [
+            31, 13, 25, 2, 12, 7, 4, 11, 32, 26, 18, 30, 17, 28, 33, 14, 6, 23, 9, 34, 0, 22, 3,
+            24, 5, 16, 15, 27, 19, 21, 20, 8, 1, 29, 35, 10,
+        ];
+        for d in &mut primary.datasets {
+            for family in ["a", "c"] {
+                let control: Vec<f64> = permutation.iter().map(|x| f64::from(*x)).collect();
+                let smooth: Vec<f64> = control.iter().map(|x| 35. - x).collect();
+                assert_eq!(zenstats::spearman(&control, &d.target), 0.);
+                assert_eq!(zenstats::spearman(&smooth, &d.target), 0.);
+                d.predictions
+                    .insert(format!("base-{family}"), vec![control.clone(); 10]);
+                d.predictions
+                    .insert(format!("r-{family}"), vec![control; 10]);
+                d.predictions
+                    .insert(format!("s-{family}"), vec![smooth.clone(); 10]);
+                d.predictions
+                    .insert(format!("sr-{family}"), vec![smooth; 10]);
+            }
+        }
+        validate(&primary).unwrap();
+        assert_eq!(
+            seed_component(&primary, &primary.tests[0]).unwrap()["state"],
+            "INCOMPLETE"
+        );
+        let value = evaluate(&primary, &registration("q12-a-v1"));
+        assert_eq!(value["state"], "COMPLETE_FOR_S", "{value}");
+        assert_eq!(value["tests"][0]["state"], "COMPLETE");
+        assert!(value["tests"][0]["theta"]["se"].as_f64().unwrap() > 0.);
+        let mut w2 = invented();
+        for d in &mut w2.datasets {
+            for family in ["a", "c"] {
+                let control: Vec<Vec<_>> = (0..10)
+                    .map(|seed| {
+                        d.target
+                            .iter()
+                            .enumerate()
+                            .map(|(i, y)| y + ((seed % 5) + 1) as f64 * (i % 3) as f64)
+                            .collect()
+                    })
+                    .collect();
+                d.predictions
+                    .insert(format!("base-{family}"), control.clone());
+                d.predictions.insert(format!("r-{family}"), control);
+            }
+        }
+        validate(&w2).unwrap();
+        assert!(
+            seed_component(&w2, &w2.tests[0])
+                .unwrap()
+                .get("reason")
+                .is_none()
+        );
+        assert_eq!(
+            w2_seed_component(&w2, &w2.tests[0])
+                .unwrap_err()
+                .to_string(),
+            "undefined seed SE"
+        );
+        let value = evaluate(&w2, &registration("q12-a-v1"));
+        assert_eq!(value["state"], "COMPLETE_FOR_S", "{value}");
+        assert_eq!(value["tests"][0]["state"], "COMPLETE");
+        assert_eq!(value["tests"][0]["w2"]["seed_unit"]["state"], "INCOMPLETE");
+        assert_eq!(value["tests"][0]["w2"]["point_guard"], false);
+    }
+
+    #[test]
     fn steer_invalid_admission_retains_all_slots() {
         let reg = registration("q12-a-v1");
         let mut cases = Vec::new();
@@ -503,9 +681,18 @@ mod tests {
         assert_eq!(evaluate(&invented(), &reg)["state"], "PENDING_OWNER_Q12");
         assert!(seed_stat(&vec![vec![0.; 4]; 10]).is_err());
         let input = invented();
-        let refused = slot(&input, &input.tests[1], "e34-strict-b-v1").unwrap();
-        assert_eq!(refused["state"], "INCOMPLETE");
-        assert_eq!(refused["w2"]["point_guard"], false);
+        // B's packet stays diagnostic-only through primary zero-SE refusal,
+        // not through the nonfatal report-only seed state. Improvement aliases
+        // have no margin addition, so this primary variance is exactly zero.
+        let strict = evaluate(&input, &registration("e34-strict-b-v1"));
+        assert_eq!(strict["state"], "INCOMPLETE");
+        assert_eq!(strict["scope"], "DIAGNOSTIC_ONLY");
+        for index in [7, 10] {
+            assert_eq!(strict["tests"][index]["state"], "INCOMPLETE");
+            assert_eq!(strict["tests"][index]["theta"]["se"], 0.);
+            assert_eq!(strict["tests"][index]["p"]["decision"], 1.);
+        }
+        assert_eq!(strict["tests"][1]["w2"]["point_guard"], false);
         // An observed identity outside the declared list cannot acquire A status.
         let mut accidental = invented();
         for d in &mut accidental.datasets {
@@ -513,8 +700,15 @@ mod tests {
             d.predictions.insert("s-a".into(), p.clone());
             d.predictions.insert("sr-a".into(), p);
         }
-        let refused = slot(&accidental, &accidental.tests[0], "q12-a-v1").unwrap();
+        // R−S (slot7) was not declared identical. Observed equality cannot
+        // acquire alias status; its actual zero primary SE blocks the packet.
+        let refused = slot(&accidental, &accidental.tests[6], "q12-a-v1").unwrap();
+        assert_eq!(refused["theta"]["se"], 0.);
         assert_eq!(refused["state"], "INCOMPLETE");
+        assert_eq!(
+            evaluate(&accidental, &registration("q12-a-v1"))["state"],
+            "INCOMPLETE"
+        );
     }
     #[test]
     fn steer_strict_guard_and_nonzero_constant_seed_refusal() {

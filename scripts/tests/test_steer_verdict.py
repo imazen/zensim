@@ -13,8 +13,8 @@ def fixture():
         tests.append(dict(test=i, arm=a, control=c,
                           state='IDENTICAL_BY_CONSTRUCTION' if i in STEER_IDENTICAL else 'COMPLETE',
                           p=dict(decision=1 if i in STEER_IDENTICAL else .000001),
-                          dataset_guards=[dict(dataset=d, point_guard=True) for d in ['kadid','tid2013','konfig','cid22_a25']],
-                          w2=dict(point_guard=i not in (2,5))))
+                          dataset_guards=[dict(dataset=d, point_guard=True, interval=dict(estimate=0, se=0)) for d in ['kadid','tid2013','konfig','cid22_a25']],
+                          w2=dict(point_guard=i not in STEER_IDENTICAL, interval=dict(estimate=0, se=0))))
     stats=dict(schema='steer-statistics-v1',state='COMPLETE_FOR_S',alias_policy='q12-a-v1',
                eligibility_margin=.0065,resamples=10000,level=.95,percentile='Hyndman-Fan type 7',
                tests=tests,holm_reject=[i not in STEER_IDENTICAL for i in range(1,13)])
@@ -42,6 +42,25 @@ class SteerVerdict(unittest.TestCase):
                 elif which=='guard':s['tests'][0]['w2']['point_guard']=None
                 elif which=='r-w2':s['tests'][1]['w2']['point_guard']=True
                 self.assertEqual(steer_verdict(s,g)['state'],'INCOMPLETE')
+
+    def test_report_only_seed_refusals_do_not_veto(self):
+        for where in ('primary','w2'):
+            s,g=fixture()
+            if where=='primary':s['tests'][0]['seed_unit']=dict(state='INCOMPLETE',reason='undefined seed SE')
+            else:s['tests'][0]['w2']['seed_unit']=dict(state='INCOMPLETE',reason='undefined seed SE')
+            self.assertTrue(all(f['eligible'] for f in steer_verdict(s,g)['families'].values()))
+
+    def test_improvement_guard_completeness_and_finite_false(self):
+        for mutation in ('missing','nonfinite'):
+            s,g=fixture()
+            if mutation=='missing':s['tests'][6]['dataset_guards']=[]
+            else:s['tests'][6]['w2']['interval']['se']=float('nan')
+            self.assertEqual(steer_verdict(s,g)['state'],'INCOMPLETE')
+        s,g=fixture()
+        for d in s['tests'][6]['dataset_guards']:d['point_guard']=False;d['interval']['estimate']=-.01
+        s['tests'][6]['w2']['point_guard']=False
+        s['tests'][6]['w2']['interval']['estimate']=-.01
+        self.assertTrue(all(f['eligible'] for f in steer_verdict(s,g)['families'].values()))
 
     def test_measured_diagnostic_failure_is_not_missing(self):
         s,g=fixture();g['r-a']['spatial']['pass_']=False
@@ -72,6 +91,18 @@ def canonical_receipt_test():
     assert v['state']=='COMPLETE_FOR_S',v
     assert all(f['eligible'] for f in v['families'].values()),v
     print('PASS canonical Rust bootstrap/Student/Holm invented predictions -> S-only verdict; exact aliases retained')
+
+
+def canonical_fix2_receipt_test():
+    path=Path(os.environ['STEER_FIX2_RESULT'])
+    cases=json.loads(path.read_text());_,g=fixture()
+    for key in ('baseline','primary_seed_zero','w2_seed_zero','test7_finite_false_guards'):
+        result=steer_verdict(cases[key],g)
+        assert result['state']=='COMPLETE_FOR_S',(key,result)
+        assert all(f['eligible'] for f in result['families'].values()),(key,result)
+    result=steer_verdict(cases['test7_invalid_guards'],g)
+    assert result['state']=='INCOMPLETE' and 'families' not in result,result
+    print('PASS FIX2 canonical Rust primary/guards/seed_stat/Holm -> real S-only verdict: nested diagnostic refusals nonfatal; invalid improvement guards fatal; finite false guards nondecisive')
 
 
 if __name__=='__main__':

@@ -1419,3 +1419,10 @@ steer-verdict-tests:
 steer-statistics-verdict-integration:
     python3 -c 'from scripts.tests.test_steer_verdict import canonical_receipt_test; canonical_receipt_test()'
 
+
+# Invented canonical evidence only; no model, corpus or fleet discovery.
+steer-fix2-check:
+    cargo fmt -p zensim-validate --check
+    just steer-statistics-check
+    just steer-verdict-tests
+    python3 -c 'from scripts.tests.test_steer_verdict import canonical_fix2_receipt_test; canonical_fix2_receipt_test()'

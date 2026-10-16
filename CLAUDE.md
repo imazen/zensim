@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-16 — STEER completeness differed from the inherited E34 rules. FIXED in the versioned adapter.** Nested primary-seed/W2-seed diagnostic refusals no longer veto a valid primary comparison. Dataset/W2 numeric evidence is required on every comparison, including improvements; finite false diagnostic point guards do not veto S eligibility. Canonical invented-data checks cover both report-only refusals, invalid improvement evidence, all twelve Holm slots and the S-only verdict. The E34 evaluator/fixtures and numerical thresholds are unchanged. Q12 remains pending; this correction does not approve the alias policy.
+
 * **2026-10-16 — inherited exact-target tie detection uses `signum`. OPEN for legacy groups.** Rust `f64::signum()` returns ±1 for ±0, so the inherited plain rank loop's `target == 0` check does not exclude exact ties. The separately admitted `subjective_rank` group now checks target equality directly and counts skipped ties; inherited control behavior is preserved. Synthetic actual-trainer tests show zero tie gradient, a nonzero inherited negative control, unchanged non-tied control outputs, no rank-leg MSE term and no between-source scale effect (`just subjective-rank-check`). This does not retrospectively correct earlier fits.
 
 * **2026-10-15 — general benchmark workspace dependency resolution. OPEN.**
