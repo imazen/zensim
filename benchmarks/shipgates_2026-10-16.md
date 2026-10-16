@@ -163,7 +163,7 @@ Full owner reports are `corruption-attempt2/<candidate>/report.json`; guarded ac
 run-heavy: done rc=0 336s | peak-RSS 0.56GiB | min-avail 40497MiB | peak-load 13.96
 ```
 
-## G-TARGET — W-C JXL (other two candidates pending)
+## G-TARGET — W-C JXL
 
 Frozen separate TRAIN calibration uses nine sources; evaluation uses eight disjoint validation families across photo, document, graphic and screen content, at max256side. The complete native owner validated every bound, coverage request, selected bitstream/pixel hash and encode/map count. Of80 requests,37 are jointly witnessed across scalar/neutral/active within±1; all80 receive a disposition. The same37 enter every arm/policy/budget. Sparse bounds do not prove the other interior requests impossible.
 
@@ -192,3 +192,44 @@ Same frozen source/protocol/driver as W-C, with its own untouched TRAIN calibrat
 | 3 | 0.39595413208 | 0.5 | 0.999382019043 | 1.0 | 1/38 beyond1.0 | 0.01 | 1.57715606689 | FAIL |
 
 Three-shot maximum passes≤3;1/38 undershoots beyond1 fails≤1%. Case: origin5315, requested90, achieved88.4228439331, signed error-1.57715606689. Owner analysis SHA-256 `8619aa8b72ee9db3bfadafa7fc60c6e422d2fc8cd75d8a2af749d88d0df8fd73`. Full per-class tables and work receipts: `jxl-target-phased/diff-frag-820/eval/`. No bar changed.
+
+## Corruption companion ID admission
+
+The coordinator requires an exact declared-ID match to the frozen release head.
+Native model/head readers confirm the following ordered-ID comparisons at the
+unchanged baked probability threshold0.9:
+
+| Candidate | Candidate declared IDs | Head declared IDs | Exact match | Authorized detection companion |
+|---|---:|---:|---|---|
+| w-c |420|420|yes|release head568380f1|
+| diff-frag-820 |420|420|yes|release head568380f1|
+| diff-410 |410|420|no|none; lacks corruption detection|
+
+The native API can form a union extraction plan for diff-410 plus this head, but
+that does not satisfy the coordinator's exact-match restriction. Its composed
+numbers above are retained diagnostic measurements and confer no corruption
+ship-gate pass. The standalone validation below-q20 result remains1723/5353.
+No companion was invented or retrained.
+
+Binding receipt SHA-256 `38d6c697c725dc6c2f30d09561f01b1a1c1153e7b32f99b0e1ad057127c2512c`.
+
+## G-TARGET — original diff-410 JXL
+
+Same frozen source/protocol/driver, with separate untouched TRAIN calibration.
+All80 requests receive a disposition;38 are jointly witnessed. The canonical
+owner validates684target cells and504offline bound cells, retained stream/pixel
+identities and work counts.
+
+| Shots | Median error | Bar | p95 error | Bar | Undershoot count | Fraction bar | Worst error | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 1.04418945312 | 2.0 | 5.99224090576 | 8.0 | 0/38 beyond8 | 0.05 | 9.72933959961 | PASS |
+| 2 | 0.277923583984 | 1.0 | 1.67393493652 | 3.0 | 0/38 beyond3 | 0.05 | 2.51805877686 | PASS |
+| 3 | 0.260280609131 | 0.5 | 1.1628112793 | 1.0 | 1/38 beyond1 | 0.01 | 1.33506011963 | FAIL |
+
+Three-shot p95 fails≤1;1/38 undershoots beyond1 fails≤1%. The maximum passes≤3. Case origin8113, requested70, achieved68.9324645996, signed error-1.06753540039.
+
+Active train-curve full encodes38/57/65 and native map evaluations114/171/195 are counted separately. Owner analysis SHA-256 `478bce2479bd68efddf29ce285bb55792a5a9f1ac1ea45082e838377768a5d3d`. Full per-class/control/work evidence remains in `jxl-target-phased/diff-410/eval/`. This sparse development screen does not qualify other sizes, modes, codecs or HDR.
+
+```text
+run-heavy: done rc=0 640s | peak-RSS 0.05GiB | min-avail 37035MiB | peak-load 20.90
+```
