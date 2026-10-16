@@ -201,5 +201,5 @@ Sources: [E34](e34_results_2026-10-15.md), [D12](e34_d12_2026-10-15.json),
 [corruption](canonical_corruption_d228_2026-09-08.md).
 Local measurement-tool clippy/fmt and script checks pass. The manually
 triggered CI run38977865933 failed in an unchanged script test because numpy
-was missing; no green CI claim is made. Later source CI was manually triggered
-as run38980708462; its live result is separate from the measured gate verdicts.
+was missing; no green CI claim is made. Later source CI run38980708462
+reproduced the same missing-numpy failure in its lint job.
