@@ -1392,6 +1392,9 @@ subjective-rank-check:
     cargo test -p zensim-validate --test subjective_rank
     just subjective-admission-check
 
+subjective-loso-check:
+    python3 -m unittest scripts/tests/test_subjective_loso.py scripts/tests/test_palette_training_pairs.py
+
 # Canonical STEER/E34 statistics on invented data only; no corpus discovery.
 steer-statistics-check:
     cargo test -p zensim-validate --bin panel panel_e34:: -- --nocapture

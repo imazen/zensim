@@ -77,7 +77,7 @@ def prepare(sources, captures, feature_contract_sha256, feature_ids):
         # Equal class, then source mass. R915 corrects rejected same-row draws.
         nominal = 2 / (5 * (50 if src["role"] == "fit" else 14))
         corrected = acceptance_weight(nominal, refs)
-        groups.append(dict(name=f"palette_{source_id}", source_id=source_id, role=src["role"],
+        groups.append(dict(name=f"palette_{source_id}"+("_development" if src["role"]=="dev" else ""), source_id=source_id, role=src["role"],
                            mode="withinref,both", nominal_weight=nominal,
                            train_weight=corrected if src["role"] == "fit" else 0.,
                            val_weight=corrected if src["role"] == "dev" else 0., rows=rows))

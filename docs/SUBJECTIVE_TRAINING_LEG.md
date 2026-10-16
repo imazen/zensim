@@ -25,3 +25,13 @@ No population identities or real manifests belong in this repository.
 
 The converter and any real data access require separate authorization. These
 modules alone neither authorize reads nor establish experiment readiness.
+
+`subjective_loso.py` consumes only a hash-bound family inventory. It emits
+28 source masks at seed indices 0/1/2, the 736 scientific fit cells and 672
+fold-local map contracts. Masks cover inherited/new legs, preprocessing and
+calibration. Control/P reuse refuses any overlap with the held-out families.
+`subjective_cell.py` verifies materialized masks and delegates fitting and
+packing to the existing final-epoch and identity-knot/tail owners. Native
+admission independently verifies all-leg mask receipts and exact seed/budget
+bindings before payloads. Private conversion, actual input archives and
+executor runs remain separately authorized stages.
