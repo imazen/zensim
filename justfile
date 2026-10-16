@@ -1395,6 +1395,16 @@ subjective-rank-check:
 subjective-loso-check:
     python3 -m unittest scripts/tests/test_subjective_loso.py scripts/tests/test_palette_training_pairs.py
 
+registered-statistics-unit:
+    cargo test --locked -p zensim-validate --bin panel registered_ -- --test-threads=1
+    cargo clippy --locked -p zensim-validate --bin panel --bin registered_owner_oracle -- -D warnings
+
+registered-statistics-build:
+    E34_OWNER_ORACLE=1 cargo build --locked -p zensim-validate --bin registered_owner_oracle --bin panel
+
+registered-statistics-parity receipt:
+    python3 scripts/tests/registered_statistics_parity.py --owner "${CARGO_TARGET_DIR:-target}/debug/registered_owner_oracle" --adapter "${CARGO_TARGET_DIR:-target}/debug/panel" --receipt '{{receipt}}'
+
 # Canonical STEER/E34 statistics on invented data only; no corpus discovery.
 steer-statistics-check:
     cargo test -p zensim-validate --bin panel panel_e34:: -- --nocapture
