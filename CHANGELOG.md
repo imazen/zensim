@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add unpublished fixed engineering judges with lossless map artifacts and exact opaque-crop source preparation; keep diagnostic matte output out of the RD sweep.
+
 - Add an actual pinned-worker scheduling oracle on invented jobs and document the STEER per-cell ledger/pause repair without changing scientific fit budgets.
 
 - Keep STEER harvest staging and installed results under one container bind mount so verified cells install by atomic rename.
