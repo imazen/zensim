@@ -52,3 +52,12 @@ uses E34's inventory and seeds and cannot issue a registered verdict.
 These commands use invented observations only. They neither open a corpus nor
 launch jobs. Actual input archives, program closures, gates and measured
 preflight remain separately bound by the coordinator.
+
+`registered_verdict.py` consumes this twelve-test packet and measured packets
+from the inherited gate owners. All eight model packets, every gate, four
+dataset guards, and paired steering counts at seeds 0/1/2 are required. It
+retains P → H → PH replacement, the strict practical improvement bar, and the
+report-only mean guard. Its fixed A-before-C seed-0 acceptance candidate is a
+binding for a later reader; the adapter never authorizes an acceptance read.
+`just registered-verdict-check` exercises replacement comparisons, all gates,
+paired steering, incomplete slots and no-eligible refusal with invented data.

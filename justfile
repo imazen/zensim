@@ -1395,6 +1395,9 @@ subjective-rank-check:
 subjective-loso-check:
     python3 -m unittest scripts/tests/test_subjective_loso.py scripts/tests/test_palette_training_pairs.py
 
+registered-verdict-check:
+    python3 -m unittest scripts/tests/test_registered_verdict.py scripts/tests/test_e34_verdict.py scripts/tests/test_steer_verdict.py
+
 registered-statistics-unit:
     cargo test --locked -p zensim-validate --bin panel registered_ -- --test-threads=1
     cargo clippy --locked -p zensim-validate --bin panel --bin registered_owner_oracle -- -D warnings
