@@ -79,6 +79,8 @@ def packet(bundle):
 
 def runtime(bundle, doc):
     """Launch runtime beside the packet: verifier tools from the program archive and the pinned inspector."""
+    if doc.get('schema') == 'steer-fleet-packet-v1' and sha(CTL) != doc['ctl_sha256']:
+        raise ValueError('canonical zenfleet controller differs from the STEER binding')
     rt = bundle.parent / "launch"
     tools = rt / "committed-tools"
     tools.mkdir(parents=True, exist_ok=True)
@@ -578,7 +580,8 @@ def shorter_queue(bundle, queue, out):
     rows=[line.split() for line in queue.read_text().splitlines() if line.strip()]
     if any(row[0] not in doc['jobsets'] for row in rows):
         raise ValueError('queue contains a jobset outside the frozen packet')
-    rows.sort(key=lambda row:costs[row[0].split('-')[1]])
+    rows.sort(key=lambda row:costs[row[0] if doc.get('schema') == 'steer-fleet-packet-v1'
+                                   else row[0].split('-')[1]])
     stage=out.with_name(out.name+'.new')
     stage.write_text(''.join(' '.join(row)+'\n' for row in rows))
     os.replace(stage,out)

@@ -115,6 +115,16 @@ class Launch(unittest.TestCase):
         self.assertEqual(owner.queued(self.queue), [plan['order'][0]])
         self.assertIn(str(self.bundle/'FIRST_CELL_MANIFEST.json'), run.call_args.args[0])
 
+    def test_steer_shorter_queue_uses_full_jobset_bindings(self):
+        doc, plan = self.steer_fixture()
+        doc['smoke_epoch_seconds'] = {js: i+1 for i,js in enumerate(plan['order'])}
+        self.queue.write_text(''.join(js+' manifest image\n' for js in reversed(plan['order'])))
+        out=self.root/'shorter'
+        with mock.patch.object(owner, 'packet', return_value=doc):
+            result=owner.shorter_queue(self.bundle,self.queue,out)
+        self.assertEqual(result['order'],plan['order'])
+        self.assertEqual(owner.queued(out),plan['order'])
+
     def test_caps_merge_keeps_other_entries_and_backs_up(self):
         out = owner.merge_caps(self.bundle, self.live)
         live = json.loads(self.live.read_text())
