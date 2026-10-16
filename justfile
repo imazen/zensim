@@ -1622,3 +1622,146 @@ steer-worker-watch packet packet_sha:
 
 steer-worker-pause packet packet_sha:
     python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --pause
+
+shipgates-gaddr models binary instruments mentor_standard mentor_ladder output:
+    python3 scripts/rev4_featpot/shipgates.py gaddr --models {{quote(models)}} --binary {{quote(binary)}} --instruments {{quote(instruments)}} --mentor-standard {{quote(mentor_standard)}} --mentor-ladder {{quote(mentor_ladder)}} --output {{quote(output)}}
+
+shipgates-corruption models binary head inputs pairs bindings output:
+    python3 scripts/rev4_featpot/shipgates.py corruption --models {{quote(models)}} --binary {{quote(binary)}} --head {{quote(head)}} --inputs {{quote(inputs)}} --pairs {{quote(pairs)}} --bindings {{quote(bindings)}} --output {{quote(output)}}
+
+shipgates-palette-ci python="python3":
+    {{quote(python)}} -B -m unittest scripts/tests/test_palette_training_pairs.py scripts/tests/test_palette_pool_authority.py
+    {{quote(python)}} -B -m unittest discover -s scripts/tests -p test_palette_admission.py
+
+shipgates-extractor-build:
+    cargo build --release --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+
+
+shipgates-jxl-smoke models binary inputs oracle output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-smoke --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --output {{quote(output)}}
+
+
+shipgates-panel-build:
+    cargo build --release --locked -p zensim-validate --bin panel
+
+shipgates-corruption-results inputs audits bindings output:
+    python3 scripts/rev4_featpot/shipgates.py corruption-results --inputs {{quote(inputs)}} --audits {{quote(audits)}} --bindings {{quote(bindings)}} --output {{quote(output)}}
+
+shipgates-panel-check:
+    cargo test --release --locked -p zensim-validate --bin panel source_series_uses_registered_clusters_and_refuses_unbound_fields
+
+shipgates-jxl-target-phased models binary inputs resume lock heavy output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-target --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --resume-calibration-root {{quote(resume)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}}
+
+shipgates-rd-sources inputs tree output:
+    python3 scripts/rev4_featpot/shipgates.py rd-sources --inputs {{quote(inputs)}} --tree {{quote(tree)}} --output {{quote(output)}}
+
+shipgates-target-report output:
+    python3 scripts/v_next/rd_probe_analyze_2026-07-18.py --target-loop {{quote(output)}} --target-only
+
+shipgates-rd-licenses tree output:
+    python3 scripts/rev4_featpot/shipgates.py rd-licenses --tree {{quote(tree)}} --output {{quote(output)}}
+
+shipgates-judge-build:
+    cargo build --release --locked --manifest-path tools/shipgates-judge/Cargo.toml --bin shipgates_judge
+
+shipgates-jxl-rd models binary inputs oracle lock heavy png8 output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --output {{quote(output)}}
+
+shipgates-oracle-help binary:
+    {{quote(binary)}} -v --help
+
+
+shipgates-analysis-check:
+    python3 -B -m unittest scripts/tests/test_shipgates_rd_analysis.py
+
+shipgates-jxl-rd-resume models binary inputs oracle lock heavy png8 resume output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --resume-encodes-root {{quote(resume)}} --png8-binary {{quote(png8)}} --output {{quote(output)}}
+
+shipgates-codec-cell codec binary oracle design source output cas extra="":
+    python3 scripts/rev4_featpot/shipgates_codec_rd.py --codec {{quote(codec)}} --binary {{quote(binary)}} --oracle {{quote(oracle)}} --design {{quote(design)}} --source-id {{quote(source)}} --output {{quote(output)}} --cas-root {{quote(cas)}} {{extra}}
+
+shipgates-head-bindings binary:
+    #!/usr/bin/env python3
+    import json,os,subprocess
+    from pathlib import Path
+    root=Path('/mnt/v/output/zensim/shipgates-2026-10-16')
+    binary=Path('{{binary}}').resolve()
+    rows={}
+    for name,record in json.loads((root/'MODELS.json').read_text()).items():
+        result=subprocess.check_output([str(binary),'--inspect-corruption-binding',record['path'],'/var/tmp/shippath6/refit/head.zcth'],env=dict(os.environ,ZENSIM_FORMULA_REV='5'))
+        rows[name]=json.loads(result)
+    with (root/'CORRUPTION_FEATURE_BINDINGS.json').open('x') as out:json.dump(rows,out,indent=2,allow_nan=False)
+
+shipgates-judge-check:
+    cargo clippy --release --locked --manifest-path tools/shipgates-judge/Cargo.toml --bin shipgates_judge -- -D warnings
+
+shipgates-source-build:
+    cargo build --release --locked --manifest-path tools/shipgates-judge/Cargo.toml --bin shipgates_prepare_source
+
+shipgates-frozen-judge-build manifest:
+    cargo build --release --locked --manifest-path {{quote(manifest)}} --bins
+
+shipgates-frozen-judge-check manifest:
+    cargo clippy --release --locked --manifest-path {{quote(manifest)}} --bins -- -D warnings
+
+shipgates-source-prepare binary input output:
+    {{quote(binary)}} --crop-opaque {{quote(input)}} {{quote(output)}}
+
+shipgates-codec-matrix codec binary oracle models sources lock heavy png8 output extra="":
+    python3 scripts/rev4_featpot/shipgates_codec_rd.py matrix --codec {{quote(codec)}} --binary {{quote(binary)}} --oracle {{quote(oracle)}} --models {{quote(models)}} --sources {{quote(sources)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --output {{quote(output)}} {{extra}}
+
+shipgates-matte-oracle input prepared output:
+    python3 scripts/rev4_featpot/shipgates_matte_oracle.py --input {{quote(input)}} --prepared {{quote(prepared)}} --output {{quote(output)}}
+
+shipgates-judge-pairs binary pairs output:
+    #!/usr/bin/env python3
+    import os,subprocess
+    env={k:v for k,v in os.environ.items() if not k.startswith(('ZENSIM_','JXL_','ZENJPEG_ZQ_','ZENWEBP_ZQ_','AVIF_ZENSIM_'))}
+    env.update(ZENSIM_FORMULA_REV='1',RAYON_NUM_THREADS='1')
+    subprocess.run(['{{binary}}','--pairs','{{pairs}}','--out-dir','{{output}}','--ssim2-map-policy','scalar-only'],env=env,check=True)
+
+shipgates-source-crop-check manifest:
+    cargo test --release --locked --manifest-path {{quote(manifest)}} --bin shipgates_prepare_source
+    cargo clippy --release --locked --manifest-path {{quote(manifest)}} --bin shipgates_prepare_source -- -D warnings
+    cargo build --release --locked --manifest-path {{quote(manifest)}} --bin shipgates_prepare_source
+
+shipgates-source-crop binary input output:
+    {{quote(binary)}} --crop-opaque {{quote(input)}} {{quote(output)}}
+
+shipgates-jxl-interventions models binary inputs oracle lock heavy output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-interventions --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}}
+
+shipgates-crop-oracle receipt output:
+    python3 scripts/rev4_featpot/shipgates_crop_oracle.py --receipt {{quote(receipt)}} --output {{quote(output)}}
+
+shipgates-judge-queue encodes binary lock heavy output reuse pid prior:
+    python3 scripts/rev4_featpot/shipgates_judge_queue.py --encodes {{quote(encodes)}} --binary {{quote(binary)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}} --reuse-first {{quote(reuse)}} --encoder-pid {{pid}} --reuse-source-root {{quote(prior)}} --map-oracle scripts/rev4_featpot/shipgates_map_oracle.py
+
+shipgates-map-oracle judges output:
+    python3 scripts/rev4_featpot/shipgates_map_oracle.py --judges {{quote(judges)}} --output {{quote(output)}}
+
+shipgates-intervention-judges root oracle judge:
+    python3 scripts/rev4_featpot/shipgates_intervention_judges.py --root {{quote(root)}} --oracle {{quote(oracle)}} --judge {{quote(judge)}} --analyzer scripts/v_next/rd_probe_analyze_2026-07-18.py --map-oracle scripts/rev4_featpot/shipgates_map_oracle.py
+
+shipgates-evidence-mirror source destination:
+    rsync -a --no-owner --no-group --partial --info=progress2 --outbuf=L {{quote(source)}}/ {{quote(destination)}}/
+    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}}
+
+shipgates-controls-report evidence output markdown:
+    python3 scripts/rev4_featpot/shipgates_controls_report.py --evidence {{quote(evidence)}} --output {{quote(output)}} --markdown {{quote(markdown)}}
+
+shipgates-source-admission sources binary output:
+    python3 scripts/rev4_featpot/shipgates_source_admission.py --sources {{quote(sources)}} --binary {{quote(binary)}} --oracle scripts/rev4_featpot/shipgates_crop_oracle.py --output {{quote(output)}}
+
+shipgates-palette-prepare sources binary pin output:
+    python3 scripts/rev4_featpot/shipgates_palette_prepare.py --sources {{quote(sources)}} --binary {{quote(binary)}} --tool-pin {{quote(pin)}} --pixel-oracle scripts/rev4_featpot/shipgates_crop_oracle.py --source-id 21 --output {{quote(output)}}
+
+shipgates-map-oracle-lossless judges output:
+    python3 scripts/rev4_featpot/shipgates_map_oracle.py --judges {{quote(judges)}} --output {{quote(output)}} --lossless-png-expansion
+
+shipgates-format-unit binary source output:
+    python3 scripts/rev4_featpot/shipgates_format_unit.py --binary {{quote(binary)}} --source {{quote(source)}} --oracle scripts/rev4_featpot/shipgates_map_oracle.py --output {{quote(output)}}
+
+shipgates-source-admission-bind sources binary output:
+    python3 scripts/rev4_featpot/shipgates_source_admission.py --sources {{quote(sources)}} --binary {{quote(binary)}} --oracle scripts/rev4_featpot/shipgates_crop_oracle.py --output {{quote(output)}} --bind-only
