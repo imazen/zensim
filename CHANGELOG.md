@@ -56,6 +56,9 @@
 
 ### Added
 
+- Add opt-in STEER all-blocks-v1 prepared repair gains using complete native pixel forwards; ordinary scoring and map defaults remain unchanged.
+
+
 - E34 preparation feature census binds the frozen E33 fit contract and reads only
   its 410 difference columns. The existing table-integrity owner accepts an
   explicit row mask for the registered coverage subset; labels stay unread

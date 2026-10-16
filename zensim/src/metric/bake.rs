@@ -7,6 +7,10 @@ use std::sync::Arc;
 #[path = "bake_gradient.rs"]
 mod gradient;
 
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+#[path = "steer_exact.rs"]
+mod steer_exact;
+
 /// A loaded bake's reusable scoring state.
 ///
 /// The caller owns the parsed model; no bytes are leaked or installed into a
@@ -186,7 +190,12 @@ impl<'a> BakeScorer<'a> {
         } else {
             self.precompute_reference(source)?
         };
+        let exact = steer_exact::selected()?;
+        if exact {
+            steer_exact::admit(self, source, bin, encoding.is_some())?;
+        }
         Ok(SteeringSession {
+            exact,
             encoding,
             scorer: self,
             source,
@@ -1263,6 +1272,7 @@ impl<'a> BakeScorer<'a> {
         {
             let result = identical_result_at(&config, plan.walk_width());
             return Ok(crate::ScoredAttribution {
+                exact_refinement: None,
                 sensitivities: vec![0.0; result.features().len()],
                 result,
                 attribution: crate::attribution::zero_attribution(
@@ -1319,6 +1329,7 @@ impl<'a> BakeScorer<'a> {
             let result = ZensimResult::new(100.0, 0.0, features, ZensimProfile::B, mean_offset)
                 .mark_identical();
             return Ok(crate::ScoredAttribution {
+                exact_refinement: None,
                 sensitivities: vec![0.0; result.features().len()],
                 result,
                 attribution: crate::attribution::zero_attribution(
@@ -1440,6 +1451,7 @@ impl<'a> BakeScorer<'a> {
             &unsupported_feature_ids,
         );
         Ok(crate::ScoredAttribution {
+            exact_refinement: None,
             max_removals,
             moment_removals,
             unsupported_refinement_feature_ids,
@@ -1495,6 +1507,7 @@ fn steering_support(reads: &[u16], hdr: bool) -> Result<(), ZensimError> {
 /// borrows keep lifetimes explicit; no image or model is installed globally.
 #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
 pub struct SteeringSession<'s, 'a, S: ImageSource> {
+    exact: bool,
     encoding: Option<crate::feature_v2::HdrEncoding>,
     scorer: &'s mut BakeScorer<'a>,
     source: &'s S,
@@ -1540,7 +1553,7 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         {
             self.scorer.corruption = companion;
         }
-        let result = attempted?;
+        let mut result = attempted?;
         #[cfg(feature = "corruption-head")]
         if !result.result().is_identical()
             && let Some((value, threshold)) = self.scorer.companion_score(
@@ -1553,7 +1566,17 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         {
             return Err(ZensimError::CorruptionDetected);
         }
-        if !result.unsupported_refinement_feature_ids().is_empty() {
+        if self.exact {
+            let table = steer_exact::gains(
+                self.scorer,
+                self.source,
+                distorted,
+                codec_hint,
+                result.result().score(),
+            )?;
+            result.exact_refinement = Some(table);
+        }
+        if !self.exact && !result.unsupported_refinement_feature_ids().is_empty() {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "steering comparison has incomplete refinement coverage",
             });

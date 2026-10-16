@@ -1369,3 +1369,12 @@ cifix-e34-all-features:
 # Reusable CI polling without waiting for the slower jobs to hide a failure.
 cifix-e34-ci-status run:
     gh run view {{run}} -R imazen/zensim --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[] | {name,status,conclusion,databaseId}]}'
+
+# Label-free synthetic native repair oracle; includes all fixed grids/edge blocks.
+steer-exact-tests:
+    cargo test -p zensim --lib --features custom-profiles r_exact_native_parity -- --nocapture
+
+steer-exact-check:
+    cargo fmt -p zensim --check
+    cargo clippy -p zensim --lib --features custom-profiles -- -D warnings
+    cargo test -p zensim --lib --features custom-profiles

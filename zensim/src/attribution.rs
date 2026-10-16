@@ -5611,6 +5611,8 @@ impl Fused944Session {
 #[cfg(feature = "feature-regime-v2")]
 #[non_exhaustive]
 pub struct ScoredAttribution {
+    /// Research-only complete native reference-paste gains, eagerly scored.
+    pub(crate) exact_refinement: Option<Vec<([usize; 4], f64)>>,
     pub(crate) result: crate::ZensimResult,
     pub(crate) attribution: AttributionResult,
     pub(crate) sensitivities: Vec<f64>,
@@ -5687,10 +5689,21 @@ impl ScoredAttribution {
     /// binned moment integrals. Those corrections are non-additive and use
     /// the same bin interpolation. Frozen-signal and head approximations remain.
     ///
+    /// Research mode `ZENSIM_STEER_EXACT=all-blocks-v1` replaces this estimate
+    /// with an eagerly scored native reference-paste gain on its fixed grids.
+    /// A rectangle outside that exact inventory returns NaN (unsupported),
+    /// never an approximate value. The ordinary score and density are unchanged.
+    ///
     /// Inspect [`Self::unsupported_refinement_feature_ids`] and
     /// [`Self::has_corruption_gate`]. Complete local coverage does not establish
     /// accurate finite pixel or codec steering.
     pub fn refinement_gain(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        if let Some(table) = &self.exact_refinement {
+            return table
+                .iter()
+                .find(|(r, _)| *r == [x0, y0, x1, y1])
+                .map_or(f64::NAN, |(_, gain)| *gain);
+        }
         if x0 >= x1.min(self.attribution.width()) || y0 >= y1.min(self.attribution.height()) {
             return 0.0;
         }
