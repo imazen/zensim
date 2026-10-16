@@ -719,9 +719,22 @@ mod tests {
     }
     #[test]
     fn steer_pending_policy_does_not_open_input() {
-        let root =
-            PathBuf::from(std::env::var_os("TMPDIR").expect("caller must set disk-backed TMPDIR"))
-                .join(format!("steer-pending-policy-{}", std::process::id()));
+        let base = std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .map(|home| PathBuf::from(home).join("tmp"))
+            })
+            .expect("disk-backed scratch or user profile required");
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = base.join(format!(
+            "steer-pending-policy-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(&root).unwrap();
         let pin = root.join("registration.json");
         fs::write(&pin,serde_json::to_vec(&json!({"schema":"steer-registration-v1","alias_policy":"q12-a-v1",

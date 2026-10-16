@@ -1445,3 +1445,8 @@ steer-smoke-build:
     cargo fmt -p zensim-validate --check
     cargo build --locked -p zensim-validate --bin zensim_mlp_train --bin bake_dial_refit --bin predict_features_with_bake --bin panel --bin steer_exact_smoke --example inspect_qualified_checkpoint
     cargo clippy --locked -p zensim-validate --bin steer_exact_smoke -- -D warnings
+
+# Reproduce CI's absent TMPDIR without putting compiler scratch under /tmp.
+steer-pending-policy-check:
+    cargo test --locked -p zensim-validate --bin panel --no-run --message-format=json > "$HOME/tmp/zensim-steer-pending-build.jsonl"
+    python3 -c 'import json,os,pathlib,subprocess; rows=[json.loads(l) for l in pathlib.Path.home().joinpath("tmp/zensim-steer-pending-build.jsonl").read_text().splitlines()]; binary=next(r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="panel" and r.get("executable")); env=dict(os.environ); env.pop("TMPDIR",None); subprocess.run([binary,"panel_e34::steer::tests::steer_pending_policy_does_not_open_input","--exact","--nocapture"],env=env,check=True)'
