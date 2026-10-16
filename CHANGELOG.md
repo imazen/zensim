@@ -6,6 +6,9 @@
 
 - Add explicit engineering source-cluster bootstrap input to the existing panel statistics owner; no data discovery or paired-label input.
 
+- Add matched reference SROCC/paired p95 reporting and opt-in exact A7r rung evidence without changing numerical gates (`61fa23f3`).
+- Add complete retained-map benchmark arms and FIR native cache parity admission (`f6bc0910`).
+
 - Bind the STEER first-cell admission, immutable-image launch and supervised image-contained harvest paths.
 
 
