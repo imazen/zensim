@@ -4,6 +4,8 @@
 
 - Keep STEER harvest staging and installed results under one container bind mount so verified cells install by atomic rename.
 
+- Add explicit engineering source-cluster bootstrap input to the existing panel statistics owner; no data discovery or paired-label input.
+
 - Bind the STEER first-cell admission, immutable-image launch and supervised image-contained harvest paths.
 
 
