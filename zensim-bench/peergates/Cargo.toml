@@ -1,0 +1,22 @@
+[package]
+name = "zensim-peergates"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+fast-ssim2 = { git = "https://github.com/imazen/fast-ssim2", rev = "54fabca919230767ba0944cbec0a37d7eb3a2a7a", features = ["rayon"] }
+butteraugli = { version = "=0.9.3", features = ["avx512"] }
+archmage = { version = "=0.9.30", features = ["std", "testable_dispatch"] }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+imgref = "=1.12.3"
+rgb = "=0.8.53"
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"
+zstd = "=0.13.3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

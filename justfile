@@ -1,5 +1,36 @@
 # zensim dev commands
 
+# Caller supplies shared heavy.lock and run-heavy for builds and scoring.
+peergates-build target:
+    cargo build --release --locked --manifest-path zensim-bench/peergates/Cargo.toml --target-dir {{quote(target)}}
+
+peergates-clippy target:
+    cargo clippy --release --locked --manifest-path zensim-bench/peergates/Cargo.toml --target-dir {{quote(target)}} -- -D warnings
+
+peergates-fmt:
+    cargo fmt --manifest-path zensim-bench/peergates/Cargo.toml --check
+
+peergates-inputs:
+    python3 scripts/rev4_featpot/peergates.py inputs
+
+peergates-quiet:
+    python3 scripts/rev4_featpot/peergates.py quiet
+
+peergates-run binary mode input output:
+    RAYON_NUM_THREADS=1 ZENSIM_FORMULA_REV=5 {{quote(binary)}} {{quote(mode)}} {{quote(input)}} {{quote(output)}}
+
+peergates-report:
+    python3 scripts/rev4_featpot/peergates.py steering-report
+
+peergates-peer-tables grid:
+    python3 scripts/rev4_featpot/peergates.py peer-tables --grid {{quote(grid)}}
+
+peergates-landed:
+    python3 scripts/rev4_featpot/peergates.py landed
+
+peergates-watch:
+    python3 scripts/rev4_featpot/peergates.py watch
+
 # Existing trainer Parquet loaders on the pinned 699,999-row Float32 table.
 # Run the study recipe under run-heavy; its output directory must be new.
 trainer-parquet-load-build:

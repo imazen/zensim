@@ -6,6 +6,7 @@
 
 
 - Bind the assessment-only runtime build to the merged smooth activation and extend the native synthetic probe with matched-control score-bit parity.
+- Add an unpublished label-free peer engineering packet tool with native maps, independent block repairs and pinned metric versions.
 
 - Complete canonical STEER A7 pre-freeze boundary replay and twelve-model inventory refusal checks; preserve the registered state machine and numerical gates.
 
