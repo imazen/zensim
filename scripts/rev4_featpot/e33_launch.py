@@ -49,7 +49,7 @@ def steer_plan(bundle, doc):
     if (plan.get('schema') != 'steer-job-plan-v1' or len(plan['order']) != 8
             or len(set(plan['order'])) != 8 or set(plan['order']) != set(doc['jobsets'])
             or set(plan['unconditional']) != set(plan['order'])
-            or sum(doc['jobsets'].values()) != 172):
+            or sum(doc['jobsets'].values()) != 172 or plan.get('total_executed_cells') != 172):
         raise ValueError('fixed STEER172-cell/eight-jobset inventory differs')
     return plan
 
@@ -700,6 +700,9 @@ def steer_harvest_command(bundle, doc, arguments):
                '-e', 'EP', '-e', 'TMPDIR=/scratch/tmp', '-e', 'STEER_HARVEST_IMAGE='+doc['image_ref']]
     for path, mode in [(repo, ':ro'), (bundle.parent, ''), (FITV2, ''), (POT, ''), (CTL.parent, ':ro')]:
         command += ['-v', str(path)+':'+str(path)+mode]
+    if '--status-file' in arguments:
+        status_parent = Path(arguments[arguments.index('--status-file')+1]).resolve().parent
+        command += ['-v', str(status_parent)+':'+str(status_parent)]
     command += ['-v', str(scratch)+':/scratch', doc['image_ref'], '-n19', 'ionice', '-c3',
                 'python3', str(Path(__file__).resolve()), *arguments]
     return command

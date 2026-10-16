@@ -12,15 +12,22 @@ log="$packet/../launch/harvest-chain.log"
 export TMPDIR="${TMPDIR:-$HOME/tmp/e33}"
 mkdir -p "$TMPDIR"
 campaign=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["schema"])' "$packet/PACKET.json")
-if [[ $campaign == e34-fleet-packet-v1 ]]; then
-    [[ $# == 3 ]] || { echo 'E34 requires its frozen packet SHA and queue'; exit 2; }
+if [[ $campaign == e34-fleet-packet-v1 || $campaign == steer-fleet-packet-v1 ]]; then
+    label=E34
+    count=305
+    if [[ $campaign == steer-fleet-packet-v1 ]]; then
+        label=STEER
+        count=172
+        export E34_STATUS_FILE="${STEER_STATUS_FILE:-${E34_STATUS_FILE:-}}"
+    fi
+    [[ $# == 3 ]] || { echo "$label requires its frozen packet SHA and queue"; exit 2; }
     pin=$2
     queue=$3
     python3 "$here/e33_launch.py" verify --packet "$packet" --packet-sha "$pin" >/dev/null
     . "$HOME/.config/zen/s3env.sh" >/dev/null 2>&1
     export EP
     exec 9>"$packet/../launch/harvest-supervisor.lock"
-    flock -n 9 || { echo 'E34 harvest supervisor already running'; exit 1; }
+    flock -n 9 || { echo "$label harvest supervisor already running"; exit 1; }
     exec > >(tee -a "$log") 2>&1
     status_args=()
     if [[ -n ${E34_STATUS_FILE:-} ]]; then
@@ -28,11 +35,11 @@ if [[ $campaign == e34-fleet-packet-v1 ]]; then
     fi
     while true; do
         if nice -n19 ionice -c3 python3 "$here/e33_launch.py" harvest-cycle --packet "$packet" --packet-sha "$pin" --queue "$queue" "${status_args[@]}"; then
-            echo "E34 ALL305 REGISTERED CELLS VERIFIED AND INSTALLED $(date -u +%FT%TZ)"
+            echo "$label ALL$count REGISTERED CELLS VERIFIED AND INSTALLED $(date -u +%FT%TZ)"
             exit 0
         else
             rc=$?
-            echo "$(date -u +%FT%TZ) E34 supervised cycle rc=$rc (3=progress,4=jobset errors); retrying in60s"
+            echo "$(date -u +%FT%TZ) $label supervised cycle rc=$rc (3=progress,4=jobset errors); retrying in60s"
             if [[ $rc != 3 && $rc != 4 && -n ${E34_STATUS_FILE:-} ]]; then
                 printf '\n%s — HARVEST SUPERVISOR cycle failed rc=%s; see %s; retry in60s\n' "$(date -u +%FT%TZ)" "$rc" "$log" >> "$E34_STATUS_FILE"
             fi

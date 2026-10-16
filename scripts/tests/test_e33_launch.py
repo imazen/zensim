@@ -39,7 +39,8 @@ class Launch(unittest.TestCase):
                  for arm in ['basea', 'basec', 'sa', 'sc']]
         doc = {'schema': 'steer-fleet-packet-v1', 'image': 'img', 'image_ref': 'img@sha256:x',
                'image_id': 'sha256:x', 'jobsets': {js: 40 if '-lodo-' in js else 3 for js in order}}
-        plan = {'schema': 'steer-job-plan-v1', 'order': order, 'unconditional': order}
+        plan = {'schema': 'steer-job-plan-v1', 'order': order, 'unconditional': order,
+                'total_executed_cells': 172}
         (self.bundle/'STEER_JOB_PLAN.json').write_text(json.dumps(plan))
         entry = {'memory': '6g', 'hosts': {'tower': 1}}
         (self.bundle/'jobset_caps.json').write_text(json.dumps({js: entry for js in order}))
