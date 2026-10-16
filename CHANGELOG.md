@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Report the four-provider JXL native intervention screen, exact companion eligibility and the prepared-result runtime measurement scope; preserve open decoder parity findings.
+
 - Bind label-free ship-gate dispatch to frozen native codec owners and exact corruption-companion feature sets; retain explicit missing-detector outcomes.
 
 - Refuse unqualified matte conversion in the private source-preparation tool; preserve exact opaque-crop output and the earlier failed diagnostic.

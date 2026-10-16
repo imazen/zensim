@@ -1,8 +1,8 @@
 # Ship gates — 2026-10-16
 
-Status: **INCOMPLETE**. Targeting is measured for W-C and diff-frag-820 (2/3 candidates); diff-410 and native codec RD are pending. Corruption fails for all three candidates with the frozen companion head. G-ADDR is complete and fails for all three candidates. The protected human-ranking composite is excluded from this execution. No model is promoted.
+Status: **INCOMPLETE**. Missing: matched-quality native RD statistics, complete codec steering-field cost, and JPEG/WebP/AVIF targeting. JXL targeting covers all three frozen candidates; every candidate fails a three-shot bar. W-C/C corruption companions fail native honesty and swap recall; diff-410 lacks an authorized matching companion. G-ADDR fails for all three. The four-provider JXL TRAIN intervention screen is complete. The protected human-ranking composite has not run. No model is promoted.
 
-These are standalone Rev5 packed candidates with D12 exact-gradient maps. W-C steering evidence is the frozen E34 seed-0 panel; the two original candidates have fresh r7900x map-cost/RSS measurements.
+These are standalone Rev5 packed candidates with D12 exact-gradient maps. W-C steering evidence is the frozen E34 seed-0 panel; the two original candidates have fresh r7900x E34 collector-cost/RSS measurements.
 
 | Candidate | Packed bytes | SHA-256 |
 |---|---:|---|
@@ -22,6 +22,8 @@ Exactly 133/135 pass the joint M2 >=0.99 / M3f >=0.70 rule. Both failures are M2
 Engineering per-case artifact SHA-256 `ca8bb71dcdd78096aba23a5f683bb89f76bedbdf896fb0ff9411652a440f37f5`.
 
 ## Cached score plus map cost
+
+The E34 collector times prepared-result construction without rectangle/refinement queries. These verdicts apply to that method; they do not qualify complete codec steering-field cost.
 
 r7900x, one pinned worker, release build, no target-cpu=native. Every geometry/tier cell retained 32 accepted paired rounds under the unchanged quiet and clean-round gates. Same candidate uncached scalar p95 is the denominator; the bar is <=3. These timings do not establish the scorecard’s dev absolute scalar-performance bars. W-C reuses the E34 measurement; the other two candidates were measured on October 16.
 
@@ -233,3 +235,30 @@ Active train-curve full encodes38/57/65 and native map evaluations114/171/195 ar
 ```text
 run-heavy: done rc=0 640s | peak-RSS 0.05GiB | min-avail 37035MiB | peak-load 20.90
 ```
+
+### Runtime scope of the registered collector
+
+The exact E34 `e34_candidate_map` arm constructs `prepare_steering(source,1)` and times `session.compute(...).result().score()`, without rectangle/refinement queries. The reported ratios follow that unchanged method and qualify prepared-result construction. Requesting codec tiles adds work; native codec manifests include it in `encode_ms`. Full codec steering-field cost remains unqualified by the collector ratios.
+
+## Native JXL intervention controls
+
+All four providers complete the same four TRAIN families (photo, document, graphic and screen), distances1/3 and16 coarse regions with0.8/1.2 raw-quantizer interventions. Each provider has272 full encodes,256 interventions and eight exact neutral repeats. Every retained output passes libjxl0.12 decoding and all three fixed judges. The independent map oracle verifies float-map bits, hashes and input-pixel bindings.
+
+All256 interventions change quantizers and pixels; none changes quantizers outside its selected region. Pixels also change outside every selected region; the responsible stage remains unresolved. Control bytes and quantizer fields match across providers; map predictions and candidate scores differ.
+
+Representative primary/libjxl U8 comparisons differ by at most one channel level. Pixel parity remains an open finding; decoding success does not establish bit identity.
+
+The table shows Spearman association between map density and central fixed-B quality improvement per added byte, using only positive byte derivatives. These are descriptive TRAIN mechanism measurements, with no acceptance bar or release qualification.
+
+| TRAIN origin | Class | Distance | W-C | C | A | Butteraugli map peer |
+|---|---|---:|---:|---:|---:|---:|
+| 2010 | photo | 1 | 0.376471 | 0.702941 | 0.485294 | 0.617647 |
+| 2010 | photo | 3 | 0.352941 | 0.467647 | 0.391176 | 0.064706 |
+| 6610 | document | 1 | 0.638235 | 0.735294 | 0.732353 | 0.305882 |
+| 6610 | document | 3 | 0.673529 | 0.697059 | 0.685294 | 0.800000 |
+| 7066 | graphic | 1 | 0.120588 | -0.108824 | 0.223529 | 0.173529 |
+| 7066 | graphic | 3 | 0.352941 | 0.394118 | 0.258824 | 0.326471 |
+| 8206 | screen | 1 | 0.135714 | 0.128571 | 0.146429 | 0.221429 |
+| 8206 | screen | 3 | 0.591176 | 0.567647 | 0.597059 | 0.408824 |
+
+Full control summary SHA256 `ad305bf3236ec0f62f5880ad5a46441e118f2d7f3007073b2fd05411d711963d`; payloads and all per-intervention records remain in the evidence archive.
