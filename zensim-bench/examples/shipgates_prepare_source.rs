@@ -1,4 +1,4 @@
-//! Explicit source preparation; white matte diagnostics or a lossless opaque crop.
+//! Explicit source preparation by a lossless all-opaque crop.
 #![forbid(unsafe_code)]
 use rgb::FromSlice;
 use sha2::{Digest, Sha256};
@@ -17,13 +17,11 @@ fn sha(bytes: &[u8]) -> String {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().collect();
-    let crop = args.get(1).is_some_and(|a| a == "--crop-opaque");
-    let offset = usize::from(crop);
-    if args.len() != 3 + offset {
-        return Err("expected [--crop-opaque] input PNG and fresh output PNG".into());
+    if args.len() != 4 || args[1] != "--crop-opaque" {
+        return Err("expected --crop-opaque input PNG and fresh output PNG; matte conversion is not admitted".into());
     }
-    let input = PathBuf::from(&args[1 + offset]);
-    let output = PathBuf::from(&args[2 + offset]);
+    let input = PathBuf::from(&args[2]);
+    let output = PathBuf::from(&args[3]);
     let bytes = fs::read(&input)?;
     let image = zenpng::decode(
         &bytes,
@@ -44,32 +42,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("outside static sRGB8 source contract".into());
     }
     let rgba = image.pixels.to_rgba8().copy_to_contiguous_bytes();
-    let rect = if crop {
-        largest_opaque(imgref::ImgRef::new(
-            rgba.as_rgba(),
-            info.width as usize,
-            info.height as usize,
-        ))
-        .ok_or("source has no opaque rectangle")?
-    } else {
-        Rect {
-            x: 0,
-            y: 0,
-            width: info.width as usize,
-            height: info.height as usize,
-        }
-    };
+    let rect = largest_opaque(imgref::ImgRef::new(
+        rgba.as_rgba(),
+        info.width as usize,
+        info.height as usize,
+    ))
+    .ok_or("source has no opaque rectangle")?;
     let (width, height) = (rect.width as u32, rect.height as u32);
     let mut rgb = vec![0u8; width as usize * height as usize * 3];
-    let options = ConvertOptions::forbid_lossy().with_alpha_policy(if crop {
-        AlphaPolicy::DiscardIfOpaque
-    } else {
-        AlphaPolicy::CompositeOnto {
-            r: 255,
-            g: 255,
-            b: 255,
-        }
-    });
+    let options = ConvertOptions::forbid_lossy().with_alpha_policy(AlphaPolicy::DiscardIfOpaque);
     let mut converter = RowConverter::new_explicit(
         PixelDescriptor::RGBA8_SRGB,
         PixelDescriptor::RGB8_SRGB,
@@ -109,10 +90,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string_pretty(&serde_json::json!({
         "input":input,"input_sha256":sha(&bytes),"input_rgba_sha256":sha(&rgba),
         "output":output,"output_sha256":sha(&png),"output_rgb_sha256":sha(&rgb),
-        "width":width,"height":height,"crop":if crop {Some(serde_json::json!({"x":rect.x,"y":rect.y,"width":rect.width,"height":rect.height}))} else {None},
-        "background_srgb8":if crop {None} else {Some([255,255,255])},
-        "recipe":if crop {"maximal opaque rectangle; alpha discard verified by RowConverter; zenpng RGB8"}
-            else {"zenpixels-convert0.2.16 RowConverter; linear-light source-over white; zenpng RGB8"},
+        "width":width,"height":height,"crop":{"x":rect.x,"y":rect.y,"width":rect.width,"height":rect.height},
+        "recipe":"maximal opaque rectangle; alpha discard verified by RowConverter; zenpng RGB8",
         "driver_sha256":sha(&fs::read(std::env::current_exe()?)?)}))?
     );
     Ok(())

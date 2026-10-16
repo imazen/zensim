@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Refuse unqualified matte conversion in the private source-preparation tool; preserve exact opaque-crop output and the earlier failed diagnostic.
+
 - Supervise bounded STEER allocations through the frozen LAN launcher, with native/NAS transition gates and operator pause interlocks.
 
 - Validate Rev5 native intervention packets against fixed three-judge artifacts; preserve exact interpolation endpoints and remove dominated baseline rungs before RD comparison.

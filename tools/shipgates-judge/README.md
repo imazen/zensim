@@ -14,6 +14,7 @@ Both available pixel maps are retained losslessly by hash in PNG byte containers
 
 `shipgates_prepare_source --crop-opaque input.png fresh-output.png` selects the
 largest all-opaque rectangle and preserves its RGB bytes, including strided rows.
-Its JSON receipt records the crop, source hashes and executable hash. The default
-white-matte mode remains diagnostic: its approximation differs from an exact IEC
-sRGB oracle at some 8-bit rounding boundaries and is excluded from this sweep.
+Its JSON receipt records the crop, source hashes and executable hash. The earlier
+white-matte prototype differs from an exact IEC sRGB oracle at some 8-bit
+rounding boundaries. Its failed diagnostic is retained; current preparation
+refuses non-crop invocations.
