@@ -234,7 +234,11 @@ def build():
     output['installed_integrity'] = dict(path=str(ROOT / 'installed-integrity-final.json'),
                                         sha256=sha(ROOT / 'installed-integrity-final.json'),
                                         cells=integrity['cells'], files=integrity['files'], unchanged=True)
+    runtime_host = read(ROOT / 'runtime-host.json')
+    assert runtime_host['host'] == 'r7900x' and runtime_host['transfer_verified']
+    assert runtime_host['payload_sha256']['evaluation/bin/costcmp-instrument'] == sha(ROOT / 'bin/costcmp-instrument')
     output['provenance'] = dict(statistics_binding=binding,
+        runtime_host=runtime_host,
         report_binary_sha256=sha(ROOT / 'bin/panel-reports'),
         runtime_build=read(ROOT / 'runtime-build.json'),
         p3_instrument=read(ROOT / 'bin/p3-instrument.artifact.json'),
@@ -289,6 +293,10 @@ def render():
         'Frozen registration `bc9be24a`, revision 5. D13 margin **0.0065** in both families; '
         'D12 exact loaded-network gradient in the served map and G-STEER. '
         'Origins 1444 and 1458 remain excluded. No production model, profile or default changed.', '',
+        'The owner directed runtime/RSS measurements to r7900x before collection, because dev '
+        'had no planned quiet window. All arms and family controls use the same transferred '
+        'binary and the unchanged quiet gate, paired-round collector and thresholds on r7900x. '
+        'These runtime measurements apply to r7900x; dev/Zen5 runtime was not measured.', '',
         '[Registration](e34_registration_freeze_draft_2026-10-15.md); '
         '[launch bindings](e34_frozen_launch_2026-10-15.json); '
         '[machine-readable readout](e34_results_2026-10-15.json).', '']

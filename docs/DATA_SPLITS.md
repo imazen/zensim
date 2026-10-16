@@ -2118,3 +2118,13 @@ any changed arm eligibility or family incumbent. This counterfactual changes
 no registered test, p-value, Holm decision or qualification verdict. The
 pre-result clarification receipt is preserved at
 `/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/mean-guard-clarification.json`.
+
+Before runtime collection and before any E34 p-value read, the owner directed
+runtime/spatial/RSS measurements to `r7900x` because no quiet window was planned
+on dev. The same benchmark binary, pinned analyzer and full-data model bytes
+were copied with a 26-file SHA-256 verification. All arms and family controls
+use that host with the unchanged quiet gate, paired-round collector and
+numeric thresholds. Native panel and statistical calculations stay on dev.
+Runtime costs apply to r7900x; no dev/Zen5 runtime measurement is claimed.
+The owner directive, machine observation and transfer hashes are recorded in
+`/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/runtime-host.json`.

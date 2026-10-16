@@ -1326,6 +1326,9 @@ e34-eval-results:
 e34-eval-runtime arm mode:
     ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_runtime.py {{mode}} --arm {{arm}} --binary /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/costcmp-instrument
 
+e34-eval-runtime-r7900x arm mode:
+    ssh -o BatchMode=yes -o ConnectTimeout=10 r7900x '~/work/claudehints/scripts/run-heavy --mem 16G --jobs 1 -- python3 ~/tmp/e34-runtime-codex-20261015/source/scripts/rev4_featpot/e34_runtime.py {{mode}} --arm {{arm}} --root /home/lilith/tmp/e34-runtime-codex-20261015/evaluation --binary /home/lilith/tmp/e34-runtime-codex-20261015/evaluation/bin/costcmp-instrument --analyzer /home/lilith/tmp/e34-runtime-codex-20261015/evaluation/bin/paired-rounds-analyzer'
+
 # Reproduce the E34 CI failures on a chosen source revision.
 cifix-e34-targets:
     cargo test -p zensim -p zensim-validate --no-fail-fast --test featcanon_rev4_contract --test featcanon_tier_parity --test palette_legacy_vectors --test bake_surface -- --nocapture

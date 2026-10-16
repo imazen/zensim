@@ -72,15 +72,24 @@ def load(path):
 
 
 def main():
+    global ROOT, ANALYZER
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode', choices=['parity', 'timing', 'rss'])
+    p.add_argument('mode', choices=['ready', 'parity', 'timing', 'rss'])
     p.add_argument('--arm', choices=['w-a', 'k-a', 'l-a', 'w-c', 'k-c'], required=True)
     p.add_argument('--binary', type=Path, required=True)
+    p.add_argument('--root', type=Path, default=ROOT,
+                   help='assessment artifact root on the owner-selected measurement host')
+    p.add_argument('--analyzer', type=Path, default=ANALYZER,
+                   help='relocated copy of the unchanged SHA-pinned analyzer')
     a = p.parse_args()
+    ROOT, ANALYZER = a.root, a.analyzer
     assert sha(ANALYZER) == ANALYZER_SHA, 'registered paired-round analyzer changed'
     models(a.arm)
     root = ROOT / 'runtime' / a.arm
     root.mkdir(parents=True, exist_ok=True)
+    if a.mode == 'ready':
+        owner.quiet_gate(root / 'startup-quiet-waits.jsonl')
+        return
     parity = root / 'PREFLIGHT_PASS.json'
     if a.mode == 'parity':
         assert not parity.exists()
