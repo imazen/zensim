@@ -349,7 +349,7 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
                 cmd += ["--install", "--rescue-root", str(FITV2 / "original-era-e33" / js)]
             if doc.get('schema') == 'steer-fleet-packet-v1' and os.environ.get('STEER_HARVEST_IMAGE') != doc['image_ref']:
                 scratch = bundle.parent/'launch/harvest-scratch'
-                scratch.mkdir(parents=True,exist_ok=True)
+                (scratch/'tmp').mkdir(parents=True,exist_ok=True)
                 cmd = ['docker','run','--rm','--network','host','--memory','6g','--memory-swap','6g',
                        '--entrypoint','/usr/bin/nice','-e','AWS_ACCESS_KEY_ID','-e','AWS_SECRET_ACCESS_KEY',
                        '-e','TMPDIR=/scratch/tmp','-v',str(bundle.parent)+':'+str(bundle.parent)+':ro',
@@ -697,7 +697,7 @@ def steer_harvest_command(bundle, doc, arguments):
     """Run the complete ledger reader and archive verifier with baked pyarrow and inspector."""
     repo = Path(__file__).resolve().parents[2]
     scratch = bundle.parent / 'launch/harvest-scratch'
-    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch/'tmp').mkdir(parents=True, exist_ok=True)
     command = ['docker', 'run', '--rm', '--network', 'host', '--memory', '6g', '--memory-swap', '6g',
                '--entrypoint', '/usr/bin/nice', '-e', 'AWS_ACCESS_KEY_ID', '-e', 'AWS_SECRET_ACCESS_KEY',
                '-e', 'EP', '-e', 'TMPDIR=/scratch/tmp', '-e', 'STEER_HARVEST_IMAGE='+doc['image_ref']]

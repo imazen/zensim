@@ -92,6 +92,7 @@ class Launch(unittest.TestCase):
         doc, _ = self.steer_fixture()
         args=['harvest-cycle','--packet',str(self.bundle),'--packet-sha',owner.PACKET_SHA]
         command=owner.steer_harvest_command(self.bundle, doc, args)
+        self.assertTrue((self.root/'launch/harvest-scratch/tmp').is_dir())
         self.assertIn('STEER_HARVEST_IMAGE='+doc['image_ref'], command)
         self.assertIn(doc['image_ref'], command)
         self.assertIn('AWS_SECRET_ACCESS_KEY', command)
