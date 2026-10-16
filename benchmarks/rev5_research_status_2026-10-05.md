@@ -834,3 +834,20 @@ Open owner decisions:
 - **Reading.** Within these choices, steering and accuracy trade off: the width-1 monotone arm steers perfectly but
   loses accuracy, while W and K keep accuracy and miss steering. No candidate yet meets the G-STEER bar. The next
   step is the owner's call.
+
+## 47. CLIC and CIQA roles settled; next experiments chosen (2026-10-16)
+
+- **Source follow-up.** A second-stage filter (DCT pHash, colour, gradient and correlation checks, with crop-template
+  search at eight scales) kept all 26 visually confirmed calibration pairs and rejected 3,180 of 3,181 unrelated ones.
+  Of 758,684 hash flags, 115 survived; all were inspected: 42 overlaps, 73 unrelated, none uncertain.
+- **Roles (owner, 2026-10-16), in `docs/DATA_SPLITS.md`:**
+  - CLIC 2021: its 315 native validation crops become validation; its 3,540 test crops keep their test tag, no role.
+  - CLIC 2022: its 57,243 new test crops are reserved as TERMINAL, activated separately later.
+  - CLIC 2024: all 24,786 crops are exact cut-outs of 32 photos that are already SafeSyn TRAIN sources. It is a TRAIN
+    candidate; any use needs its own registered experiment.
+  - CIQA: its 6,596 AVA references are held and clear, so it becomes validation. The owner approved recreating its
+    rated JPEGs once with a pinned TensorFlow JPEG encoder, for evaluation only, never for training.
+- **Next experiments (owner, 2026-10-16).** E35, the palette-ladder and subjective-JND experiment, and a separate
+  steering-mechanism experiment (smooth activations or exact re-scoring of candidate blocks) run at the same time on
+  the shared fleet. Any winning data recipe is refitted on the fixed architecture later. Both registrations are being
+  drafted; G-STEER and every other gate keep their bars.

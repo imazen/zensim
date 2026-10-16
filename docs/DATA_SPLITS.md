@@ -2,18 +2,19 @@
 
 ## D4 amendment — twelve labelled IQA collections (2026-10-16)
 
-**Approved by the owner on 2026-10-16.** Licensing alone does not exclude a collection. The roles below reserve purposes; they do not authorize
+**Approved by the owner on 2026-10-16.** The CLIC and CIQA rows were revised after the source follow-up below and
+approved by the owner the same day. Licensing alone does not exclude a collection. The roles below reserve purposes; they do not authorize
 label access, fitting, a new evaluation read, or a change to an existing seal.
 Every original photograph and all its crops, modalities, resizes and encodes inherit
-its existing source-family restrictions. No collection below is proposed as TRAIN.
+its existing source-family restrictions. CLIC 2024 is the only TRAIN candidate below.
 
 | Collection | Proposed role | Evidence and conditions |
 |---|---|---|
 | [JND-MID-MA](https://data.mendeley.com/datasets/537w5jhb7s/1) (`jnd-mid-ma`) | calibration anchor | CC BY 4.0; first-detection thresholds for 35 scenes in colour, grayscale and infrared (105 references). Group the three modalities by scene. Keep JPEG quality factor, BPG quantizer and modality explicit; these are not one common numerical JND target. |
-| [CLIC 2024 perceptual image](https://archive.compression.cc/datasets/) (`clic-2024-perceptual-image`) | excluded | 2AFC on reference crops; CC BY-SA (Unsplash and Pexels sources). Excluded until source overlap is cleared: shared source content with SafeSyn TRAIN is visually confirmed, and the remaining near-duplicate hash flags and the crop-to-original mapping are not yet resolved. |
-| [CLIC 2022 perceptual](https://archive.compression.cc/datasets/) (`clic-2022-perceptual`) | excluded | 2AFC; CC BY-SA (Unsplash sources). Excluded until source overlap is cleared: crop-to-original mapping is incomplete and near-duplicate hash flags are unresolved. Preserve the native test tag and the reused CLIC 2021 validation family; no independence claim from the year or crop identifier. |
-| [CLIC 2021 perceptual](https://archive.compression.cc/datasets/) (`clic-2021-perceptual`) | excluded | 2AFC; CC BY-SA (Unsplash sources). Excluded until source overlap is cleared. Preserve native validation/test tags. The 3,855 reference crops are not 3,855 independent original photographs; source-family clearance remains incomplete. |
-| [CIQA](https://github.com/google-research/google-research/tree/master/CIQA) (`ciqa-google`) | excluded | 2AFC on JPEG encodes of AVA photographs; each label row names its AVA reference ID. Excluded until the source audit runs: the stimuli must be reproduced from AVA with the original TensorFlow JPEG encoder, and the AVA references are not yet overlap-checked. |
+| [CLIC 2024 perceptual image](https://archive.compression.cc/datasets/) (`clic-2024-perceptual-image`) | TRAIN candidate | 2AFC; CC BY-SA (Unsplash and Pexels sources). All 24,786 reference crops are exact decoded-RGB8 subimages of 32 originals. Exact pixel containment also links all 32 originals to SafeSyn TRAIN sources, so no source-disjoint remainder exists and the collection can never serve as an independent assessment pool. Reserved as a TRAIN candidate: any training use needs its own registered experiment, and no label is read before that registration. CLIC 2021 and 2022 stay source-independent but share CLIC's test protocol with this candidate; disclose that wherever they are read. |
+| [CLIC 2022 perceptual](https://archive.compression.cc/datasets/) (`clic-2022-perceptual`) | TERMINAL | 2AFC; CC BY-SA (Unsplash sources). All 57,243 new test reference crops passed the calibrated source-overlap screen with no confirmed external match. Reserve future frozen assessment only, with separate owner activation and preread registration. Preserve native test tags; the reused 2021 validation family is covered by that collection, not counted as new content. |
+| [CLIC 2021 perceptual](https://archive.compression.cc/datasets/) (`clic-2021-perceptual`) | validation | 2AFC; CC BY-SA (Unsplash sources). All 3,855 reference crops passed the calibrated source-overlap screen with no confirmed external match. The validation reservation covers the 315 native validation crops only; the 3,540 native test crops keep their test restrictions. Do not rename test to eval or TRAIN. |
+| [CIQA](https://github.com/google-research/google-research/tree/master/CIQA) (`ciqa-google`) | validation | 2AFC on JPEG encodes of AVA photographs. The two public CSVs contain 6,596 distinct reference IDs (6,329 native train, 267 native test), all resolved and decoded with imazen codecs. No exact reference identity or confirmed near-source match was found by the calibrated overlap screen. Keep the published split tags. The rated JPEGs were never published. The owner approved recreating them once, for evaluation only, with the TensorFlow JPEG encoder: pin the TensorFlow version, run twice and require identical bytes, hash every JPEG, keep the files private, and never train on them. No stimulus has been recreated yet and no human target column was loaded; any label read is still ledgered. |
 | [mucped23](https://github.com/google-research/google-research/tree/master/mucped23) | validation | Image terms CC BY-SA 4.0, repository Apache-2.0; 2AFC. All 49 references exactly match CID22 gold references in decoded RGB8. Never TRAIN; inherits CID22 restrictions and exposures, and supplies no fresh content-disjoint holdout. |
 | [MIDD-CAP](https://norishigefukushima.github.io/iqanearlossless/) (`midd-cap`) | validation | Absolute binary detection judgments; repository BSD-3-Clause, archive image/data scope needs confirmation. All 24 original-photo families also occur in TID2013; 168 full/patch references inherit those families. Source-exposed diagnostic only. |
 | [MIDD-GAR](https://norishigefukushima.github.io/iqanearlossless/) (`midd-gar`) | validation | Grayscale visibility/identification judgments; repository BSD-3-Clause, archive scope needs confirmation. All ten photo families also occur in TID2013. Magnification, grayscale conversion and new codecs do not create independent sources. Source-exposed diagnostic only. |
@@ -34,9 +35,23 @@ required) and a 64-bit horizontal difference hash after Lanczos resampling of
 encoded luma to 9×8, with Hamming distance ≤10 as a candidate threshold. Confirmed
 matches were visually inspected. This threshold misses cropped source families:
 MIDD/TID matches were found by direct source-photo comparison outside the threshold.
-Unresolved and unreviewed flags, unavailable sources, HDR normalization and temporal
-sampling prevent a blanket independence claim. No label payload was opened, and
-no existing sealed, TERMINAL or holdout assignment is moved by this proposal.
+The 2026-10-16 source-only follow-up screened every original dHash flag. A second
+stage combined a 63-bit DCT pHash, mean RGB, luma variation, gradient cosine and
+normalized correlation, with aspect-correct crop-template searches at eight scales
+in both directions. It retained all 26/26 visually confirmed calibration pairs
+(100% recall on that fixed set) and rejected 3,180/3,181 visually unrelated pairs.
+All 115 survivors across the original screen, CIQA and supplemental originals
+were inspected: 42 confirmed overlaps, 73 unrelated, zero uncertain. The exact
+CLIC 2024 parent mapping then closed entire training-source families beyond the
+individual crops that survived the hash filter.
+
+These are bounded source-screen results, not proof of perfect recall on unseen
+rotations, small crops or colour transformations. The original 6,667-reference
+CIQA README count is not supported by the downloaded public CSVs; all 6,596 IDs
+actually present were retained. No human target column or sealed label payload
+was loaded, no CIQA stimulus was reconstructed, and existing sealed, TERMINAL
+and holdout assignments remain unchanged. HDR normalization and temporal
+sampling boundaries remain as previously recorded.
 
 ## September 14 clarification: test evaluation when no eval split exists
 
