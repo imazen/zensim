@@ -404,4 +404,41 @@ mod tests {
         );
         assert!(iv.n_finite > 0 && iv.n_finite < 10000);
     }
+    #[test]
+    fn registered_w2_selects_each_models_own_worst_three() {
+        let ranks = [[2., 1., 0.], [1., 2., 0.], [0., 2., 1.], [0., 1., 2.]];
+        let make = |name: &str| Dataset {
+            name: name.into(),
+            target: (0..12).map(|i| (i / 4) as f64).collect(),
+            reference: (0..12).map(|i| i / 4).collect(),
+            codec: (0..12).map(|i| i % 4).collect(),
+            orientation: 1.,
+            predictions: BTreeMap::from([
+                (
+                    "a".into(),
+                    vec![(0..12).map(|i| ranks[i % 4][i / 4]).collect(); 10],
+                ),
+                (
+                    "b".into(),
+                    vec![(0..12).map(|i| ranks[3 - i % 4][i / 4]).collect(); 10],
+                ),
+            ]),
+        };
+        let input = Input {
+            schema: "e34-paired-seed-v1".into(),
+            tests: vec![],
+            datasets: vec![make(DATASETS[0]), make(DATASETS[1])],
+        };
+        let t = Test {
+            index: 1,
+            arm: "a".into(),
+            control: "b".into(),
+            eligibility: false,
+        };
+        // Each model's worst-three mean is -1/3. A shared type set would
+        // incorrectly give a nonzero paired delta on this invented panel.
+        let iv = input.interval(&t, &[0, 1], 5, false, true, 0.).unwrap();
+        assert_eq!(iv.estimate, 0.);
+        assert!(iv.n_finite > 0);
+    }
 }
