@@ -95,6 +95,8 @@
 
 - Add private lossless PNG8 source preparation through existing zenpng APIs, with strided palette/gray roundtrip checks and unchanged frozen judge/codec executables.
 
+- Bind the complete opaque PNG8 source-admission receipts before native RD encoding, preserving raw palette source provenance.
+
 ### QUEUED BREAKING CHANGES
 
 - Removed obsolete experimental extraction interfaces and feature tokens (unreleased).
