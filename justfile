@@ -1381,7 +1381,7 @@ steer-exact-check:
 
 # Synthetic palette capture admission; no datasets or binaries opened.
 palette-pairs-check:
-    python3 -m unittest scripts/tests/test_palette_training_pairs.py
+    python3 -m unittest scripts/tests/test_palette_training_pairs.py scripts/tests/test_palette_pool_authority.py
 
 subjective-admission-check:
     python3 -m unittest scripts/tests/test_subjective_training_leg.py scripts/tests/test_shippath2_admission.py scripts/tests/test_rev5_teacher_admission.py scripts/tests/test_e34_admission.py
