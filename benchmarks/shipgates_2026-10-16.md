@@ -1,6 +1,6 @@
 # Ship gates — 2026-10-16
 
-Status: **INCOMPLETE**. Targeting is measured for W-C (1/3 candidates); the other two and native codec RD are pending. Corruption fails for all three candidates with the frozen companion head. G-ADDR is complete and fails for all three candidates. The protected human-ranking composite is excluded from this execution. No model is promoted.
+Status: **INCOMPLETE**. Targeting is measured for W-C and diff-frag-820 (2/3 candidates); diff-410 and native codec RD are pending. Corruption fails for all three candidates with the frozen companion head. G-ADDR is complete and fails for all three candidates. The protected human-ranking composite is excluded from this execution. No model is promoted.
 
 These are standalone Rev5 packed candidates with D12 exact-gradient maps. W-C steering evidence is the frozen E34 seed-0 panel; the two original candidates have fresh r7900x map-cost/RSS measurements.
 
@@ -180,3 +180,15 @@ The three-shot maximum1.25915527344 passes≤3, but the undershoot fraction1/37 
 The1/2/3-shot active train-curve groups use37/48/50 complete bitstream encodes and111/144/150 native map evaluations. Each complete JXL encode has three internal reconstruction comparisons; these are counted separately from full encodes. Target error evidence does not qualify general size/mode/HDR coverage or independent-judge RD.
 
 Owner analysis SHA-256 `ca9b73fad503ac446b8b8b33a3a0ed3b7125bc8af86603046f29b47701bf27d9`; full tables, per-class results and work receipts: `jxl-target-phased/w-c/eval/` under the evidence root.
+
+## G-TARGET — original diff-frag-820 JXL
+
+Same frozen source/protocol/driver as W-C, with its own untouched TRAIN calibration. All80 requests receive a disposition;38 are jointly witnessed. Every bound, selected bitstream/pixel identity and native work count passes the canonical owner’s validation.
+
+| Shots | Median error | Bar | p95 error | Bar | Undershoot count | Fraction bar | Worst error | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 0.747051239014 | 2.0 | 5.74906921387 | 8.0 | 0/38 beyond8.0 | 0.05 | 5.85446166992 | PASS |
+| 2 | 0.405738830566 | 1.0 | 1.37683105469 | 3.0 | 0/38 beyond3.0 | 0.05 | 1.80017089844 | PASS |
+| 3 | 0.39595413208 | 0.5 | 0.999382019043 | 1.0 | 1/38 beyond1.0 | 0.01 | 1.57715606689 | FAIL |
+
+Three-shot maximum passes≤3;1/38 undershoots beyond1 fails≤1%. Case: origin5315, requested90, achieved88.4228439331, signed error-1.57715606689. Owner analysis SHA-256 `8619aa8b72ee9db3bfadafa7fc60c6e422d2fc8cd75d8a2af749d88d0df8fd73`. Full per-class tables and work receipts: `jxl-target-phased/diff-frag-820/eval/`. No bar changed.
