@@ -285,6 +285,21 @@ def sync_ledger(endpoint, js, status):
     raise RuntimeError(f"ledger sync failed for {js}: " + "; ".join(failures))
 
 
+def sync_steer_ledger(endpoint, js, status):
+    """An independently proven, never-populated ledger needs no sync operation."""
+    listing = json.loads(subprocess.check_output(
+        ['aws', '--endpoint-url', endpoint, 's3api', 'list-objects-v2', '--bucket', 'zentrain',
+         '--prefix', 'jobs/'+js+'/ledger/', '--max-keys', '1'], text=True))
+    if not listing.get('Contents'):
+        if listing.get('KeyCount') != 0 or listing.get('IsTruncated') is not False:
+            raise ValueError('STEER ledger absence was not authoritatively established')
+        if list(status.glob('*.parquet')):
+            raise ValueError('remote STEER ledger disappeared while local evidence exists')
+        print('STEER ledger prefix independently verified empty: '+js, flush=True)
+        return
+    sync_ledger(endpoint, js, status)
+
+
 def harvest(bundle, arm, install=False, require_all=False, status_only=False):
     doc = packet(bundle)
     js = jobset(arm)
@@ -309,7 +324,10 @@ def harvest(bundle, arm, install=False, require_all=False, status_only=False):
     with (work / "driver.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         endpoint = os.environ["EP"]
-        sync_ledger(endpoint, js, status)
+        if doc.get('schema') == 'steer-fleet-packet-v1':
+            sync_steer_ledger(endpoint, js, status)
+        else:
+            sync_ledger(endpoint, js, status)
         ids = subprocess.check_output([str(CTL), "ids", "--manifest", str(manifest)], text=True)
         (work / "full-ids.tsv").write_text(ids)
         pairs = hfc.read_ids(work / "full-ids.tsv")

@@ -126,6 +126,24 @@ class Launch(unittest.TestCase):
         self.assertEqual(result['order'],plan['order'])
         self.assertEqual(owner.queued(out),plan['order'])
 
+    def test_steer_empty_preflight_keeps_sync_failures_and_disappeared_evidence_fatal(self):
+        status=self.root/'status';status.mkdir()
+        empty={'KeyCount':0,'IsTruncated':False}
+        with mock.patch.object(owner.subprocess,'check_output',return_value=json.dumps(empty)), \
+             mock.patch.object(owner,'sync_ledger') as sync:
+            owner.sync_steer_ledger('endpoint','scope',status)
+            sync.assert_not_called()
+            (status/'old.parquet').write_bytes(b'old evidence')
+            with self.assertRaisesRegex(ValueError,'disappeared'):
+                owner.sync_steer_ledger('endpoint','scope',status)
+        for bad in [{},dict(empty,KeyCount=1),dict(empty,IsTruncated=True)]:
+            with mock.patch.object(owner.subprocess,'check_output',return_value=json.dumps(bad)):
+                with self.assertRaises(ValueError):owner.sync_steer_ledger('endpoint','scope',status)
+        with mock.patch.object(owner.subprocess,'check_output',return_value=json.dumps({'Contents':[{}]})), \
+             mock.patch.object(owner,'sync_ledger',side_effect=RuntimeError('transport failure')):
+            with self.assertRaisesRegex(RuntimeError,'transport failure'):
+                owner.sync_steer_ledger('endpoint','scope',status)
+
     def test_caps_merge_keeps_other_entries_and_backs_up(self):
         out = owner.merge_caps(self.bundle, self.live)
         live = json.loads(self.live.read_text())
