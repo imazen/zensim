@@ -2,11 +2,24 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rev4_featpot"))
 import v2_common as c
 import v2_lodo_mlp as m
+import v2_teacher as teacher
 
 class SteerRecipe(unittest.TestCase):
+    def test_complete_coverage_path_binding_preserves_legacy_default(self):
+        with patch.dict('os.environ', {}, clear=True):
+            a=teacher.coverage_output_path(0x98,Path('/scratch/tmp'))
+            b=teacher.coverage_output_path(0x98,Path('/scratch/tmp'))
+            self.assertNotEqual(a,b)
+            self.assertNotIn('_steer_',str(a))
+        with patch.dict('os.environ', {'ZEN_STEER_ARGV_SHA':'a'*64}):
+            self.assertEqual(teacher.coverage_output_path(0x98,Path('/scratch/tmp')),Path('/scratch/tmp')/('coverage_cf98_steer_'+'a'*64+'.parquet'))
+        for token in ['', 'a'*63, '../escape', 'A'*64]:
+            with patch.dict('os.environ', {'ZEN_STEER_ARGV_SHA':token}):
+                with self.assertRaises(ValueError):teacher.coverage_output_path(0x98,Path('/scratch/tmp'))
     def test_s_only_adds_flag_to_existing_n_argv(self):
         args = ([], 1101, 101, 1825, Path("invented.keep"), "N", Path("invented.bin"))
         legacy = m.train_command(*args)

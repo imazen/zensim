@@ -17,8 +17,8 @@ ssim2-rayon = ["fast-ssim2/rayon"]
 
 [dependencies]
 zensim = { path = "../../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2", "candidate-profiles", "corruption-head", "custom-profiles"] }
-zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "417cc785b83bee0b3f827ae85c5203f5e104a308" }
-zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "417cc785b83bee0b3f827ae85c5203f5e104a308" }
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
 zenbench = { git = "https://github.com/imazen/zenbench", rev = "82ff70a3f0c212cf88f53d6e9c3e02de13f32eec" }
 archmage = { version = "=0.9.29", features = ["std", "testable_dispatch"] }
 fast-ssim2 = { version = "=0.8.2", features = ["imgref"] }

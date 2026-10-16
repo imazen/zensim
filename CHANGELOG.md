@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Bind the assessment-only runtime build to the merged smooth activation and extend the native synthetic probe with matched-control score-bit parity.
+
 - Complete canonical STEER A7 pre-freeze boundary replay and twelve-model inventory refusal checks; preserve the registered state machine and numerical gates.
 
 - Add opt-in fixed smooth hinge N research training and exact loaded/reference derivatives against the merged zenpredict activation format (zenanalyze f0903489).

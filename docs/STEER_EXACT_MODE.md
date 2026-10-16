@@ -33,3 +33,5 @@ It never opens a panel or label table and does not evaluate steering quality.
 `steer_exact_smoke.py` supplies its manifest-bound non-installable FitCell
 wrapper. External GNU time supplies process peak RSS; build timings are not
 serving measurements. The smoke policy is separate from registered fit caps.
+
+`--compare-bake PATH --compare-sha256 SHA` additionally compares native ordinary and repaired-score bits against a hash-bound matched control on the same procedural pixels. The receipt exposes only parity flags/counts and hashes; it is an engineering replay check, with no targets or quality statistic.

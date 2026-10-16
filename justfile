@@ -1484,3 +1484,14 @@ steer-s-final-check:
     cargo test --locked -p zensim --lib --features custom-profiles
     cargo test --locked -p zensim-validate --lib compact_rows_train_identically_to_zero_masked_dense
     just steer-s-reference-check
+
+# Prepare only: no scientific assessment, fit or fleet declaration.
+steer-freeze2-build:
+    cargo fmt -p zensim-validate -p zensim --check
+    cargo build --locked -p zensim-validate --bin steer_exact_smoke --bin bake_verdict --bin panel --example inspect_qualified_checkpoint
+    cargo clippy --locked -p zensim-validate --bin steer_exact_smoke -- -D warnings
+    cargo build --locked -p zensim --features custom-profiles --example serve_custom_bake
+    RUSTFLAGS="--cfg steerfix_instrument" cargo test --locked -p zensim --lib --features custom-profiles --no-run --message-format=json-render-diagnostics > "$HOME/tmp/zensim-paper/rev4/steer-freeze2-instrument-build.jsonl"
+
+steer-freeze2-runtime-build:
+    cargo bench --manifest-path zensim-bench/e34-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp --no-run --message-format=json-render-diagnostics > "$HOME/tmp/zensim-paper/rev4/steer-freeze2-runtime-build.jsonl"

@@ -9,6 +9,7 @@ scratch and deleted after training.
 
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -284,6 +285,15 @@ def _packed_or_root(name: str) -> Path:
     return packed if packed.is_file() else V2 / "e15" / Path(name).name
 
 
+def coverage_output_path(mask: int, scratch: Path) -> Path:
+    token = os.environ.get('ZEN_STEER_ARGV_SHA')
+    if token is None:
+        return scratch / f"coverage_cf{mask:x}_{uuid.uuid4().hex}.parquet"
+    if len(token) != 64 or any(c not in '0123456789abcdef' for c in token):
+        raise ValueError('STEER coverage path requires the complete manifest argv SHA256')
+    return scratch / f"coverage_cf{mask:x}_steer_{token}.parquet"
+
+
 def coverage_leg(mask: int, scratch: Path, *, admitted_root: Path | None = None) -> tuple[Path, dict]:
     """Rows of the pinned coverage pool whose family bit is set in `mask`, copied to scratch; returns (path, record)."""
     from v2c_wide import safe_path
@@ -318,7 +328,7 @@ def coverage_leg(mask: int, scratch: Path, *, admitted_root: Path | None = None)
     if not keep.any():
         raise ValueError(f"coverage mask {mask:#x} selects no rows")
     target = pq.read_table(pool, columns=["human_score"])["human_score"].to_numpy().astype(np.float64)
-    dest = scratch / f"coverage_cf{mask:x}_{uuid.uuid4().hex}.parquet"
+    dest = coverage_output_path(mask, scratch)
     record = write_curated(pool, dest, keep, target)
     record.update({"mask": mask, "families": chosen, "pool_sha256": pool_sha, "pool_formula_revision": revision})
     sidecar = Path(f"{dest}.manifest.json")

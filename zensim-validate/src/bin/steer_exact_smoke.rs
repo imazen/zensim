@@ -16,6 +16,10 @@ struct Args {
     model_sha256: String,
     #[arg(long)]
     out: PathBuf,
+    #[arg(long, requires = "compare_sha256")]
+    compare_bake: Option<PathBuf>,
+    #[arg(long, requires = "compare_bake")]
+    compare_sha256: Option<String>,
 }
 fn hash(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
@@ -33,6 +37,17 @@ fn main() -> Result<()> {
     let bytes = fs::read(&a.bake)?;
     ensure!(hash(&bytes) == a.model_sha256, "model binding changed");
     let model = Model::from_bytes(&bytes).context("load pinned control")?;
+    let comparison_bytes = a.compare_bake.as_ref().map(fs::read).transpose()?;
+    let comparison_model = if let Some(bytes) = comparison_bytes.as_ref() {
+        ensure!(
+            Some(hash(bytes)) == a.compare_sha256,
+            "comparison model binding changed"
+        );
+        Some(Model::from_bytes(bytes).context("load comparison control")?)
+    } else {
+        None
+    };
+    let mut compared_native_scores = 0usize;
     let mut cases = Vec::new();
     for (w, h) in [(65usize, 49usize), (128usize, 96usize)] {
         // Fixed procedural pixels: no source images, labels or panel inputs.
@@ -53,6 +68,14 @@ fn main() -> Result<()> {
         let mut ordinary = BakeScorer::new(&model)?.with_parallel(false);
         let start = Instant::now();
         let base = ordinary.compute(&source, &target, None)?;
+        let mut comparison = comparison_model.as_ref().map(BakeScorer::new).transpose()?;
+        if let Some(other) = &mut comparison {
+            ensure!(
+                other.compute(&source, &target, None)?.score().to_bits() == base.score().to_bits(),
+                "control ordinary score bits differ"
+            );
+            compared_native_scores += 1;
+        }
         let ordinary_seconds = start.elapsed().as_secs_f64();
         let mut scorer = BakeScorer::new(&model)?.with_parallel(false);
         let start = Instant::now();
@@ -85,10 +108,21 @@ fn main() -> Result<()> {
                         repair[y * w + x0..y * w + x1]
                             .copy_from_slice(&reference[y * w + x0..y * w + x1]);
                     }
-                    let truth = ordinary
+                    let repaired_score = ordinary
                         .compute(&source, &RgbSlice::new(&repair, w, h), None)?
-                        .score()
-                        - base.score();
+                        .score();
+                    if let Some(other) = &mut comparison {
+                        ensure!(
+                            other
+                                .compute(&source, &RgbSlice::new(&repair, w, h), None)?
+                                .score()
+                                .to_bits()
+                                == repaired_score.to_bits(),
+                            "control repaired score bits differ"
+                        );
+                        compared_native_scores += 1;
+                    }
+                    let truth = repaired_score - base.score();
                     let gain = mapped.refinement_gain(x0, y0, x1, y1);
                     ensure!(
                         gain.is_finite() && gain.to_bits() == truth.to_bits(),
@@ -116,7 +150,9 @@ fn main() -> Result<()> {
         a.out,
         serde_json::to_vec_pretty(
             &json!({"schema":"steer-exact-synthetic-smoke-v1","model_sha256":a.model_sha256,
-        "scope":"SYNTHETIC_GEOMETRY_ONLY_NOT_QUALIFICATION","policy":"all-blocks-v1","cases":cases}),
+        "scope":"SYNTHETIC_GEOMETRY_ONLY_NOT_QUALIFICATION","policy":"all-blocks-v1","cases":cases,
+        "comparison_model_sha256":a.compare_sha256,"compared_native_scores":compared_native_scores,
+        "comparison_score_bits_equal":comparison_model.is_some().then_some(true)}),
         )?,
     )?;
     Ok(())
