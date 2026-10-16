@@ -52,6 +52,8 @@
 
 ### Changed
 
+- Apply the owner-authorized question 15 short-class palette contract, verified canonical pool authority and equal class mass before R915 correction (`4ab73e94`).
+
 - Steering maps and the G-STEER instrument use the exact loaded-network gradient, including derived inputs and calibration derivatives (owner D12, `0d63ba5c`); ordinary score output is unchanged.
 
 - Removed obsolete research assets; retired feature slots remain unassigned.
