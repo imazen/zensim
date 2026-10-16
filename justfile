@@ -1254,10 +1254,73 @@ e34-eval-capture:
     ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py capture
 
 e34-eval-statistics:
-    ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- target/release/panel e34 evaluate --input /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/panel-input.json --output /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/statistics.json
+    ~/work/zen/scripts/run-heavy --mem 24G --jobs 24 -- /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/panel-d13 e34 evaluate --input /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/panel-input.json --output /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/statistics.json
 
 e34-eval-progress:
-    tail -n 8 ~/tmp/e34-eval/capture.log ~/tmp/e34-eval/statistics.log
+    python3 scripts/rev4_featpot/e34_evaluate.py progress
+
+e34-eval-verdict-tests:
+    python3 scripts/tests/test_e34_verdict.py
+
+e34-eval-steering:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py steering
+
+e34-eval-development:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py development
+
+e34-eval-gates:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py gates
+
+e34-eval-worker-inventory:
+    python3 scripts/rev4_featpot/e34_fleet.py inventory
+
+e34-eval-worker-tests:
+    python3 scripts/tests/test_e34_fleet.py
+
+e34-eval-owners-build:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo build --locked --release -p zensim-validate --bin panel --bin bake_verdict
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo test --locked --release -p zensim-validate --bin panel panel_e34::
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo build --locked --release -p zensim --example serve_custom_bake --features custom-profiles
+
+e34-eval-p3-build:
+    RUSTFLAGS='--cfg steerfix_instrument' ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo test --locked --release -p zensim --lib --features custom-profiles --no-run --message-format=json-render-diagnostics
+
+e34-eval-p3:
+    E34_P3_JOB=/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/p3-job.json ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 RAYON_NUM_THREADS=1 ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/p3-instrument metric::bake::steerfix_packet::precision::p3::e34_registered_switch_diagnostic --exact --nocapture
+
+e34-eval-runtime-build:
+    CARGO_TARGET_DIR=zensim-bench/target ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo bench --locked --no-run --message-format=json-render-diagnostics --manifest-path zensim-bench/e34-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp
+
+e34-eval-check:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo clippy --locked -p zensim-validate --bin panel -- -D warnings
+    RUSTFLAGS='--cfg steerfix_instrument' ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo clippy --locked -p zensim --lib --tests --features custom-profiles -- -D warnings
+    CARGO_TARGET_DIR=zensim-bench/target ~/work/zen/scripts/run-heavy --mem 16G --jobs 4 -- cargo clippy --locked --manifest-path zensim-bench/e34-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp -- -D warnings
+    python3 scripts/lint_scripts.py
+    python3 -m py_compile scripts/rev4_featpot/e34_evaluate.py scripts/rev4_featpot/e34_fleet.py scripts/rev4_featpot/e34_runtime.py scripts/rev4_featpot/e34_results.py scripts/rev4_featpot/e33_gates.py
+    python3 scripts/tests/test_e34_verdict.py
+    python3 scripts/tests/test_e34_fleet.py
+
+e34-eval-pack-check:
+    ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/panel-reports e34 pack-check --input /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/full-models.json --output /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/pack-checks.json
+
+e34-eval-prepare-reports:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py prepare-reports
+
+e34-eval-reports:
+    ~/work/zen/scripts/run-heavy --mem 24G --jobs 24 -- /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/panel-reports e34 reports --input /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/report-input.json --output /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/reports.json
+
+e34-eval-penalties:
+    python3 scripts/rev4_featpot/e34_results.py penalties
+
+e34-eval-integrity:
+    ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/rev4_featpot/e34_evaluate.py integrity
+
+e34-eval-results:
+    python3 scripts/rev4_featpot/e34_results.py build
+    python3 scripts/rev4_featpot/e34_results.py render
+
+e34-eval-runtime arm mode:
+    ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_runtime.py {{mode}} --arm {{arm}} --binary /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/costcmp-instrument
 
 # Reproduce the E34 CI failures on a chosen source revision.
 cifix-e34-targets:
