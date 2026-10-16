@@ -293,7 +293,7 @@ def render():
         'E34’s decisive point guards are each dataset Δ ≥ −0.005 and W2 Δ > −2 × its two-way SE. '
         'The owner confirmed this interpretation before any p-values were read; '
         'the preface’s “unchanged” refers to the rev-4 dataset/W2 guard set. '
-        'The table below retains the mean point form without adding it as a new decisive gate.', '',
+        'The mean column retains the E33 point form without adding it as a decisive gate.', '',
         '| Arm | Dataset / W2 | Δ [percentile 95%]; Student 95% | Two-way SE | Guard |',
         '|---|---|---|---:|---|']
     for t in stats['tests'][:5]:
