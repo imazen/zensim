@@ -1,4 +1,4 @@
-//! Explicit source preparation by a lossless all-opaque crop.
+//! Explicit source preparation by an opaque crop or lossless PNG8 expansion.
 #![forbid(unsafe_code)]
 use rgb::FromSlice;
 use sha2::{Digest, Sha256};
@@ -17,8 +17,9 @@ fn sha(bytes: &[u8]) -> String {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.len() != 4 || args[1] != "--crop-opaque" {
-        return Err("expected --crop-opaque input PNG and fresh output PNG; matte conversion is not admitted".into());
+    let expand = args.get(1).is_some_and(|mode| mode == "--expand-png8");
+    if args.len() != 4 || (!expand && args[1] != "--crop-opaque") {
+        return Err("expected --crop-opaque or --expand-png8, input PNG and fresh output PNG; matte conversion is not admitted".into());
     }
     let input = PathBuf::from(&args[2]);
     let output = PathBuf::from(&args[3]);
@@ -29,7 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &enough::Unstoppable,
     )?;
     let info = &image.info;
-    if info.bit_depth != 8
+    let decoded_eight = info.bit_depth == 8
+        || (expand && matches!(info.color_type, 0 | 3) && matches!(info.bit_depth, 1 | 2 | 4));
+    if !decoded_eight
         || info.sequence.is_animation()
         || info.icc_profile.is_some()
         || info.exif.is_some()
@@ -42,12 +45,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("outside static sRGB8 source contract".into());
     }
     let rgba = image.pixels.to_rgba8().copy_to_contiguous_bytes();
-    let rect = largest_opaque(imgref::ImgRef::new(
-        rgba.as_rgba(),
-        info.width as usize,
-        info.height as usize,
-    ))
-    .ok_or("source has no opaque rectangle")?;
+    let rect = if expand {
+        if rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255) {
+            return Err("PNG8 expansion requires every pixel opaque".into());
+        }
+        Rect {
+            x: 0,
+            y: 0,
+            width: info.width as usize,
+            height: info.height as usize,
+        }
+    } else {
+        largest_opaque(imgref::ImgRef::new(
+            rgba.as_rgba(),
+            info.width as usize,
+            info.height as usize,
+        ))
+        .ok_or("source has no opaque rectangle")?
+    };
     let (width, height) = (rect.width as u32, rect.height as u32);
     let mut rgb = vec![0u8; width as usize * height as usize * 3];
     let options = ConvertOptions::forbid_lossy().with_alpha_policy(AlphaPolicy::DiscardIfOpaque);
@@ -64,20 +79,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         width,
         height,
     )?;
-    let png = zenpng::encode_rgb8(
-        imgref::ImgRef::new(rgb.as_rgb(), width as usize, height as usize),
-        None,
-        &zenpng::EncodeConfig::default().with_compression(zenpng::Compression::Fastest),
-        &enough::Unstoppable,
-        &enough::Unstoppable,
-    )?;
+    let pixels = imgref::ImgRef::new(rgb.as_rgb(), width as usize, height as usize);
+    let png = if expand {
+        canonical_png8(pixels)?
+    } else {
+        zenpng::encode_rgb8(
+            pixels,
+            None,
+            &zenpng::EncodeConfig::default().with_compression(zenpng::Compression::Fastest),
+            &enough::Unstoppable,
+            &enough::Unstoppable,
+        )?
+    };
     let back = zenpng::decode(
         &png,
         &zenpng::PngDecodeConfig::default(),
         &enough::Unstoppable,
     )?;
     let check = back.pixels.to_rgb8().copy_to_contiguous_bytes();
-    if check != rgb || back.info.width != width || back.info.height != height {
+    if check != rgb
+        || back.info.width != width
+        || back.info.height != height
+        || (expand && (back.info.bit_depth != 8 || !matches!(back.info.color_type, 0 | 2)))
+    {
         return Err("prepared PNG readback differs".into());
     }
     fs::OpenOptions::new()
@@ -91,10 +115,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "input":input,"input_sha256":sha(&bytes),"input_rgba_sha256":sha(&rgba),
         "output":output,"output_sha256":sha(&png),"output_rgb_sha256":sha(&rgb),
         "width":width,"height":height,"crop":{"x":rect.x,"y":rect.y,"width":rect.width,"height":rect.height},
-        "recipe":"maximal opaque rectangle; alpha discard verified by RowConverter; zenpng RGB8",
+        "mode":if expand {"expand-png8"} else {"crop-opaque"},
+        "source_png_bit_depth":info.bit_depth,"source_png_color_type":info.color_type,
+        "output_png_bit_depth":back.info.bit_depth,"output_png_color_type":back.info.color_type,
+        "recipe":if expand {"lossless palette/gray expansion; no crop; opaque PNG8 via zenpng"} else {"maximal opaque rectangle; alpha discard verified by RowConverter; zenpng RGB8"},
         "driver_sha256":sha(&fs::read(std::env::current_exe()?)?)}))?
     );
     Ok(())
+}
+
+/// Existing first-party stats encoding avoids palette selection. Explicit gray8
+/// encoding prevents automatic sub-byte grayscale. Neither path changes samples.
+fn canonical_png8(
+    pixels: imgref::ImgRef<'_, rgb::RGB8>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let config = zenpng::EncodeConfig::default().with_compression(zenpng::Compression::Fastest);
+    let result = if pixels
+        .rows()
+        .all(|row| row.iter().all(|p| p.r == p.g && p.r == p.b))
+    {
+        let gray: Vec<u8> = pixels
+            .rows()
+            .flat_map(|row| row.iter().map(|p| p.r))
+            .collect();
+        zenpng::encode_gray8(
+            imgref::ImgRef::new(gray.as_gray(), pixels.width(), pixels.height()),
+            None,
+            &config,
+            &enough::Unstoppable,
+            &enough::Unstoppable,
+        )
+    } else {
+        zenpng::encode_rgb8_with_stats(
+            pixels,
+            None,
+            &config,
+            &enough::Unstoppable,
+            &enough::Unstoppable,
+        )
+        .map(|result| result.0)
+    };
+    Ok(result?)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,6 +208,42 @@ fn largest_opaque(pixels: imgref::ImgRef<'_, rgb::RGBA8>) -> Option<Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canonical_png8_preserves_strided_palette_and_gray_samples_without_subbyte_output() {
+        for gray in [false, true] {
+            let mut pixels = vec![rgb::RGB8::new(91, 92, 93); 10];
+            for y in 0..2 {
+                for x in 0..3 {
+                    pixels[y * 5 + x] = if gray {
+                        rgb::RGB8::new(
+                            if x == 0 { 0 } else { 255 },
+                            if x == 0 { 0 } else { 255 },
+                            if x == 0 { 0 } else { 255 },
+                        )
+                    } else if x == 0 {
+                        rgb::RGB8::new(255, 0, 0)
+                    } else {
+                        rgb::RGB8::new(0, 0, 255)
+                    };
+                }
+            }
+            let view = imgref::ImgRef::new_stride(&pixels, 3, 2, 5);
+            let png = canonical_png8(view).unwrap();
+            let back = zenpng::decode(
+                &png,
+                &zenpng::PngDecodeConfig::default(),
+                &enough::Unstoppable,
+            )
+            .unwrap();
+            assert_eq!(back.info.bit_depth, 8);
+            assert_eq!(back.info.color_type, if gray { 0 } else { 2 });
+            let expected: Vec<u8> = view
+                .rows()
+                .flat_map(|row| row.iter().flat_map(|p| [p.r, p.g, p.b]))
+                .collect();
+            assert_eq!(back.pixels.to_rgb8().copy_to_contiguous_bytes(), expected);
+        }
+    }
     #[test]
     fn every_three_by_three_alpha_mask_matches_exhaustive_strided_oracle() {
         for mask in 0..512 {

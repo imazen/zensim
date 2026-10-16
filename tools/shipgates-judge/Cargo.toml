@@ -11,7 +11,7 @@ publish = false
 [dependencies]
 zensim = { path = "../../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2", "candidate-profiles", "corruption-head", "custom-profiles"] }
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
-zenpng = { version = "=0.1.4", default-features = false }
+zenpng = { version = "=0.1.4", default-features = false, features = ["_dev"] }
 fast-ssim2 = { version = "=0.8.2", features = ["imgref"] }
 butteraugli = { version = "=0.9.3", features = ["avx512"] }
 zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }

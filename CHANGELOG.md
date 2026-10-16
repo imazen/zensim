@@ -91,6 +91,8 @@
 
 - Docs: forced-choice figures recorded before 2026-10-11 (hfhuman 2026-09-01 arms, rev4_e1, rev4_e1b) are labelled "not-sure dropped" for raw agreement, ceilings, tie rate, counts and log-likelihood; `acc_norm` and per-group majority agreement are unchanged by the half/half split now used (zenstats `Choice::NotSure`). Rule: `docs/DATA_SPLITS.md` §3d.
 
+- Add private lossless PNG8 source preparation through existing zenpng APIs, with strided palette/gray roundtrip checks and unchanged frozen judge/codec executables.
+
 ### QUEUED BREAKING CHANGES
 
 - Removed obsolete experimental extraction interfaces and feature tokens (unreleased).

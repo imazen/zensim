@@ -14,6 +14,7 @@ publish = false
 
 [features]
 # Quiet-box measurement extension; no serving code or benchmark defaults change.
+shipgates = ["dep:zenpng", "zenpng/_dev", "dep:enough", "dep:zenpixels", "dep:zenpixels-convert", "dep:serde_json", "dep:sha2"]
 speedq = ["dep:serde_json", "dep:sha2"]
 costcmp = ["speedq", "ssim2-rayon", "dep:fast-ssim2-main"]
 training = ["zensim/training"]
@@ -164,7 +165,7 @@ ssimulacra2 = "0.5"
 fast-ssim2 = { version = "=0.8.2", features = ["imgref"] }
 # COSTCMP alone prices the fetched main commit; production dependencies stay unchanged.
 fast-ssim2-main = { package = "fast-ssim2", git = "https://github.com/imazen/fast-ssim2", rev = "09ec3e7c78bd230b1545572a188e162313c59fda", features = ["imgref", "rayon"], optional = true }
-butteraugli = { version = "0.9", features = ["avx512"] }
+butteraugli = { version = "0.9.3", features = ["avx512"] }
 linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
 imgref = "1.12"
 rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
@@ -360,6 +361,9 @@ check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cf
 # lower). A dependency's own patch table is ignored — only a workspace
 # ROOT's applies, and this crate is now its own root, so declare them here.
 [patch.crates-io]
+# The current optional WebP source requires the unpublished 0.1.27 codec
+# contract. Pin the same source as the JPEG sibling for native audit builds.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "4fda439133d465246174b55f62426dc54ef204dd" }
 # NOTE 2026-09-05: this plain path patch was briefly WRONG and is right again.
 # `~/work/zen/jxl-encoder` bumped 0.3.2 -> 0.4.0 on 2026-08-29 (`4363a3d5`) while
 # the `~/work/zen/zenjxl` checkout still required `^0.3.2` — which was never
@@ -409,3 +413,11 @@ opt-level = 2
 [[bench]]
 name = "stage_isolation"
 harness = false
+
+[[example]]
+name = "shipgates_judge"
+required-features = ["shipgates"]
+
+[[example]]
+name = "shipgates_prepare_source"
+required-features = ["shipgates"]
