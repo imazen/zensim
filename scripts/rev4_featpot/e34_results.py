@@ -305,11 +305,14 @@ def render():
                      f'| {w["point_guard"]} |')
     sensitivity = doc['mean_guard_sensitivity']
     changed = ', '.join(sensitivity['changed_arm_eligibility']) or 'none'
+    section42 = ', '.join(sensitivity['changed_section42_eligibility']) or 'none'
     family_changes = '; '.join(
         f'{f.upper()}: {r["registered"]} → {r["counterfactual"]}'
         for f,r in sensitivity['families'].items() if r['changed']) or 'none'
     lines += ['', '**NON-decisive sensitivity — mean Δ ≥ −0.002 decisive:** '
-        f'arms changing eligibility: {changed}; families changing sequential verdict: {family_changes}. '
+        f'arms changing §4.2 statistical eligibility: {section42}; '
+        f'arms changing full qualification eligibility: {changed}; '
+        f'families changing sequential verdict: {family_changes}. '
         'This counterfactual replays W → K → L with unchanged p-values, Holm decisions and other gates; '
         'it does not alter the registered verdict. Its interpretation and reporting rule were fixed '
         'before reading p-values.', '']

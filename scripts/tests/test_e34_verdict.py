@@ -75,7 +75,10 @@ class E34VerdictTest(unittest.TestCase):
         self.assertEqual(stats, before)
         self.assertTrue(verdict(stats, gates)['families']['a']['arms']['w-a']['eligible'])
         gates['w-a']['G-STEER']['pass_'] = False
-        self.assertEqual(mean_guard_sensitivity(stats, gates)['changed_arm_eligibility'], [])
+        sensitivity = mean_guard_sensitivity(stats, gates)
+        self.assertEqual(sensitivity['changed_arm_eligibility'], [])
+        self.assertEqual(sensitivity['changed_section42_eligibility'], ['w-a'])
+        self.assertEqual(sensitivity['mean_failing_arms'], ['w-a'])
 
 
 if __name__ == '__main__':

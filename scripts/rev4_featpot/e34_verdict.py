@@ -83,15 +83,27 @@ def mean_guard_sensitivity(statistics, gates):
     counterfactual = verdict(statistics, gates, mean_guard_decisive=True)
     assert registered['state'] == counterfactual['state'] == 'COMPLETE'
     changes = []
+    section42_changes = []
+    mean_failing = []
     families = {}
     for family, names in ARMS.items():
         before = registered['families'][family]
         after = counterfactual['families'][family]
         changes.extend(arm for arm in names
                        if before['arms'][arm]['eligible'] != after['arms'][arm]['eligible'])
+        for arm in names:
+            i = ELIGIBILITY[arm]
+            test = statistics['tests'][i]
+            if not test['e33_mean_point_guard']:
+                mean_failing.append(arm)
+                if (statistics['holm_reject'][i] and test['w2']['point_guard']
+                        and all(g['point_guard'] for g in test['dataset_guards'])):
+                    section42_changes.append(arm)
         families[family] = dict(registered=before['incumbent'],
                                 counterfactual=after['incumbent'],
                                 changed=before['incumbent'] != after['incumbent'])
     return dict(label='NON-decisive sensitivity', rule='mean delta >= -0.002 decisive',
+                mean_failing_arms=mean_failing,
+                changed_section42_eligibility=section42_changes,
                 changed_arm_eligibility=changes, families=families,
                 counterfactual_verdict=counterfactual)
