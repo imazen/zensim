@@ -61,3 +61,32 @@ report-only mean guard. Its fixed A-before-C seed-0 acceptance candidate is a
 binding for a later reader; the adapter never authorizes an acceptance read.
 `just registered-verdict-check` exercises replacement comparisons, all gates,
 paired steering, incomplete slots and no-eligible refusal with invented data.
+
+`registered_loso_report --input <frozen-json> --input-sha256 <pin> --output
+<new-private-path>` reports already mapped source-held-out predictions. Its
+`registered-frozen-loso-v1` input supplies keyed observations, three quality/JND
+prediction rows per model, and all 672 frozen network/map bindings. Each map
+must exclude the held-out source and include the other 27; Control/P networks
+must match the same full-data seed across folds. The externally frozen input
+hash binds these predictions and receipts. This reporter does not score models
+or fit maps; the separate private preparation stage owns that materialization.
+
+The report includes each seed's signed SROCC, pooled and equal-source RMSE,
+same-ladder and cross-codec sign agreement at separation >= .5 JND, and all
+within-source pair agreement without that threshold. Metric and target ties
+contribute zero correct pairs; no uncertain human measurement is invented.
+Pair classes use the existing native pair owner, with explicit ladder/codec
+nesting. All codecs and individual sources are retained, so PNG can be read
+separately without becoming the headline population.
+
+For paired intervals, sufficient statistics preserve source-copy counts and
+sample the three seed copies independently. RMSE is recomputed within each
+seed copy, then averaged; it is not pooled across seeds before taking the root.
+Equal-source RMSE takes the root of mean source MSE within each seed. All arm
+contrasts share 10,000 paired type-7 draws. Student G is the smaller of the
+actual source population and three; the overall df is two. Undefined pair
+populations and one-source intervals remain INCOMPLETE. Networks and maps stay
+fixed, excluding retraining and map-fit uncertainty. These report-only outputs
+never enter Holm or the factorial verdict. `just registered-loso-report-check`
+checks reduction order, exact .5 separation, tie disagreement, real bootstrap
+Student intervals and missing/leaking map refusals on invented observations.
