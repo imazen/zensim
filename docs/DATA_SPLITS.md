@@ -2108,3 +2108,13 @@ exposed assessment populations and is not fresh independent confirmation.
 Production adoption remains an owner decision; served models and defaults
 are unchanged. Results are recorded in
 [e34_results_2026-10-15.md](../benchmarks/e34_results_2026-10-15.md).
+
+Before any E34 p-values were read, the owner confirmed “Follow §4.2: mean is
+report-only.” The coordinator clarified that the preface's “unchanged” refers
+to the approved rev-4 dataset/W2 guard set; mean Δ ≥ −0.002 is not decisive.
+The assessment also reports a clearly labelled NON-decisive sensitivity:
+replay the same W → K → L rule with mean Δ ≥ −0.002 decisive, and identify
+any changed arm eligibility or family incumbent. This counterfactual changes
+no registered test, p-value, Holm decision or qualification verdict. The
+pre-result clarification receipt is preserved at
+`/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/mean-guard-clarification.json`.
