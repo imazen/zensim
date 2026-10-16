@@ -375,7 +375,7 @@ def steer_dense(arm):
         {"ZENSIM_FORMULA_REV": "5", "ZENSIM_NEIGHBOUR_EXACT": "1", "STEERFIX_PACKET": str(packet)})
 
 
-def k4_full():
+def k4_full(*, fitbin=None, bounds=None, calibration_input=None):
     """Registration 8 K4 on every E33 population, raw units (review E33RESULTS finding 1).
 
     Raw = the candidate with its output spline stripped (`bake_dial_refit strip`), served through the same owners:
@@ -388,7 +388,7 @@ def k4_full():
     import pyarrow.parquet as pq
     root = GATES / "k4"
     root.mkdir(exist_ok=True)
-    fitbin = E / "bin-final2/bake_dial_refit"
+    fitbin = fitbin or E / "bin-final2/bake_dial_refit"
     inputs = {}
     for name in ("negtail", "identity", "standard", "ladder"):
         src = INSTRUMENTS / f"{name}.parquet"
@@ -399,6 +399,13 @@ def k4_full():
             codec = pq.ParquetFile(src).metadata.row_group(0).column(0).compression.lower()
             pq.write_table(t.append_column("human_score", pa.array([0.0] * t.num_rows)), dst, compression=codec)
         inputs[name] = dict(source=str(src), source_sha256=sha(src), rows=pq.ParquetFile(dst).metadata.num_rows)
+    if calibration_input is not None:
+        dst = root / "calibration.scored-input.parquet"
+        if not dst.exists():
+            dst.symlink_to(calibration_input)
+        assert dst.resolve() == calibration_input.resolve()
+        inputs["calibration"] = dict(source=str(calibration_input), source_sha256=sha(calibration_input),
+                                     rows=pq.ParquetFile(calibration_input).metadata.num_rows)
     out = {"schema": "e33-k4-full-v1", "registration": "8 K4: 0 evaluated rows with raw <= x_floor over every E33 "
            "population; report rows with raw < x0 and min raw relative to x_floor", "inputs": inputs, "arms": {}}
     import csv
@@ -407,12 +414,15 @@ def k4_full():
         m = re.search(r"x_floor (\S+) \(floor score (\S+)\).*?calibration rows: (\d+) at/below floor, (\d+) in the "
                       r"linear tail \(< x0 (\S+)\), min raw (\S+)", text)
         x_floor, x0 = float(m[1]), float(m[5])
+        if bounds is not None:
+            assert bounds[arm]["model_sha256"] == digest and bounds[arm]["K1_K2_K3"]
+            x_floor, x0 = bounds[arm]["x_floor"], bounds[arm]["x0"]
         stripped = root / f"{arm}-nospline.bin"
         if not stripped.exists():
             subprocess.run([str(fitbin), "strip", "--in", str(model), "--out", str(stripped)], check=True,
                            capture_output=True)
         calibration = Path("/mnt/v/output/zensim/v40r4-2026-10-08/v2e29/wide/main/real/cid22_fit.parquet")
-        pops = {"calibration rows (cid22_fit TRAIN, pack log)": dict(
+        pops = {} if calibration_input is not None else {"calibration rows (cid22_fit TRAIN, pack log)": dict(
             rows=pq.ParquetFile(calibration).metadata.num_rows, at_or_below_floor=int(m[3]), below_x0=int(m[4]),
             min_raw=float(m[6]))}
         for name in inputs:
