@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add independent source-pixel and float-map byte oracles, including an explicit lossless PNG sample-expansion policy checked on frozen-judge identity maps.
+
 - Report the four-provider JXL native intervention screen, exact companion eligibility and the prepared-result runtime measurement scope; preserve open decoder parity findings.
 
 - Bind label-free ship-gate dispatch to frozen native codec owners and exact corruption-companion feature sets; retain explicit missing-detector outcomes.
