@@ -2244,3 +2244,13 @@ The single CVVDP prediction vector repeats across the ten candidate-seed
 slots; it is not ten independently fitted references. Intervals remain
 exploratory/descriptive, especially for small reference counts. Confirmatory
 content guards and multiplicity requirements are not satisfied by this read.
+
+ADDRFIX matching amendment, before any new subjective statistic: include all
+three current candidate families (`k-a`, `k-c`, `w-c`) from the existing opaque
+E34 capture SHA256
+`a1511bab58833e202fe89d3c90ac663cd1e9dbbb88cc71057b5a7d99385caa9c`.
+The registered owner must prove its targets/reference IDs/orientations exactly
+equal the admitted E33 capture before joining the fixed CVVDP-FHD vectors.
+E33 A/C remain ancillary reproduction checks; current candidate comparisons use
+the original ten paired E34 seeds, same four folds and frozen interval recipe.
+No new population, raw-label read by this agent, fit or qualification is admitted.
