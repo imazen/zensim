@@ -158,6 +158,17 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-15 — general benchmark workspace dependency resolution. OPEN.**
+  `cargo bench --locked --manifest-path zensim-bench/Cargo.toml --bench
+  ssim2_speed_bar --features costcmp --no-run` failed before compilation:
+  the optional local `zenwebp` dependency required `zencodec >=0.1.27`, while
+  the registry offered only through 0.1.26. Cargo resolves optional dependency
+  constraints even when that codec is inactive. E34's assessment-only
+  [manifest](zensim-bench/e34-runtime/Cargo.toml) builds the existing benchmark
+  source with its required runtime dependencies and committed lock; the fresh
+  build and strict clippy pass. The general benchmark manifest and sibling
+  repositories were not changed. This does not alter any E34 gate or collector.
+
 * **2026-10-15 — one ledger transport error stopped the entire E34 harvest chain. FIXED in the harvest owner.** The pilot ledger still exists at its original prefix and the same sync succeeds on recheck; the old exception omitted captured stderr, so the historical transport cause is unproven. Bounded sync retries now retain diagnostics. The supervised cycle attempts every released jobset, records each failure and installed count, and retries degraded cycles. Missing or denied ledgers remain errors even when local artifacts are installed; no failed cycle can report completion. The frozen verifier, results, image and worker processes are unchanged.
 
   A live empty-prefix probe on the installed s5cmd 2.3.0 emitted a JSON error while exiting zero. Ledger sync therefore requires both a zero exit and error-free structured events; an empty successful transfer alone cannot clear an error. Three live supervised passes reached every released jobset and installed225/226/229 of305; all1,494 pre-existing installed files stayed byte-identical. Transport/supervisor negative controls and the existing E33 owner checks pass.
