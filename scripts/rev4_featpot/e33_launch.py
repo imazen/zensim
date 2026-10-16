@@ -79,8 +79,11 @@ def packet(bundle):
 
 def runtime(bundle, doc):
     """Launch runtime beside the packet: verifier tools from the program archive and the pinned inspector."""
-    if doc.get('schema') == 'steer-fleet-packet-v1' and sha(CTL) != doc['ctl_sha256']:
-        raise ValueError('canonical zenfleet controller differs from the STEER binding')
+    if doc.get('schema') == 'steer-fleet-packet-v1':
+        global CTL
+        CTL = Path(doc['ctl_binary'])
+        if sha(CTL) != doc['ctl_sha256']:
+            raise ValueError('canonical zenfleet controller differs from the STEER binding')
     rt = bundle.parent / "launch"
     tools = rt / "committed-tools"
     tools.mkdir(parents=True, exist_ok=True)
@@ -719,7 +722,8 @@ def steer_harvest_command(bundle, doc, arguments):
     command = ['docker', 'run', '--rm', '--network', 'host', '--memory', '6g', '--memory-swap', '6g',
                '--entrypoint', '/usr/bin/nice', '-e', 'AWS_ACCESS_KEY_ID', '-e', 'AWS_SECRET_ACCESS_KEY',
                '-e', 'EP', '-e', 'TMPDIR=/scratch/tmp', '-e', 'STEER_HARVEST_IMAGE='+doc['image_ref']]
-    for path, mode in [(repo, ':ro'), (bundle.parent, ''), (FITV2, ''), (POT, ''), (CTL.parent, ':ro')]:
+    ctl_parent = Path(doc.get('ctl_binary', str(CTL))).parent
+    for path, mode in [(repo, ':ro'), (bundle.parent, ''), (FITV2, ''), (POT, ''), (ctl_parent, ':ro')]:
         command += ['-v', str(path)+':'+str(path)+mode]
     if '--status-file' in arguments:
         status_parent = Path(arguments[arguments.index('--status-file')+1]).resolve().parent
