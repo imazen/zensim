@@ -43,6 +43,11 @@ jobs:
       - run: python3 scripts/test_lint_scripts.py
       - name: Synthetic palette pool and pair admission
         run: |
+          mkdir -p "$HOME/tmp"
+          export TMPDIR="$HOME/tmp"
+          python3 -m venv "$HOME/tmp/palette-admission-venv"
+          source "$HOME/tmp/palette-admission-venv/bin/activate"
+          python3 -m pip install --quiet "numpy>=1.26" "pyarrow>=15"
           python3 -B -m unittest scripts/tests/test_palette_training_pairs.py scripts/tests/test_palette_pool_authority.py
           python3 -B -m unittest discover -s scripts/tests -p test_palette_admission.py
       # The nine run_cross_codec_v*_seed.sh entry points are shims over one

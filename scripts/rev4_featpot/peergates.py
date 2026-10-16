@@ -6,6 +6,9 @@ import hashlib
 import json
 from pathlib import Path
 import statistics
+import random
+import shutil
+import socket
 import sys
 import time
 
@@ -109,6 +112,44 @@ def steering_report():
     print(json.dumps(result,indent=1))
 
 
+def failure_report():
+    """Render retained gate values and engineering content identities verbatim."""
+    summary=read(ROOT/'steering-summary.json')
+    preread=Path('/mnt/v/output/zensim/prodqual-b-2026-10-07/STEERING_PREREAD.json')
+    metadata={(c['case'],c['block']):c for c in read(preread)['cases']}
+    candidate=[('diff-410','broad-10-b32',.9650540851,.9650199082),
+        ('diff-410','broad-10-b64',.9382352941,.9352941176),
+        ('diff-410','broad-76-b64',.9882352941,.9970588235),
+        ('diff-410','broad-136-b64',.9676470588,.9794117647),
+        ('diff+frag-820','broad-31-b64',.7272727273,.7272727273),
+        ('diff+frag-820','broad-34-b32',.9518019974,.9468085106),
+        ('diff+frag-820','broad-34-b64',.9720279720,.9720279720),
+        ('diff+frag-820','broad-202-b32',.9666041276,.9660412758),
+        ('diff+frag-820','broad-202-b64',.8601398601,.9370629371),
+        ('W-C seed0','broad-13-b64',.8676470588,.8676470588),
+        ('W-C seed0','broad-202-b64',.9790209790,.9860139860)]
+    lines=['# Peer steering failures — 2026-10-16','',
+        'Engineering identifiers describe content provenance; no semantic class is inferred.',
+        'Candidate misses: M2<.99; listed M3f values all pass .70. Peer misses: own-map rho<.70; M2=N/A.',
+        'Peers: butteraugli0.9.3 pnorm3, SSIMULACRA2 native-map54fabca9.',
+        'All51 SSIMULACRA2 failures retained despite its lower task priority.','',
+        '| Model | Case / block | Source distortion / geometry | M2 | M3f or peer own-map rho |',
+        '|---|---|---|---:|---:|']
+    def add(model,key,block,m2,m3):
+        c=metadata[key,block]
+        source=Path(c['source_distorted']).name
+        lines.append(f'| {model} | {key} / {block} | {source}; {c["width"]}x{c["height"]} | {m2} | {m3:.10f} |')
+    for m,k,m2,m3 in candidate:add(m,k,int(k.rsplit('b',1)[1]),f'{m2:.10f}',m3)
+    for m in ['butter','ssim2']:
+        for r in summary['own'][m]['failures']:add(m,r['key'],r['block'],'N/A',r['rho'])
+    lines+=['','Full per-case/block cross-judge values, including every cross-judge miss:',
+        '`/mnt/v/output/zensim/peergates-2026-10-16/{steering,steering-remaining}/results.jsonl`.',
+        f'Content metadata SHA256: `{sha(preread)}`.',
+        'Original candidate values: [D12](e34_d12_2026-10-15.json);',
+        'aggregate findings and pins: [peer gates](peergates_2026-10-16.md).','']
+    (REPO/'benchmarks/peergates_2026-10-16_failures.md').write_text('\n'.join(lines))
+
+
 def peer_tables(grid):
     cases=read(ROOT/f'{grid}-input.json')['cases']
     rows=[json.loads(l) for l in (ROOT/grid/'results.jsonl').read_text().splitlines()]
@@ -181,14 +222,91 @@ def watch():
         time.sleep(2)
 
 
+def archive():
+    """Retain the measurement closure and verify a non-destructive mirror."""
+    import subprocess
+    source=ROOT/'source';source.mkdir(exist_ok=True)
+    paths=['scripts/rev4_featpot/peergates.py','scripts/rev4_featpot/peergates_cvvdp.py',
+        'zensim-bench/peergates/Cargo.toml','zensim-bench/peergates/Cargo.lock',
+        'zensim-bench/peergates/src/main.rs','zensim/examples/support/coherence_stats.rs',
+        'benchmarks/peergates_2026-10-16.md','benchmarks/peergates_2026-10-16_failures.md','justfile']
+    for name in paths:
+        dst=source/name;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(REPO/name,dst)
+    for name in ['PEERGATES_PHASE1.md','PEERGATES_PLAN.md','PEERGATES_PLAN_ADDENDUM.md',
+            'PEERGATES_CVVDP_RANK.md','PEERGATES_DONE.md','PEERGATES_PROGRESS.md']:
+        shutil.copy2(PRIVATE/name,ROOT/name)
+    retained=[Path('/var/tmp/paper-gates/scores/ladder_cvvdp_fhd.tsv'),
+        Path('/mnt/v/output/zensim/qual-a-2026-10-10/bin/bake_verdict'),
+        Path('/var/tmp/paper-gates/bv/cells/peer_butteraugli_pnorm3__native.tsv'),
+        Path('/var/tmp/paper-gates/bv/cells/peer_butteraugli_pnorm3__native.identity.tsv'),
+        Path('/var/tmp/paper-gates/bv/gaddr/peer_ssim2_registered__native.json')]
+    owner=ROOT/'retained';owner.mkdir(exist_ok=True)
+    for p in retained:shutil.copy2(p,owner/p.name)
+    files=sorted(p for p in ROOT.rglob('*') if p.is_file() and p.name not in ['SHA256SUMS','MIRROR_VERIFIED.json'])
+    hashes={str(p.relative_to(ROOT)):sha(p) for p in files}
+    (ROOT/'SHA256SUMS').write_text(''.join(f'{h}  {n}\n' for n,h in hashes.items()))
+    mirror=Path('/mnt/tower/output/zensim/peergates-2026-10-16');mirror.mkdir(parents=True,exist_ok=True)
+    assert shutil.disk_usage(mirror).free>sum(p.stat().st_size for p in files)
+    subprocess.run(['rsync','-rt','--executability',str(ROOT)+'/',str(mirror)+'/'],check=True)
+    selected=random.Random(20261016).sample(sorted(hashes),3)
+    required=['steering-summary.json','cvvdp/SMOKE_PARITY.json','PEERGATES_DONE.md',
+        'cvvdp/gates-ladder-agree/gaddr.json','bin/peergates-checked']
+    checked=sorted(set(selected+required))
+    for n in checked:assert sha(mirror/n)==hashes[n],n
+    assert sha(mirror/'SHA256SUMS')==sha(ROOT/'SHA256SUMS')
+    result=dict(host=socket.gethostname(),utc=datetime.now(timezone.utc).isoformat(),
+        files=len(hashes),manifest_sha256=sha(ROOT/'SHA256SUMS'),
+        random_files=selected,verified_files=checked,mirror=str(mirror))
+    (ROOT/'MIRROR_VERIFIED.json').write_text(json.dumps(result,indent=1)+'\n')
+    shutil.copy2(ROOT/'MIRROR_VERIFIED.json',mirror/'MIRROR_VERIFIED.json')
+    progress(f'Evidence mirror verified: {len(hashes)}files, SHA256SUMS={result["manifest_sha256"]}; three seeded-random files plus five required artifacts rehashed on tower. No mirror deletion.')
+
+
+def validate():
+    """Check completed evidence coverage and frozen experiment identities."""
+    import csv
+    import math
+    import re
+    for name in ['benchmarks/peergates_2026-10-16.md','benchmarks/peergates_2026-10-16_failures.md']:
+        for target in re.findall(r'\]\(([^)]+)\)',(REPO/name).read_text()):
+            if '://' not in target:assert (REPO/name).parent.joinpath(target).exists(),target
+    for pin,name in [('PLAN_FREEZE.json','PEERGATES_PLAN.md'),
+            ('ADDENDUM_FREEZE.json','PEERGATES_PLAN_ADDENDUM.md')]:
+        assert sha(PRIVATE/name)==read(ROOT/pin)['sha256']
+    rows=steering_rows()
+    assert len(rows)==len({case_id(r) for r in rows})==135
+    assert sum(len(r['blocks'])+1 for r in rows)==55515
+    assert all(r['scalar_map_score_bits_equal'] for r in rows)
+    for m in read(ROOT/'inputs.json')['candidate_captures'].values():assert sha(m['path'])==m['sha256']
+    counts={}
+    for g,n in [('standard',4424),('ladder',9593),('negtail',2000),('identity',38)]:
+        with (ROOT/f'cvvdp/{g}-x10.tsv').open() as f:cells=list(csv.DictReader(f,delimiter='\t'))
+        assert len(cells)==n
+        assert all(math.isfinite(float(c['pred'])) for c in cells)
+        counts[g]=n
+    assert read(ROOT/'cvvdp/SMOKE_PARITY.json')['first_ladder_measured']==7.525087
+    for grid in ['standard','ladder']:
+        for attribution in ['single','agree']:
+            d=read(ROOT/f'cvvdp/gates-{grid}-{attribution}/gaddr.json')
+            assert {r['id'] for r in d['checks'] if r['tier']=='contract'}=={f'C{i}' for i in range(1,7)}
+    write(ROOT/'FINAL_VALIDATION.json',dict(utc=datetime.now(timezone.utc).isoformat(),
+        frozen_plans_unchanged=True,steering_cases=135,forwards_per_peer=55515,
+        ssim2_base_scalar_map_bit_parity=135,cvvdp_complete_panels=counts,
+        candidate_capture_sha256s_verified=True))
+    progress('Final artifact validation PASS: frozen plans unchanged,135unique steering cases/55,515forwards,135scalar-map bit checks,complete mapped CVVDP panels4424/9593/2000/38 and four owner-gate reports.')
+
+
 def main():
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['inputs','steering-report','peer-tables','quiet','landed','watch','repair-transport']);p.add_argument('--grid',choices=['standard','ladder','negtail','identity']);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['inputs','steering-report','failure-report','peer-tables','quiet','landed','watch','repair-transport','archive','validate']);p.add_argument('--grid',choices=['standard','ladder','negtail','identity']);a=p.parse_args()
     if a.mode=='inputs':inputs()
     elif a.mode=='steering-report':steering_report()
+    elif a.mode=='failure-report':failure_report()
     elif a.mode=='peer-tables':peer_tables(a.grid)
     elif a.mode=='quiet':quiet()
     elif a.mode=='watch':watch()
     elif a.mode=='repair-transport':repair_transport()
+    elif a.mode=='archive':archive()
+    elif a.mode=='validate':validate()
     else:landed()
 
 
