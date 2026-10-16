@@ -502,7 +502,8 @@ def render():
         'come from /usr/bin/time -v as reported above.', '',
         '| Measurement | run-heavy resource receipt |', '|---|---|']
     for name, receipt in doc['execution_resources'].items():
-        lines.append(f'| {name} | `{receipt["summary"]}` |')
+        summary = receipt['summary'].replace('|', r'\|')
+        lines.append(f'| {name} | `{summary}` |')
     lines += ['', '## Audit and limits', '',
         f'All 305/305 installed cells across 18 jobsets were inventoried before the exposure entry '
         'was pushed (`02cba876`), before label access. The selected K pilot was reused as full-data '
