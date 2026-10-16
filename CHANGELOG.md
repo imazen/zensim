@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add an unpublished label-free peer engineering packet tool with native maps, independent block repairs and pinned metric versions.
+
 - Complete canonical STEER A7 pre-freeze boundary replay and twelve-model inventory refusal checks; preserve the registered state machine and numerical gates.
 
 - Add opt-in fixed smooth hinge N research training and exact loaded/reference derivatives against the merged zenpredict activation format (zenanalyze f0903489).
