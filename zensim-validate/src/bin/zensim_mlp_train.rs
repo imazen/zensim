@@ -3353,6 +3353,17 @@ fn main() {
         std::process::exit(2)
     });
     let subjective_admission = if let Some(path) = &args.subjective_authority {
+        if args.minibatch_size != 1
+            || args.pool_head
+            || args.hybrid_head
+            || args.per_sample_alpha_head
+            || args.pair_sampling != "uniform"
+            || args.pwrc_pair_weight
+            || args.norm_in_norm_weight != 0.
+        {
+            eprintln!("subjective rank requires the registered plain uniform CPU pair path");
+            std::process::exit(2);
+        }
         if args.target_column != "human_score" || args.target_scale != 1.0 {
             eprintln!("subjective leg requires stored quality targets at scale one");
             std::process::exit(2);

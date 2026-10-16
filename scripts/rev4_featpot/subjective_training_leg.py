@@ -66,7 +66,7 @@ def admit(authority_path, authority_sha256, cell_id, groups, selected_ids):
                 or d.get("target_column") != "human_score" or d.get("selection") != "fixed-final-epoch"
                 or d.get("formula_revision") != 5 or d.get("tier") != "v3"
                 or d.get("feature_ids") != selected_ids or d.get("producer_commit") != c["producer_commit"]
-                or r["mode"] != "withinref,rank" or r["val_weight"] != 0
+                or r["name"] != "subjective_rank" or r["mode"] != "withinref,rank" or r["val_weight"] != 0
                 or r["train_weight"] <= 0 or d.get("table_sha256") != r["table_sha256"]):
             raise ValueError("subjective role/loss/producer/target binding differs")
         admitted[r["name"]] = (r,d)

@@ -114,6 +114,7 @@ pub(super) fn admit(
             || d["tier"] != "v3"
             || d["feature_ids"] != c["feature_ids"]
             || d["producer_commit"] != c["producer_commit"]
+            || r["name"] != "subjective_rank"
             || r["mode"] != "withinref,rank"
             || r["val_weight"].as_f64() != Some(0.)
             || r["train_weight"].as_f64().is_none_or(|v| v <= 0.)
@@ -251,7 +252,7 @@ mod tests {
             let authority = json!({"schema":"subjective-training-authority-v1","state":"approved","artifact_visibility":"private",
                 "selection":"fixed-final-epoch","cells":{"cell":{"feature_ids":[0,1],"formula_revision":5,"tier":"v3",
                     "producer_commit":"invented-producer","sources":["s"],"excluded_families":[],"groups":[{
-                        "name":"subjective","path":table,"train_weight":16.,"val_weight":0.,"mode":"withinref,rank",
+                        "name":"subjective_rank","path":table,"train_weight":16.,"val_weight":0.,"mode":"withinref,rank",
                         "subjective":true,"table_sha256":"f".repeat(64),"keys_path":root.join("keys.json"),"rows":2,"source_counts":{"s":2}}]}}});
             Self {
                 root,
@@ -277,7 +278,7 @@ mod tests {
                 &hash(&authority).unwrap(),
                 "cell",
                 &[(
-                    "subjective".into(),
+                    "subjective_rank".into(),
                     self.table.clone(),
                     16.,
                     0.,

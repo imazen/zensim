@@ -43,6 +43,7 @@ use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 // fuse the scalar version).
 pub mod sampling;
 pub mod strategy;
+mod subjective_rank;
 use crate::adam_simd;
 
 // Norm-in-Norm + RankNet hybrid loss (Li, Jiang, Jiang 2020,
@@ -3029,6 +3030,7 @@ pub fn train_mlp_strategy_pairs(
 
         let mut total_loss = 0.0f64;
         let mut n_steps = 0u64;
+        let mut subjective_ties = 0u64;
         // Counts gradient-contributing steps since the last Adam call;
         // controls the final-flush at epoch end when not aligned with K.
         let mut steps_since_adam = 0u64;
@@ -3234,7 +3236,10 @@ pub fn train_mlp_strategy_pairs(
             // so the RNG advances identically either way and an all-`Rank`
             // run stays bit-identical to the legacy trainer.
             let mode = g.loss_mode;
-            let rank_tied = target == 0.0;
+            let rank_tied = subjective_rank::tied(g, mos_a, mos_b, target);
+            if g.name == "subjective_rank" && rank_tied {
+                subjective_ties += 1;
+            }
             let rank_sub_threshold = hyperparams.pwrc_pair_weight
                 && hyperparams.pwrc_sensory_threshold > 0.0
                 && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold;
@@ -3704,6 +3709,12 @@ pub fn train_mlp_strategy_pairs(
             );
         }
 
+        if groups.iter().any(|g| g.name == "subjective_rank") {
+            log_line(
+                &format!("subjective-rank epoch={epoch} exact_target_ties={subjective_ties}"),
+                log,
+            );
+        }
         let avg_loss = if n_steps > 0 {
             total_loss / n_steps as f64
         } else {

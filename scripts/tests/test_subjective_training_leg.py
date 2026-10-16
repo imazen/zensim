@@ -24,7 +24,7 @@ class SubjectiveAdmission(unittest.TestCase):
             target_orientation="quality",target_transform="negate-pointwise",target_column="human_score",
             selection="fixed-final-epoch",formula_revision=5,tier="v3",feature_ids=[0,1],
             producer_commit="b"*40,table_sha256="f"*64, rows=2)
-        self.record = dict(name="subjective",path=str(self.path),train_weight=16.,val_weight=0.,
+        self.record = dict(name="subjective_rank",path=str(self.path),train_weight=16.,val_weight=0.,
             mode="withinref,rank",subjective=True,table_sha256="f"*64,keys_path=str(self.keys),
             rows=2,source_counts={"invented-source":2})
         self.cell = dict(feature_ids=[0,1],formula_revision=5,tier="v3",producer_commit="b"*40,
@@ -32,7 +32,7 @@ class SubjectiveAdmission(unittest.TestCase):
         self.authority = dict(schema="subjective-training-authority-v1",state="approved",
             artifact_visibility="private",selection="fixed-final-epoch",cells={"invented-cell":self.cell})
         self.authority_path = root/"authority.json"
-        self.groups = [("subjective",self.path,16.,0.,"withinref,rank")]
+        self.groups = [("subjective_rank",self.path,16.,0.,"withinref,rank")]
 
     def save(self):
         self.keys.write_text(json.dumps(self.rows,sort_keys=True))
@@ -48,7 +48,7 @@ class SubjectiveAdmission(unittest.TestCase):
 
     def test_valid_metadata_never_opens_target(self):
         with mock.patch.object(Path,"read_bytes",autospec=True,side_effect=self.read_guard):
-            self.assertEqual(set(self.admit()),{"subjective"})
+            self.assertEqual(set(self.admit()),{"subjective_rank"})
 
     def read_guard(self,path):
         if path == self.path:
@@ -64,7 +64,7 @@ class SubjectiveAdmission(unittest.TestCase):
                 self.decl[field]=value
                 with self.assertRaises(ValueError): self.admit()
                 self.decl[field]=old
-        self.groups[0] = ("subjective",self.path,16.,1.,"withinref,rank")
+        self.groups[0] = ("subjective_rank",self.path,16.,1.,"withinref,rank")
         with self.assertRaises(ValueError): self.admit()
 
     def test_key_order_role_source_and_leak_refuse(self):
@@ -95,7 +95,7 @@ class SubjectiveAdmission(unittest.TestCase):
             strict_admission=True,subjective_authority=(self.authority_path,pin,"invented-cell",[0,1]))
         self.assertIn("--subjective-authority",argv)
         self.assertEqual(argv[argv.index("--subjective-authority-sha256")+1],pin)
-        self.assertIn("subjective:"+str(self.path)+":16.0:0.0:withinref,rank",argv)
+        self.assertIn("subjective_rank:"+str(self.path)+":16.0:0.0:withinref,rank",argv)
         with self.assertRaises(ValueError):
             wrapper.train_command(self.groups,1101,101,1825,self.path.parent/"keep.txt","N",self.path.parent/"out.bin",
                 strict_admission=True,subjective_authority=(self.authority_path,pin,"invented-cell",[0,1]))

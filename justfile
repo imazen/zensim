@@ -1388,6 +1388,10 @@ subjective-admission-check:
     cargo test -p zensim-validate --bin zensim_mlp_train subjective_native
     cargo clippy -p zensim-validate --bin zensim_mlp_train -- -D warnings
 
+subjective-rank-check:
+    cargo test -p zensim-validate --test subjective_rank
+    just subjective-admission-check
+
 # Canonical STEER/E34 statistics on invented data only; no corpus discovery.
 steer-statistics-check:
     cargo test -p zensim-validate --bin panel panel_e34:: -- --nocapture

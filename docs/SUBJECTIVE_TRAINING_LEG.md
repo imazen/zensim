@@ -16,6 +16,9 @@ human allowlist. The new authority does not add a source to that allowlist.
 The added group uses stored quality targets (`human_score = -pointwise
 distance`), scale one, `withinref,rank`, zero development weight and nominal
 weight eight through the existing within-reference acceptance correction.
+Its reserved group name is `subjective_rank`. On the registered plain CPU
+pair path, exact target ties are counted and contribute no gradient. Other
+groups retain their inherited behavior. No magnitude threshold is applied.
 All observations of each source share one reference identity. The complete
 source/order inventory and excluded families are bound before loading.
 No population identities or real manifests belong in this repository.
