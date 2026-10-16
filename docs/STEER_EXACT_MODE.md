@@ -24,3 +24,12 @@ native reference deliberately favors an auditable repair over unmeasured cost.
 independently constructed native repair forwards, including strided input,
 identity and unsupported queries. These deterministic generated images are
 outside the fixed135-case steering panel. They read no corpus, model or labels.
+
+`steer_exact_smoke` (the unpublished validation tool) accepts a bake plus its
+expected SHA256, generates two fixed synthetic geometries and checks every
+8/16/32/64 repair against independent complete native forwards. It records
+ordinary/preparation/exact-map/oracle wall components and pixel/model hashes.
+It never opens a panel or label table and does not evaluate steering quality.
+`steer_exact_smoke.py` supplies its manifest-bound non-installable FitCell
+wrapper. External GNU time supplies process peak RSS; build timings are not
+serving measurements. The smoke policy is separate from registered fit caps.

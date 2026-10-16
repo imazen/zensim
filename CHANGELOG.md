@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add a label-free exact-steering geometry/cost probe for explicitly hashed control models, with native complete-repair parity receipts.
+
 - Restore STEER completeness parity: seed-only diagnostic refusals are nonfatal; numeric dataset/W2 evidence is required on all twelve comparisons.
 
 - E34 fleet launch (`2bf1a840`, freeze `bc9be24a`): archive-bound image harvest, conditional305-cell plan, verified first-artifact admission, six-host controls, label-free pilot selection and immutable temporary-host snapshots.

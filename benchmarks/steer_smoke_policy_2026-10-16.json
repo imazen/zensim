@@ -1,0 +1,7 @@
+{
+  "schema": "bounded-fit-smoke-policy-v1",
+  "epochs": 1,
+  "pairs_per_epoch": 49999,
+  "control_wall_cap_sec": 900,
+  "scope": "ENGINEERING_SMOKE_ONLY_NOT_A_REGISTERED_FIT"
+}
