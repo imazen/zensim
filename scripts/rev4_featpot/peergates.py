@@ -145,7 +145,7 @@ def failure_report():
     lines+=['','Full per-case/block cross-judge values, including every cross-judge miss:',
         '`/mnt/v/output/zensim/peergates-2026-10-16/{steering,steering-remaining}/results.jsonl`.',
         f'Content metadata SHA256: `{sha(preread)}`.',
-        'Original candidate values: [D12](e34_d12_2026-10-15.md);',
+        'Original candidate values: [D12](e34_d12_2026-10-15.json);',
         'aggregate findings and pins: [peer gates](peergates_2026-10-16.md).','']
     (REPO/'benchmarks/peergates_2026-10-16_failures.md').write_text('\n'.join(lines))
 
@@ -266,6 +266,10 @@ def validate():
     """Check completed evidence coverage and frozen experiment identities."""
     import csv
     import math
+    import re
+    for name in ['benchmarks/peergates_2026-10-16.md','benchmarks/peergates_2026-10-16_failures.md']:
+        for target in re.findall(r'\]\(([^)]+)\)',(REPO/name).read_text()):
+            if '://' not in target:assert (REPO/name).parent.joinpath(target).exists(),target
     for pin,name in [('PLAN_FREEZE.json','PEERGATES_PLAN.md'),
             ('ADDENDUM_FREEZE.json','PEERGATES_PLAN_ADDENDUM.md')]:
         assert sha(PRIVATE/name)==read(ROOT/pin)['sha256']
