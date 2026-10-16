@@ -33,12 +33,102 @@ fn string<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("subjective {key} required"))
 }
 
+fn run_binding(c: &Value, args: &super::Args) -> Result<(), String> {
+    let limit = if c["route"] == "loso" { 3 } else { 10 };
+    if !matches!(c["route"].as_str(), Some("full" | "d1" | "loso"))
+        || c["seed_index"].as_u64().is_none_or(|v| v >= limit)
+        || c["epochs"] != 120
+        || args.epochs != 120
+        || c["pairs_per_epoch"] != 50000
+        || args.pairs_per_epoch != 50000
+        || c["selected_epoch"] != 119
+        || args.hidden != 128
+        || args.max_features != 1825
+        || c["init_seed"].as_u64() != args.init_seed
+        || c["sample_seed"].as_u64() != args.sample_seed
+        || args.init_seed.is_none()
+        || args.sample_seed.is_none()
+        || !args.nonneg_distance
+        || args.nonneg_pin != 100.
+        || !args.feature_transform.is_empty()
+        || args.auto_transforms.is_some()
+    {
+        return Err("subjective registered cell/seed/full-budget/head binding differs".into());
+    }
+    Ok(())
+}
+
+fn family_masks(c: &Value, records: &[Value]) -> Result<(), String> {
+    if c["route"] != "loso" {
+        return Ok(());
+    }
+    let masks = json(
+        Path::new(string(c, "all_leg_masks_path")?),
+        string(c, "all_leg_masks_sha256")?,
+    )?;
+    if masks["schema"] != "source-family-native-mask-v1"
+        || masks["excluded_families"] != c["excluded_families"]
+    {
+        return Err("LOSO native family-mask closure differs".into());
+    }
+    let excluded = c["excluded_families"]
+        .as_array()
+        .ok_or("LOSO exclusions required")?;
+    let groups = masks["groups"]
+        .as_object()
+        .ok_or("all-leg family masks required")?;
+    let names: BTreeSet<_> = records
+        .iter()
+        .map(|r| string(r, "name"))
+        .collect::<Result<_, _>>()?;
+    if groups.keys().map(String::as_str).collect::<BTreeSet<_>>() != names {
+        return Err("LOSO every inherited and added group must be masked".into());
+    }
+    for r in records {
+        let m = &groups[string(r, "name")?];
+        let families = m["families"]
+            .as_array()
+            .ok_or("LOSO ordered families required")?;
+        if m["manifest_sha256"] != r["manifest_sha256"]
+            || m["keys_sha256"] != r["keys_sha256"]
+            || r["rows"].as_u64() != Some(families.len() as u64)
+            || families
+                .iter()
+                .any(|f| f.as_str().is_none_or(str::is_empty) || excluded.contains(f))
+        {
+            return Err("LOSO inherited/added family leak or mask pin mismatch".into());
+        }
+    }
+    for stage in ["calibration", "preprocessing"] {
+        let m = &masks[stage];
+        let families = m["families"]
+            .as_array()
+            .ok_or("LOSO scaler/calibration family inventory required")?;
+        if families
+            .iter()
+            .any(|f| f.as_str().is_none_or(str::is_empty) || excluded.contains(f))
+        {
+            return Err("LOSO scaler/calibration family leak".into());
+        }
+        let key = format!("{stage}_manifest_sha256");
+        if c[&key] != m["manifest_sha256"] {
+            return Err("LOSO preprocessing/calibration pin differs".into());
+        }
+        json(
+            Path::new(string(m, "manifest_path")?),
+            string(m, "manifest_sha256")?,
+        )?;
+    }
+    Ok(())
+}
+
 pub(super) fn admit(
     authority_path: &Path,
     authority_pin: &str,
     cell: &str,
     groups: &[Group],
     selected: &[usize],
+    run: Option<&super::Args>,
 ) -> Result<BTreeMap<String, Value>, String> {
     let a = json(authority_path, authority_pin)?;
     if a["schema"] != "subjective-training-authority-v1"
@@ -49,6 +139,9 @@ pub(super) fn admit(
         return Err("subjective authority not admitted".into());
     }
     let c = &a["cells"][cell];
+    if let Some(args) = run {
+        run_binding(c, args)?;
+    }
     let ids: Vec<usize> =
         serde_json::from_value(c["feature_ids"].clone()).map_err(|e| e.to_string())?;
     if ids != selected || c["formula_revision"] != 5 || c["tier"] != "v3" {
@@ -94,6 +187,7 @@ pub(super) fn admit(
         safe(Path::new(string(r, "keys_path")?))?;
         pending.push((r, manifest));
     }
+    family_masks(c, records)?;
     let declarations: Vec<_> = pending
         .iter()
         .map(|(r, p)| Ok((*r, json(p, string(r, "manifest_sha256")?)?)))
@@ -286,6 +380,7 @@ mod tests {
                     GroupLossMode::Rank,
                 )],
                 &[0, 1],
+                None,
             )
         }
     }
@@ -332,5 +427,31 @@ mod tests {
             .pop();
         f.authority["cells"]["cell"]["groups"][0]["val_weight"] = json!(1.);
         assert!(f.call().unwrap_err().contains("weight"));
+    }
+    #[test]
+    fn subjective_native_all_leg_masks_reject_inherited_and_scaler_leaks() {
+        let f = Fixture::new();
+        let record = serde_json::json!({"name":"inherited","manifest_sha256":"a".repeat(64),
+            "keys_sha256":"b".repeat(64),"rows":1});
+        let path = f.root.join("masks.json");
+        let mut masks = serde_json::json!({"schema":"source-family-native-mask-v1","excluded_families":["excluded"],
+            "groups":{"inherited":{"manifest_sha256":"a".repeat(64),"keys_sha256":"b".repeat(64),"families":["excluded"]}}});
+        std::fs::write(&path, serde_json::to_vec(&masks).unwrap()).unwrap();
+        let mut c = serde_json::json!({"route":"loso","excluded_families":["excluded"],
+            "all_leg_masks_path":path,"all_leg_masks_sha256":hash(&path).unwrap()});
+        assert!(
+            family_masks(&c, std::slice::from_ref(&record))
+                .unwrap_err()
+                .contains("leak")
+        );
+        masks["groups"]["inherited"]["families"] = serde_json::json!(["allowed"]);
+        masks["calibration"] = serde_json::json!({"families":["excluded"]});
+        std::fs::write(&path, serde_json::to_vec(&masks).unwrap()).unwrap();
+        c["all_leg_masks_sha256"] = serde_json::json!(hash(&path).unwrap());
+        assert!(
+            family_masks(&c, std::slice::from_ref(&record))
+                .unwrap_err()
+                .contains("scaler/calibration")
+        );
     }
 }

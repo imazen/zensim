@@ -389,6 +389,7 @@ pub(super) fn preflight(
                 .ok_or("subjective cell required")?,
             groups,
             selected.ok_or("subjective explicit feature IDs required")?,
+            Some(args),
         )?
     } else {
         std::collections::BTreeMap::new()

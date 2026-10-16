@@ -93,6 +93,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
                   subjective_authority: tuple | None = None) -> list[str]:
     """The trainer argv of one v2 cell; `groups` = (name, path, train_weight, val_weight, mode). Shared with
     v2_confirm_fit.py, which trains on the same recipe over the full-data legs."""
+    if subjective_authority is not None:
+        from subjective_training_leg import command_binding
+        authority, pin, cell, _ = subjective_authority
+        command_binding(authority,pin,cell,init_seed,sample_seed,width,head,recipe)
     if strict_admission:
         strict_training_groups(groups, data_role_decision, upiq_label_disposition, subjective_authority)
         from v2_common import refuse_immutable_output

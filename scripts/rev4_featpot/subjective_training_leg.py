@@ -31,6 +31,36 @@ def document(path, expected=None):
     return json.loads(data)
 
 
+def command_binding(authority_path,pin,cell_id,init_seed,sample_seed,width,head,recipe):
+    c=document(authority_path,pin)["cells"][cell_id]
+    if (c.get("route") not in ("d1","full","loso")
+            or not 0<=c["seed_index"]<(3 if c["route"]=="loso" else 10)
+            or (c["epochs"],c["pairs_per_epoch"],c["selected_epoch"])!=(120,50000,119)
+            or (c["init_seed"],c["sample_seed"])!=(init_seed,sample_seed)
+            or width!=1825 or head!="N" or (recipe or {}).get("hidden",32)!=128):
+        raise ValueError("subjective registered cell/seed/full-budget/head binding differs")
+
+
+def family_masks(c,records):
+    if c.get("route")!="loso": return
+    masks=document(c["all_leg_masks_path"],c["all_leg_masks_sha256"])
+    if (masks.get("schema")!="source-family-native-mask-v1" or masks["excluded_families"]!=c["excluded_families"]
+            or set(masks["groups"])!={r["name"] for r in records}):
+        raise ValueError("LOSO every inherited and added group must be masked")
+    for r in records:
+        m=masks["groups"][r["name"]]
+        if (m["manifest_sha256"]!=r["manifest_sha256"] or m["keys_sha256"]!=r["keys_sha256"]
+                or len(m["families"])!=r["rows"] or any(not isinstance(f,str) or not f
+                    or f in c["excluded_families"] for f in m["families"])):
+            raise ValueError("LOSO inherited/added family leak or mask pin mismatch")
+    for stage in ("calibration","preprocessing"):
+        m=masks[stage]
+        if (c[stage+"_manifest_sha256"]!=m["manifest_sha256"] or any(not isinstance(f,str) or not f
+                or f in c["excluded_families"] for f in m["families"])):
+            raise ValueError("LOSO scaler/calibration family leak or pin differs")
+        document(m["manifest_path"],m["manifest_sha256"])
+
+
 def admit(authority_path, authority_sha256, cell_id, groups, selected_ids):
     if len(authority_sha256) != 64:
         raise ValueError("independently pinned authority required")
@@ -55,6 +85,7 @@ def admit(authority_path, authority_sha256, cell_id, groups, selected_ids):
         safe(str(path)+".manifest.json")
         safe(r["keys_path"])
         pending.append((r, Path(str(path)+".manifest.json")))
+    family_masks(c,c["groups"])
     declarations = [(r, document(p,r["manifest_sha256"])) for r,p in pending]
     admitted = {}
     for r,d in declarations:

@@ -3374,6 +3374,7 @@ fn main() {
             args.subjective_cell.as_deref().unwrap(),
             &group_modes,
             admitted_ids.as_deref().unwrap_or(&[]),
+            Some(&args),
         )
         .unwrap_or_else(|e| {
             eprintln!("subjective admission: {e}");

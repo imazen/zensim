@@ -28,7 +28,8 @@ class SubjectiveAdmission(unittest.TestCase):
             mode="withinref,rank",subjective=True,table_sha256="f"*64,keys_path=str(self.keys),
             rows=2,source_counts={"invented-source":2})
         self.cell = dict(feature_ids=[0,1],formula_revision=5,tier="v3",producer_commit="b"*40,
-            sources=["invented-source"],excluded_families=[],groups=[self.record])
+            sources=["invented-source"],excluded_families=[],groups=[self.record],route="full",seed_index=0,
+            epochs=120,pairs_per_epoch=50000,selected_epoch=119,init_seed=1101,sample_seed=101)
         self.authority = dict(schema="subjective-training-authority-v1",state="approved",
             artifact_visibility="private",selection="fixed-final-epoch",cells={"invented-cell":self.cell})
         self.authority_path = root/"authority.json"
@@ -91,14 +92,23 @@ class SubjectiveAdmission(unittest.TestCase):
         self.decl["immutable_input_roots"] = [str(self.path.parent)]
         pin=self.save()
         output=self.path.parent.parent/(self.path.parent.name+"-output")
-        argv=wrapper.train_command(self.groups,1101,101,1825,output/"keep.txt","N",output/"last.bin",
+        argv=wrapper.train_command(self.groups,1101,101,1825,output/"keep.txt","N",output/"last.bin",recipe={"hidden":128},
             strict_admission=True,subjective_authority=(self.authority_path,pin,"invented-cell",[0,1]))
         self.assertIn("--subjective-authority",argv)
         self.assertEqual(argv[argv.index("--subjective-authority-sha256")+1],pin)
         self.assertIn("subjective_rank:"+str(self.path)+":16.0:0.0:withinref,rank",argv)
         with self.assertRaises(ValueError):
-            wrapper.train_command(self.groups,1101,101,1825,self.path.parent/"keep.txt","N",self.path.parent/"out.bin",
+            wrapper.train_command(self.groups,1101,101,1825,self.path.parent/"keep.txt","N",self.path.parent/"out.bin",recipe={"hidden":128},
                 strict_admission=True,subjective_authority=(self.authority_path,pin,"invented-cell",[0,1]))
+
+    def test_wrong_seed_refuses_before_target_bearing_hash(self):
+        import v2_lodo_mlp as wrapper
+        pin=self.save()
+        with mock.patch.object(Path,"read_bytes",autospec=True,side_effect=self.read_guard):
+            with self.assertRaisesRegex(ValueError,"cell/seed"):
+                wrapper.train_command(self.groups,1103,101,1825,Path("unused-keep"),"N",Path("unused-out"),
+                    recipe={"hidden":128},strict_admission=True,
+                    subjective_authority=(self.authority_path,pin,"invented-cell",[0,1]))
 
 
 if __name__ == "__main__": unittest.main()
