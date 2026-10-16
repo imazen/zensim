@@ -1321,7 +1321,16 @@ e34-eval-integrity:
 
 e34-eval-results:
     python3 scripts/rev4_featpot/e34_results.py build
+    just e34-eval-render
+
+e34-eval-render:
     python3 scripts/rev4_featpot/e34_results.py render
+
+e34-eval-publication-check:
+    python3 scripts/rev4_featpot/e34_results.py verify-publication
+
+e34-eval-archive:
+    ~/work/zen/scripts/run-heavy --mem 8G --jobs 1 -- python3 scripts/demos/rev5perf_archive.py /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation /mnt/tower/output/zensim/e34-launch-2026-10-15/evaluation --verify-all --dereference --exclude-operator-locks
 
 e34-eval-runtime arm mode:
     ~/work/zen/scripts/run-heavy --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/e34_runtime.py {{mode}} --arm {{arm}} --binary /mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/costcmp-instrument

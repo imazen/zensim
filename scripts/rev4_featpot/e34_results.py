@@ -4,6 +4,9 @@ All inferential results are read from the bound Rust owners. Engineering
 thresholds and the sequential verdict are exactly the frozen registration.
 """
 import argparse
+import copy
+from collections import Counter
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -567,19 +570,126 @@ def render():
         linearity_interpretation=doc['linearity_interpretation'],
         l_coefficients=doc['l_coefficients'],
         evidence=dict(path=str(full),sha256=sha(full),per_case=doc['per_case'],penalty_logs=doc['penalty_logs'],
-                      p3=doc['p3'],installed_integrity=doc['installed_integrity']),
+                      p3=doc['p3'],installed_integrity=doc['installed_integrity'],source_ci=doc['source_ci']),
         provenance=doc['provenance'])
+    # Keep raw per-seed values and operator receipts in the bound full evidence.
+    # All nine primary tests and all five decisive guard sets remain here.
+    small = copy.deepcopy(small)
+    for test in small['statistics']['tests']:
+        test['seed_unit'].pop('seed_deltas')
+        if test['test'] > 5:
+            test.pop('dataset_guards')
+            test.pop('w2')
+        else:
+            test['w2']['seed_unit'].pop('seed_deltas')
+    small['statistics']['summary_omissions_in_full_evidence'] = [
+        'per-seed deltas', 'non-decisive improvement dataset/W2 detail']
+    small['mean_guard_sensitivity'].pop('counterfactual_verdict')
+    reference = lambda name: dict(path=str(ROOT / name),sha256=sha(ROOT / name))
+    provenance = small['provenance']
+    host = provenance['runtime_host']
+    provenance['runtime_host'] = dict(**reference('runtime-host.json'),host=host['host'],
+        cpu_model=host['machine']['cpu_model'],
+        benchmark_sha256=host['payload_sha256']['evaluation/bin/costcmp-instrument'],
+        analyzer_sha256=host['payload_sha256']['evaluation/bin/paired-rounds-analyzer'])
+    provenance['runtime_build'] = reference('runtime-build.json')
+    provenance['descriptive_execution'].pop('payload_sha256')
+    development = ROOT.parent / 'packet/DEVELOPMENT_BINDING.json'
+    provenance['development_binding'] = dict(path=str(development),sha256=sha(development))
     payload=json.dumps(small,separators=(',',':'),allow_nan=False)+'\n'
     assert len(payload.encode()) <= 30000, 'publish a smaller summary; keep full generated data outside git'
+
+    complete = '\n'.join(lines)
+    report_start = complete.index('\n## Report-only human agreement')
+    audit_start = complete.index('\n## Audit and limits')
+    appendix = ('# E34 report-only appendix — 2026-10-15\n\n'
+        '[Registered verdict and methods](e34_results_2026-10-15.md). '
+        'These human-agreement tables are descriptive; execution receipts document the collectors.\n'
+        + complete[report_start:audit_start].rstrip() + '\n')
+    main = (complete[:report_start] + '\n\n'
+        '[Report-only human agreement and execution resources](e34_report_only_2026-10-15.md) '
+        'contains the remaining pair-class/HQ intervals and exact collector resource receipts.\n'
+        + complete[audit_start:])
+    assert len(main.encode()) <= 30000 and len(appendix.encode()) <= 30000
+    appendix_path = out.parent / 'e34_report_only_2026-10-15.md'
+    full_readout = ROOT / 'full-readout.md'
+    # Resolve the original benchmark-relative hyperlinks at the copied location.
+    for name in ['e34_registration_freeze_draft_2026-10-15.md',
+                 'e34_frozen_launch_2026-10-15.json', 'e34_results_2026-10-15.json']:
+        complete = complete.replace(f']({name})',
+            f'](https://github.com/imazen/zensim/blob/main/benchmarks/{name})')
+    assert all(not path.exists() for path in [out.with_suffix('.json'),out.with_suffix('.md'),
+                                             appendix_path,full_readout]), 'fresh publication paths required'
+    with full_readout.open('x') as f:
+        f.write(complete)
     with out.with_suffix('.json').open('x') as f:
         f.write(payload)
     with out.with_suffix('.md').open('x') as f:
-        f.write('\n'.join(lines))
-    print(json.dumps(dict(markdown=str(out.with_suffix('.md')),json_bytes=len(payload.encode()))))
+        f.write(main)
+    with appendix_path.open('x') as f:
+        f.write(appendix)
+    print(json.dumps(dict(markdown=str(out.with_suffix('.md')),json_bytes=len(payload.encode()),
+                         markdown_bytes=len(main.encode()),appendix_bytes=len(appendix.encode()),
+                         full_readout=str(full_readout))))
+
+
+def verify_publication():
+    """Compare the public serialization with immutable, complete measurements."""
+    full = read(ROOT / 'result.json')
+    base = Path(__file__).resolve().parents[2] / 'benchmarks'
+    paths = [base / 'e34_results_2026-10-15.json', base / 'e34_results_2026-10-15.md',
+             base / 'e34_report_only_2026-10-15.md']
+    public = read(paths[0])
+    assert all(path.stat().st_size <= 30000 for path in paths)
+    assert public['evidence']['sha256'] == sha(ROOT / 'result.json')
+    for key in ['verdict', 'registered_falsification', 'mean_guard_interpretation',
+                'linearity_interpretation', 'l_coefficients']:
+        assert public[key] == full[key], f'published {key} changed'
+    expected = {k:v for k,v in full['mean_guard_sensitivity'].items() if k!='counterfactual_verdict'}
+    assert public['mean_guard_sensitivity'] == expected
+    assert public['gates'] == {a:{g:v['pass_'] for g,v in gates.items()}
+                               for a,gates in full['gates'].items()}
+    assert public['steering'] == {a:{k:v for k,v in row.items() if k!='failing'}
+                                  for a,row in full['steering'].items()}
+    statistical = public['statistics']
+    original = full['statistics']
+    assert statistical['holm_adjusted'] == original['holm_adjusted']
+    assert statistical['holm_reject'] == original['holm_reject']
+    assert len(statistical['tests']) == len(original['tests']) == 9
+    for published, measured in zip(statistical['tests'], original['tests'], strict=True):
+        for key in ['test','arm','control','margin','state','theta','p','seed','reference_only',
+                    'reference_only_seed','e33_mean_point_guard','improvement_point_guard']:
+            assert published[key] == measured[key], f'published test {measured["test"]} {key} changed'
+        assert published['seed_unit'] == {k:v for k,v in measured['seed_unit'].items() if k!='seed_deltas'}
+        if measured['test'] <= 5:
+            assert published['dataset_guards'] == measured['dataset_guards']
+            w2 = copy.deepcopy(measured['w2'])
+            w2['seed_unit'].pop('seed_deltas')
+            assert published['w2'] == w2
+        else:
+            assert 'dataset_guards' not in published and 'w2' not in published
+    table_rows = lambda text: Counter(line for line in text.splitlines() if line.startswith('|'))
+    complete_rows = table_rows((ROOT / 'full-readout.md').read_text())
+    published_rows = table_rows(paths[1].read_text()) + table_rows(paths[2].read_text())
+    assert published_rows == complete_rows, 'a report table row changed or was omitted'
+    validate_statistical_reports(original)
+    expected = dict(schema='e34-publication-checks-v1',all_nine_tests_unchanged=True,
+        all_five_decisive_guard_sets_unchanged=True,all_verdicts_and_gates_unchanged=True,
+        all_table_rows_unchanged=True,table_rows=sum(complete_rows.values()),
+        full_result_sha256=sha(ROOT / 'result.json'),full_readout_sha256=sha(ROOT / 'full-readout.md'),
+        publications={path.name:dict(bytes=path.stat().st_size,sha256=sha(path)) for path in paths})
+    receipt = ROOT / 'PUBLICATION_VERIFIED.json'
+    if receipt.exists():
+        previous = read(receipt)
+        previous.pop('time')
+        assert previous == expected, 'verified publication changed'
+    else:
+        write(receipt,dict(time=datetime.now(timezone.utc).isoformat(),**expected))
+    print(json.dumps(expected,indent=2))
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['build','penalties','render'])
+    p.add_argument('mode',choices=['build','penalties','render','verify-publication'])
     args=p.parse_args()
-    {'build':build,'penalties':penalties,'render':render}[args.mode]()
+    {'build':build,'penalties':penalties,'render':render,'verify-publication':verify_publication}[args.mode]()

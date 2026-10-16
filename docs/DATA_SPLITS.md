@@ -2138,3 +2138,27 @@ that locator, and both file hashes, the paired payload hash, helper pin,
 series order and unchanged B = 10,000 are recorded in
 `/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/reports-execution.json`.
 This changes execution placement, not a calculation, gate or verdict rule.
+
+
+### E34 registered evaluation completed — 2026-10-15
+
+The preread reservation above completed without another population or model
+selection. All nine frozen hypotheses were computed with margin 0.0065 in both
+families, B = 10,000 and the pinned two-way owner. Final integrity verification
+matches all 2,210 files across the 305 installed cells and 18 jobsets. The
+135-case served and raw diagnostic panels cover all 21 full-data models;
+all 21 development reads and the fixed report-only intervals are complete.
+
+The registered verdict retains each family's control: W/K pass statistical
+eligibility but miss G-STEER; L-A passes all 135 cases on all three seeds but
+fails formal statistical eligibility and spatial qualification. The registered
+falsification conjunction holds. Making the mean point guard decisive in the
+labelled NON-decisive sensitivity changes no arm eligibility or family verdict.
+The interpretation was fixed before any p-value access. No production profile,
+default or served model changed, and no sealed or new label population was read.
+
+See the [registered readout](../benchmarks/e34_results_2026-10-15.md),
+[report-only appendix](../benchmarks/e34_report_only_2026-10-15.md) and
+[machine-readable summary](../benchmarks/e34_results_2026-10-15.json).
+Complete evidence: `/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/result.json`,
+SHA-256 `2e18629bbc3014b11cc72a42ebf42b46669246162a5cf3d2fb2e228238c48b1b`.
