@@ -360,6 +360,17 @@ def progress():
     dev_log = Path.home() / 'tmp/e34-eval/development.log'
     dev_lines = ([s for s in dev_log.read_text().splitlines() if s.startswith('dev96 ')]
                  if dev_log.exists() else [])
+    timing_complete = []
+    for arm in ['w-a', 'k-a', 'l-a', 'w-c', 'k-c']:
+        timing_log = Path.home() / f'tmp/e34-eval/r7900x-{arm}-timing.log'
+        if timing_log.exists() and any(s.startswith('run-heavy: done rc=0 ')
+                                      for s in timing_log.read_text().splitlines()):
+            timing_complete.append(arm)
+    stats_log = Path.home() / 'tmp/e34-eval/statistics.log'
+    stats_lines = stats_log.read_text().splitlines() if stats_log.exists() else []
+    active_tests = [s for s in stats_lines if s.startswith('E34 test ')]
+    primary_complete = ((OUT / 'statistics.json').exists()
+                        and any(s.startswith('run-heavy: done rc=0 ') for s in stats_lines))
     path = OUT / 'PROGRESS.json'
     previous = json.loads(path.read_text()) if path.exists() else {'completed_panels': []}
     now = datetime.now(timezone.utc).isoformat()
@@ -367,20 +378,30 @@ def progress():
                   served_panels=sum(s.startswith('steer135 ') for s in lines),
                   raw_panels=sum(s.startswith('raw135 ') for s in lines),
                   expected_each=21, development_measured=dev_lines,
-                  development_complete=(OUT / 'development-results.json').exists())
+                  development_complete=(OUT / 'development-results.json').exists(),
+                  runtime_timing_complete=timing_complete,
+                  primary_stage=active_tests[-1] if active_tests else 'not started',
+                  primary_complete=primary_complete)
     path.write_text(json.dumps(record, indent=2)+'\n')
     new = [s for s in lines if s not in previous['completed_panels']]
     new += [s for s in dev_lines if s not in previous.get('development_measured', [])]
+    new += [f'r7900x {arm} timing COMPLETE' for arm in timing_complete
+            if arm not in previous.get('runtime_timing_complete', [])]
+    if record['primary_stage'] != previous.get('primary_stage'):
+        new.append(record['primary_stage'])
     if new:
         status = Path.home() / 'tmp/zensim-paper/rev4/E34_LAUNCH_STATUS.md'
         with status.open('a') as f:
-            f.write('\nEvaluation native/development progress '+now+'\n\n'+'\n'.join('- '+s for s in new)+'\n')
+            f.write('\nEvaluation progress '+now+'\n\n'+'\n'.join('- '+s for s in new)+'\n')
     lock = Path(__file__).resolve().parents[2] / '.workongoing'
     assert ' codex-e34-eval ' in lock.read_text()
     lock.write_text(now+' codex-e34-eval registered assessment in progress\n')
     print(json.dumps(dict(time=now,served_panels=record['served_panels'],raw_panels=record['raw_panels'],
                           expected_each=21,development_new_panels=len(dev_lines),
-                          development_complete=record['development_complete'],new=new),indent=2))
+                          development_complete=record['development_complete'],
+                          runtime_timing_complete=timing_complete,
+                          primary_stage=record['primary_stage'],primary_complete=primary_complete,
+                          new=new),indent=2))
 
 
 def integrity():
