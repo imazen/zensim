@@ -491,8 +491,9 @@ def render():
         f'K’s report-only log covers {penalties["cells"]} fits and {penalties["epoch_records"]} epoch records. '
         'The trainer emits each record in stderr and again in its accumulated log; the reducer '
         'verified the two copies agree exactly and retains their multiplicity.', '',
-        'P3 reports ReLU switches and dominant input contributions on the 14 stored E33 A/C '
-        'seed-0 failure cases, using the existing f64 loaded-network reference and immutable '
+        'P3 reports ReLU switches and dominant input contributions on the 14 E33 A/C '
+        'seed-0 cases recorded as failures under the historical finite-difference sensitivity, '
+        'using the existing f64 loaded-network reference and immutable '
         'feature captures. This diagnostic does not change the exact native G-STEER gate.', '',
         'The design is adaptive to the historical 135-case panel. Development is disjoint from '
         'that panel but remains TRAIN and descriptive. Historical §3.5 says 26 distinct development '
