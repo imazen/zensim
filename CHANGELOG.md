@@ -56,6 +56,9 @@
 
 ### Added
 
+- Add versioned STEER twelve-test statistics/pack inventory and registration-pinned Q12 alias policies, with S-only verdicts and unchanged E34 entry points.
+
+
 - Add opt-in STEER all-blocks-v1 prepared repair gains using complete native pixel forwards; ordinary scoring and map defaults remain unchanged.
 
 

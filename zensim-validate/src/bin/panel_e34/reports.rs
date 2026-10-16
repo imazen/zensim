@@ -2,8 +2,15 @@
 use super::*;
 
 pub(super) fn packs(bytes: &[u8]) -> Result<Value> {
+    pack_inventory(bytes, 21, "e34-pack-checks-v1")
+}
+
+pub(super) fn pack_inventory(bytes: &[u8], count: usize, schema: &str) -> Result<Value> {
     let models: BTreeMap<String, Value> = serde_json::from_slice(bytes)?;
-    ensure!(models.len() == 21, "21 frozen full-data models required");
+    ensure!(
+        models.len() == count,
+        "{count} frozen full-data models required"
+    );
     let mut output = BTreeMap::new();
     for (name, binding) in models {
         let model_bytes = fs::read(binding["path"].as_str().unwrap())?;
@@ -28,7 +35,7 @@ pub(super) fn packs(bytes: &[u8]) -> Result<Value> {
             },
         );
     }
-    Ok(json!({"schema":"e34-pack-checks-v1","models":output}))
+    Ok(json!({"schema":schema,"models":output}))
 }
 
 #[derive(Deserialize)]

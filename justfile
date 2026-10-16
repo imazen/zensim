@@ -1383,3 +1383,14 @@ steer-exact-check:
 palette-pairs-check:
     python3 -m unittest scripts/tests/test_palette_training_pairs.py
 
+# Canonical STEER/E34 statistics on invented data only; no corpus discovery.
+steer-statistics-check:
+    cargo test -p zensim-validate --bin panel panel_e34:: -- --nocapture
+    cargo clippy -p zensim-validate --bin panel -- -D warnings
+
+steer-verdict-tests:
+    python3 -m unittest scripts.tests.test_steer_verdict scripts.tests.test_e34_verdict
+
+steer-statistics-verdict-integration:
+    python3 -c 'from scripts.tests.test_steer_verdict import canonical_receipt_test; canonical_receipt_test()'
+

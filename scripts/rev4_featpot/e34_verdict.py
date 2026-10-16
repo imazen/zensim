@@ -107,3 +107,74 @@ def mean_guard_sensitivity(statistics, gates):
                 changed_section42_eligibility=section42_changes,
                 changed_arm_eligibility=changes, families=families,
                 counterfactual_verdict=counterfactual)
+
+
+# STEER is a versioned experiment; the E34 nine-test entry above is frozen.
+STEER_PAIRS = [('s-a', 'base-a'), ('r-a', 'base-a'), ('sr-a', 'base-a'),
+               ('s-c', 'base-c'), ('r-c', 'base-c'), ('sr-c', 'base-c'),
+               ('r-a', 's-a'), ('sr-a', 's-a'), ('sr-a', 'r-a'),
+               ('r-c', 's-c'), ('sr-c', 's-c'), ('sr-c', 'r-c')]
+STEER_IDENTICAL = {2, 5, 8, 11}
+
+
+def steer_verdict(statistics, gates):
+    """Q12-policy-pinned S-only qualification; R/SR never become fallbacks."""
+    incomplete = dict(state='INCOMPLETE', reason='required STEER evidence invalid; no substitute verdict',
+                      production_changed=False)
+    if statistics.get('state') == 'PENDING_OWNER_Q12':
+        return dict(state='PENDING_OWNER_Q12', production_changed=False)
+    if statistics.get('schema') != 'steer-statistics-v1':
+        return incomplete
+    if statistics.get('alias_policy') == 'e34-strict-b-v1':
+        return dict(state='INCOMPLETE', scope='DIAGNOSTIC_ONLY',
+                    reason='E34 strict completeness: known identical comparisons are incomplete',
+                    production_changed=False)
+    if (statistics.get('alias_policy') != 'q12-a-v1'
+            or statistics.get('state') != 'COMPLETE_FOR_S'
+            or statistics.get('eligibility_margin') != .0065
+            or statistics.get('resamples') != 10000 or statistics.get('level') != .95
+            or statistics.get('percentile') != 'Hyndman-Fan type 7'):
+        return incomplete
+    tests, reject = statistics.get('tests', []), statistics.get('holm_reject', [])
+    if len(tests) != 12 or len(reject) != 12 or any(type(x) is not bool for x in reject):
+        return incomplete
+    for i, (test, pair) in enumerate(zip(tests, STEER_PAIRS, strict=True), 1):
+        if (test.get('test'), test.get('arm'), test.get('control')) != (i, *pair):
+            return incomplete
+        expected = 'IDENTICAL_BY_CONSTRUCTION' if i in STEER_IDENTICAL else 'COMPLETE'
+        if test.get('state') != expected:
+            return incomplete
+        if i in STEER_IDENTICAL and (test.get('p', {}).get('decision') != 1 or reject[i-1]):
+            return incomplete
+    expected_models = {'base-a', 'base-c', 's-a', 's-c', 'r-a', 'r-c', 'sr-a', 'sr-c'}
+    if set(gates) != expected_models:
+        return incomplete
+    for measured in gates.values():
+        if set(measured) != set(GATE_KEYS):
+            return incomplete
+        if any(type(entry.get('pass_')) is not bool for entry in measured.values()):
+            return incomplete
+    for i in range(6):
+        t = tests[i]
+        if [d.get('dataset') for d in t.get('dataset_guards', [])] != ['kadid', 'tid2013', 'konfig', 'cid22_a25']:
+            return incomplete
+        if any(type(d.get('point_guard')) is not bool for d in t['dataset_guards']) or type(t.get('w2', {}).get('point_guard')) is not bool:
+            return incomplete
+    # The strict R W2 false result is expected, never waived by alias admission.
+    if any(tests[i]['w2']['point_guard'] for i in (1, 4)):
+        return incomplete
+    families = {}
+    for family, i in [('a', 0), ('c', 3)]:
+        arm, t = f's-{family}', tests[i]
+        failed = []
+        if not reject[i]:
+            failed.append('eligibility Holm')
+        failed.extend(f'dataset {d["dataset"]}' for d in t['dataset_guards'] if not d['point_guard'])
+        if not t['w2']['point_guard']:
+            failed.append('two-way W2 point guard')
+        failed.extend(name for name, entry in gates[arm].items() if not entry['pass_'])
+        families[family] = dict(eligible=not failed, failed=failed,
+                                incumbent=arm if not failed else f'base-{family}',
+                                meaning='enter full qualification only')
+    return dict(state='COMPLETE_FOR_S', families=families,
+                diagnostic_only=['r-a', 'sr-a', 'r-c', 'sr-c'], production_changed=False)

@@ -13,6 +13,7 @@ use std::process::ExitCode;
 use zenstats::resample::{BootstrapConfig, Design, Draw, Interval, cluster_bootstrap};
 
 mod reports;
+mod steer;
 
 // Owner D13, saved 2026-10-15 08:42 MDT; both model families.
 const ELIGIBILITY_MARGIN: f64 = 0.0065;
@@ -20,8 +21,10 @@ const ELIGIBILITY_MARGIN: f64 = 0.0065;
 const DATASETS: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 #[derive(Parser)]
 struct Cli {
-    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check"])]
+    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check"])]
     mode: String,
+    #[arg(long)]
+    registration: Option<PathBuf>,
     #[arg(long)]
     input: PathBuf,
     #[arg(long)]
@@ -89,14 +92,14 @@ fn seed_parity(bytes: &[u8]) -> Result<Value> {
         json!({"signed":stat,"t":t,"df":9,"p_one_sided":zenstats::student_t_upper_tail(t,9.)});
     Ok(out)
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Input {
     schema: String,
     datasets: Vec<Dataset>,
     tests: Vec<Test>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Dataset {
     name: String,
@@ -107,7 +110,7 @@ struct Dataset {
     orientation: f64,
     predictions: BTreeMap<String, Vec<Vec<f64>>>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Test {
     index: u64,
@@ -159,6 +162,9 @@ impl Input {
                 "registered nine-test order"
             );
         }
+        self.validate_rows()
+    }
+    fn validate_rows(&self) -> Result<()> {
         for d in &self.datasets {
             let n = d.target.len();
             ensure!(
@@ -559,6 +565,9 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
 }
 fn run(cli: Cli) -> Result<()> {
     ensure!(!cli.output.exists(), "fresh output required");
+    if cli.mode.starts_with("steer-") {
+        return steer::run(cli);
+    }
     let bytes = fs::read(&cli.input)?;
     let mut result = if cli.mode == "pack-check" {
         reports::packs(&bytes)?
