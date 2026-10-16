@@ -324,7 +324,7 @@ def render():
         '[launch bindings](e34_frozen_launch_2026-10-15.json); '
         '[machine-readable readout](e34_results_2026-10-15.json).', '']
     for family, row in doc['verdict']['families'].items():
-        lines.append(f'**Family {family.upper()}: {row["incumbent"]}.**')
+        lines += [f'**Family {family.upper()}: {row["incumbent"]}.**', '']
         for arm, result in row['arms'].items():
             lines.append(f'- {arm}: '+('eligible' if result['eligible'] else 'ineligible — '+', '.join(result['failed'])))
         lines.append('')
@@ -537,6 +537,11 @@ def render():
         'source closure is still unrecovered, as disclosed before launch. No new source-provenance '
         'claim is made. No sealed labels, production profiles or default bakes were changed.', '',
         f'Registered falsification conjunction: **{doc["registered_falsification"]["holds"]}**. '
+        f'Components: no eligible arm = {doc["registered_falsification"]["none_eligible"]}; '
+        f'W/K miss seed 0 in both families = {doc["registered_falsification"]["w_k_both_families_seed0_miss"]}; '
+        f'L-A seed 0 passes = {doc["registered_falsification"]["l_a_seed0_pass"]}; '
+        f'L-A fails formal §4.2 = {doc["registered_falsification"]["l_a_eligibility_section42_fails"]} '
+        f'(Holm failure alone = {doc["registered_falsification"]["l_a_eligibility_holm_fails"]}). '
         'This conjunction concerns the tested W/K/L training choices and does not prove that '
         'every model in the class must fail.', '',
         f'Full machine-readable evidence on dev: `{full}`; SHA-256 `{sha(full)}`. '
