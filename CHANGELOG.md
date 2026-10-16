@@ -58,6 +58,9 @@
 
 ### Added
 
+- Neutral registered palette pairing, subjective admission, scoped rank ties, source-family LOSO cells, D1 owner parity and conditional three-seed reports (`cb6a4f35`, `da4f062b`, `c3914f0f`, `9ae1e273`, `8ce79ac6`, `69dce779`, `58b673fe`, `94910d01`). [Contracts](docs/SUBJECTIVE_TRAINING_LEG.md), [statistics](docs/REGISTERED_FACTORIAL_STATISTICS.md). No serving API change or data/fleet launch.
+
+
 - Add versioned STEER twelve-test statistics/pack inventory and registration-pinned Q12 alias policies, with S-only verdicts and unchanged E34 entry points.
 
 

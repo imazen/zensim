@@ -1395,6 +1395,15 @@ subjective-rank-check:
 subjective-loso-check:
     python3 -m unittest scripts/tests/test_subjective_loso.py scripts/tests/test_palette_training_pairs.py
 
+# Invented-data qualification only; no job executor or corpus discovery.
+registered-implementation-check:
+    just palette-pairs-check
+    just subjective-rank-check
+    just subjective-loso-check
+    just registered-statistics-unit
+    just registered-loso-report-check
+    just registered-verdict-check
+
 registered-loso-report-check:
     cargo test --locked -p zensim-validate --bin registered_loso_report
     cargo clippy --locked -p zensim-validate --bin registered_loso_report -- -D warnings
