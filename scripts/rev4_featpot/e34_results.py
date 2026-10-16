@@ -243,6 +243,11 @@ def build():
     output['installed_integrity'] = dict(path=str(ROOT / 'installed-integrity-final.json'),
                                         sha256=sha(ROOT / 'installed-integrity-final.json'),
                                         cells=integrity['cells'], files=integrity['files'], unchanged=True)
+    ci = read(ROOT / 'source-ci.json')
+    assert ci['conclusion'] == 'success' and len(ci['jobs']) == 19
+    assert all(job['conclusion'] == 'success' for job in ci['jobs'])
+    output['source_ci'] = dict(path=str(ROOT / 'source-ci.json'),sha256=sha(ROOT / 'source-ci.json'),
+                              commit=ci['headSha'],url=ci['url'],jobs=19,conclusion='success')
     runtime_host = read(ROOT / 'runtime-host.json')
     assert runtime_host['host'] == 'r7900x' and runtime_host['transfer_verified']
     assert runtime_host['payload_sha256']['evaluation/bin/costcmp-instrument'] == sha(ROOT / 'bin/costcmp-instrument')
@@ -505,6 +510,10 @@ def render():
         summary = receipt['summary'].replace('|', r'\|')
         lines.append(f'| {name} | `{summary}` |')
     lines += ['', '## Audit and limits', '',
+        f'[Source CI]({doc["source_ci"]["url"]}) passed all {doc["source_ci"]["jobs"]} jobs '
+        f'at `{doc["source_ci"]["commit"]}`. Later changes concern the Python result adapter '
+        'and reporting; Rust sources were unchanged. Final adapter execution and local checks '
+        'validate the generated readout.', '',
         f'All 305/305 installed cells across 18 jobsets were inventoried before the exposure entry '
         'was pushed (`02cba876`), before label access. The selected K pilot was reused as full-data '
         'seed 0; A chose λ = 1 and C chose λ = 10 from dev96, before this evaluation. '
