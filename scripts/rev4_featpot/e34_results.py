@@ -278,13 +278,14 @@ def render():
         'The Student interval uses corrected SE and df 9 for pooled tests. Decision p is '
         'max(bootstrap one-sided p, Student one-sided p); Holm covers exactly nine tests at α = .05. '
         'Table intervals are on Δ (the margin is subtracted from the eligibility owner’s θ intervals).', '',
-        '| # | Arm − control | Δ [percentile 95%]; Student 95% | p bootstrap | p Student | p decision | p Holm | Reject |',
-        '|---|---|---|---:|---:|---:|---:|---|']
+        '| # | Arm − control | Δ [percentile 95%]; Student 95% | p bootstrap | p Student | p decision | p Holm | Reject | Mean ≥ −0.002 (report-only) |',
+        '|---|---|---|---:|---:|---:|---:|---|---|']
     compact_tests = []
     for i,t in enumerate(stats['tests']):
         lines.append(f'| {t["test"]} | {t["arm"]} − {t["control"]} | {interval(t["theta"], t["margin"])} '
             f'| {t["p"]["bootstrap"]:.6g} | {t["p"]["student"]:.6g} | {t["p"]["decision"]:.6g} '
-            f'| {stats["holm_adjusted"][i]:.6g} | {stats["holm_reject"][i]} |')
+            f'| {stats["holm_adjusted"][i]:.6g} | {stats["holm_reject"][i]} '
+            f'| {t["e33_mean_point_guard"] if i < 5 else "—"} |')
         compact_tests.append({k:t[k] for k in ['test','arm','control','margin','state','theta','p',
             'seed','seed_unit','reference_only','reference_only_seed','dataset_guards','w2',
             'e33_mean_point_guard','improvement_point_guard']})
