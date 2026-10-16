@@ -22,6 +22,15 @@ peergates-run binary mode input output:
 peergates-report:
     python3 scripts/rev4_featpot/peergates.py steering-report
 
+peergates-failures:
+    python3 scripts/rev4_featpot/peergates.py failure-report
+
+peergates-archive:
+    python3 scripts/rev4_featpot/peergates.py archive
+
+peergates-validate:
+    python3 scripts/rev4_featpot/peergates.py validate
+
 peergates-peer-tables grid:
     python3 scripts/rev4_featpot/peergates.py peer-tables --grid {{quote(grid)}}
 
@@ -30,6 +39,16 @@ peergates-landed:
 
 peergates-watch:
     python3 scripts/rev4_featpot/peergates.py watch
+
+peergates-repair-transport:
+    python3 scripts/rev4_featpot/peergates.py repair-transport
+
+peergates-cvvdp mode grid="standard":
+    python3 scripts/rev4_featpot/peergates_cvvdp.py {{quote(mode)}} --grid {{quote(grid)}}
+
+# Run under the caller's shared heavy.lock and run-heavy wrapper.
+peergates-cvvdp-score grid:
+    env RAYON_NUM_THREADS=1 /var/tmp/paper-cvvdp/bin/zenmetrics batch --metric cvvdp --display-model standard_fhd --bench-on-start no --use-legacy-scheduler --pairs /mnt/v/output/zensim/peergates-2026-10-16/cvvdp/{{grid}}-pairs.tsv --output /mnt/v/output/zensim/peergates-2026-10-16/cvvdp/{{grid}}-scores.tsv --jobs 4 --group-by-ref
 
 # Existing trainer Parquet loaders on the pinned 699,999-row Float32 table.
 # Run the study recipe under run-heavy; its output directory must be new.

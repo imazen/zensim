@@ -21,3 +21,13 @@ The frozen plan and evidence pins accompany the dated benchmark report.
 Throughput logs are not quiet-gated timing evidence. The separate native
 codec intervention harness needs an external-map interface before these
 maps can enter its bitrate gate.
+
+`peergates-cvvdp pipeline` verifies the retained CVVDP-FHD executable against
+stored scores, restores absent engineering PNGs from their existing mirror
+with exact hashes, verifies every input, and scores identity/negative/standard
+panels sequentially. It reuses the fully bound ladder table, applies the
+predeclared `10*JOD` mapping, and invokes `bake_verdict` with no human corpora
+and explicit empty human/integrity roots. Run it inside the same heavy lock
+and memory scope. Each stage rejects incomplete coverage and retains its
+inputs, outputs, commands and logs. `peergates-failures` renders the retained
+per-case steering failures and engineering source identities.
