@@ -1329,6 +1329,9 @@ e34-eval-runtime arm mode:
 e34-eval-runtime-r7900x arm mode:
     ssh -o BatchMode=yes -o ConnectTimeout=10 r7900x '~/work/claudehints/scripts/run-heavy --mem 16G --jobs 1 -- python3 ~/tmp/e34-runtime-codex-20261015/source/scripts/rev4_featpot/e34_runtime.py {{mode}} --arm {{arm}} --root /home/lilith/tmp/e34-runtime-codex-20261015/evaluation --binary /home/lilith/tmp/e34-runtime-codex-20261015/evaluation/bin/costcmp-instrument --analyzer /home/lilith/tmp/e34-runtime-codex-20261015/evaluation/bin/paired-rounds-analyzer'
 
+e34-eval-reports-r7900x:
+    ssh -o BatchMode=yes -o ConnectTimeout=10 r7900x '~/work/claudehints/scripts/run-heavy --mem 16G --jobs 20 -- ~/tmp/e34-runtime-codex-20261015/evaluation/bin/panel-reports e34 reports --input /home/lilith/tmp/e34-runtime-codex-20261015/evaluation/report-input-r7900x.json --output /home/lilith/tmp/e34-runtime-codex-20261015/evaluation/reports.json'
+
 # Reproduce the E34 CI failures on a chosen source revision.
 cifix-e34-targets:
     cargo test -p zensim -p zensim-validate --no-fail-fast --test featcanon_rev4_contract --test featcanon_tier_parity --test palette_legacy_vectors --test bake_surface -- --nocapture

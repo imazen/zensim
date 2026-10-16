@@ -2128,3 +2128,13 @@ numeric thresholds. Native panel and statistical calculations stay on dev.
 Runtime costs apply to r7900x; no dev/Zen5 runtime measurement is claimed.
 The owner directive, machine observation and transfer hashes are recorded in
 `/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/runtime-host.json`.
+
+Subsequent execution placement: after runtime collection, the independent
+report-only bootstrap runs on the now-idle r7900x, while the primary nine-test
+calculation and native panel work remain on dev. The same preserved report
+binary reads identical numerical inputs; only the paired-data file locator is
+relocated. The original and executed JSON are checked equal after removing
+that locator, and both file hashes, the paired payload hash, helper pin,
+series order and unchanged B = 10,000 are recorded in
+`/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/reports-execution.json`.
+This changes execution placement, not a calculation, gate or verdict rule.

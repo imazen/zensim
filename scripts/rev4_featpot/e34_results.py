@@ -154,7 +154,16 @@ def build():
     assert all(t['state']=='COMPLETE' for t in stats['tests']), 'registered hypothesis incomplete'
     validate_statistical_reports(stats)
     report = read(ROOT / 'reports.json')
-    assert report['input_sha256'] == sha(ROOT / 'report-input.json')
+    report_execution = read(ROOT / 'reports-execution.json')
+    original_report = read(ROOT / 'report-input.json')
+    executed_report = read(ROOT / 'report-input-r7900x.json')
+    assert report_execution['original_input_sha256'] == sha(ROOT / 'report-input.json')
+    assert report['input_sha256'] == report_execution['executed_input_sha256'] == sha(ROOT / 'report-input-r7900x.json')
+    original_report.pop('paired_input')
+    executed_report.pop('paired_input')
+    assert original_report == executed_report, 'only the paired-file locator may change during relocation'
+    assert original_report['paired_sha256'] == sha(ROOT / 'panel-input.json')
+    assert report_execution['binary_sha256'] == sha(ROOT / 'bin/panel-reports')
     models = read(ROOT / 'full-models.json')
     for r in models.values():
         assert sha(r['path']) == r['sha256']
@@ -240,6 +249,7 @@ def build():
     output['provenance'] = dict(statistics_binding=binding,
         runtime_host=runtime_host,
         report_binary_sha256=sha(ROOT / 'bin/panel-reports'),
+        descriptive_execution=report_execution,
         runtime_build=read(ROOT / 'runtime-build.json'),
         p3_instrument=read(ROOT / 'bin/p3-instrument.artifact.json'),
         p3_build_sources=read(ROOT / 'p3-build-sources.json'),
@@ -492,8 +502,12 @@ def render():
         'The first primary statistical attempt was interrupted before any result file was written; '
         'no p-values were read from it. The complete nine-test calculation was recomputed from the same captured input '
         'with the same preserved D13 binary and draw seeds; only thread count/memory scheduling '
-        'changed. All native gates, builds and statistical jobs were serialized under run-heavy. '
+        'changed. Heavy jobs were serialized per host under run-heavy. '
         'Raw outputs and interrupted logs are preserved.', '',
+        'After runtime collection, the same preserved report binary computed the independent '
+        'descriptive intervals on r7900x. The paired-data file locator was relocated; all numerical '
+        'inputs, model panels, thresholds, series order, helper pin and draw seeds were unchanged '
+        'and checked for equality. The primary nine-test calculation remained on dev.', '',
         'The first NearID dispatch was refused by the canonical owner’s alphanumeric label '
         'grammar before any model/packet read or scored row. An injective artifact-label mapping '
         'then ran the same seven seed-0 models through the unchanged owner and gates; the '
