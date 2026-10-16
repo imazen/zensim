@@ -1378,3 +1378,8 @@ steer-exact-check:
     cargo fmt -p zensim --check
     cargo clippy -p zensim --lib --features custom-profiles -- -D warnings
     cargo test -p zensim --lib --features custom-profiles
+
+# Synthetic palette capture admission; no datasets or binaries opened.
+palette-pairs-check:
+    python3 -m unittest scripts/tests/test_palette_training_pairs.py
+
