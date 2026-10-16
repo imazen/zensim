@@ -1,4 +1,44 @@
+addrfix-test target:
+    TMPDIR="$HOME/tmp" cargo test --locked -p zensim-validate --bin panel panel_e34:: --target-dir {{quote(target)}}
+
+addrfix-rank-resume:
+    python3 scripts/rev4_featpot/addrfix.py rank-score-resume
+
+addrfix-rank-score:
+    python3 scripts/rev4_featpot/addrfix.py rank-score
+
 # zensim dev commands
+
+addrfix-cost-report binary:
+    python3 scripts/rev4_featpot/addrfix.py cost-report --binary {{quote(binary)}}
+
+addrfix-cost-payload:
+    python3 scripts/rev4_featpot/addrfix.py cost-payload
+
+addrfix-cost mode root model:
+    python3 scripts/rev4_featpot/addrfix_cost.py {{quote(mode)}} --root {{quote(root)}} --model {{quote(model)}}
+
+# Caller supplies the shared heavy.lock and run-heavy scope.
+addrfix-owner mode binary trace="":
+    python3 scripts/rev4_featpot/addrfix.py {{quote(mode)}} --binary {{quote(binary)}} {{trace}}
+
+addrfix-rank-pairs:
+    python3 scripts/rev4_featpot/addrfix.py rank-pairs
+
+addrfix-clippy target:
+    TMPDIR="$HOME/tmp" cargo clippy --locked -p zensim-validate --bin bake_verdict --bin panel --target-dir {{quote(target)}} -- -D warnings
+
+addrfix-build target:
+    TMPDIR="$HOME/tmp" cargo build --release --locked -p zensim-validate --bin bake_verdict --bin panel --target-dir {{quote(target)}}
+
+addrfix-bench-lock:
+    TMPDIR="$HOME/tmp" cargo generate-lockfile --manifest-path zensim-bench/addrfix-runtime/Cargo.toml
+
+addrfix-bench-build target:
+    TMPDIR="$HOME/tmp" cargo build --release --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --bench ssim2_speed_bar --target-dir {{quote(target)}} --message-format=json
+
+addrfix-bench-clippy target:
+    TMPDIR="$HOME/tmp" cargo clippy --release --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --bench ssim2_speed_bar --target-dir {{quote(target)}} -- -D warnings
 
 # Caller supplies shared heavy.lock and run-heavy for builds and scoring.
 peergates-build target:
@@ -1545,3 +1585,9 @@ steer-freeze2-build:
 
 steer-freeze2-runtime-build:
     cargo bench --manifest-path zensim-bench/e34-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp --no-run --message-format=json-render-diagnostics > "$HOME/tmp/zensim-paper/rev4/steer-freeze2-runtime-build.jsonl"
+
+addrfix-peer-evaluate binary input output:
+    {{quote(binary)}} e34 peer-compare --input {{quote(input)}} --output {{quote(output)}}
+
+addrfix-map-evaluate binary input output:
+    {{quote(binary)}} e34 map-cost --input {{quote(input)}} --output {{quote(output)}}
