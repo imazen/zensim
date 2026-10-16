@@ -1,5 +1,43 @@
 # DATA_SPLITS.md — canonical train/val/test conventions (locked 2026-07-02)
 
+## D4 amendment — twelve labelled IQA collections (2026-10-16)
+
+**Approved by the owner on 2026-10-16.** Licensing alone does not exclude a collection. The roles below reserve purposes; they do not authorize
+label access, fitting, a new evaluation read, or a change to an existing seal.
+Every original photograph and all its crops, modalities, resizes and encodes inherit
+its existing source-family restrictions. No collection below is proposed as TRAIN.
+
+| Collection | Proposed role | Evidence and conditions |
+|---|---|---|
+| [JND-MID-MA](https://data.mendeley.com/datasets/537w5jhb7s/1) (`jnd-mid-ma`) | calibration anchor | CC BY 4.0; first-detection thresholds for 35 scenes in colour, grayscale and infrared (105 references). Group the three modalities by scene. Keep JPEG quality factor, BPG quantizer and modality explicit; these are not one common numerical JND target. |
+| [CLIC 2024 perceptual image](https://archive.compression.cc/datasets/) (`clic-2024-perceptual-image`) | excluded | 2AFC on reference crops; CC BY-SA (Unsplash and Pexels sources). Excluded until source overlap is cleared: shared source content with SafeSyn TRAIN is visually confirmed, and the remaining near-duplicate hash flags and the crop-to-original mapping are not yet resolved. |
+| [CLIC 2022 perceptual](https://archive.compression.cc/datasets/) (`clic-2022-perceptual`) | excluded | 2AFC; CC BY-SA (Unsplash sources). Excluded until source overlap is cleared: crop-to-original mapping is incomplete and near-duplicate hash flags are unresolved. Preserve the native test tag and the reused CLIC 2021 validation family; no independence claim from the year or crop identifier. |
+| [CLIC 2021 perceptual](https://archive.compression.cc/datasets/) (`clic-2021-perceptual`) | excluded | 2AFC; CC BY-SA (Unsplash sources). Excluded until source overlap is cleared. Preserve native validation/test tags. The 3,855 reference crops are not 3,855 independent original photographs; source-family clearance remains incomplete. |
+| [CIQA](https://github.com/google-research/google-research/tree/master/CIQA) (`ciqa-google`) | excluded | 2AFC on JPEG encodes of AVA photographs; each label row names its AVA reference ID. Excluded until the source audit runs: the stimuli must be reproduced from AVA with the original TensorFlow JPEG encoder, and the AVA references are not yet overlap-checked. |
+| [mucped23](https://github.com/google-research/google-research/tree/master/mucped23) | validation | Image terms CC BY-SA 4.0, repository Apache-2.0; 2AFC. All 49 references exactly match CID22 gold references in decoded RGB8. Never TRAIN; inherits CID22 restrictions and exposures, and supplies no fresh content-disjoint holdout. |
+| [MIDD-CAP](https://norishigefukushima.github.io/iqanearlossless/) (`midd-cap`) | validation | Absolute binary detection judgments; repository BSD-3-Clause, archive image/data scope needs confirmation. All 24 original-photo families also occur in TID2013; 168 full/patch references inherit those families. Source-exposed diagnostic only. |
+| [MIDD-GAR](https://norishigefukushima.github.io/iqanearlossless/) (`midd-gar`) | validation | Grayscale visibility/identification judgments; repository BSD-3-Clause, archive scope needs confirmation. All ten photo families also occur in TID2013. Magnification, grayscale conversion and new codecs do not create independent sources. Source-exposed diagnostic only. |
+| [NNCD-IQA](https://github.com/zakopz/NNCD-IQA-Database) (`nncd-iqa`) | validation | MOS. All 16 reference-photo families also occur in TID2013; 13 visually match LIVE references. Source-exposed diagnostic only: modern codec stimuli do not establish fresh source content, so no independent-validation claim. |
+| [Fidelity LIC, VCIP 2023](https://github.com/shimamohammadi/vcip2023) (`fidelity-lic-vcip2023`) | validation | Preference judgments allowing ties; repository MIT, image/data scope requires confirmation. At least four of the 50 held references share existing protected source families. Preserve their restrictions; diagnostic only, with no collection-wide independence claim. Labelled-subset membership was not read. |
+| [VLIC Cambridge](https://doi.org/10.17863/CAM.60354) (`vlic-cambridge`) | calibration anchor | CC BY 4.0; visually-lossless thresholds for 20 scenes under four viewing conditions. Keep JPEG/WebP quality-factor axes and viewing conditions explicit; the two codecs use different scene halves. |
+| [FlickerVidSet](https://database.mmsp-kn.de/flickervidset-database.html) (`flickervidset`) | excluded | Research-community access with citation; temporal JND/SUR and flicker/plain comparisons. Reference videos were not decoded in this source-image audit. A compatible imazen video decoder and a declared temporal comparison protocol are prerequisites. |
+
+Validation here means a reserved diagnostic purpose under the existing read and
+exposure rules. It grants no exception for a sealed or TERMINAL source family;
+source-exposed results cannot qualify a model as independently validated. Any
+future read must have its input/model freeze and exposure receipt registered first.
+Calibration anchors cannot independently validate a map fitted on those anchors.
+Source-clearance gates remain closed where stated.
+
+The source-only screen used SHA-256 of packed decoded RGB8 (equal dimensions
+required) and a 64-bit horizontal difference hash after Lanczos resampling of
+encoded luma to 9×8, with Hamming distance ≤10 as a candidate threshold. Confirmed
+matches were visually inspected. This threshold misses cropped source families:
+MIDD/TID matches were found by direct source-photo comparison outside the threshold.
+Unresolved and unreviewed flags, unavailable sources, HDR normalization and temporal
+sampling prevent a blanket independence claim. No label payload was opened, and
+no existing sealed, TERMINAL or holdout assignment is moved by this proposal.
+
 ## September 14 clarification: test evaluation when no eval split exists
 
 The user's later clarification supersedes the September 13 blanket ban:
