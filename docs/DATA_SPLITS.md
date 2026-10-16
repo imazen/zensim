@@ -2215,3 +2215,32 @@ See the [registered readout](../benchmarks/e34_results_2026-10-15.md),
 [machine-readable summary](../benchmarks/e34_results_2026-10-15.json).
 Complete evidence: `/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/result.json`,
 SHA-256 `2e18629bbc3014b11cc72a42ebf42b46669246162a5cf3d2fb2e228238c48b1b`.
+
+## ADDRFIX matched-reference exploratory assessment — 2026-10-16
+
+The owner authorised matching CVVDP-FHD to the existing E33 withheld-source
+research panels, with target access confined to the registered evaluation
+owner. Exact populations: KADID7869 rows/65 nonterminal references,
+TID2013 3000/25, KonFiG756/7 physical references (part views co-clustered),
+and CID22-A25 2192/25. All are previously exposed exploratory populations;
+no protected confirmation or terminal source is admitted. No new fitting
+or production qualification follows from this comparison.
+
+The opaque E33 capture is the already admitted E34 part5 `noise-input.json`,
+SHA256 `45e5f49dd329eee4bfb7751fe43b5dd70e548094a89b0af5dfdfd31828dd2eda`.
+It retains the original ten-seed A/C predictions, exact targets and physical
+row identities, including repeated image-pair keys. Only the evaluation
+owner opens its payload. The transport reads label-free keys and admitted
+pixel-bank metadata; it preserves every physical observation and joins
+pixels by `(member_set,pair_key)`, not by a bank-row interpretation of
+`source_row_id`.
+
+Reference: retained CPU CVVDP executable `ca154a6a`, `standard_fhd`;
+1920x1080,24inch,0.6m,200nit,250lux. Same pair files for both candidates and
+reference. `panel e34 peer-compare` reuses the E34 paired source-reference ×
+shared-seed statistic,10000 draws,seed20261016,95% type7 intervals. Report
+signed SROCC per dataset, equal-four-source mean and paired differences.
+The single CVVDP prediction vector repeats across the ten candidate-seed
+slots; it is not ten independently fitted references. Intervals remain
+exploratory/descriptive, especially for small reference counts. Confirmatory
+content guards and multiplicity requirements are not satisfied by this read.
