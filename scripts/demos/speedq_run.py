@@ -114,7 +114,7 @@ def worker_revision(name):
         revision = name.removeprefix('by_v2fy_r').split('_')[0]
         assert revision in ('3', '4', '5'), 'unknown formula revision'
         return int(revision)
-    if name.startswith('e33_'):  # E33 registered candidates are Rev5 bakes
+    if name.startswith(('e33_', 'e34_')):  # Registered candidate bakes use Rev5.
         return 5
     return 1
 
@@ -293,7 +293,7 @@ def run_segment(binary, root, geometry, tier, threads, rounds, parity, analyzer,
                     'rounds':rounds,'round_cap':64,'round_rule':CLEAN_ROUND_RULE,
                     'arms':arms,'worker_pids':[p.pid for p in owners],
                     'gate_trace':'ZENBENCH_GATE_TRACE' in env,
-                    'model_source_sha256':SOURCE_SHA,
+                    'model_source_sha256':worker_info[baseline]['model']['source_sha256'],
                     'binary_sha256':hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
             if worker_binaries:
                 header['worker_binary_sha256']={name:hashlib.sha256(Path(worker_binaries.get(name,binary)).read_bytes()).hexdigest() for name in arms}

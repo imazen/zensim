@@ -15,6 +15,61 @@ pub(super) fn action(
     h: usize,
 ) -> Option<(Action, Value)> {
     match arm {
+        "e34_control" | "e34_candidate" | "e34_candidate_map" | "e34_candidate_baseline" => {
+            // E34's registered widths are explicit caller bindings. Keep the E33
+            // H128 admission below unchanged; all E34 measurements use these
+            // same serving surfaces and SPEEDQ's existing paired-round owner.
+            let label = if arm == "e34_control" {
+                "CONTROL"
+            } else {
+                "CANDIDATE"
+            };
+            let path =
+                std::env::var(format!("ZEN_S2_E34_BAKE_{label}")).expect("pinned E34 model path");
+            let expected =
+                std::env::var(format!("ZEN_S2_E34_SHA_{label}")).expect("pinned E34 model SHA");
+            let hidden: usize = std::env::var(format!("ZEN_S2_E34_HIDDEN_{label}"))
+                .expect("registered E34 hidden width")
+                .parse()
+                .unwrap();
+            assert!(matches!(hidden, 1 | 32 | 128), "registered E34 widths");
+            let bytes = std::fs::read(path).unwrap();
+            assert_eq!(super::digest(&bytes), expected, "E34 model bytes changed");
+            assert_eq!(std::env::var("ZENSIM_FORMULA_REV").unwrap(), "5");
+            let model: &'static Model = Box::leak(Box::new(Model::from_bytes(&bytes).unwrap()));
+            assert_eq!(model.layers().next().unwrap().out_dim, hidden);
+            assert_eq!(model.n_outputs(), 1);
+            let scorer: &'static mut zensim::BakeScorer<'static> = Box::leak(Box::new(
+                zensim::BakeScorer::new(model).unwrap().with_parallel(true),
+            ));
+            let info = json!({"source_sha256":expected,"revision":"5","hidden":hidden,
+                "n_inputs":model.n_inputs(),"source_bytes":bytes.len(),"map_bin":1,
+                "surface":arm});
+            let source: &'static RgbSlice<'static> = Box::leak(Box::new(RgbSlice::new(src, w, h)));
+            let action: Action = match arm {
+                "e34_candidate_baseline" => Box::new(move || {
+                    std::hint::black_box(&scorer);
+                    0.0
+                }),
+                "e34_candidate_map" => {
+                    let mut session = scorer.prepare_steering(source, 1).unwrap();
+                    Box::new(move || {
+                        session
+                            .compute(&RgbSlice::new(dst, w, h), None)
+                            .unwrap()
+                            .result()
+                            .score()
+                    })
+                }
+                _ => Box::new(move || {
+                    scorer
+                        .compute(source, &RgbSlice::new(dst, w, h), None)
+                        .unwrap()
+                        .score()
+                }),
+            };
+            Some((action, info))
+        }
         "zensim_A" | "zensim_B" | "zensim_D" => {
             // These are the exact slots named by profile.rs and serving.rs.
             // Pin their bytes as metadata; scoring still calls Zensim::compute.
