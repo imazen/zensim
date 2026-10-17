@@ -1955,3 +1955,6 @@ shipgates-verified-reuse-snapshot root sources output:
 
 shipgates-verified-reuse-check:
     python3 -B -m unittest scripts/tests/test_shipgates_verified_reuse.py
+
+shipgates-verified-reuse-replay snapshot binary oracle output:
+    python3 scripts/rev4_featpot/shipgates_verified_reuse.py --replay-snapshot {{quote(snapshot)}} --binary {{quote(binary)}} --oracle-source {{quote(oracle)}} --output {{quote(output)}}

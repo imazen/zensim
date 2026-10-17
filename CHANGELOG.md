@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Bind RD judge reference-pixel hashes to the independently admitted source pixels and retain reproducible certified-packet replay.
+
 - Reuse completed fixed-judge packets through hash-bound pixel/map certificates, rehashing physical maps and preserving explicit verification provenance without rescoring.
 
 - Correct the ship-gate photo cohort with reviewed game-render annotations and three approved additional photographs; preserve original measurements and require explicit hash-bound source counts.

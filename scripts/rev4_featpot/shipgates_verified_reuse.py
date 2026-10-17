@@ -65,11 +65,32 @@ def restore(entry, packet_root, binary_sha, oracle_sha, destination, pairs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, action="append", required=True)
-    parser.add_argument("--sources", type=int, required=True)
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--root", type=Path, action="append")
+    modes.add_argument("--replay-snapshot", type=Path)
+    parser.add_argument("--sources", type=int)
+    parser.add_argument("--binary", type=Path)
+    parser.add_argument("--oracle-source", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    snapshot(args.root, args.sources, args.output)
+    if args.root:
+        assert args.sources is not None
+        snapshot(args.root, args.sources, args.output)
+    else:
+        assert args.binary is not None and args.oracle_source is not None
+        args.output.mkdir(parents=True, exist_ok=False)
+        data=json.loads(args.replay_snapshot.read_text())
+        assert data['schema']=='shipgates-verified-judge-reuse-v1'
+        assert data['source_count']==len(data['sources'])
+        pairs=0
+        for entry in data['sources']:
+            receipt=json.loads(Path(entry['receipt']).read_text())
+            restore(entry,Path(receipt['path']),sha(args.binary),sha(args.oracle_source),
+                    args.output/f"source-{entry['source_id']:02d}-MAP_ORACLE.json",receipt['pairs'])
+            pairs+=receipt['pairs']
+        write(args.output/'VERIFIED.json',dict(source_count=data['source_count'],pairs=pairs,
+            snapshot_sha256=sha(args.replay_snapshot),reuse_owner_sha256=sha(__file__),
+            scope='real retained packet/map certificate replay; no new metric computation'))
 
 
 if __name__ == "__main__":

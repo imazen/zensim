@@ -1223,6 +1223,19 @@ def shipgates_rd_main():
     manifest = json.loads(args.sources.read_text())
     assert digest(args.sources) == design["source_manifest_sha256"]
     sources = {s["name"]:s for s in manifest["sources"]}
+    admission_path=args.sources.parent/"ADMISSION.json"
+    admission=json.loads(admission_path.read_text())
+    assert admission["source_manifest_sha256"]==digest(args.sources)
+    assert digest(Path(admission["receipt"]))==admission["receipt_sha256"]
+    admitted=json.loads(Path(admission["receipt"]).read_text())
+    assert admitted["sources"]==admission["sources"]==len(sources)==len(admitted["receipts"])
+    assert admitted["all_original_rgb_bytes_preserved"] and admitted["no_experiment_inputs_replaced"]
+    admitted_pixels={}
+    for record in admitted["receipts"]:
+        source=record["source"]
+        assert source==sources[source["name"]] and digest(Path(source["path"]))==source["sha256"]
+        admitted_pixels[source["name"]]=record["source_rgb_sha256"]
+    assert set(admitted_pixels)==set(sources)
     judge_binding = validate_shipgates_judge_binding(args.judge_dir,root/"DESIGN.json",args.judge_pin,len(sources))
     models = list(design["models"])
     native_codec = design.get("schema") == "shipgates-codec-native-rd-v1"
@@ -1290,6 +1303,7 @@ def shipgates_rd_main():
         assert case_id in by_case and case_id not in lookup
         case = by_case[case_id]
         assert (row["ref_path"],row["dist_path"]) == (case["reference"],case["decoded"])
+        assert row["reference_pixels_sha256"]==admitted_pixels[case["source"]], "judge reference differs from admitted source pixels"
         for metric in requested:
             col,_ = columns[metric]
             assert isinstance(row[col],(int,float)) and math.isfinite(row[col])
@@ -1380,6 +1394,7 @@ def shipgates_rd_main():
         sources=len(sources),cases=len(cases),per_source=observations,summary=summaries,numeric_gates=numeric_gates,
         source_manifest_sha256=digest(args.sources),judge_results_sha256=digest(args.judge_dir / "judges.jsonl"),
         judge_binding=judge_binding,panel_sha256=digest(args.panel),encoder_design_sha256=digest(root / "DESIGN.json"),
+        source_pixel_admission_sha256=digest(admission_path),
         status="REPORT_ONLY; final gate requires complete intervention evidence")
     (args.output / "RESULT.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     print(json.dumps({k:v for k,v in result.items() if k not in ["per_source","summary"]},indent=2))
