@@ -143,6 +143,10 @@ def declare(root,runtime,phase,name):
 
 
 def run(root,name,slots,hours=None,deadline=None):
+    handoff=root/'TOWER_PHASE_HANDOFF.json'
+    if handoff.exists() and json.loads(handoff.read_text())['run']==name:
+        from e36_phase_handoff import wait_and_harvest
+        return wait_and_harvest(root,name,deadline,handoff)
     out=root/'runs'/name;d=json.loads((out/'declaration.json').read_text());runtime=Path(d['runtime'])
     if sha(runtime)!=d['runtime_sha256']:raise ValueError('runtime changed')
     env=dict(os.environ,ZEN_RAM_BYTES=str(24*1024**3),ZEN_CHUNK_WALL_SEC='300',
@@ -333,7 +337,10 @@ def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
     except (SystemExit,TimeoutError) as exc:errors.append(str(exc))
     if qualify(root,mandatory,start,deadline):
         qualified='fallback'
-        if time.time()<deadline:
+        if (root/'TOWER_PHASE_HANDOFF.json').exists():
+            from e36_phase_handoff import wait_and_harvest
+            wait_and_harvest(root,extra,deadline,root/'TOWER_PHASE_HANDOFF.json')
+        elif time.time()<deadline:
             try:run(root,extra,plan['slots'],deadline=deadline)
             except (SystemExit,TimeoutError) as exc:errors.append(str(exc))
         # Completed native evidence is qualified by its original timestamps,

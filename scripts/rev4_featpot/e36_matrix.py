@@ -51,6 +51,10 @@ def admit(root,names):
                 raise ValueError('duplicate/incomplete/out-of-window native output')
             completed.add(view);output_hashes.append(item['sha256'])
     if completed!=expected[choice['qualified']]:raise ValueError('selected matrix has missing/swapped/extra declared views')
+    remote_evidence=[]
+    if choice['qualified']=='full' and (root/'TOWER_PHASE_HANDOFF.json').exists():
+        from e36_phase_handoff import admit_installed
+        remote_evidence=admit_installed(root,tp,plan)
     bind=lambda p:dict(path=str(p),sha256=sha(p))
     return dict(schema='e36-qualified-matrix-admission-v1',matrix=choice['qualified'],choice=bind(cp),plan=bind(pp),clock=bind(tp),
-        selected_runs=names,manifests=declarations,completed_views=len(completed),outputs=output_hashes,complete=True,budget_evidence=budget_evidence)
+        selected_runs=names,manifests=declarations,completed_views=len(completed),outputs=output_hashes,complete=True,budget_evidence=budget_evidence,remote_phase_evidence=remote_evidence)

@@ -90,6 +90,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
             for key in ['original','repaired']:add(pair[key]['path'])
     matrix_doc=json.loads((pools/'matrix-admission.json').read_text())
     for value in matrix_doc['manifests'].values():add(value['path'])
+    for value in matrix_doc.get('remote_phase_evidence',[]):add(value['path'])
     fit=pools/'fit';contract=copy.deepcopy(json.loads((fit/'contract.json').read_text()))
     if not contract['semantic_export'] or contract['fits_released'] is not False:raise ValueError('successful semantic export required before packet')
     contract.update(trainer_sha256=sha(trainer),base_filter_sha256=sha(mask),build_commit=commit)
