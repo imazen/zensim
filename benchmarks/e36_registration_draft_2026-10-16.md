@@ -625,3 +625,23 @@ Amendment SHA25648019e0e09d54137e0fe35ce06243db3d9f0c703d3fcf1a95054833c39213dc9
 effective budget SHA256f9172e051b2e91d6ce9da336df439b251ec5e2f1c452ebbbe729981b2db82b1e.
 The original whole-matrix completion/fallback rule still applies. Incomplete
 optional additions cannot be cherry-picked. No fit is authorized.
+
+## Bounded memory-smoke resource amendment (2026-10-17, before fitting)
+
+The separate diagnostic uses the full admitted TV pool and full-data tv10
+route,seed0,exact2epochs/128rank draws per epoch,and a900second native cap.
+It exports a raw epoch1 checkpoint classified local-smoke,without production
+packing,and cannot install as a scientific result. Initial diagnostic memory
+limit8GiB,two Rayon threads,v3 kernels; planned host i270. The final scientific
+program remains the frozen full-budget owner/source; the diagnostic program
+has its own program,argv,manifest and native checkpoint qualification.
+
+After actual native smoke verification,set each final-fit memory cap to
+measured maximum RSS plus max(50percent of that peak,512MiB),rounded upward
+to256MiB. This is a scheduling cap with a margin,not a measured full-run or
+aggregate-process memory bound. All matched scientific cells use two Rayon
+threads and v3. Pack slots by both live memory and CPU capacity: leave12GiB
+MemAvailable and at least eight logical CPUs on tower; leave8GiB and four
+logical CPUs on i265,i270,r3500. Use at most24 logical CPUs on tower. Recheck
+capacity after the coordinator drains STEER and before claims. The129 scientific
+cells remain unreleased until the coordinator's explicit go.

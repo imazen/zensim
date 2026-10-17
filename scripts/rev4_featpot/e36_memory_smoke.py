@@ -66,26 +66,29 @@ def prepare(root,packet,out,owner,commit):
     argv.extend(['--local-smoke-budget','2:128'])
     write(out/'smoke.spec.json',dict(program_sha=sha(out/'program.tar.gz'),data_sha=original['data.tar.gz'],cells=[cell]))
     subprocess.run([str(root/'bin/zenfleet-ctl'),'declare-fits','--spec',str(out/'smoke.spec.json'),'--out',str(out/'smoke.manifest.json')],check=True)
+    with (out/'native.ids.tsv').open('x') as stream:subprocess.run([str(root/'bin/zenfleet-ctl'),'ids','--manifest',str(out/'smoke.manifest.json')],stdout=stream,check=True)
     jobs=json.loads((out/'smoke.manifest.json').read_text())
     if len(jobs)!=1:raise ValueError('exact one-cell native diagnostic declaration required')
     from qualified_fit_contract import trusted_contract
     expected=trusted_contract(jobs[0]['kind'],out/'program.tar.gz',root/'bin/e36-fit-final/inspect_qualified_checkpoint')
     if expected['execution_contract']!='local-smoke' or [expected[k] for k in ['epochs','pairs_per_epoch','selected_epoch']]!=[2,128,1] or expected['route']!='production' or expected['seed_index']!=0 or expected['e36']['arm']!='tv10-c':raise ValueError('actual native smoke qualification differs')
     if {name:sha(packet/name) for name in original}!=original:raise ValueError('diagnostic preparation changed scientific artifacts')
-    receipt=dict(schema='e36-native-memory-smoke-preparation-v1',build_commit=commit,program=bind(out/'program.tar.gz'),data=bind(packet/'data.tar.gz'),spec=bind(out/'smoke.spec.json'),manifest=bind(out/'smoke.manifest.json'),scientific_parent=bind(packet/'program.tar.gz'),policy=SMOKE,native_execution_contract=expected['execution_contract'],numerical_trainer_unchanged=True,initial_memory_cap_bytes=8*1024**3,rayon_threads=2,planned_host='i270',fits=0,labels_read=False)
+    receipt=dict(schema='e36-native-memory-smoke-preparation-v1',build_commit=commit,program=bind(out/'program.tar.gz'),data=bind(packet/'data.tar.gz'),spec=bind(out/'smoke.spec.json'),manifest=bind(out/'smoke.manifest.json'),native_ids=bind(out/'native.ids.tsv'),scientific_parent=bind(packet/'program.tar.gz'),policy=SMOKE,native_execution_contract=expected['execution_contract'],numerical_trainer_unchanged=True,initial_memory_cap_bytes=8*1024**3,rayon_threads=2,planned_host='i270',fits=0,labels_read=False)
     write(out/'PREPARED.json',receipt);return receipt
 
 
 def verify(root,out,owner,ledger,blobs):
     root=Path(root);out=Path(out);owner=Path(owner);ledger=Path(ledger);blobs=Path(blobs)
     prepared=json.loads((out/'PREPARED.json').read_text())
-    for key in ['program','data','spec','manifest']:
+    for key in ['program','data','spec','manifest','native_ids']:
         if sha(prepared[key]['path'])!=prepared[key]['sha256']:raise ValueError('prepared diagnostic identity changed')
     jobs=json.loads(Path(prepared['manifest']['path']).read_text())
     if len(jobs)!=1:raise ValueError('one diagnostic cell required')
     import pyarrow.parquet as pq
     rows=pq.read_table(ledger).to_pylist()
     if len(rows)!=1 or rows[0]['status']!='done' or rows[0]['attempts']!=1:raise ValueError('single-attempt native diagnostic DONE required')
+    identities=Path(prepared['native_ids']['path']).read_text().splitlines()
+    if len(identities)!=1 or rows[0]['job_id']!=identities[0].split('\t')[1] or json.loads(rows[0]['kind_json'])!=jobs[0]['kind']:raise ValueError('native diagnostic ID/kind differs')
     from e36_store import digest
     h=digest(rows[0]['output_sha']);blob=blobs/h
     if sha(blob)!=h:raise ValueError('native diagnostic output CAS changed')
