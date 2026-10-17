@@ -243,6 +243,9 @@ zenpredict-bake = { workspace = true }
 # examples that already used them; new example/bench tooling uses these).
 zenpng = { workspace = true }
 zenpixels = { workspace = true }
+# E36 example ingress uses native named-profile conversion and white compositing.
+zenpixels-convert = { version = "0.2.16", default-features = false, features = ["std"] }
+zencodec = { version = "0.1.26", default-features = false }
 # `zenpng`'s encode entry points all take `imgref::ImgRef<rgb::Rgb<u8>>`, so
 # example tooling that WRITES a PNG (`zen_io::encode_png_rgb8`, used by the
 # `diffmap_heatmap` demo) needs `rgb` by name. It is already a non-dev
