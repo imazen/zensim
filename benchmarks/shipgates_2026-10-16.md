@@ -338,3 +338,12 @@ These resource lines describe contended execution, not quiet latency qualificati
 The campaign is paused at the coordinator’s request. The current native source batch completed all168 cells across21 quality points and returned success. Total retained native coverage is2,184/4,536 cells across13 source batches; fixed-judge coverage remains1,176 verified rows. The outer source journal has12 consolidated sources and retains the additional complete batch for hash-bound resume.
 
 Every current-batch cell matches its quality checkpoint and complete native journal. All referenced encoded bytes, decoded images and maps are present, and every candidate-neutral encoded hash equals its no-steering control. The shared heavy-work lock is released; queued replay and judge processes are paused. No process was killed. Subsequent execution will release the lock after each quality group. Full JXL RD estimates, intervals and gate verdicts remain pending.
+
+
+## Owner encoder amendment, October17
+
+AVIF required rows now use the SVT port; original rav1e rows remain diagnostics. On the amended ladder, strict G-ADDR regression passes for W-C and diff+frag-820, and both peers. Diff-410 fails SVT38/39 against39/39 and JPEG25/39 against26/39. On the amended standard grid all three candidates fail JPEG20/22 against21/22; diff-410 also fails SVT34/35 against35/35. CVVDP-FHD and SSIMULACRA2 pass both amended regression tiers.
+
+[The complete amended rows and direction diagnostic](shipgates_encoder_monotonicity_2026-10-17.md) retain each strict value, live mentor bar and verdict beside the diagnostic. Direction agreement changes no gate. Existing SVT ladders replace standard AVIF for the same35 source families with matching reference RGB hashes. The old standard metadata records zenavif with empty backend knobs; the historical default is Zenravif, but its exact as-run backend/build receipt was not retained.
+
+Further AVIF G-RD/G-TARGET work is SVT-only. The current Zenravif CQ driver cannot supply that measurement and is refused for new gate cells; completed smokes remain diagnostics. SVT spatial steering and targeting still need implementation and validation. No new AVIF encode or fit ran, and JXL remains paused for priority generation. The recompute used one thread and4GiB without the paper lock.

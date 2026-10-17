@@ -211,11 +211,63 @@ def run(args):
     print(json.dumps({k:v for k,v in result.items() if k not in ["summary","source_pins","model_pins"]},indent=2))
 
 
+def report(args):
+    data=json.loads(args.format_result.read_text())
+    assert data["schema"]=="shipgates-encoder-monotonicity-svt-v1" and data["strict_owner_reconstruction_exact"]
+    assert data["required_rows"]==dict(standard=4494,ladder=7097)
+    assert data["original_rows"]==dict(standard=4424,ladder=9593)
+    assert args.resource_log is not None,"report requires the actual resource receipt"
+    resource=args.resource_log.read_text().splitlines()[-1]
+    assert resource.startswith("run-heavy: done rc=0 "),"light replay did not complete successfully"
+    stem="shipgates_encoder_monotonicity_2026-10-17"
+    table=args.output/(stem+".tsv")
+    rows=data["summary"]
+    with table.open("x") as stream:
+        writer=csv.DictWriter(stream,fieldnames=list(rows[0]),delimiter="\t")
+        writer.writeheader();writer.writerows(rows)
+    assert table.stat().st_size<=30000,"large generated tables belong in the artifact store"
+    names={"w-c":"W-C","diff-frag-820":"diff+frag-820","diff-410":"diff-410","cvvdp-fhd":"CVVDP-FHD","ssim2":"SSIMULACRA2"}
+    lines=["# SVT encoder amendment and G-ADDR","",
+        "The owner excludes avif-rav1e from required rows and judges AVIF on the SVT port. Original results remain archived.","",
+        "The amended ladder has7,097 rows (9,593 minus2,496 rav1e rows). The amended standard grid has4,494 rows:3,024 unchanged non-AVIF rows plus1,470 existing SVT ladder rows for its exact35 AVIF source families. All substituted reference RGB hashes match. SVT keeps its own native quality axis; the standard AVIF sample grid changes from40 to42 rungs per source.","",
+        "The standard grid records `zenavif` with empty backend knobs. Its contemporary zenavif default is Zenravif (zenrav1e), at historical source `bde705fc0057a008e123f4f2e83f9f39cfde06ad`, `src/encoder.rs`. This identifies the default route; the exact as-run encoder build/backend receipt was not preserved. These legacy AVIF rows remain diagnostics; required AVIF rows now explicitly identify `avif-svt`.","",
+        "Strict A7r comes from the frozen Rust evaluator, SHA256 `"+data["evaluator_sha256"]+"`. It selects four rungs from the SSIMULACRA2 mentor using a0.5-point materiality margin and requires strict increases plus the registered off-clamp condition. Its bar is the mentor’s own strict fraction on the same derived grid. A1–A6 and A8r retain their report-only role; this recompute does not qualify the contract tier.","",
+        "Direction agreement is diagnostic only. It uses the same selected edges and clamp condition, accepts a candidate change with the mentor’s sign, and treats mentor changes smaller than0.5 as ties. No selected mentor edge is a tie here. Both ladder-level agreement and individual material-edge agreement are shown. It changes no gate or threshold.","",
+        "Every reconstructed strict decision/count matches the native owner. Peer scores retain the original rendered-pixel binding; CVVDP-FHD retains its frozen Q=10×JOD mapping. No labels, new encodes or builds were used.","",
+        "| Grid | W-C | diff+frag-820 | diff-410 | CVVDP-FHD | SSIMULACRA2 |","|---|---|---|---|---|---|"]
+    for grid in ["standard","ladder"]:
+        lines.append("| "+grid+" | "+" | ".join(data["required_regression"][grid][n] for n in names)+" |")
+    for grid in ["standard","ladder"]:
+        lines += ["", "## "+grid,"",
+            "| Metric | Codec | Strict represented | Mentor strict bar | Strict verdict | Direction represented (diagnostic) | Agreeing material edges |",
+            "|---|---|---:|---:|---|---:|---:|"]
+        for r in rows:
+            if r["scope"]!="amended" or r["grid"]!=grid:continue
+            bar=round(r["strict_bar"]*r["ladders"])
+            assert bar/r["ladders"]==r["strict_bar"]
+            lines.append(f"| {names[r['metric']]} | {r['codec']} | {r['strict_numerator']}/{r['ladders']} | {bar}/{r['ladders']} | {r['strict_state'].upper()} | {r['direction_numerator']}/{r['ladders']} | {r['agreeing_edges']}/{r['material_edges']} |")
+    lines += ["","All original and amended rows, including excluded rav1e and legacy standard AVIF diagnostics, are in [the complete row table]("+table.name+"). Direction agreement can decrease as well as increase: on the ladder’s JXL row the candidates change from25/26 strict to24/26 direction agreement; the two criteria answer different questions.","",
+        "## Remaining AVIF work","",
+        "G-RD and G-TARGET require zenav1-svt (`svt-rs`) only. Completed Zenravif smoke cells remain diagnostics. The current native CQ/map driver explicitly selects Zenravif and4:4:4; the SVT seam requires4:2:0 and has no map hookup in that driver. The dispatcher refuses further AVIF work through the legacy driver. SVT map steering and the targeting adapter still need implementation and end-to-end validation; no SVT RD or targeting pass is claimed. JXL remains paused for priority generation.","",
+        "## Evidence","",
+        "Source: `"+data["build_commit"]+"`; frozen evaluator and model pins, derived-grid hashes and exact selected edges are bound in [the campaign pointer](shipgates_2026-10-16.pointer.md). Canonical RESULT SHA256 `"+sha(args.format_result)+"`.","",
+        "```text",resource,"```","",
+        "This was a one-thread,4GiB light recompute without the paper lock. The resource line describes this contended run, not a quiet speed qualification."]
+    (args.output/(stem+".md")).write_text("\n".join(lines)+"\n")
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    for name in ["output","original","peers","models","binary","features-root"]:p.add_argument("--"+name,type=Path,required=True)
-    p.add_argument("--build-commit",required=True)
-    run(p.parse_args())
+    p.add_argument("--output",type=Path,required=True)
+    p.add_argument("--format-result",type=Path)
+    p.add_argument("--resource-log",type=Path)
+    for name in ["original","peers","models","binary","features-root"]:p.add_argument("--"+name,type=Path)
+    p.add_argument("--build-commit")
+    args=p.parse_args()
+    if args.format_result:report(args)
+    else:
+        assert all(getattr(args,n) is not None for n in ["original","peers","models","binary","features_root","build_commit"])
+        run(args)
 
 
 if __name__=="__main__":main()

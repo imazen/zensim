@@ -1642,6 +1642,9 @@ shipgates-monotonicity original peers models binary features_root commit output:
 shipgates-monotonicity-check:
     python3 -B -m unittest scripts/tests/test_shipgates_monotonicity.py
 
+shipgates-monotonicity-report result resource_log output:
+    python3 scripts/rev4_featpot/shipgates_monotonicity.py --format-result {{quote(result)}} --resource-log {{quote(resource_log)}} --output {{quote(output)}}
+
 shipgates-corruption models binary head inputs pairs bindings output:
     python3 scripts/rev4_featpot/shipgates.py corruption --models {{quote(models)}} --binary {{quote(binary)}} --head {{quote(head)}} --inputs {{quote(inputs)}} --pairs {{quote(pairs)}} --bindings {{quote(bindings)}} --output {{quote(output)}}
 
@@ -1888,6 +1891,7 @@ e36-archive root mirror:
     python3 scripts/demos/rev5perf_archive.py {{quote(root)}} {{quote(mirror)}} --dereference --exclude-operator-locks
 
 shipgates-scripts-check:
+    just shipgates-monotonicity-check
     just shipgates-cell-scheduling-check
     python3 scripts/lint_scripts.py
     python3 scripts/test_lint_scripts.py

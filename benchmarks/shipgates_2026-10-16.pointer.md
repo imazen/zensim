@@ -87,3 +87,22 @@ Observed on dev: native coverage2,184/4,536;13complete native source batches,12c
 | `JXL_PRIORITY_PAUSE_CHECKPOINT.json` | 5371 | `4eeb023ae031cbe08473e96ca5c80abe2f1d6337e23f3971022125490f3c618e` |
 | `rd-jxl-corrected27/source-12/batch-00/COMPLETE.json` | 748 | `5c2dd50a2f3ed8f5042cb2e8d1101ded05a4d923e15e5cc0dc702e3892c87f4a` |
 | `rd-jxl-corrected27/source-12/batch-00/cells.jsonl` | 399893 | `369efd3f4130f63c3c3b82c4739d9805be1b94f85bbcfd3e36499f6973919e28` |
+
+
+## Owner SVT monotonicity amendment, October17
+
+Observed on dev: derived standard4494rows, ladder7097rows; all85 original/amended metric/codec rows have exact native strict reconstruction. Direction remains diagnostic. The campaign subtree is `encoder-monotonicity-svt-2026-10-17/`; original source grids, model bytes and prior results remain unchanged. New AVIF required RD/targeting cells require the SVT adapter; the old13-cell Zenravif smoke is diagnostic.
+
+| Relative artifact | Bytes | SHA256 |
+|---|---:|---|
+| `encoder-monotonicity-svt-2026-10-17/PLAN.json` | 1746 | `303ac476a254b4648812453a7b76984fd637286e755c185cc379ba188f886bf6` |
+| `encoder-monotonicity-svt-2026-10-17/AVIF_BACKEND_AMENDMENT.json` | 1691 | `efaddcca8cc7e475abb6fa55ef26d8af14e06eba9f0329feb84a222d480af7bf` |
+| `encoder-monotonicity-svt-2026-10-17/run-01/RESULT.json` | 46194 | `2f468bf22f10561995945e4cfe28738e9e8edb06b698f064c26e742c9a9c59ff` |
+| `encoder-monotonicity-svt-2026-10-17/run-01/SELECTED_EDGES.jsonl` | 1857386 | `30aa2cd8babe3c32acc68742740880f11e8000e34a67c9070b6c4804f91d4f50` |
+| `encoder-monotonicity-svt-2026-10-17/run-01/standard-svt.parquet` | 9418329 | `ed004e39093696d885bf4e5de696161d68d559cb942d64f1fd39f2569899a43c` |
+| `encoder-monotonicity-svt-2026-10-17/run-01/standard-svt.parquet.manifest.json` | 6105 | `3fcce980b915a4f44a89d467c2c7fdcaa3a5a494edd3468f9ed4197ce493bef3` |
+| `encoder-monotonicity-svt-2026-10-17/run-01/ladder-svt.parquet` | 15309013 | `57cbfbfb862ae8842a47a518ad2312f7fd0512229b021fb9ff84a3f4b3ce7018` |
+| `encoder-monotonicity-svt-2026-10-17/run-01/ladder-svt.parquet.manifest.json` | 6105 | `a3d5754df0bb21edb655039a4754bbb14413e2831a05261c0806398e4ed98b0d` |
+| `encoder-monotonicity-svt-2026-10-17/run-01.log` | 3781 | `4697f3562c802f4893ab748dcae72fb456a3e0fde3d1f0cb48fbfa8d30bdc7d4` |
+| `encoder-monotonicity-svt-2026-10-17/scripts-check.log` | 2583 | `ded4b8240925d6a9f34caa04e7752940ec2f2f8caca6c304ed6492103392c8b6` |
+| `encoder-monotonicity-svt-2026-10-17/source-c954661253fe/shipgates_monotonicity.py` | 14073 | `50bbeb358ff096c0ebf80972c2dffee081eae6c29cbba18004f87363a1a3d280` |

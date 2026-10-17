@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- SHIPGATES: derive SVT-only AVIF addressability views, retain strict native A7r and report the separate mentor-direction diagnostic (`c9546612`); refuse new AVIF gate cells through the legacy Zenravif driver.
+
 - Preserve E36 exact matrix/native identities while widening local generation; stream final census and bind checked native publication to the authorized absolute budget and stronger disk floor. Fits remain unreleased.
 
 - Bind an optional whole E36 native data phase to exclusive host ownership, exact input/clock/parity evidence and preserved source timestamps; retain fit-release and complete-matrix gates.

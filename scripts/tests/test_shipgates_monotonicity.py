@@ -12,6 +12,13 @@ spec.loader.exec_module(owner)
 
 
 class DirectionTests(unittest.TestCase):
+    def test_legacy_avif_gate_driver_is_refused_before_any_encode(self):
+        import shipgates_codec_rd
+        with self.assertRaisesRegex(ValueError,"SVT map/target adapter"):
+            shipgates_codec_rd.require_supported_gate_adapter("avif")
+        shipgates_codec_rd.require_supported_gate_adapter("jpeg")
+        shipgates_codec_rd.require_supported_gate_adapter("webp")
+
     def test_following_a_negative_mentor_edge_is_not_a_strict_increase(self):
         rows=[dict(image_id="source",codec="test",q=i) for i in range(4)]
         mentor={owner.key(r):-float(r["q"]) for r in rows}

@@ -15,6 +15,11 @@ import sys
 from shipgates import sha, write
 
 
+def require_supported_gate_adapter(codec):
+    if codec == "avif":
+        raise ValueError("Required AVIF gates use zenav1-svt (svt-rs) only. This dispatcher wraps the Zenravif-only CQ driver; implement and validate an SVT map/target adapter before new AVIF gate cells. Completed legacy cells remain diagnostics.")
+
+
 def store(root, kind, path):
     digest = sha(path)
     directory = root / "artifacts" / kind
@@ -32,6 +37,7 @@ def store(root, kind, path):
 
 
 def cell(args):
+    require_supported_gate_adapter(args.codec)
     from shipgates_png import canonical_pair
     design = json.loads(args.design.read_text())
     source = design["sources"][args.source_id]
@@ -194,6 +200,7 @@ def phase():
     p.add_argument("--model")
     p.add_argument("--target", type=float)
     args = p.parse_args(sys.argv[2:])
+    require_supported_gate_adapter(args.codec)
     d = json.loads(args.design.read_text())
     args.output.mkdir(parents=True, exist_ok=False)
     rows = []
