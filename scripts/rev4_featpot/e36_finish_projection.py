@@ -26,20 +26,21 @@ def observed_costs(root, out):
         text=job['kind']['view'];view=json.loads(text.split(':',1)[1])
         if view['panel']!='baseline':continue
         key=hashlib.sha256(text.encode()).hexdigest()
-        ordinal=int(key[:8],16)%len(view['q_grid'])
-        p=root/'progress'/key/(str(ordinal)+'.json.gz')
-        if not p.exists():continue
-        end=p.stat().st_mtime
-        if end<launched+60:continue
-        row=json.loads(gzip.decompress(p.read_bytes()))
-        group=json.dumps([row['codec'],row['size'],view['panel']],separators=(',',':'))
-        if len(groups[group])>=128 or row['physical_alias'] or 'cell_total_seconds' not in row:continue
-        elapsed=row['cell_total_seconds'];start=end-elapsed
-        if start<launched or start<=resumed and end>=frozen:continue
-        groups[group].append(elapsed)
-        samples.append(dict(path=str(p),sha256=hashlib.sha256(p.read_bytes()).hexdigest(),group=group,wall_seconds=elapsed,completed_unix=end,content=row['content'],q=row['q']))
+        offset=int(key[:8],16)%len(view['q_grid'])
+        for ordinal in sorted({(offset+i*len(view['q_grid'])//8)%len(view['q_grid']) for i in range(8)}):
+            p=root/'progress'/key/(str(ordinal)+'.json.gz')
+            if not p.exists():continue
+            end=p.stat().st_mtime
+            if end<launched+60:continue
+            row=json.loads(gzip.decompress(p.read_bytes()))
+            group=json.dumps([row['codec'],row['size'],view['panel']],separators=(',',':'))
+            if len(groups[group])>=128 or row['physical_alias'] or 'cell_total_seconds' not in row:continue
+            elapsed=row['cell_total_seconds'];start=end-elapsed
+            if start<launched or start<=resumed and end>=frozen:continue
+            groups[group].append(elapsed)
+            samples.append(dict(path=str(p),sha256=hashlib.sha256(p.read_bytes()).hexdigest(),group=group,wall_seconds=elapsed,completed_unix=end,content=row['content'],q=row['q']))
     result=dict(schema='e36-observed-wide-cell-costs-v1',fits=0,qualifies_data=False,since_unix=launched,
-        sampling='One deterministic hash-selected requested q per baseline view; at most128physical checkpoints per codec/size. Excludes earlier cells and the recorded live resource-amendment pause. Diagnostic sample, not a content/quality fit or population bound.',
+        sampling='Up to8uniformly spaced requested-q ordinals with a deterministic hash offset per baseline view; at most128physical checkpoints per codec/size. Excludes earlier cells and the recorded live resource-amendment pause. Diagnostic sample, not a content/quality fit or population bound.',
         groups={k:dict(n=len(v),median_seconds=statistics.median(v),p75_seconds=statistics.quantiles(v,n=4)[2] if len(v)>1 else v[0]) for k,v in groups.items()},samples=samples)
     with out.open('x') as f:json.dump(result,f,indent=2)
     print(json.dumps(dict(groups=len(groups),physical_samples=len(samples),fits=0)))
