@@ -24,6 +24,30 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(owner.rd_frontier(points),[(2.,900),(4.,1400)])
         self.assertEqual(owner.interp_bytes(owner.rd_frontier(points),2.),900)
 
+    def test_matched_scalar_blocks_apparent_global_grid_gain(self):
+        # A target controller can land below an interpolated global grid even
+        # when steering emits exactly its scalar controller's bytes.
+        grid=owner.rd_frontier([(0.,1000),(50.,2000),(100.,4000)])
+        scalar=owner.rd_frontier([(50.,1800),(70.,2500)])
+        active=scalar.copy()
+        apparent=1-owner.interp_bytes(active,50.)/owner.interp_bytes(grid,50.)
+        matched=1-owner.interp_bytes(active,50.)/owner.interp_bytes(scalar,50.)
+        self.assertGreater(apparent,.01)
+        self.assertEqual(matched,0.)
+        summaries=[]
+        for metric in ["ssim2","butter","zensim"]:
+            for baseline,saving in [("none",apparent),("candidate-scalar",matched)]:
+                for cohort in ["all","photo","screen"]:
+                    summaries.append(dict(arm="candidate",baseline=baseline,metric=metric,
+                        content_class=cohort,saving=saving,sources=24 if cohort=="all" else 12))
+        native=owner.shipgates_numeric_gates(["candidate"],summaries,["photo","screen"],True,True)
+        self.assertEqual(native["candidate"]["baseline"],"candidate-scalar")
+        self.assertEqual(native["candidate"]["verdict"],"FAIL")
+        self.assertFalse(native["candidate"]["at_least_one_judge_saves_one_percent"])
+        global_grid=owner.shipgates_numeric_gates(["candidate"],summaries,["photo","screen"],True,False)
+        self.assertEqual(global_grid["candidate"]["baseline"],"none")
+        self.assertEqual(global_grid["candidate"]["verdict"],"PASS")
+
 class JudgeBindingTests(unittest.TestCase):
     def test_rejects_aggregate_changes_and_wrong_fixed_profile(self):
         scratch = Path.home()/"tmp"

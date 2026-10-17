@@ -1201,6 +1201,27 @@ def validate_shipgates_judge_binding(root, design_path, pin_path, source_count):
                 map_oracle_source_sha256=oracle_pin["sha256"],packets=packets)
 
 
+def shipgates_numeric_gates(models, summaries, classes, complete_judges, native_codec=False):
+    """Use the matched controller as the native spatial counterfactual."""
+    numeric_gates = {}
+    for model in models:
+        baseline = model+"-scalar" if native_codec else "none"
+        overall = [r for r in summaries if r["arm"]==model and r["baseline"]==baseline and r["content_class"]=="all"]
+        per_class = [r for r in summaries if r["arm"]==model and r["baseline"]==baseline and r["content_class"]!="all"]
+        nonnegative = all(r["saving"] >= 0. for r in overall)
+        class_nonnegative = all(r["saving"] >= 0. for r in per_class)
+        one_percent = any(r["saving"] >= .01 for r in overall)
+        minimum_sources = all(r["sources"] >= 12 for r in per_class)
+        verdict = ("FAIL" if not nonnegative or not class_nonnegative else
+                   "INCOMPLETE" if not complete_judges or not minimum_sources else
+                   "PASS" if one_percent else "FAIL")
+        numeric_gates[model] = dict(verdict=verdict,baseline=baseline,scope="numeric RD bars only; intervention validation separate",
+            all_judges_nonnegative=nonnegative,at_least_one_judge_saves_one_percent=one_percent,
+            no_content_class_regression=class_nonnegative,minimum12_source_families_per_class=minimum_sources,
+            all_three_judges_measured=complete_judges,declared_content_classes=classes)
+    return numeric_gates
+
+
 def shipgates_rd_main():
     """Matched engineering curves; bootstrap stays in the Rust stats owner."""
     import argparse, hashlib, json, subprocess
@@ -1344,7 +1365,7 @@ def shipgates_rd_main():
             sizes = {a:[interp_bytes(curves[a],q) for q in qualities] for a in arms}
             assert all(v is not None and v > 0 for values in sizes.values() for v in values)
             for arm in arms:
-                for baseline in (["none"]+[m+"-butteraugli" for m in models] if native_codec else ["none","butteraugli"]):
+                for baseline in (["none"]+[a for m in models for a in [m+"-scalar",m+"-butteraugli"]] if native_codec else ["none","butteraugli"]):
                     logs = [math.log(size/base) for size,base in zip(sizes[arm],sizes[baseline])]
                     value = st.mean(logs)
                     if arm == baseline:
@@ -1370,23 +1391,8 @@ def shipgates_rd_main():
         iv=row["interval"]
         summaries.append(dict(**cohorts[row["name"]],sources=row["sources"],ratio=iv["estimate"],
             saving=1-iv["estimate"],saving_ci95=[1-iv["hi"],1-iv["lo"]],seed=row["seed"]))
-    numeric_gates = {}
     classes = sorted({r["content_class"] for r in sources.values()})
-    for model in models:
-        overall = [r for r in summaries if r["arm"]==model and r["baseline"]=="none" and r["content_class"]=="all"]
-        per_class = [r for r in summaries if r["arm"]==model and r["baseline"]=="none" and r["content_class"]!="all"]
-        nonnegative = all(r["saving"] >= 0. for r in overall)
-        class_nonnegative = all(r["saving"] >= 0. for r in per_class)
-        one_percent = any(r["saving"] >= .01 for r in overall)
-        minimum_sources = all(r["sources"] >= 12 for r in per_class)
-        complete_judges = requested == set(columns)
-        verdict = ("FAIL" if not nonnegative or not class_nonnegative else
-                   "INCOMPLETE" if not complete_judges or not minimum_sources else
-                   "PASS" if one_percent else "FAIL")
-        numeric_gates[model] = dict(verdict=verdict,scope="numeric RD bars only; intervention validation separate",
-            all_judges_nonnegative=nonnegative,at_least_one_judge_saves_one_percent=one_percent,
-            no_content_class_regression=class_nonnegative,minimum12_source_families_per_class=minimum_sources,
-            all_three_judges_measured=complete_judges,declared_content_classes=classes)
+    numeric_gates = shipgates_numeric_gates(models,summaries,classes,requested==set(columns),native_codec)
     result=dict(schema="shipgates-rd-judged-v1",scope="development probe; intervention/control qualification separate",
         source_weighting="equal weight per source; mean log ratio across common measured baseline quality points; bootstrap clusters are declared source families",
         bootstrap="canonical zenstats source-cluster bootstrap; 10000 resamples",

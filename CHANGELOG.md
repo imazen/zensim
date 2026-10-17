@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Gate JPEG/WebP/AVIF steering against each candidate’s paired scalar controller; retain global and butteraugli curves as separate comparisons.
+
 - Bind RD judge reference-pixel hashes to the independently admitted source pixels and retain reproducible certified-packet replay.
 
 - Reuse completed fixed-judge packets through hash-bound pixel/map certificates, rehashing physical maps and preserving explicit verification provenance without rescoring.
