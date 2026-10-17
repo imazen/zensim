@@ -36,3 +36,15 @@ to250GB cumulative and180GiB free; later packs use the distinct array root.
 The projection is diagnostic and includes separate mandatory/full estimates;
 no completed native matrix, final artifact-location admission or E36 fit is
 claimed by these interim records. Final hashes bind only after writers stop.
+
+2026-10-17 native generation closeout: mandatory12,300views qualified,optional384
+views finished with native0failures. The mandatory-only feature pool failed
+its unchanged nonempty-support guard on SVT/lineart/1024/selection/band2:
+0accepted of69proposals,allCVVDP-FHD margins insufficient. The prepared index
+has709,187physical features and2,788,280unique preferences; exports remain
+nonlaunchable. Exact dev-root evidence:`mandatory-zero-support-diagnosis-v1.json`,
+`zero-support-optional-preview-v1.json`,`pools-final-v1/_MANIFEST.json`,
+`POOL-PREPARE-v1.log`. Optional preview38candidate edges is diagnostic only,
+without full dedup replay. The frozen mandatory-only choice remains effective
+until coordinator direction; no fits have run. Storage-only raw archival is
+continuing under`native-archive-drain-v1`,with final location admission pending.

@@ -676,3 +676,14 @@ ledger-error logs. Publication now checks its own phase and predecessor logs;
 optional-only ledger failures remain diagnostic. Actual mandatory ledger errors,
 exact native identities and single-attempt publication remain admission gates.
 Fixture: scripts/tests/test_e36_owner_amendment.py.
+
+### Known Bugs: E36 mandatory preference support (2026-10-17)
+
+Mandatory12,300-view native coverage passed; actual pool preparation refused
+one empty required stratum: SVT,lineart,1024,selection,band2. All69proposed
+edges miss the fixed CVVDP-FHD margin,with zero admitted aliases. The support
+guard remains unchanged and no fit pool qualifies. A preview of the entire
+predeclared optional phase finds38candidate edges in its three matching views;
+full physical dedup/admission has not run. Pool-choice amendment awaits
+coordinator direction before fitting. Evidence: e36 generation pointer and
+`e36_zero_support_diagnosis.py`; no threshold or source subset was changed.

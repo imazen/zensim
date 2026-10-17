@@ -2381,3 +2381,6 @@ e36-pool-progress pool:
 
 e36-memory-smoke-verify root out owner ledger blobs:
     python3 scripts/rev4_featpot/e36_memory_smoke.py verify --root {{quote(root)}} --out {{quote(out)}} --owner {{quote(owner)}} --ledger {{quote(ledger)}} --blobs {{quote(blobs)}}
+
+e36-zero-support-diagnosis root out:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_zero_support_diagnosis.py --root {{quote(root)}} --out {{quote(out)}}
