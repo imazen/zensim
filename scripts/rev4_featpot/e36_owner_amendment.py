@@ -8,7 +8,7 @@ import sys
 import time
 import types
 from e36_artifact_location import access, durable_mkdir, resolve, sync_directory
-from e36_disk_reserve import install as install_disk_reserve
+from e36_disk_policy import install as install_disk_policy,disk20
 
 ROOT = Path('/mnt/v/output/zensim/e36-bulk-2026-10-17')
 LOCAL = ROOT / 'artifacts-local-v1'
@@ -20,7 +20,7 @@ def sha(path):
 
 
 def install(runtime):
-    if getattr(runtime, '_owner_svt_ssd', False) == 3:
+    if getattr(runtime, '_owner_svt_ssd', False) == 5:
         return
     if runtime.root != ROOT:
         raise ValueError('owner overlay refuses another experiment')
@@ -51,8 +51,7 @@ def install(runtime):
 
     def put(store, bundle):
         bundle = Path(bundle)
-        if shutil.disk_usage(LOCAL).free < 40 * 1024**3:
-            raise OSError('owner SSD 40GiB free-space floor')
+        disk20(LOCAL)
         digest = sha(bundle)
         path = LOCAL / 'blobs' / digest[:2] / (digest + '.tar')
         durable_mkdir(path.parent)
@@ -89,8 +88,8 @@ def install(runtime):
     runtime.execute_cell = types.MethodType(cell, runtime)
     # Historical checkpoints retain their original tower owner. Only future
     # bundle receipts use this explicitly registered storage overlay.
-    runtime._owner_svt_ssd = 3
-    install_disk_reserve(runtime)
+    runtime._owner_svt_ssd = 5
+    install_disk_policy(runtime)
 
 
 def live(receipt):
