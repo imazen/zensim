@@ -20,6 +20,23 @@ def unix_ns(value):
 def resolve(path):
     """Return the immutable base clock and the exact authorized effective clock."""
     path=Path(path);clock=json.loads(path.read_text())
+    if 'budget_only_extension' in clock:
+        pin=clock['budget_only_extension'];ap=Path(pin['path'])
+        if sha(ap)!=pin['sha256']:raise ValueError('budget extension hash differs')
+        a=json.loads(ap.read_text());previous=a['previous_clock'];pp=Path(previous['path'])
+        if sha(pp)!=previous['sha256']:raise ValueError('previous budget clock changed')
+        base,parent,proofs=resolve(pp)
+        projection=a['projection']
+        if sha(projection['path'])!=projection['sha256']:raise ValueError('budget projection changed')
+        if (a['schema']!='e36-authorized-projection-budget-v1'
+                or a['authorization']!='coordinator-2026-10-17-deadline-1700Z'
+                or a['scientific_change'] is not False or a['fits']!=0
+                or a['effective_deadline_unix_ns']!=1792256400000000000
+                or a['previous_deadline_unix_ns']!=unix_ns(parent['deadline_unix'])
+                or clock['deadline_unix']!=1792256400.0
+                or {k:v for k,v in clock.items() if k not in ['deadline_unix','budget_only_extension']}!={k:v for k,v in parent.items() if k!='deadline_unix'}):
+            raise ValueError('authorized projection budget chain differs')
+        return base,clock,proofs+[previous,projection,pin]
     if 'budget_only_amendment' not in clock:return clock,clock,[]
     pin=clock['budget_only_amendment'];ap=Path(pin['path'])
     if sha(ap)!=pin['sha256']:raise ValueError('budget amendment hash differs')

@@ -2224,3 +2224,22 @@ e36-tower-phase-harvest binding out:
 
 e36-tower-phase-parity root harvest out:
     python3 scripts/rev4_featpot/e36_phase_handoff.py parity --root {{quote(root)}} --harvest {{quote(harvest)}} --out {{quote(out)}}
+
+e36-resume-schedule-prepare root worker out:
+    python3 scripts/rev4_featpot/e36_resume_schedule.py prepare --root {{quote(root)}} --worker {{quote(worker)}} --out {{quote(out)}}
+
+e36-resume-schedule root amendment:
+    python3 scripts/rev4_featpot/e36_resume_schedule.py run --root {{quote(root)}} --amendment {{quote(amendment)}}
+
+e36-finish-projection root out:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_finish_projection.py --root {{quote(root)}} --out {{quote(out)}}
+
+e36-stream-census-check:
+    python3 -m unittest scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_census_install.py scripts/tests/test_e36_native_ledger_admit.py
+
+# Coordinator resource-only live operation; refuses another scope or repeated application.
+e36-budget-extend-live:
+    python3 scripts/rev4_featpot/e36_budget_apply.py
+
+e36-resource-census-check:
+    python3 -m unittest scripts/tests/test_e36_budget_extend.py scripts/tests/test_e36_pause_budget.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_census_install.py scripts/tests/test_e36_native_ledger_admit.py

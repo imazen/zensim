@@ -483,3 +483,9 @@ panel manifest SHAe9b21e153a7d22c59e5e6341f9e7f35d0050a5b55882558f62c808c4dbae56
 native helper SHA63323e29a4b840b17883415b49d9ae96da8bb887defa0ba30e1a08efec36d7e4.
 This is the registered namespace/family plus pixel-screen admission, with its
 existing lineage limits; it does not recover unknown cross-corpus parentage.
+
+## Budget-only amendment, 2026-10-17T12:33:01.546807+00:00
+
+The coordinator authorized extending generation to **2026-10-17T17:00:00Z** before any E36 fit, based on `finish-projection-v1.json` (SHA256 b360bfe831b1c27426ed280c4d8f8bd67cec1814cd7a49c310e6519a59d150bc), whose resource planning model projected16:13:22.788314Z. This supersedes14:30:16.5103547Z; all original clocks and the exact earlier frozen-time amendment remain preserved. Matrix, registered source counts,61qualities,20sizes, five native codecs, teachers, selection and assessment remain unchanged. No additional frozen interval is excluded. Wider native scheduling retains24 concurrent views within a38GiB run-heavy scope and measured size-specific reservations, checking live RAM minus8GiB. The operational disk floor is raised to40GiB; completed views are mirrored progressively as needed. This grants generation resources only; E36 fits remain prohibited.
+
+Private effective-clock SHA256 c77e5e094b780115e86469642e070cca6925db6123cf3005cb36817efbfcc55b; budget amendment SHA256 2434fa5575a35584f0060ec062b760e5f4595db0601fae19ce03dea6cff6cc0d. The single-host scheduling mechanism retains native job identities and publishers; complete native ledger and streamed census admission remain mandatory.
