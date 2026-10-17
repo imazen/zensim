@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 from shipgates import sha, write
 
@@ -240,6 +241,9 @@ def matrix():
     p.add_argument("--smoke-only", action="store_true")
     p.add_argument("--targets", default=None)
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--phase-workers", type=int, default=1,
+        help="concurrent phases per source; >1 drops per-phase flock — wrap the "
+             "whole matrix in ONE run-heavy scope instead (memory-governed)")
     args = p.parse_args(sys.argv[2:])
     admission=json.loads((args.sources.parent/"ADMISSION.json").read_text())
     assert admission["source_manifest_sha256"]==sha(args.sources) and admission["png8_binary_sha256"]==sha(args.png8_binary)
@@ -275,14 +279,22 @@ def matrix():
     if args.resume and (args.output / "DESIGN.json").is_file():
         prior = json.loads((args.output / "DESIGN.json").read_text())
         assert prior == design, "resume design differs from recorded design"
-    write(args.output / "DESIGN.json", design)
+    else:
+        write(args.output / "DESIGN.json", design)
     runner = args.output / "runner.py"
     runner.write_bytes(Path(__file__).read_bytes())
     helper = args.output / "shipgates.py"
     helper.write_bytes(Path(__file__).with_name("shipgates.py").read_bytes())
     png_helper=args.output / "shipgates_png.py"
     png_helper.write_bytes(Path(__file__).with_name("shipgates_png.py").read_bytes())
-    write(args.output / "RUNNER.json", {str(p): sha(p) for p in [runner, helper,png_helper]})
+    runner_pin = args.output / "RUNNER.json"
+    runner_sums = {str(p): sha(p) for p in [runner, helper,png_helper]}
+    if runner_pin.is_file():
+        if json.loads(runner_pin.read_text()) != runner_sums:
+            write(args.output / f"RUNNER.updated-{int(time.time())}.json",
+                  dict(runner_sums, note="driver updated under resume; per-phase *-command.json records exact argv"))
+    else:
+        write(runner_pin, runner_sums)
     count = 0
     for source_id in source_ids:
         source_dir = args.output / f"source-{source_id:02d}"
@@ -290,31 +302,47 @@ def matrix():
         phases = [("global", None, None)] + [
             (model + f"-t{target}", model, target) for model in models for target in targets]
         source_count = 0
-        for label, model, target in phases:
+        def run_phase(label, model, target):
             dest = source_dir / label
             if args.resume and (dest / "COMPLETE.json").is_file():
                 done = json.loads((dest / "COMPLETE.json").read_text())
                 lines = (dest / "cells.jsonl").read_text().splitlines()
                 assert len(lines) == done["cells"]
-                source_count += len(lines)
-                count += len(lines)
                 print(f"{args.codec} source{source_id:02d} {label}: resume-complete", flush=True)
-                continue
-            command = ["flock", str(args.heavy_lock), str(args.run_heavy), "--mem", "16G", "--jobs", "1", "--",
+                return len(lines)
+            if dest.exists() and not (dest / "COMPLETE.json").is_file():
+                dest.rename(dest.with_name(dest.name + f".partial-{int(time.time())}"))
+            for stale in [source_dir / (label + "-command.json"), source_dir / (label + ".log")]:
+                if stale.exists():
+                    stale.rename(stale.with_name(stale.name + f".partial-{int(time.time())}"))
+            heavy = [str(args.run_heavy), "--mem", "16G", "--jobs", "1", "--"]
+            command = (heavy if args.phase_workers > 1 else
+                       ["flock", str(args.heavy_lock)] + heavy) + [
                 sys.executable, str(runner), "phase", "--design", str(args.output / "DESIGN.json"),
                 "--source-id", str(source_id), "--output", str(dest)]
             if model is not None:
                 command += ["--model", model, "--target", str(target)]
             write(source_dir / (label + "-command.json"), command)
             print(f"{args.codec} source{source_id:02d} {label}: queued", flush=True)
-            with (source_dir / (label + ".log")).open("x") as log:
+            log_path = source_dir / (label + ".log")
+            with log_path.open("x") as log:
                 subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
             done = json.loads((dest / "COMPLETE.json").read_text())
             lines = (dest / "cells.jsonl").read_text().splitlines()
             assert len(lines) == done["cells"]
-            source_count += len(lines)
-            count += len(lines)
             print(f"{args.codec} source{source_id:02d} {label}: {len(lines)}cells complete", flush=True)
+            return len(lines)
+        if args.phase_workers > 1:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(args.phase_workers) as pool:
+                for got in pool.map(lambda spec: run_phase(*spec), phases):
+                    source_count += got
+                    count += got
+        else:
+            for label, model, target in phases:
+                got = run_phase(label, model, target)
+                source_count += got
+                count += got
         assert source_count == len(qualities) + len(models) * len(targets) * 4
         with (source_dir / "cells.jsonl").open("w") as out:
             for label, _, _ in phases:
