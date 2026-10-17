@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image
 
 from e34_encode import E36_CODECS, e36_run, e36_disk
-from e36_store import Client, sha
+from e36_store import Client, sha, StorageTransportError
 
 Q=[*range(21),*range(22,101,2)]
 PREFIX='e36-native-ladder-v1:'
@@ -96,6 +96,7 @@ class Runtime:
         references=json.loads(Path(s['references']).read_text())
         if sha(s['references'])!=s['references_sha256']:raise ValueError('normalized reference index changed')
         self.references={r['reference_key']:r for r in references['rows']}
+        os.environ['E36_STORE_CONNECT_GATE']=str(self.root/'storage-connect-gate')
         self.store=Client(s['storage']['command'],s['storage']['program_sha256'])
         self.plans={}
         for n in ['jpeg','rav1e','svt','webp','jxl']:
@@ -368,7 +369,7 @@ def main():
                 trace=traceback.format_exc();sys.stderr.write(trace)
                 path=runtime.root/'errors'/(str(time.time_ns())+'.json')
                 write(path,dict(error=str(exc),traceback=trace,request_sha256=hashlib.sha256(raw).hexdigest(),fits=0))
-                payload=canonical(dict(class_='unknown',detail=str(exc))).encode();status=1
+                payload=canonical(dict(**{'class':'upload_fail' if isinstance(exc,StorageTransportError) else 'unknown'},detail=str(exc))).encode();status=3
             if a.serve:
                 target.write(bytes([status])+struct.pack('<I',len(payload))+payload);target.flush()
             else:

@@ -5,6 +5,8 @@ Incomplete and corrupt uploads remain named diagnostics. Canonical objects are
 never overwritten; a successful acknowledgement follows byte-hash verification.
 """
 import argparse
+import fcntl
+import time
 import hashlib
 import json
 import os
@@ -89,6 +91,10 @@ def serve(root, source, target, min_free_bytes=0):
             relative_path=str(final.relative_to(root)), program_sha256=program_sha))
 
 
+class StorageTransportError(ConnectionError):
+    pass
+
+
 class Client:
     def __init__(self, command, program_sha):
         self.command, self.program_sha = command, digest(program_sha)
@@ -96,38 +102,63 @@ class Client:
 
     def connect(self):
         if self.process is None:
-            self.process = subprocess.Popen(self.command, stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=None)
+            gate=os.environ.get('E36_STORE_CONNECT_GATE')
+            if gate and Path(self.command[0]).name=='ssh':
+                # Pace only connection startup, never storage operations or job
+                # claims. Persistent streams remain fully concurrent.
+                with Path(gate).open('a+') as lock:
+                    fcntl.flock(lock,fcntl.LOCK_EX);lock.seek(0);last=lock.read()
+                    delay=.25-(time.monotonic()-float(last or '0'))
+                    if delay>0:time.sleep(delay)
+                    self.process = subprocess.Popen(self.command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=None)
+                    lock.seek(0);lock.truncate();lock.write(str(time.monotonic()));lock.flush()
+            else:
+                self.process = subprocess.Popen(self.command, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=None)
         return self.process
 
     def reply(self, expected):
         line = self.process.stdout.readline(4097)
         if not line or len(line) > 4096:
-            raise RuntimeError('storage process returned no bounded acknowledgement')
+            raise StorageTransportError('storage process returned no bounded acknowledgement')
         value = json.loads(line)
         if value.get('ok') is not True or value['sha256'] != expected or value['program_sha256'] != self.program_sha:
             raise ValueError('storage acknowledgement is not bound to the object/program')
         return value
 
+    def disconnect(self):
+        p,self.process=self.process,None
+        if p is None:return
+        try:p.stdin.close()
+        except OSError:pass
+        if p.poll() is None:p.terminate()
+        try:p.wait(timeout=10)
+        except subprocess.TimeoutExpired:p.kill();p.wait()
+        p.stdout.close()
+
+    def exchange(self,header,path=None):
+        for attempt in range(3):
+            try:
+                p=self.connect();p.stdin.write(json.dumps(header).encode()+b'\n')
+                if path is not None:
+                    with Path(path).open('rb') as f:
+                        while data:=f.read(1024**2):p.stdin.write(data)
+                p.stdin.flush();return self.reply(header['sha256'])
+            except (OSError,StorageTransportError) as exc:
+                self.disconnect()
+                if attempt==2:raise StorageTransportError('storage transport exhausted3 sends of the same hash-bound bundle') from exc
+                sys.stderr.write('E36 storage transport reconnect; same immutable object, prior partial upload retained\n')
+                time.sleep(.25*(attempt+1))
+        raise AssertionError('unreachable storage exchange')
+
     def put(self, path):
-        path = Path(path)
-        expected, size = sha(path), path.stat().st_size
-        p = self.connect()
-        p.stdin.write(json.dumps(dict(operation='put',sha256=expected,bytes=size)).encode()+b'\n')
-        with path.open('rb') as f:
-            while data := f.read(1024**2):
-                p.stdin.write(data)
-        p.stdin.flush()
-        answer = self.reply(expected)
-        if answer['bytes'] != size:
-            raise ValueError('storage byte count changed')
+        path=Path(path);expected,size=sha(path),path.stat().st_size
+        answer=self.exchange(dict(operation='put',sha256=expected,bytes=size),path)
+        if answer['bytes']!=size:raise ValueError('storage byte count changed')
         return answer
 
     def verify(self, expected):
-        p = self.connect()
-        p.stdin.write(json.dumps(dict(operation='verify',sha256=digest(expected))).encode()+b'\n')
-        p.stdin.flush()
-        return self.reply(expected)
+        return self.exchange(dict(operation='verify',sha256=digest(expected)))
 
     def close(self):
         if self.process is not None:

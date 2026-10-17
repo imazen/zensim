@@ -235,7 +235,7 @@ def resource_admission(root):
     print(canonical(dict(resources=str(root/'resource-admission.json'),fits=0)))
 
 
-def prepare_bulk(root,runtime,tag):
+def prepare_bulk(root,runtime,tag,plan_path=None):
     for phase in ['fallback','additions','full']:
         declare(root,runtime,phase,phase+'-'+tag)
     records={};ids={}
@@ -247,7 +247,7 @@ def prepare_bulk(root,runtime,tag):
         records[phase]=dict(run=phase+'-'+tag,manifest_sha256=sha(out/'manifest.json'),native_ids_sha256=sha(out/'native-ids.tsv'),jobs=len(ids[phase]))
     if ids['fallback']&ids['additions'] or ids['fallback']|ids['additions']!=ids['full']:
         raise ValueError('native augmented manifest does not equal the disjoint mandatory-plus-additions union')
-    write(root/'bulk-plan.json',dict(schema='e36-six-hour-data-plan-v1',runtime=str(runtime),runtime_sha256=sha(runtime),
+    write(plan_path or root/'bulk-plan.json',dict(schema='e36-six-hour-data-plan-v1',runtime=str(runtime),runtime_sha256=sha(runtime),
         resources_sha256=sha(root/'resource-admission.json'),source_budget_sha256=json.loads(runtime.read_text())['source_budget_sha256'],
         phases=records,deadline_seconds=21600,slots=28,fit_release=False,
         selection='full only if complete inside the same wall budget; otherwise exactly complete fallback; no intermediate matrix'))
@@ -269,18 +269,36 @@ def qualify(root,name,start,deadline):
     except (ValueError,KeyError):return False
 
 
-def bulk(root):
-    plan=json.loads((root/'bulk-plan.json').read_text())
+def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
+    plan_path=plan_path or root/'bulk-plan.json'
+    plan=json.loads(plan_path.read_text())
     if plan['fit_release'] is not False or plan['deadline_seconds']!=21600:raise ValueError('wrong pre-fit data plan')
     if sha(plan['runtime'])!=plan['runtime_sha256'] or sha(root/'resource-admission.json')!=plan['resources_sha256']:raise ValueError('frozen bulk admission changed')
     for d in plan['phases'].values():
         if sha(root/'runs'/d['run']/'manifest.json')!=d['manifest_sha256']:raise ValueError('frozen qualifying manifest changed')
-    clock=root/'bulk-clock.json'
+    clock=clock_path or root/'bulk-clock.json'
     if clock.exists():
         times=json.loads(clock.read_text())
-        if times['plan_sha256']!=sha(root/'bulk-plan.json'):raise ValueError('cannot replace a running wall clock')
+        if times['plan_sha256']!=sha(plan_path):raise ValueError('cannot replace a running wall clock')
     else:
-        start=time.time();times=dict(started_unix=start,deadline_unix=start+21600,plan_sha256=sha(root/'bulk-plan.json'),fits=0)
+        if inherit_clock is None:
+            start=time.time();times=dict(started_unix=start,deadline_unix=start+21600,plan_sha256=sha(plan_path),fits=0)
+        else:
+            original=json.loads(inherit_clock.read_text());old_plan=root/'bulk-plan.json';old=json.loads(old_plan.read_text())
+            if original['plan_sha256']!=sha(old_plan) or original['deadline_unix']!=original['started_unix']+21600:raise ValueError('invalid original deadline chain')
+            if any(old[k]!=plan[k] for k in ['resources_sha256','source_budget_sha256','deadline_seconds','slots','fit_release']):raise ValueError('transport repair changed scientific/resource budget')
+            old_runtime=json.loads(Path(old['runtime']).read_text());new_runtime=json.loads(Path(plan['runtime']).read_text())
+            if any(old_runtime[k]!=new_runtime[k] for k in old_runtime if k not in ['build_commit','program_files','mode_inventory']):raise ValueError('transport repair changed native numerical/source inputs')
+            if any(old_runtime['program_files'][k]!=v for k,v in new_runtime['program_files'].items() if k not in ['e36_data.py','e36_store.py']):raise ValueError('transport repair changed another producer module')
+            for phase in old['phases']:
+                def science(entry):
+                    rows=json.loads((root/'runs'/entry['run']/'manifest.json').read_text());values=[]
+                    for r in rows:
+                        v=json.loads(r['kind']['view'][len(PREFIX):]);v.pop('runtime_sha256');values.append(canonical(v))
+                    return sorted(values)
+                if science(old['phases'][phase])!=science(plan['phases'][phase]):raise ValueError('transport repair changed fixed matrix')
+            times=dict(started_unix=original['started_unix'],deadline_unix=original['deadline_unix'],plan_sha256=sha(plan_path),fits=0,
+                inherited_clock=dict(path=str(inherit_clock),sha256=sha(inherit_clock)),amendment='storage connection startup/reconnect only; no native numerical or matrix change')
         write(clock,times)
     start,deadline=times['started_unix'],times['deadline_unix'];qualified=None;errors=[]
     mandatory=plan['phases']['fallback']['run'];extra=plan['phases']['additions']['run']
@@ -293,7 +311,7 @@ def bulk(root):
             except (SystemExit,TimeoutError) as exc:errors.append(str(exc))
             if qualify(root,extra,start,deadline):qualified='full'
     choice=dict(schema='e36-fixed-matrix-choice-v1',qualified=qualified,clock_sha256=sha(clock),fits=0,
-        plan_sha256=sha(root/'bulk-plan.json'),errors=errors,closed_unix=time.time(),
+        plan_sha256=sha(plan_path),plan_path=str(plan_path),clock_path=str(clock),errors=errors,closed_unix=time.time(),
         selected_runs=([mandatory,extra] if qualified=='full' else [mandatory] if qualified=='fallback' else []),
         teacher_support_not_used_for_choice=True)
     write(root/'bulk-choice.json',choice);print(canonical(choice))
@@ -305,13 +323,14 @@ def main():
     p.add_argument('--version');p.add_argument('--commit');p.add_argument('--runtime',type=Path)
     p.add_argument('--references',type=Path);p.add_argument('--budget',type=Path)
     p.add_argument('--phase');p.add_argument('--name');p.add_argument('--slots',type=int,default=1)
+    p.add_argument('--plan',type=Path);p.add_argument('--clock',type=Path);p.add_argument('--inherit-clock',type=Path)
     p.add_argument('--hours',type=float);a=p.parse_args()
     if a.mode=='freeze':freeze(a.root,a.initial,a.version,a.commit,a.references,a.budget)
     elif a.mode=='declare':declare(a.root,a.runtime,a.phase,a.name)
     elif a.mode=='run':run(a.root,a.name,a.slots,a.hours)
     elif a.mode=='census':census(a.root,a.name)
     elif a.mode=='resources':resource_admission(a.root)
-    elif a.mode=='prepare-bulk':prepare_bulk(a.root,a.runtime,a.version)
-    else:bulk(a.root)
+    elif a.mode=='prepare-bulk':prepare_bulk(a.root,a.runtime,a.version,a.plan)
+    else:bulk(a.root,a.plan,a.clock,a.inherit_clock)
 
 if __name__=='__main__':main()

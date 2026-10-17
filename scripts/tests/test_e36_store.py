@@ -16,6 +16,27 @@ class StorageTests(unittest.TestCase):
         root=Path.home()/'tmp';root.mkdir(exist_ok=True)
         return tempfile.TemporaryDirectory(prefix='e36-store-test-',dir=root)
 
+    def test_transport_reconnect_resends_same_immutable_hash(self):
+        from unittest.mock import patch
+        with self.temporary() as d:
+            p=Path(d)/'bundle';p.write_bytes(b'invented transport bytes')
+            expected=store.sha(p);client=store.Client(['unused'],'a'*64)
+            attempts=[]
+            class Stream:
+                def __init__(self,broken):self.broken=broken
+                def write(self,value):
+                    attempts.append(value)
+                    if self.broken:raise BrokenPipeError('invented dropped SSH')
+                def flush(self):pass
+            class Process:
+                def __init__(self,broken):self.stdin=Stream(broken)
+            with patch.object(client,'connect',side_effect=[Process(True),Process(False)]),patch.object(client,'disconnect') as disconnect,patch.object(client,'reply',return_value=dict(ok=True,sha256=expected,bytes=p.stat().st_size)),patch.object(store.time,'sleep'):
+                result=client.put(p)
+            self.assertEqual(result['sha256'],expected)
+            self.assertEqual(attempts[0],attempts[1])
+            self.assertEqual(p.read_bytes(),b'invented transport bytes')
+            disconnect.assert_called_once()
+
     def test_verified_put_duplicate_and_fresh_readback(self):
         data=b'invented encoded bytes, pixels and maps\x00\xff'*71
         sha=hashlib.sha256(data).hexdigest()
