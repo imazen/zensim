@@ -2387,3 +2387,15 @@ e36-zero-support-diagnosis root out:
 
 e36-full-choice-amend root:
     python3 scripts/rev4_featpot/e36_full_choice.py amend {{quote(root)}}
+
+e36-smoke-launch-prepare out:
+    python3 scripts/rev4_featpot/e36_smoke_launch.py prepare {{quote(out)}}
+
+e36-smoke-launch-stage out:
+    python3 scripts/rev4_featpot/e36_smoke_launch.py stage {{quote(out)}}
+
+e36-full-choice-check:
+    python3 -m unittest scripts.tests.test_e36_full_choice scripts.tests.test_e36_matrix scripts.tests.test_e36_packet_proofs scripts.tests.test_e36_memory_smoke
+
+e36-smoke-launch-run out:
+    python3 -u scripts/rev4_featpot/e36_smoke_launch.py run {{quote(out)}}
