@@ -264,6 +264,9 @@ def configuration(root):
         owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
         if frozen!=owner.clock_equivalence(root,checked(proof['original_plan']),old,checked(base['inherited_clock'])):
             raise ValueError('original numerical transport equivalence changed')
+    from e36_source_cut import apply as apply_source_cut
+    proof=apply_source_cut(root,proof,clock)
+    if 'source_count_amendment' in proof:evidence.append(proof['source_count_amendment'])
     return proof,clock,evidence
 
 
@@ -446,7 +449,7 @@ def admit(root,names):
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
                 native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
-                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'))
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'))
 
 
 def install_controller(root,receipt):

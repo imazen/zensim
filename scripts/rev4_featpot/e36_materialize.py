@@ -57,6 +57,9 @@ def build(root,names,out,commit):
     runtime_spec=json.loads(runtime_path.read_text())
     references_path=Path(runtime_spec['references'])
     budget_path=Path(runtime_spec.get('source_budget',root/'source-budget/plan.json'))
+    if matrix_admission.get('effective_source_budget'):
+        budget_path=Path(matrix_admission['effective_source_budget']['path'])
+        if sha(budget_path)!=matrix_admission['effective_source_budget']['sha256']:raise ValueError('effective source-count budget changed')
     references=json.loads(references_path.read_text());refindex={(r['origin'],r['size']):r for r in references['rows']};refbykey={r['reference_key']:r for r in references['rows']}
     mode_keys={}
     for codec,digest in runtime_spec['mode_inventory_sha256'].items():
