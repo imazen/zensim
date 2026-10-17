@@ -116,14 +116,22 @@ def wait_resources(roles,out,scope,timeout=30):
             raise ValueError('resource readiness identity differs')
 
 
-def run(root,out):
+def run(root,out,phase_name='fallback'):
     proof,clock,_=configuration(root)
     if time.time()>=clock['deadline_unix']:raise TimeoutError('registered17Z deadline passed')
     if (root/'bulk-choice.json').exists():raise ValueError('existing final choice must not be replaced')
-    old=root/'runs/fallback-v6'
+    if phase_name not in ['fallback','additions']:raise ValueError('registered phase required')
+    if phase_name=='additions':
+        from e36_svt_matrix import publication
+        publication(root,proof['phases']['fallback']['run'])
+    old=root/'runs'/proof['phases'][phase_name]['old_run' if phase_name=='fallback' else 'run']
     original=json.loads((root/'scheduling-v7/amendment.json').read_text())
-    worker=Path(original['worker']['path']);scheduled=Path(original['manifests']['fallback']['path'])
-    for path,digest in [(worker,original['worker']['sha256']),(scheduled,original['manifests']['fallback']['sha256'])]:
+    worker=Path(original['worker']['path']);scheduled=Path(original['manifests'][phase_name]['path'])
+    expected_scheduled=original['manifests'][phase_name]['sha256']
+    if phase_name=='additions':
+        scheduled=Path(proof['phases'][phase_name]['scheduled']['path'])
+        expected_scheduled=proof['phases'][phase_name]['scheduled']['sha256']
+    for path,digest in [(worker,original['worker']['sha256']),(scheduled,expected_scheduled)]:
         if sha(path)!=digest:raise ValueError('frozen original native scheduling input changed')
     if not (root/'owner-svt-ssd-v1/native-exit-selected-status-v1.json').exists():
         raise ValueError('retained prior native exit audit required')
@@ -139,7 +147,7 @@ def run(root,out):
                 raise ValueError('an original numerical executor is still active')
         except (FileNotFoundError,PermissionError,ProcessLookupError):pass
     import pyarrow.parquet as pq
-    phase=proof['phases']['fallback']
+    phase=proof['phases'][phase_name]
     ids=lambda path:[line.split('\t')[1] for line in path.read_text().splitlines()]
     universe=dict(zip(ids(Path(phase['original_native_ids']['path'])),json.loads(Path(phase['original']['path']).read_text())))
     selected=set(ids(Path(phase['native_ids']['path'])))
@@ -174,17 +182,19 @@ def run(root,out):
     argv=['/usr/bin/timeout','--signal=TERM','--kill-after=120',str(clock['deadline_unix']-time.time()),
           'taskset','--cpu-list','0-23',str(worker),'--manifest',str(scheduled),
           '--ledger-out',str(old/'ledger.parquet'),'--blobs',str(old/'blobs'),
-          '--exec',str(root/'runtime-v6/executor'),'--worker','e36-dev-owner-resume-v1',
+        '--exec',str(root/'runtime-v6/executor'),'--worker','e36-dev-owner-'+phase_name+'-v1',
           '--provider','local','--max-attempts','1']
     for ledger in preserved:argv.extend(['--ledger-in',str(ledger)])
-    env={**os.environ,'PYTHONPATH':str(owner/'closure-v6'),'ZEN_LOCAL_FAIR_SCHEDULER':'1',
+    resources=owner/'resource-budget4-v2' if 'archive_budget4' in proof else owner/'closure-v6'
+    if 'archive_transport' in proof:resources=owner/'resource-budget4-v3'
+    env={**os.environ,'PYTHONPATH':str(resources),'ZEN_LOCAL_FAIR_SCHEDULER':'1',
          'ZEN_LOCAL_RESERVE_BYTES':str(8*1024**3),'ZEN_RAM_BYTES':str(budget*4//3),
          'ZEN_CHUNK_WALL_SEC':'300','ZEN_PERSISTENT_EXEC':'1','ZEN_PERSISTENT_KINDS':'bake',
          'RAYON_NUM_THREADS':'24','OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1',
          'PYTHONDONTWRITEBYTECODE':'1','E36_GENERATION_DEADLINE':str(clock['deadline_unix'])}
     pin=lambda path:dict(path=str(path),sha256=sha(path))
     launch=dict(schema='e36-existing-native-ledger-continuation-v1',argv=argv,
-        started_unix=time.time(),deadline_unix=clock['deadline_unix'],worker=pin(worker),
+        started_unix=time.time(),phase=phase_name,deadline_unix=clock['deadline_unix'],worker=pin(worker),
         scheduled=pin(scheduled),clock=proof['clock'],owner_matrix=pin(owner/'matrix-binding.json'),
         ledger_inputs=[pin(path) for path in preserved],original_ledger_paths=[str(path) for path in ledgers],prior_exit=pin(owner/'fallback-exit.json'),
         prior_audit=pin(owner/'native-exit-selected-status-v1.json'),source=pin(Path(__file__)),
@@ -192,13 +202,16 @@ def run(root,out):
         note='Original native IDs/ledger/CAS; existing completed jobs retained, rav1e rejected by frozen owner overlay. No deadline extension.')
     children=[];native=None;roles={};ownership={}
     try:
-        for role,path in [('monitor',owner/'closure-v6/e36_disk_policy.py'),('mirror',owner/'mirror-v13/e36_artifact_mirror.py')]:
+        mirror=owner/'resource-budget4-v1/e36_artifact_mirror.py' if 'archive_budget4' in proof else owner/'mirror-v13/e36_artifact_mirror.py'
+        if 'archive_transport' in proof:mirror=resources/'e36_artifact_mirror.py'
+        for role,path in [('monitor',resources/'e36_disk_policy.py'),('mirror',mirror)]:
             log=(out/(role+'.log')).open('x')
             child=subprocess.Popen(['python3',str(path)],stdout=log,stderr=subprocess.STDOUT,
                                    env={**env,'E36_RESOURCE_READY_PATH':str(out/(role+'-ready.json'))})
             children.append(child)
             roles[role]=child
-            write(owner/(role+'-resume-v1-pid.json'),dict(pid=child.pid,scope=str(scope),utc=time.time(),fits=0))
+            suffix='resume' if phase_name=='fallback' else 'additions'
+            write(owner/(role+'-'+suffix+'-v1-pid.json'),dict(pid=child.pid,scope=str(scope),utc=time.time(),fits=0))
         wait_resources(roles,out,scope)
         remaining=clock['deadline_unix']-time.time()
         if remaining<=0:raise TimeoutError('registered deadline passed during preparation')
@@ -221,4 +234,5 @@ def run(root,out):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ['root','out']:parser.add_argument('--'+name,type=Path,required=True)
-    args=parser.parse_args();run(args.root,args.out)
+    parser.add_argument('--phase',choices=['fallback','additions'],default='fallback')
+    args=parser.parse_args();run(args.root,args.out,args.phase)

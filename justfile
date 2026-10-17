@@ -2280,6 +2280,9 @@ e36-lossless-archive-probe root output:
 e36-native-continuation-close root:
     python3 scripts/rev4_featpot/e36_close_continuation.py --root {{quote(root)}}
 
+e36-svt-finalize-choice root:
+    python3 -c 'import sys; from pathlib import Path; sys.path.insert(0,"scripts/rev4_featpot"); from e36_svt_matrix import finalize_choice; finalize_choice(Path(sys.argv[1]))' {{quote(root)}}
+
 e36-owner-amendment-check:
     TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_owner_amendment.py scripts/tests/test_e36_disk_policy.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_materialize.py
 

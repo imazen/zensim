@@ -219,6 +219,36 @@ def configuration(root):
     resolver_spec=importlib.util.spec_from_file_location('e36_svt_clock_resolver',resolver_path)
     resolver=importlib.util.module_from_spec(resolver_spec);resolver_spec.loader.exec_module(resolver)
     base,clock,evidence=resolver.resolve(checked(proof['clock']))
+    budget4=root/'owner-svt-ssd-v1/archive-budget4-binding.json'
+    if budget4.exists():
+        extension=json.loads(budget4.read_text())
+        if (extension['schema']!='e36-split-archive-budget4-binding-v1' or extension['fits']!=0
+            or extension['scientific_change'] is not False or checked(extension['previous'])!=continued_supervision
+            or extension['previous_clock']!=proof['clock']):raise ValueError('budget4 resource predecessor differs')
+        for key in ['clock','amendment','handoff','application','archive_storage','map_probe','timer_fixture']:checked(extension[key])
+        for pin in extension['sources']:
+            source=json.loads(checked(pin).read_text())
+            for item in source['files'].values():checked(item)
+        _,clock,budget_evidence=resolver.resolve(checked(extension['clock']))
+        if clock['deadline_unix']!=1792274400.:raise ValueError('exact22Z registered deadline required')
+        application=json.loads(checked(extension['application']).read_text())
+        handoff=json.loads(checked(extension['handoff']).read_text())
+        if application['deadline']!=clock['deadline_unix'] or len(set(application['executors']))!=24 or any(row['old_returncode']!=0 for row in handoff['history']):
+            raise ValueError('actual budget4 executor/helper application differs')
+        for pin in extension['live_receipts']:checked(pin)
+        proof=copy.deepcopy(proof);proof['clock']=extension['clock'];proof['archive_budget4']=bind(budget4)
+        evidence+=budget_evidence+[bind(budget4)]
+        transport_path=root/'owner-svt-ssd-v1/archive-transport-v3-binding.json'
+        if transport_path.exists():
+            transport=json.loads(transport_path.read_text())
+            if (transport['schema']!='e36-cooperative-archive-transport-v3' or transport['fits']!=0
+                or transport['scientific_change'] is not False or checked(transport['previous'])!=budget4):raise ValueError('cooperative archive predecessor differs')
+            sources=json.loads(checked(transport['sources']).read_text())
+            for item in sources['files'].values():checked(item)
+            for pin in transport['worker_bootstrap']:checked(pin)
+            observed=[json.loads(checked(pin).read_text()) for pin in transport['receipts']]
+            if len({item['pid'] for item in observed if item['role']=='executor'})!=24 or len([item for item in observed if item['role']=='mirror'])!=1 or any(item['manual_kills']!=0 or item['fits']!=0 for item in observed):raise ValueError('actual cooperative transport bindings missing')
+            proof['archive_transport']=bind(transport_path);evidence.append(bind(transport_path))
     if clock['plan_sha256']!=proof['original_plan']['sha256']:
         raise ValueError('owner matrix lost original clock-plan binding')
     if 'inherited_clock' in base:
@@ -316,6 +346,31 @@ def qualify(root,name,start,deadline):
     return True
 
 
+def finalize_choice(root):
+    """Apply the registered whole-phase completion choice, never teacher support."""
+    root=Path(root);proof,clock,_=configuration(root)
+    if (root/'bulk-choice.json').exists():raise ValueError('preserve the existing immutable choice')
+    fallback=proof['phases']['fallback']['run'];additions=proof['phases']['additions']['run']
+    qualified=None;names=[]
+    if qualify(root,fallback,clock['started_unix'],clock['deadline_unix']):
+        qualified='fallback';names=[fallback]
+        if time.time()<clock['deadline_unix']:
+            try:publication(root,additions)
+            except ValueError as error:
+                raise ValueError('registered optional phase must finish or reach the original deadline before final choice') from error
+        if qualify(root,additions,clock['started_unix'],clock['deadline_unix']):
+            qualified='full';names.append(additions)
+    if qualified is None and time.time()<clock['deadline_unix']:
+        raise ValueError('mandatory matrix incomplete while registered generation budget remains')
+    choice=dict(schema='e36-fixed-matrix-choice-v1',plan_path=proof['plan']['path'],plan_sha256=proof['plan']['sha256'],
+        clock_path=proof['clock']['path'],clock_sha256=proof['clock']['sha256'],qualified=qualified,selected_runs=names,
+        teacher_support_not_used_for_choice=True,closed_unix=time.time(),fits=0,
+        scheduling_amendment=proof['scheduling'],owner_matrix=bind(root/'owner-svt-ssd-v1/matrix-binding.json'))
+    write(root/'bulk-choice.json',choice)
+    if qualified is None:raise ValueError('mandatory matrix incomplete; no fit pool qualifies')
+    return choice
+
+
 def admit(root,names):
     root=Path(root);proof,clock,evidence=configuration(root)
     choice_path=root/'bulk-choice.json';choice=json.loads(choice_path.read_text())
@@ -354,7 +409,7 @@ def admit(root,names):
         if terminal['schema']!='e36-native-continuation-final-v1' or terminal['fits']!=0 or terminal['scientific_change'] is not False or checked(terminal['continuation'])!=continuation_path:
             raise ValueError('native continuation final evidence differs')
         for key in ['log','exit','helper_exits']:checked(terminal[key])
-        audit_path=root/'owner-svt-ssd-v1/runtime-audit-admission-v1.json'
+        audit_path=root/'owner-svt-ssd-v1'/('runtime-audit-admission-v2.json' if 'archive_budget4' in proof else 'runtime-audit-admission-v1.json')
         if checked(terminal['runtime_audit'])!=audit_path:raise ValueError('actual native runtime audit missing')
         audit=json.loads(audit_path.read_text())
         if audit['schema']!='e36-live-runtime-audit-admission-v1' or audit['admitted'] is not True or audit['fits']!=0 or len(audit['receipts'])!=24:
@@ -373,6 +428,7 @@ def admit(root,names):
     if locations['schema']!='e36-artifact-location-admission-v1' or locations['admitted'] is not True or locations['fits']!=0 or locations['relocation_eligibility_replayed'] is not True:
         raise ValueError('frozen verified artifact location admission required')
     for key in ['journal','resolver','storage']:checked(locations[key])
+    if 'archive_storage' in locations:checked(locations['archive_storage'])
     if locations['unique_relocated_objects'] and len(locations['actual_random_readbacks'])!=min(3,locations['unique_relocated_objects']):
         raise ValueError('final archive readback sample missing')
     return dict(schema='e36-qualified-matrix-admission-v1',matrix=choice['qualified'],choice=bind(choice_path),
@@ -386,7 +442,8 @@ def admit(root,names):
                 resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None,
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
-                native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None)
+                native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'))
 
 
 def install_controller(root,receipt):
