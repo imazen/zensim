@@ -29,13 +29,15 @@ def main():
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--reuse-source-root',type=Path)
     parser.add_argument('--reuse-verifications',type=Path)
+    parser.add_argument('--combine-judge-oracle',action='store_true')
     parser.add_argument('--encoder-pid', type=int, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     design = json.loads((args.encodes / 'DESIGN.json').read_text())
     write(args.output / 'INPUTS.json', dict(design_sha256=sha(args.encodes/'DESIGN.json'),
         judge_binary_sha256=sha(args.binary), runner_sha256=sha(__file__),
-        ssim2_map_policy='scalar-only', sources=design['sources']))
+        ssim2_map_policy='scalar-only', sources=design['sources'],
+        phase_scheduling='combined judge then oracle' if args.combine_judge_oracle else 'separate jobs'))
     frozen_oracle=args.output/'map_oracle.py'
     frozen_oracle.write_bytes(args.map_oracle.read_bytes())
     write(args.output/'ORACLE_PIN.json',dict(sha256=sha(frozen_oracle)))
@@ -65,6 +67,8 @@ def main():
         assert len(cases) == json.loads((source/'COMPLETE.json').read_text())['cells'] == 168
         expected = {r['case']:(r['reference'],r['decoded']) for r in cases}
         assert len(expected) == len(cases)
+        oracle_completed=False
+        oracle_output=args.output/f'source-{source_id:02d}-MAP_ORACLE.json'
         dest = args.output / f'source-{source_id:02d}'
         prior=args.reuse_source_root/f'source-{source_id:02d}' if args.reuse_source_root else None
         if source_id in reused:
@@ -83,11 +87,14 @@ def main():
                 writer.writerows((r['reference'],r['decoded'],r['case']) for r in cases)
             env = {k:v for k,v in os.environ.items() if not k.startswith(('ZENSIM_','JXL_','ZENJPEG_ZQ_','ZENWEBP_ZQ_','AVIF_ZENSIM_'))}
             env.update(ZENSIM_FORMULA_REV='1',RAYON_NUM_THREADS='1')
-            command = ['flock',str(args.heavy_lock),str(args.run_heavy),'--mem','16G','--jobs','1','--',str(args.binary),
-                '--pairs',str(pairs),'--out-dir',str(dest),'--ssim2-map-policy','scalar-only']
+            prefix=['flock',str(args.heavy_lock),str(args.run_heavy),'--mem','16G','--jobs','1','--']
+            command=(prefix+['just','shipgates-judge-source-phase',str(args.binary),str(pairs),str(dest),
+                             str(frozen_oracle),str(oracle_output)] if args.combine_judge_oracle else
+                     prefix+[str(args.binary),'--pairs',str(pairs),'--out-dir',str(dest),'--ssim2-map-policy','scalar-only'])
             write(args.output/f'source-{source_id:02d}-command.json',command)
             print(f'judge source{source_id:02d}: queued',flush=True)
             run_with_memory_admission(command,args.output/f'source-{source_id:02d}.log',dest,env=env)
+            oracle_completed=args.combine_judge_oracle
         pins=json.loads((dest/'INPUTS.json').read_text())
         assert pins['driver_sha256']==sha(args.binary) and set(pins['requested_metrics'])=={'ssim2','butter','zensim'}
         assert pins['formula_revision_environment']=='1' and pins['ssim2_map_policy']=='scalar-only'
@@ -95,11 +102,14 @@ def main():
         judged = [json.loads(line) for line in (dest/'judges.jsonl').read_text().splitlines()]
         assert len(judged) == len(expected)
         assert {r['input']['case_id']:(r['ref_path'],r['dist_path']) for r in judged} == expected
-        oracle_output=args.output/f'source-{source_id:02d}-MAP_ORACLE.json'
         if source_id in reused:
             from shipgates_verified_reuse import restore
             restore(reused[source_id],dest,sha(args.binary),sha(frozen_oracle),oracle_output,len(judged))
             print(f'judge source{source_id:02d}: certified packet/maps rehashed and reused',flush=True)
+        elif oracle_completed:
+            verification=json.loads(oracle_output.read_text())
+            assert verification['judge_rows']==len(judged) and verification['judges_jsonl_sha256']==sha(dest/'judges.jsonl')
+            assert verification['oracle_source_sha256']==sha(frozen_oracle)
         else:
             oracle_command=['flock',str(args.heavy_lock),str(args.run_heavy),'--mem','16G','--jobs','1','--',sys.executable,str(frozen_oracle),
                 '--judges',str(dest),'--output',str(oracle_output),'--lossless-png-expansion']

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Permit fixed judging and independent pixel/map verification in one bounded source job, with exact replay admission and retained per-source certificates.
+
 - Include source-class and certificate integrity regressions in the ship-gate check and create their home-local scratch directory on every host.
 
 - Gate JPEG/WebP/AVIF steering against each candidate’s paired scalar controller; retain global and butteraugli curves as separate comparisons.

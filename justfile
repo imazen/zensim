@@ -1967,3 +1967,6 @@ shipgates-judge-source-phase binary pairs output oracle receipt:
 
 shipgates-rd-report result output:
     python3 scripts/rev4_featpot/shipgates_rd_report.py --result {{quote(result)}} --output {{quote(output)}}
+
+shipgates-judge-replay old new oracle output:
+    python3 scripts/rev4_featpot/shipgates_judge_replay.py --old {{quote(old)}} --new {{quote(new)}} --oracle {{quote(oracle)}} --output {{quote(output)}}
