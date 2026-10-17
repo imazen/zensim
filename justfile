@@ -2155,3 +2155,7 @@ e36-final-private-clippy:
 
 e36-final-assessment-metadata root:
     python3 -c 'from pathlib import Path; import sys; sys.path.insert(0,"scripts/rev4_featpot"); from e36_training import assessment_plan; import json; r=Path(sys.argv[1]); d=json.loads((r/"matched-base-filter-plan-v2.json").read_text()); assessment_plan(Path(d["root"]),r/"assessment-inputs-preflight.json")' {{quote(root)}}
+
+# Read-only admission: a running compute scope excludes the optional host.
+e36-idle-probe host:
+    ssh -o BatchMode=yes -o ConnectTimeout=5 {{quote(host)}} 'date -u +%FT%TZ; uptime; free -h; systemctl --user list-units --type=scope --state=running --no-pager'

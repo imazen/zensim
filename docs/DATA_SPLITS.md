@@ -2305,16 +2305,16 @@ See the [preparation evidence pointer](../benchmarks/e36_preparation_2026-10-16.
 ### E36 expanded budget registration (2026-10-17 UTC; generation in progress)
 
 The [registration](../benchmarks/e36_registration_draft_2026-10-16.md) now
-freezes all61quality points, all20sizes and five native codec families under
+freezes all 61 quality points, all 20 sizes and five native codec families under
 one original six-hour window. Source counts fall first at expensive sizes;
-all reachable sources through768 remain. The exact mandatory A6 matrix has
+all reachable sources through 768 remain. The exact mandatory A6 matrix has
 15,342 ladder views; the full nested matrix has15,810. Native completed-view
 inventory, whole-matrix equality and positive post-dedup support in every
 required reachable stratum are prerequisites for a qualifying pool. Partial
 checkpoints or a fastest-finished subset cannot satisfy admission. Runtime-v6
 repairs storage transport only and inherits the original deadline.
 
-The same frozen family mask removes230original SafeSyn FIT rows across four
+The same frozen family mask removes 230 original SafeSyn FIT rows across four
 renditions for all three prospective C/plain-N arms; other fourteen groups
 lose no rows. Keys-only projection freezes the matched child declarations;
 actual unchanged-target filtering occurs only in the bound fit executor.
