@@ -2109,12 +2109,15 @@ e36-final-normal-build root:
     env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/bin/e36-normal-final")}}
 
+e36-private-build-cargo target:
+    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --example inspect_qualified_checkpoint --bin check_holdout_overlap --target-dir {{quote(target)}}
+
 e36-final-private-build root:
     test ! -e {{quote(root + "/bin/e36-fit-final")}}
     test ! -e {{quote(root + "/bin/e36-raw-score-final")}}
-    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --bin inspect_qualified_checkpoint --bin check_holdout_overlap --target-dir /home/lilith/tmp/e36-pixels-target
+    just e36-private-build-cargo /home/lilith/tmp/e36-pixels-target
     mkdir -p {{quote(root + "/bin/e36-fit-final")}}
-    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train /home/lilith/tmp/e36-pixels-target/release/panel /home/lilith/tmp/e36-pixels-target/release/bake_dial_refit /home/lilith/tmp/e36-pixels-target/release/inspect_qualified_checkpoint /home/lilith/tmp/e36-pixels-target/release/check_holdout_overlap {{quote(root + "/bin/e36-fit-final/")}}
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train /home/lilith/tmp/e36-pixels-target/release/panel /home/lilith/tmp/e36-pixels-target/release/bake_dial_refit /home/lilith/tmp/e36-pixels-target/release/examples/inspect_qualified_checkpoint /home/lilith/tmp/e36-pixels-target/release/check_holdout_overlap {{quote(root + "/bin/e36-fit-final/")}}
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/e36_raw_score {{quote(root + "/bin/e36-raw-score-final")}}
 
 e36-final-identity-build root:
