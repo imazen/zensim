@@ -25,6 +25,12 @@ def write(p,v):
     with p.open('x') as f:json.dump(v,f,indent=2,allow_nan=False);f.write('\n')
 
 
+def retain_copy(source,dest):
+    if dest.exists():
+        if sha(dest)!=sha(source):raise ValueError('retained E36 reference differs; preserve it before a new version')
+    else:shutil.copyfile(source,dest)
+
+
 def packet(root,pools,base,trainer,out,owner,commit):
     choice=json.loads((root/'bulk-choice.json').read_text());admit_matrix(root,choice['selected_runs'])
     if sha(base)!=BASE_SHA:raise ValueError('original opaque base archive changed')
@@ -62,6 +68,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
             or current['cohort_sha256']!=sha(root/'cohort-selection.json') or current['labels_read'] is not False
             or current['strict_flags']!=0
             or current['panel_manifest_sha256']!=sha('/mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json')
+            or current['panel_manifest_sha256']!=sha(audit.parent/'SOURCE_MANIFEST.json')
             or current['native_hashes_sha256']!=sha(audit.parent/'audit.hashes.json')):
         raise ValueError('current ship panel native/family exclusion admission required')
     for path in [audit,audit.parent/'audit.hashes.json',audit.parent/'SOURCE_MANIFEST.json']:add(path)
@@ -164,10 +171,11 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     # TRAIN selection. The coordinator explicitly chose this branch.
     import struct
     identity_sources=root/'selection-identity-sources.json'
-    shutil.copyfile('/mnt/v/output/zensim/e33-impl-2026-10-09/E3_SOURCES.json',identity_sources)
+    retain_copy(Path('/mnt/v/output/zensim/e33-impl-2026-10-09/E3_SOURCES.json'),identity_sources)
     production=root/'bin/e36-selection-production.bin'
-    shutil.copyfile('/mnt/v/output/zensim/adjudicate-2026-10-07/models/seed0.bin',production)
-    if sha(production)!='f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400':raise ValueError('registered identity production owner input changed')
+    production_source=Path('/mnt/v/output/zensim/adjudicate-2026-10-07/models/seed0.bin')
+    if sha(production_source)!='f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400':raise ValueError('registered identity production owner input changed')
+    retain_copy(production_source,production)
     bind=lambda p:dict(path=str(p),sha256=sha(p))
     policy=packet_dir/'selection-guard-policy.json'
     write(policy,dict(schema='e36-train-selection-guard-policy-v1',selection_has_human_ranks=False,

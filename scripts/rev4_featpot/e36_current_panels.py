@@ -32,9 +32,11 @@ def native_admitted(native,cohort,reference_records):
 
 
 def run(root,manifest,prepared,binary,out):
-    cohort_path=root/'cohort-selection.json';cohort=json.loads(cohort_path.read_text())
-    panel=json.loads(manifest.read_text());pins=json.loads((prepared/'INPUTS.json').read_text())
-    if cohort['labels_read'] is not False or len(cohort['rows'])!=200 or pins['manifest_sha256']!=sha(manifest) or pins['sources']!=len(panel['sources']):
+    cohort_path=root/'cohort-selection.json';cohort_raw=cohort_path.read_bytes();cohort=json.loads(cohort_raw)
+    manifest_raw=manifest.read_bytes();panel=json.loads(manifest_raw)
+    cohort_sha=hashlib.sha256(cohort_raw).hexdigest();manifest_sha=hashlib.sha256(manifest_raw).hexdigest()
+    pins=json.loads((prepared/'INPUTS.json').read_text())
+    if cohort['labels_read'] is not False or len(cohort['rows'])!=200 or pins['manifest_sha256']!=manifest_sha or pins['sources']!=len(panel['sources']):
         raise ValueError('current cohort/panel preparation binding differs')
     family_path=Path(cohort['current_family_v2']['path'])
     if sha(family_path)!=cohort['current_family_v2']['sha256']:raise ValueError('current canonical family owner changed')
@@ -63,15 +65,17 @@ def run(root,manifest,prepared,binary,out):
         for row in cohort['rows']:
             if sha(row['source'])!=row['source_sha256']:raise ValueError('frozen cohort source bytes changed')
             writer.writerow([row['source']])
-    shutil.copyfile(manifest,out/'SOURCE_MANIFEST.json')
+    with (out/'SOURCE_MANIFEST.json').open('xb') as f:f.write(manifest_raw)
     argv=[str(binary),'--native-png','--max-decode-pixels','120000000','--cid22-refs',str(refs),
         '--training-csv',str(training),'--threshold','10','--expected-training','200',
         '--expected-holdout',str(len(reference_records)),'--out-tsv',str(out/'audit.tsv')]
     with (out/'native.log').open('x') as log:subprocess.run(argv,stdout=log,stderr=subprocess.STDOUT,check=True)
     native_path=out/'audit.hashes.json';native=json.loads(native_path.read_text())
+    if sha(manifest)!=manifest_sha or sha(cohort_path)!=cohort_sha or sha(family_path)!=cohort['current_family_v2']['sha256']:
+        raise ValueError('cohort/panel/family metadata changed during native audit; frozen evidence retained')
     admitted=native_admitted(native,cohort,reference_records)
     write(out/'receipt.json',dict(schema='e36-current-panel-exclusion-v1',admitted=admitted,
-        cohort_sha256=sha(cohort_path),panel_manifest_sha256=sha(manifest),panel_sources=len(reference_records),
+        cohort_sha256=cohort_sha,panel_manifest_sha256=manifest_sha,panel_sources=len(reference_records),
         native_binary_sha256=sha(binary),native_hashes_sha256=sha(native_path),native_argv=argv,
         current_family_v2=cohort['current_family_v2'],family_checks=family_checks,
         reference_records=reference_records,strict_flags=native['strict_flags'],labels_read=False,fits=0,
