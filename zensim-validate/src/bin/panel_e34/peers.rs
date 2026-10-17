@@ -247,20 +247,28 @@ pub(super) fn run(bytes: &[u8]) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
+            Self::new_at(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            )
+        }
+        fn new_at(tick: u128) -> Self {
             let home = std::env::var_os("HOME")
                 .or_else(|| std::env::var_os("USERPROFILE"))
                 .expect("test needs a user scratch root");
             let root = PathBuf::from(home).join("tmp").join(format!(
-                "addrfix-peer-{}-{}",
+                "addrfix-peer-{}-{tick}-{}",
                 std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
+                NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir_all(&root).unwrap();
             Self(root)
@@ -282,6 +290,19 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn same_clock_tick_fixtures_keep_independent_peer_bytes() {
+        let first = Fixture::new_at(0);
+        let second = Fixture::new_at(0);
+        assert_ne!(first.0, second.0);
+        let first_peer = first.peer("0\tr0\td0\t9\n1\tr1\td1\t8\n");
+        let second_peer = second.peer("0\tr0\td0\t7\n1\tr1\td1\t6\n");
+        assert_eq!(predictions(&first_peer, 2).unwrap(), vec![9.0, 8.0]);
+        assert_eq!(predictions(&second_peer, 2).unwrap(), vec![7.0, 6.0]);
+        drop(first);
+        assert_eq!(predictions(&second_peer, 2).unwrap(), vec![7.0, 6.0]);
     }
 
     #[test]
