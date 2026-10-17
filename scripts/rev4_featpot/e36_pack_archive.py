@@ -198,6 +198,31 @@ class Dispatcher:
             append_batch(self.owner/'pack-rates-v1.jsonl',[dict(utc=time.time(),pack_id=pack_id,backend='cache' if storage['root']==self.cache['root'] else 'disk1',native_bundles=len(items),raw_bytes=sum(i['bytes'] for i in items),stored_bytes=actual['stored_bytes'],elapsed_seconds=time.monotonic()-start,fits=0)])
         return rows
 
+    def reconcile_historical(self,items):
+        """Read back prior owners without writing a second archival copy."""
+        from e36_archive_store import ArchiveClient
+        clients={};rows=[]
+        try:
+            for item in items:
+                assignment=self.assignments.rows[item['sha256']]
+                candidates=[json.loads((self.root/name).read_text()) for name in ['storage-runtime.json','storage-archive-v2.json','storage-cache-v1.json']]
+                storage=next(s for s in candidates if s['root']==assignment['canonical_root'])
+                key=storage['root']
+                if key not in clients:clients[key]=ArchiveClient(storage['command'],storage['program_sha256'])
+                path=Path(item['local_path']);actual=clients[key].verify(item['sha256'])
+                if sha(path)!=item['sha256'] or actual['bytes']!=path.stat().st_size:raise ValueError('historical assigned bundle differs')
+                row=dict(utc=time.time(),sha256=item['sha256'],bytes=actual['bytes'],completed_view_sha256=item['view_sha256'],local_path=str(path),local_allocated_bytes=path.stat().st_blocks*512,
+                    canonical_host=storage['host'],canonical_root=storage['root'],relative_path=actual['relative_path'],program_sha256=storage['program_sha256'],sha_verified=True,action='prior-owner-readback-batch-before-local-unlink',fits=0)
+                if storage.get('encoding')=='zstd':
+                    for k in ['encoding','stored_sha256','stored_bytes']:row[k]=actual[k]
+                rows.append(row)
+        finally:
+            for client in clients.values():client.close()
+        with self.journal_lock:
+            publish_segment(self.owner,rows)
+            for item in items:Path(item['local_path']).unlink()
+        return rows
+
     def cycle(self,queue,priority):
         completed=[]
         for future,doc in list(self.pending.items()):
@@ -226,6 +251,16 @@ class Dispatcher:
             n=artifact.stat().st_size;selected.append(dict(sha256=h,bytes=n,local_path=str(artifact),view_sha256=view));size+=512+((n+511)//512)*512
         for value in deferred:heapq.heappush(priority,value)
         if not selected:
+            if not self.pending and deferred:
+                items=[]
+                for _,h in deferred[:256]:
+                    path,view=queue[h];assignment=self.assignments.rows[h]
+                    if assignment.get('pack_id'):raise ValueError('incomplete pack assignment has no recoverable intent')
+                    items.append(dict(sha256=h,local_path=str(path),view_sha256=view))
+                doc=dict(items=items,storage=dict(root="historical-read-only"))
+                selected_hashes={i['sha256'] for i in items}
+                priority[:]=[p for p in priority if p[1] not in selected_hashes];heapq.heapify(priority)
+                self.pending[self.pool.submit(self.reconcile_historical,items)]=doc
             if self.pending:wait(self.pending,timeout=.1,return_when=FIRST_COMPLETED)
             return completed
         reserve=((size+1024+10239)//10240)*10240

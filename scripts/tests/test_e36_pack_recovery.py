@@ -93,3 +93,15 @@ class DirectoryAdmission(unittest.TestCase):
             proof.write_text(json.dumps(dict(admitted=True,stores=rows)));self.assertEqual(require_pack_directory_proof(root),proof)
             rows[0]['container_id']='other';proof.write_text(json.dumps(dict(admitted=True,stores=rows)))
             with self.assertRaises(ValueError):require_pack_directory_proof(root)
+
+class HistoricalOwner(unittest.TestCase):
+    def test_verified_first_owner_is_reconciled_without_new_upload(self):
+        from e36_pack_store import sha
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+            root=Path(d);owner=root/'owner-svt-ssd-v1';owner.mkdir();raw=root/'raw';raw.write_bytes(b'original encoded bundle');h=sha(raw)
+            storage=dict(root='/old-array',host='tower',program_sha256='b'*64,command=['read-only-fixture'])
+            for name in ['storage-runtime.json','storage-archive-v2.json','storage-cache-v1.json']:(root/name).write_text(json.dumps(storage))
+            dispatch=Dispatcher.__new__(Dispatcher);dispatch.root=root;dispatch.owner=owner;dispatch.assignments=Mock();dispatch.assignments.rows={h:dict(canonical_root='/old-array')};dispatch.journal_lock=threading.Lock()
+            client=Mock();client.verify.return_value=dict(bytes=raw.stat().st_size,relative_path='blobs/'+h[:2]+'/'+h+'.tar')
+            with patch('e36_archive_store.ArchiveClient',return_value=client):rows=dispatch.reconcile_historical([dict(sha256=h,local_path=str(raw),view_sha256='c'*64)])
+            client.put.assert_not_called();client.close.assert_called_once();self.assertFalse(raw.exists());self.assertEqual(list(relocation_records(root)),rows)
