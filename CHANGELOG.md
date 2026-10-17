@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Preserve STEER supervision through a capacity race after container creation, with clean drain and exact pause ownership checks.
+
 - SHIPGATES: add an opt-in bounded pool across JXL quality points, with deterministic journals and exact retained-cell replay; production adoption awaits its real replay.
 
 - SHIPGATES: record the exact168-row combined-judge replay and verified incremental archive; retain incomplete RD and final-targeting status.

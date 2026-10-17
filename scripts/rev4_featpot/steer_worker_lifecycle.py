@@ -195,6 +195,37 @@ def allocation_control(bundle, doc, js, current):
     return dict(paused=False, drain=False, note='Coordinator-approved frozen STEER execution')
 
 
+def finish_capacity_hold(bundle, js, paused, active, record, receipt, error):
+    """Drain an unreleased allocation, then restore only its exact owned pause."""
+    if any(not value for key, value in record['checks'].items()
+           if key not in ('claim_window_remaining', 'not_operator_paused')):
+        raise ValueError('capacity hold has invalid envelope; control remains paused')
+    if control(bundle, js) != paused:
+        raise ValueError('capacity hold pause owner changed')
+    record.update(state='HOLD_DRAINING', reason=str(error), control_restored=False)
+    receipt.write_text(json.dumps(record, indent=2)+'\n')
+    for _ in range(45):
+        worker = inspect(record['host'], record['container'])
+        if not worker['State']['Running']:
+            break
+        time.sleep(1)
+    else:
+        raise ValueError('unreleased capacity-held worker did not drain; control remains paused')
+    if (worker['State']['ExitCode'] != 0 or worker['State']['OOMKilled']
+            or worker['RestartCount']):
+        raise ValueError('capacity-held worker exit invalid; control remains paused')
+    record.update(state='CAPACITY_HOLD', worker_exit=worker['State'],
+                  restart_count=worker['RestartCount'])
+    if control(bundle, js) != paused:
+        raise ValueError('capacity hold pause owner changed during drain')
+    if not (bundle.parent/'launch/PAUSE_WORKERS').exists():
+        control(bundle, js, active)
+        record['control_restored'] = True
+    receipt.write_text(json.dumps(record, indent=2)+'\n')
+    return dict(state='CAPACITY_HOLD', host=record['host'], reason=str(error),
+                container=record['container'], receipt=str(receipt))
+
+
 def enroll(bundle, doc, host, role, js):
     binding = read_json(bundle/'WORKER_BINDING.json')
     if host not in binding['active'] or host not in ('r3500', 'i270', 'tower'):
@@ -267,7 +298,6 @@ def enroll(bundle, doc, host, role, js):
             break
         time.sleep(0.5)
     post = capacity(host)
-    admit(host, post, ctr)
     checks['one_STEER'] = [w['name'] for w in post['workers']
                             if w['run'].startswith('jobs/fitsteer-')] == ['/'+ctr]
     checks['claim_window_remaining'] = int(ssh(host, 'date -u +%s').strip()) <= deadline-5
@@ -282,6 +312,10 @@ def enroll(bundle, doc, host, role, js):
                   execution_amendment_sha256=owner.sha(bundle/'EXECUTION_BINDING_AMENDMENT.json'),
                   entrypoint_sha256=GUARD_SHA)
     receipt.write_text(json.dumps(record, indent=2)+'\n')
+    try:
+        admit(host, post, ctr)
+    except CapacityHold as error:
+        return finish_capacity_hold(bundle, js, paused, active, record, receipt, error)
     if not all(checks.values()):
         raise ValueError('worker envelope failed; control remains paused; see '+str(receipt))
     control(bundle, js, active)
@@ -545,7 +579,12 @@ def watch(bundle, doc):
             receipt = launch/('ENVELOPE-'+role+'.json')
             if receipt.exists():
                 state[host] = dict(container='zen-score-'+role, role=role, jobset=js)
-                active.append(host)
+                enrolled = read_json(receipt)
+                if enrolled.get('state') == 'CAPACITY_HOLD':
+                    note(dict(action='CAPACITY_HOLD', host=host, reason=enrolled['reason'],
+                              receipt=str(receipt)))
+                else:
+                    active.append(host)
                 if state_path.exists():
                     state_path.rename(state_path.with_name(state_path.name+'.bak-'+str(time.time_ns())))
                 state_path.write_text(json.dumps(state, indent=2)+'\n')

@@ -263,6 +263,86 @@ class Lifecycle(unittest.TestCase):
             for js,n in jobs.items():status['jobsets'][js]['installed']=n
             self.assertIsNone(life.next_jobset(self.bundle,dict(jobsets=jobs),status))
 
+    def test_post_creation_capacity_hold_drains_before_restoring_owned_control(self):
+        paused=dict(paused=True,drain=False,note='owned envelope')
+        active=dict(paused=False,drain=False,note='prior execution')
+        stopped=dict(State=dict(Running=False,ExitCode=0,OOMKilled=False),RestartCount=0)
+        receipt=self.root/'launch/held.json'
+        for operator_pause in [False,True]:
+            record=dict(host='i270',container='candidate',checks=dict(holding=True,guard=True,
+                        claim_window_remaining=False,not_operator_paused=not operator_pause))
+            events=[]
+            def control(bundle,js,value=None):
+                if value is not None:events.append(('restore',value))
+                return paused
+            def inspect(host,ctr):
+                events.append(('drained',ctr))
+                return stopped
+            if operator_pause:(self.root/'launch/PAUSE_WORKERS').touch()
+            with mock.patch.object(life,'control',side_effect=control), \
+                 mock.patch.object(life,'inspect',side_effect=inspect):
+                out=life.finish_capacity_hold(self.bundle,'job',paused,active,record,receipt,
+                                             life.CapacityHold('reservation race'))
+            self.assertEqual(out['state'],'CAPACITY_HOLD')
+            self.assertEqual(events,[('drained','candidate')]+([] if operator_pause else [('restore',active)]))
+            self.assertEqual(json.loads(receipt.read_text())['control_restored'],not operator_pause)
+
+    def test_enrollment_capacity_race_returns_hold_without_releasing_candidate(self):
+        import types
+        role='steer-i270-005'
+        (self.bundle/'EXECUTION_BINDING_AMENDMENT.json').write_text('{}')
+        post=copy.deepcopy(self.cap)
+        post['workers']=[dict(name='/foreign-'+str(i),memory=3*life.GIB,run='jobs/other') for i in range(9)]
+        post['workers'].append(dict(name='/zen-score-'+role,memory=6*life.GIB,run='jobs/fitsteer-job'))
+        paused=dict(paused=True,drain=False,note='STEER envelope '+role)
+        active=dict(paused=False,drain=False)
+        controls=[]
+        def control(bundle,js,value=None):
+            if value is not None:controls.append(value)
+            return controls[-1] if controls else active
+        def ssh(host,cmd):
+            if cmd=='date -u +%s':return '100\n'
+            if 'sha256sum /usr/local/bin/fleet-entrypoint.sh' in cmd:return life.GUARD_SHA+' entrypoint'
+            return ''
+        stopped=dict(State=dict(Running=False,ExitCode=0,OOMKilled=False),RestartCount=0)
+        with mock.patch.object(life.owner,'steer_plan',return_value={'order':['job']}), \
+             mock.patch.object(life.owner,'first_steer_admission'), \
+             mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
+             mock.patch.object(life,'execution_amendment',return_value={'launcher':{'path':'/disk/launcher'}}), \
+             mock.patch.object(life,'stage_entrypoint',return_value='/disk/guard.sh'), \
+             mock.patch.object(life,'capacity',side_effect=[self.cap,post]), \
+             mock.patch.object(life,'inspect',side_effect=[self.docker,stopped]), \
+             mock.patch.object(life,'control',side_effect=control), \
+             mock.patch.object(life,'ssh',side_effect=ssh), \
+             mock.patch.object(life.subprocess,'run',return_value=types.SimpleNamespace(stdout='holding',stderr='')):
+            out=life.enroll(self.bundle,{'image_ref':self.binding['image']},'i270',role,'job')
+        self.assertEqual(out['state'],'CAPACITY_HOLD')
+        self.assertEqual(controls,[paused,active])
+        record=json.loads(Path(out['receipt']).read_text())
+        self.assertEqual(record['worker_exit']['ExitCode'],0)
+        self.assertEqual(record['state'],'CAPACITY_HOLD')
+
+    def test_post_creation_capacity_hold_refuses_bad_guard_changed_owner_and_bad_exit(self):
+        paused=dict(paused=True,drain=False,note='owned envelope')
+        active=dict(paused=False,drain=False)
+        good=dict(State=dict(Running=False,ExitCode=0,OOMKilled=False),RestartCount=0)
+        for mode in ['bad_guard','owner_before','owner_after','bad_exit','oom','restart','timeout']:
+            record=dict(host='i270',container='candidate',checks=dict(holding=True,guard=True))
+            worker=copy.deepcopy(good)
+            if mode=='bad_guard':record['checks']['guard']=False
+            if mode=='bad_exit':worker['State']['ExitCode']=143
+            if mode=='oom':worker['State']['OOMKilled']=True
+            if mode=='restart':worker['RestartCount']=1
+            if mode=='timeout':worker['State']['Running']=True
+            reads=[dict(paused=True,note='operator')] if mode=='owner_before' else [paused,dict(paused=True,note='operator')] if mode=='owner_after' else [paused,paused]
+            with mock.patch.object(life,'control',side_effect=reads) as ctl, \
+                 mock.patch.object(life,'inspect',return_value=worker), \
+                 mock.patch.object(life.time,'sleep'):
+                with self.assertRaises(ValueError):
+                    life.finish_capacity_hold(self.bundle,'job',paused,active,record,
+                                              self.root/'launch/refused.json',life.CapacityHold('race'))
+                self.assertTrue(all(len(call.args)==2 for call in ctl.call_args_list))
+
     def test_allocation_waits_for_cycle_start_after_exit_not_completion_time(self):
         previous=dict(jobset='a')
         worker=dict(FinishedAt='2026-10-17T04:55:27.311788685Z')
@@ -308,6 +388,27 @@ class Lifecycle(unittest.TestCase):
             self.assertEqual(hosts,['r3500','tower'])
         events=[json.loads(line) for line in (self.root/'launch/LIFECYCLE.log').read_text().splitlines()]
         self.assertEqual([e['host'] for e in events if e['action']=='CAPACITY_HOLD'],['i270'])
+
+    def test_supervisor_records_drained_post_creation_hold_and_continues_other_hosts(self):
+        (self.root/'launch/HARVEST_STATUS.json').write_text(json.dumps(dict(installed=39,state='PROGRESS')))
+        metadata=dict(installed=39,per_host={h:dict(installed=13) for h in self.binding['active']})
+        def run(command,**kwargs):
+            host=command[command.index('--host')+1];role=command[command.index('--role')+1]
+            receipt=dict(state='CAPACITY_HOLD',reason='reservation race') if host=='i270' else {}
+            (self.root/'launch'/('ENVELOPE-'+role+'.json')).write_text(json.dumps(receipt))
+        with mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
+             mock.patch.object(life,'next_jobset',return_value='job'), \
+             mock.patch.object(life,'supervise_metadata',return_value=metadata), \
+             mock.patch.object(life,'capacity',return_value=self.cap), \
+             mock.patch.object(life,'control',return_value=dict(paused=False,drain=False)), \
+             mock.patch.object(life.subprocess,'run',side_effect=run), \
+             mock.patch.object(life.time,'sleep',side_effect=RuntimeError('one iteration')):
+            with self.assertRaisesRegex(RuntimeError,'one iteration'):life.watch(self.bundle,{})
+        events=[json.loads(line) for line in (self.root/'launch/LIFECYCLE.log').read_text().splitlines()]
+        self.assertEqual([e['host'] for e in events if e['action']=='ENROLL'],['r3500','i270','tower'])
+        self.assertEqual([e['host'] for e in events if e['action']=='CAPACITY_HOLD'],['i270'])
+        self.assertEqual(events[-1]['running_hosts'],['r3500','tower'])
+        self.assertIn('i270',json.loads((self.root/'launch/LIFECYCLE_STATE.json').read_text()))
 
     def test_live_reporting_keeps_labelled_native_count_without_changing_selection(self):
         value=dict(state='OK',packet_sha256=life.owner.PACKET_SHA,native_fold=True,
