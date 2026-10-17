@@ -23,7 +23,7 @@ def main():
     storage=json.loads((ROOT/'storage-runtime.json').read_text())
     client=Client(storage['command'],storage['program_sha256'])
     journal=ROOT/'owner-svt-ssd-v1/artifact-relocations.jsonl'
-    seen=set();queue={}
+    seen=set();queue={};ledger_cache={}
     cutoff=json.loads((ROOT/'owner-svt-ssd-v1/live-cutoff.json').read_text())['closed_unix_ns']/1e9-120
     while time.time()<1792256400 and not (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():
         free=shutil.disk_usage(LOCAL).free
@@ -31,12 +31,17 @@ def main():
             published=set()
             for name in ['fallback-v6','svt-additions-v1']:
                 for ledger in (ROOT/'runs'/name).glob('ledger*.parquet'):
+                    stat=ledger.stat();identity=(stat.st_mtime_ns,stat.st_size)
+                    previous=ledger_cache.get(ledger)
+                    if previous is not None and previous[0]==identity:
+                        published.update(previous[1]);continue
                     try:
                         rows=pq.read_table(ledger,columns=['status','attempts','output_sha']).to_pylist()
                     except (OSError,pa.ArrowInvalid):
                         # A sidecar still being written grants no eligibility.
                         continue
-                    published.update(row['output_sha'] for row in rows if row['status']=='done' and row['attempts']==1 and row['output_sha'])
+                    values={row['output_sha'] for row in rows if row['status']=='done' and row['attempts']==1 and row['output_sha']}
+                    ledger_cache[ledger]=(identity,values);published.update(values)
             for directory in [ROOT/'runs/fallback-v6/blobs',ROOT/'runs/svt-additions-v1/blobs']:
                 if not directory.exists():continue
                 for path in directory.iterdir():
@@ -55,6 +60,7 @@ def main():
             # Reclaim space with fewer remote metadata operations. Tiny-first
             # directory ordering can spend minutes copying sub-MB objects.
             ordered=sorted(queue.items(),key=lambda item:item[1][0].stat().st_size if item[1][0].exists() else 0,reverse=True)
+            batch_bytes=0;batch_started=time.monotonic()
             for digest,(artifact,view_sha) in ordered:
                 if (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():return
                 if shutil.disk_usage(LOCAL).free>=56*1024**3:break
@@ -77,8 +83,11 @@ def main():
                     sync_directory(artifact.parent)
                 del queue[digest]
                 print(json.dumps(dict(mirrored_sha256=digest,bytes=record['bytes'],free_bytes=shutil.disk_usage(LOCAL).free)),flush=True)
+                batch_bytes+=record['bytes']
+                if batch_bytes>=256*1024**2 or time.monotonic()-batch_started>=5:
+                    break
         print(json.dumps(dict(utc=time.time(),free_bytes=shutil.disk_usage(LOCAL).free,queued_bundles=len(queue),seen_complete_views=len(seen))),flush=True)
-        time.sleep(10)
+        time.sleep(.1 if queue and shutil.disk_usage(LOCAL).free<48*1024**3 else 10)
 
 
 if __name__=='__main__':main()
