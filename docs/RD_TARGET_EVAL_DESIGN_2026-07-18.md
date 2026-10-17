@@ -67,7 +67,7 @@ per-block diffmap steering save vs the same codec's global-knob-only search?
 | codec | zenjpeg (Zq loop), jxl-encoder (QF loop) |
 | driver | none (global-only) · SSE-analog · butteraugli-map (jxl native) · zensim-B+shipped map (incumbent) · winner-MLP+signed model map · ADD156+abs model map |
 | target T | {25, 40, 55, 70, 80, 90} — q5–q60-band-heavy per the sweep-density rule |
-| content | gb82 (photo) + gb82-sc (screen/nonphoto) + KonJND-src sample; ≥12 images/class for the probe, full-corpus only after the mechanism is confirmed |
+| content | gb82 (photographs and game renders; classify individually) + gb82-sc (screen/nonphoto) + KonJND-src sample; ≥12 images/class for the probe, full-corpus only after the mechanism is confirmed |
 | ε | |achieved − T| ≤ 2.0 (report the residual distribution too, not just pass/fail) |
 
 Instrumentation lands as TSV rows (one per cell): image, class, codec, driver, T, bytes,
@@ -164,3 +164,7 @@ no output created. Codec/metric failures and memory-cap kills stop execution.
 The memory threshold, complete-cell requirement and numerical gates remain
 unchanged. Run `just shipgates-scripts-check` for script wiring, RD numerical
 identities, fixed-judge packet binding and admission-policy regression checks.
+
+## October17 source-class correction
+
+The gb82 directory contains game renders as well as photographs. SHIPGATES visually reviewed its selected cohort and found mc1/mc2/mc3 are game renders, leaving nine photographs in the original24-source grid. The coordinator approved retaining all original measurements, assigning these renders to screen/nonphoto, and appending the next three unused SHA256(path)-ordered photographs. The corrected cohort is27 sources:12 photo and15 screen/nonphoto. The12-image minimum, quality grid, encoder/judge pins and numerical bars are unchanged. Original registration and evidence hashes remain archived; the class-only revision binds every derived row to its original complete-cell metadata. See [the ship-gate report](../benchmarks/shipgates_2026-10-16.md).

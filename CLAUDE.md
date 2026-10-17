@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-17 — SHIPGATES source-class correction. APPROVED, ADMISSION PENDING.** The original gb82 subset has nine photographs and three game renders, rather than12 photographs. Preserve all original measurements, classify the three renders as screen/nonphoto and append the next three unused SHA256(path)-ordered photographs. The12-image class minimum is unchanged; no photo-class RD qualification until the corrected27-source cohort is admitted and complete. See [the report](benchmarks/shipgates_2026-10-16.md).
+
 * **2026-10-17 — raw ledger footer counts cannot attribute installs after failed attempts. FIXED in the lifecycle status owner.** Footer rows include retained attempt history. Use `just steer-worker-scheduler-metadata` to read the frozen native compact reduction, with no upload or amnesty, and match its scheduler columns to the canonical installed counts. The live14-cell inventory matched6/4/4 across the three active hosts, with two failed identities retained separately. This is execution telemetry, not scientific assessment.
 
 * **2026-10-17 — STEER could re-enroll after a cycle whose ledger listing preceded exit. FIXED.** A global cycle completion time, or a jobset result timestamp, can be later than worker exit even though the store listing was earlier. The lifecycle owner now requires a canonical harvest cycle whose start is strictly after that allocation exited; jobset metadata must belong to that cycle. Current fits and native job identities are unchanged.

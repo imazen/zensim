@@ -265,9 +265,9 @@ Full control summary SHA256 `ad305bf3236ec0f62f5880ad5a46441e118f2d7f3007073b2fd
 
 ## RD input admission and PNG representation
 
-All24 sources (12 photo,12 screen) passed native strict opaque/sRGB8 metadata admission and an independent whole-image RGB-byte oracle. The GUI source uses its deterministic largest opaque rectangle; the indexed screenshot is losslessly expanded to8-bit PNG through the first-party encoder. Their original bytes, source URLs, family identities and preparation receipts remain archived. No quality grid, candidate, codec or fixed-judge arithmetic changed.
+All24 original sources passed native strict opaque/sRGB8 metadata admission and an independent whole-image RGB-byte oracle. Individual visual review subsequently identified nine photographs,12 screen images and three game renders; the original “12 photo” description was incorrect. The GUI source uses its deterministic largest opaque rectangle; the indexed screenshot is losslessly expanded to8-bit PNG through the first-party encoder. Their original bytes, source URLs, family identities and preparation receipts remain archived. No quality grid, candidate, codec or fixed-judge arithmetic changed.
 
-Final source-manifest SHA256 `6ddb0f655ddfe307a6c9702a2928eb7b47690fc1b0104811287dfb08af8cdf75`. The launcher requires the hash-bound24-source admission receipt before encoding. Existing344 complete cells were hash-verified and reused. Full4032-cell JXL RD coverage and source-bootstrap results remain pending.
+Original24-source manifest SHA256 `6ddb0f655ddfe307a6c9702a2928eb7b47690fc1b0104811287dfb08af8cdf75`. The launcher requires the hash-bound24-source admission receipt before encoding. Existing344 complete cells were hash-verified and reused. Full4032-cell JXL RD coverage and source-bootstrap results remain pending.
 
 Decoded PNGs and float-map containers may use lossless palette or grayscale storage. Explicit sample expansion preserves every delivered RGB byte and every logical float-map bit; physical container hashes, logical-map hashes, input-pixel bindings and deduplication keys are checked independently. SSIMULACRA2 remains scalar-only under the approved artifact exception.
 
@@ -300,3 +300,11 @@ run-heavy: done rc=0 79s | peak-RSS 0.10GiB | min-avail 35226MiB | peak-load 6.4
 ```
 
 Evidence: `QUALITY_GROUP_REPLAY_VERIFIED.json` and `quality-group-recovery-check/VERIFIED.json`. The active continuation uses `rd-jxl-quality-groups/` and `rd-jxl-quality-groups-judges/`; historical roots and every completed artifact remain archived. Source bootstrap and numeric RD verdicts still require the complete matrix.
+
+## Approved source-class correction — October17
+
+The coordinator approved retaining the complete original mixed cohort, correcting the three game renders to the registered screen/nonphoto class, and appending the next three unused photographs in the frozen SHA256(path) ordering: girl, flowers and rain. Every one was individually reviewed before admission. The corrected cohort has12 photographs and15 screen/nonphoto images; the minimum remains12 per class. Its expected complete JXL grid is4,536 cells. Admission and the additional encodes remain pending; no RD verdict is claimed.
+
+Original source files, manifests, complete cells and measurements remain archived. Reused rows carry a class-only derivation bound to their original cell metadata and the approved revision; byte counts, encoded/decoded hashes, steering maps, source families, model/codec/judge pins and the21-point quality grid are preserved.
+
+The corrected source-manifest SHA256 is `e9b21e153a7d22c59e5e6341f9e7f35d0050a5b55882558f62c808c4dbae56df`. A replay over all1,344 complete records from the first eight original sources changes only the504 game-render class annotations; the other840 rows are unchanged. Every non-class field matches its immutable original cell. This is metadata verification, with no new encode, score or fitted value.
