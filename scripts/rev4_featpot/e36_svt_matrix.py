@@ -367,6 +367,7 @@ def install_controller(root,receipt):
     from e36_phase_handoff import supervisor_lock
     paper_lock=Path('/home/lilith/tmp/zensim-paper/rev4/heavy.lock')
     supervisor=2672125
+    (root/'step-lock-windows').mkdir(exist_ok=True)
     def window(name,stage):
         stem=name+'-'+stage+'-'+str(time.time_ns())
         for operation,label in [(8,'release'),(2,'reacquire')]:

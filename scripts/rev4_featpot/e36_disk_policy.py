@@ -40,7 +40,7 @@ def wait(deadline):
         stopped=sticky_stop(free)
         if free<30*1024**3:paused=True
         if paused and free>40*1024**3:paused=False
-        if not stopped and not paused and not state.get('claims_paused',False):return
+        if not stopped and not paused and not state.get('claims_paused',False) and not (ROOT/'owner-svt-ssd-v1/resource-failure-hold.json').exists():return
         if time.time()>=deadline:raise TimeoutError('registered deadline expired during disk admission wait')
         time.sleep(.2)
 
@@ -106,7 +106,9 @@ def monitor():
     while time.time()<1792256400 and not (ROOT/'owner-svt-ssd-v1/disk-monitor-stop.json').exists():
         now=time.time();free=shutil.disk_usage(ROOT).free
         hard=sticky_stop(free)
-        paused=paused_state(free,paused,hard)
+        hold_path=ROOT/'owner-svt-ssd-v1/resource-failure-hold.json'
+        held=json.loads(hold_path.read_text()) if hold_path.exists() else None
+        paused=paused_state(free,paused,hard or held is not None)
         workers={}
         for entry in (scope/'cgroup.procs').read_text().split():
             p=Path('/proc')/entry
@@ -115,6 +117,10 @@ def monitor():
                     fields=p.joinpath('stat').read_text().rsplit(')',1)[1].split()
                     workers[int(entry)]=dict(pid=int(entry),start_ticks=fields[19],state=fields[0])
             except (OSError,ProcessLookupError):continue
+        if held is not None and held['scope']==str(scope) and held['expected_worker']==str(expected):
+            for item in held['owned_stops']:
+                if item['pid'] in workers and workers[item['pid']]['start_ticks']==item['start_ticks']:
+                    stopped[item['pid']]=item
         if paused:
             stopped={pid:item for pid,item in stopped.items() if pid in workers and workers[pid]['start_ticks']==item['start_ticks']}
             for pid,item in workers.items():
@@ -140,9 +146,12 @@ def monitor():
         current=dict(utc=now,free_bytes=free,claims_paused=paused,hard_stop=hard,native_workers=sorted(workers),
                      owned_stops=list(stopped.values()),scope=str(scope),fits=0)
         saved=json.loads(STATE.read_text()) if STATE.exists() else {}
-        if not STATE.exists() or saved.get('claims_paused')!=paused or saved.get('owned_stops')!=current['owned_stops']:
+        if not STATE.exists() or saved.get('claims_paused')!=paused or saved.get('owned_stops')!=current['owned_stops'] or saved.get('native_workers')!=current['native_workers']:
             atomic(STATE,current)
             print(json.dumps(dict(event='claim-state',**current)),flush=True)
+        ready=os.environ.get('E36_RESOURCE_READY_PATH')
+        if ready and not Path(ready).exists():
+            atomic(Path(ready),dict(role='monitor',pid=os.getpid(),scope=str(scope),utc=now,fits=0))
         if now-last_emit>=30:
             try:
                 if relocation.exists():
