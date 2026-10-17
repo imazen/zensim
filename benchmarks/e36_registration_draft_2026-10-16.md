@@ -10,6 +10,22 @@ source-count amendment below supersedes the earlier full4096 count. The fixed
 previous registrations and measured-cost tables remain as amendment history.
 Fitting is not released.
 
+Coordinator amendment, 2026-10-17, before any fit: the already qualified
+12,300-view mandatory matrix is the final fit pool. Optional views are retained
+as diagnostics and do not gate pool selection or admission. The immutable
+mandatory census and exact native manifest bind this choice; teacher support
+and model outcomes play no part in selecting it. All mandatory source counts,
+61 q values,20 sizes,four codecs and numerical gates remain unchanged.
+
+The coordinator now authorizes a separate bounded smoke fit to measure memory
+before packing the129 registered cells. It is diagnostic, cannot install as a
+registered result, and does not change the final120-epoch/50,000-draw recipe.
+Set the final per-fit cap from measured smoke peak plus an explicit margin;
+pack tower,i265,i270,r3500 by memory while preserving their reserves. The
+registered129 fits still require the coordinator's go and STEER claim drain.
+This supersedes the blanket smoke prohibition below and the earlier coarse
+16GiB planning proposal.
+
 Revision 5 budget amendment, before any E36 fit. Preparation permits native data generation and
 non-training checks only. No optimizer step, first-epoch smoke, fit-cell claim or
 model qualification is authorized. The coordinator releases fitting separately.

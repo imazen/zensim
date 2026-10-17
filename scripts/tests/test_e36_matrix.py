@@ -18,6 +18,31 @@ from e36_semantic import edge,exact_support
 def write(p,v):p.write_text(json.dumps(v))
 
 class MatrixAdmission(unittest.TestCase):
+    def test_coordinator_mandatory_choice_never_waits_for_optional(self):
+        from unittest.mock import patch
+        import e36_svt_matrix as owner
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-mandatory-choice-') as d:
+            root=Path(d);folder=root/'owner-svt-ssd-v1';folder.mkdir()
+            run=root/'runs/fallback';run.mkdir(parents=True)
+            manifest=run/'manifest.json';write(manifest,[{'invented':'native-view'}])
+            publication=run/'native-publication.json';write(publication,{'admitted':True})
+            census=run/'census.json';write(census,dict(admitted=True,output_receipts=[{'invented':'output'}],native_publication=owner.bind(publication)))
+            phase=dict(run='fallback',manifest=owner.bind(manifest),jobs=1)
+            proof=dict(phases=dict(fallback=phase,additions=dict(run='optional')),plan=dict(path='plan',sha256='plan-sha'),clock=dict(path='clock',sha256='clock-sha'),scheduling={})
+            write(folder/'matrix-binding.json',{})
+            path=folder/'mandatory-choice-amendment-v1.json'
+            amendment=dict(schema='e36-mandatory-only-choice-amendment-v1',authorization='coordinator-qualified-mandatory-optional-nongating',selected_phase='fallback',selected_runs=['fallback'],matrix=owner.bind(manifest),census=owner.bind(census),optional_fit_pool=False,teacher_support_used=False,fits=0)
+            write(path,amendment)
+            with patch.object(owner,'configuration',return_value=(proof,{},[])),patch.object(owner,'qualify',side_effect=AssertionError('no optional qualification or recensus')):
+                choice=owner.finalize_choice(root)
+            self.assertEqual(choice['selected_runs'],['fallback'])
+            self.assertEqual(choice['mandatory_choice_amendment'],owner.bind(path))
+            for field in ['optional_fit_pool','teacher_support_used']:
+                write(path,dict(amendment,**{field:True}))
+                with self.assertRaisesRegex(ValueError,'coordinator amendment'):owner.mandatory_choice(root,proof)
+            write(path,amendment);census.write_text(census.read_text()+' ')
+            with self.assertRaisesRegex(ValueError,'evidence changed'):owner.mandatory_choice(root,proof)
+
     def test_timely_full_evidence_is_qualified_after_late_control_return(self):
         from unittest.mock import patch
         import e36_bulk

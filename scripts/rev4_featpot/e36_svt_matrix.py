@@ -362,6 +362,15 @@ def finalize_choice(root):
     root=Path(root);proof,clock,_=configuration(root)
     if (root/'bulk-choice.json').exists():raise ValueError('preserve the existing immutable choice')
     fallback=proof['phases']['fallback']['run'];additions=proof['phases']['additions']['run']
+    mandatory=mandatory_choice(root,proof)
+    if mandatory is not None:
+        choice=dict(schema='e36-fixed-matrix-choice-v1',plan_path=proof['plan']['path'],plan_sha256=proof['plan']['sha256'],
+            clock_path=proof['clock']['path'],clock_sha256=proof['clock']['sha256'],qualified='fallback',selected_runs=[fallback],
+            teacher_support_not_used_for_choice=True,closed_unix=time.time(),fits=0,
+            scheduling_amendment=proof['scheduling'],owner_matrix=bind(root/'owner-svt-ssd-v1/matrix-binding.json'),
+            mandatory_choice_amendment=bind(mandatory))
+        write(root/'bulk-choice.json',choice)
+        return choice
     qualified=None;names=[]
     if qualify(root,fallback,clock['started_unix'],clock['deadline_unix']):
         qualified='fallback';names=[fallback]
@@ -382,6 +391,25 @@ def finalize_choice(root):
     return choice
 
 
+def mandatory_choice(root,proof):
+    """Validate the coordinator's prospective mandatory-only pool selection."""
+    path=Path(root)/'owner-svt-ssd-v1/mandatory-choice-amendment-v1.json'
+    if not path.exists():return None
+    value=json.loads(path.read_text());phase=proof['phases']['fallback']
+    if (value['schema']!='e36-mandatory-only-choice-amendment-v1'
+        or value['authorization']!='coordinator-qualified-mandatory-optional-nongating'
+        or value['selected_phase']!='fallback' or value['selected_runs']!=[phase['run']]
+        or value['optional_fit_pool'] is not False or value['teacher_support_used'] is not False
+        or value['fits']!=0 or value['matrix']!=phase['manifest']):
+        raise ValueError('mandatory-only coordinator amendment differs')
+    checked(value['matrix']);census=json.loads(checked(value['census']).read_text())
+    if checked(value['census'])!=Path(root)/'runs'/phase['run']/'census.json' or census['admitted'] is not True or len(census['output_receipts'])!=phase['jobs']:
+        raise ValueError('mandatory-only complete native census differs')
+    # Full native publication/receipt replay still occurs at final admission.
+    checked(census['native_publication'])
+    return path
+
+
 def admit(root,names):
     root=Path(root);proof,clock,evidence=configuration(root)
     choice_path=root/'bulk-choice.json';choice=json.loads(choice_path.read_text())
@@ -394,6 +422,9 @@ def admit(root,names):
         expected.append(proof['phases']['additions']['run'])
     if names!=expected or choice['selected_runs']!=expected:
         raise ValueError('exact owner-selected native run list required')
+    mandatory=mandatory_choice(root,proof)
+    if mandatory is not None and (choice['qualified']!='fallback' or choice.get('mandatory_choice_amendment')!=bind(mandatory)):
+        raise ValueError('mandatory-only pool choice must exclude optional outputs')
     output_hashes=[];declarations={};seen=set();publications=[]
     for name in names:
         directory=root/'runs'/name;pin=next(p for p in proof['phases'].values() if p['run']==name)
@@ -442,7 +473,7 @@ def admit(root,names):
         if terminal['schema']!='e36-fresh-native-continuation-final-v1' or terminal['closed'] is not True or terminal['fits']!=0 or terminal['scientific_change'] is not False or terminal['fresh_binding']!=proof['fresh_continuation']:raise ValueError('fresh native terminal evidence required')
         for key in ['launch','exit','helper_exits','log','runtime_audit']:checked(terminal[key])
     optional_terminal=None
-    if list(root.glob('native-additions-*/launch.json')):
+    if list(root.glob('native-additions-*/launch.json')) and mandatory is None:
         from e36_phase_terminal import validate as validate_optional
         optional_terminal=root/'owner-svt-ssd-v1/native-additions-final-v1.json';validate_optional(root,optional_terminal)
     locations=json.loads(location_path.read_text())
@@ -464,7 +495,7 @@ def admit(root,names):
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
                 native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
-                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),optional_terminal=bind(optional_terminal) if optional_terminal else None,archive_resources=proof.get('archive_resources'),archive_resource_repair=proof.get('archive_resource_repair'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None)
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),optional_terminal=bind(optional_terminal) if optional_terminal else None,archive_resources=proof.get('archive_resources'),archive_resource_repair=proof.get('archive_resource_repair'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None,mandatory_choice_amendment=bind(mandatory) if mandatory else None)
 
 
 def install_controller(root,receipt):
