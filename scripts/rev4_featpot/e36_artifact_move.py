@@ -20,7 +20,10 @@ class Mover:
             if not artifact.exists():return None
             if sha(artifact)!=digest:raise ValueError('local artifact hash changed')
             if not hasattr(self.clients,'client'):
-                self.clients.client=Client(self.storage['command'],self.storage['program_sha256'])
+                if self.storage.get('encoding')=='zstd':
+                    from e36_archive_store import ArchiveClient
+                    self.clients.client=ArchiveClient(self.storage['command'],self.storage['program_sha256'])
+                else:self.clients.client=Client(self.storage['command'],self.storage['program_sha256'])
             client=self.clients.client;ack=client.put(artifact);verified=client.verify(digest)
             if verified['bytes']!=artifact.stat().st_size or ack['bytes']!=verified['bytes']:
                 raise ValueError('mirror size/hash verification failed')
@@ -29,6 +32,10 @@ class Mover:
                         canonical_host=self.storage['host'],canonical_root=self.storage['root'],
                         relative_path=verified['relative_path'],program_sha256=verified['program_sha256'],
                         sha_verified=True,action='canonical-mirror-verified-before-local-unlink',fits=0)
+            if self.storage.get('encoding')=='zstd':
+                for key in ['encoding','stored_sha256','stored_bytes']:record[key]=verified[key]
+                if any(ack[key]!=verified[key] for key in ['stored_sha256','stored_bytes']):
+                    raise ValueError('archive changed between upload and independent verification')
             journal=self.root/'owner-svt-ssd-v1/artifact-relocations.jsonl'
             with self.journal_lock:
                 with journal.open('a') as stream:

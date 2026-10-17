@@ -18,12 +18,34 @@ import pyarrow as pa
 
 ROOT=Path('/mnt/v/output/zensim/e36-bulk-2026-10-17')
 LOCAL=ROOT/'artifacts-local-v1'
+METADATA_CLIENT=None
+METADATA_ARCHIVED=None
 
 
 def mirror_view(path):
     """Back up a complete native receipt while retaining the trainer's copy."""
-    if not os.path.ismount('/mnt/tower'):
-        raise ValueError('tower NFS must be mounted before metadata mirroring')
+    if (ROOT/'storage-archive-v2.json').exists():
+        global METADATA_CLIENT,METADATA_ARCHIVED
+        # New receipts use the distinct disk archive. Existing NFS backups stay
+        # where recorded; no file is opened through both namespace paths.
+        from e36_archive_store import ArchiveClient
+        storage=json.loads((ROOT/'storage-archive-v2.json').read_text())
+        if METADATA_ARCHIVED is None:
+            METADATA_ARCHIVED=set()
+            for journal in ['view-mirrors.jsonl','view-mirrors-v2.jsonl']:
+                source=ROOT/'owner-svt-ssd-v1'/journal
+                if source.exists():
+                    with source.open() as stream:METADATA_ARCHIVED.update(json.loads(line)['sha256'] for line in stream)
+        if path.name in METADATA_ARCHIVED:return
+        if METADATA_CLIENT is None:METADATA_CLIENT=ArchiveClient(storage['command'],storage['program_sha256'])
+        with (ROOT/'owner-svt-ssd-v1/view-mirrors-v2.jsonl').open('a') as stream:
+            answer=METADATA_CLIENT.put(path);actual=METADATA_CLIENT.verify(path.name)
+            if actual!=answer or actual['bytes']!=path.stat().st_size:raise ValueError('native receipt archive differs')
+            stream.write(json.dumps(dict(utc=time.time(),source=str(path),canonical_root=storage['root'],
+                **actual,local_retained_reason='feature-only trainer pool not yet materialized',fits=0))+'\n')
+            stream.flush();os.fsync(stream.fileno());METADATA_ARCHIVED.add(path.name)
+        return
+    if not os.path.ismount('/mnt/tower'):raise ValueError('tower NFS must be mounted before metadata mirroring')
     destination=Path('/mnt/tower/output/zensim/e36-bulk-2026-10-17')/path.relative_to(ROOT)
     if destination.exists():
         if sha(destination)!=path.name:raise ValueError('conflicting archived native receipt')
@@ -49,7 +71,14 @@ def run(pool):
     import fcntl
     lock=(ROOT/'owner-svt-ssd-v1/mirror.lock').open('a')
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    storage=json.loads((ROOT/'storage-runtime.json').read_text())
+    storage_path=ROOT/'storage-archive-v2.json'
+    storage=json.loads((storage_path if storage_path.exists() else ROOT/'storage-runtime.json').read_text())
+    if storage.get('encoding')=='zstd':
+        proof=json.loads((ROOT/'owner-svt-ssd-v1/zstd-map-probe-v1/receipt.json').read_text())
+        if proof.get('admitted') is not True or proof['storage']['sha256']!=sha(storage_path) or len(proof['maps'])!=2:
+            raise ValueError('actual map-owner zstd readback admission required')
+        os.environ['E36_ARCHIVE_STAGE']=str(ROOT/'archive-staging-v2')
+        os.environ['E36_ARCHIVE_ROOT']=str(ROOT)
     os.environ['E36_STORE_CONNECT_GATE']=str(ROOT/'storage-connect-gate')
     mover=Mover(ROOT,storage)
     ready=os.environ.get('E36_RESOURCE_READY_PATH')
@@ -62,7 +91,7 @@ def run(pool):
         sync_directory(Path(ready).parent)
     seen=set();queue={};ledger_cache={};metadata_pending={};priority=[];next_scan=0
     cutoff=json.loads((ROOT/'owner-svt-ssd-v1/live-cutoff.json').read_text())['closed_unix_ns']/1e9-120
-    while time.time()<1792256400 and not (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():
+    while time.time()<1792274400 and not (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():
         free=shutil.disk_usage(LOCAL).free
         eager=(ROOT/'owner-svt-ssd-v1/urgent-disk-policy.json').exists()
         if eager or free<48*1024**3:
@@ -104,7 +133,7 @@ def run(pool):
             # Reclaim space with fewer remote metadata operations. Tiny-first
             # directory ordering can spend minutes copying sub-MB objects.
             batch={}
-            while priority and len(batch)<4:
+            while priority and len(batch)<8:
                 if (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():return
                 if not eager and shutil.disk_usage(LOCAL).free>=56*1024**3:break
                 _,digest=heapq.heappop(priority)
@@ -135,8 +164,10 @@ def run(pool):
 
 
 def main():
-    with ThreadPoolExecutor(max_workers=4,thread_name_prefix='e36-storage') as pool:
-        run(pool)
+    try:
+        with ThreadPoolExecutor(max_workers=8,thread_name_prefix='e36-storage') as pool:run(pool)
+    finally:
+        if METADATA_CLIENT is not None:METADATA_CLIENT.close()
 
 
 if __name__=='__main__':main()

@@ -23,13 +23,14 @@ def main():
     p.add_argument('--image',required=True)
     p.add_argument('--container',required=True)
     p.add_argument('--output',required=True,type=Path)
+    p.add_argument('--archive-zstd',action='store_true')
     a=p.parse_args()
     root=Path(a.root)
     if not root.is_absolute() or len(root.parts)<4 or root.parts[1]!='mnt' or not root.parts[2].startswith('disk'):
         raise ValueError('bulk storage requires an explicit direct array-disk path')
     if a.output.exists():raise FileExistsError(a.output)
     image=remote(a.host,['docker','image','inspect',a.image,'--format','{{.Id}}']).decode().strip()
-    source=Path(__file__).with_name('e36_store.py').read_bytes()
+    source=Path(__file__).with_name('e36_archive_store.py' if a.archive_zstd else 'e36_store.py').read_bytes()
     digest=hashlib.sha256(source).hexdigest()
     bootstrap='''import hashlib,pathlib,sys
 data=sys.stdin.buffer.read()
@@ -54,6 +55,11 @@ print(digest)
         '--env','PYTHONDONTWRITEBYTECODE=1','--volume',f'{a.root}:/data',
         '--entrypoint','python3',image,'-c',bootstrap],source).decode().strip()
     if initialized!=digest:raise ValueError('storage program changed during bootstrap')
+    if a.archive_zstd:
+        for name in ['e36_store.py','e36_artifact_location.py']:
+            payload=Path(__file__).with_name(name).read_bytes()
+            upload="import pathlib,sys; p=pathlib.Path('/data/program')/sys.argv[1]; data=sys.stdin.buffer.read(); p.open('xb').write(data)"
+            remote(a.host,['docker','run','--rm','-i',*common,image,'-c',upload,name],payload)
     container=remote(a.host,['docker','run','-d','--name',a.container,
         '--label','e36.role=storage-only','--read-only',*common,image,'-u','-c',
         'import time;time.sleep(86400)']).decode().strip()
@@ -61,11 +67,14 @@ print(digest)
     assert info['Image']==image and info['HostConfig']['Memory']==2*1024**3
     command=['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=10',a.host,
         shlex.join(['docker','exec','-i',container,'python3','-u',
-            '/data/program/'+digest+'.py','serve','--root','/data','--min-free-gib','128'])]
+            '/data/program/'+digest+'.py',* ([] if a.archive_zstd else ['serve']), '--root','/data','--min-free-gib','128'])]
     result=dict(host=a.host,root=a.root,image_id=image,container_id=container,
         container_name=a.container,program_sha256=digest,command=command,
         memory_cap_bytes=2*1024**3,cpuset='0-3',cpu_shares=256,
         min_free_gib=128,role='storage-only; no generation, scoring, fitting or job claims')
+    if a.archive_zstd:
+        result['encoding']='zstd'
+        result['support_files']={name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in ['e36_store.py','e36_artifact_location.py']}
     with a.output.open('x') as f:json.dump(result,f,indent=2);f.write('\n')
     print(json.dumps(dict(container=container,program_sha256=digest,role=result['role'])))
 

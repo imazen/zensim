@@ -64,15 +64,41 @@ def resolve(bundle,root,remote_verify,storage,journal_pin=None):
             for line in stream:
                 record=json.loads(line)
                 if record['sha256']!=hash_value:continue
-                if (record['sha_verified'] is not True or record['canonical_host']!=storage['host']
-                    or record['canonical_root']!=storage['root'] or record['relative_path']!=expected_relative
-                    or record['program_sha256']!=storage['program_sha256'] or record['bytes']!=bundle['bytes']):
+                owner=record_owner(root,record,storage)
+                if (record['sha_verified'] is not True or record['bytes']!=bundle['bytes']):
                     raise ValueError('artifact relocation owner/hash/size differs')
                 found=record
         if found is None:raise ValueError('missing local artifact has no verified relocation')
-        actual=remote_verify(hash_value)
+        owner=record_owner(root,found,storage)
+        if owner.get('encoding')=='zstd':
+            from e36_archive_store import ArchiveClient
+            client=ArchiveClient(owner['command'],owner['program_sha256'])
+            try:actual=client.verify(hash_value)
+            finally:client.close()
+            if any(actual[k]!=found[k] for k in ['stored_sha256','stored_bytes','encoding']):
+                raise ValueError('archive stored-byte identity changed')
+        else:actual=remote_verify(hash_value)
         if actual['bytes']!=bundle['bytes']:raise ValueError('relocated artifact byte count changed')
-        return dict(host=storage['host'],root=storage['root'],**actual)
+        return dict(host=owner['host'],root=owner['root'],**actual)
+
+
+def record_owner(root,record,legacy):
+    """Each immutable journal row chooses one strict, independently pinned owner."""
+    expected='blobs/'+record['sha256'][:2]+'/'+record['sha256']+'.tar'
+    if record['canonical_host']==legacy['host'] and record['canonical_root']==legacy['root']:
+        owner=legacy
+        if record.get('encoding') not in [None,'raw']:raise ValueError('legacy encoding changed')
+    else:
+        path=Path(root)/'storage-archive-v2.json';owner=json.loads(path.read_text())
+        if (owner.get('encoding')!='zstd' or owner['host']!='tower'
+            or owner['root']!='/mnt/disk1/coefficient/output/zensim/e36-bulk-2026-10-17-disk1'
+            or record['canonical_host']!=owner['host'] or record['canonical_root']!=owner['root']
+            or record.get('encoding')!='zstd' or type(record.get('stored_bytes')) is not int
+            or record['stored_bytes']<=0):raise ValueError('unknown compressed archive owner')
+        digest(record['stored_sha256']);expected+='.zst'
+    if record['relative_path']!=expected or record['program_sha256']!=owner['program_sha256']:
+        raise ValueError('archive owner/path/program differs')
+    return owner
 
 
 def freeze(root,out):
@@ -106,7 +132,8 @@ def freeze(root,out):
     unique={};by_view={}
     for row in rows:
         h=digest(row['sha256']);relative='blobs/'+h[:2]+'/'+h+'.tar'
-        if (row['sha_verified'] is not True or row['canonical_host']!=storage['host'] or row['canonical_root']!=storage['root'] or row['relative_path']!=relative or row['program_sha256']!=storage['program_sha256'] or row['completed_view_sha256'] not in published):
+        record_owner(root,row,storage)
+        if (row['sha_verified'] is not True or row['completed_view_sha256'] not in published):
             raise ValueError('archived artifact lacks exact store/native DONE eligibility')
         by_view.setdefault(row['completed_view_sha256'],[]).append(row)
         prior=unique.setdefault(h,row)
@@ -127,7 +154,14 @@ def freeze(root,out):
     client=Client(storage['command'],storage['program_sha256']);checks=[]
     try:
         for h in sampled:
-            answer=client.verify(h)
+            row=unique[h];owner=record_owner(root,row,storage)
+            if owner.get('encoding')=='zstd':
+                from e36_archive_store import ArchiveClient
+                archive=ArchiveClient(owner['command'],owner['program_sha256'])
+                try:answer=archive.verify(h)
+                finally:archive.close()
+                if any(answer[k]!=row[k] for k in ['stored_sha256','stored_bytes','encoding']):raise ValueError('final compressed archive changed')
+            else:answer=client.verify(h)
             if answer['bytes']!=unique[h]['bytes']:raise ValueError('final archive readback size changed')
             checks.append(answer)
     finally:
@@ -145,5 +179,9 @@ def freeze(root,out):
                 storage=dict(path=str(storage_path),sha256=sha(storage_path)),
                 native_ledgers=ledger_pins,unique_relocated_objects=len(unique),native_complete_views=len(by_view),
                 actual_random_readbacks=checks,relocation_eligibility_replayed=True,utc=time.time(),fits=0)
+    archive_path=root/'storage-archive-v2.json'
+    if archive_path.exists():result['archive_storage']=dict(path=str(archive_path),sha256=sha(archive_path))
+    readback=root/'owner-svt-ssd-v1/archive-program-readback-v1.json'
+    if readback.exists():result['archive_program_readback']=dict(path=str(readback),sha256=sha(readback))
     with out.open('x') as stream:json.dump(result,stream,indent=2);stream.write('\n')
     return result
