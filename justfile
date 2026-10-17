@@ -2312,7 +2312,7 @@ e36-artifact-location-freeze root:
     python3 -c 'import sys; from pathlib import Path; sys.path.insert(0,"scripts/rev4_featpot"); from e36_artifact_location import freeze; r=Path(sys.argv[1]); freeze(r,r/"ARTIFACT_LOCATION_ADMISSION.json")' {{quote(root)}}
 
 e36-pack-archive-check:
-    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_cache_archive.py scripts/tests/test_e36_archive_assignments.py scripts/tests/test_e36_archive_store.py scripts/tests/test_e36_resource_handoff.py
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_closed_archive.py scripts/tests/test_e36_archive_windows.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_cache_archive.py scripts/tests/test_e36_archive_assignments.py scripts/tests/test_e36_archive_store.py scripts/tests/test_e36_resource_handoff.py
 
 e36-pack-finish-projection root compute output:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_pack_projection.py --root {{quote(root)}} --compute {{quote(compute)}} --out {{quote(output)}}
