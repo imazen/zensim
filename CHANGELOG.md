@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add an actual pinned-worker scheduling oracle on invented jobs and document the STEER per-cell ledger/pause repair without changing scientific fit budgets.
+
 - Keep STEER harvest staging and installed results under one container bind mount so verified cells install by atomic rename.
 
 - Add explicit engineering source-cluster bootstrap input to the existing panel statistics owner; no data discovery or paired-label input.

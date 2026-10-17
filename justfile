@@ -1605,3 +1605,7 @@ addrfix-final-epoch-control binary:
 
 addrfix-map-evaluate binary input output:
     {{quote(binary)}} e34 map-cost --input {{quote(input)}} --output {{quote(output)}}
+
+# Actual pinned-worker transport oracle: invented jobs only, no training/store/network.
+steer-worker-scheduling-probe image out:
+    flock "$HOME/tmp/zen-heavy.lock" ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/tests/steer_worker_scheduling_probe.py --image {{quote(image)}} --out {{quote(out)}}
