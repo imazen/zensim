@@ -161,7 +161,7 @@ def monitor():
                             start=stream.tell();line=stream.readline()
                             if not line:break
                             if not line.endswith('\n'):stream.seek(start);break
-                            record=json.loads(line);mirrored+=record['bytes'];reclaimed+=record.get('local_allocated_bytes',0)
+                            record=json.loads(line);mirrored+=record.get('newly_mirrored_bytes',record['bytes']);reclaimed+=record.get('local_allocated_bytes',0)
                             offset=stream.tell()
                         offset=stream.tell()
                 from e36_artifact_location import relocation_segments
@@ -171,7 +171,7 @@ def monitor():
                     if sha(segment)!=segment.stem:raise ValueError('committed telemetry segment changed')
                     with segment.open() as stream:
                         for line in stream:
-                            record=json.loads(line);mirrored+=record['bytes'];reclaimed+=record.get('local_allocated_bytes',0)
+                            record=json.loads(line);mirrored+=record.get('newly_mirrored_bytes',record['bytes']);reclaimed+=record.get('local_allocated_bytes',0)
                     seen_segments.add(segment.name)
                 write_bytes,write_source=io_bytes(scope)
                 counters=dict(utc=now,free_bytes=free,observed_write_bytes=write_bytes,write_counter_source=write_source,verified_mirror_bytes=mirrored,recorded_local_reclaimed_bytes=reclaimed)

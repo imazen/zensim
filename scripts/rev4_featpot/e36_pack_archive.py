@@ -179,9 +179,11 @@ class Dispatcher:
             actual=json.loads(answer)
             if any(actual[k]!=built[k] for k in built):raise ValueError('array pack actual readback differs')
         if actual['verifier_sha256']!=self.verifier or actual['members']!={i['sha256']:i['bytes'] for i in items}:raise ValueError('packed native membership differs')
-        rows=[]
+        rows=[];known=set(self.locations)
         for item in items:
-            rows.append(dict(utc=time.time(),sha256=item['sha256'],bytes=item['bytes'],completed_view_sha256=item['view_sha256'],
+            local=Path(item['local_path'])
+            if local.exists() and (local.stat().st_size!=item['bytes'] or sha(local)!=item['sha256']):raise ValueError('retained local pack member differs; preserve it')
+            rows.append(dict(utc=time.time(),newly_mirrored_bytes=(0 if item['sha256'] in known else item['bytes']),sha256=item['sha256'],bytes=item['bytes'],completed_view_sha256=item['view_sha256'],
                 local_allocated_bytes=(Path(item['local_path']).stat().st_blocks*512 if Path(item['local_path']).exists() else 0),local_path=item['local_path'],canonical_host=storage['host'],canonical_root=storage['root'],program_sha256=storage['program_sha256'],
                 relative_path=relative,pack_id=pack_id,pack_verifier_sha256=self.verifier,stored_sha256=actual['stored_sha256'],stored_bytes=actual['stored_bytes'],
                 encoding='tar-pack-v1',sha_verified=True,action='pack-verified-journal-batch-before-local-unlink',fits=0))
@@ -195,7 +197,7 @@ class Dispatcher:
             marker=self.intents/(pack_id+'.complete')
             if not marker.exists():
                 atomic_json(marker,dict(pack_id=pack_id,utc=time.time(),stored_sha256=actual['stored_sha256'],fits=0))
-            append_batch(self.owner/'pack-rates-v1.jsonl',[dict(utc=time.time(),pack_id=pack_id,backend='cache' if storage['root']==self.cache['root'] else 'disk1',native_bundles=len(items),raw_bytes=sum(i['bytes'] for i in items),stored_bytes=actual['stored_bytes'],elapsed_seconds=time.monotonic()-start,fits=0)])
+            append_batch(self.owner/'pack-rates-v1.jsonl',[dict(utc=time.time(),pack_id=pack_id,backend='cache' if storage['root']==self.cache['root'] else 'disk1',native_bundles=len(items),raw_bytes=sum(i['bytes'] for i in items if i['sha256'] not in known),verified_pack_raw_bytes=sum(i['bytes'] for i in items),stored_bytes=actual['stored_bytes'],elapsed_seconds=time.monotonic()-start,fits=0)])
         return rows
 
     def reconcile_historical(self,items):
@@ -223,14 +225,14 @@ class Dispatcher:
             for item in items:Path(item['local_path']).unlink()
         return rows
 
-    def cycle(self,queue,priority):
+    def cycle(self,queue,priority,submit=True):
         completed=[]
         for future,doc in list(self.pending.items()):
             if not future.done():continue
             rows=future.result();completed.extend(rows);del self.pending[future]
             for item in doc['items']:queue.pop(item['sha256'],None)
             self.locations.update({row['sha256']:row for row in rows})
-        if (self.owner/'PACK_REPAIR_HOLD.json').exists() or len(self.pending)>=2:return completed
+        if not submit or (self.owner/'PACK_REPAIR_HOLD.json').exists() or len(self.pending)>=2:return completed
         if self.recovery:
             doc=self.recovery[0];self.validate_intent(doc);self.assigned_batch(doc)
             if doc['storage']['root']==self.cache['root'] and not self.exists(doc) and not self.fresh_cache(doc['reserved_bytes'],recovery=True):return completed
@@ -252,10 +254,19 @@ class Dispatcher:
         for value in deferred:heapq.heappush(priority,value)
         if not selected:
             if not self.pending and deferred:
+                first=self.assignments.rows[deferred[0][1]]
+                if first.get('pack_id'):
+                    doc=json.loads((self.intents/(first['pack_id']+'.json')).read_text())
+                    self.validate_intent(doc);self.assigned_batch(doc)
+                    if not self.exists(doc):raise ValueError('completed first-owner pack missing; preserve resurfaced local copies')
+                    selected_hashes={i['sha256'] for i in doc['items']}
+                    priority[:]=[p for p in priority if p[1] not in selected_hashes];heapq.heapify(priority)
+                    self.pending[self.pool.submit(self.pack,doc)]=doc
+                    return completed
                 items=[]
                 for _,h in deferred[:256]:
                     path,view=queue[h];assignment=self.assignments.rows[h]
-                    if assignment.get('pack_id'):raise ValueError('incomplete pack assignment has no recoverable intent')
+                    if assignment.get('pack_id'):continue
                     items.append(dict(sha256=h,local_path=str(path),view_sha256=view))
                 doc=dict(items=items,storage=dict(root="historical-read-only"))
                 selected_hashes={i['sha256'] for i in items}
@@ -276,6 +287,18 @@ class Dispatcher:
         return completed
 
     def drain(self,queue):
+        failure=None
         for future,doc in list(self.pending.items()):
-            future.result();del self.pending[future]
-            for item in doc['items']:queue.pop(item['sha256'],None)
+            succeeded=False
+            while True:
+                try:future.result();succeeded=True;break
+                except BaseException as error:
+                    if failure is None:failure=error
+                    if future.done():break
+                    # A waiting-thread interruption is not a terminal transfer.
+                    # Keep this exact future and the paper lock until joined.
+                    continue
+            if succeeded:
+                for item in doc['items']:queue.pop(item['sha256'],None)
+            del self.pending[future]
+        if failure is not None:raise failure

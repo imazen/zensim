@@ -39,7 +39,7 @@ class Recovery(unittest.TestCase):
     def test_published_array_recovery_needs_no_local_bundle_files(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
             root=Path(d);owner=root/'owner-svt-ssd-v1';owner.mkdir();intents=owner/'pack-intents-v1';intents.mkdir()
-            dispatch=Dispatcher.__new__(Dispatcher);dispatch.root=root;dispatch.owner=owner;dispatch.cache=dict(root='/cache');dispatch.intents=intents;dispatch.journal_lock=threading.Lock();dispatch.verifier='v'*64;dispatch.exists=Mock(return_value=True)
+            dispatch=Dispatcher.__new__(Dispatcher);dispatch.root=root;dispatch.owner=owner;dispatch.cache=dict(root='/cache');dispatch.intents=intents;dispatch.journal_lock=threading.Lock();dispatch.verifier='v'*64;dispatch.locations={};dispatch.exists=Mock(return_value=True)
             item=dict(sha256='a'*64,bytes=123,view_sha256='b'*64,local_path=str(root/'already-evicted.tar'))
             storage=dict(root='/array',host='tower',program_sha256='c'*64,container_id='fixture');doc=dict(pack_id='d'*64,items=[item],storage=storage,reserved_bytes=10240)
             actual=dict(members={'a'*64:123},stored_sha256='e'*64,stored_bytes=10240,verifier_sha256=dispatch.verifier)
@@ -61,7 +61,7 @@ class ExceptionalDrain(unittest.TestCase):
         import subprocess
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
             root=Path(d);owner=root/'owner-svt-ssd-v1';owner.mkdir();intents=owner/'pack-intents-v1';intents.mkdir()
-            dispatch=Dispatcher.__new__(Dispatcher);dispatch.root=root;dispatch.owner=owner;dispatch.cache=dict(root='/cache');dispatch.intents=intents;dispatch.journal_lock=threading.Lock();dispatch.verifier='v'*64;dispatch.exists=Mock(return_value=False)
+            dispatch=Dispatcher.__new__(Dispatcher);dispatch.root=root;dispatch.owner=owner;dispatch.cache=dict(root='/cache');dispatch.intents=intents;dispatch.journal_lock=threading.Lock();dispatch.verifier='v'*64;dispatch.locations={};dispatch.exists=Mock(return_value=False)
             item=dict(sha256='a'*64,bytes=123,view_sha256='b'*64,local_path=str(root/'missing'))
             doc=dict(pack_id='d'*64,items=[item],storage=dict(root='/array',host='tower',program_sha256='c'*64,container_id='fixture'),reserved_bytes=10240)
             child=Mock();child.communicate.side_effect=[subprocess.TimeoutExpired('owned',30),(b'',None)]
@@ -105,3 +105,20 @@ class HistoricalOwner(unittest.TestCase):
             client=Mock();client.verify.return_value=dict(bytes=raw.stat().st_size,relative_path='blobs/'+h[:2]+'/'+h+'.tar')
             with patch('e36_archive_store.ArchiveClient',return_value=client):rows=dispatch.reconcile_historical([dict(sha256=h,local_path=str(raw),view_sha256='c'*64)])
             client.put.assert_not_called();client.close.assert_called_once();self.assertFalse(raw.exists());self.assertEqual(list(relocation_records(root)),rows)
+
+class CompletedPackCopies(unittest.TestCase):
+    def test_resurfaced_complete_pack_copy_uses_first_pack_and_no_new_rate_credit(self):
+        import heapq
+        from e36_pack_store import sha
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+            root=Path(d);owner=root/'owner-svt-ssd-v1';owner.mkdir();intents=owner/'pack-intents-v1';intents.mkdir();raw=root/'raw';raw.write_bytes(b'resurfaced original');h=sha(raw)
+            storage=dict(root='/array',host='tower',program_sha256='c'*64,container_id='fixture');pack_id='d'*64;item=dict(sha256=h,bytes=raw.stat().st_size,local_path=str(raw),view_sha256='b'*64);doc=dict(items=[item],storage=storage,pack_id=pack_id,reserved_bytes=10240)
+            (intents/(pack_id+'.json')).write_text(json.dumps(doc));(intents/(pack_id+'.complete')).write_text('{}')
+            index=Assignments(root);index.seed_pack([dict(sha256=h,canonical_host='tower',canonical_root='/array',program_sha256='c'*64,pack_id=pack_id)])
+            dispatch=Dispatcher.__new__(Dispatcher);dispatch.root=root;dispatch.owner=owner;dispatch.intents=intents;dispatch.assignments=index;dispatch.pending={};dispatch.recovery=[];dispatch.recovery_hashes=set();dispatch.locations={h:dict(sha256=h)};dispatch.journal_lock=threading.Lock();dispatch.verifier='v'*64;dispatch.cache=dict(root='/cache');dispatch.exists=Mock(return_value=True);dispatch.validate_intent=Mock();dispatch.assigned_batch=Mock();dispatch.pool=Mock();dispatch.pool.submit.return_value=Future()
+            queue={h:(raw,item['view_sha256'])};priority=[(-raw.stat().st_size,h)];dispatch.cycle(queue,priority)
+            dispatch.pool.submit.assert_called_once_with(dispatch.pack,doc);dispatch.validate_intent.assert_called_once_with(doc);self.assertEqual(priority,[])
+            actual=dict(members={h:item['bytes']},stored_sha256='e'*64,stored_bytes=10240,verifier_sha256=dispatch.verifier)
+            with patch('e36_pack_archive.subprocess.check_output',return_value=json.dumps(actual).encode()),patch('e36_pack_archive.subprocess.Popen',side_effect=AssertionError('do not reupload completed pack')):rows=dispatch.pack(doc)
+            self.assertFalse(raw.exists());self.assertEqual(rows[0]['newly_mirrored_bytes'],0)
+            rate=json.loads((owner/'pack-rates-v1.jsonl').read_text());self.assertEqual(rate['raw_bytes'],0);self.assertEqual(rate['verified_pack_raw_bytes'],item['bytes'])
