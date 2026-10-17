@@ -26,7 +26,9 @@ class FrontierTests(unittest.TestCase):
 
 class JudgeBindingTests(unittest.TestCase):
     def test_rejects_aggregate_changes_and_wrong_fixed_profile(self):
-        with tempfile.TemporaryDirectory(prefix="shipgates-judge-binding-") as directory:
+        scratch = Path.home()/"tmp"
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="shipgates-judge-binding-",dir=scratch) as directory:
             root = Path(directory)
             def write(name, data):
                 path=root/name
