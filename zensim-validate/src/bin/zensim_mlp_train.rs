@@ -99,6 +99,7 @@ use zensim_validate::train_manifest;
 #[path = "../contamination_guard.rs"]
 mod contamination_guard;
 
+mod e36_tv;
 #[path = "../subjective_training_leg.rs"]
 mod subjective_training_leg;
 #[path = "zensim_mlp_train/upiq_training.rs"]
@@ -135,7 +136,7 @@ struct Args {
     /// Requires ref identity on the source (`ref_basename` or
     /// `image_path`); the trainer exits 2 rather than silently falling
     /// back to uniform pairing.
-    #[arg(long, required_unless_present = "manifest")]
+    #[arg(long, required_unless_present_any = ["manifest", "e36_tv_admit"])]
     group: Vec<String>,
 
     /// Replay a recorded recipe with unresolved/mixed historical table eras.
@@ -298,7 +299,7 @@ struct Args {
 
     /// Output path for the trained ZNPR v3 bake. Required unless
     /// `--manifest` is given (the manifest supplies it from `[bake].file`).
-    #[arg(long, required_unless_present = "manifest")]
+    #[arg(long, required_unless_present_any = ["manifest", "e36_tv_admit"])]
     out: Option<PathBuf>,
 
     /// Cap features at the first N columns. **Default 372** — the
@@ -383,6 +384,20 @@ struct Args {
     /// Penalty: `max(0, polarity.ladder_sign() * (pred[hi] - pred[lo]) + margin)`.
     #[arg(long)]
     tv_pairs_file: Option<PathBuf>,
+
+    /// Private E36 versioned external feature pool; requires E36_TV_PROTOCOL=1 build.
+    #[arg(long, conflicts_with = "tv_pairs_file", requires_all = ["derived_inputs", "e36_tv_contract", "e36_tv_contract_sha256"])]
+    e36_tv_manifest: Option<PathBuf>,
+
+    /// Immutable E36 ingress contract, frozen in the future fit specification.
+    #[arg(long)]
+    e36_tv_contract: Option<PathBuf>,
+    #[arg(long)]
+    e36_tv_contract_sha256: Option<String>,
+
+    /// Validate only the external label-free pool, then exit before group loading.
+    #[arg(long, requires = "e36_tv_manifest")]
+    e36_tv_admit: bool,
 
     /// TV regularizer weight (loss multiplier). 5-30 typical range.
     /// 0 disables TV even if --tv-pairs-file is given.
@@ -3034,6 +3049,51 @@ fn main() {
     let matches = Args::command().get_matches();
     let mut args = Args::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
+    if let Some(path) = &args.e36_tv_manifest {
+        e36_tv::check_contract(
+            path,
+            args.e36_tv_contract.as_ref().unwrap(),
+            args.e36_tv_contract_sha256.as_ref().unwrap(),
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("E36 contract: {e}");
+            std::process::exit(2)
+        });
+        if (matches.value_source("tv_margin") == Some(ValueSource::CommandLine)
+            && args.tv_margin != 0.05)
+            || args.tv_apply_every != 50
+            || args.tv_batch != 32
+            || args.tv_band_weights.is_some()
+        {
+            eprintln!("E36 refuses incompatible legacy TV overrides");
+            std::process::exit(2);
+        }
+        args.tv_margin = 0.05;
+    }
+
+    if args.e36_tv_admit {
+        let pool = e36_tv::load(
+            args.e36_tv_manifest.as_ref().unwrap(),
+            args.tv_weight,
+            args.derived_inputs.as_ref().unwrap(),
+            args.max_features,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("E36 admission: {e}");
+            std::process::exit(2);
+        });
+        println!(
+            "{{\"schema\":\"e36-tv-admission-v1\",\"feature_rows\":{},\"pairs\":{},\"dropped_pairs\":0,\"labels_read\":false,\"optimizer_steps\":0}}",
+            pool.features.len(),
+            pool.pairs.len()
+        );
+        return;
+    }
+    if cfg!(e36_tv) && args.tv_pairs_file.is_some() {
+        eprintln!("E36 private build refuses legacy TV pair files");
+        std::process::exit(2);
+    }
+
     // The bake sha256 the manifest CLAIMS, hoisted out of the manifest block so
     // the write site can check the claim against what we actually produced.
     // `None` when no manifest, or when the manifest records no sha — a RECIPE
@@ -4001,7 +4061,24 @@ fn main() {
     // Build optional TV regularizer: load pairs file, concatenate
     // all-group features into a flat row index space (trainer row =
     // group 0 rows [0..n0], then group 1 [n0..n0+n1], etc.).
-    let tv_regularizer: Option<TvRegularizer> = if let Some(tv_path) = &args.tv_pairs_file
+    let tv_regularizer: Option<TvRegularizer> = if let Some(path) = &args.e36_tv_manifest {
+        assert!(
+            args.nonneg_distance && args.hidden == 128 && args.minibatch_size == 1,
+            "E36 requires the frozen plain N H128 K=1 recipe"
+        );
+        Some(
+            e36_tv::load(
+                path,
+                args.tv_weight,
+                args.derived_inputs.as_ref().unwrap(),
+                args.max_features,
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("E36 pool: {e}");
+                std::process::exit(2)
+            }),
+        )
+    } else if let Some(tv_path) = &args.tv_pairs_file
         && args.tv_weight > 0.0
     {
         // Concatenate features in group order to build the flat feature index.
@@ -4945,6 +5022,15 @@ fn main() {
                 })
             })
             .collect();
+        let e36_repro = args.e36_tv_manifest.as_ref().map(|path| {
+            e36_tv::receipt(
+                path,
+                tv_regularizer.as_ref().unwrap(),
+                hyperparams.sample_seed.unwrap_or(hyperparams.seed),
+                args.e36_tv_contract_sha256.as_ref().unwrap(),
+            )
+            .expect("E36 effective reproduction receipt")
+        });
         let mut record = serde_json::json!({
             "schema": 1,
             "tool": "zensim_mlp_train",
@@ -4991,6 +5077,9 @@ fn main() {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
         });
+        if let Some(e36) = e36_repro {
+            record["e36_tv"] = e36;
+        }
         if !args.pooled_leg.is_empty() {
             record["pooled_objective"] = serde_json::json!({"legs": args.pooled_leg,
                 "rank_share": args.pooled_rank_share, "pearson_weight": args.pooled_pearson_weight,
