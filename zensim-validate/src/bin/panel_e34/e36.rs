@@ -467,6 +467,23 @@ pub(super) fn run(cli: Cli) -> Result<()> {
                 == plan["assessment_owner_sha256"].as_str().unwrap_or(""),
         "E36 frozen assessment metadata/native forward owner differs"
     );
+    // Persist the exposure boundary before opening any subjective payload.
+    // An interrupted assessment retains this receipt and needs a fresh output.
+    ensure!(
+        !cli.output.exists(),
+        "E36 assessment requires a fresh output"
+    );
+    save(
+        &cli.output.with_extension("label-read-started.json"),
+        &json!({
+            "schema":"e36-assessment-read-started-v1","program_sha256":request.program_sha256,
+            "fit_plan_sha256":request.fit_plan_sha256,"train_selection_sha256":request.train_selection_sha256,
+            "bindings_sha256":request.bindings_sha256,"assessment_inputs_sha256":plan["assessment_inputs"]["sha256"],
+            "paired_sha256":request.paired_sha256,"datasets":DATASETS,
+            "scope":"four registered source-withheld D1 targets only; native E34 forward replay after locked TRAIN selection",
+            "optimizer_steps":0
+        }),
+    )?;
     let bytes = fs::read(&request.paired)?;
     ensure!(
         digest(&bytes) == request.paired_sha256,
