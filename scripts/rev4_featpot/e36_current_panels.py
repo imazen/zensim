@@ -72,6 +72,7 @@ def run(root,manifest,prepared,binary,out):
         current_family_v2=cohort['current_family_v2'],family_checks=family_checks,
         reference_records=reference_records,strict_flags=native['strict_flags'],labels_read=False,fits=0,
         lineage_limit=cohort['inherited_lineage_limit'],
+        gb82_lineage='declared source-family namespace plus native pixel screen; cross-corpus canonical lineage not independently reconstructed',
         note='Native pixel screen plus explicit canonical family closure; no universal recovery of unknown crop/parent lineage.'))
     if not admitted:raise ValueError('current ship panel has native dHash<=10 flags; E36 remains unqualified')
 
