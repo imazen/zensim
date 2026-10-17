@@ -23,10 +23,10 @@ def progress(message):
     print(message, flush=True)
 
 
-def owner(binary, trace, peers, curve_models=None):
+def owner(binary, trace, peers, curve_models=None, control_name="curve-control"):
     """Replay exact admitted commands, replacing only outputs/scorer tables."""
     bindings=read(SHIP/'BINDINGS.json')
-    destination=ROOT/('curve-control' if curve_models else 'peer-replay' if peers else 'candidate-trace' if trace else 'candidate-baseline')
+    destination=ROOT/(control_name if curve_models else 'peer-replay' if peers else 'candidate-trace' if trace else 'candidate-baseline')
     destination.mkdir()
     models=['cvvdp_fhd','ssim2'] if peers else ['diff-410','diff-frag-820','w-c']
     for model in models:
@@ -68,7 +68,7 @@ def owner(binary, trace, peers, curve_models=None):
                 assert measured==old,(model,grid,'owner output changed')
             rows=[dict(codec=r['codec'],fraction=r['represented_frac'],bar=r['represented_frac_reference'],
                 state=r['state'],order_failures=r['n_fail_order'],clamp_failures=r['n_fail_clamp']) for r in measured]
-            progress(f'{model}/{grid}: A7r canonical rows {rows}; trace={trace}; original candidate aggregate parity verified={not peers and not curve_models}; exploratory curve control={bool(curve_models)}.')
+            progress(f'{model}/{grid}: A7r canonical rows {rows}; trace={trace}; original candidate aggregate parity verified={not peers and not curve_models}; exploratory model control={control_name if curve_models else None}.')
 
 
 def curve_control(binary):
@@ -89,6 +89,73 @@ def curve_control(binary):
             meaning='diagnostic removal of output curve; not a qualified score dial'))
         models[name]=dest
     owner(binary,False,False,models)
+
+
+def unpacked_control(binary):
+    """Check retained f32 checkpoints, with canonical dense-contract admission."""
+    refit=Path('/mnt/v/output/zensim/e34-launch-2026-10-15/bin/bake_dial_refit')
+    directory=ROOT/'unpacked-models';directory.mkdir()
+    models={};pins={}
+    for name in ['diff-410','diff-frag-820','w-c']:
+        command=read(SHIP/name/'standard/command.json')
+        packed=Path(command[command.index('--bake')+1])
+        source=packed.parent/'best.bin';pin=sha(source)
+        output=directory/f'{name}-dense-f32.bin'
+        args=[str(refit),'densify','--in',str(source),'--out',str(output)]
+        with (directory/f'{name}-densify.log').open('x') as log:
+            result=subprocess.run(args,stdout=log,stderr=subprocess.STDOUT)
+        assert sha(source)==pin and sha(packed)==sha(ROOT/'cost-payload'/f'models/{name}.bin')
+        pins[name]=dict(source=str(source),source_sha256=pin,packed_sha256=sha(packed),argv=args,
+            canonical_tool_sha256=sha(refit),returncode=result.returncode)
+        if result.returncode:
+            pins[name]['state']='admission-refused'
+            progress(f'Exploratory unpacked {name}: canonical dense-contract owner refuses rc{result.returncode}; log retained, no gate relaxation.')
+            continue
+        assert output.is_file()
+        pins[name].update(state='canonical-densify-admitted',output=str(output),output_sha256=sha(output))
+        models[name]=output
+    write(directory/'PROVENANCE.json',pins)
+    # The retained best checkpoint precedes production packing/pruning and K;
+    # this is a post-fit transformation control, not quantization alone.
+    result=dict(exploratory=True,qualification_allowed=False,
+        meaning='retained f32 checkpoint vs production bake: packing/pruning/calibration combined; densify itself proves bit identity',
+        admitted_models=list(models),refused_models=[name for name in pins if name not in models])
+    if len(models)!=3:
+        result['gate_replay']='not-run: allthree exact contracts required'
+        write(directory/'RESULT.json',result)
+        return
+    try:
+        owner(binary,False,False,models,'unpacked-control')
+    except subprocess.CalledProcessError as exc:
+        result['gate_replay']=f'canonical scorer admission refused rc{exc.returncode}'
+        progress('Unpacked checkpoint gate replay refused; exact scorer error retained; no labels or thresholds changed.')
+    else:
+        return unpacked_report()
+    write(directory/'RESULT.json',result)
+
+
+def unpacked_report():
+    """Render retained exact owner outputs; no numerical replay or label access."""
+    directory=ROOT/'unpacked-models';pins=read(directory/'PROVENANCE.json')
+    assert set(pins)=={'diff-410','diff-frag-820','w-c'}
+    rows={}
+    for name,pin in pins.items():
+        assert pin['state']=='canonical-densify-admitted'
+        assert sha(pin['source'])==pin['source_sha256'] and sha(pin['output'])==pin['output_sha256']
+        rows[name]={}
+        for grid in ['standard','ladder']:
+            actual=read(ROOT/'unpacked-control'/name/grid/'gaddr.json')['measured']['codec_floor']
+            baseline=read(ROOT/'candidate-baseline'/name/grid/'gaddr.json')['measured']['codec_floor']
+            assert [r['codec'] for r in actual]==[r['codec'] for r in baseline]
+            assert all(r['n_ladders']==b['n_ladders'] and r['represented_frac_reference']==b['represented_frac_reference']
+                for r,b in zip(actual,baseline,strict=True))
+            rows[name][grid]=[dict(codec=r['codec'],fraction=r['represented_frac'],denominator=r['n_ladders'],
+                reference=r['represented_frac_reference'],state=r['state'],
+                delta_fraction=r['represented_frac']-b['represented_frac']) for r,b in zip(actual,baseline,strict=True)]
+    write(directory/'RESULT.json',dict(exploratory=True,qualification_allowed=False,gate_replay='complete',
+        meaning='retained f32 checkpoint vs production bake: packing/pruning/calibration combined; canonical densify identity admission',
+        rows=rows))
+    progress('Exploratory unpacked f32 checkpoint control complete: '+json.dumps(rows,separators=(',',':')))
 
 
 def trace_report():
@@ -383,10 +450,12 @@ def cost_report(binary):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['candidate-trace','peer-replay','rank-pairs','curve-control','trace-report','full-trace','rank-score','rank-score-resume','cost-payload','cost-report'])
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['candidate-trace','peer-replay','rank-pairs','curve-control','trace-report','full-trace','rank-score','rank-score-resume','cost-payload','cost-report','unpacked-control','unpacked-report'])
     p.add_argument('--binary',default='/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/bake_verdict')
     p.add_argument('--trace',action='store_true');a=p.parse_args()
-    if a.mode=='cost-report':cost_report(a.binary)
+    if a.mode=='unpacked-report':unpacked_report()
+    elif a.mode=='unpacked-control':unpacked_control(a.binary)
+    elif a.mode=='cost-report':cost_report(a.binary)
     elif a.mode=='cost-payload':cost_payload()
     elif a.mode=='rank-score':rank_score()
     elif a.mode=='rank-score-resume':rank_score(True)

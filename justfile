@@ -1586,7 +1586,12 @@ steer-freeze2-build:
 steer-freeze2-runtime-build:
     cargo bench --manifest-path zensim-bench/e34-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp --no-run --message-format=json-render-diagnostics > "$HOME/tmp/zensim-paper/rev4/steer-freeze2-runtime-build.jsonl"
 
+# Label-free checkpoint control precedes this study's first target assessment.
 addrfix-peer-evaluate binary input output:
+    python3 scripts/rev4_featpot/addrfix.py unpacked-control --binary /mnt/v/output/zensim/addrfix-2026-10-16/bin/bake_verdict-final
+    {{quote(binary)}} e34 peer-compare --input {{quote(input)}} --output {{quote(output)}}
+
+addrfix-peer-statistics binary input output:
     {{quote(binary)}} e34 peer-compare --input {{quote(input)}} --output {{quote(output)}}
 
 addrfix-map-evaluate binary input output:

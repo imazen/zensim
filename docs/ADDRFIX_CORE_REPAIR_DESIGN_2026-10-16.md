@@ -6,6 +6,13 @@ inversions before the output curve. Removing K changes no A7r result. Fix the
 core ordering before fitting another scalar calibration; preserve the current
 feature sets, architectures and original bakes as controls.
 
+The subsequent cheap f32 checkpoint control improves the C ladder from 19/39
+to 25/39 on AVIF-rav1e, reaching that bar and passing all five ladder codecs.
+All three f32 models still fail standard AVIF/JPEG, and f32 W-C loses one svt
+window. Check packing/pruning effects before paying for a new fit; preserve
+separate intervention identities and select the final packed model on TRAIN.
+The retained best checkpoint comparison does not isolate weight dtype alone.
+
 ## Population and generation
 
 Extend the existing E34 reference admission in
