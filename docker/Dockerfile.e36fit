@@ -1,0 +1,13 @@
+# The admitted E34 runtime already contains pinned Python wheels and native tools.
+FROM ghcr.io/imazen/zenfleet-worker@sha256:1cc5ab665d53025d320e5d15cd6a833c53afb395775583334f7c8e07c122efd0
+ARG FIT_PROGRAM_SHA
+RUN mv /opt/fleet-fits/program /opt/fleet-fits/parent-program && \
+    if [ -f /opt/fleet-fits/program.tar.gz ]; then mv /opt/fleet-fits/program.tar.gz /opt/fleet-fits/parent-program.tar.gz; fi
+COPY program.tar.gz /opt/fleet-fits/program.tar.gz
+RUN echo "${FIT_PROGRAM_SHA}  /opt/fleet-fits/program.tar.gz" | sha256sum -c - && \
+    mkdir /opt/fleet-fits/program && \
+    tar -xzf /opt/fleet-fits/program.tar.gz -C /opt/fleet-fits/program && \
+    install -m 0755 /opt/fleet-fits/program/fit_cell_exec.py /usr/local/bin/fit-cell-exec
+ENV ZEN_FIT_PROGRAM_SHA=${FIT_PROGRAM_SHA}
+ENV ZEN_EXEC=/usr/local/bin/fit-cell-exec
+ENTRYPOINT ["/usr/local/bin/fleet-entrypoint.sh"]

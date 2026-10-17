@@ -2321,7 +2321,7 @@ e36-pack-resource-admit root:
     python3 scripts/rev4_featpot/e36_pack_binding.py --root {{quote(root)}}
 
 e36-pack-integration-check:
-    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_phase_terminal.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_packet_proofs.py scripts/tests/test_e36_pool_finalize.py scripts/tests/test_e36_memory_smoke.py
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_phase_terminal.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_packet_proofs.py scripts/tests/test_e36_pool_finalize.py scripts/tests/test_e36_memory_smoke.py scripts/tests/test_e36_fit_resources.py
 
 e36-largest-source-amendment root projection commit:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_source_cut.py --root {{quote(root)}} --projection {{quote(projection)}} --commit {{quote(commit)}}
@@ -2372,3 +2372,9 @@ e36-finalize-prepared-pool root prepared out commit:
 
 e36-memory-smoke-prepare root packet out owner commit:
     python3 scripts/rev4_featpot/e36_memory_smoke.py --root {{quote(root)}} --packet {{quote(packet)}} --out {{quote(out)}} --owner {{quote(owner)}} --commit {{quote(commit)}}
+
+e36-fit-resource-plan root packet resource out:
+    python3 scripts/rev4_featpot/e36_fit_resources.py --root {{quote(root)}} --packet {{quote(packet)}} --resource {{quote(resource)}} --out {{quote(out)}}
+
+e36-pool-progress pool:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_pool_progress.py {{quote(pool)}}
