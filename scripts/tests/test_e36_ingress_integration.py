@@ -15,11 +15,11 @@ class SourceArchive(unittest.TestCase):
             with tarfile.open(archive,'w') as bundle:
                 for name in ['scripts','scripts/jobsys']:
                     info=tarfile.TarInfo(name);info.type=tarfile.DIRTYPE;bundle.addfile(info)
-                info=tarfile.TarInfo('scripts/jobsys/owner.py');info.size=6;bundle.addfile(info,io.BytesIO(b'opaque'))
+                info=tarfile.TarInfo('scripts/jobsys/owner.txt');info.size=6;bundle.addfile(info,io.BytesIO(b'opaque'))
             out=root/'out';out.mkdir();extract_native(archive,out)
-            self.assertEqual((out/'owner.py').read_bytes(),b'opaque')
+            self.assertEqual((out/'owner.txt').read_bytes(),b'opaque')
             with tarfile.open(archive,'w') as bundle:
-                info=tarfile.TarInfo('unrelated.py');info.size=1;bundle.addfile(info,io.BytesIO(b'x'))
+                info=tarfile.TarInfo('unrelated.txt');info.size=1;bundle.addfile(info,io.BytesIO(b'x'))
             with self.assertRaises(ValueError):extract_native(archive,out)
 
 if __name__=='__main__':unittest.main()
