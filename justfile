@@ -2243,3 +2243,9 @@ e36-budget-extend-live:
 
 e36-resource-census-check:
     python3 -m unittest scripts/tests/test_e36_budget_extend.py scripts/tests/test_e36_pause_budget.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_census_install.py scripts/tests/test_e36_native_ledger_admit.py
+
+e36-observed-wide-costs root output:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_finish_projection.py --root {{quote(root)}} --out {{quote(output)}} --sample-wide-costs
+
+e36-observed-finish-projection root costs output:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_finish_projection.py --root {{quote(root)}} --costs {{quote(costs)}} --out {{quote(output)}}

@@ -4,14 +4,48 @@ import argparse
 from collections import defaultdict
 from datetime import datetime, timezone
 import hashlib
+import gzip
 import json
 from pathlib import Path
 import time
+import statistics
 
 import pyarrow.parquet as pq
 
 
-def project(root, out):
+def observed_costs(root, out):
+    """Bounded deterministic diagnostic sample of post-widening checkpoints."""
+    jobs=json.loads((root/'runs/fallback-v6/manifest.json').read_text())
+    launched=json.loads((root/'scheduling-v7/fallback-launch.json').read_text())['started_unix_ns']/1e9
+    freeze=root/'budget-amendment-v3/live/processes.json'
+    resumed=json.loads((root/'budget-amendment-v3/live/resumed.json').read_text())['unix_ns']/1e9
+    frozen=freeze.stat().st_mtime-1
+    groups=defaultdict(list)
+    samples=[]
+    for job in jobs:
+        text=job['kind']['view'];view=json.loads(text.split(':',1)[1])
+        if view['panel']!='baseline':continue
+        key=hashlib.sha256(text.encode()).hexdigest()
+        ordinal=int(key[:8],16)%len(view['q_grid'])
+        p=root/'progress'/key/(str(ordinal)+'.json.gz')
+        if not p.exists():continue
+        end=p.stat().st_mtime
+        if end<launched+60:continue
+        row=json.loads(gzip.decompress(p.read_bytes()))
+        group=json.dumps([row['codec'],row['size'],view['panel']],separators=(',',':'))
+        if len(groups[group])>=128 or row['physical_alias'] or 'cell_total_seconds' not in row:continue
+        elapsed=row['cell_total_seconds'];start=end-elapsed
+        if start<launched or start<=resumed and end>=frozen:continue
+        groups[group].append(elapsed)
+        samples.append(dict(path=str(p),sha256=hashlib.sha256(p.read_bytes()).hexdigest(),group=group,wall_seconds=elapsed,completed_unix=end,content=row['content'],q=row['q']))
+    result=dict(schema='e36-observed-wide-cell-costs-v1',fits=0,qualifies_data=False,since_unix=launched,
+        sampling='One deterministic hash-selected requested q per baseline view; at most128physical checkpoints per codec/size. Excludes earlier cells and the recorded live resource-amendment pause. Diagnostic sample, not a content/quality fit or population bound.',
+        groups={k:dict(n=len(v),median_seconds=statistics.median(v),p75_seconds=statistics.quantiles(v,n=4)[2] if len(v)>1 else v[0]) for k,v in groups.items()},samples=samples)
+    with out.open('x') as f:json.dump(result,f,indent=2)
+    print(json.dumps(dict(groups=len(groups),physical_samples=len(samples),fits=0)))
+
+
+def project(root, out, cost_snapshot=None):
     now = time.time()
     run = root / "runs/fallback-v6"
     ids = [
@@ -69,6 +103,7 @@ def project(root, out):
             modeled_serial_seconds=0.0,
         )
     )
+    observed={} if cost_snapshot is None else json.loads(cost_snapshot.read_text())['groups']
     for job_id, job in zip(ids, jobs):
         if job_id in done:
             continue
@@ -102,7 +137,9 @@ def project(root, out):
         seen = {cells[i] for i in checkpoints}
         needed = {cell for i, cell in enumerate(cells) if i not in checkpoints} - seen
         count = len(needed)
-        median = measured[(codec, size, cost_run)]
+        group_key=json.dumps([codec,size,panel],separators=(',',':'))
+        sample=observed.get(group_key)
+        median = sample['median_seconds'] if sample and sample['n']>=8 else measured[(codec, size, cost_run)]
         duration = count * median
         physical += count
         cached += len(checkpoints)
@@ -146,10 +183,11 @@ def project(root, out):
         misses_registered_deadline_in_this_model=now + ideal > clock["deadline_unix"],
         deadline_unix=clock["deadline_unix"],
         strata=dict(strata),
+        observed_costs=None if cost_snapshot is None else dict(path=str(cost_snapshot),sha256=hashlib.sha256(cost_snapshot.read_bytes()).hexdigest()),
         ledger_snapshot_files=ledgers,
         qualifies_data=False,
         fits=0,
-        basis="Measured per-codec/per-size prebulk unique-complete-cell medians; true4096-square witness at4096; native mode-panel medians at64/256. Remaining physical requests subtract existing per-view checkpoints and native mode aliases. Ideal24slot and reservation-weighted model, not a measured finish or statistical bound.",
+        basis=("Hybrid measured post-widening physical checkpoint medians where at least8diagnostic samples exist; all other strata retain their own measured prebulk cost, with no transfer between sizes. " if cost_snapshot is not None else "")+"Measured per-codec/per-size prebulk unique-complete-cell medians; true4096-square witness at4096; native mode-panel medians at64/256. Remaining physical requests subtract existing per-view checkpoints and native mode aliases. Ideal24slot and reservation-weighted model, not a measured finish or statistical bound.",
         limitations=[
             "No source-content or quality-dependent cost model.",
             "Excludes cached-row readback, scheduling, per-view ledger overhead and external interference.",
@@ -175,5 +213,8 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     for name in ["root", "out"]:
         p.add_argument("--" + name, type=Path, required=True)
+    p.add_argument('--costs',type=Path)
+    p.add_argument('--sample-wide-costs',action='store_true')
     args = p.parse_args()
-    project(args.root, args.out)
+    if args.sample_wide_costs:observed_costs(args.root,args.out)
+    else:project(args.root, args.out,args.costs)
