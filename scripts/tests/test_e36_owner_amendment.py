@@ -28,7 +28,7 @@ class Storage(unittest.TestCase):
             storage=dict(host='tower',root='canonical',program_sha256='program',command=['never-executed'])
             (root/'storage-runtime.json').write_text(json.dumps(storage))
             h='1'*64;bundle=dict(host='dev',root=str(root/'artifacts-local-v1'),sha256=h,bytes=7,relative_path='blobs/11/'+h+'.tar')
-            payload=gzip.compress(json.dumps(dict(complete=True,rows=[dict(bundle=bundle)])).encode())
+            payload=gzip.compress(json.dumps(dict(schema='e36-native-ladder-receipt-v1',complete=True,rows=[dict(bundle=bundle)])).encode())
             source=root/'runs/fallback-v6/blobs';source.mkdir(parents=True)
             tmp=source/'tmp';tmp.write_bytes(payload);view_sha=sha(tmp);tmp.rename(source/view_sha)
             ledger=source.parent/'ledger.parquet';pq.write_table(pa.Table.from_pylist([dict(status='done',attempts=1,output_sha=view_sha)]),ledger)
@@ -99,7 +99,7 @@ class Storage(unittest.TestCase):
             journal=root/'owner-svt-ssd-v1/artifact-relocations.jsonl'
             record=dict(sha256=h,bytes=7,canonical_host='tower',canonical_root='canonical',relative_path=bundle['relative_path'],program_sha256='program',sha_verified=True)
             journal.write_text(json.dumps(record)+'\n')
-            pin=matrix.bind(journal);calls=[]
+            pin=dict(matrix.bind(journal),segments=[]);calls=[]
             def verify(value):calls.append(value);return dict(ok=True,sha256=value,bytes=7)
             actual=location.resolve(bundle,root,verify,storage,pin)
             self.assertEqual(actual['host'],'tower');self.assertEqual(calls,[h])
