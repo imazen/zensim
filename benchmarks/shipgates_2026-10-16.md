@@ -331,3 +331,10 @@ These resource lines describe contended execution, not quiet latency qualificati
 ## Software validation
 
 [CI run39015216522](https://github.com/imazen/zensim/actions/runs/39015216522) passed every recorded job at `d6ad1c0f7570566945ba48f743fd64b867e4c0b6`, including Windows ARM, macOS ARM64 and i686. That head includes `74ff8fd1bf2c46e6b301b638b47692d5530da967`, which adds an optional bounded worker pool across quality points while preserving deterministic journals. Its regression and script checks pass; adoption still requires the queued32-cell encoded/pixel/map/native-manifest replay. Current production continues with its frozen scheduler until its complete source boundary. This CI result establishes source validation; model and RD qualification remain incomplete.
+
+
+## October17 10:10Z priority pause
+
+The campaign is paused at the coordinator’s request. The current native source batch completed all168 cells across21 quality points and returned success. Total retained native coverage is2,184/4,536 cells across13 source batches; fixed-judge coverage remains1,176 verified rows. The outer source journal has12 consolidated sources and retains the additional complete batch for hash-bound resume.
+
+Every current-batch cell matches its quality checkpoint and complete native journal. All referenced encoded bytes, decoded images and maps are present, and every candidate-neutral encoded hash equals its no-steering control. The shared heavy-work lock is released; queued replay and judge processes are paused. No process was killed. Subsequent execution will release the lock after each quality group. Full JXL RD estimates, intervals and gate verdicts remain pending.

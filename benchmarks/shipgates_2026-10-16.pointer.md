@@ -76,3 +76,14 @@ Use the owners and recipes in the [engineering report](shipgates_2026-10-16.md) 
 | `rd-jxl-corrected27/source-12/batch-00/GROUP-06.json` | 23492 | `60b746fc98d5a8cd9f21193a73f81bf8cb4fda091e2690ba09609fc51893038e` |
 | `rd-jxl-corrected27/source-12/batch-00/GROUP-07.json` | 23492 | `8bbb25e80d687c4c84d2abbfecaff2e22b44b4ced236c64353c7d493b3f65711` |
 | `rd-jxl-corrected27/source-12/batch-00/GROUP-08.json` | 23492 | `d3240044dc0b22c6ede70515b185edbb52d7cd5c6d37736e0de580dca730fc46` |
+
+
+## Priority-pause checkpoint, October17 10:10:39Z
+
+Observed on dev: native coverage2,184/4,536;13complete native source batches,12consolidated parent journals;1,176verified judge rows. The final source batch is fully retained and recoverable from its21group checkpoints. Heavy work is paused by coordinator instruction. No final RD verdict, complete campaign mirror or R2 upload is claimed. The earlier snapshot above remains archived.
+
+| Relative artifact | Bytes | SHA256 |
+|---|---:|---|
+| `JXL_PRIORITY_PAUSE_CHECKPOINT.json` | 5371 | `4eeb023ae031cbe08473e96ca5c80abe2f1d6337e23f3971022125490f3c618e` |
+| `rd-jxl-corrected27/source-12/batch-00/COMPLETE.json` | 748 | `5c2dd50a2f3ed8f5042cb2e8d1101ded05a4d923e15e5cc0dc702e3892c87f4a` |
+| `rd-jxl-corrected27/source-12/batch-00/cells.jsonl` | 399893 | `369efd3f4130f63c3c3b82c4739d9805be1b94f85bbcfd3e36499f6973919e28` |
