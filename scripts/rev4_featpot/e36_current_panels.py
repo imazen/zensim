@@ -31,6 +31,22 @@ def native_admitted(native,cohort,reference_records):
     return native['strict_flags']==0 and not any(r['strict_flag'] for r in native['close_pairs'])
 
 
+def input_files(root,manifest,prepared,out):
+    """Plan a byte-preserving remote reference-only audit; never decode labels."""
+    out.mkdir();cohort=json.loads((root/'cohort-selection.json').read_text());panel=json.loads(manifest.read_text())
+    if cohort['labels_read'] is not False or len(cohort['rows'])!=200:raise ValueError('frozen200-source cohort required')
+    records={r['source']:dict(path=r['source'],sha256=r['source_sha256']) for r in cohort['rows']}
+    for path in [manifest,prepared/'INPUTS.json',Path(cohort['current_family_v2']['path'])]:records[str(path)]=dict(path=str(path),sha256=sha(path))
+    for index in range(len(panel['sources'])):
+        for name in [f'source-{index:02d}.png',f'source-{index:02d}-recipe.json']:
+            path=prepared/name;records[str(path)]=dict(path=str(path),sha256=sha(path))
+    for r in records.values():r['bytes']=Path(r['path']).stat().st_size
+    write(out/'files.json',dict(schema='e36-current-panel-native-input-files-v1',cohort_sha256=sha(root/'cohort-selection.json'),
+        panel_manifest_sha256=sha(manifest),files=list(records.values()),labels_read=False,fits=0))
+    with (out/'sources.files0').open('xb') as f:f.write(b'\0'.join(p.lstrip('/').encode() for p in sorted(records))+b'\0')
+    print(json.dumps(dict(files=len(records),bytes=sum(r['bytes'] for r in records.values()),labels_read=False,fits=0)))
+
+
 def run(root,manifest,prepared,binary,out):
     cohort_path=root/'cohort-selection.json';cohort_raw=cohort_path.read_bytes();cohort=json.loads(cohort_raw)
     manifest_raw=manifest.read_bytes();panel=json.loads(manifest_raw)
@@ -88,5 +104,10 @@ def run(root,manifest,prepared,binary,out):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    for key in ['root','manifest','prepared','binary','out']:p.add_argument('--'+key,type=Path,required=True)
-    a=p.parse_args();run(a.root,a.manifest,a.prepared,a.binary,a.out)
+    for key in ['root','manifest','prepared','out']:p.add_argument('--'+key,type=Path,required=True)
+    p.add_argument('--binary',type=Path);p.add_argument('--input-files-only',action='store_true')
+    a=p.parse_args()
+    if a.input_files_only:input_files(a.root,a.manifest,a.prepared,a.out)
+    else:
+        if a.binary is None:p.error('--binary required for actual native audit')
+        run(a.root,a.manifest,a.prepared,a.binary,a.out)
