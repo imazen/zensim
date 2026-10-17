@@ -75,8 +75,8 @@ def sha256(path):
 E36_Q = [*range(21), *range(22, 101, 2)]
 
 
-def e36_consensus(a, b):
-    """Return worse/better local endpoint IDs only for two positive margins."""
+def e36_deltas(a, b):
+    """The two registered higher-is-better native-unit differences."""
     import math
     values = [float(a['butteraugli_pnorm3']), float(b['butteraugli_pnorm3']),
               float(a['cvvdp_standard_fhd']), float(b['cvvdp_standard_fhd'])]
@@ -84,6 +84,12 @@ def e36_consensus(a, b):
         raise ValueError('nonfinite native teacher score')
     db = values[0] - values[1]  # negative butter distance is higher-is-better
     dc = values[3] - values[2]
+    return db, dc
+
+
+def e36_consensus(a, b):
+    """Return worse/better local endpoint IDs only for two positive margins."""
+    db, dc = e36_deltas(a, b)
     if db > .01 and dc > .01:
         return (0, 1)
     if db < -.01 and dc < -.01:
@@ -102,6 +108,7 @@ def e36_pairs(rows):
                json.dumps(row['knobs'], sort_keys=True, separators=(',', ':')))
         groups[key].append((i, row))
     pairs, counts = [], defaultdict(int)
+    strata = {}
     for group in groups.values():
         group.sort(key=lambda item: item[1]['q'])
         q_index = {E36_Q.index(r['q']): (i, r) for i, r in group}
@@ -115,18 +122,115 @@ def e36_pairs(rows):
                 direction = e36_consensus(a, b)
                 band = 0 if a['q'] <= 20 else 1 if a['q'] <= 60 else 2
                 counts['proposed'] += 1
+                stratum = json.dumps([a['codec'],a['content'],a['size'],band,a['split']],separators=(',',':'))
+                cell_counts = strata.setdefault(stratum,defaultdict(int))
+                cell_counts['proposed'] += 1
+                db, dc = e36_deltas(a,b)
+                for teacher, delta in [('butteraugli_pnorm3',db),('cvvdp_standard_fhd',dc)]:
+                    cell_counts[teacher+'_forward_margin_pass'] += delta > .01
+                    cell_counts[teacher+'_reverse_margin_pass'] += delta < -.01
+                    cell_counts[teacher+'_veto_nominal_q'] += delta <= .01
+                    cell_counts[teacher+'_insufficient_margin'] += abs(delta) <= .01
                 if direction is None:
+                    cell_counts['excluded_disagreement_or_margin'] += 1
                     counts['excluded_disagreement_or_margin'] += 1
                     continue
                 worse, better = (i, j) if direction == (0, 1) else (j, i)
                 counts['admitted'] += 1
+                cell_counts['admitted'] += 1
+                cell_counts['reverse_nominal_q'] += direction == (1,0)
+                cell_counts['effective_mass'] += 2 if a['codec'] in {'jpeg','rav1e'} else 1
                 counts['reverse_nominal_q'] += direction == (1, 0)
                 pairs.append(dict(worse_row=worse, better_row=better, band=band,
                     weight=2 if a['codec'] in {'jpeg', 'rav1e'} else 1,
                     content=a['content'], size=a['size'], codec=a['codec'], split=a['split']))
-    return pairs, dict(counts)
+    return pairs, dict(counts,by_stratum={k:dict(v) for k,v in strata.items()})
+
+
+def e36_export(root, run_names=None, out_name="baseline-data", cohort_path=None):
+    """Feature-only pilot table; never a legacy human-rank loader input."""
+    from pathlib import Path
+    import pyarrow as pa
+    out = root/out_name
+    out.mkdir(exist_ok=False)
+    canonical = {}
+    observations = 0
+    pin = json.loads((root/'NATIVE_TOOL_PIN.json').read_text())
+    inputs = ([root/name/'complete.json' for name in run_names] if run_names else sorted(root.glob('smoke-*/complete.json')))
+    cohort = None
+    if cohort_path is not None:
+        selection = json.loads(cohort_path.read_text())
+        assert selection['labels_read'] is False
+        assert selection['internal_overlap']['admitted'] is True
+        assert selection['status'] == 'source-byte-native-overlap-and-color-admitted'
+        cohort = {r['origin']: r for r in selection['rows']}
+    for path in inputs:
+        run = json.loads(path.read_text())
+        assert run['labels_read'] is False and run['fits']==0
+        if cohort is not None:
+            assert run['tool_pin_sha256'] == sha256(root/'NATIVE_TOOL_PIN.json')
+        for row in run['rows']:
+            observations += 1
+            assert row['tool_sha256'] == pin['binary_sha256']
+            if cohort is not None:
+                source=cohort[row['origin']]
+                assert all(row[k]==source[k] for k in ['family','content','split'])
+            key=(row['origin'],row['size'],row['codec'],row['q'],
+                 json.dumps(row['knobs'],sort_keys=True,separators=(',',':')))
+            if key in canonical:
+                other=canonical[key]
+                for field in ['encoded_sha256','distorted_pixels_sha256','reference_pixels_sha256',
+                              'feature_sha256','butteraugli_pnorm3','cvvdp_standard_fhd']:
+                    assert row[field]==other[field],(key,field)
+            else:
+                canonical[key]=row
+    keys=sorted(canonical)
+    rows=[dict(canonical[key],row_id=i) for i,key in enumerate(keys)]
+    features=[]
+    with (out/'cells.jsonl').open('x') as stream:
+        for row in rows:
+            assert sha256(row['encoded_path'])==row['encoded_sha256']
+            assert sha256(row['feature_path'])==row['feature_sha256']
+            value=json.loads(Path(row['feature_path']).read_text())['features']
+            assert len(value)==1853
+            features.append(value)
+            stream.write(json.dumps(row,separators=(',',':'))+'\n')
+    pq.write_table(pa.table(dict(row_id=pa.array(range(len(rows)),type=pa.uint32()),
+        reference_sha256=[r['reference_sha256'] for r in rows],
+        encoded_sha256=[r['encoded_sha256'] for r in rows],
+        features=pa.array(features,type=pa.list_(pa.float32(),1853)))),out/'features.parquet',compression='zstd')
+    pairs,counts=e36_pairs(rows)
+    with (out/'preferences.tsv').open('x') as stream:
+        fields=['worse_row','better_row','band','weight','content','size','codec','split']
+        writer=csv.DictWriter(stream,fields,delimiter='\t');writer.writeheader();writer.writerows(pairs)
+    manifest=dict(schema='e36-feature-only-native-pilot-v1',
+        build_commit=pin['pixel_source_snapshot'],teacher_build_commit=pin['landed_commit'],
+        labels_read=False,fits=0,complete_for_fitting=False,
+        cohort_selection_sha256=None if cohort_path is None else sha256(cohort_path),
+        input_receipts={str(p):sha256(p) for p in inputs},
+        physical_observations=observations,unique_cell_keys=len(rows),
+        source_families=sorted({r['family'] for r in rows}),
+        teacher_ids=['butteraugli_pnorm3','cvvdp_standard_fhd'],margins=[.01,.01],
+        feature_width=1853,feature_layout_sha256=sha256(root/'FEATURE_LAYOUT_BINDING.json'),
+        row_indices='local feature-only table ordinals; not legacy concatenated rank-group indices',
+        artifacts={name:sha256(out/name) for name in ['cells.jsonl','features.parquet','preferences.tsv']},
+        preferences=counts,
+        missing='full registered source/content/size/mode and TRAIN-selection coverage, feature-only trainer/RNG/loss admission')
+    with (out/'_MANIFEST.json').open('x') as stream:
+        json.dump(manifest,stream,indent=2);stream.write('\n')
+    print(json.dumps(dict(physical_observations=observations,unique_cell_keys=len(rows),
+        preferences={k:v for k,v in counts.items() if k != 'by_stratum'},
+        complete_for_fitting=False)))
 
 def main():
+    if len(sys.argv)>1 and sys.argv[1]=='e36-export':
+        from pathlib import Path
+        ap=argparse.ArgumentParser(description='Native feature-only E36 pilot export; no fit')
+        ap.add_argument('--root',type=Path,required=True)
+        ap.add_argument('--runs', nargs='+')
+        ap.add_argument('--out-name',default='baseline-data')
+        ap.add_argument('--cohort-selection',type=Path)
+        args=ap.parse_args(sys.argv[2:]);e36_export(args.root,args.runs,args.out_name,args.cohort_selection);return
     ap = argparse.ArgumentParser()
     ap.add_argument("--parquet", required=True, help="the training group's parquet (group 0)")
     ap.add_argument("--sidecar", required=True, help="row-aligned CSV carrying codec/quality/size_bytes")

@@ -1,6 +1,36 @@
 """E34 artifact helpers run directly, without temporary shebang wrappers."""
 import argparse
 
+
+def e36_manifest(root, build_commit):
+    """Index completed preparation evidence; this never releases fitting."""
+    import hashlib
+    import json
+    from pathlib import Path
+    root = Path(root).resolve(strict=True)
+    assert build_commit
+    cohort = json.loads((root/'cohort-data/_MANIFEST.json').read_text())
+    audit = json.loads((root/'artifact-audit-final/complete.json').read_text())
+    closure = json.loads((root/'cohort-closure/complete.json').read_text())
+    assert cohort['fits'] == audit['fits'] == closure['fits'] == 0
+    assert cohort['complete_for_fitting'] is False
+    files = {}
+    for p in sorted(root.rglob('*')):
+        if not p.is_file() or p == root/'_MANIFEST.json':
+            continue
+        with p.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        files[str(p.relative_to(root))] = dict(sha256=digest, bytes=p.stat().st_size)
+    result = dict(schema='e36-preparation-evidence-v1', build_commit=build_commit,
+        labels_read=False, fits=0, complete_for_fitting=False, files=files,
+        cohort_selection_sha256=closure['sha256'],
+        feature_build_commit=cohort['build_commit'], teacher_build_commit=cohort['teacher_build_commit'],
+        note='initial generation only; bulk coverage and trainer/evaluation admissions remain open')
+    with (root/'_MANIFEST.json').open('x') as stream:
+        json.dump(result, stream, indent=2)
+        stream.write('\n')
+    print(json.dumps(dict(files=len(files), fits=0, complete_for_fitting=False)))
+
 def backup_check():
     import hashlib,json
     from pathlib import Path
@@ -35,6 +65,12 @@ def archive_binaries():
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['backup-check','archive-binaries'])
-    mode=p.parse_args().mode
-    {'backup-check':backup_check,'archive-binaries':archive_binaries}[mode]()
+    p.add_argument('mode',choices=['backup-check','archive-binaries','e36-manifest'])
+    p.add_argument('--root')
+    p.add_argument('--build-commit')
+    args=p.parse_args()
+    if args.mode == 'e36-manifest':
+        assert args.root and args.build_commit
+        e36_manifest(args.root, args.build_commit)
+    else:
+        {'backup-check':backup_check,'archive-binaries':archive_binaries}[args.mode]()

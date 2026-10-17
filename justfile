@@ -1782,3 +1782,91 @@ shipgates-jxl-rd-bounded models binary inputs oracle lock heavy png8 resume outp
 
 shipgates-admission-check:
     python3 -B -m unittest scripts/tests/test_shipgates_memory_admission.py
+
+# E36 preparation: no trainer or fit invocation.
+e36-pixels-build:
+    cargo build --locked --release -p zensim --example e34_pixels --features custom-profiles,feature-regime-v2 --target-dir /home/lilith/tmp/e36-pixels-target
+
+e36-native-lock-check repo snapshot:
+    cd {{quote(repo)}} && LOCK_SNAP_DIR={{quote(snapshot)}} scripts/ci/lock.sh --check
+
+e36-source-selection root out standard ladder family="/mnt/v/output/zensim/e36-2026-10-16/corpus-metadata/split_map_family_v2.tsv":
+    python3 scripts/rev4_featpot/e34_augmentation.py e36-select --root {{quote(root)}} --out {{quote(out)}} --panel {{quote(standard)}} --panel {{quote(ladder)}} --family-v2 {{quote(family)}}
+
+e36-native-smoke root tool pin references name pixels feature_spec:
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 python3 scripts/rev4_featpot/e34_encode.py e36-smoke --root {{quote(root)}} --tool {{quote(tool)}} --tool-pin {{quote(pin)}} --references {{quote(references)}} --smoke-name {{quote(name)}} --pixels {{quote(pixels)}} --feature-spec {{quote(feature_spec)}}
+
+e36-native-plan root tool pin sources:
+    python3 scripts/rev4_featpot/e34_encode.py e36-plan --root {{quote(root)}} --tool {{quote(tool)}} --tool-pin {{quote(pin)}} --sources {{quote(sources)}}
+
+e36-consensus-check:
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_consensus.py scripts/tests/test_e34_admission.py
+
+e36-color-probe job:
+    just e36-pixels-build
+    /home/lilith/tmp/e36-pixels-target/release/examples/e34_pixels {{quote(job)}}
+
+e36-normalize job:
+    just e36-pixels-build
+    /home/lilith/tmp/e36-pixels-target/release/examples/e34_pixels {{quote(job)}}
+
+e36-native-main-effects root tool pin sources:
+    python3 scripts/rev4_featpot/e34_encode.py e36-plan --root {{quote(root)}} --tool {{quote(tool)}} --tool-pin {{quote(pin)}} --sources {{quote(sources)}} --main-effects
+
+e36-pixel-ingress-check:
+    cargo test --locked --release -p zensim --example e34_pixels --features custom-profiles,feature-regime-v2 --target-dir /home/lilith/tmp/e36-pixels-target tests::
+
+e36-native-artifact-audit root djxl name="artifact-audit":
+    python3 scripts/rev4_featpot/e34_encode.py e36-audit --root {{quote(root)}} --djxl {{quote(djxl)}} --audit-name {{quote(name)}}
+
+e36-native-dense-data root tool pin references name pixels feature_spec:
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 python3 scripts/rev4_featpot/e34_encode.py e36-smoke --root {{quote(root)}} --tool {{quote(tool)}} --tool-pin {{quote(pin)}} --references {{quote(references)}} --smoke-name {{quote(name)}} --pixels {{quote(pixels)}} --feature-spec {{quote(feature_spec)}} --q 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62 64 66 68 70 72 74 76 78 80 82 84 86 88 90 92 94 96 98 100
+
+e36-base-exclusions root selection out:
+    python3 scripts/rev4_featpot/e34_augmentation.py e36-base-exclusions --root {{quote(root)}} --selection {{quote(selection)}} --out {{quote(out)}}
+
+e36-ingress-clippy:
+    cargo clippy --locked --release -p zensim --example e34_pixels --features custom-profiles,feature-regime-v2 --target-dir /home/lilith/tmp/e36-pixels-target -- -D warnings
+
+e36-feature-parity old out spec pixels:
+    python3 scripts/rev4_featpot/e34_native_parity.py e36-prepare {{quote(old)}} {{quote(out)}} {{quote(spec)}}
+    ZENSIM_FORMULA_REV=5 ZENSIM_MAX_TIER=v3 {{quote(pixels)}} {{quote(out + "/job.json")}}
+    python3 scripts/rev4_featpot/e34_native_parity.py e36-check {{quote(out)}}
+
+e36-native-color-candidates root out standard ladder family:
+    python3 scripts/rev4_featpot/e34_augmentation.py e36-select --root {{quote(root)}} --out {{quote(out)}} --panel {{quote(standard)}} --panel {{quote(ladder)}} --family-v2 {{quote(family)}} --prepare-color-only
+
+e36-native-color-selection root out standard ladder family probe:
+    python3 scripts/rev4_featpot/e34_augmentation.py e36-select --root {{quote(root)}} --out {{quote(out)}} --panel {{quote(standard)}} --panel {{quote(ladder)}} --family-v2 {{quote(family)}} --color-probe {{quote(probe)}}
+
+e36-pilot-feature-only-data root:
+    python3 scripts/canonical_corpus/build_ladder_tv_pairs.py e36-export --root {{quote(root)}}
+
+e36-cohort-feature-only-data root run selection:
+    python3 scripts/canonical_corpus/build_ladder_tv_pairs.py e36-export --root {{quote(root)}} --runs {{quote(run)}} --out-name cohort-data --cohort-selection {{quote(selection)}}
+
+e36-native-family-closed-selection root out standard ladder family probe quarantine:
+    python3 scripts/rev4_featpot/e34_augmentation.py e36-select --root {{quote(root)}} --out {{quote(out)}} --panel {{quote(standard)}} --panel {{quote(ladder)}} --family-v2 {{quote(family)}} --color-probe {{quote(probe)}} --quarantine-origins {{quote(quarantine)}}
+
+e36-native-ingress-final-check:
+    just e36-pixel-ingress-check
+    just e36-ingress-clippy
+
+e36-native-cohort-audit root djxl references:
+    python3 scripts/rev4_featpot/e34_encode.py e36-audit --root {{quote(root)}} --djxl {{quote(djxl)}} --audit-name artifact-audit-final --normalized-references {{quote(references)}}
+
+e36-close-cohort root out standard ladder family probe quarantine:
+    python3 scripts/rev4_featpot/e34_augmentation.py e36-close-cohort --root {{quote(root)}} --out {{quote(out)}} --panel {{quote(standard)}} --panel {{quote(ladder)}} --family-v2 {{quote(family)}} --color-probe {{quote(probe)}} --quarantine-origins {{quote(quarantine)}}
+
+e36-cohort-generation-phase root djxl selection:
+    just e36-native-dense-data {{quote(root)}} {{quote(root + "/bin/zenmetrics")}} {{quote(root + "/NATIVE_TOOL_PIN.json")}} {{quote(root + "/smoke-references-cohort-32.json")}} smoke-cohort-32 {{quote(root + "/bin/e36-pixels")}} {{quote(root + "/e34-feature-spec.json")}}
+    just e36-cohort-feature-only-data {{quote(root)}} smoke-cohort-32 {{quote(selection)}}
+    just e36-native-cohort-audit {{quote(root)}} {{quote(djxl)}} {{quote(root + "/opaque-references.jsonl")}}
+    just e36-base-exclusions /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2 {{quote(selection)}} {{quote(root + "/OPAQUE_TRAIN_SELECTION_BASE_FILTER.json")}}
+    just lint-scripts
+
+e36-evidence-manifest root commit:
+    python3 scripts/rev4_featpot/e34_artifacts.py e36-manifest --root {{quote(root)}} --build-commit {{quote(commit)}}
+
+e36-archive root mirror:
+    python3 scripts/demos/rev5perf_archive.py {{quote(root)}} {{quote(mirror)}} --dereference --exclude-operator-locks
