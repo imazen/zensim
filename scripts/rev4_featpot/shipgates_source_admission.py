@@ -18,7 +18,7 @@ def bind_admission(args):
     pins=json.loads((args.output/'INPUTS.json').read_text())
     done=json.loads((args.output/'COMPLETE.json').read_text())
     assert pins['manifest_sha256']==sha(args.sources) and pins['native_binary_sha256']==sha(args.binary)
-    assert done['sources']==len(manifest['sources'])==len(done['receipts'])==24
+    assert done['sources']==len(manifest['sources'])==len(done['receipts'])==args.expected_sources
     assert done['all_original_rgb_bytes_preserved'] and done['no_experiment_inputs_replaced']
     for index,(source,record) in enumerate(zip(manifest['sources'],done['receipts'])):
         assert record['source']==source and sha(Path(source['path']))==source['sha256']
@@ -28,12 +28,12 @@ def bind_admission(args):
         preparation=json.loads(recipe.read_text());check=json.loads(oracle.read_text())
         assert preparation['source_png_bit_depth']==preparation['output_png_bit_depth']==8
         assert check['changed_channels']==0 and check['all_rgb_bytes_identical'] and check['opaque'] and check['dimensions_match']
-    admission=dict(source_manifest_sha256=sha(args.sources),png8_binary_sha256=sha(args.binary),sources=24,
+    admission=dict(source_manifest_sha256=sha(args.sources),png8_binary_sha256=sha(args.binary),sources=args.expected_sources,
         receipt=str(args.output/'COMPLETE.json'),receipt_sha256=sha(args.output/'COMPLETE.json'))
     marker=args.sources.parent/'ADMISSION.json'
     with marker.open('x') as stream:
         json.dump(admission,stream,indent=2);stream.write('\n')
-    print('All24source pixel/metadata receipts bound to immutable manifest',flush=True)
+    print(f'All{args.expected_sources}source pixel/metadata receipts bound to immutable manifest',flush=True)
 
 
 def main():
@@ -41,12 +41,15 @@ def main():
     for name in ['sources','binary','oracle','output']:
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument("--bind-only",action="store_true")
+    parser.add_argument("--expected-sources",type=int,default=24)
     args = parser.parse_args()
+    assert args.expected_sources > 0
     if args.bind_only:
         bind_admission(args)
         return
     args.output.mkdir(parents=True,exist_ok=False)
     manifest = json.loads(args.sources.read_text())
+    assert len(manifest["sources"]) == args.expected_sources
     pins=dict(manifest_sha256=sha(args.sources),native_binary_sha256=sha(args.binary),
         independent_oracle_sha256=sha(args.oracle),sources=len(manifest['sources']))
     (args.output/'INPUTS.json').write_text(json.dumps(pins,indent=2)+'\n')
@@ -68,8 +71,8 @@ def main():
         receipts.append(dict(source=source,recipe_sha256=sha(recipe),oracle_sha256=sha(oracle),
             prepared_png_sha256=sha(prepared),source_rgb_sha256=result['output_rgb_sha256']))
         print(f"source admission{index:02d} {source['name']}: native contract and every RGB byte verified",flush=True)
-    assert len(receipts)==len(manifest['sources'])==24
-    (args.output/'COMPLETE.json').write_text(json.dumps(dict(sources=24,all_original_rgb_bytes_preserved=True,
+    assert len(receipts)==len(manifest['sources'])==args.expected_sources
+    (args.output/'COMPLETE.json').write_text(json.dumps(dict(sources=args.expected_sources,all_original_rgb_bytes_preserved=True,
         no_experiment_inputs_replaced=True,receipts=receipts),indent=2)+'\n')
     bind_admission(args)
 

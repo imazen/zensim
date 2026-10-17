@@ -1249,6 +1249,21 @@ def shipgates_rd_main():
         assert r["content_class"] == sources[r["source"]]["content_class"]
         assert r["source_family"] == sources[r["source"]]["source_family"]
         assert r["source_sha256"] == sources[r["source"]]["sha256"]
+        if "class_derivation" in r:
+            annotation = r["class_derivation"]
+            original_path = Path(annotation["original_cell"])
+            assert digest(original_path) == annotation["original_cell_sha256"]
+            original = json.loads(original_path.read_text())
+            expected_original = {k:v for k,v in r.items() if k != "class_derivation"}
+            expected_original["content_class"] = annotation["original_content_class"]
+            assert original == expected_original, "source-class revision changed measurement metadata"
+            revision_path = Path(annotation["revision"])
+            assert digest(revision_path) == annotation["revision_sha256"]
+            revision = json.loads(revision_path.read_text())
+            assert revision["revised_manifest_sha256"] == digest(args.sources)
+            assert revision["coordinator_approval"] == "Approve correction and add 3 photos"
+            assert dict(name=r["source"],sha256=r["source_sha256"],
+                        **{"from":annotation["original_content_class"],"to":r["content_class"]}) in revision["changes"]
         assert digest(Path(r["encoded"])) == r["encoded_sha256"]
         assert Path(r["encoded"]).stat().st_size == r["bytes"]
         assert digest(Path(r["decoded"])) == r["decoded_png_sha256"]

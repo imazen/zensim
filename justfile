@@ -1662,8 +1662,8 @@ shipgates-panel-check:
 shipgates-jxl-target-phased models binary inputs resume lock heavy output:
     python3 scripts/rev4_featpot/shipgates.py jxl-target --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --resume-calibration-root {{quote(resume)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}}
 
-shipgates-rd-sources inputs tree output:
-    python3 scripts/rev4_featpot/shipgates.py rd-sources --inputs {{quote(inputs)}} --tree {{quote(tree)}} --output {{quote(output)}}
+shipgates-rd-sources inputs tree output commit:
+    python3 scripts/rev4_featpot/shipgates.py rd-sources --inputs {{quote(inputs)}} --tree {{quote(tree)}} --output {{quote(output)}} --build-commit {{quote(commit)}}
 
 shipgates-target-report output:
     python3 scripts/v_next/rd_probe_analyze_2026-07-18.py --target-loop {{quote(output)}} --target-only
@@ -1940,3 +1940,12 @@ e36-data-census root name:
 
 shipgates-jxl-rd-source-batches models binary inputs oracle lock heavy png8 resume output:
     python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --resume-encodes-root {{quote(resume)}} --cell-workers 8 --qualities-per-job 21 --output {{quote(output)}}
+
+shipgates-source-revision evidence output commit:
+    python3 scripts/rev4_featpot/shipgates_source_revision.py --evidence {{quote(evidence)}} --output {{quote(output)}} --build-commit {{quote(commit)}}
+
+shipgates-source-admission-count sources binary output count:
+    python3 scripts/rev4_featpot/shipgates_source_admission.py --sources {{quote(sources)}} --binary {{quote(binary)}} --oracle scripts/rev4_featpot/shipgates_crop_oracle.py --output {{quote(output)}} --expected-sources {{quote(count)}}
+
+shipgates-source-revision-check:
+    python3 -B -m unittest scripts/tests/test_shipgates_source_revision.py

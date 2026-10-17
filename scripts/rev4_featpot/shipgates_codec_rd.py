@@ -234,11 +234,12 @@ def matrix():
     args = p.parse_args(sys.argv[2:])
     admission=json.loads((args.sources.parent/"ADMISSION.json").read_text())
     assert admission["source_manifest_sha256"]==sha(args.sources) and admission["png8_binary_sha256"]==sha(args.png8_binary)
-    assert admission["sources"]==24 and sha(admission["receipt"])==admission["receipt_sha256"]
+    assert sha(admission["receipt"])==admission["receipt_sha256"]
     args.output.mkdir(parents=True, exist_ok=False)
     sources = json.loads(args.sources.read_text())["sources"]
     models = json.loads(args.models.read_text())
-    assert len(sources) == 24 and len({r["source_family"] for r in sources}) == 24
+    assert len(sources) == admission["sources"] == len({r["source_family"] for r in sources})
+    assert len(sources) == json.loads(Path(admission["receipt"]).read_text())["sources"]
     for record in list(models.values()) + sources:
         assert sha(record["path"]) == record["sha256"]
     qualities = ([1. + 254. * i / 20 for i in range(21)] if args.codec == "avif"
@@ -246,7 +247,9 @@ def matrix():
     if args.smoke_only:
         qualities = [128 if args.codec == "avif" else 50]
     targets = [70] if args.smoke_only else [25, 40, 55, 70, 80, 90]
-    source_ids = [22] if args.smoke_only else list(range(24))
+    source_ids = ([i for i,r in enumerate(sources) if r["name"]=="imazen-screen-8206"]
+                  if args.smoke_only else list(range(len(sources))))
+    assert not args.smoke_only or len(source_ids)==1
     design = dict(schema="shipgates-codec-native-rd-v1", codec=args.codec,
         binary=str(args.binary), binary_sha256=sha(args.binary), oracle=str(args.oracle),
         png8_binary=str(args.png8_binary),png8_binary_sha256=sha(args.png8_binary),

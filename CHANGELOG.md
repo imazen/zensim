@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Correct the ship-gate photo cohort with reviewed game-render annotations and three approved additional photographs; preserve original measurements and require explicit hash-bound source counts.
+
 - Permit source-sized JXL scheduling in the private ship-gate runner while retaining every per-quality checkpoint and the existing resource limits.
 
 - Reuse one retired prepared finite-refinement snapshot's buffers per scoring session while keeping live map outputs independently owned.

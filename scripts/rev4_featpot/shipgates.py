@@ -256,17 +256,23 @@ def corruption_results(args):
 def rd_sources(args):
     """Copy immutable public corpus objects without touching a dirty checkout."""
     import base64
+    import re
+    assert re.fullmatch(r"[0-9a-f]{40}", args.build_commit)
     args.output.mkdir(parents=True, exist_ok=False)
     tree = json.loads(args.tree.read_text())
     assert not tree["truncated"] and tree["sha"] == "8e10d4d765667c1c49d74413878fc4bfb46dcf8d"
-    photos = sorted([x for x in tree["tree"] if x["path"].startswith("gb82/") and x["path"].endswith(".png")],
-                    key=lambda x:hashlib.sha256(x["path"].encode()).hexdigest())[:12]
+    ordered = sorted([x for x in tree["tree"] if x["path"].startswith("gb82/") and x["path"].endswith(".png")],
+                     key=lambda x:hashlib.sha256(x["path"].encode()).hexdigest())
+    render_paths = {"gb82/mc1-lossless.png", "gb82/mc2-lossless.png", "gb82/mc3-lossless.png"}
+    photos = [x for x in ordered if x["path"] not in render_paths][:12]
+    renders = [x for x in ordered if x["path"] in render_paths]
+    assert len(renders) == 3
     screens = [x for x in tree["tree"] if x["path"].startswith("gb82-sc/") and x["path"].endswith(".png")]
     assert len(photos) == 12 and len(screens) == 10
     files = args.output / "sources"
     files.mkdir()
     rows = []
-    for content_class, entries in [("photo", photos), ("screen", screens)]:
+    for content_class, entries in [("photo", photos), ("screen", screens + renders)]:
         for entry in entries:
             command = ["gh", "api", "repos/imazen/codec-corpus/git/blobs/" + entry["sha"]]
             blob = json.loads(subprocess.check_output(command))
@@ -291,10 +297,10 @@ def rd_sources(args):
         rows.append(dict(path=str(path), sha256=source["sha256"], name="imazen-screen-" + source["origin"],
                          content_class="screen", source_family=source["family"],
                          source_manifest_sha256=sha(args.inputs / "train_source_manifest.json")))
-    assert len(rows) == 24 and len({r["sha256"] for r in rows}) == 24
+    assert len(rows) == 27 and len({r["sha256"] for r in rows}) == 27
     write(args.output / "SOURCE_MANIFEST.json", dict(schema="shipgates-rd-sources-v1",
-          tree_sha256=sha(args.tree), tree_commit=tree["sha"],
-          selection="12photoSHA256(path)-ordered,10screens+2registeredTRAINscreens", sources=rows))
+          tree_sha256=sha(args.tree), tree_commit=tree["sha"], build_commit=args.build_commit,
+          selection="12 visually-reviewed photographs in SHA256(path) order,3 retained game renders,10screens+2registeredTRAINscreens", sources=rows))
     with (args.output / "corpus.tsv").open("x") as stream:
         csv.writer(stream, delimiter="\t").writerows((r["path"],r["name"],r["content_class"]) for r in rows)
     with (args.output / "links.jsonl").open("x") as stream:
@@ -426,9 +432,10 @@ def jxl_rd(args):
     admission=json.loads((args.inputs/"ADMISSION.json").read_text())
     assert admission["source_manifest_sha256"]==sha(args.inputs/"SOURCE_MANIFEST.json")
     assert admission["png8_binary_sha256"]==sha(args.png8_binary)
-    assert admission["sources"]==24 and sha(admission["receipt"])==admission["receipt_sha256"]
-    args.output.mkdir(parents=True, exist_ok=False)
     sources = json.loads((args.inputs / "SOURCE_MANIFEST.json").read_text())["sources"]
+    assert admission["sources"]==len(sources)==json.loads(Path(admission["receipt"]).read_text())["sources"]
+    assert sha(admission["receipt"])==admission["receipt_sha256"]
+    args.output.mkdir(parents=True, exist_ok=False)
     distances = [struct.unpack("<f",struct.pack("<f",math.exp(math.log(.01)+i*(math.log(25.)-math.log(.01))/20)))[0] for i in range(21)]
     design = dict(schema="shipgates-jxl-rd-encodes-v1",models=json.loads(args.models.read_text()),
         binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),
@@ -447,7 +454,10 @@ def jxl_rd(args):
     png_adapter.write_bytes(Path(__file__).with_name("shipgates_png.py").read_bytes())
     admission_adapter=args.output / "shipgates_admission.py"
     admission_adapter.write_bytes(Path(__file__).with_name("shipgates_admission.py").read_bytes())
-    write(args.output / "RUNNER.json",dict(sha256=sha(runner),png_adapter_sha256=sha(png_adapter),admission_adapter_sha256=sha(admission_adapter)))
+    revision_adapter=args.output / "shipgates_source_revision.py"
+    revision_adapter.write_bytes(Path(__file__).with_name("shipgates_source_revision.py").read_bytes())
+    write(args.output / "RUNNER.json",dict(sha256=sha(runner),png_adapter_sha256=sha(png_adapter),
+        admission_adapter_sha256=sha(admission_adapter),revision_adapter_sha256=sha(revision_adapter)))
     for i, source in enumerate(sources):
         dest = args.output / f"source-{i:02d}"
         dest.mkdir()
@@ -485,6 +495,8 @@ def jxl_rd(args):
                     assert sha(r["decoded"]) == r["decoded_png_sha256"]
                     for item in r["map_records"]:
                         assert sha(Path(r["case"]) / "maps" / (item["sha256"]+".zmap")) == item["sha256"]
+                from shipgates_source_revision import reviewed_record
+                reused=[reviewed_record(r,source,args.inputs) for r in reused]
                 write(dest / f"quality-{qi:02d}-reuse.json",dict(source=str(prior),source_sha256=sha(prior),cells=reused))
                 newrows = reused
             else:
@@ -658,6 +670,8 @@ def main():
         common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses"] else ["models", "binary", "output"]
         for name in common + names:
             command.add_argument(f"--{name}", type=Path, required=True)
+        if mode == "rd-sources":
+            command.add_argument("--build-commit",required=True)
         if mode in ["jxl-rd","jxl-rd-source"]:
             command.add_argument("--cell-workers",type=int,default=1,choices=range(1,9))
         if mode == "jxl-rd":
