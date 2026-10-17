@@ -126,6 +126,7 @@ class Runtime:
         return self.call(args,cell/'oracle.log',deadline,binary_output=cell/'oracle-discard.bin')
 
     def execute_cell(self,ref,codec,native,knobs,q,cell,deadline,cache,mode):
+        started=time.monotonic()
         cell.mkdir()
         src=cell/'source';src.mkdir();(src/(ref['origin']+'.png')).symlink_to(ref['destination'])
         encoded_dir=cell/'encoded';decoded_dir=cell/'decoded'
@@ -207,7 +208,7 @@ class Runtime:
             maps.append(dict(metric=metric,sha256=sha(blob),bytes=blob.stat().st_size,
                 member='maps/'+sha(blob)+'.pfm.gz',execution=timing,
                 pixel_pair_metric_key=feature['metric_pixel_keys'][metric+'@build:'+self.pin['binary_sha256']]))
-        self.oracle(codec,encoded,cell,deadline)
+        oracle_timing=self.oracle(codec,encoded,cell,deadline)
         # Inspection stdout can be enormous for large PPMs. Preserve its hash
         # and byte count, not an extra copy of oracle-produced image bytes.
         oracle_output=cell/'oracle-discard.bin'
@@ -227,7 +228,7 @@ class Runtime:
             feature_member='features/'+sha(feature_gz)+'.jsonl.gz',feature_layout_sha256=self.spec['feature_layout_sha256'],
             butteraugli_pnorm3=butter,cvvdp_standard_fhd=cv,scalar_precision='native JSON f64',
             native_scores=scores,maps=maps,encode_execution=encode_timing,score_execution=score_timing,
-            feature_execution=feature_timing,oracle=oracle_receipt,tool_sha256=self.pin['binary_sha256'],
+            feature_execution=feature_timing,oracle_execution=oracle_timing,oracle=oracle_receipt,tool_sha256=self.pin['binary_sha256'],
             feature_tool_sha256=self.pin['pixel_binary_sha256'],physical_alias=False)
         write(cell/'metadata.json',info)
         diagnostics=cell/'diagnostics.tar.gz'
@@ -241,6 +242,7 @@ class Runtime:
         members.update({m['member']:cell/(m['metric']+'.pfm.gz') for m in maps})
         with tarfile.open(bundle,'w') as archive:
             for name,path in members.items():archive.add(path,arcname=name)
+        storage_started=time.monotonic()
         ack=self.store.put(bundle)
         if not ack['ok']:raise ValueError('no durable artifact acknowledgement')
         if self.current_role=='first-producer':
@@ -250,6 +252,8 @@ class Runtime:
             root=self.spec['storage']['root'],host=self.spec['storage']['host'],storage_program_sha256=ack['program_sha256'])
         info['feature_ids']=self.feature_spec['feature_ids']
         info['features']=[values[i] for i in self.feature_spec['feature_ids']]
+        info['artifact_persistence_seconds']=time.monotonic()-storage_started
+        info['cell_total_seconds']=time.monotonic()-started
         cache[encoded_sha]=copy.deepcopy(info)
         return info
 
