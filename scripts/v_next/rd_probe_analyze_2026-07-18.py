@@ -1223,7 +1223,7 @@ def shipgates_numeric_gates(models, summaries, classes, complete_judges, native_
 
 
 def shipgates_r6_prime_gates(models, summaries, delta_intervals, neutral_metrics,
-                             classes, cvvdp_bound):
+                             classes, cvvdp_bound, butter_arm=None):
     """Frozen R6' exploratory verdict (GATES_REV3_AGY.md section 2).
 
     (i) vs no steering, point estimates: saving >= 0 on every analyzed judge and
@@ -1262,7 +1262,8 @@ def shipgates_r6_prime_gates(models, summaries, delta_intervals, neutral_metrics
                                  hi=interval["hi"], sources=interval.get("sources"))
                 noninf_rows.append(entry)
         candidate_self = overall.get("zensim", {}).get("saving")
-        butter_self = next((r["saving"] for r in summaries if r["arm"] == "butteraugli"
+        self_arm = butter_arm(model) if butter_arm else "butteraugli"
+        butter_self = next((r["saving"] for r in summaries if r["arm"] == self_arm
                             and r["baseline"] == "none" and r["metric"] == "butter"
                             and r["content_class"] == "all"), None)
         self_judge = (candidate_self is not None and butter_self is not None
@@ -1484,8 +1485,9 @@ def shipgates_rd_main():
     for source, record in sorted(sources.items()):
         for metric in sorted(neutral_metrics):
             for model in models:
-                delta = (math.exp(obs[(source,metric,"butteraugli","none")])
-                         - math.exp(obs[(source,metric,model,"none")]))
+                delta = (math.exp(obs[(source,metric,model+"-butteraugli","none")]) if native_codec
+                         else math.exp(obs[(source,metric,"butteraugli","none")])) \
+                        - math.exp(obs[(source,metric,model,"none")])
                 for cohort in ["all",record["content_class"]]:
                     name=f"r6delta-vs-none/{metric}/{model}/{cohort}"
                     r6_delta.setdefault(name,[]).append((ids[source],delta))
@@ -1515,7 +1517,8 @@ def shipgates_rd_main():
     packet_summaries=[r for r in summaries if r["metric"] in columns]
     numeric_gates = shipgates_numeric_gates(models,packet_summaries,classes,requested==set(columns),native_codec)
     r6_prime = shipgates_r6_prime_gates(models,summaries,delta_intervals,
-        neutral_metrics,classes,cvvdp_lookup is not None)
+        neutral_metrics,classes,cvvdp_lookup is not None,
+        butter_arm=(lambda m: m+"-butteraugli") if native_codec else None)
     result=dict(schema="shipgates-rd-judged-v1",scope="development probe; intervention/control qualification separate",
         source_weighting="equal weight per source; mean log ratio across common measured baseline quality points; bootstrap clusters are declared source families",
         bootstrap="canonical zenstats source-cluster bootstrap; 10000 resamples",
