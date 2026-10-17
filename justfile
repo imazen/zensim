@@ -2350,3 +2350,6 @@ e36-raw-drain-run root out resources:
 
 e36-raw-drain-close root out log:
     python3 scripts/rev4_featpot/e36_archive_terminal.py close --root {{quote(root)}} --out {{quote(out)}} --log {{quote(log)}}
+
+e36-metadata-storage root out commit:
+    python3 scripts/rev4_featpot/e36_metadata_storage.py --root {{quote(root)}} --out {{quote(out)}} --commit {{quote(commit)}}
