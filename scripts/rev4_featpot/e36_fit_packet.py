@@ -15,6 +15,8 @@ from e36_store import sha
 from e36_matrix import admit as admit_matrix
 
 BASE_SHA='9c3eff1b740d2b7a77a235a16a3cd3521746af55a72bb92cddd0536674963008'
+BLUEPRINTS={'lodo':'47d4dff82b977ff7cc3f2f7d04c44603b9b9bdb538168a720713f04fbf2297c1','full':'d4a47f7ec92a383a1eddac1ecc3e37465148bda8b818741d415294cdfb51478c'}
+BASE_CONTRACT='55b8ca6a6cfe545c1c776e655fc9a0cc890581f46c6dc23a79651b3ff51c97f1'
 BASE_RECEIPT='501b209a7847a454a465675ac8b4c5fa53a5299111bf363c07699180841d5e77'
 
 
@@ -81,40 +83,121 @@ def packet(root,pools,base,trainer,out,owner,commit):
         fit_manifest_sha256=sha(fit/'manifest.json'),locked_contract_sha256=sha(locked),base_filter_sha256=sha(mask),fit_release=False))
 
 
-def specs(root,pools,packet_dir,original,program,ctl):
+def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
+    """Use native program packaging; freeze qualification without fitting."""
+    from e36_training import curated_projection,SPEC,ARMS
+    receipt=json.loads((packet_dir/'data-receipt.json').read_text())
+    if sha(packet_dir/'data.tar.gz')!=receipt['sha256'] or sha(binaries/'zensim_mlp_train')!=receipt['trainer_sha256']:
+        raise ValueError('E36 program/data/trainer mismatch')
+    mask=root/'matched-base-filter-plan-v2.json'
+    projections=curated_projection(mask,packet_dir/'curated-projection')
+    protocol_files=['zensim-validate/src/bin/e36_tv/mod.rs','zensim-validate/src/bin/zensim_mlp_train.rs',
+        'zensim-validate/src/mlp_train/mod.rs','zensim-validate/src/mlp_train/e36_tv.rs','zensim-validate/build.rs']
+    protocol_sha=hashlib.sha256('\n'.join((source/n).read_text() for n in protocol_files).encode()).hexdigest()
+    manifest=json.loads((pools/'fit/manifest.json').read_text());n=0;mass=0
+    import pyarrow.parquet as pq
+    for batch in pq.ParquetFile(manifest['pairs']['path']).iter_batches(columns=['pair_weight_class'],batch_size=65536):
+        classes=batch.column(0).to_pylist()
+        if any(c not in [0,1] for c in classes):raise ValueError('bad physical pair weight class')
+        n+=len(classes);mass+=sum(2 if c==0 else 1 for c in classes)
+    if n!=manifest['pair_rows'] or n==0:raise ValueError('E36 mean pool weight requires the entire admitted fit pool')
+    if sha(original/'e34-fit-contract.json')!=BASE_CONTRACT:raise ValueError('frozen original C qualification package changed')
+    old=json.loads((original/'e34-fit-contract.json').read_text())
+    controls=[v for v in old['variants'] if v['name'] in ['controlc','full-controlc']]
+    if len(controls)!=2 or any(v['spec']!=SPEC or any(v['e34_flags'].values()) for v in controls):
+        raise ValueError('exact unaugmented original C controls required')
+    variants=[]
+    for arm in ARMS:
+        for oldvariant in controls:
+            v=copy.deepcopy(oldvariant);v.update(schema='e36-research-fit-contract-v1',name=arm+'-'+oldvariant['name'],
+                data_sha=receipt['sha256'],build_commit=commit,launchable=True)
+            v['e36']=dict(arm=arm,trainer_sha256=receipt['trainer_sha256'],protocol_source_sha256=protocol_sha,
+                manifest_sha256=receipt['fit_manifest_sha256'],contract_sha256=receipt['locked_contract_sha256'],
+                base_filter_sha256=receipt['base_filter_sha256'],mean_pool_weight=mass/n,curated_tables=projections)
+            variants.append(v)
+    package=packet_dir/'qualified-package.json';write(package,dict(schema='e36-research-fit-package-v1',variants=variants))
+    prior=json.loads((original/'source-pins.json').read_text());members=set(prior['files'])
+    members.update(['scripts/rev4_featpot/e36_training.py','scripts/rev4_featpot/e36_store.py'])
+    files={name:sha(source/name) for name in sorted(members) if Path(name).suffix in ['.py','.json']}
+    pins=packet_dir/'source-pins.json';contract_name='benchmarks/e36_fit_contract_2026-10-17.json'
+    write(pins,dict(schema='e36-public-program-v1',build_commit=commit,files=files,data={contract_name:sha(package)}))
+    meta=packet_dir/'build-meta.json';write(meta,dict(schema='fleet-fits-build-v1',build_commit=commit,
+        e36_fit=dict(data_sha256=receipt['sha256'],base_filter_sha256=receipt['base_filter_sha256'],fits_released=False)))
+    output=packet_dir/'program.tar.gz'
+    subprocess.run(['python3',str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),
+        '--source-pins',str(pins),'--source-pins-sha256',sha(pins),'--executor',str(owner/'fit_cell_exec.py'),
+        '--bin-dir',str(binaries),'--build-meta',str(meta),'--data',contract_name+'='+str(package),'--out',str(output)],check=True)
+    write(packet_dir/'program-receipt.json',dict(schema='e36-native-fit-program-v1',build_commit=commit,sha256=sha(output),
+        protocol_source_sha256=protocol_sha,qualified_package_sha256=sha(package),source_pins_sha256=sha(pins),
+        native_owner_sha256=sha(owner/'pack_fit_program.py'),binaries={p.name:sha(p) for p in binaries.iterdir() if p.is_file()},
+        labels_read=False,fits_released=False,original_control_contract_sha256=sha(original/'e34-fit-contract.json')))
+
+
+def specs(root,pools,packet_dir,original,program,ctl,owner):
     receipt=json.loads((packet_dir/'data-receipt.json').read_text())
     if sha(packet_dir/'data.tar.gz')!=receipt['sha256']:raise ValueError('opaque packet changed')
     overlay_sha=sha(packet_dir/'overlay.json');locked=pools/'fit/locked-contract.json';mask=root/'matched-base-filter-plan-v2.json'
     records={};all_cells=[]
     for arm in ['tv0-c','tv1-c','tv10-c']:
         for kind in ['lodo','full']:
-            old=original/('fit-spec-fite34-controlc-'+kind+'-20261015.json');d=json.loads(old.read_text());cells=[]
+            old=original/('fit-spec-fite34-controlc-'+kind+'-20261015.json')
+            if sha(old)!=BLUEPRINTS[kind]:raise ValueError('frozen original C blueprint changed')
+            d=json.loads(old.read_text());cells=[]
             if len(d['cells'])!=(40 if kind=='lodo' else 3):raise ValueError('original fixed C inventory changed')
             for oldcell in d['cells']:
                 cell=copy.deepcopy(oldcell);cell['name']='e36-'+arm+'__N/'+oldcell['name'].split('/')[1];argv=cell['argv']
-                original_dest=Path(argv[argv.index('--dest')+1]);suffix='confirm/cells' if kind=='full' else 'cells'
+                suffix='confirm/cells' if kind=='full' else 'cells'
                 argv[argv.index('--dest')+1]='/var/tmp/rev4-featpot/e36-'+arm+'-results/'+suffix+'/'+cell['name']
                 argv.extend(['--e36-arm',arm,'--e36-tv-manifest',str(pools/'fit/manifest.json'),'--e36-tv-contract',str(locked),
                     '--e36-tv-contract-sha256',sha(locked),'--e36-base-filter-plan',str(mask),'--e36-base-filter-sha256',sha(mask),
                     '--e36-overlay','/var/tmp/rev4-featpot/e36-native/overlay.json','--e36-overlay-sha256',overlay_sha])
-                cells.append(cell);all_cells.append(dict(arm=arm,kind=kind,name=cell['name'],argv_sha256=hashlib.sha256(json.dumps(argv,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()))
+                cells.append(cell);all_cells.append(dict(arm=arm,kind=kind,name=cell['name'],seed_index=int(argv[argv.index('--seed-index')+1]),heldout=argv[argv.index('--heldout')+1] if kind=='lodo' else None,argv_sha256=hashlib.sha256(json.dumps(argv,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()))
             name='e36-'+arm+'-'+kind;spec=packet_dir/(name+'.spec.json');manifest=packet_dir/(name+'.manifest.json')
             write(spec,dict(program_sha=sha(program),data_sha=receipt['sha256'],cells=cells))
             subprocess.run([str(ctl),'declare-fits','--spec',str(spec),'--out',str(manifest)],check=True)
             records[name]=dict(spec_path=str(spec),manifest_path=str(manifest),spec_sha256=sha(spec),manifest_sha256=sha(manifest),cells=len(cells),blueprint_sha256=sha(old))
-    if len(all_cells)!=129:raise ValueError('fixed three-arm129-cell inventory differs')
+    from e36_inventory import admit_inventory
+    admit_inventory(all_cells)
+    with tarfile.open(program) as archive:program_meta=json.load(archive.extractfile('build_meta.json'))
+    qualification_owners={k:program_meta['files'][v] for k,v in dict(inspector_sha256='bin/inspect_qualified_checkpoint',
+        qualification_owner_sha256='qualified_fit_contract.py',e36_owner_sha256='e36_fit_contract.py').items()}
+
+    # Reuse the actual executor path owner and qualified contract owner on
+    # every declared slot. This only reads program/argv metadata, never fits.
+    import sys
+    sys.path.insert(0,str(owner))
+    import fit_cell_exec as native_executor
+    import qualified_fit_contract as native_qualification
+    expected_by_name={c['name']:c for c in all_cells};native_seen=set()
+    for phase in records.values():
+        jobs=json.loads(Path(phase['manifest_path']).read_text())
+        for job in jobs:
+            name=job['cell']['image_path'];c=expected_by_name.get(name);kind=job['kind'];argv=kind['argv']
+            if c is None or name in native_seen or kind['argv_sha']!=c['argv_sha256']:
+                raise ValueError('native manifest differs from exact frozen inventory')
+            native_seen.add(name)
+            if Path(argv[argv.index('--dest')+1])!=native_executor.FIT_ROOT/native_executor.cell_root(argv)/name:
+                raise ValueError('native executor results destination differs')
+            expected=native_qualification.trusted_contract(kind,program,root/'bin/e36-fit-final/inspect_qualified_checkpoint')
+            if expected['e36']['arm']!=c['arm'] or expected['seed_index']!=c['seed_index'] or expected['route']!=(c['heldout'] or 'production'):
+                raise ValueError('native qualification route/seed/arm differs')
+    if native_seen!=set(expected_by_name):raise ValueError('native declared inventory incomplete')
     write(packet_dir/'E36_FIT_PLAN.json',dict(schema='e36-future-fit-plan-v1',program_sha256=sha(program),data_sha256=receipt['sha256'],
         fit_manifest_sha256=receipt['fit_manifest_sha256'],selection_manifest_sha256=sha(pools/'selection/manifest.json'),
         contract_sha256=receipt['locked_contract_sha256'],base_filter_sha256=receipt['base_filter_sha256'],trainer_sha256=receipt['trainer_sha256'],raw_binary_sha256=sha(root/'bin/e36-raw-score-final'),ctl_sha256=sha(ctl),
-        manifests=records,cells=all_cells,fit_release=False,fit_smoke_permitted=False,policy='all three arms use the identical frozen pool/build/base-family mask; separate coordinator go required'))
+        selection_owner_sha256=sha(Path(__file__).with_name('e36_selection.py')),inventory_owner_sha256=sha(Path(__file__).with_name('e36_inventory.py')),qualification_owners=qualification_owners,manifests=records,cells=all_cells,fit_release=False,fit_smoke_permitted=False,policy='all three arms use the identical frozen pool/build/base-family mask; separate coordinator go required'))
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='mode',required=True)
     a=sub.add_parser('data')
     for name in ['root','pools','base','trainer','out','owner']:a.add_argument('--'+name,type=Path,required=True)
     a.add_argument('--commit',required=True)
+    a=sub.add_parser('program')
+    for name in ['root','pools','packet','original','source','binaries','owner']:a.add_argument('--'+name,type=Path,required=True)
+    a.add_argument('--commit',required=True)
     a=sub.add_parser('specs')
-    for name in ['root','pools','packet','original','program','ctl']:a.add_argument('--'+name,type=Path,required=True)
+    for name in ['root','pools','packet','original','program','ctl','owner']:a.add_argument('--'+name,type=Path,required=True)
     args=p.parse_args()
     if args.mode=='data':packet(args.root,args.pools,args.base,args.trainer,args.out,args.owner,args.commit)
-    else:specs(args.root,args.pools,args.packet,args.original,args.program,args.ctl)
+    elif args.mode=='program':program_packet(args.root,args.pools,args.packet,args.original,args.source,args.binaries,args.owner,args.commit)
+    else:specs(args.root,args.pools,args.packet,args.original,args.program,args.ctl,args.owner)

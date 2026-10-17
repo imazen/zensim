@@ -56,6 +56,9 @@ def select(request,out):
     plan_path=Path(req['fit_plan']);plan=json.loads(plan_path.read_text())
     if sha(plan_path)!=req['fit_plan_sha256'] or plan['schema']!='e36-future-fit-plan-v1' or plan['fit_release'] is not False or len(plan['cells'])!=129:raise ValueError('frozen129-cell E36 plan required')
     if any(plan[k]!=req[k] for k in ['fit_manifest_sha256','contract_sha256','base_filter_sha256','trainer_sha256','raw_binary_sha256']) or plan['selection_manifest_sha256']!=req['manifest_sha256']:raise ValueError('selection pool/build/mask differs from frozen129-cell plan')
+    if plan['selection_owner_sha256']!=sha(Path(__file__)) or plan['inventory_owner_sha256']!=sha(Path(__file__).with_name('e36_inventory.py')):raise ValueError('frozen selector/inventory owner changed')
+    from e36_inventory import admit_inventory
+    admit_inventory(plan['cells'])
     expected={r['name']:r for r in plan['cells']}
     models={};keys=set()
     for model in req['models']:
@@ -63,7 +66,7 @@ def select(request,out):
         if arm not in ['tv0-c','tv1-c','tv10-c'] or seed not in [0,1,2] or key in keys:raise ValueError('model inventory differs')
         keys.add(key)
         if model.get('state','complete')!='complete':
-            if model['state'] not in ['failed','unavailable'] or model.get('bake_sha256') is not None:raise ValueError('explicit unavailable model state required')
+            if model['state'] not in ['failed','unavailable'] or 'bake_sha256' not in model or model['bake_sha256'] is not None:raise ValueError('explicit unavailable model state required')
             evidence=Path(model['ledger']);phase=plan['manifests']['e36-'+arm+'-full'];mp=Path(phase['manifest_path'])
             if sha(evidence)!=model['ledger_sha256'] or sha(mp)!=phase['manifest_sha256'] or sha(req['ctl'])!=plan['ctl_sha256']:raise ValueError('unavailable native ledger/manifest/owner changed')
             desired=[r for r in json.loads(mp.read_text()) if r['cell']['image_path']=='e36-'+arm+'__N/full_s'+str(seed)]
@@ -85,6 +88,17 @@ def select(request,out):
             or binding['manifest_sha256']!=req['fit_manifest_sha256'] or binding['contract_sha256']!=req['contract_sha256'] or binding['base_filter_sha256']!=req['base_filter_sha256']
             or binding['trainer_sha256']!=req['trainer_sha256'] or binding['tv_weight']!={'tv0-c':0.,'tv1-c':1.,'tv10-c':10.}[arm]):
             raise ValueError('fresh matched full-data model/native receipt/TV binding differs')
+        qualification=Path(model['qualification']);qualified=json.loads(qualification.read_text())
+        if (sha(qualification)!=model['qualification_sha256'] or fleet['files'].get('e36-qualified-checkpoint.json')!=sha(qualification)
+            or qualified.get('schema')!='e36-qualified-checkpoint-v1' or qualified.get('qualified') is not True
+            or qualified.get('execution_contract')!='registered-fit' or qualified.get('cell')!=cell
+            or qualified.get('program_sha256')!=plan['program_sha256'] or qualified.get('data_sha256')!=plan['data_sha256']
+            or qualified.get('argv_sha256')!=declared['argv_sha256'] or qualified.get('result_sha256')!=fleet['result_sha']
+            or qualified.get('raw_checkpoint_sha256')!=binding['raw_checkpoint_sha256']
+            or qualified.get('raw_checkpoint_sha256')!=fleet['selected_bake_sha'] or qualified.get('packed_model_sha256')!=model['bake_sha256']
+            or qualified.get('model_binding_sha256')!=sha(binding_path)
+            or any(qualified.get(k)!=v for k,v in plan['qualification_owners'].items())):
+            raise ValueError('successful native decoded-checkpoint qualification required before selection')
         rp=Path(model['raw_receipt']);r=json.loads(rp.read_text())
         if sha(rp)!=model['raw_receipt_sha256'] or r['manifest_sha256']!=req['manifest_sha256'] or r['bake_sha256']!=model['bake_sha256'] or r['binary_sha256']!=req['raw_binary_sha256'] or r['labels_read'] is not False or r['fits']!=0 or sha(r['output'])!=r['output_sha256']:
             raise ValueError('raw model/selection binding changed')

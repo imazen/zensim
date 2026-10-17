@@ -26,6 +26,13 @@ class Consensus(unittest.TestCase):
             self.assertEqual(pairs, [])
             self.assertEqual(counts['excluded_disagreement_or_margin'], 1)
 
+    def test_exclusion_census_distinguishes_ties_deadbands_and_opposition(self):
+        for b,expected in [(self.row(1,.5,8),[1,0,0]),(self.row(1,1,9),[0,1,1]),(self.row(1,.999,9.001),[0,0,1])]:
+            _,counts=owner.e36_pairs([self.row(0,1,9),b])
+            self.assertEqual([counts[n] for n in ['opposed_teacher_directions','either_exact_teacher_tie','either_insufficient_margin']],expected)
+            stratum=next(iter(counts['by_stratum'].values()))
+            self.assertEqual(stratum['either_exact_teacher_tie'],counts['either_exact_teacher_tie'])
+
     def test_nonfinite_duplicate_and_unregistered_q_refuse(self):
         with self.assertRaises(ValueError):
             owner.e36_pairs([self.row(0, 1, 9), self.row(1, float('nan'), 10)])

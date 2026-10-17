@@ -126,11 +126,15 @@ def e36_pairs(rows):
                 cell_counts = strata.setdefault(stratum,defaultdict(int))
                 cell_counts['proposed'] += 1
                 db, dc = e36_deltas(a,b)
+                for category, flag in [('opposed_teacher_directions',db*dc<0),('either_exact_teacher_tie',db==0 or dc==0),('both_exact_teacher_ties',db==0 and dc==0),('either_insufficient_margin',abs(db)<=.01 or abs(dc)<=.01)]:
+                    counts[category] += bool(flag)
+                    cell_counts[category] += bool(flag)
                 for teacher, delta in [('butteraugli_pnorm3',db),('cvvdp_standard_fhd',dc)]:
                     cell_counts[teacher+'_forward_margin_pass'] += delta > .01
                     cell_counts[teacher+'_reverse_margin_pass'] += delta < -.01
                     cell_counts[teacher+'_veto_nominal_q'] += delta <= .01
                     cell_counts[teacher+'_insufficient_margin'] += abs(delta) <= .01
+                    cell_counts[teacher+'_exact_tie'] += delta == 0
                 if direction is None:
                     cell_counts['excluded_disagreement_or_margin'] += 1
                     counts['excluded_disagreement_or_margin'] += 1

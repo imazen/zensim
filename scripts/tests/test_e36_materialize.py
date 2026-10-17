@@ -28,11 +28,11 @@ class Materialize(unittest.TestCase):
         start=time.time()-5;completed=[];manifest=[]
         run=root/'runs/fallback';run.mkdir(parents=True)
         for ref in refs:
-            for codec in ['jpeg','rav1e','svt','webp','jxl']:
+            for codec in ['jpeg','svt','rav1e','webp','jxl']:
                 view=dict(runtime_sha256=sha(runtime),reference_key=ref['reference_key'],codec=codec,q_grid=Q,panel='baseline',role='bulk')
                 rows=[]
                 for q in Q:
-                    enc=h(ref['origin']+('jpeg' if alias and codec=='rav1e' else codec)+str(q))
+                    enc=h(ref['origin']+('rav1e' if alias and codec=='svt' else codec)+str(q))
                     rows.append(dict(origin=ref['origin'],reference_sha256=ref['sha256'],reference_pixels_sha256=ref['pixels_sha256'],codec=codec,size=32,panel='baseline',split=ref['split'],content='photo',family=ref['family'],width=32,height=32,features=[float(np.float32(q/1000))]*420,feature_ids=ids,encoded_sha256=enc,distorted_pixels_sha256=h(enc),q=q,mode_key='{}',physical_alias=False,butteraugli_pnorm3=100.-q,cvvdp_standard_fhd=float(q)))
                 blob=run/(ref['origin']+'-'+codec+'.gz');blob.write_bytes(gzip.compress(json.dumps(dict(schema='e36-native-ladder-receipt-v1',view=view,rows=rows,complete=True,completed_unix=time.time(),runtime_sha256=sha(runtime))).encode()))
                 completed.append(dict(path=str(blob),sha256=sha(blob)));manifest.append(dict(kind=dict(view=PREFIX+canonical(view))))
@@ -51,6 +51,6 @@ class Materialize(unittest.TestCase):
             root=Path(d);self.fixture(root,True);out=root/'pools'
             with self.assertRaisesRegex(ValueError,'zero post-dedup'):build(root,['fallback'],out,'invented-only')
             report=json.loads((out/'_MANIFEST.json').read_text());self.assertFalse(report['required_support_admitted'])
-            self.assertTrue(any(json.loads(k)[0]=='rav1e' for k in report['zero_support_required_strata']))
+            self.assertTrue(any(json.loads(k)[0]=='svt' for k in report['zero_support_required_strata']))
 
 if __name__=='__main__':unittest.main()

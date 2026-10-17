@@ -33,7 +33,7 @@ class TrainingAdapter(unittest.TestCase):
             declaration=dict(feature_set_id='basic+peaks+v2@w1825/rev5_localwin#36c3f3af',formula_revision=5,decoder_era='invented-fixture',rows=3,
                 keys_sha256=sha(key_path(source)),row_keys_sha256=row_keys_sha(keys),table_sha256=sha(source),row_selection_sha256='invented-original-selection',data_role='TRAIN oracle teacher',immutable_input_roots=[str(inputs)])
             write(Path(str(source)+'.manifest.json'),declaration)
-            plan=root/'plan.json';write(plan,dict(schema='e36-matched-base-filter-v2',identity_normalization='member-prefix+rendition-v2',complete=True,labels_read=False,excluded_base_ids=['1fb72c0d6d4352c8'],groups=[dict(table_sha256=sha(source),keys_sha256=sha(key_path(source)),row_keys_sha256=row_keys_sha(keys),removed=2)]))
+            plan=root/'plan.json';write(plan,dict(schema='e36-matched-base-filter-v2',identity_normalization='member-prefix+rendition-v2',complete=True,labels_read=False,excluded_base_ids=['1fb72c0d6d4352c8'],groups=[dict(path=str(source),rows=3,table_sha256=sha(source),manifest_sha256=sha(Path(str(source)+'.manifest.json')),kept_indices_sha256=hashlib.sha256(np.array([1],dtype='<u8').tobytes()).hexdigest(),keys_sha256=sha(key_path(source)),row_keys_sha256=row_keys_sha(keys),removed=2)]))
             recipe=dict(e36=dict(base_filter=str(plan),base_filter_sha256=sha(plan)))
             original=[('safesyn',source,1.25,.625,'both')];groups=copy.deepcopy(original)
             with patch.dict(os.environ,{},clear=True):
@@ -44,6 +44,16 @@ class TrainingAdapter(unittest.TestCase):
                 self.assertEqual(owner.calibration_anchor(source,recipe),groups[0][1])
                 with self.assertRaisesRegex(ValueError,'exact matched'):owner.calibration_anchor(inputs/'unknown.parquet',recipe)
                 again=copy.deepcopy(original);owner.filter_groups(again,recipe,scratch)
+            # Freeze the child manifest from keys only; it must exactly match
+            # the existing unchanged-target writer's actual metadata.
+            reader=pq.read_table
+            def keys_only(path,*a,**k):
+                if Path(path)==source:raise AssertionError('projection decoded target table')
+                return reader(path,*a,**k)
+            with patch.object(pq,'read_table',side_effect=keys_only):
+                projected=owner.curated_projection(plan,root/'projection')
+            actual=copy.deepcopy(receipt['groups'][0]['stored_manifest']);actual.pop('table_sha256')
+            self.assertEqual(projected[sha(source)]['manifest'],actual)
             self.assertEqual(groups,again);self.assertEqual(groups[0][0],original[0][0]);self.assertEqual(groups[0][2:],original[0][2:])
             self.assertEqual(pq.read_table(groups[0][1]).to_pydict(),table.slice(1,1).to_pydict())
             self.assertEqual(receipt['groups'][0]['removed'],2);self.assertEqual(receipt['targets_changed'],0)

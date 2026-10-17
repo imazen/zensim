@@ -76,6 +76,33 @@ def plan(root,exclusions,inventory,out):
     print(json.dumps(dict(groups=len(records),removed_by_group={r['name']+':'+r['split']:r['removed'] for r in records},labels_read=False)))
 
 
+def curated_projection(mask_path,out):
+    """Freeze child key/declaration projections without reading target columns."""
+    from v2_teacher import key_path,row_keys_sha,selection_sha,admit_ordered_keys
+    mask=json.loads(mask_path.read_text())
+    if mask['schema']!='e36-matched-base-filter-v2' or mask['labels_read'] is not False:
+        raise ValueError('E36 exact metadata-only mask required')
+    out.mkdir();records={}
+    for r in mask['groups']:
+        if not r['removed']:continue
+        source=Path(r['path']);side=Path(str(source)+'.manifest.json');d=json.loads(side.read_text())
+        if sha(side)!=r['manifest_sha256'] or sha(key_path(source))!=r['keys_sha256']:raise ValueError('E36 parent projection changed')
+        keys=pq.read_table(key_path(source));admit_ordered_keys(source,d,keys,r['rows'])
+        keep=key_mask(keys,set(mask['excluded_base_ids']));indices=np.flatnonzero(keep)
+        if int((~keep).sum())!=r['removed'] or hashlib.sha256(indices.astype('<u8').tobytes()).hexdigest()!=r['kept_indices_sha256']:
+            raise ValueError('E36 projected selection differs')
+        selected=keys.filter(pa.array(keep));kp=out/(r['table_sha256']+'.keys.parquet');pq.write_table(selected,kp,compression='zstd')
+        child={**d,'source_table_sha256':d['table_sha256'],'source_manifest_sha256':sha(side),
+            'source_row_selection_sha256':d.get('row_selection_sha256'),'source_row_keys_sha256':d.get('row_keys_sha256'),
+            'rows_in':r['rows'],'rows_kept':len(indices),'row_selection_sha256':selection_sha(indices),
+            'targets_changed':0,'keys_sha256':sha(kp),'row_keys_sha256':row_keys_sha(selected),
+            'e36_base_filter_sha256':sha(mask_path)}
+        child.pop('table_sha256')
+        records[r['table_sha256']]=dict(removed=r['removed'],manifest=child)
+    write(out/'projection.json',dict(schema='e36-curated-declaration-projection-v1',plan_sha256=sha(mask_path),tables=records,labels_read=False))
+    return records
+
+
 def add_args(p):
     p.add_argument('--e36-arm',choices=list(ARMS))
     p.add_argument('--e36-tv-manifest',type=Path);p.add_argument('--e36-tv-contract',type=Path)
@@ -120,7 +147,7 @@ def filter_groups(groups,recipe,scratch):
     # binds this program SHA/data SHA/argv SHA to the immutable native FitCell.
     if not re.fullmatch('[0-9a-f]{64}',os.environ.get('ZEN_FIT_PROGRAM_SHA','')):
         raise ValueError('E36 base target transport is allowed only inside fit-cell-exec')
-    from v2_teacher import key_path,write_curated,row_keys_sha,admit_ordered_keys
+    from v2_teacher import key_path,write_curated,row_keys_sha,admit_ordered_keys,selection_sha
     p=Path(e['base_filter']);mask=json.loads(p.read_text())
     if mask['schema']!='e36-matched-base-filter-v2' or mask['identity_normalization']!='member-prefix+rendition-v2' or sha(p)!=e['base_filter_sha256']:raise ValueError('E36 base filter changed')
     excluded=set(mask['excluded_base_ids']);records=[];result=[];views={}
@@ -133,7 +160,8 @@ def filter_groups(groups,recipe,scratch):
             # Only the existing unchanged cf98 coverage selection is composed.
             if name!='coverage' or not keep.all() or not any(r['table_sha256']==d.get('source_table_sha256') and r['name']=='coverage' for r in mask['groups']):
                 raise ValueError('E36 runtime base group is not a registered parent/coverage view')
-        elif parent['keys_sha256']!=sha(key_path(source)) or parent['row_keys_sha256']!=row_keys_sha(keys) or parent['removed']!=int((~keep).sum()):
+        elif (parent['keys_sha256']!=sha(key_path(source)) or parent['row_keys_sha256']!=row_keys_sha(keys) or parent['removed']!=int((~keep).sum())
+              or ('kept_indices_sha256' in parent and parent['kept_indices_sha256'] != hashlib.sha256(np.flatnonzero(keep).astype('<u8').tobytes()).hexdigest())):
             raise ValueError('E36 runtime key/source removal differs from frozen plan')
         if not keep.any():raise ValueError('E36 cannot silently empty a base group')
         dest=source;record=dict(name=name,source_table_sha256=d['table_sha256'],removed=int((~keep).sum()),targets_changed=0)
@@ -155,7 +183,15 @@ def filter_groups(groups,recipe,scratch):
                     previous=json.loads(manifest.read_text());previous['e36_base_filter_sha256']=e['base_filter_sha256']
                     manifest.rename(manifest.with_suffix(manifest.suffix+'.before-e36'))
                     write(manifest,previous)
-            record.update(table_sha256=sha(dest),manifest_sha256=sha(manifest))
+            if (previous.get('source_table_sha256')!=d['table_sha256'] or previous.get('source_manifest_sha256')!=sha(side)
+                or previous.get('source_row_selection_sha256')!=d.get('row_selection_sha256')
+                or previous.get('source_row_keys_sha256')!=d.get('row_keys_sha256')
+                or previous.get('row_selection_sha256')!=selection_sha(np.flatnonzero(keep))
+                or previous.get('row_keys_sha256')!=row_keys_sha(keys.filter(pa.array(keep)))
+                or previous.get('keys_sha256')!=sha(key_path(dest)) or previous.get('rows_in')!=len(keep)
+                or previous.get('rows_kept')!=int(keep.sum())):
+                raise ValueError('E36 cached/fresh child selection differs from exact registered parent mask')
+            record.update(table_sha256=sha(dest),manifest_sha256=sha(manifest),stored_manifest=previous)
         result.append((name,dest,tw,vw,mode));records.append(record);views[str(source)]=dict(path=str(dest),sha256=sha(dest))
     groups[:]=result
     e['base_views']=views

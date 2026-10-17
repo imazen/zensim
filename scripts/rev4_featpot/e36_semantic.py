@@ -60,6 +60,7 @@ def admit(db,target,split,expected,effective,whole_matrix):
         split=split,features=bind(target/'features.parquet'),pairs=bind(target/'pairs.parquet'),edge_proof=bind(target/'edge-proof.parquet'),
         support=bind(target/'support.json'),whole_matrix=bind(whole_matrix),pair_rows=count,feature_rows=len(features),
         owner='hash-bound native outputs -> registered e36_pairs consensus -> unordered physical index -> exact export replay',
-        semantic_source_sha256=sha(Path(__file__)))
+        semantic_source_sha256=sha(Path(__file__)),
+        consensus_source_sha256=sha(Path(__file__).parents[1]/'canonical_corpus/build_ladder_tv_pairs.py'))
     with (target/'semantic-admission.json').open('x') as f:json.dump(value,f,indent=2);f.write('\n')
     return bind(target/'semantic-admission.json')

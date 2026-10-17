@@ -2100,5 +2100,4 @@ e36-native-catalog root name output:
     {{quote(root + "/bin/zenfleet-ctl")}} "${e36_args[@]}" > {{quote(output)}}
 
 e36-adapter-unit-check:
-    python3 -m unittest scripts/tests/test_e36_data.py scripts/tests/test_e36_store.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_training.py scripts/tests/test_e36_materialize.py
-
+    python3 -m unittest scripts/tests/test_e36_data.py scripts/tests/test_e36_store.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_training.py scripts/tests/test_e36_materialize.py scripts/tests/test_e36_selection.py scripts/tests/test_e36_consensus.py

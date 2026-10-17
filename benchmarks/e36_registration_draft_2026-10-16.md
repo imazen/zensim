@@ -369,3 +369,24 @@ six-hour deadline exactly. The controller verifies unchanged scientific
 views after removing only their runtime hash, and unchanged native numerical,
 source, resource and budget bindings. Initial v5 files remain immutable. This
 repair grants no extra generation time and changes no qualifying subset.
+
+
+### Prospective integration clarification (before fits)
+
+TRAIN selection pools unique physical edges across the registered strata,
+using the frozen codec weights, with equal weight for each of the three
+full-data seeds. The raw-margin fraction uses delta>=0.05; strict order uses
+delta>0. Ties then choose the smaller lambda. These definitions are fixed
+before any E36 model exists. An unavailable full-data slot needs terminal native
+ledger evidence; pending/gap slots are not failures. A treatment needs all three
+pilots and the fresh matched control. Both original human-assessment hypotheses
+remain in the fixed Holm family, including unavailable arms.
+
+The native E36 program package binds actual trainer/protocol hashes and the
+exact same frozen pool and family mask for all three arms. Its private harvest
+adapter verifies the metadata-only projected child keys/declaration and zero
+changed targets, then reuses the existing checkpoint identity, final epoch,
+seed, row-count and unchanged numeric-weight gates. The inherited86400s cell
+wall cap is a conservative limit, not a measured E36 runtime. No E36 training
+smoke is admitted. The code is preparation; actual pool/build/package admission
+must pass before READY, and READY does not release fits.
