@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import marshal
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -35,6 +36,8 @@ def guard_current(root, out):
         != hook["controller_code_sha256"]
         or frame.f_lineno >= hook["branch_line"]
         or frame.f_trace is None
+        or Path(frame.f_trace.__code__.co_filename) != Path(hook["adapter_source_path"])
+        or sha(hook["adapter_source_path"]) != hook["adapter_source_sha256"]
     ):
         raise ValueError(
             "controller has reached its tail or its installed hook differs"
@@ -51,6 +54,15 @@ def guard_current(root, out):
         raise ValueError(
             "phase already has an owner, execution evidence or frozen choice"
         )
+    tracer = int(
+        next(
+            line.split()[1]
+            for line in Path("/proc/self/status").read_text().splitlines()
+            if line.startswith("TracerPid:")
+        )
+    )
+    if tracer <= 0:
+        raise ValueError("live phase guard must execute under its attached debugger")
     write(
         out,
         dict(
@@ -60,9 +72,25 @@ def guard_current(root, out):
             line=frame.f_lineno,
             branch_line=hook["branch_line"],
             checked_unix_ns=time.time_ns(),
+            controller_pid=os.getpid(),
+            debugger_pid=tracer,
             fits=0,
         ),
     )
+
+
+def stopped_owner(guard):
+    """A receipt alone is insufficient: the launching parent still owns the stop."""
+    pid = guard["controller_pid"]
+    status = Path(f"/proc/{pid}/status").read_text().splitlines()
+    state = next(line.split()[1] for line in status if line.startswith("State:"))
+    tracer = int(
+        next(line.split()[1] for line in status if line.startswith("TracerPid:"))
+    )
+    if state != "t" or tracer != guard["debugger_pid"] or os.getppid() != tracer:
+        raise ValueError(
+            "exclusive phase launch requires its parent debugger still holding the controller stop"
+        )
 
 
 def resource_admission(binding):
@@ -112,6 +140,8 @@ def resource_admission(binding):
 def seal_start(root, binding_path, adapter, parity, guard, supervisor, paper_lock, out):
     root, out, binding_path = Path(root), Path(out), Path(binding_path)
     binding = json.loads(binding_path.read_text())
+    if binding["phase"] == "additions":
+        stopped_owner(json.loads(Path(guard).read_text()))
     resource = resource_admission(binding)
     if binding["phase"] == "additions":
         proof = json.loads(Path(parity).read_text())
@@ -159,6 +189,7 @@ def seal_start(root, binding_path, adapter, parity, guard, supervisor, paper_loc
             fits=0,
         )
         # An exclusive create is the ownership boundary, before remote start.
+        stopped_owner(live)
         write(root / "TOWER_PHASE_HANDOFF.json", handoff)
     elif binding["phase"] != "first-producer":
         raise ValueError("only the frozen first producer or whole additions can start")

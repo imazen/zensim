@@ -1,6 +1,7 @@
 """Invented resource and exclusive-start boundaries; no native work runs."""
 
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +14,12 @@ import e36_phase_start as owner
 
 
 class PhaseStart(unittest.TestCase):
+    def test_a_fresh_receipt_without_a_live_parent_debugger_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "parent debugger still holding"):
+            owner.stopped_owner(
+                dict(controller_pid=os.getpid(), debugger_pid=os.getppid())
+            )
+
     def test_busy_host_or_inadequate_available_memory_refuses(self):
         binding = dict(
             host="invented",
@@ -119,6 +126,7 @@ class PhaseStart(unittest.TestCase):
                     return_value=dict(cap_bytes=16 * 1024**3),
                 ),
                 patch.object(owner, "remote", side_effect=start),
+                patch.object(owner, "stopped_owner"),
             ):
                 with self.assertRaisesRegex(
                     RuntimeError, "invented Docker start failure"
@@ -137,6 +145,7 @@ class PhaseStart(unittest.TestCase):
             with (
                 patch.object(owner, "resource_admission", return_value={}),
                 patch.object(owner, "remote") as native,
+                patch.object(owner, "stopped_owner"),
             ):
                 with self.assertRaises(FileExistsError):
                     owner.seal_start(
