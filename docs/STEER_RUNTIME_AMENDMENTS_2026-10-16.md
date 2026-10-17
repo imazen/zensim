@@ -14,8 +14,10 @@ installed first-cell files passed NAS byte hashes before expansion.
 
 After expansion, completed blobs appeared before their ledger rows. The actual
 pinned worker groups four fit cells per chunk at the original
-`ZEN_CHUNK_WALL_SEC=7663` setting. It flushes ledger rows and consults pause
-between chunks. That parameter is a packing target; the scientific program
+`ZEN_CHUNK_WALL_SEC=7663` setting. It flushes ledger rows between chunks. It consults pause only at the start
+of a worker pass; changing the control object does not stop claims during an
+already-running pass. Its SIGTERM handler exits immediately and does not flush
+an unfinished chunk. That parameter is a packing target; the scientific program
 separately enforces the frozen 7,663-second cell cap.
 
 The executable oracle is `just steer-worker-scheduling-probe <immutable-image>
@@ -35,9 +37,13 @@ the 300-second setup/persistence reserve within the existing pass timeout.
 A conditional host also retains its earlier loan deadline, taking the minimum
 of that deadline and the rolling worker claim deadline.
 
-Do not mix chunk schemes. Keep new chunk claims paused until every old chunk
-has finished, its ledger is published and its cells verify/install/back up.
-Stop only the old holding STEER containers, then admit one remaining registered
+Do not mix chunk schemes. Set pause control to block later passes, then wait
+for each active original chunk to publish its durable ledger. Stop only that
+STEER container after publication. If it has already started another fit,
+that incomplete fit gets a full retry; preserve its partial artifacts. The
+original completed chunk must verify, install and back up before transition.
+The old worker may exit nonzero from this intentional stop; do not describe
+it as a clean drain. Then admit one remaining registered
 cell on the repaired scheduling. Verify its one-cell ledger, clean drain,
 pinned-image installation and NAS copy before reenrolling the other hosts.
 No extra fit or changed fit identity is used for this admission.
