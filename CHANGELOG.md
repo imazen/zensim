@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- SHIPGATES: expose published source/group and verified-judge coverage through `just shipgates-progress`.
+
 - SHIPGATES: distinguish archived24-source admission from the current approved27-source JXL run.
 
 - Permit fixed judging and independent pixel/map verification in one bounded source job, with exact replay admission and retained per-source certificates.

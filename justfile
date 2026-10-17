@@ -1970,3 +1970,6 @@ shipgates-rd-report result output:
 
 shipgates-judge-replay old new oracle output:
     python3 scripts/rev4_featpot/shipgates_judge_replay.py --old {{quote(old)}} --new {{quote(new)}} --oracle {{quote(oracle)}} --output {{quote(output)}}
+
+shipgates-progress encodes judges:
+    @python3 -B scripts/rev4_featpot/shipgates_progress.py --encodes {{encodes}} --judges {{judges}}
