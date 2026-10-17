@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-16 — candidate low-quality dial ordering regression. OPEN.** All three assessed Rev5 candidates miss the unchanged mentor-resolvable standard AVIF/JPEG floors and ladder AVIF-rav1e floor. The exact same-cell CVVDP-FHD and registered SSIMULACRA2 references pass both tiers. Removing only the candidate output curve leaves every represented fraction/order/clamp count unchanged; there are no clamp failures. The ADDRFIX investigation retains exact rung evidence and does not qualify a replacement model.
+
 * **2026-10-16 — palette admission imports need NumPy/PyArrow in script CI. FIXED LOCALLY; remote check pending.** The scripts job at `febb0698` failed importing the real admission owner because NumPy was absent. Its palette step now installs the existing research dependency requirements in an isolated environment before running both unchanged unittest invocations. Both invocations pass in a fresh local environment (`just shipgates-palette-ci`); no data or labels are needed and no assertion changes.
 
 * **2026-10-16 — peer engineering captures require the block size in their join key. FIXED in the PEERGATES adapter.** The first 96 broad cases have unique names, but later fixture names repeat at several block sizes. A name-only join selected a different block capture; the existing count assertion stopped the run at case 97. The adapter now joins `(case, block)`, requires all 135 distinct case/block pairs, proves the first 96 inputs unchanged and completes only the remaining 39. The failed attempt and all completed observations remain preserved; no case or numerical bar changes.

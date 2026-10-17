@@ -1,6 +1,6 @@
 # Ship gates — 2026-10-16
 
-Status: **INCOMPLETE**. Targeting and native codec RD are pending. Corruption fails for all three candidates with the frozen companion head. G-ADDR is complete and fails for all three candidates. The protected human-ranking composite is excluded from this execution. No model is promoted.
+Status: **INCOMPLETE**. Targeting is measured for W-C (1/3 candidates); the other two and native codec RD are pending. Corruption fails for all three candidates with the frozen companion head. G-ADDR is complete and fails for all three candidates. The protected human-ranking composite is excluded from this execution. No model is promoted.
 
 These are standalone Rev5 packed candidates with D12 exact-gradient maps. W-C steering evidence is the frozen E34 seed-0 panel; the two original candidates have fresh r7900x map-cost/RSS measurements.
 
@@ -162,3 +162,21 @@ Full owner reports are `corruption-attempt2/<candidate>/report.json`; guarded ac
 ```text
 run-heavy: done rc=0 336s | peak-RSS 0.56GiB | min-avail 40497MiB | peak-load 13.96
 ```
+
+## G-TARGET — W-C JXL (other two candidates pending)
+
+Frozen separate TRAIN calibration uses nine sources; evaluation uses eight disjoint validation families across photo, document, graphic and screen content, at max256side. The complete native owner validated every bound, coverage request, selected bitstream/pixel hash and encode/map count. Of80 requests,37 are jointly witnessed across scalar/neutral/active within±1; all80 receive a disposition. The same37 enter every arm/policy/budget. Sparse bounds do not prove the other interior requests impossible.
+
+Active arm with the frozen train-curve seed; p95 uses the registered owner’s nearest-rank statistic:
+
+| Shots | Median error | Bar | p95 error | Bar | Undershoot count | Fraction bar | Worst error | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 0.627105712891 | 2.0 | 2.58766174316 | 8.0 | 0/37 beyond8.0 | 0.05 | 2.88809204102 | PASS |
+| 2 | 0.344909667969 | 1.0 | 1.27006530762 | 3.0 | 0/37 beyond3.0 | 0.05 | 1.48175048828 | PASS |
+| 3 | 0.275978088379 | 0.5 | 0.942276000977 | 1.0 | 1/37 beyond1.0 | 0.01 | 1.25915527344 | FAIL |
+
+The three-shot maximum1.25915527344 passes≤3, but the undershoot fraction1/37 fails≤1%. Failing case: origin5315, requested94.1147460938, achieved92.8555908203, signed error-1.25915527344. No bar was changed.
+
+The1/2/3-shot active train-curve groups use37/48/50 complete bitstream encodes and111/144/150 native map evaluations. Each complete JXL encode has three internal reconstruction comparisons; these are counted separately from full encodes. Target error evidence does not qualify general size/mode/HDR coverage or independent-judge RD.
+
+Owner analysis SHA-256 `ca9b73fad503ac446b8b8b33a3a0ed3b7125bc8af86603046f29b47701bf27d9`; full tables, per-class results and work receipts: `jxl-target-phased/w-c/eval/` under the evidence root.
