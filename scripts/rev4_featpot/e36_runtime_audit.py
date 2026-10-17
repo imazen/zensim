@@ -23,8 +23,11 @@ def audit(root,out):
     put=Path(runtime.store.put.__func__.__code__.co_filename)
     import e34_encode
     disk=Path(e34_encode.e36_disk.__code__.co_filename)
+    deadline=1792274400. if (root/'bulk-clock-v8-budget4.json').exists() else 1792256400.
+    resolver=Path(runtime.store.verify.__func__.__globals__['resolve'].__code__.co_filename)
+    expected_resolver=root/'owner-svt-ssd-v1/resource-budget4-v2/e36_artifact_location.py' if deadline==1792274400. else folder/'e36_artifact_location.py'
     if (runtime.spec_sha!=expected or runtime._owner_svt_ssd!=5 or runtime._e36_disk_policy!=2
-        or float(os.environ['E36_GENERATION_DEADLINE'])!=1792256400.
+        or float(os.environ['E36_GENERATION_DEADLINE'])!=deadline or resolver!=expected_resolver
         or methods['execute']!=folder/'e36_owner_amendment.py'
         or methods['execute_cell']!=folder/'e36_disk_policy.py'
         or methods['call']!=root/'runtime-v6/program/e36_data.py'
@@ -32,5 +35,5 @@ def audit(root,out):
         raise ValueError('live numerical/resource/source binding differs')
     with Path(out).open('x') as stream:
         json.dump(dict(schema='e36-live-runtime-audit-v1',pid=os.getpid(),utc=time.time(),
-            runtime_sha256=expected,deadline_unix=1792256400.,methods={k:str(v) for k,v in methods.items()},
+            runtime_sha256=expected,deadline_unix=deadline,resolver_owner=str(resolver),methods={k:str(v) for k,v in methods.items()},
             put_owner=str(put),disk_owner=str(disk),fits=0,labels_read=False,admitted=True),stream,indent=2)

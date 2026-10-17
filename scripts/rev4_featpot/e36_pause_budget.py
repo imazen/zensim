@@ -28,13 +28,14 @@ def resolve(path):
         base,parent,proofs=resolve(pp)
         projection=a['projection']
         if sha(projection['path'])!=projection['sha256']:raise ValueError('budget projection changed')
-        if (a['schema']!='e36-authorized-projection-budget-v1'
-                or a['authorization']!='coordinator-2026-10-17-deadline-1700Z'
+        target={'coordinator-2026-10-17-deadline-1700Z':1792256400.0,
+                'coordinator-2026-10-17-deadline-2200Z':1792274400.0}.get(a['authorization'])
+        if (a['schema']!='e36-authorized-projection-budget-v1' or target is None
                 or a['scientific_change'] is not False or a['fits']!=0
-                or a['effective_deadline_unix_ns']!=1792256400000000000
+                or a['effective_deadline_unix_ns']!=unix_ns(target)
                 or a['previous_deadline_unix_ns']!=unix_ns(parent['deadline_unix'])
-                or clock['deadline_unix']!=1792256400.0
-                or {k:v for k,v in clock.items() if k not in ['deadline_unix','budget_only_extension']}!={k:v for k,v in parent.items() if k!='deadline_unix'}):
+                or clock['deadline_unix']!=target
+                or {k:v for k,v in clock.items() if k not in ['deadline_unix','budget_only_extension']}!={k:v for k,v in parent.items() if k not in ['deadline_unix','budget_only_extension']}):
             raise ValueError('authorized projection budget chain differs')
         return base,clock,proofs+[previous,projection,pin]
     if 'budget_only_amendment' not in clock:return clock,clock,[]

@@ -103,7 +103,7 @@ def monitor():
     last=None;offset=0;mirrored=0;reclaimed=0;last_emit=0
     relocation=ROOT/'owner-svt-ssd-v1/artifact-relocations.jsonl'
     telemetry=ROOT/'owner-svt-ssd-v1/disk-rates.jsonl'
-    while time.time()<1792256400 and not (ROOT/'owner-svt-ssd-v1/disk-monitor-stop.json').exists():
+    while time.time()<1792274400 and not (ROOT/'owner-svt-ssd-v1/disk-monitor-stop.json').exists():
         now=time.time();free=shutil.disk_usage(ROOT).free
         hard=sticky_stop(free)
         hold_path=ROOT/'owner-svt-ssd-v1/resource-failure-hold.json'

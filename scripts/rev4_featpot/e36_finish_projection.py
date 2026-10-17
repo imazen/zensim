@@ -171,7 +171,9 @@ def project(root, out, cost_snapshot=None, exclude_rav1e=False):
         s["modeled_serial_seconds"] += duration
     launch = json.loads((root / "scheduling-v7/fallback-launch.json").read_text())
     from e36_pause_budget import resolve
-    effective = root / "bulk-clock-v7-budget3.json"
+    effective = root / "bulk-clock-v8-budget4.json"
+    if not effective.exists():
+        effective = root / "bulk-clock-v7-budget3.json"
     if not effective.exists():
         effective = root / "bulk-clock-v6-budget2.json"
     _, clock, _ = resolve(effective)

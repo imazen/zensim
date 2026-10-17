@@ -26,6 +26,18 @@ class Extension(unittest.TestCase):
             cp.write_text(json.dumps(new));projection.write_text('{"changed":true}')
             with self.assertRaisesRegex(ValueError,'projection'):resolve(cp)
 
+    def test_authorized_22z_preserves_entire_prior_extension(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-22z-') as directory:
+            root=Path(directory);base=root/'base.json';base.write_text(json.dumps(dict(deadline_unix=100.,plan_sha256='frozen',fits=0)))
+            projection=root/'projection.json';projection.write_text('{}');previous=base
+            for index,(auth,deadline) in enumerate([('1700',1792256400.),('2200',1792274400.)]):
+                old=json.loads(previous.read_text());ap=root/(str(index)+'-amendment.json')
+                amendment=dict(schema='e36-authorized-projection-budget-v1',authorization='coordinator-2026-10-17-deadline-'+auth+'Z',previous_clock=dict(path=str(previous),sha256=sha(previous)),projection=dict(path=str(projection),sha256=sha(projection)),previous_deadline_unix_ns=unix_ns(old['deadline_unix']),effective_deadline_unix_ns=unix_ns(deadline),scientific_change=False,fits=0)
+                ap.write_text(json.dumps(amendment));cp=root/(str(index)+'-clock.json');cp.write_text(json.dumps({**old,'deadline_unix':deadline,'budget_only_extension':dict(path=str(ap),sha256=sha(ap))}));previous=cp
+            self.assertEqual(resolve(previous)[1]['deadline_unix'],1792274400.)
+            altered=json.loads(previous.read_text());altered['plan_sha256']='changed';previous.write_text(json.dumps(altered))
+            with self.assertRaisesRegex(ValueError,'budget chain'):resolve(previous)
+
     def test_live_view_retains_four_hour_bound(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-bound-') as d:
             root=Path(d);cp=root/'clock.json';cp.write_text('{}');out=root/'receipt.json'

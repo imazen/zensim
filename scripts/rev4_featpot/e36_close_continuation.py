@@ -15,6 +15,13 @@ def close(root):
     exit_record=json.loads((directory/'exit.json').read_text())
     helpers=json.loads((directory/'helper-exits.json').read_text())
     expected={json.loads((directory/(role+'-ready.json')).read_text())['pid'] for role in ['monitor','mirror']}
+    budget4=owner/'archive-budget4-binding.json'
+    if budget4.exists():
+        binding=json.loads(budget4.read_text());handoff_pin=binding['handoff']
+        if sha(handoff_pin['path'])!=handoff_pin['sha256']:raise ValueError('resource handoff changed')
+        handoff=json.loads(Path(handoff_pin['path']).read_text())
+        if {item['old_pid'] for item in handoff['history']}!=expected or any(item['old_returncode']!=0 for item in handoff['history']):raise ValueError('old resource owners did not drain')
+        expected={item['new_pid'] for item in handoff['history']}
     if len(helpers['exits'])!=2 or {item['pid'] for item in helpers['exits']}!=expected or any(item['returncode']!=0 for item in helpers['exits']):
         raise ValueError('required resource helpers did not close successfully')
     if (owner/'resource-failure-hold.json').exists():raise ValueError('unresolved native resource failure')
@@ -23,10 +30,11 @@ def close(root):
         raise ValueError('full run-heavy terminal resource record missing')
     pin=lambda path:dict(path=str(path),sha256=sha(path))
     result=dict(schema='e36-native-continuation-final-v1',continuation=pin(owner/'native-continuation-binding-v1.json'),
-        supervision=pin(owner/'continuation-supervision-v2-binding.json'),runtime_audit=pin(owner/'runtime-audit-admission-v1.json'),
+        supervision=pin(owner/'continuation-supervision-v2-binding.json'),runtime_audit=pin(owner/('runtime-audit-admission-v2.json' if budget4.exists() else 'runtime-audit-admission-v1.json')),
         log=pin(log),exit=pin(directory/'exit.json'),helper_exits=pin(directory/'helper-exits.json'),
         returncode=exit_record['returncode'],fits=0,scientific_change=False,closed=True,
         note='Terminal control evidence only; complete registered matrix admission remains separate.')
+    if budget4.exists():result['archive_budget4']=pin(budget4)
     with (owner/'native-continuation-final-v1.json').open('x') as stream:json.dump(result,stream,indent=2)
     print(json.dumps(result))
 
