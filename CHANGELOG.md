@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Include source-class and certificate integrity regressions in the ship-gate check and create their home-local scratch directory on every host.
+
 - Gate JPEG/WebP/AVIF steering against each candidate’s paired scalar controller; retain global and butteraugli curves as separate comparisons.
 
 - Bind RD judge reference-pixel hashes to the independently admitted source pixels and retain reproducible certified-packet replay.

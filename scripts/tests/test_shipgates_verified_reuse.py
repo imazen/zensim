@@ -11,7 +11,9 @@ from shipgates_verified_reuse import restore, sha, snapshot
 
 class VerifiedReuseTests(unittest.TestCase):
     def test_reuse_refuses_changed_packet_or_physical_map(self):
-        with tempfile.TemporaryDirectory(dir=Path.home()/"tmp",prefix="shipgates-certified-") as name:
+        scratch=Path.home()/"tmp"
+        scratch.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch,prefix="shipgates-certified-") as name:
             root=Path(name)
             packet_root=root/"packet"
             packet_root.mkdir()

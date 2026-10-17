@@ -11,7 +11,9 @@ from shipgates_source_revision import reviewed_record, sha
 
 class RevisionTests(unittest.TestCase):
     def test_class_annotation_retains_original_measurements_and_refuses_tampering(self):
-        with tempfile.TemporaryDirectory(dir=Path.home()/"tmp", prefix="shipgates-class-") as name:
+        scratch=Path.home()/"tmp"
+        scratch.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch, prefix="shipgates-class-") as name:
             root = Path(name)
             manifest = root / "SOURCE_MANIFEST.json"
             manifest.write_text('{"sources":[]}\n')
