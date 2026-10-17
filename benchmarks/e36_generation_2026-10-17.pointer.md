@@ -1,0 +1,14 @@
+# E36 generation and prospective SVT-only amendment
+
+Data remains outside git. Checked on **dev**,2026-10-17; `/mnt/v` is host-specific.
+
+- Generation/metadata root: `/mnt/v/output/zensim/e36-bulk-2026-10-17`. Original declarations and diagnostic rav1e outputs remain intact.
+- Owner amendment: `owner-svt-ssd-v1/amendment.json`, SHA256 `c2e19ae5e92a47050871c5e2052592564088fe69030b4047a64f69f667c287b0`. Exact filtered native matrix and budget/resource chain: `owner-svt-ssd-v1/matrix-binding.json`, checked with `just e36-svt-matrix-check ROOT`.
+- Original/new mandatory15342/12300, optional468/424, full15810/12724. Surviving JPEG/SVT/WebP/JXL retain source memberships,61q,20sizes. JPEG weight2, others1; rav1e has no pool mass. Deadline17:00Z; no fit released.
+- Native receipt CAS/Parquet ledgers: `runs/fallback-v6`; amended qualified views are linked by hash under `runs/svt-fallback-v1`. Optional output uses `runs/svt-additions-v1`. Native job IDs and publication proofs own completion; planning projections do not.
+- New encoded bytes, decoded pixels, native scalar variants/features/maps/diagnostics: local `artifacts-local-v1/blobs/<prefix>/<sha>.tar`. Historical and SHA-verified mirrored bundles: tower `/mnt/disk1/coefficient/output/zensim/e36-bulk-2026-10-17/blobs`. No R2/S3 generation store.
+- Original artifact locations remain immutable. `owner-svt-ssd-v1/artifact-relocations.jsonl` records verified moves. Final packaging requires `ARTIFACT_LOCATION_ADMISSION.json`, stopped mirror, bound resolver/storage/journal, native eligibility replay and actual sampled remote hash/size readbacks. A receipt lookup must resolve and verify its actual bytes. Final freeze and package archive are **pending**.
+- Live controller evidence: `owner-svt-ssd-v1/controller-binding.json`; resource/ACK closure: `owner-svt-ssd-v1/resource-closure-v3.json`. Both old and corrected application receipts are retained. Native numerical runtime is unchanged.
+- Write-path size/process snapshots: `storage-write-inventory-*.json`, with live, non-atomic allocation counts. Previous preparation mirror: `/mnt/tower/output/zensim/e36-2026-10-16`; it is separate from new direct-array artifact writes. Final completed metadata mirror/hash inventory remains pending.
+
+Public registration: [E36](e36_registration_draft_2026-10-16.md). Numerical producer source, binary closure and feature layout are pinned in `runtime-v6/runtime.json` and its referenced native pin. Final Rust trainer source534cb68f0204c02807b1a5c1612d1fcb6c805365 is byte-equivalent in Rust/Cargo inputs to published38ab546b6ad1; proof `remote-source-equivalence-svt-v1.json`. Core CI on f1d9af4870e7 passed all19platform jobs. Current generation/pool/package acceptance is distinct and incomplete.
