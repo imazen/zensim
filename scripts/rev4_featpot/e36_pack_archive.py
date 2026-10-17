@@ -18,6 +18,8 @@ from e36_artifact_location import sync_directory,durable_mkdir
 from e36_cache_archive import CachePolicy
 from e36_pack_store import build,sha
 
+from e36_archive_runs import native_runs
+
 
 def append_batch(path,rows):
     with Path(path).open('a') as stream:
@@ -109,7 +111,7 @@ class Dispatcher:
         size=sum(512+((i['bytes']+511)//512)*512 for i in items);reserve=((size+1024+10239)//10240)*10240
         if key!=doc['pack_id'] or reserve!=doc['reserved_bytes']:raise ValueError('recovered pack identity/size differs')
         published=set()
-        for name in ['fallback-v6','svt-additions-v1']:
+        for name in native_runs(self.root):
             for path in (self.root/'runs'/name).glob('ledger*.parquet'):
                 for batch in pq.ParquetFile(path).iter_batches(columns=['status','attempts','output_sha']):published.update(r['output_sha'] for r in batch.to_pylist() if r['status']=='done' and r['attempts']==1)
         views={}
@@ -117,7 +119,7 @@ class Dispatcher:
             h=item['sha256'];view=item['view_sha256'];local=self.root/'artifacts-local-v1/blobs'/h[:2]/(h+'.tar')
             if str(local)!=item['local_path'] or view not in published:raise ValueError('recovered pack lost native eligibility')
             if view not in views:
-                path=next((self.root/'runs'/name/'blobs'/view for name in ['fallback-v6','svt-additions-v1'] if (self.root/'runs'/name/'blobs'/view).exists()),None)
+                path=next((self.root/'runs'/name/'blobs'/view for name in native_runs(self.root) if (self.root/'runs'/name/'blobs'/view).exists()),None)
                 if path is None or sha(path)!=view:raise ValueError('recovered native CAS differs')
                 document=json.loads(gzip.decompress(path.read_bytes()))
                 if document.get('complete') is not True or document.get('schema')!='e36-native-ladder-receipt-v1':raise ValueError('recovered native view incomplete')

@@ -22,6 +22,8 @@ METADATA_CLIENT=None
 METADATA_ARCHIVED=None
 MIRROR_LOCKS=[]
 
+from e36_archive_runs import native_runs
+
 
 def mirror_view(path):
     """Back up a complete native receipt while retaining the trainer's copy."""
@@ -120,7 +122,7 @@ def run(pool):
             if artifacts_only or eager or free<48*1024**3:
                 scan=time.monotonic()>=next_scan
                 published=set()
-                for name in (['fallback-v6','svt-additions-v1'] if scan else []):
+                for name in (native_runs(ROOT) if scan else []):
                     for ledger in (ROOT/'runs'/name).glob('ledger*.parquet'):
                         stat=ledger.stat();identity=(stat.st_mtime_ns,stat.st_size)
                         previous=ledger_cache.get(ledger)

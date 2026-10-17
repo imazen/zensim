@@ -6,6 +6,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from e36_store import sha,digest
 
+from e36_archive_runs import native_runs
+
 
 def checked(pin):
     path=Path(pin['path'])
@@ -35,7 +37,7 @@ def closed_generation(root):
     if controller.exists() and b'e36_generation_resume.py' in (controller/'cmdline').read_bytes():raise ValueError('native controller remains active')
     retained=[checked(p) for p in launch['ledger_inputs']]
     paths=set(retained)
-    for name in ['fallback-v6','svt-additions-v1']:paths.update((root/'runs'/name).glob('ledger*.parquet'))
+    for name in native_runs(root):paths.update((root/'runs'/name).glob('ledger*.parquet'))
     if not paths:raise ValueError('closed native ledger inventory is empty')
     return terminal_path,sorted(paths)
 
@@ -49,7 +51,7 @@ def inventory(root):
         ledger_pins.append(dict(path=str(path),sha256=sha(path)))
     queue={};views=[];local=root/'artifacts-local-v1'
     for value in sorted(published):
-        h=digest(value);paths=[root/'runs'/n/'blobs'/h for n in ['fallback-v6','svt-additions-v1']];path=next((p for p in paths if p.exists()),None)
+        h=digest(value);paths=[root/'runs'/n/'blobs'/h for n in native_runs(root)];path=next((p for p in paths if p.exists()),None)
         if path is None or sha(path)!=h:raise ValueError('closed native published CAS missing or changed')
         document=json.loads(gzip.decompress(path.read_bytes()))
         if document.get('schema')!='e36-native-ladder-receipt-v1' or document.get('complete') is not True:raise ValueError('closed native CAS incomplete')

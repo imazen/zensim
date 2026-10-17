@@ -7,6 +7,8 @@ from pathlib import Path
 
 from e36_store import digest, sha
 
+from e36_archive_runs import native_runs
+
 
 def sync_directory(path):
     fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
@@ -165,7 +167,7 @@ def freeze(root,out):
     journal_sha=sha(journal)
     rows=list(relocation_records(root));segments=[dict(path=str(p),sha256=sha(p)) for p in relocation_segments(root)]
     published=set();ledger_pins=[]
-    for name in ['fallback-v6','svt-additions-v1']:
+    for name in native_runs(root):
         for p in (root/'runs'/name).glob('ledger*.parquet'):
             for batch in pq.ParquetFile(p).iter_batches(columns=['status','attempts','output_sha']):
                 published.update(r['output_sha'] for r in batch.to_pylist() if r['status']=='done' and r['attempts']==1 and r['output_sha'])

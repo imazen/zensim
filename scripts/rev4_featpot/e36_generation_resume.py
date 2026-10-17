@@ -207,10 +207,14 @@ def run(root,out,phase_name='fallback'):
     try:
         mirror=owner/'resource-budget4-v1/e36_artifact_mirror.py' if 'archive_budget4' in proof else owner/'mirror-v13/e36_artifact_mirror.py'
         if 'archive_transport' in proof:mirror=resources/'e36_artifact_mirror.py'
+        if proof.get('source_count_amendment'):
+            from e36_source_cut import checked as cut_checked
+            cut=json.loads(cut_checked(proof['source_count_amendment']).read_text())
+            mirror=cut_checked(cut['archive_resources']).parent/'e36_artifact_mirror.py'
         for role,path in [('monitor',resources/'e36_disk_policy.py'),('mirror',mirror)]:
             log=(out/(role+'.log')).open('x')
             child=subprocess.Popen(['python3',str(path)],stdout=log,stderr=subprocess.STDOUT,
-                                   env={**env,'E36_RESOURCE_READY_PATH':str(out/(role+'-ready.json'))})
+                                   env={**env,'PYTHONPATH':str(path.parent),'E36_RESOURCE_READY_PATH':str(out/(role+'-ready.json'))})
             children.append(child)
             roles[role]=child
             suffix='resume' if phase_name=='fallback' else 'additions'
