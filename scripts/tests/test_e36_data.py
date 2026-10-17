@@ -21,6 +21,16 @@ class AdmissionTests(unittest.TestCase):
             self.assertEqual(png_sha(p,2,2),hashlib.sha256(bytes([17,29,41])*4).hexdigest())
             Image.new('RGBA',(2,2),(17,29,41,254)).save(p)
             with self.assertRaisesRegex(ValueError,'not opaque'):png_sha(p,2,2)
+    def test_canonical_member_and_rendition_family_mask(self):
+        import pyarrow as pa
+        from e36_training import base_id,key_mask
+        base='1fb72c0d6d4352c8'
+        refs=['safesyn:'+base+'_'+r for r in ['1024sq','512sq','513x769','769x513']]
+        for ref in refs:self.assertEqual(base_id(ref),base)
+        self.assertIsNone(base_id('cid22:1001682'))
+        keys=pa.table({'ref_basename':refs+['safesyn:ffffffffffffffff_512sq','cid22:1001682']})
+        self.assertEqual(key_mask(keys,{base}).tolist(),[False]*4+[True,True])
+
     def scores(self):
         return [dict(metric='butteraugli',scores={'butteraugli_pnorm3':2.25},score=2.25,
             reference_pixels_sha256='r',distorted_pixels_sha256='d'),

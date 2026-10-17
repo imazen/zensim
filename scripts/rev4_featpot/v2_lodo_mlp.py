@@ -165,6 +165,8 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
                 or not math.isfinite(weight) or weight <= 0):
             raise ValueError("E34 K requires N, pairs and positive finite lambda; no L projection")
         cmd += ["--steer-pairs", str(recipe["steer_pairs"]), "--steer-lambda", repr(weight)]
+    from e36_training import command_flags
+    cmd += command_flags(recipe,trainer)
     return cmd
 
 
@@ -176,7 +178,8 @@ def e34_options(args, recipe):
     if args.steer_pairs is not None or args.steer_lambda != 0:
         recipe.update(steer_pairs=str(args.steer_pairs) if args.steer_pairs else None,
                       steer_lambda=args.steer_lambda)
-    return recipe
+    from e36_training import options
+    return options(args,recipe)
 
 
 def strict_training_groups(groups: list, data_role_decision: Path | None = None,
@@ -300,6 +303,15 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
                      dest / "ckpt", dest / "train.log", keep_file):
             refuse_immutable_output(path, roots)
     # Admission precedes output creation and the Rust trainer's payload reads.
+    e36_filter_record = None
+    if recipe and recipe.get('e36'):
+        if not strict_admission:
+            raise ValueError('E36 requires strict original-parent admission')
+        strict_training_groups(groups,data_role_decision,upiq_label_disposition,subjective_authority)
+        from e36_training import filter_groups
+        e36_filter_record=filter_groups(groups,recipe,Path(os.environ.get('TMPDIR') or dest))
+        if e36_filter_record is not None:
+            (dest/'e36-base-filter.json').write_text(json.dumps(e36_filter_record,indent=2)+'\n')
     cmd = train_command(groups, init_seed, sample_seed, width, keep_file, head, dest / "refit" / "best.bin", recipe,
                         strict_admission=strict_admission, data_role_decision=data_role_decision,
                         upiq_label_disposition=upiq_label_disposition,
@@ -327,6 +339,8 @@ def train_and_select(groups: list, init_seed: int, sample_seed: int, width: int,
     else:
         bake, selected = dest / "refit" / "best.bin", best
     selection = {"epoch_rule": EPOCH_RULE, "selected_epoch": selected, "best_epoch_by_curve": best}
+    if e36_filter_record is not None:
+        selection['e36_base_filter']=e36_filter_record
     if strict_admission:
         selection["strict_table_admission"] = strict_training_groups(groups, data_role_decision, upiq_label_disposition, subjective_authority)
     return bake, curve, selection
@@ -404,7 +418,11 @@ def main() -> None:
     ap.add_argument("--steer-lambda", type=float, default=0.0, help="E34 K residual weight")
     ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
+    from e36_training import add_args
+    add_args(ap)
     args = ap.parse_args()
+    from e36_training import bootstrap
+    bootstrap(args)
     if args.local_smoke_budget:
         if not (args.strict_admission and args.train_only):
             ap.error("local smoke requires strict training-only")
@@ -580,6 +598,8 @@ def main() -> None:
             "train_weights": weights, "coverage_leg": coverage_record,
             **({"derived_inputs": {"token": "fx1", "declaration_sha256": __import__("v2_common").FX1_SHA256}}
                if recipe.get("derived_inputs") else {})}) + "\n")
+        from e36_training import model_binding
+        model_binding(dest,recipe,args,init_seed,sample_seed,bake)
         return
     heldout = legs[args.heldout]
     table = checked(heldout["full"])

@@ -64,7 +64,11 @@ def main() -> None:
     ap.add_argument("--steer-lambda", type=float, default=0.0, help="E34 K residual weight")
     ap.add_argument("--monotone-cbc", action="store_true", help="E34 L: project plain N H1 inputs nonnegative")
     ap.add_argument("--local-smoke-budget", help="explicit non-installable local smoke epochs:pairs")
+    from e36_training import add_args
+    add_args(ap)
     args = ap.parse_args()
+    from e36_training import bootstrap
+    bootstrap(args)
     if args.local_smoke_budget:
         if not (args.strict_admission and args.train_only):
             ap.error("local smoke requires strict training-only")
@@ -159,8 +163,9 @@ def main() -> None:
         packed = {}
         if args.pack_production:
             from v2_production_pack import pack_production
+            from e36_training import calibration_anchor
             try:
-                packed = pack_production(bake, dest, checked(legs["cid22"]["fit"]),
+                packed = pack_production(bake, dest, calibration_anchor(checked(legs["cid22"]["fit"]),recipe),
                                          e33_output_stage=args.e33_output_stage)
             except RuntimeError as refusal:
                 if not args.e33_output_stage:
@@ -186,6 +191,8 @@ def main() -> None:
             "train_weights": weights, "coverage_leg": coverage_record, **packed,
             **({"derived_inputs": {"token": "fx1", "declaration_sha256": __import__("v2_common").FX1_SHA256}}
                if recipe.get("derived_inputs") else {})}) + "\n")
+        from e36_training import model_binding
+        model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed)
         return
     predictions = {}
     for name, table in tables.items():
