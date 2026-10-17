@@ -12105,7 +12105,13 @@ impl FoldRetention {
                 for (ch, &active) in channels[scale].iter().enumerate() {
                     let n = if active { w * h } else { 0 };
                     if self.pyr_src[scale][ch].len() != n {
-                        self.pyr_src[scale][ch] = vec![0.0; n];
+                        if n == 0 {
+                            // Keep retired snapshot storage for the next cached
+                            // source-plane copy; unserved channels stay empty.
+                            self.pyr_src[scale][ch].clear();
+                        } else {
+                            self.pyr_src[scale][ch] = vec![0.0; n];
+                        }
                     }
                     let dn = if scale == 0 && complete_distorted0 {
                         w * h

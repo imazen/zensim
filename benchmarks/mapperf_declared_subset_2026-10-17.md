@@ -125,3 +125,9 @@ Native verification binary SHA-256:
 The [complete retired-buffer matched grid](mapperf_pool_2026-10-17.md)
 retains every measured size and paired interval. Diff-410 and W-C pass both
 required sizes; C remains slower at1024², so the overall goal is unfinished.
+
+The subsequent [source-capacity matched grid](mapperf_source_capacity_2026-10-17.md)
+passes all six required1024²/2048² peer comparisons. Inactive source vectors
+keep length zero and retain their allocation; capture copies the current
+reference into that capacity. Feature selection and float operations remain
+unchanged. The changed-reference ownership oracle and12 full-map audits pass.

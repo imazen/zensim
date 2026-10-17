@@ -478,7 +478,7 @@ impl LocalRefineSnapshot {
                     for ch in 0..3 {
                         if !c.channel_active(0, ch) {
                             debug_assert_eq!(cached[ch].len(), w0 * h0);
-                            pyr_src0[ch] = cached[ch].clone();
+                            pyr_src0[ch].clone_from(&cached[ch]);
                         }
                     }
                 }
@@ -1814,6 +1814,7 @@ mod tests {
         let (b, b_expected) = take_pair(&src, &changed, dims, &plan, &mut scratch, &mut ret);
         assert_eq!(bits(&b), bits(&b_expected));
         let address = b.pyr_dst0[1].as_ptr() as usize;
+        let source_address = b.pyr_src0[0].as_ptr() as usize;
         assert!(
             ret.snapshot_reuse
                 .as_ref()
@@ -1834,11 +1835,20 @@ mod tests {
                 .expect("lock")
                 .is_some()
         );
-        let (c, c_expected) = take_pair(&src, &dst, dims, &plan, &mut scratch, &mut ret);
+        let mut changed_source = src.clone();
+        for px in &mut changed_source {
+            px[2] ^= 37;
+        }
+        let (c, c_expected) = take_pair(&changed_source, &dst, dims, &plan, &mut scratch, &mut ret);
         assert_eq!(
             c.pyr_dst0[1].as_ptr() as usize,
             address,
             "reuse the retired allocation"
+        );
+        assert_eq!(
+            c.pyr_src0[0].as_ptr() as usize,
+            source_address,
+            "reuse source storage while copying the current reference"
         );
         assert_eq!(bits(&c), bits(&c_expected));
         assert_eq!(bits(&a), a_bits, "live results must not be recycled");

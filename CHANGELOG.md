@@ -14,6 +14,8 @@
 
 - Isolate peer-validation test scratch directories created during the same clock tick.
 
+- Retain inactive source-plane capacity and copy the current cached reference into it for prepared finite-refinement snapshots.
+
 - Permit source-sized JXL scheduling in the private ship-gate runner while retaining every per-quality checkpoint and the existing resource limits.
 
 - Reuse one retired prepared finite-refinement snapshot's buffers per scoring session while keeping live map outputs independently owned.
