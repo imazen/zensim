@@ -121,3 +121,6 @@ mapperf-clean-owned-targets artifacts:
     cargo clean --locked --target-dir "$PWD/target"
     cargo clean --locked --target-dir "$PWD/target-before"
     cargo clean --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --target-dir "$PWD/zensim-bench/addrfix-runtime/target"
+
+mapperf-archive root destination:
+    python3 scripts/rev4_featpot/mapperf_archive.py --root {{quote(root)}} --destination {{quote(destination)}}
