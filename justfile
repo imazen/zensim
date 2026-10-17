@@ -2167,3 +2167,9 @@ e36-idle-probe host:
 # Native reference-only screen; the existing threshold and hash era stay fixed.
 e36-final-current-panel-audit root:
     python3 scripts/rev4_featpot/e36_current_panels.py --root {{quote(root)}} --manifest /mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json --prepared /mnt/v/output/zensim/shipgates-2026-10-16/rd-source-admission-corrected27 --binary {{quote(root + "/bin/e36-fit-final/check_holdout_overlap")}} --out {{quote(root + "/current-panel-audit-final")}}
+
+# Read-only status for a coordinator-requested local allocation window.
+e36-allocation-status lock scope:
+    @date -u +%FT%TZ
+    @lslocks --json --output PID,PATH,MODE | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps([r for r in d.get("locks",[]) if r.get("path")==sys.argv[1]]))' {{quote(lock)}}
+    @systemctl --user show {{quote(scope)}} -p ActiveState -p FreezerState
