@@ -1964,3 +1964,6 @@ shipgates-verified-reuse-replay snapshot binary oracle output:
 shipgates-judge-source-phase binary pairs output oracle receipt:
     {{quote(binary)}} --pairs {{quote(pairs)}} --out-dir {{quote(output)}} --ssim2-map-policy scalar-only
     python3 {{quote(oracle)}} --judges {{quote(output)}} --output {{quote(receipt)}} --lossless-png-expansion
+
+shipgates-rd-report result output:
+    python3 scripts/rev4_featpot/shipgates_rd_report.py --result {{quote(result)}} --output {{quote(output)}}
