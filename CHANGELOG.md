@@ -6,6 +6,8 @@
 
 - Preserve exact manifest-bound STEER coverage scratch by hash-checked rename before interrupted-fit retries; refuse live workers and unpaused controls.
 
+- Retain required raw distorted scale-0 planes on prepared subset walks so finite-refinement snapshots reuse the conversion.
+
 - Reuse the production walk's coarse strip partials when capturing exact finite-refinement snapshots.
 
 - Prepare E36 native teacher-consensus ladders with opaque color admission, current TRAIN family closure, and label-free exact consumed-feature parity (`f9d6adcd`, `05b27bda`, `c1ed83af`, `3a1cc0ce`); no E36 fits or qualification.

@@ -416,7 +416,9 @@ impl LocalRefineSnapshot {
                 }
                 None => fill_inactive_scale0(source, encoding, c, (w0, h0), &mut pyr_src0),
             }
-            fill_inactive_scale0(distorted, encoding, c, (w0, h0), &mut pyr_dst0);
+            if !ret.complete_distorted0 {
+                fill_inactive_scale0(distorted, encoding, c, (w0, h0), &mut pyr_dst0);
+            }
         }
         let mut served = [[false; 3]; LOCAL_SCALES];
         let mut gradient_on = [false; LOCAL_SCALES];
@@ -1535,6 +1537,112 @@ mod tests {
             }
         }
         println!("REV5_RETAINED_STRIPS_OK");
+    }
+
+    #[test]
+    fn prepared_scale0_distorted_planes_match_reconversion_bits() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "local_refine::tests::prepared_scale0_distorted_planes_match_reconversion_bits",
+            "PREPARED_RAW0_OK",
+        ) {
+            return;
+        }
+        let _token = archmage::testing::lock_token_testing();
+        let ids = (13..26).chain(39..156).chain(401..430).chain(459..720);
+        let plan = crate::feature_plan::Plan::derive(
+            &crate::feature_set_id::SlotSet::from_slots(ids),
+            720,
+        )
+        .expect("sparse prepared plan");
+        assert!(!plan.compute.full_res_xb);
+        let mut scratch = V2Scratch::new();
+        let mut ret = FoldRetention::default();
+        for (w, h) in [(64, 64), (257, 521), (137, 101), (257, 521)] {
+            let src = textured(w, h, 41);
+            let dst = distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+            let reference = crate::PrecomputedReference::for_candidate(
+                &source,
+                false,
+                None,
+                FormulaRevision::Rev5,
+            );
+            let prepared = crate::feature_v2::compute_folded_with_ref_retained(
+                &source,
+                &reference,
+                &distorted,
+                false,
+                &mut scratch,
+                &plan,
+                Some(&mut ret),
+            );
+            assert!(ret.complete_distorted0);
+            let actual = LocalRefineSnapshot::capture_with_encoding(
+                &ret,
+                &plan,
+                (w, h),
+                &source,
+                &distorted,
+                None,
+            )
+            .expect("raw retained capture");
+            ret.complete_distorted0 = false;
+            let expected = LocalRefineSnapshot::capture_with_encoding(
+                &ret,
+                &plan,
+                (w, h),
+                &source,
+                &distorted,
+                None,
+            )
+            .expect("original reconverting capture");
+            for ch in 0..3 {
+                assert_eq!(
+                    actual.pyr_dst0[ch]
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                    expected.pyr_dst0[ch]
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                    "{w}x{h} channel{ch}",
+                );
+            }
+            for rect in [(0, 0, 8, 8), (16, 16, 24, 24), (w - 9, h - 9, w, h)] {
+                let bits = |snapshot: &LocalRefineSnapshot| {
+                    snapshot
+                        .deltas(rect, &Candidate::Reference)
+                        .expect("finite repair")
+                        .into_iter()
+                        .map(|(id, v)| (id, v.to_bits()))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(bits(&actual), bits(&expected), "{w}x{h} {rect:?}");
+            }
+            // The ordinary sparse walk still uses the original omitted-plane path.
+            let ordinary = crate::feature_v2::compute_folded_v1_372_streaming_impl(
+                &source,
+                &distorted,
+                None,
+                false,
+                &mut scratch,
+                Some(&plan),
+                Some(&mut ret),
+            )
+            .expect("ordinary sparse walk");
+            assert_eq!(
+                prepared.0.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                ordinary.0.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "prepared features must preserve the ordinary sparse walk",
+            );
+            assert_eq!(prepared.1.map(f64::to_bits), ordinary.1.map(f64::to_bits));
+            assert!(!ret.complete_distorted0);
+            assert!(ret.pyr_dst[0][0].is_empty() && ret.pyr_dst[0][2].is_empty());
+        }
+        println!("PREPARED_RAW0_OK");
     }
 
     /// `feature_v2::tests::textured_image`'s fixture family, duplicated

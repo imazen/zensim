@@ -12032,6 +12032,8 @@ pub(crate) struct FoldRetention {
     pub(crate) mg: Vec<[(f64, f64); 3]>,
     /// Production strip partials, in walk order, for exact coarse refinement.
     pub(crate) strips: Vec<[Vec<(DenseAccum, GradientAccum)>; 3]>,
+    /// Prepared finite-query snapshots can move all distorted scale-0 channels.
+    pub(crate) complete_distorted0: bool,
     pub(crate) basic_stats: Vec<crate::metric::ScaleStats>,
     pub(crate) basic_hf: Vec<[(f64, f64); 3]>,
     pub(crate) basic_sd: Vec<[Vec<f32>; 3]>,
@@ -12056,6 +12058,7 @@ impl FoldRetention {
             cells: Vec::new(),
             mg: Vec::new(),
             strips: Vec::new(),
+            complete_distorted0: false,
             basic_stats: Vec::new(),
             basic_hf: Vec::new(),
             basic_sd: Vec::new(),
@@ -12067,7 +12070,13 @@ impl FoldRetention {
 
     /// Size every buffer for the walk's scale dims (no-op when unchanged;
     /// cells/mg/planes are fully rewritten by each retaining walk).
-    fn ensure(&mut self, dims: &[(usize, usize)], compute: &ComputeSet, retain_basic: bool) {
+    fn ensure(
+        &mut self,
+        dims: &[(usize, usize)],
+        compute: &ComputeSet,
+        retain_basic: bool,
+        complete_distorted0: bool,
+    ) {
         self.strips.clear();
         self.strips
             .resize_with(dims.len(), || core::array::from_fn(|_| Vec::new()));
@@ -12081,17 +12090,24 @@ impl FoldRetention {
             && self.retain_basic == retain_basic
             && self.channels == channels
             && self.rev5 == rev5
+            && self.complete_distorted0 == complete_distorted0
         {
             // A steering snapshot may have moved planes out
             // (`LocalRefineSnapshot::capture_taking`); re-create exactly those.
             // Every retaining walk rewrites each element before any read.
             for (scale, &(w, h)) in dims.iter().enumerate() {
-                for ch in 0..3 {
-                    let n = if channels[scale][ch] { w * h } else { 0 };
-                    for side in [&mut self.pyr_src, &mut self.pyr_dst] {
-                        if side[scale][ch].len() != n {
-                            side[scale][ch] = vec![0.0; n];
-                        }
+                for (ch, &active) in channels[scale].iter().enumerate() {
+                    let n = if active { w * h } else { 0 };
+                    if self.pyr_src[scale][ch].len() != n {
+                        self.pyr_src[scale][ch] = vec![0.0; n];
+                    }
+                    let dn = if scale == 0 && complete_distorted0 {
+                        w * h
+                    } else {
+                        n
+                    };
+                    if self.pyr_dst[scale][ch].len() != dn {
+                        self.pyr_dst[scale][ch] = vec![0.0; dn];
                     }
                     let p = &self.planes[scale][ch];
                     if [&p.mu1, &p.mu2, &p.ssq, &p.s12, &p.act]
@@ -12116,7 +12132,13 @@ impl FoldRetention {
         self.pyr_dst = dims
             .iter()
             .enumerate()
-            .map(|(scale, &(w, h))| mk(scale, w * h))
+            .map(|(scale, &(w, h))| {
+                if scale == 0 && complete_distorted0 {
+                    core::array::from_fn(|_| vec![0.0; w * h])
+                } else {
+                    mk(scale, w * h)
+                }
+            })
             .collect();
         self.planes = dims
             .iter()
@@ -12129,6 +12151,7 @@ impl FoldRetention {
             .collect();
         self.cells = vec![[AttrCellSums::default(); 3]; dims.len()];
         self.mg = vec![[(0.0, 0.0); 3]; dims.len()];
+        self.complete_distorted0 = complete_distorted0;
         self.retain_basic = retain_basic;
         self.rev5 = rev5;
         self.basic_stats = if retain_basic {
@@ -14734,6 +14757,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         ..
     } = scratch;
 
+    // Finite queries need the omitted raw scale-0 distorted channels too.
+    // Keep them during the prepared walk instead of converting the image again.
+    // This changes storage only; channel_active still controls every feature.
+    let complete_distorted0 = ref_planes.is_some()
+        && retention.is_some()
+        && compute.formula_revision >= FormulaRevision::Rev5
+        && compute.v2_blocks;
     let mut accums: [StreamChannelAccums; 3] =
         std::array::from_fn(|_| StreamChannelAccums::new(n_scales, band_slots_for(band_parallel)));
     // REV4 C4's strip scratch — sized for the largest plane width; the
@@ -14746,6 +14776,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             &dims,
             &compute,
             compute.formula_revision >= FormulaRevision::Rev5 && fold_v1,
+            complete_distorted0,
         );
         if compute.formula_revision >= FormulaRevision::Rev5 {
             for (ch, acc) in accums.iter_mut().enumerate() {
@@ -14782,7 +14813,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         ref_planes,
         compute.sampling,
         toggles.formula_revision,
-        !compute.full_res_xb,
+        !compute.full_res_xb && !complete_distorted0,
     );
 
     #[cfg(feature = "threads")]
@@ -14797,6 +14828,23 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             break;
         };
         let scale = info.scale;
+        if complete_distorted0 && scale == 0 {
+            let y1 = info.y0 + info.strip_h;
+            let range = info.y0 * info.plane_w..y1 * info.plane_w;
+            let ret = retention.as_deref_mut().expect("prepared retaining walk");
+            for ch in 0..3 {
+                if !compute.channel_active(0, ch) {
+                    let rows = producer.rows(
+                        crate::feature_v2_stream::Side::Distorted,
+                        ch,
+                        0,
+                        info.y0,
+                        y1,
+                    );
+                    ret.pyr_dst[0][ch][range.clone()].copy_from_slice(rows);
+                }
+            }
+        }
         let local = compute.at_scale(scale);
         let v2_blocks = local.v2_blocks;
         let append_on = local.append;
