@@ -1937,3 +1937,6 @@ e36-data-run root name slots:
 
 e36-data-census root name:
     python3 scripts/rev4_featpot/e36_bulk.py census --root {{quote(root)}} --name {{quote(name)}}
+
+shipgates-jxl-rd-source-batches models binary inputs oracle lock heavy png8 resume output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --resume-encodes-root {{quote(resume)}} --cell-workers 8 --qualities-per-job 21 --output {{quote(output)}}

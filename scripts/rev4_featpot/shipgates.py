@@ -661,7 +661,8 @@ def main():
         if mode in ["jxl-rd","jxl-rd-source"]:
             command.add_argument("--cell-workers",type=int,default=1,choices=range(1,9))
         if mode == "jxl-rd":
-            command.add_argument("--qualities-per-job",type=int,default=1,choices=range(1,5))
+            command.add_argument("--qualities-per-job",type=int,default=1,choices=[1,2,3,4,21],
+                                 help="release the heavy lock per quality group or complete source; every quality is checkpointed")
         if mode == "jxl-rd-source":
             command.add_argument("--quality-start",type=int,default=0)
             command.add_argument("--quality-end",type=int,default=21)

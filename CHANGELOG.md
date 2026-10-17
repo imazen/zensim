@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Permit source-sized JXL scheduling in the private ship-gate runner while retaining every per-quality checkpoint and the existing resource limits.
+
 - Attribute STEER installed cells by host through the frozen native ledger reduction, preserving failed history and waiting on asynchronous harvest mismatches.
 
 - Verify original-image STEER drain behavior with invented passes and use its existing between-pass allocation budget without changing scientific cell/pass caps or image files.
