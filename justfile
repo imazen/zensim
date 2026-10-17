@@ -1632,6 +1632,19 @@ steer-worker-preserve-scratch packet packet_sha host:
 steer-worker-scheduler-metadata packet packet_sha:
     flock "$HOME/tmp/zen-heavy.lock" ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --scheduler-metadata
 
+# Read cached operational metadata; keep the last native count labelled during harvest.
+steer-launch-status root:
+    @python3 -c 'import json, pathlib, shutil, sys; \
+        launch = pathlib.Path(sys.argv[1]) / "launch"; \
+        harvest = json.loads((launch / "HARVEST_STATUS.json").read_text()); \
+        native = json.loads((launch / "SCHEDULER_METADATA.json").read_text()); \
+        backup = max((launch / "backups").glob("*.json")); \
+        print(json.dumps({"harvest": {key: harvest.get(key) for key in ("state", "installed", "updated_at", "errors")}, \
+        "installed_last_native_verified": native["installed"], "counts_verified_at": native["time"], \
+        "per_host": native["per_host"], "snapshot": (launch / "loan-snapshots/i270/LATEST").read_text().strip(), \
+        "backup": backup.name, "backup_state": json.loads(backup.read_text())["state"], \
+        "home_free": shutil.disk_usage(pathlib.Path.home()).free}))' {{quote(root)}}
+
 shipgates-gaddr models binary instruments mentor_standard mentor_ladder output:
     python3 scripts/rev4_featpot/shipgates.py gaddr --models {{quote(models)}} --binary {{quote(binary)}} --instruments {{quote(instruments)}} --mentor-standard {{quote(mentor_standard)}} --mentor-ladder {{quote(mentor_ladder)}} --output {{quote(output)}}
 
