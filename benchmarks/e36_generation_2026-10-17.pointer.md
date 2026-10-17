@@ -101,3 +101,32 @@ preferences,zero dropped/optimizer steps/label reads.
 minavailable36029MiB,peakload1.14. This is ingress memory,notfit memory.
 Final archive/finalized-pool/native-package admission and the separately
 authorized bounded diagnostic remain required. The129 scientificfits awaitgo.
+
+2026-10-17 final publication and package admission on dev:
+`owner-svt-ssd-v1/archive-drain-final-v1.json` closes completed-view archival;
+`ARTIFACT_LOCATION_ADMISSION.json` admits406886unique relocated objects,
+with3actual remote readbacks. Eleven residual raw archives (202649600B)
+remain protected locally and enter the final metadata backup opaquely,
+without training admission. Original failed mandatory-only evidence stays.
+
+`pools-full-admitted-v1/FINAL_POOL_ADMISSION.json` rebinds the complete
+12684-view matrix to final locations without changing feature, preference,
+edge, alias or FX1 bytes. Final matrix SHA256
+94a24af67bc578e29a9f4c5fd8ca6400bcf41b02ecd1904cde4177fb2ef74816;
+fit manifest601356c649c6cb8b69c67efb4332e992da86c0e4a8867660583928d13bbf5dc8.
+`actual-pool-admission-final/receipt.json` admits558295features/2201054pairs,
+zero dropped or optimizer steps. `ACTUAL-POOL-FINAL-v1.log`:run-heavy
+rc0,10s,peak-RSS3.94GiB,minavailable38002MiB,peakload1.73.
+
+`fit-packet-final-v1/data.tar.gz` has16601934998B,SHA256
+143bbcb4c5ff5bb2fa56158f991295ce2c472802905f34a5abfef76fb7c114c8.
+The original base payload is copied verbatim. `program.tar.gz` has10616469B,
+SHA2566ff5ad2b91319f48d9a9e796b8daf0f823f3b1c586b1318016ef39a338999a35.
+Its actual archive inventory and driver help paths pass admission with
+payload reads denied. The dependency recipe remains pinned to SHA256
+36aaf194687e9c6a9c18d17a7631af0cb92e6c5d881534d119306dcf3effe318;
+the executor and qualified contract come from successor native owner v3.
+`E36_FIT_PLAN.json` declares and qualifies129scientific cells,unreleased.
+A separate native local-smoke program uses the same data and numerical
+trainer,2epochs/128draws/900s,raw-only epoch1,tv10/fullseed0.
+Actual smoke verification and measured resource plan still precede fit go.
