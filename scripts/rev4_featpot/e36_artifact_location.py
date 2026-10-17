@@ -161,7 +161,6 @@ def freeze(root,out):
     """Bind final relocation history and replay native eligibility plus readback."""
     import gzip
     import random
-    import shutil
     import time
     import pyarrow.parquet as pq
     from e36_store import Client
