@@ -46,7 +46,7 @@ def observed_costs(root, out):
     print(json.dumps(dict(groups=len(groups),physical_samples=len(samples),fits=0)))
 
 
-def project(root, out, cost_snapshot=None):
+def project(root, out, cost_snapshot=None, exclude_rav1e=False):
     now = time.time()
     run = root / "runs/fallback-v6"
     ids = [
@@ -58,6 +58,13 @@ def project(root, out, cost_snapshot=None):
     jobs = json.loads((run / "manifest.json").read_text())
     if len(ids) != len(jobs):
         raise ValueError("native ordered job identity inventory differs")
+    original_count = len(jobs)
+    excluded_ids = {job_id for job_id, job in zip(ids, jobs)
+                    if exclude_rav1e and json.loads(job['kind']['view'].split(':', 1)[1])['codec'] == 'rav1e'}
+    selected = [(job_id, job) for job_id, job in zip(ids, jobs) if job_id not in excluded_ids]
+    ids = [item[0] for item in selected]
+    jobs = [item[1] for item in selected]
+    selected_ids = set(ids)
     done = set()
     ledgers = []
     # Ignore only files whose write could still be in progress in this snapshot.
@@ -67,6 +74,10 @@ def project(root, out, cost_snapshot=None):
             continue
         table = pq.read_table(path, columns=["job_id", "status"])
         for row in table.to_pylist():
+            if row['job_id'] in excluded_ids:
+                continue
+            if row['job_id'] not in selected_ids:
+                raise ValueError('projection ledger contains an unknown native job')
             if row["status"].lower() != "done":
                 raise ValueError("projection needs explicit failed-status accounting")
             done.add(row["job_id"])
@@ -170,6 +181,9 @@ def project(root, out, cost_snapshot=None):
         observed_unix=now,
         observed_utc=datetime.fromtimestamp(now, timezone.utc).isoformat(),
         done_views=len(done),
+        required_views=len(jobs),
+        original_required_views=original_count,
+        owner_excluded_rav1e_views=len(excluded_ids),
         remaining_views=len(jobs) - len(done),
         remaining_physical_cells=physical,
         existing_checkpoint_rows=cached,
@@ -193,7 +207,7 @@ def project(root, out, cost_snapshot=None):
             "No source-content or quality-dependent cost model.",
             "Excludes cached-row readback, scheduling, per-view ledger overhead and external interference.",
             "Simultaneous in-flight cells are treated as unfinished until their checkpoint lands.",
-            "Only mandatory15342views modeled; optional468additions excluded.",
+            "Only selected mandatory views modeled; optional additions excluded.",
         ],
     )
     with out.open("x") as f:
@@ -216,6 +230,7 @@ if __name__ == "__main__":
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument('--costs',type=Path)
     p.add_argument('--sample-wide-costs',action='store_true')
+    p.add_argument('--exclude-rav1e', action='store_true')
     args = p.parse_args()
     if args.sample_wide_costs:observed_costs(args.root,args.out)
-    else:project(args.root, args.out,args.costs)
+    else:project(args.root, args.out,args.costs,args.exclude_rav1e)

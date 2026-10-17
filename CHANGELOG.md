@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Honor the prospective E36 SVT-only AVIF matrix, preserving exact native identities and original budget proofs; retain hash-verified local SSD artifact ownership through recorded tower relocations (`538c0aeb940e`). Fits remain unreleased.
+
 - SHIPGATES: derive SVT-only AVIF addressability views, retain strict native A7r and report the separate mentor-direction diagnostic (`c9546612`); refuse new AVIF gate cells through the legacy Zenravif driver.
 
 - Preserve E36 exact matrix/native identities while widening local generation; stream final census and bind checked native publication to the authorized absolute budget and stronger disk floor. Fits remain unreleased.
