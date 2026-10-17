@@ -263,6 +263,36 @@ class Lifecycle(unittest.TestCase):
             for js,n in jobs.items():status['jobsets'][js]['installed']=n
             self.assertIsNone(life.next_jobset(self.bundle,dict(jobsets=jobs),status))
 
+    def test_capacity_hold_precedes_remote_mutation_and_other_hosts_continue(self):
+        held=copy.deepcopy(self.cap)
+        held['workers']=[dict(name='/foreign-'+str(i),memory=3*life.GIB,run='jobs/other') for i in range(8)]
+        with self.assertRaises(life.CapacityHold):life.admit('i270',held)
+        with mock.patch.object(life.owner,'steer_plan',return_value={'order':['job']}), \
+             mock.patch.object(life.owner,'first_steer_admission'), \
+             mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
+             mock.patch.object(life,'execution_amendment'), \
+             mock.patch.object(life,'capacity',return_value=held), \
+             mock.patch.object(life,'control',return_value=dict(paused=False,drain=False)) as ctl, \
+             mock.patch.object(life,'ssh',side_effect=AssertionError('remote mutation')), \
+             mock.patch.object(life,'stage_entrypoint',side_effect=AssertionError('staging')):
+            result=life.enroll(self.bundle,dict(image_ref=self.binding['image']),'i270','steer-i270-004','job')
+            self.assertEqual(result['state'],'CAPACITY_HOLD')
+            self.assertEqual(ctl.call_count,1)
+        (self.root/'launch/HARVEST_STATUS.json').write_text(json.dumps(dict(installed=17,state='PROGRESS')))
+        metadata=dict(installed=17,per_host={h:dict(installed=n) for h,n in [('r3500',8),('i270',5),('tower',4)]})
+        with mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
+             mock.patch.object(life,'next_jobset',return_value='job'), \
+             mock.patch.object(life,'supervise_metadata',return_value=metadata), \
+             mock.patch.object(life,'capacity',side_effect=lambda host:held if host=='i270' else self.cap), \
+             mock.patch.object(life,'control',return_value=dict(paused=False,drain=False)), \
+             mock.patch.object(life.subprocess,'run') as run, \
+             mock.patch.object(life.time,'sleep',side_effect=RuntimeError('one iteration')):
+            with self.assertRaisesRegex(RuntimeError,'one iteration'):life.watch(self.bundle,{})
+            hosts=[call.args[0][call.args[0].index('--host')+1] for call in run.call_args_list]
+            self.assertEqual(hosts,['r3500','tower'])
+        events=[json.loads(line) for line in (self.root/'launch/LIFECYCLE.log').read_text().splitlines()]
+        self.assertEqual([e['host'] for e in events if e['action']=='CAPACITY_HOLD'],['i270'])
+
     def test_live_reporting_keeps_labelled_native_count_without_changing_selection(self):
         value=dict(state='OK',packet_sha256=life.owner.PACKET_SHA,native_fold=True,
                    upload=False,amnesty=False,installed=16,time='invented timestamp',

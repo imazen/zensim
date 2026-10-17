@@ -75,6 +75,10 @@ def capacity(host):
     return dict(memory=mem, workers=workers, disk=disk, free=free, docker_free=docker_free)
 
 
+class CapacityHold(ValueError):
+    """Current reservations cannot admit another worker; leave all limits intact."""
+
+
 def admit(host, cap, own_name=None):
     workers = cap['workers']
     own = [w for w in workers if w['name'] == '/'+str(own_name)]
@@ -85,14 +89,14 @@ def admit(host, cap, own_name=None):
     if host != 'tower' and any(w['memory'] <= 0 for w in workers):
         raise ValueError('uncapped active reservation')
     if sum(w['memory'] for w in workers)+new+reserve > cap['memory']['MemTotal']:
-        raise ValueError('configured reservations exceed admission')
+        raise CapacityHold('configured reservations exceed admission')
     if cap['memory']['MemAvailable'] < reserve+new:
-        raise ValueError('available memory below admission')
+        raise CapacityHold('available memory below admission')
     if min(cap['free'], cap['docker_free']) < 20*GIB:
         raise ValueError('disk below 20 GiB floor')
     if host == 'tower' and sum(w['memory'] for w in workers
                                if w['run'].startswith('jobs/fit'))+new > 12*GIB:
-        raise ValueError('shared fit pool reservation exceeded')
+        raise CapacityHold('shared fit pool reservation exceeded')
 
 
 GUARD_SHA = '8608f5ef328e0da8f57ea2bff653f280540f858f50732e34a1eb03d89fd5e09e'
@@ -211,7 +215,10 @@ def enroll(bundle, doc, host, role, js):
     ctr = 'zen-score-'+role
     amendment = execution_amendment(bundle)
     before = capacity(host)
-    admit(host, before)
+    try:
+        admit(host, before)
+    except CapacityHold as error:
+        return dict(state='CAPACITY_HOLD', host=host, reason=str(error), capacity=before)
     # Refuse accidental reuse, including a stopped container with preserved evidence.
     sudo = '' if host == 'tower' else 'sudo -n '
     if ctr in ssh(host, sudo+'docker ps -a --format "{{.Names}}"').splitlines():
@@ -507,6 +514,11 @@ def watch(bundle, doc):
                 updated = datetime.fromisoformat(status['updated_at'].replace('Z', '+00:00'))
                 if updated <= finished:
                     continue
+            try:
+                admit(host, cap)
+            except CapacityHold as error:
+                note(dict(action='CAPACITY_HOLD', host=host, reason=str(error), capacity=cap))
+                continue
             ctl = control(bundle, js)
             if (ctl.get('paused') or ctl.get('drain')) and ctl != INITIAL_JOBSET_HOLD:
                 continue
