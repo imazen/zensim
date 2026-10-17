@@ -3,7 +3,6 @@
 No real PNG, native hash, label, model or optimizer runs in these tests.
 """
 import copy
-import csv
 import json
 from pathlib import Path
 import sys

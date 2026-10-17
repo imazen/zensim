@@ -52,12 +52,13 @@ def run(root,manifest,prepared,binary,out):
             raise ValueError('current ship source requires explicit family lineage admission')
     out.mkdir();refs=out/'references';refs.mkdir();reference_records=[]
     for index,source in enumerate(panel['sources']):
-        recipe=prepared/f'source-{index:02d}-recipe.json';r=json.loads(recipe.read_text())
+        recipe=prepared/f'source-{index:02d}-recipe.json';recipe_raw=recipe.read_bytes();r=json.loads(recipe_raw)
         path=prepared/f'source-{index:02d}.png'
         if r['input_sha256']!=source['sha256'] or sha(path)!=r['output_sha256']:
             raise ValueError('current prepared reference differs from native source receipt')
         dest=refs/path.name;shutil.copyfile(path,dest)
-        reference_records.append(dict(path=str(dest),sha256=sha(dest),recipe=dict(path=str(recipe),sha256=sha(recipe)),
+        if sha(dest)!=r['output_sha256']:raise ValueError('prepared reference changed while copying')
+        reference_records.append(dict(path=str(dest),sha256=r['output_sha256'],recipe=dict(path=str(recipe),sha256=hashlib.sha256(recipe_raw).hexdigest()),
             original_source=source))
     training=out/'training.csv'
     with training.open('x') as f:
