@@ -2369,3 +2369,6 @@ e36-prepare-pool root out commit:
 
 e36-finalize-prepared-pool root prepared out commit:
     python3 scripts/rev4_featpot/e36_pool_finalize.py --root {{quote(root)}} --prepared {{quote(prepared)}} --out {{quote(out)}} --commit {{quote(commit)}}
+
+e36-memory-smoke-prepare root packet out owner commit:
+    python3 scripts/rev4_featpot/e36_memory_smoke.py --root {{quote(root)}} --packet {{quote(packet)}} --out {{quote(out)}} --owner {{quote(owner)}} --commit {{quote(commit)}}
