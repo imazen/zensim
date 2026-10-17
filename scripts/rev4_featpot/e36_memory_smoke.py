@@ -1,7 +1,6 @@
 """Prepare one distinct, noninstallable native E36 memory-smoke cell."""
 import argparse
 import copy
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -14,6 +13,20 @@ def write(path,value):
     with path.open('x') as stream:json.dump(value,stream,indent=2);stream.write('\n')
 
 def bind(path):return dict(path=str(path),sha256=sha(path))
+
+
+def seed_zero(blueprint):
+    def arg(argv,key):
+        if argv.count(key)!=1:raise ValueError('unique diagnostic identity argument required: '+key)
+        return argv[argv.index(key)+1]
+    cells=blueprint['cells'];seeds=[]
+    for cell in cells:
+        argv=cell['argv']
+        if argv[0]!='v2_confirm_fit.py' or arg(argv,'--e36-arm')!='tv10-c' or '--heldout' in argv:raise ValueError('full-data tv10 diagnostic parent required')
+        seed=int(arg(argv,'--seed-index'));seeds.append(seed)
+        if cell['name']!='e36-tv10-c__N/full_s'+str(seed):raise ValueError('diagnostic parent name/seed differs')
+    if sorted(seeds)!=[0,1,2]:raise ValueError('exact three-seed full-data blueprint required')
+    return copy.deepcopy(cells[seeds.index(0)])
 
 def prepare(root,packet,out,owner,commit):
     root=Path(root);packet=Path(packet);out=Path(out);owner=Path(owner)
@@ -43,7 +56,9 @@ def prepare(root,packet,out,owner,commit):
     meta['e36_memory_smoke']=dict(policy=SMOKE,projection_overlay=bind(projection),original_projection_sha256=before,final_scientific_program_sha256=original['program.tar.gz'],native_owner=bind(owner/'SOURCE.json'),final_scientific_program_unchanged=True)
     write(out/'build-meta.json',meta)
     subprocess.run([sys.executable,str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),'--source-pins',str(out/'source-pins.json'),'--source-pins-sha256',sha(out/'source-pins.json'),'--executor',str(owner/'fit_cell_exec.py'),'--bin-dir',str(root/'bin/e36-fit-final'),'--build-meta',str(out/'build-meta.json'),'--data',contract+'='+str(out/'qualified-package.json'),'--out',str(out/'program.tar.gz')],check=True)
-    blueprint=json.loads((packet/'e36-tv10-c-full.spec.json').read_text());cell=copy.deepcopy(blueprint['cells'][0]);cell['name']='e36-memory-smoke__N/full_s0'
+    plan=json.loads((packet/'E36_FIT_PLAN.json').read_text());spec=packet/'e36-tv10-c-full.spec.json'
+    if sha(spec)!=plan['manifests']['e36-tv10-c-full']['spec_sha256'] or plan['program_sha256']!=original['program.tar.gz'] or plan['data_sha256']!=original['data.tar.gz']:raise ValueError('registered scientific blueprint/program/data changed')
+    blueprint=json.loads(spec.read_text());cell=seed_zero(blueprint);cell['name']='e36-memory-smoke__N/full_s0'
     argv=cell['argv'];argv[argv.index('--dest')+1]='/var/tmp/rev4-featpot/e36-memory-smoke-results/confirm/cells/'+cell['name']
     for flag in ['--pack-production','--e33-output-stage']:
         if argv.count(flag)!=1:raise ValueError('exact original production flags required')
@@ -52,9 +67,10 @@ def prepare(root,packet,out,owner,commit):
     write(out/'smoke.spec.json',dict(program_sha=sha(out/'program.tar.gz'),data_sha=original['data.tar.gz'],cells=[cell]))
     subprocess.run([str(root/'bin/zenfleet-ctl'),'declare-fits','--spec',str(out/'smoke.spec.json'),'--out',str(out/'smoke.manifest.json')],check=True)
     jobs=json.loads((out/'smoke.manifest.json').read_text())
+    if len(jobs)!=1:raise ValueError('exact one-cell native diagnostic declaration required')
     from qualified_fit_contract import trusted_contract
     expected=trusted_contract(jobs[0]['kind'],out/'program.tar.gz',root/'bin/e36-fit-final/inspect_qualified_checkpoint')
-    if len(jobs)!=1 or expected['execution_contract']!='local-smoke' or [expected[k] for k in ['epochs','pairs_per_epoch','selected_epoch']]!=[2,128,1]:raise ValueError('actual native smoke qualification differs')
+    if expected['execution_contract']!='local-smoke' or [expected[k] for k in ['epochs','pairs_per_epoch','selected_epoch']]!=[2,128,1] or expected['route']!='production' or expected['seed_index']!=0 or expected['e36']['arm']!='tv10-c':raise ValueError('actual native smoke qualification differs')
     if {name:sha(packet/name) for name in original}!=original:raise ValueError('diagnostic preparation changed scientific artifacts')
     receipt=dict(schema='e36-native-memory-smoke-preparation-v1',build_commit=commit,program=bind(out/'program.tar.gz'),data=bind(packet/'data.tar.gz'),spec=bind(out/'smoke.spec.json'),manifest=bind(out/'smoke.manifest.json'),scientific_parent=bind(packet/'program.tar.gz'),policy=SMOKE,native_execution_contract=expected['execution_contract'],numerical_trainer_unchanged=True,initial_memory_cap_bytes=8*1024**3,rayon_threads=2,planned_host='i270',fits=0,labels_read=False)
     write(out/'PREPARED.json',receipt);return receipt

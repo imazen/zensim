@@ -2321,7 +2321,7 @@ e36-pack-resource-admit root:
     python3 scripts/rev4_featpot/e36_pack_binding.py --root {{quote(root)}}
 
 e36-pack-integration-check:
-    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_phase_terminal.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_packet_proofs.py scripts/tests/test_e36_pool_finalize.py
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_phase_terminal.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_packet_proofs.py scripts/tests/test_e36_pool_finalize.py scripts/tests/test_e36_memory_smoke.py
 
 e36-largest-source-amendment root projection commit:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_source_cut.py --root {{quote(root)}} --projection {{quote(projection)}} --commit {{quote(commit)}}
