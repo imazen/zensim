@@ -2,6 +2,11 @@
 use std::{env, fs, path::PathBuf, process::Command};
 const OWNER: &str = "81a545a3ff3457c9fabae93bc9d262b19b50952e";
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(e36_tv)");
+    println!("cargo:rerun-if-env-changed=E36_TV_PROTOCOL");
+    if env::var("E36_TV_PROTOCOL").as_deref() == Ok("1") {
+        println!("cargo:rustc-cfg=e36_tv");
+    }
     println!("cargo:rustc-check-cfg=cfg(e34_owner_oracle)");
     println!("cargo:rerun-if-env-changed=E34_OWNER_ORACLE");
     if env::var("E34_OWNER_ORACLE").as_deref() != Ok("1") {

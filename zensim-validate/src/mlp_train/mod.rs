@@ -52,6 +52,8 @@ use crate::adam_simd;
 // produced by K mini-batch pair forwards, with closed-form gradient
 // added to the RankNet per-prediction backprop direction. See module
 // docs for the exact formula and gradient derivation.
+#[cfg(e36_tv)]
+mod e36_tv;
 mod loss_norm_in_norm;
 mod loss_pearson;
 mod loss_steer;
@@ -2422,6 +2424,15 @@ pub fn train_mlp_strategy_pairs(
     );
     let hyperparams = &effective;
 
+    #[cfg(e36_tv)]
+    let mut e36_pool = tv.map(|config| e36_tv::Pool::new(config, hyperparams));
+    #[cfg(e36_tv)]
+    let mut e36_rng = SplitMix64::new(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed) ^ 0xe360_7476_726e_6700,
+    );
+    #[cfg(e36_tv)]
+    let (mut e36_loss_total, mut e36_batches_total) = (0.0, 0_u64);
+
     if hyperparams.per_sample_alpha_head {
         return train_mlp_per_sample_alpha_head(
             groups,
@@ -2631,6 +2642,11 @@ pub fn train_mlp_strategy_pairs(
     // Standardize TV-regularizer features using the same scaler, in
     // their flat (n_rows × n_features) form. The TV pairs reference
     // row indices in this flat buffer.
+    #[cfg(e36_tv)]
+    if let Some(pool) = e36_pool.as_mut() {
+        pool.bind_scaler(&scaler_mean, &scaler_scale);
+    }
+    #[cfg(not(e36_tv))]
     let tv_std: Option<Vec<f64>> = tv.map(|t| {
         assert_eq!(
             t.n_features_check(),
@@ -2938,9 +2954,13 @@ pub fn train_mlp_strategy_pairs(
     //    writes w1 after the walk when on);
     //  - not the epoch's last pair (the next draw belongs to the next
     //    epoch and may never happen under early stop).
+    #[cfg(e36_tv)]
+    let tv_pool_ready = e36_pool.is_some();
+    #[cfg(not(e36_tv))]
+    let tv_pool_ready = tv_std.is_some();
     let tv_can_fire = tv
         .is_some_and(|c| c.weight > 0.0 && c.apply_every > 0 && !c.pairs.is_empty())
-        && tv_std.is_some();
+        && tv_pool_ready;
     let pooled_on = !hyperparams.pooled_legs.is_empty();
     let lookahead_ok = fuse_w1
         && !hyperparams.monotone_cbc
@@ -3340,7 +3360,12 @@ pub fn train_mlp_strategy_pairs(
             let dl_dya = dl_dya_rn + dl_dya_mse;
             let dl_dyb = dl_dyb_rn + dl_dyb_mse;
 
-            if fuse_w1 {
+            #[cfg(e36_tv)]
+            let e36_scheduled = e36_pool.as_ref().is_some_and(|p| p.scheduled(n_steps));
+            #[cfg(not(e36_tv))]
+            let e36_scheduled = false;
+
+            if fuse_w1 && !e36_scheduled {
                 // Fused pair update: the two gw1 row sweeps, the L2 term,
                 // and the w1 Adam step run as one pass. The `dl_dh_pre`
                 // vectors and the gw2/gb1/gb2 accumulations come from
@@ -3524,6 +3549,22 @@ pub fn train_mlp_strategy_pairs(
 
                 // T8.1: K=1 → step every pair (bit-identical to legacy).
                 // K>1 sequential → step once per K accumulated pairs.
+                #[cfg(e36_tv)]
+                if e36_scheduled {
+                    e36_loss_total += e36_pool.as_ref().unwrap().accumulate(
+                        &mut e36_rng,
+                        &w1,
+                        &b1,
+                        &w2,
+                        &b2,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        hyperparams,
+                        ladder_sign,
+                    );
+                    e36_batches_total += 1;
+                }
                 if k == 1 || steps_since_adam >= k as u64 {
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                     apply_post_adam_penalties(&mut w1, n_hidden, lr);
@@ -3537,6 +3578,7 @@ pub fn train_mlp_strategy_pairs(
             // the run's polarity (see the actual hinge below). TV pair draws
             // consume the SAME RNG as the main sampler; enabling TV changes
             // its subsequent draws and adds Adam updates for active hinges.
+            #[cfg(not(e36_tv))]
             if let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
                 && tv_cfg.weight > 0.0
                 && tv_cfg.apply_every > 0
@@ -3633,6 +3675,17 @@ pub fn train_mlp_strategy_pairs(
                     }
                 }
             }
+        }
+
+        #[cfg(e36_tv)]
+        if e36_pool.is_some() {
+            log_line(
+                &format!(
+                    "E36 TV epoch {epoch}: cumulative_batches={e36_batches_total} cumulative_pair_draws={} cumulative_normalized_loss={e36_loss_total:.12}",
+                    e36_batches_total * 32
+                ),
+                log,
+            );
         }
 
         // T8.1 final-flush: leftover gradients accumulated since the
