@@ -241,4 +241,6 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ['root','out']:parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--phase',choices=['fallback','additions'],default='fallback')
-    args=parser.parse_args();run(args.root,args.out,args.phase)
+    args=parser.parse_args()
+    from e36_metadata_seal import lifecycle
+    with lifecycle(args.root):run(args.root,args.out,args.phase)

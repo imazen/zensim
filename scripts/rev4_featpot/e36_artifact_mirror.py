@@ -190,7 +190,7 @@ def run(pool):
     if artifacts_only and not drain_complete:raise TimeoutError('archive-only run ended before its complete published-bundle drain; retained local data is not admitted')
 
 
-def main():
+def _main():
     try:
         with ThreadPoolExecutor(max_workers=8,thread_name_prefix='e36-storage') as pool:run(pool)
     finally:
@@ -199,6 +199,11 @@ def main():
         finally:
             for lock in MIRROR_LOCKS:lock.close()
             MIRROR_LOCKS.clear()
+
+
+def main():
+    from e36_metadata_seal import lifecycle
+    with lifecycle(ROOT):_main()
 
 
 if __name__=='__main__':main()

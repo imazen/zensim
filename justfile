@@ -2321,7 +2321,7 @@ e36-pack-resource-admit root:
     python3 scripts/rev4_featpot/e36_pack_binding.py --root {{quote(root)}}
 
 e36-pack-integration-check:
-    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_matrix.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_packet_proofs.py
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_phase_terminal.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_pack_recovery.py scripts/tests/test_e36_pack_store.py scripts/tests/test_e36_packet_proofs.py
 
 e36-largest-source-amendment root projection commit:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_source_cut.py --root {{quote(root)}} --projection {{quote(projection)}} --commit {{quote(commit)}}
@@ -2343,3 +2343,10 @@ e36-metadata-archive plan storage out:
 
 e36-optional-terminal root out log audit:
     python3 scripts/rev4_featpot/e36_phase_terminal.py --root {{quote(root)}} --out {{quote(out)}} --log {{quote(log)}} --audit {{quote(audit)}}
+
+# Storage windows own the paper lock; no inherited flock around this scope.
+e36-raw-drain-run root out resources:
+    ~/work/zen/scripts/run-heavy --mem 8G --jobs 2 -- python3 scripts/rev4_featpot/e36_archive_terminal.py run --root {{quote(root)}} --out {{quote(out)}} --resources {{quote(resources)}}
+
+e36-raw-drain-close root out log:
+    python3 scripts/rev4_featpot/e36_archive_terminal.py close --root {{quote(root)}} --out {{quote(out)}} --log {{quote(log)}}
