@@ -1910,3 +1910,30 @@ shipgates-jxl-rd-grouped models binary inputs oracle lock heavy png8 resume outp
 
 shipgates-jxl-group-recovery evidence prior replay output:
     python3 scripts/rev4_featpot/shipgates_group_recovery.py --evidence {{quote(evidence)}} --prior {{quote(prior)}} --replay {{quote(replay)}} --output {{quote(output)}}
+
+e36-store-check:
+    python3 -m unittest scripts/tests/test_e36_store.py
+
+e36-storage-create host root image container output:
+    python3 scripts/rev4_featpot/e36_storage_admin.py --host {{quote(host)}} --root {{quote(root)}} --image {{quote(image)}} --container {{quote(container)}} --output {{quote(output)}}
+
+e36-budget-prepare root features initial:
+    python3 scripts/rev4_featpot/e36_budget.py prepare --root {{quote(root)}} --features {{quote(features)}} --initial {{quote(initial)}}
+
+e36-budget-normalize root pixels:
+    python3 scripts/rev4_featpot/e36_budget.py normalize --root {{quote(root)}} --pixels {{quote(pixels)}}
+
+e36-data-check:
+    python3 -m unittest scripts/tests/test_e36_store.py scripts/tests/test_e36_data.py
+
+e36-data-freeze root initial version commit:
+    python3 scripts/rev4_featpot/e36_bulk.py freeze --root {{quote(root)}} --initial {{quote(initial)}} --version {{quote(version)}} --commit {{quote(commit)}}
+
+e36-data-declare root runtime phase name:
+    python3 scripts/rev4_featpot/e36_bulk.py declare --root {{quote(root)}} --runtime {{quote(runtime)}} --phase {{quote(phase)}} --name {{quote(name)}}
+
+e36-data-run root name slots:
+    python3 scripts/rev4_featpot/e36_bulk.py run --root {{quote(root)}} --name {{quote(name)}} --slots {{quote(slots)}}
+
+e36-data-census root name:
+    python3 scripts/rev4_featpot/e36_bulk.py census --root {{quote(root)}} --name {{quote(name)}}

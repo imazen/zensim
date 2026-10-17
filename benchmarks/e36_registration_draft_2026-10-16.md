@@ -1,6 +1,6 @@
 # E36 draft — native TRAIN ladders for core ordering
 
-Revision 3, before any E36 fit. Preparation permits native data generation and
+Revision 4 budget amendment, before any E36 fit. Preparation permits native data generation and
 non-training checks only. No optimizer step, first-epoch smoke, fleet claim or
 model qualification is authorized. The coordinator releases fitting separately.
 
@@ -92,21 +92,25 @@ Longest-edge sizes:32,40,48,64,80,96,128,160,192,256,320,384,512,640,768,1024,
 and every structurally unsupported or failed cell. Keep actual q-to-setting
 identities and aliases; nominal q alone does not define a physical setting.
 
-The candidate finite mode matrix uses native `modes_full` plans for JPEG,
-rav1e, WebP and JXL and `svt_doe_main` for SVT, with `--max-deviations 1` and
-no budget/compute/q coarsening. Every active knob value needs a resolved
-coverage table. Conditional values requiring companion modes need named
-compatible baselines/submatrices before bulk, or remain explicit blockers.
-Flags, inactive overrides and aliased values do not prove active coverage.
-This main-effects design excludes systematic multi-knob interactions and makes
-no claim across the full production configuration cross-product. Keep all
-shipping-gate configurations unchanged. Full-cross census exports are retained.
+The budgeted matrix in the prospective six-hour amendment below is current.
+Dense 20-size ladders use frozen native baselines. The separate 64/256 mode panel
+uses native `modes_full` plans for JPEG,rav1e,WebP,JXL and `svt_doe_main` for SVT,
+with `--max-deviations 1`, without thinning its registered q axis. Native
+physical aliases retain requested-setting provenance; inactive values do not
+prove active coverage. Every required active knob/value needs a resolved
+coverage table; conditional values need named compatible baselines/submatrices.
+Missing coverage remains explicit. Nonbaseline large-size effects and systematic
+multi-knob interactions are untested. Shipping-gate configurations are unchanged.
+The superseded full-cross/all-source main-effects census exports are retained.
 
 Active teachers are zenmetrics' own butteraugli pnorm3 and CVVDP standard_fhd,
 with native maps from its diffmap owner. SSIMULACRA2 and served B do not generate
 targets. This prospective choice follows the owner's any-metric grant and
 independent Astra agreement; shipping judges remain fixed. Pin builds, scalar
-precision, color ingress and CVVDP display/resampling. Both teachers receive
+precision, color ingress and CVVDP display/resampling. Bulk targets use full
+native JSON f64 values from ScoreFile, with exact decoded pixel hashes. The
+initial TSV-rounded pilot targets remain diagnostic-only and are not mixed
+into the bulk TRAIN view. Both teachers receive
 identical normalized native RGB8 reference/distorted pixels.
 
 Orient CVVDP positively and butteraugli pnorm3 negatively. For endpoints a,b,
@@ -196,3 +200,109 @@ and accepted the prospective two-hypothesis statistical correction. Review
 receipts/source pins are in the private artifact manifest. No E36 fit occurred
 before any of these amendments. The coordinator alone releases fitting; this
 draft and preparation receipt do not authorize it.
+
+
+## Prospective six-hour bulk amendment (2026-10-17)
+
+The coordinator now requests budgeted bulk generation, followed by trainer
+integration, before the fit go. The generation wall budget is about six hours
+on dev; i265 is permitted only after a live idle admission. Other workers
+remain assigned elsewhere. No fit is authorized. This amendment replaces the
+rev3 all-source/all-size mode cross-product; it preserves all 61 qualities,
+five native codecs and 20 registered sizes. It changes no shipping gate.
+
+The dense-size panel uses frozen native baseline configurations. The separate
+eight-source configuration panel covers resolved active native alternatives
+and compatible baselines at 64 and 256, with all61q. It includes one fit and
+one selection source per class, chosen from reference features only. Deduplicate
+overlapping logical baseline configurations without counting their preferences
+twice. Nonbaseline knob effects at large sizes, as well as multi-knob
+interactions, are untested; small-size coverage cannot qualify either domain.
+
+Baseline source counts below are requested/selected before teacher scoring.
+At sizes through768, keep all200 requested sources and every reachable source.
+The only omission there is structural:11 sources cannot reach768 without
+upscaling. At larger sizes, use stratified centroid-nearest sampling within
+the frozen content/split strata. The fast-codec column applies independently
+to JPEG, WebP, JXL and the native SVT AVIF port.
+
+|Longest edge|Reachable of200|rav1e full|Other codec full|rav1e fallback|Other codec fallback|Measured cost basis before bulk|
+|---:|---:|---:|---:|---:|---:|---|
+|32|200|200|200|200|200|five-q native source1520 receipt|
+|40|200|200|200|200|200|per-size preflight pending|
+|48|200|200|200|200|200|per-size preflight pending|
+|64|200|200|200|200|200|per-size preflight pending|
+|80|200|200|200|200|200|per-size preflight pending|
+|96|200|200|200|200|200|per-size preflight pending|
+|128|200|200|200|200|200|per-size preflight pending|
+|160|200|200|200|200|200|per-size preflight pending|
+|192|200|200|200|200|200|per-size preflight pending|
+|256|200|200|200|200|200|five-q native source1520 receipt|
+|320|200|200|200|200|200|per-size preflight pending|
+|384|200|200|200|200|200|per-size preflight pending|
+|512|200|200|200|200|200|per-size preflight pending|
+|640|200|200|200|200|200|per-size preflight pending|
+|768|189|189|189|189|189|per-size preflight pending|
+|1024|186|40|80|8|20|per-size preflight pending|
+|1280|146|20|40|8|20|per-size preflight pending|
+|1536|129|8|20|8|12|per-size preflight pending|
+|2048|121|8|20|8|12|per-size preflight pending|
+|4096|33|5|16|5|10|five-q native source1520 receipt; square witness pending|
+
+For1024, full rav1e quotas per class are8fit/2selection, other codecs16/4.
+For1280 they are4/1 and8/2. For1536/2048 they are1/1 and4/1.
+Fallback1024/1280 quotas are1/1 for rav1e and4/1 for other codecs;
+fallback1536/2048 other codecs use2/1. At4096 the full fast allocation is
+photo6fit/1selection, lineart2fit, mixed5fit/2selection; its fallback is
+photo3fit/1selection, lineart1fit, mixed3fit/2selection. Rav1e uses one
+reference per available content/split stratum. There are no naturally reachable
+screen sources or lineart-selection sources at4096. These are unavailable,
+not passes or replacements. Retain the three available selection references
+in the fast panel. Report references and unique families; reduced panels do
+not inherit the full cohort's precision or per-class holdout claims.
+
+Freeze exact IDs, centroid feature/layout hashes, tie breaks, native baseline
+and active-knob coverage, structural availability mask, normalized reference
+hashes and both source-budget manifests before bulk. Cluster on reference
+embeddings only (same standardization/Lloyd/n_init4/seed36 owner), retain
+singletons, and choose fallback centroids within each full subset so panels
+are nested. No teacher or model value chooses a reference.
+
+The mandatory fallback matrix runs first, in complete whole61q ladders; full
+source additions run only after it completes. At the six-hour boundary, use
+only a wholly completed predeclared matrix. If additions are incomplete, the
+TRAIN view uses exactly the frozen fallback matrix, without cherry-picking
+completed additions; all partial artifacts remain retained and reported. An
+incomplete mandatory matrix cannot qualify READY. No q thinning, missing-size
+substitution or selection of fastest-finished references is allowed. The
+required-stratum positive-support guard uses the frozen reachable mask; a
+reachable required stratum with no consensus preferences remains blocking.
+
+Before bulk, fill every pending table cost basis from bounded native preflight
+receipts, retain per-size/codec/configuration timings and actual byte/RSS
+observations, and distinguish forecasts from measurements. Do not extrapolate
+a fit cost. Preflight/build time is recorded separately from the six-hour bulk
+clock; integration/READY follows generation. The initial2,440-cell subset and
+all earlier pilot renders are diagnostic, never a substitute for bulk coverage.
+
+Storage admission uses a bounded local staging area with the20GiB free-space
+floor. Native bytes/maps/pixels live in a content-addressed bundle store written
+from a capped Docker storage process directly to a NAS array disk; local
+metadata binds each encoded SHA/member, both map SHAs/pixel-metric keys and
+producer build. Zenfleet owns declaration, scheduling, gap/ledger and retries.
+The storage process does not claim compute work. Verify the first persisted
+producer bundle end-to-end before scaling. No artifact is discarded to meet
+the budget; missing/partial work remains explicit.
+
+The E34 N binding is the plain --nonneg-distance K=1 owner, not the separate
+alpha head. The private E36 build/schema leaves normal builds and TV0 behavior
+unchanged. Every50 loss-bearing primary pairs within an epoch, sample32 pairs
+uniformly with replacement using an independent TV RNG. With frozen
+mean_pool_weight=sum_pool(w)/N_pool, accumulate
+lambda*sum_batch(w*hinge)/(32*mean_pool_weight) into the existing pre-update
+primary gradients. Include inactive hinges in normalization. Keep rawmargin.05,
+codec weights2/1 and all q-band weights1. Add no TV-only Adam step, penalty or
+projection. Admit actual fused/unfused gradient consumption with non-training
+oracles; do not change control optimizations. Strict external-pool loading,
+base-scaler isolation and zero dropped pairs remain mandatory. No new public
+Rust type/field/signature is needed.
