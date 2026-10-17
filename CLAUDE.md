@@ -713,3 +713,12 @@ authorization; this is corrected and tested. A rebuilt feature-only probe
 passes with zero optimizer steps and label reads. Numerical sources are
 unchanged; preserve old identities and bind the recorded successor before
 fitting. Actualsmoke and finalarchive/packageadmission remain pending.
+
+
+2026-10-17 E36 diagnostic image finding: cached fit parent
+`1cc5ab665d53025d320e5d15cd6a833c53afb395775583334f7c8e07c122efd0`
+lacks `/usr/bin/time`. The first bounded native diagnostic failed before its
+training command. Its ledger and container remain retained; worker exit0 did
+not qualify the cell. `docker/Dockerfile.e36fit` now bakes pinned GNU time at
+image build and exercises its verbose receipt before installing the program.
+No boot installation or scientific-fit retry is authorized by this repair.

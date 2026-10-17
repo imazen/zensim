@@ -1,6 +1,11 @@
 # The admitted E34 runtime already contains pinned Python wheels and native tools.
 FROM ghcr.io/imazen/zenfleet-worker@sha256:1cc5ab665d53025d320e5d15cd6a833c53afb395775583334f7c8e07c122efd0
 ARG FIT_PROGRAM_SHA
+# The cached parent lacks GNU time; resource receipts require it at runtime.
+RUN mkdir -p /var/tmp/e36-image && \
+    TMPDIR=/var/tmp/e36-image apt-get update && \
+    TMPDIR=/var/tmp/e36-image apt-get install -y --no-install-recommends time=1.9-0.4 && \
+    rm -rf /var/lib/apt/lists/* && /usr/bin/time -v true
 RUN mv /opt/fleet-fits/program /opt/fleet-fits/parent-program && \
     if [ -f /opt/fleet-fits/program.tar.gz ]; then mv /opt/fleet-fits/program.tar.gz /opt/fleet-fits/parent-program.tar.gz; fi
 COPY program.tar.gz /opt/fleet-fits/program.tar.gz
