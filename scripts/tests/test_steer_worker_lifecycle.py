@@ -35,6 +35,59 @@ class Lifecycle(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_preservation_moves_only_declared_scratch_and_keeps_bytes(self):
+        scratch=self.root/'scratch';tmp=scratch/'tmp';tmp.mkdir(parents=True)
+        stem='coverage_cf98_steer_'+'a'*64
+        for suffix in ['.parquet','.keys.parquet','.parquet.manifest.json']:
+            (tmp/(stem+suffix)).write_bytes(b'preserved interrupted bytes')
+        unrelated=tmp/('coverage_cf98_steer_'+'b'*64+'.parquet')
+        unrelated.write_bytes(b'unrelated')
+        result=life.preserve_coverage_scratch(str(scratch),[('98','a'*64)],'20261017T040000.000000Z')
+        self.assertEqual(len(result['files']),3)
+        for item in result['files']:
+            self.assertFalse((tmp/item['name']).exists())
+            self.assertEqual((Path(result['backup'])/item['name']).read_bytes(),b'preserved interrupted bytes')
+        self.assertEqual(unrelated.read_bytes(),b'unrelated')
+        with self.assertRaisesRegex(ValueError,'already exists'):
+            life.preserve_coverage_scratch(str(scratch),[('98','a'*64)],'20261017T040000.000000Z')
+
+    def test_preservation_refuses_symlinks_and_foreign_identity_before_mutation(self):
+        scratch=self.root/'scratch';tmp=scratch/'tmp';tmp.mkdir(parents=True)
+        good=tmp/('coverage_cf98_steer_'+'a'*64+'.parquet');good.write_bytes(b'partial')
+        foreign=self.root/'input';foreign.write_bytes(b'immutable input')
+        link=tmp/('coverage_cf98_steer_'+'b'*64+'.parquet');link.symlink_to(foreign)
+        with self.assertRaisesRegex(ValueError,'regular file'):
+            life.preserve_coverage_scratch(str(scratch),[('98','a'*64),('98','b'*64)],'20261017T040000.000000Z')
+        self.assertEqual(good.read_bytes(),b'partial')
+        self.assertEqual(foreign.read_bytes(),b'immutable input')
+        for declarations in [[('98','../input')],[('../98','a'*64)]]:
+            with self.assertRaisesRegex(ValueError,'coverage identity'):
+                life.preserve_coverage_scratch(str(scratch),declarations,'20261017T040000.000000Z')
+        alias=self.root/'alias';alias.symlink_to(scratch)
+        with self.assertRaisesRegex(ValueError,'resolved disk path'):
+            life.preserve_coverage_scratch(str(alias),[],'20261017T040000.000000Z')
+
+    def test_preservation_requires_paused_controls_and_no_live_worker(self):
+        manifest=[dict(kind=dict(argv=['--spec','fixture:cf98'],argv_sha='a'*64))]
+        (self.bundle/'fit-manifest-job.json').write_text(json.dumps(manifest))
+        with mock.patch.object(life,'ssh',side_effect=AssertionError('remote mutation')):
+            with self.assertRaisesRegex(ValueError,'operator pause'):
+                life.preserve_interrupted_scratch(self.bundle,{},'r3500')
+        (self.root/'launch/PAUSE_WORKERS').touch()
+        cap=copy.deepcopy(self.cap)
+        cap['workers']=[dict(run='jobs/fitsteer-job')]
+        with mock.patch.object(life.owner,'steer_plan',return_value={'order':['job']}), \
+             mock.patch.object(life,'control',return_value=dict(paused=False)), \
+             mock.patch.object(life,'ssh',side_effect=AssertionError('remote mutation')):
+            with self.assertRaisesRegex(ValueError,'controls must be paused'):
+                life.preserve_interrupted_scratch(self.bundle,{},'r3500')
+        with mock.patch.object(life.owner,'steer_plan',return_value={'order':['job']}), \
+             mock.patch.object(life,'control',return_value=dict(paused=True)), \
+             mock.patch.object(life,'capacity',return_value=cap), \
+             mock.patch.object(life,'ssh',side_effect=AssertionError('remote mutation')):
+            with self.assertRaisesRegex(ValueError,'still running'):
+                life.preserve_interrupted_scratch(self.bundle,{},'r3500')
+
     def test_capacity_refuses_occupied_slot_reservations_memory_and_disk(self):
         life.admit('r3500', self.cap)
         cases=[]

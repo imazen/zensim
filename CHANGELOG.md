@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Preserve exact manifest-bound STEER coverage scratch by hash-checked rename before interrupted-fit retries; refuse live workers and unpaused controls.
+
 - Reuse the production walk's coarse strip partials when capturing exact finite-refinement snapshots.
 
 - Add independent source-pixel and float-map byte oracles, including an explicit lossless PNG sample-expansion policy checked on frozen-judge identity maps.

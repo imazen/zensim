@@ -6,6 +6,7 @@ ledger rows. The pinned worker performs all scientific work and reconciliation.
 import argparse
 from datetime import datetime, timezone
 import fcntl
+import inspect as source_inspect
 import json
 import os
 from pathlib import Path
@@ -323,6 +324,101 @@ def pause_workers(bundle, doc):
                 current_fits='continue; native rolling claim deadlines still apply')
 
 
+def preserve_coverage_scratch(scratch, declarations, generation):
+    """Preserve exact manifest-bound temporary outputs; never reuse or delete them."""
+    import hashlib
+    import json
+    from pathlib import Path
+    import re
+    import stat
+
+    root = Path(scratch)
+    if not root.is_absolute() or root.is_symlink() or root.resolve() != root:
+        raise ValueError('scratch must be a resolved disk path')
+    tmp = root/'tmp'
+    if tmp.is_symlink():
+        raise ValueError('temporary directory must not be a symlink')
+    if not re.fullmatch(r'[0-9]{8}T[0-9]{6}\.[0-9]{6}Z', generation):
+        raise ValueError('invalid preservation generation')
+    names = set()
+    for mask, token in declarations:
+        if not re.fullmatch('[0-9a-f]+', mask) or not re.fullmatch('[0-9a-f]{64}', token):
+            raise ValueError('invalid manifest coverage identity')
+        stem = 'coverage_cf'+mask+'_steer_'+token
+        names.update(stem+suffix for suffix in
+                     ('.parquet', '.keys.parquet', '.parquet.manifest.json'))
+    files = []
+    for name in sorted(names):
+        path = tmp/name
+        if not path.exists() and not path.is_symlink():
+            continue
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError('temporary output is not a regular file')
+        digest = hashlib.sha256()
+        with path.open('rb') as stream:
+            for block in iter(lambda: stream.read(1024*1024), b''):
+                digest.update(block)
+        files.append(dict(name=name, bytes=path.stat().st_size, sha256=digest.hexdigest()))
+    backup = root/'steer-interrupted-preserved'/generation
+    if backup.exists() or backup.parent.is_symlink():
+        raise ValueError('preservation destination already exists or is a symlink')
+    if not files:
+        return dict(files=[], generation=generation, scratch=str(root))
+    backup.mkdir(parents=True)
+    receipt = dict(files=files, generation=generation, scratch=str(root), backup=str(backup))
+    (backup/'PLAN.json').write_text(json.dumps(receipt, indent=2)+'\n')
+    for item in files:
+        (tmp/item['name']).rename(backup/item['name'])
+        digest = hashlib.sha256()
+        with (backup/item['name']).open('rb') as stream:
+            for block in iter(lambda: stream.read(1024*1024), b''):
+                digest.update(block)
+        if digest.hexdigest() != item['sha256']:
+            raise ValueError('preserved temporary output changed')
+    (backup/'PRESERVED.json').write_text(json.dumps(receipt, indent=2)+'\n')
+    return receipt
+
+
+def preserve_interrupted_scratch(bundle, doc, host):
+    """Operator repair while enrollment and every STEER worker are quiescent."""
+    launch = bundle.parent/'launch'
+    if not (launch/'PAUSE_WORKERS').exists():
+        raise ValueError('operator pause required before scratch preservation')
+    binding = read_json(bundle/'WORKER_BINDING.json')
+    if host not in ('r3500', 'i270', 'tower') or host not in binding['active']:
+        raise ValueError('host outside frozen active placement')
+    declarations = set()
+    for js in owner.steer_plan(bundle, doc)['order']:
+        ctl = control(bundle, js)
+        if not (ctl.get('paused') or ctl.get('drain')):
+            raise ValueError('all STEER controls must be paused')
+        for job in read_json(bundle/('fit-manifest-'+js+'.json')):
+            argv = job['kind']['argv']
+            spec = argv[argv.index('--spec')+1]
+            mask = re.search(r':cf([0-9a-f]+)$', spec)
+            if mask is None:
+                raise ValueError('manifest lacks an exact coverage mask')
+            declarations.add((mask[1], job['kind']['argv_sha']))
+    cap = capacity(host)
+    if any(w['run'].startswith('jobs/fitsteer-') for w in cap['workers']):
+        raise ValueError('STEER worker still running; preserve only after it stops')
+    if min(cap['free'], cap['docker_free']) < 20*GIB:
+        raise ValueError('disk below 20 GiB floor')
+    generation = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+    code = ('import json,sys\n'+source_inspect.getsource(preserve_coverage_scratch)
+            +'\nprint(json.dumps(preserve_coverage_scratch(sys.argv[1],json.loads(sys.argv[2]),sys.argv[3])))')
+    sudo = '' if host == 'tower' else 'sudo -n '
+    command = sudo+'python3 -c '+shlex.quote(code)+' '+shlex.quote(
+        binding['active'][host]['ZEN_TMPDIR_HOST_DIR'])+' '+shlex.quote(
+        json.dumps(sorted(declarations)))+' '+shlex.quote(generation)
+    receipt = dict(host=host, packet_sha256=owner.PACKET_SHA,
+                   scientific_changes=False, retry_limits_changed=False,
+                   preservation=json.loads(ssh(host, command)))
+    (launch/('SCRATCH_PRESERVED-'+host+'-'+generation+'.json')).write_text(
+        json.dumps(receipt, indent=2)+'\n')
+    return receipt
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--packet', type=Path, required=True)
@@ -332,12 +428,19 @@ def main():
     p.add_argument('--jobset')
     p.add_argument('--watch', action='store_true')
     p.add_argument('--pause', action='store_true')
+    p.add_argument('--preserve-interrupted-scratch', action='store_true')
     a = p.parse_args()
     if not re.fullmatch('[0-9a-f]{64}', a.packet_sha):
         p.error('full packet SHA-256 required')
     owner.PACKET_SHA = a.packet_sha
     doc = owner.packet(a.packet)
-    if a.pause:
+    if a.preserve_interrupted_scratch:
+        if a.pause or a.watch or not a.host:
+            p.error('scratch preservation requires only --host')
+        with (Path.home()/'tmp/zen-heavy.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            print(json.dumps(preserve_interrupted_scratch(a.packet, doc, a.host)))
+    elif a.pause:
         if a.watch:
             p.error('--pause and --watch are mutually exclusive')
         print(json.dumps(pause_workers(a.packet, doc)))

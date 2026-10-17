@@ -81,3 +81,25 @@ An observed coordinator change to the admission control object prevents
 release. In contrast,
 the original workers lack that rolling guard and must use the publication-bound
 stop described above.
+
+An interrupted STEER fit can retain its deterministic coverage temporary table,
+whose filename contains the complete manifest argv SHA. The frozen writer
+requires that table, its keys and its manifest all be absent before creating
+them. A native retry therefore refuses if partial scratch survives. Use
+`just steer-worker-preserve-scratch <packet> <packet-sha> <host>` only after
+pausing every STEER jobset and stopping all STEER workers on that host. The
+existing lifecycle owner derives exact names from the verified manifests,
+rejects symlinks and foreign identities, and renames only those three kinds of
+temporary files into a new generation on the same disk. It records hashes
+before and after each rename. It changes no admitted input, installed result,
+ledger row, retry count, scientific program or fit identity. Preserve that
+generation with the launch evidence before retrying.
+
+The staged worker source is not proof of the image entrypoint's contents.
+Direct inspection found the frozen image entrypoint SHA to be
+`8c506757c7bc5fb2a8e3478fe2348aefd0e8eaa17640a94c55e1b330f12f77cf`;
+it lacks the staged source's loop-top deadline-exit guard. The native worker
+still refuses new claims after its deadline, but the wrapper treats skipped
+work and pause as holding and keeps polling until its allocation limit.
+An entrypoint override is pending owner clarification. Do not describe that
+holding state as a clean drain or deploy an override from an unverified source.

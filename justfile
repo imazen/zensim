@@ -1623,6 +1623,9 @@ steer-worker-watch packet packet_sha:
 steer-worker-pause packet packet_sha:
     python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --pause
 
+steer-worker-preserve-scratch packet packet_sha host:
+    ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --host {{quote(host)}} --preserve-interrupted-scratch
+
 shipgates-gaddr models binary instruments mentor_standard mentor_ladder output:
     python3 scripts/rev4_featpot/shipgates.py gaddr --models {{quote(models)}} --binary {{quote(binary)}} --instruments {{quote(instruments)}} --mentor-standard {{quote(mentor_standard)}} --mentor-ladder {{quote(mentor_ladder)}} --output {{quote(output)}}
 
