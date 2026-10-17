@@ -158,7 +158,7 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
-* **2026-10-17 — SHIPGATES source-class correction. APPROVED, ADMISSION PENDING.** The original gb82 subset has nine photographs and three game renders, rather than12 photographs. Preserve all original measurements, classify the three renders as screen/nonphoto and append the next three unused SHA256(path)-ordered photographs. The12-image class minimum is unchanged; no photo-class RD qualification until the corrected27-source cohort is admitted and complete. See [the report](benchmarks/shipgates_2026-10-16.md).
+* **2026-10-17 — SHIPGATES source-class correction. CORRECTED INPUTS ADMITTED; RD PENDING.** The original gb82 subset has nine photographs and three game renders, rather than12 photographs. Preserve all original measurements, classify the three renders as screen/nonphoto and append the next three unused SHA256(path)-ordered photographs. The12-image class minimum is unchanged; the corrected27-source cohort passed native metadata and exact full-RGB admission; no photo-class RD qualification until its complete grid and judges are available. See [the report](benchmarks/shipgates_2026-10-16.md).
 
 * **2026-10-17 — peer tests could share a scratch directory on one clock tick. FIXED.** macOS CI saw a peer hash mismatch followed by a missing-directory cleanup panic because fixtures used only PID and wall-clock time. Test-only paths now include a process-local atomic nonce. A forced same-tick test checks independent peer bytes and cleanup; validation and scientific executables are unchanged.
 
