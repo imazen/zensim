@@ -1,5 +1,6 @@
 """Invented artifacts and native rows; no labels, optimizer or codec execution."""
 import gzip
+from contextlib import contextmanager
 import importlib.util
 import json
 from pathlib import Path
@@ -20,6 +21,49 @@ from e36_store import sha
 
 
 class Storage(unittest.TestCase):
+    def test_final_location_freeze_replays_native_membership_and_real_readback(self):
+        import e36_store
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-artifact-freeze-') as d:
+            root=Path(d);owner=root/'owner-svt-ssd-v1';owner.mkdir();(owner/'mirror-stop.json').write_text('{}')
+            storage=dict(host='tower',root='canonical',program_sha256='program',command=['never-executed'])
+            (root/'storage-runtime.json').write_text(json.dumps(storage))
+            h='1'*64;bundle=dict(host='dev',root=str(root/'artifacts-local-v1'),sha256=h,bytes=7,relative_path='blobs/11/'+h+'.tar')
+            payload=gzip.compress(json.dumps(dict(complete=True,rows=[dict(bundle=bundle)])).encode())
+            source=root/'runs/fallback-v6/blobs';source.mkdir(parents=True)
+            tmp=source/'tmp';tmp.write_bytes(payload);view_sha=sha(tmp);tmp.rename(source/view_sha)
+            ledger=source.parent/'ledger.parquet';pq.write_table(pa.Table.from_pylist([dict(status='done',attempts=1,output_sha=view_sha)]),ledger)
+            record=dict(sha256=h,bytes=7,canonical_host='tower',canonical_root='canonical',relative_path=bundle['relative_path'],program_sha256='program',sha_verified=True,completed_view_sha256=view_sha)
+            journal=owner/'artifact-relocations.jsonl';journal.write_text(json.dumps(record)+'\n')
+            calls=[]
+            fake=types.SimpleNamespace(process=None,verify=lambda h:(calls.append(h) or dict(ok=True,sha256=h,bytes=7)))
+            with patch.object(e36_store,'Client',return_value=fake):
+                result=location.freeze(root,root/'final.json')
+                self.assertTrue(result['admitted']);self.assertEqual(calls,[h])
+                self.assertEqual(result['unique_relocated_objects'],1)
+                self.assertTrue(Path(result['resolver']['path']).is_relative_to(root))
+                journal.write_text(json.dumps(dict(record,completed_view_sha256='9'*64))+'\n')
+                with self.assertRaisesRegex(ValueError,'native DONE eligibility'):
+                    location.freeze(root,root/'rejected.json')
+
+    def test_put_ack_survives_eviction_immediately_after_unlock(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-ack-race-') as d:
+            root=Path(d);local=root/'artifacts-local-v1'
+            storage=dict(host='tower',root='original-store',program_sha256='server')
+            (root/'storage-runtime.json').write_text(json.dumps(storage))
+            runtime=types.SimpleNamespace(root=root,spec={'storage':storage.copy()},
+                execute=lambda j:None,execute_cell=lambda *a:None,call=lambda *a:None,
+                store=types.SimpleNamespace(verify=lambda h:None))
+            @contextmanager
+            def evict_after_unlock(root,h,exclusive=False):
+                with location.access(root,h,exclusive):yield
+                if exclusive:(local/'blobs'/h[:2]/(h+'.tar')).unlink()
+            with patch.object(overlay,'ROOT',root),patch.object(overlay,'LOCAL',local),patch.object(overlay,'access',evict_after_unlock):
+                overlay.install(runtime)
+                artifact=root/'bundle.tar';artifact.write_bytes(b'captured ACK')
+                answer=runtime.store.put(artifact)
+                self.assertEqual(answer['bytes'],12)
+                self.assertEqual(answer['sha256'],sha(artifact))
+
     def test_local_hardlink_ack_excludes_rav1e_and_keeps_legacy_owner(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-owner-') as d:
             root=Path(d);local=root/'artifacts-local-v1'

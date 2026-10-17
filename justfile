@@ -2269,3 +2269,6 @@ e36-owner-amendment-check:
 
 e36-svt-matrix-check root:
     python3 -c 'import sys; from pathlib import Path; sys.path.insert(0,"scripts/rev4_featpot"); from e36_svt_matrix import configuration; configuration(Path(sys.argv[1])); print("exact owner matrix and original budget chain admitted; fits=0")' {{quote(root)}}
+
+e36-artifact-location-freeze root:
+    python3 -c 'import sys; from pathlib import Path; sys.path.insert(0,"scripts/rev4_featpot"); from e36_artifact_location import freeze; r=Path(sys.argv[1]); freeze(r,r/"ARTIFACT_LOCATION_ADMISSION.json")' {{quote(root)}}

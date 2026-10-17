@@ -92,6 +92,22 @@ def packet(root,pools,base,trainer,out,owner,commit):
     for value in matrix_doc['manifests'].values():add(value['path'])
     for value in matrix_doc.get('remote_phase_evidence',[]):add(value['path'])
     for value in matrix_doc.get('scheduling_evidence',[]):add(value['path'])
+    # Owner amendments carry nested native identity/ledger/resource and artifact
+    # location proofs. Retain those exact bytes, checking each pin before copy.
+    retained=set()
+    def retain_proof(value):
+        if isinstance(value,list):
+            for item in value:retain_proof(item)
+        elif isinstance(value,dict):
+            if isinstance(value.get('path'),str) and isinstance(value.get('sha256'),str):
+                path=Path(value['path'])
+                if sha(path)!=value['sha256']:raise ValueError('nested E36 proof changed')
+                if path not in retained:
+                    retained.add(path);add(path)
+                    if path.suffix=='.json':retain_proof(json.loads(path.read_text()))
+            for item in value.values():retain_proof(item)
+    for key in ['owner_amendment','owner_matrix','native_publication','artifact_location','resource_closure']:
+        if key in matrix_doc:retain_proof(matrix_doc[key])
     fit=pools/'fit';contract=copy.deepcopy(json.loads((fit/'contract.json').read_text()))
     if not contract['semantic_export'] or contract['fits_released'] is not False:raise ValueError('successful semantic export required before packet')
     contract.update(trainer_sha256=sha(trainer),base_filter_sha256=sha(mask),build_commit=commit)

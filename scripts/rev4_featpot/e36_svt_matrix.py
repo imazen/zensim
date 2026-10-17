@@ -99,6 +99,13 @@ def configuration(root):
     for key in ['original_plan','plan','owner_amendment','overlay','cutoff','clock','scheduling']:
         checked(proof[key])
     for pin in proof.get('resource_bootstrap',{}).values():checked(pin)
+    extension_path=root/'owner-svt-ssd-v1/resource-closure-v3.json'
+    if extension_path.exists():
+        extension=json.loads(extension_path.read_text())
+        if extension['schema']!='e36-owner-resource-closure-v3' or extension['scientific_change'] is not False or extension['fits']!=0 or checked(extension['matrix_binding'])!=proof_path:
+            raise ValueError('resource closure changed the scientific matrix')
+        for key in ['controller_binding','controller_environment','cutoff']:checked(extension[key])
+        for pin in extension['files'].values():checked(pin)
     def schedule_chain(pin):
         a=json.loads(checked(pin).read_text())
         for key in ['plan','effective_clock','worker']:checked(a[key])
@@ -273,12 +280,20 @@ def admit(root,names):
     full_expected={j['kind']['view'] for j in json.loads(checked(proof['phases'][choice['qualified']]['manifest']).read_text())}
     if seen!=full_expected:
         raise ValueError('missing/extra owner native views')
+    location_path=root/'ARTIFACT_LOCATION_ADMISSION.json'
+    locations=json.loads(location_path.read_text())
+    if locations['schema']!='e36-artifact-location-admission-v1' or locations['admitted'] is not True or locations['fits']!=0 or locations['relocation_eligibility_replayed'] is not True:
+        raise ValueError('frozen verified artifact location admission required')
+    for key in ['journal','resolver','storage']:checked(locations[key])
+    if locations['unique_relocated_objects'] and len(locations['actual_random_readbacks'])!=min(3,locations['unique_relocated_objects']):
+        raise ValueError('final archive readback sample missing')
     return dict(schema='e36-qualified-matrix-admission-v1',matrix=choice['qualified'],choice=bind(choice_path),
                 plan=proof['plan'],clock=proof['clock'],selected_runs=names,manifests=declarations,
                 completed_views=len(seen),outputs=output_hashes,complete=True,budget_evidence=evidence,
                 remote_phase_evidence=[],scheduling_evidence=[proof['scheduling']],
                 owner_amendment=proof['owner_amendment'],owner_matrix=bind(root/'owner-svt-ssd-v1/matrix-binding.json'),
-                excluded_codecs=['rav1e'],native_publication=publications)
+                excluded_codecs=['rav1e'],native_publication=publications,artifact_location=bind(location_path),
+                resource_closure=bind(root/'owner-svt-ssd-v1/resource-closure-v3.json'))
 
 
 def install_controller(root,receipt):
