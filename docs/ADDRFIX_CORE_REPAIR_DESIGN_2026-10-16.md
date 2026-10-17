@@ -11,7 +11,11 @@ to 25/39 on AVIF-rav1e, reaching that bar and passing all five ladder codecs.
 All three f32 models still fail standard AVIF/JPEG, and f32 W-C loses one svt
 window. Check packing/pruning effects before paying for a new fit; preserve
 separate intervention identities and select the final packed model on TRAIN.
-The retained best checkpoint comparison does not isolate weight dtype alone.
+The original fit receipts show production selects epoch 119 (`last.bin`) while
+the recorded best curve epoch is 0; all three best checkpoints differ from the
+selected final checkpoint. The retained best comparison therefore changes the
+training epoch as well. A same-epoch f32 comparison must precede attributing
+regressions to a packing operation.
 
 ## Population and generation
 
