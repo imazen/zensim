@@ -130,6 +130,8 @@ class NativePublication(unittest.TestCase):
             root=Path(d);proof,ledger,rows=self.fixture(root)
             with patch.object(matrix,'configuration',return_value=(proof,{},[])):
                 self.assertEqual(len(matrix.publication(root,'svt-fallback-v1')[0]),1)
+                (root/'GENERATION-additions-v1.log').write_text('native ledger write failed\n')
+                self.assertEqual(len(matrix.publication(root,'svt-fallback-v1')[0]),1)
                 for mutation in [dict(status='poison'),dict(attempts=2),dict(output_sha=None)]:
                     changed=[dict(rows[0],**mutation),rows[1]];pq.write_table(pa.Table.from_pylist(changed),ledger)
                     with self.assertRaisesRegex(ValueError,'publication failed'):

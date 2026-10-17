@@ -668,3 +668,11 @@ The October 8 coordinator arm amendment omits only `ssimulacra2_rs` from remaini
 The later owner-approved October 8 clean-round amendment replaces whole-segment refusal on any flagged round: retain the first 32 clean rounds in order out of at most 64 total. One shared index vector excludes each flagged round from every arm, preserving pairing. Fewer than 32 clean rounds, foreign build/training during the attempt, or zenbench unreliable status still triggers a fresh TimingNoise retry. Existing all-32-clean segments remain valid; archived attempts are never salvaged. Raw outputs preserve every measured round and flag; COMPLETE.json and the report record the rule, total/excluded counts and indices. Adaptive batches request only the rounds still missing, keep the same persistent workers and run the original explicit warmup once; per-batch untimed estimation calls are excluded. Quiet gates, grid, six-arm inventory, parity and RSS scope are unchanged.
 
 The pinned SPEEDQ Cargo lock resolves fast-ssim2 0.8.2, butteraugli 0.9.3 and Rust-av ssimulacra2 0.5.1 with Rayon enabled for all three. Zensim/fast-ssim2/butteraugli share archmage 0.9.29, so its forced ceiling applies to those arms; Rust-av has no archmage dependency and its tier rows repeat the same compiled implementation. Verify resolved features before assuming a peer is serial.
+
+### Known Bugs: E36 publication phase scoping (2026-10-17)
+
+Fixed: mandatory native publication previously scanned excluded optional-phase
+ledger-error logs. Publication now checks its own phase and predecessor logs;
+optional-only ledger failures remain diagnostic. Actual mandatory ledger errors,
+exact native identities and single-attempt publication remain admission gates.
+Fixture: scripts/tests/test_e36_owner_amendment.py.
