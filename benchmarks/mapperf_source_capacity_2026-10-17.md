@@ -41,4 +41,21 @@ Normal after SHA-256: `26fe769038bc9d4cfc02d9b46f24a2525638cf6ca956bd77bdc116719
 
 Complete cycle run-heavy: C107s, diff-410117s, W-C255s including admission/queue waits. All peak RSS1.03GiB. Minimum available RAM20781/20800/20675MiB and peak load2.46/2.21/2.25 respectively. Timing/report owners and all numerical/quiet/round/statistical gates are unchanged. Existing global-lock turns wait for the current job to release naturally, then release after one new accepted cell or300seconds; no process is signalled.
 
-Current source checks:12/12 full score/map/gradient/query/refinement audit cells; the four-size forced-original subset oracle;38 scorer and15 refinement checks (three pre-existing ignores unchanged). The current original270-case native-cache rerun is pending; the preceding storage variant has exact270/270 original-row equality. [Artifact hashes and paths](mapperf_2026-10-17.pointer.md).
+Current source checks:12/12 full score/map/gradient/query/refinement audit cells; the four-size forced-original subset oracle;38 scorer and15 refinement checks (three pre-existing ignores unchanged). The final source-capacity binary passes all270/270 original native-cache rows, including every original output field and the original repair-cache path (135 rows per fixture). [Artifact hashes and paths](mapperf_2026-10-17.pointer.md).
+
+
+Final source commit: `2c6cfad25204f065d92e8e3ee89097a5852d8c30`, verified on origin/main. The final native-cache receipt is `src0-final/FULL_NATIVE_CACHE_PARITY.json`.
+
+Final instrumented release-stage medians at1024² on CPU10, ten samples after three warmups (milliseconds):
+
+| Candidate | Scalar extraction | Scalar forward | Map extraction | Map forward | Gradient | Density | Snapshot |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| diff-410 | 27.3336615 | 0.009318 | 35.280959 | 0.0175135 | 0.384871 | 21.278758 | 0.671470 |
+| diff+frag-820 | 27.3862575 | 0.016622 | 35.2085215 | 0.027322 | 0.6984615 | 19.681150 | 0.663695 |
+| W-C | 27.409301 | 0.006573 | 32.8858605 | 0.012649 | 0.1976205 | 20.0112465 | 0.678699 |
+
+Scalar extraction uses the uncached production pair; maps use a cached reference. Stage medians are separate from paired p95 qualification and need not add to a median total. Stage binary SHA-256: `3f7b21075f620d1751a1b6cc2e902405f7cdf919b05c09b019e033317e371ea7`. Stage run-heavy:64s including admission, peak RSS0.17GiB, minimum available23137MiB, peak load4.84.
+
+The final C process counter diagnostic (100 complete calls plus setup) records803063 minor faults, zero major faults,4.793281s user and1.019059s system time,5.809872915s elapsed;31194432833 cycles and57340854692 instructions. This diagnostic does not replace paired per-call timing. Its wrapper reports6s, peak RSS0.17GiB, minimum available22490MiB, peak load1.52.
+
+Final verification wrapper receipts: original135-row packets143s each, peak RSS0.18GiB, minimum available27055/31927MiB and peak load28.60/30.01; these ran on dev and are correctness evidence only. The subset oracle reports1s/0.86GiB/min37273MiB/load31.27; scorer/refinement checks15s/0.13GiB/min34213MiB/load33.06. Strict source clippy passes (4s/0.55GiB/min22884MiB/load1.43). No thresholds or existing ignores changed.

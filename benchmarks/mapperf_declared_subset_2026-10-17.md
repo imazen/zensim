@@ -131,3 +131,8 @@ passes all six required1024²/2048² peer comparisons. Inactive source vectors
 keep length zero and retain their allocation; capture copies the current
 reference into that capacity. Feature selection and float operations remain
 unchanged. The changed-reference ownership oracle and12 full-map audits pass.
+
+
+Final source-capacity verification is complete:270/270 original native-cache rows match every field, plus12/12 fresh full-map cells and the four-size forced-original subset oracle. The final stage table and paired performance grid are in the [source-capacity report](mapperf_source_capacity_2026-10-17.md).
+
+Current source trace at commit2c6cfad2: `zensim/src/metric/bake.rs:706` resolves the cached plan; `zensim/src/feature_plan.rs:476` and`:876` expand declared dependencies. Scalar scoring enters `zensim/src/metric/bake.rs:1036` → `zensim/src/fold_engine.rs:138` → `zensim/src/feature_v2.rs:13590`. Complete prepared maps enter `zensim/src/attribution.rs:5535` →`:5673` → `zensim/src/feature_v2.rs:13854`. Both use the production planned fold. Final computed counts remain410/420/420 for diff-410/C/W-C.

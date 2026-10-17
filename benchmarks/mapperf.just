@@ -113,3 +113,11 @@ mapperf-lock-window root log:
 
 mapperf-lock-window-check:
     python3 scripts/rev4_featpot/test_mapperf_lock_window.py
+
+# Run from this lane's owned workspace; preserve reference binaries first.
+mapperf-clean-owned-targets artifacts:
+    python3 scripts/rev4_featpot/mapperf_cargo_refs.py --workspace "$PWD" --artifacts {{quote(artifacts)}}
+    python3 scripts/rev4_featpot/mapperf_cargo_refs.py --workspace "$PWD" --artifacts {{quote(artifacts)}} --check-only
+    cargo clean --locked --target-dir "$PWD/target"
+    cargo clean --locked --target-dir "$PWD/target-before"
+    cargo clean --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --target-dir "$PWD/zensim-bench/addrfix-runtime/target"
