@@ -1157,6 +1157,50 @@ def rd_frontier(points):
     return list(reversed(frontier))
 
 
+def validate_shipgates_judge_binding(root, design_path, pin_path, source_count):
+    """Bind every source packet and its map oracle to the frozen judge bytes."""
+    import hashlib, json
+    from pathlib import Path
+    def digest(path):
+        with Path(path).open("rb") as stream:
+            return hashlib.file_digest(stream,"sha256").hexdigest()
+    pin = json.loads(pin_path.read_text())
+    assert digest(pin["binary"]) == pin["binary_sha256"], "fixed judge binary changed"
+    inputs = json.loads((root/"INPUTS.json").read_text())
+    assert inputs["judge_binary_sha256"] == pin["binary_sha256"], "unbound judge binary"
+    assert inputs["design_sha256"] == digest(design_path), "judge encoder design mismatch"
+    assert inputs["sources"] == source_count
+    assert inputs["ssim2_map_policy"] == "scalar-only"
+    oracle_pin = json.loads((root/"ORACLE_PIN.json").read_text())
+    assert digest(root/"map_oracle.py") == oracle_pin["sha256"]
+    combined = hashlib.sha256()
+    packets = []
+    for index in range(source_count):
+        receipt = json.loads((root/f"source-{index:02d}-VERIFIED.json").read_text())
+        packet_root = Path(receipt["path"])
+        packet = packet_root/"judges.jsonl"
+        assert digest(packet) == receipt["sha256"]
+        metadata = json.loads((packet_root/"INPUTS.json").read_text())
+        assert metadata["driver_sha256"] == pin["binary_sha256"]
+        assert metadata["fixed_zensim_profile"] == "B" and metadata["formula_revision_environment"] == "1"
+        assert set(metadata["requested_metrics"]) == {"ssim2","butter","zensim"}
+        assert metadata["ssim2_map_policy"] == "scalar-only"
+        oracle = json.loads((root/f"source-{index:02d}-MAP_ORACLE.json").read_text())
+        assert oracle["oracle_source_sha256"] == oracle_pin["sha256"]
+        assert oracle["judges_jsonl_sha256"] == receipt["sha256"]
+        assert oracle["judge_rows"] == receipt["pairs"]
+        for field in ["all_physical_hashes_verified","all_logical_hashes_verified","all_float_values_finite",
+                      "all_padding_zero","all_input_pixel_hashes_verified","all_map_dedup_keys_verified"]:
+            assert oracle[field] is True, field
+        with packet.open("rb") as stream:
+            for chunk in iter(lambda:stream.read(1024*1024),b""):
+                combined.update(chunk)
+        packets.append(dict(source_id=index,packet_sha256=receipt["sha256"],pairs=receipt["pairs"]))
+    assert combined.hexdigest() == digest(root/"judges.jsonl"), "aggregate judge rows differ from verified packets"
+    return dict(fixed_judge_binary_sha256=pin["binary_sha256"],pin_sha256=digest(pin_path),
+                map_oracle_source_sha256=oracle_pin["sha256"],packets=packets)
+
+
 def shipgates_rd_main():
     """Matched engineering curves; bootstrap stays in the Rust stats owner."""
     import argparse, hashlib, json, subprocess
@@ -1164,6 +1208,7 @@ def shipgates_rd_main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shipgates-rd", type=Path, required=True)
     ap.add_argument("--judge-dir", type=Path, required=True)
+    ap.add_argument("--judge-pin", type=Path, required=True)
     ap.add_argument("--sources", type=Path, required=True)
     ap.add_argument("--panel", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
@@ -1178,6 +1223,7 @@ def shipgates_rd_main():
     manifest = json.loads(args.sources.read_text())
     assert digest(args.sources) == design["source_manifest_sha256"]
     sources = {s["name"]:s for s in manifest["sources"]}
+    judge_binding = validate_shipgates_judge_binding(args.judge_dir,root/"DESIGN.json",args.judge_pin,len(sources))
     models = list(design["models"])
     native_codec = design.get("schema") == "shipgates-codec-native-rd-v1"
     assert not design.get("smoke_only", False), "smoke cells cannot qualify RD"
@@ -1318,7 +1364,7 @@ def shipgates_rd_main():
         requested_judges=sorted(requested),all_three_judges_measured=requested==set(columns),
         sources=len(sources),cases=len(cases),per_source=observations,summary=summaries,numeric_gates=numeric_gates,
         source_manifest_sha256=digest(args.sources),judge_results_sha256=digest(args.judge_dir / "judges.jsonl"),
-        panel_sha256=digest(args.panel),encoder_design_sha256=digest(root / "DESIGN.json"),
+        judge_binding=judge_binding,panel_sha256=digest(args.panel),encoder_design_sha256=digest(root / "DESIGN.json"),
         status="REPORT_ONLY; final gate requires complete intervention evidence")
     (args.output / "RESULT.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     print(json.dumps({k:v for k,v in result.items() if k not in ["per_source","summary"]},indent=2))

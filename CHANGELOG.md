@@ -97,6 +97,8 @@
 
 - Bind the complete opaque PNG8 source-admission receipts before native RD encoding, preserving raw palette source provenance.
 
+- Require frozen fixed-judge identity and independently verified source packets before producing RD aggregates.
+
 ### QUEUED BREAKING CHANGES
 
 - Removed obsolete experimental extraction interfaces and feature tokens (unreleased).

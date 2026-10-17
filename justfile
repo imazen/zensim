@@ -1767,3 +1767,6 @@ shipgates-source-admission-bind sources binary output:
     python3 scripts/rev4_featpot/shipgates_source_admission.py --sources {{quote(sources)}} --binary {{quote(binary)}} --oracle scripts/rev4_featpot/shipgates_crop_oracle.py --output {{quote(output)}} --bind-only
 
 import 'benchmarks/mapperf.just'
+
+shipgates-rd-analysis encodes judges sources panel pin output:
+    python3 scripts/v_next/rd_probe_analyze_2026-07-18.py --shipgates-rd {{quote(encodes)}} --judge-dir {{quote(judges)}} --sources {{quote(sources)}} --panel {{quote(panel)}} --judge-pin {{quote(pin)}} --output {{quote(output)}}
