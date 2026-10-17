@@ -851,3 +851,28 @@ Open owner decisions:
   steering-mechanism experiment (smooth activations or exact re-scoring of candidate blocks) run at the same time on
   the shared fleet. Any winning data recipe is refitted on the fixed architecture later. Both registrations are being
   drafted; G-STEER and every other gate keep their bars.
+
+## 48. STEER freeze approved and launch authorized (2026-10-16)
+
+The coordinator approved revision 5, frozen in `6b549a4b` and landed through
+merge `5b402ef8`, with zenmetrics prerequisite `c0e33f16`. See the
+[registration](steer_registration_2026-10-16.md),
+[packet pointer](steer_freeze_packet_2026-10-16.pointer.md) and
+[launch plan](../docs/STEER_LAUNCH_PLAN_2026-10-16.md).
+
+Under the adopted shipping decisions, STEER supplies exploratory evidence
+under its original frozen rules. Shipping qualification moves to a later
+confirmatory registration; this launch changes no STEER gate or verdict rule.
+The fresh matched-control replay in the final pinned image completed the full
+120 epochs × 50,000 pairs in 1,050.57 seconds with 1,141,136 KiB peak RSS.
+Normalized weights matched the historical parity anchor, and all 349 native
+score comparisons passed. The replay supplies no scientific control cell.
+The packet retains the disclosed historical E34 metric exposure record.
+
+The 172 fresh fits use one trainer thread, a 7,663-second cell cap and 6 GiB
+memory with no swap. The approved launch first releases one paused registered
+cell, verifies its envelope, clean drain, external ledger/blob, pinned-image
+installation and NAS persistence, then expands across eight jobsets. Fresh
+host capacity checks govern placement; r3800x remains excluded. Harvesting
+and backups remain supervised, and new claims can be paused for a retrain
+without discarding completed cells. No scientific assessment is authorized.
