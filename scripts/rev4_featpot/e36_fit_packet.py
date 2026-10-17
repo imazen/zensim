@@ -123,7 +123,8 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     projections=curated_projection(mask,packet_dir/'curated-projection')
     protocol_sha=protocol_source_sha(source)
     admission=json.loads((root/'actual-pool-admission-final/receipt.json').read_text())
-    if admission['binary_sha256']!=receipt['trainer_sha256'] or admission['native'].get('embedded_protocol_source_sha256')!=protocol_sha:
+    if (admission['binary_sha256']!=receipt['trainer_sha256'] or admission['manifest_sha256']!=receipt['fit_manifest_sha256']
+            or admission['native'].get('embedded_protocol_source_sha256')!=protocol_sha):
         raise ValueError('actual final trainer/source admission required before program packaging')
     manifest=json.loads((pools/'fit/manifest.json').read_text());n=0;mass=0
     import pyarrow.parquet as pq
@@ -170,7 +171,21 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     files={name:sha(source/name) for name in sorted(members) if Path(name).suffix in ['.py','.json']}
     pins=packet_dir/'source-pins.json';contract_name='benchmarks/e36_fit_contract_2026-10-17.json'
     write(pins,dict(schema='e36-public-program-v1',build_commit=commit,files=files,data={contract_name:sha(package)}))
+    import importlib.metadata
+    import os
+    import re
+    import sys
+    versions={name:importlib.metadata.version(name) for name in ['numpy','pandas','pyarrow','scipy']}
+    image=owner/'Dockerfile.fitcell'
+    image_pins=dict(re.findall(r'([a-z][a-z0-9_-]*)==([0-9][a-zA-Z0-9.+_-]*)',image.read_text()))
+    if any(versions[n]!=image_pins[n] for n in versions):raise ValueError('local program admission packages differ from frozen fit image pins')
     meta=packet_dir/'build-meta.json';write(meta,dict(schema='fleet-fits-build-v1',build_commit=commit,
+        python_build_version=sys.version.split()[0],python_packages=versions,
+        rustc=subprocess.check_output(['rustc','--version'],text=True).strip(),
+        cargo=subprocess.check_output(['cargo','--version'],text=True).strip(),
+        cargo_lock_sha256=sha(source/'Cargo.lock'),image_recipe_sha256=sha(image),
+        zensim_profile='release',source_pins_sha256=sha(pins),protocol_source_sha256=protocol_sha,
+        rustflags=os.environ.get('RUSTFLAGS',''),cargo_encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS',''),
         e36_fit=dict(data_sha256=receipt['sha256'],base_filter_sha256=receipt['base_filter_sha256'],fits_released=False)))
     output=packet_dir/'program.tar.gz'
     subprocess.run(['python3',str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),
