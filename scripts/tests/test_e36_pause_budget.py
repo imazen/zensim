@@ -1,5 +1,5 @@
 """Invented budget/clock/frame fixtures; no producers, fits or human targets."""
-import copy
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -28,6 +28,12 @@ def fixture(root):
 
 
 class PauseBudget(unittest.TestCase):
+    def test_epoch_scale_integer_division_preserves_nearest_float(self):
+        ns=1_792_247_416_510_353_700
+        exact=float(Decimal(ns)/Decimal(1_000_000_000))
+        self.assertEqual(ns/1_000_000_000,exact)
+        self.assertNotEqual(ns/1e9,exact)
+
     def test_exact_interval_preserves_original_and_refuses_changed_budget(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-clock-') as d:
             base,ap,cp,a,clock=fixture(Path(d));original=base.read_bytes()

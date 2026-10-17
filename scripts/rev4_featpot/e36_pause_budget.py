@@ -149,14 +149,14 @@ gdb.execute('detach')
     with output.open('x') as f:subprocess.run(['sudo','-n','gdb','-q','-n','-batch','-x',str(script)],stdout=f,stderr=subprocess.STDOUT,check=True)
 
 
-def resume(root,scope,supervisor,controller,auto_thaw_shell,registration):
+def resume(root,scope,supervisor,controller,auto_thaw_shell,registration,recovery=None):
     """Resume the identified owned scope after an authorized, audited timer repair."""
     import datetime
     import os
     import signal
     import subprocess
     import time
-    root=Path(root);out=root/'budget-amendment-v1';out.mkdir()
+    root=Path(root);out=root/('budget-amendment-v2' if recovery else 'budget-amendment-v1');out.mkdir()
     supervisor_argv=[x.decode() for x in Path(f'/proc/{supervisor}/cmdline').read_bytes().split(b'\0') if x]
     if Path(supervisor_argv[0]).name!='flock' or str(root) not in supervisor_argv:raise ValueError('unexpected original supervisor')
     paper_lock=supervisor_argv[1]
@@ -164,41 +164,52 @@ def resume(root,scope,supervisor,controller,auto_thaw_shell,registration):
         result=json.loads(subprocess.check_output(['lslocks','--json','-o','PID,PATH,MODE'],text=True))
         return any(r.get('pid')==supervisor and r.get('mode')=='WRITE' and r.get('path')==paper_lock for r in result['locks'])
     if not owner():raise ValueError('original E36 supervisor does not own the paper lock')
-    if subprocess.check_output(['systemctl','--user','show',scope,'-p','FreezerState','--value'],text=True).strip()!='frozen':
+    if not recovery and subprocess.check_output(['systemctl','--user','show',scope,'-p','FreezerState','--value'],text=True).strip()!='frozen':
         raise ValueError('budget repair requires the original scope still frozen')
     cgline=Path(f'/proc/{controller}/cgroup').read_text().strip().split('::')[1]
     if not cgline.endswith('/'+scope):raise ValueError('controller scope differs')
     cg=Path('/sys/fs/cgroup'+cgline);records={}
-    for text in (cg/'cgroup.procs').read_text().split():
-        pid=int(text);p=Path('/proc')/text
-        cmd=[x.decode() for x in (p/'cmdline').read_bytes().split(b'\0') if x]
-        status=(p/'status').read_text();parent=int(next(s for s in status.splitlines() if s.startswith('PPid:')).split()[1])
-        records[pid]=dict(pid=pid,parent=parent,argv=cmd)
+    if recovery:
+        recovery=Path(recovery)
+        if list(recovery.glob('*.gdb')) or (recovery/'receipt.json').exists():raise ValueError('recovery requires failed preapplication admission, never partly applied frames')
+        records={int(k):v for k,v in json.loads((recovery/'processes-before.json').read_text()).items()}
+    else:
+        for text in (cg/'cgroup.procs').read_text().split():
+            pid=int(text);p=Path('/proc')/text
+            cmd=[x.decode() for x in (p/'cmdline').read_bytes().split(b'\0') if x]
+            status=(p/'status').read_text();parent=int(next(s for s in status.splitlines() if s.startswith('PPid:')).split()[1])
+            records[pid]=dict(pid=pid,parent=parent,argv=cmd)
     python_pids=[p for p,r in records.items() if len(r['argv'])>1 and Path(r['argv'][1]).name in ['e36_bulk.py','e36_data.py']]
     timers=[p for p,r in records.items() if r['argv'][0]=='/usr/bin/timeout']
     workers=[p for p,r in records.items() if Path(r['argv'][0]).name=='zenfleet-worker']
     if controller not in python_pids or len(workers)!=1 or not timers:raise ValueError('unexpected live generation inventory')
     with (out/'processes-before.json').open('x') as f:json.dump(records,f,indent=2)
-    for pid in python_pids+timers+workers:os.kill(pid,signal.SIGSTOP)
+    for pid in python_pids+timers+workers:
+        if recovery:
+            if 'State:\tT' not in Path(f'/proc/{pid}/status').read_text():raise ValueError('preapplication process no longer stopped')
+        else:os.kill(pid,signal.SIGSTOP)
     if not owner():raise ValueError('original generation lock lost before thaw')
-    subprocess.run(['systemctl','--user','thaw',scope],check=True)
-    journal=[json.loads(s) for s in subprocess.check_output(['journalctl','--user','-u',scope,'--since','2026-10-17 07:30:00 UTC','--no-pager','-o','json'],text=True).splitlines()]
-    freezes=[r for r in journal if r['MESSAGE']==scope+': Unit now frozen.']
-    thaws=[r for r in journal if r['MESSAGE']==scope+': Unit now thawed.']
-    freeze=freezes[-1];thaw=thaws[-1]
-    freeze_ns=int(freeze['__REALTIME_TIMESTAMP'])*1000;resume_ns=int(thaw['__REALTIME_TIMESTAMP'])*1000
+    if recovery:
+        previous=json.loads((recovery/'freeze-evidence.json').read_text());freeze=previous['freeze'];thaw=previous['thaw']
+    else:
+        subprocess.run(['systemctl','--user','thaw',scope],check=True)
+        journal=[json.loads(s) for s in subprocess.check_output(['journalctl','--user','-u',scope,'--since','2026-10-17 07:30:00 UTC','--no-pager','-o','json'],text=True).splitlines()]
+        freeze=[r for r in journal if r['MESSAGE']==scope+': Unit now frozen.'][-1]
+        thaw=[r for r in journal if r['MESSAGE']==scope+': Unit now thawed.'][-1]
+    freeze_ns=int(freeze.get('_SOURCE_REALTIME_TIMESTAMP',freeze['__REALTIME_TIMESTAMP']))*1000
+    resume_ns=int(thaw.get('_SOURCE_REALTIME_TIMESTAMP',thaw['__REALTIME_TIMESTAMP']))*1000
     if resume_ns<=freeze_ns:raise ValueError('journal freeze/thaw ordering differs')
     evidence=out/'freeze-evidence.json'
     with evidence.open('x') as f:json.dump(dict(freeze_unix_ns=freeze_ns,resume_unix_ns=resume_ns,freeze=freeze,thaw=thaw),f,indent=2)
     original=root/'bulk-clock-v6.json';base=json.loads(original.read_text());old_deadline_ns=unix_ns(base['deadline_unix']);delta=resume_ns-freeze_ns
-    clock_path=root/'bulk-clock-v6-budget1.json';ap=out/'amendment.json'
+    clock_path=root/('bulk-clock-v6-budget2.json' if recovery else 'bulk-clock-v6-budget1.json');ap=out/'amendment.json'
     launcher=root/'runtime-v6/executor';old_launcher=launcher.with_name('executor.before-budget1')
-    original_launcher=launcher.read_bytes();old_launcher_sha=sha(launcher)
-    newline=('export E36_GENERATION_DEADLINE='+repr(str((old_deadline_ns+delta)/1e9))+'\n').encode()
+    original_launcher=(old_launcher if recovery else launcher).read_bytes();old_launcher_sha=sha(old_launcher if recovery else launcher)
+    newline=('export E36_GENERATION_DEADLINE='+repr(str((old_deadline_ns+delta)/1_000_000_000))+'\n').encode()
     lines=original_launcher.splitlines(keepends=True)
     if len(lines)!=3 or not lines[-1].startswith(b'exec '):raise ValueError('frozen executor launcher shape differs')
     new_launcher=b''.join(lines[:-1])+newline+lines[-1]
-    launcher.rename(old_launcher)
+    launcher.rename(launcher.with_name('executor.failed-budget1') if recovery else old_launcher)
     with launcher.open('xb') as f:f.write(new_launcher)
     launcher.chmod(0o755)
     amendment=dict(schema='e36-authorized-frozen-budget-v1',authorization='coordinator-2026-10-17-frozen-time-exclusion',scientific_change=False,fits=0,
@@ -207,7 +218,7 @@ def resume(root,scope,supervisor,controller,auto_thaw_shell,registration):
         live_budget_helper=dict(path=str(Path(__file__).resolve()),sha256=sha(__file__)),
         launcher_before=dict(path=str(old_launcher),sha256=old_launcher_sha),launcher_after=dict(path=str(launcher),sha256=sha(launcher)))
     with ap.open('x') as f:json.dump(amendment,f,indent=2)
-    effective={**base,'deadline_unix':(old_deadline_ns+delta)/1e9,'budget_only_amendment':dict(path=str(ap),sha256=sha(ap))}
+    effective={**base,'deadline_unix':(old_deadline_ns+delta)/1_000_000_000,'budget_only_amendment':dict(path=str(ap),sha256=sha(ap))}
     with clock_path.open('x') as f:json.dump(effective,f,indent=2)
     resolve(clock_path)
     def utc(ns):return datetime.datetime.fromtimestamp(ns/1e9,datetime.timezone.utc).isoformat()
@@ -245,6 +256,6 @@ if __name__=='__main__':
     import argparse
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['root','registration']:p.add_argument('--'+name,type=Path,required=True)
-    p.add_argument('--scope',required=True)
+    p.add_argument('--scope',required=True);p.add_argument('--recover-preapplication',type=Path)
     for name in ['supervisor','controller','auto-thaw-shell']:p.add_argument('--'+name,type=int,required=True)
-    a=p.parse_args();resume(a.root,a.scope,a.supervisor,a.controller,a.auto_thaw_shell,a.registration)
+    a=p.parse_args();resume(a.root,a.scope,a.supervisor,a.controller,a.auto_thaw_shell,a.registration,a.recover_preapplication)

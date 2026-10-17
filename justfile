@@ -2191,3 +2191,6 @@ e36-budget-live-timer-check out:
 
 e36-budget-resume root scope supervisor controller auto_thaw_shell:
     python3 {{quote(root + "/control-budget-v1/e36_pause_budget.py")}} --root {{quote(root)}} --scope {{quote(scope)}} --supervisor {{supervisor}} --controller {{controller}} --auto-thaw-shell {{auto_thaw_shell}} --registration benchmarks/e36_registration_draft_2026-10-16.md
+
+e36-budget-recover-preapplication root scope supervisor controller auto_thaw_shell:
+    python3 {{quote(root + "/control-budget-v2/e36_pause_budget.py")}} --root {{quote(root)}} --scope {{quote(scope)}} --supervisor {{supervisor}} --controller {{controller}} --auto-thaw-shell {{auto_thaw_shell}} --registration benchmarks/e36_registration_draft_2026-10-16.md --recover-preapplication {{quote(root + "/budget-amendment-v1")}}
