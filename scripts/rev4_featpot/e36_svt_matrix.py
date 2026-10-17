@@ -249,6 +249,9 @@ def configuration(root):
             observed=[json.loads(checked(pin).read_text()) for pin in transport['receipts']]
             if len({item['pid'] for item in observed if item['role']=='executor'})!=24 or len([item for item in observed if item['role']=='mirror'])!=1 or any(item['manual_kills']!=0 or item['fits']!=0 for item in observed):raise ValueError('actual cooperative transport bindings missing')
             proof['archive_transport']=bind(transport_path);evidence.append(bind(transport_path))
+    if (root/'owner-svt-ssd-v1/pack-storage-admission-v1.json').exists():
+        from e36_pack_binding import admit as admit_pack
+        pack_pin,_=admit_pack(root);proof['archive_pack']=pack_pin;evidence.append(pack_pin)
     if clock['plan_sha256']!=proof['original_plan']['sha256']:
         raise ValueError('owner matrix lost original clock-plan binding')
     if 'inherited_clock' in base:
@@ -443,7 +446,7 @@ def admit(root,names):
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
                 native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
-                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'))
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'))
 
 
 def install_controller(root,receipt):

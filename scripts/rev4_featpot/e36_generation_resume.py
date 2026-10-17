@@ -187,6 +187,9 @@ def run(root,out,phase_name='fallback'):
     for ledger in preserved:argv.extend(['--ledger-in',str(ledger)])
     resources=owner/'resource-budget4-v2' if 'archive_budget4' in proof else owner/'closure-v6'
     if 'archive_transport' in proof:resources=owner/'resource-budget4-v3'
+    if 'archive_pack' in proof:
+        from e36_pack_binding import admit as admit_pack
+        _,resources=admit_pack(root)
     env={**os.environ,'PYTHONPATH':str(resources),'ZEN_LOCAL_FAIR_SCHEDULER':'1',
          'ZEN_LOCAL_RESERVE_BYTES':str(8*1024**3),'ZEN_RAM_BYTES':str(budget*4//3),
          'ZEN_CHUNK_WALL_SEC':'300','ZEN_PERSISTENT_EXEC':'1','ZEN_PERSISTENT_KINDS':'bake',

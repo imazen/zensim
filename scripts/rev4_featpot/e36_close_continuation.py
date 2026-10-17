@@ -44,9 +44,11 @@ def close(root):
         note='Terminal control evidence only; complete registered matrix admission remains separate.')
     if budget4.exists():result['archive_budget4']=pin(budget4)
     result['later_resource_handoffs']=resource_chain
-    pack_binding=owner/'archive-pack-binding-v1.json'
+    pack_binding=owner/'archive-pack-binding-v2.json'
     if (owner/'pack-storage-admission-v1.json').exists():
         if not pack_binding.exists():raise ValueError('applied pack runtime source chain missing')
+        from e36_pack_binding import admit as admit_pack
+        admit_pack(root)
         result['archive_pack_binding']=pin(pack_binding)
     with (owner/'native-continuation-final-v1.json').open('x') as stream:json.dump(result,stream,indent=2)
     print(json.dumps(result))
