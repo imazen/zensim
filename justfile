@@ -2331,3 +2331,12 @@ e36-fresh-continuation operation root:
 
 e36-source-archive-repair root:
     python3 scripts/rev4_featpot/e36_source_cut.py --root {{quote(root)}} --repair-archive
+
+e36-metadata-archive-check:
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_metadata_archive.py
+
+e36-metadata-plan root out commit:
+    python3 scripts/rev4_featpot/e36_metadata_archive.py plan --root {{quote(root)}} --out {{quote(out)}} --commit {{quote(commit)}}
+
+e36-metadata-archive plan storage out:
+    python3 scripts/rev4_featpot/e36_metadata_archive.py archive --plan {{quote(plan)}} --storage {{quote(storage)}} --out {{quote(out)}} --lock "$HOME/tmp/zensim-paper/rev4/heavy.lock"
