@@ -416,6 +416,7 @@ def jxl_rd_source(args):
 
 def jxl_rd(args):
     """Encoder-only source phases; judges consume separate frozen sidecars."""
+    from shipgates_admission import run_with_memory_admission
     import math
     import struct
     import sys
@@ -430,7 +431,7 @@ def jxl_rd(args):
         binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),
         png8_binary_sha256=sha(args.png8_binary),source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),
         distances_f32=distances,arms=8,iterations=2,threads=1,judges="separate; not yet scored",
-        sources=len(sources),cell_workers=args.cell_workers,neutral_rule="every candidate-neutral byte-identical to none at every cell")
+        sources=len(sources),cell_workers=args.cell_workers,memory_admission="wait30s only for exact unstarted run-heavy low-memory refusal; execution failures fatal",neutral_rule="every candidate-neutral byte-identical to none at every cell")
     if args.resume_encodes_root:
         previous=json.loads((args.resume_encodes_root/"DESIGN.json").read_text())
         assert previous["binary_sha256"]==design["binary_sha256"] and previous["oracle_sha256"]==design["oracle_sha256"]
@@ -441,7 +442,9 @@ def jxl_rd(args):
     runner.write_bytes(Path(__file__).read_bytes())
     png_adapter=args.output / "shipgates_png.py"
     png_adapter.write_bytes(Path(__file__).with_name("shipgates_png.py").read_bytes())
-    write(args.output / "RUNNER.json",dict(sha256=sha(runner),png_adapter_sha256=sha(png_adapter)))
+    admission_adapter=args.output / "shipgates_admission.py"
+    admission_adapter.write_bytes(Path(__file__).with_name("shipgates_admission.py").read_bytes())
+    write(args.output / "RUNNER.json",dict(sha256=sha(runner),png_adapter_sha256=sha(png_adapter),admission_adapter_sha256=sha(admission_adapter)))
     for i, source in enumerate(sources):
         dest = args.output / f"source-{i:02d}"
         dest.mkdir()
@@ -478,8 +481,7 @@ def jxl_rd(args):
                     "--source-id",str(i),"--quality-index",str(qi),"--cell-workers",str(args.cell_workers),"--output",str(phase)]
                 write(dest / f"quality-{qi:02d}-command.json",command)
                 print(f"JXL RD source{i:02d} {source['name']} quality{qi:02d}: queued",flush=True)
-                with (dest / f"quality-{qi:02d}.log").open("x") as log:
-                    subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True)
+                run_with_memory_admission(command,dest / f"quality-{qi:02d}.log",phase)
                 assert (phase / "COMPLETE.json").is_file()
                 newrows = [json.loads(line) for line in (phase / "cells.jsonl").read_text().splitlines()]
             assert len(newrows) == 8

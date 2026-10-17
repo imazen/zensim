@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 
+from shipgates_admission import run_with_memory_admission
+
 
 def sha(path):
     with Path(path).open('rb') as stream:
@@ -36,6 +38,10 @@ def main():
     frozen_oracle=args.output/'map_oracle.py'
     frozen_oracle.write_bytes(args.map_oracle.read_bytes())
     write(args.output/'ORACLE_PIN.json',dict(sha256=sha(frozen_oracle)))
+    admission_adapter=args.output/"shipgates_admission.py"
+    admission_adapter.write_bytes(Path(__file__).with_name("shipgates_admission.py").read_bytes())
+    write(args.output/"ADMISSION_POLICY.json",dict(source_sha256=sha(admission_adapter),
+        rule="wait30s only for exact run-heavy low-memory refusal before output creation; all execution failures fatal"))
     packets = []
     for source_id in range(design['sources']):
         source = args.encodes / f'source-{source_id:02d}'
@@ -67,8 +73,7 @@ def main():
                 '--pairs',str(pairs),'--out-dir',str(dest),'--ssim2-map-policy','scalar-only']
             write(args.output/f'source-{source_id:02d}-command.json',command)
             print(f'judge source{source_id:02d}: queued',flush=True)
-            with (args.output/f'source-{source_id:02d}.log').open('x') as log:
-                subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+            run_with_memory_admission(command,args.output/f'source-{source_id:02d}.log',dest,env=env)
         pins=json.loads((dest/'INPUTS.json').read_text())
         assert pins['driver_sha256']==sha(args.binary) and set(pins['requested_metrics'])=={'ssim2','butter','zensim'}
         assert pins['formula_revision_environment']=='1' and pins['ssim2_map_policy']=='scalar-only'
@@ -78,8 +83,9 @@ def main():
         assert {r['input']['case_id']:(r['ref_path'],r['dist_path']) for r in judged} == expected
         oracle_command=['flock',str(args.heavy_lock),str(args.run_heavy),'--mem','16G','--jobs','1','--',sys.executable,str(frozen_oracle),
             '--judges',str(dest),'--output',str(args.output/f'source-{source_id:02d}-MAP_ORACLE.json'),'--lossless-png-expansion']
-        with (args.output/f'source-{source_id:02d}-map-oracle.log').open('x') as log:
-            subprocess.run(oracle_command,stdout=log,stderr=subprocess.STDOUT,check=True)
+        print(f'judge source{source_id:02d}: independent map oracle queued',flush=True)
+        run_with_memory_admission(oracle_command,args.output/f'source-{source_id:02d}-map-oracle.log',
+                                  args.output/f'source-{source_id:02d}-MAP_ORACLE.json')
         packets.append(dest/'judges.jsonl')
         write(args.output/f'source-{source_id:02d}-VERIFIED.json',dict(path=str(dest),pairs=len(judged),sha256=sha(dest/'judges.jsonl')))
         print(f'judge source{source_id:02d}: {len(judged)} verified rows',flush=True)

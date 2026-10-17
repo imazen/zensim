@@ -1779,3 +1779,6 @@ shipgates-jxl-group-compare replay prior output:
 
 shipgates-jxl-rd-bounded models binary inputs oracle lock heavy png8 resume output:
     python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --resume-encodes-root {{quote(resume)}} --cell-workers 8 --output {{quote(output)}}
+
+shipgates-admission-check:
+    python3 -B -m unittest scripts/tests/test_shipgates_memory_admission.py

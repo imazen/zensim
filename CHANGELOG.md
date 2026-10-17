@@ -101,6 +101,8 @@
 
 - Bound native JXL quality-group scheduling while requiring exact serial replay of all encoded bytes, delivered pixels and steering fields.
 
+- Wait visibly for exact pre-launch RAM refusals in local native RD jobs while preserving every attempt receipt and failing on execution errors.
+
 ### QUEUED BREAKING CHANGES
 
 - Removed obsolete experimental extraction interfaces and feature tokens (unreleased).
