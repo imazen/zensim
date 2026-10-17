@@ -20,6 +20,17 @@ def write(path,value):
     with path.open('x') as f:json.dump(value,f,indent=2,allow_nan=False);f.write('\n')
 
 
+def native_admitted(native,cohort,reference_records):
+    expected_training={r['source']:r['source_sha256'] for r in cohort['rows']}
+    expected_refs={r['path']:r['sha256'] for r in reference_records}
+    if (native['schema']!='native-png-dhash-audit-v1' or native['hash_era']!='bt709-encoded-luma-zenresize-lanczos-gray8-v1'
+            or native['threshold']!=10 or len(native['training'])!=200 or len(native['holdout'])!=len(reference_records)
+            or {r['path']:r['sha256'] for r in native['training']}!=expected_training
+            or {r['path']:r['sha256'] for r in native['holdout']}!=expected_refs):
+        raise ValueError('complete native current-panel hash coverage differs')
+    return native['strict_flags']==0 and not any(r['strict_flag'] for r in native['close_pairs'])
+
+
 def run(root,manifest,prepared,binary,out):
     cohort_path=root/'cohort-selection.json';cohort=json.loads(cohort_path.read_text())
     panel=json.loads(manifest.read_text());pins=json.loads((prepared/'INPUTS.json').read_text())
@@ -58,14 +69,7 @@ def run(root,manifest,prepared,binary,out):
         '--expected-holdout',str(len(reference_records)),'--out-tsv',str(out/'audit.tsv')]
     with (out/'native.log').open('x') as log:subprocess.run(argv,stdout=log,stderr=subprocess.STDOUT,check=True)
     native_path=out/'audit.hashes.json';native=json.loads(native_path.read_text())
-    expected_training={r['source']:r['source_sha256'] for r in cohort['rows']}
-    expected_refs={r['path']:r['sha256'] for r in reference_records}
-    if (native['schema']!='native-png-dhash-audit-v1' or native['hash_era']!='bt709-encoded-luma-zenresize-lanczos-gray8-v1'
-            or native['threshold']!=10 or len(native['training'])!=200 or len(native['holdout'])!=len(reference_records)
-            or {r['path']:r['sha256'] for r in native['training']}!=expected_training
-            or {r['path']:r['sha256'] for r in native['holdout']}!=expected_refs):
-        raise ValueError('complete native current-panel hash coverage differs')
-    admitted=native['strict_flags']==0 and not any(r['strict_flag'] for r in native['close_pairs'])
+    admitted=native_admitted(native,cohort,reference_records)
     write(out/'receipt.json',dict(schema='e36-current-panel-exclusion-v1',admitted=admitted,
         cohort_sha256=sha(cohort_path),panel_manifest_sha256=sha(manifest),panel_sources=len(reference_records),
         native_binary_sha256=sha(binary),native_hashes_sha256=sha(native_path),native_argv=argv,

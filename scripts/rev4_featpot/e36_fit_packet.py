@@ -52,8 +52,13 @@ def packet(root,pools,base,trainer,out,owner,commit):
         for key in ['references','source_budget','cohort','runtime']:add(m[key]['path'])
     for name in ['whole-matrix.json','matrix-admission.json']:add(pools/name)
     add(mask)
+    from e36_current_panels import native_admitted
     audit=root/'current-panel-audit-final/receipt.json';current=json.loads(audit.read_text())
-    if (current['schema']!='e36-current-panel-exclusion-v1' or current['admitted'] is not True
+    native_audit=json.loads((audit.parent/'audit.hashes.json').read_text())
+    cohort=json.loads((root/'cohort-selection.json').read_text())
+    if (not native_admitted(native_audit,cohort,current['reference_records'])
+            or current['native_binary_sha256']!=sha(root/'bin/e36-fit-final/check_holdout_overlap')
+            or current['schema']!='e36-current-panel-exclusion-v1' or current['admitted'] is not True
             or current['cohort_sha256']!=sha(root/'cohort-selection.json') or current['labels_read'] is not False
             or current['strict_flags']!=0
             or current['panel_manifest_sha256']!=sha('/mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json')
