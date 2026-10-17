@@ -157,3 +157,10 @@ The [current engineering report](../benchmarks/shipgates_2026-10-16.md) records
 coverage, failed bars, input/decoder findings and the limits of the runtime
 collector. A completed development probe does not qualify full size/mode or HDR
 coverage. Protected human-ranking evaluation remains a separate authorization.
+
+Local RD dispatch preserves every pre-launch RAM refusal and waits outside the
+shared heavy lock only for run-heavy's exact low-memory admission receipt, with
+no output created. Codec/metric failures and memory-cap kills stop execution.
+The memory threshold, complete-cell requirement and numerical gates remain
+unchanged. Run `just shipgates-scripts-check` for script wiring, RD numerical
+identities, fixed-judge packet binding and admission-policy regression checks.

@@ -1870,3 +1870,9 @@ e36-evidence-manifest root commit:
 
 e36-archive root mirror:
     python3 scripts/demos/rev5perf_archive.py {{quote(root)}} {{quote(mirror)}} --dereference --exclude-operator-locks
+
+shipgates-scripts-check:
+    python3 scripts/lint_scripts.py
+    python3 scripts/test_lint_scripts.py
+    just shipgates-analysis-check
+    just shipgates-admission-check
