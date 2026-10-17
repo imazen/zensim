@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 from e36_store import sha
 
 
@@ -36,11 +37,20 @@ def diagnostic_result(result,qualified):
 
 def prepare(root,packet,out,owner,commit):
     root=Path(root);packet=Path(packet);out=Path(out);owner=Path(owner)
-    original={name:sha(packet/name) for name in ['program.tar.gz','data.tar.gz','qualified-package.json','source-pins.json']}
+    original={name:sha(packet/name) for name in ['program.tar.gz','data.tar.gz','qualified-package.json','source-pins.json','program-receipt.json']}
     admission=json.loads((packet/'program-admission/receipt.json').read_text())
     if admission['program_sha256']!=original['program.tar.gz'] or not admission['all_inventory_hashes_match']:raise ValueError('admitted scientific program required')
     out.mkdir();source=out/'source';source.mkdir()
-    pins=json.loads((packet/'source-pins.json').read_text());frozen=root/'program-source-v1'
+    pins=json.loads((packet/'source-pins.json').read_text())
+    scientific_receipt=json.loads((packet/'program-receipt.json').read_text())
+    preparation=scientific_receipt['frozen_source_preparation']
+    if sha(preparation['path'])!=preparation['sha256']:raise ValueError('scientific source preparation changed')
+    frozen=Path(json.loads(Path(preparation['path']).read_text())['extracted_source'])
+    binaries=Path(scientific_receipt.get('binary_directory',root/'bin/e36-fit-final'))
+    with tarfile.open(packet/'program.tar.gz') as archive:
+        parent_meta=json.load(archive.extractfile('build_meta.json'))
+    for binary in binaries.iterdir():
+        if not binary.is_file() or parent_meta['files'].get('bin/'+binary.name)!=sha(binary):raise ValueError('diagnostic numerical binary differs from scientific parent')
     for name,digest in pins['files'].items():
         if sha(frozen/name)!=digest:raise ValueError('frozen final scientific source changed')
         target=source/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(frozen/name,target)
@@ -61,7 +71,7 @@ def prepare(root,packet,out,owner,commit):
     meta=json.loads((packet/'build-meta.json').read_text());meta.update(build_commit=commit,source_pins_sha256=sha(out/'source-pins.json'))
     meta['e36_memory_smoke']=dict(policy=SMOKE,projection_overlay=bind(projection),original_projection_sha256=before,final_scientific_program_sha256=original['program.tar.gz'],native_owner=bind(owner/'SOURCE.json'),final_scientific_program_unchanged=True)
     write(out/'build-meta.json',meta)
-    subprocess.run([sys.executable,str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),'--source-pins',str(out/'source-pins.json'),'--source-pins-sha256',sha(out/'source-pins.json'),'--executor',str(owner/'fit_cell_exec.py'),'--bin-dir',str(root/'bin/e36-fit-final'),'--build-meta',str(out/'build-meta.json'),'--data',contract+'='+str(out/'qualified-package.json'),'--out',str(out/'program.tar.gz')],check=True)
+    subprocess.run([sys.executable,str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),'--source-pins',str(out/'source-pins.json'),'--source-pins-sha256',sha(out/'source-pins.json'),'--executor',str(owner/'fit_cell_exec.py'),'--bin-dir',str(binaries),'--build-meta',str(out/'build-meta.json'),'--data',contract+'='+str(out/'qualified-package.json'),'--out',str(out/'program.tar.gz')],check=True)
     plan=json.loads((packet/'E36_FIT_PLAN.json').read_text());spec=packet/'e36-tv10-c-full.spec.json'
     if sha(spec)!=plan['manifests']['e36-tv10-c-full']['spec_sha256'] or plan['program_sha256']!=original['program.tar.gz'] or plan['data_sha256']!=original['data.tar.gz']:raise ValueError('registered scientific blueprint/program/data changed')
     blueprint=json.loads(spec.read_text());cell=seed_zero(blueprint);cell['name']='e36-memory-smoke__N/full_s0'
@@ -76,10 +86,10 @@ def prepare(root,packet,out,owner,commit):
     jobs=json.loads((out/'smoke.manifest.json').read_text())
     if len(jobs)!=1:raise ValueError('exact one-cell native diagnostic declaration required')
     from qualified_fit_contract import trusted_contract
-    expected=trusted_contract(jobs[0]['kind'],out/'program.tar.gz',root/'bin/e36-fit-final/inspect_qualified_checkpoint')
+    expected=trusted_contract(jobs[0]['kind'],out/'program.tar.gz',binaries/'inspect_qualified_checkpoint')
     if expected['execution_contract']!='local-smoke' or [expected[k] for k in ['epochs','pairs_per_epoch','selected_epoch']]!=[2,128,1] or expected['route']!='production' or expected['seed_index']!=0 or expected['e36']['arm']!='tv10-c':raise ValueError('actual native smoke qualification differs')
     if {name:sha(packet/name) for name in original}!=original:raise ValueError('diagnostic preparation changed scientific artifacts')
-    receipt=dict(schema='e36-native-memory-smoke-preparation-v1',build_commit=commit,program=bind(out/'program.tar.gz'),data=bind(packet/'data.tar.gz'),spec=bind(out/'smoke.spec.json'),manifest=bind(out/'smoke.manifest.json'),native_ids=bind(out/'native.ids.tsv'),scientific_parent=bind(packet/'program.tar.gz'),policy=SMOKE,native_execution_contract=expected['execution_contract'],numerical_trainer_unchanged=True,initial_memory_cap_bytes=8*1024**3,rayon_threads=2,planned_host='i270',fits=0,labels_read=False)
+    receipt=dict(schema='e36-native-memory-smoke-preparation-v1',build_commit=commit,program=bind(out/'program.tar.gz'),data=bind(packet/'data.tar.gz'),spec=bind(out/'smoke.spec.json'),manifest=bind(out/'smoke.manifest.json'),native_ids=bind(out/'native.ids.tsv'),scientific_parent=bind(packet/'program.tar.gz'),inspector=bind(binaries/'inspect_qualified_checkpoint'),policy=SMOKE,native_execution_contract=expected['execution_contract'],numerical_trainer_unchanged=True,initial_memory_cap_bytes=8*1024**3,rayon_threads=2,planned_host='i270',fits=0,labels_read=False)
     write(out/'PREPARED.json',receipt);return receipt
 
 
@@ -102,7 +112,9 @@ def verify(root,out,owner,ledger,blobs):
     stage=out/'verified-stage'
     if stage.exists():raise ValueError('preserve the previous diagnostic verification stage')
     job=jobs[0];name=job['cell']['image_path']
-    receipt=native.verify_blob(blob,stage,name,job['kind'],program_archive=Path(prepared['program']['path']),checkpoint_inspector=root/'bin/e36-fit-final/inspect_qualified_checkpoint',allow_local_smoke=True)
+    inspector=prepared['inspector'] if 'inspector' in prepared else bind(root/'bin/e36-fit-final/inspect_qualified_checkpoint')
+    if sha(inspector['path'])!=inspector['sha256']:raise ValueError('diagnostic inspector changed')
+    receipt=native.verify_blob(blob,stage,name,job['kind'],program_archive=Path(prepared['program']['path']),checkpoint_inspector=Path(inspector['path']),allow_local_smoke=True)
     dest=native.cell_dir(stage,name,job['kind']);result=json.loads((dest/'result.json').read_text())
     qualified=json.loads((dest/'e36-qualified-checkpoint.json').read_text())
     diagnostic_result(result,qualified)

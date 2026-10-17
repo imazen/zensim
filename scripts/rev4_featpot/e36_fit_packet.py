@@ -170,8 +170,10 @@ def local_import_closure(source,members):
 
 
 def admit_program_closure(files,preflight,preparation):
-    frozen='62a43287c53d9e19824a66b556745c2a8fdb9cf7'
-    if preparation['published_source']!=frozen or preflight['published_source']!=frozen or preparation['compiled_rust_source']!='534cb68f0204c02807b1a5c1612d1fcb6c805365':raise ValueError('authorized frozen program source differs')
+    versions={'62a43287c53d9e19824a66b556745c2a8fdb9cf7':'534cb68f0204c02807b1a5c1612d1fcb6c805365',
+              '170dabe93463bca9a781a8cf65f2a3adf76b6fc9':'170dabe93463bca9a781a8cf65f2a3adf76b6fc9'}
+    frozen=preparation['published_source']
+    if frozen not in versions or preflight['published_source']!=frozen or preparation['compiled_rust_source']!=versions[frozen]:raise ValueError('authorized frozen program source differs')
     expected={name:value for name,value in preflight['files'].items() if Path(name).suffix in ['.py','.json']}
     # The two admitted Markdown registrations are evidence, not Python owners.
     omitted=set(preflight['files'])-set(expected)
@@ -186,10 +188,11 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
         raise ValueError('E36 program/data/trainer mismatch')
     mask=root/'matched-base-filter-plan-v2.json'
     projections=curated_projection(mask,packet_dir/'curated-projection')
-    preparation=root/'program-source-preparation-v1.json'
+    version='v2' if source.name=='program-source-v2' else 'v1'
+    preparation=root/('program-source-preparation-'+version+'.json')
     source_proof=json.loads(preparation.read_text())
     if Path(source_proof['extracted_source'])!=source or source_proof['exact_rust_cargo_equivalence'] is not True or source_proof['fits']!=0:raise ValueError('frozen admitted trainer program source required')
-    preflight=root/'program-closure-preflight-v1.json';source_closure=json.loads(preflight.read_text())
+    preflight=root/('program-closure-preflight-'+version+'.json');source_closure=json.loads(preflight.read_text())
     protocol_sha=protocol_source_sha(source)
     if protocol_sha!=source_closure['protocol_source_sha256'] or source_proof['published_source']!=source_closure['published_source']:raise ValueError('frozen trainer protocol/source differs')
     admission=json.loads((root/'actual-pool-admission-final/receipt.json').read_text())
@@ -264,7 +267,7 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     subprocess.run(['python3',str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),
         '--source-pins',str(pins),'--source-pins-sha256',sha(pins),'--executor',str(owner/'fit_cell_exec.py'),
         '--bin-dir',str(binaries),'--build-meta',str(meta),'--data',contract_name+'='+str(package),'--out',str(output)],check=True)
-    write(packet_dir/'program-receipt.json',dict(schema='e36-native-fit-program-v1',build_commit=commit,sha256=sha(output),
+    write(packet_dir/'program-receipt.json',dict(schema='e36-native-fit-program-v1',build_commit=commit,sha256=sha(output),binary_directory=str(binaries),
         protocol_source_sha256=protocol_sha,qualified_package_sha256=sha(package),source_pins_sha256=sha(pins),
         native_owner_sha256=sha(owner/'pack_fit_program.py'),binaries={p.name:sha(p) for p in binaries.iterdir() if p.is_file()},
         frozen_source_preparation=dict(path=str(preparation),sha256=sha(preparation)),frozen_source_preflight=dict(path=str(preflight),sha256=sha(preflight)),
@@ -298,6 +301,9 @@ def specs(root,pools,packet_dir,original,program,ctl,owner):
     from e36_inventory import admit_inventory
     admit_inventory(all_cells)
     with tarfile.open(program) as archive:program_meta=json.load(archive.extractfile('build_meta.json'))
+    program_receipt=json.loads((packet_dir/'program-receipt.json').read_text())
+    inspector=Path(program_receipt.get('binary_directory',root/'bin/e36-fit-final'))/'inspect_qualified_checkpoint'
+    if sha(inspector)!=program_meta['files']['bin/inspect_qualified_checkpoint']:raise ValueError('native declaration inspector differs from program')
     qualification_owners={k:program_meta['files'][v] for k,v in dict(inspector_sha256='bin/inspect_qualified_checkpoint',
         qualification_owner_sha256='qualified_fit_contract.py',e36_owner_sha256='e36_fit_contract.py').items()}
 
@@ -317,7 +323,7 @@ def specs(root,pools,packet_dir,original,program,ctl,owner):
             native_seen.add(name)
             if Path(argv[argv.index('--dest')+1])!=native_executor.FIT_ROOT/native_executor.cell_root(argv)/name:
                 raise ValueError('native executor results destination differs')
-            expected=native_qualification.trusted_contract(kind,program,root/'bin/e36-fit-final/inspect_qualified_checkpoint')
+            expected=native_qualification.trusted_contract(kind,program,inspector)
             if expected['e36']['arm']!=c['arm'] or expected['seed_index']!=c['seed_index'] or expected['route']!=(c['heldout'] or 'production'):
                 raise ValueError('native qualification route/seed/arm differs')
     if native_seen!=set(expected_by_name):raise ValueError('native declared inventory incomplete')

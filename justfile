@@ -2175,20 +2175,20 @@ e36-final-ingress root:
     just e36-tv-ingress-fixtures {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} {{quote(root + "/FEATURE_LAYOUT_BINDING.json")}} {{quote(root + "/ingress-fixtures-final")}}
     python3 scripts/rev4_featpot/e36_nontraining_modes.py --root {{quote(root)}} --private {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --normal {{quote(root + "/bin/e36-normal-final")}} --raw {{quote(root + "/bin/e36-raw-score-final")}} --fixtures {{quote(root + "/ingress-fixtures-final")}} --out {{quote(root + "/mode-admission-final")}}
 
-e36-final-actual-pool root pools:
-    python3 scripts/rev4_featpot/e36_actual_pool_admit.py --binary {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --pool {{quote(pools + "/fit")}} --out {{quote(root + "/actual-pool-admission-final")}}
+e36-final-actual-pool root pools binaries="bin/e36-fit-final":
+    python3 scripts/rev4_featpot/e36_actual_pool_admit.py --binary {{quote(root + "/" + binaries + "/zensim_mlp_train")}} --pool {{quote(pools + "/fit")}} --out {{quote(root + "/actual-pool-admission-final")}}
 
-e36-final-data-packet root pools original out commit:
-    python3 scripts/rev4_featpot/e36_fit_packet.py data --root {{quote(root)}} --pools {{quote(pools)}} --base {{quote(original + "/e33-fit-data.tar.gz")}} --trainer {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --out {{quote(out)}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
+e36-final-data-packet root pools original out commit binaries="bin/e36-fit-final":
+    python3 scripts/rev4_featpot/e36_fit_packet.py data --root {{quote(root)}} --pools {{quote(pools)}} --base {{quote(original + "/e33-fit-data.tar.gz")}} --trainer {{quote(root + "/" + binaries + "/zensim_mlp_train")}} --out {{quote(out)}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
 
-e36-final-program-packet root pools original packet commit:
-    python3 scripts/rev4_featpot/e36_fit_packet.py program --root {{quote(root)}} --pools {{quote(pools)}} --original {{quote(original)}} --packet {{quote(packet)}} --source {{quote(root + "/program-source-v1")}} --binaries {{quote(root + "/bin/e36-fit-final")}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
+e36-final-program-packet root pools original packet commit source_version="program-source-v1" binaries="bin/e36-fit-final" owner_version="fit-native-owner-v2":
+    python3 scripts/rev4_featpot/e36_fit_packet.py program --root {{quote(root)}} --pools {{quote(pools)}} --original {{quote(original)}} --packet {{quote(packet)}} --source {{quote(root + "/" + source_version)}} --binaries {{quote(root + "/" + binaries)}} --owner {{quote(root + "/" + owner_version)}} --commit {{quote(commit)}}
 
 e36-final-program-admit packet:
     python3 scripts/rev4_featpot/e36_program_admit.py --program {{quote(packet + "/program.tar.gz")}} --out {{quote(packet + "/program-admission")}}
 
-e36-final-declare root pools original packet:
-    python3 scripts/rev4_featpot/e36_fit_packet.py specs --root {{quote(root)}} --pools {{quote(pools)}} --packet {{quote(packet)}} --original {{quote(original)}} --program {{quote(packet + "/program.tar.gz")}} --ctl {{quote(root + "/bin/zenfleet-ctl")}} --owner {{quote(root + "/fit-native-owner-v2")}}
+e36-final-declare root pools original packet owner_version="fit-native-owner-v2":
+    python3 scripts/rev4_featpot/e36_fit_packet.py specs --root {{quote(root)}} --pools {{quote(pools)}} --packet {{quote(packet)}} --original {{quote(original)}} --program {{quote(packet + "/program.tar.gz")}} --ctl {{quote(root + "/bin/zenfleet-ctl")}} --owner {{quote(root + "/" + owner_version)}}
 
 # Pure invented fixtures and admission checks; these never run the optimizer.
 e36-final-panel-test target="/home/lilith/tmp/e36-pixels-target":
@@ -2405,3 +2405,9 @@ e36-metadata-frozen-plan root resources out commit:
 
 e36-metadata-frozen-archive resources plan storage out:
     python3 {{quote(resources + "/e36_metadata_archive.py")}} archive --plan {{quote(plan)}} --storage {{quote(storage)}} --out {{quote(out)}} --lock "$HOME/tmp/zensim-paper/rev4/heavy.lock"
+
+e36-ingress-freeze root target:
+    python3 scripts/rev4_featpot/e36_ingress_integration.py freeze --root {{quote(root)}} --target {{quote(target)}}
+
+e36-ingress-probe root pool out:
+    python3 scripts/rev4_featpot/e36_ingress_integration.py probe --root {{quote(root)}} --pool {{quote(pool)}} --out {{quote(out)}}
