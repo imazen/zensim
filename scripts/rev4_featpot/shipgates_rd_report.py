@@ -30,21 +30,25 @@ def main():
     def saving(value):
         lo,hi=value["saving_ci95"]
         return f"{100*value['saving']:.9g}% [{100*lo:.9g}, {100*hi:.9g}]"
+    judge_names={"ssim2":"SSIMULACRA2","butter":"butteraugli (p-norm 3)","zensim":"fixed zensim B"}
+    baseline_name=("no steering" if all(data["numeric_gates"][m]["baseline"]=="none" for m in models)
+                   else "matched scalar controller")
     lines=["# Judged RD development probe","",data["status"],"",
         "Control/intervention qualification remains separate from these numeric bars.","",
         f"Sources: {data['sources']}; cells: {data['cases']}. {data['bootstrap']}.","",
         "Source weighting: "+data["source_weighting"]+".","",
+        "Baseline: "+baseline_name+".","",
         "Bars: >=0% on every judge, >=1% on at least one, no content-class aggregate regression, and >=12 source families per class.","",
         "Numeric verdicts: "+"; ".join(f"{m}: {data['numeric_gates'][m]['verdict']}" for m in models)+"."]
     for cohort in ["all"]+classes:
         lines += ["",f"## {cohort}","",
-            "| Candidate | Judge | Candidate vs scalar (95% CI) | Butteraugli peer vs scalar (95% CI) | Candidate vs peer (95% CI) |",
+            "| Candidate | Judge | Candidate vs baseline (95% CI) | Butteraugli peer vs baseline (95% CI) | Candidate vs peer (95% CI) |",
             "|---|---|---:|---:|---:|"]
         for model in models:
             baseline=data["numeric_gates"][model]["baseline"]
             peer="butteraugli" if baseline=="none" else model+"-butteraugli"
             for metric in data["requested_judges"]:
-                lines.append(f"| {model} | {metric} | {saving(row(model,baseline,metric,cohort))} | "
+                lines.append(f"| {model} | {judge_names[metric]} | {saving(row(model,baseline,metric,cohort))} | "
                     f"{saving(row(peer,baseline,metric,cohort))} | {saving(row(model,peer,metric,cohort))} |")
     comparisons=[]
     for model in models:
