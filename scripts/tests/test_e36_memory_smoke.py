@@ -4,11 +4,27 @@ from pathlib import Path
 import sys
 import unittest
 import argparse
+import tempfile
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'rev4_featpot'))
 from e36_memory_smoke import seed_zero,diagnostic_result
 
 class Diagnostic(unittest.TestCase):
+    def test_six_source_binaries_match_four_archived_runtime_members(self):
+        from e36_memory_smoke import runtime_binaries
+        from e36_store import sha
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as directory:
+            root=Path(directory);names=['zensim_mlp_train','bake_dial_refit','panel','inspect_qualified_checkpoint','check_holdout_overlap','serve_custom_bake']
+            for name in names:(root/name).write_bytes(('invented '+name).encode())
+            metadata=dict(files={'bin/'+name:sha(root/name) for name in names[:4]})
+            self.assertEqual(runtime_binaries(metadata,root),metadata['files'])
+            extra=dict(files=metadata['files']|{'bin/serve_custom_bake':sha(root/'serve_custom_bake')})
+            with self.assertRaises(ValueError):runtime_binaries(extra,root)
+            original=(root/'panel').read_bytes();(root/'panel').write_bytes(b'changed')
+            with self.assertRaises(ValueError):runtime_binaries(metadata,root)
+            (root/'panel').write_bytes(original);(root/'panel').unlink()
+            with self.assertRaises(ValueError):runtime_binaries(metadata,root)
+
     def test_adapter_refuses_unbound_or_wrong_diagnostic_before_bootstrap(self):
         import e36_training as training
         args=argparse.Namespace(e36_arm='tv10-c',seed_index=0,heldout=None,strict_admission=True,

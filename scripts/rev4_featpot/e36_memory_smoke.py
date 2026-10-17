@@ -15,6 +15,15 @@ def write(path,value):
 
 def bind(path):return dict(path=str(path),sha256=sha(path))
 
+def runtime_binaries(metadata,directory):
+    inventory={name:value for name,value in metadata['files'].items() if name.startswith('bin/')}
+    if set(inventory)!={'bin/zensim_mlp_train','bin/bake_dial_refit','bin/panel','bin/inspect_qualified_checkpoint'}:
+        raise ValueError('exact four E36 archived runtime binaries required')
+    for name,value in inventory.items():
+        path=Path(directory)/Path(name).name
+        if not path.is_file() or sha(path)!=value:raise ValueError('diagnostic runtime binary differs from scientific parent')
+    return inventory
+
 
 def seed_zero(blueprint):
     def arg(argv,key):
@@ -49,8 +58,7 @@ def prepare(root,packet,out,owner,commit):
     binaries=Path(scientific_receipt.get('binary_directory',root/'bin/e36-fit-final'))
     with tarfile.open(packet/'program.tar.gz') as archive:
         parent_meta=json.load(archive.extractfile('build_meta.json'))
-    for binary in binaries.iterdir():
-        if not binary.is_file() or parent_meta['files'].get('bin/'+binary.name)!=sha(binary):raise ValueError('diagnostic numerical binary differs from scientific parent')
+    parent_runtime=runtime_binaries(parent_meta,binaries)
     for name,digest in pins['files'].items():
         if sha(frozen/name)!=digest:raise ValueError('frozen final scientific source changed')
         target=source/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(frozen/name,target)
@@ -72,6 +80,9 @@ def prepare(root,packet,out,owner,commit):
     meta['e36_memory_smoke']=dict(policy=SMOKE,projection_overlay=bind(projection),original_projection_sha256=before,final_scientific_program_sha256=original['program.tar.gz'],native_owner=bind(owner/'SOURCE.json'),final_scientific_program_unchanged=True)
     write(out/'build-meta.json',meta)
     subprocess.run([sys.executable,str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),'--source-pins',str(out/'source-pins.json'),'--source-pins-sha256',sha(out/'source-pins.json'),'--executor',str(owner/'fit_cell_exec.py'),'--bin-dir',str(binaries),'--build-meta',str(out/'build-meta.json'),'--data',contract+'='+str(out/'qualified-package.json'),'--out',str(out/'program.tar.gz')],check=True)
+    with tarfile.open(out/'program.tar.gz') as archive:
+        smoke_meta=json.load(archive.extractfile('build_meta.json'))
+    if runtime_binaries(smoke_meta,binaries)!=parent_runtime:raise ValueError('diagnostic archive runtime inventory differs from scientific parent')
     plan=json.loads((packet/'E36_FIT_PLAN.json').read_text());spec=packet/'e36-tv10-c-full.spec.json'
     if sha(spec)!=plan['manifests']['e36-tv10-c-full']['spec_sha256'] or plan['program_sha256']!=original['program.tar.gz'] or plan['data_sha256']!=original['data.tar.gz']:raise ValueError('registered scientific blueprint/program/data changed')
     blueprint=json.loads(spec.read_text());cell=seed_zero(blueprint);cell['name']='e36-memory-smoke__N/full_s0'
