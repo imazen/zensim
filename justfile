@@ -2106,11 +2106,17 @@ e36-adapter-unit-check:
 # Do not wrap their sequence in a single shared-lock allocation.
 e36-final-normal-build root:
     test ! -e {{quote(root + "/bin/e36-normal-final")}}
-    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
+    just e36-normal-build-cargo /home/lilith/tmp/e36-pixels-target
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/bin/e36-normal-final")}}
 
 e36-private-build-cargo target:
     E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --example inspect_qualified_checkpoint --bin check_holdout_overlap --target-dir {{quote(target)}}
+
+e36-normal-build-cargo target:
+    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir {{quote(target)}}
+
+e36-identity-build-cargo target:
+    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim --example serve_custom_bake --features custom-profiles,candidate-profiles --target-dir {{quote(target)}}
 
 e36-final-private-build root:
     test ! -e {{quote(root + "/bin/e36-fit-final")}}
@@ -2122,7 +2128,7 @@ e36-final-private-build root:
 
 e36-final-identity-build root:
     test ! -e {{quote(root + "/bin/e36-fit-final/serve_custom_bake")}}
-    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim --example serve_custom_bake --features custom-profiles,candidate-profiles --target-dir /home/lilith/tmp/e36-pixels-target
+    just e36-identity-build-cargo /home/lilith/tmp/e36-pixels-target
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/examples/serve_custom_bake {{quote(root + "/bin/e36-fit-final/serve_custom_bake")}}
 
 e36-final-pool root out commit:
