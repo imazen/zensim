@@ -18,6 +18,21 @@ GEOMETRIES = ['64x64', '256x256', '1024x1024', '2048x2048']
 AUDIT_KEYS = ['density_sha256', 'features_gradient_sha256', 'queries_sha256', 'refinement_sha256']
 
 
+def refresh_activity(activity):
+    """Keep the owner's check, publishing our shared lane heartbeat atomically."""
+    from datetime import datetime, timezone
+    name = os.environ.get('SPEEDQ_LOCK_OWNER', 'codex SPEEDQ')
+    path = Path(owner.__file__).resolve().parents[2] / '.workongoing'
+    if not path.exists() or f' {name}' not in path.read_text():
+        raise RuntimeError('SPEEDQ workspace lock ownership changed')
+    temporary = path.with_name(f'.workongoing.{os.getpid()}.new')
+    temporary.write_text(datetime.now(timezone.utc).isoformat() + f' {name} ' + activity + '\n')
+    os.replace(temporary, path)
+
+
+owner.refresh_activity = refresh_activity
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
@@ -43,7 +58,7 @@ def main():
         os.environ['XDG_CACHE_HOME'] = str(root / job['benchmark_cache'])
     assert owner.CPUSETS[1].isdigit()
     if a.mode == 'report':
-        report(root, job)
+        report(root, job, a.model)
         return
     assert a.model in job['models'], 'explicit registered model required'
     binding = job['models'][a.model]
@@ -154,23 +169,26 @@ def main():
         write(parity, dict(status='PASS', job_sha256=sha(root / 'JOB.json'), records=records, audits=audits))
         load(parity)
     else:
+        geometry_order = job.get('timing_geometry_order', GEOMETRIES)
+        assert len(geometry_order) == len(GEOMETRIES) and set(geometry_order) == set(GEOMETRIES)
         owner.timing(
             binaries['after'], dest / 'timing', 32, parity, binaries['analyzer'], arms=ARMS,
-            cells=[(g, 'v4x', 1) for g in GEOMETRIES], baseline='e34_butter_map',
+            cells=[(g, 'v4x', 1) for g in geometry_order], baseline='e34_butter_map',
             parity_loader=load, ready_check=lambda *args: ready(load(parity), *args),
             worker_binaries={'e34_candidate_map_before': binaries['before']},
             lock=Path.home() / 'tmp/zensim-paper/rev4/heavy.lock',
         )
 
 
-def report(root, job):
+def report(root, job, selected=None):
     from speed_matrix_report import least_squares
     from speedq_report_support import verify_speedq_batches
 
     panel = root / job['binaries']['panel']['path']
     assert sha(panel) == job['binaries']['panel']['sha256']
     result = dict(models={}, job_sha256=sha(root / 'JOB.json'), exploratory=True,
-                  qualification_allowed=False, host=job['host'], cpuset=str(job['cpuset']), threads=1, tier='v4x')
+                  qualification_allowed=False, host=job['host'], cpuset=str(job['cpuset']), threads=1, tier='v4x',
+                  complete_model_grid=selected is None)
     lines = ['# Complete score and map performance', '',
              f"Same deterministic RGB8 pairs, complete retained outputs, cached references, CPU{job['cpuset']}/v4x/one thread. "
              'First32cleanrounds of at most64; unchanged SPEEDQ quiet admission. '
@@ -178,7 +196,8 @@ def report(root, job):
              'type7. Exploratory engineering evidence on one deterministic pair per geometry; no content-wide claim.', '',
              '| model | size | before p95 ms | after p95 ms | butter p95 ms | after−before95% CI ms | after−butter95% CI ms |',
              '|---|---|---:|---:|---:|---|---|']
-    for model in job['models']:
+    assert selected is None or selected in job['models']
+    for model in ([selected] if selected else job['models']):
         base = root / 'results' / model
         parity = read(base / 'PREFLIGHT_PASS.json')
         assert parity['status'] == 'PASS' and parity['job_sha256'] == sha(root / 'JOB.json')
@@ -237,8 +256,9 @@ def report(root, job):
     for model, record in result['models'].items():
         for arm, fit in record['median_fits'].items():
             lines.append(f"| {model} | {arm} | {fit['alpha_ns']/1e6:.6f} | {fit['beta_ns_per_pixel']:.6f} |")
-    write(root / 'RESULTS.json', result)
-    (root / 'REPORT.md').write_text('\n'.join(lines) + '\n')
+    suffix = f'-{selected}' if selected else ''
+    write(root / f'RESULTS{suffix}.json', result)
+    (root / f'REPORT{suffix}.md').write_text('\n'.join(lines) + '\n')
 
 
 def native_cache(root, mode, selected, binary):

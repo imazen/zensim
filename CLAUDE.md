@@ -158,9 +158,11 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-17 — concurrent MAPPERF waiters raced the activity-file rewrite. FIXED LOCALLY.** A queued diff-410 cycle saw the activity file during another same-owner write and refused before parity/timing. The lane adapter retains the ownership check and publishes activity with atomic replace; failed attempts remain preserved.
+
 * **2026-10-16 — native JXL intervention decoder pixel parity. OPEN FINDING.** The representative primary/libjxl0.12 U8 comparisons in the SHIPGATES TRAIN control panel differ by at most1 channel level. All retained outputs decode, neutral repeats are exact, and control quantizer changes stay inside selected regions; this does not establish bit identity with libjxl. The responsible conversion/decoder stage is unresolved. Preserve both outputs and report the finding alongside RD evidence; no decoder fix or product qualification is claimed.
 
-* **2026-10-17 — MAPPERF worker alias omitted from paired-coordinator inventory. FIXED LOCALLY.** The fresh map audits passed, but the coordinator refused the first segment before collecting rounds because the before-worker alias was absent from its explicit declarations. The alias now names the same complete retained-output action in both registries. The failed attempt is preserved; no measurement or admission rule changed.
+* **2026-10-17 — MAPPERF worker alias omitted from paired-coordinator inventory. FIXED in b2205962.** The fresh map audits passed, but the coordinator refused the first segment before collecting rounds because the before-worker alias was absent from its explicit declarations. The alias now names the same complete retained-output action in both registries. The failed attempt is preserved; no measurement or admission rule changed.
 
 * **2026-10-16 — source-preparation matte rounding differs from exact IEC sRGB. OPEN.** The SHIPGATES white-matte diagnostic through zenpixels-convert0.2.16 differs on21 RGB channels by1 on the transparent codec-corpus GUI image. Its strict independent oracle fails and the prepared matte is excluded. The sweep instead admits a maximal all-opaque crop with exact byte equality and retained original family; no color-conversion fix is claimed.
 

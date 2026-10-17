@@ -5,7 +5,7 @@ mapperf-bin-check:
     cargo test --locked -p zensim --lib --features custom-profiles attribution::tests::binned_ -- --nocapture
 
 mapperf-runtime-build:
-    cargo bench --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp --no-run --message-format=json-render-diagnostics
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}" cargo bench --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp --no-run --message-format=json-render-diagnostics
 
 mapperf-runtime-clippy:
     cargo clippy --locked --manifest-path zensim-bench/addrfix-runtime/Cargo.toml --bench ssim2_speed_bar --features costcmp -- -D warnings
