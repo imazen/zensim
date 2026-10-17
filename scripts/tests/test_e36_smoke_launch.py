@@ -32,6 +32,7 @@ class Launch(unittest.TestCase):
             self.assertLess(final,shell.index('exec docker run'))
             self.assertNotIn('pip install',shell)
             self.assertEqual(json.loads((out/'LAUNCH_PLAN.json').read_text())['diagnostic_cells'],1)
+            self.assertEqual((out/'image.dockerignore').read_text(),'*\n!Dockerfile\n!program.tar.gz\n')
             # An invalid host refuses before preparing any launch files.
             prepared['planned_host']='tower';(out/'PREPARED.json').write_text(json.dumps(prepared))
             with self.assertRaisesRegex(ValueError,'authorized bounded'):owner.prepare(out)

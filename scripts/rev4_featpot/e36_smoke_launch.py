@@ -54,7 +54,8 @@ def prepare(out):
     lines[-2]=prefix+'bash -c '+q(check+' && exec '+invocation[len(prefix):])
     script.write_text('\n'.join(lines)+'\n')
     docker=Path(__file__).parents[2]/'docker/Dockerfile.e36fit'
-    files={'program.tar.gz':Path(prepared['program']['path']),'data.tar.gz':Path(prepared['data']['path']),'scheduled.manifest.json':scheduled,'Dockerfile':docker,'run-i270.sh':script}
+    dockerignore=out/'image.dockerignore';dockerignore.write_text('*\n!Dockerfile\n!program.tar.gz\n')
+    files={'program.tar.gz':Path(prepared['program']['path']),'data.tar.gz':Path(prepared['data']['path']),'scheduled.manifest.json':scheduled,'Dockerfile':docker,'run-i270.sh':script,'.dockerignore':dockerignore}
     sums=out/'INPUT_SHA256SUMS';sums.write_text(''.join(sha(path)+'  '+name+'\n' for name,path in files.items()));files['INPUT_SHA256SUMS']=sums
     write(out/'LAUNCH_PLAN.json',dict(schema='e36-one-native-diagnostic-launch-v1',host=HOST,directory=directory,image=image,container=name,base=BASE,prepared_sha256=sha(out/'PREPARED.json'),program_admission_sha256=sha(out/'program-admission/receipt.json'),files={name:dict(path=str(path),sha256=sha(path)) for name,path in files.items()},native_ids_unchanged=True,scientific_fits=0,diagnostic_cells=1,container_memory_bytes=8*1024**3,threads=2,wall_cap_sec=900))
 
