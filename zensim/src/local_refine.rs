@@ -98,7 +98,7 @@ const SCALE_W: usize = 3 * CH_W;
 
 /// One channel-scale's retained phase-A planes, minus the append-only
 /// `bs2` (never read by a served v2 family).
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct ChPlanes {
     mu1: Vec<f32>,
     mu2: Vec<f32>,
@@ -142,7 +142,7 @@ fn fill_inactive_scale0(
 
 /// The retained planes a snapshot keeps, copied from or moved out of a
 /// [`FoldRetention`].
-struct RetainedParts {
+pub(crate) struct RetainedParts {
     pyr_src0: [Vec<f32>; 3],
     pyr_dst0: [Vec<f32>; 3],
     pyr_src: [[Vec<f32>; 3]; LOCAL_SCALES],
@@ -200,8 +200,68 @@ pub(crate) struct LocalRefineSnapshot {
     /// The computation's formula revision (blur arithmetic + `direct`).
     revision: FormulaRevision,
     omit_pjnd_fragility: bool,
+    snapshot_reuse: Option<SnapshotReuse>,
     /// Rev5 ordered production strip partials; central moments are replaced, never subtracted.
     strips: [[Vec<(DenseAccum, GradientAccum)>; 3]; LOCAL_SCALES],
+}
+
+/// One retired snapshot's owned buffers per retaining session. No snapshot
+/// carries a reference to another snapshot, and live outputs never enter it.
+pub(crate) type SnapshotReuse = std::sync::Arc<std::sync::Mutex<Option<RetainedParts>>>;
+
+/// Restore only storage. The next walk rewrites every active element, and
+/// `FoldRetention::ensure` checks every length and plan restriction afterwards.
+pub(crate) fn restore_snapshot_buffers(ret: &mut FoldRetention) {
+    let Some(pool) = &ret.snapshot_reuse else {
+        return;
+    };
+    let Some(parts) = pool.lock().expect("snapshot reuse lock").take() else {
+        return;
+    };
+    if ret.pyr_src.len() <= LOCAL_SCALES
+        || ret.pyr_dst.len() <= LOCAL_SCALES
+        || ret.planes.len() <= LOCAL_SCALES
+    {
+        return;
+    }
+    ret.pyr_src[0] = parts.pyr_src0;
+    ret.pyr_dst[0] = parts.pyr_dst0;
+    for (si, ((src, dst), planes)) in parts
+        .pyr_src
+        .into_iter()
+        .zip(parts.pyr_dst)
+        .zip(parts.planes)
+        .enumerate()
+    {
+        ret.pyr_src[si + 1] = src;
+        ret.pyr_dst[si + 1] = dst;
+        for (out, p) in ret.planes[si + 1].iter_mut().zip(planes) {
+            out.mu1 = p.mu1;
+            out.mu2 = p.mu2;
+            out.ssq = p.ssq;
+            out.s12 = p.s12;
+            out.act = p.act;
+        }
+    }
+}
+
+impl Drop for LocalRefineSnapshot {
+    fn drop(&mut self) {
+        let Some(pool) = self.snapshot_reuse.take() else {
+            return;
+        };
+        let mut slot = pool.lock().expect("snapshot reuse lock");
+        if slot.is_none() {
+            *slot = Some(RetainedParts {
+                pyr_src0: core::mem::take(&mut self.pyr_src0),
+                pyr_dst0: core::mem::take(&mut self.pyr_dst0),
+                pyr_src: core::mem::take(&mut self.pyr_src),
+                pyr_dst: core::mem::take(&mut self.pyr_dst),
+                planes: core::mem::take(&mut self.planes),
+                strips: core::mem::take(&mut self.strips),
+            });
+        }
+    }
 }
 
 /// Scale-0 distorted values for the queried rectangle — the intervention
@@ -347,6 +407,12 @@ impl LocalRefineSnapshot {
         if !Self::capture_admits(ret, plan, src_dims) {
             return None;
         }
+        let snapshot_reuse = ret.complete_distorted0.then(|| {
+            std::sync::Arc::clone(
+                ret.snapshot_reuse
+                    .get_or_insert_with(|| std::sync::Arc::new(std::sync::Mutex::new(None))),
+            )
+        });
         let take = core::mem::take::<Vec<f32>>;
         let parts = RetainedParts {
             strips: std::array::from_fn(|s| ret.strips[s + 1].each_mut().map(core::mem::take)),
@@ -367,7 +433,7 @@ impl LocalRefineSnapshot {
                 })
             }),
         };
-        Self::capture_from_parts(
+        let mut snapshot = Self::capture_from_parts(
             ret,
             plan,
             src_dims,
@@ -376,7 +442,9 @@ impl LocalRefineSnapshot {
             encoding,
             parts,
             cached_source0,
-        )
+        )?;
+        snapshot.snapshot_reuse = snapshot_reuse;
+        Some(snapshot)
     }
 
     /// The one capture body; `parts` are the retained planes, copied or moved.
@@ -447,6 +515,7 @@ impl LocalRefineSnapshot {
             toggles: plan.toggles(),
             revision: c.formula_revision,
             omit_pjnd_fragility: c.omit_pjnd_fragility,
+            snapshot_reuse: None,
             strips,
         };
         if !this.rebuild_unretained_coarse(c) {
@@ -622,7 +691,7 @@ impl LocalRefineSnapshot {
         true
     }
 
-    /// Heap bytes held by the snapshot — the number the lane's cost section
+    /// Directly owned heap bytes (excluding the shared session reuse slot) — the number the lane's cost section
     /// reports as "snapshot memory" (scale-0 src+dst, scales 1–3 src/dst +
     /// five phase-A planes; cells/mg are a few KB). Read by the cost
     /// measurement test.
@@ -1643,6 +1712,166 @@ mod tests {
             assert!(ret.pyr_dst[0][0].is_empty() && ret.pyr_dst[0][2].is_empty());
         }
         println!("PREPARED_RAW0_OK");
+    }
+
+    #[test]
+    fn retired_snapshot_buffers_reuse_without_changing_live_results() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "local_refine::tests::retired_snapshot_buffers_reuse_without_changing_live_results",
+            "SNAPSHOT_REUSE_OK",
+        ) {
+            return;
+        }
+        let _token = archmage::testing::lock_token_testing();
+        let plan = crate::feature_plan::Plan::derive(
+            &crate::feature_set_id::SlotSet::from_slots(
+                (13..26).chain(39..156).chain(401..430).chain(459..720),
+            ),
+            720,
+        )
+        .expect("sparse prepared plan");
+        fn take_pair(
+            src: &[[u8; 3]],
+            dst: &[[u8; 3]],
+            dims: (usize, usize),
+            plan: &crate::feature_plan::Plan,
+            scratch: &mut V2Scratch,
+            ret: &mut FoldRetention,
+        ) -> (LocalRefineSnapshot, LocalRefineSnapshot) {
+            let (w, h) = dims;
+            let source = RgbSlice::new(src, w, h);
+            let distorted = RgbSlice::new(dst, w, h);
+            let reference = crate::PrecomputedReference::for_candidate(
+                &source,
+                false,
+                None,
+                FormulaRevision::Rev5,
+            );
+            let prepared = crate::feature_v2::compute_folded_with_ref_retained(
+                &source,
+                &reference,
+                &distorted,
+                false,
+                scratch,
+                plan,
+                Some(ret),
+            );
+            let actual = LocalRefineSnapshot::capture_taking(
+                ret,
+                plan,
+                dims,
+                &source,
+                &distorted,
+                None,
+                Some(&reference.scales[0].0),
+            )
+            .expect("moving prepared capture");
+            // A fresh ordinary retention has no recycle slot or prepared raw0 path.
+            let mut fresh = FoldRetention::default();
+            let ordinary = crate::feature_v2::compute_folded_v1_372_streaming_impl(
+                &source,
+                &distorted,
+                None,
+                false,
+                &mut V2Scratch::new(),
+                Some(plan),
+                Some(&mut fresh),
+            )
+            .expect("fresh ordinary walk");
+            assert_eq!(
+                prepared.0.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                ordinary.0.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            );
+            let expected = LocalRefineSnapshot::capture(&fresh, plan, dims, &source, &distorted)
+                .expect("independent ordinary capture");
+            (actual, expected)
+        }
+        let bits = |snapshot: &LocalRefineSnapshot| {
+            [(0, 0, 8, 8), (16, 16, 24, 24), (31, 40, 47, 56)]
+                .into_iter()
+                .flat_map(|rect| {
+                    snapshot
+                        .deltas(rect, &Candidate::Reference)
+                        .expect("finite repair")
+                        .into_iter()
+                        .map(|(id, v)| (id, v.to_bits()))
+                })
+                .collect::<Vec<_>>()
+        };
+        let dims = (257, 521);
+        let src = textured(dims.0, dims.1, 91);
+        let dst = distort(&src, dims.0, dims.1);
+        let mut scratch = V2Scratch::new();
+        let mut ret = FoldRetention::default();
+        let (a, a_expected) = take_pair(&src, &dst, dims, &plan, &mut scratch, &mut ret);
+        let a_bits = bits(&a_expected);
+        assert_eq!(bits(&a), a_bits);
+        let mut changed = dst.clone();
+        for px in &mut changed {
+            px[0] ^= 17;
+        }
+        let (b, b_expected) = take_pair(&src, &changed, dims, &plan, &mut scratch, &mut ret);
+        assert_eq!(bits(&b), bits(&b_expected));
+        let address = b.pyr_dst0[1].as_ptr() as usize;
+        assert!(
+            ret.snapshot_reuse
+                .as_ref()
+                .expect("reuse slot")
+                .lock()
+                .expect("lock")
+                .is_none()
+        );
+        // Returning from another thread must not mutate the still-live A result.
+        std::thread::spawn(move || drop(b))
+            .join()
+            .expect("drop thread");
+        assert!(
+            ret.snapshot_reuse
+                .as_ref()
+                .expect("reuse slot")
+                .lock()
+                .expect("lock")
+                .is_some()
+        );
+        let (c, c_expected) = take_pair(&src, &dst, dims, &plan, &mut scratch, &mut ret);
+        assert_eq!(
+            c.pyr_dst0[1].as_ptr() as usize,
+            address,
+            "reuse the retired allocation"
+        );
+        assert_eq!(bits(&c), bits(&c_expected));
+        assert_eq!(bits(&a), a_bits, "live results must not be recycled");
+        drop(a);
+        let small = (137, 101);
+        let other_src = textured(small.0, small.1, 117);
+        let other_dst = distort(&other_src, small.0, small.1);
+        let (d, d_expected) =
+            take_pair(&other_src, &other_dst, small, &plan, &mut scratch, &mut ret);
+        assert_eq!(
+            bits(&d),
+            bits(&d_expected),
+            "resize and overwrite retired storage"
+        );
+        assert_eq!(
+            bits(&c),
+            bits(&c_expected),
+            "older live geometry remains valid"
+        );
+        drop(d);
+        drop(c);
+        let slot = ret
+            .snapshot_reuse
+            .as_ref()
+            .expect("reuse slot")
+            .lock()
+            .expect("lock");
+        assert_eq!(
+            slot.as_ref().expect("one retired result").pyr_dst0[1].len(),
+            small.0 * small.1,
+            "a later drop must not accumulate a second retired buffer set"
+        );
+        println!("SNAPSHOT_REUSE_OK");
     }
 
     /// `feature_v2::tests::textured_image`'s fixture family, duplicated

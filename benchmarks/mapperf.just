@@ -41,6 +41,9 @@ mapperf-native-cache-check binary root model:
 mapperf-native-cache-compare root:
     python3 scripts/rev4_featpot/mapperf.py native-cache-compare --root {{quote(root)}}
 
+mapperf-native-cache-full-compare binary root:
+    python3 scripts/rev4_featpot/mapperf.py native-cache-full-compare --binary {{quote(binary)}} --root {{quote(root)}}
+
 # Each nine-case native-cache chunk releases the shared locks for other lanes.
 mapperf-native-cache-run binary root model:
     python3 scripts/rev4_featpot/mapperf.py native-cache-run --binary {{quote(binary)}} --root {{quote(root)}} --model {{quote(model)}}

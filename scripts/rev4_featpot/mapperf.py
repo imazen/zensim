@@ -35,13 +35,16 @@ owner.refresh_activity = refresh_activity
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'profile-stat', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
+    p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'profile-stat', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare', 'native-cache-full-compare'])
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--model')
     p.add_argument('--geometry', choices=GEOMETRIES)
     p.add_argument('--binary', type=Path)
     a = p.parse_args()
     root = a.root
+    if a.mode == 'native-cache-full-compare':
+        native_cache_full_compare(root, a.binary)
+        return
     if a.mode == 'cycle':
         assert a.model
         os.environ['SPEEDQ_LOCK_OWNER'] = 'codex-MAPPERF'
@@ -340,6 +343,35 @@ def native_cache(root, mode, selected, binary):
                                  chunk_result_sha256s=[sha(dest / f'chunk-{start:03}' / 'result.json') for start in range(0, 135, 9)], **pins)
     if mode == 'native-cache-compare':
         write(root / 'NATIVE_CACHE_PARITY.json', dict(status='PASS', models=results))
+
+
+def native_cache_full_compare(root, binary):
+    """The original 135-case packets keep the original cache path unchanged."""
+    assert binary is not None and binary.is_file()
+    old = Path('/mnt/v/output/zensim/e34-prep-2026-10-15/part6')
+    results = {}
+    for model in ['a', 'c']:
+        dest = root / 'native-cache' / model
+        pins = read(dest / 'PINS.json')
+        source_job = old / f'cached-gate-{model}' / 'job.json'
+        previous = old / f'cached-gate-{model}' / 'result.json'
+        assert sha(source_job) == pins['source_job_sha256']
+        assert sha(previous) == pins['previous_sha256']
+        job = read(dest / 'job.json')
+        original_job = read(source_job)
+        assert {k: v for k, v in job.items() if k != 'output'} == {
+            k: v for k, v in original_job.items() if k != 'output'}
+        assert sha(job['repair_feature_cache']) == pins['cache_sha256']
+        current = read(dest / 'result.json')
+        prior = read(previous)
+        assert current['packet_sha256'] == sha(dest / 'job.json')
+        assert len(current['rows']) == len(prior['rows']) == len(job['cases']) == 135
+        assert current['rows'] == prior['rows'], f'{model}: full native packet changed'
+        results[model] = dict(rows=135, every_output_row_field_equal=True,
+                              result_sha256=sha(dest / 'result.json'), **pins)
+    write(root / 'FULL_NATIVE_CACHE_PARITY.json', dict(
+        status='PASS', models=results, binary_sha256=sha(binary),
+        scope='all original row fields including the original repair cache path'))
 
 
 if __name__ == '__main__':
