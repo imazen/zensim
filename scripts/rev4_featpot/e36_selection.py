@@ -42,7 +42,7 @@ def score(binary,manifest,bake,out):
             raise
     write(out/'receipt.json',dict(schema='e36-raw-selection-forward-v1',manifest=str(manifest),manifest_sha256=sha(manifest),
         bake_sha256=sha(bake),binary_sha256=sha(binary),output=str(pred),output_sha256=sha(pred),rows=count,
-        owner='BakeScorer.without_output_calibration; production fx1/scaler/head',labels_read=False,fits=0))
+        owner='BakeScorer.without_output_calibration; production fx1/scaler/head',score_convention='higher_is_better; plain N raw=pin-g',labels_read=False,fits=0))
 
 
 def select(request,out):
@@ -100,14 +100,14 @@ def select(request,out):
             or any(qualified.get(k)!=v for k,v in plan['qualification_owners'].items())):
             raise ValueError('successful native decoded-checkpoint qualification required before selection')
         rp=Path(model['raw_receipt']);r=json.loads(rp.read_text())
-        if sha(rp)!=model['raw_receipt_sha256'] or r['manifest_sha256']!=req['manifest_sha256'] or r['bake_sha256']!=model['bake_sha256'] or r['binary_sha256']!=req['raw_binary_sha256'] or r['labels_read'] is not False or r['fits']!=0 or sha(r['output'])!=r['output_sha256']:
+        if sha(rp)!=model['raw_receipt_sha256'] or r['manifest_sha256']!=req['manifest_sha256'] or r['bake_sha256']!=model['bake_sha256'] or r['binary_sha256']!=req['raw_binary_sha256'] or r['labels_read'] is not False or r['fits']!=0 or r['score_convention']!='higher_is_better; plain N raw=pin-g' or sha(r['output'])!=r['output_sha256']:
             raise ValueError('raw model/selection binding changed')
         values=[]
         with Path(r['output']).open() as f:
             for i,line in enumerate(f):
                 v=json.loads(line)
-                if v['row_idx']!=i or not math.isfinite(v['raw_distance']):raise ValueError('unordered/nonfinite prediction')
-                values.append(v['raw_distance'])
+                if v['row_idx']!=i or not math.isfinite(v['raw_score']):raise ValueError('unordered/nonfinite prediction')
+                values.append(v['raw_score'])
         if len(values)!=m['feature_rows']:raise ValueError('missing raw predictions')
         models[key]=values
     available={arm:all(models[arm,s] is not None for s in range(3)) for arm in ['tv0-c','tv1-c','tv10-c']}
@@ -120,21 +120,21 @@ def select(request,out):
             for arm,totals in stats.items():
                 if not available[arm]:continue
                 for seed in range(3):
-                    values=models[arm,seed];delta=values[a]-values[b]
+                    values=models[arm,seed];delta=values[b]-values[a]
                     totals['weight']+=weight;totals['margin_mass']+=weight*(delta>=.05);totals['order_mass']+=weight*(delta>0.)
     for totals in stats.values():
         if totals['state']!='complete':continue
         if totals['weight']<=0:raise ValueError('empty selection support')
         totals['margin_fraction']=totals['margin_mass']/totals['weight'];totals['strict_order_fraction']=totals['order_mass']/totals['weight']
-    # Guard outputs must come from the unchanged engineering owners; no new
-    # thresholds or assessment result enters the predeclared tie-break.
-    guards=Path(req['engineering_guards']);g=json.loads(guards.read_text())
-    if sha(guards)!=req['engineering_guards_sha256'] or g['schema']!='e36-frozen-selection-guards-v1' or g['manifest_sha256']!=req['manifest_sha256'] or g['model_bindings']!=[{k:v[k] for k in ['arm','seed_index','bake_sha256']} for v in req['models']]:raise ValueError('selection guard model binding')
-    if any(g['passed'][arm] is True and not available[arm] for arm in ['tv1-c','tv10-c']):raise ValueError('unavailable full-data arm cannot pass selection guards')
-    eligible=[arm for arm in ['tv1-c','tv10-c'] if available['tv0-c'] and available[arm] and g['passed'][arm] is True]
+    # Compute the unchanged exact-identity guard with its frozen native owner;
+    # no request-supplied aggregate pass boolean can admit a treatment.
+    from e36_selection_guards import evaluate as compute_guards
+    guard_passed,guard_receipt=compute_guards(plan,req,models,out.parent/(out.name+'-guards'))
+    eligible=[arm for arm in ['tv1-c','tv10-c'] if available['tv0-c'] and available[arm]
+              and guard_passed['tv0-c'] and guard_passed[arm]]
     selected=min(eligible,key=lambda arm:(-stats[arm]['margin_fraction'],-stats[arm]['strict_order_fraction'],1 if arm=='tv1-c' else 10)) if eligible else None
     write(out,dict(schema='e36-global-train-selection-v1',selected_arm=selected,selection_locked_before_assessment=True,
-        request_sha256=sha(request),manifest_sha256=req['manifest_sha256'],fit_plan_sha256=req['fit_plan_sha256'],program_sha256=plan['program_sha256'],base_filter_sha256=req['base_filter_sha256'],trainer_sha256=req['trainer_sha256'],raw_binary_sha256=req['raw_binary_sha256'],engineering_guards_sha256=req['engineering_guards_sha256'],
+        request_sha256=sha(request),manifest_sha256=req['manifest_sha256'],fit_plan_sha256=req['fit_plan_sha256'],program_sha256=plan['program_sha256'],base_filter_sha256=req['base_filter_sha256'],trainer_sha256=req['trainer_sha256'],raw_binary_sha256=req['raw_binary_sha256'],engineering_guards=guard_receipt,
         model_bindings=[{k:v[k] for k in ['arm','seed_index','bake_sha256']} for v in req['models']],
         stats=stats,raw_margin=.05,aggregation='registered codec-weighted physical edges pooled over strata; three equally weighted full-data seeds',
         tie_break='margin fraction, strict-order fraction, smaller lambda',labels_read=False,fits=0))

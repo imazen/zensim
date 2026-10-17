@@ -105,3 +105,12 @@ generalization. Confirmation needs a separately frozen untouched ladder panel
 and the adopted ranking, steering and runtime gates; any new assessment exposure
 is logged before access. Existing matched CVVDP ranking results cannot select
 this repair's hyperparameters or checkpoint.
+
+
+E36 prospective clarification (coordinator, 2026-10-17): the TRAIN selection
+split has no human ranks, so no cross-reference rank acceptance rule is added
+to selection. Cross-reference ranking is protected at the registered human
+assessment by noninferiority and its dataset and W2 guards. Plain N emits a
+higher-is-better raw score `pin-g`; its ladder improvement is raw(better) minus
+raw(worse). This is the existing score-polarity hinge convention, independent
+of the `nonneg_distance` flag's name.

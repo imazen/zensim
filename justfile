@@ -2100,4 +2100,48 @@ e36-native-catalog root name output:
     {{quote(root + "/bin/zenfleet-ctl")}} "${e36_args[@]}" > {{quote(output)}}
 
 e36-adapter-unit-check:
-    python3 -m unittest scripts/tests/test_e36_data.py scripts/tests/test_e36_store.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_training.py scripts/tests/test_e36_materialize.py scripts/tests/test_e36_selection.py scripts/tests/test_e36_consensus.py
+    python3 -m unittest scripts/tests/test_e36_data.py scripts/tests/test_e36_store.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_training.py scripts/tests/test_e36_materialize.py scripts/tests/test_e36_selection.py scripts/tests/test_e36_consensus.py scripts/tests/test_e36_selection_guards.py
+
+# Caller acquires heavy.lock + run-heavy separately for EACH recipe below.
+# Do not wrap their sequence in a single shared-lock allocation.
+e36-final-normal-build root:
+    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/bin/e36-normal-final")}}
+
+e36-final-private-build root:
+    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --bin inspect_qualified_checkpoint --target-dir /home/lilith/tmp/e36-pixels-target
+    mkdir -p {{quote(root + "/bin/e36-fit-final")}}
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train /home/lilith/tmp/e36-pixels-target/release/panel /home/lilith/tmp/e36-pixels-target/release/bake_dial_refit /home/lilith/tmp/e36-pixels-target/release/inspect_qualified_checkpoint {{quote(root + "/bin/e36-fit-final/")}}
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/e36_raw_score {{quote(root + "/bin/e36-raw-score-final")}}
+
+e36-final-identity-build root:
+    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim --example serve_custom_bake --features custom-profiles,candidate-profiles --target-dir /home/lilith/tmp/e36-pixels-target
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/examples/serve_custom_bake {{quote(root + "/bin/e36-fit-final/serve_custom_bake")}}
+
+e36-final-pool root out commit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t e36_selected_runs < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["qualified"] in ("full","fallback"); print("\n".join(d["selected_runs"]))' {{quote(root + "/bulk-choice.json")}})
+    (( ${#e36_selected_runs[@]} > 0 ))
+    e36_selected_args=()
+    for e36_selected_run in "${e36_selected_runs[@]}"; do e36_selected_args+=(--run "$e36_selected_run"); done
+    python3 scripts/rev4_featpot/e36_materialize.py --root {{quote(root)}} "${e36_selected_args[@]}" --out {{quote(out)}} --commit {{quote(commit)}}
+
+e36-final-ingress root:
+    just e36-tv-ingress-fixtures {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} {{quote(root + "/FEATURE_LAYOUT_BINDING.json")}} {{quote(root + "/ingress-fixtures-final")}}
+    python3 scripts/rev4_featpot/e36_nontraining_modes.py --root {{quote(root)}} --private {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --normal {{quote(root + "/bin/e36-normal-final")}} --raw {{quote(root + "/bin/e36-raw-score-final")}} --fixtures {{quote(root + "/ingress-fixtures-final")}} --out {{quote(root + "/mode-admission-final")}}
+
+e36-final-actual-pool root pools:
+    python3 scripts/rev4_featpot/e36_actual_pool_admit.py --binary {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --pool {{quote(pools + "/fit")}} --out {{quote(root + "/actual-pool-admission-final")}}
+
+e36-final-data-packet root pools original out commit:
+    python3 scripts/rev4_featpot/e36_fit_packet.py data --root {{quote(root)}} --pools {{quote(pools)}} --base {{quote(original + "/e33-fit-data.tar.gz")}} --trainer {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --out {{quote(out)}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
+
+e36-final-program-packet root pools original packet commit:
+    python3 scripts/rev4_featpot/e36_fit_packet.py program --root {{quote(root)}} --pools {{quote(pools)}} --original {{quote(original)}} --packet {{quote(packet)}} --source {{quote(invocation_directory())}} --binaries {{quote(root + "/bin/e36-fit-final")}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
+
+e36-final-program-admit packet:
+    python3 scripts/rev4_featpot/e36_program_admit.py --program {{quote(packet + "/program.tar.gz")}} --out {{quote(packet + "/program-admission")}}
+
+e36-final-declare root pools original packet:
+    python3 scripts/rev4_featpot/e36_fit_packet.py specs --root {{quote(root)}} --pools {{quote(pools)}} --packet {{quote(packet)}} --original {{quote(original)}} --program {{quote(packet + "/program.tar.gz")}} --ctl {{quote(root + "/bin/zenfleet-ctl")}} --owner {{quote(root + "/fit-native-owner-v2")}}

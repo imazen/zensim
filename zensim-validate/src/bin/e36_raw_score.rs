@@ -68,14 +68,14 @@ fn main() -> Result<()> {
         for (&id, &value) in request.feature_ids.iter().zip(&row.features) {
             raw[id as usize] = f64::from(value);
         }
-        let distance = scorer
+        let score = scorer
             .score_features(&raw, row.width, row.height, None)
             .map_err(|e| anyhow::anyhow!("raw forward: {e:?}"))?;
-        ensure!(distance.is_finite(), "nonfinite raw distance");
+        ensure!(score.is_finite(), "nonfinite raw score");
         writeln!(
             output,
             "{}",
-            serde_json::json!({"row_idx":row.row_idx,"raw_distance":distance})
+            serde_json::json!({"row_idx":row.row_idx,"raw_score":score})
         )?;
     }
     output.flush()?;

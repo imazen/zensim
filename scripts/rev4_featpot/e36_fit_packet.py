@@ -1,5 +1,6 @@
 """Prepare opaque data transport and future native FitCell specs; never execute fits."""
 import argparse
+import ast
 import copy
 import gzip
 import hashlib
@@ -83,6 +84,32 @@ def packet(root,pools,base,trainer,out,owner,commit):
         fit_manifest_sha256=sha(fit/'manifest.json'),locked_contract_sha256=sha(locked),base_filter_sha256=sha(mask),fit_release=False))
 
 
+def local_import_closure(source,members):
+    """Include local Python owners reached by literal imports, even optional ones."""
+    pending=list(members);done=set()
+    while pending:
+        name=pending.pop()
+        if name in done:continue
+        done.add(name);path=source/name
+        if path.suffix!='.py':continue
+        for node in ast.walk(ast.parse(path.read_text(),filename=name)):
+            modules=[]
+            if isinstance(node,ast.Import):modules=[r.name for r in node.names]
+            elif isinstance(node,ast.ImportFrom) and node.module:modules=[node.module]
+            elif (isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id=='__import__'
+                  and node.args and isinstance(node.args[0],ast.Constant) and isinstance(node.args[0].value,str)):
+                modules=[node.args[0].value]
+            for module in modules:
+                relative=Path(*module.split('.')).with_suffix('.py')
+                candidates=[path.parent/relative,source/relative,source/'scripts'/relative,source/'scripts/rev4_featpot'/relative]
+                for candidate in candidates:
+                    if candidate.is_file() and candidate.is_relative_to(source):
+                        item=str(candidate.relative_to(source))
+                        if item not in done:pending.append(item)
+                        break
+    return done
+
+
 def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     """Use native program packaging; freeze qualification without fitting."""
     from e36_training import curated_projection,SPEC,ARMS
@@ -115,9 +142,27 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
                 manifest_sha256=receipt['fit_manifest_sha256'],contract_sha256=receipt['locked_contract_sha256'],
                 base_filter_sha256=receipt['base_filter_sha256'],mean_pool_weight=mass/n,curated_tables=projections)
             variants.append(v)
+    # Existing E33 exact-identity owner and inputs; no human ranks enter
+    # TRAIN selection. The coordinator explicitly chose this branch.
+    import struct
+    identity_sources=root/'selection-identity-sources.json'
+    shutil.copyfile('/mnt/v/output/zensim/e33-impl-2026-10-09/E3_SOURCES.json',identity_sources)
+    production=root/'bin/e36-selection-production.bin'
+    shutil.copyfile('/mnt/v/output/zensim/adjudicate-2026-10-07/models/seed0.bin',production)
+    if sha(production)!='f803b74c4252952f337abdc0234c2930839d45dddc32ae9b8b5296d6c840f400':raise ValueError('registered identity production owner input changed')
+    bind=lambda p:dict(path=str(p),sha256=sha(p))
+    policy=packet_dir/'selection-guard-policy.json'
+    write(policy,dict(schema='e36-train-selection-guard-policy-v1',selection_has_human_ranks=False,
+        required_guards=['native_raw_forward_finite','existing_e33_exact_identity'],identity_expected_rows=620,
+        identity_expected_sources=62,identity_pin_bits=struct.unpack('<Q',struct.pack('<d',100.))[0],
+        admission_owner_sha256=sha(Path(__file__).with_name('e36_selection_guards.py')),
+        binary=bind(binaries/'serve_custom_bake'),sources=bind(identity_sources),fx1=bind(source/'scripts/rev4_featpot/e33_fx1_declaration.json'),
+        production=bind(production),identity_source_sha256=sha(source/'zensim/examples/serve_custom_bake/nearid.rs'),
+        cross_reference_ranking='assessment: registered noninferiority, dataset point and W2 guards'))
     package=packet_dir/'qualified-package.json';write(package,dict(schema='e36-research-fit-package-v1',variants=variants))
     prior=json.loads((original/'source-pins.json').read_text());members=set(prior['files'])
     members.update(['scripts/rev4_featpot/e36_training.py','scripts/rev4_featpot/e36_store.py'])
+    members=local_import_closure(source,members)
     files={name:sha(source/name) for name in sorted(members) if Path(name).suffix in ['.py','.json']}
     pins=packet_dir/'source-pins.json';contract_name='benchmarks/e36_fit_contract_2026-10-17.json'
     write(pins,dict(schema='e36-public-program-v1',build_commit=commit,files=files,data={contract_name:sha(package)}))
@@ -185,7 +230,7 @@ def specs(root,pools,packet_dir,original,program,ctl,owner):
     write(packet_dir/'E36_FIT_PLAN.json',dict(schema='e36-future-fit-plan-v1',program_sha256=sha(program),data_sha256=receipt['sha256'],
         fit_manifest_sha256=receipt['fit_manifest_sha256'],selection_manifest_sha256=sha(pools/'selection/manifest.json'),
         contract_sha256=receipt['locked_contract_sha256'],base_filter_sha256=receipt['base_filter_sha256'],trainer_sha256=receipt['trainer_sha256'],raw_binary_sha256=sha(root/'bin/e36-raw-score-final'),ctl_sha256=sha(ctl),
-        selection_owner_sha256=sha(Path(__file__).with_name('e36_selection.py')),inventory_owner_sha256=sha(Path(__file__).with_name('e36_inventory.py')),qualification_owners=qualification_owners,manifests=records,cells=all_cells,fit_release=False,fit_smoke_permitted=False,policy='all three arms use the identical frozen pool/build/base-family mask; separate coordinator go required'))
+        selection_guard_policy=dict(path=str(packet_dir/'selection-guard-policy.json'),sha256=sha(packet_dir/'selection-guard-policy.json')),selection_owner_sha256=sha(Path(__file__).with_name('e36_selection.py')),inventory_owner_sha256=sha(Path(__file__).with_name('e36_inventory.py')),qualification_owners=qualification_owners,manifests=records,cells=all_cells,fit_release=False,fit_smoke_permitted=False,policy='all three arms use the identical frozen pool/build/base-family mask; separate coordinator go required'))
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='mode',required=True)

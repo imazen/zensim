@@ -12,6 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 sys.path.insert(0,str(Path(__file__).parents[1]/'rev4_featpot'))
 import e36_selection as owner
+import e36_selection_guards as guard_owner
 from e36_store import sha
 
 
@@ -19,7 +20,7 @@ def write(p,x):p.write_text(json.dumps(x))
 
 
 class Selection(unittest.TestCase):
-    def fixture(self,root):
+    def fixture(self,root,reverse_arm=None):
         pairs=root/'pairs.parquet';pq.write_table(pa.table(dict(worse_idx=[0],better_idx=[1],pair_weight_class=[0])),pairs)
         manifest=root/'manifest.json';write(manifest,dict(split='selection',feature_rows=2,pairs=dict(path=str(pairs),sha256=sha(pairs))))
         ctl=root/'invented-native-owner';ctl.write_bytes(b'invented-not-executable')
@@ -33,10 +34,11 @@ class Selection(unittest.TestCase):
                 cells.append(dict(name=cell,arm=arm,kind='full',seed_index=seed,heldout=None,argv_sha256=argv_sha))
                 desired.append(dict(cell=dict(image_path=cell)))
                 folder=root/(arm+'-'+str(seed));folder.mkdir()
-                raw=folder/'raw.jsonl';raw.write_text(json.dumps(dict(row_idx=0,raw_distance=.25))+'\n'+json.dumps(dict(row_idx=1,raw_distance=.125))+'\n')
+                raw=folder/'raw.jsonl';scores=[.25,.125] if arm==reverse_arm else [.125,.25]
+                raw.write_text(json.dumps(dict(row_idx=0,raw_score=scores[0]))+'\n'+json.dumps(dict(row_idx=1,raw_score=scores[1]))+'\n')
                 raw_receipt=folder/'raw-receipt.json';bake_sha=sha(raw)
                 write(raw_receipt,dict(manifest_sha256=sha(manifest),bake_sha256=bake_sha,binary_sha256='d'*64,
-                    labels_read=False,fits=0,output=str(raw),output_sha256=sha(raw)))
+                    labels_read=False,fits=0,score_convention='higher_is_better; plain N raw=pin-g',output=str(raw),output_sha256=sha(raw)))
                 binding=folder/'binding.json';write(binding,dict(schema='e36-fit-model-binding-v1',contains_labels=False,
                     label_payload_read_by_projection=False,role='full-data',heldout=None,arm=arm,seed_index=seed,selected_epoch=119,
                     program_sha256='e'*64,packed_model_sha256=bake_sha,manifest_sha256='f'*64,contract_sha256='c'*64,
@@ -62,7 +64,8 @@ class Selection(unittest.TestCase):
         return request
 
     def run_request(self,root,request,name):
-        path=root/(name+'-request.json');write(path,request);out=root/(name+'-selected.json');owner.select(path,out)
+        path=root/(name+'-request.json');write(path,request);out=root/(name+'-selected.json')
+        with patch.object(guard_owner,'evaluate',return_value=({'tv0-c':True,'tv1-c':name!='no-eligible','tv10-c':True},{'invented_only':True})):owner.select(path,out)
         return json.loads(out.read_text())
 
     def test_equal_scores_choose_smaller_lambda_and_bind_fresh_models(self):
@@ -85,6 +88,14 @@ class Selection(unittest.TestCase):
             m=request['models'][0];path=Path(m['model_binding']);binding=json.loads(path.read_text());binding['selected_epoch']=118
             write(path,binding);m['model_binding_sha256']=sha(path)
             with self.assertRaisesRegex(ValueError,'fresh matched'):self.run_request(root,request,'old-epoch')
+
+    def test_raw_score_polarity_rejects_reversed_arm(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+            root=Path(d);request=self.fixture(root,reverse_arm='tv1-c')
+            result=self.run_request(root,request,'polarity')
+            self.assertEqual(result['selected_arm'],'tv10-c')
+            self.assertEqual(result['stats']['tv1-c']['margin_fraction'],0.)
+            self.assertEqual(result['stats']['tv10-c']['margin_fraction'],1.)
 
     def test_terminal_failed_arm_never_shrinks_inventory_or_substitutes(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:

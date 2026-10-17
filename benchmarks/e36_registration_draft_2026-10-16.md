@@ -141,8 +141,10 @@ versioned implementation repairs apply consistently to affected matched cells.
 
 Choose one lambda globally on held-out TRAIN families: maximize weighted
 fraction meeting raw margin0.05, then strict-order fraction, then smaller
-lambda, aggregated over registered strata and three full-data seeds. Identity,
-finite and cross-reference guards use unchanged existing tests/thresholds.
+lambda, aggregated over registered strata and three full-data seeds. Identity and
+finite guards use unchanged existing tests/thresholds. TRAIN selection has no
+human ranks. Cross-reference ranking is protected at assessment by the
+registered noninferiority test and its dataset and W2 guards.
 If neither arm passes, select neither. No assessment dataset/fold/seed chooses
 checkpoint, feature set, margin or another lambda rule.
 
@@ -375,8 +377,8 @@ repair grants no extra generation time and changes no qualifying subset.
 
 TRAIN selection pools unique physical edges across the registered strata,
 using the frozen codec weights, with equal weight for each of the three
-full-data seeds. The raw-margin fraction uses delta>=0.05; strict order uses
-delta>0. Ties then choose the smaller lambda. These definitions are fixed
+full-data seeds. For plain N, raw(x)=pin-g(x) is higher-is-better. Use delta=raw(better)-raw(worse).
+The raw-margin fraction uses delta>=0.05; strict order uses delta>0. Ties then choose the smaller lambda. These definitions are fixed
 before any E36 model exists. An unavailable full-data slot needs terminal native
 ledger evidence; pending/gap slots are not failures. A treatment needs all three
 pilots and the fresh matched control. Both original human-assessment hypotheses
@@ -390,3 +392,12 @@ seed, row-count and unchanged numeric-weight gates. The inherited86400s cell
 wall cap is a conservative limit, not a measured E36 runtime. No E36 training
 smoke is admitted. The code is preparation; actual pool/build/package admission
 must pass before READY, and READY does not release fits.
+
+
+Coordinator clarification (2026-10-17 UTC): the no-human-ranks branch applies to
+TRAIN selection. No cross-reference rank guard or threshold is added to that
+selector. Existing exact-identity and native finite-forward checks remain;
+the selector invokes the frozen identity owner and derives pass from its
+complete bit-level evidence, rather than trusting a supplied aggregate boolean.
+Cross-reference ranking remains protected at human assessment by the registered
+noninferiority test, each-dataset point delta>=-0.005 and W2 delta>-2SE.

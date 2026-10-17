@@ -97,6 +97,8 @@ fn is_sha(value: &str) -> bool {
 struct Assessment {
     schema: String,
     program_sha256: String,
+    fit_plan: PathBuf,
+    fit_plan_sha256: String,
     paired: PathBuf,
     paired_sha256: String,
     bindings: PathBuf,
@@ -113,11 +115,111 @@ struct Binding {
     init_seed: u64,
     sample_seed: u64,
     bake_sha256: Option<String>,
+    fit_receipt: Option<PathBuf>,
     fit_receipt_sha256: String,
+    qualification: Option<PathBuf>,
+    qualification_sha256: Option<String>,
+    model_binding: Option<PathBuf>,
+    model_binding_sha256: Option<String>,
     withheld_source_excluded: bool,
     state: String,
     final_epoch: usize,
     role: String,
+}
+fn bound_metadata(path: &Path, pin: &str) -> Result<Value> {
+    safe_metadata(path)?;
+    let bytes = fs::read(path)?;
+    ensure!(
+        is_sha(pin) && digest(&bytes) == pin,
+        "E36 native metadata hash mismatch"
+    );
+    Ok(serde_json::from_slice(&bytes)?)
+}
+fn verify_native_records(
+    c: &Binding,
+    plan: &Value,
+    fleet: &Value,
+    q: &Value,
+    b: &Value,
+) -> Result<()> {
+    let cell = format!("e36-{}__N/without_{}_s{}", c.arm, c.heldout, c.seed_index);
+    let slots: Vec<_> = plan["cells"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("E36 frozen slots"))?
+        .iter()
+        .filter(|r| r["name"] == cell)
+        .collect();
+    ensure!(
+        slots.len() == 1
+            && slots[0]["kind"] == "lodo"
+            && slots[0]["arm"] == c.arm
+            && slots[0]["heldout"] == c.heldout
+            && slots[0]["seed_index"] == c.seed_index,
+        "E36 source-withheld slot absent from exact frozen fit plan"
+    );
+    let bake = c
+        .bake_sha256
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("E36 complete bake"))?;
+    ensure!(
+        fleet["schema"] == "zenfleet-fit-cell-receipt-v1"
+            && fleet["cell"] == cell
+            && fleet["program_sha"] == plan["program_sha256"]
+            && fleet["data_sha"] == plan["data_sha256"]
+            && fleet["argv_sha"] == slots[0]["argv_sha256"]
+            && fleet["selected_bake_sha"] == bake
+            && fleet["files"]["e36-qualified-checkpoint.json"].as_str()
+                == c.qualification_sha256.as_deref()
+            && fleet["files"]["e36-model-binding.json"].as_str()
+                == c.model_binding_sha256.as_deref(),
+        "E36 source-withheld native fleet identity differs"
+    );
+    ensure!(
+        q["schema"] == "e36-qualified-checkpoint-v1"
+            && q["qualified"] == true
+            && q["execution_contract"] == "registered-fit"
+            && q["cell"] == cell
+            && q["program_sha256"] == plan["program_sha256"]
+            && q["data_sha256"] == plan["data_sha256"]
+            && q["argv_sha256"] == slots[0]["argv_sha256"]
+            && q["result_sha256"] == fleet["result_sha"]
+            && q["raw_checkpoint_sha256"] == bake
+            && q["packed_model_sha256"].is_null()
+            && q["model_binding_sha256"].as_str() == c.model_binding_sha256.as_deref(),
+        "E36 complete assessment model requires native checkpoint qualification"
+    );
+    for key in [
+        "inspector_sha256",
+        "qualification_owner_sha256",
+        "e36_owner_sha256",
+    ] {
+        ensure!(
+            plan["qualification_owners"][key]
+                .as_str()
+                .is_some_and(is_sha)
+                && q[key] == plan["qualification_owners"][key],
+            "E36 qualification owner differs"
+        );
+    }
+    ensure!(
+        b["schema"] == "e36-fit-model-binding-v1"
+            && b["role"] == "source-withheld"
+            && b["heldout"] == c.heldout
+            && b["arm"] == c.arm
+            && b["seed_index"] == c.seed_index
+            && b["init_seed"] == c.init_seed
+            && b["sample_seed"] == c.sample_seed
+            && b["selected_epoch"] == 119
+            && b["raw_checkpoint_sha256"] == bake
+            && b["packed_model_sha256"].is_null()
+            && b["program_sha256"] == plan["program_sha256"]
+            && b["manifest_sha256"] == plan["fit_manifest_sha256"]
+            && b["contract_sha256"] == plan["contract_sha256"]
+            && b["base_filter_sha256"] == plan["base_filter_sha256"]
+            && b["trainer_sha256"] == plan["trainer_sha256"],
+        "E36 full-data/other-source/other-build model refused in primary assessment"
+    );
+    Ok(())
 }
 pub(super) fn run(cli: Cli) -> Result<()> {
     safe_metadata(&cli.input)?;
@@ -131,7 +233,12 @@ pub(super) fn run(cli: Cli) -> Result<()> {
         "E36 human assessment must run inside the bound fit-cell-exec program"
     );
     // Lock the one TRAIN-only choice before opening any paired target payload.
-    for path in [&request.train_selection, &request.bindings, &request.paired] {
+    for path in [
+        &request.train_selection,
+        &request.bindings,
+        &request.paired,
+        &request.fit_plan,
+    ] {
         safe_metadata(path)?;
     }
     let selection_bytes = fs::read(&request.train_selection)?;
@@ -140,11 +247,16 @@ pub(super) fn run(cli: Cli) -> Result<()> {
         "E36 TRAIN selection hash"
     );
     let selection: Value = serde_json::from_slice(&selection_bytes)?;
+    let plan = bound_metadata(&request.fit_plan, &request.fit_plan_sha256)?;
     ensure!(
         selection["schema"] == "e36-global-train-selection-v1"
             && selection["selection_locked_before_assessment"] == true
             && selection["labels_read"] == false
             && selection["fits"] == 0
+            && selection["fit_plan_sha256"] == request.fit_plan_sha256
+            && plan["schema"] == "e36-future-fit-plan-v1"
+            && plan["program_sha256"] == request.program_sha256
+            && plan["fit_release"] == false
             && (selection["selected_arm"].is_null()
                 || ["tv1-c", "tv10-c"].contains(&selection["selected_arm"].as_str().unwrap_or(""))),
         "E36 frozen global TRAIN selection required"
@@ -184,9 +296,30 @@ pub(super) fn run(cli: Cli) -> Result<()> {
                     "failed" | "unavailable" => c.bake_sha256.is_none(),
                     _ => false,
                 }
-                && keys.insert((c.arm, c.heldout, c.seed_index)),
+                && keys.insert((c.arm.clone(), c.heldout.clone(), c.seed_index)),
             "E36 immutable matched seed/source/final-epoch binding"
         );
+        if c.state == "complete" {
+            let fleet = bound_metadata(
+                c.fit_receipt
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("E36 native fleet receipt required"))?,
+                &c.fit_receipt_sha256,
+            )?;
+            let qualification = bound_metadata(
+                c.qualification
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("E36 native qualification required"))?,
+                c.qualification_sha256.as_deref().unwrap_or(""),
+            )?;
+            let binding = bound_metadata(
+                c.model_binding
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("E36 native model binding required"))?,
+                c.model_binding_sha256.as_deref().unwrap_or(""),
+            )?;
+            verify_native_records(&c, &plan, &fleet, &qualification, &binding)?;
+        }
     }
     let bytes = fs::read(&request.paired)?;
     ensure!(
@@ -222,11 +355,60 @@ pub(super) fn run(cli: Cli) -> Result<()> {
     result["paired_sha256"] = json!(request.paired_sha256);
     result["bindings_sha256"] = json!(request.bindings_sha256);
     result["fit_program_sha256"] = json!(request.program_sha256);
+    result["fit_plan_sha256"] = json!(request.fit_plan_sha256);
+    result["native_source_withheld_qualification_verified"] = json!(true);
     save(&cli.output, &result)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn e36_assessment_requires_qualified_withheld_models() {
+        // Invented metadata only. No model, label payload or optimizer.
+        let c: Binding = serde_json::from_value(json!({
+            "arm":"tv1-c","heldout":"kadid","seed_index":0,"init_seed":1101,"sample_seed":101,
+            "bake_sha256":"b".repeat(64),"fit_receipt_sha256":"f".repeat(64),
+            "qualification_sha256":"c".repeat(64),"model_binding_sha256":"d".repeat(64),
+            "withheld_source_excluded":true,"state":"complete","final_epoch":119,"role":"source-withheld-primary"
+        })).unwrap();
+        let cell = "e36-tv1-c__N/without_kadid_s0";
+        let plan = json!({"program_sha256":"a".repeat(64),"data_sha256":"e".repeat(64),
+            "fit_manifest_sha256":"1".repeat(64),"contract_sha256":"2".repeat(64),
+            "base_filter_sha256":"3".repeat(64),"trainer_sha256":"4".repeat(64),
+            "qualification_owners":{"inspector_sha256":"5".repeat(64),"qualification_owner_sha256":"6".repeat(64),"e36_owner_sha256":"7".repeat(64)},
+            "cells":[{"name":cell,"kind":"lodo","arm":"tv1-c","heldout":"kadid","seed_index":0,"argv_sha256":"8".repeat(64)}]});
+        let fleet = json!({"schema":"zenfleet-fit-cell-receipt-v1","cell":cell,
+            "program_sha":"a".repeat(64),"data_sha":"e".repeat(64),"argv_sha":"8".repeat(64),
+            "selected_bake_sha":"b".repeat(64),"result_sha":"9".repeat(64),
+            "files":{"e36-qualified-checkpoint.json":"c".repeat(64),"e36-model-binding.json":"d".repeat(64)}});
+        let q = json!({"schema":"e36-qualified-checkpoint-v1","qualified":true,"execution_contract":"registered-fit","cell":cell,
+            "program_sha256":"a".repeat(64),"data_sha256":"e".repeat(64),"argv_sha256":"8".repeat(64),
+            "result_sha256":"9".repeat(64),"raw_checkpoint_sha256":"b".repeat(64),"packed_model_sha256":null,
+            "model_binding_sha256":"d".repeat(64),"inspector_sha256":"5".repeat(64),
+            "qualification_owner_sha256":"6".repeat(64),"e36_owner_sha256":"7".repeat(64)});
+        let b = json!({"schema":"e36-fit-model-binding-v1","role":"source-withheld","heldout":"kadid","arm":"tv1-c",
+            "seed_index":0,"init_seed":1101,"sample_seed":101,"selected_epoch":119,
+            "raw_checkpoint_sha256":"b".repeat(64),"packed_model_sha256":null,"program_sha256":"a".repeat(64),
+            "manifest_sha256":"1".repeat(64),"contract_sha256":"2".repeat(64),"base_filter_sha256":"3".repeat(64),"trainer_sha256":"4".repeat(64)});
+        verify_native_records(&c, &plan, &fleet, &q, &b).unwrap();
+        for (key, value) in [
+            ("role", json!("full-data")),
+            ("heldout", json!("tid2013")),
+            ("sample_seed", json!(102)),
+            ("base_filter_sha256", json!("0".repeat(64))),
+            ("raw_checkpoint_sha256", json!("0".repeat(64))),
+        ] {
+            let mut wrong = b.clone();
+            wrong[key] = value;
+            assert!(
+                verify_native_records(&c, &plan, &fleet, &q, &wrong).is_err(),
+                "{key}"
+            );
+        }
+        let mut unqualified = q.clone();
+        unqualified["qualified"] = json!(false);
+        assert!(verify_native_records(&c, &plan, &fleet, &unqualified, &b).is_err());
+    }
     #[test]
     fn e36_one_available_slot_reuses_exact_owner_and_keeps_missing_p_one() {
         let mut input = super::super::tests::toy();

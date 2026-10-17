@@ -572,6 +572,7 @@ pub(super) fn receipt(
         "manifest_sha256":sha256_file(path).map_err(|e|e.to_string())?,"contract_sha256":contract_sha,"bound_inputs":manifest,
         "binary_sha256":sha256_file(&std::env::current_exe().map_err(|e|e.to_string())?).map_err(|e|e.to_string())?,
         "embedded_protocol_source_sha256":source_sha,"lambda":pool.weight,"raw_margin":0.05,"every_primary_pairs":50,
+        "output_polarity":"score","raw_definition":"pin-g","improvement":"raw(better)-raw(worse)",
         "epoch_local_counter":true,"batch":32,"mean_pool_weight":mean,"pair_weight_class_values":[2,1],
         "tv_rng_seed":sample_seed^0xe360_7476_726e_6700_u64,"normalization":"lambda*w/(32*mean_pool_weight)",
         "optimizer":"pre-update gradient addition; one existing primary Adam boundary; no TV-only Adam"}),
