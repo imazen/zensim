@@ -2359,3 +2359,6 @@ e36-optional-finish-projection root costs out:
 
 e36-control-freeze out commit:
     python3 scripts/rev4_featpot/e36_freeze_control.py --out {{quote(out)}} --commit {{quote(commit)}}
+
+e36-largest-support-preview root out:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_largest_support_preview.py --root {{quote(root)}} --out {{quote(out)}}
