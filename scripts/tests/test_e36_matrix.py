@@ -18,6 +18,28 @@ from e36_semantic import edge,exact_support
 def write(p,v):p.write_text(json.dumps(v))
 
 class MatrixAdmission(unittest.TestCase):
+    def test_timely_full_evidence_is_qualified_after_late_control_return(self):
+        from unittest.mock import patch
+        import e36_bulk
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-late-control-') as d:
+            root=Path(d);start=self.fixture(root)
+            plan=json.loads((root/'bulk-plan.json').read_text())
+            plan.update(runtime=str(root/'runtime.json'),runtime_sha256='pinned',resources_sha256='resources',slots=1)
+            write(root/'runtime.json',{});write(root/'resource-admission.json',{})
+            plan['runtime_sha256']=sha(root/'runtime.json');plan['resources_sha256']=sha(root/'resource-admission.json')
+            write(root/'bulk-plan.json',plan)
+            clock=json.loads((root/'bulk-clock.json').read_text());clock['plan_sha256']=sha(root/'bulk-plan.json');write(root/'bulk-clock.json',clock)
+            # No replacement of a frozen outcome: this fixture's choice was
+            # only setup metadata, removed before running the controller once.
+            (root/'bulk-choice.json').unlink()
+            with patch.object(e36_bulk,'run') as run,patch.object(e36_bulk.time,'time',return_value=start+21601):
+                e36_bulk.bulk(root)
+            self.assertEqual(run.call_count,1)
+            choice=json.loads((root/'bulk-choice.json').read_text())
+            self.assertEqual(choice['qualified'],'full')
+            self.assertEqual(choice['selected_runs'],['fallback','additions'])
+            self.assertEqual(admit(root,['fallback','additions'])['matrix'],'full')
+
     def fixture(self,root):
         start=time.time()-10;views={'fallback':['a'],'additions':['b'],'full':['a','b']};phases={}
         for phase,items in views.items():

@@ -2200,3 +2200,6 @@ e36-budget-resume root scope supervisor controller auto_thaw_shell:
 
 e36-budget-recover-preapplication root scope supervisor controller auto_thaw_shell:
     python3 {{quote(root + "/control-budget-v2/e36_pause_budget.py")}} --root {{quote(root)}} --scope {{quote(scope)}} --supervisor {{supervisor}} --controller {{controller}} --auto-thaw-shell {{auto_thaw_shell}} --registration benchmarks/e36_registration_draft_2026-10-16.md --recover-preapplication {{quote(root + "/budget-amendment-v1")}}
+
+e36-tower-phase-prepare root out image:
+    python3 scripts/rev4_featpot/e36_tower_prepare.py --root {{quote(root)}} --out {{quote(out)}} --image {{quote(image)}}

@@ -336,7 +336,9 @@ def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
         if time.time()<deadline:
             try:run(root,extra,plan['slots'],deadline=deadline)
             except (SystemExit,TimeoutError) as exc:errors.append(str(exc))
-            if qualify(root,extra,start,deadline):qualified='full'
+        # Completed native evidence is qualified by its original timestamps,
+        # independently of when control or evidence transport returns.
+        if qualify(root,extra,start,deadline):qualified='full'
     choice=dict(schema='e36-fixed-matrix-choice-v1',qualified=qualified,clock_sha256=sha(clock),fits=0,
         plan_sha256=sha(plan_path),plan_path=str(plan_path),clock_path=str(clock),errors=errors,closed_unix=time.time(),
         selected_runs=([mandatory,extra] if qualified=='full' else [mandatory] if qualified=='fallback' else []),
