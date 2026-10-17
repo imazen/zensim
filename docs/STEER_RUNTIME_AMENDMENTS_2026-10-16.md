@@ -60,3 +60,24 @@ remain under the [frozen packet's artifact root](../benchmarks/steer_freeze_pack
 The launch status distinguishes raw completed blobs, published ledger rows and
 verified installed cells. In-flight snapshots are preservation, not optimizer
 resume or installed results. Keep new claims paused on any unresolved defect.
+
+The canonical allocation owner is `scripts/rev4_featpot/steer_worker_lifecycle.py`.
+It refuses enrollment before the original-chunk transition and the repaired
+first-cell native/NAS admission proofs. It calls the packet-hashed LAN launcher
+and leaves job selection, leases and reconciliation to the pinned worker.
+`just steer-worker-watch <packet> <packet-sha>` re-enrolls the three active hosts
+in the frozen jobset order, using canonical harvest metadata only. Every new
+allocation rechecks capacity and its paused envelope. A failed allocation or
+harvest stops the supervisor; completed evidence is retained.
+
+To hold enrollment, use `just steer-worker-pause <packet> <packet-sha>`.
+It creates `launch/PAUSE_WORKERS` beside the packet before waiting on the
+shared enrollment lock, then publishes native pause for all eight jobsets.
+Waiting for the enrollment critical section prevents a late release from
+overwriting that pause. The owner checks that flag before allocation
+and again before releasing its paused envelope. The rolling native deadline
+prevents an admitted worker from claiming another cell after its window closes.
+An observed coordinator change to the admission control object prevents
+release. In contrast,
+the original workers lack that rolling guard and must use the publication-bound
+stop described above.

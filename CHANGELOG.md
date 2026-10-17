@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Supervise bounded STEER allocations through the frozen LAN launcher, with native/NAS transition gates and operator pause interlocks.
+
 - Validate Rev5 native intervention packets against fixed three-judge artifacts; preserve exact interpolation endpoints and remove dominated baseline rungs before RD comparison.
 
 - Add unpublished fixed engineering judges with lossless map artifacts and exact opaque-crop source preparation; keep diagnostic matte output out of the RD sweep.

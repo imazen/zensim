@@ -1609,3 +1609,16 @@ addrfix-map-evaluate binary input output:
 # Actual pinned-worker transport oracle: invented jobs only, no training/store/network.
 steer-worker-scheduling-probe image out:
     flock "$HOME/tmp/zen-heavy.lock" ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/tests/steer_worker_scheduling_probe.py --image {{quote(image)}} --out {{quote(out)}}
+
+# Native worker owns claims/jobs; caller holds shared heavy lock for enrollment.
+steer-worker-enroll packet packet_sha host role jobset:
+    python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --host {{quote(host)}} --role {{quote(role)}} --jobset {{quote(jobset)}}
+
+steer-worker-lifecycle-check:
+    PYTHONPATH=scripts/rev4_featpot python3 -m unittest discover -s scripts/tests -p test_steer_worker_lifecycle.py -v
+
+steer-worker-watch packet packet_sha:
+    python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --watch
+
+steer-worker-pause packet packet_sha:
+    python3 scripts/rev4_featpot/steer_worker_lifecycle.py --packet {{quote(packet)}} --packet-sha {{quote(packet_sha)}} --pause
