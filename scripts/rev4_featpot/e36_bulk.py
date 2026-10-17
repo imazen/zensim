@@ -269,6 +269,37 @@ def qualify(root,name,start,deadline):
     except (ValueError,KeyError):return False
 
 
+def clock_equivalence(root,plan_path,plan,inherit_clock):
+    original=json.loads(inherit_clock.read_text());old_plan=root/'bulk-plan.json';old=json.loads(old_plan.read_text())
+    if original['plan_sha256']!=sha(old_plan) or original['deadline_unix']!=original['started_unix']+21600:raise ValueError('invalid original deadline chain')
+    if any(old[k]!=plan[k] for k in ['resources_sha256','source_budget_sha256','deadline_seconds','slots','fit_release']):raise ValueError('transport repair changed scientific/resource budget')
+    if sha(old['runtime'])!=old['runtime_sha256'] or sha(plan['runtime'])!=plan['runtime_sha256']:raise ValueError('original/new runtime pin changed')
+    old_runtime=json.loads(Path(old['runtime']).read_text());new_runtime=json.loads(Path(plan['runtime']).read_text())
+    if set(old_runtime)!=set(new_runtime) or set(old_runtime['program_files'])!=set(new_runtime['program_files']) or set(old['phases'])!=set(plan['phases']):raise ValueError('transport repair changed runtime/program/phase schema')
+    if any(old_runtime[k]!=new_runtime[k] for k in old_runtime if k not in ['build_commit','program_files','mode_inventory']):raise ValueError('transport repair changed native numerical/source inputs')
+    if any(old_runtime['program_files'][k]!=v for k,v in new_runtime['program_files'].items() if k not in ['e36_data.py','e36_store.py']):raise ValueError('transport repair changed another producer module')
+    bind=lambda p:dict(path=str(p),sha256=sha(p))
+    manifests={}
+    for phase in old['phases']:
+        def science(entry,runtime_sha):
+            path=root/'runs'/entry['run']/'manifest.json'
+            if sha(path)!=entry['manifest_sha256']:raise ValueError('original/new phase manifest pin changed')
+            rows=json.loads(path.read_text());values=[]
+            for r in rows:
+                v=json.loads(r['kind']['view'][len(PREFIX):])
+                if v.pop('runtime_sha256')!=runtime_sha or runtime_sha not in r['inputs']:raise ValueError('view/runtime input binding differs')
+                r['kind']['view']=PREFIX+canonical(v);r['inputs']=['RUNTIME' if x==runtime_sha else x for x in r['inputs']]
+                values.append(canonical(r))
+            return sorted(values),bind(path)
+        old_values,old_bind=science(old['phases'][phase],old['runtime_sha256']);new_values,new_bind=science(plan['phases'][phase],plan['runtime_sha256'])
+        if old_values!=new_values:raise ValueError('transport repair changed fixed matrix/inputs/hints/capabilities')
+        manifests[phase]=dict(original=old_bind,repaired=new_bind,normalized_views_sha256=hashlib.sha256(canonical(old_values).encode()).hexdigest())
+    return dict(schema='e36-original-clock-equivalence-v1',admitted=True,original_clock=bind(inherit_clock),
+        original_plan=bind(old_plan),repaired_plan=bind(plan_path),original_runtime=bind(old['runtime']),repaired_runtime=bind(plan['runtime']),
+        manifests=manifests,started_unix=original['started_unix'],deadline_unix=original['deadline_unix'],
+        owner_sha256=sha(Path(__file__)),allowed_changes=['e36_data storage startup/error framing','e36_store client transport','version-location fields'],fits=0)
+
+
 def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
     plan_path=plan_path or root/'bulk-plan.json'
     plan=json.loads(plan_path.read_text())
@@ -277,28 +308,23 @@ def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
     for d in plan['phases'].values():
         if sha(root/'runs'/d['run']/'manifest.json')!=d['manifest_sha256']:raise ValueError('frozen qualifying manifest changed')
     clock=clock_path or root/'bulk-clock.json'
-    if clock.exists():
-        times=json.loads(clock.read_text())
+    times=json.loads(clock.read_text()) if clock.exists() else None
+    inherited=inherit_clock or (Path(times['inherited_clock']['path']) if times and 'inherited_clock' in times else None)
+    if plan_path!=root/'bulk-plan.json' and inherited is None:raise ValueError('an amended plan must inherit the original clock; a fresh window is forbidden')
+    equivalence=None
+    if inherited is not None:
+        equivalence=clock_equivalence(root,plan_path,plan,inherited)
+        ep=clock.with_name(clock.stem+'-equivalence.json')
+        if ep.exists():
+            if json.loads(ep.read_text())!=equivalence:raise ValueError('immutable original-clock equivalence changed')
+        else:write(ep,equivalence)
+    if times is not None:
         if times['plan_sha256']!=sha(plan_path):raise ValueError('cannot replace a running wall clock')
+        if equivalence is not None and (times.get('inherited_clock')!=equivalence['original_clock'] or times.get('equivalence')!=dict(path=str(ep),sha256=sha(ep)) or any(times[k]!=equivalence[k] for k in ['started_unix','deadline_unix'])):raise ValueError('resumed repair changed original clock or equivalence')
     else:
-        if inherit_clock is None:
-            start=time.time();times=dict(started_unix=start,deadline_unix=start+21600,plan_sha256=sha(plan_path),fits=0)
-        else:
-            original=json.loads(inherit_clock.read_text());old_plan=root/'bulk-plan.json';old=json.loads(old_plan.read_text())
-            if original['plan_sha256']!=sha(old_plan) or original['deadline_unix']!=original['started_unix']+21600:raise ValueError('invalid original deadline chain')
-            if any(old[k]!=plan[k] for k in ['resources_sha256','source_budget_sha256','deadline_seconds','slots','fit_release']):raise ValueError('transport repair changed scientific/resource budget')
-            old_runtime=json.loads(Path(old['runtime']).read_text());new_runtime=json.loads(Path(plan['runtime']).read_text())
-            if any(old_runtime[k]!=new_runtime[k] for k in old_runtime if k not in ['build_commit','program_files','mode_inventory']):raise ValueError('transport repair changed native numerical/source inputs')
-            if any(old_runtime['program_files'][k]!=v for k,v in new_runtime['program_files'].items() if k not in ['e36_data.py','e36_store.py']):raise ValueError('transport repair changed another producer module')
-            for phase in old['phases']:
-                def science(entry):
-                    rows=json.loads((root/'runs'/entry['run']/'manifest.json').read_text());values=[]
-                    for r in rows:
-                        v=json.loads(r['kind']['view'][len(PREFIX):]);v.pop('runtime_sha256');values.append(canonical(v))
-                    return sorted(values)
-                if science(old['phases'][phase])!=science(plan['phases'][phase]):raise ValueError('transport repair changed fixed matrix')
-            times=dict(started_unix=original['started_unix'],deadline_unix=original['deadline_unix'],plan_sha256=sha(plan_path),fits=0,
-                inherited_clock=dict(path=str(inherit_clock),sha256=sha(inherit_clock)),amendment='storage connection startup/reconnect only; no native numerical or matrix change')
+        start=time.time() if equivalence is None else equivalence['started_unix']
+        times=dict(started_unix=start,deadline_unix=start+21600,plan_sha256=sha(plan_path),fits=0)
+        if equivalence is not None:times.update(inherited_clock=equivalence['original_clock'],equivalence=dict(path=str(ep),sha256=sha(ep)),amendment='storage transport only; original window unchanged')
         write(clock,times)
     start,deadline=times['started_unix'],times['deadline_unix'];qualified=None;errors=[]
     mandatory=plan['phases']['fallback']['run'];extra=plan['phases']['additions']['run']
