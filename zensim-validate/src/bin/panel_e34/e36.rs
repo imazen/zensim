@@ -325,8 +325,9 @@ fn replay_predictions(
             );
             let model =
                 zenpredict::Model::from_bytes(&bytes).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            let models = [model];
             let mut scorer =
-                zensim::BakeScorer::ensemble(&[model], None).map_err(|e| anyhow::anyhow!("{e}"))?;
+                zensim::BakeScorer::ensemble(&models, None).map_err(|e| anyhow::anyhow!("{e}"))?;
             let native: Vec<f64> = group
                 .feature_rows
                 .iter()
