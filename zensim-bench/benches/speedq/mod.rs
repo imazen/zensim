@@ -342,6 +342,8 @@ pub(super) fn run() {
         #[cfg(feature = "costcmp")]
         ("e34_candidate_map", "e34_candidate_map", "5"),
         #[cfg(feature = "costcmp")]
+        ("e34_candidate_map_before", "e34_candidate_map_before", "5"),
+        #[cfg(feature = "costcmp")]
         ("e34_candidate_baseline", "e34_candidate_baseline", "5"),
         #[cfg(feature = "costcmp")]
         (

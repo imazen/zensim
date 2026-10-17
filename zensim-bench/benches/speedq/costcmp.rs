@@ -101,6 +101,8 @@ pub(super) fn action(
         "e34_control"
         | "e34_candidate"
         | "e34_candidate_map"
+        | "e34_candidate_map_audit"
+        | "e34_candidate_map_before"
         | "e34_candidate_baseline"
         | "e34_candidate_map_retained" => {
             // E34's registered widths are explicit caller bindings. Keep the E33
@@ -129,11 +131,70 @@ pub(super) fn action(
             let scorer: &'static mut zensim::BakeScorer<'static> = Box::leak(Box::new(
                 zensim::BakeScorer::new(model).unwrap().with_parallel(true),
             ));
-            let info = json!({"source_sha256":expected,"revision":"5","hidden":hidden,
+            let mut info = json!({"source_sha256":expected,"revision":"5","hidden":hidden,
                 "n_inputs":model.n_inputs(),"source_bytes":bytes.len(),"map_bin":1,
                 "surface":arm});
             let source: &'static RgbSlice<'static> = Box::leak(Box::new(RgbSlice::new(src, w, h)));
             let action: Action = match arm {
+                "e34_candidate_map_audit" => {
+                    // Untimed cross-build audit of every density/feature/gradient
+                    // bit and rectangle queries, including finite neighbour replay.
+                    let mut session = scorer.prepare_steering(source, 1).unwrap();
+                    let result = session.compute(&RgbSlice::new(dst, w, h), None).unwrap();
+                    let mut bytes = Vec::new();
+                    for value in result.attribution().density() {
+                        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+                    }
+                    info["density_sha256"] = json!(super::digest(&bytes));
+                    bytes.clear();
+                    for value in result
+                        .result()
+                        .features()
+                        .iter()
+                        .chain(result.sensitivities())
+                    {
+                        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+                    }
+                    info["features_gradient_sha256"] = json!(super::digest(&bytes));
+                    info["feature_bits"] = json!(
+                        result
+                            .result()
+                            .features()
+                            .iter()
+                            .map(|v| format!("{:016x}", v.to_bits()))
+                            .collect::<Vec<_>>()
+                    );
+                    info["gradient_bits"] = json!(
+                        result
+                            .sensitivities()
+                            .iter()
+                            .map(|v| format!("{:016x}", v.to_bits()))
+                            .collect::<Vec<_>>()
+                    );
+                    bytes.clear();
+                    for block in [1usize, 8, 16, 32, 64] {
+                        for y in (0..h).step_by(block) {
+                            for x in (0..w).step_by(block) {
+                                let v = result.attribution().query_rect(
+                                    x,
+                                    y,
+                                    (x + block).min(w),
+                                    (y + block).min(h),
+                                );
+                                bytes.extend_from_slice(&v.to_bits().to_le_bytes());
+                            }
+                        }
+                    }
+                    info["queries_sha256"] = json!(super::digest(&bytes));
+                    bytes.clear();
+                    for (x, y) in [(0, 0), (w / 2, h / 2), (w - 8, h - 8)] {
+                        let v = result.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                        bytes.extend_from_slice(&v.to_bits().to_le_bytes());
+                    }
+                    info["refinement_sha256"] = json!(super::digest(&bytes));
+                    let score = result.result().score();
+                    Box::new(move || score)
+                }
                 "e34_candidate_baseline" => Box::new(move || {
                     std::hint::black_box(&scorer);
                     0.0
@@ -148,7 +209,7 @@ pub(super) fn action(
                             .score()
                     })
                 }
-                "e34_candidate_map_retained" => {
+                "e34_candidate_map_retained" | "e34_candidate_map_before" => {
                     let mut session = scorer.prepare_steering(source, 1).unwrap();
                     Box::new(move || {
                         let result = session.compute(&RgbSlice::new(dst, w, h), None).unwrap();

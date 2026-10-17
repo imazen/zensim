@@ -1765,3 +1765,5 @@ shipgates-format-unit binary source output:
 
 shipgates-source-admission-bind sources binary output:
     python3 scripts/rev4_featpot/shipgates_source_admission.py --sources {{quote(sources)}} --binary {{quote(binary)}} --oracle scripts/rev4_featpot/shipgates_crop_oracle.py --output {{quote(output)}} --bind-only
+
+import 'benchmarks/mapperf.just'
