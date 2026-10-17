@@ -8,7 +8,7 @@ import time
 from e36_disk_projection import pin
 
 
-def project(root,compute,out):
+def project(root,compute,out,optional_compute=None):
     root=Path(root);owner=root/'owner-svt-ssd-v1';now=time.time();cpu=json.loads(Path(compute).read_text())
     if cpu['fits'] or cpu['qualifies_data'] is not False:raise ValueError('diagnostic compute projection required')
     rates=[json.loads(s) for s in (owner/'pack-rates-v1.jsonl').read_text().splitlines()]
@@ -65,12 +65,20 @@ def project(root,compute,out):
         view=json.loads(job['kind']['view'].split(':',1)[1]);size=refs[view['reference_key']]['size'];mean,_,_=measured(view['codec'],size,view['panel'])
         if view['panel']!='baseline':raise ValueError('optional mode count needs its explicit unique-cell inventory')
         n=len(view['q_grid']);optional_bytes+=mean*n;optional_by_size[str(size)]=optional_by_size.get(str(size),0)+mean*n
+    optional_cpu=None
+    if optional_compute is not None:
+        optional_cpu=json.loads(Path(optional_compute).read_text())
+        if optional_cpu['phase']!='additions' or optional_cpu['fits']!=0 or optional_cpu['required_views']!=len(optional):raise ValueError('matched optional compute snapshot required')
+        optional_bytes=0;optional_by_size={}
+        for key,remaining in optional_cpu['strata'].items():
+            codec,size,panel=json.loads(key);mean,_,_=measured(codec,size,panel);value=mean*remaining['physical_cells_remaining'];optional_bytes+=value;optional_by_size[str(size)]=optional_by_size.get(str(size),0)+value
     def model(extra):
         total=local_bytes+future+extra;cache=min(total,remaining_cache);array=max(0,total-cache)
         # The two routes are deliberately serialized cache FIRST. No invented
         # array pack measurement: use the coordinator's explicit 1GB dd result.
         seconds=cache/cache_rate+array/array_rate
-        finish=now+max(cpu['optimistic_modeled_seconds_remaining'],seconds)
+        cpu_seconds=cpu['optimistic_modeled_seconds_remaining']+(optional_cpu['optimistic_modeled_seconds_remaining'] if extra and optional_cpu else 0)
+        finish=now+max(cpu_seconds,seconds)
         return dict(modeled_remaining_bytes=total,cache_bytes=cache,array_bytes=array,storage_seconds=seconds,modeled_finish_utc=datetime.fromtimestamp(finish,timezone.utc).isoformat(),misses22Z=finish>1792274400.)
     result=dict(schema='e36-grouped-storage-planning-v1',observed_utc=datetime.fromtimestamp(now,timezone.utc).isoformat(),compute=pin(Path(compute)),
         actual_cache_pack_sample=cache_rows,measured_cache_active_window_seconds=end-start,measured_cache_raw_bytes_per_second=cache_rate,
@@ -78,7 +86,7 @@ def project(root,compute,out):
         exact_local_raw_objects=local_objects,exact_local_raw_bytes=local_bytes,cache_reservations_bytes=used,remaining_cache_allowance_bytes=remaining_allowance,remaining_cache_capacity_after_floor_bytes=remaining_cache,cache_observed_free_bytes=observed_free,pending_cache_reservations_bytes=pending_cache,
         modeled_future_mandatory_bytes=future,modeled_optional_bytes=optional_bytes,optional_bytes_by_size=optional_by_size,
         registered_mandatory_fallback=model(0),registered_full_including_optional=model(optional_bytes),same_size_codec_measured_strata=strata,
-        measured_censuses={n:pin(p) for n,p in paths.items()},deadline_unix=1792274400.,fits=0,qualifies_data=False,source_count_change=cut.exists(),optional_manifest=pin(optional_path),
+        measured_censuses={n:pin(p) for n,p in paths.items()},optional_compute=pin(Path(optional_compute)) if optional_compute is not None else None,deadline_unix=1792274400.,fits=0,qualifies_data=False,source_count_change=cut.exists(),optional_manifest=pin(optional_path),
         limitations=['A planning projection, not observed future bytes or a guaranteed finish.','Cache rate is an actual short active-pack window; initialization and review hold excluded. Longer sustained rate may differ.','Before any actual disk1 pack window, array27MB/s is the coordinator dd proxy; verification/SSH/shared-load overhead may lower it.','Local raw census includes protected in-flight/unpublished bundles, conservatively charged but not eligible for eviction.','Future bytes use same-codec/same-size prebulk means; no scaling between sizes, statistical bound or future hash dedup assumption.','Optional future encodes modeled at all61 requestedq; no source/quality score selection.','Excludes future metadata/staging growth and retained features; local30/40/20GiB floors remain independently enforced.'])
     with Path(out).open('x') as stream:json.dump(result,stream,indent=2);stream.write('\n')
     print(json.dumps({k:v for k,v in result.items() if k not in ['actual_cache_pack_sample','same_size_codec_measured_strata','limitations','measured_censuses']}),flush=True)
@@ -87,4 +95,5 @@ def project(root,compute,out):
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     for k in ['root','compute','out']:parser.add_argument('--'+k,type=Path,required=True)
-    a=parser.parse_args();project(a.root,a.compute,a.out)
+    parser.add_argument('--optional-compute',type=Path)
+    a=parser.parse_args();project(a.root,a.compute,a.out,a.optional_compute)

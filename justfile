@@ -2353,3 +2353,9 @@ e36-raw-drain-close root out log:
 
 e36-metadata-storage root out commit:
     python3 scripts/rev4_featpot/e36_metadata_storage.py --root {{quote(root)}} --out {{quote(out)}} --commit {{quote(commit)}}
+
+e36-optional-finish-projection root costs out:
+    nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_finish_projection.py --root {{quote(root)}} --costs {{quote(costs)}} --out {{quote(out)}} --phase additions
+
+e36-control-freeze out commit:
+    python3 scripts/rev4_featpot/e36_freeze_control.py --out {{quote(out)}} --commit {{quote(commit)}}

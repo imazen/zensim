@@ -307,7 +307,7 @@ def publication(root, name, completed=None, files=None):
         ledgers.append(bind(path))
     if set(published)!=set(desired):
         raise ValueError('required SVT matrix native publication incomplete')
-    for log in [root/'GENERATION-v7.log',*root.glob('GENERATION-continuation*.log')]:
+    for log in [root/'GENERATION-v7.log',*root.glob('GENERATION-continuation*.log'),*root.glob('GENERATION-additions*.log')]:
         if any('ledger write' in line and 'failed' in line for line in log.read_text().splitlines()):
             raise ValueError('publication failure needs explicit reconciliation')
     if completed is None:

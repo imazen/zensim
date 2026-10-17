@@ -46,7 +46,7 @@ def observed_costs(root, out):
     print(json.dumps(dict(groups=len(groups),physical_samples=len(samples),fits=0)))
 
 
-def project(root, out, cost_snapshot=None, exclude_rav1e=False):
+def project(root, out, cost_snapshot=None, exclude_rav1e=False, phase='fallback'):
     now = time.time()
     run = root / "runs/fallback-v6"
     ids = [
@@ -56,6 +56,11 @@ def project(root, out, cost_snapshot=None, exclude_rav1e=False):
         .splitlines()
     ]
     jobs = json.loads((run / "manifest.json").read_text())
+    if phase=='additions':
+        from e36_svt_matrix import configuration
+        proof,_,_=configuration(root);entry=proof['phases']['additions'];run=root/'runs'/entry['run']
+        jobs=json.loads(Path(entry['manifest']['path']).read_text());ids=[line.split('\t')[1] for line in Path(entry['native_ids']['path']).read_text().splitlines()]
+    elif phase!='fallback':raise ValueError('registered diagnostic phase required')
     if len(ids) != len(jobs):
         raise ValueError("native ordered job identity inventory differs")
     original_count = len(jobs)
@@ -180,6 +185,7 @@ def project(root, out, cost_snapshot=None, exclude_rav1e=False):
     ideal = max(serial / 24, longest, weighted / launch["job_budget_bytes"])
     result = dict(
         schema="e36-planning-projection-v1",
+        phase=phase,
         observed_unix=now,
         observed_utc=datetime.fromtimestamp(now, timezone.utc).isoformat(),
         done_views=len(done),
@@ -209,7 +215,7 @@ def project(root, out, cost_snapshot=None, exclude_rav1e=False):
             "No source-content or quality-dependent cost model.",
             "Excludes cached-row readback, scheduling, per-view ledger overhead and external interference.",
             "Simultaneous in-flight cells are treated as unfinished until their checkpoint lands.",
-            "Only selected mandatory views modeled; optional additions excluded.",
+            "Only the selected "+phase+" phase modeled; other phase CPU work excluded.",
         ],
     )
     with out.open("x") as f:
@@ -233,6 +239,7 @@ if __name__ == "__main__":
     p.add_argument('--costs',type=Path)
     p.add_argument('--sample-wide-costs',action='store_true')
     p.add_argument('--exclude-rav1e', action='store_true')
+    p.add_argument('--phase',choices=['fallback','additions'],default='fallback')
     args = p.parse_args()
     if args.sample_wide_costs:observed_costs(args.root,args.out)
-    else:project(args.root, args.out,args.costs,args.exclude_rav1e)
+    else:project(args.root, args.out,args.costs,args.exclude_rav1e,args.phase)
