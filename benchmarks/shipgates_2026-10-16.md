@@ -267,7 +267,7 @@ Full control summary SHA256 `ad305bf3236ec0f62f5880ad5a46441e118f2d7f3007073b2fd
 
 All24 original sources passed native strict opaque/sRGB8 metadata admission and an independent whole-image RGB-byte oracle. Individual visual review subsequently identified nine photographs,12 screen images and three game renders; the original “12 photo” description was incorrect. The GUI source uses its deterministic largest opaque rectangle; the indexed screenshot is losslessly expanded to8-bit PNG through the first-party encoder. Their original bytes, source URLs, family identities and preparation receipts remain archived. No quality grid, candidate, codec or fixed-judge arithmetic changed.
 
-Original24-source manifest SHA256 `6ddb0f655ddfe307a6c9702a2928eb7b47690fc1b0104811287dfb08af8cdf75`. The launcher requires the hash-bound24-source admission receipt before encoding. Existing344 complete cells were hash-verified and reused. Full4032-cell JXL RD coverage and source-bootstrap results remain pending.
+Original24-source manifest SHA256 `6ddb0f655ddfe307a6c9702a2928eb7b47690fc1b0104811287dfb08af8cdf75` remains archived. Its initial admitted run reused344 hash-verified complete cells. The current launcher requires the corrected27-source admission receipt described below; complete4,536-cell coverage and source-bootstrap results remain pending.
 
 Decoded PNGs and float-map containers may use lossless palette or grayscale storage. Explicit sample expansion preserves every delivered RGB byte and every logical float-map bit; physical container hashes, logical-map hashes, input-pixel bindings and deduplication keys are checked independently. SSIMULACRA2 remains scalar-only under the approved artifact exception.
 
@@ -293,7 +293,7 @@ Exact replay receipt: `GROUP_REPLAY_VERIFIED.json` under the evidence root. Full
 
 ### Consecutive quality groups
 
-Four consecutive qualities can share one bounded heavy job, with a separate complete eight-arm receipt written after each quality. A32-cell replay of four already measured qualities matches every encoded hash, decoded RGB byte and all156 ordered steering fields. An interrupted-journal check recovers16 unappended complete cells beside16 journaled cells, then selects the next quality without executing a codec. The21-point grid,24 sources, models and native/judge binaries are unchanged; full RD results remain pending.
+Four consecutive qualities can share one bounded heavy job, with a separate complete eight-arm receipt written after each quality. A32-cell replay of four already measured qualities matches every encoded hash, decoded RGB byte and all156 ordered steering fields. An interrupted-journal check recovers16 unappended complete cells beside16 journaled cells, then selects the next quality without executing a codec. That scheduling replay used the original24 sources and unchanged21-point grid, models and native/judge binaries. The later approved source correction extends the cohort to27 without changing that grid or those executable pins; full RD results remain pending.
 
 ```text
 run-heavy: done rc=0 79s | peak-RSS 0.10GiB | min-avail 35226MiB | peak-load 6.41
