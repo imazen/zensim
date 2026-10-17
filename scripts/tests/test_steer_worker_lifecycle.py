@@ -263,6 +263,27 @@ class Lifecycle(unittest.TestCase):
             for js,n in jobs.items():status['jobsets'][js]['installed']=n
             self.assertIsNone(life.next_jobset(self.bundle,dict(jobsets=jobs),status))
 
+    def test_jobset_release_requires_next_order_and_exact_initial_hold(self):
+        jobs={'a':2,'b':2}
+        status=dict(packet_sha256=life.owner.PACKET_SHA,state='PROGRESS',errors=[],
+                    jobsets={js:dict(state='OK',installed=0,ledger={}) for js in jobs})
+        path=self.root/'launch/HARVEST_STATUS.json'
+        with mock.patch.object(life.owner,'steer_plan',return_value=dict(order=list(jobs))):
+            path.write_text(json.dumps(status))
+            self.assertIsNone(life.allocation_control(self.bundle,dict(jobsets=jobs),'b',life.INITIAL_JOBSET_HOLD))
+            status['jobsets']['a']['installed']=2;path.write_text(json.dumps(status))
+            self.assertEqual(life.allocation_control(self.bundle,dict(jobsets=jobs),'b',life.INITIAL_JOBSET_HOLD),
+                             dict(paused=False,drain=False,note='Coordinator-approved frozen STEER execution'))
+            for hold in [dict(paused=True,drain=False,note='operator pause'),
+                         dict(life.INITIAL_JOBSET_HOLD,drain=True),
+                         dict(life.INITIAL_JOBSET_HOLD,extra='unknown owner')]:
+                self.assertIsNone(life.allocation_control(self.bundle,dict(jobsets=jobs),'b',hold))
+            status['jobsets']['a']['ledger']={'failed':1};path.write_text(json.dumps(status))
+            with self.assertRaises(ValueError):
+                life.allocation_control(self.bundle,dict(jobsets=jobs),'b',life.INITIAL_JOBSET_HOLD)
+            status['state']='RUNNING';path.write_text(json.dumps(status))
+            self.assertIsNone(life.allocation_control(self.bundle,dict(jobsets=jobs),'b',life.INITIAL_JOBSET_HOLD))
+
     def test_pause_closes_enrollment_before_waiting_for_release_lock(self):
         events=[]
         def lock(fd,mode):

@@ -175,6 +175,22 @@ def control(bundle, js, value=None):
                        stdout=log, stderr=log, check=True)
 
 
+INITIAL_JOBSET_HOLD = dict(paused=True, drain=False,
+                          note='Frozen registered fit; coordinator authorization')
+
+
+def allocation_control(bundle, doc, js, current):
+    """Release only our untouched declaration hold in frozen jobset order."""
+    if not current.get('paused') and not current.get('drain'):
+        return current
+    if current != INITIAL_JOBSET_HOLD:
+        return None
+    status = read_json(bundle.parent/'launch/HARVEST_STATUS.json')
+    if next_jobset(bundle, doc, status) != js:
+        return None
+    return dict(paused=False, drain=False, note='Coordinator-approved frozen STEER execution')
+
+
 def enroll(bundle, doc, host, role, js):
     binding = read_json(bundle/'WORKER_BINDING.json')
     if host not in binding['active'] or host not in ('r3500', 'i270', 'tower'):
@@ -189,8 +205,8 @@ def enroll(bundle, doc, host, role, js):
     launch = bundle.parent/'launch'
     if (launch/'PAUSE_WORKERS').exists():
         return dict(state='PAUSED', host=host)
-    active = control(bundle, js)
-    if active.get('paused') or active.get('drain'):
+    active = allocation_control(bundle, doc, js, control(bundle, js))
+    if active is None:
         return dict(state='PAUSED', host=host)
     ctr = 'zen-score-'+role
     amendment = execution_amendment(bundle)
@@ -476,7 +492,7 @@ def watch(bundle, doc):
                 if updated <= finished:
                     continue
             ctl = control(bundle, js)
-            if ctl.get('paused') or ctl.get('drain'):
+            if (ctl.get('paused') or ctl.get('drain')) and ctl != INITIAL_JOBSET_HOLD:
                 continue
             role = 'steer-'+host+'-'+str(time.time_ns())
             command = ['flock', str(Path.home()/'tmp/zen-heavy.lock'),
