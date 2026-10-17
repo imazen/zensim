@@ -22,9 +22,15 @@ def finalize(root,prepared,out,commit):
         if old[key]!=current[key]:raise ValueError('prepared scientific matrix changed: '+key)
     metadata=load(prepared/'_MANIFEST.json')
     if not metadata['required_support_admitted'] or metadata['zero_support_required_strata'] or metadata['fits']!=0 or metadata['labels_read'] is not False:raise ValueError('prepared support/label discipline differs')
+    def scalar(path,expected):
+        if sha(path)!=expected:raise ValueError('prepared proof/data changed: '+str(path))
+    scalar(prepared/'whole-matrix.json',metadata['whole_matrix_sha256'])
+    scalar(prepared/'alias-memberships.parquet',metadata['alias_memberships_sha256'])
     for split in ['fit','selection']:
         support=load(prepared/split/'support.json');semantic=load(prepared/split/'semantic-admission.json')
         if support['admitted'] is not True or support['zero_support_required_strata']!=0 or semantic['admitted'] is not True or semantic['fits']!=0:raise ValueError('prepared semantic/support admission required')
+        scalar(prepared/split/'manifest.json',load(prepared/split/'contract.json')['manifest_sha256'])
+        for name,key in [('features.parquet','features_sha256'),('pairs.parquet','pairs_sha256'),('edge-proof.parquet','edge_proof_sha256'),('fx1.json','derived_sha256')]:scalar(prepared/split/name,support[key])
     out.mkdir();done={};active=set();verified={}
     def checked(path,expected):
         if path not in verified:verified[path]=sha(path)
@@ -49,6 +55,7 @@ def finalize(root,prepared,out,commit):
             if relative==Path('_MANIFEST.json'):
                 value['whole_matrix_sha256']=sha(copy_file(Path('whole-matrix.json')))
                 value['artifact_archive_pending']=False
+            if source.name=='contract.json':value['manifest_sha256']=sha(copy_file(relative.parent/'manifest.json'))
             write(target,value)
         else:os.link(source,target)
         active.remove(relative);done[relative]=target;return target
@@ -57,6 +64,12 @@ def finalize(root,prepared,out,commit):
     for split in ['fit','selection']:
         for name in ['features.parquet','pairs.parquet','edge-proof.parquet','support.json','manifest.json','semantic-admission.json','contract.json','fx1.json']:
             copy_file(Path(split)/name)
+        contract=load(out/split/'contract.json')
+        for key,path in [('semantic_export',out/split/'semantic-admission.json'),('matrix_admission',out/'matrix-admission.json')]:
+            if contract[key]!={'path':str(path),'sha256':sha(path)}:raise ValueError('final contract proof graph differs')
+        if contract['manifest_sha256']!=sha(out/split/'manifest.json'):raise ValueError('final contract manifest differs')
+    final_metadata=load(out/'_MANIFEST.json')
+    if final_metadata['whole_matrix_sha256']!=sha(out/'whole-matrix.json') or final_metadata['alias_memberships_sha256']!=sha(out/'alias-memberships.parquet'):raise ValueError('final scalar provenance differs')
     receipt=dict(schema='e36-final-prepared-pool-admission-v1',build_commit=commit,prepared_matrix=dict(path=str(prepared/'matrix-admission.json'),sha256=sha(prepared/'matrix-admission.json')),final_matrix=dict(path=str(out/'matrix-admission.json'),sha256=sha(out/'matrix-admission.json')),scientific_matrix_unchanged=True,feature_and_pair_bytes_unchanged=True,artifact_archive_pending=False,fits=0,labels_read=False,files={str(k):sha(v) for k,v in sorted(done.items())})
     write(out/'FINAL_POOL_ADMISSION.json',receipt)
     return receipt
