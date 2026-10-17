@@ -1222,6 +1222,70 @@ def shipgates_numeric_gates(models, summaries, classes, complete_judges, native_
     return numeric_gates
 
 
+def shipgates_r6_prime_gates(models, summaries, delta_intervals, neutral_metrics,
+                             classes, cvvdp_bound):
+    """Frozen R6' exploratory verdict (GATES_REV3_AGY.md section 2).
+
+    (i) vs no steering, point estimates: saving >= 0 on every analyzed judge and
+        >= 1% on at least one; no content class negative on a neutral judge.
+    (ii) vs butteraugli's map on neutral judges: paired lower bound of
+        (candidate saving - butteraugli-map saving) >= -0.01 overall and
+        >= -0.02 in every class; plus the symmetric self-judge check on overall
+        point estimates (candidate under zensim >= butteraugli arm under
+        butteraugli).
+    cvvdp_bound: whether the CVVDP-FHD judge rows were bound for this run; its
+        absence leaves the verdict INCOMPLETE rather than judging silently.
+    """
+    gates = {}
+    for model in models:
+        vs_none = [r for r in summaries if r["arm"] == model and r["baseline"] == "none"]
+        overall = {r["metric"]: r for r in vs_none if r["content_class"] == "all"}
+        class_rows = [r for r in vs_none if r["content_class"] != "all"]
+        nonnegative = bool(overall) and all(r["saving"] >= 0. for r in overall.values())
+        one_percent = any(r["saving"] >= .01 for r in overall.values())
+        neutral_class = [r for r in class_rows if r["metric"] in neutral_metrics]
+        class_nonnegative = all(r["saving"] >= 0. for r in neutral_class)
+        minimum_sources = bool(class_rows) and all(r["sources"] >= 12 for r in class_rows)
+        noninf_rows, noninf_ok, noninf_missing = [], True, False
+        for metric in sorted(neutral_metrics):
+            for cohort in ["all"] + list(classes):
+                bound = -0.01 if cohort == "all" else -0.02
+                interval = delta_intervals.get((metric, model, cohort))
+                if interval is None:
+                    noninf_missing = True
+                    entry = dict(metric=metric, cohort=cohort, bound_pp=bound, missing=True)
+                else:
+                    ok = interval["lo"] >= bound
+                    noninf_ok &= ok
+                    entry = dict(metric=metric, cohort=cohort, bound_pp=bound,
+                                 estimate=interval["estimate"], lo=interval["lo"],
+                                 hi=interval["hi"], sources=interval.get("sources"))
+                noninf_rows.append(entry)
+        candidate_self = overall.get("zensim", {}).get("saving")
+        butter_self = next((r["saving"] for r in summaries if r["arm"] == "butteraugli"
+                            and r["baseline"] == "none" and r["metric"] == "butter"
+                            and r["content_class"] == "all"), None)
+        self_judge = (candidate_self is not None and butter_self is not None
+                      and candidate_self >= butter_self)
+        failed = (not nonnegative or not one_percent or not class_nonnegative
+                  or not noninf_ok or not self_judge)
+        verdict = ("FAIL" if failed else
+                   "INCOMPLETE" if (noninf_missing or not minimum_sources or not cvvdp_bound)
+                   else "PASS")
+        gates[model] = dict(verdict=verdict, baseline="none",
+            scope="R6' exploratory numeric bars; confirmatory stage separate",
+            all_judges_nonnegative=nonnegative,
+            at_least_one_judge_saves_one_percent=one_percent,
+            no_neutral_judge_class_regression=class_nonnegative,
+            paired_noninferiority_vs_butteraugli=noninf_rows,
+            self_judge_symmetry=dict(candidate_by_zensim=candidate_self,
+                butteraugli_by_butteraugli=butter_self, holds=self_judge),
+            minimum12_source_families_per_class=minimum_sources,
+            cvvdp_bound=cvvdp_bound, neutral_judges=sorted(neutral_metrics),
+            declared_content_classes=classes)
+    return gates
+
+
 def shipgates_rd_main():
     """Matched engineering curves; bootstrap stays in the Rust stats owner."""
     import argparse, hashlib, json, subprocess
@@ -1234,6 +1298,7 @@ def shipgates_rd_main():
     ap.add_argument("--panel", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--metrics", default="ssim2,butter,zensim")
+    ap.add_argument("--cvvdp-dir", type=Path)
     args = ap.parse_args()
     root = args.shipgates_rd
     def digest(path):
@@ -1316,6 +1381,28 @@ def shipgates_rd_main():
     requested = set(args.metrics.split(","))
     assert requested and requested <= {"ssim2","butter","zensim"}
     columns = {"ssim2":("ssim2",1),"butter":("butteraugli_pnorm3",-1),"zensim":("fixed_zensim",1)}
+    cvvdp_lookup, cvvdp_binding = None, None
+    if args.cvvdp_dir is not None:
+        cvvdp_lookup, cvvdp_binding = {}, {}
+        inputs = json.loads((args.cvvdp_dir/"INPUTS.json").read_text())
+        assert inputs["schema"] == "shipgates-cvvdp-fhd-judge-v1"
+        assert inputs["binary_sha256"] == "ca154a6a39f910c9cba21422eb9b238463661bfa2d4a8d8f10407904c83e4cd1"
+        assert inputs["display_model"] == "standard_fhd"
+        assert inputs["design_sha256"] == digest(root/"DESIGN.json")
+        assert inputs["sources"] == len(sources)
+        assert (args.cvvdp_dir/"ORACLE_PASS.json").is_file(), "cvvdp oracle smoke missing"
+        for i in range(len(sources)):
+            receipt = json.loads((args.cvvdp_dir/f"source-{i:02d}-CVVDP.json").read_text())
+            cells_path = root/f"source-{i:02d}"/"cells.jsonl"
+            assert receipt["cells_jsonl_sha256"] == digest(cells_path)
+            rows_path = args.cvvdp_dir/f"source-{i:02d}-cvvdp.jsonl"
+            assert receipt["rows_sha256"] == digest(rows_path)
+            for line in rows_path.read_text().splitlines():
+                row = json.loads(line)
+                cvvdp_lookup[row["case"]] = row
+        assert json.loads((args.cvvdp_dir/"COMPLETE.json").read_text())["sources"] == len(sources)
+        cvvdp_binding = dict(judge="cvvdp-fhd",binary_sha256=inputs["binary_sha256"],
+            display_model="standard_fhd",rows=len(cvvdp_lookup),root=str(args.cvvdp_dir))
     judges = [json.loads(line) for line in (args.judge_dir / "judges.jsonl").read_text().splitlines()]
     assert json.loads((args.judge_dir / "COMPLETE.json").read_text())["pairs"] == len(judges) == len(cases)
     lookup, reference_pixels, decoded_pixels, checked_maps = {}, {}, {}, set()
@@ -1342,11 +1429,20 @@ def shipgates_rd_main():
         assert previous == row["distorted_pixels_sha256"]
         lookup[case_id] = row
     assert set(lookup) == set(by_case)
+    if cvvdp_lookup is not None:
+        assert set(cvvdp_lookup) == set(by_case), "cvvdp coverage differs from cells"
+        for case_id, row in cvvdp_lookup.items():
+            case = by_case[case_id]
+            assert (row["arm"],row["quality_index"],row["source"],row["decoded_png_sha256"]) == \
+                   (case["arm"],case["quality_index"],case["source"],case["decoded_png_sha256"])
+            assert math.isfinite(row["cvvdp_jod"])
+    analysis_metrics = sorted(requested) + (["cvvdp"] if cvvdp_lookup is not None else [])
     group, cohorts = defaultdict(list), {}
     for case in cases:
-        for metric in requested:
-            col,sign = columns[metric]
-            group[(case["source"],metric,case["arm"])].append((sign*lookup[case["case"]][col],case["bytes"]))
+        for metric in analysis_metrics:
+            value = (cvvdp_lookup[case["case"]]["cvvdp_jod"] if metric == "cvvdp"
+                     else columns[metric][1]*lookup[case["case"]][columns[metric][0]])
+            group[(case["source"],metric,case["arm"])].append((value,case["bytes"]))
     observations, series = [], defaultdict(list)
     family_ids = {f:i for i,f in enumerate(sorted({r["source_family"] for r in sources.values()}))}
     ids = {s:family_ids[r["source_family"]] for s,r in sources.items()}
@@ -1355,7 +1451,7 @@ def shipgates_rd_main():
         family = sources[name]["source_family"]
         assert pixel_families.setdefault(pixel_hash,family) == family, "exact reference pixels occur across declared families"
     for source, record in sorted(sources.items()):
-        for metric in sorted(requested):
+        for metric in analysis_metrics:
             curves = {a:rd_frontier(group[(source,metric,a)]) for a in arms}
             assert all(curves.values())
             low = max(c[0][0] for c in curves.values())
@@ -1378,26 +1474,57 @@ def shipgates_rd_main():
                         name=f"{baseline}/{metric}/{arm}/{cohort}"
                         series[name].append((ids[source],value))
                         cohorts[name] = dict(baseline=baseline,metric=metric,arm=arm,content_class=cohort)
+    # R6' paired deltas: candidate-vs-none saving minus butteraugli-vs-none
+    # saving on the same neutral judge, per source. Raw (non-log) series; the
+    # lower bootstrap bound carries the noninferiority rule.
+    neutral_metrics = {"ssim2"} | ({"cvvdp"} if cvvdp_lookup is not None else set())
+    obs = {(o["source"],o["metric"],o["arm"],o["baseline"]): o["mean_log_ratio"]
+           for o in observations}
+    r6_delta = {}
+    for source, record in sorted(sources.items()):
+        for metric in sorted(neutral_metrics):
+            for model in models:
+                delta = (math.exp(obs[(source,metric,"butteraugli","none")])
+                         - math.exp(obs[(source,metric,model,"none")]))
+                for cohort in ["all",record["content_class"]]:
+                    name=f"r6delta-vs-none/{metric}/{model}/{cohort}"
+                    r6_delta.setdefault(name,[]).append((ids[source],delta))
     args.output.mkdir(parents=True,exist_ok=False)
-    job = dict(schema="engineering-source-series-v1",series=[dict(name=name,reference=[i for i,_ in data],
-        values=[v for _,v in data],exp=True) for name,data in sorted(series.items())])
+    all_series = sorted([dict(name=name,reference=[i for i,_ in data],
+        values=[v for _,v in data],exp=(name not in r6_delta))
+        for name,data in [*series.items(),*r6_delta.items()]],key=lambda s:s["name"])
+    job = dict(schema="engineering-source-series-v1",series=all_series)
     (args.output / "SOURCE_SERIES.json").write_text(json.dumps(job,indent=2,allow_nan=False)+"\n")
     command=[str(args.panel),"e34","source-series","--input",str(args.output / "SOURCE_SERIES.json"),
              "--output",str(args.output / "SOURCE_INTERVALS.json")]
     subprocess.run(command,check=True)
     intervals=json.loads((args.output / "SOURCE_INTERVALS.json").read_text())
     summaries=[]
+    delta_intervals={}
     for row in intervals["series"]:
         iv=row["interval"]
+        if row["name"].startswith("r6delta-vs-none/"):
+            _,metric,model,cohort = row["name"].split("/")
+            delta_intervals[(metric,model,cohort)] = dict(
+                estimate=iv["estimate"],lo=iv["lo"],hi=iv["hi"],
+                sources=row["sources"],seed=row["seed"])
+            continue
         summaries.append(dict(**cohorts[row["name"]],sources=row["sources"],ratio=iv["estimate"],
             saving=1-iv["estimate"],saving_ci95=[1-iv["hi"],1-iv["lo"]],seed=row["seed"]))
     classes = sorted({r["content_class"] for r in sources.values()})
-    numeric_gates = shipgates_numeric_gates(models,summaries,classes,requested==set(columns),native_codec)
+    packet_summaries=[r for r in summaries if r["metric"] in columns]
+    numeric_gates = shipgates_numeric_gates(models,packet_summaries,classes,requested==set(columns),native_codec)
+    r6_prime = shipgates_r6_prime_gates(models,summaries,delta_intervals,
+        neutral_metrics,classes,cvvdp_lookup is not None)
     result=dict(schema="shipgates-rd-judged-v1",scope="development probe; intervention/control qualification separate",
         source_weighting="equal weight per source; mean log ratio across common measured baseline quality points; bootstrap clusters are declared source families",
         bootstrap="canonical zenstats source-cluster bootstrap; 10000 resamples",
         requested_judges=sorted(requested),all_three_judges_measured=requested==set(columns),
+        analysis_metrics=analysis_metrics,neutral_judges=sorted(neutral_metrics),
+        cvvdp_binding=cvvdp_binding,
         sources=len(sources),cases=len(cases),per_source=observations,summary=summaries,numeric_gates=numeric_gates,
+        r6_prime=r6_prime,
+        r6_prime_rule="GATES_REV3_AGY section 2: >=0 on every judge and >=1% on one (point estimates); no neutral-judge class regression; paired noninferiority lower bound >=-1.0pp overall/-2.0pp per class; self-judge symmetry",
         source_manifest_sha256=digest(args.sources),judge_results_sha256=digest(args.judge_dir / "judges.jsonl"),
         judge_binding=judge_binding,panel_sha256=digest(args.panel),encoder_design_sha256=digest(root / "DESIGN.json"),
         source_pixel_admission_sha256=digest(admission_path),

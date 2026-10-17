@@ -200,8 +200,8 @@ def phase():
     p.add_argument("--model")
     p.add_argument("--target", type=float)
     args = p.parse_args(sys.argv[2:])
-    require_supported_gate_adapter(args.codec)
     d = json.loads(args.design.read_text())
+    require_supported_gate_adapter(d["codec"])
     args.output.mkdir(parents=True, exist_ok=False)
     rows = []
     specs = [(f"q{i:02d}", q, None, "scalar", "zensim")
@@ -238,11 +238,13 @@ def matrix():
     for name in ["binary", "oracle", "models", "sources", "output", "heavy-lock", "run-heavy", "png8-binary"]:
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--smoke-only", action="store_true")
+    p.add_argument("--targets", default=None)
+    p.add_argument("--resume", action="store_true")
     args = p.parse_args(sys.argv[2:])
     admission=json.loads((args.sources.parent/"ADMISSION.json").read_text())
     assert admission["source_manifest_sha256"]==sha(args.sources) and admission["png8_binary_sha256"]==sha(args.png8_binary)
     assert sha(admission["receipt"])==admission["receipt_sha256"]
-    args.output.mkdir(parents=True, exist_ok=False)
+    args.output.mkdir(parents=True, exist_ok=args.resume)
     sources = json.loads(args.sources.read_text())["sources"]
     models = json.loads(args.models.read_text())
     assert len(sources) == admission["sources"] == len({r["source_family"] for r in sources})
@@ -253,7 +255,8 @@ def matrix():
                  else list(range(0, 101, 5)))
     if args.smoke_only:
         qualities = [128 if args.codec == "avif" else 50]
-    targets = [70] if args.smoke_only else [25, 40, 55, 70, 80, 90]
+    targets = [70] if args.smoke_only else ([float(t) for t in args.targets.split(",")]
+        if args.targets else [25, 40, 55, 70, 80, 90])
     source_ids = ([i for i,r in enumerate(sources) if r["name"]=="imazen-screen-8206"]
                   if args.smoke_only else list(range(len(sources))))
     assert not args.smoke_only or len(source_ids)==1
@@ -269,6 +272,9 @@ def matrix():
             else "JPEG444,two corrections" if args.codec == "jpeg" else "method6,segments4,three passes",
         scalar_controller="same candidate for active/neutral/scalar/butteraugli peer; no model on dense global frontier",
         cas_root=str(args.output), smoke_only=args.smoke_only, label_free=True)
+    if args.resume and (args.output / "DESIGN.json").is_file():
+        prior = json.loads((args.output / "DESIGN.json").read_text())
+        assert prior == design, "resume design differs from recorded design"
     write(args.output / "DESIGN.json", design)
     runner = args.output / "runner.py"
     runner.write_bytes(Path(__file__).read_bytes())
@@ -280,12 +286,20 @@ def matrix():
     count = 0
     for source_id in source_ids:
         source_dir = args.output / f"source-{source_id:02d}"
-        source_dir.mkdir()
+        source_dir.mkdir(exist_ok=True)
         phases = [("global", None, None)] + [
             (model + f"-t{target}", model, target) for model in models for target in targets]
         source_count = 0
         for label, model, target in phases:
             dest = source_dir / label
+            if args.resume and (dest / "COMPLETE.json").is_file():
+                done = json.loads((dest / "COMPLETE.json").read_text())
+                lines = (dest / "cells.jsonl").read_text().splitlines()
+                assert len(lines) == done["cells"]
+                source_count += len(lines)
+                count += len(lines)
+                print(f"{args.codec} source{source_id:02d} {label}: resume-complete", flush=True)
+                continue
             command = ["flock", str(args.heavy_lock), str(args.run_heavy), "--mem", "16G", "--jobs", "1", "--",
                 sys.executable, str(runner), "phase", "--design", str(args.output / "DESIGN.json"),
                 "--source-id", str(source_id), "--output", str(dest)]
@@ -298,12 +312,13 @@ def matrix():
             done = json.loads((dest / "COMPLETE.json").read_text())
             lines = (dest / "cells.jsonl").read_text().splitlines()
             assert len(lines) == done["cells"]
-            with (source_dir / "cells.jsonl").open("a") as out:
-                out.write("\n".join(lines) + "\n")
             source_count += len(lines)
             count += len(lines)
             print(f"{args.codec} source{source_id:02d} {label}: {len(lines)}cells complete", flush=True)
         assert source_count == len(qualities) + len(models) * len(targets) * 4
+        with (source_dir / "cells.jsonl").open("w") as out:
+            for label, _, _ in phases:
+                out.write((source_dir / label / "cells.jsonl").read_text())
         write(source_dir / "COMPLETE.json", dict(cells=source_count))
     write(args.output / "COMPLETE.json", dict(cells=count, sources=len(source_ids), smoke_only=args.smoke_only,
         qualification="encoder-only; independent judges and intervention controls required"))

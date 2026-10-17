@@ -91,5 +91,121 @@ class JudgeBindingTests(unittest.TestCase):
                 owner.validate_shipgates_judge_binding(root,design,pin,1)
 
 
+def _r6_summaries(model="cand", overall=None, classes=None, butter_self=.02):
+    """Invented summary rows: per (arm,baseline,metric,cohort) saving + sources."""
+    rows = []
+    metrics = ["ssim2", "butter", "zensim", "cvvdp"]
+    for metric in metrics:
+        rows.append(dict(arm=model, baseline="none", metric=metric,
+                         content_class="all",
+                         saving=(overall or {}).get(metric, .02), sources=27))
+        for cls in ["photo", "screen"]:
+            rows.append(dict(arm=model, baseline="none", metric=metric,
+                             content_class=cls,
+                             saving=(classes or {}).get((metric, cls), .02),
+                             sources=12))
+    rows.append(dict(arm="butteraugli", baseline="none", metric="butter",
+                     content_class="all", saving=butter_self, sources=27))
+    return rows
+
+
+def _r6_deltas(model="cand", lo_overall=0., lo_class=0., metrics=("ssim2", "cvvdp"),
+               classes=("photo", "screen")):
+    out = {}
+    for metric in metrics:
+        out[(metric, model, "all")] = dict(estimate=lo_overall, lo=lo_overall,
+                                           hi=lo_overall, sources=27, seed=1)
+        for cls in classes:
+            out[(metric, model, cls)] = dict(estimate=lo_class, lo=lo_class,
+                                             hi=lo_class, sources=12, seed=1)
+    return out
+
+
+class R6PrimeGateTests(unittest.TestCase):
+    METRICS = {"ssim2", "cvvdp"}
+    CLASSES = ["photo", "screen"]
+
+    def gate(self, **kw):
+        summaries = kw.pop("summaries", _r6_summaries())
+        deltas = kw.pop("deltas", _r6_deltas())
+        return owner.shipgates_r6_prime_gates(
+            ["cand"], summaries, deltas, self.METRICS, self.CLASSES, True)["cand"]
+
+    def test_pass_baseline(self):
+        g = self.gate()
+        self.assertEqual(g["verdict"], "PASS")
+        self.assertTrue(g["all_judges_nonnegative"])
+        self.assertTrue(g["at_least_one_judge_saves_one_percent"])
+        self.assertTrue(g["no_neutral_judge_class_regression"])
+        self.assertTrue(g["self_judge_symmetry"]["holds"])
+
+    def test_negative_saving_on_any_judge_fails(self):
+        # savings >= 0 is required on every analyzed judge, not only neutral ones.
+        g = self.gate(summaries=_r6_summaries(overall={"butter": -.001}))
+        self.assertEqual(g["verdict"], "FAIL")
+        self.assertFalse(g["all_judges_nonnegative"])
+
+    def test_one_percent_must_hold_on_at_least_one_judge(self):
+        g = self.gate(summaries=_r6_summaries(
+            overall={"ssim2": .005, "butter": .005, "zensim": .005, "cvvdp": .005}))
+        self.assertEqual(g["verdict"], "FAIL")
+        self.assertFalse(g["at_least_one_judge_saves_one_percent"])
+
+    def test_class_rule_applies_only_to_neutral_judges(self):
+        # A negative class saving on butteraugli/zensim does not violate R6'(i);
+        # the same value on ssim2 or cvvdp does.
+        ok = self.gate(summaries=_r6_summaries(
+            classes={("butter", "photo"): -.05, ("zensim", "screen"): -.05}))
+        self.assertEqual(ok["verdict"], "PASS")
+        bad = self.gate(summaries=_r6_summaries(classes={("cvvdp", "photo"): -.001}))
+        self.assertEqual(bad["verdict"], "FAIL")
+        self.assertFalse(bad["no_neutral_judge_class_regression"])
+        bad2 = self.gate(summaries=_r6_summaries(classes={("ssim2", "screen"): -.001}))
+        self.assertEqual(bad2["verdict"], "FAIL")
+
+    def test_noninferiority_overall_bound(self):
+        ok = self.gate(deltas=_r6_deltas(lo_overall=-.0099))
+        self.assertEqual(ok["verdict"], "PASS")
+        bad = self.gate(deltas=_r6_deltas(lo_overall=-.0101))
+        self.assertEqual(bad["verdict"], "FAIL")
+
+    def test_noninferiority_per_class_bound(self):
+        ok = self.gate(deltas=_r6_deltas(lo_class=-.0199))
+        self.assertEqual(ok["verdict"], "PASS")
+        bad = self.gate(deltas=_r6_deltas(lo_class=-.0201))
+        self.assertEqual(bad["verdict"], "FAIL")
+
+    def test_self_judge_symmetry(self):
+        ok = self.gate(summaries=_r6_summaries(
+            overall={"zensim": .03}, butter_self=.02))
+        self.assertEqual(ok["verdict"], "PASS")
+        bad = self.gate(summaries=_r6_summaries(
+            overall={"zensim": .01}, butter_self=.02))
+        self.assertEqual(bad["verdict"], "FAIL")
+        self.assertFalse(bad["self_judge_symmetry"]["holds"])
+
+    def test_missing_delta_interval_is_incomplete(self):
+        deltas = _r6_deltas()
+        del deltas[("ssim2", "cand", "photo")]
+        g = self.gate(deltas=deltas)
+        self.assertEqual(g["verdict"], "INCOMPLETE")
+
+    def test_thin_class_is_incomplete(self):
+        rows = _r6_summaries()
+        for r in rows:
+            if r["content_class"] == "photo":
+                r["sources"] = 11
+        g = self.gate(summaries=rows)
+        self.assertEqual(g["verdict"], "INCOMPLETE")
+        self.assertFalse(g["minimum12_source_families_per_class"])
+
+    def test_unbound_cvvdp_is_incomplete_not_silent(self):
+        g = owner.shipgates_r6_prime_gates(
+            ["cand"], _r6_summaries(), _r6_deltas(metrics=("ssim2",)),
+            {"ssim2"}, self.CLASSES, False)["cand"]
+        self.assertEqual(g["verdict"], "INCOMPLETE")
+        self.assertFalse(g["cvvdp_bound"])
+
+
 if __name__ == "__main__":
     unittest.main()
