@@ -124,3 +124,9 @@ mapperf-clean-owned-targets artifacts:
 
 mapperf-archive root destination:
     python3 scripts/rev4_featpot/mapperf_archive.py --root {{quote(root)}} --destination {{quote(destination)}}
+
+mapperf-archive-complete root destination:
+    test ! -e target && test ! -e target-before && test ! -e zensim-bench/addrfix-runtime/target
+    rsync -a --stats r7900x:/home/lilith/tmp/mapperf-20261017/preserved-cargo/ {{quote(root)}}/preserved-remote-cargo/
+    python3 -c 'import hashlib,json; from pathlib import Path; r=Path("{{root}}")/"preserved-remote-cargo"; rows=json.loads((r/"MANIFEST.json").read_text())["files"]; assert rows; assert all(hashlib.file_digest((r/Path(row["preserved"]).name).open("rb"), "sha256").hexdigest()==row["sha256"] for row in rows); print("Remote preserved references verified:", len(rows))'
+    just mapperf-archive {{quote(root)}} {{quote(destination)}}
