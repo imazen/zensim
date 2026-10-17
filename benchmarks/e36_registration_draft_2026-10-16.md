@@ -559,3 +559,6 @@ The exact original freeze exclusion and absolute22:00Z deadline remain
 unchanged; later storage/review waits receive no extra time credit. Fits
 remain prohibited until completed matrix, pool and packet admission and
 coordinator fit go.
+
+
+2026-10-17 execution-clock correction, before any fit: the continuation wrapper expired at17:00Z despite earlier live22Z timer application. All original output/exit/resource evidence is retained;11625 selected native DONE/attempt1 views survived. A fresh same-ID continuation now creates its timeout directly from the already authorized absolute22Z clock, with no new frozen-time exclusion.24 actual resumed numerical runtimes passed the original-core/storage-resolver/source/deadline audit. No data/teacher/quality/size/source/matrix change or attempt reset; no fit. Actual native completion and canonical artifact admission remain mandatory.

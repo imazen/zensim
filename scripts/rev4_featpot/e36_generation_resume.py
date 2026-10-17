@@ -214,7 +214,7 @@ def run(root,out,phase_name='fallback'):
             children.append(child)
             roles[role]=child
             suffix='resume' if phase_name=='fallback' else 'additions'
-            write(owner/(role+'-'+suffix+'-v1-pid.json'),dict(pid=child.pid,scope=str(scope),utc=time.time(),fits=0))
+            write(owner/(role+'-'+out.name+'-pid.json'),dict(pid=child.pid,scope=str(scope),utc=time.time(),fits=0))
         wait_resources(roles,out,scope)
         remaining=clock['deadline_unix']-time.time()
         if remaining<=0:raise TimeoutError('registered deadline passed during preparation')
