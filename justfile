@@ -2105,16 +2105,20 @@ e36-adapter-unit-check:
 # Caller acquires heavy.lock + run-heavy separately for EACH recipe below.
 # Do not wrap their sequence in a single shared-lock allocation.
 e36-final-normal-build root:
+    test ! -e {{quote(root + "/bin/e36-normal-final")}}
     env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/bin/e36-normal-final")}}
 
 e36-final-private-build root:
+    test ! -e {{quote(root + "/bin/e36-fit-final")}}
+    test ! -e {{quote(root + "/bin/e36-raw-score-final")}}
     E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --bin inspect_qualified_checkpoint --target-dir /home/lilith/tmp/e36-pixels-target
     mkdir -p {{quote(root + "/bin/e36-fit-final")}}
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train /home/lilith/tmp/e36-pixels-target/release/panel /home/lilith/tmp/e36-pixels-target/release/bake_dial_refit /home/lilith/tmp/e36-pixels-target/release/inspect_qualified_checkpoint {{quote(root + "/bin/e36-fit-final/")}}
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/e36_raw_score {{quote(root + "/bin/e36-raw-score-final")}}
 
 e36-final-identity-build root:
+    test ! -e {{quote(root + "/bin/e36-fit-final/serve_custom_bake")}}
     env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim --example serve_custom_bake --features custom-profiles,candidate-profiles --target-dir /home/lilith/tmp/e36-pixels-target
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/examples/serve_custom_bake {{quote(root + "/bin/e36-fit-final/serve_custom_bake")}}
 
