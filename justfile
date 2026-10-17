@@ -1881,6 +1881,7 @@ e36-archive root mirror:
     python3 scripts/demos/rev5perf_archive.py {{quote(root)}} {{quote(mirror)}} --dereference --exclude-operator-locks
 
 shipgates-scripts-check:
+    just shipgates-cell-scheduling-check
     python3 scripts/lint_scripts.py
     python3 scripts/test_lint_scripts.py
     just shipgates-analysis-check
@@ -1973,3 +1974,6 @@ shipgates-judge-replay old new oracle output:
 
 shipgates-progress encodes judges:
     @python3 -B scripts/rev4_featpot/shipgates_progress.py --encodes {{encodes}} --judges {{judges}}
+
+shipgates-cell-scheduling-check:
+    python3 -B -m unittest scripts/tests/test_shipgates_cell_scheduling.py

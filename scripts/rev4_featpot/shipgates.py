@@ -334,6 +334,50 @@ def rd_licenses(args):
     write(args.output / "LICENSES.json",receipts)
 
 
+def bounded_cell_records(selected, arms, workers, cross_quality, encode_cell):
+    """Bound concurrent cells while preserving the declared journal order."""
+    from concurrent.futures import ThreadPoolExecutor
+    assert 1 <= workers <= 8
+    batches = [[(qi, distance, arm) for qi, distance in selected for arm in arms]] if cross_quality else [
+        [(qi, distance, arm) for arm in arms] for qi, distance in selected]
+    for tasks in batches:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            yield from pool.map(encode_cell, tasks)
+
+
+def verify_native_cell_replay(records, prior, output):
+    old = [json.loads(line) for line in prior.read_text().splitlines()]
+    wanted = {(r["quality_index"], r["arm"]) for r in records}
+    old = [r for r in old if (r["quality_index"], r["arm"]) in wanted]
+    lookup = {(r["quality_index"], r["arm"]):r for r in old}
+    assert len(lookup) == len(old) == len(records) == len(wanted)
+    keys = ["source", "source_family", "content_class", "source_sha256", "arm", "codec",
+            "quality_index", "distance_f32", "decoded_png_sha256", "encoded_sha256", "bytes",
+            "map_records", "model_sha256", "independent_decoder"]
+    maps = 0
+    for new in records:
+        previous = lookup[(new["quality_index"], new["arm"])]
+        assert {k:new[k] for k in keys} == {k:previous[k] for k in keys}
+        for row in [previous, new]:
+            assert sha(row["encoded"]) == row["encoded_sha256"]
+            assert sha(row["decoded"]) == row["decoded_png_sha256"]
+            for item in row["map_records"]:
+                assert sha(Path(row["case"])/"maps"/(item["sha256"]+".zmap")) == item["sha256"]
+        assert sha(new["reference"]) == sha(previous["reference"])
+        def manifest(row):
+            path = Path(row["case"])/("manifest_"+row["arm"]+".tsv")
+            with path.open() as stream:
+                values = list(csv.DictReader(stream, delimiter="\t"))
+            assert len(values) == 1
+            assert set(values[0]) == {"ref_path", "dist_path", "label", "image", "corpus", "distance", "bytes", "encode_ms"}
+            return {k:v for k,v in values[0].items() if k not in ["ref_path", "dist_path", "encode_ms"]}
+        assert manifest(new) == manifest(previous)
+        maps += len(new["map_records"])
+    write(output, dict(cells=len(records), ordered_map_records=maps,
+        prior_journal_sha256=sha(prior), replay_owner_sha256=sha(__file__),
+        scope="exact encoded/reference/decoded bytes, map records/bits and non-path/non-timing native manifest fields"))
+
+
 def jxl_rd_source(args):
     """Encode one frozen source, retaining all actual driver artifacts."""
     from shipgates_png import canonical_pair
@@ -356,69 +400,74 @@ def jxl_rd_source(args):
     selected = [(qi,d) for qi,d in enumerate(design["distances_f32"])
                 if args.quality_start <= qi < args.quality_end and (args.quality_index is None or qi == args.quality_index)]
     assert selected and 0 <= args.quality_start < args.quality_end <= 21
-    for qi, distance in selected:
-        hashes = {}
-        def encode_arm(arm):
-            label,metric,iterations,gain,model = arm
-            free = os.statvfs(str(Path.home()))
-            assert free.f_bavail * free.f_frsize >= 20 * 1024**3, "disk guard: below20GiB free"
-            assert sha(model["path"]) == model["sha256"]
-            dest = args.output / label / f"d{qi:02d}"
-            dest.mkdir(parents=True)
-            corpus = dest / "corpus.tsv"
-            corpus.write_text(f"{source['path']}\t{source['name']}\t{source['content_class']}\n")
-            maps = dest / "maps"
-            artifacts = dest / "artifacts"
-            env = {k:v for k,v in os.environ.items() if not k.startswith(("ZENSIM_","JXL_"))}
-            env.update(ZENSIM_FORMULA_REV="5", ZENSIM_NEIGHBOUR_EXACT="1", RAYON_NUM_THREADS="1",
-                ZENSIM_H3_GAIN=gain,JXL_ZENSIM_MODEL_MAP="h3-mag",JXL_ZENSIM_S4_EPS="0",
-                JXL_ZENSIM_RD_PROFILE="bake:"+model["path"],
-                JXL_RD_MAP_CAS=str(maps),JXL_RD_ARTIFACT_ROOT=str(artifacts))
-            command = [str(args.binary),"--metric",metric,"--label",label,"--iters",str(iterations),
-                "--canonical-png","--corpus-file",str(corpus),"--distances",format(distance,".9g"),"--out-dir",str(dest)]
-            write(dest / "command.json",dict(command=command,environment={k:v for k,v in env.items() if k.startswith(("ZENSIM_","JXL_","RAYON_"))}))
-            with (dest / "run.log").open("x") as log:
-                subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
-            encoded = list((artifacts / "jxl").glob("*.jxl"))
-            assert len(encoded) == 1, "one complete encoded artifact expected"
-            encoded = encoded[0]
-            assert sha(encoded) == encoded.stem
-            oracle = [str(args.oracle),str(encoded),"--disable_output","--num_threads=1"]
-            with (dest / "oracle.log").open("x") as log:
-                subprocess.run(oracle,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
-            index = maps / "index.jsonl"
-            items = [json.loads(line) for line in index.read_text().splitlines()] if index.exists() else []
-            assert bool(items) == bool(iterations), "map engagement/persistence differs"
-            for item in items:
-                path = maps / (item["sha256"]+".zmap")
-                assert sha(path) == item["sha256"]
-            decoded = list((dest / "decoded").glob("*.png"))
-            assert len(decoded) == 1
-            reference,decoded_path,png_metadata = canonical_pair(source["path"],
-                dest / "ref" / (source["name"]+".png"),decoded[0],dest,args.png8_binary)
-            record = dict(source=source["name"],source_family=source["source_family"],content_class=source["content_class"],
-                source_sha256=source["sha256"],arm=label,codec="jxl",quality_index=qi,distance_f32=distance,
-                reference=str(reference),decoded=str(decoded_path),
-                decoded_png_sha256=sha(decoded_path),**png_metadata,encoded=str(encoded),encoded_sha256=encoded.stem,
-                bytes=encoded.stat().st_size,map_records=items,case=str(dest),model_sha256=model["sha256"],
-                independent_decoder="libjxl0.12-success")
-            write(dest / "CELL.json",record)
-            print(f"{datetime.now(timezone.utc).isoformat()} RD JXL {source['name']} d{qi:02d} {label}: {record['bytes']}B maps{len(items)}",flush=True)
-            return record
-        from concurrent.futures import ThreadPoolExecutor
-        assert 1 <= args.cell_workers <= 8
-        with ThreadPoolExecutor(max_workers=args.cell_workers) as workers:
-            for record in workers.map(encode_arm,arms):
-                if not records:
-                    write(args.output / "FIRST_CELL_VERIFIED.json",record)
-                records.append(record)
-                hashes[record["arm"]] = record["encoded_sha256"]
-                with (args.output / "cells.jsonl").open("a") as stream:
-                    stream.write(json.dumps(record,allow_nan=False)+"\n")
-        assert all(hashes[label+"-neutral"] == hashes["none"] for label in models), "neutral/no-steering bitstreams differ"
-        write(args.output / f"GROUP-{qi:02d}.json",dict(cells=8,quality_index=qi,records=records[-8:],
-            source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),design_sha256=sha(args.design)))
+    def encode_cell(cell):
+        qi, distance, arm = cell
+        label,metric,iterations,gain,model = arm
+        free = os.statvfs(str(Path.home()))
+        assert free.f_bavail * free.f_frsize >= 20 * 1024**3, "disk guard: below20GiB free"
+        assert sha(model["path"]) == model["sha256"]
+        dest = args.output / label / f"d{qi:02d}"
+        dest.mkdir(parents=True)
+        corpus = dest / "corpus.tsv"
+        corpus.write_text(f"{source['path']}\t{source['name']}\t{source['content_class']}\n")
+        maps = dest / "maps"
+        artifacts = dest / "artifacts"
+        env = {k:v for k,v in os.environ.items() if not k.startswith(("ZENSIM_","JXL_"))}
+        env.update(ZENSIM_FORMULA_REV="5", ZENSIM_NEIGHBOUR_EXACT="1", RAYON_NUM_THREADS="1",
+            ZENSIM_H3_GAIN=gain,JXL_ZENSIM_MODEL_MAP="h3-mag",JXL_ZENSIM_S4_EPS="0",
+            JXL_ZENSIM_RD_PROFILE="bake:"+model["path"],
+            JXL_RD_MAP_CAS=str(maps),JXL_RD_ARTIFACT_ROOT=str(artifacts))
+        command = [str(args.binary),"--metric",metric,"--label",label,"--iters",str(iterations),
+            "--canonical-png","--corpus-file",str(corpus),"--distances",format(distance,".9g"),"--out-dir",str(dest)]
+        write(dest / "command.json",dict(command=command,environment={k:v for k,v in env.items() if k.startswith(("ZENSIM_","JXL_","RAYON_"))}))
+        with (dest / "run.log").open("x") as log:
+            subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        encoded = list((artifacts / "jxl").glob("*.jxl"))
+        assert len(encoded) == 1, "one complete encoded artifact expected"
+        encoded = encoded[0]
+        assert sha(encoded) == encoded.stem
+        oracle = [str(args.oracle),str(encoded),"--disable_output","--num_threads=1"]
+        with (dest / "oracle.log").open("x") as log:
+            subprocess.run(oracle,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        index = maps / "index.jsonl"
+        items = [json.loads(line) for line in index.read_text().splitlines()] if index.exists() else []
+        assert bool(items) == bool(iterations), "map engagement/persistence differs"
+        for item in items:
+            path = maps / (item["sha256"]+".zmap")
+            assert sha(path) == item["sha256"]
+        decoded = list((dest / "decoded").glob("*.png"))
+        assert len(decoded) == 1
+        reference,decoded_path,png_metadata = canonical_pair(source["path"],
+            dest / "ref" / (source["name"]+".png"),decoded[0],dest,args.png8_binary)
+        record = dict(source=source["name"],source_family=source["source_family"],content_class=source["content_class"],
+            source_sha256=source["sha256"],arm=label,codec="jxl",quality_index=qi,distance_f32=distance,
+            reference=str(reference),decoded=str(decoded_path),
+            decoded_png_sha256=sha(decoded_path),**png_metadata,encoded=str(encoded),encoded_sha256=encoded.stem,
+            bytes=encoded.stat().st_size,map_records=items,case=str(dest),model_sha256=model["sha256"],
+            independent_decoder="libjxl0.12-success")
+        write(dest / "CELL.json",record)
+        print(f"{datetime.now(timezone.utc).isoformat()} RD JXL {source['name']} d{qi:02d} {label}: {record['bytes']}B maps{len(items)}",flush=True)
+        return record
+    write(args.output / "SCHEDULING.json", dict(cross_quality_cells=args.cross_quality_cells,
+        worker_cap=args.cell_workers, qualities=[qi for qi,_ in selected], runner_sha256=sha(__file__)))
+    for record in bounded_cell_records(selected, arms, args.cell_workers, args.cross_quality_cells, encode_cell):
+        if not records:
+            write(args.output / "FIRST_CELL_VERIFIED.json", record)
+        records.append(record)
+        with (args.output / "cells.jsonl").open("a") as stream:
+            stream.write(json.dumps(record, allow_nan=False)+"\n")
+        if len(records) % 8 == 0:
+            group = records[-8:]
+            qi = record["quality_index"]
+            assert {r["quality_index"] for r in group} == {qi}
+            hashes = {r["arm"]:r["encoded_sha256"] for r in group}
+            assert len(hashes) == 8
+            assert all(hashes[label+"-neutral"] == hashes["none"] for label in models), "neutral/no-steering bitstreams differ"
+            write(args.output / f"GROUP-{qi:02d}.json", dict(cells=8, quality_index=qi, records=group,
+                source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"), design_sha256=sha(args.design)))
     assert len(records) == len(selected)*8
+    if args.replay_source_journal:
+        verify_native_cell_replay(records, args.replay_source_journal, args.output / "REPLAY_VERIFIED.json")
     write(args.output / "COMPLETE.json",dict(cells=len(records),source=source,
           source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),design_sha256=sha(args.design)))
 
@@ -441,7 +490,8 @@ def jxl_rd(args):
         binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),
         png8_binary_sha256=sha(args.png8_binary),source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),
         distances_f32=distances,arms=8,iterations=2,threads=1,judges="separate; not yet scored",
-        sources=len(sources),cell_workers=args.cell_workers,qualities_per_job=args.qualities_per_job,memory_admission="wait30s only for exact unstarted run-heavy low-memory refusal; execution failures fatal",neutral_rule="every candidate-neutral byte-identical to none at every cell")
+        sources=len(sources),cell_workers=args.cell_workers,qualities_per_job=args.qualities_per_job,
+        cell_scheduling="across-qualities" if args.cross_quality_cells else "within-quality",memory_admission="wait30s only for exact unstarted run-heavy low-memory refusal; execution failures fatal",neutral_rule="every candidate-neutral byte-identical to none at every cell")
     if args.resume_encodes_root:
         previous=json.loads((args.resume_encodes_root/"DESIGN.json").read_text())
         assert previous["binary_sha256"]==design["binary_sha256"] and previous["oracle_sha256"]==design["oracle_sha256"]
@@ -507,6 +557,8 @@ def jxl_rd(args):
                         sys.executable,str(runner),"jxl-rd-source","--models",str(args.models),"--binary",str(args.binary),
                         "--inputs",str(args.inputs),"--oracle",str(args.oracle),"--png8-binary",str(args.png8_binary),"--design",str(args.output / "DESIGN.json"),
                         "--source-id",str(i),"--quality-start",str(qi),"--quality-end",str(end_quality),"--cell-workers",str(args.cell_workers),"--output",str(phase)]
+                    if args.cross_quality_cells:
+                        command.append("--cross-quality-cells")
                     write(dest / f"quality-{qi:02d}-command.json",command)
                     print(f"JXL RD source{i:02d} {source['name']} qualities{qi:02d}..{end_quality-1:02d}: queued",flush=True)
                     run_with_memory_admission(command,dest / f"quality-{qi:02d}.log",phase)
@@ -674,6 +726,7 @@ def main():
             command.add_argument("--build-commit",required=True)
         if mode in ["jxl-rd","jxl-rd-source"]:
             command.add_argument("--cell-workers",type=int,default=1,choices=range(1,9))
+            command.add_argument("--cross-quality-cells",action="store_true",help="keep the same bounded worker pool busy across quality points")
         if mode == "jxl-rd":
             command.add_argument("--qualities-per-job",type=int,default=1,choices=[1,2,3,4,21],
                                  help="release the heavy lock per quality group or complete source; every quality is checkpointed")
@@ -681,6 +734,7 @@ def main():
             command.add_argument("--quality-start",type=int,default=0)
             command.add_argument("--quality-end",type=int,default=21)
             command.add_argument("--quality-index", type=int)
+            command.add_argument("--replay-source-journal",type=Path)
         if mode in ["jxl-rd", "jxl-interventions"]:
             command.add_argument("--resume-encodes-root", type=Path)
         if mode == "gaddr":
