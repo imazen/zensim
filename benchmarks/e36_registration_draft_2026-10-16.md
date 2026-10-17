@@ -1,5 +1,15 @@
 # E36 draft — native TRAIN ladders for core ordering
 
+Effective amendments as of 2026-10-17, before any fit: AVIF uses SVT only;
+JPEG, SVT, WebP and JXL retain all61 q values and all20 sizes. Mandatory12300
+views are unchanged; amended full12684=12620 baseline ladders+64 mode-panel
+views, with384 optional additions. Only full4096 source count changed16→6
+per surviving codec, using the original mandatory-six centroid subset. The
+source-count amendment below supersedes the earlier full4096 count. The fixed
+22:00Z deadline and original exact frozen interval govern generation. All
+previous registrations and measured-cost tables remain as amendment history.
+Fitting is not released.
+
 Revision 5 budget amendment, before any E36 fit. Preparation permits native data generation and
 non-training checks only. No optimizer step, first-epoch smoke, fit-cell claim or
 model qualification is authorized. The coordinator releases fitting separately.

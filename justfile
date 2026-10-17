@@ -2346,7 +2346,7 @@ e36-optional-terminal root out log audit:
 
 # Storage windows own the paper lock; no inherited flock around this scope.
 e36-raw-drain-run root out resources:
-    ~/work/zen/scripts/run-heavy --mem 8G --jobs 2 -- python3 scripts/rev4_featpot/e36_archive_terminal.py run --root {{quote(root)}} --out {{quote(out)}} --resources {{quote(resources)}}
+    ~/work/zen/scripts/run-heavy --mem 8G --jobs 2 -- python3 {{quote(resources + "/e36_archive_terminal.py")}} run --root {{quote(root)}} --out {{quote(out)}} --resources {{quote(resources)}}
 
 e36-raw-drain-close root out log:
     python3 scripts/rev4_featpot/e36_archive_terminal.py close --root {{quote(root)}} --out {{quote(out)}} --log {{quote(log)}}
