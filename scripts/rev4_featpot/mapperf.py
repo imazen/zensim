@@ -44,6 +44,7 @@ def main():
     root = a.root
     if a.mode == 'cycle':
         assert a.model
+        os.environ['SPEEDQ_LOCK_OWNER'] = 'codex-MAPPERF'
         command = [sys.executable, __file__]
         with owner.segment_lock(Path.home() / 'tmp/zensim-paper/rev4/heavy.lock'):
             subprocess.run(command + ['parity', '--root', str(root), '--model', a.model], check=True)
