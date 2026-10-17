@@ -21,6 +21,20 @@ from e36_store import sha
 
 
 class Storage(unittest.TestCase):
+    def test_resolver_versions_preserve_old_owner_and_refuse_changed_content_address(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as directory:
+            root=Path(directory);owner=root/'owner-svt-ssd-v1';owner.mkdir()
+            legacy=owner/'artifact-location-final.py';legacy.write_text('previous retained owner')
+            source=root/'resolver.py';source.write_text('first owner')
+            first=location.retain_resolver(root,source)
+            self.assertEqual(location.retain_resolver(root,source),first)
+            first.write_text('changed content address')
+            with self.assertRaisesRegex(ValueError,'resolver changed'):location.retain_resolver(root,source)
+            source.write_text('successor owner');second=location.retain_resolver(root,source)
+            self.assertNotEqual(first,second);self.assertEqual(second.read_text(),'successor owner')
+            self.assertEqual(first.read_text(),'changed content address')
+            self.assertEqual(legacy.read_text(),'previous retained owner')
+
     def test_final_location_freeze_replays_native_membership_and_real_readback(self):
         import e36_store
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-artifact-freeze-') as d:

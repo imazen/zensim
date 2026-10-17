@@ -124,6 +124,18 @@ class MetadataOwnership(unittest.TestCase):
 
 
 class MetadataClosure(unittest.TestCase):
+    def test_remaining_local_raw_bytes_are_backed_up_without_training_admission(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as directory:
+            root=Path(directory);terminal,owner=self.terminal(root)
+            raw=root/'artifacts-local-v1/blobs/aa/retained.tar';raw.parent.mkdir(parents=True);raw.write_bytes(b'opaque retained raw bundle')
+            with patch('e36_closed_archive.closed_generation',return_value=(owner/'native.json',[])):
+                result=client.plan(root,root/'backup-plan','invented')
+            retained=result['retained_local_raw_artifacts']
+            self.assertFalse(retained['training_admission']);self.assertTrue(retained['local_copies_retained'])
+            self.assertEqual(retained['files'],[dict(path=str(raw.relative_to(root)),sha256=store.sha(raw),bytes=raw.stat().st_size)])
+            self.assertTrue(any(item['sha256']==store.sha(raw) for job in result['jobs'] for item in job['items']))
+            self.assertEqual(raw.read_bytes(),b'opaque retained raw bundle')
+
     def terminal(self,root,reason='all native-published local bundles drained; metadata retained for separate canonical archive'):
         import e36_archive_terminal as terminal
         owner=root/'owner-svt-ssd-v1';owner.mkdir()

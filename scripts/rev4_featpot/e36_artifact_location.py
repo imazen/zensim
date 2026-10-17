@@ -143,6 +143,20 @@ def require_pack_directory_proof(root):
     return path
 
 
+def retain_resolver(root,source):
+    """Preserve earlier owners and retain this exact code by content hash."""
+    import shutil
+    source=Path(source);value=sha(source)
+    path=Path(root)/'owner-svt-ssd-v1'/('artifact-location-final-'+value+'.py')
+    if path.exists():
+        if sha(path)!=value:raise ValueError('content-addressed artifact resolver changed')
+    else:
+        with source.open('rb') as incoming,path.open('xb') as output:
+            shutil.copyfileobj(incoming,output);output.flush();os.fsync(output.fileno())
+        sync_directory(path.parent)
+    return path
+
+
 def freeze(root,out):
     """Bind final relocation history and replay native eligibility plus readback."""
     import gzip
@@ -213,10 +227,7 @@ def freeze(root,out):
         if client.process is not None:
             client.process.stdin.close();client.process.wait(timeout=30);client.process.stdout.close()
     if sha(journal)!=journal_sha:raise ValueError('relocation journal changed during freeze')
-    resolver_path=root/'owner-svt-ssd-v1/artifact-location-final.py'
-    if resolver_path.exists():
-        if sha(resolver_path)!=sha(__file__):raise ValueError('preserve previous artifact resolver before changing it')
-    else:shutil.copyfile(__file__,resolver_path)
+    resolver_path=retain_resolver(root,Path(__file__))
     result=dict(schema='e36-artifact-location-admission-v1',admitted=True,
                 journal=dict(path=str(journal),sha256=journal_sha,segments=segments),
                 resolver=dict(path=str(resolver_path),sha256=sha(resolver_path)),

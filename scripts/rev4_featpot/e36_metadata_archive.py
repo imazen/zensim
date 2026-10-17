@@ -58,7 +58,7 @@ def plan(root,out,commit):
     durable_mkdir(out);files=[];unique={};links=[]
     for path in sorted(root.rglob('*')):
         relative=path.relative_to(root)
-        if relative.parts[0] in ['artifacts-local-v1','artifact-access-locks'] or path.is_relative_to(out):continue
+        if relative.parts[0]=='artifact-access-locks' or path.is_relative_to(out):continue
         if path.is_symlink():links.append(dict(path=str(relative),target=os.readlink(path)));continue
         if not path.is_file():continue
         stat=path.stat();h=sha(path)
@@ -78,6 +78,7 @@ def plan(root,out,commit):
         jobs.append(dict(id=value,items=group,tar_bytes=stored,tar_format=format_name))
     result=dict(schema='e36-closed-metadata-archive-plan-v2' if format_name=='pax' else 'e36-closed-metadata-archive-plan-v1',archive_format=format_name,root=str(root),build_commit=commit,raw_drain=dict(path=str(drain_path),sha256=sha(drain_path)),seal=dict(path=str(seal),sha256=sha(seal)),ustar_members_fit=all(row['bytes']<8*1024**3 for row in files),terminal=dict(path=str(terminal),sha256=sha(terminal)),stop=dict(path=str(stop),sha256=sha(stop)),files=files,symlinks=links,jobs=jobs,raw_bytes=sum(r['bytes'] for r in unique.values()),fits=0,labels_read=False,local_copies_retained=True)
     result['client_source']=pin(Path(__file__))
+    result['retained_local_raw_artifacts']=dict(files=[row for row in files if Path(row['path']).parts[0]=='artifacts-local-v1'],training_admission=False,local_copies_retained=True)
     sources=Path(__file__).with_name('sources.json')
     if sources.exists():result['control_sources']=pin(sources)
     write(out/'plan.json',result);return result
