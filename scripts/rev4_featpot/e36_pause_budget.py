@@ -221,7 +221,9 @@ def resume(root,scope,supervisor,controller,auto_thaw_shell,registration,recover
     effective={**base,'deadline_unix':(old_deadline_ns+delta)/1_000_000_000,'budget_only_amendment':dict(path=str(ap),sha256=sha(ap))}
     with clock_path.open('x') as f:json.dump(effective,f,indent=2)
     resolve(clock_path)
-    def utc(ns):return datetime.datetime.fromtimestamp(ns/1e9,datetime.timezone.utc).isoformat()
+    def utc(ns):
+        seconds,nanos=divmod(ns,1_000_000_000)
+        return datetime.datetime.fromtimestamp(seconds,datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')+'.'+f'{nanos:09d}'.rstrip('0')+'Z'
     with Path(registration).open('a') as f:f.write('\nExact budget-only amendment: journal freeze '+utc(freeze_ns)+', actual native-generation thaw '+utc(resume_ns)+
         '; excluded '+str(delta)+'ns ('+str(Decimal(delta)/Decimal(1_000_000_000))+'s). Original deadline '+utc(old_deadline_ns)+
         '; effective deadline '+utc(old_deadline_ns+delta)+'. Amendment SHA256 '+sha(ap)+'. No scientific change; no fit has run.\n')

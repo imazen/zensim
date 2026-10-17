@@ -437,3 +437,7 @@ same measured frozen interval; retaining an expired inner timeout would defeat
 the approved exclusion. All predeclared mandatory matrix and support requirements
 remain required. Freeze-spanning performance timings remain contaminated and
 cannot replace the prebulk cost census. This amendment grants no fit execution.
+
+Exact budget-only amendment: journal freeze 2026-10-17T07:31:48.642139+00:00, actual native-generation thaw 2026-10-17T10:13:45.193356+00:00; excluded 9716551217000ns (9716.551217s). Original deadline 2026-10-17T11:48:19.959138+00:00; effective deadline 2026-10-17T14:30:16.510355+00:00. Amendment SHA256 a888cc9133ae409a932d36a66c047efc1deb37a206ab0a9b429d87a1c6aa4f9c. No scientific change; no fit has run.
+
+Nanosecond-precise clock notation (supersedes rounded datetime display above): original deadline 2026-10-17T11:48:19.9591377Z; freeze 2026-10-17T07:31:48.642139Z; actual native-generation thaw 2026-10-17T10:13:45.193356Z; excluded 9716551217000ns =9716.551217s; effective deadline 2026-10-17T14:30:16.5103547Z. Integer-nanosecond receipt is authoritative.
