@@ -223,7 +223,10 @@ def filter_groups(groups,recipe,scratch):
 def model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed=None,selection=None):
     e=recipe.get('e36')
     if e is None:return
-    if selection is None or selection.get('epoch_rule')!='last' or selection.get('selected_epoch')!=119:raise ValueError('E36 projection requires actual final epoch119 selection')
+    smoke=getattr(args,'local_smoke_budget',None)
+    if smoke is not None and smoke!='2:128':raise ValueError('E36 memory smoke requires exact diagnostic2:128 budget')
+    epoch=1 if smoke else 119
+    if selection is None or selection.get('epoch_rule')!='last' or selection.get('selected_epoch')!=epoch:raise ValueError('E36 projection requires actual final registered or diagnostic epoch')
     program=os.environ.get('ZEN_FIT_PROGRAM_SHA','')
     if not re.fullmatch('[0-9a-f]{64}',program):raise ValueError('E36 model projection requires fit-cell-exec')
     contract=json.loads(Path(e['contract']).read_text())
@@ -231,7 +234,7 @@ def model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed=None,select
     packed=packed or {}
     write(Path(dest)/'e36-model-binding.json',dict(schema='e36-fit-model-binding-v1',arm=e['arm'],tv_weight=e['weight'],
         role='source-withheld' if getattr(args,'heldout',None) else 'full-data',heldout=getattr(args,'heldout',None),seed_index=args.seed_index,
-        init_seed=init_seed,sample_seed=sample_seed,selected_epoch=119,spec=SPEC,head='N',
+        init_seed=init_seed,sample_seed=sample_seed,selected_epoch=epoch,spec=SPEC,head='N',
         program_sha256=program,trainer_sha256=contract['trainer_sha256'],manifest_sha256=sha(e['manifest']),contract_sha256=e['contract_sha256'],
         base_filter_sha256=e['base_filter_sha256'],raw_checkpoint_sha256=sha(bake),packed_model_sha256=packed.get('packed_model_sha256'),
         deployment_order=packed.get('deployment_order'),label_payload_read_by_projection=False,contains_labels=False,projection_only=True))

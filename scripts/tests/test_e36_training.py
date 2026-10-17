@@ -103,6 +103,13 @@ class TrainingAdapter(unittest.TestCase):
             self.assertEqual(projection['raw_checkpoint_sha256'],sha(bake));self.assertEqual(projection['packed_model_sha256'],'f'*64)
             self.assertFalse(projection['contains_labels']);self.assertFalse(projection['label_payload_read_by_projection'])
             self.assertEqual(projection['selected_epoch'],119)
+            args.local_smoke_budget='2:128';smoke_dest=root/'smoke-projection';smoke_dest.mkdir()
+            with patch.dict(os.environ,{'ZEN_FIT_PROGRAM_SHA':'a'*64}):
+                owner.model_binding(smoke_dest,recipe,args,1101,101,bake,selection=dict(epoch_rule='last',selected_epoch=1))
+            self.assertEqual(json.loads((smoke_dest/'e36-model-binding.json').read_text())['selected_epoch'],1)
+            args.local_smoke_budget=None
+            with self.assertRaisesRegex(ValueError,'actual final registered'):
+                owner.model_binding(root/'refused',recipe,args,1101,101,bake,selection=dict(epoch_rule='last',selected_epoch=1))
             trainer.write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError,'actual trainer'):owner.command_flags(recipe,trainer)
             args.e36_arm=None;normal=dict(hidden=128);self.assertIs(owner.options(args,normal),normal)
