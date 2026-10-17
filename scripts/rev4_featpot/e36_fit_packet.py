@@ -165,6 +165,15 @@ def local_import_closure(source,members):
     return done
 
 
+def admit_program_closure(files,preflight,preparation):
+    frozen='62a43287c53d9e19824a66b556745c2a8fdb9cf7'
+    if preparation['published_source']!=frozen or preflight['published_source']!=frozen or preparation['compiled_rust_source']!='534cb68f0204c02807b1a5c1612d1fcb6c805365':raise ValueError('authorized frozen program source differs')
+    expected={name:value for name,value in preflight['files'].items() if Path(name).suffix in ['.py','.json']}
+    # The two admitted Markdown registrations are evidence, not Python owners.
+    omitted=set(preflight['files'])-set(expected)
+    if omitted!={'benchmarks/e29_e31_e32_shared_control_decision_2026-10-07.md','benchmarks/e29_four_source_amendment_2026-10-07.md'} or files!=expected:raise ValueError('exact frozen program Python closure differs from preflight')
+
+
 def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     """Use native program packaging; freeze qualification without fitting."""
     from e36_training import curated_projection,protocol_source_sha,SPEC,ARMS
@@ -227,7 +236,7 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     members.update(['scripts/rev4_featpot/e36_training.py','scripts/rev4_featpot/e36_store.py'])
     members=local_import_closure(source,members)
     files={name:sha(source/name) for name in sorted(members) if Path(name).suffix in ['.py','.json']}
-    if any(source_closure['files'].get(name)!=value for name,value in files.items()):raise ValueError('frozen program Python closure differs from preflight')
+    admit_program_closure(files,source_closure,source_proof)
     pins=packet_dir/'source-pins.json';contract_name='benchmarks/e36_fit_contract_2026-10-17.json'
     write(pins,dict(schema='e36-public-program-v1',build_commit=commit,files=files,data={contract_name:sha(package)}))
     import importlib.metadata

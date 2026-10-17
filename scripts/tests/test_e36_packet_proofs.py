@@ -20,3 +20,12 @@ class Proofs(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class ExactClosure(unittest.TestCase):
+    def test_missing_or_changed_frozen_owner_refuses(self):
+        from e36_fit_packet import admit_program_closure
+        frozen='62a43287c53d9e19824a66b556745c2a8fdb9cf7';preparation=dict(published_source=frozen,compiled_rust_source='534cb68f0204c02807b1a5c1612d1fcb6c805365')
+        files={'scripts/a.py':'a','scripts/b.py':'b'};preflight=dict(published_source=frozen,files={**files,'benchmarks/e29_e31_e32_shared_control_decision_2026-10-07.md':'m','benchmarks/e29_four_source_amendment_2026-10-07.md':'n'})
+        admit_program_closure(files,preflight,preparation)
+        with self.assertRaisesRegex(ValueError,'exact'):admit_program_closure({'scripts/a.py':'a'},preflight,preparation)
+        with self.assertRaisesRegex(ValueError,'authorized'):admit_program_closure(files,preflight,{**preparation,'published_source':'changed'})
