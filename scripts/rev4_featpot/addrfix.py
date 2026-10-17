@@ -445,6 +445,68 @@ def rank_report():
     progress('Matched ranking aggregate JSON/table rendered from full canonical owner output; all15 intervals retained; source SHA '+sha(source)+'.')
 
 
+def cost_summary_report():
+    """Render completed canonical timing/RSS captures without recalculating stats."""
+    import shutil
+    source=ROOT/'cost-analysis/SUMMARY.json';data=read(source)
+    assert data['qualification_allowed'] is False and len(data['cells'])==3
+    destination=REPO/'benchmarks/addrfix_matched_cost_2026-10-16.json'
+    assert not destination.exists();shutil.copyfile(source,destination)
+    assert sha(source)==sha(destination) and destination.stat().st_size<30000
+    parity=[]
+    for model in data['cells']:
+        receipt=read(ROOT/'cost-r7900x/results'/model/'PREFLIGHT_PASS.json')
+        assert receipt['status']=='PASS'
+        parity.extend(r['model'] for r in receipt['cache_parity'])
+    assert len(parity)==6
+    lines=['','## Matched complete-map cost and peak RSS','',
+        'r7900x; v4x, CPU 2, one thread; identical deterministic RGB8 pairs at',
+        '1024² and 2048². Both arms prepare their reference cache outside latency',
+        'and inside process RSS, then retain the complete native score+map result',
+        'through each call. Candidate uses `BakeScorer`; butteraugli 0.9.3 FIR',
+        'uses `ButteraugliReference`, full-resolution diffmap and pnorm3. Dependency',
+        'features include AVX-512/rayon and exclude IIR. The frozen worker SHA is',
+        '`'+data['worker_sha256']+'`.', '',
+        'All three preflights pass: candidate scalar bits equal the cached-map path',
+        'and prior frozen worker; cached/direct butter scores and native maps',
+        f"have maximum observed absolute differences {max(r['score_abs_delta'] for r in parity):g} / {max(r['map_max_abs_delta'] for r in parity):g}.",
+        'The pre-existing FIR tolerances remain 1e-10 score and 1e-6 map.',
+        'Every cell retains the first 32 quiet paired rounds of at most 64;',
+        'all six use exactly 32 rounds, with zero excluded rounds or retries.', '',
+        '| Model / size | Candidate map p95 ms | Butter map p95 ms | Difference ms [paired 95% CI] |',
+        '|---|---:|---:|---:|']
+    for model,grids in data['cells'].items():
+        assert len(grids)==2
+        for geometry,r in grids.items():
+            assert r['accepted_rounds']==32 and r['excluded_rounds']==0
+            iv=r['paired_p95_delta_ns']
+            lines.append(f"| {model} / {geometry} | {r['map_p95_ns']/1e6:.3f} | {r['butter_map_p95_ns']/1e6:.3f} | {iv['estimate']/1e6:+.3f} [{iv['lo']/1e6:+.3f}, {iv['hi']/1e6:+.3f}] |")
+    lines+=['','Nearest-rank p95 and paired-round bootstrap: existing Rust owner, 10,000',
+        'finite draws per interval, seed 20261016, 95% type-7 percentiles.',
+        'All six candidate p95s meet the absolute 150/600 ms budgets. All three',
+        'candidates are slower than matched butter at 1024² and faster at 2048²;',
+        'the corresponding paired intervals exclude zero. The matched-peer',
+        'latency requirement therefore fails at 1024² for every candidate.', '',
+        '| Model / size | Candidate peak KiB | Butter peak KiB | Absolute cap KiB | Cap met |',
+        '|---|---:|---:|---:|---|']
+    for model,grids in data['cells'].items():
+        for geometry,r in grids.items():
+            lines.append(f"| {model} / {geometry} | {r['absolute_map_peak_kib']} | {r['butter_absolute_map_peak_kib']} | {r['absolute_rss_cap_kib']} | {'yes' if r['absolute_rss_cap_met'] else 'no'} |")
+    lines+=['','Peak is the maximum of three independent fresh-process `/usr/bin/time -v`',
+        'runs per arm, 108 records total including map, scalar and baseline arms.',
+        'Every candidate peak is below matched butter. All 1024² cells meet the',
+        'absolute 128 B/pixel + 64 MiB cap; every 2048² cell exceeds it. Baseline',
+        'subtraction would make all six pass the older incremental convention,',
+        'which does not satisfy adopted R3. The [full summary](addrfix_matched_cost_2026-10-16.json)',
+        'retains every repetition, baselines, increments and scalar-ratio diagnostics.', '',
+        'Acquisition resource receipt: `run-heavy rc=0,279s,peak-RSS1.03GiB,',
+        'min-avail21497MiB,peak-load1.72`, hard 16 GiB cap. Statistical analysis:',
+        '`rc=0,1s,peak-RSS0.02GiB,min-avail38704MiB,peak-load20.04`.',
+        'These are measured engineering comparisons, not a new model qualification.','']
+    with (REPO/'benchmarks/addrfix_2026-10-16.md').open('a') as f:f.write('\n'.join(lines))
+    progress('Matched cost full6cell table and RSS repetitions rendered; all1024peer-p95checks fail, all2048absoluteRSScapsfail; absolute latency budgets and relativeRSS pass. Source SHA '+sha(source)+'.')
+
+
 def cost_payload():
     """Assemble a reviewable single-host job, without launching remote work."""
     import shutil
@@ -534,12 +596,13 @@ def cost_report(binary):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['candidate-trace','peer-replay','rank-pairs','rank-report','curve-control','trace-report','full-trace','rank-score','rank-score-resume','cost-payload','cost-report','unpacked-control','unpacked-report'])
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['candidate-trace','peer-replay','rank-pairs','rank-report','curve-control','trace-report','full-trace','rank-score','rank-score-resume','cost-payload','cost-report','cost-summary-report','unpacked-control','unpacked-report'])
     p.add_argument('--binary',default='/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/bake_verdict')
     p.add_argument('--trace',action='store_true');p.add_argument('--checkpoint',choices=['best','last'],default='best');a=p.parse_args()
     if a.mode=='unpacked-report':unpacked_report(a.checkpoint)
     elif a.mode=='unpacked-control':unpacked_control(a.binary,a.checkpoint)
     elif a.mode=='rank-report':rank_report()
+    elif a.mode=='cost-summary-report':cost_summary_report()
     elif a.mode=='cost-report':cost_report(a.binary)
     elif a.mode=='cost-payload':cost_payload()
     elif a.mode=='rank-score':rank_score()

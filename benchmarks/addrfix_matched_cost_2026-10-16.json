@@ -1,0 +1,415 @@
+{
+ "cells": {
+  "diff-410": {
+   "1024x1024": {
+    "map_p95_ns": 85152924.0,
+    "butter_map_p95_ns": 64429953.0,
+    "paired_p95_delta_ns": {
+     "estimate": 20722971.0,
+     "hi": 24222446.0,
+     "lo": 17807384.0,
+     "n_finite": 10000,
+     "p_nonpositive": 9.999000099990002e-05,
+     "se": 2036720.3329083694,
+     "student_interval": [
+      16502585.57800864,
+      24943356.42199136
+     ]
+    },
+    "p95_upper_ci_le_butter": false,
+    "absolute_latency_budget_ns": 150000000,
+    "absolute_latency_budget_met": true,
+    "old_map_over_uncached_scalar": 3.100470020940835,
+    "rss_peaks_kib": {
+     "e34_candidate_map_retained": [
+      170384,
+      170528,
+      170428
+     ],
+     "e34_candidate_baseline": [
+      13540,
+      13452,
+      13208
+     ],
+     "e34_candidate": [
+      36720,
+      36648,
+      36444
+     ],
+     "e34_butter_map": [
+      179320,
+      179116,
+      179336
+     ],
+     "e34_butter_baseline": [
+      11240,
+      11188,
+      11140
+     ],
+     "e34_butter_scalar": [
+      161924,
+      162044,
+      161984
+     ]
+    },
+    "absolute_map_peak_kib": 170528,
+    "butter_absolute_map_peak_kib": 179336,
+    "map_incremental_kib": [
+     156844,
+     157076,
+     157220
+    ],
+    "absolute_rss_cap_kib": 196608,
+    "absolute_rss_cap_met": true,
+    "absolute_rss_le_butter": true,
+    "incremental_rss_cap_met": true,
+    "qualification_allowed": false,
+    "exploratory": true,
+    "accepted_rounds": 32,
+    "excluded_rounds": 0
+   },
+   "2048x2048": {
+    "map_p95_ns": 334342101.0,
+    "butter_map_p95_ns": 340428227.0,
+    "paired_p95_delta_ns": {
+     "estimate": -6086126.0,
+     "hi": -3589777.0,
+     "lo": -7813657.0,
+     "n_finite": 10000,
+     "p_nonpositive": 1.0,
+     "se": 1326611.0393407121,
+     "student_interval": [
+      -8835060.058654698,
+      -3337191.941345303
+     ]
+    },
+    "p95_upper_ci_le_butter": true,
+    "absolute_latency_budget_ns": 600000000,
+    "absolute_latency_budget_met": true,
+    "old_map_over_uncached_scalar": 3.0186874303336886,
+    "rss_peaks_kib": {
+     "e34_candidate_map_retained": [
+      608168,
+      608248,
+      607936
+     ],
+     "e34_candidate_baseline": [
+      31536,
+      32096,
+      31624
+     ],
+     "e34_candidate": [
+      76660,
+      76436,
+      76608
+     ],
+     "e34_butter_map": [
+      698336,
+      698032,
+      698392
+     ],
+     "e34_butter_baseline": [
+      29712,
+      29624,
+      29488
+     ],
+     "e34_butter_scalar": [
+      649428,
+      649280,
+      649044
+     ]
+    },
+    "absolute_map_peak_kib": 608248,
+    "butter_absolute_map_peak_kib": 698392,
+    "map_incremental_kib": [
+     576632,
+     576152,
+     576312
+    ],
+    "absolute_rss_cap_kib": 589824,
+    "absolute_rss_cap_met": false,
+    "absolute_rss_le_butter": true,
+    "incremental_rss_cap_met": true,
+    "qualification_allowed": false,
+    "exploratory": true,
+    "accepted_rounds": 32,
+    "excluded_rounds": 0
+   }
+  },
+  "diff-frag-820": {
+   "1024x1024": {
+    "map_p95_ns": 73010717.0,
+    "butter_map_p95_ns": 61386113.0,
+    "paired_p95_delta_ns": {
+     "estimate": 11624604.0,
+     "hi": 12483384.0,
+     "lo": 11251326.0,
+     "n_finite": 10000,
+     "p_nonpositive": 9.999000099990002e-05,
+     "se": 287848.7959777169,
+     "student_interval": [
+      11028138.769770093,
+      12221069.230229907
+     ]
+    },
+    "p95_upper_ci_le_butter": false,
+    "absolute_latency_budget_ns": 150000000,
+    "absolute_latency_budget_met": true,
+    "old_map_over_uncached_scalar": 2.6553435071887965,
+    "rss_peaks_kib": {
+     "e34_candidate_map_retained": [
+      170604,
+      170996,
+      170976
+     ],
+     "e34_candidate_baseline": [
+      13828,
+      14084,
+      13972
+     ],
+     "e34_candidate": [
+      36824,
+      36844,
+      36772
+     ],
+     "e34_butter_map": [
+      179152,
+      179004,
+      179008
+     ],
+     "e34_butter_baseline": [
+      11052,
+      11076,
+      11284
+     ],
+     "e34_butter_scalar": [
+      162076,
+      162044,
+      161928
+     ]
+    },
+    "absolute_map_peak_kib": 170996,
+    "butter_absolute_map_peak_kib": 179152,
+    "map_incremental_kib": [
+     156776,
+     156912,
+     157004
+    ],
+    "absolute_rss_cap_kib": 196608,
+    "absolute_rss_cap_met": true,
+    "absolute_rss_le_butter": true,
+    "incremental_rss_cap_met": true,
+    "qualification_allowed": false,
+    "exploratory": true,
+    "accepted_rounds": 32,
+    "excluded_rounds": 0
+   },
+   "2048x2048": {
+    "map_p95_ns": 301187815.0,
+    "butter_map_p95_ns": 344625617.0,
+    "paired_p95_delta_ns": {
+     "estimate": -43437802.0,
+     "hi": -38484237.0,
+     "lo": -48155842.0,
+     "n_finite": 10000,
+     "p_nonpositive": 1.0,
+     "se": 2771128.613812342,
+     "student_interval": [
+      -49179989.876867875,
+      -37695614.123132125
+     ]
+    },
+    "p95_upper_ci_le_butter": true,
+    "absolute_latency_budget_ns": 600000000,
+    "absolute_latency_budget_met": true,
+    "old_map_over_uncached_scalar": 2.7157966246980965,
+    "rss_peaks_kib": {
+     "e34_candidate_map_retained": [
+      609564,
+      609604,
+      609592
+     ],
+     "e34_candidate_baseline": [
+      31968,
+      32312,
+      32456
+     ],
+     "e34_candidate": [
+      77084,
+      76884,
+      77252
+     ],
+     "e34_butter_map": [
+      697912,
+      698308,
+      698392
+     ],
+     "e34_butter_baseline": [
+      29800,
+      29548,
+      29824
+     ],
+     "e34_butter_scalar": [
+      648908,
+      649196,
+      649452
+     ]
+    },
+    "absolute_map_peak_kib": 609604,
+    "butter_absolute_map_peak_kib": 698392,
+    "map_incremental_kib": [
+     577596,
+     577292,
+     577136
+    ],
+    "absolute_rss_cap_kib": 589824,
+    "absolute_rss_cap_met": false,
+    "absolute_rss_le_butter": true,
+    "incremental_rss_cap_met": true,
+    "qualification_allowed": false,
+    "exploratory": true,
+    "accepted_rounds": 32,
+    "excluded_rounds": 0
+   }
+  },
+  "w-c": {
+   "1024x1024": {
+    "map_p95_ns": 82550041.0,
+    "butter_map_p95_ns": 61591323.0,
+    "paired_p95_delta_ns": {
+     "estimate": 20958718.0,
+     "hi": 21822849.0,
+     "lo": 20958718.0,
+     "n_finite": 10000,
+     "p_nonpositive": 9.999000099990002e-05,
+     "se": 280135.6033132582,
+     "student_interval": [
+      20378235.644469246,
+      21539200.355530754
+     ]
+    },
+    "p95_upper_ci_le_butter": false,
+    "absolute_latency_budget_ns": 150000000,
+    "absolute_latency_budget_met": true,
+    "old_map_over_uncached_scalar": 3.024874607009256,
+    "rss_peaks_kib": {
+     "e34_candidate_map_retained": [
+      169712,
+      169904,
+      169692
+     ],
+     "e34_candidate_baseline": [
+      13284,
+      13640,
+      13064
+     ],
+     "e34_candidate": [
+      36208,
+      36536,
+      36692
+     ],
+     "e34_butter_map": [
+      179388,
+      179360,
+      179300
+     ],
+     "e34_butter_baseline": [
+      11132,
+      11208,
+      11196
+     ],
+     "e34_butter_scalar": [
+      161972,
+      162124,
+      162168
+     ]
+    },
+    "absolute_map_peak_kib": 169904,
+    "butter_absolute_map_peak_kib": 179388,
+    "map_incremental_kib": [
+     156428,
+     156264,
+     156628
+    ],
+    "absolute_rss_cap_kib": 196608,
+    "absolute_rss_cap_met": true,
+    "absolute_rss_le_butter": true,
+    "incremental_rss_cap_met": true,
+    "qualification_allowed": false,
+    "exploratory": true,
+    "accepted_rounds": 32,
+    "excluded_rounds": 0
+   },
+   "2048x2048": {
+    "map_p95_ns": 335096022.0,
+    "butter_map_p95_ns": 341698168.0,
+    "paired_p95_delta_ns": {
+     "estimate": -6602146.0,
+     "hi": -2527419.0,
+     "lo": -9402645.0,
+     "n_finite": 10000,
+     "p_nonpositive": 0.9986001399860014,
+     "se": 1898094.2648303492,
+     "student_interval": [
+      -10535277.72919348,
+      -2669014.27080652
+     ]
+    },
+    "p95_upper_ci_le_butter": true,
+    "absolute_latency_budget_ns": 600000000,
+    "absolute_latency_budget_met": true,
+    "old_map_over_uncached_scalar": 3.0102149907413907,
+    "rss_peaks_kib": {
+     "e34_candidate_map_retained": [
+      607948,
+      607768,
+      607472
+     ],
+     "e34_candidate_baseline": [
+      32204,
+      32044,
+      31908
+     ],
+     "e34_candidate": [
+      76388,
+      76508,
+      76572
+     ],
+     "e34_butter_map": [
+      698268,
+      698024,
+      698224
+     ],
+     "e34_butter_baseline": [
+      29652,
+      29468,
+      29772
+     ],
+     "e34_butter_scalar": [
+      649436,
+      649248,
+      649176
+     ]
+    },
+    "absolute_map_peak_kib": 607948,
+    "butter_absolute_map_peak_kib": 698268,
+    "map_incremental_kib": [
+     575744,
+     575724,
+     575564
+    ],
+    "absolute_rss_cap_kib": 589824,
+    "absolute_rss_cap_met": false,
+    "absolute_rss_le_butter": true,
+    "incremental_rss_cap_met": true,
+    "qualification_allowed": false,
+    "exploratory": true,
+    "accepted_rounds": 32,
+    "excluded_rounds": 0
+   }
+  }
+ },
+ "qualification_allowed": false,
+ "p95_owner_sha256": "585249e5ab78bb5c41e3756c30a50a58c375b434b0b4877599c8a12b519b4e60",
+ "worker_sha256": "a0249f7b94409fc8a107eecfd625c7124bd48ea717dff93e975b268678fdf342"
+}

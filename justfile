@@ -12,6 +12,9 @@ addrfix-rank-score:
 addrfix-cost-report binary:
     python3 scripts/rev4_featpot/addrfix.py cost-report --binary {{quote(binary)}}
 
+addrfix-cost-summary-report:
+    python3 scripts/rev4_featpot/addrfix.py cost-summary-report
+
 addrfix-cost-payload:
     python3 scripts/rev4_featpot/addrfix.py cost-payload
 
