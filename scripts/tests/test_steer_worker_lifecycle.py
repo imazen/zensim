@@ -104,6 +104,11 @@ class Lifecycle(unittest.TestCase):
             import shlex
             args=shlex.split(ssh.call_args.args[1])
             self.assertEqual(json.loads(args[-2]),[['98',c*64] for c in 'abcd'])
+            self.assertEqual(args[args.index('--entrypoint')+1],'nice')
+            self.assertIn(self.binding['image'],args)
+            self.assertEqual(args[args.index('--network')+1],'none')
+            self.assertEqual(args[args.index('--memory')+1],'256m')
+            self.assertEqual(args[args.index('-v')+1],'/disk/scratch:/disk/scratch')
             jobs[0]['kind']['argv']=['--spec','sel:abc:cf98:cf99']
             manifest.write_text(json.dumps(jobs))
             with self.assertRaisesRegex(ValueError,'exact coverage mask'):

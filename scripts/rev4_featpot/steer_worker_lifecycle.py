@@ -409,9 +409,14 @@ def preserve_interrupted_scratch(bundle, doc, host):
     code = ('import json,sys\n'+source_inspect.getsource(preserve_coverage_scratch)
             +'\nprint(json.dumps(preserve_coverage_scratch(sys.argv[1],json.loads(sys.argv[2]),sys.argv[3])))')
     sudo = '' if host == 'tower' else 'sudo -n '
-    command = sudo+'python3 -c '+shlex.quote(code)+' '+shlex.quote(
-        binding['active'][host]['ZEN_TMPDIR_HOST_DIR'])+' '+shlex.quote(
-        json.dumps(sorted(declarations)))+' '+shlex.quote(generation)
+    scratch = binding['active'][host]['ZEN_TMPDIR_HOST_DIR']
+    # The appliance host has no Python; keep tooling in the same pinned image.
+    command = sudo+shlex.join([
+        'docker', 'run', '--rm', '--network', 'none', '--memory', '256m',
+        '--memory-swap', '256m', '--cpus', '1', '-v', scratch+':'+scratch,
+        '-e', 'TMPDIR='+scratch+'/tmp', '--entrypoint', 'nice', binding['image'],
+        '-n19', 'ionice', '-c3', 'python3', '-c', code, scratch,
+        json.dumps(sorted(declarations)), generation])
     receipt = dict(host=host, packet_sha256=owner.PACKET_SHA,
                    scientific_changes=False, retry_limits_changed=False,
                    preservation=json.loads(ssh(host, command)))
