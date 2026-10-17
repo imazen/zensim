@@ -155,3 +155,29 @@ The coordinator alone releases fitting after E36_READY.
 ## Review and unresolved admission
 
 Independent Astra review and its focused teacher/tiny agreement are archived with the private run manifest. Revision 2 resolves design choices; source/color admission, finite native grid export, build closure, measured artifact smokes, storage staging and feature-only TV mechanics still require evidence. Preparation completion does not authorize fits.
+
+## Generation admission amendment (before any E36 encode)
+
+The current corpus family-v2 map supplements the original E34 family owner;
+require TRAIN membership in both and close all older rejections/development
+families through the newer burst/crop groups. Quarantine origins missing from
+the current corpus. Native source dimensions/dHash are reused only with exact
+current-byte SHA checks. No missing lineage is inferred from an absent hash.
+
+Freeze the finite native mode plan names to `modes_full` for zenjpeg, zenwebp,
+zenjxl and rav1e/zenavif, and `svt_doe_main` for the SVT port. Use all 61 q
+values, no budget, no compute cap and no deviation cap. These are the native
+owners' finite documented mode/CPU-knob sets, not every real-valued setting.
+Export resolved identities, aliases, unsupported states and source-size
+reachability before bulk generation. Preserve resolved q/setting aliases.
+
+First bounded smoke: five native codec producers at q{0,1,20,60,100} and
+presented longest edges32,256,4096 from a selected TRAIN source reaching4096;
+75 cells if all are admitted. Freeze actual source/dimensions after native
+color probing and before encoding. A source-color refusal cannot be waived
+by this amendment. Retain all bytes/pixels, native scalar variants and genuine
+maps; first-cell verification precedes the remaining cells. This is a data
+artifact/capacity smoke, never a fit or a source-informing calibration sweep.
+Bulk execution remains blocked until the exported full-grid/staging budget
+and admission evidence close. Feature-only TV integration remains a pre-fit
+requirement and is not required to generate admitted data.
