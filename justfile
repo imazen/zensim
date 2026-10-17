@@ -1876,3 +1876,6 @@ shipgates-scripts-check:
     python3 scripts/test_lint_scripts.py
     just shipgates-analysis-check
     just shipgates-admission-check
+
+shipgates-jxl-progress encodes judges:
+    python3 scripts/rev4_featpot/shipgates_progress.py --encodes {{quote(encodes)}} --judges {{quote(judges)}}
