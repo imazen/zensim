@@ -2176,3 +2176,9 @@ e36-allocation-status lock scope:
     @date -u +%FT%TZ
     @lslocks --json --output PID,PATH,MODE | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps([r for r in d.get("locks",[]) if r.get("path")==sys.argv[1]]))' {{quote(lock)}}
     @systemctl --user show {{quote(scope)}} -p ActiveState -p FreezerState
+
+# Export a committed source tree for a nontraining build, preserving prior versions.
+e36-build-source root commit version:
+    test ! -e {{quote(root + "/" + version + ".tar")}}
+    nice -n19 ionice -c3 git -C /home/lilith/work/zen/zensim archive --format=tar --output={{quote(root + "/" + version + ".tar")}} {{quote(commit)}}
+    python3 -c 'import hashlib,json,socket,sys; from pathlib import Path; p=Path(sys.argv[1]); a=Path(str(p)+".tar"); h=hashlib.sha256(); f=a.open("rb"); [h.update(b) for b in iter(lambda:f.read(1048576),b"")]; f.close(); r=dict(source_commit=sys.argv[2],archive_sha256=h.hexdigest(),archive_bytes=a.stat().st_size,source_host=socket.gethostname(),fits=0); o=Path(str(p)+".json").open("x"); json.dump(r,o,indent=2); o.write("\n"); o.close(); print(json.dumps(r))' {{quote(root + "/" + version)}} {{quote(commit)}}
