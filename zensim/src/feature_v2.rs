@@ -11590,6 +11590,8 @@ struct Append2Params {
 /// Per-channel accumulator state for the streaming walk: per-scale totals
 /// for every family the walk pools, merged strictly in kernel-strip order.
 struct StreamChannelAccums {
+    /// Rev5 retaining walks keep the exact coarse strip kernel results.
+    retained_strips: Option<Vec<Vec<(DenseAccum, GradientAccum)>>>,
     dense: Vec<DenseAccum>,
     grad: Vec<GradientAccum>,
     app: Vec<AppendAccum>,
@@ -11936,6 +11938,7 @@ impl StreamChannelAccums {
     /// count in `1..=V1_BANDS_PER_STRIP` computes the same bytes.
     fn new(n_scales: usize, n_band_slots: usize) -> Self {
         Self {
+            retained_strips: None,
             dense: vec![DenseAccum::default(); n_scales],
             grad: vec![GradientAccum::default(); n_scales],
             app: vec![AppendAccum::default(); n_scales],
@@ -12027,6 +12030,8 @@ pub(crate) struct FoldRetention {
     pub(crate) cells: Vec<[AttrCellSums; 3]>,
     /// `[scale][ch]` (mean grad src, mean grad dst) from finalize.
     pub(crate) mg: Vec<[(f64, f64); 3]>,
+    /// Production strip partials, in walk order, for exact coarse refinement.
+    pub(crate) strips: Vec<[Vec<(DenseAccum, GradientAccum)>; 3]>,
     pub(crate) basic_stats: Vec<crate::metric::ScaleStats>,
     pub(crate) basic_hf: Vec<[(f64, f64); 3]>,
     pub(crate) basic_sd: Vec<[Vec<f32>; 3]>,
@@ -12050,6 +12055,7 @@ impl FoldRetention {
             planes: Vec::new(),
             cells: Vec::new(),
             mg: Vec::new(),
+            strips: Vec::new(),
             basic_stats: Vec::new(),
             basic_hf: Vec::new(),
             basic_sd: Vec::new(),
@@ -12062,6 +12068,9 @@ impl FoldRetention {
     /// Size every buffer for the walk's scale dims (no-op when unchanged;
     /// cells/mg/planes are fully rewritten by each retaining walk).
     fn ensure(&mut self, dims: &[(usize, usize)], compute: &ComputeSet, retain_basic: bool) {
+        self.strips.clear();
+        self.strips
+            .resize_with(dims.len(), || core::array::from_fn(|_| Vec::new()));
         let rev5 = compute.formula_revision >= FormulaRevision::Rev5;
         let channels = core::array::from_fn(|scale| {
             core::array::from_fn(|ch| {
@@ -12526,6 +12535,7 @@ fn stream_phase_b(
         );
         crate::fold_timing::stop(__t_dense, crate::fold_timing::Phase::DenseKernel, scale);
         acc.dense[scale].accumulate(&d);
+        let mut retained_grad = GradientAccum::default();
 
         // REV4 C2/C4-bleed ride the gradient kernel too — it must run
         // whenever either hook has work, even with `gradient_features`
@@ -12572,6 +12582,14 @@ fn stream_phase_b(
             );
             crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
+            if toggles.gradient_features {
+                retained_grad = g;
+            }
+        }
+        if let Some(strips) = &mut acc.retained_strips
+            && (1..=3).contains(&scale)
+        {
+            strips[scale].push((d, retained_grad));
         }
 
         // REV4 C1 — the full-boundary pass over the wide window (the
@@ -14729,6 +14747,21 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             &compute,
             compute.formula_revision >= FormulaRevision::Rev5 && fold_v1,
         );
+        if compute.formula_revision >= FormulaRevision::Rev5 {
+            for (ch, acc) in accums.iter_mut().enumerate() {
+                acc.retained_strips = Some(
+                    dims.iter()
+                        .enumerate()
+                        .map(|(scale, &(_, h))| {
+                            let active = (1..=3).contains(&scale)
+                                && compute.at_scale(scale).v2_blocks
+                                && compute.channel_active(scale, ch);
+                            Vec::with_capacity(if active { h.div_ceil(STRIP_ROWS) } else { 0 })
+                        })
+                        .collect(),
+                );
+            }
+        }
     }
     // BANDVIS dst self-mask live: phase A additionally produces the Y
     // channel's dst-activity plane (and ONLY the Y channel's — the block
@@ -15243,6 +15276,15 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         crate::fold_timing::walk_done(t.elapsed().as_nanos() as u64);
     }
     producer.recycle(stream_pool);
+    if let Some(ret) = retention.as_deref_mut() {
+        for (ch, acc) in accums.iter_mut().enumerate() {
+            if let Some(strips) = acc.retained_strips.take() {
+                for (scale, values) in strips.into_iter().enumerate() {
+                    ret.strips[scale][ch] = values;
+                }
+            }
+        }
+    }
 
     // --- Finalize: the materialized walk's per-scale epilogue, replayed
     //     on the merged accumulators (identical f64 ops on identical

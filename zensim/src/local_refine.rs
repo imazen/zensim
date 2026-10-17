@@ -148,6 +148,7 @@ struct RetainedParts {
     pyr_src: [[Vec<f32>; 3]; LOCAL_SCALES],
     pyr_dst: [[Vec<f32>; 3]; LOCAL_SCALES],
     planes: [[ChPlanes; 3]; LOCAL_SCALES],
+    strips: [[Vec<(DenseAccum, GradientAccum)>; 3]; LOCAL_SCALES],
 }
 
 /// The coarse-scale slice of a walk's [`FoldRetention`] that exact local
@@ -298,6 +299,7 @@ impl LocalRefineSnapshot {
             return None;
         }
         let parts = RetainedParts {
+            strips: std::array::from_fn(|s| ret.strips[s + 1].clone()),
             pyr_src0: ret.pyr_src[0].clone(),
             pyr_dst0: ret.pyr_dst[0].clone(),
             pyr_src: std::array::from_fn(|s| ret.pyr_src[s + 1].clone()),
@@ -347,6 +349,7 @@ impl LocalRefineSnapshot {
         }
         let take = core::mem::take::<Vec<f32>>;
         let parts = RetainedParts {
+            strips: std::array::from_fn(|s| ret.strips[s + 1].each_mut().map(core::mem::take)),
             pyr_src0: ret.pyr_src[0].each_mut().map(take),
             pyr_dst0: ret.pyr_dst[0].each_mut().map(take),
             pyr_src: std::array::from_fn(|s| ret.pyr_src[s + 1].each_mut().map(take)),
@@ -391,6 +394,7 @@ impl LocalRefineSnapshot {
         let c = &plan.compute;
         let (w0, h0) = src_dims;
         let RetainedParts {
+            strips,
             mut pyr_src0,
             mut pyr_dst0,
             pyr_src,
@@ -441,7 +445,7 @@ impl LocalRefineSnapshot {
             toggles: plan.toggles(),
             revision: c.formula_revision,
             omit_pjnd_fragility: c.omit_pjnd_fragility,
-            strips: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
+            strips,
         };
         if !this.rebuild_unretained_coarse(c) {
             return None;
@@ -451,9 +455,11 @@ impl LocalRefineSnapshot {
                 for ch in 0..3 {
                     if this.served[si][ch] {
                         let (_, h) = this.dims[si];
-                        this.strips[si][ch] = (0..h.div_ceil(feature_v2::STRIP_ROWS))
-                            .map(|strip| this.strip_accumulators(si, ch, strip, None))
-                            .collect();
+                        assert_eq!(
+                            this.strips[si][ch].len(),
+                            h.div_ceil(feature_v2::STRIP_ROWS),
+                            "retaining walk must supply every served production strip"
+                        );
                     }
                 }
             }
@@ -1448,6 +1454,87 @@ mod tests {
         coarse_y_only_plan_coarse_channels_rebuilt();
         sparse_retention_scale0_channels_rebuilt();
         println!("REV5_LOCAL_EXACT_OK");
+    }
+
+    #[test]
+    fn rev5_retained_strips_match_snapshot_replay_bits() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "local_refine::tests::rev5_retained_strips_match_snapshot_replay_bits",
+            "REV5_RETAINED_STRIPS_OK",
+        ) {
+            return;
+        }
+        let _token = archmage::testing::lock_token_testing();
+        let plan = full_plan();
+        let mut scratch = V2Scratch::new();
+        let mut ret = FoldRetention::default();
+        // Multiple strips, odd edges, changed dimensions and moved-buffer reuse.
+        for (iteration, (w, h)) in [(257, 521), (137, 101), (257, 521)].into_iter().enumerate() {
+            let src = textured(w, h, 5 + iteration as u32);
+            let dst = distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+            crate::feature_v2::compute_folded_v1_372_streaming_impl(
+                &source,
+                &distorted,
+                None,
+                iteration != 1,
+                &mut scratch,
+                Some(&plan),
+                Some(&mut ret),
+            )
+            .expect("retaining production walk");
+            let mut replay = LocalRefineSnapshot::capture(&ret, &plan, (w, h), &source, &distorted)
+                .expect("copy capture");
+            // Reproduce the original capture's independent dense/gradient pass.
+            for si in 0..LOCAL_SCALES {
+                for ch in 0..3 {
+                    if replay.served[si][ch] {
+                        for strip in 0..replay.strips[si][ch].len() {
+                            replay.strips[si][ch][strip] =
+                                replay.strip_accumulators(si, ch, strip, None);
+                        }
+                    }
+                }
+            }
+            let actual = LocalRefineSnapshot::capture_taking(
+                &mut ret,
+                &plan,
+                (w, h),
+                &source,
+                &distorted,
+                None,
+                None,
+            )
+            .expect("moving capture");
+            let y = if h > 280 { 240 } else { 32 };
+            for rect in [(0, 0, 8, 8), (16, y, 24, y + 40), (w - 9, h - 9, w, h)] {
+                let rw = rect.2 - rect.0;
+                let rh = rect.3 - rect.1;
+                let planes: [Vec<f32>; 3] =
+                    std::array::from_fn(|ch| vec![0.25 + ch as f32 * 0.125; rw * rh]);
+                for candidate in [
+                    Candidate::Reference,
+                    Candidate::Planar(planes.each_ref().map(Vec::as_slice)),
+                ] {
+                    let bits = |snapshot: &LocalRefineSnapshot| {
+                        snapshot
+                            .deltas(rect, &candidate)
+                            .expect("finite refinement")
+                            .into_iter()
+                            .map(|(id, value)| (id, value.to_bits()))
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(
+                        bits(&actual),
+                        bits(&replay),
+                        "iteration{iteration} rect{rect:?}"
+                    );
+                }
+            }
+        }
+        println!("REV5_RETAINED_STRIPS_OK");
     }
 
     /// `feature_v2::tests::textured_image`'s fixture family, duplicated

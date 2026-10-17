@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Reuse the production walk's coarse strip partials when capturing exact finite-refinement snapshots.
+
 - Add independent source-pixel and float-map byte oracles, including an explicit lossless PNG sample-expansion policy checked on frozen-judge identity maps.
 
 - Report the four-provider JXL native intervention screen, exact companion eligibility and the prepared-result runtime measurement scope; preserve open decoder parity findings.
