@@ -17,7 +17,8 @@ class Lifecycle(unittest.TestCase):
         (self.root/'launch').mkdir(); (self.root/'logs').mkdir()
         self.binding = dict(image='image@sha256:fixture',
                             shared_environment={'ZEN_MEMORY': '6g', 'ZEN_CPU_SHARES': '256',
-                                                'ZEN_PASS_TIMEOUT': '8000', 'ZEN_CHUNK_WALL_SEC': '7663'},
+                                                'ZEN_PASS_TIMEOUT': '8000', 'ZEN_CHUNK_WALL_SEC': '7663',
+                                                'ZEN_MAX_MIN': '150'},
                             active={h: dict(ZEN_CPUSET='0', ZEN_TMPDIR_HOST_DIR='/disk/scratch')
                                     for h in ['r3500', 'i270', 'tower']})
         (self.bundle/'WORKER_BINDING.json').write_text(json.dumps(self.binding))
@@ -25,6 +26,7 @@ class Lifecycle(unittest.TestCase):
                         workers=[], free=40*life.GIB, docker_free=40*life.GIB)
         self.docker = dict(Config=dict(Image=self.binding['image'],
                                       Env=['ZEN_PASS_TIMEOUT=8000', 'ZEN_CHUNK_WALL_SEC=1',
+                                           'ZEN_MAX_MIN=1',
                                            'ZEN_NO_NEW_AFTER_EPOCH=130']),
                            HostConfig=dict(Memory=6*life.GIB, MemorySwap=6*life.GIB,
                                            CpusetCpus='0', CpuShares=256,
@@ -143,6 +145,8 @@ class Lifecycle(unittest.TestCase):
             self.assertFalse(all(life.envelope(self.binding,'r3500','ctr',d,130).values()))
         d=copy.deepcopy(self.docker);d['Config']['Env']=['ZEN_PASS_TIMEOUT=8000','ZEN_CHUNK_WALL_SEC=1']
         self.assertFalse(life.envelope(self.binding,'r3500','ctr',d,130)['deadline'])
+        d=copy.deepcopy(self.docker);d['Config']['Env'].append('ZEN_MAX_MIN=150')
+        self.assertFalse(life.envelope(self.binding,'r3500','ctr',d,130)['ZEN_MAX_MIN'])
 
     def test_transition_requires_all_evidence(self):
         proof=dict(packet_sha256=life.owner.PACKET_SHA,all_old_chunks_complete=True,
@@ -215,6 +219,7 @@ class Lifecycle(unittest.TestCase):
                     env=launch.kwargs['env']
                     self.assertEqual(env['ZEN_PASS_TIMEOUT'],'8000')
                     self.assertEqual(env['ZEN_CHUNK_WALL_SEC'],'1')
+                    self.assertEqual(env['ZEN_MAX_MIN'],'1')
                     self.assertEqual(env['ZEN_NO_NEW_AFTER_EPOCH'],'130')
 
     def test_metadata_selection_refuses_partial_invalid_and_failed_evidence(self):

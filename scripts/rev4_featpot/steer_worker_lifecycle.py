@@ -99,7 +99,8 @@ def envelope(binding, host, container, d, deadline, kernel_swap=None):
     env = dict(v.split('=', 1) for v in d['Config']['Env'] if '=' in v)
     h = d['HostConfig']
     rename = {'ZEN_FORMULA_REV': 'ZENSIM_FORMULA_REV'}
-    expected = {**binding['shared_environment'], 'ZEN_CHUNK_WALL_SEC': '1'}
+    expected = {**binding['shared_environment'], 'ZEN_CHUNK_WALL_SEC': '1',
+                'ZEN_MAX_MIN': '1'}
     checks = {k: env.get(rename.get(k, k)) == v for k, v in expected.items()
               if k not in ('ZEN_MEMORY', 'ZEN_CPU_SHARES')}
     checks.update(image=d['Config']['Image'] == binding['image'],
@@ -163,8 +164,12 @@ def enroll(bundle, doc, host, role, js):
     paused = dict(paused=True, drain=False, note='STEER envelope '+role)
     control(bundle, js, paused)
     deadline = int(ssh(host, 'date -u +%s').strip())+30
+    # In the frozen entrypoint this budget is checked BETWEEN passes. A fit may
+    # finish under its unchanged 7663s cap; the wrapper then exits instead of
+    # polling with an already-expired native claim deadline for 150 minutes.
     env = {**os.environ, **binding['shared_environment'], **binding['active'][host],
            'ZEN_STORE': 'tower', 'ZEN_CHUNK_WALL_SEC': '1',
+           'ZEN_MAX_MIN': '1',
            'ZEN_NO_NEW_AFTER_EPOCH': str(deadline)}
     helper = bundle.parent/'launch-source/zenmetrics/scripts/jobsys/lan_score_launch.sh'
     receipt = launch/('ENVELOPE-'+role+'.json')
@@ -208,7 +213,8 @@ def enroll(bundle, doc, host, role, js):
                   jobset=js, container=ctr, checks=checks, before=before, after=post,
                   claim_deadline=deadline, kernel_swap=kernel,
                   packet_sha256=owner.PACKET_SHA, cell_wall_cap_sec=7663,
-                  pass_timeout_sec=8000, packing_target_sec=1)
+                  pass_timeout_sec=8000, packing_target_sec=1,
+                  allocation_postpass_budget_minutes=1)
     receipt.write_text(json.dumps(record, indent=2)+'\n')
     if not all(checks.values()):
         raise ValueError('worker envelope failed; control remains paused; see '+str(receipt))

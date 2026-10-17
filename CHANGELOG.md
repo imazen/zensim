@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Verify original-image STEER drain behavior with invented passes and use its existing between-pass allocation budget without changing scientific cell/pass caps or image files.
+
 - Preserve exact manifest-bound STEER coverage scratch by hash-checked rename before interrupted-fit retries; refuse live workers and unpaused controls.
 
 - Reuse the production walk's coarse strip partials when capturing exact finite-refinement snapshots.

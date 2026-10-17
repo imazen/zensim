@@ -103,3 +103,22 @@ still refuses new claims after its deadline, but the wrapper treats skipped
 work and pause as holding and keeps polling until its allocation limit.
 An entrypoint override is pending owner clarification. Do not describe that
 holding state as a clean drain or deploy an override from an unverified source.
+
+The subsequent configuration-only repair uses the original image entrypoint
+unchanged. Set the existing `ZEN_MAX_MIN=1` for each rolling allocation. This
+timer is checked only between native passes, so it does not interrupt an
+in-flight fit. It supersedes the preceding 150-minute wrapper polling budget;
+the 30-second native claim window, 7,663-second scientific cell cap and
+8,000-second worker-pass timeout stay unchanged. A short fit can hold until the
+minute expires; a longer fit finishes its pass before the wrapper exits.
+
+The full-image oracle is `just steer-worker-entrypoint-probe <image>
+<original-script> <proposed-guard-script> <new-output-directory>`. It verifies
+that the scripts differ by exactly the proposed four-line loop guard and runs
+invented worker/store stubs with networking disabled. The original wrapper
+holds after the claim deadline. The guarded wrapper completes its in-flight
+pass, refuses an already-expired allocation and preserves idle behavior.
+Separately, the original wrapper with `ZEN_MAX_MIN=1` permits an invented pass
+to run for 66 seconds by recorded start/end epochs, then exits zero after that
+pass. No trainer, admitted target or registered result is used. The guard
+proposal remains unused; no image file or entrypoint bind override is needed.
