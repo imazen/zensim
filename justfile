@@ -2328,3 +2328,6 @@ e36-largest-source-amendment root projection commit:
 
 e36-fresh-continuation operation root:
     python3 scripts/rev4_featpot/e36_fresh_continuation.py {{quote(operation)}} --root {{quote(root)}}
+
+e36-source-archive-repair root:
+    python3 scripts/rev4_featpot/e36_source_cut.py --root {{quote(root)}} --repair-archive

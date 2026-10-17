@@ -92,14 +92,34 @@ def apply(root,base,clock):
             scheduled=json.loads(checked(entry['scheduled']).read_text());previous=json.loads(checked(base['phases'][phase]['scheduled']).read_text())
             if scheduled!=[j for j in previous if keep(j)]:raise ValueError('source-count scheduler changed retained jobs')
     if binding['phases']['fallback']!=base['phases']['fallback']:raise ValueError('mandatory fallback changed')
-    source_manifest=json.loads(checked(binding['archive_resources']).read_text())
+    resources=binding['archive_resources'];correction=Path(root)/'source-count-amendment-v1/archive-resources-v2-binding.json'
+    if correction.exists():
+        repair=json.loads(correction.read_text())
+        if repair['schema']!='e36-source-cut-archive-repair-v1' or repair['predecessor']!=pin(path) or repair['previous_resources']!=resources or repair['fits']!=0 or repair['scientific_change'] is not False:raise ValueError('source-count archive repair predecessor differs')
+        resources=repair['resources']
+    source_manifest=json.loads(checked(resources).read_text())
     for value in source_manifest['files'].values():checked(value)
-    checked(binding['plan']);result=copy.deepcopy(base);result.update(plan=binding['plan'],phases=binding['phases'],source_count_amendment=pin(path),effective_source_budget=binding['source_budget'])
+    checked(binding['plan']);result=copy.deepcopy(base);result.update(plan=binding['plan'],phases=binding['phases'],source_count_amendment=pin(path),effective_source_budget=binding['source_budget'],archive_resources=resources,archive_resource_repair=pin(correction) if correction.exists() else None)
     return result
+
+
+def repair_archive(root):
+    """Version storage helpers without rewriting the scientific amendment."""
+    root=Path(root);out=root/'source-count-amendment-v1';binding=out/'binding.json';previous=json.loads(binding.read_text())
+    if list((root/'runs'/previous['phases']['additions']['run']).glob('ledger*.parquet')):raise ValueError('freeze corrected archive helpers before optional generation')
+    resources=out/'archive-resources-v2';resources.mkdir()
+    for source in Path(__file__).parent.glob('*.py'):shutil.copyfile(source,resources/source.name)
+    startup=checked(previous['archive_resources']).parent/'sitecustomize.py'
+    (resources/'sitecustomize.py').write_text(startup.read_text().replace(str(startup.parent),str(resources)))
+    write(resources/'sources.json',dict(schema='e36-source-cut-archive-resources-v1',files={p.name:pin(p) for p in resources.glob('*.py')},fits=0,scientific_change=False))
+    correction=dict(schema='e36-source-cut-archive-repair-v1',predecessor=pin(binding),previous_resources=previous['archive_resources'],resources=pin(resources/'sources.json'),utc=datetime.now(timezone.utc).isoformat(),fits=0,scientific_change=False,
+        reason='Discover amended optional CAS through the same native-run owner as ledgers; preserve all historical stores and source counts.')
+    path=out/'archive-resources-v2-binding.json';write(path,correction);return pin(path)
 
 
 if __name__=='__main__':
     import argparse
     parser=argparse.ArgumentParser(description=__doc__)
-    for name in ['root','projection']:parser.add_argument('--'+name,type=Path,required=True)
-    parser.add_argument('--commit',required=True);a=parser.parse_args();print(json.dumps(prepare(a.root,a.projection,a.commit)))
+    parser.add_argument('--root',type=Path,required=True);parser.add_argument('--projection',type=Path);parser.add_argument('--commit');parser.add_argument('--repair-archive',action='store_true');a=parser.parse_args()
+    if not a.repair_archive and (a.projection is None or a.commit is None):parser.error('projection and commit required for scientific amendment')
+    print(json.dumps(repair_archive(a.root) if a.repair_archive else prepare(a.root,a.projection,a.commit)))

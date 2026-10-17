@@ -1,5 +1,6 @@
 """Retain historical publications plus the explicitly amended whole phase."""
 import json
+import gzip
 from pathlib import Path
 import re
 from e36_store import sha
@@ -14,3 +15,15 @@ def native_runs(root):
         if sha(manifest['path'])!=manifest['sha256']:raise ValueError('amended archive native manifest changed')
         if name not in names:names.append(name)
     return names
+
+
+def native_cas_directories(root):
+    return [Path(root)/'runs'/name/'blobs' for name in native_runs(root)]
+
+
+def published_receipt(root,value):
+    path=next((directory/value for directory in native_cas_directories(root) if (directory/value).exists()),None)
+    if path is None or sha(path)!=value:raise ValueError('published archive eligibility CAS missing or changed')
+    document=json.loads(gzip.decompress(path.read_bytes()))
+    if document.get('schema')!='e36-native-ladder-receipt-v1' or document.get('complete') is not True:raise ValueError('archive source ladder incomplete')
+    return document

@@ -135,7 +135,8 @@ def run(pool):
                             continue
                         values={row['output_sha'] for row in rows if row['status']=='done' and row['attempts']==1 and row['output_sha']}
                         ledger_cache[ledger]=(identity,values);published.update(values)
-                directories=[ROOT/'runs/fallback-v6/blobs',ROOT/'runs/svt-additions-v1/blobs'] if scan else []
+                from e36_archive_runs import native_cas_directories
+                directories=native_cas_directories(ROOT) if scan else []
                 for directory in directories:
                     if not directory.exists():continue
                     for path in directory.iterdir():

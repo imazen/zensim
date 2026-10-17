@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 sys.path.insert(0,str(Path(__file__).parents[1]/'rev4_featpot'))
 import e36_closed_archive as closed
 import e36_artifact_mirror as mirror
+from e36_archive_runs import native_cas_directories,published_receipt
 from e36_store import sha
 
 
@@ -34,6 +35,19 @@ class ClosedInventory(unittest.TestCase):
             with patch.object(closed,'closed_generation',return_value=(terminal,[ledger])):
                 with self.assertRaises(pa.ArrowInvalid):closed.inventory(root)
             self.assertTrue(path.exists())
+
+    def test_amended_optional_cas_reaches_discovery_and_final_replay(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+            root,owner,terminal,ledger,h,path=self.fixture(d);name='svt-additions-source-count-v1';directory=root/'runs'/name/'blobs';directory.mkdir(parents=True)
+            old=ledger.parent/'blobs';cas=next(old.iterdir());cas.rename(directory/cas.name)
+            binding=root/'source-count-amendment-v1';binding.mkdir();manifest=directory.parent/'manifest.json';manifest.write_text('[]')
+            (binding/'binding.json').write_text(json.dumps(dict(phases=dict(additions=dict(run=name,manifest=dict(path=str(manifest),sha256=sha(manifest)))))))
+            self.assertIn(directory,native_cas_directories(root))
+            document=published_receipt(root,cas.name);self.assertEqual(document['rows'][0]['bundle']['sha256'],h)
+            with patch.object(closed,'closed_generation',return_value=(terminal,[ledger])):queue,proof=closed.inventory(root)
+            self.assertEqual(set(queue),{h});self.assertEqual(proof['published_views'],1)
+            (directory/cas.name).write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'CAS missing or changed'):published_receipt(root,cas.name)
 
     def test_high_free_no_urgent_flag_still_inventories_before_completion(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:

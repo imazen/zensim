@@ -184,11 +184,8 @@ def freeze(root,out):
         if any(prior[k]!=row[k] for k in ['bytes','canonical_host','canonical_root','relative_path','program_sha256']):
             raise ValueError('conflicting artifact relocations')
     for v,records in by_view.items():
-        candidates=[root/'runs/fallback-v6/blobs'/v,root/'runs/svt-additions-v1/blobs'/v]
-        p=next((p for p in candidates if p.exists()),None)
-        if p is None or sha(p)!=v:raise ValueError('published archive eligibility CAS missing')
-        doc=json.loads(gzip.decompress(p.read_bytes()))
-        if doc.get('complete') is not True:raise ValueError('archive source ladder incomplete')
+        from e36_archive_runs import published_receipt
+        doc=published_receipt(root,v)
         native={r['bundle']['sha256']:r['bundle'] for r in doc['rows']}
         for row in records:
             b=native.get(row['sha256'])

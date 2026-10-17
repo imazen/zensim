@@ -48,7 +48,7 @@ class Assignment(unittest.TestCase):
             cache=dict(host='tower',root='/mnt/user/coefficient/output/zensim/e36-bulk-2026-10-17-cache',program_sha256='b'*64,command=['cache'],encoding='zstd',authorization='coordinator-2026-10-17-cache250GB',cache_budget_bytes=250000000000,cache_reserve_bytes=180*1024**3)
             (root/'storage-runtime.json').write_text(json.dumps(legacy));(root/'storage-cache-v1.json').write_text(json.dumps(cache))
             bundle=dict(sha256=digest,bytes=123,host='dev',root=str(root/'artifacts-local-v1'))
-            data=gzip.compress(json.dumps(dict(complete=True,rows=[dict(bundle=bundle)])).encode(),mtime=0);path=run/'blobs/temporary';path.write_bytes(data);view=sha(path);path.rename(path.with_name(view))
+            data=gzip.compress(json.dumps(dict(schema="e36-native-ladder-receipt-v1",complete=True,rows=[dict(bundle=bundle)])).encode(),mtime=0);path=run/'blobs/temporary';path.write_bytes(data);view=sha(path);path.rename(path.with_name(view))
             pq.write_table(pa.Table.from_pylist([dict(status='done',attempts=1,output_sha=view)]),run/'ledger.parquet')
             row=dict(sha256=digest,bytes=123,canonical_host='tower',canonical_root=cache['root'],relative_path=relative,program_sha256='b'*64,encoding='zstd',stored_sha256='d'*64,stored_bytes=111,sha_verified=True,completed_view_sha256=view)
             (owner/'artifact-relocations.jsonl').write_text(json.dumps(row)+'\n');(owner/'cache-reservations-v1.jsonl').write_text(json.dumps(dict(sha256=digest,reserved_bytes=1000))+'\n')

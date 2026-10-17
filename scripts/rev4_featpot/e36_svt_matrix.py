@@ -269,7 +269,9 @@ def configuration(root):
         fresh,_,_=validate_fresh(root);proof['fresh_continuation']=bind(fresh);evidence.append(bind(fresh))
     from e36_source_cut import apply as apply_source_cut
     proof=apply_source_cut(root,proof,clock)
-    if 'source_count_amendment' in proof:evidence.append(proof['source_count_amendment'])
+    if 'source_count_amendment' in proof:
+        evidence.extend([proof['source_count_amendment'],proof['archive_resources']])
+        if proof.get('archive_resource_repair'):evidence.append(proof['archive_resource_repair'])
     return proof,clock,evidence
 
 
@@ -458,7 +460,7 @@ def admit(root,names):
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
                 native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
-                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None)
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),archive_resources=proof.get('archive_resources'),archive_resource_repair=proof.get('archive_resource_repair'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None)
 
 
 def install_controller(root,receipt):
