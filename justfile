@@ -1635,6 +1635,13 @@ steer-worker-scheduler-metadata packet packet_sha:
 shipgates-gaddr models binary instruments mentor_standard mentor_ladder output:
     python3 scripts/rev4_featpot/shipgates.py gaddr --models {{quote(models)}} --binary {{quote(binary)}} --instruments {{quote(instruments)}} --mentor-standard {{quote(mentor_standard)}} --mentor-ladder {{quote(mentor_ladder)}} --output {{quote(output)}}
 
+# Explicit owner-authorized light recompute; intentionally no shared paper flock.
+shipgates-monotonicity original peers models binary features_root commit output:
+    ~/work/zen/scripts/run-heavy --mem 4G --jobs 1 -- python3 scripts/rev4_featpot/shipgates_monotonicity.py --original {{quote(original)}} --peers {{quote(peers)}} --models {{quote(models)}} --binary {{quote(binary)}} --features-root {{quote(features_root)}} --build-commit {{quote(commit)}} --output {{quote(output)}}
+
+shipgates-monotonicity-check:
+    python3 -B -m unittest scripts/tests/test_shipgates_monotonicity.py
+
 shipgates-corruption models binary head inputs pairs bindings output:
     python3 scripts/rev4_featpot/shipgates.py corruption --models {{quote(models)}} --binary {{quote(binary)}} --head {{quote(head)}} --inputs {{quote(inputs)}} --pairs {{quote(pairs)}} --bindings {{quote(bindings)}} --output {{quote(output)}}
 
