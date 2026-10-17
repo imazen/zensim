@@ -25,6 +25,9 @@ addrfix-owner mode binary trace="":
 addrfix-rank-pairs:
     python3 scripts/rev4_featpot/addrfix.py rank-pairs
 
+addrfix-rank-report:
+    python3 scripts/rev4_featpot/addrfix.py rank-report
+
 addrfix-clippy target:
     TMPDIR="$HOME/tmp" cargo clippy --locked -p zensim-validate --bin bake_verdict --bin panel --target-dir {{quote(target)}} -- -D warnings
 
@@ -1593,6 +1596,9 @@ addrfix-peer-evaluate binary input output:
 
 addrfix-peer-statistics binary input output:
     {{quote(binary)}} e34 peer-compare --input {{quote(input)}} --output {{quote(output)}}
+
+addrfix-final-epoch-control binary:
+    python3 scripts/rev4_featpot/addrfix.py unpacked-control --checkpoint last --binary {{quote(binary)}}
 
 addrfix-map-evaluate binary input output:
     {{quote(binary)}} e34 map-cost --input {{quote(input)}} --output {{quote(output)}}

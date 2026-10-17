@@ -2254,3 +2254,16 @@ equal the admitted E33 capture before joining the fixed CVVDP-FHD vectors.
 E33 A/C remain ancillary reproduction checks; current candidate comparisons use
 the original ten paired E34 seeds, same four folds and frozen interval recipe.
 No new population, raw-label read by this agent, fit or qualification is admitted.
+
+
+ADDRFIX matched assessment completed 2026-10-17 UTC: all 13,817 physical
+observations and the exact target/reference/orientation equality checks pass.
+All fifteen current-candidate comparisons are emitted by the registered owner;
+source-specific intervals have 10,000 finite draws, overall intervals 9,739
+finite / 261 dropped draws. Full aggregate result SHA256
+`5357188bdc350a13388560a866ac00857a2072e9f75ec630ec7a0198b7988627`:
+[matched result](../benchmarks/addrfix_matched_rank_2026-10-16.json).
+This is one explicitly admitted owner evaluation; E33 A/C ancillary means
+reproduce the retained points. No raw target was opened by the transport agent,
+no protected population was accessed, and these descriptive results do not
+select the separately designed TRAIN-only dial repair.

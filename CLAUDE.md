@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-17 — addressability report transport assumed a nonserialized count. FIXED.** The floor JSON exposes `represented_frac` and `n_ladders`, not `n_represented`. The first f32-control renderer refused after all six numerical replays; rendering retained owner fractions recovered the report without rescoring. Keep best-epoch and selected-final-epoch controls separate: all three production receipts select epoch 119, while the recorded best curve epoch is 0. Same-epoch f32 preserves all 97 observed inversions, so this failure is not caused by packing.
+
 * **2026-10-16 — STEER pinned-image install crossed Docker bind mounts. FIXED; same-artifact transport replay passed.** The archive/native verifier accepted the first registered cell, but separate staging/result bind mounts made its atomic directory rename return EXDEV. Mount their common parent once; the image, archive, verifier and scientific state machine stay unchanged. The preserved first artifact verifies and installs in the same pinned image after the mount change, without another fit; all 24 launch/harvest tests pass.
 
 * **2026-10-16 — matched batch inputs must supply physical row indices. FIXED in the ADDRFIX transport.** The fixed metric batch tool preserves input columns; it does not synthesize `row_index`. The first KADID scoring pass completed all 7,869 rows but the transport refused the missing index before any target assessment. Its original scores are retained; exact pair keys restore all physical observations only after proving duplicated pairs have identical scores. Subsequent inputs carry explicit indices. Numerical owners still refuse duplicate, foreign or missing indices.

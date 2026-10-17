@@ -16,6 +16,10 @@ the recorded best curve epoch is 0; all three best checkpoints differ from the
 selected final checkpoint. The retained best comparison therefore changes the
 training epoch as well. A same-epoch f32 comparison must precede attributing
 regressions to a packing operation.
+The same-epoch replay is complete: all gate counts are unchanged, and all 97
+original bad edges remain strict inversions in f32. Packing did not create
+these failures. Prioritize the TRAIN-only core ordering loss below; the best
+checkpoint comparison remains a separate exploratory observation.
 
 ## Population and generation
 

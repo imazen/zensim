@@ -91,22 +91,27 @@ def curve_control(binary):
     owner(binary,False,False,models)
 
 
-def unpacked_control(binary):
+def unpacked_control(binary, checkpoint='best'):
     """Check retained f32 checkpoints, with canonical dense-contract admission."""
     refit=Path('/mnt/v/output/zensim/e34-launch-2026-10-15/bin/bake_dial_refit')
-    directory=ROOT/'unpacked-models';directory.mkdir()
+    directory=ROOT/('unpacked-models' if checkpoint=='best' else 'last-f32-models');directory.mkdir()
+    control_name='unpacked-control' if checkpoint=='best' else 'last-f32-control'
     models={};pins={}
     for name in ['diff-410','diff-frag-820','w-c']:
         command=read(SHIP/name/'standard/command.json')
         packed=Path(command[command.index('--bake')+1])
-        source=packed.parent/'best.bin';pin=sha(source)
+        source=packed.parent/(checkpoint+'.bin');pin=sha(source)
+        if checkpoint=='last':
+            receipt=read(packed.parent.parent/'result.json')
+            assert receipt['selection']['epoch_rule']=='last'
+            assert receipt['selected_bake_sha256']==pin and receipt['packed_model_sha256']==sha(packed)
         output=directory/f'{name}-dense-f32.bin'
         args=[str(refit),'densify','--in',str(source),'--out',str(output)]
         with (directory/f'{name}-densify.log').open('x') as log:
             result=subprocess.run(args,stdout=log,stderr=subprocess.STDOUT)
         assert sha(source)==pin and sha(packed)==sha(ROOT/'cost-payload'/f'models/{name}.bin')
         pins[name]=dict(source=str(source),source_sha256=pin,packed_sha256=sha(packed),argv=args,
-            canonical_tool_sha256=sha(refit),returncode=result.returncode)
+            canonical_tool_sha256=sha(refit),returncode=result.returncode,checkpoint=checkpoint)
         if result.returncode:
             pins[name]['state']='admission-refused'
             progress(f'Exploratory unpacked {name}: canonical dense-contract owner refuses rc{result.returncode}; log retained, no gate relaxation.')
@@ -115,28 +120,30 @@ def unpacked_control(binary):
         pins[name].update(state='canonical-densify-admitted',output=str(output),output_sha256=sha(output))
         models[name]=output
     write(directory/'PROVENANCE.json',pins)
-    # The retained best checkpoint precedes production packing/pruning and K;
-    # this is a post-fit transformation control, not quantization alone.
+    # Best changes the training epoch as well; last is the production epoch.
+    # Neither comparison attributes an effect to quantization alone.
     result=dict(exploratory=True,qualification_allowed=False,
-        meaning='retained f32 checkpoint vs production bake: packing/pruning/calibration combined; densify itself proves bit identity',
+        checkpoint=checkpoint,
+        meaning='f32 checkpoint vs production; best changes epoch, last matches production epoch; canonical identity admission',
         admitted_models=list(models),refused_models=[name for name in pins if name not in models])
     if len(models)!=3:
         result['gate_replay']='not-run: allthree exact contracts required'
         write(directory/'RESULT.json',result)
         return
     try:
-        owner(binary,False,False,models,'unpacked-control')
+        owner(binary,False,False,models,control_name)
     except subprocess.CalledProcessError as exc:
         result['gate_replay']=f'canonical scorer admission refused rc{exc.returncode}'
         progress('Unpacked checkpoint gate replay refused; exact scorer error retained; no labels or thresholds changed.')
     else:
-        return unpacked_report()
+        return unpacked_report(checkpoint)
     write(directory/'RESULT.json',result)
 
 
-def unpacked_report():
+def unpacked_report(checkpoint='best'):
     """Render retained exact owner outputs; no numerical replay or label access."""
-    directory=ROOT/'unpacked-models';pins=read(directory/'PROVENANCE.json')
+    directory=ROOT/('unpacked-models' if checkpoint=='best' else 'last-f32-models');pins=read(directory/'PROVENANCE.json')
+    control_name='unpacked-control' if checkpoint=='best' else 'last-f32-control'
     assert set(pins)=={'diff-410','diff-frag-820','w-c'}
     rows={}
     for name,pin in pins.items():
@@ -144,7 +151,7 @@ def unpacked_report():
         assert sha(pin['source'])==pin['source_sha256'] and sha(pin['output'])==pin['output_sha256']
         rows[name]={}
         for grid in ['standard','ladder']:
-            actual=read(ROOT/'unpacked-control'/name/grid/'gaddr.json')['measured']['codec_floor']
+            actual=read(ROOT/control_name/name/grid/'gaddr.json')['measured']['codec_floor']
             baseline=read(ROOT/'candidate-baseline'/name/grid/'gaddr.json')['measured']['codec_floor']
             assert [r['codec'] for r in actual]==[r['codec'] for r in baseline]
             assert all(r['n_ladders']==b['n_ladders'] and r['represented_frac_reference']==b['represented_frac_reference']
@@ -152,10 +159,30 @@ def unpacked_report():
             rows[name][grid]=[dict(codec=r['codec'],fraction=r['represented_frac'],denominator=r['n_ladders'],
                 reference=r['represented_frac_reference'],state=r['state'],
                 delta_fraction=r['represented_frac']-b['represented_frac']) for r,b in zip(actual,baseline,strict=True)]
+    with (ROOT/'diagnosis/FAILING_RUNGS.tsv').open() as f:edges=list(csv.DictReader(f,delimiter='\t'))
+    comparisons=[];orientations={}
+    for name in pins:
+        counts=dict(still_inverted=0,exact_tie=0,now_increasing=0)
+        for grid in ['standard','ladder']:
+            with (ROOT/control_name/name/grid/'scores.tsv').open() as f:
+                scores={(r['image_id'],r['codec'],float(r['q'])):float(r['pred']) for r in csv.DictReader(f,delimiter='\t')}
+            for edge in edges:
+                if edge['model']!=name or edge['grid']!=grid:continue
+                left=scores[edge['image_id'],edge['codec'],float(edge['q0'])]
+                right=scores[edge['image_id'],edge['codec'],float(edge['q1'])]
+                state='still_inverted' if right<left else 'exact_tie' if right==left else 'now_increasing'
+                counts[state]+=1
+                comparisons.append(dict(model=name,grid=grid,codec=edge['codec'],image_id=edge['image_id'],
+                    q0=edge['q0'],q1=edge['q1'],f32_left=left,f32_right=right,orientation=state))
+        orientations[name]=counts
+    assert len(comparisons)==len(edges)==97
+    with (directory/'EDGE_COMPARISON.tsv').open('x') as f:
+        w=csv.DictWriter(f,fieldnames=list(comparisons[0]),delimiter='\t',lineterminator='\n');w.writeheader();w.writerows(comparisons)
     write(directory/'RESULT.json',dict(exploratory=True,qualification_allowed=False,gate_replay='complete',
-        meaning='retained f32 checkpoint vs production bake: packing/pruning/calibration combined; canonical densify identity admission',
-        rows=rows))
-    progress('Exploratory unpacked f32 checkpoint control complete: '+json.dumps(rows,separators=(',',':')))
+        checkpoint=checkpoint,
+        meaning='retained f32 checkpoint vs production bake; best differs in epoch, last is selected production epoch; canonical densify identity admission',
+        rows=rows,original_failed_edge_orientations=orientations))
+    progress(f'Exploratory {checkpoint} f32 checkpoint control complete: '+json.dumps(rows,separators=(',',':')))
 
 
 def trace_report():
@@ -361,6 +388,63 @@ def rank_score(resume=False):
         progress_markdown=str(PRIV/'ADDRFIX_PROGRESS.md')))
 
 
+def rank_report():
+    """Render only aggregate results emitted by the registered statistics owner."""
+    import shutil
+    source=ROOT/'ranking/MATCHED_RESULT.json';data=read(source)
+    assert data['schema']=='addrfix-matched-cvvdp-result-v1' and not data['qualification_allowed']
+    assert len(data['comparisons'])==15
+    models=['diff410','diff_frag820','w_c']
+    scopes=['kadid','tid2013','konfig','cid22_a25','overall']
+    titles=['KADID','TID2013','KonFiG','CID22-A25','Four-source mean']
+    dest=REPO/'benchmarks/addrfix_matched_rank_2026-10-16.json'
+    assert not dest.exists();shutil.copyfile(source,dest)
+    assert sha(source)==sha(dest) and dest.stat().st_size<30000
+    lines=['','## Matched CVVDP-FHD ranking','',
+        'Exploratory only. The registered Rust owner checks exact E33/E34 target,',
+        'reference and orientation equality; physical pair indices, pixel-key SHA',
+        'and all scalar sidecar hashes are bound before assessment. All 13,817',
+        'physical observations and 122 references are retained, including three',
+        'repeated KADID pixel pairs. No protected holdout is used.', '',
+        'CVVDP is the pinned imazen CPU implementation (`ca154a6a`, `standard_fhd`):',
+        '1920×1080, 24-inch display, 0.6 m, 200 nit, contrast 1000, 250 lux.',
+        'Native JOD is consumed at the CLI’s six-decimal output precision.', '',
+        '| Population | Pairs / references | CVVDP-FHD | diff-410 | diff+frag-820 | W-C |',
+        '|---|---:|---:|---:|---:|---:|']
+    for scope,title in zip(scopes,titles,strict=True):
+        if scope=='overall':
+            point=data['four_source_mean'];coverage='4 sources'
+        else:
+            row=data['point_scores'][scope];point={k:v['mean_signed_srocc'] for k,v in row['models'].items()}
+            coverage=f"{row['rows']} / {row['references']}"
+        lines.append('| '+title+' | '+coverage+' | '+' | '.join(f'{point[k]:.6f}' for k in ['cvvdp_fhd',*models])+' |')
+    lines+=['','Candidate minus CVVDP-FHD SROCC, with paired 95% intervals:', '',
+        '| Population | diff-410 | diff+frag-820 | W-C |', '|---|---:|---:|---:|']
+    for scope,title in zip(scopes,titles,strict=True):
+        cells=[]
+        for model in models:
+            row=next(r for r in data['comparisons'] if r['scope']==scope and r['candidate']==model)
+            iv=row['delta'];cells.append(f"{iv['estimate']:+.6f} [{iv['lo']:+.6f}, {iv['hi']:+.6f}]")
+        lines.append('| '+title+' | '+' | '.join(cells)+' |')
+    lines+=['','Each candidate point averages its ten withheld-fold training seeds; the',
+        'overall point weights the four sources equally. The reference is one fixed',
+        'score vector, repeated across those ten slots for paired resampling, not',
+        'ten independent fits. The existing source-reference × shared-seed bootstrap',
+        'uses 10,000 draws, seed 20261016 and type-7 percentile intervals. Every',
+        'source-specific interval has 10,000 finite draws; each overall interval',
+        'has 9,739 finite draws and 261 dropped draws. Full counts and auxiliary',
+        'Student intervals remain in the [owner result](addrfix_matched_rank_2026-10-16.json).',
+        'All fifteen descriptive lower bounds exceed zero. These intervals are',
+        'unadjusted across comparisons and cannot qualify the adopted confirmatory',
+        'gate or select a repair on these previously exposed populations.','',
+        'The ancillary E33 A/C four-source means reproduce the prior retained',
+        f"points: {data['four_source_mean']['a']:.16f} / {data['four_source_mean']['c']:.16f}.",
+        'Resource receipt: `run-heavy rc=0,266s,peak-RSS0.11GiB,',
+        'min-avail34817MiB,peak-load22.96` (statistics, not quiet runtime).','']
+    with (REPO/'benchmarks/addrfix_2026-10-16.md').open('a') as f:f.write('\n'.join(lines))
+    progress('Matched ranking aggregate JSON/table rendered from full canonical owner output; all15 intervals retained; source SHA '+sha(source)+'.')
+
+
 def cost_payload():
     """Assemble a reviewable single-host job, without launching remote work."""
     import shutil
@@ -450,11 +534,12 @@ def cost_report(binary):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['candidate-trace','peer-replay','rank-pairs','curve-control','trace-report','full-trace','rank-score','rank-score-resume','cost-payload','cost-report','unpacked-control','unpacked-report'])
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['candidate-trace','peer-replay','rank-pairs','rank-report','curve-control','trace-report','full-trace','rank-score','rank-score-resume','cost-payload','cost-report','unpacked-control','unpacked-report'])
     p.add_argument('--binary',default='/mnt/v/output/zensim/e34-launch-2026-10-15/evaluation/bin/bake_verdict')
-    p.add_argument('--trace',action='store_true');a=p.parse_args()
-    if a.mode=='unpacked-report':unpacked_report()
-    elif a.mode=='unpacked-control':unpacked_control(a.binary)
+    p.add_argument('--trace',action='store_true');p.add_argument('--checkpoint',choices=['best','last'],default='best');a=p.parse_args()
+    if a.mode=='unpacked-report':unpacked_report(a.checkpoint)
+    elif a.mode=='unpacked-control':unpacked_control(a.binary,a.checkpoint)
+    elif a.mode=='rank-report':rank_report()
     elif a.mode=='cost-report':cost_report(a.binary)
     elif a.mode=='cost-payload':cost_payload()
     elif a.mode=='rank-score':rank_score()
