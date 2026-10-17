@@ -262,3 +262,19 @@ The table shows Spearman association between map density and central fixed-B qua
 | 8206 | screen | 3 | 0.591176 | 0.567647 | 0.597059 | 0.408824 |
 
 Full control summary SHA256 `ad305bf3236ec0f62f5880ad5a46441e118f2d7f3007073b2fd05411d711963d`; payloads and all per-intervention records remain in the evidence archive.
+
+## RD input admission and PNG representation
+
+All24 sources (12 photo,12 screen) passed native strict opaque/sRGB8 metadata admission and an independent whole-image RGB-byte oracle. The GUI source uses its deterministic largest opaque rectangle; the indexed screenshot is losslessly expanded to8-bit PNG through the first-party encoder. Their original bytes, source URLs, family identities and preparation receipts remain archived. No quality grid, candidate, codec or fixed-judge arithmetic changed.
+
+Final source-manifest SHA256 `6ddb0f655ddfe307a6c9702a2928eb7b47690fc1b0104811287dfb08af8cdf75`. The launcher requires the hash-bound24-source admission receipt before encoding. Existing344 complete cells were hash-verified and reused. Full4032-cell JXL RD coverage and source-bootstrap results remain pending.
+
+Decoded PNGs and float-map containers may use lossless palette or grayscale storage. Explicit sample expansion preserves every delivered RGB byte and every logical float-map bit; physical container hashes, logical-map hashes, input-pixel bindings and deduplication keys are checked independently. SSIMULACRA2 remains scalar-only under the approved artifact exception.
+
+```text
+run-heavy: done rc=0 14s | peak-RSS 0.55GiB | min-avail 37893MiB | peak-load 20.63
+run-heavy: done rc=0 1s | peak-RSS 0.04GiB | min-avail 40957MiB | peak-load 16.97
+run-heavy: done rc=0 4s | peak-RSS 0.15GiB | min-avail 40038MiB | peak-load 17.80
+```
+
+Private source-preparation helper tests cover strided palette/gray expansion and exact opaque cropping; strict Clippy and release build pass. JXL native-intervention source CI succeeds on its complete required matrix, including Windows ARM, macOS ARM64 and i686; run38991498232. These checks do not establish RD gains or decoder pixel parity.
