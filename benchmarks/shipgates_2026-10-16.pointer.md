@@ -1,16 +1,16 @@
 # SHIPGATES evidence pointer
 
-Snapshot: 2026-10-17T06:06:00.449216+00:00. Experiment started October16. Paths were checked on dev.
+Snapshot: 2026-10-17T07:04:21.016512+00:00. Experiment started October16. Paths were checked on dev.
 
 JXL RD and its complete source-bootstrap verdict remain unfinished. JPEG/WebP/AVIF RD matrices and final-candidate targeting on all four codecs remain unfinished. The protected human-ranking composite is awaiting explicit authorization.
 
-The corrected JXL source manifest admits27 sources (12 photographs,15 screen/nonphoto). This snapshot includes 11/27 complete source journals, 1848/4536 cells. It preserves original measurements and binds the three approved game-render class annotations to their original cells.
+The corrected JXL source manifest admits27 sources (12 photographs,15 screen/nonphoto). This snapshot includes 12/27 complete source journals, 2016/4536 cells. It preserves original measurements and binds the three approved game-render class annotations to their original cells.
 
 Local evidence: `/mnt/v/output/zensim/shipgates-2026-10-16/`.
 NAS archive: `/mnt/tower/output/zensim-shipgates-archive-2026-10-16/`.
 R2: not uploaded.
 
-The latest completed incremental mirror receipt is dated 2026-10-17T04:54:15.302436+00:00; it verifies three random immutable payloads. A later incremental mirror is queued. Final completeness and newly produced files are not covered by that earlier receipt.
+The latest completed incremental mirror receipt is dated 2026-10-17T07:01:46.302100+00:00; it verifies three random immutable payloads. Its immutable receipt is listed below. Final completeness and files produced after that receipt remain outside its scope.
 
 The input manifests pin the candidate, codec, decoder, fixed judge and source identities. Every encoded bitstream and steering/judge map is retained by hash; each source journal references its actual payloads. Fixed judges use SSIMULACRA2 (approved scalar-only exception), butteraugli and fixed zensim B. Raw diff-410 companion composition is an unauthorized historical diagnostic; the authorized report marks its detector missing.
 
@@ -59,3 +59,7 @@ Use the owners and recipes in the [engineering report](shipgates_2026-10-16.md) 
 | `rd-jxl-corrected27/source-08/cells.jsonl` | 399907 | `0b3cab2f849950743316b7508b4a4f0132388ccc65a6fd9a3c046f3191d84e42` |
 | `rd-jxl-corrected27/source-09/cells.jsonl` | 398572 | `f9d77478ee11e23775996309ea80b063e11194db834fd9409e3f75e093816ee9` |
 | `rd-jxl-corrected27/source-10/cells.jsonl` | 397248 | `c6059ee5b8b26d2f06ec8ba27509114cd12b97918de8ae385f08a9893f91636c` |
+| `rd-jxl-corrected27/source-11/cells.jsonl` | 396548 | `b2d826b92401f5299a2bf97873eea3bbb0196937188032402c50c09761428f3a` |
+| `COMBINED_JUDGE_REPLAY_VERIFIED.json` | 627 | `897caf22503d5191ab1f7e7c6fb9542c2961bc2ff9186c59e83466fef6776da2` |
+| `MIRROR_VERIFIED_2026-10-17_070146Z.json` | 1092 | `8f8c956ad3698ecf36d14c46ce53a0ae5bc78488545eb6d1fd0904452f329220` |
+| `VERIFIED_SEVEN_SOURCE_SNAPSHOT.json` | 4604 | `1f2b5f71d29c2ac78351c8930408c5481fa79dd2800818551a900583b46cb5f2` |

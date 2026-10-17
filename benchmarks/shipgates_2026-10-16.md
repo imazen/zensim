@@ -314,3 +314,16 @@ The six-source certified-packet replay rehashes the physical map artifacts and r
 JPEG/WebP/AVIF RD verdicts compare each candidate-map arm against that candidate’s paired scalar-only controller. The butteraugli-map arm uses the same controller. Global knob frontiers remain reporting comparisons. An inert map therefore has zero spatial gain against its matched control; a synthetic regression case rejects the apparent gain that sparse global-grid interpolation can introduce. JXL retains its global-distance baseline and exact neutral/no-steering checks.
 
 The [evidence pointer](shipgates_2026-10-16.pointer.md) records host-checked paths, completed dataset hashes, source/metric pins, mirror status and unfinished coverage.
+
+## Fixed-judge scheduling replay and archive
+
+The combined source job runs the same frozen fixed judge followed by the same independent map/pixel oracle. A168-row replay matches all metric values, feature values, input-pixel hashes and map metadata exactly after normalizing only output paths; all420 old/new physical map files rehash correctly. The oracle verifies every logical float-map bit, input-pixel binding, deduplication key and padding value. Seven completed source packets (1,176 rows) were rehashed and reused. The encoder and numerical protocol are unchanged.
+
+The incremental archive completed October17 at07:01:46Z and passed three random immutable-payload SHA256 checks. It covers that snapshot; final campaign completeness remains pending. The [evidence pointer](shipgates_2026-10-16.pointer.md) lists the replay and archive receipt hashes.
+
+```text
+combined judge/oracle replay: run-heavy: done rc=0 18s | peak-RSS 0.07GiB | min-avail 29898MiB | peak-load 16.69
+incremental archive: run-heavy: done rc=0 156s | peak-RSS 0.05GiB | min-avail 26148MiB | peak-load 22.45
+```
+
+These resource lines describe contended execution, not quiet latency qualification. The full JXL RD grid and source-bootstrap verdict remain incomplete. JPEG/WebP/AVIF targeting will be validated on frozen diff-frag-820 bytes as adapter validation; a final dial-range candidate does not yet exist.

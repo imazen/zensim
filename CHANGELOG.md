@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- SHIPGATES: record the exact168-row combined-judge replay and verified incremental archive; retain incomplete RD and final-targeting status.
+
 - SHIPGATES: expose published source/group and verified-judge coverage through `just shipgates-progress`.
 
 - SHIPGATES: distinguish archived24-source admission from the current approved27-source JXL run.
