@@ -1,6 +1,6 @@
 # E36 draft — native TRAIN ladders for core ordering
 
-Revision 4 budget amendment, before any E36 fit. Preparation permits native data generation and
+Revision 5 budget amendment, before any E36 fit. Preparation permits native data generation and
 non-training checks only. No optimizer step, first-epoch smoke, fit-cell claim or
 model qualification is authorized. The coordinator releases fitting separately.
 
@@ -415,3 +415,25 @@ source order; target, reference, codec and orientation must match the frozen
 original source. Forward receipts bind checkpoint, source/key and output hashes
 to the pinned assessment binary. Swapped models or rows refuse before a
 statistical decision. This changes no statistic, threshold or selection rule.
+
+### Coordinator-authorized frozen-time budget exclusion (2026-10-17)
+
+Before any E36 fit, the coordinator authorized excluding the second cooperative
+freeze from the generation budget. The original deadline is
+2026-10-17T11:48:19.9591377Z. The scope journal records the exact freeze start
+as2026-10-17T07:31:48.642139Z; the progress log's later window-open entry is not
+the start clock. The exclusion ends at the journal-confirmed actual generation
+thaw. Record both timestamps, integer nanoseconds of excluded time, and the
+resulting exact deadline in the immutable amendment before fitting. Preserve
+the original clocks and transport-equivalence evidence byte for byte; the new
+clock references them and the freeze/thaw evidence by hash. No additional time
+is granted for other intervals by this amendment.
+
+This is a budget-only amendment, authorized before any model exists. It changes
+no source or family membership, quality/size/codec grid, native numerical
+producer, teacher margin, pair deduplication, loss, lambda family, selector,
+assessment test or guard. Extend the live outer and per-ladder deadlines by the
+same measured frozen interval; retaining an expired inner timeout would defeat
+the approved exclusion. All predeclared mandatory matrix and support requirements
+remain required. Freeze-spanning performance timings remain contaminated and
+cannot replace the prebulk cost census. This amendment grants no fit execution.

@@ -79,6 +79,10 @@ def packet(root,pools,base,trainer,out,owner,commit):
     for path in [root/'bulk-choice.json',Path(choice_doc.get('plan_path',root/'bulk-plan.json')),Path(choice_doc.get('clock_path',root/'bulk-clock.json')),root/'bulk-plan.json',root/'bulk-clock.json',root/'resource-admission.json']:
         add(path)
     repaired_clock=json.loads(Path(choice_doc.get('clock_path',root/'bulk-clock.json')).read_text())
+    if 'budget_only_amendment' in repaired_clock:
+        from e36_pause_budget import resolve
+        _,_,budget_evidence=resolve(Path(choice_doc['clock_path']))
+        for evidence in budget_evidence:add(evidence['path'])
     if 'equivalence' in repaired_clock:
         add(repaired_clock['equivalence']['path']);eq=json.loads(Path(repaired_clock['equivalence']['path']).read_text())
         for key in ['original_clock','original_plan','repaired_plan','original_runtime','repaired_runtime']:add(eq[key]['path'])

@@ -308,7 +308,8 @@ def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
     for d in plan['phases'].values():
         if sha(root/'runs'/d['run']/'manifest.json')!=d['manifest_sha256']:raise ValueError('frozen qualifying manifest changed')
     clock=clock_path or root/'bulk-clock.json'
-    times=json.loads(clock.read_text()) if clock.exists() else None
+    from e36_pause_budget import resolve
+    base_times,times,_=resolve(clock) if clock.exists() else (None,None,[])
     inherited=inherit_clock or (Path(times['inherited_clock']['path']) if times and 'inherited_clock' in times else None)
     if plan_path!=root/'bulk-plan.json' and inherited is None:raise ValueError('an amended plan must inherit the original clock; a fresh window is forbidden')
     equivalence=None
@@ -320,7 +321,7 @@ def bulk(root,plan_path=None,clock_path=None,inherit_clock=None):
         else:write(ep,equivalence)
     if times is not None:
         if times['plan_sha256']!=sha(plan_path):raise ValueError('cannot replace a running wall clock')
-        if equivalence is not None and (times.get('inherited_clock')!=equivalence['original_clock'] or times.get('equivalence')!=dict(path=str(ep),sha256=sha(ep)) or any(times[k]!=equivalence[k] for k in ['started_unix','deadline_unix'])):raise ValueError('resumed repair changed original clock or equivalence')
+        if equivalence is not None and (base_times.get('inherited_clock')!=equivalence['original_clock'] or base_times.get('equivalence')!=dict(path=str(ep),sha256=sha(ep)) or any(base_times[k]!=equivalence[k] for k in ['started_unix','deadline_unix'])):raise ValueError('resumed repair changed original clock or equivalence')
     else:
         start=time.time() if equivalence is None else equivalence['started_unix']
         times=dict(started_unix=start,deadline_unix=start+21600,plan_sha256=sha(plan_path),fits=0)

@@ -2182,3 +2182,12 @@ e36-build-source root commit version:
     test ! -e {{quote(root + "/" + version + ".tar")}}
     nice -n19 ionice -c3 git -C /home/lilith/work/zen/zensim archive --format=tar --output={{quote(root + "/" + version + ".tar")}} {{quote(commit)}}
     python3 -c 'import hashlib,json,socket,sys; from pathlib import Path; p=Path(sys.argv[1]); a=Path(str(p)+".tar"); h=hashlib.sha256(); f=a.open("rb"); [h.update(b) for b in iter(lambda:f.read(1048576),b"")]; f.close(); r=dict(source_commit=sys.argv[2],archive_sha256=h.hexdigest(),archive_bytes=a.stat().st_size,source_host=socket.gethostname(),fits=0); o=Path(str(p)+".json").open("x"); json.dump(r,o,indent=2); o.write("\n"); o.close(); print(json.dumps(r))' {{quote(root + "/" + version)}} {{quote(commit)}}
+
+e36-budget-amendment-check:
+    python3 -m unittest scripts/tests/test_e36_pause_budget.py scripts/tests/test_e36_matrix.py
+
+e36-budget-live-timer-check out:
+    python3 scripts/tests/e36_live_budget_fixture.py --out {{quote(out)}}
+
+e36-budget-resume root scope supervisor controller auto_thaw_shell:
+    python3 {{quote(root + "/control-budget-v1/e36_pause_budget.py")}} --root {{quote(root)}} --scope {{quote(scope)}} --supervisor {{supervisor}} --controller {{controller}} --auto-thaw-shell {{auto_thaw_shell}} --registration benchmarks/e36_registration_draft_2026-10-16.md

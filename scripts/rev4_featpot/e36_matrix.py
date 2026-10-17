@@ -9,18 +9,20 @@ from e36_store import sha
 def admit(root,names):
     cp=root/'bulk-choice.json';choice=json.loads(cp.read_text())
     pp=Path(choice.get('plan_path',root/'bulk-plan.json'));tp=Path(choice.get('clock_path',root/'bulk-clock.json'))
-    plan=json.loads(pp.read_text());clock=json.loads(tp.read_text())
+    plan=json.loads(pp.read_text())
+    from e36_pause_budget import resolve
+    base_clock,clock,budget_evidence=resolve(tp)
     if (choice['schema']!='e36-fixed-matrix-choice-v1' or plan['schema']!='e36-six-hour-data-plan-v1'
         or choice['qualified'] not in ['fallback','full'] or choice['plan_sha256']!=sha(pp)
         or choice['clock_sha256']!=sha(tp) or clock['plan_sha256']!=sha(pp)
-        or plan['deadline_seconds']!=21600 or clock['deadline_unix']!=clock['started_unix']+21600
+        or plan['deadline_seconds']!=21600 or base_clock['deadline_unix']!=base_clock['started_unix']+21600
         or choice['teacher_support_not_used_for_choice'] is not True or plan['fit_release'] is not False):
         raise ValueError('deadline-qualified frozen matrix chain required')
-    if 'inherited_clock' in clock:
-        inherited=clock['inherited_clock'];previous=json.loads(Path(inherited['path']).read_text())
-        if sha(inherited['path'])!=inherited['sha256'] or any(clock[k]!=previous[k] for k in ['started_unix','deadline_unix']):raise ValueError('transport repair reset the original deadline')
+    if 'inherited_clock' in base_clock:
+        inherited=base_clock['inherited_clock'];previous=json.loads(Path(inherited['path']).read_text())
+        if sha(inherited['path'])!=inherited['sha256'] or any(base_clock[k]!=previous[k] for k in ['started_unix','deadline_unix']):raise ValueError('transport repair reset the original deadline')
         from e36_bulk import clock_equivalence
-        eq=clock['equivalence'];ep=Path(eq['path'])
+        eq=base_clock['equivalence'];ep=Path(eq['path'])
         if sha(ep)!=eq['sha256'] or json.loads(ep.read_text())!=clock_equivalence(root,pp,plan,Path(inherited['path'])):
             raise ValueError('original/repaired scientific equivalence no longer verifies')
     selected=[plan['phases']['fallback']['run']]
@@ -51,4 +53,4 @@ def admit(root,names):
     if completed!=expected[choice['qualified']]:raise ValueError('selected matrix has missing/swapped/extra declared views')
     bind=lambda p:dict(path=str(p),sha256=sha(p))
     return dict(schema='e36-qualified-matrix-admission-v1',matrix=choice['qualified'],choice=bind(cp),plan=bind(pp),clock=bind(tp),
-        selected_runs=names,manifests=declarations,completed_views=len(completed),outputs=output_hashes,complete=True)
+        selected_runs=names,manifests=declarations,completed_views=len(completed),outputs=output_hashes,complete=True,budget_evidence=budget_evidence)
