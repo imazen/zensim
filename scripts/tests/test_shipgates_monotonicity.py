@@ -12,6 +12,23 @@ spec.loader.exec_module(owner)
 
 
 class DirectionTests(unittest.TestCase):
+    def test_frozen_tier_keeps_partial_windows_and_uses_only_mentor(self):
+        mentor={("a","jpeg",i):v for i,v in enumerate([0.,.1,.5,.4,-.1])}
+        mentor.update({("b","jpeg",i):v for i,v in enumerate([0.,.1,.2])})
+        edges,excluded=owner.direction_edges(mentor)
+        self.assertEqual([(e["from_q"],e["to_q"]) for e in edges],[(0.,2.),(2.,4.)])
+        self.assertEqual([e["image_id"] for e in excluded],["b"])
+        self.assertTrue(all(owner.direction_flag(e,mentor) for e in edges))
+        for values in [{}, {("a","jpeg",0.):0.,("a","jpeg",2.):float("inf")},
+                       {("a","jpeg",0.):0.,("a","jpeg",2.):0.}]:
+            self.assertEqual(owner.direction_flag(edges[0],values),0)
+
+    def test_frozen_tier_requires_both_guards_and_minimum_ladders(self):
+        self.assertEqual(owner.direction_verdict(9,0.,0.),"INSUFFICIENT")
+        self.assertEqual(owner.direction_verdict(10,0.,-.05),"PASS")
+        self.assertEqual(owner.direction_verdict(10,-.001,0.),"FAIL")
+        self.assertEqual(owner.direction_verdict(10,.01,-.051),"FAIL")
+
     def test_legacy_avif_gate_driver_is_refused_before_any_encode(self):
         import shipgates_codec_rd
         with self.assertRaisesRegex(ValueError,"SVT map/target adapter"):

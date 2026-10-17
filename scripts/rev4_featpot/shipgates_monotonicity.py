@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import shutil
 
 from shipgates import sha, write
 
@@ -256,15 +257,201 @@ def report(args):
     (args.output/(stem+".md")).write_text("\n".join(lines)+"\n")
 
 
+NAMES=["diff-410","diff-frag-820","w-c","cvvdp-fhd","ssim2"]
+FAMILIES=["avif-svt","jpeg","jxl","webp"]
+SPEC_SHA="b62a136965c4e1a236c12c8d158cd02733ca7a03fc40f0e932a484f91d4a6f9e"
+STATS_COMMIT="48665c8fb1bb3de5c99d792ae4ed4f3f1e854629"
+
+
+def direction_scores(path):
+    """Missing and nonfinite candidate values survive as failures, not exclusions."""
+    with path.open() as stream:
+        reader=csv.DictReader(stream,delimiter="\t")
+        assert reader.fieldnames==["image_id","codec","q","pred"]
+        result={}
+        for row in reader:
+            k=key(row)
+            assert k not in result,"duplicate score key"
+            result[k]=float(row["pred"]) if row["pred"].strip() else float("nan")
+    return result
+
+
+def direction_edges(mentor):
+    """Registered greedy selector, including partial windows; mentor alone owns keys."""
+    groups=defaultdict(list)
+    for k,v in mentor.items():
+        assert math.isfinite(v),"nonfinite registered mentor"
+        assert k[1] in FAMILIES,"out-of-scope codec"
+        groups[k[:2]].append(k)
+    edges=[];excluded=[]
+    for (image,codec),keys in sorted(groups.items()):
+        keys.sort(key=lambda k:k[2]);selected=[keys[0]]
+        for k in keys[1:]:
+            if abs(mentor[k]-mentor[selected[-1]])>=.5:selected.append(k)
+            if len(selected)==4:break
+        if len(selected)==1:
+            excluded.append(dict(image_id=image,codec=codec,reason="mentor-unevaluable"))
+        for a,b in zip(selected,selected[1:]):
+            edges.append(dict(image_id=image,codec=codec,from_q=a[2],to_q=b[2],mentor_delta=mentor[b]-mentor[a]))
+    return edges,excluded
+
+
+def direction_flag(edge,scores):
+    a=scores.get((edge["image_id"],edge["codec"],edge["from_q"]),float("nan"))
+    b=scores.get((edge["image_id"],edge["codec"],edge["to_q"]),float("nan"))
+    dm=edge["mentor_delta"];dc=b-a
+    return int(math.isfinite(a) and math.isfinite(b) and math.isfinite(dc) and dc*dm>0)
+
+
+def direction_verdict(ladders,difference,lower):
+    if ladders<10:return "INSUFFICIENT"
+    return "PASS" if difference>=0 and lower>=-.05 else "FAIL"
+
+
+def direction_native_check(binary,output):
+    # Unequal cluster sizes distinguish edge weighting from ladder averaging;
+    # the two all-bad/all-good draws distinguish clusters from edge resampling.
+    fixture="0\t0\t1\t1\t1\t1\n"+"1\t1\t1\t1\t1\t1\n"*3
+    one=subprocess.check_output([str(binary)],input=fixture,text=True)
+    two=subprocess.check_output([str(binary)],input=fixture,text=True)
+    assert one==two,"seed replay differs"
+    rows=list(csv.DictReader(one.splitlines(),delimiter="\t"))
+    assert float(rows[0]["estimate"])==.75
+    assert float(rows[0]["lo95"])==0 and float(rows[0]["hi95"])==1
+    assert float(rows[5]["estimate"])==-.25 and float(rows[5]["lower5"])==-1
+    assert all(float(rows[i][k])==0 for i in [6,7] for k in ["estimate","lo95","hi95","lower5"])
+    write(output,dict(state="PASS",fixture=fixture,native_output=one,identical_seed_replay=True,
+        checks=["edge-weighted unequal clusters","whole-ladder resampling","paired identical scorers have exactly zero difference"]))
+
+
+def direction_run(args):
+    assert sha(args.direction_spec)==SPEC_SHA,"frozen direction spec changed"
+    assert sha(args.original/"RESULT.json")=="2f468bf22f10561995945e4cfe28738e9e8edb06b698f064c26e742c9a9c59ff"
+    args.output.mkdir(parents=True,exist_ok=False)
+    shutil.copyfile(args.direction_spec,args.output/"SPEC.md")
+    source=Path(__file__);helper=source.with_name("shipgates_direction.rs")
+    stats=args.stats_source
+    assert subprocess.check_output(["git","-C",str(stats),"rev-parse","HEAD"],text=True).strip()==STATS_COMMIT
+    shutil.copytree(stats/"crates/zenmetrics-stats/src",args.output/"stats-source")
+    shutil.copyfile(source,args.output/source.name);shutil.copyfile(helper,args.output/helper.name)
+    pins=[dict(path=str(p),sha256=sha(p)) for p in [args.direction_spec,args.original/"RESULT.json",source,helper,args.models]]
+    models=json.loads(args.models.read_text())
+    for model in models.values():assert sha(model["path"])==model["sha256"]
+    commands=[]
+    for command in [
+        ["rustc","--edition=2024","--crate-name","zenstats","--crate-type","rlib","-C","opt-level=1",str(args.output/"stats-source/lib.rs"),"-o",str(args.output/"libzenstats.rlib")],
+        ["rustc","--edition=2024","-C","opt-level=1",str(helper),"--extern","zenstats="+str(args.output/"libzenstats.rlib"),"-o",str(args.output/"direction-stats")]]:
+        commands.append(command)
+        subprocess.run(command,check=True)
+    write(args.output/"BUILD.json",dict(commands=commands,stats_commit=STATS_COMMIT,
+        rustc=subprocess.check_output(["rustc","--version"],text=True).strip(),
+        sources=[dict(path=str(p.relative_to(args.output)),sha256=sha(p)) for p in sorted((args.output/"stats-source").rglob("*.rs"))],
+        binary_sha256=sha(args.output/"direction-stats")))
+    direction_native_check(args.output/"direction-stats",args.output/"NATIVE_CHECKS.json")
+    rows=[];all_edges=[];all_exclusions=[]
+    for grid in ["standard","ladder"]:
+        paths={n:args.original/"amended"/grid/n/"input-scores.tsv" for n in NAMES}
+        pins += [dict(path=str(p),sha256=sha(p)) for p in paths.values()]
+        scores={n:direction_scores(p) for n,p in paths.items()}
+        edges,excluded=direction_edges(scores["ssim2"])
+        all_exclusions += [dict(grid=grid,**r) for r in excluded]
+        for edge in edges:
+            flags={n:direction_flag(edge,scores[n]) for n in NAMES}
+            assert flags["ssim2"]==1
+            all_edges.append(dict(grid=grid,**edge,agreement=flags))
+        for codec in FAMILIES:
+            current=[e for e in all_edges if e["grid"]==grid and e["codec"]==codec]
+            sources=sorted({e["image_id"] for e in current})
+            assert len(sources)>=2,"cannot bootstrap fewer than two ladders"
+            ids={n:i for i,n in enumerate(sources)}
+            data="".join("\t".join(map(str,[ids[e["image_id"]]]+[e["agreement"][n] for n in NAMES]))+"\n" for e in current)
+            stem=args.output/(grid+"-"+codec)
+            Path(str(stem)+".input.tsv").write_text(data)
+            raw=subprocess.check_output([str(args.output/"direction-stats")],input=data,text=True)
+            Path(str(stem)+".native.tsv").write_text(raw)
+            native=list(csv.DictReader(raw.splitlines(),delimiter="\t"))
+            assert len(native)==8
+            for i,name in enumerate(NAMES):
+                iv=native[i];agree=sum(e["agreement"][name] for e in current)
+                assert float(iv["estimate"])==agree/len(current)
+                row=dict(grid=grid,codec=codec,metric=name,ladders=len(sources),edges=len(current),
+                    agreeing_edges=agree,agreement=agree/len(current),lo95=float(iv["lo95"]),hi95=float(iv["hi95"]),
+                    missing_or_nonfinite_cells=sum(k not in scores[name] or not math.isfinite(scores[name][k]) for k in scores["ssim2"] if k[1]==codec))
+                if i<3:
+                    delta=native[i+5];d=float(delta["estimate"]);lower=float(delta["lower5"])
+                    # Integer numerator keeps the exact edge-weighted point guard.
+                    assert d==(agree-sum(e["agreement"]["cvvdp-fhd"] for e in current))/len(current)
+                    row.update(difference=d,lower5=lower,state=direction_verdict(len(sources),d,lower))
+                rows.append(row)
+            print(grid,codec,"ladders",len(sources),"edges",len(current),flush=True)
+    edgefile=args.output/"EDGES.jsonl"
+    with edgefile.open("x") as stream:
+        for edge in all_edges:stream.write(json.dumps(edge,sort_keys=True,allow_nan=False)+"\n")
+    write(args.output/"RESULT.json",dict(schema="shipgates-frozen-a7r-direction-v1",spec_sha256=SPEC_SHA,
+        stats_commit=STATS_COMMIT,build_commit=args.build_commit,inputs=pins,models=models,
+        bootstrap=dict(resamples=10000,seed=20261017,unit="ladder",paired=True,edge_weighted=True,
+            rng="zenstats serial Xoshiro256ss",quantile="Hyndman-Fan type7",lower_probability=.05,
+            descriptive_probabilities=[.025,.975],multiplicity_adjustment=False),
+        edge_sha256=sha(edgefile),exclusions=all_exclusions,rows=rows,
+        verdicts={n:"PASS" if all(r["state"]=="PASS" for r in rows if r["metric"]==n) else "FAIL" for n in NAMES[:3]}))
+    print(json.dumps(json.loads((args.output/"RESULT.json").read_text())["verdicts"]),flush=True)
+
+
+def direction_report(args):
+    d=json.loads(args.format_direction.read_text())
+    assert d["spec_sha256"]==SPEC_SHA
+    args.output.mkdir(parents=True,exist_ok=True)
+    stem="shipgates_a7r_direction_2026-10-17"
+    rows=d["rows"]
+    with (args.output/(stem+".tsv")).open("w") as stream:
+        writer=csv.DictWriter(stream,fieldnames=list(dict.fromkeys(k for r in rows for k in r)),delimiter="\t")
+        writer.writeheader();writer.writerows(rows)
+    names=dict(zip(NAMES,["diff-410","diff+frag-820","W-C","CVVDP-FHD","SSIMULACRA2"]))
+    lines=["# Frozen A7r direction-agreement tier — 2026-10-17","",
+        "All three candidates **FAIL**. Standard JPEG and ladder JXL fail for every candidate; diff-410 additionally fails AVIF-SVT on both grids. Every failure is a negative point difference D; every one-sided lower bound meets −0.05. Reachability and final targeting qualification remain separate, and the original strict A7r results remain on record.","",
+        "Frozen spec SHA256: `"+SPEC_SHA+"`.","",
+        "SSIMULACRA2 alone greedily selects up to four points from each q-sorted ladder, beginning at its lowest setting and requiring |Δmentor| ≥ 0.5 from the last selected point. Partial windows are retained; only ladders with no selected edge are excluded. There is no clamp exclusion. Here all249 ladders contribute three edges:747 total, no exclusions, no missing/nonfinite score cells. AVIF uses SVT only; rav1e is excluded. The standard SVT view replaces its legacy AVIF rows with the same35references’ SVT rows from the ladder instrument, preserving their RGB bindings; other standard rows are unchanged. The two grids remain separate. [Derivation and historical strict results](shipgates_encoder_monotonicity_2026-10-17.md).","",
+        "An edge agrees iff Δscorer × Δmentor > 0; zero, missing or nonfinite scores fail. Family agreement is edge-weighted. D is candidate agreement minus CVVDP-FHD on identical edges. The paired bootstrap resamples whole ladders with replacement, carrying every scorer together:10000draws, seed20261017, canonical zenmetrics-stats `"+STATS_COMMIT+"`, serial Xoshiro256ss, Hyndman–Fan type7. D’s lower bound is the5th percentile; scorer intervals are descriptive two-sided95% (2.5th/97.5th percentiles) from the same draws.","",
+        "A family passes iff D ≥ 0 and lower5 ≥ −0.05, with at least10evaluable ladders. All four families on both grids must pass; this is an intersection-union test with no multiplicity adjustment. All eight families have16–39ladders, so none is insufficient.","",
+        "| Candidate | Overall | Failed grid/family |","|---|---|---|"]
+    for n in NAMES[:3]:
+        fail=[r["grid"]+"/"+r["codec"] for r in rows if r["metric"]==n and r["state"]!="PASS"]
+        lines.append(f"| {names[n]} | {d['verdicts'][n]} | {', '.join(fail)} |")
+    for grid in ["standard","ladder"]:
+        lines += ["","## "+grid,"",
+            "| Candidate | Codec | Ladders / edges | Agreement | CVVDP-FHD agreement | D | Lower5 | Verdict |",
+            "|---|---|---:|---:|---:|---:|---:|---|"]
+        for r in rows:
+            if r["grid"]!=grid or r["metric"] not in NAMES[:3]:continue
+            peer=next(p for p in rows if p["grid"]==grid and p["codec"]==r["codec"] and p["metric"]=="cvvdp-fhd")
+            lines.append(f"| {names[r['metric']]} | {r['codec']} | {r['ladders']} / {r['edges']} | {r['agreeing_edges']}/{r['edges']} | {peer['agreeing_edges']}/{r['edges']} | {r['difference']:.9f} | {r['lower5']:.9f} | {r['state']} |")
+        lines += ["","### Descriptive scorer intervals","",
+            "| Scorer | Codec | Agreement | Descriptive95% interval |","|---|---|---:|---|"]
+        for r in rows:
+            if r["grid"]==grid:
+                lines.append(f"| {names[r['metric']]} | {r['codec']} | {r['agreement']:.9f} | [{r['lo95']:.9f}, {r['hi95']:.9f}] |")
+    lines += ["","SSIMULACRA2 self-agreement is100% by construction on all747edges, descriptive only. Exact counts, point differences, bounds, missing-score counts and descriptive intervals are in [the machine-readable table]("+stem+".tsv).","","## Pins and validation",""]
+    for n in NAMES[:3]:lines.append("- "+names[n]+" model SHA256 `"+d["models"][n]["sha256"]+"`.")
+    lines += ["","RESULT SHA256 `"+sha(args.format_direction)+"`; shared edge ledger SHA256 `"+d["edge_sha256"]+"`. [Artifact pointer](shipgates_2026-10-16.pointer.md) retains full input, source, canonical statistics and binary hashes. No new model scoring, encodes, training or human-label access. Native checks cover unequal edge counts per ladder, whole-ladder resampling, paired identical-scorer differences and deterministic seed replay. Original evidence remains immutable.","",
+        "```text",next(line for line in args.resource_log.read_text().splitlines() if line.startswith("run-heavy: done")),"```","",
+        "One CPU,4GiB cap, nice19/ionice3; no paper lock. The resource line describes this contended evaluation, not a performance qualification. JXL remains paused for priority generation."]
+    (args.output/(stem+".md")).write_text("\n".join(lines)+"\n")
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--output",type=Path,required=True)
     p.add_argument("--format-result",type=Path)
+    p.add_argument("--format-direction",type=Path)
     p.add_argument("--resource-log",type=Path)
+    p.add_argument("--direction-spec",type=Path)
+    p.add_argument("--stats-source",type=Path)
     for name in ["original","peers","models","binary","features-root"]:p.add_argument("--"+name,type=Path)
     p.add_argument("--build-commit")
     args=p.parse_args()
-    if args.format_result:report(args)
+    if args.format_direction:direction_report(args)
+    elif args.direction_spec:direction_run(args)
+    elif args.format_result:report(args)
     else:
         assert all(getattr(args,n) is not None for n in ["original","peers","models","binary","features_root","build_commit"])
         run(args)

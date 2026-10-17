@@ -1642,6 +1642,13 @@ shipgates-monotonicity original peers models binary features_root commit output:
 shipgates-monotonicity-check:
     python3 -B -m unittest scripts/tests/test_shipgates_monotonicity.py
 
+# Frozen direction tier: canonical serial statistics, explicitly no paper lock.
+shipgates-direction spec original models stats_source commit output:
+    TMPDIR="$HOME/tmp" RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 ~/work/zen/scripts/run-heavy --mem 4G --jobs 1 -- python3 scripts/rev4_featpot/shipgates_monotonicity.py --direction-spec {{quote(spec)}} --original {{quote(original)}} --models {{quote(models)}} --stats-source {{quote(stats_source)}} --build-commit {{quote(commit)}} --output {{quote(output)}}
+
+shipgates-direction-report result resource_log output:
+    python3 scripts/rev4_featpot/shipgates_monotonicity.py --format-direction {{quote(result)}} --resource-log {{quote(resource_log)}} --output {{quote(output)}}
+
 shipgates-monotonicity-report result resource_log output:
     python3 scripts/rev4_featpot/shipgates_monotonicity.py --format-result {{quote(result)}} --resource-log {{quote(resource_log)}} --output {{quote(output)}}
 
