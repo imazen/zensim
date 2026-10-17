@@ -99,6 +99,8 @@
 
 - Require frozen fixed-judge identity and independently verified source packets before producing RD aggregates.
 
+- Bound native JXL quality-group scheduling while requiring exact serial replay of all encoded bytes, delivered pixels and steering fields.
+
 ### QUEUED BREAKING CHANGES
 
 - Removed obsolete experimental extraction interfaces and feature tokens (unreleased).

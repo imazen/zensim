@@ -278,3 +278,15 @@ run-heavy: done rc=0 4s | peak-RSS 0.15GiB | min-avail 40038MiB | peak-load 17.8
 ```
 
 Private source-preparation helper tests cover strided palette/gray expansion and exact opaque cropping; strict Clippy and release build pass. JXL native-intervention source CI succeeds on its complete required matrix, including Windows ARM, macOS ARM64 and i686; run38991498232. These checks do not establish RD gains or decoder pixel parity.
+
+### Bounded native group scheduling
+
+An eight-arm replay of an already completed576x576 source/quality group preserves all8 encoded hashes, every decoded RGB byte and all39 ordered steering-map fields exactly. All outputs pass the independent decoder; neutral controls remain byte-identical to no steering. Frozen model, encoder, decoder, source, judge and quality-grid pins are unchanged. Complete hash-verified groups remain reusable.
+
+Subsequent scheduling may run up to8 independent local arms inside one16GiB/jobs8 shared-lock heavy job. Each codec and independent decoder remains single-threaded. This changes scheduling only; grouped native timings are contended diagnostics and confer no quiet latency or per-worker memory qualification.
+
+```text
+run-heavy: done rc=0 25s | peak-RSS 0.10GiB | min-avail 17858MiB | peak-load 34.93
+```
+
+Exact replay receipt: `GROUP_REPLAY_VERIFIED.json` under the evidence root. Full RD coverage and matched-quality bootstrap results remain pending.

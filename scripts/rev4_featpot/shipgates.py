@@ -351,7 +351,8 @@ def jxl_rd_source(args):
         if args.quality_index is not None and qi != args.quality_index:
             continue
         hashes = {}
-        for label,metric,iterations,gain,model in arms:
+        def encode_arm(arm):
+            label,metric,iterations,gain,model = arm
             free = os.statvfs(str(Path.home()))
             assert free.f_bavail * free.f_frsize >= 20 * 1024**3, "disk guard: below20GiB free"
             assert sha(model["path"]) == model["sha256"]
@@ -395,13 +396,18 @@ def jxl_rd_source(args):
                 bytes=encoded.stat().st_size,map_records=items,case=str(dest),model_sha256=model["sha256"],
                 independent_decoder="libjxl0.12-success")
             write(dest / "CELL.json",record)
-            if not records:
-                write(args.output / "FIRST_CELL_VERIFIED.json",record)
-            records.append(record)
-            hashes[label] = encoded.stem
-            with (args.output / "cells.jsonl").open("a") as stream:
-                stream.write(json.dumps(record,allow_nan=False)+"\n")
             print(f"{datetime.now(timezone.utc).isoformat()} RD JXL {source['name']} d{qi:02d} {label}: {record['bytes']}B maps{len(items)}",flush=True)
+            return record
+        from concurrent.futures import ThreadPoolExecutor
+        assert 1 <= args.cell_workers <= 8
+        with ThreadPoolExecutor(max_workers=args.cell_workers) as workers:
+            for record in workers.map(encode_arm,arms):
+                if not records:
+                    write(args.output / "FIRST_CELL_VERIFIED.json",record)
+                records.append(record)
+                hashes[record["arm"]] = record["encoded_sha256"]
+                with (args.output / "cells.jsonl").open("a") as stream:
+                    stream.write(json.dumps(record,allow_nan=False)+"\n")
         assert all(hashes[label+"-neutral"] == hashes["none"] for label in models), "neutral/no-steering bitstreams differ"
     assert len(records) == (21 if args.quality_index is None else 1)*8
     write(args.output / "COMPLETE.json",dict(cells=len(records),source=source,
@@ -424,7 +430,7 @@ def jxl_rd(args):
         binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),
         png8_binary_sha256=sha(args.png8_binary),source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),
         distances_f32=distances,arms=8,iterations=2,threads=1,judges="separate; not yet scored",
-        sources=len(sources),neutral_rule="every candidate-neutral byte-identical to none at every cell")
+        sources=len(sources),cell_workers=args.cell_workers,neutral_rule="every candidate-neutral byte-identical to none at every cell")
     if args.resume_encodes_root:
         previous=json.loads((args.resume_encodes_root/"DESIGN.json").read_text())
         assert previous["binary_sha256"]==design["binary_sha256"] and previous["oracle_sha256"]==design["oracle_sha256"]
@@ -466,10 +472,10 @@ def jxl_rd(args):
                 write(dest / f"quality-{qi:02d}-reuse.json",dict(source=str(prior),source_sha256=sha(prior),cells=reused))
                 newrows = reused
             else:
-                command = ["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","16G","--jobs","1","--",
+                command = ["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","16G","--jobs",str(args.cell_workers),"--",
                     sys.executable,str(runner),"jxl-rd-source","--models",str(args.models),"--binary",str(args.binary),
                     "--inputs",str(args.inputs),"--oracle",str(args.oracle),"--png8-binary",str(args.png8_binary),"--design",str(args.output / "DESIGN.json"),
-                    "--source-id",str(i),"--quality-index",str(qi),"--output",str(phase)]
+                    "--source-id",str(i),"--quality-index",str(qi),"--cell-workers",str(args.cell_workers),"--output",str(phase)]
                 write(dest / f"quality-{qi:02d}-command.json",command)
                 print(f"JXL RD source{i:02d} {source['name']} quality{qi:02d}: queued",flush=True)
                 with (dest / f"quality-{qi:02d}.log").open("x") as log:
@@ -628,6 +634,8 @@ def main():
         common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses"] else ["models", "binary", "output"]
         for name in common + names:
             command.add_argument(f"--{name}", type=Path, required=True)
+        if mode in ["jxl-rd","jxl-rd-source"]:
+            command.add_argument("--cell-workers",type=int,default=1,choices=range(1,9))
         if mode == "jxl-rd-source":
             command.add_argument("--quality-index", type=int)
         if mode in ["jxl-rd", "jxl-interventions"]:

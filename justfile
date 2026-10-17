@@ -1770,3 +1770,12 @@ import 'benchmarks/mapperf.just'
 
 shipgates-rd-analysis encodes judges sources panel pin output:
     python3 scripts/v_next/rd_probe_analyze_2026-07-18.py --shipgates-rd {{quote(encodes)}} --judge-dir {{quote(judges)}} --sources {{quote(sources)}} --panel {{quote(panel)}} --judge-pin {{quote(pin)}} --output {{quote(output)}}
+
+shipgates-jxl-group-replay models binary inputs oracle png8 design output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd-source --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --png8-binary {{quote(png8)}} --design {{quote(design)}} --source-id 0 --quality-index 0 --cell-workers 8 --output {{quote(output)}}
+
+shipgates-jxl-group-compare replay prior output:
+    python3 scripts/rev4_featpot/shipgates_group_replay.py --replay {{quote(replay)}} --prior {{quote(prior)}} --output {{quote(output)}}
+
+shipgates-jxl-rd-bounded models binary inputs oracle lock heavy png8 resume output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --resume-encodes-root {{quote(resume)}} --cell-workers 8 --output {{quote(output)}}
