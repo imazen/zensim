@@ -1,5 +1,6 @@
 """Mirror immutable artifacts of native-published views; no job claims or fits."""
 import gzip
+import heapq
 import json
 import os
 from pathlib import Path
@@ -51,14 +52,15 @@ def run(pool):
     storage=json.loads((ROOT/'storage-runtime.json').read_text())
     os.environ['E36_STORE_CONNECT_GATE']=str(ROOT/'storage-connect-gate')
     mover=Mover(ROOT,storage)
-    seen=set();queue={};ledger_cache={};metadata_pending={}
+    seen=set();queue={};ledger_cache={};metadata_pending={};priority=[];next_scan=0
     cutoff=json.loads((ROOT/'owner-svt-ssd-v1/live-cutoff.json').read_text())['closed_unix_ns']/1e9-120
     while time.time()<1792256400 and not (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():
         free=shutil.disk_usage(LOCAL).free
         eager=(ROOT/'owner-svt-ssd-v1/urgent-disk-policy.json').exists()
         if eager or free<48*1024**3:
+            scan=time.monotonic()>=next_scan
             published=set()
-            for name in ['fallback-v6','svt-additions-v1']:
+            for name in (['fallback-v6','svt-additions-v1'] if scan else []):
                 for ledger in (ROOT/'runs'/name).glob('ledger*.parquet'):
                     stat=ledger.stat();identity=(stat.st_mtime_ns,stat.st_size)
                     previous=ledger_cache.get(ledger)
@@ -71,7 +73,8 @@ def run(pool):
                         continue
                     values={row['output_sha'] for row in rows if row['status']=='done' and row['attempts']==1 and row['output_sha']}
                     ledger_cache[ledger]=(identity,values);published.update(values)
-            for directory in [ROOT/'runs/fallback-v6/blobs',ROOT/'runs/svt-additions-v1/blobs']:
+            directories=[ROOT/'runs/fallback-v6/blobs',ROOT/'runs/svt-additions-v1/blobs'] if scan else []
+            for directory in directories:
                 if not directory.exists():continue
                 for path in directory.iterdir():
                     if not path.is_file() or path.name not in published or path.name in seen or path.stat().st_mtime<cutoff:continue
@@ -85,22 +88,26 @@ def run(pool):
                         bundle=row['bundle']
                         if bundle['host']=='dev' and bundle['root']==str(LOCAL):
                             digest=bundle['sha256'];artifact=LOCAL/bundle['relative_path']
-                            if artifact.exists():queue[digest]=(artifact,path.name)
+                            if artifact.exists() and digest not in queue:
+                                queue[digest]=(artifact,path.name)
+                                heapq.heappush(priority,(-artifact.stat().st_size,digest))
                     seen.add(path.name)
+            if scan:next_scan=time.monotonic()+10
             # Reclaim space with fewer remote metadata operations. Tiny-first
             # directory ordering can spend minutes copying sub-MB objects.
-            ordered=sorted(queue.items(),key=lambda item:item[1][0].stat().st_size if item[1][0].exists() else 0,reverse=True)
-            batch=[]
-            for digest,(artifact,view_sha) in ordered[:4]:
+            batch={}
+            while priority and len(batch)<4:
                 if (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():return
                 if not eager and shutil.disk_usage(LOCAL).free>=56*1024**3:break
+                _,digest=heapq.heappop(priority)
+                artifact,view_sha=queue[digest]
                 if not artifact.exists():
                     del queue[digest];continue
-                batch.append(pool.submit(mover.move,digest,artifact,view_sha))
+                batch[pool.submit(mover.move,digest,artifact,view_sha)]=digest
             for future in as_completed(batch):
                 record=future.result()
+                del queue[batch[future]]
                 if record is None:continue
-                del queue[record['sha256']]
                 print(json.dumps(dict(mirrored_sha256=record['sha256'],bytes=record['bytes'],free_bytes=shutil.disk_usage(LOCAL).free)),flush=True)
             # Artifact eviction owns the urgent disk relief. Back up a bounded
             # number of trainer-needed receipts between reclamation batches.
