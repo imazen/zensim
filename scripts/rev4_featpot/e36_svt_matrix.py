@@ -132,6 +132,14 @@ def configuration(root):
         for key in ['cutoff','controller_environment','monitor','mirror']:checked(latest[key])
         for key in ['files','mirror_files']:
             for pin in latest[key].values():checked(pin)
+    monitor_restart=root/'owner-svt-ssd-v1/monitor-restart-binding.json'
+    if monitor_restart.exists():
+        restarted=json.loads(monitor_restart.read_text())
+        if (restarted['schema']!='e36-actual-owned-pause-restart-v1'
+            or restarted['fits']!=0 or restarted['scientific_change'] is not False
+            or checked(restarted['previous'])!=supervision):
+            raise ValueError('monitor restart changed resource evidence owner')
+        for key in ['before','source','monitor']:checked(restarted[key])
     def schedule_chain(pin):
         a=json.loads(checked(pin).read_text())
         for key in ['plan','effective_clock','worker']:checked(a[key])
@@ -321,7 +329,8 @@ def admit(root,names):
                 excluded_codecs=['rav1e'],native_publication=publications,artifact_location=bind(location_path),
                 resource_closure=bind(root/'owner-svt-ssd-v1/resource-closure-v3.json'),
                 urgent_disk=bind(root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json') if (root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json').exists() else None,
-                resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None)
+                resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None,
+                monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None)
 
 
 def install_controller(root,receipt):
