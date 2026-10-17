@@ -34,7 +34,7 @@ def main():
         owner.write_text(json.dumps(binding, indent=2) + '\n')
     # The archive share controls ownership and modes; preserve file contents.
     subprocess.run(['rsync', '-r', '--links', '--checksum', '--no-owner', '--no-group',
-                    '--no-perms', '--no-times', '--stats',
+                    '--no-perms', '--no-times', '--bwlimit=60M', '--stats',
                     str(root) + '/', str(destination) + '/'], check=True)
     files = sorted(p.relative_to(root) for p in root.rglob('*') if p.is_file())
     seed = 20261017
