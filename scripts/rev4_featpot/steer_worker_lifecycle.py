@@ -395,10 +395,11 @@ def preserve_interrupted_scratch(bundle, doc, host):
         for job in read_json(bundle/('fit-manifest-'+js+'.json')):
             argv = job['kind']['argv']
             spec = argv[argv.index('--spec')+1]
-            mask = re.search(r':cf([0-9a-f]+)$', spec)
-            if mask is None:
+            masks = [m[1] for part in spec.split(':')
+                     if (m := re.fullmatch(r'cf([0-9a-f]+)', part))]
+            if len(masks) != 1:
                 raise ValueError('manifest lacks an exact coverage mask')
-            declarations.add((mask[1], job['kind']['argv_sha']))
+            declarations.add((masks[0], job['kind']['argv_sha']))
     cap = capacity(host)
     if any(w['run'].startswith('jobs/fitsteer-') for w in cap['workers']):
         raise ValueError('STEER worker still running; preserve only after it stops')

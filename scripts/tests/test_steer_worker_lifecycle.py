@@ -88,6 +88,28 @@ class Lifecycle(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'still running'):
                 life.preserve_interrupted_scratch(self.bundle,{},'r3500')
 
+    def test_preservation_admits_all_four_registered_spec_shapes(self):
+        (self.root/'launch/PAUSE_WORKERS').touch()
+        variants=['sel:abc@h32:H128:cv16:cf98', 'sel:abc@h32:H128:cv16:cf98:fx1',
+                  'sel:abc@h32:H128:cv16:cf98:sh1', 'sel:abc@h32:H128:cv16:cf98:fx1:sh1']
+        jobs=[dict(kind=dict(argv=['--spec',spec],argv_sha=token*64))
+              for spec,token in zip(variants,'abcd')]
+        manifest=self.bundle/'fit-manifest-job.json';manifest.write_text(json.dumps(jobs))
+        with mock.patch.object(life.owner,'steer_plan',return_value={'order':['job']}), \
+             mock.patch.object(life,'control',return_value=dict(paused=True)), \
+             mock.patch.object(life,'capacity',return_value=self.cap), \
+             mock.patch.object(life,'ssh',return_value='{"files": []}') as ssh:
+            out=life.preserve_interrupted_scratch(self.bundle,{},'r3500')
+            self.assertFalse(out['retry_limits_changed'])
+            import shlex
+            args=shlex.split(ssh.call_args.args[1])
+            self.assertEqual(json.loads(args[-2]),[['98',c*64] for c in 'abcd'])
+            jobs[0]['kind']['argv']=['--spec','sel:abc:cf98:cf99']
+            manifest.write_text(json.dumps(jobs))
+            with self.assertRaisesRegex(ValueError,'exact coverage mask'):
+                life.preserve_interrupted_scratch(self.bundle,{},'r3500')
+            self.assertEqual(ssh.call_count,1)
+
     def test_capacity_refuses_occupied_slot_reservations_memory_and_disk(self):
         life.admit('r3500', self.cap)
         cases=[]
