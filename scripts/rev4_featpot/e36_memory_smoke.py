@@ -75,7 +75,35 @@ def prepare(root,packet,out,owner,commit):
     receipt=dict(schema='e36-native-memory-smoke-preparation-v1',build_commit=commit,program=bind(out/'program.tar.gz'),data=bind(packet/'data.tar.gz'),spec=bind(out/'smoke.spec.json'),manifest=bind(out/'smoke.manifest.json'),scientific_parent=bind(packet/'program.tar.gz'),policy=SMOKE,native_execution_contract=expected['execution_contract'],numerical_trainer_unchanged=True,initial_memory_cap_bytes=8*1024**3,rayon_threads=2,planned_host='i270',fits=0,labels_read=False)
     write(out/'PREPARED.json',receipt);return receipt
 
+
+def verify(root,out,owner,ledger,blobs):
+    root=Path(root);out=Path(out);owner=Path(owner);ledger=Path(ledger);blobs=Path(blobs)
+    prepared=json.loads((out/'PREPARED.json').read_text())
+    for key in ['program','data','spec','manifest']:
+        if sha(prepared[key]['path'])!=prepared[key]['sha256']:raise ValueError('prepared diagnostic identity changed')
+    jobs=json.loads(Path(prepared['manifest']['path']).read_text())
+    if len(jobs)!=1:raise ValueError('one diagnostic cell required')
+    import pyarrow.parquet as pq
+    rows=pq.read_table(ledger).to_pylist()
+    if len(rows)!=1 or rows[0]['status']!='done' or rows[0]['attempts']!=1:raise ValueError('single-attempt native diagnostic DONE required')
+    from e36_store import digest
+    h=digest(rows[0]['output_sha']);blob=blobs/h
+    if sha(blob)!=h:raise ValueError('native diagnostic output CAS changed')
+    sys.path.insert(0,str(owner));import harvest_fit_cells as native
+    stage=out/'verified-stage'
+    if stage.exists():raise ValueError('preserve the previous diagnostic verification stage')
+    job=jobs[0];name=job['cell']['image_path']
+    receipt=native.verify_blob(blob,stage,name,job['kind'],program_archive=Path(prepared['program']['path']),checkpoint_inspector=root/'bin/e36-fit-final/inspect_qualified_checkpoint',allow_local_smoke=True)
+    dest=native.cell_dir(stage,name,job['kind']);result=json.loads((dest/'result.json').read_text())
+    qualified=json.loads((dest/'e36-qualified-checkpoint.json').read_text())
+    if result['execution_contract']!='local-smoke' or qualified['execution_contract']!='local-smoke' or result['selected_epoch']!=1:raise ValueError('diagnostic cannot be scientific output')
+    value=dict(schema='e36-verified-memory-smoke-v1',admitted=True,execution_contract='local-smoke',diagnostic_fits=1,scientific_fits=0,program=prepared['program'],data=prepared['data'],manifest=prepared['manifest'],ledger=bind(ledger),blob=bind(blob),native_receipt=receipt,resource=bind(dest/'RESOURCE_USAGE.txt'),qualified=bind(dest/'e36-qualified-checkpoint.json'),labels_read=False)
+    write(out/'VERIFIED.json',value);return value
+
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__)
-    for name in ['root','packet','out','owner']:p.add_argument('--'+name,type=Path,required=True)
-    p.add_argument('--commit',required=True);a=p.parse_args();print(json.dumps(prepare(a.root,a.packet,a.out,a.owner,a.commit)))
+    p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='mode',required=True)
+    a=sub.add_parser('prepare')
+    for name in ['root','packet','out','owner']:a.add_argument('--'+name,type=Path,required=True)
+    a.add_argument('--commit',required=True);v=sub.add_parser('verify')
+    for name in ['root','out','owner','ledger','blobs']:v.add_argument('--'+name,type=Path,required=True)
+    a=p.parse_args();print(json.dumps(prepare(a.root,a.packet,a.out,a.owner,a.commit) if a.mode=='prepare' else verify(a.root,a.out,a.owner,a.ledger,a.blobs)))

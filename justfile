@@ -2371,10 +2371,13 @@ e36-finalize-prepared-pool root prepared out commit:
     python3 scripts/rev4_featpot/e36_pool_finalize.py --root {{quote(root)}} --prepared {{quote(prepared)}} --out {{quote(out)}} --commit {{quote(commit)}}
 
 e36-memory-smoke-prepare root packet out owner commit:
-    python3 scripts/rev4_featpot/e36_memory_smoke.py --root {{quote(root)}} --packet {{quote(packet)}} --out {{quote(out)}} --owner {{quote(owner)}} --commit {{quote(commit)}}
+    python3 scripts/rev4_featpot/e36_memory_smoke.py prepare --root {{quote(root)}} --packet {{quote(packet)}} --out {{quote(out)}} --owner {{quote(owner)}} --commit {{quote(commit)}}
 
-e36-fit-resource-plan root packet resource out:
-    python3 scripts/rev4_featpot/e36_fit_resources.py --root {{quote(root)}} --packet {{quote(packet)}} --resource {{quote(resource)}} --out {{quote(out)}}
+e36-fit-resource-plan root packet resource out verification:
+    python3 scripts/rev4_featpot/e36_fit_resources.py --root {{quote(root)}} --packet {{quote(packet)}} --resource {{quote(resource)}} --out {{quote(out)}} --verification {{quote(verification)}}
 
 e36-pool-progress pool:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_pool_progress.py {{quote(pool)}}
+
+e36-memory-smoke-verify root out owner ledger blobs:
+    python3 scripts/rev4_featpot/e36_memory_smoke.py verify --root {{quote(root)}} --out {{quote(out)}} --owner {{quote(owner)}} --ledger {{quote(ledger)}} --blobs {{quote(blobs)}}

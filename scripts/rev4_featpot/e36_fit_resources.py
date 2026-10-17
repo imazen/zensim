@@ -32,10 +32,13 @@ def slots(host,observed,fit_cap):
 def write(path,value):
     with path.open('x') as f:json.dump(value,f,indent=2);f.write('\n')
 
-def prepare(root,packet,resource,out):
+def prepare(root,packet,resource,out,verification):
     root=Path(root);packet=Path(packet);resource=Path(resource);out=Path(out)
+    verification=Path(verification);verified=json.loads(verification.read_text())
+    if verified['schema']!='e36-verified-memory-smoke-v1' or verified['admitted'] is not True or verified['execution_contract']!='local-smoke' or verified['resource']!={'path':str(resource),'sha256':sha(resource)}:raise ValueError('native verified smoke resource required')
     measured=re.findall(r'^\s*Maximum resident set size \(kbytes\):\s*(\d+)\s*$',resource.read_text(),flags=re.M)
     if len(measured)!=1:raise ValueError('one actual native /usr/bin/time maximum RSS required')
+    if re.findall(r'^\s*Exit status:\s*(\d+)\s*$',resource.read_text(),flags=re.M)!=['0']:raise ValueError('successful measured smoke required')
     peak=int(measured[0]);fit_cap,margin=cap(peak);out.mkdir();observations={};packing={}
     for host in HOSTS:
         command,observed=observe(host);observations[host]=observed;packing[host]=slots(host,observed,fit_cap)
@@ -55,10 +58,10 @@ def prepare(root,packet,resource,out):
         with target.open('x') as stream:subprocess.run([str(root/'bin/zenfleet-ctl'),'ids','--manifest',str(path)],stdout=stream,check=True)
         ids.append(target)
     if ids[0].read_bytes()!=ids[1].read_bytes():raise ValueError('resource hints changed scientific native identity')
-    result=dict(schema='e36-measured-fit-resource-plan-v1',measurement=dict(path=str(resource),sha256=sha(resource),peak_rss_kib=peak,scope='native smoke command maximum RSS; not a full-run or aggregate-process memory bound'),margin_bytes=margin,margin_policy='max(50percent measured peak,512MiB), cap rounded up to256MiB',per_fit_memory_cap_bytes=fit_cap,rayon_threads=2,hosts=packing,observations=observations,manifests=manifests,scheduled_manifest=dict(path=str(scheduled),sha256=sha(scheduled)),native_ids_unchanged=True,fit_release=False,requires_coordinator_steer_drain_and_go=True)
+    result=dict(schema='e36-measured-fit-resource-plan-v1',verification=dict(path=str(verification),sha256=sha(verification)),measurement=dict(path=str(resource),sha256=sha(resource),peak_rss_kib=peak,scope='native smoke command maximum RSS; not a full-run or aggregate-process memory bound'),margin_bytes=margin,margin_policy='max(50percent measured peak,512MiB), cap rounded up to256MiB',per_fit_memory_cap_bytes=fit_cap,rayon_threads=2,hosts=packing,observations=observations,manifests=manifests,scheduled_manifest=dict(path=str(scheduled),sha256=sha(scheduled)),native_ids_unchanged=True,fit_release=False,requires_coordinator_steer_drain_and_go=True)
     write(out/'RESOURCE_PLAN.json',result);return result
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    for name in ['root','packet','resource','out']:p.add_argument('--'+name,type=Path,required=True)
-    a=p.parse_args();print(json.dumps(prepare(a.root,a.packet,a.resource,a.out)))
+    for name in ['root','packet','resource','out','verification']:p.add_argument('--'+name,type=Path,required=True)
+    a=p.parse_args();print(json.dumps(prepare(a.root,a.packet,a.resource,a.out,a.verification)))
