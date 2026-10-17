@@ -324,6 +324,11 @@ impl AttributionResult {
     /// SAT over sums, `f32` view = bin means over real clipped pixel counts.
     fn from_bin_sums(sums: Vec<f64>, width: usize, height: usize, bin: usize) -> Self {
         debug_assert!(bin > 0);
+        if bin == 1 {
+            // Every bin has one real pixel, including image boundaries.
+            // Dividing by its area is exactly division by one.
+            return Self::from_f64_canvas(sums, width, height);
+        }
         let grid_w = width.div_ceil(bin);
         let grid_h = height.div_ceil(bin);
         debug_assert_eq!(sums.len(), grid_w * grid_h);
@@ -997,6 +1002,10 @@ impl BinAccum {
     /// `factor × factor` fine footprint; a bin receives
     /// `value / factor² × |footprint ∩ bin ∩ image|`.
     fn add_scale_plane(&mut self, plane: PlaneRef<'_>, sw: usize, sh: usize, factor: usize) {
+        if self.bin == 1 {
+            self.add_pixel_plane(plane, sw, sh, factor);
+            return;
+        }
         if factor == 1 {
             // Fast path: row fold with logical clip (sw ≥ width when padded).
             debug_assert!(sw >= self.width && sh >= self.height);
@@ -1074,6 +1083,47 @@ impl BinAccum {
                         bx += 1;
                     }
                     by += 1;
+                }
+            }
+        }
+    }
+
+    /// Pixel bins need no footprint/bin intersection or integer division.
+    /// Each destination receives one addition per scale, in the same scale
+    /// order as the general fold. Keep its zero handling and multiply order.
+    fn add_pixel_plane(&mut self, plane: PlaneRef<'_>, sw: usize, sh: usize, factor: usize) {
+        if factor == 1 {
+            debug_assert!(sw >= self.width && sh >= self.height);
+            for (y, row) in self.bins.chunks_exact_mut(self.width).enumerate() {
+                match plane {
+                    PlaneRef::F64(src) => {
+                        for (cell, &v) in row.iter_mut().zip(&src[y * sw..y * sw + self.width]) {
+                            *cell += 0.0 + v;
+                        }
+                    }
+                    PlaneRef::F32(src) => {
+                        for (cell, &v) in row.iter_mut().zip(&src[y * sw..y * sw + self.width]) {
+                            *cell += 0.0 + f64::from(v);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        let inv_area = 1.0 / (factor * factor) as f64;
+        for (y, row) in self
+            .bins
+            .chunks_exact_mut(self.width)
+            .enumerate()
+            .take(sh * factor)
+        {
+            let base = (y / factor) * sw;
+            for (sx, pixels) in row.chunks_mut(factor).enumerate().take(sw) {
+                let v = plane.get(base + sx) * inv_area;
+                if v != 0.0 {
+                    for cell in pixels {
+                        *cell += v;
+                    }
                 }
             }
         }
