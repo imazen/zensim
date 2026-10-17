@@ -133,7 +133,7 @@ run-heavy: done rc=0 1s | peak-RSS 0.15GiB | min-avail 42188MiB | peak-load 11.4
 
 The complete registered 15,060-row synthetic/codec battery was audited separately for each candidate (9,036 TRAIN, 6,024 validation attempts). These are generator labels, with no human-label read. The fixed later release companion is ZCTH v4, Rev5, 420 declared inputs, SHA-256 `568380f1bd2fe6202ebcc5a194078d7885035f466abe93ada3a4b3ea8f4a26f2`, baked probability threshold 0.9. This explicitly composed diagnostic differs from the standalone perceptual candidates used in map/steering gates. It does not qualify the later severity-reviewed contract.
 
-Every candidate fails zero honest native activation/lowering and 100% non-inert RGB-swap detection. All three share the same head detection results; their perceptual branches produce different ordering counts. Statistics below deduplicate exact pixel/input identities within each role.
+Only w-c and diff-frag-820 match the companion’s420 declared feature IDs exactly. Both fail zero honest native activation/lowering and100% non-inert RGB-swap detection; their perceptual branches produce different ordering counts. **diff-410 has no authorized corruption detector**: its410 declared IDs do not match. Its historical head-composed diagnostics do not qualify a corruption gate. Statistics below deduplicate exact pixel/input identities within each role.
 
 | Shared measure | Bar | TRAIN | Validation | Verdict |
 |---|---|---:|---:|---|
@@ -153,13 +153,13 @@ Activation uses the actual identity guard: `!pixels_identical && probability > t
 |---|---:|---:|---:|---:|---|
 | w-c | 2245/7725 | 1447/5353 | 7716/7725 | 5300/5353 | PASS |
 | diff-frag-820 | 2285/7725 | 1577/5353 | 7715/7725 | 5303/5353 | PASS |
-| diff-410 | 2450/7725 | 1723/5353 | 7717/7725 | 5304/5353 | PASS |
+| diff-410 | 2450/7725 | 1723/5353 | not authorized | not authorized | MISSING DETECTOR |
 
 The native failure is the validation document origin 5315, AVIF scalar CQ1: head probability 1.0, composed score 0.0. The missed swaps are the whole-image GB swap at opacity0.5 (6/7 cases detected) and whole-image opaque RB swap (6/7). Every origin/content/codec/family breakdown and each native/detection failure is retained in the evidence packet. No threshold was changed.
 
-All 15,060 rows per candidate passed native/cached/stored-f32 consumed-feature, score and head-probability replay with maximum absolute deltas 0. Input packet SHA-256 `9d51d1e64d987465a5519a2cb9c1d5f19b271394a17f30e27e6b8054ad8b96bc`; extractor SHA-256 `6dad3b66c66ead7fb382c6ef46b17412cfedab6c53aaf0bf052dbecec348b496`.
+All15,060 rows per candidate passed native/cached/stored-f32 consumed-feature, score and diagnostic head-probability replay with maximum absolute deltas0. The diff-410 head replay is an unauthorized diagnostic only. Input packet SHA-256 `9d51d1e64d987465a5519a2cb9c1d5f19b271394a17f30e27e6b8054ad8b96bc`; extractor SHA-256 `6dad3b66c66ead7fb382c6ef46b17412cfedab6c53aaf0bf052dbecec348b496`.
 
-Full owner reports are `corruption-attempt2/<candidate>/report.json`; guarded activation/failure bindings are `corruption-bars-attempt2/REGISTERED_BARS.json`, SHA-256 `e8f9b77a7df7217c8ce1459cb04956c2faa59fb3068ec0933e573c6203e5452c`.
+Full owner reports are `corruption-attempt2/<candidate>/report.json`; authorized activation/failure bindings and the explicit missing-detector result are `corruption-authorized-bars/REGISTERED_BARS.json`, SHA-256 `5fe2140a325fbaad32801d609f8bd5b35b4e2d1255346f9788adde5aa2835e6b`.
 
 ```text
 run-heavy: done rc=0 336s | peak-RSS 0.56GiB | min-avail 40497MiB | peak-load 13.96
