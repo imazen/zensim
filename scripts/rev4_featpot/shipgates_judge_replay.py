@@ -47,7 +47,7 @@ def main():
     result=dict(pairs=args.expected_pairs,physical_map_files_rehashed=len(physical),
         old_packet_sha256=sha(args.old/"judges.jsonl"),new_packet_sha256=sha(args.new/"judges.jsonl"),
         normalized_rows_sha256=hashlib.sha256("\n".join(new).encode()).hexdigest(),
-        independent_oracle_sha256=sha(args.oracle),replay_owner_sha256=sha(__file__),
+        independent_oracle_sha256=sha(args.oracle),replay_owner_sha256=sha(Path(__file__)),
         scope="exact scheduling replay; map output paths alone may differ; no encode or model change")
     with args.output.open("x") as stream:
         json.dump(result,stream,indent=2);stream.write("\n")
