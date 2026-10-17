@@ -71,6 +71,61 @@ def sha256(path):
     return h.hexdigest()
 
 
+
+E36_Q = [*range(21), *range(22, 101, 2)]
+
+
+def e36_consensus(a, b):
+    """Return worse/better local endpoint IDs only for two positive margins."""
+    import math
+    values = [float(a['butteraugli_pnorm3']), float(b['butteraugli_pnorm3']),
+              float(a['cvvdp_standard_fhd']), float(b['cvvdp_standard_fhd'])]
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError('nonfinite native teacher score')
+    db = values[0] - values[1]  # negative butter distance is higher-is-better
+    dc = values[3] - values[2]
+    if db > .01 and dc > .01:
+        return (0, 1)
+    if db < -.01 and dc < -.01:
+        return (1, 0)
+    return None
+
+
+def e36_pairs(rows):
+    """Keyed feature-only TV preferences; no label column or q-order truth."""
+    groups = defaultdict(list)
+    for i, row in enumerate(rows):
+        e36_consensus(row, row)  # every cell must have finite teachers
+        if row['q'] not in E36_Q:
+            raise ValueError('unregistered q')
+        key = (row['reference_sha256'], row['codec'], row['size'], row['split'],
+               json.dumps(row['knobs'], sort_keys=True, separators=(',', ':')))
+        groups[key].append((i, row))
+    pairs, counts = [], defaultdict(int)
+    for group in groups.values():
+        group.sort(key=lambda item: item[1]['q'])
+        q_index = {E36_Q.index(r['q']): (i, r) for i, r in group}
+        if len(q_index) != len(group):
+            raise ValueError('duplicate ladder setting')
+        for index, (i, a) in q_index.items():
+            for lag in [1, 2, 4, 8, 16]:
+                if index + lag not in q_index:
+                    continue
+                j, b = q_index[index + lag]
+                direction = e36_consensus(a, b)
+                band = 0 if a['q'] <= 20 else 1 if a['q'] <= 60 else 2
+                counts['proposed'] += 1
+                if direction is None:
+                    counts['excluded_disagreement_or_margin'] += 1
+                    continue
+                worse, better = (i, j) if direction == (0, 1) else (j, i)
+                counts['admitted'] += 1
+                counts['reverse_nominal_q'] += direction == (1, 0)
+                pairs.append(dict(worse_row=worse, better_row=better, band=band,
+                    weight=2 if a['codec'] in {'jpeg', 'rav1e'} else 1,
+                    content=a['content'], size=a['size'], codec=a['codec'], split=a['split']))
+    return pairs, dict(counts)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--parquet", required=True, help="the training group's parquet (group 0)")
