@@ -35,7 +35,7 @@ owner.refresh_activity = refresh_activity
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
+    p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'profile-stat', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--model')
     p.add_argument('--geometry', choices=GEOMETRIES)
@@ -75,8 +75,9 @@ def main():
         ZEN_S2_E34_HIDDEN_CANDIDATE=str(binding['hidden']),
     )
     os.environ.pop('ZENSIM_MAX_TIER', None)
-    if a.mode == 'profile':
-        dest = root / 'profiles' / a.model
+    if a.mode in ('profile', 'profile-stat'):
+        counter_profile = a.mode == 'profile-stat'
+        dest = root / 'profiles' / (a.model + ('-stat' if counter_profile else ''))
         dest.mkdir(parents=True, exist_ok=False)
         with owner.segment_lock(Path.home() / 'tmp/zensim-paper/rev4/heavy.lock'):
             owner.refresh_activity('quiet gate before profile ' + a.model)
@@ -84,14 +85,17 @@ def main():
             env = owner.environment('1024x1024', 'v4x', 1)
             env.update(ZEN_S2_SPEEDQ_WORKER='e34_candidate_map_retained',
                        ZENSIM_FORMULA_REV='5', ZEN_S2_RSS_ONLY='1', ZEN_S2_PROFILE_CALLS='100')
+            perf_command = (['perf', 'stat', '-e', 'cycles,instructions,page-faults,minor-faults,major-faults',
+                             '-o', str(dest / 'stat.txt')] if counter_profile else
+                            ['perf', 'record', '-F', '199', '-g', '-o', str(dest / 'perf.data')])
             command = ['taskset', '-c', owner.CPUSETS[1], 'nice', '-n19', 'ionice', '-c3',
-                       'perf', 'record', '-F', '199', '-g', '-o', str(dest / 'perf.data'),
-                       '--', str(binaries['after'])]
+                       *perf_command, '--', str(binaries['after'])]
             with (dest / 'record.log').open('x') as log:
                 subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
-            with (dest / 'report.txt').open('x') as log:
-                subprocess.run(['perf', 'report', '--stdio', '--no-children', '-i', str(dest / 'perf.data')],
-                               stdout=log, stderr=subprocess.STDOUT, check=True)
+            if not counter_profile:
+                with (dest / 'report.txt').open('x') as log:
+                    subprocess.run(['perf', 'report', '--stdio', '--no-children', '-i', str(dest / 'perf.data')],
+                                   stdout=log, stderr=subprocess.STDOUT, check=True)
             write(dest / 'PROVENANCE.json', dict(job_sha256=sha(root / 'JOB.json'), quiet_gate=gate,
                   command=command, calls=100, cpuset=job['cpuset'], model_sha256=binding['sha256'],
                   binary_sha256=job['binaries']['after']['sha256']))

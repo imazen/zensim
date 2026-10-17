@@ -100,3 +100,6 @@ mapperf-profile root model:
 # Validate one finished cell without fitting or implying a complete grid.
 mapperf-cell-report root model geometry:
     python3 scripts/rev4_featpot/mapperf.py report --root {{quote(root)}} --model {{quote(model)}} --geometry {{quote(geometry)}}
+
+mapperf-profile-stat root model:
+    python3 scripts/rev4_featpot/mapperf.py profile-stat --root {{quote(root)}} --model {{quote(model)}}
