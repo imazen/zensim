@@ -694,3 +694,8 @@ and no hand-picked sources. The old choice and failed pool remain immutable;
 `e36_full_choice.py` binds the explicit support-triggered amendment. Fresh full
 global deduplication/support/semantic replay is required; this approval does not
 waive a guard or release scientific fits.
+
+The complete12684-view replay subsequently passed all1884support strata and
+both semantic exports; the formerlyempty stratum retains38unique preferences
+afterglobaldeduplication. Fullarchive/nativepool/packageadmission remains
+required before the authorized bounded diagnostic. No scientificfit released.

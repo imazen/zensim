@@ -59,3 +59,14 @@ unchanged. Full global materialization at`pools-full-v1` is still pending,
 and all129 scientific fits remain unreleased. The prior choice and failed
 mandatory pool are retained. Distinct bounded smoke preparation/launch uses
 `e36_memory_smoke.py` and`e36_smoke_launch.py`; actual measurement is pending.
+
+2026-10-17 full-pool materialization completed on dev:
+728867physical features,2866213unique preferences,3063009rawaliases.
+All1884required strata have support; formerlyemptySVT/lineart/1024/selection/
+band2 has38unique preferences. Fit export558295features/2201054pairs;
+selection168758features/665159pairs. Bothsemanticexports passed at unchanged
+teachers/margins. `pools-full-v1/_MANIFEST.json` SHA2567053b5ec0363c6524349e9c5f77438367fb2a09d65b727e7884638cd80a3a186.
+`POOL-FULL-PREPARE-v1.log`:run-heavy rc0,485s,peak-RSS2.64GiB,
+minavailable31621MiB,peakload24.79. This is pool-preparation memory,notfitRSS.
+The pool remains archive-pending; final artifact-location/native/package
+admission and actual bounded-smoke measurement still precede fit go.
