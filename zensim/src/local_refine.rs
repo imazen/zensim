@@ -503,11 +503,17 @@ impl LocalRefineSnapshot {
         let n = sh * w;
         let p = &self.planes[si][ch];
         let src = &self.pyr_src[si][ch];
-        let mut dst = self.pyr_dst[si][ch][base..base + n].to_vec();
-        let mut mu2 = p.mu2[base..base + n].to_vec();
-        let mut ssq = p.ssq[base..base + n].to_vec();
-        let mut s12 = p.s12[base..base + n].to_vec();
+        // Snapshot construction reads the untouched strip. Only a repair
+        // query needs owned copies in which to replace the changed samples.
+        let mut dst = std::borrow::Cow::Borrowed(&self.pyr_dst[si][ch][base..base + n]);
+        let mut mu2 = std::borrow::Cow::Borrowed(&p.mu2[base..base + n]);
+        let mut ssq = std::borrow::Cow::Borrowed(&p.ssq[base..base + n]);
+        let mut s12 = std::borrow::Cow::Borrowed(&p.s12[base..base + n]);
         if let Some((q, planes)) = query {
+            let dst = dst.to_mut();
+            let mu2 = mu2.to_mut();
+            let ssq = ssq.to_mut();
+            let s12 = s12.to_mut();
             let changed = q.changed[si].expect("a replay strip has a changed coarse rectangle");
             for y in y0.max(changed.y0)..(y0 + sh).min(changed.y1) {
                 for x in changed.x0..changed.x1 {

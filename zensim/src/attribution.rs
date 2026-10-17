@@ -527,10 +527,13 @@ fn build_sat_into(get: impl Fn(usize) -> f64, width: usize, height: usize, sat: 
         let row = y * width;
         let sat_prev = y * w1;
         let sat_row = (y + 1) * w1;
+        let (previous, current) = sat.split_at_mut(sat_row);
+        let above = &previous[sat_prev + 1..sat_row];
+        let current = &mut current[1..w1];
         let mut run = 0.0f64;
-        for x in 0..width {
+        for (x, (cell, &prior)) in current.iter_mut().zip(above).enumerate() {
             run += get(row + x);
-            sat[sat_row + x + 1] = run + sat[sat_prev + x + 1];
+            *cell = run + prior;
         }
     }
 }
@@ -1092,6 +1095,9 @@ impl BinAccum {
     /// Each destination receives one addition per scale, in the same scale
     /// order as the general fold. Keep its zero handling and multiply order.
     fn add_pixel_plane(&mut self, plane: PlaneRef<'_>, sw: usize, sh: usize, factor: usize) {
+        if self.width == 0 {
+            return;
+        }
         if factor == 1 {
             debug_assert!(sw >= self.width && sh >= self.height);
             for (y, row) in self.bins.chunks_exact_mut(self.width).enumerate() {
@@ -2516,7 +2522,7 @@ mod tests {
 
     #[test]
     fn aligned_bin_fold_matches_independent_footprint_intersections() {
-        for (width, height) in [(1, 1), (13, 19), (32, 24), (17, 8)] {
+        for (width, height) in [(0, 0), (0, 4), (4, 0), (1, 1), (13, 19), (32, 24), (17, 8)] {
             for factor in [2, 3, 4, 8] {
                 for bin in [1, 2, 3, 4, 6, 8, 16] {
                     let (sw, sh) = (width / factor + 3, height / factor + 3);
@@ -2586,6 +2592,42 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn pixel_bin_unit_factor_matches_frozen_row_fold_bits() {
+        for (width, height, stride) in [(0, 4, 3), (4, 0, 7), (1, 1, 4), (13, 19, 16)] {
+            let values = [
+                0.0_f64,
+                -0.0,
+                f64::from_bits(1),
+                1e100,
+                -7.0,
+                -1e100,
+                9.125,
+                1e-100,
+            ];
+            let plane: Vec<_> = (0..stride * height)
+                .map(|i| values[i % values.len()])
+                .collect();
+            let mut actual = BinAccum::new(width, height, 1);
+            actual.bins.fill(-0.0);
+            let mut expected = actual.bins.clone();
+            for _ in 0..2 {
+                // The frozen factor-one fold starts each source-row bin
+                // integral at +0, even when its only sample is -0.
+                for y in 0..height {
+                    for x in 0..width {
+                        expected[y * width + x] += 0.0 + plane[y * stride + x];
+                    }
+                }
+                actual.add_scale_plane_f64(&plane, stride, height, 1);
+                assert_eq!(
+                    actual.bins.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                );
             }
         }
     }
