@@ -35,6 +35,10 @@ def closed_generation(root):
             continue
     controller=Path('/proc')/str(launch['controller_pid'])
     if controller.exists() and b'e36_generation_resume.py' in (controller/'cmdline').read_bytes():raise ValueError('native controller remains active')
+    optional=root/'owner-svt-ssd-v1/native-additions-final-v1.json'
+    if list(root.glob('native-additions-*/launch.json')):
+        from e36_phase_terminal import validate as validate_optional
+        validate_optional(root,optional)
     retained=[checked(p) for p in launch['ledger_inputs']]
     paths=set(retained)
     for name in native_runs(root):paths.update((root/'runs'/name).glob('ledger*.parquet'))

@@ -2340,3 +2340,6 @@ e36-metadata-plan root out commit:
 
 e36-metadata-archive plan storage out:
     python3 scripts/rev4_featpot/e36_metadata_archive.py archive --plan {{quote(plan)}} --storage {{quote(storage)}} --out {{quote(out)}} --lock "$HOME/tmp/zensim-paper/rev4/heavy.lock"
+
+e36-optional-terminal root out log audit:
+    python3 scripts/rev4_featpot/e36_phase_terminal.py --root {{quote(root)}} --out {{quote(out)}} --log {{quote(log)}} --audit {{quote(audit)}}
