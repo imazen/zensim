@@ -312,8 +312,8 @@ def native_cache(root, mode, selected, binary):
                            'flock', str(home / 'tmp/devin/heavy.lock'),
                            str(home / 'work/claudehints/scripts/run-heavy'), '--mem', '16G', '--jobs', '1', '--',
                            str(binary), 'metric::bake::steerfix_packet::engineering_packet', '--exact', '--nocapture']
-                    with (chunk / 'run.log').open('x') as log:
-                        subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+                    from shipgates_admission import run_with_memory_admission
+                    run_with_memory_admission(cmd, chunk / 'run.log', chunk / 'result.json', env=env)
                     write(chunk / 'BUILD.json', dict(binary_sha256=sha(binary)))
                 current = read(chunk / 'result.json')
                 assert len(current['rows']) == 9
