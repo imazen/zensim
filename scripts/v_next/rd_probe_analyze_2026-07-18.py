@@ -1492,8 +1492,12 @@ def shipgates_rd_main():
                     name=f"r6delta-vs-none/{metric}/{model}/{cohort}"
                     r6_delta.setdefault(name,[]).append((ids[source],delta))
     args.output.mkdir(parents=True,exist_ok=False)
+    # Delta series carry one-sided R6' bounds: level 0.90 makes the bootstrap
+    # `lo` the fifth percentile — the one-sided 95% lower bound the frozen
+    # rule names; savings series keep the registered two-sided 0.95.
     all_series = sorted([dict(name=name,reference=[i for i,_ in data],
-        values=[v for _,v in data],exp=(name not in r6_delta))
+        values=[v for _,v in data],exp=(name not in r6_delta),
+        level=0.90 if name in r6_delta else 0.95)
         for name,data in [*series.items(),*r6_delta.items()]],key=lambda s:s["name"])
     job = dict(schema="engineering-source-series-v1",series=all_series)
     (args.output / "SOURCE_SERIES.json").write_text(json.dumps(job,indent=2,allow_nan=False)+"\n")
@@ -1509,7 +1513,8 @@ def shipgates_rd_main():
             _,metric,model,cohort = row["name"].split("/")
             delta_intervals[(metric,model,cohort)] = dict(
                 estimate=iv["estimate"],lo=iv["lo"],hi=iv["hi"],
-                sources=row["sources"],seed=row["seed"])
+                sources=row["sources"],seed=row["seed"],
+                level=row.get("level"),bound="one-sided 95% lower (fifth percentile)")
             continue
         summaries.append(dict(**cohorts[row["name"]],sources=row["sources"],ratio=iv["estimate"],
             saving=1-iv["estimate"],saving_ci95=[1-iv["hi"],1-iv["lo"]],seed=row["seed"]))
@@ -1528,6 +1533,7 @@ def shipgates_rd_main():
         sources=len(sources),cases=len(cases),per_source=observations,summary=summaries,numeric_gates=numeric_gates,
         r6_prime=r6_prime,
         r6_prime_rule="GATES_REV3_AGY section 2: >=0 on every judge and >=1% on one (point estimates); no neutral-judge class regression; paired noninferiority lower bound >=-1.0pp overall/-2.0pp per class; self-judge symmetry",
+        r6_prime_bound_semantics="delta series run at level=0.90 so interval.lo is the fifth percentile — the spec's one-sided 95% lower bound; savings series keep two-sided 0.95",
         source_manifest_sha256=digest(args.sources),judge_results_sha256=digest(args.judge_dir / "judges.jsonl"),
         judge_binding=judge_binding,panel_sha256=digest(args.panel),encoder_design_sha256=digest(root / "DESIGN.json"),
         source_pixel_admission_sha256=digest(admission_path),

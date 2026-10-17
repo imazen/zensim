@@ -58,6 +58,10 @@ struct Series {
     values: Vec<f64>,
     /// Log ratios are averaged on the log scale and exponentiated afterwards.
     exp: bool,
+    /// Optional two-sided coverage override (default 0.95). A series that
+    /// carries a one-sided bound requests 0.90 so `lo` is the fifth
+    /// percentile — the one-sided 95% lower bound.
+    level: Option<f64>,
 }
 
 fn cfg(offset: u64) -> BootstrapConfig {
@@ -244,7 +248,11 @@ pub(super) fn source_series(bytes: &[u8]) -> Result<Value> {
         );
         let groups = s.reference.iter().collect::<BTreeSet<_>>().len();
         ensure!(groups >= 2, "at least two source groups required");
-        let config = cfg(10000 + offset as u64);
+        let mut config = cfg(10000 + offset as u64);
+        if let Some(level) = s.level {
+            ensure!(level > 0.0 && level < 1.0, "series level outside (0,1)");
+            config.level = level;
+        }
         let iv = cluster_bootstrap(
             s.values.len(),
             &Design::OneWay(&s.reference),
@@ -268,7 +276,7 @@ pub(super) fn source_series(bytes: &[u8]) -> Result<Value> {
             interval_json(&iv, groups)
         };
         output.push(json!({"name":s.name,"sources":groups,"rows":s.values.len(),
-            "exp":s.exp,"seed":config.seed,"interval":interval}));
+            "exp":s.exp,"seed":config.seed,"level":config.level,"interval":interval}));
     }
     Ok(
         json!({"schema":"engineering-source-series-results-v1", "resamples":10000,
