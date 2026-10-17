@@ -92,3 +92,7 @@ mapperf-frozen-map-check binary:
 
 mapperf-source-clippy:
     cargo clippy --locked -p zensim --lib --features custom-profiles -- -D warnings
+
+# Samples the complete warmed prepared-map action; timing acceptance is separate.
+mapperf-profile root model:
+    python3 scripts/rev4_featpot/mapperf.py profile --root {{quote(root)}} --model {{quote(model)}}

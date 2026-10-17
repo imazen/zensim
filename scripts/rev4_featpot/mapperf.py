@@ -20,7 +20,7 @@ AUDIT_KEYS = ['density_sha256', 'features_gradient_sha256', 'queries_sha256', 'r
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
+    p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--model')
     p.add_argument('--binary', type=Path)
@@ -39,6 +39,8 @@ def main():
         return
     job = read(root / 'JOB.json')
     owner.CPUSETS[1] = str(job['cpuset'])
+    if 'benchmark_cache' in job:
+        os.environ['XDG_CACHE_HOME'] = str(root / job['benchmark_cache'])
     assert owner.CPUSETS[1].isdigit()
     if a.mode == 'report':
         report(root, job)
@@ -57,6 +59,27 @@ def main():
         ZEN_S2_E34_HIDDEN_CANDIDATE=str(binding['hidden']),
     )
     os.environ.pop('ZENSIM_MAX_TIER', None)
+    if a.mode == 'profile':
+        dest = root / 'profiles' / a.model
+        dest.mkdir(parents=True, exist_ok=False)
+        with owner.segment_lock(Path.home() / 'tmp/zensim-paper/rev4/heavy.lock'):
+            owner.refresh_activity('quiet gate before profile ' + a.model)
+            gate = owner.quiet_gate(dest / 'quiet-waits.jsonl')
+            env = owner.environment('1024x1024', 'v4x', 1)
+            env.update(ZEN_S2_SPEEDQ_WORKER='e34_candidate_map_retained',
+                       ZENSIM_FORMULA_REV='5', ZEN_S2_RSS_ONLY='1', ZEN_S2_PROFILE_CALLS='100')
+            command = ['taskset', '-c', owner.CPUSETS[1], 'nice', '-n19', 'ionice', '-c3',
+                       'perf', 'record', '-F', '199', '-g', '-o', str(dest / 'perf.data'),
+                       '--', str(binaries['after'])]
+            with (dest / 'record.log').open('x') as log:
+                subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+            with (dest / 'report.txt').open('x') as log:
+                subprocess.run(['perf', 'report', '--stdio', '--no-children', '-i', str(dest / 'perf.data')],
+                               stdout=log, stderr=subprocess.STDOUT, check=True)
+            write(dest / 'PROVENANCE.json', dict(job_sha256=sha(root / 'JOB.json'), quiet_gate=gate,
+                  command=command, calls=100, cpuset=job['cpuset'], model_sha256=binding['sha256'],
+                  binary_sha256=job['binaries']['after']['sha256']))
+        return
     dest = root / 'results' / a.model
     dest.mkdir(parents=True, exist_ok=True)
     parity = dest / 'PREFLIGHT_PASS.json'
