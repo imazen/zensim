@@ -54,9 +54,11 @@ def run(pool):
     mover=Mover(ROOT,storage)
     ready=os.environ.get('E36_RESOURCE_READY_PATH')
     if ready:
-        with Path(ready).open('x') as stream:
+        temporary=Path(ready).with_name(Path(ready).name+'.'+uuid.uuid4().hex+'.partial')
+        with temporary.open('x') as stream:
             json.dump(dict(role='mirror',pid=os.getpid(),scope='/sys/fs/cgroup'+Path('/proc/self/cgroup').read_text().strip().split('::')[1],utc=time.time(),fits=0),stream)
             stream.flush();os.fsync(stream.fileno())
+        os.replace(temporary,ready)
         sync_directory(Path(ready).parent)
     seen=set();queue={};ledger_cache={};metadata_pending={};priority=[];next_scan=0
     cutoff=json.loads((ROOT/'owner-svt-ssd-v1/live-cutoff.json').read_text())['closed_unix_ns']/1e9-120

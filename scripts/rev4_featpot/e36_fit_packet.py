@@ -106,7 +106,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
                     retained.add(path);add(path)
                     if path.suffix=='.json':retain_proof(json.loads(path.read_text()))
             for item in value.values():retain_proof(item)
-    for key in ['owner_amendment','owner_matrix','native_publication','artifact_location','resource_closure','urgent_disk','resource_supervision','monitor_restart','storage_priority']:
+    for key in ['owner_amendment','owner_matrix','native_publication','artifact_location','resource_closure','urgent_disk','resource_supervision','monitor_restart','storage_priority','native_continuation']:
         if key in matrix_doc:retain_proof(matrix_doc[key])
     fit=pools/'fit';contract=copy.deepcopy(json.loads((fit/'contract.json').read_text()))
     if not contract['semantic_export'] or contract['fits_released'] is not False:raise ValueError('successful semantic export required before packet')

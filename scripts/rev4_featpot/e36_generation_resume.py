@@ -16,23 +16,91 @@ def write(path,value):
     with path.open('x') as stream:json.dump(value,stream,indent=2)
 
 
-def hold_admission(root,scope,worker,reason):
-    from e36_disk_policy import atomic,sticky_stop
-    stops=[]
+def same_worker(pid,start_ticks,scope,worker):
+    process=Path('/proc')/str(pid)
+    try:
+        group=Path('/sys/fs/cgroup'+(process/'cgroup').read_text().strip().split('::')[1])
+        fields=(process/'stat').read_text().rsplit(')',1)[1].split()
+        return group==scope and (process/'exe').resolve()==worker and fields[19]==start_ticks
+    except (OSError,ProcessLookupError):return False
+
+
+def worker_handles(scope,worker):
+    result=[]
     for pid in (scope/'cgroup.procs').read_text().split():
-        process=Path('/proc')/pid
+        handle=None
         try:
-            if (process/'exe').resolve()!=worker:continue
-            fields=(process/'stat').read_text().rsplit(')',1)[1].split()
-            stops.append(dict(pid=int(pid),start_ticks=fields[19]))
-        except (FileNotFoundError,ProcessLookupError):continue
-    owner=root/'owner-svt-ssd-v1'
-    hold=dict(scope=str(scope),expected_worker=str(worker),owned_stops=stops,reason=reason,utc=time.time(),fits=0)
-    atomic(owner/'resource-failure-hold.json',hold)
-    atomic(owner/'disk-claim-state.json',dict(claims_paused=True,hard_stop=sticky_stop(shutil.disk_usage(root).free),scope=str(scope),owned_stops=stops,native_workers=[v['pid'] for v in stops],utc=time.time(),fits=0))
-    for item in stops:
-        try:os.kill(item['pid'],signal.SIGSTOP)
-        except ProcessLookupError:pass
+            handle=os.pidfd_open(int(pid))
+            fields=(Path('/proc')/pid/'stat').read_text().rsplit(')',1)[1].split()
+            if not same_worker(int(pid),fields[19],scope,worker):
+                os.close(handle);continue
+            result.append((dict(pid=int(pid),start_ticks=fields[19],state=fields[0]),handle))
+        except (OSError,ProcessLookupError):
+            if handle is not None:os.close(handle)
+    return result
+
+
+def hold_admission(root,scope,worker,reason,memory=None):
+    from e36_disk_policy import atomic,sticky_stop
+    owner=root/'owner-svt-ssd-v1';memory={} if memory is None else memory
+    # Preserve verified ownership of a worker already paused by this resource
+    # owner. Never adopt a stopped process from its state alone.
+    for path in [owner/'resource-failure-hold.json',owner/'disk-claim-state.json']:
+        try:
+            prior=json.loads(path.read_text())
+            if prior['scope']==str(scope):
+                for item in prior.get('owned_stops',[]):memory[(item['pid'],item['start_ticks'])]=item
+        except (OSError,ValueError,KeyError):pass
+    handles=worker_handles(scope,worker);selected=[];error=None
+    try:
+        for item,handle in handles:
+            key=(item['pid'],item['start_ticks'])
+            if item['state']=='T' and key not in memory:continue
+            if not same_worker(item['pid'],item['start_ticks'],scope,worker):continue
+            record=dict(pid=item['pid'],start_ticks=item['start_ticks'])
+            memory[key]=record;selected.append((record,handle))
+        stops=[item for item,_ in selected]
+        hold=dict(scope=str(scope),expected_worker=str(worker),owned_stops=stops,reason=reason,utc=time.time(),fits=0)
+        try:
+            atomic(owner/'resource-failure-hold.json',hold)
+            atomic(owner/'disk-claim-state.json',dict(claims_paused=True,hard_stop=sticky_stop(shutil.disk_usage(root).free),scope=str(scope),owned_stops=stops,native_workers=[v['pid'] for v in stops],utc=time.time(),fits=0))
+        except OSError as failure:
+            # A failed receipt write must not bypass the owned producer pause.
+            # The live supervisor retains ownership in memory and retries.
+            error=str(failure)
+        finally:
+            for item,handle in selected:
+                if same_worker(item['pid'],item['start_ticks'],scope,worker):
+                    try:signal.pidfd_send_signal(handle,signal.SIGSTOP)
+                    except ProcessLookupError:pass
+        return dict(owned_stops=stops,persistence_error=error)
+    finally:
+        for _,handle in handles:os.close(handle)
+
+
+def supervise(native,roles,root,scope,worker,force_reason=None,forced_event=None,memory=None):
+    import sys
+    memory={} if memory is None else memory;reason=force_reason;reported=None
+    while native.poll() is None:
+        if reason is None and (any(child.poll() is not None for child in roles.values()) or forced_event is not None and forced_event.is_set()):
+            reason='required resource child exited or controller cleanup was attempted during live production'
+        if reason is not None:
+            try:
+                result=hold_admission(root,scope,worker,reason,memory)
+                error=result['persistence_error']
+            except Exception as failure:error=repr(failure)
+            if error and error!=reported:
+                print('E36 resource hold persistence/reconciliation failure; retaining supervision: '+error,file=sys.stderr,flush=True)
+                reported=error
+        time.sleep(.2)
+    return native.returncode
+
+
+def drain_before_cleanup(native,roles,root,scope,worker,memory):
+    while native is not None and native.poll() is None:
+        try:supervise(native,roles,root,scope,worker,force_reason='controller exceptional exit',memory=memory)
+        except BaseException as failure:
+            print('E36 retaining native supervision after controller exception: '+repr(failure),flush=True)
 
 
 def wait_resources(roles,out,scope,timeout=30):
@@ -122,9 +190,8 @@ def run(root,out):
         prior_audit=pin(owner/'native-exit-selected-status-v1.json'),source=pin(Path(__file__)),
         job_budget_bytes=budget,scope=str(scope),controller_pid=os.getpid(),prior_completed_required=len(completed),fits=0,scientific_change=False,
         note='Original native IDs/ledger/CAS; existing completed jobs retained, rav1e rejected by frozen owner overlay. No deadline extension.')
-    children=[]
+    children=[];native=None;roles={};ownership={}
     try:
-        roles={}
         for role,path in [('monitor',owner/'closure-v6/e36_disk_policy.py'),('mirror',owner/'mirror-v13/e36_artifact_mirror.py')]:
             log=(out/(role+'.log')).open('x')
             child=subprocess.Popen(['python3',str(path)],stdout=log,stderr=subprocess.STDOUT,
@@ -138,16 +205,12 @@ def run(root,out):
         argv[3]=str(remaining);launch['started_unix']=time.time()
         write(out/'launch.json',launch)
         native=subprocess.Popen(argv,env=env)
-        failed=False
-        while native.poll() is None:
-            if not failed and any(child.poll() is not None for child in children):
-                hold_admission(root,scope,worker,'required archival/monitor child exited during native execution')
-                failed=True
-                write(out/'resource-failure.json',dict(utc=time.time(),helper_exits={role:child.poll() for role,child in roles.items()},fits=0))
-            time.sleep(.2)
-        rc=native.returncode
+        rc=supervise(native,roles,root,scope,worker,memory=ownership)
         write(out/'exit.json',dict(returncode=rc,closed_unix=time.time(),fits=0))
     finally:
+        # Exceptions after spawn cannot shut down resource owners around a
+        # live producer. Reconcile until the original native timeout drains.
+        drain_before_cleanup(native,roles,root,scope,worker,ownership)
         # Cooperative resource shutdown; never terminate archival transfers.
         for name in ['mirror-stop.json','disk-monitor-stop.json']:
             if not (owner/name).exists():write(owner/name,dict(utc=time.time(),reason='native phase ended',fits=0))

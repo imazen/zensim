@@ -134,6 +134,10 @@ class NativePublication(unittest.TestCase):
                     changed=[dict(rows[0],**mutation),rows[1]];pq.write_table(pa.Table.from_pylist(changed),ledger)
                     with self.assertRaisesRegex(ValueError,'publication failed'):
                         matrix.publication(root,'svt-fallback-v1')
+                pq.write_table(pa.Table.from_pylist(rows),ledger)
+                (root/'GENERATION-continuation-v1.log').write_text('native ledger write failed\n')
+                with self.assertRaisesRegex(ValueError,'publication failure'):
+                    matrix.publication(root,'svt-fallback-v1')
 
 
 if __name__=='__main__':unittest.main()

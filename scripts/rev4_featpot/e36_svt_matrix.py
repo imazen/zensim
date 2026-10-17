@@ -150,6 +150,28 @@ def configuration(root):
             raise ValueError('storage priority changed resource evidence owner')
         checked(priority['mirror'])
         for pin in priority['files'].values():checked(pin)
+    continuation=root/'owner-svt-ssd-v1/native-continuation-binding-v1.json'
+    if continuation.exists():
+        continued=json.loads(continuation.read_text())
+        if (continued['schema']!='e36-native-continuation-binding-v1' or continued['fits']!=0
+            or continued['scientific_change'] is not False or checked(continued['previous'])!=storage_priority):
+            raise ValueError('native continuation changed resource evidence owner')
+        sources=json.loads(checked(continued['sources']).read_text())
+        for pin in sources['files'].values():checked(pin)
+        launch=json.loads(checked(continued['launch']).read_text())
+        if launch['clock']!=proof['clock'] or launch['deadline_unix']!=json.loads(checked(proof['clock']).read_text())['deadline_unix'] or launch['scientific_change'] is not False or launch['fits']!=0:
+            raise ValueError('native continuation changed the registered clock')
+        for key in ['worker','scheduled','owner_matrix','prior_exit','prior_audit','source']:checked(launch[key])
+        for pin in launch['ledger_inputs']:checked(pin)
+        for key in ['monitor_ready','mirror_ready','monitor_pid','mirror_pid']:checked(continued[key])
+    continued_supervision=root/'owner-svt-ssd-v1/continuation-supervision-v2-binding.json'
+    if continued_supervision.exists():
+        supervision_doc=json.loads(continued_supervision.read_text())
+        if supervision_doc['schema']!='e36-continuation-supervision-binding-v2' or supervision_doc['fits']!=0 or supervision_doc['scientific_change'] is not False or checked(supervision_doc['previous'])!=continuation:
+            raise ValueError('native continuation supervision differs')
+        sources=json.loads(checked(supervision_doc['sources']).read_text())
+        for pin in sources['files'].values():checked(pin)
+        checked(supervision_doc['live']);checked(supervision_doc['install_log'])
     def schedule_chain(pin):
         a=json.loads(checked(pin).read_text())
         for key in ['plan','effective_clock','worker']:checked(a[key])
@@ -244,7 +266,7 @@ def publication(root, name, completed=None, files=None):
         ledgers.append(bind(path))
     if set(published)!=set(desired):
         raise ValueError('required SVT matrix native publication incomplete')
-    for log in [root/'GENERATION-v7.log']:
+    for log in [root/'GENERATION-v7.log',*root.glob('GENERATION-continuation*.log')]:
         if any('ledger write' in line and 'failed' in line for line in log.read_text().splitlines()):
             raise ValueError('publication failure needs explicit reconciliation')
     if completed is None:
@@ -325,6 +347,16 @@ def admit(root,names):
     if seen!=full_expected:
         raise ValueError('missing/extra owner native views')
     location_path=root/'ARTIFACT_LOCATION_ADMISSION.json'
+    continuation_path=root/'owner-svt-ssd-v1/native-continuation-binding-v1.json'
+    if continuation_path.exists():
+        if (root/'owner-svt-ssd-v1/resource-failure-hold.json').exists():raise ValueError('unresolved generation resource failure')
+        terminal=json.loads((root/'owner-svt-ssd-v1/native-continuation-final-v1.json').read_text())
+        if terminal['schema']!='e36-native-continuation-final-v1' or terminal['fits']!=0 or terminal['scientific_change'] is not False or checked(terminal['continuation'])!=continuation_path:
+            raise ValueError('native continuation final evidence differs')
+        for key in ['log','exit','helper_exits']:checked(terminal[key])
+        supervision_path=root/'owner-svt-ssd-v1/continuation-supervision-v2-binding.json'
+        if supervision_path.exists() and checked(terminal['supervision'])!=supervision_path:
+            raise ValueError('native continuation live supervision evidence missing')
     locations=json.loads(location_path.read_text())
     if locations['schema']!='e36-artifact-location-admission-v1' or locations['admitted'] is not True or locations['fits']!=0 or locations['relocation_eligibility_replayed'] is not True:
         raise ValueError('frozen verified artifact location admission required')
@@ -341,7 +373,8 @@ def admit(root,names):
                 urgent_disk=bind(root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json') if (root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json').exists() else None,
                 resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None,
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
-                storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None)
+                storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
+                native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None)
 
 
 def install_controller(root,receipt):
