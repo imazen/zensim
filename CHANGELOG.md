@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Attribute STEER installed cells by host through the frozen native ledger reduction, preserving failed history and waiting on asynchronous harvest mismatches.
+
 - Verify original-image STEER drain behavior with invented passes and use its existing between-pass allocation budget without changing scientific cell/pass caps or image files.
 
 - Preserve exact manifest-bound STEER coverage scratch by hash-checked rename before interrupted-fit retries; refuse live workers and unpaused controls.

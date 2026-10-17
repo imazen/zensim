@@ -245,6 +245,141 @@ def next_jobset(bundle, doc, status):
                  if status['jobsets'][js]['installed'] < doc['jobsets'][js]), None)
 
 
+def metadata_signature(status):
+    if status.get('state') not in ('PROGRESS', 'COMPLETE') or status.get('errors'):
+        return None
+    return dict(packet_sha256=status['packet_sha256'], installed=status['installed'],
+                jobsets={js: dict(installed=s['installed'], done=s['done'], ledger=s['ledger'])
+                         for js, s in status['jobsets'].items()})
+
+
+def attribute_native_rows(status, folded, manifest_ids):
+    """Validate and count already-folded scheduler rows; never reduce ledger history."""
+    from collections import Counter
+
+    hosts = {h: dict(installed=0, failed=0, poison=0) for h in ('r3500', 'i270', 'tower')}
+    if type(status['installed']) is not int or status['installed'] < 0:
+        raise ValueError('canonical installed count is invalid')
+    if set(status['jobsets']) != set(folded) or set(folded) != set(manifest_ids):
+        raise ValueError('native metadata inventory differs from harvest inventory')
+    for js, s in status['jobsets'].items():
+        if s.get('state') != 'OK' or any(type(v) is not int or v < 0 for v in s['ledger'].values()):
+            raise ValueError('canonical jobset state is invalid')
+        if any(type(s[k]) is not int or s[k] < 0 for k in ('total', 'done', 'installed')):
+            raise ValueError('canonical jobset count is invalid')
+        if max(s['done'], s['installed']) > s['total']:
+            raise ValueError('canonical jobset count exceeds its manifest')
+        ids = manifest_ids[js]
+        if len(ids) != len(set(ids)) or len(ids) != s['total']:
+            raise ValueError('canonical manifest IDs are missing or duplicated')
+        rows = folded[js]
+        if len({r['job_id'] for r in rows}) != len(rows):
+            raise ValueError('metadata must come from a native folded snapshot')
+        if any(r['job_id'] not in ids for r in rows):
+            raise ValueError('native snapshot contains a foreign job')
+        if any(r['status'] not in ('done', 'failed', 'poison', 'poisoned') for r in rows):
+            raise ValueError('native snapshot contains an unexpected scheduler state')
+        counts = dict(Counter(r['status'] for r in rows))
+        if (counts != s['ledger'] or counts.get('done', 0) != s['installed']
+                or s['done'] != s['installed']):
+            # A newly published cell may precede its canonical verified install.
+            return None
+        for r in rows:
+            host = next((h for h in hosts if r['worker'].lower().startswith(h+'-')), None)
+            if host is None:
+                raise ValueError('native snapshot names a worker outside active placement')
+            key = 'installed' if r['status'] == 'done' else 'failed' if r['status'] == 'failed' else 'poison'
+            hosts[host][key] += 1
+    if sum(v['installed'] for v in hosts.values()) != status['installed']:
+        raise ValueError('native attribution does not cover canonical installed cells')
+    return hosts
+
+
+def scheduler_metadata(bundle, doc):
+    """Read native compact snapshots without uploading, amnestying or inspecting fit data."""
+    launch = bundle.parent/'launch'
+    status = read_json(launch/'HARVEST_STATUS.json')
+    signature = metadata_signature(status)
+    if signature is None:
+        return dict(state='WAIT_FOR_CANONICAL_HARVEST')
+    if status['packet_sha256'] != owner.PACKET_SHA or set(status['jobsets']) != set(doc['jobsets']):
+        raise ValueError('scheduler metadata packet or inventory differs')
+    latest = launch/'SCHEDULER_METADATA.json'
+    if latest.exists():
+        previous = read_json(latest)
+        if (previous.get('signature') == signature and previous.get('native_fold') is True
+                and previous.get('upload') is False and previous.get('amnesty') is False):
+            return previous
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+    dest = launch/'scheduler-metadata'/stamp
+    dest.mkdir(parents=True)
+    (dest/'HARVEST_STATUS.json').write_text(json.dumps(status)+'\n')
+    binding = read_json(bundle/'QUALIFICATION_BUNDLE.json')['binaries']['zenfleet-ctl']
+    ctl = Path(binding['path'])
+    if owner.sha(ctl) != binding['sha256']:
+        raise ValueError('frozen native metadata tool changed')
+    private = Path.home()/'tmp/zensim-paper/rev4/private_telemetry/steer-launch'
+    private.mkdir(parents=True, exist_ok=True)
+    for js, s in status['jobsets'].items():
+        ids = subprocess.check_output([str(ctl), 'ids', '--manifest',
+                                       str(bundle/('fit-manifest-'+js+'.json'))], text=True)
+        (dest/(js+'.ids.tsv')).write_text(ids)
+        if s['ledger']:
+            log = private/('native-metadata-'+stamp+'-'+js+'.log')
+            with log.open('wb') as stream:
+                try:
+                    rc = subprocess.run([str(ctl), 'compact', '--run', js,
+                                         '--endpoint', os.environ['EP'], '--out-dir', str(dest)],
+                                        stdout=stream, stderr=stream, timeout=60).returncode
+                except subprocess.TimeoutExpired:
+                    raise ValueError('native metadata timed out; inspect restricted transport log') from None
+            if rc or re.search(rb'(?im)^WARNING|[1-9][0-9]* unreadable', log.read_bytes()):
+                raise ValueError('native metadata refused; inspect restricted transport log')
+    code = ('import json\nfrom pathlib import Path\nimport pyarrow.parquet as pq\n'
+            +source_inspect.getsource(attribute_native_rows)+'''
+root=Path('/metadata');status=json.loads((root/'HARVEST_STATUS.json').read_text())
+ids={};folded={}
+for js,s in status['jobsets'].items():
+ ids[js]=[line.split('\\t',2)[1] for line in (root/(js+'.ids.tsv')).read_text().splitlines()]
+ folded[js]=(pq.read_table(root/('snap_'+js+'.parquet'),columns=['job_id','status','worker']).to_pylist()
+             if s['ledger'] else [])
+print(json.dumps(attribute_native_rows(status,folded,ids)))
+''')
+    command = ['docker', 'run', '--rm', '--pull', 'never', '--network', 'none',
+               '--memory', '512m', '--memory-swap', '512m', '--cpus', '1',
+               '-e', 'TMPDIR=/metadata', '-v', str(dest)+':/metadata',
+               '--entrypoint', '/usr/bin/nice', doc['image_ref'],
+               '-n19', 'ionice', '-c3', 'python3', '-c', code]
+    hosts = json.loads(subprocess.check_output(command, text=True))
+    if hosts is None or metadata_signature(read_json(launch/'HARVEST_STATUS.json')) != signature:
+        return dict(state='WAIT_FOR_CANONICAL_HARVEST', generation=str(dest))
+    proof = dict(state='OK', time=datetime.now(timezone.utc).isoformat(), signature=signature,
+                 packet_sha256=owner.PACKET_SHA, native_fold=True, upload=False, amnesty=False,
+                 installed=status['installed'], per_host=hosts, generation=str(dest),
+                 tool_sha256=binding['sha256'], model_or_target_values_read=False)
+    (dest/'RESULT.json').write_text(json.dumps(proof, indent=2)+'\n')
+    if latest.exists():
+        latest.rename(latest.with_name(latest.name+'.bak-'+stamp))
+    latest.write_text(json.dumps(proof, indent=2)+'\n')
+    return proof
+
+
+def supervise_metadata(bundle, status):
+    path = bundle.parent/'launch/SCHEDULER_METADATA.json'
+    if path.exists():
+        previous = read_json(path)
+        if (previous.get('state') == 'OK' and previous.get('native_fold') is True
+                and previous.get('upload') is False and previous.get('amnesty') is False
+                and previous.get('signature') == metadata_signature(status)):
+            return previous
+    command = ['flock', str(Path.home()/'tmp/zen-heavy.lock'),
+               str(Path.home()/'work/claudehints/scripts/run-heavy'), '--mem', '2G', '--jobs', '1',
+               '--', 'python3', str(Path(__file__).resolve()), '--packet', str(bundle),
+               '--packet-sha', owner.PACKET_SHA, '--scheduler-metadata']
+    value = json.loads(subprocess.check_output(command, text=True))
+    return value if value.get('state') == 'OK' and value.get('signature') == metadata_signature(status) else None
+
+
 def watch(bundle, doc):
     """Supervise bounded allocations; native worker remains the only job scheduler."""
     transition_proof(bundle)
@@ -258,9 +393,17 @@ def watch(bundle, doc):
         with log.open('a') as stream:
             stream.write(json.dumps(value)+'\n')
         print(json.dumps(value), flush=True)
+        if path := os.environ.get('STEER_STATUS_FILE'):
+            with Path(path).open('a') as stream:
+                stream.write('\n'+value['time']+' — LIFECYCLE '+json.dumps(value)+'\n')
     while True:
         status = read_json(launch/'HARVEST_STATUS.json')
         js = next_jobset(bundle, doc, status)
+        metadata = None
+        if js != 'WAIT':
+            metadata = supervise_metadata(bundle, status)
+            if metadata is None:
+                js = 'WAIT'
         active = []
         for host in ['r3500', 'i270', 'tower']:
             cap = capacity(host)
@@ -309,6 +452,8 @@ def watch(bundle, doc):
                 state_path.write_text(json.dumps(state, indent=2)+'\n')
         note(dict(action='OBSERVE', installed=status.get('installed'),
                   harvest_state=status.get('state'), running_hosts=active,
+                  installed_per_host=(None if metadata is None else
+                                      {h: v['installed'] for h, v in metadata['per_host'].items()}),
                   operator_pause=(launch/'PAUSE_WORKERS').exists()))
         if js is None and not active:
             note(dict(action='COMPLETE', installed=172, workers_drained=True))
@@ -441,12 +586,17 @@ def main():
     p.add_argument('--watch', action='store_true')
     p.add_argument('--pause', action='store_true')
     p.add_argument('--preserve-interrupted-scratch', action='store_true')
+    p.add_argument('--scheduler-metadata', action='store_true')
     a = p.parse_args()
     if not re.fullmatch('[0-9a-f]{64}', a.packet_sha):
         p.error('full packet SHA-256 required')
     owner.PACKET_SHA = a.packet_sha
     doc = owner.packet(a.packet)
-    if a.preserve_interrupted_scratch:
+    if a.scheduler_metadata:
+        if a.pause or a.watch or a.preserve_interrupted_scratch or a.host:
+            p.error('scheduler metadata is a separate read-only operation')
+        print(json.dumps(scheduler_metadata(a.packet, doc)))
+    elif a.preserve_interrupted_scratch:
         if a.pause or a.watch or not a.host:
             p.error('scratch preservation requires only --host')
         with (Path.home()/'tmp/zen-heavy.lock').open('a') as lock:

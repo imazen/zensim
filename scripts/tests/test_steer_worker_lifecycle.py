@@ -258,13 +258,48 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(out['jobsets'],['a','b'])
         self.assertEqual(events,['locked','a','b'])
 
-    def test_watch_completion_pause_and_disk_stop(self):
+    def test_native_attribution_keeps_failure_metadata_without_double_counting(self):
+        status=dict(installed=2,jobsets=dict(a=dict(state='OK',total=4,done=2,installed=2,
+                                                  ledger=dict(done=2,failed=1)),
+                                           b=dict(state='OK',total=1,done=0,installed=0,ledger={})))
+        ids=dict(a=['a','b','c','d'],b=['e'])
+        rows=dict(a=[dict(job_id='a',status='done',worker='r3500-fixture'),
+                     dict(job_id='b',status='done',worker='Tower-fixture'),
+                     dict(job_id='c',status='failed',worker='i270-fixture')],b=[])
+        got=life.attribute_native_rows(status,rows,ids)
+        self.assertEqual(got,dict(r3500=dict(installed=1,failed=0,poison=0),
+                                  i270=dict(installed=0,failed=1,poison=0),
+                                  tower=dict(installed=1,failed=0,poison=0)))
+        changed=copy.deepcopy(rows);changed['a'].append(dict(job_id='d',status='done',worker='i270-fixture'))
+        self.assertIsNone(life.attribute_native_rows(status,changed,ids))
+        for kind in ['duplicate','foreign','unexpected','unknown_worker','bad_count','missing_ids']:
+            changed=copy.deepcopy(rows);s=copy.deepcopy(status);i=copy.deepcopy(ids)
+            if kind=='duplicate':changed['a'].append(dict(changed['a'][0]))
+            elif kind=='foreign':changed['a'][0]['job_id']='foreign'
+            elif kind=='unexpected':changed['a'][0]['status']='pending'
+            elif kind=='unknown_worker':changed['a'][0]['worker']='dev-foreign'
+            elif kind=='bad_count':s['installed']=True
+            else:i['b']=[]
+            with self.subTest(kind=kind),self.assertRaises(ValueError):
+                life.attribute_native_rows(s,changed,i)
+
+    @mock.patch.object(life,'supervise_metadata',return_value=dict(per_host={
+        h:dict(installed=0) for h in ['r3500','i270','tower']}))
+    def test_watch_completion_pause_and_disk_stop(self, metadata):
         (self.root/'launch/HARVEST_STATUS.json').write_text(json.dumps(dict(installed=172,state='COMPLETE')))
         with mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
              mock.patch.object(life,'next_jobset',return_value=None), \
              mock.patch.object(life,'capacity',return_value=self.cap), \
              mock.patch.object(life.subprocess,'run',side_effect=AssertionError('unexpected launch')):
             life.watch(self.bundle,{})
+        accepted=metadata.return_value;metadata.return_value=None
+        with mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
+             mock.patch.object(life,'next_jobset',return_value=None), \
+             mock.patch.object(life,'capacity',return_value=self.cap), \
+             mock.patch.object(life.time,'sleep',side_effect=RuntimeError('metadata still pending')):
+            with self.assertRaisesRegex(RuntimeError,'metadata still pending'):
+                life.watch(self.bundle,{})
+        metadata.return_value=accepted
         (self.root/'launch/PAUSE_WORKERS').touch()
         with mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
              mock.patch.object(life,'next_jobset',return_value='job'), \

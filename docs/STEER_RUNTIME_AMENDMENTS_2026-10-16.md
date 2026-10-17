@@ -122,3 +122,15 @@ Separately, the original wrapper with `ZEN_MAX_MIN=1` permits an invented pass
 to run for 66 seconds by recorded start/end epochs, then exits zero after that
 pass. No trainer, admitted target or registered result is used. The guard
 proposal remains unused; no image file or entrypoint bind override is needed.
+
+Per-host installation counts come from the frozen native `zenfleet-ctl compact`
+reduction, without `--upload` or amnesty. Raw Parquet footer counts include failed
+attempt history and cannot attribute installed cells. The lifecycle owner's
+`just steer-worker-scheduler-metadata <packet> <packet-sha>` checks the frozen
+tool hash, derives every manifest ID through that tool, and reads only job ID,
+status and worker columns from its local snapshots inside the pinned image.
+It refuses duplicate/foreign identities, unexpected states and unknown workers.
+Counts must match the complete canonical harvest's installed/ledger inventory;
+an asynchronous mismatch waits for the next harvest. No model or target values
+are read. The allocation supervisor appends those per-host counts to the status
+file named by `STEER_STATUS_FILE` and preserves each reporting generation.
