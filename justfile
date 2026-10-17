@@ -2274,6 +2274,9 @@ e36-svt-finish-projection root costs output:
 e36-disk-finish-projection root compute output:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_disk_projection.py --root {{quote(root)}} --compute {{quote(compute)}} --out {{quote(output)}}
 
+e36-lossless-archive-probe root output:
+    ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/rev4_featpot/e36_archive_probe.py --root {{quote(root)}} --out {{quote(output)}}
+
 e36-owner-amendment-check:
     TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_owner_amendment.py scripts/tests/test_e36_disk_policy.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_materialize.py
 
