@@ -140,6 +140,16 @@ def configuration(root):
             or checked(restarted['previous'])!=supervision):
             raise ValueError('monitor restart changed resource evidence owner')
         for key in ['before','source','monitor']:checked(restarted[key])
+    storage_priority=root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json'
+    if storage_priority.exists():
+        priority=json.loads(storage_priority.read_text())
+        if (priority['schema']!='e36-resource-mirror-priority-v12'
+            or priority['fits']!=0 or priority['scientific_change'] is not False
+            or priority['max_storage_transfers']!=4
+            or checked(priority['previous'])!=monitor_restart):
+            raise ValueError('storage priority changed resource evidence owner')
+        checked(priority['mirror'])
+        for pin in priority['files'].values():checked(pin)
     def schedule_chain(pin):
         a=json.loads(checked(pin).read_text())
         for key in ['plan','effective_clock','worker']:checked(a[key])
@@ -330,7 +340,8 @@ def admit(root,names):
                 resource_closure=bind(root/'owner-svt-ssd-v1/resource-closure-v3.json'),
                 urgent_disk=bind(root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json') if (root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json').exists() else None,
                 resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None,
-                monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None)
+                monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
+                storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None)
 
 
 def install_controller(root,receipt):
