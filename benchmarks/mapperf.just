@@ -103,3 +103,10 @@ mapperf-cell-report root model geometry:
 
 mapperf-profile-stat root model:
     python3 scripts/rev4_featpot/mapperf.py profile-stat --root {{quote(root)}} --model {{quote(model)}}
+
+# Queue behind the current job; release after one accepted cell or five minutes.
+mapperf-lock-window root log:
+    flock "$HOME/tmp/r7900x-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/mapperf_lock_window.py --root {{quote(root)}} --log {{quote(log)}}
+
+mapperf-lock-window-check:
+    python3 scripts/rev4_featpot/test_mapperf_lock_window.py
