@@ -88,7 +88,7 @@ fn guarded_decision(primary: &Interval, guards: &[Interval], w2: &Interval) -> V
     }
     p
 }
-fn slot(input: &Input, t: &Test, seed_shift: u64, reports: bool) -> Result<Value> {
+pub(super) fn slot(input: &Input, t: &Test, seed_shift: u64, reports: bool) -> Result<Value> {
     if input.datasets.iter().any(|d| {
         [&t.arm, &t.control].iter().any(|m| {
             d.predictions.get(*m).is_none_or(|p| {

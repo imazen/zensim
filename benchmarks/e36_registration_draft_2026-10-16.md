@@ -343,3 +343,29 @@ admission. Report raw proposals and unique effective support separately.
 Private TV scaling can be computed on sampled compact rows using the frozen
 base scaler, with the identical f64 arithmetic, avoiding a second full-pool
 standardized copy. This changes no objective, scaler fit or sampler stream.
+
+### Storage transport repair within the original bulk window
+
+The first v5 runtime passed its five-codec artifact readback, then concurrent
+cold SSH starts caused connection resets. Failed warm clients retained dead
+pipes. The allocation was stopped after110seconds; its outputs, native failure
+ledgers and partial artifacts are retained as diagnostics and excluded from
+both qualifying pools. No native pixel, score, feature or codec defect was
+observed in that failure.
+
+The repaired client paces connection launches at most four per second and
+permits three sends of the same immutable hash-bound object after transport
+failure. This is storage transport, not a second job-claim system. Bad hashes
+or semantic acknowledgements still refuse. Worker error frames use its native
+classified protocol. The storage server, numerical producers, source budgets,
+qualities, configurations and resources remain pinned. Admit28 concurrent
+readback connections and the five-codec first producer before the repaired
+runtime's complete matrix. Both native job attempts and all failed outputs
+remain visible; no failed ledger row is rewritten or removed.
+
+Version6 uses new runtime-bound native IDs consistently for the complete
+predeclared matrix. Its versioned clock inherits the original v5 start and
+six-hour deadline exactly. The controller verifies unchanged scientific
+views after removing only their runtime hash, and unchanged native numerical,
+source, resource and budget bindings. Initial v5 files remain immutable. This
+repair grants no extra generation time and changes no qualifying subset.

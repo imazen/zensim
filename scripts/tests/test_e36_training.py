@@ -67,7 +67,7 @@ class TrainingAdapter(unittest.TestCase):
             args.seed_index=0;args.heldout=None
             bake=root/'invented-checkpoint.bin';bake.write_bytes(b'invented-not-a-model')
             dest=root/'projection';dest.mkdir()
-            with patch.dict(os.environ,{'ZEN_FIT_PROGRAM_SHA':'a'*64}):owner.model_binding(dest,recipe,args,1101,101,bake,dict(packed_model_sha256='f'*64,deployment_order='final epoch; canonical densify; f16 quantization; TRAIN calibration'))
+            with patch.dict(os.environ,{'ZEN_FIT_PROGRAM_SHA':'a'*64}):owner.model_binding(dest,recipe,args,1101,101,bake,dict(packed_model_sha256='f'*64,deployment_order='final epoch; canonical densify; f16 quantization; TRAIN calibration'),selection=dict(epoch_rule='last',selected_epoch=119))
             projection=json.loads((dest/'e36-model-binding.json').read_text())
             self.assertEqual(projection['raw_checkpoint_sha256'],sha(bake));self.assertEqual(projection['packed_model_sha256'],'f'*64)
             self.assertFalse(projection['contains_labels']);self.assertFalse(projection['label_payload_read_by_projection'])

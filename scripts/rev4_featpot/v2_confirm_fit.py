@@ -192,7 +192,7 @@ def main() -> None:
             **({"derived_inputs": {"token": "fx1", "declaration_sha256": __import__("v2_common").FX1_SHA256}}
                if recipe.get("derived_inputs") else {})}) + "\n")
         from e36_training import model_binding
-        model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed)
+        model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed,selection=selection)
         return
     predictions = {}
     for name, table in tables.items():

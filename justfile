@@ -1977,3 +1977,128 @@ shipgates-progress encodes judges:
 
 shipgates-cell-scheduling-check:
     python3 -B -m unittest scripts/tests/test_shipgates_cell_scheduling.py
+
+e36-tv-gradient-check:
+    E36_TV_PROTOCOL=1 cargo test --locked --release -p zensim-validate --lib --target-dir /home/lilith/tmp/e36-pixels-target e36_tv::tests:: -- --nocapture
+
+e36-tv-cli-check:
+    E36_TV_PROTOCOL=1 cargo check --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
+
+e36-preflight-all root suffix:
+    just e36-data-run {{quote(root)}} first-producer-{{suffix}} 1
+    just e36-data-census {{quote(root)}} first-producer-{{suffix}}
+    just e36-data-run {{quote(root)}} geometry-{{suffix}} 28
+    just e36-data-census {{quote(root)}} geometry-{{suffix}}
+    just e36-data-run {{quote(root)}} cost-{{suffix}} 28
+    just e36-data-census {{quote(root)}} cost-{{suffix}}
+    just e36-data-run {{quote(root)}} square-{{suffix}} 28
+    just e36-data-census {{quote(root)}} square-{{suffix}}
+    just e36-data-run {{quote(root)}} modes-{{suffix}} 28
+    just e36-data-census {{quote(root)}} modes-{{suffix}}
+
+e36-tv-cli-build:
+    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
+
+e36-tv-ingress-fixtures binary layout out:
+    python3 scripts/rev4_featpot/e36_admission_fixtures.py --binary {{quote(binary)}} --layout {{quote(layout)}} --out {{quote(out)}}
+
+e36-preflight-resume root suffix:
+    just e36-data-run {{quote(root)}} cost-{{suffix}} 28
+    just e36-data-census {{quote(root)}} cost-{{suffix}}
+    just e36-data-run {{quote(root)}} square-{{suffix}} 28
+    just e36-data-census {{quote(root)}} square-{{suffix}}
+    just e36-data-run {{quote(root)}} modes-{{suffix}} 28
+    just e36-data-census {{quote(root)}} modes-{{suffix}}
+
+e36-budget-amend root features:
+    python3 scripts/rev4_featpot/e36_budget.py amend --root {{quote(root)}} --features {{quote(features)}}
+
+e36-base-filter-plan root exclusions inventory out:
+    python3 scripts/rev4_featpot/e36_training.py --root {{quote(root)}} --exclusions {{quote(exclusions)}} --inventory {{quote(inventory)}} --out {{quote(out)}}
+
+e36-reference-prefit-plan root initial rank:
+    just e36-budget-amend {{quote(root)}} /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/reference-features.jsonl
+    just e36-base-filter-plan {{quote(rank)}} {{quote(initial + "/OPAQUE_TRAIN_SELECTION_BASE_FILTER.json")}} /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/audit.hashes.json {{quote(root + "/matched-base-filter-plan.json")}}
+
+e36-measured-stage-cost root out:
+    python3 scripts/rev4_featpot/e36_cost.py --root {{quote(root)}} --out {{quote(out)}}
+
+e36-base-filter-retry root initial rank:
+    just e36-base-filter-plan {{quote(rank)}} {{quote(initial + "/OPAQUE_TRAIN_SELECTION_BASE_FILTER.json")}} /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/audit.hashes.json {{quote(root + "/matched-base-filter-plan.json")}}
+
+e36-max-area-preflight root:
+    just e36-data-run {{quote(root)}} max-area-v4 28
+    just e36-data-census {{quote(root)}} max-area-v4
+
+e36-tv-final-nontraining-check root:
+    just e36-data-check
+    just e36-tv-gradient-check
+    just e36-tv-cli-build
+    just e36-tv-ingress-fixtures /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/FEATURE_LAYOUT_BINDING.json")}} {{quote(root + "/ingress-fixtures-v3")}}
+    E36_TV_PROTOCOL=1 cargo test --locked --release -p zensim-validate --bin panel --target-dir /home/lilith/tmp/e36-pixels-target panel_e34::e36::tests:: -- --nocapture
+
+# Versioned correction: normalize canonical member prefixes before family masking.
+e36-base-filter-v2 root initial rank:
+    just e36-base-filter-plan {{quote(rank)}} {{quote(initial + "/OPAQUE_TRAIN_SELECTION_BASE_FILTER.json")}} /mnt/v/output/zensim/e34-prep-2026-10-15/part5/p4-inventory-r2/audit.hashes.json {{quote(root + "/matched-base-filter-plan-v2.json")}}
+
+e36-bulk-final-preparation root initial rank:
+    just e36-base-filter-v2 {{quote(root)}} {{quote(initial)}} {{quote(rank)}}
+    just e36-measured-stage-cost {{quote(root)}} {{quote(root + "/MEASURED_STAGE_COSTS-v2.json")}}
+    python3 scripts/rev4_featpot/e36_bulk.py resources --root {{quote(root)}}
+
+e36-raw-selection-build:
+    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin e36_raw_score --target-dir /home/lilith/tmp/e36-pixels-target
+
+# Immutable controller/source snapshot: trainer integration cannot alter the data run.
+e36-generation-v5 root initial commit:
+    python3 {{quote(root + "/control-v5/e36_bulk.py")}} freeze --root {{quote(root)}} --initial {{quote(initial)}} --version runtime-v5 --commit {{quote(commit)}} --references {{quote(root + "/references-v2.json")}} --budget {{quote(root + "/source-budget-v2/plan.json")}}
+    python3 {{quote(root + "/control-v5/e36_bulk.py")}} declare --root {{quote(root)}} --runtime {{quote(root + "/runtime-v5/runtime.json")}} --phase first-producer --name first-producer-v5
+    python3 {{quote(root + "/control-v5/e36_bulk.py")}} run --root {{quote(root)}} --name first-producer-v5 --slots 1
+    python3 {{quote(root + "/control-v5/e36_bulk.py")}} census --root {{quote(root)}} --name first-producer-v5
+    python3 {{quote(root + "/control-v5/e36_bulk.py")}} prepare-bulk --root {{quote(root)}} --runtime {{quote(root + "/runtime-v5/runtime.json")}} --version v5
+    python3 {{quote(root + "/control-v5/e36_bulk.py")}} bulk --root {{quote(root)}}
+
+e36-matrix-semantic-check:
+    python3 -m unittest scripts/tests/test_e36_matrix.py
+
+e36-final-integration-check root:
+    just e36-data-check
+    just e36-matrix-semantic-check
+    just e36-tv-gradient-check
+    just e36-tv-cli-build
+    just e36-tv-ingress-fixtures /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/FEATURE_LAYOUT_BINDING.json")}} {{quote(root + "/ingress-fixtures-v4")}}
+    E36_TV_PROTOCOL=1 cargo test --locked --release -p zensim-validate --bin panel --target-dir /home/lilith/tmp/e36-pixels-target panel_e34::e36::tests:: -- --nocapture
+    just e36-raw-selection-build
+    E36_TV_PROTOCOL=1 cargo clippy --locked --release -p zensim-validate --lib --bin zensim_mlp_train --bin panel --bin e36_raw_score --target-dir /home/lilith/tmp/e36-pixels-target
+
+e36-generation-v6 root initial commit:
+    just e36-final-mode-admission {{quote(root)}}
+    python3 {{quote(root + "/control-v6/e36_transport_probe.py")}} --root {{quote(root)}} --out {{quote(root + "/transport-admission-v6.json")}}
+    python3 {{quote(root + "/control-v6/e36_bulk.py")}} freeze --root {{quote(root)}} --initial {{quote(initial)}} --version runtime-v6 --commit {{quote(commit)}} --references {{quote(root + "/references-v2.json")}} --budget {{quote(root + "/source-budget-v2/plan.json")}}
+    python3 {{quote(root + "/control-v6/e36_bulk.py")}} declare --root {{quote(root)}} --runtime {{quote(root + "/runtime-v6/runtime.json")}} --phase first-producer --name first-producer-v6
+    python3 {{quote(root + "/control-v6/e36_bulk.py")}} run --root {{quote(root)}} --name first-producer-v6 --slots 1
+    python3 {{quote(root + "/control-v6/e36_bulk.py")}} census --root {{quote(root)}} --name first-producer-v6
+    python3 {{quote(root + "/control-v6/e36_bulk.py")}} prepare-bulk --root {{quote(root)}} --runtime {{quote(root + "/runtime-v6/runtime.json")}} --version v6 --plan {{quote(root + "/bulk-plan-v6.json")}}
+    python3 {{quote(root + "/control-v6/e36_bulk.py")}} bulk --root {{quote(root)}} --plan {{quote(root + "/bulk-plan-v6.json")}} --clock {{quote(root + "/bulk-clock-v6.json")}} --inherit-clock {{quote(root + "/bulk-clock.json")}}
+
+e36-final-mode-admission root:
+    just e36-raw-selection-build
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/bin/e36-tv-admission-v4")}}
+    env -u E36_TV_PROTOCOL cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --target-dir /home/lilith/tmp/e36-pixels-target
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train {{quote(root + "/bin/e36-normal-admission-v1")}}
+    python3 scripts/rev4_featpot/e36_nontraining_modes.py --root {{quote(root)}} --private {{quote(root + "/bin/e36-tv-admission-v4")}} --normal {{quote(root + "/bin/e36-normal-admission-v1")}} --raw /home/lilith/tmp/e36-pixels-target/release/e36_raw_score --out {{quote(root + "/mode-admission-v1")}}
+    E36_TV_PROTOCOL=1 cargo clippy --locked --release -p zensim-validate --lib --bin zensim_mlp_train --bin panel --bin e36_raw_score --target-dir /home/lilith/tmp/e36-pixels-target
+
+e36-native-catalog root name output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    e36_args=(catalog --manifest {{quote(root + "/runs/" + name + "/manifest.json")}})
+    for e36_ledger_path in {{quote(root + "/runs/" + name)}}/ledger*.parquet; do
+        [[ -f "$e36_ledger_path" ]] || continue
+        e36_args+=(--ledger "$e36_ledger_path")
+    done
+    {{quote(root + "/bin/zenfleet-ctl")}} "${e36_args[@]}" > {{quote(output)}}
+
+e36-adapter-unit-check:
+    python3 -m unittest scripts/tests/test_e36_data.py scripts/tests/test_e36_store.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_training.py scripts/tests/test_e36_materialize.py
+

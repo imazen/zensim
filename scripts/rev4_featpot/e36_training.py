@@ -89,7 +89,7 @@ def options(args,recipe):
     if (args.spec!=SPEC or args.head!='N' or not args.strict_admission or not args.train_only
         or recipe.get('hidden')!=128 or recipe.get('derived_inputs')!='fx1'
         or getattr(args,'steer_pairs',None) is not None or getattr(args,'steer_lambda',0)!=0
-        or getattr(args,'monotone_cbc',False) or getattr(args,'heldout',None) not in [None,*SOURCES]):
+        or getattr(args,'local_smoke_budget',None) is not None or getattr(args,'monotone_cbc',False) or getattr(args,'heldout',None) not in [None,*SOURCES]):
         raise ValueError('E36 requires the exact strict C/plain-N H128 base recipe, train-only and four-source folds')
     for n in ['e36_tv_manifest','e36_tv_contract','e36_base_filter_plan']:
         if getattr(args,n,None) is None:raise ValueError('E36 missing '+n)
@@ -162,9 +162,10 @@ def filter_groups(groups,recipe,scratch):
     return dict(schema='e36-applied-base-filter-v1',plan_sha256=e['base_filter_sha256'],groups=records,targets_changed=0,
         exact_group_weights_preserved=True)
 
-def model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed=None):
+def model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed=None,selection=None):
     e=recipe.get('e36')
     if e is None:return
+    if selection is None or selection.get('epoch_rule')!='last' or selection.get('selected_epoch')!=119:raise ValueError('E36 projection requires actual final epoch119 selection')
     program=os.environ.get('ZEN_FIT_PROGRAM_SHA','')
     if not re.fullmatch('[0-9a-f]{64}',program):raise ValueError('E36 model projection requires fit-cell-exec')
     contract=json.loads(Path(e['contract']).read_text())
@@ -200,6 +201,7 @@ def bootstrap(args):
     column is decoded here; source filtering and trainer reads happen later.
     """
     if getattr(args,'e36_arm',None) is None:return
+    if getattr(args,'local_smoke_budget',None) is not None:raise ValueError('E36 smoke fits are not part of the registered protocol')
     if not re.fullmatch('[0-9a-f]{64}',os.environ.get('ZEN_FIT_PROGRAM_SHA','')):
         raise ValueError('E36 training bootstrap requires fit-cell-exec; fits remain separately released')
     if args.e36_overlay is None or sha(args.e36_overlay)!=args.e36_overlay_sha256:

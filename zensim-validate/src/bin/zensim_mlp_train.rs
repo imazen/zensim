@@ -3069,6 +3069,23 @@ fn main() {
             std::process::exit(2);
         }
         args.tv_margin = 0.05;
+        if !args.e36_tv_admit {
+            let program = std::env::var("ZEN_FIT_PROGRAM_SHA").unwrap_or_default();
+            if program.len() != 64
+                || !program
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                || args.hidden != 128
+                || args.epochs != 120
+                || args.pairs_per_epoch != 50_000
+                || !args.nonneg_distance
+            {
+                eprintln!(
+                    "E36 fitting requires bound fit-cell-exec and exact plain-N H128/120epoch/50000pair recipe"
+                );
+                std::process::exit(2);
+            }
+        }
     }
 
     if args.e36_tv_admit {

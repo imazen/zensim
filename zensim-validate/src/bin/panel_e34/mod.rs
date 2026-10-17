@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use zenstats::resample::{BootstrapConfig, Design, Draw, Interval, cluster_bootstrap};
 
+mod e36;
 mod map_cost;
 mod peers;
 mod registered;
@@ -24,7 +25,7 @@ const ELIGIBILITY_MARGIN: f64 = 0.0065;
 const DATASETS: [&str; 4] = ["kadid", "tid2013", "konfig", "cid22_a25"];
 #[derive(Parser)]
 struct Cli {
-    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check", "registered-evaluate", "registered-owner-parity", "peer-compare", "map-cost", "source-series"])]
+    #[arg(value_parser = ["seed-parity", "noise", "evaluate", "reports", "pack-check", "steer-evaluate", "steer-pack-check", "registered-evaluate", "registered-owner-parity", "peer-compare", "map-cost", "source-series", "e36-evaluate"])]
     mode: String,
     #[arg(long)]
     registration: Option<PathBuf>,
@@ -568,6 +569,9 @@ fn evaluate(input: &Input, noise: bool) -> Result<Value> {
 }
 fn run(cli: Cli) -> Result<()> {
     ensure!(!cli.output.exists(), "fresh output required");
+    if cli.mode == "e36-evaluate" {
+        return e36::run(cli);
+    }
     if cli.mode.starts_with("registered-") {
         return registered::run(cli);
     }
@@ -608,7 +612,7 @@ pub(super) fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn toy() -> Input {
+    pub(super) fn toy() -> Input {
         Input {
             schema: "e34-paired-seed-v1".into(),
             datasets: DATASETS
