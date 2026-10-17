@@ -28,6 +28,7 @@ def main():
     for name in ['encodes', 'binary', 'heavy-lock', 'run-heavy', 'output', 'reuse-first', 'map-oracle']:
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--reuse-source-root',type=Path)
+    parser.add_argument('--reuse-verifications',type=Path)
     parser.add_argument('--encoder-pid', type=int, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
@@ -42,6 +43,17 @@ def main():
     admission_adapter.write_bytes(Path(__file__).with_name("shipgates_admission.py").read_bytes())
     write(args.output/"ADMISSION_POLICY.json",dict(source_sha256=sha(admission_adapter),
         rule="wait30s only for exact run-heavy low-memory refusal before output creation; all execution failures fatal"))
+    reused = {}
+    if args.reuse_verifications:
+        reuse = json.loads(args.reuse_verifications.read_text())
+        assert reuse['schema']=='shipgates-verified-judge-reuse-v1'
+        assert reuse['source_count']==len(reuse['sources'])
+        reused={r['source_id']:r for r in reuse['sources']}
+        assert set(reused)==set(range(reuse['source_count'])) and reuse['source_count']<=design['sources']
+        write(args.output/'VERIFICATION_REUSE_PIN.json',dict(path=str(args.reuse_verifications),sha256=sha(args.reuse_verifications)))
+        reuse_adapter=args.output/'shipgates_verified_reuse.py'
+        reuse_adapter.write_bytes(Path(__file__).with_name('shipgates_verified_reuse.py').read_bytes())
+        write(args.output/'VERIFICATION_REUSE_OWNER.json',dict(sha256=sha(reuse_adapter)))
     packets = []
     for source_id in range(design['sources']):
         source = args.encodes / f'source-{source_id:02d}'
@@ -55,7 +67,9 @@ def main():
         assert len(expected) == len(cases)
         dest = args.output / f'source-{source_id:02d}'
         prior=args.reuse_source_root/f'source-{source_id:02d}' if args.reuse_source_root else None
-        if source_id == 0:
+        if source_id in reused:
+            dest=Path(json.loads(Path(reused[source_id]['receipt']).read_text())['path'])
+        elif source_id == 0:
             dest = args.reuse_first
         elif prior and (prior/'COMPLETE.json').is_file():
             dest=prior
@@ -81,11 +95,16 @@ def main():
         judged = [json.loads(line) for line in (dest/'judges.jsonl').read_text().splitlines()]
         assert len(judged) == len(expected)
         assert {r['input']['case_id']:(r['ref_path'],r['dist_path']) for r in judged} == expected
-        oracle_command=['flock',str(args.heavy_lock),str(args.run_heavy),'--mem','16G','--jobs','1','--',sys.executable,str(frozen_oracle),
-            '--judges',str(dest),'--output',str(args.output/f'source-{source_id:02d}-MAP_ORACLE.json'),'--lossless-png-expansion']
-        print(f'judge source{source_id:02d}: independent map oracle queued',flush=True)
-        run_with_memory_admission(oracle_command,args.output/f'source-{source_id:02d}-map-oracle.log',
-                                  args.output/f'source-{source_id:02d}-MAP_ORACLE.json')
+        oracle_output=args.output/f'source-{source_id:02d}-MAP_ORACLE.json'
+        if source_id in reused:
+            from shipgates_verified_reuse import restore
+            restore(reused[source_id],dest,sha(args.binary),sha(frozen_oracle),oracle_output,len(judged))
+            print(f'judge source{source_id:02d}: certified packet/maps rehashed and reused',flush=True)
+        else:
+            oracle_command=['flock',str(args.heavy_lock),str(args.run_heavy),'--mem','16G','--jobs','1','--',sys.executable,str(frozen_oracle),
+                '--judges',str(dest),'--output',str(oracle_output),'--lossless-png-expansion']
+            print(f'judge source{source_id:02d}: independent map oracle queued',flush=True)
+            run_with_memory_admission(oracle_command,args.output/f'source-{source_id:02d}-map-oracle.log',oracle_output)
         packets.append(dest/'judges.jsonl')
         write(args.output/f'source-{source_id:02d}-VERIFIED.json',dict(path=str(dest),pairs=len(judged),sha256=sha(dest/'judges.jsonl')))
         print(f'judge source{source_id:02d}: {len(judged)} verified rows',flush=True)

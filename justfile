@@ -1949,3 +1949,9 @@ shipgates-source-admission-count sources binary output count:
 
 shipgates-source-revision-check:
     python3 -B -m unittest scripts/tests/test_shipgates_source_revision.py
+
+shipgates-verified-reuse-snapshot root sources output:
+    python3 scripts/rev4_featpot/shipgates_verified_reuse.py --root {{quote(root)}} --sources {{quote(sources)}} --output {{quote(output)}}
+
+shipgates-verified-reuse-check:
+    python3 -B -m unittest scripts/tests/test_shipgates_verified_reuse.py
