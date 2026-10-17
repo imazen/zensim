@@ -2177,6 +2177,9 @@ e36-idle-probe host:
 e36-final-current-panel-audit root:
     python3 scripts/rev4_featpot/e36_current_panels.py --root {{quote(root)}} --manifest /mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json --prepared /mnt/v/output/zensim/shipgates-2026-10-16/rd-source-admission-corrected27 --binary {{quote(root + "/bin/e36-fit-final/check_holdout_overlap")}} --out {{quote(root + "/current-panel-audit-final")}}
 
+e36-current-panel-input-files root out:
+    python3 scripts/rev4_featpot/e36_current_panels.py --root {{quote(root)}} --manifest /mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json --prepared /mnt/v/output/zensim/shipgates-2026-10-16/rd-source-admission-corrected27 --out {{quote(out)}} --input-files-only
+
 # Read-only status for a coordinator-requested local allocation window.
 e36-allocation-status lock scope:
     @date -u +%FT%TZ
@@ -2192,6 +2195,9 @@ e36-build-source root commit version:
 e36-budget-amendment-check:
     python3 -m unittest scripts/tests/test_e36_pause_budget.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_live_completion.py
 
+e36-native-phase-unit-check:
+    python3 -m unittest scripts/tests/test_e36_phase_worker.py scripts/tests/test_e36_phase_handoff.py scripts/tests/test_e36_phase_start.py
+
 e36-budget-live-timer-check out:
     python3 scripts/tests/e36_live_budget_fixture.py --out {{quote(out)}}
 
@@ -2203,3 +2209,18 @@ e36-budget-recover-preapplication root scope supervisor controller auto_thaw_she
 
 e36-tower-phase-prepare root out image:
     python3 scripts/rev4_featpot/e36_tower_prepare.py --root {{quote(root)}} --out {{quote(out)}} --image {{quote(image)}}
+
+e36-tower-phase-stage preparation host container name:
+    python3 scripts/rev4_featpot/e36_tower_prepare.py --preparation {{quote(preparation)}} --host {{quote(host)}} --container {{quote(container)}} --stage-name {{quote(name)}}
+
+e36-tower-container-create preparation stage name phase out:
+    python3 scripts/rev4_featpot/e36_tower_container.py --preparation {{quote(preparation)}} --stage {{quote(stage)}} --name {{quote(name)}} --phase {{quote(phase)}} --out {{quote(out)}}
+
+e36-tower-first-producer-start root binding out:
+    python3 scripts/rev4_featpot/e36_phase_start.py first-producer --root {{quote(root)}} --binding {{quote(binding)}} --out {{quote(out)}}
+
+e36-tower-phase-harvest binding out:
+    python3 scripts/rev4_featpot/e36_phase_handoff.py harvest --binding {{quote(binding)}} --out {{quote(out)}}
+
+e36-tower-phase-parity root harvest out:
+    python3 scripts/rev4_featpot/e36_phase_handoff.py parity --root {{quote(root)}} --harvest {{quote(harvest)}} --out {{quote(out)}}

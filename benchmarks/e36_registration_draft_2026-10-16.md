@@ -441,3 +441,45 @@ cannot replace the prebulk cost census. This amendment grants no fit execution.
 Exact budget-only amendment: journal freeze 2026-10-17T07:31:48.642139+00:00, actual native-generation thaw 2026-10-17T10:13:45.193356+00:00; excluded 9716551217000ns (9716.551217s). Original deadline 2026-10-17T11:48:19.959138+00:00; effective deadline 2026-10-17T14:30:16.510355+00:00. Amendment SHA256 a888cc9133ae409a932d36a66c047efc1deb37a206ab0a9b429d87a1c6aa4f9c. No scientific change; no fit has run.
 
 Nanosecond-precise clock notation (supersedes rounded datetime display above): original deadline 2026-10-17T11:48:19.9591377Z; freeze 2026-10-17T07:31:48.642139Z; actual native-generation thaw 2026-10-17T10:13:45.193356Z; excluded 9716551217000ns =9716.551217s; effective deadline 2026-10-17T14:30:16.5103547Z. Integer-nanosecond receipt is authoritative.
+
+### Optional whole-phase tower transport (before any E36 fit)
+
+The already-declared468-view additions phase may run as one exclusive native
+zenfleet-worker pass on tower, independently of dev's mandatory15342-view pass.
+No manifest splitting, custom claims/retries or partial-row selection is allowed.
+Both phases retain the same amended deadline and original full/fallback rule.
+Complete timely evidence may be harvested after the deadline; qualification
+checks native completion times and restored original output-file timestamps.
+It must not depend on the wall time at which the controller returns.
+
+The prospective resource cap is16GiB Docker memory,12GiB native packing budget
+and4slots; a first-producer diagnostic uses8GiB/1slot. Pin the bulk container to
+cpus0-7,16-23 (observed eight physical cores), cpu-shares256. Admit only after
+actual competing heavy allocations drain and at least12GiB available memory
+remains beyond the cap. The shared storage container is a separate allocation.
+Every native descendant stays inside the bound Docker limits and run-heavy.
+These operational limits change no source count, size, q, mode or teacher.
+
+Use the ready image digest965b72e456d18e54915f25f124a4620ec7bd7702c329d38a5105fb4145761beb,
+with the exact frozen native executables, oracle inspection tools, ELF libraries,
+Pillow wheel files, references and runtime. Its Python3.14.4 differs from dev's
+3.14.7. Require the original frozen five first-producer views to match encoded
+and decoded hashes, consumed-feature f32 bits, every native scalar f64 bit and
+map hashes before scaling. That bounded check does not establish universal
+cross-host parity. No tower numerical parity or generation result is claimed yet.
+
+Before tower additions start, hold the dev controller at a verified pre-tail
+frame, seal the exact container/image/invocation/resources/input/clock/parity
+ownership binding, then start that container before releasing the controller.
+An unsuccessful start keeps the ownership intent and cannot start a dev copy.
+The wait adapter releases the dev paper allocation while only tower computes,
+then reacquires it before copying and qualifying evidence. Final matrix and
+data-packet admission retain the complete transfer proof. No fit is authorized.
+
+The actual200-source by27-reference current-panel native exclusion replay passed
+on2026-10-17 with zero strict flags at the existing threshold10 and native hash
+era. Cohort SHA7504bfb8f16ffd0b6f9567b831d39aa65d01819402c7857e082449286f1cee11,
+panel manifest SHAe9b21e153a7d22c59e5e6341f9e7f35d0050a5b55882558f62c808c4dbae56df,
+native helper SHA63323e29a4b840b17883415b49d9ae96da8bb887defa0ba30e1a08efec36d7e4.
+This is the registered namespace/family plus pixel-screen admission, with its
+existing lineage limits; it does not recover unknown cross-corpus parentage.
