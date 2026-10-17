@@ -2112,9 +2112,9 @@ e36-final-normal-build root:
 e36-final-private-build root:
     test ! -e {{quote(root + "/bin/e36-fit-final")}}
     test ! -e {{quote(root + "/bin/e36-raw-score-final")}}
-    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --bin inspect_qualified_checkpoint --target-dir /home/lilith/tmp/e36-pixels-target
+    E36_TV_PROTOCOL=1 cargo build --locked --release -p zensim-validate --bin zensim_mlp_train --bin panel --bin e36_raw_score --bin bake_dial_refit --bin inspect_qualified_checkpoint --bin check_holdout_overlap --target-dir /home/lilith/tmp/e36-pixels-target
     mkdir -p {{quote(root + "/bin/e36-fit-final")}}
-    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train /home/lilith/tmp/e36-pixels-target/release/panel /home/lilith/tmp/e36-pixels-target/release/bake_dial_refit /home/lilith/tmp/e36-pixels-target/release/inspect_qualified_checkpoint {{quote(root + "/bin/e36-fit-final/")}}
+    cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/zensim_mlp_train /home/lilith/tmp/e36-pixels-target/release/panel /home/lilith/tmp/e36-pixels-target/release/bake_dial_refit /home/lilith/tmp/e36-pixels-target/release/inspect_qualified_checkpoint /home/lilith/tmp/e36-pixels-target/release/check_holdout_overlap {{quote(root + "/bin/e36-fit-final/")}}
     cp --reflink=auto /home/lilith/tmp/e36-pixels-target/release/e36_raw_score {{quote(root + "/bin/e36-raw-score-final")}}
 
 e36-final-identity-build root:
@@ -2163,3 +2163,7 @@ e36-final-assessment-metadata root:
 # Read-only admission: a running compute scope excludes the optional host.
 e36-idle-probe host:
     ssh -o BatchMode=yes -o ConnectTimeout=5 {{quote(host)}} 'date -u +%FT%TZ; uptime; free -h; systemctl --user list-units --type=scope --state=running --no-pager'
+
+# Native reference-only screen; the existing threshold and hash era stay fixed.
+e36-final-current-panel-audit root:
+    python3 scripts/rev4_featpot/e36_current_panels.py --root {{quote(root)}} --manifest /mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json --prepared /mnt/v/output/zensim/shipgates-2026-10-16/rd-source-admission-corrected27 --binary {{quote(root + "/bin/e36-fit-final/check_holdout_overlap")}} --out {{quote(root + "/current-panel-audit-final")}}

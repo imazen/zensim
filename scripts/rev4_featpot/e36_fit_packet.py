@@ -52,6 +52,14 @@ def packet(root,pools,base,trainer,out,owner,commit):
         for key in ['references','source_budget','cohort','runtime']:add(m[key]['path'])
     for name in ['whole-matrix.json','matrix-admission.json']:add(pools/name)
     add(mask)
+    audit=root/'current-panel-audit-final/receipt.json';current=json.loads(audit.read_text())
+    if (current['schema']!='e36-current-panel-exclusion-v1' or current['admitted'] is not True
+            or current['cohort_sha256']!=sha(root/'cohort-selection.json') or current['labels_read'] is not False
+            or current['strict_flags']!=0
+            or current['panel_manifest_sha256']!=sha('/mnt/v/output/zensim/shipgates-2026-10-16/rd-inputs-corrected27/SOURCE_MANIFEST.json')
+            or current['native_hashes_sha256']!=sha(audit.parent/'audit.hashes.json')):
+        raise ValueError('current ship panel native/family exclusion admission required')
+    for path in [audit,audit.parent/'audit.hashes.json',audit.parent/'SOURCE_MANIFEST.json']:add(path)
     from e36_training import assessment_plan
     assessment_inputs=root/'assessment-inputs.json'
     assessment_plan(Path(d['root']),assessment_inputs);add(assessment_inputs)
