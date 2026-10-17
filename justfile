@@ -2400,9 +2400,6 @@ e36-full-choice-check:
 e36-smoke-launch-run out:
     python3 -u scripts/rev4_featpot/e36_smoke_launch.py run {{quote(out)}}
 
-e36-control-freeze out commit:
-    python3 scripts/rev4_featpot/e36_freeze_control.py --out {{quote(out)}} --commit {{quote(commit)}}
-
 e36-metadata-frozen-plan root resources out commit:
     python3 {{quote(resources + "/e36_metadata_archive.py")}} plan --root {{quote(root)}} --out {{quote(out)}} --commit {{quote(commit)}}
 
