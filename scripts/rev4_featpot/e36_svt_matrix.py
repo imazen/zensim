@@ -106,6 +106,32 @@ def configuration(root):
             raise ValueError('resource closure changed the scientific matrix')
         for key in ['controller_binding','controller_environment','cutoff']:checked(extension[key])
         for pin in extension['files'].values():checked(pin)
+    urgent_path=root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json'
+    if urgent_path.exists():
+        urgent=json.loads(urgent_path.read_text())
+        restart=json.loads(checked(urgent['previous']).read_text())
+        first=json.loads(checked(restart['previous']).read_text())
+        policy=json.loads(checked(first['policy']).read_text())
+        if (policy['authorization']!='coordinator-urgent-disk-2026-10-17'
+            or [policy[k] for k in ['pause_below_bytes','resume_above_bytes','stop_below_bytes']]!=[30*1024**3,40*1024**3,20*1024**3]
+            or policy['keep_inflight'] is not True or urgent['max_storage_transfers']!=4):
+            raise ValueError('exact coordinator disk policy differs')
+        for value in [urgent,restart,first]:
+            if value['fits']!=0 or value['scientific_change'] is not False:
+                raise ValueError('urgent disk operation changed science')
+            for field in ['cutoff','controller_environment','monitor','mirror','monitor_source']:
+                if field in value:checked(value[field])
+            for field in ['files','mirror_files']:
+                for pin in value.get(field,{}).values():checked(pin)
+        checked(first['previous'])
+    supervision=root/'owner-svt-ssd-v1/resource-supervision-v11.json'
+    if supervision.exists():
+        latest=json.loads(supervision.read_text())
+        if latest['schema']!='e36-reviewed-resource-closure-v11' or latest['fits']!=0 or latest['scientific_change'] is not False or checked(latest['previous'])!=urgent_path:
+            raise ValueError('resource supervision changed scientific inputs')
+        for key in ['cutoff','controller_environment','monitor','mirror']:checked(latest[key])
+        for key in ['files','mirror_files']:
+            for pin in latest[key].values():checked(pin)
     def schedule_chain(pin):
         a=json.loads(checked(pin).read_text())
         for key in ['plan','effective_clock','worker']:checked(a[key])
@@ -293,7 +319,9 @@ def admit(root,names):
                 remote_phase_evidence=[],scheduling_evidence=[proof['scheduling']],
                 owner_amendment=proof['owner_amendment'],owner_matrix=bind(root/'owner-svt-ssd-v1/matrix-binding.json'),
                 excluded_codecs=['rav1e'],native_publication=publications,artifact_location=bind(location_path),
-                resource_closure=bind(root/'owner-svt-ssd-v1/resource-closure-v3.json'))
+                resource_closure=bind(root/'owner-svt-ssd-v1/resource-closure-v3.json'),
+                urgent_disk=bind(root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json') if (root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json').exists() else None,
+                resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None)
 
 
 def install_controller(root,receipt):
