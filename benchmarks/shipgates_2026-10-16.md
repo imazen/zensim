@@ -310,3 +310,7 @@ Original source files, manifests, complete cells and measurements remain archive
 The corrected source-manifest SHA256 is `e9b21e153a7d22c59e5e6341f9e7f35d0050a5b55882558f62c808c4dbae56df`. A replay over all1,344 complete records from the first eight original sources changes only the504 game-render class annotations; the other840 rows are unchanged. Every non-class field matches its immutable original cell. This is metadata verification, with no new encode, score or fitted value.
 
 The six-source certified-packet replay rehashes the physical map artifacts and retains successful logical-map/input-pixel certificates for all1,008 rows. Their reference-pixel hashes also match the independent source admission. The reporter requires that admitted-pixel binding and verifies each class-only derivation against its original complete cell. No metric values are recomputed by certificate reuse.
+
+JPEG/WebP/AVIF RD verdicts compare each candidate-map arm against that candidate’s paired scalar-only controller. The butteraugli-map arm uses the same controller. Global knob frontiers remain reporting comparisons. An inert map therefore has zero spatial gain against its matched control; a synthetic regression case rejects the apparent gain that sparse global-grid interpolation can introduce. JXL retains its global-distance baseline and exact neutral/no-steering checks.
+
+The [evidence pointer](shipgates_2026-10-16.pointer.md) records host-checked paths, completed dataset hashes, source/metric pins, mirror status and unfinished coverage.
