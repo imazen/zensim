@@ -24,10 +24,17 @@ def main():
     p.add_argument('--container',required=True)
     p.add_argument('--output',required=True,type=Path)
     p.add_argument('--archive-zstd',action='store_true')
+    p.add_argument('--cache-authorized',action='store_true',help='Coordinator2026-10-17 separate250GB cache grant only')
     a=p.parse_args()
     root=Path(a.root)
-    if not root.is_absolute() or len(root.parts)<4 or root.parts[1]!='mnt' or not root.parts[2].startswith('disk'):
+    cache_root=Path('/mnt/user/coefficient/output/zensim/e36-bulk-2026-10-17-cache')
+    if a.cache_authorized and (root!=cache_root or not a.archive_zstd):raise ValueError('exact separately authorized cache root required')
+    if not a.cache_authorized and (not root.is_absolute() or len(root.parts)<4 or root.parts[1]!='mnt' or not root.parts[2].startswith('disk')):
         raise ValueError('bulk storage requires an explicit direct array-disk path')
+    if a.cache_authorized:
+        print(remote(a.host,['df','-h','/mnt/cache']).decode(),file=sys.stderr)
+        available=int(remote(a.host,['df','-B1','--output=avail','/mnt/cache']).decode().splitlines()[-1])
+        if available<180*1024**3:raise OSError('cache reserve refuses initialization')
     if a.output.exists():raise FileExistsError(a.output)
     image=remote(a.host,['docker','image','inspect',a.image,'--format','{{.Id}}']).decode().strip()
     source=Path(__file__).with_name('e36_archive_store.py' if a.archive_zstd else 'e36_store.py').read_bytes()
@@ -48,6 +55,7 @@ print(digest)
         '--env','PYTHONDONTWRITEBYTECODE=1','--env','TMPDIR=/data/scratch',
         '--mount',f'type=bind,source={a.root},target=/data',
         '--entrypoint','python3']
+    if a.cache_authorized:common[0:0]=['--mount','type=bind,source=/mnt/cache,target=/cache-capacity,readonly']
     # Docker creates a missing -v source; the explicit bind form below is used
     # only after this one capped initializer has made the data directory.
     initialized=remote(a.host,['docker','run','--rm','-i','--network=none',
@@ -65,13 +73,16 @@ print(digest)
         'import time;time.sleep(86400)']).decode().strip()
     info=json.loads(remote(a.host,['docker','inspect',container]))[0]
     assert info['Image']==image and info['HostConfig']['Memory']==2*1024**3
+    reserve=180 if a.cache_authorized else 128
     command=['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=10',a.host,
         shlex.join(['docker','exec','-i',container,'python3','-u',
-            '/data/program/'+digest+'.py',* ([] if a.archive_zstd else ['serve']), '--root','/data','--min-free-gib','128'])]
+            '/data/program/'+digest+'.py',* ([] if a.archive_zstd else ['serve']), '--root','/data','--min-free-gib',str(reserve),
+            * (['--reserve-path','/cache-capacity'] if a.cache_authorized else [])])]
     result=dict(host=a.host,root=a.root,image_id=image,container_id=container,
         container_name=a.container,program_sha256=digest,command=command,
         memory_cap_bytes=2*1024**3,cpuset='0-3',cpu_shares=256,
-        min_free_gib=128,role='storage-only; no generation, scoring, fitting or job claims')
+        min_free_gib=reserve,role='storage-only; no generation, scoring, fitting or job claims')
+    if a.cache_authorized:result.update(cache_budget_bytes=250000000000,cache_reserve_bytes=180*1024**3,capacity_path='/mnt/cache',authorization='coordinator-2026-10-17-cache250GB')
     if a.archive_zstd:
         result['encoding']='zstd'
         result['support_files']={name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in ['e36_store.py','e36_artifact_location.py']}

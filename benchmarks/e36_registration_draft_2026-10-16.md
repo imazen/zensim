@@ -510,3 +510,52 @@ Source `e36_disk_policy.py` records30-second write/mirror/free-space windows; wh
 
 
 Budget-only amendment4 recorded 2026-10-17T15:16:04.481576+00:00: coordinator authorizes absolute generation deadline2026-10-17T22:00:00Z, based on disk-finish-projection-v2.json SHA256 9d0575d103633a11a29447d33774f4504f8f13964198a0ab0ae5f48d6096239f (modeled20:50:45Z at measured27.946663MB/s archival). Previous17Z clock and exact original frozen interval remain preserved; no later wait is excluded. Matrix12300 mandatory/424 optional, surviving source counts,61q,20sizes, teachers and all scientific rules remain unchanged. Amendment SHA256 787407008a1da94eef3380deefb60d5f1cdbf3849b6fe6f636869d8322a1b456; effective clock SHA256 e1da04e454dbaddf159b7cd64e3e10e365089228b1ed2dbc328e7ecc9dd09a04. Fits remain prohibited. New bulk archives go directly to a distinct array directory; historical archive locations stay fixed. Pause below30GiB, resume strictly above40GiB, sticky stop below20GiB; no in-flight process is killed for this migration.
+
+2026-10-17T15:44:09.319497+00:00 — Coordinator cache grant recorded before fits: separate /mnt/tower/output/zensim/e36-bulk-2026-10-17-cache/ (tower user-share path /mnt/user/coefficient/output/zensim/e36-bulk-2026-10-17-cache), maximum250000000000stored bytes, conservatively reserved before upload using native ZSTD_compressBound plus64KiB framing slack. Check exact ssh tower df -h /mnt/cache plus byte-count df before each batch; stop new cache batches below180GiB (193273528320B, a conservative interpretation of180GB). Server checks the actual cache filesystem via a read-only capacity bind, not share-wide free space. Cache/array microbatches progress independently, at most8total streams; each raw bundle gets exactly one archival owner and raw/encoded byte identities stay in journal. Original/earlier disk1 locations retained, all beyond cache allowance go to existing distinct disk1 root. Metadata backups wait behind artifact evacuation; trainer-needed local CAS stays until final metadata archive/package, before any cleanup. Matrix, source counts, teachers, clock22Z and all science unchanged. No fit.
+
+
+### Sequential archive transport amendment, 2026-10-17
+
+The coordinator supersedes the preceding parallel microbatch transport with
+**cache first, at most two sequential streams**, using lossless USTAR packs
+with a256MiB target. Every native bundle remains byte-identical and retains
+its original SHA256; both teacher maps passed actual packed readback and the
+existing map validator. Compression is optional and these packs are raw tar.
+Each pack publishes immutable destination-assignment and relocation segments
+with a batch durability boundary before removing any local bundle. There is
+no per-object archival flock or fsync. Existing individual archives retain
+their first owner; cache and array never receive the same new native bundle.
+
+The250000000000-byte cache grant includes old cache reservations, diagnostic
+packs and all pending pack intents. A fresh actual cache observation precedes
+each writing batch;180GiB remains the conservative floor. All subsequent
+bulk goes directly to the previously declared distinct array namespace once
+the allowance or floor prevents another cache pack. Existing files are kept
+at their recorded locations. Admission requires actual durable remote pack
+and incoming directories, exact bundle/native-view replay, immutable segment
+pins, the pack verifier and quota proofs, and actual random readbacks.
+Recovery preserves the first owner, rechecks admission, and verifies an
+already published pack before requiring local originals. Receive processes
+drain cooperatively on failures; no in-flight cell or transfer is killed.
+
+The initial five completed cache packs measured80649464B/s over a16.678550s
+active window, including verification and local eviction. This is a short
+observation, not a sustained guarantee. The planning model combines the
+actual local raw-file census and same-codec/same-size measured prebulk bytes
+with that cache observation and the coordinator's27MB/s array write test.
+At16:21Z it projected21:01Z for the exact12300-view mandatory fallback,
+and02:53Z the next day for the optional full12724-view matrix. These are
+modeled finish times, not data admission or observed future bytes. The
+registered whole-matrix fallback rule remains unchanged. No source-count
+cut has been invoked: the mandatory storage projection precedes22Z. A later
+storage projection missing22Z may trigger only the coordinator-authorized,
+explicitly registered largest-size source reductions; all61qualities,
+four codecs and20sizes must remain represented with nonzero source counts.
+
+Astra reviewed ordinary transfer, interrupted recovery, atomic publication
+and final proof retention. Recovery/final-admission corrections preserve
+all numerical runtime, source, quality, teacher and assessment identities.
+The exact original freeze exclusion and absolute22:00Z deadline remain
+unchanged; later storage/review waits receive no extra time credit. Fits
+remain prohibited until completed matrix, pool and packet admission and
+coordinator fit go.

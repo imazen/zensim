@@ -22,3 +22,17 @@ Lossless archive diagnostic: `owner-svt-ssd-v1/archive-probe-v1/receipt.json` an
 Mirror CPU profiling: `owner-svt-ssd-v1/mirror-profile-v1/receipt.json` pins the20s99Hz DWARF perf capture, command, deployed source, record log and aggregated reports.415cycle samples,0lost; SHA256 code accounts for65.41% of on-CPU sample weight. This does not measure wall-time saturation or NAS latency. The6.823MB raw profile stays under the dev experiment root; no new instrumentation or throughput improvement is claimed.
 
 Archive/budget4 amendment (2026-10-17): coordinator authorizes absolute22:00:00Z, budget only. Effective clock bulk-clock-v8-budget4.json; prior clocks/freeze chain stay intact, no later waiting excluded. Matrix12300+424 and science unchanged. New archives use distinct direct-array tower /mnt/disk1/coefficient/output/zensim/e36-bulk-2026-10-17-disk1/blobs/<raw-sha-prefix>/<raw-sha>.tar.zst. Historical raw bundles and earlier receipt backups remain at their recorded locations. Each relocation records original raw SHA/size and compressed SHA/size; native map-owner readback after actual tower retrieval/decompression passed for both teachers. Journal/source/actual24executor/core/deadline/transport bindings: owner-svt-ssd-v1/archive-budget4-binding.json and archive-transport-v3-binding.json. Eight bounded streams; recent observed rates do not establish sustained28MB/s. The600.669534s planning snapshot in disk-finish-projection-v3.json averages4199891.518verified B/s and projects2026-10-19T03:05:11Z if that mix persists; it is not a measured future finish. No truncation or fit release. Astra archive review2 closes two specific failure-recovery findings; active clients use cooperative EOF/join, retaining transfers and admission supervision.
+
+
+2026-10-17 grouped-archive continuation (dev): the same bulk root now retains
+`owner-svt-ssd-v1/archive-pack-binding-v1.json`, the applied frozen resource
+versions,24 live numerical audits, cooperative helper exit/readiness proofs,
+`pack-storage-admission-v1.json`, `pack-directory-durability-v1.json`,
+`pack-finish-projection-v1.json`, pack intents and atomic assignment/relocation
+segments. Every pack member keeps its original native bundle SHA256.
+`pack-rates-v1.jsonl` records actual whole-pack verification/eviction timing.
+Old individual archive locations are unchanged. Cache-first storage is limited
+to250GB cumulative and180GiB free; later packs use the distinct array root.
+The projection is diagnostic and includes separate mandatory/full estimates;
+no completed native matrix, final artifact-location admission or E36 fit is
+claimed by these interim records. Final hashes bind only after writers stop.

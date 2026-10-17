@@ -100,7 +100,7 @@ def monitor():
     previous=json.loads(STATE.read_text()) if STATE.exists() else {}
     paused=previous.get('claims_paused',False)
     stopped={int(v['pid']):v for v in previous.get('owned_stops',[])}
-    last=None;offset=0;mirrored=0;reclaimed=0;last_emit=0
+    last=None;offset=0;mirrored=0;reclaimed=0;last_emit=0;seen_segments=set()
     relocation=ROOT/'owner-svt-ssd-v1/artifact-relocations.jsonl'
     telemetry=ROOT/'owner-svt-ssd-v1/disk-rates.jsonl'
     while time.time()<1792274400 and not (ROOT/'owner-svt-ssd-v1/disk-monitor-stop.json').exists():
@@ -164,6 +164,15 @@ def monitor():
                             record=json.loads(line);mirrored+=record['bytes'];reclaimed+=record.get('local_allocated_bytes',0)
                             offset=stream.tell()
                         offset=stream.tell()
+                from e36_artifact_location import relocation_segments
+                from e36_store import sha
+                for segment in relocation_segments(ROOT):
+                    if segment.name in seen_segments:continue
+                    if sha(segment)!=segment.stem:raise ValueError('committed telemetry segment changed')
+                    with segment.open() as stream:
+                        for line in stream:
+                            record=json.loads(line);mirrored+=record['bytes'];reclaimed+=record.get('local_allocated_bytes',0)
+                    seen_segments.add(segment.name)
                 write_bytes,write_source=io_bytes(scope)
                 counters=dict(utc=now,free_bytes=free,observed_write_bytes=write_bytes,write_counter_source=write_source,verified_mirror_bytes=mirrored,recorded_local_reclaimed_bytes=reclaimed)
                 if last:

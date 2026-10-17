@@ -55,7 +55,7 @@ def verify(root,expected,program):
                 encoding='zstd',stored_sha256=sha(path),stored_bytes=path.stat().st_size,program_sha256=program)
 
 
-def serve(root,source,target,min_free):
+def serve(root,source,target,min_free,reserve_path=None):
     root=Path(root).resolve(strict=True);incoming=root/'.incoming';durable_mkdir(incoming)
     program=sha(__file__)
     while line:=source.readline(4097):
@@ -66,7 +66,7 @@ def serve(root,source,target,min_free):
         size=header['stored_bytes'];raw_size=header['bytes'];stored_sha=digest(header['stored_sha256'])
         if type(size) is not int or not 0<size<=2*1024**3 or type(raw_size) is not int or not 0<raw_size<=1024**3:
             raise ValueError('invalid archive size')
-        if shutil.disk_usage(root).free<min_free+size:raise OSError('archive reserve refuses write')
+        if shutil.disk_usage(reserve_path or root).free<min_free+size:raise OSError('archive reserve refuses write')
         path=incoming/(expected+'-'+uuid.uuid4().hex+'.partial');remaining=size;h=hashlib.sha256()
         with path.open('xb') as stream:
             while remaining:
@@ -119,6 +119,8 @@ class ArchiveClient(Client):
         with compressed.open('xb') as output:
             subprocess.run(['zstd','-q','-1','-T1','-c','--',str(path)],stdout=output,check=True)
         try:
+            if compressed.stat().st_size>getattr(self,'max_stored_bytes',2*1024**3):
+                raise ValueError('compressed archive exceeds its pre-upload reservation')
             header=dict(operation='put',sha256=expected,bytes=size,stored_sha256=sha(compressed),stored_bytes=compressed.stat().st_size)
             result=self.exchange(header,compressed)
             if result['bytes']!=size or result['encoding']!='zstd' or result['stored_sha256']!=header['stored_sha256']:
@@ -132,6 +134,7 @@ class ArchiveClient(Client):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,required=True);parser.add_argument('--min-free-gib',type=int,required=True)
+    parser.add_argument('--reserve-path',type=Path)
     args=parser.parse_args()
     if args.min_free_gib<=0:raise ValueError('positive archive reserve required')
-    serve(args.root,sys.stdin.buffer,sys.stdout.buffer,args.min_free_gib*1024**3)
+    serve(args.root,sys.stdin.buffer,sys.stdout.buffer,args.min_free_gib*1024**3,args.reserve_path)

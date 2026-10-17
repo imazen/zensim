@@ -7,7 +7,7 @@ import sys
 import time
 
 
-def audit(root,out):
+def audit(root,out,resolver_expected=None):
     root=Path(root);instances={}
     for top in sys._current_frames().values():
         frame=top
@@ -26,6 +26,7 @@ def audit(root,out):
     deadline=1792274400. if (root/'bulk-clock-v8-budget4.json').exists() else 1792256400.
     resolver=Path(runtime.store.verify.__func__.__globals__['resolve'].__code__.co_filename)
     expected_resolver=root/'owner-svt-ssd-v1/resource-budget4-v2/e36_artifact_location.py' if deadline==1792274400. else folder/'e36_artifact_location.py'
+    if resolver_expected is not None:expected_resolver=Path(resolver_expected)
     if (runtime.spec_sha!=expected or runtime._owner_svt_ssd!=5 or runtime._e36_disk_policy!=2
         or float(os.environ['E36_GENERATION_DEADLINE'])!=deadline or resolver!=expected_resolver
         or methods['execute']!=folder/'e36_owner_amendment.py'

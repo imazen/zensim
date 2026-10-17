@@ -19,12 +19,18 @@ class Mover:
         with access(self.root,digest,exclusive=True):
             if not artifact.exists():return None
             if sha(artifact)!=digest:raise ValueError('local artifact hash changed')
+            assigned=self.assignments.ensure(digest,self.storage) if hasattr(self,'assignments') else {}
             if not hasattr(self.clients,'client'):
                 if self.storage.get('encoding')=='zstd':
                     from e36_archive_store import ArchiveClient
                     self.clients.client=ArchiveClient(self.storage['command'],self.storage['program_sha256'])
                 else:self.clients.client=Client(self.storage['command'],self.storage['program_sha256'])
-            client=self.clients.client;ack=client.put(artifact);verified=client.verify(digest)
+            client=self.clients.client
+            if self.storage.get('authorization')=='coordinator-2026-10-17-cache250GB':
+                from e36_cache_archive import compression_bound
+                client.max_stored_bytes=compression_bound(artifact.stat().st_size)
+            ack=client.verify(digest) if assigned.get('physical_seen') else client.put(artifact)
+            verified=client.verify(digest)
             if verified['bytes']!=artifact.stat().st_size or ack['bytes']!=verified['bytes']:
                 raise ValueError('mirror size/hash verification failed')
             record=dict(utc=time.time(),sha256=digest,bytes=verified['bytes'],completed_view_sha256=view_sha,

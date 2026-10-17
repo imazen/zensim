@@ -26,7 +26,7 @@ def policy():
     # The numerical runtime and local put owner stay frozen. Only the location
     # resolver gains the independently pinned second archive namespace.
     import e36_owner_amendment
-    prior=ROOT/'owner-svt-ssd-v1/resource-budget4-v2/e36_artifact_location.py'
+    prior=Path(__file__).with_name('e36_artifact_location.py')
     spec=importlib.util.spec_from_file_location('e36_location_budget4_fixed',prior)
     location=importlib.util.module_from_spec(spec);spec.loader.exec_module(location)
     e36_owner_amendment.resolve=location.resolve

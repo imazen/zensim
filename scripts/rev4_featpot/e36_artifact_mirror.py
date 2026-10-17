@@ -81,6 +81,11 @@ def run(pool):
         os.environ['E36_ARCHIVE_ROOT']=str(ROOT)
     os.environ['E36_STORE_CONNECT_GATE']=str(ROOT/'storage-connect-gate')
     mover=Mover(ROOT,storage)
+    if (ROOT/'owner-svt-ssd-v1/pack-storage-admission-v1.json').exists():
+        from e36_pack_archive import Dispatcher
+    else:
+        from e36_mirror_dispatch import Dispatcher
+    dispatcher=Dispatcher(ROOT,pool,storage)
     ready=os.environ.get('E36_RESOURCE_READY_PATH')
     if ready:
         temporary=Path(ready).with_name(Path(ready).name+'.'+uuid.uuid4().hex+'.partial')
@@ -132,23 +137,11 @@ def run(pool):
             if scan:next_scan=time.monotonic()+10
             # Reclaim space with fewer remote metadata operations. Tiny-first
             # directory ordering can spend minutes copying sub-MB objects.
-            batch={}
-            while priority and len(batch)<8:
-                if (ROOT/'owner-svt-ssd-v1/mirror-stop.json').exists():return
-                if not eager and shutil.disk_usage(LOCAL).free>=56*1024**3:break
-                _,digest=heapq.heappop(priority)
-                artifact,view_sha=queue[digest]
-                if not artifact.exists():
-                    del queue[digest];continue
-                batch[pool.submit(mover.move,digest,artifact,view_sha)]=digest
-            for future in as_completed(batch):
-                record=future.result()
-                del queue[batch[future]]
-                if record is None:continue
+            for record in dispatcher.cycle(queue,priority):
                 print(json.dumps(dict(mirrored_sha256=record['sha256'],bytes=record['bytes'],free_bytes=shutil.disk_usage(LOCAL).free)),flush=True)
             # Artifact eviction owns the urgent disk relief. Back up a bounded
             # number of trainer-needed receipts between reclamation batches.
-            if eager and shutil.disk_usage(LOCAL).free>40*1024**3:
+            if eager and not priority and not dispatcher.pending and shutil.disk_usage(LOCAL).free>40*1024**3:
                 for key,path in list(metadata_pending.items())[:4]:
                     try:mirror_view(path)
                     except (OSError,ValueError) as error:
@@ -159,8 +152,10 @@ def run(pool):
                         del metadata_pending[key]
                         print(json.dumps(failure),flush=True)
                     else:del metadata_pending[key]
-        print(json.dumps(dict(utc=time.time(),free_bytes=shutil.disk_usage(LOCAL).free,queued_bundles=len(queue),seen_complete_views=len(seen))),flush=True)
+        print(json.dumps(dict(utc=time.time(),free_bytes=shutil.disk_usage(LOCAL).free,queued_bundles=len(queue),seen_complete_views=len(seen),
+            pending_transfers=len(dispatcher.pending),deferred_native_receipt_backups=len(metadata_pending))),flush=True)
         time.sleep(.1 if queue and (eager or shutil.disk_usage(LOCAL).free<48*1024**3) else 10)
+    dispatcher.drain(queue)
 
 
 def main():

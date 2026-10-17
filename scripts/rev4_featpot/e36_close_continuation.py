@@ -22,6 +22,14 @@ def close(root):
         handoff=json.loads(Path(handoff_pin['path']).read_text())
         if {item['old_pid'] for item in handoff['history']}!=expected or any(item['old_returncode']!=0 for item in handoff['history']):raise ValueError('old resource owners did not drain')
         expected={item['new_pid'] for item in handoff['history']}
+    resource_chain=[]
+    for receipt in sorted(owner.glob('resource-budget4-v*/receipt.json'),key=lambda p:int(p.parent.name.rsplit('v',1)[1])):
+        if budget4.exists() and str(receipt)==handoff_pin['path']:continue
+        record=json.loads(receipt.read_text())
+        if record.get('schema')!='e36-cooperative-budget4-resources-v1':continue
+        if ({item['old_pid'] for item in record['history']}!=expected or any(item['old_returncode']!=0 for item in record['history']) or record['controller_pid']!=launch['controller_pid']):raise ValueError('later resource handoff owner/closure differs')
+        expected={item['new_pid'] for item in record['history']}
+        resource_chain.append(dict(path=str(receipt),sha256=sha(receipt)))
     if len(helpers['exits'])!=2 or {item['pid'] for item in helpers['exits']}!=expected or any(item['returncode']!=0 for item in helpers['exits']):
         raise ValueError('required resource helpers did not close successfully')
     if (owner/'resource-failure-hold.json').exists():raise ValueError('unresolved native resource failure')
@@ -35,6 +43,11 @@ def close(root):
         returncode=exit_record['returncode'],fits=0,scientific_change=False,closed=True,
         note='Terminal control evidence only; complete registered matrix admission remains separate.')
     if budget4.exists():result['archive_budget4']=pin(budget4)
+    result['later_resource_handoffs']=resource_chain
+    pack_binding=owner/'archive-pack-binding-v1.json'
+    if (owner/'pack-storage-admission-v1.json').exists():
+        if not pack_binding.exists():raise ValueError('applied pack runtime source chain missing')
+        result['archive_pack_binding']=pin(pack_binding)
     with (owner/'native-continuation-final-v1.json').open('x') as stream:json.dump(result,stream,indent=2)
     print(json.dumps(result))
 
