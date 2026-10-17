@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Prepare E36 private plain-N ladder gradients, immutable matched-family filtering, native qualified-checkpoint bindings, TRAIN-only selection and exact assessment-forward replay; fit release remains separate.
+
 - SHIPGATES: record full platform CI for the opt-in scheduler and retain its pending numerical-replay requirement.
 
 - Preserve STEER supervision through a capacity race after container creation, with clean drain and exact pause ownership checks.

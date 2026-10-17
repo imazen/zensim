@@ -2301,3 +2301,29 @@ application, complete base-group filtering and two-arm assessment adapter remain
 pre-fit requirements. Full registered source/size/mode coverage and nonzero
 required-stratum support are not established by an initial generation subset.
 See the [preparation evidence pointer](../benchmarks/e36_preparation_2026-10-16.pointer.md).
+
+### E36 expanded budget registration (2026-10-17 UTC; generation in progress)
+
+The [registration](../benchmarks/e36_registration_draft_2026-10-16.md) now
+freezes all61quality points, all20sizes and five native codec families under
+one original six-hour window. Source counts fall first at expensive sizes;
+all reachable sources through768 remain. The exact mandatory A6 matrix has
+15,342 ladder views; the full nested matrix has15,810. Native completed-view
+inventory, whole-matrix equality and positive post-dedup support in every
+required reachable stratum are prerequisites for a qualifying pool. Partial
+checkpoints or a fastest-finished subset cannot satisfy admission. Runtime-v6
+repairs storage transport only and inherits the original deadline.
+
+The same frozen family mask removes230original SafeSyn FIT rows across four
+renditions for all three prospective C/plain-N arms; other fourteen groups
+lose no rows. Keys-only projection freezes the matched child declarations;
+actual unchanged-target filtering occurs only in the bound fit executor.
+
+TRAIN selection contains no human ranks. It applies existing finite-forward
+and exact-identity owners and adds no cross-reference ranking guard. Registered
+assessment noninferiority, each-dataset delta>=-0.005 and W2 delta>-2SE protect
+cross-reference ranking. Before future assessment target access, the TRAIN
+choice and native source-withheld checkpoint identities lock. Native E34
+score-unit replay must then establish exact prediction/target/source-row
+correspondence. No E36 fit or optimizer smoke has run; actual completed-matrix,
+final binary, pool and package admission remain required.

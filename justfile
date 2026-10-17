@@ -2145,3 +2145,13 @@ e36-final-program-admit packet:
 
 e36-final-declare root pools original packet:
     python3 scripts/rev4_featpot/e36_fit_packet.py specs --root {{quote(root)}} --pools {{quote(pools)}} --packet {{quote(packet)}} --original {{quote(original)}} --program {{quote(packet + "/program.tar.gz")}} --ctl {{quote(root + "/bin/zenfleet-ctl")}} --owner {{quote(root + "/fit-native-owner-v2")}}
+
+# Pure invented fixtures and admission checks; these never run the optimizer.
+e36-final-panel-test:
+    E36_TV_PROTOCOL=1 cargo test --locked --release -p zensim-validate --bin panel --target-dir /home/lilith/tmp/e36-pixels-target panel_e34::e36::tests:: -- --nocapture
+
+e36-final-private-clippy:
+    E36_TV_PROTOCOL=1 cargo clippy --locked --release -p zensim-validate --lib --bin zensim_mlp_train --bin panel --bin e36_raw_score --target-dir /home/lilith/tmp/e36-pixels-target -- -D warnings
+
+e36-final-assessment-metadata root:
+    python3 -c 'from pathlib import Path; import sys; sys.path.insert(0,"scripts/rev4_featpot"); from e36_training import assessment_plan; import json; r=Path(sys.argv[1]); d=json.loads((r/"matched-base-filter-plan-v2.json").read_text()); assessment_plan(Path(d["root"]),r/"assessment-inputs-preflight.json")' {{quote(root)}}
