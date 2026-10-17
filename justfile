@@ -1882,3 +1882,13 @@ shipgates-scripts-check:
 
 shipgates-jxl-progress encodes judges:
     python3 scripts/rev4_featpot/shipgates_progress.py --encodes {{quote(encodes)}} --judges {{quote(judges)}}
+
+e36-source-archives root commit producer:
+    git -C /home/lilith/work/zen/zensim archive --format=tar --output={{quote(root + "/sources/preparation-code.tar")}} {{quote(commit)}}
+    git -C /home/lilith/work/zen/zensim archive --format=tar --output={{quote(root + "/sources/cohort-producer-code.tar")}} {{quote(producer)}}
+    just e36-evidence-manifest {{quote(root)}} {{quote(commit)}}
+    just e36-archive {{quote(root)}} /mnt/tower/output/zensim/e36-2026-10-16
+
+e36-retention-resume root commit mirror:
+    just e36-evidence-manifest {{quote(root)}} {{quote(commit)}}
+    just e36-archive {{quote(root)}} {{quote(mirror)}}

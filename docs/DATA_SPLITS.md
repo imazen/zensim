@@ -2267,3 +2267,37 @@ This is one explicitly admitted owner evaluation; E33 A/C ancillary means
 reproduce the retained points. No raw target was opened by the transport agent,
 no protected population was accessed, and these descriptive results do not
 select the separately designed TRAIN-only dial repair.
+
+
+### E36 native label-free preparation (2026-10-17 UTC)
+
+[Registration rev3](../benchmarks/e36_registration_draft_2026-10-16.md) freezes
+two native teachers: butteraugli pnorm3 and CVVDP standard_fhd. Both signed
+improvements must exceed 0.01; neither nominal quality nor SSIMULACRA2 supplies
+an E36 target. Independent decoders inspect output only. No human score column
+is constructed, and preparation reads no protected or subjective labels.
+
+Current TRAIN family-v2, source-byte hashes, the retained native exclusion
+audit and all inspected engineering references bind the source cohort. Alpha
+inputs and unresolved color/orientation are refused. Whole-family quarantine
+repeats reference-only selection until there are zero native dHash<=10 flags
+between fit and TRAIN-selection sources. The closed cohort has 200 sources,
+50 per semantic class, 172 families and a 160/40 split. Tiny is an overlapping
+presented-size tag from those families, not a claim of originally tiny sources.
+All 3,604 reachable size renditions are registered; 396 larger-than-source
+renditions are unavailable and never upscaled.
+
+The feature producer stays fixed at source snapshot 6e625e9451ff, including
+its extraction model and ordered consumed-feature layout. A native replay of
+12 frozen E34 parity pairs matches all 5,040 consumed f32 values exactly without
+reading target columns. The 1520 capacity pilot and earlier provisional source
+renders are diagnostic-only: later source admission supersedes them. Keep
+initial cohort data separate and bind any feature-only export to the closed
+selection SHA256; these local row ordinals are not legacy human-rank indices.
+
+No E36 fit, training smoke, optimizer step or fleet claim is admitted here.
+The external feature-only TV pool, independent RNG, exact N loss reduction/
+application, complete base-group filtering and two-arm assessment adapter remain
+pre-fit requirements. Full registered source/size/mode coverage and nonzero
+required-stratum support are not established by an initial generation subset.
+See the [preparation evidence pointer](../benchmarks/e36_preparation_2026-10-16.pointer.md).
