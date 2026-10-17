@@ -70,3 +70,13 @@ teachers/margins. `pools-full-v1/_MANIFEST.json` SHA2567053b5ec0363c6524349e9c5f
 minavailable31621MiB,peakload24.79. This is pool-preparation memory,notfitRSS.
 The pool remains archive-pending; final artifact-location/native/package
 admission and actual bounded-smoke measurement still precede fit go.
+
+The full native census proofs total4685955696B before pool features,failed
+physical-index evidence and the opaque710380867B base archive. The resulting
+transport can exceed USTAR's8GiB member limit. Metadata plans explicitly use
+PAXv2 for such files,with exact serialized header lengths and unchanged
+64GiB archive/128GiB array-headroom limits. Whole-file and archive hashes,
+receiver rehash,closed native/raw-drain seals and restorable locator remain
+required. Originalv1 USTAR validation stays strict. This is a storage-format
+extension; no fitting or teacher rule changes. Actual large transport proof
+remains part of final metadata admission.

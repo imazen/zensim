@@ -28,6 +28,23 @@ def write(path,value):
     sync_directory(Path(path).parent)
 
 
+
+def tar_format(job):
+    value=job.get('tar_format','ustar')
+    if value not in ['ustar','pax']:raise ValueError('explicit supported metadata tar format required')
+    return tarfile.PAX_FORMAT if value=='pax' else tarfile.USTAR_FORMAT
+
+
+def member_info(row):
+    info=tarfile.TarInfo(row.get('member_name',row['sha256']+'.blob'));info.size=row['bytes'];info.mode=0o444
+    return info
+
+
+def tar_bytes(items,format_name='ustar'):
+    format_code=tar_format(dict(tar_format=format_name))
+    raw=sum(len(member_info(row).tobuf(format=format_code))+((row['bytes']+511)//512)*512 for row in items)
+    return ((raw+1024+10239)//10240)*10240
+
 def plan(root,out,commit):
     root=Path(root);out=Path(out)
     from e36_metadata_seal import freeze as seal_metadata
@@ -48,18 +65,21 @@ def plan(root,out,commit):
         if path.stat().st_size!=stat.st_size or path.stat().st_mtime_ns!=stat.st_mtime_ns:raise ValueError('metadata changed during inventory')
         row=dict(path=str(relative),sha256=h,bytes=stat.st_size);files.append(row);unique.setdefault(h,dict(row,local_path=str(path)))
     groups=[];current=[];size=0
+    format_name='pax' if any(row['bytes']>=8*1024**3 for row in unique.values()) else 'ustar'
     for row in unique.values():
-        if row['bytes']>=8*1024**3:raise ValueError('metadata member exceeds USTAR; explicit chunk plan required')
         if current and size+row['bytes']>512*1024**2:groups.append(current);current=[];size=0
         current.append(row);size+=row['bytes']
     if current:groups.append(current)
     jobs=[]
     for group in groups:
         value=hashlib.sha256(json.dumps(group,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-        raw=sum(512+((r['bytes']+511)//512)*512 for r in group);stored=((raw+1024+10239)//10240)*10240
+        stored=tar_bytes(group,format_name)
         if stored>64*1024**3:raise ValueError('metadata job exceeds receiver cap')
-        jobs.append(dict(id=value,items=group,tar_bytes=stored))
-    result=dict(schema='e36-closed-metadata-archive-plan-v1',root=str(root),build_commit=commit,raw_drain=dict(path=str(drain_path),sha256=sha(drain_path)),seal=dict(path=str(seal),sha256=sha(seal)),ustar_members_fit=all(row['bytes']<8*1024**3 for row in files),terminal=dict(path=str(terminal),sha256=sha(terminal)),stop=dict(path=str(stop),sha256=sha(stop)),files=files,symlinks=links,jobs=jobs,raw_bytes=sum(r['bytes'] for r in unique.values()),fits=0,labels_read=False,local_copies_retained=True)
+        jobs.append(dict(id=value,items=group,tar_bytes=stored,tar_format=format_name))
+    result=dict(schema='e36-closed-metadata-archive-plan-v2' if format_name=='pax' else 'e36-closed-metadata-archive-plan-v1',archive_format=format_name,root=str(root),build_commit=commit,raw_drain=dict(path=str(drain_path),sha256=sha(drain_path)),seal=dict(path=str(seal),sha256=sha(seal)),ustar_members_fit=all(row['bytes']<8*1024**3 for row in files),terminal=dict(path=str(terminal),sha256=sha(terminal)),stop=dict(path=str(stop),sha256=sha(stop)),files=files,symlinks=links,jobs=jobs,raw_bytes=sum(r['bytes'] for r in unique.values()),fits=0,labels_read=False,local_copies_retained=True)
+    result['client_source']=pin(Path(__file__))
+    sources=Path(__file__).with_name('sources.json')
+    if sources.exists():result['control_sources']=pin(sources)
     write(out/'plan.json',result);return result
 
 
@@ -67,11 +87,14 @@ def validate_closed_plan(plan):
     from e36_metadata_seal import validate as validate_seal
     sealed=validate_seal(plan['root'],plan['seal'])
     if sealed['raw_drain']!=plan['raw_drain'] or sealed['native_terminal']!=plan['terminal']:raise ValueError('metadata plan differs from sealed closure')
+    large=plan.get('schema')=='e36-closed-metadata-archive-plan-v2'
+    if large and plan.get('archive_format')!='pax':raise ValueError('v2 metadata plan requires explicit PAX format')
     expected={r['sha256']:r['bytes'] for r in plan['files']};actual={}
     for job in plan['jobs']:
-        if any(not 0<=row['bytes']<8*1024**3 for row in job['items']) or not 0<job['tar_bytes']<=64*1024**3:raise ValueError('metadata USTAR/receiver preflight failed')
-        raw=sum(512+((row['bytes']+511)//512)*512 for row in job['items'])
-        if job['tar_bytes']!=((raw+1024+10239)//10240)*10240:raise ValueError('metadata declared tar length differs')
+        if job.get('tar_format','ustar')!=('pax' if large else 'ustar'):raise ValueError('metadata schema/format differs')
+        limit=64*1024**3 if large else 8*1024**3
+        if any(not 0<=row['bytes']<limit for row in job['items']) or not 0<job['tar_bytes']<=64*1024**3:raise ValueError('metadata USTAR/receiver preflight failed')
+        if job['tar_bytes']!=tar_bytes(job['items'],job.get('tar_format','ustar')):raise ValueError('metadata declared tar length differs')
         for row in job['items']:
             if row['sha256'] in actual:raise ValueError('metadata payload hash scheduled twice')
             actual[row['sha256']]=row['bytes']
@@ -149,9 +172,9 @@ def owned_exchange(command,send):
 
 def transmit(job,command,program,destination='/data/metadata-v1',hostname=None):
     def send(writer):
-        with tarfile.open(fileobj=writer,mode='w|',format=tarfile.USTAR_FORMAT,bufsize=1024**2) as archive:
+        with tarfile.open(fileobj=writer,mode='w|',format=tar_format(job),bufsize=1024**2) as archive:
             for row in job['items']:
-                info=tarfile.TarInfo(row.get('member_name',row['sha256']+'.blob'));info.size=row['bytes'];info.mode=0o444
+                info=member_info(row)
                 with Path(row['local_path']).open('rb') as source:
                     reader=HashReader(source);archive.addfile(info,reader)
                     if reader.hash.hexdigest()!=row['sha256'] or reader.size!=info.size or source.read(1):raise ValueError('opaque metadata changed during transfer')
@@ -164,7 +187,7 @@ def transmit(job,command,program,destination='/data/metadata-v1',hostname=None):
 
 def archive(plan_path,storage,out,lock):
     out=Path(out);durable_mkdir(out);plan_path=Path(plan_path);p=json.loads(plan_path.read_text());config=json.loads(Path(storage).read_text())
-    if p['schema']!='e36-closed-metadata-archive-plan-v1' or p['fits']!=0 or p['labels_read'] is not False:raise ValueError('closed metadata plan required')
+    if p['schema'] not in ['e36-closed-metadata-archive-plan-v1','e36-closed-metadata-archive-plan-v2'] or p['fits']!=0 or p['labels_read'] is not False:raise ValueError('closed metadata plan required')
     validate_storage(config)
     validate_closed_plan(p)
     command=config['command'];receipts=[]

@@ -13,6 +13,35 @@ import e36_metadata_archive as client
 import e36_metadata_store as store
 
 
+class LargeMetadataFormat(unittest.TestCase):
+    def test_large_pax_header_decodes_exact_size_and_v1_stays_strict(self):
+        row=dict(sha256='a'*64,bytes=8*1024**3,local_path='opaque-large-fixture')
+        info=client.member_info(row)
+        with self.assertRaises(ValueError):info.tobuf(format=tarfile.USTAR_FORMAT)
+        header=info.tobuf(format=tarfile.PAX_FORMAT)
+        with tarfile.open(fileobj=io.BytesIO(header),mode='r|') as archive:
+            member=next(iter(archive));self.assertEqual(member.size,row['bytes']);self.assertEqual(member.name,row['sha256']+'.blob')
+        job=dict(items=[row],tar_bytes=client.tar_bytes([row],'pax'),tar_format='pax')
+        plan=dict(schema='e36-closed-metadata-archive-plan-v2',archive_format='pax',root='fixture',seal={},raw_drain={},terminal={},files=[row],jobs=[job])
+        with patch('e36_metadata_seal.validate',return_value=dict(raw_drain={},native_terminal={})):
+            client.validate_closed_plan(plan)
+            with self.assertRaisesRegex(ValueError,'schema/format'):
+                client.validate_closed_plan(dict(plan,schema='e36-closed-metadata-archive-plan-v1'))
+            bad=dict(job,tar_bytes=job['tar_bytes']-10240)
+            with self.assertRaisesRegex(ValueError,'tar length'):client.validate_closed_plan(dict(plan,jobs=[bad]))
+
+    def test_actual_pax_stream_remote_hash_roundtrip(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as directory:
+            root=Path(directory);job=MetadataArchive().job(root);job['tar_format']='pax';job['tar_bytes']=client.tar_bytes(job['items'],'pax')
+            program=Path(store.__file__).resolve();bootstrap=root/'receiver.py'
+            bootstrap.write_text('import sys,json\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(program.parent))+')\nimport e36_metadata_store as s\nfrom unittest.mock import patch\nwith patch.object(s.shutil,"disk_usage",return_value=type("Space",(),dict(free=1024**4))()):\n print(json.dumps(s.receive(sys.argv[2],sys.argv[4],int(sys.argv[6]))),flush=True)\n')
+            answer=client.transmit(job,[sys.executable,str(bootstrap)],store.sha(program),root/'remote')
+            self.assertEqual(answer['members'],{r['sha256']:r['bytes'] for r in job['items']})
+            with tarfile.open(root/'remote'/(job['id']+'.tar')) as archive:
+                for item in job['items']:
+                    self.assertEqual(archive.extractfile(item['sha256']+'.blob').read(),Path(item['local_path']).read_bytes())
+
+
 class MetadataArchive(unittest.TestCase):
     def job(self,root):
         items=[]
