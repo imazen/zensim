@@ -263,6 +263,23 @@ class Lifecycle(unittest.TestCase):
             for js,n in jobs.items():status['jobsets'][js]['installed']=n
             self.assertIsNone(life.next_jobset(self.bundle,dict(jobsets=jobs),status))
 
+    def test_live_reporting_keeps_labelled_native_count_without_changing_selection(self):
+        value=dict(state='OK',packet_sha256=life.owner.PACKET_SHA,native_fold=True,
+                   upload=False,amnesty=False,installed=16,time='invented timestamp',
+                   per_host={h:dict(installed=n) for h,n in [('r3500',8),('i270',4),('tower',4)]})
+        self.assertEqual(life.report_metadata(self.bundle,None)[0],None)
+        path=self.root/'launch/SCHEDULER_METADATA.json';path.write_text(json.dumps(value))
+        reported,basis=life.report_metadata(self.bundle,None)
+        self.assertEqual(reported,value)
+        self.assertIn('last verified',basis)
+        self.assertEqual(life.report_metadata(self.bundle,value)[1],'current verified native fold')
+        with mock.patch.object(life.owner,'steer_plan',return_value=dict(order=['a'])):
+            self.assertEqual(life.next_jobset(self.bundle,{},dict(state='RUNNING',packet_sha256=life.owner.PACKET_SHA)),'WAIT')
+        for key,replacement in [('packet_sha256','wrong'),('upload',True),('amnesty',True),('installed',True)]:
+            path.write_text(json.dumps(dict(value,**{key:replacement})))
+            with self.assertRaisesRegex(ValueError,'invalid cached'):
+                life.report_metadata(self.bundle,None)
+
     def test_jobset_release_requires_next_order_and_exact_initial_hold(self):
         jobs={'a':2,'b':2}
         status=dict(packet_sha256=life.owner.PACKET_SHA,state='PROGRESS',errors=[],

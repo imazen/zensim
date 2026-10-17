@@ -439,6 +439,22 @@ def supervise_metadata(bundle, status):
     return value if value.get('state') == 'OK' and value.get('signature') == metadata_signature(status) else None
 
 
+def report_metadata(bundle, metadata):
+    """Reporting fallback only: never use cached counts to admit allocations."""
+    if metadata is not None:
+        return metadata, 'current verified native fold'
+    path = bundle.parent/'launch/SCHEDULER_METADATA.json'
+    if not path.exists():
+        return None, 'no verified native count available'
+    value = read_json(path)
+    if (value.get('state') != 'OK' or value.get('packet_sha256') != owner.PACKET_SHA
+            or value.get('native_fold') is not True or value.get('upload') is not False
+            or value.get('amnesty') is not False or type(value.get('installed')) is not int
+            or not 0 <= value['installed'] <= 172):
+        raise ValueError('invalid cached scheduler count for reporting')
+    return value, 'last verified native fold; current harvest not yet reconciled'
+
+
 def watch(bundle, doc):
     """Supervise bounded allocations; native worker remains the only job scheduler."""
     transition_proof(bundle)
@@ -509,10 +525,12 @@ def watch(bundle, doc):
                 if state_path.exists():
                     state_path.rename(state_path.with_name(state_path.name+'.bak-'+str(time.time_ns())))
                 state_path.write_text(json.dumps(state, indent=2)+'\n')
-        note(dict(action='OBSERVE', installed=status.get('installed'),
+        reported, count_basis = report_metadata(bundle, metadata)
+        note(dict(action='OBSERVE', installed=(status.get('installed') if reported is None else reported.get('installed', status.get('installed'))),
                   harvest_state=status.get('state'), running_hosts=active,
-                  installed_per_host=(None if metadata is None else
-                                      {h: v['installed'] for h, v in metadata['per_host'].items()}),
+                  installed_per_host=(None if reported is None else
+                                      {h: v['installed'] for h, v in reported['per_host'].items()}),
+                  count_basis=count_basis, counts_verified_at=(None if reported is None else reported.get('time')),
                   operator_pause=(launch/'PAUSE_WORKERS').exists()))
         if js is None and not active:
             note(dict(action='COMPLETE', installed=172, workers_drained=True))
