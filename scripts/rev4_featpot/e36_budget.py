@@ -133,9 +133,32 @@ def normalize(root,pixels):
     print(json.dumps(dict(normalized_references=len(refs),fits=0)))
 
 
+def amend(root,features_path):
+    """Cost-only prospective cut, before bulk; retain every earlier receipt."""
+    old=root/'source-budget/plan.json';plan=json.loads(old.read_text())
+    features={r['origin']:r for r in map(json.loads,features_path.read_text().splitlines())}
+    if sha(features_path)!=plan['features_sha256']:raise ValueError('reference embedding owner changed')
+    out=root/'source-budget-v2';out.mkdir();panel=plan['panels']['4096:fast']
+    pool=[plan['references'][k] for k in panel['fallback']]
+    quota=dict(zip(STRATA,[1,1,0,0,1,0,1,2]))
+    selected=choose(pool,quota,features,plan['centroid_receipts'],'4096:fast:mandatory-six')
+    panel['fallback']=[r['reference_key'] for r in selected]
+    assert len(selected)==6 and set(panel['fallback'])<=set(panel['full'])
+    for r in plan['census']:
+        if r['size']==4096 and r['group']=='fast':
+            r['fallback']=6;r['fallback_families']=len({s['family'] for s in selected})
+    plan['supersedes_sha256']=sha(old)
+    plan['amendment']='Mandatory4096 fast sources10 to6: reference-only nested centroids; retain all3 available selection sources; rav1e5 unchanged. Before bulk; measured cost motivation only.'
+    write(out/'plan.json',plan)
+    refs=json.loads((root/'references.json').read_text());refs['source_budget_sha256']=sha(out/'plan.json')
+    write(root/'references-v2.json',refs)
+    print(json.dumps(dict(mandatory_fast_4096=panel['fallback'],source_budget_sha256=sha(out/'plan.json'),labels_read=False,fits=0)))
+
+
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['prepare','normalize'])
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['prepare','normalize','amend'])
     p.add_argument('--root',required=True,type=Path);p.add_argument('--features',type=Path)
     p.add_argument('--initial',type=Path);p.add_argument('--pixels',type=Path);a=p.parse_args()
     if a.mode=='prepare':prepare(a.root,a.features,a.initial)
-    else:normalize(a.root,a.pixels)
+    elif a.mode=='normalize':normalize(a.root,a.pixels)
+    else:amend(a.root,a.features)

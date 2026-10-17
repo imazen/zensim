@@ -1,7 +1,7 @@
 # E36 draft — native TRAIN ladders for core ordering
 
 Revision 4 budget amendment, before any E36 fit. Preparation permits native data generation and
-non-training checks only. No optimizer step, first-epoch smoke, fleet claim or
+non-training checks only. No optimizer step, first-epoch smoke, fit-cell claim or
 model qualification is authorized. The coordinator releases fitting separately.
 
 The existing 97 inverted edges survived same-final-epoch f32 and output-curve
@@ -228,33 +228,33 @@ to JPEG, WebP, JXL and the native SVT AVIF port.
 
 |Longest edge|Reachable of200|rav1e full|Other codec full|rav1e fallback|Other codec fallback|Measured cost basis before bulk|
 |---:|---:|---:|---:|---:|---:|---|
-|32|200|200|200|200|200|five-q native source1520 receipt|
-|40|200|200|200|200|200|per-size preflight pending|
-|48|200|200|200|200|200|per-size preflight pending|
-|64|200|200|200|200|200|per-size preflight pending|
-|80|200|200|200|200|200|per-size preflight pending|
-|96|200|200|200|200|200|per-size preflight pending|
-|128|200|200|200|200|200|per-size preflight pending|
-|160|200|200|200|200|200|per-size preflight pending|
-|192|200|200|200|200|200|per-size preflight pending|
-|256|200|200|200|200|200|five-q native source1520 receipt|
-|320|200|200|200|200|200|per-size preflight pending|
-|384|200|200|200|200|200|per-size preflight pending|
-|512|200|200|200|200|200|per-size preflight pending|
-|640|200|200|200|200|200|per-size preflight pending|
-|768|189|189|189|189|189|per-size preflight pending|
-|1024|186|40|80|8|20|per-size preflight pending|
-|1280|146|20|40|8|20|per-size preflight pending|
-|1536|129|8|20|8|12|per-size preflight pending|
-|2048|121|8|20|8|12|per-size preflight pending|
-|4096|33|5|16|5|10|five-q native source1520 receipt; square witness pending|
+|32|200|200|200|200|200|encode medians 0.004561/0.013575/0.005916/0.003535/0.008481; unique-cell medians 0.096915/0.064877/0.061886/0.028470/0.047296|
+|40|200|200|200|200|200|encode medians 0.003013/0.019645/0.005797/0.003194/0.008842; unique-cell medians 0.038882/0.060958/0.059290/0.026258/0.043661|
+|48|200|200|200|200|200|encode medians 0.008365/0.034666/0.007863/0.003087/0.008657; unique-cell medians 0.069768/0.083693/0.091291/0.023798/0.045065|
+|64|200|200|200|200|200|encode medians 0.003014/0.050174/0.006867/0.003600/0.009752; unique-cell medians 0.024809/0.095112/0.047290/0.030485/0.048474|
+|80|200|200|200|200|200|encode medians 0.004675/0.070003/0.012614/0.003677/0.010488; unique-cell medians 0.040252/0.120458/0.079655/0.036854/0.049460|
+|96|200|200|200|200|200|encode medians 0.004607/0.108335/0.011908/0.004230/0.011059; unique-cell medians 0.040950/0.168301/0.063605/0.030019/0.050975|
+|128|200|200|200|200|200|encode medians 0.004315/0.157374/0.021288/0.004637/0.014353; unique-cell medians 0.057579/0.222593/0.084960/0.037277/0.065169|
+|160|200|200|200|200|200|encode medians 0.004087/0.277186/0.028007/0.005878/0.018390; unique-cell medians 0.041591/0.383357/0.092301/0.058473/0.077346|
+|192|200|200|200|200|200|encode medians 0.005533/0.334103/0.032555/0.007122/0.018429; unique-cell medians 0.166131/0.425012/0.097249/0.077149/0.095658|
+|256|200|200|200|200|200|encode medians 0.006184/0.504239/0.064404/0.007677/0.024871; unique-cell medians 0.078795/0.664088/0.182640/0.069504/0.098467|
+|320|200|200|200|200|200|encode medians 0.006174/0.924121/0.093953/0.012941/0.039760; unique-cell medians 0.088030/1.183969/0.213518/0.135859/0.176062|
+|384|200|200|200|200|200|encode medians 0.008037/1.241351/0.120784/0.012398/0.046233; unique-cell medians 0.123344/1.528536/0.263969/0.133217/0.211946|
+|512|200|200|200|200|200|encode medians 0.011303/2.084153/0.205835/0.020849/0.077573; unique-cell medians 0.177394/2.575877/0.441237/0.219730/0.274000|
+|640|200|200|200|200|200|encode medians 0.018317/3.016449/0.292578/0.027653/0.112142; unique-cell medians 0.390412/3.854734/0.587637/0.321149/0.427055|
+|768|189|189|189|189|189|encode medians 0.021528/4.348998/0.383989/0.054767/0.155276; unique-cell medians 0.393386/5.441512/0.859281/0.653485/0.542643|
+|1024|186|40|80|8|20|encode medians 0.036413/7.458310/0.516240/0.059912/0.275367; unique-cell medians 0.686423/9.735817/1.450641/0.803038/0.990319|
+|1280|146|20|40|8|20|encode medians 0.049936/11.683835/0.802853/0.089413/0.408583; unique-cell medians 0.989209/14.455641/2.193507/1.351896/1.396144|
+|1536|129|8|20|8|12|encode medians 0.068078/15.634002/1.098092/0.135175/0.577065; unique-cell medians 1.572187/20.000195/2.831455/2.018131/1.985772|
+|2048|121|8|20|8|12|encode medians 0.125601/26.937547/1.583742/0.208981/0.834037; unique-cell medians 2.931062/33.754656/4.809152/3.013305/3.750966|
+|4096|33|5|16|5|6|encode medians 0.367785/92.559851/3.129097/0.754497/3.163048; unique-cell medians 10.128724/138.106744/13.493125/12.859013/14.112359|
 
 For1024, full rav1e quotas per class are8fit/2selection, other codecs16/4.
 For1280 they are4/1 and8/2. For1536/2048 they are1/1 and4/1.
 Fallback1024/1280 quotas are1/1 for rav1e and4/1 for other codecs;
 fallback1536/2048 other codecs use2/1. At4096 the full fast allocation is
 photo6fit/1selection, lineart2fit, mixed5fit/2selection; its fallback is
-photo3fit/1selection, lineart1fit, mixed3fit/2selection. Rav1e uses one
+photo1fit/1selection, lineart1fit, mixed1fit/2selection. Rav1e uses one
 reference per available content/split stratum. There are no naturally reachable
 screen sources or lineart-selection sources at4096. These are unavailable,
 not passes or replacements. Retain the three available selection references
@@ -278,9 +278,15 @@ substitution or selection of fastest-finished references is allowed. The
 required-stratum positive-support guard uses the frozen reachable mask; a
 reachable required stratum with no consensus preferences remains blocking.
 
-Before bulk, fill every pending table cost basis from bounded native preflight
-receipts, retain per-size/codec/configuration timings and actual byte/RSS
-observations, and distinguish forecasts from measurements. Do not extrapolate
+The table records observed seconds in JPEG/rav1e/SVT/WebP/JXL order. Encode
+medians use five actual q0/1/20/60/100 commands on source1520 at every size;
+unique complete-cell medians exclude encoded-byte aliases and include native
+encode/decode/scalars/maps/features, inspection and storage. The source is
+3072x4096 at longest edge4096; it is not a square. Retain command-level samples
+and sample counts in MEASURED_STAGE_COSTS-v2.json. No full-grid forecast is
+claimed. V4 alias cell-total fields inherited the original cell timing and are
+invalid for summing ladders; these fields are excluded. The bulk producer
+records actual alias encode/conversion cost and complete ladder wall time. Do not extrapolate
 a fit cost. Preflight/build time is recorded separately from the six-hour bulk
 clock; integration/READY follows generation. The initial2,440-cell subset and
 all earlier pilot renders are diagnostic, never a substitute for bulk coverage.
@@ -306,3 +312,34 @@ projection. Admit actual fused/unfused gradient consumption with non-training
 oracles; do not change control optimizations. Strict external-pool loading,
 base-scaler isolation and zero dropped pairs remain mandatory. No new public
 Rust type/field/signature is needed.
+
+
+### Cost-driven mandatory 4096 amendment, before bulk
+
+The mandatory fast-codec subset at4096 is reduced from10 to6 references;
+full remains16 and rav1e remains5. The six contain one fit and one selection
+photo, one fit line-art source, one fit and both available selection mixed
+sources. Choose fit centroids inside the previously frozen ten-source subset,
+using the same reference-only owner, seed and lexical tie break. Retain all
+three available selection sources and every available content/split stratum.
+No teacher/model value chooses IDs. All other source counts, all61q and all20
+sizes are unchanged. Archive the ten-source proposal and its normalization;
+write a new budget/reference-index version, never replace pinned inputs.
+
+Measured motivation is the five-q native stage census above, plus the actual
+4096x4096 source2018 witness (q0/60/100). Cached-alias totals are excluded;
+the earlier quoted SVT/JXL five-cell sums were inherited metadata and are
+withdrawn. The true-square unique complete-cell medians are JPEG15.099442s,
+rav1e106.481567s, SVT18.445593s, WebP17.630070s and JXL18.578682s.
+These measurements motivate the prospective six-source minimum; they do not
+establish full-grid feasibility. A six-hour actual bulk deadline remains
+binding; an incomplete mandatory matrix cannot qualify READY.
+
+Deduplicate each unordered physical reference/encoded-endpoint pair globally.
+If codec/mode aliases propose the same direction, retain the larger registered
+codec weight, then lexical codec/mode/q metadata as the deterministic tie break;
+never teacher magnitude. Opposite directions for one physical edge refuse
+admission. Report raw proposals and unique effective support separately.
+Private TV scaling can be computed on sampled compact rows using the frozen
+base scaler, with the identical f64 arithmetic, avoiding a second full-pool
+standardized copy. This changes no objective, scaler fit or sampler stream.

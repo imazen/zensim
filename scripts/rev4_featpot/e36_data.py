@@ -154,7 +154,7 @@ class Runtime:
             convert=[self.tool,'--use-legacy-scheduler','--bench-on-start','no','sweep','--codec','zenpng',
                 '--sources',encoded_dir,'--q-grid','0','--knob-grid','{"compression":["none"]}',
                 '--metric','psnr','--gpu-runtime','cpu','--jobs','1','--output',cell/'convert.tsv','--encoded-out-dir',decoded_dir]
-            self.call(convert,cell/'convert.log',deadline)
+            convert_timing=self.call(convert,cell/'convert.log',deadline)
             pixels=list(decoded_dir.iterdir());assert len(pixels)==1;decoded=pixels[0]
             actual_knobs=knobs
         encoded_sha=sha(encoded)
@@ -170,6 +170,10 @@ class Runtime:
             prior['physical_alias']=True
             prior['physical_alias_of']=dict(q=cache[encoded_sha]['q'],mode_key=cache[encoded_sha]['mode_key'])
             prior['encode_execution']=encode_timing
+            if mode!='baseline':prior['convert_execution']=convert_timing
+            prior['encode_reused']=False
+            prior['artifact_persistence_seconds']=0.0
+            prior['cell_total_seconds']=time.monotonic()-started
             return prior
         # File URI input must be named by its content digest (native ingress
         # verifies it). This link is temporary; the canonical bundle follows.
@@ -229,7 +233,8 @@ class Runtime:
             butteraugli_pnorm3=butter,cvvdp_standard_fhd=cv,scalar_precision='native JSON f64',
             native_scores=scores,maps=maps,encode_execution=encode_timing,score_execution=score_timing,
             feature_execution=feature_timing,oracle_execution=oracle_timing,oracle=oracle_receipt,tool_sha256=self.pin['binary_sha256'],
-            feature_tool_sha256=self.pin['pixel_binary_sha256'],physical_alias=False)
+            feature_tool_sha256=self.pin['pixel_binary_sha256'],physical_alias=False,encode_reused=False)
+        if mode!='baseline':info['convert_execution']=convert_timing
         write(cell/'metadata.json',info)
         diagnostics=cell/'diagnostics.tar.gz'
         with tarfile.open(diagnostics,'w:gz',compresslevel=1) as archive:
@@ -258,6 +263,7 @@ class Runtime:
         return info
 
     def execute(self,job):
+        ladder_started=time.monotonic()
         if job['kind']['kind']!='bake' or not job['kind']['view'].startswith(PREFIX):
             raise ValueError('executor accepts only the versioned data view, never fit jobs')
         view=json.loads(job['kind']['view'][len(PREFIX):])
@@ -300,6 +306,9 @@ class Runtime:
             if physical_key in native_aliases:
                 result=copy.deepcopy(native_aliases[physical_key]);result['q']=cell['q']
                 result['native_alias']=cell.get('native_alias');result['physical_alias']=True
+                result['encode_reused']=True
+                result['artifact_persistence_seconds']=0.0
+                result['cell_total_seconds']=0.0
             else:
                 result=self.execute_cell(ref,view['codec'],native,cell['knobs'],cell.get('physical_q',cell['q']),stage/str(i),deadline,cache,cell['mode'])
                 native_aliases[physical_key]=copy.deepcopy(result)
@@ -316,6 +325,7 @@ class Runtime:
             if (stage/str(i)).exists():shutil.rmtree(stage/str(i))
         output=dict(schema='e36-native-ladder-receipt-v1',fits=0,labels_read=False,view=view,
             rows=receipts,runtime_sha256=self.spec_sha,stage=str(stage),complete=True,
+            ladder_wall_seconds=time.monotonic()-ladder_started,completed_unix=time.time(),
             alias_contract='native emitted physical cells; requested mode/q aliases are joined from the frozen native inventory')
         payload=gzip.compress(canonical(output).encode(),compresslevel=1,mtime=0)
         stage.rmdir()
