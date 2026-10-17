@@ -43,9 +43,14 @@ def write(path,value):
 
 def png_sha(path,width,height):
     with Image.open(path) as im:
-        if im.size!=(width,height) or im.mode!='RGB':
-            raise ValueError('native materialized pixels must be RGB8 at the registered dimensions')
-        return hashlib.sha256(im.tobytes()).hexdigest()
+        if im.size!=(width,height) or im.mode not in ['RGB','RGBA','P','L','LA','1']:
+            raise ValueError('native materialized pixels must be lossless 8-bit PNG at the registered dimensions')
+        if im.convert('RGBA').getextrema()[3]!=(255,255):
+            raise ValueError('decoded materialization is not opaque; no matte conversion is admitted')
+        # PNG may losslessly store a constant decode using indexed/gray pixels.
+        # This is independent readback only: the exact expanded RGB hash MUST
+        # equal both native ScoreFile and native feature extraction below.
+        return hashlib.sha256(im.convert('RGB').tobytes()).hexdigest()
 
 
 def validate_scores(rows,reference_pixels,distorted_pixels):

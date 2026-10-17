@@ -9,9 +9,18 @@ import tempfile
 import unittest
 
 sys.path.insert(0,str(Path(__file__).parents[1]/'rev4_featpot'))
-from e36_data import validate_scores,validate_map,read_exact
+from e36_data import validate_scores,validate_map,read_exact,png_sha
 
 class AdmissionTests(unittest.TestCase):
+    def test_lossless_png_storage_expansion_and_opacity(self):
+        from PIL import Image
+        import hashlib
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-png-test-') as d:
+            p=Path(d)/'pixels.png'
+            im=Image.new('P',(2,2));im.putpalette([17,29,41]+[0]*765);im.save(p)
+            self.assertEqual(png_sha(p,2,2),hashlib.sha256(bytes([17,29,41])*4).hexdigest())
+            Image.new('RGBA',(2,2),(17,29,41,254)).save(p)
+            with self.assertRaisesRegex(ValueError,'not opaque'):png_sha(p,2,2)
     def scores(self):
         return [dict(metric='butteraugli',scores={'butteraugli_pnorm3':2.25},score=2.25,
             reference_pixels_sha256='r',distorted_pixels_sha256='d'),
