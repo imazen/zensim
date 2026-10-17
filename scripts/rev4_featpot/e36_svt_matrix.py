@@ -354,6 +354,18 @@ def admit(root,names):
         if terminal['schema']!='e36-native-continuation-final-v1' or terminal['fits']!=0 or terminal['scientific_change'] is not False or checked(terminal['continuation'])!=continuation_path:
             raise ValueError('native continuation final evidence differs')
         for key in ['log','exit','helper_exits']:checked(terminal[key])
+        audit_path=root/'owner-svt-ssd-v1/runtime-audit-admission-v1.json'
+        if checked(terminal['runtime_audit'])!=audit_path:raise ValueError('actual native runtime audit missing')
+        audit=json.loads(audit_path.read_text())
+        if audit['schema']!='e36-live-runtime-audit-admission-v1' or audit['admitted'] is not True or audit['fits']!=0 or len(audit['receipts'])!=24:
+            raise ValueError('actual24-executor source audit required')
+        checked(audit['source']);checked(audit['runtime'])
+        audited_pids=set()
+        for pin in audit['receipts']:
+            observed=json.loads(checked(pin).read_text())
+            if observed['pid'] in audited_pids or observed['admitted'] is not True or observed['fits']!=0 or observed['runtime_sha256']!=audit['runtime']['sha256'] or observed['deadline_unix']!=clock['deadline_unix']:
+                raise ValueError('live executor source/deadline differed')
+            audited_pids.add(observed['pid'])
         supervision_path=root/'owner-svt-ssd-v1/continuation-supervision-v2-binding.json'
         if supervision_path.exists() and checked(terminal['supervision'])!=supervision_path:
             raise ValueError('native continuation live supervision evidence missing')

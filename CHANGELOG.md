@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+None.
+
+### Changed
+
+- Continue E36 through its original native ledger under a fresh registered-deadline wrapper; preserve resource supervision across helper and controller failures, and bind actual executor/source/terminal evidence before fitting (`84ec2ee7`, `9ea5ffed`). No fit release.
+
 - Honor the prospective E36 SVT-only AVIF matrix, preserving exact native identities and original budget proofs; retain hash-verified local SSD artifact ownership through recorded tower relocations (`538c0aeb940e`). Fits remain unreleased.
 
 - SHIPGATES: derive SVT-only AVIF addressability views, retain strict native A7r and report the separate mentor-direction diagnostic (`c9546612`); refuse new AVIF gate cells through the legacy Zenravif driver.

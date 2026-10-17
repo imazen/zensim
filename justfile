@@ -2277,6 +2277,9 @@ e36-disk-finish-projection root compute output:
 e36-lossless-archive-probe root output:
     ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/rev4_featpot/e36_archive_probe.py --root {{quote(root)}} --out {{quote(output)}}
 
+e36-native-continuation-close root:
+    python3 scripts/rev4_featpot/e36_close_continuation.py --root {{quote(root)}}
+
 e36-owner-amendment-check:
     TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_owner_amendment.py scripts/tests/test_e36_disk_policy.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_materialize.py
 
