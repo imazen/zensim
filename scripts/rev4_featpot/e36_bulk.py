@@ -1,6 +1,5 @@
 """Freeze E36 native data views; zenfleet alone schedules and records execution."""
 import argparse
-import collections
 import gzip
 import hashlib
 import json
@@ -181,39 +180,8 @@ def run(root,name,slots,hours=None,deadline=None):
 
 
 def census(root,name):
-    out=root/'runs'/name;rows=[];files=[];completed=[]
-    for p in sorted((out/'blobs').rglob('*')):
-        if not p.is_file():continue
-        try:doc=json.loads(gzip.decompress(p.read_bytes()))
-        except (ValueError,OSError):continue
-        if doc.get('schema')!='e36-native-ladder-receipt-v1':continue
-        if not doc['complete']:raise ValueError('incomplete output')
-        rows.extend(doc['rows']);files.append(dict(path=str(p),sha256=sha(p)))
-        completed.append(PREFIX+canonical(doc['view']))
-    groups=collections.defaultdict(list)
-    for r in rows:groups[f"{r['size']}:{r['codec']}"] .append(r)
-    stats={}
-    import statistics
-    for k,values in groups.items():
-        physical=[r for r in values if not r['physical_alias']]
-        stats[k]=dict(logical=len(values),physical=len(physical),
-            stage_median_seconds={s:statistics.median(r[s]['wall_seconds'] for r in physical) for s in ['encode_execution','score_execution','feature_execution']},
-            peak_native_rss_kib=max(r[s]['peak_rss_kib'] for r in physical for s in ['encode_execution','score_execution','feature_execution']),
-            bundle_bytes=sum(r['bundle']['bytes'] for r in physical)) if physical else dict(logical=len(values),physical=0)
-        if physical and all('cell_total_seconds' in r for r in physical):
-            stats[k].update(total_median_seconds=statistics.median(r['cell_total_seconds'] for r in physical),
-                total_sum_seconds=sum(r['cell_total_seconds'] for r in physical),
-                persistence_sum_seconds=sum(r['artifact_persistence_seconds'] for r in physical),
-                map_sum_seconds=sum(m['execution']['wall_seconds'] for r in physical for m in r['maps']),
-                peak_native_rss_kib=max([r[s]['peak_rss_kib'] for r in physical
-                    for s in ['encode_execution','score_execution','feature_execution','oracle_execution']]
-                    +[m['execution']['peak_rss_kib'] for r in physical for m in r['maps']]))
-    expected=[j['kind']['view'] for j in json.loads((out/'manifest.json').read_text())]
-    admitted=len(completed)==len(set(completed)) and set(completed)==set(expected)
-    result=dict(schema='e36-data-census-v1',fits=0,completed_ladders=len(files),logical_rows=len(rows),
-        output_receipts=files,groups=stats,admitted=admitted,declared_ladders=len(expected))
-    write(out/'census.json',result);print(canonical({k:result[k] for k in ['admitted','completed_ladders','declared_ladders','logical_rows','fits']}))
-    if not admitted:raise ValueError('native ledger outputs do not complete the declared matrix')
+    from e36_census_stream import census as stream
+    return stream(root,name)
 
 
 
