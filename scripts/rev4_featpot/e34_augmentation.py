@@ -1,4 +1,4 @@
-"""Label-free E34 source inventory; explicit inputs, fresh outputs, no label reads.
+"""Label-free E34/E36 source inventory and reference-only selection.
 
 The canonical split owner is imported from its pinned capture. Pixel operations
 and dHash belong to the native e34_pixels and check_holdout_overlap executables.
@@ -205,11 +205,30 @@ def reference_job(a):
     write(root/'reference-features-job.json',dict(output=str(root/'reference-features.jsonl'),rows=rows))
 
 
-def select(a):
+
+def cluster(panel, k, seed):
     import numpy as np
-    import sklearn
     from sklearn.cluster import KMeans
     from threadpoolctl import threadpool_limits
+    assert len(panel)>=k
+    x=np.asarray([[v for _,v in r['features']] for r in panel],dtype=np.float64)
+    assert np.isfinite(x).all()
+    mu=x.mean(axis=0);sd=x.std(axis=0);sd[sd==0]=1
+    z=(x-mu)/sd
+    with threadpool_limits(limits=1):
+        fit=KMeans(n_clusters=k,random_state=seed,n_init=4).fit(z)
+    assert len(set(fit.labels_))==k
+    picks=[];sizes=[]
+    for c in range(k):
+        ix=np.flatnonzero(fit.labels_==c)
+        assert len(ix)>0
+        chosen=ix[np.square(z[ix]-fit.cluster_centers_[c]).sum(axis=1).argmin()]
+        picks.append(panel[int(chosen)]['origin']);sizes.append(len(ix))
+    return dict(origins=picks,cluster_sizes=sizes,singletons=sum(n==1 for n in sizes),
+        means=mu.tolist(),scales=sd.tolist(),inertia=float(fit.inertia_),iterations=int(fit.n_iter_),seed=seed,n_init=4)
+
+def select(a):
+    import sklearn
     root=Path(a.root)
     admission=json.loads((root/'eligibility.json').read_text())
     eligible={r['origin']:r for r in admission['eligible']}
@@ -218,23 +237,6 @@ def select(a):
     assert {r['origin'] for r in rows}==eligible.keys()
     feature_ids=[int(k) for k,v in rows[0]['features']]
     assert all([int(k) for k,v in r['features']]==feature_ids for r in rows)
-    def cluster(panel,k,seed):
-        assert len(panel)>=k
-        x=np.asarray([[v for _,v in r['features']] for r in panel],dtype=np.float64)
-        assert np.isfinite(x).all()
-        mu=x.mean(axis=0);sd=x.std(axis=0);sd[sd==0]=1
-        z=(x-mu)/sd
-        with threadpool_limits(limits=1):
-            fit=KMeans(n_clusters=k,random_state=seed,n_init=4).fit(z)
-        assert len(set(fit.labels_))==k
-        picks=[];sizes=[]
-        for c in range(k):
-            ix=np.flatnonzero(fit.labels_==c)
-            assert len(ix)>0
-            chosen=ix[np.square(z[ix]-fit.cluster_centers_[c]).sum(axis=1).argmin()]
-            picks.append(panel[int(chosen)]['origin']);sizes.append(len(ix))
-        return dict(origins=picks,cluster_sizes=sizes,singletons=sum(n==1 for n in sizes),
-            means=mu.tolist(),scales=sd.tolist(),inertia=float(fit.inertia_),iterations=int(fit.n_iter_),seed=seed,n_init=4)
     augmentation=cluster(rows,128,17)
     families={eligible[o]['family'] for o in augmentation['origins']}
     dev=cluster([r for r in rows if eligible[r['origin']]['family'] not in families],8,18)
@@ -250,6 +252,213 @@ def select(a):
         augmentation_singletons=augmentation['singletons'],dev_singletons=dev['singletons'],family_overlap=0)))
 
 
+
+def e36_select(a):
+    """Rebind native E34 audits; no label payload or third-party pixel reader."""
+    import math
+    import sklearn
+    root = admitted(a.root)
+    out = Path(a.out)
+    out.mkdir(exist_ok=False)
+    inv = json.loads((root / 'inventory.json').read_text())
+    eligibility = json.loads((root / 'eligibility.json').read_text())
+    audit_rows = json.loads((root / 'audit.hashes.json').read_text())
+    assert audit_rows['threshold'] == 10
+    for name, digest in eligibility['bindings'].items():
+        assert sha(root / name) == digest, name
+    for binding in [inv['family_map'], inv['split_owner'], *inv['keys_bindings']]:
+        assert sha(admitted(binding['path'])) == binding['sha256'], binding['path']
+    previous = json.loads((root / 'selection.json').read_text())
+    assert sha(root / 'reference-features.jsonl') == previous['reference_features_sha256']
+    assert sha(root / 'eligibility.json') == previous['eligibility_receipt_sha256']
+    audit = {r['path']: r for r in audit_rows['training']}
+    v2_path = admitted(a.family_v2)
+    v2 = {r['id']: r for r in csv.DictReader(v2_path.open(), delimiter='\t')}
+    def family(oid):
+        return v2[oid]['family'] or 'origin:' + oid
+    eligible = [dict(r, previous_family=r['family'], family=family(r['origin']))
+                for r in eligibility['eligible']
+                if r['origin'] in v2 and v2[r['origin']]['split'] == 'train']
+    dev = set(previous['development']['origins'])
+    dev_hashes = [audit[r['source']]['dhash'] for r in eligibility['eligible'] if r['origin'] in dev]
+    excluded = {family(r['origin']) for r in eligibility['rejected'] if r['origin'] in v2}
+    excluded |= {family(oid) for oid in dev if oid in v2}
+    excluded |= {r['family'] for r in eligible if r['origin'] in dev or any(
+        (audit[r['source']]['dhash'] ^ h).bit_count() <= 10 for h in dev_hashes)}
+    # All new panel references must already be represented in the native exclusion
+    # audit. A new reference refuses admission; it needs the native audit owner.
+    covered = {r['source_sha256'] for r in inv['exclusions']}
+    panel_bindings = []
+    for name in a.panel:
+        p = admitted(name)
+        refs = {r['reference'] for r in json.loads(p.read_text())['cases']}
+        hashes = {sha(admitted(ref)) for ref in refs}
+        assert hashes <= covered, f'new panel needs native overlap audit: {p}'
+        panel_bindings.append(dict(path=str(p), sha256=sha(p), references=len(refs)))
+    candidates = []
+    def content(oid):
+        n = int(oid)
+        if 6600 <= n < 6800:
+            return None  # illustrated color plates are outside line-art admission
+        return ('photo' if 1000 <= n < 5000 else 'mixed' if 5000 <= n < 6000
+                else 'lineart' if 6000 <= n < 8000 else 'screen' if 8000 <= n < 9000 else None)
+    for r in eligible:
+        if r['family'] in excluded or content(r['origin']) is None:
+            continue
+        native = audit[r['source']]
+        assert native['sha256'] == r['source_sha256']
+        assert sha(admitted(r['source'])) == r['source_sha256']
+        candidates.append(dict(r, content=content(r['origin']),
+                               width=native['width'], height=native['height']))
+    if a.prepare_color_only:
+        write(out/'candidates.json',dict(rows=candidates,labels_read=False))
+        write(out/'probe-job.json',dict(mode='probe',rows=candidates,output=str(out/'probe.jsonl')))
+        print(json.dumps(dict(candidate_sources=len(candidates),status='native-color-probe-pending')))
+        return
+    color_rejected_families = set()
+    if a.color_probe:
+        probes = {r['source_sha256']:r for r in map(json.loads,admitted(a.color_probe).read_text().splitlines())}
+        assert {r['source_sha256'] for r in candidates} == probes.keys()
+        def opaque_admitted(probe):
+            if 'srgb_opaque_admitted' in probe:
+                return probe['srgb_opaque_admitted'] is True
+            # Exact projection of the retained native metadata receipt to the
+            # stricter opaque policy. Neither field may be absent.
+            return probe['srgb_white_admitted'] is True and probe['has_alpha'] is False
+        color_rejected_families = {r['family'] for r in candidates
+            if not opaque_admitted(probes[r['source_sha256']])}
+        candidates = [r for r in candidates if r['family'] not in color_rejected_families]
+    extra_quarantine = set()
+    if a.quarantine_origins:
+        ids = json.loads(admitted(a.quarantine_origins).read_text())['origins']
+        assert all(oid in v2 for oid in ids)
+        extra_quarantine = {family(oid) for oid in ids}
+        candidates = [r for r in candidates if r['family'] not in extra_quarantine]
+    features = {r['origin']: r for r in map(json.loads,
+        (root / 'reference-features.jsonl').read_text().splitlines())}
+    # A family must have one semantic class; unexpected cross-class lineage needs
+    # an explicit global split instead of independent per-class assignment.
+    family_class = {}
+    for r in candidates:
+        assert family_class.setdefault(r['family'], r['content']) == r['content']
+    selected, clusters, census = [], {}, {}
+    for cls in ['photo', 'screen', 'lineart', 'mixed']:
+        rows = sorted([r for r in candidates if r['content'] == cls], key=lambda r:r['origin'])
+        families = sorted({r['family'] for r in rows},
+            key=lambda f:(hashlib.sha256(('e36:family:' + f).encode()).hexdigest(), f))
+        n = math.ceil(.2 * len(families))
+        while sum(r['family'] in set(families[:n]) for r in rows) < 10:
+            n += 1
+        selection_families = set(families[:n])
+        cls_picks = []
+        for split, k in [('fit', 40), ('selection', 10)]:
+            pool = [r for r in rows if (r['family'] in selection_families) == (split == 'selection')]
+            result = cluster([features[r['origin']] for r in pool], k, 36)
+            clusters[cls + ':' + split] = result
+            origins = set(result['origins'])
+            cls_picks.extend(dict(r, split=split) for r in pool if r['origin'] in origins)
+        sf = {r['family'] for r in cls_picks if r['split'] == 'selection'}
+        ff = {r['family'] for r in cls_picks if r['split'] == 'fit'}
+        assert not sf & ff and len(sf) >= .2 * (len(sf) + len(ff))
+        assert len(cls_picks) == 50
+        selected.extend(cls_picks)
+        census[cls] = dict(candidates=len(rows), candidate_families=len(families),
+                          selected=50, fit=40, selection=10,
+                          selected_fit_families=len(ff), selected_selection_families=len(sf))
+    assert len({r['family'] for r in selected}) >= 50
+    fit_rows = [r for r in selected if r['split'] == 'fit']
+    selection_rows = [r for r in selected if r['split'] == 'selection']
+    internal_flags = [dict(fit=x['origin'], selection=y['origin'],
+        hamming=(audit[x['source']]['dhash'] ^ audit[y['source']]['dhash']).bit_count())
+        for x in fit_rows for y in selection_rows
+        if (audit[x['source']]['dhash'] ^ audit[y['source']]['dhash']).bit_count() <= 10]
+    sizes = [32,40,48,64,80,96,128,160,192,256,320,384,512,640,768,1024,1280,1536,2048,4096]
+    reachability = []
+    for r in selected:
+        for size in sizes:
+            reachability.append(dict(origin=r['origin'], content=r['content'], split=r['split'],
+                size=size, reachable=size <= max(r['width'], r['height'])))
+    receipt = dict(schema='e36-reference-selection-v1', labels_read=False,
+        status='source-byte-native-overlap-and-color-admitted' if a.color_probe else 'source-byte-and-native-overlap-admitted; color-probe-pending',
+        native_color_probe=None if not a.color_probe else dict(path=a.color_probe,sha256=sha(a.color_probe)),
+        color_rejected_families=sorted(color_rejected_families),
+        extra_quarantine_families=sorted(extra_quarantine),
+        quarantine_origins_binding=None if not a.quarantine_origins else dict(path=a.quarantine_origins,sha256=sha(a.quarantine_origins)),
+        rows=selected, census=census, clusters=clusters, sklearn_version=sklearn.__version__,
+        internal_overlap=dict(threshold=10, flags=internal_flags,
+            admitted=not internal_flags,
+            action='quarantine both endpoint families and repeat selection if flagged'),
+        tiny_definition='presented dimensions <=64, orthogonal; no upscaling',
+        tiny_source_families=len({r['family'] for r in selected}),
+        prior_development_family_exclusions=sorted(excluded), panels=panel_bindings,
+        bindings={name:sha(root/name) for name in ['inventory.json', 'eligibility.json',
+            'audit.hashes.json', 'reference-features.jsonl', 'selection.json']},
+        current_family_v2=dict(path=str(v2_path), sha256=sha(v2_path)),
+        quarantined_missing_current_origin=[r['origin'] for r in eligibility['eligible'] if r['origin'] not in v2],
+        inherited_lineage_limit=eligibility['safesyn_conclusion'],
+        reachability=reachability)
+    write(out / 'selection.json', receipt)
+    write(out / 'probe-job.json', dict(mode='probe', rows=selected, output=str(out/'color-probe.jsonl')))
+    print(json.dumps(dict(census=census, tiny_families=receipt['tiny_source_families'],
+        reachable_renditions=sum(r['reachable'] for r in reachability),
+        unreachable_renditions=sum(not r['reachable'] for r in reachability))))
+
+
+def e36_close_cohort(a):
+    """Repeat metadata-only selection after conservative whole-family removals."""
+    import copy
+    out = Path(a.out)
+    out.mkdir(exist_ok=False)
+    origins = set(json.loads(admitted(a.quarantine_origins).read_text())['origins'])
+    history = []
+    for iteration in range(100):
+        quarantine = out / f'quarantine-{iteration}.json'
+        write(quarantine, dict(origins=sorted(origins), labels_read=False,
+            reason='whole-family quarantine of alpha and native dHash <=10 cross-split neighbors'))
+        args = copy.copy(a)
+        args.out = str(out / f'selection-{iteration}')
+        args.quarantine_origins = str(quarantine)
+        args.prepare_color_only = False
+        e36_select(args)
+        selected = Path(args.out) / 'selection.json'
+        receipt = json.loads(selected.read_text())
+        flags = receipt['internal_overlap']['flags']
+        history.append(dict(selection=str(selected), sha256=sha(selected), flags=flags))
+        if not flags:
+            write(out / 'complete.json', dict(selection=str(selected), sha256=sha(selected),
+                labels_read=False, fits=0, history=history))
+            return
+        prior = len(origins)
+        origins.update(oid for flag in flags for oid in [flag['fit'], flag['selection']])
+        assert len(origins) > prior, 'internal quarantine made no progress'
+    raise RuntimeError('internal source-family closure did not converge')
+
+
+def e36_base_exclusions(a):
+    root = admitted(a.root)
+    selection_path = admitted(a.selection)
+    selection = json.loads(selection_path.read_text())
+    inventory = json.loads((root/'inventory.json').read_text())
+    audit = {r['path']:r for r in json.loads((root/'audit.hashes.json').read_text())['training']}
+    for name in ['inventory.json','audit.hashes.json']:
+        assert sha(root/name)==selection['bindings'][name]
+    safe = [audit[p] for p in inventory['safesyn_sources']]
+    rows = []
+    for source in selection['rows']:
+        if source['split']!='selection':
+            continue
+        native = audit[source['source']]
+        matches = [dict(path=r['path'],sha256=r['sha256'],
+            hamming=(native['dhash']^r['dhash']).bit_count()) for r in safe
+            if (native['dhash']^r['dhash']).bit_count()<=10]
+        if matches:
+            rows.append(dict(origin=source['origin'],family=source['family'],matches=matches))
+    write(a.out,dict(schema='e36-train-selection-base-exclusion-v1',labels_read=False,
+        selection_sha256=sha(selection_path),threshold=10,rows=rows,
+        scope='remove these and family relatives from every base optimization/scaling/calibration input before fitting',
+        complete_base_group_admission=False))
+    print(json.dumps(dict(families_needing_safesyn_filter=len(rows),complete_base_group_admission=False)))
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='command', required=True)
@@ -261,8 +470,21 @@ def main():
         c=sub.add_parser(command)
         c.add_argument('--root',required=True)
         if command=='audit':c.add_argument('--context-review',required=True)
+    for command in ['e36-select', 'e36-close-cohort']:
+        e = sub.add_parser(command)
+        e.add_argument('--root', required=True)
+        e.add_argument('--out', required=True)
+        e.add_argument('--panel', action='append', required=True)
+        e.add_argument('--family-v2', required=True)
+        e.add_argument('--prepare-color-only', action='store_true')
+        e.add_argument('--color-probe', required=command == 'e36-close-cohort')
+        e.add_argument('--quarantine-origins', required=command == 'e36-close-cohort')
+    b = sub.add_parser('e36-base-exclusions')
+    b.add_argument('--root', required=True)
+    b.add_argument('--selection', required=True)
+    b.add_argument('--out', required=True)
     a = p.parse_args()
-    {'inventory':inventory,'audit':audit,'reference-job':reference_job,'select':select}[a.command](a)
+    {'inventory':inventory,'audit':audit,'reference-job':reference_job,'select':select,'e36-select':e36_select,'e36-close-cohort':e36_close_cohort,'e36-base-exclusions':e36_base_exclusions}[a.command](a)
 
 
 if __name__ == '__main__':
