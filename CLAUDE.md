@@ -699,3 +699,17 @@ The complete12684-view replay subsequently passed all1884support strata and
 both semantic exports; the formerlyempty stratum retains38unique preferences
 afterglobaldeduplication. Fullarchive/nativepool/packageadmission remains
 required before the authorized bounded diagnostic. No scientificfit released.
+
+### Known Bugs: E36 amendment and diagnostic ingress (2026-10-17)
+
+The actual full-pool native reader refused because its original budget-equality
+check did not recognize the approved4096source cut. Exact registered amendment
+identity now binds original/effective/runtime hashes; original inputs retain
+the old equality. The bootstrap/options/native CLI also rejected the authorized
+2:128 diagnostic. Native executor-derived authorization now admits only its
+exact full-data tv10seed0 route,with unchanged full120/50000 and output guards.
+A finalizer initially attached the outer binding rather than its nested
+authorization; this is corrected and tested. A rebuilt feature-only probe
+passes with zero optimizer steps and label reads. Numerical sources are
+unchanged; preserve old identities and bind the recorded successor before
+fitting. Actualsmoke and finalarchive/packageadmission remain pending.

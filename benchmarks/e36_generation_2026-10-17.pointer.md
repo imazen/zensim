@@ -80,3 +80,24 @@ receiver rehash,closed native/raw-drain seals and restorable locator remain
 required. Originalv1 USTAR validation stays strict. This is a storage-format
 extension; no fitting or teacher rule changes. Actual large transport proof
 remains part of final metadata admission.
+
+2026-10-17 native-ingress successor: the original reader rejected the effective
+source-budget hash before optimization. The repaired reader recognizes the
+exact approved amendment,retaining original equality for unamended input.
+`ingress-integration-v1/receipt.json` SHA256b14beda10a783e9dc22b7f17c6c784b7d65dee526780ee131e78e15ae3a8a63e records
+source170dabe93463bca9a781a8cf65f2a3adf76b6fc9,nativeowner
+66ac610c528e1c89da6b00cf92d6b3ec5cee4ce4 and preserved predecessors.
+Only two compiled ingress Rust files changed;521other Rust/Cargo files are
+unchanged,with a standalone non-Cargo assessment adapter separately reported.
+Only e36_training.py changes in the49-file Python runtime closure.
+Numerical optimizer,TV gradient/normalization,RNG,weights,margins and feature
+code remain unchanged. Successor trainer SHA256
+ff7d9523e519192ac19dd0b356bfedad95c3d7ce925c0679b5742f3f884dbec6;
+protocol447d5fa0aefd18f1a1e8881b94c8182cb523354f82846de208ae6716ce472898.
+
+The corrected nontraining native probe admitted558295fitfeatures/2201054
+preferences,zero dropped/optimizer steps/label reads.
+`ACTUAL-POOL-PREADMIT-v2.log`:run-heavy rc0,10s,peak-RSS3.94GiB,
+minavailable36029MiB,peakload1.14. This is ingress memory,notfit memory.
+Final archive/finalized-pool/native-package admission and the separately
+authorized bounded diagnostic remain required. The129 scientificfits awaitgo.
