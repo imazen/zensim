@@ -40,7 +40,7 @@ def run(root,manifest,prepared,binary,out):
         raise ValueError('current cohort/panel preparation binding differs')
     family_path=Path(cohort['current_family_v2']['path'])
     if sha(family_path)!=cohort['current_family_v2']['sha256']:raise ValueError('current canonical family owner changed')
-    families={r['id']:r for r in csv.DictReader(family_path.open(),delimiter='\t')}
+    with family_path.open() as f:families={r['id']:r for r in csv.DictReader(f,delimiter='\t')}
     used={r['family'] for r in cohort['rows']};family_checks=[]
     for source in panel['sources']:
         match=re.fullmatch(r'imazen-screen-(\d+)',source['name'])

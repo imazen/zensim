@@ -2327,3 +2327,12 @@ choice and native source-withheld checkpoint identities lock. Native E34
 score-unit replay must then establish exact prediction/target/source-row
 correspondence. No E36 fit or optimizer smoke has run; actual completed-matrix,
 final binary, pool and package admission remain required.
+
+The corrected 27-reference ship panel receives a separate native exclusion
+replay against all 200 frozen E36 sources before data packaging. This reuses
+`check_holdout_overlap --native-png`, threshold 10 and its existing hash era;
+any strict flag blocks admission. Known imazen canonical families must also
+be absent. GB82 provenance remains declared namespace plus pixel screening,
+with no claim of independently reconstructed cross-corpus lineage. The
+snapshot and copied native reference bytes are hash-bound; a manifest change
+during the audit refuses a passed receipt. This replay is still pending.
