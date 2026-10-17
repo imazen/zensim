@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 from e36_store import sha
+from e36_training import protocol_source_sha
 
 
 def run(binary,pool,out):
@@ -25,7 +26,11 @@ def run(binary,pool,out):
     r=rows[0]
     if (r.get('schema')!='e36-tv-admission-v1' or r.get('feature_rows')!=m['feature_rows']
             or r.get('pairs')!=m['pair_rows'] or r.get('dropped_pairs')!=0
-            or r.get('optimizer_steps')!=0 or r.get('labels_read') is not False):
+            or r.get('optimizer_steps')!=0 or r.get('labels_read') is not False
+            or r.get('binary_sha256')!=sha(binary) or r.get('cfg_e36_tv') is not True
+            or r.get('embedded_protocol_source_sha256')!=protocol_source_sha(Path(__file__).resolve().parents[2])
+            or r.get('output_polarity')!='score' or r.get('raw_definition')!='pin-g'
+            or r.get('improvement')!='raw(better)-raw(worse)'):
         raise ValueError('actual native pool admission incomplete')
     result=dict(schema='e36-actual-pool-admission-v1',binary_sha256=sha(binary),manifest_sha256=sha(manifest),
         contract_sha256=sha(contract),consensus_source_sha256=sha(owner),argv=argv,native=r,

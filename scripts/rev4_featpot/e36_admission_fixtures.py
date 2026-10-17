@@ -99,6 +99,11 @@ def run(binary,layout,out):
         if (r.returncode==0)!=expected:raise ValueError(f'{name}: incorrect admission result rc{r.returncode}: {r.stderr}')
         if expected:
             receipt=json.loads(r.stdout.strip().splitlines()[-1]);assert receipt['optimizer_steps']==0 and receipt['labels_read'] is False and receipt['dropped_pairs']==0
+            from e36_training import protocol_source_sha
+            assert receipt['binary_sha256']==sha(binary) and receipt['cfg_e36_tv'] is True
+            assert receipt['embedded_protocol_source_sha256']==protocol_source_sha(Path(__file__).resolve().parents[2])
+            assert receipt['output_polarity']=='score' and receipt['raw_definition']=='pin-g'
+            assert receipt['improvement']=='raw(better)-raw(worse)'
         results.append(dict(case=name,expected_accept=expected,returncode=r.returncode,manifest_sha256=sha(path)))
     write(out/'result.json',dict(schema='e36-invented-ingress-fixtures-v1',fits=0,optimizer_steps=0,
         real_labels_read=False,binary_sha256=sha(binary),cases=results,passed=True))

@@ -115,15 +115,16 @@ def local_import_closure(source,members):
 
 def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     """Use native program packaging; freeze qualification without fitting."""
-    from e36_training import curated_projection,SPEC,ARMS
+    from e36_training import curated_projection,protocol_source_sha,SPEC,ARMS
     receipt=json.loads((packet_dir/'data-receipt.json').read_text())
     if sha(packet_dir/'data.tar.gz')!=receipt['sha256'] or sha(binaries/'zensim_mlp_train')!=receipt['trainer_sha256']:
         raise ValueError('E36 program/data/trainer mismatch')
     mask=root/'matched-base-filter-plan-v2.json'
     projections=curated_projection(mask,packet_dir/'curated-projection')
-    protocol_files=['zensim-validate/src/bin/e36_tv/mod.rs','zensim-validate/src/bin/zensim_mlp_train.rs',
-        'zensim-validate/src/mlp_train/mod.rs','zensim-validate/src/mlp_train/e36_tv.rs','zensim-validate/build.rs']
-    protocol_sha=hashlib.sha256('\n'.join((source/n).read_text() for n in protocol_files).encode()).hexdigest()
+    protocol_sha=protocol_source_sha(source)
+    admission=json.loads((root/'actual-pool-admission-final/receipt.json').read_text())
+    if admission['binary_sha256']!=receipt['trainer_sha256'] or admission['native'].get('embedded_protocol_source_sha256')!=protocol_sha:
+        raise ValueError('actual final trainer/source admission required before program packaging')
     manifest=json.loads((pools/'fit/manifest.json').read_text());n=0;mass=0
     import pyarrow.parquet as pq
     for batch in pq.ParquetFile(manifest['pairs']['path']).iter_batches(columns=['pair_weight_class'],batch_size=65536):

@@ -103,6 +103,14 @@ def curated_projection(mask_path,out):
     return records
 
 
+PROTOCOL_FILES = ('zensim-validate/src/bin/e36_tv/mod.rs','zensim-validate/src/bin/zensim_mlp_train.rs',
+    'zensim-validate/src/mlp_train/mod.rs','zensim-validate/src/mlp_train/e36_tv.rs','zensim-validate/build.rs')
+
+
+def protocol_source_sha(source):
+    return hashlib.sha256('\n'.join((source/n).read_text() for n in PROTOCOL_FILES).encode()).hexdigest()
+
+
 def assessment_plan(base_root,out):
     """Freeze original E34 row/reference/codec metadata without target reads."""
     from e34_evaluate import admit_tables

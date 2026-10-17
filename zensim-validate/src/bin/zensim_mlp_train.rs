@@ -3099,10 +3099,22 @@ fn main() {
             eprintln!("E36 admission: {e}");
             std::process::exit(2);
         });
+        let build = e36_tv::receipt(
+            args.e36_tv_manifest.as_ref().unwrap(),
+            &pool,
+            0, // Metadata only: no RNG draw or optimizer step.
+            args.e36_tv_contract_sha256.as_deref().unwrap(),
+        )
+        .expect("E36 admission build receipt");
         println!(
-            "{{\"schema\":\"e36-tv-admission-v1\",\"feature_rows\":{},\"pairs\":{},\"dropped_pairs\":0,\"labels_read\":false,\"optimizer_steps\":0}}",
-            pool.features.len(),
-            pool.pairs.len()
+            "{}",
+            serde_json::json!({"schema":"e36-tv-admission-v1",
+                "feature_rows":pool.features.len(),"pairs":pool.pairs.len(),
+                "dropped_pairs":0,"labels_read":false,"optimizer_steps":0,
+                "binary_sha256":build["binary_sha256"],
+                "embedded_protocol_source_sha256":build["embedded_protocol_source_sha256"],
+                "cfg_e36_tv":build["cfg_e36_tv"],"output_polarity":build["output_polarity"],
+                "raw_definition":build["raw_definition"],"improvement":build["improvement"]})
         );
         return;
     }
