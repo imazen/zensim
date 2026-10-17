@@ -163,7 +163,12 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
         raise ValueError('E36 program/data/trainer mismatch')
     mask=root/'matched-base-filter-plan-v2.json'
     projections=curated_projection(mask,packet_dir/'curated-projection')
+    preparation=root/'program-source-preparation-v1.json'
+    source_proof=json.loads(preparation.read_text())
+    if Path(source_proof['extracted_source'])!=source or source_proof['exact_rust_cargo_equivalence'] is not True or source_proof['fits']!=0:raise ValueError('frozen admitted trainer program source required')
+    preflight=root/'program-closure-preflight-v1.json';source_closure=json.loads(preflight.read_text())
     protocol_sha=protocol_source_sha(source)
+    if protocol_sha!=source_closure['protocol_source_sha256'] or source_proof['published_source']!=source_closure['published_source']:raise ValueError('frozen trainer protocol/source differs')
     admission=json.loads((root/'actual-pool-admission-final/receipt.json').read_text())
     if (admission['binary_sha256']!=receipt['trainer_sha256'] or admission['manifest_sha256']!=receipt['fit_manifest_sha256']
             or admission['native'].get('embedded_protocol_source_sha256')!=protocol_sha):
@@ -212,6 +217,7 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     members.update(['scripts/rev4_featpot/e36_training.py','scripts/rev4_featpot/e36_store.py'])
     members=local_import_closure(source,members)
     files={name:sha(source/name) for name in sorted(members) if Path(name).suffix in ['.py','.json']}
+    if any(source_closure['files'].get(name)!=value for name,value in files.items()):raise ValueError('frozen program Python closure differs from preflight')
     pins=packet_dir/'source-pins.json';contract_name='benchmarks/e36_fit_contract_2026-10-17.json'
     write(pins,dict(schema='e36-public-program-v1',build_commit=commit,files=files,data={contract_name:sha(package)}))
     import importlib.metadata
@@ -229,6 +235,7 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
         cargo_lock_sha256=sha(source/'Cargo.lock'),image_recipe_sha256=sha(image),
         zensim_profile='release',source_pins_sha256=sha(pins),protocol_source_sha256=protocol_sha,
         rustflags=os.environ.get('RUSTFLAGS',''),cargo_encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS',''),
+        e36_source=dict(preparation_sha256=sha(preparation),preflight_sha256=sha(preflight),python_source_commit=source_proof['published_source'],compiled_rust_source_commit=source_proof['compiled_rust_source']),
         e36_fit=dict(data_sha256=receipt['sha256'],base_filter_sha256=receipt['base_filter_sha256'],fits_released=False)))
     output=packet_dir/'program.tar.gz'
     subprocess.run(['python3',str(owner/'pack_fit_program.py'),'--profile','e36','--source',str(source),
@@ -237,6 +244,8 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     write(packet_dir/'program-receipt.json',dict(schema='e36-native-fit-program-v1',build_commit=commit,sha256=sha(output),
         protocol_source_sha256=protocol_sha,qualified_package_sha256=sha(package),source_pins_sha256=sha(pins),
         native_owner_sha256=sha(owner/'pack_fit_program.py'),binaries={p.name:sha(p) for p in binaries.iterdir() if p.is_file()},
+        frozen_source_preparation=dict(path=str(preparation),sha256=sha(preparation)),frozen_source_preflight=dict(path=str(preflight),sha256=sha(preflight)),
+        python_source_commit=source_proof['published_source'],compiled_rust_source_commit=source_proof['compiled_rust_source'],
         labels_read=False,fits_released=False,original_control_contract_sha256=sha(original/'e34-fit-contract.json')))
 
 

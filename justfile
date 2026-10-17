@@ -2182,7 +2182,7 @@ e36-final-data-packet root pools original out commit:
     python3 scripts/rev4_featpot/e36_fit_packet.py data --root {{quote(root)}} --pools {{quote(pools)}} --base {{quote(original + "/e33-fit-data.tar.gz")}} --trainer {{quote(root + "/bin/e36-fit-final/zensim_mlp_train")}} --out {{quote(out)}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
 
 e36-final-program-packet root pools original packet commit:
-    python3 scripts/rev4_featpot/e36_fit_packet.py program --root {{quote(root)}} --pools {{quote(pools)}} --original {{quote(original)}} --packet {{quote(packet)}} --source {{quote(invocation_directory())}} --binaries {{quote(root + "/bin/e36-fit-final")}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
+    python3 scripts/rev4_featpot/e36_fit_packet.py program --root {{quote(root)}} --pools {{quote(pools)}} --original {{quote(original)}} --packet {{quote(packet)}} --source {{quote(root + "/program-source-v1")}} --binaries {{quote(root + "/bin/e36-fit-final")}} --owner {{quote(root + "/fit-native-owner-v2")}} --commit {{quote(commit)}}
 
 e36-final-program-admit packet:
     python3 scripts/rev4_featpot/e36_program_admit.py --program {{quote(packet + "/program.tar.gz")}} --out {{quote(packet + "/program-admission")}}
