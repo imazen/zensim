@@ -4115,6 +4115,7 @@ mod owner_gates {
             blockiness: false,
             transducer_bank: false,
             transducers_luma_only: false,
+            omit_pjnd_fragility: false,
             append: false,
             append2: false,
             append2_dst_activity: false,

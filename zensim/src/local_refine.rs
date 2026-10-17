@@ -198,6 +198,7 @@ pub(crate) struct LocalRefineSnapshot {
     toggles: V2NewFeatureToggles,
     /// The computation's formula revision (blur arithmetic + `direct`).
     revision: FormulaRevision,
+    omit_pjnd_fragility: bool,
     /// Rev5 ordered production strip partials; central moments are replaced, never subtracted.
     strips: [[Vec<(DenseAccum, GradientAccum)>; 3]; LOCAL_SCALES],
 }
@@ -439,6 +440,7 @@ impl LocalRefineSnapshot {
             blockiness_on,
             toggles: plan.toggles(),
             revision: c.formula_revision,
+            omit_pjnd_fragility: c.omit_pjnd_fragility,
             strips: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
         };
         if !this.rebuild_unretained_coarse(c) {
@@ -713,12 +715,13 @@ impl LocalRefineSnapshot {
                     continue; // unserved cells: base == new == the walk's zero slots
                 }
                 let cell = &self.cells[si][ch];
-                feature_v2::finish_channel_scale(
+                feature_v2::finish_channel_scale_planned(
                     &cell.dense,
                     &cell.grad,
                     cell.blockiness,
                     cell.n,
                     &mut outs_base[si][ch],
+                    self.omit_pjnd_fragility,
                 );
                 feature_v2::apply_transducer_luma_gate(&mut outs_base[si][ch], ch, self.toggles);
                 let mut dense_n = cell.dense;
@@ -757,12 +760,13 @@ impl LocalRefineSnapshot {
                         dblock = q.blockiness_delta(si, ch, &c);
                     }
                 }
-                mg_new[si][ch] = feature_v2::finish_channel_scale(
+                mg_new[si][ch] = feature_v2::finish_channel_scale_planned(
                     &dense_n,
                     &grad_n,
                     cell.blockiness + dblock,
                     cell.n,
                     &mut outs_new[si][ch],
+                    self.omit_pjnd_fragility,
                 );
                 feature_v2::apply_transducer_luma_gate(&mut outs_new[si][ch], ch, self.toggles);
             }

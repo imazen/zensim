@@ -1029,6 +1029,10 @@ impl<'a> BakeScorer<'a> {
         let plan = self.plan()?;
         #[cfg(feature = "feature-regime-v2")]
         if plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5 {
+            #[cfg(steerfix_instrument)]
+            let mut mapperf_stage = mapperf_audit::start();
+            #[cfg(steerfix_instrument)]
+            let mapperf_total = mapperf_stage;
             let mut result = crate::fold_engine::compute_fold_backed(
                 source,
                 distorted,
@@ -1037,6 +1041,8 @@ impl<'a> BakeScorer<'a> {
                 &mut self.pixel_scratch,
                 Some(&plan),
             )?;
+            #[cfg(steerfix_instrument)]
+            mapperf_audit::stage(&mut mapperf_stage, "scalar_extract");
             if images_byte_identical(source, distorted) {
                 result.score = 100.0;
                 result.raw_distance = 0.0;
@@ -1048,6 +1054,10 @@ impl<'a> BakeScorer<'a> {
                 source.height() as u32,
                 codec_hint,
             )?;
+            #[cfg(steerfix_instrument)]
+            mapperf_audit::stage(&mut mapperf_stage, "scalar_forward");
+            #[cfg(steerfix_instrument)]
+            mapperf_audit::total(mapperf_total, "scalar");
             return Ok(result);
         }
         #[cfg(not(feature = "feature-regime-v2"))]
@@ -1288,6 +1298,10 @@ impl<'a> BakeScorer<'a> {
                 neighbour_exact: None,
             });
         }
+        #[cfg(steerfix_instrument)]
+        let mut mapperf_stage = mapperf_audit::start();
+        #[cfg(steerfix_instrument)]
+        let mapperf_total = mapperf_stage;
         let (mut features, mean_offset) = session.planned_features(
             source,
             precomputed,
@@ -1296,6 +1310,8 @@ impl<'a> BakeScorer<'a> {
             self.parallel,
             encoding,
         )?;
+        #[cfg(steerfix_instrument)]
+        mapperf_audit::stage(&mut mapperf_stage, "extract");
         // REV4SERVE: resize, not truncate — an identity-declared bake can be
         // wider than the plan's emitted regime (1853-input v2+basic cells),
         // and the uncomputed tail slots are provably unread zeros.
@@ -1345,6 +1361,8 @@ impl<'a> BakeScorer<'a> {
                 neighbour_exact: None,
             });
         }
+        #[cfg(steerfix_instrument)]
+        mapperf_audit::stage(&mut mapperf_stage, "forward");
         let sensitivities = if prepared_steering {
             self.prepared_steering_gradient(
                 &features,
@@ -1360,6 +1378,8 @@ impl<'a> BakeScorer<'a> {
                 codec_hint,
             )?
         };
+        #[cfg(steerfix_instrument)]
+        mapperf_audit::stage(&mut mapperf_stage, "gradient");
         let (mut spatial, unsupported_feature_ids) =
             crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
         // Rev5 defaults to neighbour-exact replay. Older revisions require
@@ -1417,6 +1437,8 @@ impl<'a> BakeScorer<'a> {
                 bin,
                 Some(plan.compute.formula_revision),
             )?;
+        #[cfg(steerfix_instrument)]
+        mapperf_audit::stage(&mut mapperf_stage, "density");
         let neighbour_exact = if capture {
             // The walk took its source side from the prepared reference under
             // this same test (`Fused944Session::planned_features`).
@@ -1445,11 +1467,15 @@ impl<'a> BakeScorer<'a> {
         } else {
             None
         };
+        #[cfg(steerfix_instrument)]
+        mapperf_audit::stage(&mut mapperf_stage, "snapshot");
         let unsupported_refinement_feature_ids = crate::attribution::bind_max_removals(
             &mut max_removals,
             &features,
             &unsupported_feature_ids,
         );
+        #[cfg(steerfix_instrument)]
+        mapperf_audit::total(mapperf_total, "map");
         Ok(crate::ScoredAttribution {
             exact_refinement: None,
             max_removals,
@@ -4569,3 +4595,7 @@ mod revision_contract_tests {
 #[cfg(all(test, steerfix_instrument))]
 #[path = "steerfix_packet.rs"]
 mod steerfix_packet;
+
+#[cfg(steerfix_instrument)]
+#[path = "mapperf_audit.rs"]
+mod mapperf_audit;

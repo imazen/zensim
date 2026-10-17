@@ -300,6 +300,12 @@ impl Plan {
             blockiness: v2_blocks,
             transducer_bank: v2_blocks,
             transducers_luma_only: false,
+            omit_pjnd_fragility: v2_blocks
+                && !want.iter_slots().any(|id| {
+                    crate::feature_defs::def_at(id, ns).is_some_and(|d| {
+                        d.signal.family == ComputeToken::V2 && d.signal.name == "pjnd_fragility"
+                    })
+                }),
             append,
             append2,
             append2_dst_activity: false,
@@ -436,6 +442,7 @@ impl Plan {
         // toggles. Normalization preserves it only for supported families.
         compute.v1_full_scales = requested.v1_full_scales;
         compute.v2_scales = requested.v2_scales;
+        compute.omit_pjnd_fragility = requested.omit_pjnd_fragility;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
         compute.coarse_y_only_scales = if (!compute.v2_blocks || compute.chroma_local_families())
@@ -558,6 +565,7 @@ impl Plan {
             blockiness: false,
             transducer_bank: false,
             transducers_luma_only: false,
+            omit_pjnd_fragility: false,
             append: false,
             append2: false,
             append2_dst_activity: false,
@@ -746,6 +754,7 @@ impl Plan {
             // A luma-only request is a RESTRICTION; the union must not
             // restrict, so it is on only when both sides ask for it.
             transducers_luma_only: a.transducers_luma_only && b.transducers_luma_only,
+            omit_pjnd_fragility: a.omit_pjnd_fragility && b.omit_pjnd_fragility,
             append: a.append || b.append,
             append2: a.append2 || b.append2,
             append2_dst_activity: a.append2_dst_activity || b.append2_dst_activity,
@@ -899,6 +908,39 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn declared_difference_plan_omits_reference_fragility_and_union_restores_it() {
+        if !crate::ssim_form::run_at_revision(
+            "5",
+            "feature_plan::tests::declared_difference_plan_omits_reference_fragility_and_union_restores_it",
+            "MAPPERF-SUBSET-PLAN-RAN",
+        ) {
+            return;
+        }
+        use super::*;
+        let ns = crate::NUM_SCALES;
+        let all = crate::feature_defs::family_slots(ComputeToken::Basic, ns)
+            .union(&crate::feature_defs::family_slots(ComputeToken::V2, ns));
+        let reference = SlotSet::from_slots(all.iter_slots().filter(|&id| {
+            crate::feature_defs::def_at(id, ns).is_some_and(|d| d.signal.name == "pjnd_fragility")
+        }));
+        let difference =
+            SlotSet::from_slots(all.iter_slots().filter(|id| !reference.contains(*id)));
+        let complete = Plan::derive(&all, 720).unwrap();
+        let narrow = Plan::derive(&difference, 720).unwrap();
+        assert!(narrow.compute.omit_pjnd_fragility);
+        assert!(!complete.compute.omit_pjnd_fragility);
+        assert!(narrow.emit.covers(&difference));
+        assert!(narrow.emit.intersect(&reference).is_empty());
+        assert_eq!(narrow.emit.union(&reference), complete.emit);
+        assert_eq!(
+            Plan::widened_to_identity(&narrow, 944).compute,
+            narrow.compute
+        );
+        assert_eq!(narrow.union(&complete).compute, complete.compute);
+        println!("MAPPERF-SUBSET-PLAN-RAN");
+    }
+
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "training"))]
     fn palette_bakes_refuse_at_serving_boundary() {

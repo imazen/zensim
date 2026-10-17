@@ -3067,6 +3067,8 @@ pub(crate) struct ComputeSet {
     pub blockiness: bool,
     pub transducer_bank: bool,
     pub transducers_luma_only: bool,
+    /// Declared plans may omit the reference-only PJND fragility finalizer.
+    pub omit_pjnd_fragility: bool,
     pub append: bool,
     pub append2: bool,
     pub append2_dst_activity: bool,
@@ -3218,6 +3220,7 @@ impl ComputeSet {
             blockiness: t.blockiness && v2_blocks,
             transducer_bank: t.transducer_bank,
             transducers_luma_only: t.transducers_luma_only,
+            omit_pjnd_fragility: false,
             append,
             append2,
             append2_dst_activity: t.append2_dst_activity && append2,
@@ -3544,8 +3547,11 @@ impl ComputeSet {
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
-            (!self.local_only
-                || (id < basic && id % crate::metric::FEATURES_PER_CHANNEL_BASIC < 10))
+            (!self.omit_pjnd_fragility
+                || !(v1_total..v2_end).contains(&id)
+                || (id - v1_total) % FEATURES_PER_CHANNEL_V2_TOTAL != idx::PJND_FRAGILITY)
+                && (!self.local_only
+                    || (id < basic && id % crate::metric::FEATURES_PER_CHANNEL_BASIC < 10))
                 && (!self.omit_edges || (id < basic && matches!(id % 13, 0..=2 | 9)))
                 && (self.full_res_xb || !Self::is_full_res_xb(id, n_scales))
                 && !crate::feature_defs::def_at(id, n_scales).is_some_and(|d| {
@@ -10634,6 +10640,19 @@ pub(crate) fn finish_channel_scale(
     n: usize,
     out: &mut [f64],
 ) -> (f64, f64) {
+    finish_channel_scale_planned(dense, grad, sum_blockiness, n, out, false)
+}
+
+/// Same ordered finalizer with a private declared-input restriction.
+#[inline]
+pub(crate) fn finish_channel_scale_planned(
+    dense: &DenseAccum,
+    grad: &GradientAccum,
+    sum_blockiness: f64,
+    n: usize,
+    out: &mut [f64],
+    omit_pjnd_fragility: bool,
+) -> (f64, f64) {
     let n_f = n as f64;
 
     // --- Raw-moment -> central-moment conversion (§A.14 module doc):
@@ -10701,7 +10720,9 @@ pub(crate) fn finish_channel_scale(
     out[idx::IW_DET] = clamp02(dense.ws_iw_det.finish());
     out[idx::IW_MSE] = clamp02(dense.ws_iw_mse.finish());
     out[idx::PJND_TRANSDUCER] = clamp01(dense.sum_pjnd / n_f);
-    out[idx::PJND_FRAGILITY] = 1.0 - saturate(grad.sum_grad_src / n_f, C_PJND_GRAD);
+    if !omit_pjnd_fragility {
+        out[idx::PJND_FRAGILITY] = 1.0 - saturate(grad.sum_grad_src / n_f, C_PJND_GRAD);
+    }
     out[idx::GMS] = grad.sum_gms / n_f;
     out[idx::PJND_TRANSDUCER_LOW_K] = clamp01(dense.sum_pjnd_lo / n_f);
     out[idx::PJND_TRANSDUCER_HIGH_K] = clamp01(dense.sum_pjnd_hi / n_f);
@@ -15351,8 +15372,14 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             } else {
                 0.0
             };
-            grads[ch] =
-                finish_channel_scale(&acc.dense[scale], &acc.grad[scale], sum_blockiness, n, out);
+            grads[ch] = finish_channel_scale_planned(
+                &acc.dense[scale],
+                &acc.grad[scale],
+                sum_blockiness,
+                n,
+                out,
+                compute.omit_pjnd_fragility,
+            );
             if append_cell_active(append_on, ch, scale) {
                 let out_app = &mut features_app
                     [app_scale_base + ch * FEATURES_PER_CHANNEL_APPEND..]
