@@ -83,6 +83,7 @@ def prepare(root,out,image,run_heavy=None):
             if match:library_paths.add(match.group(1))
     for path in sorted(library_paths):add(path)
     transport=Path(__file__).with_name('e36_local_store_transport.py');add(transport,dest='/opt/e36/transport/ssh')
+    add(Path(__file__).with_name('e36_phase_worker.py'),dest='/opt/e36/phase-worker.py')
     if run_heavy is not None:add(run_heavy,dest='/opt/e36/run-heavy')
     write(out/'files.json',dict(schema='e36-whole-native-phase-files-v1',files=list(files.values()),library_paths=sorted(library_paths),
         manifests=manifests,first_producer=dict(path=str(first),sha256=sha(first),jobs=len(first_jobs)),
