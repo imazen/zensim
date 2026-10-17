@@ -223,6 +223,12 @@ def freeze(root,out):
                 storage=dict(path=str(storage_path),sha256=sha(storage_path)),
                 native_ledgers=ledger_pins,unique_relocated_objects=len(unique),native_complete_views=len(by_view),
                 actual_random_readbacks=checks,relocation_eligibility_replayed=True,utc=time.time(),fits=0)
+    drain=root/'owner-svt-ssd-v1/archive-drain-final-v1.json'
+    if drain.exists() or list(root.glob('native-archive-drain-*/launch.json')):
+        from e36_archive_terminal import validate as validate_drain
+        path,terminal=validate_drain(root)
+        result['archive_drain_terminal']=dict(path=str(path),sha256=sha(path))
+        result['archive_drain_inventory']=json.loads(Path(terminal['stop']['path']).read_text())['inventory']
     archive_path=root/'storage-archive-v2.json'
     if archive_path.exists():result['archive_storage']=dict(path=str(archive_path),sha256=sha(archive_path))
     cache_path=root/'storage-cache-v1.json'

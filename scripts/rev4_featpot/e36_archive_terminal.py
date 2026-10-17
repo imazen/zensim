@@ -46,8 +46,11 @@ def run(root,out,resources):
     if (root/'owner-svt-ssd-v1/mirror-stop.json').exists():raise ValueError('preserve prior stop marker before raw drain')
     durable_mkdir(out);mirror=resources/'e36_artifact_mirror.py';process=None
     env={**os.environ,'PYTHONPATH':str(resources),'E36_ARTIFACTS_ONLY':'1','E36_ARCHIVE_INTERLEAVE_LOCK':str(Path.home()/'tmp/zensim-paper/rev4/heavy.lock'),'E36_ARCHIVE_INVENTORY_PATH':str(out/'inventory.json'),'E36_RESOURCE_READY_PATH':str(out/'ready.json'),'PYTHONDONTWRITEBYTECODE':'1'}
+    from e36_process_owner import DeferredCancellation
+    cancellation=DeferredCancellation();cancellation.__enter__()
     try:
-        process=subprocess.Popen(['python3','-u',str(mirror)],env=env)
+        process=cancellation.spawn(['python3','-u',str(mirror)],env=env)
+        cancellation.installed()
         write(out/'launch.json',dict(schema='e36-raw-drain-launch-v1',controller_pid=os.getpid(),mirror_pid=process.pid,source=pin(Path(__file__)),mirror=pin(mirror),sources=pin(resources/'sources.json'),fits=0,utc=time.time()))
         write(root/'owner-svt-ssd-v1/mirror-drain-pid.json',dict(pid=process.pid,controller_pid=os.getpid(),utc=time.time(),fits=0))
         code=process.wait()
@@ -57,6 +60,7 @@ def run(root,out,resources):
                 try:code=process.wait();break
                 except BaseException:continue
             write(out/'exit.json',dict(returncode=code,closed_unix=time.time(),fits=0))
+        cancellation.__exit__(None,None,None)
     if code:raise RuntimeError('raw archive drain did not complete')
 
 

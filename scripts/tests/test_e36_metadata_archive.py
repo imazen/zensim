@@ -100,7 +100,8 @@ class MetadataClosure(unittest.TestCase):
         owner=root/'owner-svt-ssd-v1';owner.mkdir()
         def put(name,value):
             path=owner/name;path.write_text(json.dumps(value));return terminal.pin(path)
-        inventory=put('inventory.json',dict(schema='e36-closed-native-archive-inventory-v1',fits=0,qualifies_data=False))
+        native=put('native.json',{})
+        inventory=put('inventory.json',dict(schema='e36-closed-native-archive-inventory-v1',terminal=native,ledgers=[],fits=0,qualifies_data=False))
         stop=put('mirror-stop.json',dict(reason=reason,inventory=inventory,fits=0));source=put('source.json',{})
         launch=put('launch.json',dict(controller_pid=0,mirror_pid=0,source=source,mirror=source));exit_record=put('exit.json',dict(returncode=0));sources=put('sources.json',dict(files=dict(source=source)))
         log=owner/'drain.log';log.write_text('run-heavy: done rc=0 1s | peak-RSS 0.1GiB\n')
@@ -124,11 +125,57 @@ class MetadataClosure(unittest.TestCase):
     def test_seal_prevents_restart_and_plan_union_omission_refuses(self):
         from e36_metadata_seal import freeze,lifecycle
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
-            root=Path(d);terminal,owner=self.terminal(root);drain,_=terminal.validate(root);seal=freeze(root,drain)
-            with self.assertRaisesRegex(ValueError,'restart refused'):
-                with lifecycle(root):pass
-            plan=dict(root=str(root),raw_drain=client.pin(drain),seal=client.pin(seal),files=[dict(sha256='a'*64,bytes=1)],jobs=[])
-            with self.assertRaisesRegex(ValueError,'union differs'):client.validate_closed_plan(plan)
+            root=Path(d);terminal,owner=self.terminal(root);drain,_=terminal.validate(root)
+            with patch('e36_closed_archive.closed_generation',return_value=(owner/'native.json',[])):
+                seal=freeze(root,drain)
+                with self.assertRaisesRegex(ValueError,'restart refused'):
+                    with lifecycle(root):pass
+                plan=dict(root=str(root),raw_drain=client.pin(drain),terminal=client.pin(owner/'native.json'),seal=client.pin(seal),files=[dict(sha256='a'*64,bytes=1)],jobs=[])
+                with self.assertRaisesRegex(ValueError,'union differs'):client.validate_closed_plan(plan)
+
+
+
+    def test_producer_interleaving_before_exclusive_seal_refuses_stale_drain(self):
+        import threading
+        from contextlib import contextmanager
+        import e36_metadata_seal as sealing
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+            root=Path(d);terminal,owner=self.terminal(root);held=threading.Event();requested=threading.Event();original=sealing.lifecycle;ledger=owner/'new-ledger.parquet'
+            def producer():
+                with original(root):
+                    held.set();requested.wait();ledger.write_bytes(b'new native publication')
+            @contextmanager
+            def acquire(*args,**kwargs):
+                if kwargs.get('seal'):requested.set()
+                with original(*args,**kwargs) as value:yield value
+            thread=threading.Thread(target=producer);thread.start();held.wait()
+            def current(root):return owner/'native.json',([ledger] if ledger.exists() else [])
+            try:
+                with patch.object(sealing,'lifecycle',acquire),patch('e36_closed_archive.closed_generation',side_effect=current):
+                    with self.assertRaisesRegex(ValueError,'stale against current'):sealing.freeze(root)
+                self.assertFalse((owner/'metadata-sealed-v1.json').exists())
+            finally:requested.set();thread.join()
+
+
+
+class MetadataSignals(unittest.TestCase):
+    def test_real_sigterm_and_spawn_boundary_cancel_after_same_child_exits(self):
+        import os
+        import signal
+        import subprocess
+        import time
+        for mode in ['live','spawn']:
+            with self.subTest(mode=mode),tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+                root=Path(d);lock=root/'paper.lock';proof=root/'child.json';ready=root/'ready';done=root/'done';child=root/'child.py';parent=root/'parent.py'
+                child.write_text('import sys,time,fcntl,json,signal\nfrom pathlib import Path\nsys.stdin.buffer.read()\ntime.sleep(.05)\nwith Path(sys.argv[1]).open("a") as guard:\n try:\n  fcntl.flock(guard,fcntl.LOCK_EX|fcntl.LOCK_NB);held=False\n except BlockingIOError:held=True\nPath(sys.argv[2]).write_text(json.dumps(dict(held=held,mask=[int(v) for v in signal.pthread_sigmask(signal.SIG_BLOCK,set())])))\nprint("done",flush=True)\n')
+                parent.write_text('import sys,time,fcntl,os,signal\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(Path(client.__file__).parent))+')\nimport e36_metadata_archive as c\nfrom unittest.mock import patch\noriginal=c.subprocess.Popen\ndef spawn(*args,**kwargs):\n p=original(*args,**kwargs)\n if sys.argv[1]=="spawn":os.kill(os.getpid(),signal.SIGTERM)\n return p\ndef send(writer):\n Path(sys.argv[5]).write_text("ready")\n writer.write(b"opaque")\n time.sleep(.1)\nwith Path(sys.argv[2]).open("a") as lock:\n fcntl.flock(lock,fcntl.LOCK_EX)\n try:\n  with patch.object(c.subprocess,"Popen",side_effect=spawn):\n   c.owned_exchange([sys.executable,sys.argv[3],sys.argv[2],sys.argv[4]],send)\n except InterruptedError:Path(sys.argv[6]).write_text("cancelled after join")\n')
+                process=subprocess.Popen([sys.executable,str(parent),mode,str(lock),str(child),str(proof),str(ready),str(done)])
+                if mode=='live':
+                    deadline=time.monotonic()+5
+                    while not ready.exists() and process.poll() is None and time.monotonic()<deadline:time.sleep(.005)
+                    self.assertTrue(ready.exists());os.kill(process.pid,signal.SIGTERM)
+                self.assertEqual(process.wait(timeout=5),0);self.assertTrue(done.exists())
+                result=json.loads(proof.read_text());self.assertTrue(result['held']);self.assertNotIn(signal.SIGTERM,result['mask']);self.assertNotIn(signal.SIGINT,result['mask'])
 
 
 if __name__=='__main__':unittest.main()

@@ -118,7 +118,7 @@ def wait_resources(roles,out,scope,timeout=30):
 
 def run(root,out,phase_name='fallback'):
     proof,clock,_=configuration(root)
-    if time.time()>=clock['deadline_unix']:raise TimeoutError('registered17Z deadline passed')
+    if time.time()>=clock['deadline_unix']:raise TimeoutError('registered generation deadline passed')
     if (root/'bulk-choice.json').exists():raise ValueError('existing final choice must not be replaced')
     if phase_name not in ['fallback','additions']:raise ValueError('registered phase required')
     if phase_name=='additions':

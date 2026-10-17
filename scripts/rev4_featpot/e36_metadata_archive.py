@@ -4,7 +4,6 @@ import fcntl
 import hashlib
 import json
 import os
-import signal
 from pathlib import Path
 import subprocess
 import tarfile
@@ -30,12 +29,10 @@ def write(path,value):
 
 
 def plan(root,out,commit):
-    from e36_closed_archive import closed_generation
-    root=Path(root);out=Path(out);terminal,_=closed_generation(root)
-    from e36_archive_terminal import validate as drain_terminal
-    drain_path,_=drain_terminal(root)
+    root=Path(root);out=Path(out)
     from e36_metadata_seal import freeze as seal_metadata
-    seal=seal_metadata(root,drain_path)
+    seal=seal_metadata(root);sealed=json.loads(seal.read_text())
+    terminal=Path(sealed['native_terminal']['path']);drain_path=Path(sealed['raw_drain']['path'])
     stop=root/'owner-svt-ssd-v1/mirror-stop.json'
     if not stop.exists():raise ValueError('stop archive writers before metadata inventory')
     for receipt in (root/'owner-svt-ssd-v1').glob('mirror*pid.json'):
@@ -67,13 +64,9 @@ def plan(root,out,commit):
 
 
 def validate_closed_plan(plan):
-    from e36_archive_terminal import validate as validate_drain
-    path,_=validate_drain(plan['root'])
-    if plan['raw_drain']!={'path':str(path),'sha256':sha(path)}:raise ValueError('metadata raw drain predecessor differs')
-    seal=Path(plan['seal']['path'])
-    if sha(seal)!=plan['seal']['sha256']:raise ValueError('metadata lifecycle seal changed')
-    document=json.loads(seal.read_text())
-    if document['raw_drain']!=plan['raw_drain'] or document['producer_restarts'] is not False:raise ValueError('metadata lifecycle interlock differs')
+    from e36_metadata_seal import validate as validate_seal
+    sealed=validate_seal(plan['root'],plan['seal'])
+    if sealed['raw_drain']!=plan['raw_drain'] or sealed['native_terminal']!=plan['terminal']:raise ValueError('metadata plan differs from sealed closure')
     expected={r['sha256']:r['bytes'] for r in plan['files']};actual={}
     for job in plan['jobs']:
         if any(not 0<=row['bytes']<8*1024**3 for row in job['items']) or not 0<job['tar_bytes']<=64*1024**3:raise ValueError('metadata USTAR/receiver preflight failed')
@@ -103,18 +96,17 @@ def validate_storage(config):
 
 
 def owned_exchange(command,send):
-    process=None;error=None;writer=None;answer=b'';code=None;stdin_fd=None
-    previous=signal.pthread_sigmask(signal.SIG_BLOCK,{signal.SIGINT,signal.SIGTERM})
+    from e36_process_owner import DeferredCancellation
+    process=None;error=None;writer=None;answer=b'';code=None
+    cancellation=DeferredCancellation();cancellation.__enter__()
     try:
-        process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,bufsize=0)
-        stdin_fd=stdin_fd
-        signal.pthread_sigmask(signal.SIG_SETMASK,previous)
+        process=cancellation.spawn(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,bufsize=0)
+        cancellation.installed()
         writer=PipeWriter(process.stdin);send(writer)
     except BaseException as exc:error=exc
     finally:
         if process is not None:
             try:
-                fd=stdin_fd
                 while not process.stdin.closed:
                     try:process.stdin.close()
                     except BaseException as exc:
@@ -147,7 +139,7 @@ def owned_exchange(command,send):
                 try:process.stdout.close()
                 except BaseException as exc:
                     if error is None:error=exc
-        try:signal.pthread_sigmask(signal.SIG_SETMASK,previous)
+        try:cancellation.__exit__(None,None,None)
         except BaseException as exc:
             if error is None:error=exc
     if error is not None:raise error
@@ -215,7 +207,7 @@ def finalize_index(plan_path,storage,out,lock,payload,config):
     with Path(lock).open('a') as guard:
         fcntl.flock(guard,fcntl.LOCK_EX)
         try:
-            validate_storage(config);answer=transmit(job,config['command'],config['program_sha256'],config['destination'],config['hostname'])
+            validate_closed_plan(json.loads(Path(plan_path).read_text()));validate_storage(config);answer=transmit(job,config['command'],config['program_sha256'],config['destination'],config['hostname'])
             locator=dict(schema='e36-restorable-metadata-locator-v1',canonical_root=config['root'],index_id=job['id'],index_sha256=answer['sha256'],descriptor_sha256=answer['index_sha256'],plan_sha256=sha(plan_path),fits=0)
             body=(json.dumps(locator,sort_keys=True)+'\n').encode();value=hashlib.sha256(body).hexdigest()
             # A bounded control-only locator is published in the same admitted
