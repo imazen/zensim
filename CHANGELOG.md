@@ -111,6 +111,8 @@
 
 - Wait visibly for exact pre-launch RAM refusals in local native RD jobs while preserving every attempt receipt and failing on execution errors.
 
+- Preserve each completed native quality within bounded jobs and recover complete quality receipts missing from interrupted parent journals.
+
 ### QUEUED BREAKING CHANGES
 
 - Removed obsolete experimental extraction interfaces and feature tokens (unreleased).

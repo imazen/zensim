@@ -290,3 +290,13 @@ run-heavy: done rc=0 25s | peak-RSS 0.10GiB | min-avail 17858MiB | peak-load 34.
 ```
 
 Exact replay receipt: `GROUP_REPLAY_VERIFIED.json` under the evidence root. Full RD coverage and matched-quality bootstrap results remain pending.
+
+### Consecutive quality groups
+
+Four consecutive qualities can share one bounded heavy job, with a separate complete eight-arm receipt written after each quality. A32-cell replay of four already measured qualities matches every encoded hash, decoded RGB byte and all156 ordered steering fields. An interrupted-journal check recovers16 unappended complete cells beside16 journaled cells, then selects the next quality without executing a codec. The21-point grid,24 sources, models and native/judge binaries are unchanged; full RD results remain pending.
+
+```text
+run-heavy: done rc=0 79s | peak-RSS 0.10GiB | min-avail 35226MiB | peak-load 6.41
+```
+
+Evidence: `QUALITY_GROUP_REPLAY_VERIFIED.json` and `quality-group-recovery-check/VERIFIED.json`. The active continuation uses `rd-jxl-quality-groups/` and `rd-jxl-quality-groups-judges/`; historical roots and every completed artifact remain archived. Source bootstrap and numeric RD verdicts still require the complete matrix.
