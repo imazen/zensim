@@ -1892,3 +1892,15 @@ e36-source-archives root commit producer:
 e36-retention-resume root commit mirror:
     just e36-evidence-manifest {{quote(root)}} {{quote(commit)}}
     just e36-archive {{quote(root)}} {{quote(mirror)}}
+
+shipgates-jxl-qualities-replay models binary inputs oracle png8 design output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd-source --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --png8-binary {{quote(png8)}} --design {{quote(design)}} --source-id 0 --quality-start 0 --quality-end 4 --cell-workers 8 --output {{quote(output)}}
+
+shipgates-jxl-qualities-compare replay prior output quality:
+    python3 scripts/rev4_featpot/shipgates_group_replay.py --replay {{quote(replay)}} --prior {{quote(prior)}} --output {{quote(output)}} --quality-index {{quality}}
+
+shipgates-jxl-rd-grouped models binary inputs oracle lock heavy png8 resume output:
+    python3 scripts/rev4_featpot/shipgates.py jxl-rd --models {{quote(models)}} --binary {{quote(binary)}} --inputs {{quote(inputs)}} --oracle {{quote(oracle)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --png8-binary {{quote(png8)}} --resume-encodes-root {{quote(resume)}} --cell-workers 8 --qualities-per-job 4 --output {{quote(output)}}
+
+shipgates-jxl-group-recovery evidence prior replay output:
+    python3 scripts/rev4_featpot/shipgates_group_recovery.py --evidence {{quote(evidence)}} --prior {{quote(prior)}} --replay {{quote(replay)}} --output {{quote(output)}}

@@ -347,9 +347,10 @@ def jxl_rd_source(args):
     fixed = next(iter(models.values()))
     arms += [("butteraugli","butteraugli",2,"0",fixed),("none","butteraugli",0,"0",fixed)]
     records = []
-    for qi, distance in enumerate(design["distances_f32"]):
-        if args.quality_index is not None and qi != args.quality_index:
-            continue
+    selected = [(qi,d) for qi,d in enumerate(design["distances_f32"])
+                if args.quality_start <= qi < args.quality_end and (args.quality_index is None or qi == args.quality_index)]
+    assert selected and 0 <= args.quality_start < args.quality_end <= 21
+    for qi, distance in selected:
         hashes = {}
         def encode_arm(arm):
             label,metric,iterations,gain,model = arm
@@ -409,7 +410,9 @@ def jxl_rd_source(args):
                 with (args.output / "cells.jsonl").open("a") as stream:
                     stream.write(json.dumps(record,allow_nan=False)+"\n")
         assert all(hashes[label+"-neutral"] == hashes["none"] for label in models), "neutral/no-steering bitstreams differ"
-    assert len(records) == (21 if args.quality_index is None else 1)*8
+        write(args.output / f"GROUP-{qi:02d}.json",dict(cells=8,quality_index=qi,records=records[-8:],
+            source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),design_sha256=sha(args.design)))
+    assert len(records) == len(selected)*8
     write(args.output / "COMPLETE.json",dict(cells=len(records),source=source,
           source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),design_sha256=sha(args.design)))
 
@@ -431,7 +434,7 @@ def jxl_rd(args):
         binary_sha256=sha(args.binary),oracle_sha256=sha(args.oracle),
         png8_binary_sha256=sha(args.png8_binary),source_manifest_sha256=sha(args.inputs / "SOURCE_MANIFEST.json"),
         distances_f32=distances,arms=8,iterations=2,threads=1,judges="separate; not yet scored",
-        sources=len(sources),cell_workers=args.cell_workers,memory_admission="wait30s only for exact unstarted run-heavy low-memory refusal; execution failures fatal",neutral_rule="every candidate-neutral byte-identical to none at every cell")
+        sources=len(sources),cell_workers=args.cell_workers,qualities_per_job=args.qualities_per_job,memory_admission="wait30s only for exact unstarted run-heavy low-memory refusal; execution failures fatal",neutral_rule="every candidate-neutral byte-identical to none at every cell")
     if args.resume_encodes_root:
         previous=json.loads((args.resume_encodes_root/"DESIGN.json").read_text())
         assert previous["binary_sha256"]==design["binary_sha256"] and previous["oracle_sha256"]==design["oracle_sha256"]
@@ -449,6 +452,7 @@ def jxl_rd(args):
         dest = args.output / f"source-{i:02d}"
         dest.mkdir()
         rows = []
+        batch_rows = {}
         for qi in range(21):
             prior = args.resume_encodes_root / f"source-{i:02d}/cells.jsonl" if args.resume_encodes_root else None
             reused = [json.loads(line) for line in prior.read_text().splitlines()
@@ -462,6 +466,15 @@ def jxl_rd(args):
                     prior = child / "cells.jsonl"
                     reused = [json.loads(line) for line in prior.read_text().splitlines()]
                     assert len(reused) == 8
+                if len(reused) != 8:
+                    groups=list((args.resume_encodes_root/f"source-{i:02d}").glob(f"batch-*/GROUP-{qi:02d}.json"))
+                    assert len(groups) <= 1, "duplicate completed batch quality"
+                    if groups:
+                        prior=groups[0]
+                        group=json.loads(prior.read_text())
+                        assert group["cells"]==8 and group["quality_index"]==qi
+                        reused=group["records"]
+                        assert len(reused)==8
             if len(reused) == 8:
                 hashes = {r["arm"]:r["encoded_sha256"] for r in reused}
                 assert len(hashes) == 8
@@ -475,15 +488,24 @@ def jxl_rd(args):
                 write(dest / f"quality-{qi:02d}-reuse.json",dict(source=str(prior),source_sha256=sha(prior),cells=reused))
                 newrows = reused
             else:
-                command = ["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","16G","--jobs",str(args.cell_workers),"--",
-                    sys.executable,str(runner),"jxl-rd-source","--models",str(args.models),"--binary",str(args.binary),
-                    "--inputs",str(args.inputs),"--oracle",str(args.oracle),"--png8-binary",str(args.png8_binary),"--design",str(args.output / "DESIGN.json"),
-                    "--source-id",str(i),"--quality-index",str(qi),"--cell-workers",str(args.cell_workers),"--output",str(phase)]
-                write(dest / f"quality-{qi:02d}-command.json",command)
-                print(f"JXL RD source{i:02d} {source['name']} quality{qi:02d}: queued",flush=True)
-                run_with_memory_admission(command,dest / f"quality-{qi:02d}.log",phase)
-                assert (phase / "COMPLETE.json").is_file()
-                newrows = [json.loads(line) for line in (phase / "cells.jsonl").read_text().splitlines()]
+                if qi not in batch_rows:
+                    end_quality=min(21,qi+args.qualities_per_job)
+                    phase=dest/f"batch-{qi:02d}"
+                    command = ["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","16G","--jobs",str(args.cell_workers),"--",
+                        sys.executable,str(runner),"jxl-rd-source","--models",str(args.models),"--binary",str(args.binary),
+                        "--inputs",str(args.inputs),"--oracle",str(args.oracle),"--png8-binary",str(args.png8_binary),"--design",str(args.output / "DESIGN.json"),
+                        "--source-id",str(i),"--quality-start",str(qi),"--quality-end",str(end_quality),"--cell-workers",str(args.cell_workers),"--output",str(phase)]
+                    write(dest / f"quality-{qi:02d}-command.json",command)
+                    print(f"JXL RD source{i:02d} {source['name']} qualities{qi:02d}..{end_quality-1:02d}: queued",flush=True)
+                    run_with_memory_admission(command,dest / f"quality-{qi:02d}.log",phase)
+                    assert json.loads((phase/"COMPLETE.json").read_text())["cells"]==(end_quality-qi)*8
+                    batch=[json.loads(line) for line in (phase/"cells.jsonl").read_text().splitlines()]
+                    assert len(batch)==(end_quality-qi)*8
+                    for quality in range(qi,end_quality):
+                        group=json.loads((phase/f"GROUP-{quality:02d}.json").read_text())
+                        batch_rows[quality]=[r for r in batch if r["quality_index"]==quality]
+                        assert group["records"]==batch_rows[quality] and len(batch_rows[quality])==8
+                newrows=batch_rows[qi]
             assert len(newrows) == 8
             rows += newrows
             with (dest / "cells.jsonl").open("a") as stream:
@@ -638,7 +660,11 @@ def main():
             command.add_argument(f"--{name}", type=Path, required=True)
         if mode in ["jxl-rd","jxl-rd-source"]:
             command.add_argument("--cell-workers",type=int,default=1,choices=range(1,9))
+        if mode == "jxl-rd":
+            command.add_argument("--qualities-per-job",type=int,default=1,choices=range(1,5))
         if mode == "jxl-rd-source":
+            command.add_argument("--quality-start",type=int,default=0)
+            command.add_argument("--quality-end",type=int,default=21)
             command.add_argument("--quality-index", type=int)
         if mode in ["jxl-rd", "jxl-interventions"]:
             command.add_argument("--resume-encodes-root", type=Path)

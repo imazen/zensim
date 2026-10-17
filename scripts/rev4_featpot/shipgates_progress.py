@@ -21,6 +21,10 @@ def main():
         for complete in root.glob("quality-*/COMPLETE.json"):
             assert json.loads(complete.read_text())["cells"]==design["arms"]
             rows.extend(json.loads(s) for s in (complete.parent/"cells.jsonl").read_text().splitlines())
+        for marker in root.glob("batch-*/GROUP-*.json"):
+            group=json.loads(marker.read_text())
+            assert group["cells"]==len(group["records"])==design["arms"]
+            rows.extend(group["records"])
         unique={}
         for row in rows:
             key=row["quality_index"],row["arm"]

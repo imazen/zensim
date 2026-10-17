@@ -16,9 +16,13 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ["replay","prior","output"]:
         parser.add_argument("--"+name,type=Path,required=True)
+    parser.add_argument("--quality-index",type=int)
     args=parser.parse_args()
     replay=[json.loads(line) for line in (args.replay/"cells.jsonl").read_text().splitlines()]
-    assert json.loads((args.replay/"COMPLETE.json").read_text())["cells"]==len(replay)==8
+    assert json.loads((args.replay/"COMPLETE.json").read_text())["cells"]==len(replay)
+    if args.quality_index is not None:
+        replay=[row for row in replay if row["quality_index"]==args.quality_index]
+    assert len(replay)==8
     source=replay[0]["source"]
     quality=replay[0]["quality_index"]
     prior=[json.loads(line) for line in args.prior.read_text().splitlines()]
