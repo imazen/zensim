@@ -48,3 +48,14 @@ nonlaunchable. Exact dev-root evidence:`mandatory-zero-support-diagnosis-v1.json
 without full dedup replay. The frozen mandatory-only choice remains effective
 until coordinator direction; no fits have run. Storage-only raw archival is
 continuing under`native-archive-drain-v1`,with final location admission pending.
+
+2026-10-17 authorized pre-fit full-pool amendment supersedes that pending choice:
+`pool-choice-full-v2.json` and `owner-svt-ssd-v1/full-pool-choice-amendment-v2.json`
+select the entire preregistered12684-view pool,12300mandatory+384optional.
+Both native phases have qualified census,total909388logicalrows. The required
+zero-support finding triggered a data-availability decision; no outcome/loss/
+label seen and no source hand-picked. All teachers/margins/axes/guards/seeds
+unchanged. Full global materialization at`pools-full-v1` is still pending,
+and all129 scientific fits remain unreleased. The prior choice and failed
+mandatory pool are retained. Distinct bounded smoke preparation/launch uses
+`e36_memory_smoke.py` and`e36_smoke_launch.py`; actual measurement is pending.

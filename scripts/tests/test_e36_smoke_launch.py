@@ -26,6 +26,10 @@ class Launch(unittest.TestCase):
             shell=(out/'run-i270.sh').read_text()
             for required in ['--memory 8g --memory-swap 8g','--cpuset-cpus 0-1','ZEN_FIT_RAYON_THREADS=2','ZENSIM_MAX_TIER=v3','--max-attempts 1','--mem 10G','--network none','--exec /usr/local/bin/fit-cell-exec']:
                 self.assertIn(required,shell)
+            final=shell.rindex('MemAvailable:')
+            self.assertGreater(final,shell.index('docker build'))
+            self.assertGreater(final,shell.index('--mem 10G'))
+            self.assertLess(final,shell.index('exec docker run'))
             self.assertNotIn('pip install',shell)
             self.assertEqual(json.loads((out/'LAUNCH_PLAN.json').read_text())['diagnostic_cells'],1)
             # An invalid host refuses before preparing any launch files.

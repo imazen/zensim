@@ -46,6 +46,12 @@ def prepare(out):
         'docker image inspect '+q(image)+' > image-inspect.json',
         '/home/lilith/work/claudehints/scripts/run-heavy --mem 10G --jobs 2 -- docker run --name '+q(name)+' --network none --memory 8g --memory-swap 8g --cpuset-cpus 0-1 --cpu-shares 256 --pids-limit 512 --security-opt no-new-privileges --mount type=bind,src='+directory+'/work,dst=/work --mount type=bind,src='+directory+'/scratch,dst=/scratch --mount type=bind,src='+directory+',dst=/input,readonly -e TMPDIR=/scratch/tmp -e ZEN_FIT_DATA_LOCAL=/input/data.tar.gz -e ZEN_FIT_RAYON_THREADS=2 -e RAYON_NUM_THREADS=2 -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 -e ZENSIM_MAX_TIER=v3 -e ZEN_RAM_BYTES=8589934592 -e ZEN_CHUNK_REF_CONCURRENCY=1 -e ZEN_DEBUG_ADMIT=1 --entrypoint /usr/bin/nice '+q(image)+' -n19 /usr/bin/ionice -c3 /usr/local/bin/zenfleet-worker --manifest /input/scheduled.manifest.json --ledger-out /work/ledger.parquet --blobs /work/blobs --exec /usr/local/bin/fit-cell-exec --worker e36-i270-memory-smoke --provider local --max-attempts 1',
         'docker inspect '+q(name)+' > container-inspect.json']
+    # run-heavy may wait for another host job: check only after that wait.
+    invocation=lines[-2]
+    prefix='/home/lilith/work/claudehints/scripts/run-heavy --mem 10G --jobs 2 -- '
+    if not invocation.startswith(prefix):raise ValueError('diagnostic wrapper boundary changed')
+    check='test "$(awk \'/MemAvailable:/{print $2}\' /proc/meminfo)" -ge 16777216'
+    lines[-2]=prefix+'bash -c '+q(check+' && exec '+invocation[len(prefix):])
     script.write_text('\n'.join(lines)+'\n')
     docker=Path(__file__).parents[2]/'docker/Dockerfile.e36fit'
     files={'program.tar.gz':Path(prepared['program']['path']),'data.tar.gz':Path(prepared['data']['path']),'scheduled.manifest.json':scheduled,'Dockerfile':docker,'run-i270.sh':script}

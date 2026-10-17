@@ -687,3 +687,10 @@ predeclared optional phase finds38candidate edges in its three matching views;
 full physical dedup/admission has not run. Pool-choice amendment awaits
 coordinator direction before fitting. Evidence: e36 generation pointer and
 `e36_zero_support_diagnosis.py`; no threshold or source subset was changed.
+
+2026-10-17 pre-fit follow-up: coordinator approved the entire completed12684-view
+matrix after this support failure,with no outcome/loss/human-label inspection
+and no hand-picked sources. The old choice and failed pool remain immutable;
+`e36_full_choice.py` binds the explicit support-triggered amendment. Fresh full
+global deduplication/support/semantic replay is required; this approval does not
+waive a guard or release scientific fits.
