@@ -401,3 +401,17 @@ the selector invokes the frozen identity owner and derives pass from its
 complete bit-level evidence, rather than trusting a supplied aggregate boolean.
 Cross-reference ranking remains protected at human assessment by the registered
 noninferiority test, each-dataset point delta>=-0.005 and W2 delta>-2SE.
+
+### Prospective assessment provenance closure (2026-10-17, before fits)
+
+The paired assessment artifact is admitted only after the global TRAIN-only
+selection locks and all source-withheld checkpoints pass native qualification.
+The original E34 metadata owner freezes source-table, manifest and ordered-key
+hashes and reference/codec IDs without decoding targets. Inside the bound
+assessment executor, the existing E34 score-unit forward is replayed with the
+actual qualified checkpoint: `BakeScorer::ensemble` and
+`score_features(row, 0, 0, None)`. Predictions must match every native f64 bit in
+source order; target, reference, codec and orientation must match the frozen
+original source. Forward receipts bind checkpoint, source/key and output hashes
+to the pinned assessment binary. Swapped models or rows refuse before a
+statistical decision. This changes no statistic, threshold or selection rule.

@@ -52,6 +52,9 @@ def packet(root,pools,base,trainer,out,owner,commit):
         for key in ['references','source_budget','cohort','runtime']:add(m[key]['path'])
     for name in ['whole-matrix.json','matrix-admission.json']:add(pools/name)
     add(mask)
+    from e36_training import assessment_plan
+    assessment_inputs=root/'assessment-inputs.json'
+    assessment_plan(Path(d['root']),assessment_inputs);add(assessment_inputs)
     choice_doc=json.loads((root/'bulk-choice.json').read_text())
     for path in [root/'bulk-choice.json',Path(choice_doc.get('plan_path',root/'bulk-plan.json')),Path(choice_doc.get('clock_path',root/'bulk-clock.json')),root/'bulk-plan.json',root/'bulk-clock.json',root/'resource-admission.json']:
         add(path)
@@ -230,7 +233,7 @@ def specs(root,pools,packet_dir,original,program,ctl,owner):
     write(packet_dir/'E36_FIT_PLAN.json',dict(schema='e36-future-fit-plan-v1',program_sha256=sha(program),data_sha256=receipt['sha256'],
         fit_manifest_sha256=receipt['fit_manifest_sha256'],selection_manifest_sha256=sha(pools/'selection/manifest.json'),
         contract_sha256=receipt['locked_contract_sha256'],base_filter_sha256=receipt['base_filter_sha256'],trainer_sha256=receipt['trainer_sha256'],raw_binary_sha256=sha(root/'bin/e36-raw-score-final'),ctl_sha256=sha(ctl),
-        selection_guard_policy=dict(path=str(packet_dir/'selection-guard-policy.json'),sha256=sha(packet_dir/'selection-guard-policy.json')),selection_owner_sha256=sha(Path(__file__).with_name('e36_selection.py')),inventory_owner_sha256=sha(Path(__file__).with_name('e36_inventory.py')),qualification_owners=qualification_owners,manifests=records,cells=all_cells,fit_release=False,fit_smoke_permitted=False,policy='all three arms use the identical frozen pool/build/base-family mask; separate coordinator go required'))
+        assessment_inputs=dict(path=str(root/'assessment-inputs.json'),sha256=sha(root/'assessment-inputs.json')),assessment_owner_sha256=program_meta['files']['bin/panel'],selection_guard_policy=dict(path=str(packet_dir/'selection-guard-policy.json'),sha256=sha(packet_dir/'selection-guard-policy.json')),selection_owner_sha256=sha(Path(__file__).with_name('e36_selection.py')),inventory_owner_sha256=sha(Path(__file__).with_name('e36_inventory.py')),qualification_owners=qualification_owners,manifests=records,cells=all_cells,fit_release=False,fit_smoke_permitted=False,policy='all three arms use the identical frozen pool/build/base-family mask; separate coordinator go required'))
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='mode',required=True)

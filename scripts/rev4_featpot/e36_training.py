@@ -103,6 +103,20 @@ def curated_projection(mask_path,out):
     return records
 
 
+def assessment_plan(base_root,out):
+    """Freeze original E34 row/reference/codec metadata without target reads."""
+    from e34_evaluate import admit_tables
+    from v2_teacher import key_path,row_keys_sha
+    rp=base_root/'wide/main/real/receipt.json';receipt=json.loads(rp.read_text());tables={}
+    for fold,path,reference,codec in admit_tables(base_root):
+        r=receipt['legs'][fold]['full'];kp=key_path(path)
+        tables[fold]=dict(path='/var/tmp/rev4-featpot/v2e29/'+r['rel'],table_sha256=r['sha256'],
+            manifest_sha256=r['manifest_sha256'],keys_sha256=r['keys_sha256'],row_keys_sha256=row_keys_sha(pq.read_table(kp)),
+            rows=r['rows'],reference=reference,codec=codec,orientation=1.)
+    write(out,dict(schema='e36-frozen-assessment-inputs-v1',base_root_receipt_sha256=sha(rp),tables=tables,
+        labels_read=False,metadata_owner_sha256=sha(Path(__file__).with_name('e34_evaluate.py'))))
+
+
 def add_args(p):
     p.add_argument('--e36-arm',choices=list(ARMS))
     p.add_argument('--e36-tv-manifest',type=Path);p.add_argument('--e36-tv-contract',type=Path)

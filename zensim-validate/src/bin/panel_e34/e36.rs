@@ -105,6 +105,7 @@ struct Assessment {
     bindings_sha256: String,
     train_selection: PathBuf,
     train_selection_sha256: String,
+    assessment_inputs: PathBuf,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -115,6 +116,7 @@ struct Binding {
     init_seed: u64,
     sample_seed: u64,
     bake_sha256: Option<String>,
+    bake: Option<PathBuf>,
     fit_receipt: Option<PathBuf>,
     fit_receipt_sha256: String,
     qualification: Option<PathBuf>,
@@ -221,6 +223,130 @@ fn verify_native_records(
     );
     Ok(())
 }
+// The original E34 score-unit prediction path is replayed here, inside the
+// bound executor and only after the TRAIN choice and all model identities lock.
+// A supplied prediction array is evidence only after exact native replay.
+fn file_digest(path: &Path) -> Result<String> {
+    use std::io::Read;
+    safe_metadata(path)?;
+    let mut f = fs::File::open(path)?;
+    let mut h = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+fn same_values(a: &[f64], b: &[f64]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.is_finite() && y.is_finite() && x.to_bits() == y.to_bits())
+}
+fn verify_forward(dataset: &Dataset, arm: &str, seed: usize, native: &[f64]) -> Result<()> {
+    let supplied = dataset
+        .predictions
+        .get(arm)
+        .and_then(|p| p.get(seed))
+        .ok_or_else(|| anyhow::anyhow!("E36 qualified native prediction missing"))?;
+    ensure!(
+        same_values(supplied, native),
+        "E36 predictions differ from qualified checkpoint native forward/row order"
+    );
+    Ok(())
+}
+fn verify_axes(dataset: &Dataset, source: &Value, target: &[f64]) -> Result<()> {
+    ensure!(
+        dataset.orientation.to_bits() == 1f64.to_bits()
+            && source["orientation"] == 1.
+            && source["rows"].as_u64() == Some(target.len() as u64)
+            && source["reference"] == json!(dataset.reference)
+            && source["codec"] == json!(dataset.codec)
+            && same_values(&dataset.target, target),
+        "E36 paired target/reference/codec/orientation differ from frozen source order"
+    );
+    Ok(())
+}
+fn replay_predictions(
+    input: &Input,
+    cells: &[Binding],
+    unavailable: &BTreeSet<String>,
+    frozen: &Value,
+) -> Result<Value> {
+    let mut receipts = Vec::new();
+    for name in DATASETS {
+        let datasets: Vec<_> = input.datasets.iter().filter(|d| d.name == name).collect();
+        ensure!(
+            datasets.len() == 1,
+            "E36 exact frozen assessment dataset inventory"
+        );
+        let dataset = datasets[0];
+        let source = &frozen["tables"][name];
+        let path = PathBuf::from(
+            source["path"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("E36 frozen table path"))?,
+        );
+        // Hashes bind the complete original features/targets and ordered key file.
+        for (p, key) in [
+            (path.clone(), "table_sha256"),
+            (
+                PathBuf::from(format!("{}.manifest.json", path.display())),
+                "manifest_sha256",
+            ),
+            (path.with_extension("keys.parquet"), "keys_sha256"),
+        ] {
+            ensure!(
+                source[key].as_str().is_some_and(is_sha)
+                    && file_digest(&p)? == source[key].as_str().unwrap(),
+                "E36 frozen assessment table/key/manifest differs"
+            );
+        }
+        let group =
+            zensim_validate::parquet_loader::load_parquet(&path, "predict", "human_score", 1.)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        verify_axes(dataset, source, &group.human_scores)?;
+        for c in cells
+            .iter()
+            .filter(|c| c.heldout == name && !unavailable.contains(&c.arm))
+        {
+            let bytes = fs::read(
+                c.bake
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("E36 actual qualified bake required"))?,
+            )?;
+            ensure!(
+                Some(digest(&bytes)).as_ref() == c.bake_sha256.as_ref(),
+                "E36 qualified checkpoint bytes differ"
+            );
+            let model =
+                zenpredict::Model::from_bytes(&bytes).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            let mut scorer =
+                zensim::BakeScorer::ensemble(&[model], None).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let native: Vec<f64> = group
+                .feature_rows
+                .iter()
+                .map(|row| {
+                    scorer
+                        .score_features(row, 0, 0, None)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                })
+                .collect::<Result<_>>()?;
+            verify_forward(dataset, &c.arm, c.seed_index, &native)?;
+            let output: Vec<u8> = native.iter().flat_map(|v| v.to_le_bytes()).collect();
+            receipts.push(json!({"arm":c.arm,"source":name,"seed_index":c.seed_index,
+                "checkpoint_sha256":c.bake_sha256,"table_sha256":source["table_sha256"],
+                "keys_sha256":source["keys_sha256"],"row_keys_sha256":source["row_keys_sha256"],
+                "orientation":1.,"predictions_f64le_sha256":digest(&output),"rows":native.len(),
+                "forward":"E34 BakeScorer::ensemble score_features(row,0,0,None), score units"}));
+        }
+    }
+    Ok(json!(receipts))
+}
 pub(super) fn run(cli: Cli) -> Result<()> {
     safe_metadata(&cli.input)?;
     let request: Assessment = serde_json::from_slice(&fs::read(&cli.input)?)?;
@@ -274,7 +400,7 @@ pub(super) fn run(cli: Cli) -> Result<()> {
     let init = [1101, 1103, 1107, 1109, 1117, 1123, 1129, 1151, 1153, 1163];
     let mut keys = BTreeSet::new();
     let mut unavailable = BTreeSet::new();
-    for c in cells {
+    for c in &cells {
         let fold = DATASETS
             .iter()
             .position(|&s| s == c.heldout)
@@ -318,15 +444,35 @@ pub(super) fn run(cli: Cli) -> Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("E36 native model binding required"))?,
                 c.model_binding_sha256.as_deref().unwrap_or(""),
             )?;
-            verify_native_records(&c, &plan, &fleet, &qualification, &binding)?;
+            verify_native_records(c, &plan, &fleet, &qualification, &binding)?;
+            let path = c
+                .bake
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("E36 qualified bake path required"))?;
+            ensure!(
+                Some(file_digest(path)?).as_ref() == c.bake_sha256.as_ref(),
+                "E36 actual model hash differs"
+            );
         }
     }
+    let frozen = bound_metadata(
+        &request.assessment_inputs,
+        plan["assessment_inputs"]["sha256"].as_str().unwrap_or(""),
+    )?;
+    ensure!(
+        frozen["schema"] == "e36-frozen-assessment-inputs-v1"
+            && frozen["labels_read"] == false
+            && file_digest(&std::env::current_exe()?)?
+                == plan["assessment_owner_sha256"].as_str().unwrap_or(""),
+        "E36 frozen assessment metadata/native forward owner differs"
+    );
     let bytes = fs::read(&request.paired)?;
     ensure!(
         digest(&bytes) == request.paired_sha256,
         "E36 paired target payload hash mismatch"
     );
     let mut input: Input = serde_json::from_slice(&bytes)?;
+    let forward_receipts = replay_predictions(&input, &cells, &unavailable, &frozen)?;
     for dataset in &mut input.datasets {
         for arm in &unavailable {
             dataset.predictions.remove(arm);
@@ -357,11 +503,36 @@ pub(super) fn run(cli: Cli) -> Result<()> {
     result["fit_program_sha256"] = json!(request.program_sha256);
     result["fit_plan_sha256"] = json!(request.fit_plan_sha256);
     result["native_source_withheld_qualification_verified"] = json!(true);
+    result["native_forward_receipts"] = forward_receipts;
+    result["assessment_inputs_sha256"] = plan["assessment_inputs"]["sha256"].clone();
+    result["native_forward_owner_sha256"] = plan["assessment_owner_sha256"].clone();
     save(&cli.output, &result)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn e36_predictions_require_exact_native_model_and_row_order() {
+        let mut dataset: Dataset =
+            serde_json::from_value(json!({"name":"kadid","target":[1.,2.,3.],
+            "reference":[0,0,1],"codec":[0,1,0],"orientation":1.,
+            "predictions":{"tv1-c":[[98.,94.,91.]]}}))
+            .unwrap();
+        let source = json!({"orientation":1.,"rows":3,"reference":[0,0,1],"codec":[0,1,0]});
+        verify_axes(&dataset, &source, &[1., 2., 3.]).unwrap();
+        verify_forward(&dataset, "tv1-c", 0, &[98., 94., 91.]).unwrap();
+        // Otherwise valid qualified metadata cannot authorize another model's
+        // numbers, a row permutation, a missing seed, or changed target axes.
+        assert!(verify_forward(&dataset, "tv1-c", 0, &[97., 93., 90.]).is_err());
+        assert!(verify_forward(&dataset, "tv1-c", 0, &[94., 98., 91.]).is_err());
+        assert!(verify_forward(&dataset, "tv1-c", 1, &[98., 94., 91.]).is_err());
+        assert!(verify_axes(&dataset, &source, &[2., 1., 3.]).is_err());
+        dataset.reference.swap(1, 2);
+        assert!(verify_axes(&dataset, &source, &[1., 2., 3.]).is_err());
+        dataset.reference.swap(1, 2);
+        dataset.orientation = -1.;
+        assert!(verify_axes(&dataset, &source, &[1., 2., 3.]).is_err());
+    }
     #[test]
     fn e36_assessment_requires_qualified_withheld_models() {
         // Invented metadata only. No model, label payload or optimizer.

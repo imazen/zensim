@@ -63,6 +63,27 @@ class TrainingAdapter(unittest.TestCase):
             old=json.loads(plan.read_text());old['schema']='e36-matched-base-filter-v1';write(plan,old);recipe['e36']['base_filter_sha256']=sha(plan)
             with patch.dict(os.environ,{'ZEN_FIT_PROGRAM_SHA':'a'*64}):
                 with self.assertRaisesRegex(ValueError,'changed'):owner.filter_groups(copy.deepcopy(original),recipe,scratch)
+    def test_assessment_inputs_freeze_order_without_targets(self):
+        import e34_evaluate
+        with self.temporary() as d:
+            root=Path(d);real=root/'wide/main/real';real.mkdir(parents=True)
+            source=real/'invented.parquet';source.write_bytes(b'opaque never decoded target fixture')
+            keys=pa.table(dict(pair_key=['a','b','c'],ref_basename=['ref0','ref0','ref1'],member_set=['invented']*3,row_id=pa.array([0,1,2],type=pa.uint64())))
+            pq.write_table(keys,key_path(source),compression='zstd')
+            side=Path(str(source)+'.manifest.json');write(side,{'invented':'original metadata'})
+            write(real/'receipt.json',dict(legs=dict(kadid=dict(full=dict(rel='wide/main/real/invented.parquet',
+                sha256=sha(source),manifest_sha256=sha(side),keys_sha256=sha(key_path(source)),rows=3)))))
+            reader=pq.read_table
+            def keys_only(path,*a,**k):
+                if Path(path)==source:raise AssertionError('assessment plan decoded target table')
+                return reader(path,*a,**k)
+            out=root/'assessment.json'
+            with patch.object(e34_evaluate,'admit_tables',return_value=[('kadid',source,[0,0,1],[0,1,0])]),patch.object(pq,'read_table',side_effect=keys_only):
+                owner.assessment_plan(root,out)
+            frozen=json.loads(out.read_text());r=frozen['tables']['kadid']
+            self.assertFalse(frozen['labels_read']);self.assertEqual(r['reference'],[0,0,1]);self.assertEqual(r['codec'],[0,1,0])
+            self.assertEqual(r['row_keys_sha256'],row_keys_sha(keys));self.assertEqual(r['table_sha256'],sha(source))
+            self.assertEqual(r['orientation'],1.);self.assertEqual(r['rows'],3)
     def test_three_fixed_arms_and_trainer_digest(self):
         with self.temporary() as d:
             root=Path(d);manifest=root/'manifest.json';write(manifest,{'invented':'feature-only'})

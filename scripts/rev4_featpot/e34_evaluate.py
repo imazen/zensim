@@ -36,30 +36,15 @@ def write(path, value):
         f.write('\n')
 
 
-def capture():
+def admit_tables(root):
+    """Existing E34 metadata-only row/reference/codec admission; no targets."""
     import pandas as pd
     import pyarrow.parquet as pq
-    from v2_lodo_mlp import predict
-    ledger = Path(__file__).resolve().parents[2] / 'docs/DATA_SPLITS.md'
-    assert 'E34 registered evaluation preread' in ledger.read_text()
-    inventory = OUT / 'preread.json'
-    assert sha(inventory) == 'e3aae632f8cc4537bb91c48c3de88ce039b4c691c8bd0e77c7025715590d1909'
-    cells = json.loads(inventory.read_text())['cells']
-    grids = {label: {} for label in LABELS.values()}
-    for c in cells:
-        name = c['jobset'].split('-')[1]
-        if name in LABELS and c['fold'] != 'full':
-            assert sha(c['selected_model']) == c['selected_sha256']
-            key = (c['fold'], c['seed'])
-            assert key not in grids[LABELS[name]]
-            grids[LABELS[name]][key] = c
-    expected = {(f, s) for f in FOLDS for s in range(10)}
-    assert all(set(grid) == expected for grid in grids.values())
-    receipt = json.loads((ROOT / 'wide/main/real/receipt.json').read_text())
+    receipt = json.loads((root / 'wide/main/real/receipt.json').read_text())
     admitted = []
     for fold, count, groups in zip(FOLDS, COUNTS, GROUPS, strict=True):
         rec = receipt['legs'][fold]['full']
-        table = ROOT / rec['rel']
+        table = root / rec['rel']
         keys = table.with_suffix('.keys.parquet')
         assert sha(table) == rec['sha256']
         assert sha(str(table) + '.manifest.json') == rec['manifest_sha256']
@@ -86,6 +71,28 @@ def capture():
         assert codec.notna().all()
         codec_ids = {v: i for i, v in enumerate(sorted(set(codec)))}
         admitted.append((fold, table, [ids[v] for v in names], [codec_ids[v] for v in codec]))
+    return admitted
+
+
+def capture():
+    import pyarrow.parquet as pq
+    from v2_lodo_mlp import predict
+    ledger = Path(__file__).resolve().parents[2] / 'docs/DATA_SPLITS.md'
+    assert 'E34 registered evaluation preread' in ledger.read_text()
+    inventory = OUT / 'preread.json'
+    assert sha(inventory) == 'e3aae632f8cc4537bb91c48c3de88ce039b4c691c8bd0e77c7025715590d1909'
+    cells = json.loads(inventory.read_text())['cells']
+    grids = {label: {} for label in LABELS.values()}
+    for c in cells:
+        name = c['jobset'].split('-')[1]
+        if name in LABELS and c['fold'] != 'full':
+            assert sha(c['selected_model']) == c['selected_sha256']
+            key = (c['fold'], c['seed'])
+            assert key not in grids[LABELS[name]]
+            grids[LABELS[name]][key] = c
+    expected = {(f, s) for f in FOLDS for s in range(10)}
+    assert all(set(grid) == expected for grid in grids.values())
+    admitted = admit_tables(ROOT)
     write(OUT / 'label-read-started.json', dict(ledger_sha256=sha(ledger),
           preread_sha256=sha(inventory), script_sha256=sha(__file__),
           scope='four frozen D1 target columns; seven paired ten-seed grids'))
