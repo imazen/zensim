@@ -20,7 +20,7 @@ def sha(path):
 
 
 def install(runtime):
-    if getattr(runtime, '_owner_svt_ssd', False) == 2:
+    if getattr(runtime, '_owner_svt_ssd', False) == 3:
         return
     if runtime.root != ROOT:
         raise ValueError('owner overlay refuses another experiment')
@@ -65,11 +65,12 @@ def install(runtime):
                 if sha(path) != digest:
                     raise ValueError('refusing conflicting local object')
             sync_directory(path.parent)
+            ack=dict(ok=True,sha256=digest,bytes=path.stat().st_size,
+                     relative_path=str(path.relative_to(LOCAL)),program_sha256=sha(__file__))
         # Set the receipt location only after this local put succeeds. A remote
         # put already in flight at installation must keep its tower location.
         runtime.spec['storage'] = dict(runtime.spec['storage'], root=str(LOCAL), host='dev')
-        return dict(ok=True, sha256=digest, bytes=path.stat().st_size,
-                    relative_path=str(path.relative_to(LOCAL)), program_sha256=sha(__file__))
+        return ack
 
     def execute(owner, job):
         view = json.loads(job['kind']['view'].split(':', 1)[1])
@@ -88,7 +89,7 @@ def install(runtime):
     runtime.execute_cell = types.MethodType(cell, runtime)
     # Historical checkpoints retain their original tower owner. Only future
     # bundle receipts use this explicitly registered storage overlay.
-    runtime._owner_svt_ssd = 2
+    runtime._owner_svt_ssd = 3
     install_disk_reserve(runtime)
 
 
