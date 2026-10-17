@@ -95,12 +95,46 @@ def admit(host, cap, own_name=None):
         raise ValueError('shared fit pool reservation exceeded')
 
 
-def envelope(binding, host, container, d, deadline, kernel_swap=None):
+GUARD_SHA = '8608f5ef328e0da8f57ea2bff653f280540f858f50732e34a1eb03d89fd5e09e'
+ORIGINAL_ENTRYPOINT_SHA = '8c506757c7bc5fb2a8e3478fe2348aefd0e8eaa17640a94c55e1b330f12f77cf'
+
+
+def execution_amendment(bundle):
+    amendment = read_json(bundle/'EXECUTION_BINDING_AMENDMENT.json')
+    if (amendment.get('packet_sha256') != owner.PACKET_SHA
+            or amendment.get('owner_approved') is not True
+            or amendment.get('before_sha256') != ORIGINAL_ENTRYPOINT_SHA
+            or amendment.get('after_sha256') != GUARD_SHA):
+        raise ValueError('approved entrypoint execution amendment missing or invalid')
+    for key in ('entrypoint', 'launcher'):
+        item = amendment[key]
+        if owner.sha(Path(item['path'])) != item['sha256']:
+            raise ValueError('execution amendment bytes changed: '+key)
+    if amendment['entrypoint']['sha256'] != GUARD_SHA:
+        raise ValueError('entrypoint guard hash differs')
+    return amendment
+
+
+def stage_entrypoint(bundle, binding, host, amendment):
+    scratch = binding['active'][host]['ZEN_TMPDIR_HOST_DIR']
+    target = scratch+'/steer-entrypoint-'+GUARD_SHA+'.sh'
+    # Only the separately approved script crosses SSH, never credentials or data.
+    script = Path(amendment['entrypoint']['path']).read_bytes()
+    command = ('set -eu; p='+shlex.quote(target)+'; '
+               'if [ -e "$p" ] || [ -L "$p" ]; then '
+               '[ ! -L "$p" ] && [ "$(sha256sum "$p" | cut -d " " -f 1)" = '+GUARD_SHA+' ]; '
+               'else (umask 022; set -C; cat > "$p"); fi; '
+               'chmod 555 "$p"; [ "$(sha256sum "$p" | cut -d " " -f 1)" = '+GUARD_SHA+' ]')
+    subprocess.run(['ssh', '-o', 'BatchMode=yes', host, command], input=script, check=True)
+    return target
+
+
+def envelope(binding, host, container, d, deadline, kernel_swap=None, entrypoint_path=None):
     env = dict(v.split('=', 1) for v in d['Config']['Env'] if '=' in v)
     h = d['HostConfig']
     rename = {'ZEN_FORMULA_REV': 'ZENSIM_FORMULA_REV'}
     expected = {**binding['shared_environment'], 'ZEN_CHUNK_WALL_SEC': '1',
-                'ZEN_MAX_MIN': '1'}
+                'ZEN_MAX_MIN': '150'}
     checks = {k: env.get(rename.get(k, k)) == v for k, v in expected.items()
               if k not in ('ZEN_MEMORY', 'ZEN_CPU_SHARES')}
     checks.update(image=d['Config']['Image'] == binding['image'],
@@ -114,6 +148,10 @@ def envelope(binding, host, container, d, deadline, kernel_swap=None):
                   deadline=env.get('ZEN_NO_NEW_AFTER_EPOCH') == str(deadline),
                   scratch=any(m['Source'] == binding['active'][host]['ZEN_TMPDIR_HOST_DIR']
                               and m['Destination'] == '/scratch' for m in d['Mounts']))
+    if entrypoint_path is not None:
+        checks['entrypoint_readonly_bind'] = any(
+            m['Source'] == entrypoint_path and m['Destination'] == '/usr/local/bin/fleet-entrypoint.sh'
+            and m.get('RW') is False for m in d['Mounts'])
     return checks
 
 
@@ -155,6 +193,7 @@ def enroll(bundle, doc, host, role, js):
     if active.get('paused') or active.get('drain'):
         return dict(state='PAUSED', host=host)
     ctr = 'zen-score-'+role
+    amendment = execution_amendment(bundle)
     before = capacity(host)
     admit(host, before)
     # Refuse accidental reuse, including a stopped container with preserved evidence.
@@ -164,14 +203,15 @@ def enroll(bundle, doc, host, role, js):
     paused = dict(paused=True, drain=False, note='STEER envelope '+role)
     control(bundle, js, paused)
     deadline = int(ssh(host, 'date -u +%s').strip())+30
-    # In the frozen entrypoint this budget is checked BETWEEN passes. A fit may
-    # finish under its unchanged 7663s cap; the wrapper then exits instead of
-    # polling with an already-expired native claim deadline for 150 minutes.
+    entrypoint = stage_entrypoint(bundle, binding, host, amendment)
+    # The owner-approved guard exits only between passes after the native claim
+    # deadline. Preserve the original 150-minute allocation budget and cell caps.
     env = {**os.environ, **binding['shared_environment'], **binding['active'][host],
            'ZEN_STORE': 'tower', 'ZEN_CHUNK_WALL_SEC': '1',
-           'ZEN_MAX_MIN': '1',
-           'ZEN_NO_NEW_AFTER_EPOCH': str(deadline)}
-    helper = bundle.parent/'launch-source/zenmetrics/scripts/jobsys/lan_score_launch.sh'
+           'ZEN_MAX_MIN': '150',
+           'ZEN_NO_NEW_AFTER_EPOCH': str(deadline),
+           'ZEN_ENTRYPOINT_HOST_PATH': entrypoint, 'ZEN_ENTRYPOINT_SHA256': GUARD_SHA}
+    helper = Path(amendment['launcher']['path'])
     receipt = launch/('ENVELOPE-'+role+'.json')
     if receipt.exists():
         raise ValueError('enrollment receipt already exists')
@@ -193,7 +233,8 @@ def enroll(bundle, doc, host, role, js):
                    'cat "/sys/fs/cgroup$cg/memory.max" '
                    '"/sys/fs/cgroup$cg/memory.swap.max" "/sys/fs/cgroup$cg/memory.swap.current"')
         kernel = [int(v) for v in ssh(host, command).splitlines()]
-    checks = envelope(binding, host, ctr, d, deadline, kernel)
+    checks = envelope(binding, host, ctr, d, deadline, kernel, entrypoint)
+    checks['entrypoint_sha256'] = ssh(host, sudo+'docker exec '+ctr+' sha256sum /usr/local/bin/fleet-entrypoint.sh').split()[0] == GUARD_SHA
     checks['holding'] = False
     for _ in range(20):
         logs = subprocess.run(['ssh', '-o', 'BatchMode=yes', host,
@@ -214,7 +255,9 @@ def enroll(bundle, doc, host, role, js):
                   claim_deadline=deadline, kernel_swap=kernel,
                   packet_sha256=owner.PACKET_SHA, cell_wall_cap_sec=7663,
                   pass_timeout_sec=8000, packing_target_sec=1,
-                  allocation_postpass_budget_minutes=1)
+                  allocation_postpass_budget_minutes=150,
+                  execution_amendment_sha256=owner.sha(bundle/'EXECUTION_BINDING_AMENDMENT.json'),
+                  entrypoint_sha256=GUARD_SHA)
     receipt.write_text(json.dumps(record, indent=2)+'\n')
     if not all(checks.values()):
         raise ValueError('worker envelope failed; control remains paused; see '+str(receipt))
@@ -395,7 +438,7 @@ def watch(bundle, doc):
         print(json.dumps(value), flush=True)
         if path := os.environ.get('STEER_STATUS_FILE'):
             with Path(path).open('a') as stream:
-                stream.write('\n'+value['time']+' — LIFECYCLE '+json.dumps(value)+'\n')
+                stream.write('\n'+('LIVE ' if value.get('action') in ('OBSERVE', 'COMPLETE') else '')+value['time']+' — LIFECYCLE '+json.dumps(value)+'\n')
     while True:
         status = read_json(launch/'HARVEST_STATUS.json')
         js = next_jobset(bundle, doc, status)

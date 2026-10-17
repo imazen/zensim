@@ -26,13 +26,14 @@ class Lifecycle(unittest.TestCase):
                         workers=[], free=40*life.GIB, docker_free=40*life.GIB)
         self.docker = dict(Config=dict(Image=self.binding['image'],
                                       Env=['ZEN_PASS_TIMEOUT=8000', 'ZEN_CHUNK_WALL_SEC=1',
-                                           'ZEN_MAX_MIN=1',
+                                           'ZEN_MAX_MIN=150',
                                            'ZEN_NO_NEW_AFTER_EPOCH=130']),
                            HostConfig=dict(Memory=6*life.GIB, MemorySwap=6*life.GIB,
                                            CpusetCpus='0', CpuShares=256,
                                            RestartPolicy=dict(Name='no')),
                            RestartCount=0, State=dict(Running=True),
-                           Mounts=[dict(Source='/disk/scratch', Destination='/scratch')])
+                           Mounts=[dict(Source='/disk/scratch', Destination='/scratch'),
+                                   dict(Source='/disk/guard.sh',Destination='/usr/local/bin/fleet-entrypoint.sh',RW=False)])
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -145,8 +146,25 @@ class Lifecycle(unittest.TestCase):
             self.assertFalse(all(life.envelope(self.binding,'r3500','ctr',d,130).values()))
         d=copy.deepcopy(self.docker);d['Config']['Env']=['ZEN_PASS_TIMEOUT=8000','ZEN_CHUNK_WALL_SEC=1']
         self.assertFalse(life.envelope(self.binding,'r3500','ctr',d,130)['deadline'])
-        d=copy.deepcopy(self.docker);d['Config']['Env'].append('ZEN_MAX_MIN=150')
+        d=copy.deepcopy(self.docker);d['Config']['Env'].append('ZEN_MAX_MIN=1')
         self.assertFalse(life.envelope(self.binding,'r3500','ctr',d,130)['ZEN_MAX_MIN'])
+
+    def test_guard_bind_must_be_readonly_and_amendment_bytes_verified(self):
+        d=copy.deepcopy(self.docker)
+        self.assertTrue(life.envelope(self.binding,'r3500','ctr',d,130,entrypoint_path='/disk/guard.sh')['entrypoint_readonly_bind'])
+        d['Mounts'][-1]['RW']=True
+        self.assertFalse(life.envelope(self.binding,'r3500','ctr',d,130,entrypoint_path='/disk/guard.sh')['entrypoint_readonly_bind'])
+        with self.assertRaises(FileNotFoundError):life.execution_amendment(self.bundle)
+        script=self.root/'guard';script.write_text('fixture')
+        launcher=self.root/'launcher';launcher.write_text('fixture')
+        amendment=dict(packet_sha256=life.owner.PACKET_SHA,owner_approved=True,
+                       before_sha256=life.ORIGINAL_ENTRYPOINT_SHA,after_sha256=life.GUARD_SHA,
+                       entrypoint=dict(path=str(script),sha256=life.GUARD_SHA),
+                       launcher=dict(path=str(launcher),sha256=life.owner.sha(launcher)))
+        p=self.bundle/'EXECUTION_BINDING_AMENDMENT.json';p.write_text(json.dumps(amendment))
+        with self.assertRaisesRegex(ValueError,'bytes changed'):life.execution_amendment(self.bundle)
+        amendment['owner_approved']=False;p.write_text(json.dumps(amendment))
+        with self.assertRaisesRegex(ValueError,'invalid'):life.execution_amendment(self.bundle)
 
     def test_transition_requires_all_evidence(self):
         proof=dict(packet_sha256=life.owner.PACKET_SHA,all_old_chunks_complete=True,
@@ -184,6 +202,7 @@ class Lifecycle(unittest.TestCase):
 
     def test_release_order_and_operator_pause_race(self):
         import types
+        (self.bundle/'EXECUTION_BINDING_AMENDMENT.json').write_text('{}')
         for stop in [False,True]:
             role='steer-r3500-'+('004' if stop else '003')
             post=copy.deepcopy(self.cap)
@@ -197,10 +216,13 @@ class Lifecycle(unittest.TestCase):
                 return paused
             def ssh(host,cmd):
                 if cmd=='date -u +%s':return '100\n'
+                if 'sha256sum /usr/local/bin/fleet-entrypoint.sh' in cmd:return life.GUARD_SHA+'  entrypoint'
                 return ''
             with mock.patch.object(life.owner,'steer_plan',return_value={'order':['job']}), \
                  mock.patch.object(life.owner,'first_steer_admission'), \
                  mock.patch.object(life,'transition_proof'),mock.patch.object(life,'repaired_admission'), \
+                 mock.patch.object(life,'execution_amendment',return_value={'launcher':{'path':'/disk/launcher.sh'}}), \
+                 mock.patch.object(life,'stage_entrypoint',return_value='/disk/guard.sh'), \
                  mock.patch.object(life,'capacity',side_effect=[self.cap,post]), \
                  mock.patch.object(life,'inspect',return_value=self.docker), \
                  mock.patch.object(life,'control',side_effect=control), \
@@ -215,11 +237,11 @@ class Lifecycle(unittest.TestCase):
                     self.assertEqual(out['state'],'RELEASED')
                     self.assertEqual(controls,[paused,dict(paused=False,drain=False)])
                     launch=run.call_args_list[0]
-                    self.assertEqual(launch.args[0],['bash',str(self.root/'launch-source/zenmetrics/scripts/jobsys/lan_score_launch.sh'),'r3500','job',role,'cpu',self.binding['image']])
+                    self.assertEqual(launch.args[0],['bash',str(Path('/disk/launcher.sh')),'r3500','job',role,'cpu',self.binding['image']])
                     env=launch.kwargs['env']
                     self.assertEqual(env['ZEN_PASS_TIMEOUT'],'8000')
                     self.assertEqual(env['ZEN_CHUNK_WALL_SEC'],'1')
-                    self.assertEqual(env['ZEN_MAX_MIN'],'1')
+                    self.assertEqual(env['ZEN_MAX_MIN'],'150')
                     self.assertEqual(env['ZEN_NO_NEW_AFTER_EPOCH'],'130')
 
     def test_metadata_selection_refuses_partial_invalid_and_failed_evidence(self):

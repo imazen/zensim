@@ -59,11 +59,12 @@ fi
                    ZEN_R2_ENDPOINT='http://invented.invalid', ZEN_BUCKET='invented',
                    ZEN_RUN='jobs/invented', ZEN_MANIFEST_URI='s3://invented/manifest.json',
                    ZEN_WORKER='invented', ZEN_PROVIDER='engineering', ZEN_REQUIRE_SNAPSHOT='0',
-                   ZEN_MAX_MIN='1', ZEN_PASS_TIMEOUT='15', ZEN_IDLE_PASSES='1', ZEN_LONG_LIVED='0')
+                   ZEN_MAX_MIN='150', ZEN_PASS_TIMEOUT='15', ZEN_IDLE_PASSES='1', ZEN_LONG_LIVED='0')
         if deadline is not None:
             env['ZEN_NO_NEW_AFTER_EPOCH'] = str(deadline)
         if case == 'original_budget_drains':
             # Existing post-pass allocation budget must not truncate the in-flight pass.
+            env['ZEN_MAX_MIN'] = '1'
             env['PROBE_END_EPOCH'] = str(int(time.time())+65)
             env['ZEN_PASS_TIMEOUT'] = '80'
         command = ['docker', 'run', '-d', '--pull', 'never', '--restart', 'no',
