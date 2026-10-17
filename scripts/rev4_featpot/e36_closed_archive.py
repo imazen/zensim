@@ -16,10 +16,10 @@ def checked(pin):
 
 
 def closed_generation(root):
-    root=Path(root);terminal_path=root/'owner-svt-ssd-v1/native-continuation-final-v1.json';terminal=json.loads(terminal_path.read_text())
-    if terminal['schema']!='e36-native-continuation-final-v1' or terminal['closed'] is not True or terminal['fits']!=0 or terminal['scientific_change'] is not False:raise ValueError('closed native terminal proof required')
-    binding=json.loads(checked(terminal['continuation']).read_text());launch=json.loads(checked(binding['launch']).read_text())
-    if binding['schema']!='e36-native-continuation-binding-v1' or binding['fits']!=0 or binding['scientific_change'] is not False or launch['schema']!='e36-existing-native-ledger-continuation-v1' or launch['fits']!=0 or launch['scientific_change'] is not False:raise ValueError('closed native launch/source binding differs')
+    root=Path(root);fresh=(root/'owner-svt-ssd-v1/native-continuation-v3-binding.json').exists();terminal_path=root/'owner-svt-ssd-v1'/('native-continuation-final-v3.json' if fresh else 'native-continuation-final-v1.json');terminal=json.loads(terminal_path.read_text())
+    if terminal['schema']!=('e36-fresh-native-continuation-final-v1' if fresh else 'e36-native-continuation-final-v1') or terminal['closed'] is not True or terminal['fits']!=0 or terminal['scientific_change'] is not False:raise ValueError('closed native terminal proof required')
+    binding=json.loads(checked(terminal['fresh_binding'] if fresh else terminal['continuation']).read_text());launch=json.loads(checked(binding['launch']).read_text())
+    if binding['schema']!=('e36-fresh-native-continuation-v1' if fresh else 'e36-native-continuation-binding-v1') or binding['fits']!=0 or binding['scientific_change'] is not False or launch['schema']!='e36-existing-native-ledger-continuation-v1' or launch['fits']!=0 or launch['scientific_change'] is not False:raise ValueError('closed native launch/source binding differs')
     exit_record=json.loads(checked(terminal['exit']).read_text());helpers=json.loads(checked(terminal['helper_exits']).read_text());checked(terminal['log'])
     if exit_record['returncode']!=terminal['returncode'] or len(helpers['exits'])!=2 or any(r['returncode']!=0 for r in helpers['exits']):raise ValueError('native terminal exit/helper evidence differs')
     worker=root/'bin/zenfleet-worker-fair-v7'

@@ -2325,3 +2325,6 @@ e36-pack-integration-check:
 
 e36-largest-source-amendment root projection commit:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_source_cut.py --root {{quote(root)}} --projection {{quote(projection)}} --commit {{quote(commit)}}
+
+e36-fresh-continuation operation root:
+    python3 scripts/rev4_featpot/e36_fresh_continuation.py {{quote(operation)}} --root {{quote(root)}}

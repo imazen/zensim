@@ -264,6 +264,9 @@ def configuration(root):
         owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
         if frozen!=owner.clock_equivalence(root,checked(proof['original_plan']),old,checked(base['inherited_clock'])):
             raise ValueError('original numerical transport equivalence changed')
+    if (root/'owner-svt-ssd-v1/native-continuation-v3-binding.json').exists():
+        from e36_fresh_continuation import validate as validate_fresh
+        fresh,_,_=validate_fresh(root);proof['fresh_continuation']=bind(fresh);evidence.append(bind(fresh))
     from e36_source_cut import apply as apply_source_cut
     proof=apply_source_cut(root,proof,clock)
     if 'source_count_amendment' in proof:evidence.append(proof['source_count_amendment'])
@@ -430,6 +433,12 @@ def admit(root,names):
         supervision_path=root/'owner-svt-ssd-v1/continuation-supervision-v2-binding.json'
         if supervision_path.exists() and checked(terminal['supervision'])!=supervision_path:
             raise ValueError('native continuation live supervision evidence missing')
+    fresh_terminal=None
+    if proof.get('fresh_continuation'):
+        fresh_terminal=root/'owner-svt-ssd-v1/native-continuation-final-v3.json'
+        terminal=json.loads(fresh_terminal.read_text())
+        if terminal['schema']!='e36-fresh-native-continuation-final-v1' or terminal['closed'] is not True or terminal['fits']!=0 or terminal['scientific_change'] is not False or terminal['fresh_binding']!=proof['fresh_continuation']:raise ValueError('fresh native terminal evidence required')
+        for key in ['launch','exit','helper_exits','log','runtime_audit']:checked(terminal[key])
     locations=json.loads(location_path.read_text())
     if locations['schema']!='e36-artifact-location-admission-v1' or locations['admitted'] is not True or locations['fits']!=0 or locations['relocation_eligibility_replayed'] is not True:
         raise ValueError('frozen verified artifact location admission required')
@@ -449,7 +458,7 @@ def admit(root,names):
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
                 native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
-                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'))
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None)
 
 
 def install_controller(root,receipt):
