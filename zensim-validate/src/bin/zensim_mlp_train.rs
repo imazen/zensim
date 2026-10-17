@@ -3076,12 +3076,17 @@ fn main() {
                     .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
                 || args.hidden != 128
-                || args.epochs != 120
-                || args.pairs_per_epoch != 50_000
+                || !e36_tv::fit_budget(
+                    args.epochs,
+                    args.pairs_per_epoch,
+                    std::env::var("ZEN_E36_EXECUTION_CONTRACT").ok().as_deref(),
+                    std::env::var("ZEN_E36_MEMORY_SMOKE").ok().as_deref(),
+                    std::env::var("ZEN_E36_ARGV_SHA").ok().as_deref(),
+                )
                 || !args.nonneg_distance
             {
                 eprintln!(
-                    "E36 fitting requires bound fit-cell-exec and exact plain-N H128/120epoch/50000pair recipe"
+                    "E36 fitting requires bound fit-cell-exec, plain-N H128 and registered full or exact diagnostic budget"
                 );
                 std::process::exit(2);
             }

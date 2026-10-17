@@ -133,12 +133,30 @@ def add_args(p):
     p.add_argument('--e36-overlay',type=Path);p.add_argument('--e36-overlay-sha256')
 
 
+def diagnostic(args):
+    budget=getattr(args,'local_smoke_budget',None)
+    contract=os.environ.get('ZEN_E36_EXECUTION_CONTRACT')
+    marker=os.environ.get('ZEN_E36_MEMORY_SMOKE','')
+    if budget is None:
+        if contract=='local-smoke' or marker:raise ValueError('diagnostic authorization cannot label a full fit')
+        return False
+    if (budget!='2:128' or contract!='local-smoke' or marker!='2:128'
+        or not re.fullmatch('[0-9a-f]{64}',os.environ.get('ZEN_E36_ARGV_SHA',''))
+        or not re.fullmatch('[0-9a-f]{64}',os.environ.get('ZEN_FIT_PROGRAM_SHA',''))
+        or args.e36_arm!='tv10-c' or args.seed_index!=0 or getattr(args,'heldout',None) is not None
+        or not args.strict_admission or not args.train_only or args.head!='N' or args.spec!=SPEC
+        or getattr(args,'pack_production',False) or getattr(args,'e33_output_stage',False)):
+        raise ValueError('exact native-authorized full-data tv10 seed0 diagnostic required')
+    return True
+
+
 def options(args,recipe):
     if getattr(args,'e36_arm',None) is None:return recipe
+    diagnostic(args)
     if (args.spec!=SPEC or args.head!='N' or not args.strict_admission or not args.train_only
         or recipe.get('hidden')!=128 or recipe.get('derived_inputs')!='fx1'
         or getattr(args,'steer_pairs',None) is not None or getattr(args,'steer_lambda',0)!=0
-        or getattr(args,'local_smoke_budget',None) is not None or getattr(args,'monotone_cbc',False) or getattr(args,'heldout',None) not in [None,*SOURCES]):
+        or getattr(args,'monotone_cbc',False) or getattr(args,'heldout',None) not in [None,*SOURCES]):
         raise ValueError('E36 requires the exact strict C/plain-N H128 base recipe, train-only and four-source folds')
     for n in ['e36_tv_manifest','e36_tv_contract','e36_base_filter_plan']:
         if getattr(args,n,None) is None:raise ValueError('E36 missing '+n)
@@ -223,6 +241,7 @@ def filter_groups(groups,recipe,scratch):
 def model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed=None,selection=None):
     e=recipe.get('e36')
     if e is None:return
+    diagnostic(args)
     smoke=getattr(args,'local_smoke_budget',None)
     if smoke is not None and smoke!='2:128':raise ValueError('E36 memory smoke requires exact diagnostic2:128 budget')
     epoch=1 if smoke else 119
@@ -262,7 +281,7 @@ def bootstrap(args):
     column is decoded here; source filtering and trainer reads happen later.
     """
     if getattr(args,'e36_arm',None) is None:return
-    if getattr(args,'local_smoke_budget',None) is not None:raise ValueError('E36 smoke fits are not part of the registered protocol')
+    diagnostic(args)
     if not re.fullmatch('[0-9a-f]{64}',os.environ.get('ZEN_FIT_PROGRAM_SHA','')):
         raise ValueError('E36 training bootstrap requires fit-cell-exec; fits remain separately released')
     if args.e36_overlay is None or sha(args.e36_overlay)!=args.e36_overlay_sha256:

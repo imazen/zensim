@@ -665,3 +665,31 @@ deduplication and the original nonempty-support and semantic admission guards.
 An optional preview is not admission. The failed pool cannot be promoted through
 the unchanged-matrix finalizer. The bounded diagnostic remains separately
 authorized; the129 scientific fits still require the coordinator's fit go.
+
+
+## Pre-fit ingress integration repair (2026-10-17)
+
+The full pool passed support and semantic export,then the actual native reader
+refused its source-budget binding before any optimizer step. The immutable
+reference index records the original source budget; the approved4096source
+cut correctly gives the fit pool a different effective budget. Native ingress
+now recognizes only that exact registered amendment and original/effective/
+runtime SHA tuple. The original equality remains required without amendment,
+and invalid amendments refuse. Reference/runtime/data bytes are preserved.
+
+The separately authorized2:128 diagnostic was also blocked by generic
+full-fit-only adapter checks. Its native executor now derives a diagnostic
+authorization from the trusted archived program/argv contract. The adapter
+requires that authorization before bootstrap,options and projection,with the
+exact tv10/full-data/seed0/plain-N H128/strict TRAIN route. The native CLI
+accepts that exact bounded budget alongside the unchanged120/50000 full route.
+Diagnostic output remains raw epoch1/local-smoke/noninstallable; scientific
+output remains packed epoch119/registered-fit with existing assessment guards.
+
+Rebuild and freeze successor ingress/program identities before any fit.
+Preserve the prior source,binaries and failed admission. Record the actual
+bounded diff and hashes proving the optimizer,TV gradient/normalization,RNG,
+weights,margins and numerical feature code unchanged. Training tables,teachers,
+source memberships,axes,guards and seeds do not change. The129 semantic cells
+and seed assignments remain; native job hashes must bind the actual successor
+program/data,not obsolete byte hashes. No scientific fit is released.

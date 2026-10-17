@@ -12,11 +12,29 @@ def load(path):return json.loads(Path(path).read_text())
 def write(path,value):
     with path.open('x') as stream:json.dump(value,stream,indent=2,allow_nan=False);stream.write('\n')
 
+def native_source_amendment(current):
+    outer=current.get('source_count_amendment')
+    if outer is None:return None
+    def bound(pin):
+        path=Path(pin['path'])
+        if sha(path)!=pin['sha256']:raise ValueError('native source-budget amendment proof changed')
+        return load(path)
+    binding=bound(outer);inner=binding['amendment'];amendment=bound(inner)
+    if (inner['sha256']!='48019e0e09d54137e0fe35ce06243db3d9f0c703d3fcf1a95054833c39213dc9'
+        or binding['schema']!='e36-source-count-native-binding-v1'
+        or amendment['schema']!='e36-authorized-source-count-amendment-v1'
+        or binding['source_budget']!=current['effective_source_budget']
+        or amendment['effective_budget']!=current['effective_source_budget']):
+        raise ValueError('exact nested approved native source-budget amendment required')
+    return inner
+
+
 def finalize(root,prepared,out,commit):
     root=Path(root);prepared=Path(prepared);out=Path(out)
     old=load(prepared/'matrix-admission.json')
     if old.get('artifact_archive_pending') is not True:raise ValueError('explicit archive-pending preparation required')
     current=admit(root,old['selected_runs'])
+    source_amendment=native_source_amendment(current)
     if current.get('artifact_archive_pending') is not False or not current.get('artifact_location'):raise ValueError('final artifact admission required')
     for key in ['matrix','selected_runs','manifests','completed_views','outputs','clock','plan']:
         if old[key]!=current[key]:raise ValueError('prepared scientific matrix changed: '+key)
@@ -52,6 +70,8 @@ def finalize(root,prepared,out,commit):
         if relative==Path('matrix-admission.json'):write(target,current)
         elif source.suffix=='.json' and source.name!='fx1.json':
             value=transform(load(source))
+            if source.name=='manifest.json' and value.get('schema')=='e36-tv-feature-only-v1' and source_amendment:
+                value['source_budget_amendment']=source_amendment
             if relative==Path('_MANIFEST.json'):
                 value['whole_matrix_sha256']=sha(copy_file(Path('whole-matrix.json')))
                 value['artifact_archive_pending']=False

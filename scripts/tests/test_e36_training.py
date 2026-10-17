@@ -104,7 +104,7 @@ class TrainingAdapter(unittest.TestCase):
             self.assertFalse(projection['contains_labels']);self.assertFalse(projection['label_payload_read_by_projection'])
             self.assertEqual(projection['selected_epoch'],119)
             args.local_smoke_budget='2:128';smoke_dest=root/'smoke-projection';smoke_dest.mkdir()
-            with patch.dict(os.environ,{'ZEN_FIT_PROGRAM_SHA':'a'*64}):
+            with patch.dict(os.environ,{'ZEN_FIT_PROGRAM_SHA':'a'*64,'ZEN_E36_EXECUTION_CONTRACT':'local-smoke','ZEN_E36_MEMORY_SMOKE':'2:128','ZEN_E36_ARGV_SHA':'b'*64}):
                 owner.model_binding(smoke_dest,recipe,args,1101,101,bake,selection=dict(epoch_rule='last',selected_epoch=1))
             self.assertEqual(json.loads((smoke_dest/'e36-model-binding.json').read_text())['selected_epoch'],1)
             args.local_smoke_budget=None

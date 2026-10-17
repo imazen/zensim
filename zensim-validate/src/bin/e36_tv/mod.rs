@@ -35,6 +35,8 @@ struct Manifest {
     required_support: Bound,
     references: Bound,
     source_budget: Bound,
+    #[serde(default)]
+    source_budget_amendment: Option<Bound>,
     cohort: Bound,
     runtime: Bound,
     features: Bound,
@@ -54,6 +56,44 @@ fn bound(b: &Bound) -> Result<(), String> {
         return Err("E36 bound file digest mismatch".into());
     }
     Ok(())
+}
+
+fn source_budget_identity(
+    reference: &str,
+    budget: &str,
+    runtime: &str,
+    amendment: Option<&str>,
+) -> bool {
+    match amendment {
+        None => reference == budget,
+        // The registered 4096-only 16-to-6 cut preserves the immutable
+        // generation runtime/reference index. Its exact complete budgets and
+        // authorization are retained; this is not an arbitrary hash waiver.
+        Some(amendment) => {
+            reference == "324762fbf74b72fd6ebf3a53524015af07c0a175ca53b2f4ea9f63d6be11d7ba"
+                && budget == "f9172e051b2e91d6ce9da336df439b251ec5e2f1c452ebbbe729981b2db82b1e"
+                && runtime == "35238d8ae522471267469e9f36fb3e133004d259ca4d37bb1dcf92296a6f4f8c"
+                && amendment == "48019e0e09d54137e0fe35ce06243db3d9f0c703d3fcf1a95054833c39213dc9"
+        }
+    }
+}
+
+pub(super) fn fit_budget(
+    epochs: usize,
+    pairs: usize,
+    contract: Option<&str>,
+    smoke: Option<&str>,
+    argv: Option<&str>,
+) -> bool {
+    if smoke.is_some_and(|value| !value.is_empty()) || contract == Some("local-smoke") {
+        epochs == 2
+            && pairs == 128
+            && contract == Some("local-smoke")
+            && smoke == Some("2:128")
+            && argv.is_some_and(digest)
+    } else {
+        epochs == 120 && pairs == 50_000
+    }
 }
 fn reader(
     path: &Path,
@@ -127,9 +167,19 @@ pub(super) fn load(
     let budget = json(&m.source_budget.path)?;
     let cohort = json(&m.cohort.path)?;
     let runtime = json(&m.runtime.path)?;
+    if let Some(amendment) = &m.source_budget_amendment {
+        bound(amendment)?;
+    }
     if m.source_budget.sha256 != m.source_budget_sha256
         || m.runtime.sha256 != m.generation_runtime_sha256
-        || references["source_budget_sha256"] != m.source_budget.sha256
+        || !source_budget_identity(
+            references["source_budget_sha256"].as_str().unwrap_or(""),
+            &m.source_budget.sha256,
+            &m.runtime.sha256,
+            m.source_budget_amendment
+                .as_ref()
+                .map(|value| value.sha256.as_str()),
+        )
         || budget["selection_sha256"] != m.cohort.sha256
         || cohort["labels_read"] != false
         || cohort["internal_overlap"]["admitted"] != true
@@ -577,4 +627,61 @@ pub(super) fn receipt(
         "tv_rng_seed":sample_seed^0xe360_7476_726e_6700_u64,"normalization":"lambda*w/(32*mean_pool_weight)",
         "optimizer":"pre-update gradient addition; one existing primary Adam boundary; no TV-only Adam"}),
     )
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    #[test]
+    fn original_budget_and_exact_registered_amendment_are_distinct() {
+        let original = "324762fbf74b72fd6ebf3a53524015af07c0a175ca53b2f4ea9f63d6be11d7ba";
+        let effective = "f9172e051b2e91d6ce9da336df439b251ec5e2f1c452ebbbe729981b2db82b1e";
+        let runtime = "35238d8ae522471267469e9f36fb3e133004d259ca4d37bb1dcf92296a6f4f8c";
+        let amendment = "48019e0e09d54137e0fe35ce06243db3d9f0c703d3fcf1a95054833c39213dc9";
+        assert!(source_budget_identity(original, original, runtime, None));
+        assert!(!source_budget_identity(original, effective, runtime, None));
+        assert!(source_budget_identity(
+            original,
+            effective,
+            runtime,
+            Some(amendment)
+        ));
+        for (r, b, t, a) in [
+            (effective, effective, runtime, amendment),
+            (original, original, runtime, amendment),
+            (original, effective, original, amendment),
+            (original, effective, runtime, effective),
+        ] {
+            assert!(!source_budget_identity(r, b, t, Some(a)));
+        }
+    }
+    #[test]
+    fn diagnostic_needs_native_classification_exact_budget_and_argv() {
+        let argv = "a".repeat(64);
+        assert!(fit_budget(120, 50000, None, None, None));
+        assert!(!fit_budget(2, 128, None, None, None));
+        assert!(fit_budget(
+            2,
+            128,
+            Some("local-smoke"),
+            Some("2:128"),
+            Some(&argv)
+        ));
+        for (epochs, pairs, contract, marker, hash) in [
+            (120, 50000, "local-smoke", "2:128", argv.as_str()),
+            (2, 128, "registered-fit", "2:128", argv.as_str()),
+            (2, 128, "local-smoke", "", argv.as_str()),
+            (2, 129, "local-smoke", "2:128", argv.as_str()),
+            (3, 128, "local-smoke", "2:128", argv.as_str()),
+            (2, 128, "local-smoke", "2:128", "invalid"),
+        ] {
+            assert!(!fit_budget(
+                epochs,
+                pairs,
+                Some(contract),
+                Some(marker),
+                Some(hash)
+            ));
+        }
+    }
 }
