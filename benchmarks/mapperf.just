@@ -96,3 +96,7 @@ mapperf-source-clippy:
 # Samples the complete warmed prepared-map action; timing acceptance is separate.
 mapperf-profile root model:
     python3 scripts/rev4_featpot/mapperf.py profile --root {{quote(root)}} --model {{quote(model)}}
+
+# Validate one finished cell without fitting or implying a complete grid.
+mapperf-cell-report root model geometry:
+    python3 scripts/rev4_featpot/mapperf.py report --root {{quote(root)}} --model {{quote(model)}} --geometry {{quote(geometry)}}

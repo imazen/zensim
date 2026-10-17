@@ -38,6 +38,7 @@ def main():
     p.add_argument('mode', choices=['cycle', 'parity', 'timing', 'profile', 'report', 'native-cache-prepare', 'native-cache-run', 'native-cache-compare'])
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--model')
+    p.add_argument('--geometry', choices=GEOMETRIES)
     p.add_argument('--binary', type=Path)
     a = p.parse_args()
     root = a.root
@@ -58,7 +59,7 @@ def main():
         os.environ['XDG_CACHE_HOME'] = str(root / job['benchmark_cache'])
     assert owner.CPUSETS[1].isdigit()
     if a.mode == 'report':
-        report(root, job, a.model)
+        report(root, job, a.model, a.geometry)
         return
     assert a.model in job['models'], 'explicit registered model required'
     binding = job['models'][a.model]
@@ -180,7 +181,7 @@ def main():
         )
 
 
-def report(root, job, selected=None):
+def report(root, job, selected=None, geometry=None):
     from speed_matrix_report import least_squares
     from speedq_report_support import verify_speedq_batches
 
@@ -188,7 +189,7 @@ def report(root, job, selected=None):
     assert sha(panel) == job['binaries']['panel']['sha256']
     result = dict(models={}, job_sha256=sha(root / 'JOB.json'), exploratory=True,
                   qualification_allowed=False, host=job['host'], cpuset=str(job['cpuset']), threads=1, tier='v4x',
-                  complete_model_grid=selected is None)
+                  complete_model_grid=selected is None, complete_geometry_grid=geometry is None)
     lines = ['# Complete score and map performance', '',
              f"Same deterministic RGB8 pairs, complete retained outputs, cached references, CPU{job['cpuset']}/v4x/one thread. "
              'First32cleanrounds of at most64; unchanged SPEEDQ quiet admission. '
@@ -197,13 +198,15 @@ def report(root, job, selected=None):
              '| model | size | before p95 ms | after p95 ms | butter p95 ms | after−before95% CI ms | after−butter95% CI ms |',
              '|---|---|---:|---:|---:|---|---|']
     assert selected is None or selected in job['models']
+    assert geometry is None or geometry in GEOMETRIES
+    grid = [geometry] if geometry else GEOMETRIES
     for model in ([selected] if selected else job['models']):
         base = root / 'results' / model
         parity = read(base / 'PREFLIGHT_PASS.json')
         assert parity['status'] == 'PASS' and parity['job_sha256'] == sha(root / 'JOB.json')
         rows = {}
         medians = {arm: [] for arm in ARMS}
-        for g in GEOMETRIES:
+        for g in grid:
             dest = base / 'timing' / f'v4x-t1-{g}'
             done = read(dest / 'COMPLETE.json')
             header = read(dest / 'header.json')
@@ -245,18 +248,19 @@ def report(root, job, selected=None):
                          f"{interval(peer['comparisons'][ARMS[1]]['delta_ns'])} |")
         pixels = [int(g.split('x')[0]) * int(g.split('x')[1]) for g in GEOMETRIES]
         fits = {}
-        for arm, times in medians.items():
+        for arm, times in (medians.items() if geometry is None else []):
             alpha, beta = least_squares(pixels, times)
             fits[arm] = dict(alpha_ns=alpha, beta_ns_per_pixel=beta,
                              residuals_ns=[y-alpha-beta*x for x, y in zip(pixels, times)])
         result['models'][model] = dict(cells=rows, median_fits=fits, parity_sha256=sha(base / 'PREFLIGHT_PASS.json'))
-    lines += ['', 'Descriptive unconstrained OLS of median time_ns=alpha_ns+beta_ns_per_pixel*pixels '
-              'through the existing speed_matrix_report.least_squares owner. Negative intercepts are fit artifacts.', '',
-              '| model | arm | alpha ms | beta ns/pixel |', '|---|---|---:|---:|']
-    for model, record in result['models'].items():
-        for arm, fit in record['median_fits'].items():
-            lines.append(f"| {model} | {arm} | {fit['alpha_ns']/1e6:.6f} | {fit['beta_ns_per_pixel']:.6f} |")
-    suffix = f'-{selected}' if selected else ''
+    if geometry is None:
+        lines += ['', 'Descriptive unconstrained OLS of median time_ns=alpha_ns+beta_ns_per_pixel*pixels '
+                  'through the existing speed_matrix_report.least_squares owner. Negative intercepts are fit artifacts.', '',
+                  '| model | arm | alpha ms | beta ns/pixel |', '|---|---|---:|---:|']
+        for model, record in result['models'].items():
+            for arm, fit in record['median_fits'].items():
+                lines.append(f"| {model} | {arm} | {fit['alpha_ns']/1e6:.6f} | {fit['beta_ns_per_pixel']:.6f} |")
+    suffix = (f'-{selected}' if selected else '') + (f'-{geometry}' if geometry else '')
     write(root / f'RESULTS{suffix}.json', result)
     (root / f'REPORT{suffix}.md').write_text('\n'.join(lines) + '\n')
 
