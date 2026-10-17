@@ -645,3 +645,23 @@ MemAvailable and at least eight logical CPUs on tower; leave8GiB and four
 logical CPUs on i265,i270,r3500. Use at most24 logical CPUs on tower. Recheck
 capacity after the coordinator drains STEER and before claims. The129 scientific
 cells remain unreleased until the coordinator's explicit go.
+
+
+## Full completed pool amendment (2026-10-17, before any fit)
+
+The coordinator approves the entire completed, preregistered12684-view matrix,
+mandatory12300 plus all384 optional views. The mandatory-only pool failed the
+unchanged required-support guard in SVT/lineart/1024/high-q selection: zero
+accepted edges among69 proposals. This is a data-availability decision after
+inspecting teacher support, before any fit; no outcome, loss or label was seen
+and no source was hand-picked. The prior mandatory-only choice and failed pool
+remain immutable evidence. The new choice explicitly records that teacher
+support triggered this amendment; it does not claim support-independent choice.
+
+All teachers, positive margins, axes, guards, seeds and source memberships remain
+unchanged. All384 optional views enter together. Both native phases require
+publication, census and terminal proof, followed by complete global physical
+deduplication and the original nonempty-support and semantic admission guards.
+An optional preview is not admission. The failed pool cannot be promoted through
+the unchanged-matrix finalizer. The bounded diagnostic remains separately
+authorized; the129 scientific fits still require the coordinator's fit go.

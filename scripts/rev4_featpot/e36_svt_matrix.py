@@ -413,8 +413,10 @@ def mandatory_choice(root,proof):
 
 def admit(root,names,archive_pending=False):
     root=Path(root);proof,clock,evidence=configuration(root)
-    choice_path=root/'bulk-choice.json';choice=json.loads(choice_path.read_text())
-    if choice['schema']!='e36-fixed-matrix-choice-v1' or choice['qualified'] not in ['fallback','full'] or choice['teacher_support_not_used_for_choice'] is not True:
+    from e36_full_choice import active
+    choice_path=active(root,proof);choice=json.loads(choice_path.read_text())
+    full_amendment=choice.get('full_choice_amendment')
+    if choice['schema']!='e36-fixed-matrix-choice-v1' or choice['qualified'] not in ['fallback','full'] or (choice['teacher_support_not_used_for_choice'] is not True and full_amendment is None):
         raise ValueError('qualified owner matrix choice required')
     if choice['plan_sha256']!=proof['plan']['sha256'] or choice['clock_sha256']!=proof['clock']['sha256']:
         raise ValueError('owner choice plan/clock differs')
@@ -424,7 +426,7 @@ def admit(root,names,archive_pending=False):
     if names!=expected or choice['selected_runs']!=expected:
         raise ValueError('exact owner-selected native run list required')
     mandatory=mandatory_choice(root,proof)
-    if mandatory is not None and (choice['qualified']!='fallback' or choice.get('mandatory_choice_amendment')!=bind(mandatory)):
+    if mandatory is not None and full_amendment is None and (choice['qualified']!='fallback' or choice.get('mandatory_choice_amendment')!=bind(mandatory)):
         raise ValueError('mandatory-only pool choice must exclude optional outputs')
     output_hashes=[];declarations={};seen=set();publications=[]
     for name in names:
@@ -474,7 +476,7 @@ def admit(root,names,archive_pending=False):
         if terminal['schema']!='e36-fresh-native-continuation-final-v1' or terminal['closed'] is not True or terminal['fits']!=0 or terminal['scientific_change'] is not False or terminal['fresh_binding']!=proof['fresh_continuation']:raise ValueError('fresh native terminal evidence required')
         for key in ['launch','exit','helper_exits','log','runtime_audit']:checked(terminal[key])
     optional_terminal=None
-    if list(root.glob('native-additions-*/launch.json')) and mandatory is None:
+    if list(root.glob('native-additions-*/launch.json')) and (mandatory is None or full_amendment is not None):
         from e36_phase_terminal import validate as validate_optional
         optional_terminal=root/'owner-svt-ssd-v1/native-additions-final-v1.json';validate_optional(root,optional_terminal)
     if archive_pending:
@@ -499,7 +501,7 @@ def admit(root,names,archive_pending=False):
                 monitor_restart=bind(root/'owner-svt-ssd-v1/monitor-restart-binding.json') if (root/'owner-svt-ssd-v1/monitor-restart-binding.json').exists() else None,
                 storage_priority=bind(root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json') if (root/'owner-svt-ssd-v1/mirror-priority-binding-v12.json').exists() else None,
                 native_continuation=bind(root/'owner-svt-ssd-v1/native-continuation-final-v1.json') if continuation_path.exists() else None,
-                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),optional_terminal=bind(optional_terminal) if optional_terminal else None,archive_resources=proof.get('archive_resources'),archive_resource_repair=proof.get('archive_resource_repair'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None,mandatory_choice_amendment=bind(mandatory) if mandatory else None)
+                archive_budget4=proof.get('archive_budget4'),archive_transport=proof.get('archive_transport'),archive_pack=proof.get('archive_pack'),source_count_amendment=proof.get('source_count_amendment'),effective_source_budget=proof.get('effective_source_budget'),optional_terminal=bind(optional_terminal) if optional_terminal else None,archive_resources=proof.get('archive_resources'),archive_resource_repair=proof.get('archive_resource_repair'),fresh_continuation=bind(fresh_terminal) if fresh_terminal else None,mandatory_choice_amendment=bind(mandatory) if mandatory else None,full_choice_amendment=full_amendment)
 
 
 def install_controller(root,receipt):

@@ -43,7 +43,9 @@ def proof_relative(root,path):
 def packet(root,pools,base,trainer,out,owner,commit):
     if json.loads((pools/'matrix-admission.json').read_text()).get('artifact_archive_pending'):
         raise ValueError('feature preparation is not final archive/pool admission')
-    choice=json.loads((root/'bulk-choice.json').read_text());admit_matrix(root,choice['selected_runs'])
+    from e36_full_choice import active
+    choice_path=active(root) if (root/'owner-svt-ssd-v1/matrix-binding.json').exists() else root/'bulk-choice.json'
+    choice=json.loads(choice_path.read_text());admit_matrix(root,choice['selected_runs'])
     if sha(base)!=BASE_SHA:raise ValueError('original opaque base archive changed')
     # Only the first, target-free inventory member is decoded. The original
     # compressed payload is transported verbatim as a single opaque member.
@@ -87,8 +89,8 @@ def packet(root,pools,base,trainer,out,owner,commit):
     from e36_training import assessment_plan
     assessment_inputs=root/'assessment-inputs.json'
     assessment_plan(Path(d['root']),assessment_inputs);add(assessment_inputs)
-    choice_doc=json.loads((root/'bulk-choice.json').read_text())
-    for path in [root/'bulk-choice.json',Path(choice_doc.get('plan_path',root/'bulk-plan.json')),Path(choice_doc.get('clock_path',root/'bulk-clock.json')),root/'bulk-plan.json',root/'bulk-clock.json',root/'resource-admission.json']:
+    choice_doc=json.loads(choice_path.read_text())
+    for path in [choice_path,root/'bulk-choice.json',Path(choice_doc.get('plan_path',root/'bulk-plan.json')),Path(choice_doc.get('clock_path',root/'bulk-clock.json')),root/'bulk-plan.json',root/'bulk-clock.json',root/'resource-admission.json']:
         add(path)
     repaired_clock=json.loads(Path(choice_doc.get('clock_path',root/'bulk-clock.json')).read_text())
     if 'budget_only_amendment' in repaired_clock or 'budget_only_extension' in repaired_clock:
@@ -118,7 +120,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
                     retained.add(path);add(path)
                     if path.suffix=='.json':retain_proof(json.loads(path.read_text()))
             for item in value.values():retain_proof(item)
-    for key in ['owner_amendment','owner_matrix','native_publication','artifact_location','resource_closure','urgent_disk','resource_supervision','monitor_restart','storage_priority','native_continuation','archive_budget4','archive_transport','archive_pack','source_count_amendment','effective_source_budget','archive_resources','archive_resource_repair','optional_terminal','fresh_continuation','mandatory_choice_amendment']:
+    for key in ['owner_amendment','owner_matrix','native_publication','artifact_location','resource_closure','urgent_disk','resource_supervision','monitor_restart','storage_priority','native_continuation','archive_budget4','archive_transport','archive_pack','source_count_amendment','effective_source_budget','archive_resources','archive_resource_repair','optional_terminal','fresh_continuation','mandatory_choice_amendment','full_choice_amendment']:
         if key in matrix_doc:retain_proof(matrix_doc[key])
     fit=pools/'fit';contract=copy.deepcopy(json.loads((fit/'contract.json').read_text()))
     if not contract['semantic_export'] or contract['fits_released'] is not False:raise ValueError('successful semantic export required before packet')

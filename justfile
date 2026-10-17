@@ -2165,7 +2165,7 @@ e36-final-identity-build root:
 e36-final-pool root out commit:
     #!/usr/bin/env bash
     set -euo pipefail
-    mapfile -t e36_selected_runs < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["qualified"] in ("full","fallback"); print("\n".join(d["selected_runs"]))' {{quote(root + "/bulk-choice.json")}})
+    mapfile -t e36_selected_runs < <(python3 scripts/rev4_featpot/e36_full_choice.py runs {{quote(root)}})
     (( ${#e36_selected_runs[@]} > 0 ))
     e36_selected_args=()
     for e36_selected_run in "${e36_selected_runs[@]}"; do e36_selected_args+=(--run "$e36_selected_run"); done
@@ -2384,3 +2384,6 @@ e36-memory-smoke-verify root out owner ledger blobs:
 
 e36-zero-support-diagnosis root out:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_zero_support_diagnosis.py --root {{quote(root)}} --out {{quote(out)}}
+
+e36-full-choice-amend root:
+    python3 scripts/rev4_featpot/e36_full_choice.py amend {{quote(root)}}
