@@ -79,7 +79,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
     for path in [root/'bulk-choice.json',Path(choice_doc.get('plan_path',root/'bulk-plan.json')),Path(choice_doc.get('clock_path',root/'bulk-clock.json')),root/'bulk-plan.json',root/'bulk-clock.json',root/'resource-admission.json']:
         add(path)
     repaired_clock=json.loads(Path(choice_doc.get('clock_path',root/'bulk-clock.json')).read_text())
-    if 'budget_only_amendment' in repaired_clock:
+    if 'budget_only_amendment' in repaired_clock or 'budget_only_extension' in repaired_clock:
         from e36_pause_budget import resolve
         _,_,budget_evidence=resolve(Path(choice_doc['clock_path']))
         for evidence in budget_evidence:add(evidence['path'])
@@ -91,6 +91,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
     matrix_doc=json.loads((pools/'matrix-admission.json').read_text())
     for value in matrix_doc['manifests'].values():add(value['path'])
     for value in matrix_doc.get('remote_phase_evidence',[]):add(value['path'])
+    for value in matrix_doc.get('scheduling_evidence',[]):add(value['path'])
     fit=pools/'fit';contract=copy.deepcopy(json.loads((fit/'contract.json').read_text()))
     if not contract['semantic_export'] or contract['fits_released'] is not False:raise ValueError('successful semantic export required before packet')
     contract.update(trainer_sha256=sha(trainer),base_filter_sha256=sha(mask),build_commit=commit)

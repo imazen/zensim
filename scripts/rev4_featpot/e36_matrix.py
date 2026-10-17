@@ -6,6 +6,49 @@ from e36_data import PREFIX,canonical
 from e36_store import sha
 
 
+def scheduled_evidence(root,choice,names):
+    """Retain the resource chain and checked native publication for every run."""
+    if 'scheduling_amendment' not in choice:
+        if (root/'scheduling-v7/amendment.json').exists():
+            raise ValueError('native scheduling amendment missing from choice')
+        return []
+    evidence=[]
+    def checked(pin):
+        p=Path(pin['path'])
+        if sha(p)!=pin['sha256']:raise ValueError('scheduling/publication evidence changed')
+        evidence.append(pin)
+        return p
+    amendment=checked(choice['scheduling_amendment']);a=json.loads(amendment.read_text())
+    if (a['schema']!='e36-native-scheduling-only-v1' or a['scientific_change'] is not False
+            or a['fits']!=0 or a['plan']['sha256']!=choice['plan_sha256']
+            or a['effective_clock']['sha256']!=choice['clock_sha256']):
+        raise ValueError('scheduling amendment differs from qualified choice')
+    checked(a['plan']);checked(a['effective_clock']);checked(a['worker'])
+    original_amendment=amendment
+    if 'previous_scheduling_amendment' in a:
+        original_amendment=checked(a['previous_scheduling_amendment'])
+        previous=json.loads(original_amendment.read_text())
+        changes={'effective_clock','deadline_changed','disk_floor_bytes','resource_bootstrap','previous_scheduling_amendment'}
+        if {k:v for k,v in a.items() if k not in changes}!={k:v for k,v in previous.items() if k not in changes}:
+            raise ValueError('resource amendment changed native scheduling inputs')
+        for pin in a['resource_bootstrap'].values():checked(pin)
+    for name in names:
+        census=json.loads((root/'runs'/name/'census.json').read_text())
+        proof=json.loads(checked(census['native_publication']).read_text())
+        if (proof['schema']!='e36-native-publication-admission-v1' or proof['admitted'] is not True
+                or proof['fits']!=0 or proof['producer_attempts_per_job']!=1
+                or proof['jobs']!=proof['published'] or proof['jobs']!=len(census['output_receipts'])
+                or proof['amendment']['sha256']!=sha(original_amendment)):
+            raise ValueError('complete native publication proof differs')
+        from e36_data import canonical
+        import hashlib
+        if proof['census_output_inventory_sha256']!=hashlib.sha256(canonical(census['output_receipts']).encode()).hexdigest():
+            raise ValueError('native publication output inventory changed')
+        for key in ['native_ids','scheduled_ids','amendment']:checked(proof[key])
+        for pin in proof['ledgers']:checked(pin)
+    return evidence
+
+
 def admit(root,names):
     cp=root/'bulk-choice.json';choice=json.loads(cp.read_text())
     pp=Path(choice.get('plan_path',root/'bulk-plan.json'));tp=Path(choice.get('clock_path',root/'bulk-clock.json'))
@@ -55,6 +98,7 @@ def admit(root,names):
     if choice['qualified']=='full' and (root/'TOWER_PHASE_HANDOFF.json').exists():
         from e36_phase_handoff import admit_installed
         remote_evidence=admit_installed(root,tp,plan)
+    scheduling_evidence=scheduled_evidence(root,choice,names)
     bind=lambda p:dict(path=str(p),sha256=sha(p))
     return dict(schema='e36-qualified-matrix-admission-v1',matrix=choice['qualified'],choice=bind(cp),plan=bind(pp),clock=bind(tp),
-        selected_runs=names,manifests=declarations,completed_views=len(completed),outputs=output_hashes,complete=True,budget_evidence=budget_evidence,remote_phase_evidence=remote_evidence)
+        selected_runs=names,manifests=declarations,completed_views=len(completed),outputs=output_hashes,complete=True,budget_evidence=budget_evidence,remote_phase_evidence=remote_evidence,scheduling_evidence=scheduling_evidence)

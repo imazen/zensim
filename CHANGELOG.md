@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Preserve E36 exact matrix/native identities while widening local generation; stream final census and bind checked native publication to the authorized absolute budget and stronger disk floor. Fits remain unreleased.
+
 - Bind an optional whole E36 native data phase to exclusive host ownership, exact input/clock/parity evidence and preserved source timestamps; retain fit-release and complete-matrix gates.
 
 - Prepare E36 private plain-N ladder gradients, immutable matched-family filtering, native qualified-checkpoint bindings, TRAIN-only selection and exact assessment-forward replay; fit release remains separate.

@@ -2336,3 +2336,9 @@ be absent. GB82 provenance remains declared namespace plus pixel screening,
 with no claim of independently reconstructed cross-corpus lineage. The
 snapshot and copied native reference bytes are hash-bound; a manifest change
 during the audit refuses a passed receipt. This replay is still pending.
+
+### E36 generation resource amendment (2026-10-17T12:40:06.604863+00:00)
+
+The coordinator extended the generation deadline to17:00:00Z, budget only, based on the preserved16:13Z planning projection. All scientific axes, registered source counts and teacher rules remain fixed. Exact prior frozen-time evidence remains preserved; later control pauses consume the extended window. The [registration](../benchmarks/e36_registration_draft_2026-10-16.md) binds the immutable clock/amendment hashes. Native local scheduling retains24slots in a38GiB run-heavy scope; a per-admission live-headroom check plus fixed measured-hint packing is not a guaranteed maintained8GiB reserve. The operational disk floor is40GiB.
+
+Generation remains incomplete. Fresh streamed census admission must establish exact whole-matrix coverage and timing, and checked native publication must cover every job/output with one producer attempt. Final matrix admission binds both scheduling and budget chains, all native ledger hashes and every census output inventory. Data packaging carries those proof files. Missing or changed publication evidence refuses materialization/packaging. No E36 fit or optimizer run is authorized.

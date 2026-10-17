@@ -102,6 +102,31 @@ class Publication(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, pattern):
                     admit(root, "invented", views, files)
 
+class FinalMatrixPublication(unittest.TestCase):
+    def test_final_admission_binds_native_publication_and_resource_amendment(self):
+        from e36_matrix import scheduled_evidence
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp',prefix='e36-final-publish-') as d:
+            root=Path(d)
+            directory,ledger,rows,views,files=Publication().fixture(root)
+            ap=root/'scheduling-v7/amendment.json';a=json.loads(ap.read_text())
+            def bind(p):return dict(path=str(p),sha256=sha(p))
+            clock=root/'clock.json';clock.write_text('{}')
+            a.update(schema='e36-native-scheduling-only-v1',scientific_change=False,fits=0,
+                plan=bind(root/'bulk-plan-v6.json'),effective_clock=bind(clock))
+            ap.write_text(json.dumps(a));proof=admit(root,'invented',views,files)
+            (directory/'census.json').write_text(json.dumps(dict(native_publication=proof,output_receipts=files)))
+            choice=dict(scheduling_amendment=bind(ap),plan_sha256=a['plan']['sha256'],clock_sha256=sha(clock))
+            self.assertTrue(scheduled_evidence(root,choice,['invented']))
+            extension=root/'scheduling-v8';extension.mkdir();bootstrap=root/'bootstrap.py';bootstrap.write_text('# resource bootstrap\n')
+            new={**a,'previous_scheduling_amendment':bind(ap),'resource_bootstrap':{'bootstrap':bind(bootstrap)},'disk_floor_bytes':40*1024**3,'deadline_changed':True}
+            ep=extension/'amendment.json';ep.write_text(json.dumps(new));choice['scheduling_amendment']=bind(ep)
+            self.assertTrue(scheduled_evidence(root,choice,['invented']))
+            bootstrap.write_text('# changed\n')
+            with self.assertRaisesRegex(ValueError,'evidence changed'):scheduled_evidence(root,choice,['invented'])
+            bootstrap.write_text('# resource bootstrap\n')
+            ledger.write_bytes(ledger.read_bytes()+b'changed')
+            with self.assertRaisesRegex(ValueError,'evidence changed'):scheduled_evidence(root,choice,['invented'])
+
 
 if __name__ == "__main__":
     unittest.main()
