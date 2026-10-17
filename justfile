@@ -2272,7 +2272,7 @@ e36-svt-finish-projection root costs output:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_finish_projection.py --root {{quote(root)}} --costs {{quote(costs)}} --out {{quote(output)}} --exclude-rav1e
 
 e36-owner-amendment-check:
-    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_owner_amendment.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_materialize.py
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_owner_amendment.py scripts/tests/test_e36_disk_policy.py scripts/tests/test_e36_census_stream.py scripts/tests/test_e36_matrix.py scripts/tests/test_e36_materialize.py
 
 e36-svt-matrix-check root:
     python3 -c 'import sys; from pathlib import Path; sys.path.insert(0,"scripts/rev4_featpot"); from e36_svt_matrix import configuration; configuration(Path(sys.argv[1])); print("exact owner matrix and original budget chain admitted; fits=0")' {{quote(root)}}
