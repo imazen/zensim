@@ -121,3 +121,7 @@ Normal runtime SHA-256:
 `fedf543a67818a8ac207a5c3931775563b86d96523596b7662a146960c3e42a7`.
 Native verification binary SHA-256:
 `a0c14ea2ecf31ea34f4fd4f15f248a2a1f27636d23f3622ecf50a9cec9ea2b82`.
+
+The [complete retired-buffer matched grid](mapperf_pool_2026-10-17.md)
+retains every measured size and paired interval. Diff-410 and W-C pass both
+required sizes; C remains slower at1024², so the overall goal is unfinished.
