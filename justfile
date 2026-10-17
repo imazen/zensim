@@ -2274,8 +2274,11 @@ e36-svt-finish-projection root costs output:
 e36-disk-finish-projection root compute output:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_disk_projection.py --root {{quote(root)}} --compute {{quote(compute)}} --out {{quote(output)}}
 
-e36-lossless-archive-probe root output:
-    ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/rev4_featpot/e36_archive_probe.py --root {{quote(root)}} --out {{quote(output)}}
+e36-lossless-archive-probe root bundle output:
+    ~/work/zen/scripts/run-heavy --mem 2G --jobs 1 -- python3 scripts/rev4_featpot/e36_archive_probe.py --root {{quote(root)}} --bundle {{quote(bundle)}} --out {{quote(output)}}
+
+e36-archive-resource-check:
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_e36_archive_store.py scripts/tests/test_e36_resource_handoff.py scripts/tests/test_e36_budget_extend.py scripts/tests/test_e36_generation_resume.py scripts/tests/test_e36_owner_amendment.py scripts/tests/test_e36_disk_policy.py
 
 e36-native-continuation-close root:
     python3 scripts/rev4_featpot/e36_close_continuation.py --root {{quote(root)}}

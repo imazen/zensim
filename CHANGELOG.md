@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Preserve raw E36 artifact identities across split zstd archives and the authorized22Z budget; drain archive transfers cooperatively and retain failed-handoff supervision. Fits remain unreleased.
+
 - Continue E36 through its original native ledger under a fresh registered-deadline wrapper; preserve resource supervision across helper and controller failures, and bind actual executor/source/terminal evidence before fitting (`84ec2ee7`, `9ea5ffed`). No fit release.
 
 - Honor the prospective E36 SVT-only AVIF matrix, preserving exact native identities and original budget proofs; retain hash-verified local SSD artifact ownership through recorded tower relocations (`538c0aeb940e`). Fits remain unreleased.
