@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- SHIPGATES: record full platform CI for the opt-in scheduler and retain its pending numerical-replay requirement.
+
 - Preserve STEER supervision through a capacity race after container creation, with clean drain and exact pause ownership checks.
 
 - SHIPGATES: add an opt-in bounded pool across JXL quality points, with deterministic journals and exact retained-cell replay; production adoption awaits its real replay.

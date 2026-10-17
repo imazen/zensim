@@ -1,10 +1,10 @@
 # SHIPGATES evidence pointer
 
-Snapshot: 2026-10-17T07:04:21.016512+00:00. Experiment started October16. Paths were checked on dev.
+Snapshot: 2026-10-17T09:00:39.202393+00:00. Experiment started October16. Paths were checked on dev.
 
 JXL RD and its complete source-bootstrap verdict remain unfinished. JPEG/WebP/AVIF RD matrices and final-candidate targeting on all four codecs remain unfinished. The protected human-ranking composite is awaiting explicit authorization.
 
-The corrected JXL source manifest admits27 sources (12 photographs,15 screen/nonphoto). This snapshot includes 12/27 complete source journals, 2016/4536 cells. It preserves original measurements and binds the three approved game-render class annotations to their original cells.
+The corrected JXL source manifest admits27 sources (12 photographs,15 screen/nonphoto). This snapshot includes 12/27 complete source journals and 2088/4536 complete cells, including published groups from the current source. It preserves original measurements and binds the three approved game-render class annotations to their original cells.
 
 Local evidence: `/mnt/v/output/zensim/shipgates-2026-10-16/`.
 NAS archive: `/mnt/tower/output/zensim-shipgates-archive-2026-10-16/`.
@@ -63,3 +63,16 @@ Use the owners and recipes in the [engineering report](shipgates_2026-10-16.md) 
 | `COMBINED_JUDGE_REPLAY_VERIFIED.json` | 627 | `897caf22503d5191ab1f7e7c6fb9542c2961bc2ff9186c59e83466fef6776da2` |
 | `MIRROR_VERIFIED_2026-10-17_070146Z.json` | 1092 | `8f8c956ad3698ecf36d14c46ce53a0ae5bc78488545eb6d1fd0904452f329220` |
 | `VERIFIED_SEVEN_SOURCE_SNAPSHOT.json` | 4604 | `1f2b5f71d29c2ac78351c8930408c5481fa79dd2800818551a900583b46cb5f2` |
+| `CI_GREEN_39015216522.json` | 33501 | `8ff57b70ef848e4a571a3405a14d7af38c36a2315f483de4321660433affe528` |
+| `CI_GREEN_39015216522_VERIFIED.json` | 669 | `7cd7b76207cd997c58fb5d007255f726ed8948630229a8dee7f5b75410e906bc` |
+| `CROSS_QUALITY_PILOT_PROCESS.json` | 1577 | `3221b891d463cbbecc3047e83c93e43933b41acc679f0e7b80cf3e3e8e594f41` |
+| `sources/cross-quality-scheduling/PINS.json` | 459 | `da5b92801901b779bc746a4afcacca7031f896be41a69784b68eadad32efabbb` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-00.json` | 23500 | `0e0e754148ddc6a4a14cc6b2052538c3bfa2b2e8a9b38119c737bae1c59ee94a` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-01.json` | 23500 | `75c32cd6db5cf581835a587f11311aac0c5207a4fce2844aacb17108b810f40a` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-02.json` | 23500 | `a0cbcebb138ec4d2c2c28c4a57f684756593b1546518bb67045c56d034a4ffaf` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-03.json` | 23492 | `02e0bb2d4148bebb5a17845c540f61c934b76da6e37349ee94a8fde64d1abda3` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-04.json` | 23492 | `fcbb61510e95db632ff4aff5f33bde54f1ebc824fff741f62a7d30f85c105e43` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-05.json` | 23484 | `333eea525285c12f1ba398198861afc561192a95730c8aa555dcec848ea3a524` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-06.json` | 23492 | `60b746fc98d5a8cd9f21193a73f81bf8cb4fda091e2690ba09609fc51893038e` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-07.json` | 23492 | `8bbb25e80d687c4c84d2abbfecaff2e22b44b4ced236c64353c7d493b3f65711` |
+| `rd-jxl-corrected27/source-12/batch-00/GROUP-08.json` | 23492 | `d3240044dc0b22c6ede70515b185edbb52d7cd5c6d37736e0de580dca730fc46` |

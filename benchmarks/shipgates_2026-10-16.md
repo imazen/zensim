@@ -317,9 +317,9 @@ The [evidence pointer](shipgates_2026-10-16.pointer.md) records host-checked pat
 
 ## Fixed-judge scheduling replay and archive
 
-The combined source job runs the same frozen fixed judge followed by the same independent map/pixel oracle. A168-row replay matches all metric values, feature values, input-pixel hashes and map metadata exactly after normalizing only output paths; all420 old/new physical map files rehash correctly. The oracle verifies every logical float-map bit, input-pixel binding, deduplication key and padding value. Seven completed source packets (1,176 rows) were rehashed and reused. The encoder and numerical protocol are unchanged.
+The combined source job runs the same frozen fixed judge followed by the same independent map/pixel oracle. A 168-row replay matches all metric values, feature values, input-pixel hashes and map metadata exactly after normalizing only output paths; all 420 old/new physical map files rehash correctly. The oracle verifies every logical float-map bit, input-pixel binding, deduplication key and padding value. Seven completed source packets (1,176 rows) were rehashed and reused. The encoder and numerical protocol are unchanged.
 
-The incremental archive completed October17 at07:01:46Z and passed three random immutable-payload SHA256 checks. It covers that snapshot; final campaign completeness remains pending. The [evidence pointer](shipgates_2026-10-16.pointer.md) lists the replay and archive receipt hashes.
+The incremental archive completed October17 at 07:01:46Z and passed three random immutable-payload SHA256 checks. It covers that snapshot; final campaign completeness remains pending. The [evidence pointer](shipgates_2026-10-16.pointer.md) lists the replay and archive receipt hashes.
 
 ```text
 combined judge/oracle replay: run-heavy: done rc=0 18s | peak-RSS 0.07GiB | min-avail 29898MiB | peak-load 16.69
@@ -327,3 +327,7 @@ incremental archive: run-heavy: done rc=0 156s | peak-RSS 0.05GiB | min-avail 26
 ```
 
 These resource lines describe contended execution, not quiet latency qualification. The full JXL RD grid and source-bootstrap verdict remain incomplete. JPEG/WebP/AVIF targeting will be validated on frozen diff-frag-820 bytes as adapter validation; a final dial-range candidate does not yet exist.
+
+## Software validation
+
+[CI run39015216522](https://github.com/imazen/zensim/actions/runs/39015216522) passed every recorded job at `d6ad1c0f7570566945ba48f743fd64b867e4c0b6`, including Windows ARM, macOS ARM64 and i686. That head includes `74ff8fd1bf2c46e6b301b638b47692d5530da967`, which adds an optional bounded worker pool across quality points while preserving deterministic journals. Its regression and script checks pass; adoption still requires the queued32-cell encoded/pixel/map/native-manifest replay. Current production continues with its frozen scheduler until its complete source boundary. This CI result establishes source validation; model and RD qualification remain incomplete.
