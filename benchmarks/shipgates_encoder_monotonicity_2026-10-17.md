@@ -10,7 +10,7 @@ Strict A7r comes from the frozen Rust evaluator, SHA256 `3be3ef6fa3b123b50ccdbbe
 
 Direction agreement is diagnostic only. It uses the same selected edges and clamp condition, accepts a candidate change with the mentor’s sign, and treats mentor changes smaller than0.5 as ties. No selected mentor edge is a tie here. Both ladder-level agreement and individual material-edge agreement are shown. It changes no gate or threshold.
 
-Every reconstructed strict decision/count matches the native owner. Peer scores retain the original rendered-pixel binding; CVVDP-FHD retains its frozen Q=10×JOD mapping. No labels, new encodes or builds were used.
+Every reconstructed per-codec strict fraction and order/clamp/short count matches the native owner. Selected-edge decisions are retained as the diagnostic. Peer scores retain the original rendered-pixel binding; CVVDP-FHD retains its frozen Q=10×JOD mapping. No labels, new encodes or builds were used.
 
 | Grid | W-C | diff+frag-820 | diff-410 | CVVDP-FHD | SSIMULACRA2 |
 |---|---|---|---|---|---|

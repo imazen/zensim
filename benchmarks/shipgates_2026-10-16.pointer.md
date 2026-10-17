@@ -106,3 +106,9 @@ Observed on dev: derived standard4494rows, ladder7097rows; all85 original/amende
 | `encoder-monotonicity-svt-2026-10-17/run-01.log` | 3781 | `4697f3562c802f4893ab748dcae72fb456a3e0fde3d1f0cb48fbfa8d30bdc7d4` |
 | `encoder-monotonicity-svt-2026-10-17/scripts-check.log` | 2583 | `ded4b8240925d6a9f34caa04e7752940ec2f2f8caca6c304ed6492103392c8b6` |
 | `encoder-monotonicity-svt-2026-10-17/source-c954661253fe/shipgates_monotonicity.py` | 14073 | `50bbeb358ff096c0ebf80972c2dffee081eae6c29cbba18004f87363a1a3d280` |
+| `encoder-monotonicity-svt-2026-10-17/SVT_LADDER_ORIGINAL_MANIFEST.json` | 3398 | `20ca2c02d2b8fe387b16a253df902c9f14d3f8210d7143ab09c33cde3d974075` |
+| `encoder-monotonicity-svt-2026-10-17/SVT_LADDER_ENCODER_PIN.json` | 581 | `368a69e23b1885438a7c8bfab9912306f9fbc273fd0d3b762f3d3858e2f4738c` |
+| `encoder-monotonicity-svt-2026-10-17/provenance/archive-verification.json` | 20579 | `dff2383e38c4f35ab6a22dcb4b0d609839a1b7c7829b1677c7e73e29a6b5b475` |
+| `ENCODER_MONOTONICITY_MIRROR_VERIFIED.json` | 1084 | `dfe01768b9fc729515650800c22e8ec4c3ed315648a7c83e515cf09eb4829bec` |
+
+The completed monotonicity subtree is mirrored at `/mnt/tower/output/zensim-shipgates-archive-2026-10-16/encoder-monotonicity-svt-2026-10-17/`: all129files SHA256-verified plus three random rechecks. This is separate from the incomplete full campaign mirror; no R2 upload. The original SVT producer manifest pins zenav1-svt `2d75a105fe0b310bf586110951315f014e274fff`.
