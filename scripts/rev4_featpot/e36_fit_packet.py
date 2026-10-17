@@ -31,6 +31,15 @@ def retain_copy(source,dest):
     else:shutil.copyfile(source,dest)
 
 
+def proof_relative(root,path):
+    """Keep external source/diagnostic proofs without opening data tables."""
+    root=Path(root);path=Path(path)
+    if path.is_relative_to(root):return path.relative_to(root)
+    if path.suffix not in ['.py','.json','.jsonl','.log','.gdb','.md','.txt','.sh']:
+        raise ValueError('external proof must be explicit source or diagnostic text, not a data table')
+    return Path('_external_proofs')/sha(path)/path.name
+
+
 def packet(root,pools,base,trainer,out,owner,commit):
     choice=json.loads((root/'bulk-choice.json').read_text());admit_matrix(root,choice['selected_runs'])
     if sha(base)!=BASE_SHA:raise ValueError('original opaque base archive changed')
@@ -43,9 +52,10 @@ def packet(root,pools,base,trainer,out,owner,commit):
     if inventory['files']['rev4-featpot/v2e29/wide/main/real/receipt.json']!=BASE_RECEIPT:raise ValueError('original base root differs from metadata-only mask plan')
     mask=root/'matched-base-filter-plan-v2.json';d=json.loads(mask.read_text())
     if d['schema']!='e36-matched-base-filter-v2' or d['identity_normalization']!='member-prefix+rendition-v2' or not d['complete'] or d['root_receipt_sha256']!=BASE_RECEIPT or d['labels_read'] is not False:raise ValueError('strict version2 base filter required')
-    out.mkdir();native=out/'native';native.mkdir();files={}
+    out.mkdir();native=out/'native';native.mkdir();files={};external_proofs={}
     def add(path):
-        path=Path(path);relative=path.relative_to(root);dest=native/relative;dest.parent.mkdir(parents=True,exist_ok=True)
+        path=Path(path);relative=proof_relative(root,path);dest=native/relative;dest.parent.mkdir(parents=True,exist_ok=True)
+        if not path.is_relative_to(root):external_proofs[str(path)]=dict(relative_path=str(relative),sha256=sha(path))
         if dest.exists():
             if sha(dest)!=sha(path):raise ValueError('conflicting native metadata member')
         else:shutil.copyfile(path,dest)
@@ -114,7 +124,7 @@ def packet(root,pools,base,trainer,out,owner,commit):
     locked=pools/'fit/locked-contract.json';write(locked,contract);add(locked)
     overlay=out/'overlay.json';write(overlay,dict(schema='e36-fit-data-overlay-v1',base_archive_relative='base-data.tar.gz',
         base_data_sha256=BASE_SHA,base_root_receipt_sha256=BASE_RECEIPT,expected_native_root=str(root),
-        native_member_sha256={name:sha(path) for name,path in files.items()},labels_read=False,fits_released=False,build_commit=commit))
+        native_member_sha256={name:sha(path) for name,path in files.items()},external_proof_sources=external_proofs,labels_read=False,fits_released=False,build_commit=commit))
     archive_files={'rev4-featpot/e36-native/overlay.json':overlay,'rev4-featpot/e36-native/base-data.tar.gz':base}
     archive_files.update({'rev4-featpot/e36-native/native/'+name:path for name,path in files.items()})
     module_spec=importlib.util.spec_from_file_location('native_pack_fit_data',owner/'pack_fit_data.py');native_owner=importlib.util.module_from_spec(module_spec);module_spec.loader.exec_module(native_owner)

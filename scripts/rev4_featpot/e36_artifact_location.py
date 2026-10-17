@@ -259,6 +259,8 @@ def freeze(root,out):
             member=next((i for i in intent['items'] if i['sha256']==row['sha256']),None)
             if member is None or member['bytes']!=row['bytes'] or member['view_sha256']!=row['completed_view_sha256']:raise ValueError('packed relocation member differs from intent')
         result['pack_intents']=pack_pins
+        review_closeout=owner_dir/'review-pin-recovery-v1.json'
+        if review_closeout.exists():result['pack_review_closeout']=dict(path=str(review_closeout),sha256=sha(review_closeout))
         if any(row.get('encoding')=='tar-pack-v1' for row in unique.values()):
             durability=require_pack_directory_proof(root)
             result['pack_directory_durability']=dict(path=str(durability),sha256=sha(durability))
