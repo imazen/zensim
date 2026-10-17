@@ -263,6 +263,22 @@ class Lifecycle(unittest.TestCase):
             for js,n in jobs.items():status['jobsets'][js]['installed']=n
             self.assertIsNone(life.next_jobset(self.bundle,dict(jobsets=jobs),status))
 
+    def test_allocation_waits_for_cycle_start_after_exit_not_completion_time(self):
+        previous=dict(jobset='a')
+        worker=dict(FinishedAt='2026-10-17T04:55:27.311788685Z')
+        status=dict(state='PROGRESS',time='2026-10-17T04:55:20Z',
+                    updated_at='2026-10-17T04:55:40Z',
+                    jobsets=dict(a=dict(state='OK',time='2026-10-17T04:55:33Z')))
+        self.assertFalse(life.allocation_harvested(status,previous,worker))
+        status['time']='2026-10-17T04:55:28Z'
+        self.assertTrue(life.allocation_harvested(status,previous,worker))
+        self.assertFalse(life.allocation_harvested(dict(status,state='RUNNING'),previous,worker))
+        status['jobsets']['a']['time']='2026-10-17T04:55:26Z'
+        with self.assertRaisesRegex(ValueError,'evidence invalid'):
+            life.allocation_harvested(status,previous,worker)
+        del status['time']
+        with self.assertRaises(KeyError):life.allocation_harvested(status,previous,worker)
+
     def test_capacity_hold_precedes_remote_mutation_and_other_hosts_continue(self):
         held=copy.deepcopy(self.cap)
         held['workers']=[dict(name='/foreign-'+str(i),memory=3*life.GIB,run='jobs/other') for i in range(8)]

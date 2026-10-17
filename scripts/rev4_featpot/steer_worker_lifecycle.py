@@ -462,6 +462,19 @@ def report_metadata(bundle, metadata):
     return value, 'last verified native fold; current harvest not yet reconciled'
 
 
+def allocation_harvested(status, previous, worker_state):
+    """Require a cycle that started after exit, before any ledger listing."""
+    if status.get('state') == 'RUNNING':
+        return False
+    started = datetime.fromisoformat(status['time'].replace('Z', '+00:00'))
+    finished = datetime.fromisoformat(worker_state['FinishedAt'].replace('Z', '+00:00'))
+    jobset = status['jobsets'][previous['jobset']]
+    observed = datetime.fromisoformat(jobset['time'].replace('Z', '+00:00'))
+    if jobset['state'] != 'OK' or observed < started:
+        raise ValueError('allocation jobset harvest evidence invalid')
+    return started > finished
+
+
 def watch(bundle, doc):
     """Supervise bounded allocations; native worker remains the only job scheduler."""
     transition_proof(bundle)
@@ -509,10 +522,9 @@ def watch(bundle, doc):
             if js == 'WAIT' or js is None or (launch/'PAUSE_WORKERS').exists():
                 continue
             if previous:
-                # Require a canonical verification cycle after that allocation finished.
-                finished = datetime.fromisoformat(d['State']['FinishedAt'].replace('Z', '+00:00'))
-                updated = datetime.fromisoformat(status['updated_at'].replace('Z', '+00:00'))
-                if updated <= finished:
+                # A later completion timestamp can still describe a ledger listing
+                # made before this allocation exited. Wait for a wholly fresh cycle.
+                if not allocation_harvested(status, previous, d['State']):
                     continue
             try:
                 admit(host, cap)
