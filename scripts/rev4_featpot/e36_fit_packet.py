@@ -251,7 +251,11 @@ def program_packet(root,pools,packet_dir,original,source,binaries,owner,commit):
     import re
     import sys
     versions={name:importlib.metadata.version(name) for name in ['numpy','pandas','pyarrow','scipy']}
-    image=owner/'Dockerfile.fitcell'
+    # Runtime dependencies keep the already admitted image recipe. The
+    # successor archive contains executor code, not the separate image recipe.
+    image=root/'fit-native-owner-v2/Dockerfile.fitcell'
+    if sha(image)!='36aaf194687e9c6a9c18d17a7631af0cb92e6c5d881534d119306dcf3effe318':
+        raise ValueError('frozen fit image dependency recipe changed')
     image_pins=dict(re.findall(r'([a-z][a-z0-9_-]*)==([0-9][a-zA-Z0-9.+_-]*)',image.read_text()))
     if any(versions[n]!=image_pins[n] for n in versions):raise ValueError('local program admission packages differ from frozen fit image pins')
     meta=packet_dir/'build-meta.json';write(meta,dict(schema='fleet-fits-build-v1',build_commit=commit,
