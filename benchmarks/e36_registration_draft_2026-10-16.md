@@ -562,3 +562,40 @@ coordinator fit go.
 
 
 2026-10-17 execution-clock correction, before any fit: the continuation wrapper expired at17:00Z despite earlier live22Z timer application. All original output/exit/resource evidence is retained;11625 selected native DONE/attempt1 views survived. A fresh same-ID continuation now creates its timeout directly from the already authorized absolute22Z clock, with no new frozen-time exclusion.24 actual resumed numerical runtimes passed the original-core/storage-resolver/source/deadline audit. No data/teacher/quality/size/source/matrix change or attempt reset; no fit. Actual native completion and canonical artifact admission remain mandatory.
+
+
+### Authorized source-count amendment, 2026-10-17 (before optional generation or fits)
+
+Measured sequential disk1 archival now averages51.006648MB/s in the registered
+planning model. At17:21Z, the original full12724-view matrix still projected
+22:16:39.769Z, beyond22Z. The coordinator pre-authorized cutting source counts
+at the largest sizes if storage still misses that deadline.
+
+Apply that authorization at4096 only: full source count16→6 for JPEG, SVT,
+WebP and JXL, reusing exactly the already frozen mandatory-six stratified
+centroid-nearest subset. No clustering is rerun, and teacher/model scores or
+which sources finished first do not choose the retained identities. The other
+19sizes retain their original full counts; all61 q values, four codecs and
+20sizes remain represented. Every prior/unused artifact is retained. The
+12300-view mandatory matrix is unchanged. Optional424→384; full12724→12684.
+The excluded40 optional ladders have not started. This is an authorized
+**scientific source-sampling amendment**, distinct from the earlier budget-only
+clock extensions. The absolute22Z deadline and exact original freeze exclusion
+are unchanged; no additional wait receives credit.
+
+The measured same-codec/same-size prebulk4096 bundle basis attributes
+326022519466.667 modeled bytes to those excluded optional ladders. This is a
+planning estimate, not measured future bytes or a bound. New complete native
+manifests/ID inventories and effective source-budget metadata are recorded
+before optional generation. The six-source membership and centroid receipts
+are reused from the original mandatory-six register. Numerical producer bytes,
+source pixels, quality/size/mode support, teachers, consensus rule/margin,
+JPEGweight2, othercodecweight1, optimizer/selection/assessment recipe and129
+future fit identities remain unchanged. The effective pool budget records the
+new membership while the immutable generation runtime retains its original
+source-budget pin; the compatibility is this exact native-view subset.
+
+Amendment SHA25648019e0e09d54137e0fe35ce06243db3d9f0c703d3fcf1a95054833c39213dc9;
+effective budget SHA256f9172e051b2e91d6ce9da336df439b251ec5e2f1c452ebbbe729981b2db82b1e.
+The original whole-matrix completion/fallback rule still applies. Incomplete
+optional additions cannot be cherry-picked. No fit is authorized.
