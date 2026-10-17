@@ -9,6 +9,16 @@ from e36_store import sha
 
 
 class Proofs(unittest.TestCase):
+    def test_unfinished_archive_preparation_cannot_make_fit_packet(self):
+        import json
+        from e36_fit_packet import packet
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
+            root=Path(d);pools=root/'pools';pools.mkdir()
+            (pools/'matrix-admission.json').write_text(json.dumps(dict(artifact_archive_pending=True)))
+            with self.assertRaisesRegex(ValueError,'not final archive/pool admission'):
+                packet(root,pools,root/'opaque-base',root/'trainer',root/'out',root/'owner','invented')
+            self.assertFalse((root/'out').exists())
+
     def test_external_diagnostic_is_content_addressed_and_tables_refuse(self):
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as d:
             root=Path(d)/'native';root.mkdir();proof=Path(d)/'receipt.json';proof.write_text('{"fits":0}')

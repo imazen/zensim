@@ -49,10 +49,11 @@ def scheduled_evidence(root,choice,names):
     return evidence
 
 
-def admit(root,names):
+def admit(root,names,archive_pending=False):
     if (root/'owner-svt-ssd-v1/matrix-binding.json').exists():
         from e36_svt_matrix import admit as admit_svt
-        return admit_svt(root,names)
+        return admit_svt(root,names,archive_pending=archive_pending)
+    if archive_pending:raise ValueError('deferred archive preparation requires qualified SVT owner')
     cp=root/'bulk-choice.json';choice=json.loads(cp.read_text())
     pp=Path(choice.get('plan_path',root/'bulk-plan.json'));tp=Path(choice.get('clock_path',root/'bulk-clock.json'))
     plan=json.loads(pp.read_text())

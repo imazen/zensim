@@ -411,7 +411,7 @@ def mandatory_choice(root,proof):
     return path
 
 
-def admit(root,names):
+def admit(root,names,archive_pending=False):
     root=Path(root);proof,clock,evidence=configuration(root)
     choice_path=root/'bulk-choice.json';choice=json.loads(choice_path.read_text())
     if choice['schema']!='e36-fixed-matrix-choice-v1' or choice['qualified'] not in ['fallback','full'] or choice['teacher_support_not_used_for_choice'] is not True:
@@ -477,19 +477,22 @@ def admit(root,names):
     if list(root.glob('native-additions-*/launch.json')) and mandatory is None:
         from e36_phase_terminal import validate as validate_optional
         optional_terminal=root/'owner-svt-ssd-v1/native-additions-final-v1.json';validate_optional(root,optional_terminal)
-    locations=json.loads(location_path.read_text())
-    if locations['schema']!='e36-artifact-location-admission-v1' or locations['admitted'] is not True or locations['fits']!=0 or locations['relocation_eligibility_replayed'] is not True:
-        raise ValueError('frozen verified artifact location admission required')
-    for key in ['journal','resolver','storage']:checked(locations[key])
-    if 'archive_storage' in locations:checked(locations['archive_storage'])
-    if locations['unique_relocated_objects'] and len(locations['actual_random_readbacks'])!=min(3,locations['unique_relocated_objects']):
-        raise ValueError('final archive readback sample missing')
+    if archive_pending:
+        if mandatory is None:raise ValueError('coordinator mandatory-only amendment required for concurrent archive preparation')
+    else:
+        locations=json.loads(location_path.read_text())
+        if locations['schema']!='e36-artifact-location-admission-v1' or locations['admitted'] is not True or locations['fits']!=0 or locations['relocation_eligibility_replayed'] is not True:
+            raise ValueError('frozen verified artifact location admission required')
+        for key in ['journal','resolver','storage']:checked(locations[key])
+        if 'archive_storage' in locations:checked(locations['archive_storage'])
+        if locations['unique_relocated_objects'] and len(locations['actual_random_readbacks'])!=min(3,locations['unique_relocated_objects']):
+            raise ValueError('final archive readback sample missing')
     return dict(schema='e36-qualified-matrix-admission-v1',matrix=choice['qualified'],choice=bind(choice_path),
                 plan=proof['plan'],clock=proof['clock'],selected_runs=names,manifests=declarations,
                 completed_views=len(seen),outputs=output_hashes,complete=True,budget_evidence=evidence,
                 remote_phase_evidence=[],scheduling_evidence=[proof['scheduling']],
                 owner_amendment=proof['owner_amendment'],owner_matrix=bind(root/'owner-svt-ssd-v1/matrix-binding.json'),
-                excluded_codecs=['rav1e'],native_publication=publications,artifact_location=bind(location_path),
+                excluded_codecs=['rav1e'],native_publication=publications,artifact_location=None if archive_pending else bind(location_path),artifact_archive_pending=archive_pending,
                 resource_closure=bind(root/'owner-svt-ssd-v1/resource-closure-v3.json'),
                 urgent_disk=bind(root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json') if (root/'owner-svt-ssd-v1/urgent-mirror-v10-binding.json').exists() else None,
                 resource_supervision=bind(root/'owner-svt-ssd-v1/resource-supervision-v11.json') if (root/'owner-svt-ssd-v1/resource-supervision-v11.json').exists() else None,

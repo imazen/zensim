@@ -40,8 +40,8 @@ def outputs(root,name):
     if seen!=expected:raise ValueError('missing whole registered ladders')
 
 
-def build(root,names,out,commit):
-    matrix_admission=admit_matrix(root,names)
+def build(root,names,out,commit,archive_pending=False):
+    matrix_admission=admit_matrix(root,names,archive_pending=True) if archive_pending else admit_matrix(root,names)
     out.mkdir();write(out/'matrix-admission.json',matrix_admission);db=sqlite3.connect(out/'physical-index.sqlite3')
     db.execute('PRAGMA temp_store=MEMORY')
     db.execute('PRAGMA journal_mode=WAL')
@@ -214,4 +214,4 @@ def build(root,names,out,commit):
     if missing:raise ValueError('zero post-dedup consensus support in required strata; no fit pool qualifies')
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True);p.add_argument('--run',action='append',required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--commit',required=True);a=p.parse_args();build(a.root,a.run,a.out,a.commit)
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True);p.add_argument('--run',action='append',required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--commit',required=True);p.add_argument('--prepare-while-archiving',action='store_true',help='nonlaunchable feature preparation; final artifact admission/rebinding still required');a=p.parse_args();build(a.root,a.run,a.out,a.commit,a.prepare_while_archiving)

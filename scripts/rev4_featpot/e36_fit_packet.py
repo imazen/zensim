@@ -41,6 +41,8 @@ def proof_relative(root,path):
 
 
 def packet(root,pools,base,trainer,out,owner,commit):
+    if json.loads((pools/'matrix-admission.json').read_text()).get('artifact_archive_pending'):
+        raise ValueError('feature preparation is not final archive/pool admission')
     choice=json.loads((root/'bulk-choice.json').read_text());admit_matrix(root,choice['selected_runs'])
     if sha(base)!=BASE_SHA:raise ValueError('original opaque base archive changed')
     # Only the first, target-free inventory member is decoded. The original

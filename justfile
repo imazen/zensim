@@ -2362,3 +2362,7 @@ e36-control-freeze out commit:
 
 e36-largest-support-preview root out:
     nice -n19 ionice -c3 python3 scripts/rev4_featpot/e36_largest_support_preview.py --root {{quote(root)}} --out {{quote(out)}}
+
+# Feature computation may overlap storage; packet creation refuses pending archive proof.
+e36-prepare-pool root out commit:
+    python3 scripts/rev4_featpot/e36_materialize.py --root {{quote(root)}} --run svt-fallback-v1 --out {{quote(out)}} --commit {{quote(commit)}} --prepare-while-archiving
