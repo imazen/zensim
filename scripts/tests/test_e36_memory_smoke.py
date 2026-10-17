@@ -4,9 +4,19 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).parents[1]/'rev4_featpot'))
-from e36_memory_smoke import seed_zero
+from e36_memory_smoke import seed_zero,diagnostic_result
 
 class Diagnostic(unittest.TestCase):
+    def test_raw_production_result_uses_nested_final_epoch(self):
+        result=dict(execution_contract='local-smoke',selection=dict(epoch_rule='last',selected_epoch=1))
+        qualified=dict(execution_contract='local-smoke')
+        diagnostic_result(result,qualified)
+        self.assertNotIn('selected_epoch',result)
+        for key,value in [('epoch_rule','best'),('selected_epoch',119)]:
+            bad=copy.deepcopy(result);bad['selection'][key]=value
+            with self.assertRaises(ValueError):diagnostic_result(bad,qualified)
+        with self.assertRaises(ValueError):diagnostic_result(result,dict(execution_contract='registered-fit'))
+
     def test_reordered_parent_selects_actual_seed_zero(self):
         cells=[dict(name='e36-tv10-c__N/full_s'+str(s),argv=['v2_confirm_fit.py','--e36-arm','tv10-c','--seed-index',str(s)]) for s in [1,0,2]]
         blueprint=dict(cells=cells);selected=seed_zero(blueprint)

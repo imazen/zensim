@@ -28,6 +28,12 @@ def seed_zero(blueprint):
     if sorted(seeds)!=[0,1,2]:raise ValueError('exact three-seed full-data blueprint required')
     return copy.deepcopy(cells[seeds.index(0)])
 
+
+def diagnostic_result(result,qualified):
+    if (result['execution_contract']!='local-smoke' or qualified['execution_contract']!='local-smoke'
+        or result['selection']['epoch_rule']!='last' or result['selection']['selected_epoch']!=1):
+        raise ValueError('diagnostic cannot be scientific output')
+
 def prepare(root,packet,out,owner,commit):
     root=Path(root);packet=Path(packet);out=Path(out);owner=Path(owner)
     original={name:sha(packet/name) for name in ['program.tar.gz','data.tar.gz','qualified-package.json','source-pins.json']}
@@ -99,7 +105,7 @@ def verify(root,out,owner,ledger,blobs):
     receipt=native.verify_blob(blob,stage,name,job['kind'],program_archive=Path(prepared['program']['path']),checkpoint_inspector=root/'bin/e36-fit-final/inspect_qualified_checkpoint',allow_local_smoke=True)
     dest=native.cell_dir(stage,name,job['kind']);result=json.loads((dest/'result.json').read_text())
     qualified=json.loads((dest/'e36-qualified-checkpoint.json').read_text())
-    if result['execution_contract']!='local-smoke' or qualified['execution_contract']!='local-smoke' or result['selection']['selected_epoch']!=1:raise ValueError('diagnostic cannot be scientific output')
+    diagnostic_result(result,qualified)
     value=dict(schema='e36-verified-memory-smoke-v1',admitted=True,execution_contract='local-smoke',diagnostic_fits=1,scientific_fits=0,program=prepared['program'],data=prepared['data'],manifest=prepared['manifest'],ledger=bind(ledger),blob=bind(blob),native_receipt=receipt,resource=bind(dest/'RESOURCE_USAGE.txt'),qualified=bind(dest/'e36-qualified-checkpoint.json'),labels_read=False)
     write(out/'VERIFIED.json',value);return value
 
