@@ -97,6 +97,13 @@ class Launch(unittest.TestCase):
         self.assertIn(doc['image_ref'], command)
         self.assertIn('AWS_SECRET_ACCESS_KEY', command)
         self.assertEqual(command[-len(args):], args)
+        mounts = [command[i+1] for i, arg in enumerate(command[:-1]) if arg == '-v']
+        self.assertIn(str(owner.FITV2.parent)+':'+str(owner.FITV2.parent), mounts)
+        self.assertNotIn(str(owner.FITV2)+':'+str(owner.FITV2), mounts)
+        self.assertNotIn(str(owner.POT)+':'+str(owner.POT), mounts)
+        with mock.patch.object(owner, 'POT', Path('/different-parent/results')):
+            with self.assertRaisesRegex(ValueError, 'shared mount parent'):
+                owner.steer_harvest_command(self.bundle, doc, args)
 
     def test_steer_first_manifest_starts_paused_and_queues_one_cell(self):
         import types

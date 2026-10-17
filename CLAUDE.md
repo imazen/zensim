@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-16 — STEER pinned-image install crossed Docker bind mounts. FIXED; same-artifact transport replay passed.** The archive/native verifier accepted the first registered cell, but separate staging/result bind mounts made its atomic directory rename return EXDEV. Mount their common parent once; the image, archive, verifier and scientific state machine stay unchanged. The preserved first artifact verifies and installs in the same pinned image after the mount change, without another fit; all 24 launch/harvest tests pass.
+
 * **2026-10-16 — candidate low-quality dial ordering regression. OPEN.** All three assessed Rev5 candidates miss the unchanged mentor-resolvable standard AVIF/JPEG floors and ladder AVIF-rav1e floor. The exact same-cell CVVDP-FHD and registered SSIMULACRA2 references pass both tiers. Removing only the candidate output curve leaves every represented fraction/order/clamp count unchanged; there are no clamp failures. The ADDRFIX investigation retains exact rung evidence and does not qualify a replacement model.
 
 * **2026-10-16 — palette admission imports need NumPy/PyArrow in script CI. FIXED LOCALLY; remote check pending.** The scripts job at `febb0698` failed importing the real admission owner because NumPy was absent. Its palette step now installs the existing research dependency requirements in an isolated environment before running both unchanged unittest invocations. Both invocations pass in a fresh local environment (`just shipgates-palette-ci`); no data or labels are needed and no assertion changes.

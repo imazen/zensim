@@ -723,7 +723,11 @@ def steer_harvest_command(bundle, doc, arguments):
                '--entrypoint', '/usr/bin/nice', '-e', 'AWS_ACCESS_KEY_ID', '-e', 'AWS_SECRET_ACCESS_KEY',
                '-e', 'EP', '-e', 'TMPDIR=/scratch/tmp', '-e', 'STEER_HARVEST_IMAGE='+doc['image_ref']]
     ctl_parent = Path(doc.get('ctl_binary', str(CTL))).parent
-    for path, mode in [(repo, ':ro'), (bundle.parent, ''), (FITV2, ''), (POT, ''), (ctl_parent, ':ro')]:
+    # install_stages atomically renames staging into the registered result root.
+    # Separate Docker bind mounts return EXDEV even on one host filesystem.
+    if FITV2.parent != POT.parent:
+        raise ValueError('STEER harvest staging and results require one shared mount parent')
+    for path, mode in [(repo, ':ro'), (bundle.parent, ''), (FITV2.parent, ''), (ctl_parent, ':ro')]:
         command += ['-v', str(path)+':'+str(path)+mode]
     if '--status-file' in arguments:
         status_parent = Path(arguments[arguments.index('--status-file')+1]).resolve().parent

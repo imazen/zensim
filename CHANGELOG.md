@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Keep STEER harvest staging and installed results under one container bind mount so verified cells install by atomic rename.
+
 - Bind the STEER first-cell admission, immutable-image launch and supervised image-contained harvest paths.
 
 
