@@ -32,7 +32,10 @@ def main():
     else:
         destination.mkdir()
         owner.write_text(json.dumps(binding, indent=2) + '\n')
-    subprocess.run(['rsync', '-a', '--stats', str(root) + '/', str(destination) + '/'], check=True)
+    # The archive share controls ownership and modes; preserve file contents.
+    subprocess.run(['rsync', '-r', '--links', '--checksum', '--no-owner', '--no-group',
+                    '--no-perms', '--no-times', '--stats',
+                    str(root) + '/', str(destination) + '/'], check=True)
     files = sorted(p.relative_to(root) for p in root.rglob('*') if p.is_file())
     seed = 20261017
     checked = []
@@ -44,7 +47,7 @@ def main():
     receipt.write_text(json.dumps(dict(time_utc=datetime.now(timezone.utc).isoformat(),
                                       source=str(root), destination=str(destination),
                                       seed=seed, checked=checked), indent=2) + '\n')
-    shutil.copy2(receipt, destination / receipt.relative_to(root))
+    shutil.copyfile(receipt, destination / receipt.relative_to(root))
     assert sha(receipt) == sha(destination / receipt.relative_to(root))
     print(receipt.read_text())
 
