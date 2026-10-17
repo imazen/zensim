@@ -77,6 +77,8 @@ def build(root,names,out,commit):
     mode_coverage=defaultdict(lambda:defaultdict(int));raw_counts=defaultdict(int);raw_strata=defaultdict(lambda:defaultdict(int));effective=defaultdict(int);effective_mass=defaultdict(int);producer_outputs=[];runtime=None
     for name in names:
         for receipt_sha,doc in outputs(root,name):
+            if doc['view']['codec'] in matrix_admission.get('excluded_codecs',[]):
+                raise ValueError('owner-excluded codec cannot enter the E36 pool')
             if runtime is None:runtime=doc['runtime_sha256']
             if doc['runtime_sha256']!=runtime:raise ValueError('mixed native runtimes')
             producer_outputs.append(receipt_sha);rows=doc['rows'];local=[];rowmap=[];declared_ref=refbykey[doc['view']['reference_key']]
@@ -144,7 +146,7 @@ def build(root,names,out,commit):
         effective_mass[key]+=count*(2 if codec in ['jpeg','rav1e'] else 1)
     matrix=matrix_admission['matrix']
     budget=json.loads(budget_path.read_text())
-    expected=required_strata(budget,matrix)
+    expected=required_strata(budget,matrix,matrix_admission.get('excluded_codecs',()))
     missing=[k for k in expected if effective[k]==0]
     write(out/'whole-matrix.json',dict(schema='e36-whole-matrix-completion-v1',matrix=matrix,
         runtime_sha256=runtime,source_budget_sha256=sha(budget_path),outputs=producer_outputs,complete=True,build_commit=commit,

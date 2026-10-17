@@ -29,7 +29,7 @@ def group():
     )
 
 
-def census(root, name):
+def census(root, name, publication_admitter=None):
     out = Path(root) / "runs" / name
     files = []
     completed = []
@@ -114,7 +114,10 @@ def census(root, name):
         declared_ladders=len(expected),
     )
     if admitted and (Path(root)/'scheduling-v7/amendment.json').exists():
-        from e36_native_ledger_admit import admit
+        if publication_admitter is None:
+            from e36_native_ledger_admit import admit
+        else:
+            admit = publication_admitter
         result['native_publication']=admit(root,name,completed,files)
     with (out / "census.json").open("x") as f:
         json.dump(result, f, indent=2, allow_nan=False)

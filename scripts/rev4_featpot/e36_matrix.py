@@ -50,6 +50,9 @@ def scheduled_evidence(root,choice,names):
 
 
 def admit(root,names):
+    if (root/'owner-svt-ssd-v1/matrix-binding.json').exists():
+        from e36_svt_matrix import admit as admit_svt
+        return admit_svt(root,names)
     cp=root/'bulk-choice.json';choice=json.loads(cp.read_text())
     pp=Path(choice.get('plan_path',root/'bulk-plan.json'));tp=Path(choice.get('clock_path',root/'bulk-clock.json'))
     plan=json.loads(pp.read_text())

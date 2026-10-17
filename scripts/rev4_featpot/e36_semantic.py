@@ -5,7 +5,7 @@ import pyarrow.parquet as pq
 from e36_store import sha
 
 
-def required_strata(budget,matrix):
+def required_strata(budget,matrix,excluded_codecs=()):
     from collections import defaultdict
     from e36_data import canonical
     expected=defaultdict(int)
@@ -15,6 +15,7 @@ def required_strata(budget,matrix):
         for key in panel[matrix]:
             r=budget['references'][key]
             for codec in (['rav1e'] if group=='rav1e' else ['jpeg','svt','webp','jxl']):
+                if codec in excluded_codecs:continue
                 for band in range(3):expected[canonical([codec,r['content'],int(size),band,r['split']])]+=1
     return dict(expected)
 
