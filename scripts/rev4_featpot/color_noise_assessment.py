@@ -434,16 +434,73 @@ def report(out):
         ranks=ranks,severe_cases=case_scores,qualified=False,time_utc=now()))
 
 
+def finalize(out):
+    """Bind the completed study for the existing full-tree archive owner."""
+    from color_noise_repair import ARMS,registration,read,write,sha
+    reg=registration(out);choice=read(out/'TRAIN_SELECTION.json')
+    exposure=read(out/'EXTERNAL_EXPOSURE.json');data=read(out/'EXTERNAL_INPUTS.json')
+    report_data=read(out/'REPORT.json')
+    if not read(out/'CONTROL_PARITY.json')['pass_all']:
+        raise ValueError('control replay failed')
+    if (exposure['choice_sha256']!=sha(out/'TRAIN_SELECTION.json')
+            or report_data['train_selection_sha256']!=sha(out/'TRAIN_SELECTION.json')
+            or report_data['external_exposure_sha256']!=sha(out/'EXTERNAL_EXPOSURE.json')
+            or report_data['selected']!=choice['selected']):
+        raise ValueError('decision/exposure/report binding differs')
+    if report_data['qualified'] or choice['qualification']:
+        raise ValueError('exploratory study cannot claim qualification')
+    if set(choice['models'])!={f'{a}/s{s}' for a in ARMS for s in range(3)}:
+        raise ValueError('registered model population differs')
+    compatibility=read(out/'FEATURE_COMPATIBILITY.json')
+    if not all(compatibility[k] for k in ['decoded_pixels_exact','f32_exact','f64_exact']):
+        raise ValueError('TRAIN feature replay differs')
+    for binding in choice['models'].values():
+        if sha(binding['path'])!=binding['sha256']:
+            raise ValueError('frozen model changed')
+    expected={'diff-frag-820','w-c','diff-410','peer_cvvdp_fhd','peer_ssim2','peer_butter3'}|{'repair-'+a for a in ARMS}
+    if {m['name'] for m in data['models']}!=expected or len(data['models'])!=len(expected):
+        raise ValueError('comparison model population differs')
+    if set(data['datasets'])!=set(EXTERNAL):raise ValueError('external panel population differs')
+    cells=0
+    for model in data['models']:
+        doc=read(out/(model['name']+'.fulleval.json'))
+        if set(doc['rank'])!=set(EXTERNAL):raise ValueError('assessment panel population differs')
+        for corpus,d in data['datasets'].items():
+            points=doc['per_pair'][corpus]
+            if points['pred']!=d['scores'][model['name']]['pred'] or points[d['axis']]!=d['target']:
+                raise ValueError('assessment vectors differ')
+            cells+=1
+    execution=read(out/'EXECUTION_SOURCE.json')
+    training=['color_noise_repair.py','v2_confirm_fit.py','v2_common.py','v2_lodo_mlp.py','v2_human_role.py']
+    for name in training:
+        relative='scripts/rev4_featpot/'+name
+        if sha(REPO/relative)!=execution['sources'][relative]:
+            raise ValueError('executed training owner changed')
+    files=['REGISTRATION.json','ADMISSION.json','EXECUTION_SOURCE.json','ASSESSMENT_PLAN.json',
+           'DEVELOPMENT_POPULATIONS.json','FEATURE_COMPATIBILITY.json','CONTROL_PARITY.json',
+           'TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','REPORT.json',
+           'gauntlet.html','index.html']
+    write(out/'_MANIFEST.json',dict(schema='color-noise-repair-complete-v1',
+        build_commit=subprocess.check_output(['jj','log','--no-graph','-r','@-','-T','commit_id'],text=True,cwd=REPO).strip(),
+        owner_sha256=sha(__file__),training_build_commit=execution['build_commit'],
+        program_sha256=reg['program_sha256'],binaries=reg['binaries'],models=choice['models'],
+        files={name:sha(out/name) for name in files},model_count=len(data['models']),
+        panel_count=len(EXTERNAL),statistical_cells=cells,selected=choice['selected'],
+        qualification_allowed=False,source_commit_limitation='Retained external extractor source commit unresolved; twelve TRAIN pixel pairs replay exactly at all504 consumed f32/f64 inputs.',
+        scope='Completed exploratory three-seed 2x2 study. Original qualification gates remain required. External panels previously exposed; LIVE diagnostic only.',time_utc=now()))
+    print('Completed evidence manifest:',len(data['models']),'models;',cells,'statistical cells',flush=True)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
+    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report','finalize'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
+    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report,'finalize':finalize}[a.mode](a.out)
 
 
 if __name__=='__main__':main()
