@@ -2529,16 +2529,16 @@ r8-severe-tests config:
     TMPDIR="$HOME/tmp" cargo test --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --bin r8-severe-quant
 
 
-gauntlet-archive source destination:
+gauntlet-archive source destination kind="encoded":
     test ! -e {{quote(destination)}}
     rsync -a --no-owner --no-group {{quote(source + "/")}} {{quote(destination + "/")}}
-    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json
+    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json --payload-kind {{quote(kind)}}
 
 # Resume only an owned partial mirror with the exact same completion identity.
-gauntlet-archive-resume source destination:
+gauntlet-archive-resume source destination kind="encoded":
     cmp {{quote(source + "/_MANIFEST.json")}} {{quote(destination + "/_MANIFEST.json")}}
     rsync -a --no-owner --no-group {{quote(source + "/")}} {{quote(destination + "/")}}
-    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json
+    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json --payload-kind {{quote(kind)}}
 
 gauntlet-reference-view html reference:
     node scripts/v_next/gauntlet_render_check.js {{quote(html)}} --reference {{quote(reference)}}

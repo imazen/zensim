@@ -11,6 +11,15 @@ SPEC.loader.exec_module(owner)
 
 
 class CompleteArchive(unittest.TestCase):
+    def test_model_readback_is_explicit_and_preserves_encoded_default(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()/"tmp") as tmp:
+            root=Path(tmp)
+            for name in ['image.jpg','map.data.png','bake.bin','notes.json']:
+                (root/name).write_bytes(b'payload')
+            self.assertEqual({p.name for p in owner.payload_candidates(root)}, {'image.jpg','map.data.png'})
+            self.assertEqual({p.name for p in owner.payload_candidates(root,'model')}, {'bake.bin'})
+            with self.assertRaises(ValueError):owner.payload_candidates(root,'unknown')
+
     def fixture(self, root):
         source=root/"source";destination=root/"destination"
         source.mkdir();(source/"COMPLETE.json").write_text("{}\n")

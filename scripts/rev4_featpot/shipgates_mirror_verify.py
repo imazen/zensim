@@ -1,4 +1,4 @@
-"""Verify three random immutable encoded/map payloads after an evidence mirror."""
+"""Verify three random immutable payloads after an evidence mirror."""
 import argparse
 import hashlib
 import json
@@ -15,6 +15,14 @@ def sha(path):
 # Receipts are written only after payload verification, so exclude their own
 # self-referential hashes from the immutable payload inventory.
 RECEIPTS = {"LAST_MIRROR_VERIFIED.json", "ARCHIVE_FILES.json"}
+
+
+def payload_candidates(source, kind="encoded"):
+    if kind not in ("encoded", "model"):
+        raise ValueError("unknown immutable payload kind")
+    return [p for p in source.rglob('*') if p.is_file() and
+            ((kind == "model" and p.suffix == '.bin') or
+             (kind == "encoded" and (p.suffix in ['.jxl','.avif','.webp','.jpg','.zmap'] or p.name.endswith('.data.png'))))]
 
 
 def verify_all(source, destination, complete_marker):
@@ -45,9 +53,9 @@ def main():
     for name in ['source','destination']:
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--complete-marker', type=Path, help='also SHA256-verify the complete finished tree; path relative to source')
+    parser.add_argument('--payload-kind', choices=['encoded','model'], default='encoded', help='immutable payload type for three random readbacks')
     args = parser.parse_args()
-    choices = [p for p in args.source.rglob('*') if p.is_file() and
-               (p.suffix in ['.jxl','.avif','.webp','.jpg','.zmap'] or p.name.endswith('.data.png'))]
+    choices = payload_candidates(args.source,args.payload_kind)
     assert len(choices) >= 3
     chosen = secrets.SystemRandom().sample(choices, 3)
     rows = []
@@ -65,9 +73,10 @@ def main():
                 stream.write('\n')
     receipt = dict(time_utc=datetime.now(timezone.utc).isoformat(), source=str(args.source),
         destination=str(args.destination),verified_immutable_payloads=rows,
+        payload_kind=args.payload_kind,
         scope='incremental mirror while campaign is running; final completeness not claimed')
     if full is not None:
-        receipt.update(scope='complete finished evidence tree SHA256-verified, plus three random encoded payloads',
+        receipt.update(scope='complete finished evidence tree SHA256-verified, plus three random '+args.payload_kind+' payloads',
                        verifier_sha256=sha(Path(__file__)),
                        complete_marker=str(args.complete_marker),file_count=full['file_count'],total_bytes=full['total_bytes'],
                        archive_files_sha256=sha(args.source/'ARCHIVE_FILES.json'))
