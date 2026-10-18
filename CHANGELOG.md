@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Reuse retained-map accumulation storage, dispatch independent bin rows once per band, and keep underfilled folds on serial SIMD while preserving output bits and live-result ownership. Add measured map-grid and thread-scaling diagnostics ([report](benchmarks/perf2_2026-10-18.md); `ff73cd55`, `3c224aa1`, `6c1b2a27`).
+
 - Render explicit frozen human comparisons with source-clustered SROCC intervals, fitted PLCC, KROCC, complete scatter populations and per-item training-overlap records. Keep withheld family fits distinct from packed deployment bakes; add exact BMP-to-PNG evaluation transport and preserve existing browser gates (`95a6c7f4`, `a5510e71`, `b476d7cc`, `b9196f8b`).
 
 - Verify the preregistered detector-disabled severe DC/coarse-AC validation probe: both frozen candidates score below same-source q20 on48/48 cases; retain all96 comparisons, native/independent decode proofs and full mirrored evidence (`99ab8b92`, `d46a81a6`).
