@@ -1,0 +1,48 @@
+"""A completed evidence archive refuses missing, changed and extra files."""
+import importlib.util
+from pathlib import Path
+import shutil
+import tempfile
+import unittest
+
+SPEC = importlib.util.spec_from_file_location("mirror", Path(__file__).parents[1]/"rev4_featpot/shipgates_mirror_verify.py")
+owner = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(owner)
+
+
+class CompleteArchive(unittest.TestCase):
+    def fixture(self, root):
+        source=root/"source";destination=root/"destination"
+        source.mkdir();(source/"COMPLETE.json").write_text("{}\n")
+        (source/"encoded.jpg").write_bytes(bytes(range(255)))
+        shutil.copytree(source,destination)
+        return source,destination
+
+    def test_complete_tree_and_receipt_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source,destination=self.fixture(Path(tmp))
+            result=owner.verify_all(source,destination,Path("COMPLETE.json"))
+            self.assertEqual(result["file_count"],2)
+            self.assertEqual(result["total_bytes"],258)
+
+    def test_changed_payload_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source,destination=self.fixture(Path(tmp));(destination/"encoded.jpg").write_bytes(b"changed")
+            with self.assertRaises(AssertionError):
+                owner.verify_all(source,destination,Path("COMPLETE.json"))
+
+    def test_missing_completion_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source,destination=self.fixture(Path(tmp));(source/"COMPLETE.json").unlink()
+            with self.assertRaisesRegex(AssertionError,"completion marker missing"):
+                owner.verify_all(source,destination,Path("COMPLETE.json"))
+
+    def test_extra_destination_file_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source,destination=self.fixture(Path(tmp));(destination/"extra").write_bytes(b"unreviewed")
+            with self.assertRaisesRegex(AssertionError,"population differs"):
+                owner.verify_all(source,destination,Path("COMPLETE.json"))
+
+
+if __name__ == "__main__":
+    unittest.main()

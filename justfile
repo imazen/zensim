@@ -2428,3 +2428,9 @@ gtarget-scalar-run binary action codec encoder inputs bake calibration output or
 
 gtarget-scalar-panel models binary encoders inputs lock heavy output phase='all':
     python3 scripts/rev4_featpot/shipgates.py scalar-target --models {{quote(models)}} --binary {{quote(binary)}} --encoders {{quote(encoders)}} --inputs {{quote(inputs)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}} --phase {{quote(phase)}}
+
+gtarget-archive-check:
+    TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_shipgates_mirror_verify.py
+
+gtarget-archive-verify source destination:
+    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker scalar-v1/COMPLETE.json
