@@ -2554,5 +2554,9 @@ color-noise-assessment mode output:
 color-noise-ensemble mode output:
     TMPDIR="$HOME/tmp" python3 -u scripts/rev4_featpot/color_noise_ensemble.py {{quote(mode)}} --out {{quote(output)}}
 
+color-noise-freeze output:
+    just color-noise-assessment select {{quote(output)}}
+    just color-noise-ensemble score {{quote(output)}}
+
 color-noise-check:
     TMPDIR="$HOME/tmp" PYTHONPATH=scripts:scripts/rev4_featpot python3 -m unittest scripts.tests.test_color_noise_repair scripts.tests.test_e33_package

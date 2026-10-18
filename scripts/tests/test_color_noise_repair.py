@@ -102,7 +102,7 @@ class EnsembleDecision(unittest.TestCase):
         import color_noise_ensemble as ensemble
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
             root=Path(td);(root/'EXTERNAL_EXPOSURE.json').write_text('{}')
-            with patch.object(ensemble,'registration'):
+            with patch.object(owner,'registration'):
                 with self.assertRaisesRegex(ValueError,'precede external reads'):ensemble.plan(root)
             self.assertFalse((root/'ensembles').exists())
 

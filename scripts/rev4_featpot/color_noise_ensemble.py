@@ -8,11 +8,11 @@ import shutil
 import subprocess
 
 import color_noise_assessment as assessment
-from color_noise_repair import ARMS,registration,read,write,sha
 import numpy as np
 
 
 def plan(out):
+    from color_noise_repair import ARMS,registration,write,sha
     registration(out)
     if (out/'EXTERNAL_EXPOSURE.json').exists():raise ValueError('supplement must precede external reads')
     root=out/'ensembles';root.mkdir()
@@ -27,7 +27,9 @@ def plan(out):
 
 
 def predict(out,arm,table,dest,seeds=range(3)):
-    from v2_common import dense_bake
+    from color_noise_repair import read,sha
+    from v2_common import dense_bake,FITBIN
+    if FITBIN.resolve()!=(out/'bin/bake_dial_refit').resolve():raise ValueError('ensemble densifier is not the pinned native owner')
     choice=read(out/'TRAIN_SELECTION.json')
     members=[]
     for seed in seeds:
@@ -49,6 +51,7 @@ def predict(out,arm,table,dest,seeds=range(3)):
 
 
 def choose(records):
+    from color_noise_repair import ARMS
     by={(r['arm'],r['population']):r['statistics']['srocc_signed'] for r in records}
     decisions=[]
     for arm in list(ARMS)[1:]:
@@ -63,6 +66,7 @@ def choose(records):
 
 
 def score(out):
+    from color_noise_repair import ARMS,registration,read,write,sha
     import pandas as pd
     import pyarrow.parquet as pq
     from lib.zen_stats import panel_batch
@@ -102,6 +106,7 @@ def score(out):
 
 
 def external(out):
+    from color_noise_repair import ARMS,registration,read,write,sha
     registration(out);root=out/'ensembles';choice=read(root/'TRAIN_SELECTION.json')
     reg=read(root/'REGISTRATION.json')
     if (choice['state']!='frozen-before-external-read' or choice['registration_sha256']!=sha(root/'REGISTRATION.json')
@@ -165,6 +170,7 @@ def main():
     a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(assessment.BASE/'bin/panel')
+    from color_noise_repair import sha,read
     if sha(assessment.BASE/'bin/panel')!=read(assessment.BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel changed')
     {'plan':plan,'score':score,'external':external}[a.mode](a.out)
