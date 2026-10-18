@@ -1150,30 +1150,7 @@ impl BinAccum {
         }
         let rows = self.height.min(sh * factor);
         let run = |first: usize, bins: &mut [f64]| {
-            for (offset, row) in bins.chunks_exact_mut(width).enumerate() {
-                let base = ((first + offset) / factor) * sw;
-                let source = match plane {
-                    PlaneRef::F32(src) => PlaneRef::F32(&src[base..base + sw]),
-                    PlaneRef::F64(src) => PlaneRef::F64(&src[base..base + sw]),
-                };
-                match factor {
-                    1 => add_pixel_unit_row(source, row),
-                    2 => add_pixel_scaled_row::<2>(source, row),
-                    4 => add_pixel_scaled_row::<4>(source, row),
-                    8 => add_pixel_scaled_row::<8>(source, row),
-                    _ => {
-                        let inv_area = 1.0 / (factor * factor) as f64;
-                        for (sx, pixels) in row.chunks_mut(factor).enumerate().take(sw) {
-                            let v = source.get(sx) * inv_area;
-                            if v != 0.0 {
-                                for cell in pixels {
-                                    *cell += v;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            add_pixel_band(plane, sw, width, factor, first, bins);
         };
         let _ = self.parallel;
         #[cfg(feature = "threads")]
@@ -1220,11 +1197,44 @@ impl BinAccum {
     }
 }
 
-/// Source-plane dtype adapter for [`BinAccum`] — one fold algorithm for the
-/// f64 (standalone) and f32 (fused) accumulation pipelines.
 // Independent destination rows retain the original per-pixel addition order.
 // Dispatch widens only these elementwise operations; no reduction is reordered.
 #[autoversion]
+fn add_pixel_band(
+    plane: PlaneRef<'_>,
+    sw: usize,
+    width: usize,
+    factor: usize,
+    first: usize,
+    bins: &mut [f64],
+) {
+    for (offset, row) in bins.chunks_exact_mut(width).enumerate() {
+        let base = ((first + offset) / factor) * sw;
+        let source = match plane {
+            PlaneRef::F32(src) => PlaneRef::F32(&src[base..base + sw]),
+            PlaneRef::F64(src) => PlaneRef::F64(&src[base..base + sw]),
+        };
+        match factor {
+            1 => add_pixel_unit_row(source, row),
+            2 => add_pixel_scaled_row::<2>(source, row),
+            4 => add_pixel_scaled_row::<4>(source, row),
+            8 => add_pixel_scaled_row::<8>(source, row),
+            _ => {
+                let inv_area = 1.0 / (factor * factor) as f64;
+                for (sx, pixels) in row.chunks_mut(factor).enumerate().take(sw) {
+                    let v = source.get(sx) * inv_area;
+                    if v != 0.0 {
+                        for cell in pixels {
+                            *cell += v;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[inline(always)]
 fn add_pixel_unit_row(plane: PlaneRef<'_>, row: &mut [f64]) {
     match plane {
         PlaneRef::F32(src) => {
@@ -1240,7 +1250,7 @@ fn add_pixel_unit_row(plane: PlaneRef<'_>, row: &mut [f64]) {
     }
 }
 
-#[autoversion]
+#[inline(always)]
 fn add_pixel_scaled_row<const FACTOR: usize>(plane: PlaneRef<'_>, row: &mut [f64]) {
     let inv_area = 1.0 / (FACTOR * FACTOR) as f64;
     let len = match plane {
@@ -1257,6 +1267,8 @@ fn add_pixel_scaled_row<const FACTOR: usize>(plane: PlaneRef<'_>, row: &mut [f64
     }
 }
 
+/// Source-plane dtype adapter for [`BinAccum`] — one fold algorithm for the
+/// f64 (standalone) and f32 (fused) accumulation pipelines.
 #[derive(Clone, Copy)]
 enum PlaneRef<'a> {
     F64(&'a [f64]),

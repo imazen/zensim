@@ -105,6 +105,7 @@ pub(super) fn action(
         | "e34_candidate_map_before"
         | "e34_candidate_baseline"
         | "e34_candidate_map_retained"
+        | "e34_candidate_map_bin2"
         | "e34_candidate_map_bin8"
         | "e34_candidate_map_bin16" => {
             // E34's registered widths are explicit caller bindings. Keep the E33
@@ -134,6 +135,7 @@ pub(super) fn action(
                 zensim::BakeScorer::new(model).unwrap().with_parallel(true),
             ));
             let bin = match arm {
+                "e34_candidate_map_bin2" => 2,
                 "e34_candidate_map_bin8" => 8,
                 "e34_candidate_map_bin16" => 16,
                 "e34_candidate_map_audit" => std::env::var("ZEN_S2_MAP_BIN")
@@ -257,6 +259,7 @@ pub(super) fn action(
                 }
                 "e34_candidate_map_retained"
                 | "e34_candidate_map_before"
+                | "e34_candidate_map_bin2"
                 | "e34_candidate_map_bin8"
                 | "e34_candidate_map_bin16" => {
                     let mut session = scorer.prepare_steering(source, bin).unwrap();

@@ -237,7 +237,7 @@ def compare(args):
     dest.mkdir(exist_ok=False)
     arms=["e34_control","e34_candidate","e34_candidate_map_before","e34_candidate_map_retained"]
     before_rows=load_audits(ROOT/"audits-before"/"AUDITS.json")
-    after_rows=load_audits(ROOT/"audits-after"/"AUDITS.json")
+    after_rows=load_audits(args.audit_after)
     assert before_rows.keys()==after_rows.keys()
     for key in before_rows:
         assert before_rows[key]["record"]["model"]==after_rows[key]["record"]["model"],key
@@ -280,9 +280,9 @@ def options(args):
     configure()
     dest=ROOT/args.name
     dest.mkdir(exist_ok=False)
-    arms=["e34_candidate_map_retained","e34_candidate_map_bin8","e34_candidate_map_bin16"]
+    arms=["e34_candidate_map_retained","e34_candidate_map_bin2","e34_candidate_map_bin8","e34_candidate_map_bin16"]
     cells=[(f"{side}x{side}","v4x",n) for n in [1,16] for side in [256,1024,2048]]
-    audit_rows=load_audits(ROOT/"audits-after"/"AUDITS.json")
+    audit_rows=load_audits(args.audit_after)
     def ready(name,g,t,n,rec):
         old=audit_rows[("diff-frag-820",n,int(g.split("x")[0]),0)]["record"]
         assert rec["score_bits"]==old["score_bits"]
@@ -292,7 +292,7 @@ def options(args):
         arms=arms,cells=cells,parity_loader=lambda _: {},baseline=arms[0],ready_check=ready)
     movements=[]
     for side in [256,1024,2048]:
-        for bin in [8,16]:
+        for bin in [2,8,16]:
             os.environ["ZEN_S2_MAP_BIN"]=str(bin)
             tag=f"movement-{side}-bin{bin}"
             rec=owner.worker_run(args.binary,"e34_candidate_map_audit",5,
@@ -303,7 +303,7 @@ def options(args):
 
 def verify(args):
     before=load_audits(ROOT/"audits-before"/"AUDITS.json")
-    after=load_audits(ROOT/"audits-after"/"AUDITS.json")
+    after=load_audits(args.audit_after)
     assert before.keys()==after.keys() and len(before)==54
     for key in before:
         for field in ["model","score_bits","input_sha256"]:
@@ -320,6 +320,26 @@ def verify(args):
         dependencies=artifacts[0]["dependencies"])
     owner.write(ROOT/args.name/"RUNTIME_PARITY.json",proof)
     print(json.dumps({k:v for k,v in proof.items() if k!="dependencies"},indent=2))
+
+
+def native_original(args):
+    configure()
+    root=ROOT/args.name
+    root.mkdir(exist_ok=False)
+    packet=root/"original-packets"
+    tool=Path(__file__).with_name("mapperf_native_remote.py")
+    with owner.segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+        with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
+            with (root/"prepare.log").open("x") as out:
+                subprocess.run([str(Path.home()/"work/claudehints/scripts/run-heavy"),
+                    "--mem","16G","--jobs","1","--",sys.executable,str(tool),
+                    "prepare-original","--root",str(packet),
+                    "--feature-root",str(ROOT/"native-feature-source"),
+                    "--original-root","/mnt/v/output/zensim/e34-prep-2026-10-15/part6",
+                    "--pins-root",str(ROOT/"original-pins")],stdout=out,stderr=subprocess.STDOUT,check=True)
+    digest=hashlib.sha256(args.binary.read_bytes()).hexdigest()
+    subprocess.run([sys.executable,str(tool),"run-original","--root",str(packet),
+        "--binary",str(args.binary),"--binary-sha256",digest],check=True)
 
 def profile_report(args):
     import re
@@ -363,10 +383,11 @@ def profile_report(args):
     print(json.dumps({k:v["families"] for k,v in profiles.items()},indent=2))
 
 p=argparse.ArgumentParser()
-p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify"])
+p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original"])
 p.add_argument("--binary",type=Path,required=True)
 p.add_argument("--name",required=True)
 p.add_argument("--source",type=Path)
 p.add_argument("--before",type=Path)
+p.add_argument("--audit-after",type=Path,default=ROOT/"audits-after"/"AUDITS.json")
 args=p.parse_args()
 globals()[args.mode](args)
