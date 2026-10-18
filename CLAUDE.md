@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-18 — Scalar target CI fixture dependency, fixed.** The integrity fixtures import Pillow; their new CI step initially omitted it and failed with five import errors. The step now installs the existing prerequisite in an explicit isolated environment. The exact17tests pass in a fresh environment; no assertion or numerical threshold changed.
+
 * **2026-10-18 — G-TARGET AVIF backend selector.** The adapter passed `svt-rs`; frozen native driver925d832b accepts `svt` or `zenav1-svt`, defaulting other values to Zenravif. Earlier AVIF rows are excluded diagnostics; preserve them and rerun both SVT panels with the accepted selector. JPEG/WebP data remain valid; numerical bars, models and q grid are unchanged.
 
 * **2026-10-18 — reachable-target report referenced an undefined target-only flag. FIXED.** The existing complete-matrix regression exposed a `NameError` in report metadata before any summary could be written. Pass the optional reporting flag explicitly; retain every numeric gate and negative-control assertion.

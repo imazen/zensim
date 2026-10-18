@@ -2456,3 +2456,8 @@ gtarget-peer-tests:
 
 gtarget-controller-tests config:
     cargo test --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --test controller
+
+gtarget-peer-tests-isolated venv:
+    python3 -m venv {{quote(venv)}}
+    {{quote(venv + "/bin/python")}} -m pip install --quiet 'pillow>=10'
+    TMPDIR="$HOME/tmp" {{quote(venv + "/bin/python")}} -B -m unittest scripts.tests.test_shipgates_peer_target scripts.tests.test_reachable_target_analysis scripts.tests.test_shipgates_mirror_verify

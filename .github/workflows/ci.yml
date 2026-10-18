@@ -45,6 +45,9 @@ jobs:
         run: |
           mkdir -p "$HOME/tmp"
           export TMPDIR="$HOME/tmp"
+          python3 -m venv "$HOME/tmp/target-integrity-venv"
+          source "$HOME/tmp/target-integrity-venv/bin/activate"
+          python3 -m pip install --quiet "pillow>=10"
           python3 -B -m unittest scripts.tests.test_shipgates_peer_target scripts.tests.test_reachable_target_analysis scripts.tests.test_shipgates_mirror_verify
       - name: Synthetic palette pool and pair admission
         run: |
