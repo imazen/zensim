@@ -202,7 +202,10 @@ fn worker(arm: &str) {
     let bits = score.to_bits();
     // RSS-only runs record the pool size too for by_v2fy, whose walk has
     // already built the global pool; other arms keep the untouched pool.
-    let actual_threads = if std::env::var_os("ZEN_S2_RSS_ONLY").is_none() || arm == "by_v2fy" {
+    let actual_threads = if std::env::var_os("ZEN_S2_RSS_ONLY").is_none()
+        || arm == "by_v2fy"
+        || std::env::var_os("ZEN_S2_VERIFY_THREADS").is_some()
+    {
         let actual = rayon::current_num_threads();
         assert_eq!(
             actual,
@@ -343,6 +346,10 @@ pub(super) fn run() {
         ("e34_candidate_map", "e34_candidate_map", "5"),
         #[cfg(feature = "costcmp")]
         ("e34_candidate_map_before", "e34_candidate_map_before", "5"),
+        #[cfg(feature = "costcmp")]
+        ("e34_candidate_map_bin8", "e34_candidate_map_bin8", "5"),
+        #[cfg(feature = "costcmp")]
+        ("e34_candidate_map_bin16", "e34_candidate_map_bin16", "5"),
         #[cfg(feature = "costcmp")]
         ("e34_candidate_baseline", "e34_candidate_baseline", "5"),
         #[cfg(feature = "costcmp")]

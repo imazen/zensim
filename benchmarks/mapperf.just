@@ -130,3 +130,25 @@ mapperf-archive-complete root destination:
     rsync -r --links --checksum --no-owner --no-group --no-perms --no-times --bwlimit=60M --stats r7900x:/home/lilith/tmp/mapperf-20261017/preserved-cargo/ {{quote(root)}}/preserved-remote-cargo/
     python3 -c 'import hashlib,json; from pathlib import Path; r=Path("{{root}}")/"preserved-remote-cargo"; rows=json.loads((r/"MANIFEST.json").read_text())["files"]; assert rows; assert all(hashlib.file_digest((r/Path(row["preserved"]).name).open("rb"), "sha256").hexdigest()==row["sha256"] for row in rows); print("Remote preserved references verified:", len(rows))'
     just mapperf-archive {{quote(root)}} {{quote(destination)}}
+
+# PERF2 extends the existing production timing and parity owners.
+perf2 mode binary name:
+    python3 scripts/rev4_featpot/perf2.py {{quote(mode)}} --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf2-runtime-build:
+    CARGO_PROFILE_RELEASE_DEBUG=1 just mapperf-runtime-build
+
+perf2-native-build:
+    RUSTFLAGS='--cfg steerfix_instrument' cargo test --locked -p zensim --lib --features custom-profiles --no-run --message-format=json-render-diagnostics
+
+perf2-profile-build:
+    CARGO_PROFILE_RELEASE_DEBUG=1 just mapperf-stage-runtime-build
+
+mapperf-native-hydrate root destination features:
+    python3 scripts/rev4_featpot/mapperf_native_remote.py hydrate-features --root {{quote(root)}} --remote-root {{quote(destination)}} --feature-root {{quote(features)}}
+
+mapperf-original-prepare root vfs original pins:
+    python3 scripts/rev4_featpot/mapperf_native_remote.py prepare-original --root {{quote(root)}} --feature-root {{quote(vfs)}} --original-root {{quote(original)}} --pins-root {{quote(pins)}}
+
+mapperf-original-run root binary sha:
+    python3 scripts/rev4_featpot/mapperf_native_remote.py run-original --root {{quote(root)}} --binary {{quote(binary)}} --binary-sha256 {{quote(sha)}}

@@ -8,9 +8,11 @@ use serde_json::json;
 use std::time::Instant;
 
 pub(super) fn start() -> Option<Instant> {
+    profile_begin();
     std::env::var_os("MAPPERF_STAGE_TIMING").map(|_| Instant::now())
 }
 pub(super) fn stage(t: &mut Option<Instant>, name: &str) {
+    profile_stage(name);
     if let Some(previous) = t.as_mut() {
         eprintln!("MAPPERF_STAGE {} {}", name, previous.elapsed().as_nanos());
         *previous = Instant::now();
@@ -20,6 +22,91 @@ pub(super) fn stage(t: &mut Option<Instant>, name: &str) {
 pub(super) fn total(t: Option<Instant>, name: &str) {
     if let Some(t) = t {
         eprintln!("MAPPERF_RUNTIME_TOTAL {} {}", name, t.elapsed().as_nanos());
+    }
+}
+
+// perf's acknowledged FIFO control isolates existing production regions.
+// This diagnostic is absent from ordinary builds and uses no elapsed-time probes.
+struct ProfileControl {
+    phase: String,
+    control: std::fs::File,
+    ack: std::io::BufReader<std::fs::File>,
+    calls: usize,
+    enabled: bool,
+}
+
+impl ProfileControl {
+    fn command(&mut self, enabled: bool) {
+        use std::io::{BufRead, Write};
+        if self.enabled == enabled {
+            return;
+        }
+        writeln!(
+            self.control,
+            "{}",
+            if enabled { "enable" } else { "disable" }
+        )
+        .unwrap();
+        self.control.flush().unwrap();
+        let mut ack = Vec::new();
+        assert_ne!(
+            self.ack.read_until(0, &mut ack).unwrap(),
+            0,
+            "perf control closed"
+        );
+        assert_eq!(ack, b"ack\n\0", "perf command not acknowledged");
+        self.enabled = enabled;
+    }
+}
+
+fn profile_control() -> Option<&'static std::sync::Mutex<ProfileControl>> {
+    static CONTROL: std::sync::OnceLock<Option<std::sync::Mutex<ProfileControl>>> =
+        std::sync::OnceLock::new();
+    CONTROL
+        .get_or_init(|| {
+            let phase = std::env::var("PERF2_PROFILE_PHASE").ok()?;
+            assert!(matches!(
+                phase.as_str(),
+                "scalar_extract" | "extract" | "density"
+            ));
+            let control = std::fs::OpenOptions::new()
+                .write(true)
+                .open(std::env::var_os("PERF2_PROFILE_CONTROL").expect("perf control FIFO"))
+                .unwrap();
+            let ack = std::io::BufReader::new(
+                std::fs::File::open(
+                    std::env::var_os("PERF2_PROFILE_ACK").expect("perf acknowledgement FIFO"),
+                )
+                .unwrap(),
+            );
+            Some(std::sync::Mutex::new(ProfileControl {
+                phase,
+                control,
+                ack,
+                calls: 0,
+                enabled: false,
+            }))
+        })
+        .as_ref()
+}
+
+fn profile_begin() {
+    if let Some(control) = profile_control() {
+        let mut control = control.lock().unwrap();
+        control.calls += 1;
+        let enable = control.calls > 3 && control.phase != "density";
+        control.command(enable);
+    }
+}
+
+fn profile_stage(name: &str) {
+    if let Some(control) = profile_control() {
+        let mut control = control.lock().unwrap();
+        if control.phase == name {
+            control.command(false);
+        } else if control.phase == "density" && name == "gradient" && control.calls > 3 {
+            control.command(true);
+        }
     }
 }
 

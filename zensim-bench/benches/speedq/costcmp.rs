@@ -104,7 +104,9 @@ pub(super) fn action(
         | "e34_candidate_map_audit"
         | "e34_candidate_map_before"
         | "e34_candidate_baseline"
-        | "e34_candidate_map_retained" => {
+        | "e34_candidate_map_retained"
+        | "e34_candidate_map_bin8"
+        | "e34_candidate_map_bin16" => {
             // E34's registered widths are explicit caller bindings. Keep the E33
             // H128 admission below unchanged; all E34 measurements use these
             // same serving surfaces and SPEEDQ's existing paired-round owner.
@@ -131,15 +133,23 @@ pub(super) fn action(
             let scorer: &'static mut zensim::BakeScorer<'static> = Box::leak(Box::new(
                 zensim::BakeScorer::new(model).unwrap().with_parallel(true),
             ));
+            let bin = match arm {
+                "e34_candidate_map_bin8" => 8,
+                "e34_candidate_map_bin16" => 16,
+                "e34_candidate_map_audit" => std::env::var("ZEN_S2_MAP_BIN")
+                    .map(|s| s.parse::<usize>().expect("explicit map bin"))
+                    .unwrap_or(1),
+                _ => 1,
+            };
             let mut info = json!({"source_sha256":expected,"revision":"5","hidden":hidden,
-                "n_inputs":model.n_inputs(),"source_bytes":bytes.len(),"map_bin":1,
+                "n_inputs":model.n_inputs(),"source_bytes":bytes.len(),"map_bin":bin,
                 "surface":arm});
             let source: &'static RgbSlice<'static> = Box::leak(Box::new(RgbSlice::new(src, w, h)));
             let action: Action = match arm {
                 "e34_candidate_map_audit" => {
                     // Untimed cross-build audit of every density/feature/gradient
                     // bit and rectangle queries, including finite neighbour replay.
-                    let mut session = scorer.prepare_steering(source, 1).unwrap();
+                    let mut session = scorer.prepare_steering(source, bin).unwrap();
                     let result = session.compute(&RgbSlice::new(dst, w, h), None).unwrap();
                     let mut bytes = Vec::new();
                     for value in result.attribution().density() {
@@ -192,6 +202,42 @@ pub(super) fn action(
                         bytes.extend_from_slice(&v.to_bits().to_le_bytes());
                     }
                     info["refinement_sha256"] = json!(super::digest(&bytes));
+                    if bin != 1 {
+                        let mut exact_scorer = zensim::BakeScorer::new(model).unwrap();
+                        let mut exact_session = exact_scorer.prepare_steering(source, 1).unwrap();
+                        let exact = exact_session
+                            .compute(&RgbSlice::new(dst, w, h), None)
+                            .unwrap();
+                        assert_eq!(
+                            exact.result().score().to_bits(),
+                            result.result().score().to_bits()
+                        );
+                        let mut query_max = 0.0_f64;
+                        let mut query_sum = 0.0_f64;
+                        let mut queries = 0usize;
+                        let mut refine_max = 0.0_f64;
+                        for y in (3..h).step_by(17) {
+                            for x in (3..w).step_by(17) {
+                                let x1 = (x + 13).min(w);
+                                let y1 = (y + 19).min(h);
+                                let delta = (result.attribution().query_rect(x, y, x1, y1)
+                                    - exact.attribution().query_rect(x, y, x1, y1))
+                                .abs();
+                                query_max = query_max.max(delta);
+                                query_sum += delta;
+                                queries += 1;
+                                refine_max = refine_max.max(
+                                    (result.refinement_gain(x, y, x1, y1)
+                                        - exact.refinement_gain(x, y, x1, y1))
+                                    .abs(),
+                                );
+                            }
+                        }
+                        info["bin_movement"] = json!({"score_bits_equal":true,
+                            "unaligned_rectangles":queries,"query_max_abs":query_max,
+                            "query_mean_abs":query_sum/queries as f64,
+                            "refinement_max_abs":refine_max});
+                    }
                     let score = result.result().score();
                     Box::new(move || score)
                 }
@@ -200,7 +246,7 @@ pub(super) fn action(
                     0.0
                 }),
                 "e34_candidate_map" => {
-                    let mut session = scorer.prepare_steering(source, 1).unwrap();
+                    let mut session = scorer.prepare_steering(source, bin).unwrap();
                     Box::new(move || {
                         session
                             .compute(&RgbSlice::new(dst, w, h), None)
@@ -209,8 +255,11 @@ pub(super) fn action(
                             .score()
                     })
                 }
-                "e34_candidate_map_retained" | "e34_candidate_map_before" => {
-                    let mut session = scorer.prepare_steering(source, 1).unwrap();
+                "e34_candidate_map_retained"
+                | "e34_candidate_map_before"
+                | "e34_candidate_map_bin8"
+                | "e34_candidate_map_bin16" => {
+                    let mut session = scorer.prepare_steering(source, bin).unwrap();
                     Box::new(move || {
                         let result = session.compute(&RgbSlice::new(dst, w, h), None).unwrap();
                         let score = result.result().score();

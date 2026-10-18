@@ -278,12 +278,15 @@ impl Head {
 /// content family the attribution tests and `fold_pools_bench` also use, so
 /// this bench and that one feed their kernels the same pixels.
 fn test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+    let offset = std::env::var("ZEN_S2_PAIR_OFFSET")
+        .map(|s| s.parse::<usize>().expect("explicit pair offset"))
+        .unwrap_or(0);
     let mut src = Vec::with_capacity(w * h);
     let mut dst = Vec::with_capacity(w * h);
     for y in 0..h {
         for x in 0..w {
             let base = ((x * 255) / w) as u8;
-            let tex = (((x * 7 + y * 13) % 32) * 3) as u8;
+            let tex = (((x * 7 + y * 13 + offset) % 32) * 3) as u8;
             let edge = if (y / 16) % 2 == 0 { 40 } else { 0 };
             let px = [
                 base.wrapping_add(tex),
