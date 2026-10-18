@@ -627,7 +627,23 @@ def severe_quant(args):
         summary[model]=dict(overall=rate(group),levels={level["id"]:rate([r for r in group if r["level"]==level]) for level in manifest["levels"]},
                             kinds={k:rate([r for r in group if r["level"]["kind"]==k]) for k in ("dc-only","coarse-ac")},
                             failures=[r for r in group if not r["below_q20"]])
+    assert len(rows)==96
     write(root/"SUMMARY.json",dict(rows=rows,summary=summary,inputs_sha256=sha(root/"INPUTS.json"),binary_sha256=encoded["binary_sha256"],full_encodes=48,detector_attached=False))
+    import csv
+    with (root/"ROWS.tsv").open("x") as stream:
+        writer=csv.writer(stream,delimiter="\t")
+        writer.writerow(["model","origin","content_class","kind","dc_quant","ac_quant","base_score","q20_base_score","strict_below_q20","nonzero_ac","encoded_sha256","map_sha256"])
+        for row in rows:
+            writer.writerow([row["model"],row["origin"],row["content_class"],row["level"]["kind"],row["level"]["dc"],row["level"]["ac"],row["base_score"],row["q20_base_score"],row["below_q20"],row["nonzero_ac"],row["encoded_sha256"],row["map_sha256"]])
+    lines=["# Registered severe-quantization probe", "", "Eight original validation sources; six levels frozen before scoring. Exact literal DQTs and zero AC for DC-only, with native/independent preservation checks. Detector absent; strict source-matched q20 comparison. No severity or model tuning.", "", "|Kind|DC quant|AC quant|C below q20|W-C below q20|", "|---|---:|---:|---:|---:|"]
+    for level in manifest["levels"]:
+        counts=[summary[m]["levels"][level["id"]] for m in ("diff-frag-820","w-c")]
+        lines.append(f"|{level['kind']}|{level['dc']}|{level['ac']}|{counts[0]['count']}/{counts[0]['n']}|{counts[1]['count']}/{counts[1]['n']}|")
+    for model,value in summary.items():
+        overall=value["overall"]
+        lines.append(f"\n{model}: {overall['count']}/{overall['n']} ({100*overall['rate']:.6f}%), >=99%: **{overall['verdict']}**.")
+    lines += ["", "Every source/model/level and actual score/anchor/pixel/bitstream/map identity is retained in ROWS.tsv and SUMMARY.json. Source INPUTS.json and preregistration bind the exact scope. This is development verification on eight already exposed families, not untouched broad product qualification."]
+    (root/"REPORT.md").write_text("\n".join(lines)+"\n")
     print(json.dumps(summary,indent=2),flush=True)
 
 if __name__=="__main__":
