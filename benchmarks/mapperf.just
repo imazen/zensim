@@ -211,3 +211,8 @@ perf3-quality:
     just mapperf-runtime-clippy
     just lint-scripts
     cargo fmt -p zensim -p zensim-validate --check
+
+perf3-frozen-gates binary:
+    just mapperf-frozen-bin-check {{quote(binary)}}
+    just mapperf-frozen-map-check {{quote(binary)}}
+    just mapperf-subset-oracle {{quote(binary)}} "$HOME/tmp/mapperf-20261017"

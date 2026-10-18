@@ -4609,7 +4609,12 @@ fn rev5_job_bytes(max_n: usize) -> Option<usize> {
         + size_of::<(crate::featcanon::SumVar, crate::featcanon::SumVar)>()
         + size_of::<CsfwAccum>()
         + size_of::<Rev4CellAccum>();
-    let fixed = size_of::<Rev5StripJob>() + crate::NUM_SCALES * cell + size_of::<FoldPoolScratch>();
+    let fixed = size_of::<Rev5StripJob>()
+        + crate::NUM_SCALES * cell
+        + size_of::<FoldPoolScratch>()
+        + crate::NUM_SCALES * size_of::<Vec<(DenseAccum, GradientAccum)>>()
+        + 3 * size_of::<(DenseAccum, GradientAccum)>()
+        + size_of::<Option<RetainedRows<'static>>>();
     max_n
         .checked_mul(11)?
         .checked_mul(size_of::<f32>())?
@@ -4668,6 +4673,7 @@ impl Rev5StripJob {
         producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
         info: crate::feature_v2_stream::StripInfo,
         ch: usize,
+        borrow_source: bool,
     ) {
         use crate::feature_v2_stream::Side;
         self.info = info;
@@ -4685,6 +4691,9 @@ impl Rev5StripJob {
             (Side::Source, &mut self.scratch.src_wide),
             (Side::Distorted, &mut self.scratch.dst_wide),
         ] {
+            if side == Side::Source && borrow_source {
+                continue;
+            }
             if let Some(window) = producer.wide_window(side, ch, &info) {
                 out[..n].copy_from_slice(window);
             } else {
@@ -4718,10 +4727,25 @@ fn rev5_job_scratch(n: usize) -> ScratchV2Strip {
 }
 
 #[cfg(feature = "threads")]
+fn rev5_cached_window<'a>(
+    reference: Option<&'a [crate::streaming::XybPyramidLevel]>,
+    info: &crate::feature_v2_stream::StripInfo,
+    ch: usize,
+) -> Option<&'a [f32]> {
+    if !info.interior() {
+        return None;
+    }
+    let (planes, width, height) = &reference?[info.scale];
+    debug_assert_eq!((*width, *height), (info.plane_w, info.plane_h));
+    Some(&planes[ch][(info.y0 - HALO_P) * width..(info.y0 + info.strip_h + HALO_P) * width])
+}
+
+#[cfg(feature = "threads")]
 fn rev5_job_blur(
     info: &crate::feature_v2_stream::StripInfo,
     scratch: &mut ScratchV2Strip,
     revision: FormulaRevision,
+    source: Option<&[f32]>,
 ) {
     let n = info.plane_w * info.wide_h();
     let ScratchV2Strip {
@@ -4738,9 +4762,10 @@ fn rev5_job_blur(
         activity,
         ..
     } = scratch;
+    let src = source.unwrap_or(&src_wide[..n]);
     let start = crate::fold_timing::start();
     fused_blur_h_ssim_banded(
-        &src_wide[..n],
+        src,
         &dst_wide[..n],
         &mut mu1_h[..n],
         &mut mu2_h[..n],
@@ -4767,7 +4792,7 @@ fn rev5_job_blur(
             BLUR_RADIUS,
         );
     }
-    crate::simd_ops::abs_diff_into(&src_wide[..n], &mu1[..n], &mut mu1_h[..n]);
+    crate::simd_ops::abs_diff_into(src, &mu1[..n], &mut mu1_h[..n]);
     crate::blur::box_blur_1pass_into(
         &mu1_h[..n],
         &mut activity[..n],
@@ -4788,10 +4813,14 @@ fn rev5_run_jobs(
     toggles: V2NewFeatureToggles,
     fold_v1: bool,
     totals: &mut [StreamChannelAccums; 3],
+    retention: Option<&mut FoldRetention>,
+    reference: Option<&[crate::streaming::XybPyramidLevel]>,
 ) {
     use rayon::prelude::*;
     let wall = crate::fold_timing::start();
-    jobs.par_iter_mut().for_each(|job| {
+    let retain = retention.is_some();
+    let outputs = retention.map(|r| r.job_sinks(jobs));
+    let execute = |job: &mut Rev5StripJob, mut output: Option<RetainedRows<'_>>| {
         let busy = crate::fold_timing::start();
         let info = &job.info;
         let scale = info.scale;
@@ -4806,11 +4835,33 @@ fn rev5_run_jobs(
         };
         job.result.dense[scale] = DenseAccum::default();
         job.result.grad[scale] = GradientAccum::default();
-        rev5_job_blur(info, &mut job.scratch, compute.formula_revision);
+        if retain && (1..=3).contains(&scale) {
+            let strips = job
+                .result
+                .retained_strips
+                .get_or_insert_with(|| (0..crate::NUM_SCALES).map(|_| Vec::new()).collect());
+            strips[scale].clear();
+            if strips[scale].capacity() == 0 {
+                strips[scale].reserve_exact(1);
+            }
+        } else if !retain {
+            job.result.retained_strips = None;
+        }
+        let cached_source = rev5_cached_window(reference, info, job.ch);
+        rev5_job_blur(
+            info,
+            &mut job.scratch,
+            compute.formula_revision,
+            cached_source,
+        );
         let n = info.plane_w * info.wide_h();
+        let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
+        if let Some(output) = &mut output {
+            output.copy(info, &job.scratch, src, &job.scratch.dst_wide[..n], false);
+        }
         stream_phase_b(
             &job.scratch,
-            &job.scratch.src_wide[..n],
+            src,
             &job.scratch.dst_wide[..n],
             info,
             toggles,
@@ -4828,7 +4879,7 @@ fn rev5_run_jobs(
             &mut job.result,
         );
         if fold_v1 {
-            let raw = [&job.scratch.src_wide[..n], &job.scratch.dst_wide[..n]];
+            let raw = [src, &job.scratch.dst_wide[..n]];
             let vertical = FoldHSource::Vertical([
                 &job.scratch.mu1[..n],
                 &job.scratch.mu2[..n],
@@ -4854,7 +4905,14 @@ fn rev5_run_jobs(
             }
         }
         crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
-    });
+    };
+    if let Some(outputs) = outputs {
+        jobs.par_iter_mut()
+            .zip(outputs.into_par_iter())
+            .for_each(|(job, output)| execute(job, output));
+    } else {
+        jobs.par_iter_mut().for_each(|job| execute(job, None));
+    }
     crate::fold_timing::stop(wall, crate::fold_timing::Phase::BWall, 0);
     // Every cell's kernel partial is merged once, in the producer's order.
     // Do not replace this loop with a parallel/tree reduction.
@@ -4865,8 +4923,13 @@ fn rev5_run_jobs(
         let total = &mut totals[job.ch];
         total.dense[scale].accumulate(&job.result.dense[scale]);
         total.grad[scale].accumulate(&job.result.grad[scale]);
+        if let Some(target) = &mut total.retained_strips
+            && let Some(strips) = &job.result.retained_strips
+        {
+            target[scale].extend_from_slice(&strips[scale]);
+        }
         let n = info.plane_w * info.wide_h();
-        let src = &job.scratch.src_wide[..n];
+        let src = rev5_cached_window(reference, info, job.ch).unwrap_or(&job.scratch.src_wide[..n]);
         let dst = &job.scratch.dst_wide[..n];
         if fold_v1 {
             // Preserve each canonical 32-row band addition, never merge a
@@ -5194,6 +5257,9 @@ impl FoldRetention {
         }
     }
 }
+
+#[cfg(feature = "threads")]
+include!("feature_v2_retained_rows.rs");
 
 // Retain the basic direct-error plane with the same fused expression as its
 // fold owner. Setup and correctly rounded scalar tails remain outside SIMD.
@@ -7669,10 +7735,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // they were computed inside the loop purely because that is where they are
     // read — and the loop now reads these, so there is one definition of each.
     #[cfg(feature = "threads")]
-    let fuse_channels = parallel && !append_on && retention.is_none();
+    let fuse_channels = parallel && !append_on;
     #[cfg(not(feature = "threads"))]
     let fuse_channels = false;
-    let self_blur = fuse_channels && compute.self_blur_eligible();
+    let self_blur = fuse_channels && retention.is_none() && compute.self_blur_eligible();
     // Phase A is skipped WHOLE under self-blur bands, so its four fused-H
     // outputs are never written — `plane_needs` is where that is decided.
     // Bounded strip queue: independent v2 cells retain their original 128-row
@@ -7685,7 +7751,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     #[cfg(feature = "threads")]
     let batch_limit = if parallel
         && compute.formula_revision >= FormulaRevision::Rev5
-        && retention.is_none()
         && compute.v2_blocks
         && !layout_append
         && rayon::current_num_threads() >= 8
@@ -7864,6 +7929,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     toggles,
                     fold_v1,
                     &mut accums,
+                    retention.as_deref_mut(),
+                    ref_planes.filter(|_| compute.sampling.is_none()),
                 );
                 queued = 0;
             }
@@ -7876,7 +7943,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         rev5_jobs.push(Rev5StripJob::new(info, ch));
                     }
                     let job = &mut rev5_jobs[queued];
-                    job.gather(&producer, info, ch);
+                    job.gather(
+                        &producer,
+                        info,
+                        ch,
+                        compute.sampling.is_none()
+                            && rev5_cached_window(ref_planes, &info, ch).is_some(),
+                    );
                     queued += 1;
                     if queued == batch_limit {
                         rev5_run_jobs(
@@ -7885,6 +7958,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                             toggles,
                             fold_v1,
                             &mut accums,
+                            retention.as_deref_mut(),
+                            ref_planes.filter(|_| compute.sampling.is_none()),
                         );
                         queued = 0;
                     }
@@ -7998,11 +8073,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // * `!append_on` => `cross` is `None` on every channel and `refy` is
         //   empty, so Y needs nothing from X/B — the ONLY cross-channel edge
         //   in the walk.
-        // * `retention.is_none()` => nothing runs between the phases (the
-        //   retention hook is a `&mut` shared across channels and must stay
-        //   in the split arm).
-        // A `v1_only` SCORING request satisfies both by construction; the
-        // 944-full product extraction satisfies neither and keeps the split.
+        // * Retention destinations are disjoint channel/row views, so each
+        //   worker copies its own outputs before phase B.
         //
         // Byte-neutral by construction: identical kernels on identical inputs
         // into per-channel accumulators that are already disjoint. Only which
@@ -8032,7 +8104,82 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // `fuse_channels` conjunct stays because it is a runtime parallelism
         // fact the compute set does not model.
         #[cfg(feature = "threads")]
-        let self_blur = fuse_channels && local.self_blur_eligible();
+        let self_blur = fuse_channels && retention.is_none() && local.self_blur_eligible();
+        #[cfg(feature = "threads")]
+        if fuse_channels && retention.is_some() {
+            use rayon::prelude::*;
+            let __t_f = crate::fold_timing::start();
+            let outputs: [Option<RetainedRows<'_>>; 3] = if let Some(ret) = retention.as_deref_mut()
+            {
+                let sinks = ret.row_sinks().nth(scale).unwrap();
+                let mut sinks = sinks.into_iter().enumerate();
+                core::array::from_fn(|_| {
+                    let (ch, mut sink) = sinks.next().unwrap();
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        return None;
+                    }
+                    sink.take_prefix(info.y0 * info.plane_w);
+                    Some(sink.take_prefix(info.strip_h * info.plane_w))
+                })
+            } else {
+                core::array::from_fn(|_| None)
+            };
+            scratch_strips
+                .par_iter_mut()
+                .zip(accums.par_iter_mut())
+                .zip(outputs.into_par_iter())
+                .enumerate()
+                .for_each(|(ch, ((scr, acc), mut output))| {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
+                        return;
+                    }
+                    let __t = crate::fold_timing::start();
+                    if self_blur {
+                        // Phase A is skipped whole; only the wide-window
+                        // gather it also performs is still needed.
+                        stream_gather_windows(&producer, &info, ch, scr);
+                    } else {
+                        stream_phase_a(
+                            &producer,
+                            &info,
+                            ch,
+                            false,
+                            false,
+                            v2_blocks,
+                            true,
+                            scr,
+                            compute.formula_revision,
+                        );
+                    }
+                    let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
+                    if let Some(output) = &mut output {
+                        output.copy(&info, scr, src_win, dst_win, false);
+                    }
+                    stream_phase_b(
+                        scr,
+                        src_win,
+                        dst_win,
+                        &info,
+                        toggles,
+                        fold_v1,
+                        v2_blocks,
+                        band_parallel,
+                        self_blur,
+                        false,
+                        &[][..],
+                        None,
+                        append2,
+                        csfw,
+                        local.free_work(ch, scale),
+                        local.rev4_work(scale, ch, bleed_mask, chroma_strip),
+                        acc,
+                    );
+                    crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
+                });
+            crate::fold_timing::stop(__t_f, crate::fold_timing::Phase::BWall, scale);
+            continue;
+        }
+
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
@@ -8310,6 +8457,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             toggles,
             fold_v1,
             &mut accums,
+            retention.as_deref_mut(),
+            ref_planes.filter(|_| compute.sampling.is_none()),
         );
     }
 

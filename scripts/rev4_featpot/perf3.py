@@ -106,8 +106,69 @@ def small_profile():
                 binary_sha256=hashlib.file_digest(a.binary.open("rb"),"sha256").hexdigest(),
                 scope="whole warmed score worker; includes setup, no isolated-phase claim"),indent=2)+"\n")
 
+def export_summary():
+    """Export owner percentiles and paired inference without refitting."""
+    import csv
+    import hashlib
+    import io
+    import json
+    p = argparse.ArgumentParser()
+    p.add_argument("mode")
+    p.add_argument("--binary", type=Path, required=True)
+    p.add_argument("--name", required=True)
+    p.add_argument("--before", type=Path, default=perf2.ROOT / "before-v2")
+    a = p.parse_args()
+    dest = perf2.ROOT / a.name
+    rows = json.loads((dest / "SUMMARY.json").read_text())
+    proof = json.loads((perf2.ROOT / (a.name + "-verify") / "RUNTIME_PARITY.json").read_text())
+    digest = hashlib.sha256(a.binary.read_bytes()).hexdigest()
+    assert proof["status"] == "PASS" and proof["cases"] == 54
+    assert proof["after_binary_sha256"] == digest
+    assert hashlib.sha256(a.before.read_bytes()).hexdigest() == proof["before_binary_sha256"]
+    output = []
+    for side in [256, 1024, 2048]:
+        for threads in [1, 8, 16]:
+            cell = dest / f"v4x-t{threads}-{side}x{side}"
+            selected = {r["arm"]:r for r in rows if r["size"] == f"{side}x{side}" and r["threads"] == threads}
+            score = json.loads((cell / "paired_analysis.json").read_text())["comparisons"]["e34_candidate"]
+            maps = json.loads((cell / "map_paired_analysis.json").read_text())[0]
+            for action, before, after, inference in [
+                ("score", "e34_control", "e34_candidate", score),
+                ("map", "e34_candidate_map_before", "e34_candidate_map_retained", maps),
+            ]:
+                old, new = selected[before], selected[after]
+                output.append(dict(action=action, side=side, threads=threads,
+                    before_p50_ms=old["p50_ms"], before_p95_ms=old["p95_ms"],
+                    after_p50_ms=new["p50_ms"], after_p95_ms=new["p95_ms"],
+                    before_efficiency=old["efficiency"], after_efficiency=new["efficiency"],
+                    rounds_considered=new["rounds"], rounds_excluded=new["excluded"],
+                    paired_mean_change_percent=inference["pct_change"],
+                    significant=inference["significant"],
+                    inference_samples=inference["baseline"]["n"],
+                    ci_lower_ns=inference["ci_lower"], ci_upper_ns=inference["ci_upper"]))
+    artifact = json.loads(a.binary.with_name(a.binary.name+".artifact.json").read_text())
+    log = Path(artifact["build_log"])
+    source = json.loads(log.with_name(log.name.removesuffix("-build.log")+"-SOURCE.json").read_text())
+    buffer = io.StringIO()
+    buffer.write("# host=r7900x; model=diff-frag-820; formula=5; date=2026-10-18\n")
+    home_relative = lambda path: str(path).replace(str(Path.home()), "$HOME", 1)
+    buffer.write("# command=python3 scripts/rev4_featpot/perf3.py qualify --binary "+home_relative(a.binary)+" --before "+home_relative(a.before)+" --name "+a.name+"\n")
+    buffer.write("# rustc="+source["rustc"]+"; rustflags="+json.dumps(source["effective_rustflags"])+"; release_debug="+str(source["profile_release_debug"])+"\n")
+    buffer.write("# source_commit="+source["build_commit"]+"; before_sha256="+proof["before_binary_sha256"]+"; after_sha256="+digest+"\n")
+    buffer.write("# SPEEDQ first 32 clean rounds of <=64; paired inference uses the frozen analyzer outlier policy\n")
+    writer = csv.DictWriter(buffer, fieldnames=list(output[0]), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(output)
+    path = dest / "paired_summary.csv"
+    value = buffer.getvalue()
+    if path.exists():
+        assert path.read_text() == value, "refuse to replace changed measurements"
+    else:
+        path.write_text(value)
+    print(path)
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] in ("cached", "cached_audit", "small_compare", "small_profile"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("cached", "cached_audit", "small_compare", "small_profile", "export_summary"):
         globals()[sys.argv[1]]()
     else:
         perf2.main()

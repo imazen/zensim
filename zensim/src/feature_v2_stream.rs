@@ -531,10 +531,10 @@ fn convert_side_y_and_downscale_parallel(
     true
 }
 
-/// Ref-cached-feed twin of [`convert_side_scale0`]: copy the source side's
-/// scale-0 rows out of the caller's already-built XYB pyramid.
+/// Advance the source window over the caller's immutable cached XYB rows.
+/// The row accessor borrows that storage directly.
 #[cfg(feature = "threads")]
-fn copy_cached_scale0(
+fn advance_cached_scale0(
     rp: &[crate::streaming::XybPyramidLevel],
     planes: &mut [Vec<RollingPlane>; 3],
     hi0: usize,
@@ -544,8 +544,8 @@ fn copy_cached_scale0(
     let (cached, cw, _) = &rp[0];
     debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
     for (ch, plane) in planes.iter_mut().enumerate() {
-        let dst = plane[0].append_rows(n_new);
-        dst.copy_from_slice(&cached[ch][hi0 * width..(hi0 + n_new) * width]);
+        debug_assert!(cached[ch].len() >= (hi0 + n_new) * width);
+        plane[0].hi = hi0 + n_new;
     }
 }
 
@@ -890,9 +890,8 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 if let Some(rp) = ref_planes {
                     // Scale-zero chroma is unread. Feed the cached coarse planes
                     // directly rather than copying full-resolution X/B first.
-                    sp[1][0]
-                        .append_rows(n_new)
-                        .copy_from_slice(&rp[0].0[1][hi0 * width..(hi0 + n_new) * width]);
+                    debug_assert!(rp[0].0[1].len() >= (hi0 + n_new) * width);
+                    sp[1][0].hi = hi0 + n_new;
                     for ch in [0, 2] {
                         sp[ch][0].hi = hi0 + n_new;
                     }
@@ -936,7 +935,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 let (sp, dp) = (&mut h[0], &mut t[0]);
                 rayon::join(
                     || match ref_planes {
-                        Some(rp) => copy_cached_scale0(rp, sp, hi0, n_new, width),
+                        Some(rp) => advance_cached_scale0(rp, sp, hi0, n_new, width),
                         None => convert_side_scale0(
                             source,
                             sp,
@@ -963,7 +962,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             for si in (0..2).take(if sides_parallel { 0 } else { 2 }) {
                 let width = self.scales[0].plane_w;
                 // REF-CACHED FEED: the source side's scale-0 rows already exist
-                // in the caller's pyramid — copy them instead of decoding and
+                // in the caller's pyramid — borrow them instead of decoding and
                 // converting. Bytes are identical by construction (see the
                 // `ref_planes` field doc); the distorted side never takes this
                 // branch.
@@ -974,8 +973,8 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                     debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
                     let [c0, c1, c2] = &mut self.planes[0];
                     for (ch, plane) in [c0, c1, c2].into_iter().enumerate() {
-                        let dst = plane[0].append_rows(n_new);
-                        dst.copy_from_slice(&planes[ch][hi0 * width..(hi0 + n_new) * width]);
+                        debug_assert!(planes[ch].len() >= (hi0 + n_new) * width);
+                        plane[0].hi = hi0 + n_new;
                     }
                     continue;
                 }
@@ -1089,16 +1088,14 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 let n_out = target - child_hi;
                 // REF-CACHED FEED: the cache holds every level, built by
                 // the same `downscale_2x_into` this cascade runs, so the
-                // source side copies instead of downscaling.
+                // source side advances its borrowed view instead of downscaling.
                 if *si == 0
                     && let Some(rp) = ref_planes
                 {
                     let (cached, cw, _) = &rp[scale];
                     debug_assert_eq!(*cw, plane_w, "cached ref stride at scale {scale}");
-                    let dst = planes[scale].append_rows(n_out);
-                    dst.copy_from_slice(
-                        &cached[*ch][child_hi * plane_w..(child_hi + n_out) * plane_w],
-                    );
+                    debug_assert!(cached[*ch].len() >= (child_hi + n_out) * plane_w);
+                    planes[scale].hi = child_hi + n_out;
                     return;
                 }
                 // Split borrow: parent (read) vs child (write).
@@ -1214,6 +1211,14 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             };
             let p = &sampled[si][scale];
             return &p.0[ch][r0 * p.1..r1 * p.1];
+        }
+        if side == Side::Source
+            && let Some(cached) = self.ref_planes
+        {
+            let held = self.plane(side, ch, scale);
+            debug_assert!(held.lo <= r0 && r0 <= r1 && r1 <= held.hi);
+            let (planes, width, _) = &cached[scale];
+            return &planes[ch][r0 * width..r1 * width];
         }
         self.plane(side, ch, scale).rows(r0, r1)
     }

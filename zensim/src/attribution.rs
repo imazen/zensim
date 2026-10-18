@@ -276,8 +276,17 @@ impl AttributionResult {
     }
 
     fn from_f64_values(canvas: &[f64], width: usize, height: usize) -> Self {
+        Self::from_f64_values_parallel(canvas, width, height, false)
+    }
+
+    fn from_f64_values_parallel(
+        canvas: &[f64],
+        width: usize,
+        height: usize,
+        parallel: bool,
+    ) -> Self {
         debug_assert_eq!(canvas.len(), width * height);
-        let sat = build_sat(|i| canvas[i], width, height);
+        let sat = build_sat_values(canvas, width, height, parallel);
         let density = canvas.iter().map(|&v| v as f32).collect();
         Self {
             density,
@@ -331,16 +340,26 @@ impl AttributionResult {
     }
 
     fn from_bin_values(sums: &[f64], width: usize, height: usize, bin: usize) -> Self {
+        Self::from_bin_values_parallel(sums, width, height, bin, false)
+    }
+
+    fn from_bin_values_parallel(
+        sums: &[f64],
+        width: usize,
+        height: usize,
+        bin: usize,
+        parallel: bool,
+    ) -> Self {
         debug_assert!(bin > 0);
         if bin == 1 {
             // Every bin has one real pixel, including image boundaries.
             // Dividing by its area is exactly division by one.
-            return Self::from_f64_values(sums, width, height);
+            return Self::from_f64_values_parallel(sums, width, height, parallel);
         }
         let grid_w = width.div_ceil(bin);
         let grid_h = height.div_ceil(bin);
         debug_assert_eq!(sums.len(), grid_w * grid_h);
-        let sat = build_sat(|i| sums[i], grid_w, grid_h);
+        let sat = build_sat_values(sums, grid_w, grid_h, parallel);
         let density = sums
             .iter()
             .enumerate()
@@ -544,6 +563,47 @@ fn build_sat_into(get: impl Fn(usize) -> f64, width: usize, height: usize, sat: 
             *cell = run + prior;
         }
     }
+}
+
+// Row prefix sums are independent. The vertical pass keeps each cell's
+// original addition (row prefix + preceding row), with no tree reduction.
+fn build_sat_values(values: &[f64], width: usize, height: usize, parallel: bool) -> Vec<f64> {
+    #[cfg(feature = "threads")]
+    if parallel {
+        use rayon::prelude::*;
+        let threads = rayon::current_num_threads();
+        const ROWS: usize = 64;
+        if threads > 1 && height.div_ceil(ROWS) >= threads {
+            let stride = width + 1;
+            let mut sat = vec![0.0; stride * (height + 1)];
+            sat[stride..]
+                .par_chunks_mut(stride * ROWS)
+                .enumerate()
+                .for_each(|(band, rows)| {
+                    for (r, row) in rows.chunks_mut(stride).enumerate() {
+                        let input = &values[(band * ROWS + r) * width..][..width];
+                        let mut run = 0.0;
+                        for (cell, &v) in row[1..].iter_mut().zip(input) {
+                            run += v;
+                            *cell = run;
+                        }
+                    }
+                });
+            for y in 1..=height {
+                let (above, current) = sat.split_at_mut(y * stride);
+                for (cell, &prior) in current[1..stride]
+                    .iter_mut()
+                    .zip(&above[(y - 1) * stride + 1..])
+                {
+                    *cell += prior;
+                }
+            }
+            return sat;
+        }
+    }
+    #[cfg(not(feature = "threads"))]
+    let _ = parallel;
+    build_sat(|i| values[i], width, height)
 }
 
 /// Per-(scale, channel) combine coefficients — everything deferred until the
@@ -1026,8 +1086,13 @@ impl BinAccum {
         for lattice in &mut self.lattice {
             lattice.finalize();
         }
-        let mut result =
-            AttributionResult::from_bin_values(&self.bins, self.width, self.height, self.bin);
+        let mut result = AttributionResult::from_bin_values_parallel(
+            &self.bins,
+            self.width,
+            self.height,
+            self.bin,
+            self.parallel,
+        );
         result.lattice = self.lattice;
         *scratch = self.bins;
         result
