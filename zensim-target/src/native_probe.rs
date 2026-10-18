@@ -1,7 +1,6 @@
 //! Shared native-codec development experiment: train-only calibration, attained bounds and actual encode budgets.
-use crate::{
-    CodecKind, SeedCurve, TargetSpec, codec::CodecBackend, target_search_with_backend_and_bake,
-};
+use crate::native_dial::DialScorer;
+use crate::{CodecKind, SeedCurve, TargetSpec, codec::CodecBackend};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -13,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
-use zensim::{BakeScorer, RgbSlice};
+use zensim::RgbSlice;
 
 const ARMS: [&str; 3] = ["scalar", "neutral", "active"];
 const FIXED: [f32; 5] = [-10., 30., 70., 90., 99.];
@@ -129,7 +128,7 @@ fn pixels(source: &Source) -> Result<(Vec<u8>, u32, u32)> {
 }
 fn score(
     codec: CodecKind,
-    scorer: &mut BakeScorer<'_>,
+    scorer: &mut DialScorer<'_>,
     rgb: &[u8],
     decoded: &[u8],
     w: u32,
@@ -139,13 +138,11 @@ fn score(
         rgb.len() == decoded.len() && rgb.len() == w as usize * h as usize * 3,
         "decoded dimensions/format mismatch"
     );
-    let value = scorer
-        .compute(
-            &RgbSlice::new(rgb.as_chunks::<3>().0, w as usize, h as usize),
-            &RgbSlice::new(decoded.as_chunks::<3>().0, w as usize, h as usize),
-            Some(codec.extension()),
-        )?
-        .score() as f32;
+    let value = scorer.compute(
+        codec,
+        &RgbSlice::new(rgb.as_chunks::<3>().0, w as usize, h as usize),
+        &RgbSlice::new(decoded.as_chunks::<3>().0, w as usize, h as usize),
+    )?;
     ensure!(value.is_finite(), "nonfinite served score");
     Ok(value)
 }
@@ -229,7 +226,7 @@ fn ladder(
     arm: &str,
     bake: &Path,
     out: &Path,
-    scorer: &mut BakeScorer<'_>,
+    scorer: &mut DialScorer<'_>,
     sink: &mut fs::File,
 ) -> Result<Vec<Bound>> {
     let (rgb, w, h) = pixels(source)?;
@@ -291,6 +288,18 @@ pub(crate) fn fit_arms(
     out: &Path,
     arms: &[&str],
 ) -> Result<()> {
+    fit_arms_scored(codec, root, bake, out, arms, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fit_arms_scored(
+    codec: &impl NativeProbeCodec,
+    root: &Path,
+    bake: &Path,
+    out: &Path,
+    arms: &[&str],
+    peer: Option<&Path>,
+) -> Result<()> {
     ensure!(
         arms == ARMS || arms == ["scalar"],
         "unsupported probe scope"
@@ -298,9 +307,22 @@ pub(crate) fn fit_arms(
     validate_configuration(codec)?;
     let training = source_set(&root.join("train_source_manifest.json"), "train")?;
     let bytes = fs::read(bake)?;
+    if let Some(path) = peer {
+        let spec: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+        ensure!(
+            spec["reference_model_sha256"] == sha(&bytes),
+            "peer model binding"
+        );
+        ensure!(
+            codec
+                .configuration()
+                .contains(&format!("peer-spec-sha256={}", sha(&fs::read(path)?))),
+            "peer configuration binding"
+        );
+    }
     let model = zenpredict::Model::from_bytes(&bytes)?;
     fresh(out)?;
-    let mut scorer = BakeScorer::new(&model)?;
+    let mut scorer = DialScorer::new(&model, peer, &out.join("dial-scores"))?;
     let mut sink = fs::File::create(out.join("bounds.jsonl"))?;
     let mut curves = BTreeMap::new();
     for &arm in arms {
@@ -361,6 +383,19 @@ pub(crate) fn evaluate_arms(
     out: &Path,
     arms: &[&str],
 ) -> Result<()> {
+    evaluate_arms_scored(codec, root, calibration_path, bake, out, arms, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn evaluate_arms_scored(
+    codec: &impl NativeProbeCodec,
+    root: &Path,
+    calibration_path: &Path,
+    bake: &Path,
+    out: &Path,
+    arms: &[&str],
+    peer: Option<&Path>,
+) -> Result<()> {
     ensure!(
         arms == ARMS || arms == ["scalar"],
         "unsupported probe scope"
@@ -401,8 +436,21 @@ pub(crate) fn evaluate_arms(
             .context("missing calibration arm")?
             .estimate(50.)?;
     }
+    if let Some(path) = peer {
+        let spec: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+        ensure!(
+            spec["reference_model_sha256"] == sha(&bytes),
+            "peer model binding"
+        );
+        ensure!(
+            codec
+                .configuration()
+                .contains(&format!("peer-spec-sha256={}", sha(&fs::read(path)?))),
+            "peer configuration binding"
+        );
+    }
     let model = zenpredict::Model::from_bytes(&bytes)?;
-    let mut scorer = BakeScorer::new(&model)?;
+    let mut scorer = DialScorer::new(&model, peer, &out.join("dial-scores"))?;
     fresh(out)?;
     let mut sink = fs::File::create(out.join("bounds.jsonl"))?;
     let mut bounds = BTreeMap::new();
@@ -475,7 +523,7 @@ pub(crate) fn evaluate_arms(
                             None
                         };
                         let start = Instant::now();
-                        let result = target_search_with_backend_and_bake(
+                        let result = crate::controller::search(
                             &rgb,
                             w,
                             h,
@@ -487,8 +535,9 @@ pub(crate) fn evaluate_arms(
                                 seed,
                                 ..TargetSpec::default()
                             },
+                            None,
                             &*native,
-                            &mut scorer,
+                            |a, b| scorer.compute(codec.codec(), a, b),
                         )?;
                         let search_seconds = start.elapsed().as_secs_f64();
                         let work = native.take_work();
