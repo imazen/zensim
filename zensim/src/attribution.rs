@@ -1153,8 +1153,15 @@ impl BinAccum {
             add_pixel_band(plane, sw, width, factor, first, bins);
         };
         let _ = self.parallel;
+        // Keep an underfilled fold on the serial SIMD path. Starting fewer
+        // independent bands than workers adds a pool rendezvous without
+        // supplying one band per worker; the arithmetic stays identical.
         #[cfg(feature = "threads")]
-        if self.parallel && rows > 64 && rayon::current_num_threads() > 1 {
+        if self.parallel
+            && rows > 64
+            && rayon::current_num_threads() > 1
+            && rows.div_ceil(64) >= rayon::current_num_threads()
+        {
             use rayon::prelude::*;
             self.bins[..rows * width]
                 .par_chunks_mut(64 * width)
@@ -2429,7 +2436,14 @@ mod tests {
                 .build()
                 .unwrap()
                 .install(|| {
-                    for (w, h) in [(31usize, 97usize), (127, 129), (64, 257), (129, 17)] {
+                    for (w, h) in [
+                        (31usize, 97usize),
+                        (127, 129),
+                        (64, 257),
+                        (129, 17),
+                        (127, 513),
+                        (129, 1025),
+                    ] {
                         let mut serial = BinAccum::new(w, h, 1);
                         let mut scratch = Vec::new();
                         let mut parallel = BinAccum::new_reusing(w, h, 1, &mut scratch, true);
