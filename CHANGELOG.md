@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Replay owner-approved peer-relative scalar target comparisons and detector-disabled q20 ordering from retained evidence, with every statistic/failure and original absolute bars preserved; no new encodes or scorer calls (`47175b9c`).
+
 - Correct AVIF G-TARGET routing with physical SVT selector proof and a fresh six-panel run: all18 calibrated budget gates fail unchanged bars. Preserve excluded legacy AVIF diagnostics and exact JPEG/WebP replay; all12 matched SSIMULACRA2/butteraugli3 controls also fail every unchanged budget gate, with TRAIN-only native-unit mapping (`56f875d2`, `48ff9618`, `f23cf7c1`, `61d8c31a`).
 
 - Report explicitly scoped native scalar G-TARGET validation with unchanged target-error bars and integrity guards. Preserve spatial qualification boundaries and fix reachable-target report flag propagation (`2acd4af7`).
