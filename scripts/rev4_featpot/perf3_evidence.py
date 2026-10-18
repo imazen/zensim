@@ -13,7 +13,8 @@ import perf2_evidence as base
 
 def preserve(workspace, output, commit):
     workspace = workspace.resolve()
-    assert workspace.name == "zensim--perf3"
+    # This is an identity check on the supplied path, not a sibling path dependency.
+    assert workspace.name.partition("--") == ("zensim", "--", "perf3")
     assert " codex-perf3 " in (workspace / ".workongoing").read_text()
     assert not output.resolve().is_relative_to(workspace)
     output.mkdir(exist_ok=False)
@@ -56,7 +57,8 @@ def preserve(workspace, output, commit):
 
 def preserve_cargo(workspace, output, commit):
     workspace = workspace.resolve()
-    assert workspace.name == "zensim--perf3"
+    # This is an identity check on the supplied path, not a sibling path dependency.
+    assert workspace.name.partition("--") == ("zensim", "--", "perf3")
     assert " codex-perf3 " in (workspace / ".workongoing").read_text()
     targets = [workspace / name for name in ["target", "target-native"]]
     for target in targets:

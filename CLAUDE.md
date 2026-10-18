@@ -158,6 +158,9 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-18 — PERF3 archive-helper CI path check (fixed).** Script lint interpreted the literal lane basename in an ownership assertion as a deleted sibling dependency. The helper now checks the supplied basename components with the same exact identity and lock-owner requirements. Keep lane names as input validation rather than embedded sibling paths; verify helper lint with no sibling checkout.
+
+
 * **2026-10-18 — PERF3 final combined API measurement.** Binary `8fd20366` has no significant score regression in its nine-cell paired grid and improves all nine map cells. This is a separate build from the isolated-parent finding below; retain both measurements. See [the full report](benchmarks/perf3_2026-10-18.md).
 
 
