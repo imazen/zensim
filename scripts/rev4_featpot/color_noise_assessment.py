@@ -221,6 +221,8 @@ def external(out):
                     check=True,stdout=output,stderr=log,env={**os.environ,'ZENSIM_FORMULA_REV':'5'})
             pred=[float(x) for x in dest.read_text().splitlines()]
             if len(pred)!=len(data['target']) or not np.isfinite(pred).all():raise ValueError('external prediction population differs')
+            if arm=='current' and pred!=data['scores']['diff-frag-820']['pred']:
+                raise ValueError('matched control serving differs from original frozen vector')
             data['scores'][name]=dict(pred=pred,status='external-screened',
                 note='Frozen TRAIN-only repair; exact same original gauntlet population. LIVE is exposed diagnostic only.',
                 provenance=dict(model_sha256=sha(model),feature_manifest_sha256=sha(bank/'_MANIFEST.json'),
