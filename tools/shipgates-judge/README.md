@@ -30,3 +30,11 @@ original input policy; matte conversion remains refused.
 The extra zenpng developer feature serves source preparation only. The campaign's
 archived fixed-judge executable and its original manifest remain frozen; adding
 source-container support does not rebuild or replace that executable.
+
+`shipgates_prepare_source --bmp-list LIST OUTPUT_DIRECTORY` converts an explicit
+list of true RGB8 BMP files with zenbitmaps into PNGs with zenpng. It refuses
+non-BMP input and existing destinations, verifies every decoded RGB sample on
+readback, and writes original-file, PNG and pixel hashes to `PIXELS.jsonl`.
+Disguised PNG/JPEG inputs retain their compressed bytes through the frozen
+comparison transport; that adapter checks native pixel receipts and uses an
+independent decoder to verify every newly written PNG.

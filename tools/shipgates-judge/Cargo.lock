@@ -519,6 +519,7 @@ dependencies = [
  "rgb",
  "serde_json",
  "sha2",
+ "zenbitmaps",
  "zenpixels",
  "zenpixels-convert",
  "zenpng",
@@ -679,6 +680,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00f1f60154ad4ef9871d606765c3ea037cde93bbd77536327b594de8f82df1cb"
 dependencies = [
  "wide",
+]
+
+[[package]]
+name = "zenbitmaps"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b824b3e1572d27df2ebdc9b57fcd89e1bc676486cd47e34f99100bb36ecdba2c"
+dependencies = [
+ "enough",
+ "thiserror",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ publish = false
 # Keep judge/source-preparation builds independent of optional sweep, training,
 # codec and GPU tool dependencies. Numerical owners match the bench prototype.
 [dependencies]
+zenbitmaps = { version = "=0.1.5", default-features = false, features = ["std", "bmp"] }
 zensim = { path = "../../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2", "candidate-profiles", "corruption-head", "custom-profiles"] }
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
 zenpng = { version = "=0.1.4", default-features = false, features = ["_dev"] }

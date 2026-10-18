@@ -17,6 +17,12 @@ fn sha(bytes: &[u8]) -> String {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|mode| mode == "--bmp-list") {
+        if args.len() != 4 {
+            return Err("--bmp-list LIST OUTPUT_DIRECTORY required".into());
+        }
+        return prepare_bmp_list(&PathBuf::from(&args[2]), &PathBuf::from(&args[3]));
+    }
     let expand = args.get(1).is_some_and(|mode| mode == "--expand-png8");
     if args.len() != 4 || (!expand && args[1] != "--crop-opaque") {
         return Err("expected --crop-opaque or --expand-png8, input PNG and fresh output PNG; matte conversion is not admitted".into());
@@ -283,4 +289,76 @@ mod tests {
             }
         }
     }
+}
+
+// Developer-only transport: preserve original BMP samples in a PNG container.
+fn prepare_bmp_list(
+    list: &std::path::Path,
+    output: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::collections::BTreeSet;
+    let inputs: Vec<PathBuf> = fs::read_to_string(list)?
+        .lines()
+        .map(PathBuf::from)
+        .collect();
+    let mut names = BTreeSet::new();
+    for p in &inputs {
+        let name = p.file_stem().ok_or("missing filename")?;
+        if !names.insert(name.to_owned()) {
+            return Err("ambiguous output filename".into());
+        }
+    }
+    fs::create_dir(output)?;
+    let mut receipts = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(output.join("PIXELS.jsonl"))?;
+    for (i, input) in inputs.iter().enumerate() {
+        let bytes = fs::read(input)?;
+        let image = zenbitmaps::decode_bmp(&bytes, enough::Unstoppable)?;
+        if image.layout != zenbitmaps::PixelLayout::Rgb8 {
+            return Err("RGB8 BMP required; no conversion".into());
+        }
+        let rgb = image.pixels();
+        let pixels = imgref::ImgRef::new(rgb.as_rgb(), image.width as usize, image.height as usize);
+        let png = zenpng::encode_rgb8(
+            pixels,
+            None,
+            &zenpng::EncodeConfig::default().with_compression(zenpng::Compression::Fastest),
+            &enough::Unstoppable,
+            &enough::Unstoppable,
+        )?;
+        let back = zenpng::decode(
+            &png,
+            &zenpng::PngDecodeConfig::default(),
+            &enough::Unstoppable,
+        )?;
+        if back.info.width != image.width
+            || back.info.height != image.height
+            || back.pixels.to_rgb8().copy_to_contiguous_bytes() != rgb
+        {
+            return Err("BMP to PNG changed decoded pixels".into());
+        }
+        let dest = output
+            .join(input.file_stem().ok_or("missing filename")?)
+            .with_extension("png");
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&dest)?
+            .write_all(&png)?;
+        writeln!(
+            receipts,
+            "{}",
+            serde_json::json!({"input":input,"output":dest,"source_sha256":sha(&bytes),"png_sha256":sha(&png),"width":image.width,"height":image.height,"rgb_sha256":sha(rgb),"roundtrip_exact":true})
+        )?;
+        if (i + 1) % 1000 == 0 {
+            eprintln!("BMP transport {}/{}", i + 1, inputs.len());
+        }
+    }
+    eprintln!(
+        "BMP transport complete: {} inputs; exact PNG readback for every input",
+        inputs.len()
+    );
+    Ok(())
 }
