@@ -1072,7 +1072,7 @@ def stamp_srocc_ci_kinds(rank):
     return rank
 
 
-def load_fulleval(fulleval_dir, best_per_day=None):
+def load_fulleval(fulleval_dir, best_per_day=None, include_all_scatter=False, comparison_only=False):
     """Read every *.fulleval.json; order by best_per_day date when available. Returns the list of
     bake dicts prepared for embedding (subsampled scatter points + fit lines + composite)."""
     fulleval_dir = Path(fulleval_dir)
@@ -1095,7 +1095,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                             if o.get("name") in CURATED
                             else (1, len(CURATED_BOARD), str(o.get("name", "")).lower())))
 
-    ann_entries, _ann_meta = load_annotations_registry()
+    ann_entries, _ann_meta = ([], {}) if comparison_only else load_annotations_registry()
     # FAIRNESS LAYER (2026-09-04): seed groups + per-row tier, computed ONCE over the
     # whole set (a group is a property of the population, not of a row).
     seed_groups = build_seed_groups(raw)
@@ -1109,12 +1109,12 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         _vals[_axis] = {o.get("name"): _get(o) for o in raw}
     for _gid, _g in seed_groups.items():
         _g["stats"] = {a: seed_group_stats(_g, _vals[a]) for a in _vals}
-    gaddr = load_gaddr_registry()
+    gaddr = None if comparison_only else load_gaddr_registry()
     # Why a cell has no ladder-inversion split (measure_dial_zones.py records one
     # reason per board cell). NOT MEASURED must always come with its reason.
     zone_skip = {}
     _zl = Path("/mnt/v/output/zensim/failure-profiles-2026-08-31/dial_zones_measure_log.json")
-    if _zl.exists():
+    if not comparison_only and _zl.exists():
         try:
             for r in json.loads(_zl.read_text()).get("records", []):
                 if not r.get("measured") and r.get("name"):
@@ -1125,10 +1125,17 @@ def load_fulleval(fulleval_dir, best_per_day=None):
     bakes = []
     for ci, o in enumerate(raw):
         name = o.get("name", f"bake{ci}")
-        curated = name in CURATED
+        curated = include_all_scatter or name in CURATED
         rank = o.get("rank", {})
         stamp_srocc_ci_kinds(rank)
         matched_ann = [e["id"] for e in ann_entries if "id" in e and _ann_matches(o, e)]
+        comparison_annotations = {}
+        if o.get("comparison_notes"):
+            comparison_annotations["explicit-comparison-scope"] = {
+                "kind": "caveat", "fields": ["rank"],
+                "reason": " ".join(o["comparison_notes"]),
+            }
+            matched_ann.append("explicit-comparison-scope")
         fair = fairness_of(o, ann_entries, seed_groups, name_to_group)
         # Read the recorded instrument's composite; missing stays unmeasured.
         # Recalculating historical rows here made their scale/rejection depend
@@ -1147,7 +1154,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # cloud is stripped, and its per-pair data stays in the source verdict (never
         # deleted) exactly as `--strip-per-pair` already does for grid-interior cells.
         # This is what buys the fair view its size budget without dropping any DATA.
-        pp = o.get("per_pair", {}) if ((curated and fair["tier"] != "LEGACY") or (name.startswith("MT913_") and ("ens5" in name or "linear60" in name))) else {}
+        pp = o.get("per_pair", {}) if (include_all_scatter or (curated and fair["tier"] != "LEGACY") or (name.startswith("MT913_") and ("ens5" in name or "linear60" in name))) else {}
         sc_json = o.get("scatter", {})
         for corp, cols in pp.items():
             pred = cols.get("pred")
@@ -1402,6 +1409,9 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "dominated_by": o.get("dominated_by") or [],
             "blocks": blocks,
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
+            "comparisonNotes": o.get("comparison_notes"),
+            "comparisonAnnotations": comparison_annotations,
+            "trainingOverlap": o.get("training_overlap"),
         })
     # ride the population-level artefacts on the first row so build_html can lift them
     # without changing load_fulleval's return type (its callers are the dashboard's
@@ -1541,13 +1551,15 @@ svg{display:block;max-width:100%;height:auto}
 
 
 def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None,
-               hfnl_axis=None, fair_only=False):
+               hfnl_axis=None, fair_only=False, comparison_only=False):
     ech_js, ech_ver = _load_echarts()
-    _, ann_meta = load_annotations_registry()
+    _, ann_meta = ([], {}) if comparison_only else load_annotations_registry()
+    for bake in bakes:
+        ann_meta.update(bake.get("comparisonAnnotations") or {})
     # population-level artefacts lifted off row 0 (see load_fulleval)
     seed_groups = (bakes[0].pop("_seed_groups", None) if bakes else None) or {}
     gaddr_reg = (bakes[0].pop("_gaddr", None) if bakes else None)
-    exam = load_ssim2_exam()
+    exam = None if comparison_only else load_ssim2_exam()
     # FAIR-ONLY board (2026-09-04): the LEGACY tier is dropped from the FILE, not
     # hidden in it — that is the only way the fair view fits the registered 12 MB cap.
     # Nothing is deleted: every legacy row keeps its fulleval JSON on disk and appears
@@ -1595,7 +1607,7 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     # codename registry (user directive 2026-08-28: memorable word-chain names).
     _np = Path(__file__).resolve().parents[2] / "benchmarks" / "candidate_names.json"
     _nm = {}
-    if _np.exists():
+    if not comparison_only and _np.exists():
         for cn, e in json.loads(_np.read_text()).get("names", {}).items():
             if e.get("board_name"):
                 _nm[e["board_name"]] = cn
@@ -1604,7 +1616,7 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     # gates + stars overlay (user directive 2026-08-28): committed, append-only,
     # measured-verdicts-only registry (absent = NOT MEASURED, never failed).
     _gp = Path(__file__).resolve().parents[2] / "benchmarks" / "board_gates_2026-08-28.json"
-    _gov = json.loads(_gp.read_text()).get("bakes", {}) if _gp.exists() else {}
+    _gov = json.loads(_gp.read_text()).get("bakes", {}) if not comparison_only and _gp.exists() else {}
     for b in bakes:
         ov = _gov.get(b.get("name") or "", {})
         b["gatecheck"] = {k: v for k, v in ov.items() if k != "star"}
@@ -1615,7 +1627,7 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     # READ, never re-derived here). Name map: proxy run names -> board names.
     proxy = None
     _pp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_proxy_2026-08-28.json"
-    if _pp.exists():
+    if not comparison_only and _pp.exists():
         _pj = json.loads(_pp.read_text())
         _pmap = {"A_PH_s4004": "W10L9PH_s4004_packed", "B_e060": "PH_s4004_e060",
                  "incumbent": "W10L9_s4003_packed", "GL2": "R1_GL2_s2503_packed"}
@@ -1624,7 +1636,7 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     # discussion's models UNION incumbents UNION iqa peers.
     _dp = Path(__file__).resolve().parents[2] / "benchmarks" / "board_discussion_sets.json"
     _ds, _inc = [], []
-    if _dp.exists():
+    if not comparison_only and _dp.exists():
         _dj = json.loads(_dp.read_text())
         # Registry entries are append-only. On the same date the later entry
         # supersedes the earlier discussion, so keep that chronology explicit.
@@ -1632,13 +1644,13 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
                key=lambda item: (item[1].get("date", ""), item[0]), reverse=True)]
         _inc = _dj.get("incumbents", [])
     _cp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_eval_coverage.json"
-    _cov = json.loads(_cp.read_text()).get("rows", []) if _cp.exists() else []
-    data = {"bakes": bakes, "loopCoverage": _cov,
+    _cov = json.loads(_cp.read_text()).get("rows", []) if not comparison_only and _cp.exists() else []
+    data = {"bakes": bakes, "loopCoverage": _cov, "comparisonOnly": comparison_only,
             "zoneRowKeys": ZONE_ROW_KEYS,
         "discussionSets": _ds, "incumbents": _inc,
             "loopProxy": proxy, "nDominatedExcluded": n_dom,
             "palette": PALETTE, "references": REFERENCES,
-            "refLabels": REF_LABELS, "corpOrder": CORP_ORDER,
+            "refLabels": REF_LABELS, "corpOrder": list(dict.fromkeys(CORP_ORDER + sorted({c for b in bakes for c in b.get("rank", {})}))),
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
             "annRegistry": ann_meta,
             "orientation": EXPECTED_ORIENTATION,
@@ -1895,7 +1907,8 @@ const PRODUCT_NAMES=['b_sdr_linear_cid80_inclwinsor_dense_dial@cur372',
   'b_sdr_linear_cid80_inclwinsor_dense_dial','d_id100_negrich@did100lane',
   'BOA_H_anchorlad_s4004','BOA_H_anchorlad_s4005','BOA_H_anchorlad_s4006'];
 const PRODUCT_SET=DATA.bakes.filter(b=>PRODUCT_NAMES.includes(b.name)).map(b=>b.name);
-const _DEFVIS=(()=>{const f=new Set(FAIRSET);
+const _DEFVIS=(()=>{if(DATA.comparisonOnly)return DATA.bakes.map(b=>b.name);
+  const f=new Set(FAIRSET);
   const product=PRODUCT_SET.filter(n=>f.has(n));
   if(product.length)return product;
   const c=CURATED.filter(n=>f.has(n));
@@ -4231,6 +4244,18 @@ function renderFailures(){
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
+  const notes=[...new Set(DATA.bakes.flatMap(b=>b.comparisonNotes||[]))];
+  if(notes.length){
+    p.append(el('div',{class:'cap',text:notes.join(' ')}),el('a',{href:'TRAINING_OVERLAP.json',text:'Per-item training-overlap audit'}));
+    const details=el('details');details.append(el('summary',{text:'Exact statistics, intervals, training overlap and downloads'}));
+    DATA.bakes.forEach(b=>{
+      details.append(el('h3',{text:b.name}),el('a',{href:b.name+'.fulleval.json',text:'Full population JSON'}));
+      Object.entries(b.trainingOverlap||{}).forEach(([c,note])=>{
+        const r=b.rank[c];
+        details.append(el('p',{text:c+': '+(r?'SROCC '+f3(r.srocc_signed)+' ['+(r.srocc_ci||[]).map(f3).join(', ')+']; PLCC '+f3(r.plcc)+'; KROCC '+f3(r.krocc)+'. ':'UNMEASURED. ')+note}));
+      });
+    });p.append(details);
+  }
   p.append(el('div',{id:'table'}),el('div',{id:'fairsec'}),el('div',{id:'beatssec'}),el('div',{id:'failures'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'loopcov'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
 
@@ -4390,6 +4415,8 @@ if __name__ == "__main__":
     ap.add_argument("--hfnl-axis", default=DEFAULT_HFNL_AXIS,
                     help="appendix-O HF-NL axis study JSON (panel omitted if absent)")
     ap.add_argument("--out", default="/mnt/v/output/zensim/reports/summer_gauntlet.html")
+    ap.add_argument("--comparison-only", action="store_true", help="use only supplied comparisons; omit unrelated historical study overlays")
+    ap.add_argument("--include-all-scatter", action="store_true", help="embed every explicitly selected row, including new comparison models")
     ap.add_argument("--fair-only", action="store_true",
                     help="emit the VERIFIED-FAIR board: LEGACY rows are dropped from the "
                          "FILE (not merely hidden) so the fair view fits the registered "
@@ -4403,11 +4430,11 @@ if __name__ == "__main__":
         out, size, failed, total = build_spatial_gallery(a.spatial_gallery, a.out)
         print(f"wrote {out} ({size // 1024} KB); {failed}/{total} failed cells")
         raise SystemExit(0)
-    bakes = load_fulleval(a.fulleval_dir, a.best_per_day)
+    bakes = load_fulleval(a.fulleval_dir, a.best_per_day, a.include_all_scatter, a.comparison_only)
     if a.fairness_tsv:
         tp, n = write_fairness_tsv(bakes, a.fairness_tsv)
         print(f"wrote {tp}  ({n} rows, fairness audit)")
-    out, size = build_html(bakes, a.out, loop_targeting=load_loop_targeting(a.loop_targeting),
-                           hfnl_axis=load_hfnl_axis(a.hfnl_axis), fair_only=a.fair_only)
+    out, size = build_html(bakes, a.out, loop_targeting=None if a.comparison_only else load_loop_targeting(a.loop_targeting),
+                           hfnl_axis=None if a.comparison_only else load_hfnl_axis(a.hfnl_axis), fair_only=a.fair_only, comparison_only=a.comparison_only)
     print(f"wrote {out}  ({size // 1024} KB)  {len(bakes)} bakes"
           + ("  [FAIR-ONLY]" if a.fair_only else ""))

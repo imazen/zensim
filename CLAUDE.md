@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-18 — standalone discovery of a private panel module. FIXED.** A helper placed directly in `zensim-validate/src/bin/` was also discovered as a separate binary, where its module visibility was invalid. It now lives in `panel_rank_interval/mod.rs`; Cargo metadata confirms there is no extra target. Focused module tests passed; the complete CI rebuild validates target discovery.
+
 * **2026-10-18 — Scalar target CI fixture dependency, fixed.** The integrity fixtures import Pillow; their new CI step initially omitted it and failed with five import errors. The step now installs the existing prerequisite in an explicit isolated environment. The exact17tests pass in a fresh environment; no assertion or numerical threshold changed.
 
 * **2026-10-18 — G-TARGET AVIF backend selector.** The adapter passed `svt-rs`; frozen native driver925d832b accepts `svt` or `zenav1-svt`, defaulting other values to Zenravif. Earlier AVIF rows are preserved excluded diagnostics. Physical accepted-alias/420 proof and the corrected six-panel rerun are complete; all18 TRAIN-curve budget gates fail unchanged bars. JPEG/WebP reproduce exactly; numerical bars, models and q grids are unchanged. See `benchmarks/gtarget_2026-10-18.md`.

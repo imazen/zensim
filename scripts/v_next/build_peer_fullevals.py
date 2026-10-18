@@ -91,6 +91,68 @@ def build_admitted(manifest_path, out_dir):
         f.write("\n")
     print(f"{name}: {len(doc['rank'])} admitted corpora -> {out}")
 
+def build_comparison(manifest_path, out_dir):
+    """Render explicitly admitted candidate/peer vectors through the shared owners.
+
+    The transport manifest keeps model identity, exclusions and per-corpus
+    training-overlap disposition. No legacy corpus discovery occurs here.
+    """
+    from zen_stats import panel_batch, reference_srocc_interval, scatter
+    spec = json.loads(Path(manifest_path).read_text())
+    if spec.get("schema") != "zensim-frozen-gauntlet-v1":
+        raise ValueError("explicit frozen-gauntlet manifest required")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for model in spec["models"]:
+        name = model["name"]
+        if Path(name).name != name:
+            raise ValueError("single filename component required")
+        dest = out_dir / (name + ".fulleval.json")
+        if dest.exists():
+            raise ValueError("fresh comparison outputs required")
+        doc = dict(model, rank={}, scatter={}, scatter_assessment={}, per_pair={},
+                   training_overlap={}, source_manifest_sha256=hashlib.sha256(Path(manifest_path).read_bytes()).hexdigest(),
+                   comparison_notes=spec["notes"], qualification={"status":"NOT QUALIFIED", "reason":"Exploratory comparison only"})
+        for source_corpus, data in spec["datasets"].items():
+            corpus = {"cid22_a25":"cid22", "tid2013":"tid"}.get(source_corpus, source_corpus)
+            entry = data["scores"].get(name)
+            if entry is None:
+                doc["training_overlap"][corpus] = data.get("missing", {}).get(name, "No compatible scores")
+                continue
+            if entry["status"] not in ("withheld-fold", "source-disjoint", "external-screened", "peer"):
+                raise ValueError("training-overlap rows cannot be scored as withheld")
+            pred, target, refs = entry["pred"], data["target"], data["reference"]
+            if not pred or len(pred) != len(target) or len(refs) != len(pred) or any(not math.isfinite(v) for v in pred+target):
+                raise ValueError("complete aligned finite population required")
+            st = panel(pred, target)
+            if st["n_dropped"] != 0:
+                raise ValueError("canonical panel dropped rows")
+            interval = reference_srocc_interval(pred, target, refs)
+            signed = interval["signed"]
+            st.update(srocc_signed=signed["estimate"], srocc_ci=[signed["lo"],signed["hi"]],
+                      srocc_ci_method=interval["srocc_ci_method"],
+                      plcc_ci=None, krocc_ci=None, evaluation_status=entry["status"],
+                      training_overlap=entry["note"], source_corpus=source_corpus, score_provenance=entry.get("provenance"))
+            doc["rank"][corpus] = st
+            doc["training_overlap"][corpus] = entry["note"]
+            axis = data["axis"]
+            cols = dict(pred=pred, **{axis:target})
+            for peer, key in spec["references"].items():
+                if peer in data["scores"]:
+                    cols[key] = data["scores"][peer]["pred"]
+            doc["per_pair"][corpus] = cols
+            assessment = scatter(pred, target)
+            cols["normalized_pred"] = assessment.pop("normalized_pred", None)
+            doc["scatter_assessment"][corpus] = {axis:assessment}
+            jobs = [(key,pred,values) for key,values in cols.items() if key in ("mos","jnd","ssim2","butter","cvvdp")]
+            stats = panel_batch(jobs)
+            doc["scatter"][corpus] = {job[0]:value for job,value in zip(jobs,stats,strict=True)}
+            print(f"{name}/{corpus}: n={len(pred)} source clusters={len(set(refs))}", flush=True)
+        with dest.open("x") as f:
+            json.dump(doc, f, allow_nan=False)
+            f.write("\n")
+
+
 RM = "/mnt/v/output/zensim/reports/refmetrics"
 OUT = "/mnt/v/output/zensim/reports/fulleval"
 
@@ -347,13 +409,16 @@ def main(only=None):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--comparison-manifest", type=Path, help="explicit frozen candidate/peer vectors")
     ap.add_argument("--admitted-manifest", type=Path,
                     help="explicit hash-bound eval peer TSVs; bypass all legacy corpus reads")
     ap.add_argument("--out-dir", type=Path, default=Path(OUT))
     ap.add_argument("--peer", action="append", choices=sorted(PEERS),
                     help="build only these peer rows (repeatable); default: all")
     args = ap.parse_args()
-    if args.admitted_manifest:
+    if args.comparison_manifest:
+        build_comparison(args.comparison_manifest, args.out_dir)
+    elif args.admitted_manifest:
         build_admitted(args.admitted_manifest, args.out_dir)
     else:
         OUT = str(args.out_dir)

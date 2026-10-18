@@ -2465,3 +2465,36 @@ gtarget-peer-tests-isolated venv:
 # R8/R10 only reinterpret retained statistics/scores; no encoder/scorer entry.
 gtarget-approved-amendments root inputs audits plan output:
     python3 scripts/rev4_featpot/shipgates_peer_target.py amendments --root {{quote(root)}} --inputs {{quote(inputs)}} --audits {{quote(audits)}} --plan {{quote(plan)}} --output {{quote(output)}}
+
+# Frozen human-panel transport; caller supplies run-heavy and the shared lock.
+gauntlet-frozen mode output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py {{quote(mode)}} --out {{quote(output)}}
+
+gauntlet-build target:
+    cargo build --release --locked -p zensim-validate --bin panel --target-dir {{quote(target)}}
+
+gauntlet-stat-tests target:
+    TMPDIR="$HOME/tmp" cargo test --release --locked -p zensim-validate --bin panel panel_rank_interval:: --target-dir {{quote(target)}}
+
+gauntlet-stat-clippy target:
+    cargo clippy --release --locked -p zensim-validate --bin panel --target-dir {{quote(target)}} -- -D warnings
+
+
+gauntlet-adapter-tests panel:
+    TMPDIR="$HOME/tmp" ZEN_PANEL_BIN={{quote(panel)}} python3 -B -m unittest scripts.tests.test_gauntlet_frozen scripts.tests.gauntlet_owner_integration
+
+gauntlet-bmp-build target:
+    cargo build --release --locked --manifest-path tools/shipgates-judge/Cargo.toml --bin shipgates_prepare_source --target-dir {{quote(target)}}
+
+gauntlet-bmp-prepare binary list output:
+    {{quote(binary)}} --bmp-list {{quote(list)}} {{quote(output)}}
+
+gauntlet-comparison manifest output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/build_peer_fullevals.py --comparison-manifest {{quote(manifest)}} --out-dir {{quote(output)}}
+
+gauntlet-bmp-check target:
+    cargo clippy --release --locked --manifest-path tools/shipgates-judge/Cargo.toml --bin shipgates_prepare_source --target-dir {{quote(target)}} -- -D warnings
+
+gauntlet-analyze target output:
+    just gauntlet-build {{quote(target)}}
+    ZEN_PANEL_BIN={{quote(target + "/release/panel")}} just gauntlet-comparison {{quote(output + "/WITHHELD_INPUTS.json")}} {{quote(output)}}
