@@ -448,6 +448,8 @@ def report(out):
     with (out/'index.html').open('x') as f:f.write(''.join(text))
     write(out/'REPORT.json',dict(schema='color-noise-repair-report-v1',selected=choice['selected'],
         train_selection_sha256=sha(out/'TRAIN_SELECTION.json'),external_exposure_sha256=sha(out/'EXTERNAL_EXPOSURE.json'),
+        ensemble_selected=ensemble_choice['selected'] if ensemble_choice else None,
+        ensemble_selection_sha256=sha(out/'ensembles/TRAIN_SELECTION.json') if ensemble_choice else None,
         ranks=ranks,severe_cases=case_scores,qualified=False,time_utc=now()))
 
 
@@ -497,13 +499,16 @@ def finalize(out):
            'DEVELOPMENT_POPULATIONS.json','FEATURE_COMPATIBILITY.json','CONTROL_PARITY.json',
            'TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','REPORT.json',
            'gauntlet.html','index.html']
-    ensemble_cells=0
+    ensemble_cells=0;ensemble_models=0
     if (out/'ensembles/TRAIN_SELECTION.json').exists():
         root=out/'ensembles';ec=read(root/'TRAIN_SELECTION.json');ed=read(root/'EXTERNAL_INPUTS.json')
         if ec['parent_choice_sha256']!=sha(out/'TRAIN_SELECTION.json') or ec['qualification']:
             raise ValueError('ensemble parent decision/qualification differs')
         if read(root/'EXTERNAL_EXPOSURE.json')['choice_sha256']!=sha(root/'TRAIN_SELECTION.json'):
             raise ValueError('ensemble exposure differs')
+        if report_data['ensemble_selection_sha256']!=sha(root/'TRAIN_SELECTION.json') or report_data['ensemble_selected']!=ec['selected']:
+            raise ValueError('ensemble report binding differs')
+        ensemble_models=len(ed['models'])
         for binding in ec['models'].values():
             if sha(binding['path'])!=binding['sha256']:raise ValueError('ensemble composition changed')
         for model in ed['models']:
@@ -512,12 +517,13 @@ def finalize(out):
                 if doc['per_pair'][corpus]['pred']!=d['scores'][model['name']]['pred'] or doc['per_pair'][corpus][d['axis']]!=d['target']:
                     raise ValueError('ensemble assessment vectors differ')
                 ensemble_cells+=1
-        files+=['ensembles/'+n for n in ['REGISTRATION.json','TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','gauntlet.html']]
+        files+=['ensembles/'+n for n in ['REGISTRATION.json','TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','PREDICTION_VIEWS.json','EXTERNAL_INPUTS.json','gauntlet.html']]
     write(out/'_MANIFEST.json',dict(schema='color-noise-repair-complete-v1',
         build_commit=subprocess.check_output(['jj','log','--no-graph','-r','@-','-T','commit_id'],text=True,cwd=REPO).strip(),
         owner_sha256=sha(__file__),training_build_commit=execution['build_commit'],
         program_sha256=reg['program_sha256'],binaries=reg['binaries'],models=choice['models'],
-        files={name:sha(out/name) for name in files},model_count=len(data['models']),
+        files={name:sha(out/name) for name in files},single_dashboard_model_count=len(data['models']),
+        ensemble_dashboard_model_count=ensemble_models,report_model_count=len({r['model'] for r in report_data['ranks']}),report_rank_cells=len(report_data['ranks']),
         panel_count=len(EXTERNAL),statistical_cells=cells,ensemble_dashboard_cells=ensemble_cells,selected=choice['selected'],
         qualification_allowed=False,source_commit_limitation='Retained external extractor source commit unresolved; twelve TRAIN pixel pairs replay exactly at all504 consumed f32/f64 inputs.',
         scope='Completed exploratory three-seed 2x2 study. Original qualification gates remain required. External panels previously exposed; LIVE diagnostic only.',time_utc=now()))
