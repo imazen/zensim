@@ -760,6 +760,81 @@ def scalar_target(args):
         write(args.output/"COMPLETE.json",dict(scope=design["scope"],codecs=list(encoders),models=list(models)))
 
 
+def scalar_target_report(args):
+    """Join the six native-owner reports without recomputing their statistics."""
+    assert (args.reports / "COMPLETE.json").is_file(), "scalar panel incomplete"
+    design=json.loads((args.reports/"DESIGN.json").read_text())
+    assert set(design["models"]) == {"diff-frag-820","w-c"}
+    assert set(design["encoders"]) == {"jpeg","webp","avif"}
+    panels=[]
+    smoke_encodes=0
+    for codec in ("jpeg","webp","avif"):
+        smoke=json.loads((args.reports/codec/"smoke/COMPLETE.json").read_text())
+        assert len(smoke["work"])==1 and smoke["work"][0]["encoded_sha256"]==smoke["encoded_sha256"]
+        smoke_encodes+=len(smoke["work"])
+        for model in ("diff-frag-820","w-c"):
+            root=args.reports/codec/model/"eval"
+            report_path=root/"analysis_summary.json"
+            report=json.loads(report_path.read_text())
+            inputs=json.loads((root/"INPUTS.json").read_text())
+            assert report["schema"] == inputs["schema"] == "native-codec-target-scalar-v1"
+            assert inputs["arms"] == ["scalar"]
+            assert inputs["model_sha256"] == design["models"][model]["sha256"]
+            assert inputs["driver_sha256"] == design["binary_sha256"]
+            assert report["input_sha256"] == sha(root/"INPUTS.json")
+            assert report["measurement_sha256"] == sha(root/"measurements.jsonl")
+            keys=[(r["policy"],r["budget"]) for r in report["summary"]]
+            assert len(keys)==6 and set(keys)=={(p,b) for p in ("midpoint","train_curve") for b in (1,2,3)}
+            assert all(r["n"] == report["jointly_witnessed_targets"] for r in report["summary"])
+            training=[json.loads(line) for line in (root.parent/"fit/bounds.jsonl").read_text().splitlines()]
+            training_encodes=sum(len(row["work"]) for row in training)
+            search_encodes=sum(row["full_encodes"] for row in report["summary"])
+            validation_encodes=report["offline_validation_bound_cost"]["full_encodes"]+search_encodes
+            for phase,expected in (("fit",training_encodes),("eval",validation_encodes)):
+                probes=list((root.parent/(phase+".retained")).glob("probe-*"))
+                assert len(probes)==expected, "physical probe accounting differs"
+                for probe in probes:
+                    native=json.loads((probe/"native/result.json").read_text())
+                    work=json.loads((probe/"WORK.json").read_text())
+                    assert native["full_encodes"]==1 and native["encoded_sha256"]==work["encoded_sha256"]
+                    assert native["driver_sha256"]==design["encoders"][codec]["sha256"]
+                    assert all((probe/name).is_file() for name in ("oracle.stdout","oracle.stderr"))
+            panels.append(dict(codec=codec,model=model,model_sha256=inputs["model_sha256"],
+                report=str(report_path),report_sha256=sha(report_path),requests=report["requested_targets"],
+                witnessed=report["jointly_witnessed_targets"],cases=report["cells"],
+                training_encodes=training_encodes,validation_encodes=validation_encodes,
+                train_curve=[r for r in report["summary"] if r["policy"]=="train_curve"],
+                midpoint=[r for r in report["summary"] if r["policy"]=="midpoint"],
+                coverage=report["coverage_by_arm"],by_content_class=report["by_content_class"]))
+    args.output.mkdir(parents=True,exist_ok=False)
+    totals=dict(panels=len(panels),cases=sum(p["cases"] for p in panels),
+                training_encodes=sum(p["training_encodes"] for p in panels),
+                validation_encodes=sum(p["validation_encodes"] for p in panels),smoke_encodes=smoke_encodes)
+    totals["full_encodes"]=totals["training_encodes"]+totals["validation_encodes"]+smoke_encodes
+    result=dict(schema="native-scalar-target-panels-v1",scope="scalar adapter validation; active/neutral-map targeting UNMEASURED",
+                design_sha256=sha(args.reports/"DESIGN.json"),panels=panels,totals=totals)
+    write(args.output/"SUMMARY.json",result)
+    lines=["# Native scalar G-TARGET", "", result["scope"], "",
+        "C = diff+frag-820 (89cb4861); W-C = f73059ff. Each model has its own witnessed target population.", "",
+        "| Codec | Bake | Witnessed / requests | Target cases | TRAIN / validation encodes |",
+        "|---|---|---:|---:|---:|"]
+    for p in panels:
+        lines.append(f"| {p['codec']} | {'C' if p['model']=='diff-frag-820' else 'W-C'} | {p['witnessed']}/{p['requests']} | {p['cases']} | {p['training_encodes']}/{p['validation_encodes']} |")
+    lines += ["", "TRAIN-curve errors; undershoot limit is >8 / >3 / >1 for K1 / K2 / K3.", "",
+        "| Codec | Bake | K | Median | p95 | Undershoots / n | K3 max | Verdict |",
+        "|---|---|---:|---:|---:|---:|---:|---|"]
+    for p in panels:
+        for row in p["train_curve"]:
+            budget=row['budget'];limit={1:'8',2:'3',3:'1'}[budget]
+            maximum=f"{row['worst_abs_error']:.3f}" if budget==3 else "—"
+            lines.append(f"| {p['codec']} | {'C' if p['model']=='diff-frag-820' else 'W-C'} | {budget} | {row['median_abs_error']:.3f} | {row['p95_abs_error']:.3f} | {row['undershoot_counts'][limit]}/{row['n']} | {maximum} | {row['registered_gate']['verdict']} |")
+    lines += ["", "Bars: K1 median/p95 ≤2/8 and undershoots ≤5%; K2 ≤1/3 and ≤5%; K3 ≤0.5/1, ≤1%, maximum ≤3. All unchanged.",
+        "", f"Actual work: {totals['full_encodes']} full encodes including three smoke cells; {totals['cases']} target cases, each with one terminal decode/score. Scalar maps and extra instrumented reconstructions: zero. Every probe retains its native encoder decode, separate first-party RGB verification and independent decode-oracle receipt.",
+        "", "All nine TRAIN and eight family-disjoint validation sources are the frozen JXL panel, opaque sRGB8, maximum side256. Numeric failures are retained. This is a development panel; spatial steering, a final candidate and performance remain unqualified."]
+    (args.output/"SUMMARY.md").write_text("\n".join(lines)+"\n")
+    print(json.dumps(totals),flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -770,12 +845,13 @@ def main():
                         ("jxl-target", ["inputs", "resume-calibration-root", "heavy-lock", "run-heavy"]),
                         ("scalar-target", ["inputs", "encoders", "heavy-lock", "run-heavy"]),
                         ("corruption-results", ["inputs", "audits", "bindings"]),
+                        ("scalar-target-report", ["reports"]),
                         ("rd-sources", ["inputs", "tree"]),
                         ("rd-licenses", ["tree"]),
                         ("jxl-rd", ["inputs", "oracle", "heavy-lock", "run-heavy", "png8-binary"]),
                         ("jxl-rd-source", ["inputs", "oracle", "design", "source-id", "png8-binary"])]:
         command = sub.add_parser(mode)
-        common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses"] else ["models", "binary", "output"]
+        common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses", "scalar-target-report"] else ["models", "binary", "output"]
         for name in common + names:
             command.add_argument(f"--{name}", type=Path, required=True)
         if mode == "scalar-target":
@@ -799,7 +875,7 @@ def main():
             command.add_argument("--features-root", type=Path,
                                 default=Path("/mnt/v/output/zensim/adjudicate-2026-10-07/no-human-corpus"))
     args = parser.parse_args()
-    {"gaddr": gaddr, "corruption": corruption, "jxl-smoke": jxl_smoke, "jxl-target": jxl_target, "scalar-target": scalar_target,
+    {"gaddr": gaddr, "corruption": corruption, "jxl-smoke": jxl_smoke, "jxl-target": jxl_target, "scalar-target": scalar_target, "scalar-target-report": scalar_target_report,
      "corruption-results": corruption_results, "rd-sources": rd_sources, "rd-licenses": rd_licenses, "jxl-rd": jxl_rd,
      "jxl-rd-source": jxl_rd_source, "jxl-interventions": jxl_interventions}[args.mode](args)
 

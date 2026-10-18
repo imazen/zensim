@@ -2434,3 +2434,6 @@ gtarget-archive-check:
 
 gtarget-archive-verify source destination:
     python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker scalar-v1/COMPLETE.json
+
+gtarget-scalar-report reports output:
+    python3 scripts/rev4_featpot/shipgates.py scalar-target-report --reports {{quote(reports)}} --output {{quote(output)}}
