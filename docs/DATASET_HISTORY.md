@@ -1,5 +1,22 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**October 18, prospective TRAIN-only color/noise repair:**
+The [registered 2×2 comparison](../benchmarks/color_noise_repair_registration_2026-10-18.md)
+reuses the receipt-approved four-source D1 recipe, TRAIN oracle legs and pinned
+ordinal pool. Its TRAIN-development decision population is2387 rows: KADID1210,
+TID480, KonFiG84, CID22-A613. Registered noise subsets contain200 KADID and140
+TID rows. No new labels, source roles or feature arithmetic are introduced.
+All504 read inputs are finite across all seven admitted TRAIN/development
+legs; the restored chroma declaration adds82 difference inputs and82 products.
+The exact original E33 native program is reused. Seed0 control checkpoint and
+packed model match the original candidate byte-for-byte after native removal
+of reproduction metadata. Four training and four serving smokes pass.
+Selection is fixed before any new external scoring. CSIQ/PIPAL/LIVE inherit
+the original gauntlet exposure and overlap limits; LIVE motivated this repair
+and is an exposed diagnostic, never selection data. Original qualification
+requirements and protected-set exclusions remain unchanged. Artifact identities
+and role receipts live under the registered dev output root.
+
 **October 4, Rev5 entry/refinement engineering audit:**
 [Serving report](../benchmarks/rev5_entries_2026-10-04.md) records the owner-directed
 48-case KADID local-refinement panel: I01/I21/I41/I61, JPEG distortion 10 at

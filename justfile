@@ -2550,3 +2550,6 @@ color-noise-repair mode output:
 
 color-noise-assessment mode output:
     TMPDIR="$HOME/tmp" python3 -u scripts/rev4_featpot/color_noise_assessment.py {{quote(mode)}} --out {{quote(output)}}
+
+color-noise-check:
+    TMPDIR="$HOME/tmp" PYTHONPATH=scripts:scripts/rev4_featpot python3 -m unittest scripts.tests.test_color_noise_repair scripts.tests.test_e33_package
