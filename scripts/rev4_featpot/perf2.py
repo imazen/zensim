@@ -227,7 +227,7 @@ def build_locked(args):
     commit=subprocess.check_output(["jj","log","-r","@","--no-graph","-T","commit_id"],cwd=source,text=True).strip()
     native=args.mode=="build_native"
     recipe="perf2-native-build" if native else ("perf2-profile-build" if args.mode=="build_profile" else "perf2-runtime-build")
-    env={**os.environ,"CARGO_TARGET_DIR":str(Path.home()/"work/zen/zensim--perf2"/("target-native" if native else "target")),
+    env={**os.environ,"CARGO_TARGET_DIR":str(Path(__file__).resolve().parents[2]/("target-native" if native else "target")),
          "CARGO_PROFILE_RELEASE_DEBUG":"1"}
     log=ROOT/(args.name+"-build.log")
     with log.open("x") as out:
