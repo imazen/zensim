@@ -28,7 +28,12 @@ def read(path):
 
 
 def write(path, value):
-    Path(path).write_text(json.dumps(value, indent=2) + "\n")
+    payload=json.dumps(value, indent=2, allow_nan=False) + "\n"
+    path=Path(path)
+    if path.exists():
+        assert path.read_text()==payload,"refuse to overwrite changed generated evidence"
+    else:
+        path.write_text(payload)
 
 
 def unit_mapping(z, p):
@@ -153,24 +158,33 @@ def report(args):
     compact=["# G-TARGET completed: scalar adapter validation", "",
         "C = diff+frag-820 (89cb4861); W = W-C (f73059ff). Peer C/W labels identify the TRAIN unit mapping, not different peer metrics. Nine TRAIN and eight family-disjoint validation sources per panel; both policies and budgets1/2/3 retained. AVIF is proven zenav1-svt420/s6. Historical wrong-selector AVIF rows remain excluded diagnostics.", "",
         "Errors below are normalized points. Native tolerance alpha is the peer TRAIN q5-q95 median span divided by the corresponding candidate span, with a TRAIN q95 affine anchor. SSIMULACRA2 is higher-better; butteraugli3 is lower-better. Native error bars equal normalized bars times alpha. Each row uses its own actually witnessed target population; no interpolated feasibility or monotonicity gate.", "",
-        "| Codec | Dial / reference | Native tolerance | Witnesses /80 | K1 median/p95 | K2 median/p95 | K3 median/p95 | K3 max | Undershoots K1/2/3 | Verdict K1/2/3 |",
+        "| Codec | Dial / reference | Native tolerance | Witnesses / requests | K1 median/p95 | K2 median/p95 | K3 median/p95 | K3 max | Undershoots K1/2/3 | Verdict K1/2/3 |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---|"]
     detailed=["# Scalar G-TARGET candidate and peer controls", "", "All errors are normalized by the registered TRAIN mapping; raw native units are obtained by multiplying errors by alpha. Both policies retain the unchanged owner verdicts.", "",
         "| Dial | Codec | Reference | Policy | K | n | Median | p95 | Maximum | Undershoots | Verdict |",
         "|---|---|---|---|---:|---:|---:|---:|---:|---:|---|"]
     counts={}
+    worst=[]
     for dial,summary in tables:
         counts[dial]={}
         for panel in summary["panels"]:
             codec=panel["codec"];model=panel["model"]
             ref="C" if model=="diff-frag-820" else "W"
             alpha=1. if dial=="zensim" else summary["unit_mappings"][codec][model]["alpha"]
+            evaluation=Path(panel["report"]).parent
+            measured=[json.loads(line) for line in (evaluation/"measurements.jsonl").read_text().splitlines()]
+            bounds=[json.loads(line)["bound"] for line in (evaluation/"bounds.jsonl").read_text().splitlines()]
+            selected=sorted((r for r in measured if r["policy"]=="train_curve" and r["budget"]==3),key=lambda r:abs(r["signed_error"]),reverse=True)[:3]
+            for row in selected:
+                witness=min((b for b in bounds if b["origin"]==row["origin"] and b["arm"]=="scalar"),key=lambda b:abs(b["score"]-row["target"]))
+                assert abs(witness["score"]-row["target"])<=1.,"reported target lacks its actual witness"
+                worst.append(dict(dial=dial,codec=codec,reference=model,measurement=row,witness=witness))
             rows=panel["train_curve"]
             pair=lambda r:f"{r['median_abs_error']:.3f}/{r['p95_abs_error']:.3f}"
             under="/".join(str(r["undershoot_counts"][{1:"8",2:"3",3:"1"}[r["budget"]]]) for r in rows)
             verdict="/".join(r["registered_gate"]["verdict"] for r in rows)
             label={"zensim":"zensim","ssim2":"SSIM2","butter":"butter3"}[dial]
-            compact.append(f"| {codec} | {label} {ref} | {alpha:.6g} | {panel['witnessed']}/80 | {pair(rows[0])} | {pair(rows[1])} | {pair(rows[2])} | {rows[2]['worst_abs_error']:.3f} | {under} | {verdict} |")
+            compact.append(f"| {codec} | {label} {ref} | {alpha:.6g} | {panel['witnessed']}/{panel['requests']} | {pair(rows[0])} | {pair(rows[1])} | {pair(rows[2])} | {rows[2]['worst_abs_error']:.3f} | {under} | {verdict} |")
             for policy in ("train_curve","midpoint"):
                 for row in panel[policy]:
                     k=row["budget"];n=row["n"];v=row["registered_gate"]["verdict"]
@@ -180,9 +194,35 @@ def report(args):
                     detailed.append(f"| {label} | {codec} | {ref} | {policy} | {k} | {n} | {row['median_abs_error']:.9g} | {row['p95_abs_error']:.9g} | {row['worst_abs_error']:.9g} | {failures}/{n} | {v} |")
     compact += ["", "Undershoot counts use quality errors below -8/-3/-1 for K1/2/3, divided by the witnessed n. Bars: K1 median/p95<=2/8 and undershoot fraction<=5%; K2<=1/3 and<=5%; K3<=.5/1, maximum<=3, undershoot<=1%. No numerical rule or controller was changed after results.", "",
         "Active-map targeting on JPEG/WebP/AVIF: NOT RUN (not waived). Steering is judged by G-RD; first-encode map hooks are unvalidated. This development panel does not qualify a final candidate or performance.", "",
-        "Corruption readout: the honest AVIF case is a strong detector false positive (both composed scores fall from about95 to0); the RB swap and half-opacity GB swap are real, non-inert missed operations with preserved page layout. GB has a severity-label nuance. All three original corruption failures remain; no threshold or verdict changed. See CORRUPTION_READOUT.md for exact files, hashes and scores.", "",
+        "Corruption readout: the honest AVIF case is a strong detector false positive (both composed scores fall to0); the RB swap and half-opacity GB swap are real, non-inert missed operations with preserved page layout. GB has a severity-label nuance. All three original corruption failures remain; no threshold or verdict changed. See CORRUPTION_READOUT.md for exact files, hashes and scores.", "",
         "Full per-budget/policy tables: COMPARISON.md; exact numbers, unit mappings, endpoint/encoding/scoring evidence and retained excluded diagnostics: the hash-bound artifact pointer. Different dial witness populations prevent interpreting raw failure fractions as paired significance tests."]
-    write(args.output/"COMPARISON.json",dict(candidate=candidate,peers=summaries,counts=counts))
+    work=dict(candidate=candidate["totals"],endpoint_mapping=read(args.output/"mapping/COMPLETE.json"),peer_metrics={})
+    actual=candidate["totals"]["full_encodes"]+work["endpoint_mapping"]["endpoint_full_encodes"]
+    for metric,summary in summaries.items():
+        physical_packets=0
+        for panel in summary["panels"]:
+            base=args.output/metric/panel["codec"]/panel["model"]
+            for phase in ("fit","eval"):
+                physical_packets+=len(list((base/phase/"dial-scores").glob("*/packet/COMPLETE.json")))
+        logical=summary["totals"]["training_encodes"]+summary["totals"]["validation_encodes"]+summary["totals"]["cases"]
+        work["peer_metrics"][metric]=dict(totals=summary["totals"],physical_runtime_calibration_judge_packets=physical_packets,logical_score_calls=logical,exact_pixel_cache_hits=logical-physical_packets,reused_routing_encodes=summary["totals"]["routing_preflight_encodes"])
+        actual+=summary["totals"]["full_encodes"]-summary["totals"]["routing_preflight_encodes"]
+    work["actual_new_full_encodes_in_corrected_and_peer_runs"]=actual
+    work["replay_new_encodes"]=0
+    failed=sum(v["FAIL"] for values in counts.values() for key,v in values.items() if key.startswith("train_curve-"))
+    midpoint_failed=sum(v["FAIL"] for values in counts.values() for key,v in values.items() if key.startswith("midpoint-"))
+    compact.insert(2,f"TRAIN-curve budget configurations: {failed}/54 FAIL. Midpoint controls: {midpoint_failed}/54 FAIL. All18 panels are complete.")
+    write(args.output/"WORK_ACCOUNTING.json",work)
+    write(args.output/"WORST_CASES.json",worst)
+    shared=[r for r in worst if r["codec"]=="webp" and r["reference"]=="diff-frag-820" and r["measurement"]["origin"]=="8183"]
+    by_dial={r["dial"]:r for r in shared}
+    z=by_dial["zensim"];ss=by_dial["ssim2"]
+    assert z["witness"]["encoded_sha256"]==ss["witness"]["encoded_sha256"]
+    assert z["measurement"]["encoded_sha256"]==ss["measurement"]["encoded_sha256"]
+    compact += ["",f"Shared failure: WebP screen8183 has the same actual q0 witness under C and SSIM2, yet both controllers select the same output of {z['measurement']['bytes']:,} bytes after three probes; errors are {z['measurement']['signed_error']:.3f}/{ss['measurement']['signed_error']:.3f}normalized points. Failures occur with peer dials as well, so this panel does not isolate a zensim-specific cause. The frozen controller remains unchanged."]
+
+    compact += ["",f"Actual corrected/control work: {actual} full encodes, including108TRAIN endpoint encodes. Replayed candidate outputs add0encodes; shared SVT routing controls count once. Exact-pixel peer cache hits and physical judge packets are reported separately in WORK_ACCOUNTING.json."]
+    write(args.output/"COMPARISON.json",dict(candidate=candidate,peers=summaries,counts=counts,work=work))
     (args.output/"COMPARISON.md").write_text("\n".join(detailed)+"\n")
     (args.output/"GTARGET_DONE.md").write_text("\n".join(compact)+"\n")
 
