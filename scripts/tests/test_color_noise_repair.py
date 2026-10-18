@@ -104,4 +104,30 @@ class Report(unittest.TestCase):
             self.assertFalse(result['qualified'])
             self.assertEqual(result['severe_cases'][9]['scores']['repair-both'],9)
 
+class DevelopmentBinding(unittest.TestCase):
+    def test_cached_predictions_cannot_move_between_models_or_populations(self):
+        import color_noise_assessment as assessment
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
+            root=Path(td);(root/'REGISTRATION.json').write_text('{}')
+            table=root/'table.parquet';table.write_bytes(b'fixture')
+            p=dict(registration_sha256=common.sha(root/'REGISTRATION.json'),table=str(table),table_sha256=common.sha(table))
+            (root/'DEVELOPMENT_POPULATIONS.json').write_text(json.dumps(p))
+            cell=root/'cells/current/s0';cell.mkdir(parents=True)
+            model=cell/'packed.bin';model.write_bytes(b'model')
+            r=dict(packed_model=str(model),packed_model_sha256=common.sha(model),execution_contract='registered-fit',selection=dict(selected_epoch=119),epochs=120,pairs_per_epoch=50000)
+            (cell/'result.json').write_text(json.dumps(r))
+            dest=root/'development/current/s0';dest.mkdir(parents=True)
+            (dest/'pred.tsv').write_text('row_idx\tpred\n0\t1\n')
+            cached=dict(model=dict(path=str(model),sha256=common.sha(model),result_sha256=common.sha(cell/'result.json')),
+                population_sha256=common.sha(root/'DEVELOPMENT_POPULATIONS.json'),predictions_sha256=common.sha(dest/'pred.tsv'),records=[])
+            (dest/'CELL.json').write_text(json.dumps(cached))
+            self.assertEqual(assessment.development_cell(root,'current',0),cached)
+            (dest/'pred.tsv').write_text('row_idx\tpred\n0\t2\n')
+            with self.assertRaisesRegex(ValueError,'cached TRAIN-development identity differs'):
+                assessment.development_cell(root,'current',0)
+            r['selection']['selected_epoch']=0
+            (cell/'result.json').write_text(json.dumps(r))
+            with self.assertRaisesRegex(ValueError,'registered full fit/packing missing'):
+                assessment.development_cell(root,'current',0)
+
 if __name__=='__main__':unittest.main()

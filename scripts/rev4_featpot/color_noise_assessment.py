@@ -135,36 +135,62 @@ def parity(out, seeds=range(3)):
     if not all(r['pass_all'] for r in records):raise ValueError('original control replay mismatch; inspect before assessment')
 
 
+def development_cell(out,arm,seed):
+    from color_noise_repair import read,write,sha
+    from v2_lodo_mlp import predict
+    from lib.zen_stats import panel_batch
+    p=read(out/'DEVELOPMENT_POPULATIONS.json')
+    if p['registration_sha256']!=sha(out/'REGISTRATION.json') or sha(p['table'])!=p['table_sha256']:
+        raise ValueError('development inputs changed')
+    cell=out/'cells'/arm/f's{seed}';r=read(cell/'result.json');model=Path(r['packed_model'])
+    if (r['execution_contract']!='registered-fit' or r['selection']['selected_epoch']!=119
+            or r['epochs']!=120 or r['pairs_per_epoch']!=50000 or sha(model)!=r['packed_model_sha256']):
+        raise ValueError('registered full fit/packing missing: '+str(cell))
+    binding=dict(path=str(model),sha256=sha(model),result_sha256=sha(cell/'result.json'))
+    dest=out/'development'/arm/f's{seed}';receipt=dest/'CELL.json'
+    if receipt.exists():
+        cached=read(receipt)
+        if (cached['model']!=binding or cached['population_sha256']!=sha(out/'DEVELOPMENT_POPULATIONS.json')
+                or cached['predictions_sha256']!=sha(dest/'pred.tsv')):
+            raise ValueError('cached TRAIN-development identity differs')
+        return cached
+    dest.mkdir(parents=True,exist_ok=False)
+    target=pq.read_table(p['table'],columns=['human_score'])['human_score'].to_numpy()
+    pred=predict(model,Path(p['table']),dest/'pred.tsv')
+    if len(pred)!=len(target):raise ValueError('development prediction coverage differs')
+    jobs=[(name,pred[indices],target[indices]) for name,indices in p['populations'].items()]
+    stats=panel_batch(jobs);records=[]
+    for (name,_,_),st in zip(jobs,stats,strict=True):
+        if st['n_dropped'] or not np.isfinite(st['srocc_signed']):raise ValueError('incomplete canonical statistics')
+        records.append(dict(arm=arm,seed=seed,population=name,rows=len(p['populations'][name]),statistics=st))
+    result=dict(schema='color-noise-development-cell-v1',model=binding,
+        population_sha256=sha(out/'DEVELOPMENT_POPULATIONS.json'),predictions_sha256=sha(dest/'pred.tsv'),
+        records=records,time_utc=now())
+    write(receipt,result)
+    return result
+
+
+def development_completed(out):
+    from color_noise_repair import ARMS,registration
+    registration(out);complete=[];pending=[]
+    for seed in range(3):
+        for arm in ARMS:
+            if not (out/'cells'/arm/f's{seed}'/'result.json').exists():
+                pending.append(f'{arm}/s{seed}');continue
+            complete.extend(development_cell(out,arm,seed)['records'])
+    print(json.dumps(dict(state='partial TRAIN diagnostics; no selection',pending=pending,statistics=complete),allow_nan=False),flush=True)
+
+
 def select(out):
     from color_noise_repair import ARMS, registration, read, write, sha
     registration(out)
     if read(out/'CONTROL_PARITY.json')['pass_all'] is not True:
         raise ValueError('original control replay must be resolved before selection')
-    p=read(out/'DEVELOPMENT_POPULATIONS.json')
-    if p['registration_sha256']!=sha(out/'REGISTRATION.json') or sha(p['table'])!=p['table_sha256']:
-        raise ValueError('development inputs changed')
-    from v2_lodo_mlp import predict
-    from lib.zen_stats import panel_batch
-    target=pq.read_table(p['table'],columns=['human_score'])['human_score'].to_numpy()
-    jobs=[];records=[];models={}
+    records=[];models={}
     for seed in range(3):
         for arm in ARMS:
-            cell=out/'cells'/arm/f's{seed}';r=read(cell/'result.json')
-            model=Path(r['packed_model'])
-            if (r['execution_contract']!='registered-fit' or r['selection']['selected_epoch']!=119
-                    or r['epochs']!=120 or r['pairs_per_epoch']!=50000 or sha(model)!=r['packed_model_sha256']):
-                raise ValueError('registered full fit/packing missing: '+str(cell))
-            dest=out/'development'/arm/f's{seed}';dest.mkdir(parents=True,exist_ok=False)
-            pred=predict(model,Path(p['table']),dest/'pred.tsv')
-            if len(pred)!=len(target):raise ValueError('development prediction coverage differs')
-            models[f'{arm}/s{seed}']=dict(path=str(model),sha256=sha(model),result_sha256=sha(cell/'result.json'))
-            for name,indices in p['populations'].items():
-                jobs.append((f'{arm}/s{seed}/{name}',pred[indices],target[indices]))
-                records.append(dict(arm=arm,seed=seed,population=name,rows=len(indices)))
-    stats=panel_batch(jobs)
-    for r,s in zip(records,stats,strict=True):
-        if s['n_dropped'] or not np.isfinite(s['srocc_signed']):raise ValueError('incomplete canonical statistics')
-        r['statistics']=s
+            cell=development_cell(out,arm,seed)
+            records.extend(cell['records']);models[f'{arm}/s{seed}']=cell['model']
     selected,decisions=choose(records)
     write(out/'TRAIN_SELECTION.json',dict(schema='color-noise-train-choice-v1',state='frozen-before-external-read',
         registration_sha256=sha(out/'REGISTRATION.json'),population_sha256=sha(out/'DEVELOPMENT_POPULATIONS.json'),
@@ -307,14 +333,14 @@ def report(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['assessment-plan','prepare','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
+    p.add_argument('mode',choices=['assessment-plan','prepare','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'assessment-plan':assessment_plan,'prepare':prepare,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
+    {'assessment-plan':assessment_plan,'prepare':prepare,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
 
 
 if __name__=='__main__':main()
