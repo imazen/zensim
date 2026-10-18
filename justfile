@@ -2558,5 +2558,21 @@ color-noise-freeze output:
     just color-noise-assessment select {{quote(output)}}
     just color-noise-ensemble score {{quote(output)}}
 
+color-noise-assess output:
+    test -f {{quote(output + "/ensembles/TRAIN_SELECTION.json")}}
+    just color-noise-assessment external {{quote(output)}}
+    just color-noise-ensemble external {{quote(output)}}
+    just color-noise-assessment dashboard {{quote(output)}}
+    just color-noise-assessment dashboard {{quote(output + "/ensembles")}}
+    just color-noise-assessment report {{quote(output)}}
+
+color-noise-verify output:
+    scripts/v_next/gauntlet_gates.sh {{quote(output + "/gauntlet.html")}} {{quote(output)}}
+    scripts/v_next/gauntlet_gates.sh {{quote(output + "/ensembles/gauntlet.html")}} {{quote(output + "/ensembles")}}
+    just gauntlet-reference-view {{quote(output + "/gauntlet.html")}} mos
+    just gauntlet-reference-view {{quote(output + "/gauntlet.html")}} jnd
+    just gauntlet-reference-view {{quote(output + "/ensembles/gauntlet.html")}} mos
+    just gauntlet-reference-view {{quote(output + "/ensembles/gauntlet.html")}} jnd
+
 color-noise-check:
     TMPDIR="$HOME/tmp" PYTHONPATH=scripts:scripts/rev4_featpot python3 -m unittest scripts.tests.test_color_noise_repair scripts.tests.test_e33_package
