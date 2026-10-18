@@ -163,9 +163,21 @@ def development_cell(out,arm,seed):
     for (name,_,_),st in zip(jobs,stats,strict=True):
         if st['n_dropped'] or not np.isfinite(st['srocc_signed']):raise ValueError('incomplete canonical statistics')
         records.append(dict(arm=arm,seed=seed,population=name,rows=len(p['populations'][name]),statistics=st))
+    # Report-only severity diagnostics. The registered pooled choice is unchanged.
+    ladders={}
+    for source in ['kadid','tid2013']:
+        for i in p['populations'][source+'_noise']:
+            row=p['rows'][i];key=(source,row['ref_basename'],row['codec'])
+            ladders.setdefault(key,[]).append(i)
+    local_jobs=[('/'.join(key),pred[indices],target[indices]) for key,indices in sorted(ladders.items())]
+    local_stats=panel_batch(local_jobs,stats='srocc');local=[]
+    for ((key,indices),st) in zip(sorted(ladders.items()),local_stats,strict=True):
+        if st['n_dropped'] or not np.isfinite(st['srocc_signed']):raise ValueError('incomplete local-noise diagnostic')
+        local.append(dict(arm=arm,seed=seed,source=key[0],reference=key[1],codec=key[2],
+            rows=len(indices),indices=indices,pred=pred[indices].tolist(),target=target[indices].tolist(),statistics=st))
     result=dict(schema='color-noise-development-cell-v1',model=binding,
         population_sha256=sha(out/'DEVELOPMENT_POPULATIONS.json'),predictions_sha256=sha(dest/'pred.tsv'),
-        records=records,time_utc=now())
+        records=records,local_noise=local,time_utc=now())
     write(receipt,result)
     return result
 
@@ -186,16 +198,17 @@ def select(out):
     registration(out)
     if read(out/'CONTROL_PARITY.json')['pass_all'] is not True:
         raise ValueError('original control replay must be resolved before selection')
-    records=[];models={}
+    records=[];models={};local=[]
     for seed in range(3):
         for arm in ARMS:
             cell=development_cell(out,arm,seed)
             records.extend(cell['records']);models[f'{arm}/s{seed}']=cell['model']
+            local.extend(cell['local_noise'])
     selected,decisions=choose(records)
     write(out/'TRAIN_SELECTION.json',dict(schema='color-noise-train-choice-v1',state='frozen-before-external-read',
         registration_sha256=sha(out/'REGISTRATION.json'),population_sha256=sha(out/'DEVELOPMENT_POPULATIONS.json'),
         assessment_plan_sha256=sha(out/'ASSESSMENT_PLAN.json'),
-        selected=selected,assessment_seed=0,decisions=decisions,models=models,statistics=records,
+        selected=selected,assessment_seed=0,decisions=decisions,models=models,statistics=records,local_noise=local,
         selection_inputs='TRAIN-development only; no external/LIVE input',qualification=False,time_utc=now()))
     print('Frozen TRAIN decision:',selected,decisions,flush=True)
 
@@ -298,7 +311,18 @@ def report(out):
         '<div class="scroll"><table><tr><th>Arm</th><th>Human mean Δ</th><th>Noise Δ</th>'+''.join('<th>'+html.escape(s)+' Δ</th>' for s in SOURCES)+'<th>Eligible</th></tr>']
     for r in choice['decisions']:
         text.append('<tr><td>'+r['arm']+'</td>'+''.join(f'<td>{v:+.5f}</td>' for v in [r['human_mean_delta'],r['noise_mean_delta'],*[r['source_mean_delta'][s] for s in SOURCES]])+'<td>'+str(r['eligible'])+'</td></tr>')
-    text.append('</table></div><h2>Frozen external assessment</h2><p>Each cell shows signed SROCC / fitted PLCC. Full canonical statistics, source-cluster SROCC intervals and every point are in the downloadable JSONs and scatter comparison.</p><div class="scroll"><table><tr><th>Corpus</th>'+''.join('<th>'+s+'</th>' for s in labels)+'</tr>')
+    text.append('</table></div>')
+    if choice.get('local_noise'):
+        text.append('<h2>TRAIN noise severity within each reference</h2><p>Report-only checks of individual reference × distortion-type ladders. Each cell below is the mean / minimum of canonical signed SROCCs across those ladders. Individual predictions, targets and statistics are retained in TRAIN_SELECTION.json. These checks do not change the registered pooled selection rule.</p><table><tr><th>Arm / seed</th><th>KADID</th><th>TID2013</th></tr>')
+        for arm in ARMS:
+            for seed in range(3):
+                text.append('<tr><td>'+arm+f' / {seed}</td>')
+                for source in ['kadid','tid2013']:
+                    values=[r['statistics']['srocc_signed'] for r in choice['local_noise'] if r['arm']==arm and r['seed']==seed and r['source']==source]
+                    text.append(f'<td>{float(np.mean(values)):.4f} / {min(values):.4f} ({len(values)} ladders)</td>')
+                text.append('</tr>')
+        text.append('</table>')
+    text.append('<h2>Frozen external assessment</h2><p>Each cell shows signed SROCC / fitted PLCC. Full canonical statistics, source-cluster SROCC intervals and every point are in the downloadable JSONs and scatter comparison.</p><div class="scroll"><table><tr><th>Corpus</th>'+''.join('<th>'+s+'</th>' for s in labels)+'</tr>')
     ranks=[]
     for corpus in EXTERNAL:
         text.append('<tr><td>'+corpus+(' (exposed diagnostic)' if corpus=='live' else '')+'</td>')
