@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Trace frozen LIVE color-noise failures through declared inputs, signed affine/ReLU matrices and output calibration; retain exact native feature probes and independent pixel/matrix checks without modifying the models.
+
 - Surface LIVE near-zero human-quality image pairs from frozen gauntlet scores, with original PNGs, native scores and the existing plotted coordinates.
 
 - Reuse retained-map accumulation storage, dispatch independent bin rows once per band, and keep underfilled folds on serial SIMD while preserving output bits and live-result ownership. Add measured map-grid and thread-scaling diagnostics ([report](benchmarks/perf2_2026-10-18.md); `ff73cd55`, `3c224aa1`, `6c1b2a27`).

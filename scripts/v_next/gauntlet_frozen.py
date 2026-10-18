@@ -499,15 +499,314 @@ def live_images(source, out):
     print(json.dumps(dict(primary=len(primary),additional=len(other),images=len(copied),html=str(out/'index.html'))),flush=True)
 
 
+def live_trace(source, out):
+    """Trace stored LIVE color noise with exact native feature interventions.
+
+    Interventions are off-manifold feature probes, not new images or fitted
+    models. Every reported counterfactual is scored by the retained serving
+    executable, including its derived products and output calibration.
+    """
+    source = source.resolve()
+    if out.exists():raise ValueError('refusing to overwrite trace: '+str(out))
+    out.mkdir(parents=True)
+    data = read(source/'SCORED_INPUTS.json')['datasets']['live']
+    cases = [i for i,y in enumerate(data['target']) if abs(y)<=.12 and Path(data['pixels'][i]['dist_path']).parent.name=='wn']
+    cases.sort(key=lambda i: -sum(read(source/(n+'.fulleval.json'))['per_pair']['live']['normalized_pred'][i]-data['target'][i] for n in MODELS))
+    bank = source/'scoring/banks/live'
+    table = pq.read_table(bank/'features.parquet')
+    columns = sorted([c for c in table.column_names if c.startswith('f') and c[1:].isdigit()],key=lambda c:int(c[1:]))
+    if columns != ['f'+str(i) for i in range(len(columns))]:raise ValueError('nonidentity cached feature layout')
+    matrix = np.column_stack([table[c].to_numpy() for c in columns])
+    for i,p in enumerate(data['pixels']):
+        if table['pair_key'][i].as_py()!=p['pair_key']:raise ValueError('cached pixel row mismatch')
+    def cell(fid):
+        if 0<=fid<156:return fid//39,(fid%39)//13,'basic',fid%13
+        if 156<=fid<228:
+            k=(fid-156)//6;return k//3,k%3,'peaks',(fid-156)%6
+        if 372<=fid<720:
+            k=(fid-372)//29;return k//3,k%3,'v2',(fid-372)%29
+        return None
+    difference = [i for i in range(len(columns)) if (c:=cell(i)) is not None and not (c[2]=='v2' and c[3]==21)]
+    groups = {'fine_XB':[i for i in difference if cell(i)[0]==0 and cell(i)[1]!=1],
+              'all_XB':[i for i in difference if cell(i)[1]!=1],
+              'all_Y':[i for i in difference if cell(i)[1]==1]}
+    groups.update({f's{s}_{"XYB"[ch]}':[i for i in difference if cell(i)[:2]==(s,ch)] for s in range(4) for ch in range(3)})
+    groups.update({f's{s}_all':[i for i in difference if cell(i)[0]==s] for s in range(4)})
+    groups.update({family:[i for i in difference if cell(i)[2]==family] for family in ['basic','v2']})
+    inspect_bin=Path('/mnt/data/fitv2-canon/zenpredict-target/release/zenpredict')
+    inspected={}
+    for name in MODELS:
+        model=source/'models'/(name+'.bin')
+        if sha(model)!=MODELS[name]:raise ValueError('frozen model hash mismatch: '+name)
+        doc=json.loads(subprocess.check_output([str(inspect_bin),'inspect',str(model),'--weights'],text=True))
+        write(out/(name+'.inspect.json'),doc);inspected[name]=doc
+    md = lambda doc:{m['key']:m for m in doc['metadata']}
+    direct = [int(x) for x in md(inspected['diff-410'])['zentrain.feature_ids']['value_text'].split()]
+    if len(direct)!=410 or not set(direct)<=set(difference):raise ValueError('unexpected direct input identity')
+    # Native baseline, removals, response paths, single-feature removals for
+    # the worst case, and complete same-source controls from the exposed bank.
+    rows=[]; probes=[]
+    def add(i,label,row):probes.append(dict(index=i,probe=label));rows.append(row)
+    for i in cases:
+        base=matrix[i].copy();add(i,'baseline',base)
+        for name,ids in groups.items():
+            row=base.copy();row[ids]=0;add(i,'zero:'+name,row)
+        for factor in [.0,.25,.5,.75,1.,1.25,1.5,2.]:
+            row=base.copy();row[direct]*=factor;add(i,'scale_all_differences:'+str(factor),row)
+        if i==cases[0]:
+            for fid in direct:
+                row=base.copy();row[fid]=0;add(i,'zero:f'+str(fid),row)
+    worst=cases[0]
+    controls=[i for i,p in enumerate(data['pixels']) if p['ref_path']==data['pixels'][worst]['ref_path']]
+    for i in controls:add(i,'same_source_actual',matrix[i].copy())
+    wire=out/'probes.f64.bin'
+    with wire.open('xb') as f:
+        f.write(struct.pack('<II',len(columns),len(rows)));f.write(np.asarray(rows,dtype='<f8').tobytes())
+    scores={}; coverage={}; first_layer={}
+    for name,doc in inspected.items():
+        dest=out/(name+'.scores.txt')
+        with dest.open('x') as f,(out/(name+'.score.log')).open('x') as log:
+            subprocess.run([str(PREDICT),'--bake',str(source/'models'/(name+'.bin')),'--features-file',str(wire),'--f64-wire','--production'],check=True,stdout=f,stderr=log,env={**os.environ,'ZENSIM_FORMULA_REV':'5'})
+        values=[float(v) for v in dest.read_text().splitlines()]
+        if len(values)!=len(probes) or not np.isfinite(values).all():raise ValueError('native probe result incomplete')
+        for p,value in zip(probes,values,strict=True):p.setdefault('scores',{})[name]=value
+        for p,value in zip(probes,values,strict=True):
+            if p['probe'] in ['baseline','same_source_actual'] and value != data['scores'][name]['pred'][p['index']]:
+                raise ValueError('native baseline differs from dashboard: '+name)
+        scores[name]=values
+        meta=md(doc);ids=[int(x) for x in meta['zentrain.feature_ids']['value_text'].split()]
+        coverage[name]={f's{s}_{"XYB"[ch]}':[i for i in ids if cell(i) is not None and cell(i)[:2]==(s,ch)] for s in range(4) for ch in range(3)}
+        # Matrix-only arithmetic diagnostic; score conclusions above always
+        # come from the complete Rust serving surface, never this NumPy walk.
+        entries=[('in',i) for i in ids]
+        if 'zensim.derived_inputs' in meta:
+            entries=[tuple([parts[0],*[int(x) for x in parts[1:]]]) for line in meta['zensim.derived_inputs']['value_text'].splitlines()[1:] if (parts:=line.split())]
+        l0=doc['layers'][0];w=np.asarray(l0['weights']).reshape(l0['in_dim'],l0['out_dim'])
+        if any(float(v)!=0 for v in doc['scaler_mean']) or any(float(v)!=0 for v in l0['biases']):raise ValueError('trace requires registered bias-free zero-centered model')
+        layer_rows=[]
+        for i in cases+controls:
+            f=matrix[i].astype(np.float32)
+            x=np.asarray([f[e[1]] if e[0]=='in' else np.float32(f[e[1]]*f[e[2]]) for e in entries],dtype=np.float32)
+            x=(x-np.asarray(doc['scaler_mean'],dtype=np.float32))/np.asarray(doc['scaler_scale'],dtype=np.float32)
+            contrib=x.astype(float)[:,None]*w
+            positive=np.maximum(contrib,0).sum(axis=0);negative=np.minimum(contrib,0).sum(axis=0);z=positive+negative
+            layer_rows.append(dict(index=i,active_units=int((z>0).sum()),positive_preactivation_sum=float(positive.sum()),negative_preactivation_sum=float(negative.sum()),after_cancellation_positive_sum=float(np.maximum(z,0).sum())))
+        first_layer[name]=dict(note='Independent f64 matrix diagnostic on f32 standardized inputs; exact served-score claims use native probe output.',negative_weights=int((w<0).sum()),positive_weights=int((w>0).sum()),rows=layer_rows)
+    details=[]
+    for i in cases+controls:
+        p=data['pixels'][i]
+        details.append(dict(index=i,pixels=p,human=data['target'][i],features={str(fid):float(matrix[i,fid]) for fid in difference},
+            scores={name:data['scores'][name]['pred'][i] for name in MODELS}))
+    result=dict(schema='live-color-noise-trace-v1',build_commit=subprocess.check_output(['jj','log','--no-graph','-r','@','-T','commit_id'],text=True).strip(),
+        source=str(source),source_sha256=sha(source/'SCORED_INPUTS.json'),owner_sha256=sha(__file__),
+        predictor_sha256=sha(PREDICT),inspector_sha256=sha(inspect_bin),feature_sha256=sha(bank/'features.parquet'),
+        interpretation='Frozen exposed LIVE diagnostic; no training or gate changes. Zero/removal/scaling probes are off-manifold features and do not establish a pixel intervention.',
+        cases=cases,worst=worst,controls=controls,coverage=coverage,first_layer=first_layer,details=details,probes=probes)
+    write(out/'TRACE.json',result)
+    print('native baselines exactly reproduce all displayed scores; trace:',out/'TRACE.json',flush=True)
+    for p in probes:
+        if p['index']==worst and p['probe'] in ['baseline','zero:fine_XB','zero:all_XB','zero:all_Y','zero:s0_all','zero:basic','zero:v2','scale_all_differences:0.5','scale_all_differences:2.0']:
+            print(p,flush=True)
+
+
+def live_matrix(source, out):
+    """Independently check matrix accounting against frozen native scores."""
+    import re
+    from PIL import Image
+    from scipy.interpolate import PchipInterpolator
+    trace=read(source/'TRACE.json');original=Path(trace['source'])
+    if out.exists():raise ValueError('refusing to overwrite matrix accounting')
+    out.mkdir(parents=True)
+    registry=(REPO/'zensim/src/feature_defs.rs').read_text()
+    basic_text=registry.split('pub(crate) static BASIC:',1)[1].split('pub(crate) static',1)[0]
+    v2_text=registry.split('pub(crate) static V2:',1)[1].split('pub(crate) static',1)[0]
+    basic=dict((int(k),v) for k,v in re.findall(r'v1(?:_\w+)?\(\s*F,\s*(\d+),\s*"([^"]+)"',basic_text))
+    v2=dict((int(k),v) for k,v in re.findall(r'v2sig(?:_rev)?\(\s*(\d+),\s*"([^"]+)"',v2_text))
+    if len(basic)!=13 or len(v2)!=29:raise ValueError('canonical feature registry parse mismatch')
+    def label(fid):
+        if fid<156:s,ch,local=fid//39,(fid%39)//13,fid%13;family='basic';name=basic[local]
+        elif 372<=fid<720:k=(fid-372)//29;s,ch=k//3,k%3;family='v2';name=v2[(fid-372)%29]
+        else:raise ValueError('unexpected input family')
+        return f'{family}.{name}.s{s}.{"XYB"[ch]}'
+    keys=pq.read_table(original/'scoring/banks/live/keys.parquet').to_pylist()
+    data=read(original/'SCORED_INPUTS.json')['datasets']['live']
+    tab=pq.read_table(original/'scoring/banks/live/features.parquet')
+    native={n:{p['index']:p['scores'][n] for p in trace['probes'] if p['probe'] in ['baseline','same_source_actual']} for n in MODELS}
+    result=dict(schema='live-color-noise-matrix-v1',source_trace_sha256=sha(source/'TRACE.json'),owner_sha256=sha(__file__),
+        registry_sha256=sha(REPO/'zensim/src/feature_defs.rs'),matrix_method='Independent f64 affine/ReLU accounting on the declared f32 gathered/product/standardized inputs; SciPy PCHIP checks the output spline against native scores. Never used as the scorer for interventions.',models={},pixels=[])
+    for i in trace['cases']:
+        keyrow=keys[i];arrays=[]
+        for side,path in [('reference',keyrow['ref_path']),('distorted',keyrow['dist_path'])]:
+            if sha(path)!=keyrow[side+'_file_sha256']:raise ValueError('original file mismatch')
+            with Image.open(path) as image:a=np.asarray(image.convert('RGB'))
+            if hashlib.sha256(a.tobytes()).hexdigest()!=keyrow[side+'_pixels_sha256']:raise ValueError('independent decoded pixel mismatch')
+            arrays.append(a.astype(float))
+        delta=arrays[1]-arrays[0]
+        result['pixels'].append(dict(index=i,reference=Path(keyrow['ref_path']).stem,
+            width=keyrow['width'],height=keyrow['height'],independent_native_rgb_hashes_match=True,
+            rgb_error_rms=np.sqrt(np.mean(delta**2,axis=(0,1))).tolist(),
+            rgb_error_correlation=np.corrcoef(delta.reshape(-1,3).T).tolist()))
+    for n in MODELS:
+        doc=read(source/(n+'.inspect.json'));meta={m['key']:m for m in doc['metadata']}
+        ids=[int(x) for x in meta['zentrain.feature_ids']['value_text'].split()]
+        entries=[('in',i) for i in ids]
+        if 'zensim.derived_inputs' in meta:
+            entries=[tuple([p[0],*[int(x) for x in p[1:]]]) for line in meta['zensim.derived_inputs']['value_text'].splitlines()[1:] if (p:=line.split())]
+        l0,l1=doc['layers']
+        if l0['activation']!='relu' or l1['activation']!='identity' or l1['out_dim']!=1:raise ValueError('unregistered matrix architecture')
+        w0=np.asarray(l0['weights']).reshape(l0['in_dim'],l0['out_dim']);w1=np.asarray(l1['weights'])
+        payload=bytes.fromhex(meta['zentrain.output_calibration_spline']['value_hex']);count=struct.unpack_from('<I',payload)[0]
+        knots=np.asarray(struct.unpack_from('<'+'f'*(count*2),payload,4)).reshape(count,2)
+        spline=PchipInterpolator(knots[:,0],knots[:,1]);derivative=spline.derivative()
+        if not (np.diff(knots[:,0])>0).all() or not (np.diff(knots[:,1])>=0).all():raise ValueError('nonmonotone calibration')
+        rows=[];errors=[]
+        for i in dict.fromkeys(trace['cases']+trace['controls']):
+            f=np.asarray([tab['f'+str(k)][i].as_py() for k in range(720)],dtype=np.float32)
+            x=np.asarray([f[e[1]] if e[0]=='in' else np.float32(f[e[1]]*f[e[2]]) for e in entries],dtype=np.float32)
+            x=(x-np.asarray(doc['scaler_mean'],dtype=np.float32))/np.asarray(doc['scaler_scale'],dtype=np.float32)
+            terms=x.astype(float)[:,None]*w0;z=terms.sum(axis=0)+np.asarray(l0['biases']);h=np.maximum(z,0)
+            network=float(h@w1+l1['biases'][0])
+            if network<knots[0,0]:mapped=float(knots[0,1]+derivative(knots[0,0])*(network-knots[0,0]))
+            elif network>knots[-1,0]:mapped=float(knots[-1,1]+derivative(knots[-1,0])*(network-knots[-1,0]))
+            else:mapped=float(spline(network))
+            mapped=min(100.,mapped);error=abs(mapped-native[n][i]);errors.append(error)
+            if error>1e-3:raise ValueError(f'independent matrix accounting differs from native by {error}: {n}/{i}')
+            rows.append(dict(index=i,network_before_calibration=network,after_calibration=mapped,native=native[n][i],absolute_error=error,active_units=int((z>0).sum())))
+            if i==trace['worst']:
+                # Fixed-active-set decomposition sums to the shadow network
+                # output exactly; single-feature probes capture gate changes.
+                contribution=terms[:,z>0]@w1[z>0]
+                total=float(np.sum(contribution)+l1['biases'][0])
+                if abs(total-network)>1e-8:raise ValueError('raw matrix accounting does not sum')
+                inputs=[dict(position=k,entry=list(e),name=label(e[1])+(' × '+label(e[2]) if e[0]=='product' else ''),standardized=float(x[k]),raw_score_contribution=float(contribution[k])) for k,e in enumerate(entries)]
+                hidden=[dict(unit=j,preactivation=float(z[j]),positive_terms=float(np.maximum(terms[:,j],0).sum()),negative_terms=float(np.minimum(terms[:,j],0).sum()),active=bool(z[j]>0),output_weight=float(w1[j]),score_contribution=float(h[j]*w1[j])) for j in range(len(z))]
+                result['models'].setdefault(n,{}).update(worst_inputs=inputs,worst_hidden=hidden,raw_output_bias=l1['biases'][0])
+        result['models'].setdefault(n,{}).update(rows=rows,max_native_absolute_error=max(errors),calibration_knots=knots.tolist())
+    write(out/'MATRIX.json',result)
+    print('Independent pixel hashes match all ten native decodes. Matrix maximum errors:',{n:d['max_native_absolute_error'] for n,d in result['models'].items()},flush=True)
+
+
+def live_report(source, out):
+    """Render the finished native probes and independently checked matrix."""
+    t=read(source/'TRACE.json');m=read(out/'MATRIX.json');original=Path(t['source'])
+    if sha(source/'TRACE.json')!=m['source_trace_sha256']:raise ValueError('matrix/trace binding mismatch')
+    if (out/'index.html').exists():raise ValueError('refusing to overwrite report')
+    names=list(MODELS);worst=t['worst']
+    probe={p['probe']:p['scores'] for p in t['probes'] if p['index']==worst}
+    inputs={n:read(source/(n+'.inspect.json')) for n in names}
+    manifests={n:read(original/'models'/(n+'-training-manifest.json')) for n in names}
+    details={d['index']:d for d in t['details']}
+    # All same-source real noise stimuli, with their exposed human labels;
+    # no selection or model-fitting claim is made from these diagnostics.
+    controls=sorted([i for i in t['controls'] if Path(details[i]['pixels']['dist_path']).parent.name=='wn'],key=lambda i:-details[i]['human'])
+    def row(label,values):return '| '+label+' | '+' | '.join(f'{v:.4f}' for v in values)+' |'
+    lines=['# LIVE color noise: where the response is lost','',
+        '**Finding:** decoded color noise reaches the feature matrix. The shared input mask omits finest-scale chroma, and signed first-layer weights cancel substantial remaining damage before ReLU. The two fragility-product models show the largest overrating on the first case. This is a frozen-model finding, not a repaired or qualified model.','',
+        '## First pair: manfishing / wn/img41.png','',
+        'Human quality is −0.002388 (the plotted MOS axis is `1 − DMOS/100`). Independent Pillow RGB hashes reproduce the native decoder hashes for all ten severe noise pairs. The first image is634×438; per-channel RGB RMS error is '+', '.join(f'{v:.4f}' for v in m['pixels'][0]['rgb_error_rms'])+' on the0–255 scale.','',
+        '| Stage / native feature probe | diff+frag-820 | W-C | diff-410 |','|---|---:|---:|---:|',
+        row('Stored and reproduced native score',[probe['baseline'][n] for n in names]),
+        row('Zero finest-scale X/B errors',[probe['zero:fine_XB'][n] for n in names]),
+        row('Zero all v2 difference features',[probe['zero:v2'][n] for n in names]),
+        row('Zero f136: basic.edge_det_mean.s3.Y',[probe['zero:f136'][n] for n in names]),'',
+        'Zero/removal probes are off-manifold feature interventions, not edited images. Fragility remains fixed and the native serving executable recomputes every product and calibration. Removing a whole block changes which ReLU units fire; individual contributions cannot be added to predict that removal.','',
+        '## Path through the matrix','',
+        '1. **Extraction sees the damage.** Finest-scale basic SSIM error is '+', '.join(f'{details[worst]["features"][str(fid)]:.6f}' for fid in [0,13,26])+' for X/Y/B. Even scale1 color SSIM errors are '+', '.join(f'{details[worst]["features"][str(fid)]:.6f}' for fid in [39,65])+'. The decoder or color transform has not collapsed these differences to zero.','',
+        '2. **Input selection discards full-resolution color.** All three packed models read no scale0 X or B input. They read scale0 Y and scales1–3 X/Y/B. This is the declared by_v2fy-derived feature selection, not a missing-column/NaN fill. Setting every finest-scale color error to zero is bit-identical on all ten cases. The removed peaks are also unread.','',
+        '3. **Remaining errors can raise quality.** The first affine layer has mixed signs, followed by ReLU; its output weights are nonpositive and its output bias is100. Increasing a positive error through a negative first-layer weight can turn off distance units and raise the score. `--nonneg-distance` anchors identity and nonnegative distance; it does not impose monotonicity in each error input. The native f136 probe above confirms the effect in all three models.','',
+        '4. **Calibration does not create the reversal.** Independent matrix-plus-monotone-spline reconstruction matches native scores on all ten severe cases plus all same-source controls. Max absolute discrepancies: '+', '.join(n+' '+f'{m["models"][n]["max_native_absolute_error"]:.9f}' for n in names)+'. Before calibration, the worst-case network outputs are '+', '.join(f'{next(r for r in m["models"][n]["rows"] if r["index"]==worst)["network_before_calibration"]:.6f}' for n in names)+'.','',
+        '## Real-image ordering failure','',
+        '| manfishing stimulus | Human quality | diff+frag-820 | W-C | diff-410 |','|---|---:|---:|---:|---:|']
+    for i in controls:
+        d=details[i];lines.append('| '+Path(d['pixels']['dist_path']).name+' | '+f'{d["human"]:.6f}'+' | '+' | '.join(f'{d["scores"][n]:.4f}' for n in names)+' |')
+    lines+=['',
+        f'All three rate the severe img41 above the real, less-damaged img73 (human{details[152]["human"]:.6f}). These are actual images and exact stored/native scores, so the failure is not an artifact of feature ablation or rank-normalized plotting.','',
+        '## Training-recipe clue and limits','',
+        'Every frozen training manifest records `cf98`: auxiliary coverage families '+', '.join(manifests[names[0]]['coverage_leg']['families'])+',17600 selected rows. Color and noise were excluded from that auxiliary coverage leg. This does not mean all training data lacked noise, and its causal contribution has not been measured. These exposed LIVE examples are diagnostic only; they must not become fit or model-selection data. A remedy needs TRAIN-only controls that distinguish finest-chroma coverage from learned cancellation, then a separately frozen assessment. No feature selection, weights, gate, threshold or model was changed.','',
+        'Full native probes: [TRACE.json](../'+source.name+'/TRACE.json). Matrix accounting: [MATRIX.json](MATRIX.json). Original [image inspection](../gauntlet-live-zero-2026-10-18/index.html). All original gauntlet evidence remains unchanged.']
+    (out/'REPORT.md').write_text('\n'.join(lines)+'\n')
+    # Render this report's small Markdown subset without network dependencies.
+    body=[];table_open=False
+    for line in lines:
+        if line.startswith('|'):
+            if set(line.replace('|','').replace(':','').replace('-','').strip())==set():continue
+            if not table_open:body.append('<div class="scroll"><table>');table_open=True
+            tag='th' if 'Stage /' in line or 'manfishing stimulus' in line else 'td'
+            body.append('<tr>'+''.join('<'+tag+'>'+html.escape(v.strip())+'</'+tag+'>' for v in line.strip('|').split('|'))+'</tr>');continue
+        if table_open:body.append('</table></div>');table_open=False
+        if line.startswith('# '):body.append('<h1>'+html.escape(line[2:])+'</h1>')
+        elif line.startswith('## '):body.append('<h2>'+html.escape(line[3:])+'</h2>')
+        elif line:body.append('<p>'+html.escape(line)+'</p>')
+    if table_open:body.append('</table></div>')
+    # Preserve the report's actual resource hyperlinks in rendered prose.
+    import re
+    text='\n'.join(body)
+    text=re.sub(r'\[([^\]]+)\]\(([^)]+)\)',r'<a href="\2">\1</a>',text)
+    text=re.sub(r'\*\*([^*]+)\*\*',r'<b>\1</b>',text)
+    text=re.sub(r'`([^`]+)`',r'<code>\1</code>',text)
+    images=out/'images';images.mkdir()
+    image_records=[];figures=[]
+    for i in [worst,152]:
+        p=Path(details[i]['pixels']['dist_path']);dest=images/(sha(p)+'.png');shutil.copyfile(p,dest)
+        if sha(p)!=sha(dest):raise ValueError('report image copy mismatch')
+        image_records.append(dict(index=i,path=str(p),sha256=sha(p)))
+        figures.append(f'<figure><a href="images/{dest.name}" target="_blank"><img src="images/{dest.name}" alt="{html.escape(p.name)}"></a><figcaption>{html.escape(p.name)} · human {details[i]["human"]:.6f}</figcaption></figure>')
+    text=text.replace('<h2>Real-image ordering failure</h2>','<h2>Real-image ordering failure</h2><div class="pair">'+''.join(figures)+'</div>')
+    (out/'index.html').write_text('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LIVE color-noise matrix trace</title><style>body{max-width:1100px;margin:30px auto;padding:0 22px;font:16px system-ui;background:#10141d;color:#e4eaf5;line-height:1.6}h1{font-size:28px}h2{font-size:21px;margin-top:32px}a{color:#8ecaff}td,th{padding:9px;border-bottom:1px solid #485166;text-align:right}td:first-child,th:first-child{text-align:left}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.scroll{overflow:auto}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}figure{margin:0}img{width:100%}code{font-size:14px}@media(max-width:650px){.pair{grid-template-columns:1fr}}</style>'+text+'</html>')
+    write(out/'REPORT_RECEIPT.json',dict(source_trace_sha256=sha(source/'TRACE.json'),matrix_sha256=sha(out/'MATRIX.json'),owner_sha256=sha(__file__),html_sha256=sha(out/'index.html'),images=image_records))
+    print('Report:',out/'index.html',flush=True)
+
+
+def move_intermediates(source, out):
+    """Relocate completed intermediates with original-inventory hash checks.
+
+    Caller explicitly authorizes removing these local copies after readback.
+    Final reports/JSON remain local, and old intermediate paths resolve via
+    directory symlinks so retained scientific receipts keep their meaning.
+    """
+    if out.exists():raise ValueError('refusing existing relocation destination')
+    inventory=read(source/'ARCHIVE_FILES.json')
+    groups=['pipal-png','pipal-aliases','pipal-png.attempt1-disguised-png-refusal','scoring']
+    out.mkdir(parents=True)
+    receipt=dict(schema='gauntlet-intermediate-relocation-v1',source=str(source),destination=str(out),
+        original_inventory_sha256=sha(source/'ARCHIVE_FILES.json'),groups=[])
+    for group in groups:
+        root=source/group
+        if not root.is_dir() or root.is_symlink():raise ValueError('unexpected local intermediate: '+group)
+        records=[r for r in inventory['files'] if r['relative'].startswith(group+'/')]
+        actual={str(p.relative_to(source)) for p in root.rglob('*') if p.is_file()}
+        if actual!={r['relative'] for r in records}:raise ValueError('intermediate population changed: '+group)
+        for i,r in enumerate(records,1):
+            src=source/r['relative'];dest=out/r['relative'];dest.parent.mkdir(parents=True,exist_ok=True)
+            if sha(src)!=r['sha256']:raise ValueError('original intermediate changed: '+str(src))
+            shutil.copyfile(src,dest)
+            if sha(dest)!=r['sha256'] or sha(src)!=r['sha256']:raise ValueError('NAS readback mismatch: '+str(src))
+            if i%1000==0:print(group,'hash verified',i,'/',len(records),flush=True)
+        # Delete only individually verified, inventory-named local files.
+        # Refuse any newly appearing file; preserve it rather than sweeping it.
+        for r in records:
+            src=source/r['relative']
+            if sha(src)!=r['sha256']:raise ValueError('intermediate changed before unlink: '+str(src))
+            src.unlink()
+        for p in sorted([p for p in root.rglob('*') if p.is_dir()],key=lambda p:len(p.parts),reverse=True):p.rmdir()
+        root.rmdir();root.symlink_to(out/group,target_is_directory=True)
+        receipt['groups'].append(dict(name=group,files=len(records),bytes=sum(r['bytes'] for r in records),
+            local_path=str(root),canonical_path=str(out/group),all_local_and_NAS_hashes_verified=True))
+        write(out/(group+'.complete.json'),receipt['groups'][-1])
+        print('relocated',group,receipt['groups'][-1],flush=True)
+    write(out/'RELOCATION.json',receipt);write(source/'INTERMEDIATES_RELOCATED.json',receipt)
+    (source/'INTERMEDIATES.pointer.md').write_text('# Gauntlet intermediate relocation\n\nHost checked: dev. Final dashboard and fulleval/statistical JSON remain local.\nOriginal intermediate paths are directory symlinks into `'+str(out)+'`.\n`INTERMEDIATES_RELOCATED.json` records each location and its complete original-inventory hash verification.\nThe original NAS archive remains at `/mnt/tower/output/zensim/gauntlet-2026-10-18/`.\n')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['prepare','score','audit-overlap','peer-containers','summary','live-images'])
+    parser.add_argument('mode',choices=['prepare','score','audit-overlap','peer-containers','summary','live-images','live-trace','live-matrix','live-report','move-intermediates'])
     parser.add_argument('--out',required=True,type=Path)
     parser.add_argument('--source',type=Path,help='Existing immutable gauntlet root for live-images')
     args=parser.parse_args()
-    if args.mode == 'live-images':
-        if args.source is None:parser.error('live-images requires --source')
-        live_images(args.source,args.out)
+    if args.mode in ['live-images','live-trace','live-matrix','live-report','move-intermediates']:
+        if args.source is None:parser.error(args.mode+' requires --source')
+        {'live-images':live_images,'live-trace':live_trace,'live-matrix':live_matrix,'live-report':live_report,'move-intermediates':move_intermediates}[args.mode](args.source,args.out)
         return
     args.out.mkdir(parents=True,exist_ok=True)
     {'prepare':prepare,'score':score,'audit-overlap':audit_overlap,'peer-containers':peer_containers,'summary':summary}[args.mode](args.out)

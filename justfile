@@ -2473,6 +2473,18 @@ gauntlet-frozen mode output:
 gauntlet-live-images source output:
     TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py live-images --source {{quote(source)}} --out {{quote(output)}}
 
+gauntlet-live-trace source output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py live-trace --source {{quote(source)}} --out {{quote(output)}}
+
+gauntlet-live-matrix source output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py live-matrix --source {{quote(source)}} --out {{quote(output)}}
+
+gauntlet-live-report source output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py live-report --source {{quote(source)}} --out {{quote(output)}}
+
+gauntlet-move-intermediates source destination:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py move-intermediates --source {{quote(source)}} --out {{quote(destination)}}
+
 gauntlet-build target:
     cargo build --release --locked -p zensim-validate --bin panel --target-dir {{quote(target)}}
 

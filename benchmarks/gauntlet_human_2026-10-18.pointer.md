@@ -76,3 +76,14 @@ http://dev.lan:3300/zensim/gauntlet-live-zero-2026-10-18/index.html
 Reproduce with `just gauntlet-live-images <existing-gauntlet-root> <new-output>`.
 The existing frozen transport owns this inspection; the original dashboard
 and its archive remain unchanged.
+
+The subsequent [color-noise matrix trace](gauntlet_live_color_trace_2026-10-18.md)
+locates the shared finest-chroma omission and learned cancellation, with native
+feature probes and independent pixel/matrix checks. The models remain unmodified.
+
+Completed PIPAL conversion/alias and scoring intermediates now reside under
+`/mnt/tower/output/zensim/gauntlet-2026-10-18-intermediates/`; directory symlinks
+preserve their original paths. Local `INTERMEDIATES.pointer.md` and
+`INTERMEDIATES_RELOCATED.json` record23,621 files /3,802,381,046 logical bytes
+with original-inventory and NAS SHA256 readbacks. Final dashboard and JSONs
+remain regular local files. The original frozen NAS archive is preserved.
