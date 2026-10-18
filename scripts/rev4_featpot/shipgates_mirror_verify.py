@@ -30,10 +30,12 @@ def verify_all(source, destination, complete_marker):
     left, right = inventory(source), inventory(destination)
     assert set(left) == set(right), "archive file population differs"
     files = []
-    for relative, src in sorted(left.items()):
+    for index, (relative, src) in enumerate(sorted(left.items()), 1):
         expected = sha(src)
         assert expected == sha(right[relative]) == sha(src), relative
         files.append(dict(relative=relative,sha256=expected,bytes=src.stat().st_size))
+        if index % 512 == 0:
+            print(f"Archive SHA256 verified {index}/{len(left)} files",flush=True)
     return dict(schema="complete-evidence-archive-files-v1",complete_marker=str(complete_marker),files=files,
                 file_count=len(files),total_bytes=sum(f["bytes"] for f in files))
 
@@ -66,6 +68,7 @@ def main():
         scope='incremental mirror while campaign is running; final completeness not claimed')
     if full is not None:
         receipt.update(scope='complete finished evidence tree SHA256-verified, plus three random encoded payloads',
+                       verifier_sha256=sha(Path(__file__)),
                        complete_marker=str(args.complete_marker),file_count=full['file_count'],total_bytes=full['total_bytes'],
                        archive_files_sha256=sha(args.source/'ARCHIVE_FILES.json'))
     for root in [args.source,args.destination]:
