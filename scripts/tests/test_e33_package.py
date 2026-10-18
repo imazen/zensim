@@ -13,7 +13,8 @@ if [ -f "$CAPS" ]; then
   envelope=$(python3 - "$CAPS" "$JOBSET" "$HOST" "$N" <<'PY_CAP'
 import json, subprocess, sys
 caps,js,host,want=sys.argv[1:]
-r=json.load(open(caps)).get(js)
+with open(caps) as stream:
+    r=json.load(stream).get(js)
 if r is None:
     print('- -')
 else:
