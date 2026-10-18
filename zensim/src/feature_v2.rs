@@ -4848,6 +4848,27 @@ fn rev5_run_jobs(
             job.result.retained_strips = None;
         }
         let cached_source = rev5_cached_window(reference, info, job.ch);
+        if let Some(output) = output.as_mut()
+            && retained_core_admits(&local)
+        {
+            rev5_blur_into_retained(info, &mut job.scratch, [cached_source, None], output);
+            let n = info.plane_w * info.wide_h();
+            let src = cached_source.unwrap_or(&job.scratch.src_wide[..n]);
+            rev5_retained_phase_b(
+                info,
+                [src, &job.scratch.dst_wide[..n]],
+                output.moment_rows(),
+                RetainedCoreWork {
+                    toggles,
+                    fold_v1,
+                    free: local.free_work(job.ch, scale),
+                },
+                &mut job.result,
+                &mut job.bands,
+            );
+            crate::fold_timing::stop(busy, crate::fold_timing::Phase::BBusy, scale);
+            return;
+        }
         rev5_job_blur(
             info,
             &mut job.scratch,
@@ -5260,6 +5281,14 @@ impl FoldRetention {
 
 #[cfg(feature = "threads")]
 include!("feature_v2_retained_rows.rs");
+#[cfg(feature = "threads")]
+#[path = "feature_v2_retained_core.rs"]
+mod retained_core;
+#[cfg(feature = "threads")]
+use retained_core::{
+    RetainedCoreWork, retained_core_admits, rev5_blur_into_retained, rev5_retained_phase_b,
+    rev5_retained_single_channel,
+};
 
 // Retain the basic direct-error plane with the same fused expression as its
 // fold owner. Setup and correctly rounded scalar tails remain outside SIMD.
@@ -8061,8 +8090,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         };
 
         // FUSED PER-CHANNEL FAN-OUT (fold-MT lane). When no channel reads
-        // another channel's phase-A output and nothing runs BETWEEN the two
-        // phases, the split fan-out below buys nothing and costs the walk's
+        // another channel's phase-A output, each worker can finish its own
+        // retention and phase B. A split fan-out costs the walk's
         // locality contract: it holds THREE channels' ~9 MB phase-A buffers
         // live across a barrier, then re-reads them from wherever they landed.
         // The serial arm already fuses A->B per channel for exactly that
@@ -8134,6 +8163,26 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         return;
                     }
                     let __t = crate::fold_timing::start();
+                    if rayon::current_num_threads() == 1
+                        && retained_core_admits(&local)
+                        && let Some(output) = output.as_mut()
+                    {
+                        rev5_retained_single_channel(
+                            &producer,
+                            &info,
+                            ch,
+                            (scr, acc),
+                            output,
+                            &local,
+                            RetainedCoreWork {
+                                toggles,
+                                fold_v1,
+                                free: local.free_work(ch, scale),
+                            },
+                        );
+                        crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
+                        return;
+                    }
                     if self_blur {
                         // Phase A is skipped whole; only the wide-window
                         // gather it also performs is still needed.

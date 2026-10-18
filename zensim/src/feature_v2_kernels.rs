@@ -213,6 +213,7 @@ pub(crate) struct OnlineMoments {
 #[cfg_attr(not(test), allow(dead_code))] // see struct note: exercised by the Terriberry parity test
 impl OnlineMoments {
     /// Two-pass moments within a small block; no subtraction of raw powers.
+    #[inline(never)]
     fn block(values: &[f64]) -> Self {
         if values.is_empty() {
             return Self::default();
@@ -7040,4 +7041,3 @@ fn global_stats_from_raw_moments(
     let (g_cgain, g_closs) = bounded_excess_pair(gvar2, gvar1, C_GCONTRAST);
     (dmean, g_cgain, g_closs)
 }
-
