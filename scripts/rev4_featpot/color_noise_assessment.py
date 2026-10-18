@@ -207,15 +207,23 @@ def parity(out, seeds=range(3)):
 
 
 def development_cell(out,arm,seed):
-    from color_noise_repair import read,write,sha
+    from color_noise_repair import read,write,sha,arm_record,confirm_seeds
     from v2_lodo_mlp import predict
     from lib.zen_stats import panel_batch
     p=read(out/'DEVELOPMENT_POPULATIONS.json')
     if p['registration_sha256']!=sha(out/'REGISTRATION.json') or sha(p['table'])!=p['table_sha256']:
         raise ValueError('development inputs changed')
     cell=out/'cells'/arm/f's{seed}';r=read(cell/'result.json');model=Path(r['packed_model'])
+    expected=arm_record(arm);reg=read(out/'REGISTRATION.json')
     if (r['execution_contract']!='registered-fit' or r['selection']['selected_epoch']!=119
-            or r['epochs']!=120 or r['pairs_per_epoch']!=50000 or sha(model)!=r['packed_model_sha256']):
+            or r['epochs']!=120 or r['pairs_per_epoch']!=50000 or sha(model)!=r['packed_model_sha256']
+            or r.get('spec')!=expected['spec'] or r.get('head')!='N' or r.get('seed_index')!=seed
+            or (r.get('init_seed'),r.get('sample_seed'))!=confirm_seeds(seed)
+            or r.get('kept_features')!=len(expected['columns'])
+            or r.get('derived_inputs')!=dict(token=expected['token'],declaration_sha256=expected['declaration_sha256'])
+            or r.get('frozen_sha256')!=reg['frozen_sha256']
+            or r.get('data_role_decision_sha256')!=reg['role_decision_sha256']
+            or r.get('output_stage')!='e33-identity-knot-tail2'):
         raise ValueError('registered full fit/packing missing: '+str(cell))
     binding=dict(path=str(model),sha256=sha(model),result_sha256=sha(cell/'result.json'))
     dest=out/'development'/arm/f's{seed}';receipt=dest/'CELL.json'

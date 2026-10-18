@@ -108,13 +108,16 @@ class DevelopmentBinding(unittest.TestCase):
     def test_cached_predictions_cannot_move_between_models_or_populations(self):
         import color_noise_assessment as assessment
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
-            root=Path(td);(root/'REGISTRATION.json').write_text('{}')
+            root=Path(td);reg=dict(frozen_sha256='frozen',role_decision_sha256='role');(root/'REGISTRATION.json').write_text(json.dumps(reg))
             table=root/'table.parquet';table.write_bytes(b'fixture')
             p=dict(registration_sha256=common.sha(root/'REGISTRATION.json'),table=str(table),table_sha256=common.sha(table))
             (root/'DEVELOPMENT_POPULATIONS.json').write_text(json.dumps(p))
             cell=root/'cells/current/s0';cell.mkdir(parents=True)
             model=cell/'packed.bin';model.write_bytes(b'model')
-            r=dict(packed_model=str(model),packed_model_sha256=common.sha(model),execution_contract='registered-fit',selection=dict(selected_epoch=119),epochs=120,pairs_per_epoch=50000)
+            a=owner.arm_record('current')
+            r=dict(packed_model=str(model),packed_model_sha256=common.sha(model),execution_contract='registered-fit',selection=dict(selected_epoch=119),epochs=120,pairs_per_epoch=50000,
+                spec=a['spec'],head='N',seed_index=0,init_seed=1101,sample_seed=101,kept_features=len(a['columns']),derived_inputs=dict(token=a['token'],declaration_sha256=a['declaration_sha256']),
+                frozen_sha256=reg['frozen_sha256'],data_role_decision_sha256=reg['role_decision_sha256'],output_stage='e33-identity-knot-tail2')
             (cell/'result.json').write_text(json.dumps(r))
             dest=root/'development/current/s0';dest.mkdir(parents=True)
             (dest/'pred.tsv').write_text('row_idx\tpred\n0\t1\n')
