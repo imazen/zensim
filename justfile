@@ -2498,3 +2498,18 @@ gauntlet-bmp-check target:
 gauntlet-analyze target output:
     just gauntlet-build {{quote(target)}}
     ZEN_PANEL_BIN={{quote(target + "/release/panel")}} just gauntlet-comparison {{quote(output + "/WITHHELD_INPUTS.json")}} {{quote(output)}}
+
+# Registered severe quantization: exact native tables; base-only scalar and map.
+r8-severe-build config:
+    python3 -c 'import shutil; from pathlib import Path; margin = 2 if Path("tools/shipgates-target/target/release/deps").is_dir() else 4; assert shutil.disk_usage("/home/lilith").free >= (40+margin)*1024**3, "build disk floor plus headroom unavailable"'
+    cargo build --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --bin r8-severe-quant
+
+r8-severe-clippy config:
+    cargo clippy --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --bin r8-severe-quant -- -D warnings
+
+r8-severe-phase phase inputs audits plan registration binary oracle output:
+    python3 scripts/rev4_featpot/shipgates_peer_target.py severe-quant --phase {{quote(phase)}} --inputs {{quote(inputs)}} --audits {{quote(audits)}} --plan {{quote(plan)}} --registration {{quote(registration)}} --binary {{quote(binary)}} --oracle {{quote(oracle)}} --output {{quote(output)}}
+
+r8-severe-tests config:
+    TMPDIR="$HOME/tmp" cargo test --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --bin r8-severe-quant
+

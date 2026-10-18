@@ -431,8 +431,214 @@ def amendments_report(args):
     print(json.dumps(dict(r10_pass_cells=sum(c["peer_verdict"]=="PASS" for c in cells),r10_cells=len(cells),
                          r8={m:v["splits"] for m,v in r8.items()},new_encodes=0,new_score_calls=0),indent=2))
 
+
+def severe_quant(args):
+    """Registered label-free DC-only/coarse-AC probe on original validation sources."""
+    import shutil
+    from PIL import Image
+
+    def headroom():
+        available = shutil.disk_usage(Path.home()).free
+        assert available >= 40*1024**3, f"disk floor: {available} bytes"
+        if args.output.exists():
+            with (args.output / ("HEADROOM_"+args.phase+".jsonl")).open("a") as stream:
+                stream.write(json.dumps(dict(utc=datetime.now(timezone.utc).isoformat(),available_bytes=available,floor_bytes=40*1024**3))+"\n")
+        return available
+
+    def rgb(path):
+        with Image.open(path) as image:
+            image.load()
+            if image.mode == "P":
+                # Lossless palette expansion: the delivered RGB hashes must
+                # still equal the original native audit, and alpha stays opaque.
+                rgba=image.convert("RGBA")
+                assert rgba.getchannel("A").getextrema()==(255,255),"nonopaque source refused"
+                image=rgba.convert("RGB")
+            assert image.mode == "RGB", "original opaque RGB8 required"
+            return image.size, image.tobytes()
+
+    def call(argv, log):
+        headroom()
+        write(log.with_suffix(".command.json"), dict(argv=list(map(str, argv)), environment={k:env()[k] for k in ("ZENSIM_FORMULA_REV","ZENSIM_NEIGHBOUR_EXACT","RAYON_NUM_THREADS","TMPDIR")}))
+        with log.open("x") as stream:
+            subprocess.run(list(map(str, argv)), env=env(), stdout=stream, stderr=subprocess.STDOUT, check=True)
+        headroom()
+
+    root = args.output
+    def cas(path, category, suffix, digest):
+        assert sha(path)==digest
+        dest=root/"artifacts"/category/(digest+suffix)
+        dest.parent.mkdir(parents=True,exist_ok=True)
+        if dest.exists():
+            assert sha(dest)==digest
+        else:
+            os.link(path,dest)
+        return str(dest)
+
+    if args.phase == "prepare":
+        headroom()
+        root.mkdir(parents=True, exist_ok=False)
+        packet = read(args.inputs)
+        assert sha(args.inputs) == "9d51d1e64d987465a5519a2cb9c1d5f19b271394a17f30e27e6b8054ad8b96bc"
+        records = [r for r in packet["records"] if r["role"] == "validate" and r["kind"] == "honest_anchor" and Path(r["distorted"]).stem == "anchor-q20"]
+        assert {r["origin"] for r in records} == {"3311","2403","5315","6823","9113","9413","8113","8183"} and len(records)==8
+        sources = {}
+        input_hashes = {str(args.inputs):sha(args.inputs),str(args.registration):sha(args.registration),str(args.plan):sha(args.plan)}
+        models = read(args.audits/"INPUTS.json")["models"]
+        for label in ("diff-frag-820","w-c"):
+            audit_path = args.audits/label/"full.jsonl"
+            assert sha(audit_path) == read(args.audits/label/"report.json")["audit_sha256"]
+            input_hashes[str(audit_path)] = sha(audit_path)
+            wanted = {r["index"]:r for r in records}
+            found = set()
+            with audit_path.open() as stream:
+                for line in stream:
+                    audit = json.loads(line); key = int(audit["human_score"])
+                    if key not in wanted:
+                        continue
+                    meta = wanted[key]; origin = meta["origin"]
+                    assert audit["reference"]==meta["reference"] and audit["distorted"]==meta["distorted"]
+                    assert audit["distorted_file_sha256"]==meta["expected_distorted_file_sha256"]
+                    assert key not in found and audit["model_inputs"][0][1] == models[label]["sha256"]
+                    assert audit["formula_revision"] == "Rev5"
+                    found.add(key)
+                    if origin not in sources:
+                        source, anchor = Path(meta["reference"]), Path(meta["distorted"])
+                        assert sha(source)==audit["reference_file_sha256"]
+                        assert sha(anchor)==meta["expected_distorted_file_sha256"]==audit["distorted_file_sha256"]
+                        size, pixels = rgb(source); anchor_size, anchor_pixels = rgb(anchor)
+                        assert size==anchor_size
+                        assert hashlib.sha256(pixels).hexdigest()==audit["reference_pixels_sha256"]
+                        assert hashlib.sha256(anchor_pixels).hexdigest()==audit["distorted_pixels_sha256"]
+                        sources[origin]=dict(origin=origin,content_class=meta["content_class"],reference=str(source),anchor=str(anchor),
+                            width=size[0],height=size[1],reference_file_sha256=sha(source),anchor_file_sha256=sha(anchor),
+                            reference_rgb_sha256=audit["reference_pixels_sha256"],anchor_rgb_sha256=audit["distorted_pixels_sha256"],anchor_scores={})
+                    assert audit["reference_pixels_sha256"]==sources[origin]["reference_rgb_sha256"]
+                    assert audit["distorted_pixels_sha256"]==sources[origin]["anchor_rgb_sha256"]
+                    sources[origin]["anchor_scores"][label]=audit["base_score"]
+            assert found==set(wanted)
+        for label in ("diff-frag-820","w-c"):
+            assert sha(models[label]["path"])==models[label]["sha256"]
+        levels=[dict(kind="dc-only",dc=dc,ac=32767,id=f"dc-{dc}") for dc in (16,64,256)]
+        levels += [dict(kind="coarse-ac",dc=16,ac=ac,id=f"ac-{ac}") for ac in (256,512,1024)]
+        manifest=dict(schema="r8-severe-quant-probe-v1",sources=[sources[k] for k in sorted(sources)],levels=levels,
+                      models={k:models[k] for k in ("diff-frag-820","w-c")},input_sha256=input_hashes,
+                      registered_cases_per_candidate=48,strict_below_q20_bar=.99,detector=False,minimum_free_bytes=40*1024**3)
+        write(root/"INPUTS.json",manifest)
+        (root/"REGISTRATION.md").write_bytes(args.registration.read_bytes())
+        (root/"RELAXATIONS_ADOPTED.snapshot.md").write_bytes(args.plan.read_bytes())
+        print("INPUTS bound; eight original validation sources; zero metric calls",flush=True)
+        return
+    manifest=read(root/"INPUTS.json")
+    assert manifest["detector"] is False
+    headroom()
+    if args.phase=="encode":
+        assert not (root/"ENCODES_COMPLETE.json").exists()
+        binary=sha(args.binary); rows=[]
+        for source in manifest["sources"]:
+            assert sha(source["reference"])==source["reference_file_sha256"]
+            for level in manifest["levels"]:
+                cell=root/"encodes"/source["origin"]/level["id"]
+                cell.parent.mkdir(parents=True,exist_ok=True)
+                call([args.binary,"encode",source["reference"],level["dc"],level["ac"],cell],cell.with_suffix(".log"))
+                native=read(cell/"ENCODE.json")
+                assert native["reference_rgb_sha256"]==source["reference_rgb_sha256"]
+                assert native["dc_quant"]==level["dc"] and native["ac_quant"]==level["ac"]
+                assert sha(cell/"encoded.jpg")==native["encoded_sha256"]
+                assert sha(cell/"decoded.rgb")==native["decoded_rgb_sha256"]
+                native["encoded_cas"]=cas(cell/"encoded.jpg","jpeg",".jpg",native["encoded_sha256"])
+                native["decoded_cas"]=cas(cell/"decoded.rgb","rgb",".rgb",native["decoded_rgb_sha256"])
+                size,pixels=rgb(cell/"decoded.png")
+                assert size==(source["width"],source["height"]) and hashlib.sha256(pixels).hexdigest()==native["decoded_rgb_sha256"]
+                oracle=cell/"oracle.ppm"
+                call([args.oracle,"-dct","int","-rgb","-outfile",oracle,cell/"encoded.jpg"],cell/"oracle.log")
+                with Image.open(oracle) as image:
+                    image.load(); assert image.mode=="RGB" and image.size==size
+                    other=image.tobytes()
+                    if level["kind"]=="dc-only":
+                        for y0 in range(0,size[1],8):
+                            for x0 in range(0,size[0],8):
+                                block=image.crop((x0,y0,min(x0+8,size[0]),min(y0+8,size[1])))
+                                assert len(set(block.getdata()))==1,"independent decoder contradicts DC-only blocks"
+                initial_oracle=cell/"initial-oracle.ppm"
+                call([args.oracle,"-dct","int","-rgb","-outfile",initial_oracle,cell/"initial.jpg"],cell/"initial-oracle.log")
+                with Image.open(initial_oracle) as initial_image:
+                    initial_image.load()
+                    assert initial_image.size==size and initial_image.mode=="RGB"
+                    assert initial_image.tobytes()==other,"independent decode changed after literal DQT serialization"
+                differences=[abs(a-b) for a,b in zip(pixels,other,strict=True)]
+                receipt=dict(initial_final_oracle_pixels_exact=True,initial_encoded_sha256=sha(cell/"initial.jpg"),oracle_sha256=sha(args.oracle),oracle_output_sha256=sha(oracle),oracle_rgb_sha256=hashlib.sha256(other).hexdigest(),
+                             width=size[0],height=size[1],different_channels=sum(v!=0 for v in differences),max_channel_difference=max(differences),
+                             mean_abs_channel_difference=sum(differences)/len(differences),independent_decode="PASS")
+                write(cell/"ORACLE.json",receipt)
+                rows.append(dict(origin=source["origin"],level=level,native=native,cell=str(cell),oracle=receipt))
+                if len(rows)==1:
+                    write(root/"FIRST_CELL_PERSISTED.json",dict(row=rows[0],binary_sha256=binary))
+                print(f"ENCODE {len(rows)}/48 {source['origin']} {level['id']}; retained/oracle PASS",flush=True)
+        assert len(rows)==48
+        write(root/"ENCODES_COMPLETE.json",dict(rows=rows,binary_sha256=binary,oracle_sha256=sha(args.oracle),full_encodes=48))
+        return
+    encoded=read(root/"ENCODES_COMPLETE.json")
+    assert encoded["binary_sha256"]==sha(args.binary)
+    if args.phase=="score":
+        for model,record in manifest["models"].items():
+            assert sha(record["path"])==record["sha256"]
+            for source in manifest["sources"]:
+                dest=root/"scores"/model/source["origin"]/"anchor"
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                call([args.binary,"score",record["path"],source["reference"],source["anchor"],dest],dest.with_suffix(".log"))
+                value=read(dest/"SCORE.json")
+                assert value["model_sha256"]==record["sha256"] and not value["detector_attached"]
+                assert value["reference_rgb_sha256"]==source["reference_rgb_sha256"] and value["distorted_rgb_sha256"]==source["anchor_rgb_sha256"]
+                assert abs(value["base_score"]-source["anchor_scores"][model])<=1e-4,"original q20 base replay mismatch"
+                cas(dest/"attribution.f32le","maps",".f32le",value["attribution_sha256"])
+        write(root/"ANCHOR_REPLAY.json",dict(pairs=16,verdict="PASS",precision_contract=1e-4))
+        for model,record in manifest["models"].items():
+            for source in manifest["sources"]:
+                for level in manifest["levels"]:
+                    dest=root/"scores"/model/source["origin"]/level["id"]
+                    call([args.binary,"score",record["path"],source["reference"],root/"encodes"/source["origin"]/level["id"]/"decoded.png",dest],dest.with_suffix(".log"))
+                    value=read(dest/"SCORE.json")
+                    assert not value["detector_attached"] and value["model_sha256"]==record["sha256"]
+                    cas(dest/"attribution.f32le","maps",".f32le",value["attribution_sha256"])
+                    print(f"SCORE {model} {source['origin']} {level['id']} {value['base_score']:.9g}",flush=True)
+        write(root/"SCORES_COMPLETE.json",dict(variant_pairs=96,anchor_pairs=16,scalar_comparisons=112,map_comparisons=112,detector=False))
+        return
+    assert args.phase=="report" and read(root/"SCORES_COMPLETE.json")["variant_pairs"]==96
+    rows=[]
+    for model,record in manifest["models"].items():
+        for source in manifest["sources"]:
+            for level in manifest["levels"]:
+                directory=root/"scores"/model/source["origin"]/level["id"]
+                value=read(directory/"SCORE.json")
+                encode=next(r for r in encoded["rows"] if r["origin"]==source["origin"] and r["level"]==level)
+                assert value["distorted_rgb_sha256"]==encode["native"]["decoded_rgb_sha256"]
+                anchor=source["anchor_scores"][model]
+                rows.append(dict(model=model,origin=source["origin"],content_class=source["content_class"],level=level,
+                                 base_score=value["base_score"],q20_base_score=anchor,below_q20=value["base_score"]<anchor,
+                                 encoded_sha256=encode["native"]["encoded_sha256"],nonzero_ac=encode["native"]["nonzero_ac_coefficients"],
+                                 map_sha256=value["attribution_sha256"],score_sha256=sha(directory/"SCORE.json")))
+    def rate(group):
+        n=len(group);count=sum(r["below_q20"] for r in group)
+        return dict(count=count,n=n,rate=count/n,bar=.99,verdict="PASS" if count/n>=.99 else "FAIL")
+    summary={}
+    for model in manifest["models"]:
+        group=[r for r in rows if r["model"]==model]
+        summary[model]=dict(overall=rate(group),levels={level["id"]:rate([r for r in group if r["level"]==level]) for level in manifest["levels"]},
+                            kinds={k:rate([r for r in group if r["level"]["kind"]==k]) for k in ("dc-only","coarse-ac")},
+                            failures=[r for r in group if not r["below_q20"]])
+    write(root/"SUMMARY.json",dict(rows=rows,summary=summary,inputs_sha256=sha(root/"INPUTS.json"),binary_sha256=encoded["binary_sha256"],full_encodes=48,detector_attached=False))
+    print(json.dumps(summary,indent=2),flush=True)
+
 if __name__=="__main__":
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "severe-quant":
+        parser=argparse.ArgumentParser(description="Registered severe JPEG quantization")
+        parser.add_argument("--phase",choices=("prepare","encode","score","report"),required=True)
+        for name in ("inputs","audits","plan","registration","binary","oracle","output"):
+            parser.add_argument("--"+name,type=Path,required=True)
+        severe_quant(parser.parse_args(sys.argv[2:]))
+        raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "amendments":
         parser = argparse.ArgumentParser(description="R8/R10 retained-score reanalysis only")
         for name in ("root", "inputs", "audits", "plan", "output"):

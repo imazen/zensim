@@ -10,7 +10,7 @@ publish = false
 zensim-target = { path = "../../zensim-target", default-features = false, features = ["native-probe"] }
 zensim = { path = "../../zensim", features = ["custom-profiles", "imgref"] }
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
-zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "4196fa93d422bc367d1e3ddadbaddfe672b9cdfc", default-features = false }
+zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "4196fa93d422bc367d1e3ddadbaddfe672b9cdfc", default-features = false, features = ["recompress-expert"] }
 zenwebp = { git = "https://github.com/imazen/zenwebp", rev = "160acc6588ebb57c4982c30ebb1c303e4fa7cabc", default-features = false, features = ["std"] }
 zenavif = { git = "https://github.com/imazen/zenavif", rev = "5712b80af91f17804d09b5eef0d888435594cd65", default-features = false }
 bytemuck = "1.25.2"
