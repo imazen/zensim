@@ -201,7 +201,7 @@ impl codec::CodecBackend for Backend<'_> {
                     .arg(source)
                     .args(["--global-cq", &knob.to_string(), "--out-dir"])
                     .arg(&probe)
-                    .env("AVIF_ZENSIM_BACKEND", "svt-rs")
+                    .env("AVIF_ZENSIM_BACKEND", "zenav1-svt")
                     .env("AVIF_ZENSIM_SPEED", "6")
                     .env("AVIF_RD_ARTIFACT_ROOT", dir.join("native-artifacts"));
             }

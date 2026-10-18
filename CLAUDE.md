@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-18 — G-TARGET AVIF backend selector.** The adapter passed `svt-rs`; frozen native driver925d832b accepts `svt` or `zenav1-svt`, defaulting other values to Zenravif. Earlier AVIF rows are excluded diagnostics; preserve them and rerun both SVT panels with the accepted selector. JPEG/WebP data remain valid; numerical bars, models and q grid are unchanged.
+
 * **2026-10-18 — reachable-target report referenced an undefined target-only flag. FIXED.** The existing complete-matrix regression exposed a `NameError` in report metadata before any summary could be written. Pass the optional reporting flag explicitly; retain every numeric gate and negative-control assertion.
 
 * **2026-10-17 — E36 second live timer extension also left an old expiry.** Native continuation exited124 exactly17:00Z despite the registered22Z clock; both resource helpers drained0 and11625 selected DONE/attempt1 rows were retained. The same-binary fixture and timer readback did not establish full-process enforcement. Fresh continuationv3 constructs its original timeout directly from22Z and audits24 actual runtimes; no further live timer repair, extra clock credit, matrix/source change or attempt reset. A bootstrap collision in fixed PID receipt names was repaired with per-output-version names before new cells launched. Final native/archive/pool admission remains pending.
