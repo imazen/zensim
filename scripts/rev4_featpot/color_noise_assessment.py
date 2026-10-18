@@ -6,6 +6,7 @@ their existing native owners. This file only binds populations and decisions.
 import argparse
 import copy
 from datetime import datetime, timezone
+import html
 import json
 import os
 from pathlib import Path
@@ -75,9 +76,39 @@ def choose(rows):
     return selected,decisions
 
 
+def parity(out):
+    """Reuse the E33 parity owner's native metadata stripping operation."""
+    from color_noise_repair import read,write,sha
+    original=read(BASE/'models/diff-frag-820-training-manifest.json')
+    oldroot=Path(original['selected_bake']).parent.parent.parent
+    dest=out/'control-parity';dest.mkdir()
+    records=[]
+    for seed in range(3):
+        old=oldroot/f'full_s{seed}'/'result.json'
+        new=out/'cells/current'/f's{seed}'/'result.json'
+        a,b=read(old),read(new)
+        same={k:a[k]==b[k] for k in ['init_seed','sample_seed','train_weights','dev_curve']}
+        for key in ['selected_bake','packed_model']:
+            stripped=[]
+            for label,result in [('original',a),('matched',b)]:
+                model=Path(result[key])
+                if sha(model)!=result[key+'_sha256']:raise ValueError('control model pin changed')
+                target=dest/f'{label}-s{seed}-{key}.bin'
+                subprocess.run([str(out/'bin/bake_dial_refit'),'strip','--in',str(model),
+                    '--out',str(target),'--key','zentrain.repro'],check=True,capture_output=True)
+                stripped.append(sha(target))
+            same[key+'_nonrepro_bytes']=stripped[0]==stripped[1]
+        records.append(dict(seed=seed,fields_equal=same,pass_all=all(same.values())))
+    write(out/'CONTROL_PARITY.json',dict(schema='color-noise-control-replay-v1',
+        records=records,pass_all=all(r['pass_all'] for r in records),time_utc=now()))
+    if not all(r['pass_all'] for r in records):raise ValueError('original control replay mismatch; inspect before assessment')
+
+
 def select(out):
     from color_noise_repair import ARMS, registration, read, write, sha
     registration(out)
+    if read(out/'CONTROL_PARITY.json')['pass_all'] is not True:
+        raise ValueError('original control replay must be resolved before selection')
     p=read(out/'DEVELOPMENT_POPULATIONS.json')
     if p['registration_sha256']!=sha(out/'REGISTRATION.json') or sha(p['table'])!=p['table_sha256']:
         raise ValueError('development inputs changed')
@@ -141,6 +172,8 @@ def external(out):
             bank=Path(data['feature_bank']);manifest=read(bank/'_MANIFEST.json')
             if sha(bank/'features.parquet')!=manifest['features_parquet_sha256'] or sha(bank/'keys.parquet')!=manifest['keys_sha256']:
                 raise ValueError('external feature bank changed')
+            if sha(PREDICT)!=data['scores']['diff-frag-820']['provenance']['predictor_sha256']:
+                raise ValueError('original native prediction owner changed')
             wire=BASE/'scoring'/f'{corpus}.features-f64.bin'
             inventory=read(BASE/'ARCHIVE_FILES.json')
             expected=next(r['sha256'] for r in inventory['files'] if r['relative']==f'scoring/{corpus}.features-f64.bin')
@@ -166,13 +199,65 @@ def dashboard(out):
         '--comparison-only','--include-all-scatter','--out',str(out/'gauntlet.html')],check=True)
 
 
+def report(out):
+    from color_noise_repair import ARMS, read, write, sha
+    choice=read(out/'TRAIN_SELECTION.json');data=read(out/'EXTERNAL_INPUTS.json')
+    names=['diff-frag-820','w-c','diff-410']+['repair-'+a for a in ARMS]
+    docs={n:read(out/(n+'.fulleval.json')) for n in names}
+    labels=['Frozen C','Frozen W-C','Frozen A','Matched current','+coverage','+fine chroma','Both']
+    text=['<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+        '<title>Color-noise repair comparison</title><style>body{max-width:1200px;margin:32px auto;padding:0 20px;font:16px system-ui;background:#10141d;color:#e4eaf5;line-height:1.6}a{color:#8ecaff}h1{font-size:28px}h2{font-size:22px;margin-top:36px}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:8px;border-bottom:1px solid #485166;text-align:right}th:first-child,td:first-child{text-align:left}.scroll{overflow:auto}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}figure{margin:0}img{width:100%}summary{cursor:pointer}@media(max-width:650px){.pair{grid-template-columns:1fr}}</style>',
+        '<h1>Color-noise repair comparison</h1>',
+        '<p>TRAIN-development selection: <strong>'+html.escape(choice['selected'])+'</strong>. Four fixed arms, three matched seeds, original 120-epoch budget. Assessment uses seed0. This is an exploratory repair experiment; original qualification gates remain required.</p>',
+        '<p><a href="gauntlet.html">Open full scatter comparison</a> · <a href="TRAIN_SELECTION.json">All TRAIN-development results</a> · <a href="REGISTRATION.json">Frozen experiment</a></p>',
+        '<p>LIVE motivated this investigation and is an exposed diagnostic. It did not choose the repair. CSIQ/PIPAL were also previously exposed; this assessment cannot establish fresh independent holdout performance.</p>',
+        '<h2>TRAIN-only decision</h2><p>Deltas are three-seed means against matched current, using canonical signed SROCC. Noise combines the registered KADID/TID subsets with equal source weights.</p>',
+        '<div class="scroll"><table><tr><th>Arm</th><th>Human mean Δ</th><th>Noise Δ</th>'+''.join('<th>'+html.escape(s)+' Δ</th>' for s in SOURCES)+'<th>Eligible</th></tr>']
+    for r in choice['decisions']:
+        text.append('<tr><td>'+r['arm']+'</td>'+''.join(f'<td>{v:+.5f}</td>' for v in [r['human_mean_delta'],r['noise_mean_delta'],*[r['source_mean_delta'][s] for s in SOURCES]])+'<td>'+str(r['eligible'])+'</td></tr>')
+    text.append('</table></div><h2>Frozen external assessment</h2><p>Each cell shows signed SROCC / fitted PLCC. Full canonical statistics, source-cluster SROCC intervals and every point are in the downloadable JSONs and scatter comparison.</p><div class="scroll"><table><tr><th>Corpus</th>'+''.join('<th>'+s+'</th>' for s in labels)+'</tr>')
+    ranks=[]
+    for corpus in ['csiq','pipal','live']:
+        text.append('<tr><td>'+corpus+(' (exposed diagnostic)' if corpus=='live' else '')+'</td>')
+        for name in names:
+            r=docs[name]['rank'][corpus]
+            text.append(f'<td>{r["srocc_signed"]:.4f} / {r["plcc"]:.4f}</td>')
+            ranks.append(dict(model=name,corpus=corpus,**r))
+        text.append('</tr>')
+    text.append('</table></div><h2>The ten severe LIVE white-noise examples</h2><p>The order preserves the original inspection, with manfishing first. Tables show native serving scores (higher means better quality), not MOS-normalized plot coordinates. Human quality uses the original gauntlet scale. Images retain their original PNG bytes.</p>')
+    cases=read(BASE.parent/'gauntlet-live-zero-2026-10-18/CASES.json')
+    live=data['datasets']['live'];target=live['target'];case_scores=[]
+    for case in cases['cases']:
+        if not case['primary']:continue
+        i=case['index']
+        if target[i]!=case['target']:raise ValueError('original LIVE case order changed')
+        text.append('<h3>'+html.escape(case['reference']+' / '+case['filename'])+f' — human quality {target[i]:.4f}</h3><div class="pair">')
+        for field,label in [('ref_image','Reference'),('dist_image','Severe white noise')]:
+            text.append('<figure><figcaption>'+label+'</figcaption><img loading="lazy" alt="'+label+'" src="/zensim/gauntlet-live-zero-2026-10-18/'+case[field]+'"></figure>')
+        text.append('</div><div class="scroll"><table><tr>'+''.join('<th>'+s+'</th>' for s in labels)+'</tr><tr>'+''.join(f'<td>{docs[n]["per_pair"]["live"]["pred"][i]:.4f}</td>' for n in names)+'</tr></table></div>')
+        rows=[j for j,p in enumerate(live['pixels']) if live['reference'][j]==live['reference'][i] and Path(p['dist_path']).parent.name=='wn']
+        text.append('<details><summary>All actual white-noise severities for this reference</summary><div class="scroll"><table><tr><th>Image</th><th>Human quality</th>'+''.join('<th>'+s+'</th>' for s in labels)+'</tr>')
+        for j in sorted(rows,key=lambda j:target[j]):
+            text.append('<tr><td>'+html.escape(Path(live['pixels'][j]['dist_path']).name)+f'</td><td>{target[j]:.4f}</td>'+''.join(f'<td>{docs[n]["per_pair"]["live"]["pred"][j]:.4f}</td>' for n in names)+'</tr>')
+        text.append('</table></div></details>')
+        case_scores.append(dict(index=i,reference=case['reference'],target=target[i],scores={n:docs[n]['per_pair']['live']['pred'][i] for n in names}))
+    text.append('<p>Remaining limitations: reused sparse ordinal ladders; three-seed exploratory selection; external feature extractor source-commit closure unresolved; crop/resize source lineage not comprehensively cleared. No protected populations were accessed.</p></html>')
+    with (out/'index.html').open('x') as f:f.write(''.join(text))
+    write(out/'REPORT.json',dict(schema='color-noise-repair-report-v1',selected=choice['selected'],
+        train_selection_sha256=sha(out/'TRAIN_SELECTION.json'),external_exposure_sha256=sha(out/'EXTERNAL_EXPOSURE.json'),
+        ranks=ranks,severe_cases=case_scores,qualified=False,time_utc=now()))
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['prepare','select','external','dashboard'])
+    p.add_argument('mode',choices=['prepare','parity','select','external','dashboard','report'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
-    {'prepare':prepare,'select':select,'external':external,'dashboard':dashboard}[a.mode](a.out)
+    from color_noise_repair import sha, read
+    if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
+        raise ValueError('canonical panel binary changed')
+    {'prepare':prepare,'parity':parity,'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
 
 
 if __name__=='__main__':main()

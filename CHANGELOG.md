@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Register a matched TRAIN-only color/noise coverage × fine-chroma repair comparison with original native training/packing, three paired seeds, fixed exploratory selection and separate frozen external assessment (`206cf9d2`, `7d62b026`).
+
 - Trace frozen LIVE color-noise failures through declared inputs, signed affine/ReLU matrices and output calibration; retain exact native feature probes and independent pixel/matrix checks without modifying the models.
 
 - Surface LIVE near-zero human-quality image pairs from frozen gauntlet scores, with original PNGs, native scores and the existing plotted coordinates.

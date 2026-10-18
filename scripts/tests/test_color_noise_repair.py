@@ -79,4 +79,29 @@ class Decision(unittest.TestCase):
         self.assertEqual(choose(rows)[0],'coverage')
         with self.assertRaises(KeyError):choose(rows[:-1])
 
+class Report(unittest.TestCase):
+    def test_report_keeps_every_inspection_pair_and_native_score(self):
+        import color_noise_assessment as assessment
+        target=[i*.01 for i in range(10)]
+        cases=[dict(primary=True,index=i,target=target[i],reference=f'ref{i}',filename=f'{i}.png',ref_image=f'images/ref{i}.png',dist_image=f'images/dist{i}.png') for i in range(10)]
+        live=dict(target=target,reference=[f'ref{i}' for i in range(10)],pixels=[dict(dist_path=f'/corpus/wn/{i}.png') for i in range(10)])
+        doc=dict(rank={n:dict(srocc_signed=.8,plcc=.9) for n in ['csiq','pipal','live']},per_pair=dict(live=dict(pred=list(range(10)))))
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
+            root=Path(td)
+            (root/'TRAIN_SELECTION.json').write_text('{}')
+            (root/'EXTERNAL_EXPOSURE.json').write_text('{}')
+            def read(path):
+                if path.name=='TRAIN_SELECTION.json':return dict(selected='coverage',decisions=[])
+                if path.name=='EXTERNAL_INPUTS.json':return dict(datasets=dict(live=live))
+                if path.name=='CASES.json':return dict(cases=cases)
+                return doc
+            with patch.object(owner,'read',side_effect=read):assessment.report(root)
+            text=(root/'index.html').read_text()
+            self.assertEqual(text.count('<figure>'),20)
+            self.assertIn('ref9 / 9.png',text)
+            result=json.loads((root/'REPORT.json').read_text())
+            self.assertEqual(len(result['severe_cases']),10)
+            self.assertFalse(result['qualified'])
+            self.assertEqual(result['severe_cases'][9]['scores']['repair-both'],9)
+
 if __name__=='__main__':unittest.main()
