@@ -179,7 +179,11 @@ def report(args):
         baseline=next(r for r in rows if r["size"]==row["size"] and r["arm"]==row["arm"] and r["threads"]==1)
         row["speedup"]=baseline["p50_ms"]/row["p50_ms"]
         row["efficiency"]=row["speedup"]/row["threads"]
-    (dest/"SUMMARY.json").write_text(json.dumps(rows,indent=2)+"\n")
+    summary=dest/"SUMMARY.json"
+    if summary.exists():
+        assert json.loads(summary.read_text())==rows, "refuse to replace changed measurements"
+    else:
+        summary.write_text(json.dumps(rows,indent=2)+"\n")
     for r in rows:
         print(r)
 
@@ -442,7 +446,11 @@ def topology_report(args):
             rows.append(row)
             print(row)
     assert len(rows)==6,len(rows)
-    (dest/"SUMMARY.json").write_text(json.dumps(rows,indent=2)+"\n")
+    summary=dest/"SUMMARY.json"
+    if summary.exists():
+        assert json.loads(summary.read_text())==rows, "refuse to replace changed measurements"
+    else:
+        summary.write_text(json.dumps(rows,indent=2)+"\n")
 
 
 def serial(args):
@@ -472,6 +480,66 @@ def serial(args):
     owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
         arms=arms,cells=[(f"{side}x{side}","v4x",1) for side in [256,1024,2048]],
         lock=Path.home()/"tmp/r7900x-heavy.lock",parity_loader=lambda _: {},baseline=arms[0],ready_check=ready)
+
+
+def pin_inputs(args):
+    """Preserve frozen model and analysis-tool bytes beside this lane's evidence."""
+    import shutil
+    dest=ROOT/args.name
+    dest.mkdir(exist_ok=False)
+    job=json.loads((OLD/"JOB.json").read_text())
+    pins=[]
+    sources=[("JOB.json",OLD/"JOB.json",None)]
+    for name,binding in job["models"].items():
+        source=OLD/binding["path"]
+        sources.append(("models/"+name+source.suffix,source,binding["sha256"]))
+    for name in ["paired-rounds-analyzer","panel"]:
+        sources.append(("tools/"+name,OLD/"bin"/name,None))
+    for name,source,expected in sources:
+        digest=hashlib.sha256(source.read_bytes()).hexdigest()
+        if expected is not None:
+            assert digest==expected
+        target=dest/name
+        target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(source,target)
+        assert hashlib.sha256(target.read_bytes()).hexdigest()==digest
+        pins.append(dict(source=str(source),preserved=name,sha256=digest))
+    owner.write(dest/"INPUTS.json",dict(files=pins,labels_read=False))
+    print(json.dumps(dict(files=len(pins),status="PASS")))
+
+
+def source_archives(args):
+    """Preserve each compiled jj snapshot, including revisions later rewritten."""
+    import tarfile
+    dest=ROOT/args.name
+    dest.mkdir(exist_ok=False)
+    rows=[]
+    metadata=sorted(ROOT.glob("*-SOURCE.json"))
+    assert metadata
+    for path in metadata:
+        binding=json.loads(path.read_text())
+        commit=binding["build_commit"]
+        archive=dest/(commit+".tar")
+        if not archive.exists():
+            subprocess.run(["git","--git-dir",str(Path.home()/"work/zen/zensim/.git"),
+                "archive","--format=tar","--output",str(archive),commit],check=True)
+        wanted=binding["source_inputs"]
+        actual={}
+        with tarfile.open(archive,"r:") as source:
+            for member in source:
+                if member.name in wanted:
+                    stream=source.extractfile(member)
+                    assert stream is not None,member.name
+                    with stream:
+                        actual[member.name]=hashlib.file_digest(stream,"sha256").hexdigest()
+        assert actual==wanted,(path,set(wanted)-set(actual),
+            [name for name in actual if actual[name]!=wanted[name]])
+        with archive.open("rb") as stream:
+            digest=hashlib.file_digest(stream,"sha256").hexdigest()
+        rows.append(dict(metadata=path.name,source_commit=commit,archive=archive.name,
+                         sha256=digest,compiled_inputs_verified=len(actual)))
+        print(path.name,"source inputs verified",len(actual),flush=True)
+    owner.write(dest/"MANIFEST.json",dict(snapshots=rows,status="PASS"))
 
 
 def native_original(args):
@@ -535,7 +603,7 @@ def profile_report(args):
     print(json.dumps({k:v["families"] for k,v in profiles.items()},indent=2))
 
 p=argparse.ArgumentParser()
-p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology","topology_report","serial"])
+p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology","topology_report","serial","pin_inputs","source_archives"])
 p.add_argument("--binary",type=Path,required=True)
 p.add_argument("--name",required=True)
 p.add_argument("--source",type=Path)

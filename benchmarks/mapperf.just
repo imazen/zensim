@@ -177,3 +177,20 @@ perf2-archive root destination:
 
 perf2-serial binary audits name:
     flock "$HOME/tmp/zen-coz-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/perf2.py serial --binary {{quote(binary)}} --audit-after {{quote(audits)}} --name {{quote(name)}}
+
+perf2-source-archives binary name:
+    flock "$HOME/tmp/zen-coz-heavy.lock" flock "$HOME/tmp/r7900x-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/perf2.py source_archives --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf2-preserve-cargo artifacts:
+    flock "$HOME/tmp/zen-coz-heavy.lock" flock "$HOME/tmp/r7900x-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/mapperf_cargo_refs.py --lane PERF2 --workspace "$PWD" --artifacts {{quote(artifacts)}}
+
+perf2-clean-targets artifacts:
+    python3 scripts/rev4_featpot/mapperf_cargo_refs.py --lane PERF2 --workspace "$PWD" --artifacts {{quote(artifacts)}} --check-only
+    cargo clean --locked --target-dir "$PWD/target"
+    cargo clean --locked --target-dir "$PWD/target-native"
+
+perf2-evidence mode root manifest="":
+    python3 scripts/rev4_featpot/perf2_evidence.py {{quote(mode)}} --root {{quote(root)}} --manifest-sha256 {{quote(manifest)}}
+
+perf2-preserve-ignored root first second:
+    python3 scripts/rev4_featpot/perf2_evidence.py preserve-ignored --root {{quote(root)}} --workspace {{quote(first)}} --workspace {{quote(second)}}

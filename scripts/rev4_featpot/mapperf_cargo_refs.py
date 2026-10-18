@@ -12,9 +12,13 @@ def sha(path):
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
-def check_idle(workspace, targets):
-    assert workspace.name.endswith('--mapperf') or workspace == Path.home() / 'tmp/mapperf-20261017'
-    assert ' codex-MAPPERF ' in (workspace / '.workongoing').read_text()
+def check_idle(workspace, targets, lane='MAPPERF'):
+    if lane == 'PERF2':
+        assert workspace.name.endswith('--perf2') and workspace.name.removesuffix('--perf2') == 'zensim'
+        assert ' codex-perf2 ' in (workspace / '.workongoing').read_text()
+    else:
+        assert workspace.name.endswith('--mapperf') or workspace == Path.home() / 'tmp/mapperf-20261017'
+        assert ' codex-MAPPERF ' in (workspace / '.workongoing').read_text()
     for target in targets:
         assert target.is_dir() and not target.is_symlink()
         assert (target / 'CACHEDIR.TAG').read_text().splitlines()[0] == 'Signature: 8a477f597d28d172789f06886806bc55'
@@ -36,20 +40,31 @@ def check_idle(workspace, targets):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--workspace', type=Path, required=True)
+    parser.add_argument('--lane', choices=['MAPPERF', 'PERF2'], default='MAPPERF')
     parser.add_argument('--artifacts', type=Path, required=True)
     parser.add_argument('--check-only', action='store_true')
     parser.add_argument('--remote-scratch', action='store_true')
     args = parser.parse_args()
     workspace = args.workspace.resolve()
-    if args.remote_scratch:
+    if args.lane == 'PERF2':
+        assert not args.remote_scratch
+        assert workspace.name.endswith('--perf2') and workspace.name.removesuffix('--perf2') == 'zensim'
+        names = ['target', 'target-native']
+    elif args.remote_scratch:
         assert workspace == Path.home() / 'tmp/mapperf-20261017'
         names = ['priority-test-target', 'priority-release-target']
     else:
         assert workspace.name.endswith('--mapperf')
         names = ['target', 'target-before', 'zensim-bench/addrfix-runtime/target']
     targets = [workspace / p for p in names]
-    check_idle(workspace, targets)
+    check_idle(workspace, targets, args.lane)
     if args.check_only:
+        if args.lane == 'PERF2':
+            manifest = json.loads((args.artifacts / 'preserved-cargo/MANIFEST.json').read_text())
+            assert manifest['targets'] == [str(target) for target in targets]
+            assert manifest['files']
+            for record in manifest['files']:
+                assert sha(Path(record['preserved'])) == record['sha256'], record['preserved']
         print('Owned Cargo targets are inactive:', *targets)
         return
     dest = args.artifacts / 'preserved-cargo'
@@ -75,7 +90,7 @@ def main():
                 shutil.copy2(path, saved)
             assert sha(saved) == digest
             records.append(dict(source=str(path), preserved=str(saved), sha256=digest))
-    check_idle(workspace, targets)
+    check_idle(workspace, targets, args.lane)
     (dest / 'MANIFEST.json').write_text(json.dumps(dict(targets=[str(t) for t in targets], files=records), indent=2)+'\n')
     print('Preserved and hash-verified reference artifacts:', len(records))
 
