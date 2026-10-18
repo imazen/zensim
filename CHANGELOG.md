@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Add complete cached-reference bake scoring, direct retained moment outputs and measured Rev5 queue/SAT scaling; preserve exact native, map and refinement results ([report](benchmarks/perf3_2026-10-18.md); `f6348b9c`, `034d8e20`, `ec298b71`).
+
 - Trace frozen LIVE color-noise failures through declared inputs, signed affine/ReLU matrices and output calibration; retain exact native feature probes and independent pixel/matrix checks without modifying the models.
 
 - Surface LIVE near-zero human-quality image pairs from frozen gauntlet scores, with original PNGs, native scores and the existing plotted coordinates.

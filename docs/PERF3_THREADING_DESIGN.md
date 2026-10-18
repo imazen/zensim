@@ -51,3 +51,8 @@ The additional direct-core work is reviewed with the cached scoring API rather
 than advanced on main: its qualified run retains a significant score cost at
 1024 squared with eight workers. The benchmark pointer records that trade-off
 alongside the map gains and unchanged output-bit audits.
+
+The final combined API binary has no significant score regression across its
+nine paired cells. The isolated-parent cost above remains a separately scoped
+measurement. Full first-32-clean percentiles and both source identities are in
+[the PERF3 report](../benchmarks/perf3_2026-10-18.md).
