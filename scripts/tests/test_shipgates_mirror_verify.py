@@ -25,6 +25,12 @@ class CompleteArchive(unittest.TestCase):
             self.assertEqual(result["file_count"],2)
             self.assertEqual(result["total_bytes"],258)
 
+    def test_self_archive_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source,_=self.fixture(Path(tmp))
+            with self.assertRaisesRegex(AssertionError,"distinct and disjoint"):
+                owner.verify_all(source,source,Path("COMPLETE.json"))
+
     def test_changed_payload_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:
             source,destination=self.fixture(Path(tmp));(destination/"encoded.jpg").write_bytes(b"changed")

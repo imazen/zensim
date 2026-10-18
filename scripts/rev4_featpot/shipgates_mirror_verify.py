@@ -19,6 +19,8 @@ RECEIPTS = {"LAST_MIRROR_VERIFIED.json", "ARCHIVE_FILES.json"}
 
 def verify_all(source, destination, complete_marker):
     """Compare a finished source tree byte-for-byte before moving its local copy."""
+    source_real,destination_real=source.resolve(),destination.resolve()
+    assert source_real != destination_real and source_real not in destination_real.parents and destination_real not in source_real.parents, "archive roots must be distinct and disjoint"
     assert not complete_marker.is_absolute() and ".." not in complete_marker.parts
     assert (source / complete_marker).is_file(), "source completion marker missing"
     assert (destination / complete_marker).is_file(), "destination completion marker missing"
