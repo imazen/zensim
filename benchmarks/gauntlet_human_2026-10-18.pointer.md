@@ -49,3 +49,30 @@ render with `just compare <root> <root>/gauntlet.html --comparison-only
 complete human-reference views. Commands use the shared heavy lock and
 run-heavy for substantial work. The discussion registry links this study
 separately from model-qualification rows.
+
+## LIVE zero-human-quality image inspection
+
+The owner requested the points hugging the near-zero human axis. The complete
+post-hoc query `abs(human quality) <= 0.12` selects32 of267 admitted LIVE pairs.
+The first section contains10 white-noise cases, one per admitted source;
+22 other near-zero pairs follow for context. Each pair shows unchanged original
+reference/distorted PNGs, native scores and the stored full-population
+rank-to-human-quantile coordinates for all six metrics. Six overview plots
+retain all267 points and link selected points to the corresponding images.
+Human quality is `1 - DMOS/100`; plotted quantiles are not calibrated MOS
+predictions. No new scoring, fitting, extraction or label population.
+
+Host checked: dev. Local artifact:
+`/mnt/v/output/zensim/gauntlet-live-zero-2026-10-18/`; NAS mirror:
+`/mnt/tower/output/zensim/gauntlet-live-zero-2026-10-18/`.
+`CASES.json` pins the exact selection, input fulleval hashes, source-owner hash
+and original PNG hashes. All42 original image URLs returned exact bytes.
+All44 payload files /15,418,155 bytes passed full source→NAS→source SHA256
+verification, including three random PNG readbacks. Inventory SHA256:
+`792f956ddaa4f5a6dc49a500996ac5ba5805eb9cd3719eff5e1c3ab2cc10c9b8`.
+
+http://dev.lan:3300/zensim/gauntlet-live-zero-2026-10-18/index.html
+
+Reproduce with `just gauntlet-live-images <existing-gauntlet-root> <new-output>`.
+The existing frozen transport owns this inspection; the original dashboard
+and its archive remain unchanged.

@@ -2470,6 +2470,9 @@ gtarget-approved-amendments root inputs audits plan output:
 gauntlet-frozen mode output:
     TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py {{quote(mode)}} --out {{quote(output)}}
 
+gauntlet-live-images source output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py live-images --source {{quote(source)}} --out {{quote(output)}}
+
 gauntlet-build target:
     cargo build --release --locked -p zensim-validate --bin panel --target-dir {{quote(target)}}
 

@@ -7,10 +7,12 @@ Rank/scatter statistics remain owned by zen_stats and the gauntlet renderer.
 import argparse
 import csv
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
 import struct
+import shutil
 import subprocess
 import sys
 
@@ -403,11 +405,111 @@ def summary(out):
     write(out/'STATISTICS.json',dict(schema='frozen-gauntlet-statistics-v1',cells=records))
 
 
+def live_images(source, out):
+    """Inspect existing zero-human-quality points without new scoring or fitting."""
+    source = source.resolve()
+    names = [*MODELS, 'peer_cvvdp_fhd', 'peer_ssim2', 'peer_butter3']
+    data = read(source/'SCORED_INPUTS.json')['datasets']['live']
+    docs = {name: read(source/(name+'.fulleval.json')) for name in names}
+    points = {name: doc['per_pair']['live'] for name, doc in docs.items()}
+    target = data['target']
+    for name, cols in points.items():
+        if cols['mos'] != target or cols['pred'] != data['scores'][name]['pred']:
+            raise ValueError('LIVE stored score/target identity mismatch: '+name)
+        if len(cols['normalized_pred']) != len(target):
+            raise ValueError('missing full-population normalized coordinates')
+    # Explicit visual-inspection query, never an admission or qualification gate.
+    # Show ALL near-zero points; white-noise cases are the first section.
+    near = [i for i, y in enumerate(target) if abs(y) <= .12]
+    primary = [i for i in near if Path(data['pixels'][i]['dist_path']).parent.name == 'wn']
+    primary.sort(key=lambda i: -sum(points[n]['normalized_pred'][i]-target[i] for n in MODELS))
+    other = [i for i in near if i not in primary]
+    if not primary:
+        raise ValueError('no LIVE near-zero white-noise points to inspect')
+    if out.exists():
+        raise ValueError('refusing to overwrite image inspection output: '+str(out))
+    out.mkdir(parents=True)
+    images = out/'images'; images.mkdir()
+    copied = {}; cases = []
+    def image(path):
+        path = Path(path); digest = sha(path)
+        dest = images/(digest+path.suffix.lower())
+        if not dest.exists():
+            shutil.copyfile(path, dest)
+        if sha(dest) != digest:
+            raise ValueError('copied image differs from scored source')
+        copied[str(path)] = {'file':str(dest.relative_to(out)), 'sha256':digest}
+        return str(dest.relative_to(out))
+    for i in primary+other:
+        p = data['pixels'][i]
+        cases.append(dict(index=i, pair_key=p['pair_key'], row_id=p['row_id'],
+            reference=Path(p['ref_path']).stem, distortion=Path(p['dist_path']).parent.name,
+            filename=Path(p['dist_path']).name, target=target[i],
+            primary=i in primary, ref_image=image(p['ref_path']), dist_image=image(p['dist_path']),
+            scores={n:dict(raw=points[n]['pred'][i], plotted=points[n]['normalized_pred'][i]) for n in names}))
+    source_files = ['SCORED_INPUTS.json', *[n+'.fulleval.json' for n in names]]
+    manifest = dict(schema='gauntlet-live-image-inspection-v1',
+        build_commit=subprocess.check_output(['jj','log','--no-graph','-r','@', '-T','commit_id'],text=True).strip(),
+        inspection_owner_sha256=sha(__file__),
+        source=str(source), source_files={n:sha(source/n) for n in source_files},
+        selection='All LIVE abs(human quality) <= 0.12; white-noise rows shown first. Post-hoc visual query only.',
+        population=len(target), primary=len(primary), additional=len(other), images=copied, cases=cases,
+        score_note='Existing packed frozen-model predictions and existing full-population rank-to-human-quantile coordinates. No new scores or fit.')
+    write(out/'CASES.json', manifest)
+    esc = html.escape
+    parts = ['<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+        '<title>LIVE near-zero human ratings · image inspection</title><style>',
+        'body{font:16px system-ui;background:#10141d;color:#e5e9f0;margin:24px auto;padding:0 20px;max-width:1400px}a{color:#90c9ff}p{line-height:1.5}h1{font-size:28px}h2{font-size:23px}.plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.plot,article{background:#1b2230;border:1px solid #3a4557;border-radius:10px;padding:16px;margin:14px 0}svg{width:100%;height:auto}svg text{fill:#d4dbe7;font:11px system-ui}article{scroll-margin-top:10px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}figure{margin:0}img{width:100%;height:auto;display:block}figcaption{margin:7px 0}.native img{width:auto;max-width:none;image-rendering:pixelated}.native figure{overflow:auto}button{padding:8px 12px;cursor:pointer;margin:6px}table{border-collapse:collapse;margin:16px 0;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:7px;border-bottom:1px solid #3a4557}th:first-child,td:first-child{text-align:left}.small{font-size:13px;color:#b5bfd0}.tag{color:#ffb49b}@media(max-width:650px){.pair{grid-template-columns:1fr}table{font-size:12px}th,td{padding:4px}}</style>',
+        '<h1>LIVE: the points along the zero-human-quality axis</h1>',
+        f'<p><b>{len(primary)} white-noise cases</b> match the cluster: all three variants place them above the bottom of the quality scale. The six panels below retain all {len(target)} LIVE pairs; red points link to images. Blue points are other near-zero cases, retained for context.</p>',
+        '<p>Human quality is the dashboard’s MOS axis: <b>1 − DMOS/100</b>; lower is worse, and negative values are retained. The x coordinate reuses each metric’s stored full-population rank mapped to human-score quantiles, exactly as the dashboard’s default shape-normalized view. It is <b>not a calibrated MOS prediction</b>. Native scores are listed separately. No images, scores, fits or labels were regenerated.</p>',
+        '<p><a href="../gauntlet-2026-10-18/gauntlet.html">Original dashboard</a> · <a href="CASES.json">Cases, hashes and selection rule</a></p><div class="plots">']
+    lo, hi = min(target), max(target); span = hi-lo
+    def xy(x, y):return 44+280*(x-lo)/span, 294-260*(y-lo)/span
+    for name in names:
+        parts.append('<div class="plot"><b>'+esc(name)+'</b><svg viewBox="0 0 350 340" role="img" aria-label="'+esc(name)+' versus human quality">')
+        for tick in [0,.25,.5,.75,1]:
+            x,y = xy(tick,tick)
+            parts.append(f'<path d="M44 {y:.2f}H324 M{x:.2f} 34V294" stroke="#384254"/><text x="{x:.2f}" y="310" text-anchor="middle">{tick:g}</text><text x="38" y="{y+4:.2f}" text-anchor="end">{tick:g}</text>')
+        x0,y0=xy(lo,lo);x1,y1=xy(hi,hi)
+        parts.append(f'<path d="M{x0} {y0}L{x1} {y1}" stroke="#c0c9d6" stroke-dasharray="5 5"/><text x="180" y="333" text-anchor="middle">Prediction rank → human quantile</text><text x="12" y="170" transform="rotate(-90 12 170)" text-anchor="middle">Human quality</text>')
+        order = [i for i in range(len(target)) if i not in near]+other+primary
+        for i in order:
+            x,y = xy(points[name]['normalized_pred'][i],target[i]); p=data['pixels'][i]
+            color='#ff866a' if i in primary else '#86c7ff' if i in other else '#8b95a8'
+            title=f"{Path(p['ref_path']).stem} / {Path(p['dist_path']).parent.name}/{Path(p['dist_path']).name}; human={target[i]:.4f}; raw={points[name]['pred'][i]:.4f}"
+            circle=f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{4 if i in near else 2}" fill="{color}" opacity="{1 if i in near else .38}"><title>{esc(title)}</title></circle>'
+            parts.append(f'<a href="#pair-{i}">{circle}</a>' if i in near else circle)
+        parts.append('</svg></div>')
+    parts.append('</div><h2>White-noise cluster</h2>')
+    for k, case in enumerate(cases):
+        if k == len(primary):parts.append(f'<h2>Other near-zero human ratings ({len(other)})</h2><p>These cases are shown for context, regardless of model disagreement.</p>')
+        i=case['index']; ref=esc(case['reference']); dist=esc(case['distortion']+'/'+case['filename'])
+        parts.append(f'<article id="pair-{i}"><h2>{ref} · {dist}</h2><p class="tag">Human quality {case["target"]:.4f} · dashboard row {i} (zero-based)</p><button onclick="this.closest(\'article\').classList.toggle(\'native\')">Toggle native pixel size</button><div class="pair">')
+        for kind,label in [('ref_image','Reference'),('dist_image','Distorted')]:
+            url=case[kind];parts.append(f'<figure><a href="{url}" target="_blank"><img src="{url}" loading="lazy" alt="{label}: {ref} {dist}"></a><figcaption>{label} · <a href="{url}" target="_blank">open original PNG</a></figcaption></figure>')
+        parts.append('</div><table><tr><th>Metric</th><th>Native score</th><th>Plotted x</th><th>Human y</th></tr>')
+        for name in names:
+            score=case['scores'][name]; native=-score['raw'] if name=='peer_butter3' else score['raw']
+            label=name+(' (distance ↓)' if name=='peer_butter3' else ' ↑')
+            parts.append(f'<tr><td>{esc(label)}</td><td>{native:.4f}</td><td>{score["plotted"]:.4f}</td><td>{case["target"]:.4f}</td></tr>')
+        parts.append('<tr><td colspan="4" class="small">CVVDP-FHD native score is 10 × JOD. Butter3 is shown as its positive 3-norm distance; plots use the quality-oriented negative distance.</td></tr></table></article>')
+    parts.append('</html>')
+    (out/'index.html').write_text('\n'.join(parts))
+    print(json.dumps(dict(primary=len(primary),additional=len(other),images=len(copied),html=str(out/'index.html'))),flush=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['prepare','score','audit-overlap','peer-containers','summary'])
+    parser.add_argument('mode',choices=['prepare','score','audit-overlap','peer-containers','summary','live-images'])
     parser.add_argument('--out',required=True,type=Path)
-    args=parser.parse_args();args.out.mkdir(parents=True,exist_ok=True)
+    parser.add_argument('--source',type=Path,help='Existing immutable gauntlet root for live-images')
+    args=parser.parse_args()
+    if args.mode == 'live-images':
+        if args.source is None:parser.error('live-images requires --source')
+        live_images(args.source,args.out)
+        return
+    args.out.mkdir(parents=True,exist_ok=True)
     {'prepare':prepare,'score':score,'audit-overlap':audit_overlap,'peer-containers':peer_containers,'summary':summary}[args.mode](args.out)
 
 
