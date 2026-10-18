@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import color_noise_assessment as assessment
@@ -114,6 +115,30 @@ def external(out):
         populations=assessment.EXTERNAL,choice_sha256=sha(root/'TRAIN_SELECTION.json'),
         original_exposure_sha256=sha(out/'EXTERNAL_EXPOSURE.json'),time_utc=assessment.now()))
     work=root/'external';work.mkdir()
+    # The retained Parquet prediction CLI requires a target column even though
+    # inference never reads its values. Keep real external labels out of this
+    # compatibility view; all statistical truth remains in the frozen input.
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    views={};receipts=[]
+    for corpus,d in data['datasets'].items():
+        if shutil.disk_usage('/home').free<45*1024**3:raise ValueError('prediction view requires45GiB free')
+        bank=Path(d['feature_bank']);manifest=read(bank/'_MANIFEST.json')
+        source=bank/'features.parquet'
+        if sha(source)!=manifest['features_parquet_sha256'] or sha(bank/'keys.parquet')!=manifest['keys_sha256']:
+            raise ValueError('external ensemble bank changed')
+        table=pq.read_table(source,columns=[f'f{i}' for i in range(720)])
+        if table.num_rows!=len(d['target']):raise ValueError('external view row population differs')
+        table=table.append_column('human_score',pa.array(np.zeros(table.num_rows),type=pa.float64()))
+        metadata=dict(table.schema.metadata or {})
+        metadata[b'prediction_view_role']=b'Inference only; human_score is an unused constant-zero loader placeholder. Not training or statistical truth.'
+        table=table.replace_schema_metadata(metadata)
+        view=work/f'{corpus}.features.parquet';pq.write_table(table,view,compression='zstd')
+        views[corpus]=view
+        receipts.append(dict(corpus=corpus,path=str(view),sha256=sha(view),source_sha256=sha(source),
+            feature_manifest_sha256=sha(bank/'_MANIFEST.json'),rows=table.num_rows,feature_ids=list(range(720)),
+            role=metadata[b'prediction_view_role'].decode()))
+    write(root/'PREDICTION_VIEWS.json',dict(schema='ensemble-prediction-views-v1',views=receipts))
     for arm in ARMS:
         binding=choice['models'][arm]
         if sha(binding['path'])!=binding['sha256']:raise ValueError('composition changed')
@@ -121,14 +146,12 @@ def external(out):
         data['models'].append(dict(name=name,bake=binding['path'],bake_sha256=binding['sha256'],
             regime='Three fixed seeds; native equal-weight score ensemble',model=dict(kind='ensemble',note='TRAIN-selected' if arm==choice['selected'] else 'fixed comparison ensemble')))
         for corpus,d in data['datasets'].items():
-            bank=Path(d['feature_bank']);manifest=read(bank/'_MANIFEST.json')
-            if sha(bank/'features.parquet')!=manifest['features_parquet_sha256'] or sha(bank/'keys.parquet')!=manifest['keys_sha256']:
-                raise ValueError('external ensemble bank changed')
-            pred=predict(out,arm,bank/'features.parquet',work/f'{corpus}-{arm}.tsv')
+            bank=Path(d['feature_bank'])
+            pred=predict(out,arm,views[corpus],work/f'{corpus}-{arm}.tsv')
             if len(pred)!=len(d['target']):raise ValueError('external ensemble population differs')
             d['scores'][name]=dict(pred=pred.tolist(),status='external-screened',note='Prospectively frozen native ensemble; exposed assessment only.',
                 provenance=dict(composition_sha256=binding['sha256'],feature_manifest_sha256=sha(bank/'_MANIFEST.json'),
-                    feature_sha256=sha(bank/'features.parquet'),selection_sha256=sha(root/'TRAIN_SELECTION.json')))
+                    prediction_view_sha256=sha(views[corpus]),selection_sha256=sha(root/'TRAIN_SELECTION.json')))
             print(name,corpus,len(pred),flush=True)
     write(root/'EXTERNAL_INPUTS.json',data)
 
