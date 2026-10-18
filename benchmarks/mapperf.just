@@ -171,3 +171,9 @@ perf2-topology binary name:
 
 perf2-report root output:
     python3 scripts/rev4_featpot/perf2_report.py --root {{quote(root)}} --output {{quote(output)}}
+
+perf2-archive root destination:
+    python3 scripts/rev4_featpot/mapperf_archive.py --lane PERF2 --root {{quote(root)}} --destination {{quote(destination)}}
+
+perf2-serial binary audits name:
+    flock "$HOME/tmp/zen-coz-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 1 -- python3 scripts/rev4_featpot/perf2.py serial --binary {{quote(binary)}} --audit-after {{quote(audits)}} --name {{quote(name)}}

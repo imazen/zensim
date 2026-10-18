@@ -11,16 +11,16 @@ def read(path):
 
 
 def render(root):
-    matrix = read(root / "matched-band-final/SUMMARY.json")
-    options = read(root / "matched-band-final-options/SUMMARY.json")
-    movement = read(root / "matched-band-final-options/MOVEMENT.json")
-    runtime = read(root / "matched-band-final-verify/RUNTIME_PARITY.json")
-    native = read(root / "native-band-final/original-packets/FULL_NATIVE_CACHE_PARITY.json")
+    matrix = read(root / "matched-grain-final/SUMMARY.json")
+    options = read(root / "matched-grain-final-options/SUMMARY.json")
+    movement = read(root / "matched-grain-final-options/MOVEMENT.json")
+    runtime = read(root / "matched-grain-final-verify/RUNTIME_PARITY.json")
+    native = read(root / "native-grain-final/original-packets/FULL_NATIVE_CACHE_PARITY.json")
     assert len(matrix) == 36 and len(options) == 24 and len(movement) == 9
     assert runtime["status"] == native["status"] == "PASS"
     assert sum(row["rows"] for row in native["models"].values()) == 270
     assert all(row["every_output_row_field_equal"] for row in native["models"].values())
-    final_profiles = read(root / "profiles-band-final/TOP15.json")
+    final_profiles = read(root / "profiles-grain-final/TOP15.json")
     before_profiles = read(root / "profiles-isolated-before-v2/TOP15.json")
     assert len(final_profiles) == len(before_profiles) == 6
     def cell(rows, side, threads, arm):
@@ -28,7 +28,7 @@ def render(root):
                     and row["threads"] == threads and row["arm"] == arm)
     out = ["# Production candidate timing and threading (2026-10-18)", "",
         "Measured on r7900x (Ryzen 9 7900X, Zen 4), Rust 1.99.1, symbolized release, thin LTO. "
-        "No target-cpu=native. Frozen diff+frag-820 model SHA256 "
+        "No target-cpu=native. Zen 5 was not measured. Frozen diff+frag-820 model SHA256 "
         "`89cb4861e2651ff8d4a98bb879feed83a0f9eb3f22b83e644e42eb2291d74b2e`.", "",
         "SPEEDQ owns the unchanged quiet gate, paired rounds, retries and percentiles: first 32 clean rounds "
         "from at most 64, shared exclusion indices. All raw rounds, failed attempts, source pins and binaries "
@@ -64,8 +64,21 @@ def render(root):
         "The exact changes reuse the temporary f64 bin canvas, bound combine slices once, and process "
         "independent bin rows in 64-row bands with runtime SIMD dispatch once per band. Each pixel retains "
         "the original addition/multiply/zero-handling order; returned density and SAT buffers remain independent. "
-        "The retained-extraction queue/barrier limitation remains.", "",
-        "## Lower-resolution options", "",
+        "The retained-extraction queue/barrier limitation remains."]
+    topology = read(root / "topology-grain-final/SUMMARY.json")
+    assert len(topology) == 6
+    out += ["", "A separate matched 2048-square diagnostic compares physical cores with SMT. "
+        "These are descriptive cross-cell medians; no cross-thread confidence interval is claimed.", "",
+        "|Workers|Physical cores|Scalar p50 / p95 ms|Map p50 / p95 ms|",
+        "|---:|---:|---:|---:|"]
+    for n, cores in [(8, 8), (11, 11), (16, 11)]:
+        rows = [next(row for row in topology if row["threads"] == n and row["arm"] == arm)
+                for arm in ["e34_candidate", "e34_candidate_map_retained"]]
+        out.append(f"|{n}|{cores}|{rows[0]['p50_ms']:.3f} / {rows[0]['p95_ms']:.3f}|"
+                   f"{rows[1]['p50_ms']:.3f} / {rows[1]['p95_ms']:.3f}|")
+    out += ["", "The measured 16-worker medians exceed the 11-core medians for both actions. "
+        "The map also gains little between 8 and 11 physical cores, consistent with the retained task layout."]
+    out += ["", "## Lower-resolution options", "",
         "Existing `bin=2` gives half width and half height. `bin=8`/`16` give coarser grids. These change "
         "map representation and unaligned rectangle interpolation, while preserving scalar score bits. "
         "Feature extraction and much of density evaluation still run at the original scales. Defaults remain bin1.", "",
@@ -127,10 +140,10 @@ def render(root):
         "Remote source receipts bind every compiled input and frozen binary SHA256.", ""]
     out += ["", "## Resource wrapper records", "",
         "These are complete command scopes, including setup and workers, not per-call heap measurements.", ""]
-    for name in ["band-oracles.log", "final-validation.log", "after-release-band-checked-build.log",
-                 "profile-after-band-build.log", "matched-band-final-compare-controller.log",
-                 "matched-band-final-options-options-controller.log", "profiles-band-final-profile-controller.log",
-                 "profiles-band-final-profile_stat-controller.log"]:
+    for name in ["grain-oracles.log", "grain-oracles.log", "after-release-grain-build.log",
+                 "profile-after-grain-build.log", "matched-grain-final-compare-controller.log",
+                 "matched-grain-final-options-options-controller.log", "profiles-grain-final-profile-controller.log",
+                 "profiles-grain-final-profile_stat-controller.log"]:
         lines = [line for line in (root / name).read_text().splitlines() if line.startswith("run-heavy: done")]
         assert len(lines) == 1, (name, lines)
         out.append(f"- `{name}`: `{lines[0]}`")

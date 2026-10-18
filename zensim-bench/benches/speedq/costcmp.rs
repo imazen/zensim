@@ -105,6 +105,9 @@ pub(super) fn action(
         | "e34_candidate_map_before"
         | "e34_candidate_baseline"
         | "e34_candidate_map_retained"
+        | "e34_candidate_serial"
+        | "e34_candidate_map_serial"
+        | "e34_candidate_map_serial_audit"
         | "e34_candidate_map_bin2"
         | "e34_candidate_map_bin8"
         | "e34_candidate_map_bin16" => {
@@ -132,7 +135,14 @@ pub(super) fn action(
             assert_eq!(model.layers().next().unwrap().out_dim, hidden);
             assert_eq!(model.n_outputs(), 1);
             let scorer: &'static mut zensim::BakeScorer<'static> = Box::leak(Box::new(
-                zensim::BakeScorer::new(model).unwrap().with_parallel(true),
+                zensim::BakeScorer::new(model)
+                    .unwrap()
+                    .with_parallel(!matches!(
+                        arm,
+                        "e34_candidate_serial"
+                            | "e34_candidate_map_serial"
+                            | "e34_candidate_map_serial_audit"
+                    )),
             ));
             let bin = match arm {
                 "e34_candidate_map_bin2" => 2,
@@ -148,7 +158,7 @@ pub(super) fn action(
                 "surface":arm});
             let source: &'static RgbSlice<'static> = Box::leak(Box::new(RgbSlice::new(src, w, h)));
             let action: Action = match arm {
-                "e34_candidate_map_audit" => {
+                "e34_candidate_map_audit" | "e34_candidate_map_serial_audit" => {
                     // Untimed cross-build audit of every density/feature/gradient
                     // bit and rectangle queries, including finite neighbour replay.
                     let mut session = scorer.prepare_steering(source, bin).unwrap();
@@ -262,6 +272,7 @@ pub(super) fn action(
                     })
                 }
                 "e34_candidate_map_retained"
+                | "e34_candidate_map_serial"
                 | "e34_candidate_map_before"
                 | "e34_candidate_map_bin2"
                 | "e34_candidate_map_bin8"

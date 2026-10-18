@@ -174,7 +174,7 @@ def report(args):
             rows.append(dict(size=header["geometry"],threads=header["threads"],arm=arm,
                 p50_ms=percentile(times,.5)/1e6,p95_ms=percentile(times,.95)/1e6,
                 rounds=selection["rounds_total"],excluded=selection["rounds_excluded"]))
-    assert len(rows) in (18,24,36), len(rows)
+    assert len(rows) in (12,18,24,36), len(rows)
     for row in rows:
         baseline=next(r for r in rows if r["size"]==row["size"] and r["arm"]==row["arm"] and r["threads"]==1)
         row["speedup"]=baseline["p50_ms"]/row["p50_ms"]
@@ -364,15 +364,17 @@ def qualify(args):
     audit_name="audits-"+args.name
     after=ROOT/audit_name/"AUDITS.json"
     def child(mode,name,extra=(),timing_owner=False):
-        with queued_segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+        from contextlib import nullcontext
+        context=queued_segment_lock(Path.home()/"tmp/zen-coz-heavy.lock") if mode not in ("report","verify") else nullcontext()
+        with context:
             def run():
                 with (ROOT/(name+"-"+mode+"-controller.log")).open("x") as out:
                     subprocess.run([str(Path.home()/"work/claudehints/scripts/run-heavy"),
                         "--mem","16G","--jobs","16","--",sys.executable,str(Path(__file__).resolve()),
                         mode,"--binary",str(args.binary),"--name",name,*extra],
                         stdout=out,stderr=subprocess.STDOUT,check=True)
-            if timing_owner:
-                run() # SPEEDQ owns the per-cell r7900x lock.
+            if timing_owner or mode in ("report","verify"):
+                run() # SPEEDQ owns the per-cell r7900x lock; receipts are read-only.
             else:
                 with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
                     run()
@@ -417,6 +419,59 @@ def topology(args):
     cells=[("2048x2048","v4x",n) for n in [8,11,16]]
     owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
         arms=ARMS,cells=cells,lock=Path.home()/"tmp/r7900x-heavy.lock",parity_loader=lambda _: {},baseline=ARMS[0],ready_check=ready)
+
+
+def topology_report(args):
+    dest=ROOT/args.name
+    expected=load_audits(ROOT/"audits-matched-grain-final/AUDITS.json")[("diff-frag-820",1,2048,0)]["record"]
+    rows=[]
+    for complete in sorted(dest.glob("*/COMPLETE.json")):
+        cell=complete.parent
+        header=json.loads((cell/"header.json").read_text())
+        raw=json.loads((cell/"zenbench.inner.json").read_text())
+        values,selection=owner.select_clean_rounds(raw)
+        for arm,times in values.items():
+            ready=raw["workers"][arm]
+            assert ready["actual_rayon_threads"]==header["threads"]
+            for field in ["score_bits","input_sha256"]:
+                assert ready[field]==expected[field],(cell,arm,field)
+            assert ready["model"]["source_sha256"]==expected["model"]["source_sha256"]
+            row=dict(threads=header["threads"],cpuset=header["cpuset"],arm=arm,
+                     p50_ms=percentile(times,.5)/1e6,p95_ms=percentile(times,.95)/1e6,
+                     excluded=selection["rounds_excluded"])
+            rows.append(row)
+            print(row)
+    assert len(rows)==6,len(rows)
+    (dest/"SUMMARY.json").write_text(json.dumps(rows,indent=2)+"\n")
+
+
+def serial(args):
+    """Compare one Rayon worker with the existing parallel=false caller option."""
+    configure()
+    dest=ROOT/args.name
+    dest.mkdir(exist_ok=False)
+    expected=load_audits(args.audit_after)
+    proofs=[]
+    for side in [256,1024,2048]:
+        with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
+            rec=owner.worker_run(args.binary,"e34_candidate_map_serial_audit",5,
+                f"{side}x{side}","v4x",1,dest/f"audit-{side}.log")
+        old=expected[("diff-frag-820",1,side,0)]["record"]
+        for field in ["score_bits","input_sha256"]:
+            assert rec[field]==old[field],(side,field)
+        for field in ["density_sha256","features_gradient_sha256","feature_bits","gradient_bits",
+                      "queries_sha256","refinement_sha256","source_sha256"]:
+            assert rec["model"][field]==old["model"][field],(side,field)
+        proofs.append(dict(side=side,status="PASS",score_bits=rec["score_bits"]))
+    owner.write(dest/"SERIAL_PARITY.json",proofs)
+    arms=["e34_candidate","e34_candidate_serial","e34_candidate_map_retained","e34_candidate_map_serial"]
+    def ready(name,g,t,n,rec):
+        old=expected[("diff-frag-820",1,int(g.split("x")[0]),0)]["record"]
+        assert rec["score_bits"]==old["score_bits"] and rec["input_sha256"]==old["input_sha256"]
+        assert rec["model"]["source_sha256"]==old["model"]["source_sha256"]
+    owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
+        arms=arms,cells=[(f"{side}x{side}","v4x",1) for side in [256,1024,2048]],
+        lock=Path.home()/"tmp/r7900x-heavy.lock",parity_loader=lambda _: {},baseline=arms[0],ready_check=ready)
 
 
 def native_original(args):
@@ -480,7 +535,7 @@ def profile_report(args):
     print(json.dumps({k:v["families"] for k,v in profiles.items()},indent=2))
 
 p=argparse.ArgumentParser()
-p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology"])
+p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology","topology_report","serial"])
 p.add_argument("--binary",type=Path,required=True)
 p.add_argument("--name",required=True)
 p.add_argument("--source",type=Path)
