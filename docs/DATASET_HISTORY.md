@@ -10,7 +10,10 @@ All504 read inputs are finite across all seven admitted TRAIN/development
 legs; the restored chroma declaration adds82 difference inputs and82 products.
 The exact original E33 native program is reused. Seed0 control checkpoint and
 packed model match the original candidate byte-for-byte after native removal
-of reproduction metadata. Four training and four serving smokes pass.
+of reproduction metadata. Four training and four serving smokes pass. A twelve-pair TRAIN pixel replay
+across the six admitted human-bank members matches all504 consumed features
+exactly at both f32 and f64 precision, with matching decoded RGB hashes.
+This bounded replay does not resolve the retained extractor source commit.
 Selection is fixed before any new external scoring. CSIQ/PIPAL/LIVE inherit
 the original gauntlet exposure and overlap limits; LIVE motivated this repair
 and is an exposed diagnostic, never selection data. Original qualification
