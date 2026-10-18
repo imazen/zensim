@@ -2461,3 +2461,7 @@ gtarget-peer-tests-isolated venv:
     python3 -m venv {{quote(venv)}}
     {{quote(venv + "/bin/python")}} -m pip install --quiet 'pillow>=10'
     TMPDIR="$HOME/tmp" {{quote(venv + "/bin/python")}} -B -m unittest scripts.tests.test_shipgates_peer_target scripts.tests.test_reachable_target_analysis scripts.tests.test_shipgates_mirror_verify
+
+# R8/R10 only reinterpret retained statistics/scores; no encoder/scorer entry.
+gtarget-approved-amendments root inputs audits plan output:
+    python3 scripts/rev4_featpot/shipgates_peer_target.py amendments --root {{quote(root)}} --inputs {{quote(inputs)}} --audits {{quote(audits)}} --plan {{quote(plan)}} --output {{quote(output)}}

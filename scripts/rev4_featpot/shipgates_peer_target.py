@@ -228,7 +228,217 @@ def report(args):
 
 
 
+
+def relative_cells(comparison):
+    """R10: compare each registered statistic with its worse matched peer."""
+    panels = {"zensim": comparison["candidate"], **comparison["peers"]}
+    expected = {(c, m) for c in ("jpeg", "webp", "avif") for m in ("diff-frag-820", "w-c")}
+    indexed = {}
+    for dial, summary in panels.items():
+        rows = {(p["codec"], p["model"]): p for p in summary["panels"]}
+        assert len(rows) == len(summary["panels"]) and set(rows) == expected
+        indexed[dial] = rows
+    assert set(indexed) == {"zensim", "ssim2", "butter"}
+    cells = []
+    for codec, model in sorted(expected):
+        group = {d: ps[(codec, model)] for d, ps in indexed.items()}
+        assert len({p["model_sha256"] for p in group.values()}) == 1
+        for policy in ("train_curve", "midpoint"):
+            by_budget = {d: {r["budget"]: r for r in p[policy]} for d, p in group.items()}
+            assert all(set(v) == {1, 2, 3} for v in by_budget.values())
+            for k in (1, 2, 3):
+                rows = {d: ps[k] for d, ps in by_budget.items()}
+                threshold = {1: "8", 2: "3", 3: "1"}[k]
+                stats = [("median", "median_abs_error", {1: 2., 2: 1., 3: .5}[k]),
+                         ("p95", "p95_abs_error", {1: 8., 2: 3., 3: 1.}[k]),
+                         ("undershoot_fraction", None, {1: .05, 2: .05, 3: .01}[k])]
+                if k == 3:
+                    stats.append(("max", "worst_abs_error", 3.))
+                for statistic, field, absolute_bar in stats:
+                    values = {d: r[field] if field else r["undershoot_counts"][threshold] / r["n"]
+                              for d, r in rows.items()}
+                    assert all(r["n"] > 0 for r in rows.values())
+                    assert all(math.isfinite(v) and v >= 0 for v in values.values())
+                    ceiling = max(values["ssim2"], values["butter"])
+                    cells.append(dict(codec=codec, model=model, policy=policy, budget=k,
+                                      statistic=statistic, values=values, peer_ceiling=ceiling,
+                                      peer_verdict="PASS" if values["zensim"] <= ceiling else "FAIL",
+                                      absolute_bar=absolute_bar,
+                                      absolute_verdict="PASS" if values["zensim"] <= absolute_bar else "FAIL",
+                                      witnessed_n={d: r["n"] for d, r in rows.items()}))
+    assert len(cells) == 120
+    return cells
+
+
+def base_only_rows(records, audits, metadata):
+    """Replay the registered unique-pixel ordering using base scores only."""
+    expected = {r["index"]: r for r in records}
+    assert len(expected) == len(records) and set(expected) == set(audits)
+    anchors = {}
+    unique = {}
+    for key, meta in expected.items():
+        audit = audits[key]
+        assert math.isfinite(audit["base_score"])
+        assert meta["role"] in ("train", "validate")
+        identity = (meta["origin"], audit["reference_pixels_sha256"], audit["distorted_pixels_sha256"])
+        if identity in unique:
+            old_meta, old_audit = unique[identity]
+            assert old_meta["role"] == meta["role"] and old_meta["label"] == meta["label"]
+            assert old_audit["base_score"] == audit["base_score"]
+        else:
+            unique[identity] = (meta, audit)
+        if meta["kind"] == "honest_anchor" and Path(meta["distorted"]).stem == "anchor-q20":
+            anchor_key = (meta["role"], meta["origin"])
+            assert anchor_key not in anchors
+            anchors[anchor_key] = audit["base_score"]
+    rows = []
+    for meta, audit in unique.values():
+        if not meta["label"]:
+            continue
+        anchor = anchors[(meta["role"], meta["origin"])]
+        source = metadata[(meta["source_table"], meta["source_row_id"])]
+        params = json.loads(source["params_json"])
+        assert params["expected_below_lq"] is True
+        family = params["params"]["family"]
+        operations = [k for k in family if k != "family"]
+        rows.append(dict(index=meta["index"], source_row_id=meta["source_row_id"],
+                         role=meta["role"], origin=meta["origin"], family=meta["family"],
+                         content_class=meta["content_class"],
+                         operation=operations[0] if operations else meta["family"],
+                         region=params["params"]["region"], severity=params["params"]["severity"],
+                         base_score=audit["base_score"], q20_base_score=anchor,
+                         below_q20=audit["base_score"] < anchor,
+                         distorted_pixels_sha256=audit["distorted_pixels_sha256"]))
+    return rows
+
+
+def amendments_report(args):
+    """Owner-approved R8/R10, retained statistics and base scores; no encodes."""
+    import csv
+    import pyarrow.parquet as pq
+
+    args.output.mkdir(parents=True, exist_ok=False)
+    pins = {}
+
+    def pinned(path):
+        path = Path(path)
+        pins[str(path)] = sha(path)
+        return read(path)
+
+    amendment_sha = sha(args.plan)
+    text = args.plan.read_text()
+    assert all(f"**R{k}," in text for k in (8, 9, 10)), "approved amendments absent"
+    comparison = pinned(args.root / "peers-v1/COMPARISON.json")
+    mappings = pinned(args.root / "peers-v1/FROZEN_MAPPINGS.json")
+    assert pins[str(args.root / "peers-v1/FROZEN_MAPPINGS.json")] == "361aff9504672e0f2d7e503f1f587e65526b99eb160c5a89ada966da9b697551"
+    for entry in mappings:
+        assert pinned(entry["path"]) == entry["spec"]
+        assert pins[entry["path"]] == entry["sha256"]
+        spec = entry["spec"]
+        summary = comparison["peers"][spec["metric"]]
+        assert summary["unit_mappings"][spec["codec"]]["diff-frag-820" if spec["reference_model_sha256"].startswith("89cb") else "w-c"]["alpha"] == spec["alpha"]
+    for summary in [comparison["candidate"], *comparison["peers"].values()]:
+        for panel in summary["panels"]:
+            path = Path(panel["report"])
+            pins[str(path)] = sha(path)
+            assert pins[str(path)] == panel["report_sha256"]
+            original = read(path)
+            for policy in ("train_curve", "midpoint"):
+                assert all(r in original["summary"] for r in panel[policy])
+    cells = relative_cells(comparison)
+    with (args.output / "R10_CELLS.tsv").open("x") as stream:
+        writer = csv.writer(stream, delimiter="\t")
+        writer.writerow(["codec", "model", "policy", "budget", "statistic", "zensim", "ssim2", "butter3", "peer_ceiling", "R10", "absolute_bar", "absolute", "n_z", "n_s", "n_b"])
+        for c in cells:
+            writer.writerow([c["codec"], c["model"], c["policy"], c["budget"], c["statistic"],
+                             *[c["values"][d] for d in ("zensim", "ssim2", "butter")], c["peer_ceiling"], c["peer_verdict"],
+                             c["absolute_bar"], c["absolute_verdict"], *[c["witnessed_n"][d] for d in ("zensim", "ssim2", "butter")]])
+    lines = ["# R10 retained scalar comparisons", "", "Every registered cell; smaller is better. R10 is z<=max(S,B); equality passes. Units are registered normalized points; undershoots are fractions. Each dial retains its original witness denominator. No new scoring/encodes or paired inference.", "",
+             "|Codec|Candidate|Policy|K|Statistic|Z|SSIM2|Butter3|Worse peer|R10|Absolute bar|Absolute|", "|---|---|---|---:|---|---:|---:|---:|---:|---|---:|---|"]
+    for c in cells:
+        v = c["values"]
+        lines.append(f"|{c['codec']}|{c['model']}|{c['policy']}|{c['budget']}|{c['statistic']}|{v['zensim']:.9g}|{v['ssim2']:.9g}|{v['butter']:.9g}|{c['peer_ceiling']:.9g}|{c['peer_verdict']}|{c['absolute_bar']:.9g}|{c['absolute_verdict']}|")
+    (args.output / "R10_CELLS.md").write_text("\n".join(lines) + "\n")
+
+    packet = pinned(args.inputs)
+    audit_pins = pinned(args.audits / "INPUTS.json")
+    assert pins[str(args.inputs)] == audit_pins["packet_sha256"]
+    records = packet["records"]
+    assert len(records) == audit_pins["rows"] == 15060
+    tables = sorted({r["source_table"] for r in records if r["label"]})
+    metadata = {}
+    operation_inventory = set()
+    for table in tables:
+        pins[table] = sha(table)
+        assert pins[table] == packet["files_sha256"][table]
+        for row in pq.read_table(table, columns=["row_id", "filename", "params_json"]).to_pylist():
+            key = (table, row["row_id"])
+            assert key not in metadata
+            metadata[key] = row
+            params = json.loads(row["params_json"])
+            if params:
+                operation_inventory.update(k for k in params["params"]["family"] if k != "family")
+    r8 = {}
+    for model in ("diff-frag-820", "w-c"):
+        report = pinned(args.audits / model / "report.json")
+        path = args.audits / model / "full.jsonl"
+        pins[str(path)] = sha(path)
+        assert pins[str(path)] == report["audit_sha256"] and report["inputs_sha256"] == audit_pins["packet_sha256"]
+        audits = {}
+        with path.open() as stream:
+            for line in stream:
+                audit = json.loads(line)
+                key = int(audit["human_score"])
+                assert key == audit["human_score"] and key not in audits
+                meta = records[key]
+                assert meta["index"] == key
+                assert audit["model_inputs"][0][1] == audit_pins["models"][model]["sha256"]
+                assert audit["formula_revision"] == "Rev5"
+                assert audit["reference"] == meta["reference"] and audit["distorted"] == meta["distorted"]
+                assert audit["distorted_file_sha256"] == meta["expected_distorted_file_sha256"]
+                if "expected_distorted_pixels_sha256" in meta:
+                    assert audit["distorted_pixels_sha256"] == meta["expected_distorted_pixels_sha256"]
+                if meta["label"]:
+                    source = metadata[(meta["source_table"], meta["source_row_id"])]
+                    assert source["filename"] == meta["distorted"]
+                audits[key] = {k: audit[k] for k in ("base_score", "reference_pixels_sha256", "distorted_pixels_sha256")}
+        rows = base_only_rows(records, audits, metadata)
+        summaries = {}
+        for role in ("train", "validate"):
+            group = [r for r in rows if r["role"] == role]
+            count = sum(r["below_q20"] for r in group)
+            original = report["splits"][role]["base_below_q20"]
+            assert (len(group), count) == (original["n"], original["count"]), "registered base-score ordering replay differs"
+            summaries[role] = dict(n=len(group), count=count, rate=count/len(group), bar=.99,
+                                   verdict="PASS" if count/len(group) >= .99 else "FAIL")
+        # These named AC/DC bug proxies are not quantizer sweeps. Preserve this
+        # limitation instead of assigning an unregistered severity threshold.
+        proxy_ops = {"zenjpeg_progressive_ac_truncation", "zenjpeg_progressive_dc_desync", "zenjpeg_xyb_dc_clamp_bitstream"}
+        proxies = [r for r in rows if r["operation"] in proxy_ops]
+        r8[model] = dict(splits=summaries, ac_dc_proxy_rows=proxies,
+                         explicit_quantization_operations=sorted(o for o in operation_inventory if "quant" in o.lower()),
+                         detector_disabled=True, source_score_field="base_score", failures=sum(not r["below_q20"] for r in rows))
+        with (args.output / (model + "-q20-failures.jsonl")).open("x") as stream:
+            for row in rows:
+                if not row["below_q20"]:
+                    stream.write(json.dumps(row, allow_nan=False) + "\n")
+        with (args.output / (model + "-all-ordering.jsonl")).open("x") as stream:
+            for row in rows:
+                stream.write(json.dumps(row, allow_nan=False) + "\n")
+    write(args.output / "R8_R10.json", dict(schema="r8-r10-existing-evidence-v1", new_encodes=0, new_score_calls=0,
+          model_hashes={m:audit_pins["models"][m]["sha256"] for m in r8}, amendment_sha256=amendment_sha,
+          amended_after_exploratory_results=True, r10=cells, r8=r8, input_sha256=pins))
+    print(json.dumps(dict(r10_pass_cells=sum(c["peer_verdict"]=="PASS" for c in cells),r10_cells=len(cells),
+                         r8={m:v["splits"] for m,v in r8.items()},new_encodes=0,new_score_calls=0),indent=2))
+
 if __name__=="__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "amendments":
+        parser = argparse.ArgumentParser(description="R8/R10 retained-score reanalysis only")
+        for name in ("root", "inputs", "audits", "plan", "output"):
+            parser.add_argument("--" + name, type=Path, required=True)
+        amendments_report(parser.parse_args(sys.argv[2:]))
+        raise SystemExit(0)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode",choices=("replay","prepare","run","report"))
     for name in ("root","binary","output","judge","plan","lock","heavy"):
