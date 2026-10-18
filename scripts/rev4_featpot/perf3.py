@@ -27,6 +27,7 @@ def cached():
             cells=[(f"{s}x{s}", "v4x", n) for n in [1,8] for s in [256,1024,2048]],
             lock=Path.home() / "tmp/r7900x-heavy.lock", parity_loader=lambda _: {},
             baseline=arms[0], ready_check=ready)
+    perf2.report(a)
 
 def cached_audit():
     import hashlib
@@ -277,6 +278,7 @@ def export_cached():
     binding = json.loads((perf2.ROOT / (a.name + "-audits") / "BINDING.json").read_text())
     assert binding["status"] == "PASS" and binding["cases"] == 54
     assert binding["binary_sha256"] == digest
+    perf2.report(a)
     rows = json.loads((dest / "SUMMARY.json").read_text())
     output = []
     for side in [256, 1024, 2048]:
