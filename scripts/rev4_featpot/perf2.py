@@ -60,6 +60,24 @@ def guarded_quiet(log):
 owner.quiet_gate=guarded_quiet
 
 
+from contextlib import contextmanager
+import fcntl
+
+@contextmanager
+def queued_segment_lock(path):
+    """Join the existing machine-lock queue; keep admission gates unchanged."""
+    owner.refresh_activity("queued for machine lock")
+    with Path(path).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        owner.refresh_activity("machine lock acquired")
+        print(f"segment lock acquired: {path}", flush=True)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            print(f"segment lock released: {path}", flush=True)
+
+
 def configure(model="diff-frag-820"):
     binding = json.loads((OLD / "JOB.json").read_text())["models"][model]
     path = OLD / binding["path"]
@@ -107,6 +125,11 @@ def profile(args):
                 env.update(PERF2_PROFILE_PHASE=phase,PERF2_PROFILE_CONTROL=str(control),PERF2_PROFILE_ACK=str(ack))
                 cmd=["taskset","-c",owner.CPUSETS[threads],"perf","record","-F","499","-D","-1","--control",f"fifo:{control},{ack}",
                      "--call-graph","dwarf,16384","-o",str(dest/(tag+".data")),"--",str(args.binary)]
+                if args.mode == "profile_stat":
+                    cmd=["taskset","-c",owner.CPUSETS[threads],"perf","stat","-D","-1",
+                        "--control",f"fifo:{control},{ack}","-x",",",
+                        "-e","task-clock,cycles,instructions,cache-references,cache-misses,context-switches,page-faults",
+                        "-o",str(dest/(tag+".stat.csv")),"--",str(args.binary)]
                 states=[]
                 with (dest/(tag+".log")).open("x") as out:
                     proc=subprocess.Popen(cmd,env=env,stdout=out,stderr=subprocess.STDOUT)
@@ -127,13 +150,17 @@ def profile(args):
                     print(tag+" retained as contaminated; retrying",flush=True)
                     attempt+=1
                     continue
-                with (dest/(tag+"-report.txt")).open("x") as out:
-                    subprocess.run(["perf","report","--stdio","--no-children","--call-graph","none",
-                        "--percent-limit","0","-i",str(dest/(tag+".data"))],
-                        stdout=out,stderr=subprocess.STDOUT,check=True)
+                if args.mode != "profile_stat":
+                    with (dest/(tag+"-report.txt")).open("x") as out:
+                        subprocess.run(["perf","report","--stdio","--no-children","--call-graph","none",
+                            "--percent-limit","0","-i",str(dest/(tag+".data"))],
+                            stdout=out,stderr=subprocess.STDOUT,check=True)
                 (dest/(base+"-PASS.json")).write_text(json.dumps(record|dict(tag=tag),indent=2)+"\n")
                 print(tag+" complete",flush=True)
                 break
+
+def profile_stat(args):
+    profile(args)
 
 def report(args):
     dest=ROOT/args.name
@@ -147,7 +174,7 @@ def report(args):
             rows.append(dict(size=header["geometry"],threads=header["threads"],arm=arm,
                 p50_ms=percentile(times,.5)/1e6,p95_ms=percentile(times,.95)/1e6,
                 rounds=selection["rounds_total"],excluded=selection["rounds_excluded"]))
-    assert len(rows) in (18,36), len(rows)
+    assert len(rows) in (18,24,36), len(rows)
     for row in rows:
         baseline=next(r for r in rows if r["size"]==row["size"] and r["arm"]==row["arm"] and r["threads"]==1)
         row["speedup"]=baseline["p50_ms"]/row["p50_ms"]
@@ -181,7 +208,10 @@ def audit(args):
 
 def build(args):
     configure()
-    with owner.segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+    if args.held_locks:
+        build_locked(args)
+        return
+    with queued_segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
         with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
             build_locked(args)
 
@@ -250,7 +280,7 @@ def compare(args):
         assert rec["model"]["source_sha256"]==old["model"]["source_sha256"]
     cells=[(f"{side}x{side}","v4x",n) for n in [1,8,16] for side in [256,1024,2048]]
     owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
-        arms=arms,cells=cells,parity_loader=lambda _: {},baseline=arms[0],ready_check=ready,
+        arms=arms,cells=cells,lock=Path.home()/"tmp/r7900x-heavy.lock",parity_loader=lambda _: {},baseline=arms[0],ready_check=ready,
         worker_binaries={"e34_control":args.before,"e34_candidate_map_before":args.before})
     for geometry,tier,threads in cells:
         cell=dest/f"{tier}-t{threads}-{geometry}"
@@ -289,14 +319,15 @@ def options(args):
         assert rec["input_sha256"]==old["input_sha256"]
         assert rec["model"]["source_sha256"]==old["model"]["source_sha256"]
     owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
-        arms=arms,cells=cells,parity_loader=lambda _: {},baseline=arms[0],ready_check=ready)
+        arms=arms,cells=cells,lock=Path.home()/"tmp/r7900x-heavy.lock",parity_loader=lambda _: {},baseline=arms[0],ready_check=ready)
     movements=[]
     for side in [256,1024,2048]:
         for bin in [2,8,16]:
             os.environ["ZEN_S2_MAP_BIN"]=str(bin)
             tag=f"movement-{side}-bin{bin}"
-            rec=owner.worker_run(args.binary,"e34_candidate_map_audit",5,
-                f"{side}x{side}","v4x",1,dest/(tag+".log"))
+            with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
+                rec=owner.worker_run(args.binary,"e34_candidate_map_audit",5,
+                    f"{side}x{side}","v4x",1,dest/(tag+".log"))
             movements.append(dict(side=side,bin=bin,movement=rec["model"]["bin_movement"]))
     (dest/"MOVEMENT.json").write_text(json.dumps(movements,indent=2)+"\n")
 
@@ -318,8 +349,74 @@ def verify(args):
         fields=["score_bits","all feature/gradient bits","density hash","all rectangle query hash","finite refinement hash"],
         before_binary_sha256=artifacts[0]["binary_sha256"],after_binary_sha256=artifacts[1]["binary_sha256"],
         dependencies=artifacts[0]["dependencies"])
+    (ROOT/args.name).mkdir(exist_ok=True)
     owner.write(ROOT/args.name/"RUNTIME_PARITY.json",proof)
     print(json.dumps({k:v for k,v in proof.items() if k!="dependencies"},indent=2))
+
+
+def qualify(args):
+    """Reproduce the final runtime qualification through the existing owners."""
+    configure()
+    import time
+    while not args.binary.with_name(args.binary.name+".artifact.json").exists():
+        owner.refresh_activity("waiting for frozen runtime artifact")
+        time.sleep(5)
+    audit_name="audits-"+args.name
+    after=ROOT/audit_name/"AUDITS.json"
+    def child(mode,name,extra=(),timing_owner=False):
+        with queued_segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+            def run():
+                with (ROOT/(name+"-"+mode+"-controller.log")).open("x") as out:
+                    subprocess.run([str(Path.home()/"work/claudehints/scripts/run-heavy"),
+                        "--mem","16G","--jobs","16","--",sys.executable,str(Path(__file__).resolve()),
+                        mode,"--binary",str(args.binary),"--name",name,*extra],
+                        stdout=out,stderr=subprocess.STDOUT,check=True)
+            if timing_owner:
+                run() # SPEEDQ owns the per-cell r7900x lock.
+            else:
+                with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
+                    run()
+    child("audit",audit_name)
+    assert args.before
+    extra=["--before",str(args.before),"--audit-after",str(after)]
+    child("compare",args.name,extra,timing_owner=True)
+    child("verify",args.name+"-verify",extra)
+    child("report",args.name)
+    child("options",args.name+"-options",["--audit-after",str(after)],timing_owner=True)
+    child("report",args.name+"-options")
+    (ROOT/(args.name+"-QUALIFIED.json")).write_text(json.dumps(dict(
+        binary=str(args.binary),audit=str(after),timing=args.name,
+        options=args.name+"-options",status="PASS"),indent=2)+"\n")
+
+
+def qualify_profile(args):
+    configure()
+    import time
+    while not args.binary.with_name(args.binary.name+".artifact.json").exists():
+        owner.refresh_activity("waiting for frozen profile artifact")
+        time.sleep(5)
+    for mode,suffix in [("profile",""),("profile_report",""),("profile_stat","-stats")]:
+        name=args.name+suffix
+        with queued_segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+            with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
+                with (ROOT/(args.name+"-"+mode+"-controller.log")).open("x") as out:
+                    subprocess.run([str(Path.home()/"work/claudehints/scripts/run-heavy"),
+                        "--mem","16G","--jobs","16","--",sys.executable,str(Path(__file__).resolve()),
+                        mode,"--binary",str(args.binary),"--name",name],
+                        stdout=out,stderr=subprocess.STDOUT,check=True)
+
+
+def topology(args):
+    """Matched 2048-square physical-core versus SMT diagnostic."""
+    configure()
+    owner.CPUSETS[11]="0,1,3-11"
+    dest=ROOT/args.name
+    dest.mkdir(exist_ok=False)
+    def ready(name,g,t,n,rec):
+        assert rec["model"]["source_sha256"]==os.environ["ZEN_S2_E34_SHA_CANDIDATE"]
+    cells=[("2048x2048","v4x",n) for n in [8,11,16]]
+    owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
+        arms=ARMS,cells=cells,lock=Path.home()/"tmp/r7900x-heavy.lock",parity_loader=lambda _: {},baseline=ARMS[0],ready_check=ready)
 
 
 def native_original(args):
@@ -328,7 +425,7 @@ def native_original(args):
     root.mkdir(exist_ok=False)
     packet=root/"original-packets"
     tool=Path(__file__).with_name("mapperf_native_remote.py")
-    with owner.segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+    with queued_segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
         with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
             with (root/"prepare.log").open("x") as out:
                 subprocess.run([str(Path.home()/"work/claudehints/scripts/run-heavy"),
@@ -360,7 +457,7 @@ def profile_report(args):
         if "combine_basic" in symbol: return "basic density"
         if "attr_pass_b" in symbol or "retention_pass_b" in symbol: return "v2 density"
         if "blockiness" in symbol: return "sparse blockiness"
-        if "BinAccum" in symbol or "from_f64" in symbol or "build_sat" in symbol or "pixel_" in symbol: return "bin accumulation/SAT"
+        if "BinAccum" in symbol or "from_f64" in symbol or "from_bin" in symbol or "build_sat" in symbol or "pixel_" in symbol: return "bin accumulation/SAT"
         if "memmove" in symbol or "memset" in symbol or "alloc" in symbol: return "copy/allocation"
         if "rayon" in symbol or "futex" in symbol: return "thread scheduling"
         return "other"
@@ -383,10 +480,11 @@ def profile_report(args):
     print(json.dumps({k:v["families"] for k,v in profiles.items()},indent=2))
 
 p=argparse.ArgumentParser()
-p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original"])
+p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology"])
 p.add_argument("--binary",type=Path,required=True)
 p.add_argument("--name",required=True)
 p.add_argument("--source",type=Path)
+p.add_argument("--held-locks",action="store_true",help="caller owns both machine locks")
 p.add_argument("--before",type=Path)
 p.add_argument("--audit-after",type=Path,default=ROOT/"audits-after"/"AUDITS.json")
 args=p.parse_args()

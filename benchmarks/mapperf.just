@@ -152,3 +152,22 @@ mapperf-original-prepare root vfs original pins:
 
 mapperf-original-run root binary sha:
     python3 scripts/rev4_featpot/mapperf_native_remote.py run-original --root {{quote(root)}} --binary {{quote(binary)}} --binary-sha256 {{quote(sha)}}
+
+# Blocking lock acquisition gives builds a place among other admitted jobs.
+perf2-queued-build mode binary name:
+    flock "$HOME/tmp/zen-coz-heavy.lock" flock "$HOME/tmp/r7900x-heavy.lock" python3 scripts/rev4_featpot/perf2.py {{quote(mode)}} --held-locks --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf2-qualify binary before name:
+    python3 scripts/rev4_featpot/perf2.py qualify --binary {{quote(binary)}} --before {{quote(before)}} --name {{quote(name)}}
+
+perf2-profile-qualify binary name:
+    python3 scripts/rev4_featpot/perf2.py qualify_profile --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf2-native-original binary name:
+    python3 scripts/rev4_featpot/perf2.py native_original --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf2-topology binary name:
+    flock "$HOME/tmp/zen-coz-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 16G --jobs 16 -- python3 scripts/rev4_featpot/perf2.py topology --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf2-report root output:
+    python3 scripts/rev4_featpot/perf2_report.py --root {{quote(root)}} --output {{quote(output)}}

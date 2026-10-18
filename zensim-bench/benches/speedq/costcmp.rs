@@ -225,18 +225,22 @@ pub(super) fn action(
                                 let delta = (result.attribution().query_rect(x, y, x1, y1)
                                     - exact.attribution().query_rect(x, y, x1, y1))
                                 .abs();
+                                assert!(delta.is_finite(), "nonfinite map-query movement");
                                 query_max = query_max.max(delta);
                                 query_sum += delta;
                                 queries += 1;
-                                refine_max = refine_max.max(
-                                    (result.refinement_gain(x, y, x1, y1)
-                                        - exact.refinement_gain(x, y, x1, y1))
-                                    .abs(),
+                                let refinement_delta = (result.refinement_gain(x, y, x1, y1)
+                                    - exact.refinement_gain(x, y, x1, y1))
+                                .abs();
+                                assert!(
+                                    refinement_delta.is_finite(),
+                                    "nonfinite refinement movement"
                                 );
+                                refine_max = refine_max.max(refinement_delta);
                             }
                         }
                         info["bin_movement"] = json!({"score_bits_equal":true,
-                            "unaligned_rectangles":queries,"query_max_abs":query_max,
+                            "unaligned_rectangles":queries,"finite_rectangles":queries,"query_max_abs":query_max,
                             "query_mean_abs":query_sum/queries as f64,
                             "refinement_max_abs":refine_max});
                     }
