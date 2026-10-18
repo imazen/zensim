@@ -207,6 +207,25 @@ impl codec::CodecBackend for Backend<'_> {
             }
             _ => anyhow::bail!("unsupported codec"),
         }
+        let explicit_environment: BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let argv: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        fs::write(
+            dir.join("COMMAND.json"),
+            serde_json::to_vec_pretty(
+                &json!({"program":a.binary,"argv":argv,"explicit_environment":explicit_environment}),
+            )?,
+        )?;
         let start = Instant::now();
         let result = command.output()?;
         fs::write(dir.join("stdout.log"), &result.stdout)?;
@@ -378,7 +397,9 @@ fn main() -> Result<()> {
     a.config += match kind {
         CodecKind::Jpeg => "444,q0-100",
         CodecKind::Webp => "method6,q0-100",
-        CodecKind::Avif => "zenav1-svt,s6,420,8bit,threads1,CQ1-255",
+        CodecKind::Avif => {
+            "zenav1-svt,s6,420,8bit,threads1,CQ1-255;backend-env=zenav1-svt;router-source925d832b"
+        }
         _ => unreachable!(),
     };
     fs::write(

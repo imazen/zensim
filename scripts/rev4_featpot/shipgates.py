@@ -710,10 +710,14 @@ def scalar_target(args):
     """Serial scalar-only native validation; release the paper lock each phase."""
     models = json.loads(args.models.read_text())
     encoders = json.loads(args.encoders.read_text())
+    proof=json.loads((args.svt_selector_proof/"COMPLETE.json").read_text())
+    assert proof["encoder_sha256"]==encoders["avif"]["sha256"]
+    assert {r["token"] for r in proof["rows"]}=={"svt","zenav1-svt"}
+    assert all(r["header"]["pix_fmt"]=="yuv420p" for r in proof["rows"])
     assert set(models) == {"diff-frag-820", "w-c"}
     assert set(encoders) == {"jpeg", "webp", "avif"}
     design = dict(schema="native-scalar-target-dispatch-v1", scope="adapter validation, not final or spatial qualification",
-        models=models, encoders=encoders, binary=str(args.binary),binary_sha256=sha(args.binary),
+        models=models, encoders=encoders, svt_selector_proof_sha256=sha(args.svt_selector_proof/"COMPLETE.json"), binary=str(args.binary),binary_sha256=sha(args.binary),
         manifests={n:sha(args.inputs/n) for n in ("train_source_manifest.json","source_manifest.json")},
         calibration="TRAIN families only; one separately fitted curve per codec/model",
         budgets=[1,2,3],policies=["midpoint","train_curve"],memory="8G",threads=1)
@@ -766,6 +770,12 @@ def scalar_target_report(args):
     design=json.loads((args.reports/"DESIGN.json").read_text())
     assert set(design["models"]) == {"diff-frag-820","w-c"}
     assert set(design["encoders"]) == {"jpeg","webp","avif"}
+    proof=json.loads((args.svt_selector_proof/"COMPLETE.json").read_text())
+    assert sha(args.svt_selector_proof/"COMPLETE.json")==design["svt_selector_proof_sha256"]
+    assert proof["encoder_sha256"]==design["encoders"]["avif"]["sha256"]
+    assert all(row["header"]["pix_fmt"]=="yuv420p" for row in proof["rows"])
+    routing_encodes=proof["actual_encodes"]
+    assert routing_encodes==len(proof["rows"])==2
     panels=[]
     smoke_encodes=0
     for codec in ("jpeg","webp","avif"):
@@ -799,6 +809,9 @@ def scalar_target_report(args):
                     assert native["full_encodes"]==1 and native["encoded_sha256"]==work["encoded_sha256"]
                     assert native["driver_sha256"]==design["encoders"][codec]["sha256"]
                     assert all((probe/name).is_file() for name in ("oracle.stdout","oracle.stderr"))
+                    if codec=="avif":
+                        command=json.loads((probe/"COMMAND.json").read_text())
+                        assert command["explicit_environment"]["AVIF_ZENSIM_BACKEND"]=="zenav1-svt", "AVIF backend token differs from proven selector"
             panels.append(dict(codec=codec,model=model,model_sha256=inputs["model_sha256"],
                 report=str(report_path),report_sha256=sha(report_path),requests=report["requested_targets"],
                 witnessed=report["jointly_witnessed_targets"],cases=report["cells"],
@@ -809,8 +822,8 @@ def scalar_target_report(args):
     args.output.mkdir(parents=True,exist_ok=False)
     totals=dict(panels=len(panels),cases=sum(p["cases"] for p in panels),
                 training_encodes=sum(p["training_encodes"] for p in panels),
-                validation_encodes=sum(p["validation_encodes"] for p in panels),smoke_encodes=smoke_encodes)
-    totals["full_encodes"]=totals["training_encodes"]+totals["validation_encodes"]+smoke_encodes
+                validation_encodes=sum(p["validation_encodes"] for p in panels),smoke_encodes=smoke_encodes,routing_preflight_encodes=routing_encodes)
+    totals["full_encodes"]=totals["training_encodes"]+totals["validation_encodes"]+smoke_encodes+routing_encodes
     result=dict(schema="native-scalar-target-panels-v1",scope="scalar adapter validation; active/neutral-map targeting UNMEASURED",
                 design_sha256=sha(args.reports/"DESIGN.json"),panels=panels,totals=totals)
     write(args.output/"SUMMARY.json",result)
@@ -829,10 +842,43 @@ def scalar_target_report(args):
             maximum=f"{row['worst_abs_error']:.3f}" if budget==3 else "—"
             lines.append(f"| {p['codec']} | {'C' if p['model']=='diff-frag-820' else 'W-C'} | {budget} | {row['median_abs_error']:.3f} | {row['p95_abs_error']:.3f} | {row['undershoot_counts'][limit]}/{row['n']} | {maximum} | {row['registered_gate']['verdict']} |")
     lines += ["", "Bars: K1 median/p95 ≤2/8 and undershoots ≤5%; K2 ≤1/3 and ≤5%; K3 ≤0.5/1, ≤1%, maximum ≤3. All unchanged.",
-        "", f"Actual work: {totals['full_encodes']} full encodes including three smoke cells; {totals['cases']} target cases, each with one terminal decode/score. Scalar maps and extra instrumented reconstructions: zero. Every probe retains its native encoder decode, separate first-party RGB verification and independent decode-oracle receipt.",
+        "", f"Actual work: {totals['full_encodes']} full encodes including three smoke cells and two backend-routing preflight encodes; {totals['cases']} target cases, each with one terminal decode/score. Scalar maps and extra instrumented reconstructions: zero. Every probe retains its native encoder decode, separate first-party RGB verification and independent decode-oracle receipt.",
         "", "All nine TRAIN and eight family-disjoint validation sources are the frozen JXL panel, opaque sRGB8, maximum side256. Numeric failures are retained. This is a development panel; spatial steering, a final candidate and performance remain unqualified."]
     (args.output/"SUMMARY.md").write_text("\n".join(lines)+"\n")
     print(json.dumps(totals),flush=True)
+
+
+def svt_selector_check(args):
+    """Prove the frozen driver's accepted SVT aliases using TRAIN bytes and an independent header read."""
+    args.output.mkdir(parents=True,exist_ok=False)
+    source=json.loads((args.inputs/"train_source_manifest.json").read_text())["sources"][0]
+    assert source["split"]=="train" and source["origin"]=="2010"
+    assert sha(source["path"])==source["sha256"]
+    rows=[]
+    for token in ("svt","zenav1-svt"):
+        output=args.output/token
+        env={k:v for k,v in os.environ.items() if not k.startswith(("ZENSIM_","AVIF_"))}
+        env.update(ZENSIM_FORMULA_REV="5",RAYON_NUM_THREADS="1",AVIF_ZENSIM_BACKEND=token)
+        command=[str(args.encoder),"--image",source["path"],"--global-cq","128","--out-dir",str(output)]
+        write(args.output/(token+".command.json"),dict(argv=command,backend=token,encoder_sha256=sha(args.encoder)))
+        with (args.output/(token+".log")).open("x") as log:
+            subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        result=json.loads((output/"result.json").read_text())
+        encoded=output/"selected.avif"
+        assert result["full_encodes"]==1 and sha(encoded)==result["encoded_sha256"]
+        header=subprocess.run([str(args.oracle),"-v","error","-select_streams","v:0","-show_entries","stream=codec_name,pix_fmt,width,height","-of","json",str(encoded)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
+        data=json.loads(header.stdout);write(output/"independent-header.json",data)
+        stream=data["streams"][0]
+        assert stream["codec_name"]=="av1" and stream["pix_fmt"]=="yuv420p"
+        assert (stream["width"],stream["height"])==(result["width"],result["height"])
+        rows.append(dict(token=token,encoded_sha256=sha(encoded),decoded_sha256=result["decoded_sha256"],header=stream))
+    assert rows[0]["encoded_sha256"]==rows[1]["encoded_sha256"]
+    assert rows[0]["decoded_sha256"]==rows[1]["decoded_sha256"]
+    prior=json.loads((args.previous/"result.json").read_text())
+    assert prior["source_sha256"]==source["sha256"] and prior["cq"]==128
+    assert prior["encoded_sha256"]!=rows[0]["encoded_sha256"], "accepted SVT aliases match the excluded default-backend diagnostic"
+    write(args.output/"COMPLETE.json",dict(scope="TRAIN routing/header preflight; no target scoring",encoder_sha256=sha(args.encoder),oracle_sha256=sha(args.oracle),source=source,rows=rows,excluded_predecessor_encoded_sha256=prior["encoded_sha256"],actual_encodes=len(rows)))
+    print("SVT selector preflight PASS: accepted aliases byte-identical,420header verified,distinct from excluded predecessor",flush=True)
 
 
 def main():
@@ -846,14 +892,17 @@ def main():
                         ("scalar-target", ["inputs", "encoders", "heavy-lock", "run-heavy"]),
                         ("corruption-results", ["inputs", "audits", "bindings"]),
                         ("scalar-target-report", ["reports"]),
+                        ("svt-selector-check", ["inputs", "encoder", "previous", "oracle"]),
                         ("rd-sources", ["inputs", "tree"]),
                         ("rd-licenses", ["tree"]),
                         ("jxl-rd", ["inputs", "oracle", "heavy-lock", "run-heavy", "png8-binary"]),
                         ("jxl-rd-source", ["inputs", "oracle", "design", "source-id", "png8-binary"])]:
         command = sub.add_parser(mode)
-        common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses", "scalar-target-report"] else ["models", "binary", "output"]
+        common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses", "scalar-target-report", "svt-selector-check"] else ["models", "binary", "output"]
         for name in common + names:
             command.add_argument(f"--{name}", type=Path, required=True)
+        if mode in ["scalar-target", "scalar-target-report"]:
+            command.add_argument("--svt-selector-proof",type=Path,required=True)
         if mode == "scalar-target":
             command.add_argument("--phase", choices=["smoke", "all"], default="all")
         if mode == "rd-sources":
@@ -875,7 +924,7 @@ def main():
             command.add_argument("--features-root", type=Path,
                                 default=Path("/mnt/v/output/zensim/adjudicate-2026-10-07/no-human-corpus"))
     args = parser.parse_args()
-    {"gaddr": gaddr, "corruption": corruption, "jxl-smoke": jxl_smoke, "jxl-target": jxl_target, "scalar-target": scalar_target, "scalar-target-report": scalar_target_report,
+    {"gaddr": gaddr, "corruption": corruption, "jxl-smoke": jxl_smoke, "jxl-target": jxl_target, "scalar-target": scalar_target, "scalar-target-report": scalar_target_report, "svt-selector-check": svt_selector_check,
      "corruption-results": corruption_results, "rd-sources": rd_sources, "rd-licenses": rd_licenses, "jxl-rd": jxl_rd,
      "jxl-rd-source": jxl_rd_source, "jxl-interventions": jxl_interventions}[args.mode](args)
 

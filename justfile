@@ -2426,8 +2426,8 @@ gtarget-scalar-tests:
 gtarget-scalar-run binary action codec encoder inputs bake calibration output oracle:
     {{quote(binary)}} {{quote(action)}} {{quote(codec)}} {{quote(encoder)}} {{quote(inputs)}} {{quote(bake)}} {{quote(calibration)}} {{quote(output)}} {{quote(oracle)}}
 
-gtarget-scalar-panel models binary encoders inputs lock heavy output phase='all':
-    python3 scripts/rev4_featpot/shipgates.py scalar-target --models {{quote(models)}} --binary {{quote(binary)}} --encoders {{quote(encoders)}} --inputs {{quote(inputs)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}} --phase {{quote(phase)}}
+gtarget-scalar-panel models binary encoders inputs lock heavy output proof phase='all':
+    python3 scripts/rev4_featpot/shipgates.py scalar-target --models {{quote(models)}} --binary {{quote(binary)}} --encoders {{quote(encoders)}} --inputs {{quote(inputs)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}} --svt-selector-proof {{quote(proof)}} --phase {{quote(phase)}}
 
 gtarget-archive-check:
     TMPDIR="$HOME/tmp" python3 -m unittest scripts/tests/test_shipgates_mirror_verify.py
@@ -2435,5 +2435,8 @@ gtarget-archive-check:
 gtarget-archive-verify source destination:
     python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker scalar-v1/COMPLETE.json
 
-gtarget-scalar-report reports output:
-    python3 scripts/rev4_featpot/shipgates.py scalar-target-report --reports {{quote(reports)}} --output {{quote(output)}}
+gtarget-scalar-report reports output proof:
+    python3 scripts/rev4_featpot/shipgates.py scalar-target-report --reports {{quote(reports)}} --output {{quote(output)}} --svt-selector-proof {{quote(proof)}}
+
+gtarget-svt-selector encoder inputs previous oracle output:
+    python3 scripts/rev4_featpot/shipgates.py svt-selector-check --encoder {{quote(encoder)}} --inputs {{quote(inputs)}} --previous {{quote(previous)}} --oracle {{quote(oracle)}} --output {{quote(output)}}
