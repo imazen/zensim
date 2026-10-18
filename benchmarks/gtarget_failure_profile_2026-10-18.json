@@ -1,0 +1,182 @@
+[
+  {
+    "dial": "zensim",
+    "codec": "jpeg",
+    "reference": "diff-frag-820",
+    "witnessed": 54,
+    "K3_errors_gt1": 12,
+    "only_endpoint_witnesses": 5,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "zensim",
+    "codec": "jpeg",
+    "reference": "w-c",
+    "witnessed": 50,
+    "K3_errors_gt1": 13,
+    "only_endpoint_witnesses": 4,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "zensim",
+    "codec": "webp",
+    "reference": "diff-frag-820",
+    "witnessed": 51,
+    "K3_errors_gt1": 14,
+    "only_endpoint_witnesses": 3,
+    "repeated_bitstream_probes": 1,
+    "both": 1
+  },
+  {
+    "dial": "zensim",
+    "codec": "webp",
+    "reference": "w-c",
+    "witnessed": 53,
+    "K3_errors_gt1": 9,
+    "only_endpoint_witnesses": 3,
+    "repeated_bitstream_probes": 1,
+    "both": 1
+  },
+  {
+    "dial": "zensim",
+    "codec": "avif",
+    "reference": "diff-frag-820",
+    "witnessed": 52,
+    "K3_errors_gt1": 9,
+    "only_endpoint_witnesses": 2,
+    "repeated_bitstream_probes": 1,
+    "both": 1
+  },
+  {
+    "dial": "zensim",
+    "codec": "avif",
+    "reference": "w-c",
+    "witnessed": 50,
+    "K3_errors_gt1": 11,
+    "only_endpoint_witnesses": 1,
+    "repeated_bitstream_probes": 2,
+    "both": 0
+  },
+  {
+    "dial": "ssim2",
+    "codec": "jpeg",
+    "reference": "diff-frag-820",
+    "witnessed": 53,
+    "K3_errors_gt1": 7,
+    "only_endpoint_witnesses": 3,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "ssim2",
+    "codec": "jpeg",
+    "reference": "w-c",
+    "witnessed": 53,
+    "K3_errors_gt1": 8,
+    "only_endpoint_witnesses": 3,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "ssim2",
+    "codec": "webp",
+    "reference": "diff-frag-820",
+    "witnessed": 51,
+    "K3_errors_gt1": 10,
+    "only_endpoint_witnesses": 3,
+    "repeated_bitstream_probes": 2,
+    "both": 2
+  },
+  {
+    "dial": "ssim2",
+    "codec": "webp",
+    "reference": "w-c",
+    "witnessed": 51,
+    "K3_errors_gt1": 11,
+    "only_endpoint_witnesses": 3,
+    "repeated_bitstream_probes": 2,
+    "both": 2
+  },
+  {
+    "dial": "ssim2",
+    "codec": "avif",
+    "reference": "diff-frag-820",
+    "witnessed": 54,
+    "K3_errors_gt1": 16,
+    "only_endpoint_witnesses": 2,
+    "repeated_bitstream_probes": 4,
+    "both": 1
+  },
+  {
+    "dial": "ssim2",
+    "codec": "avif",
+    "reference": "w-c",
+    "witnessed": 47,
+    "K3_errors_gt1": 12,
+    "only_endpoint_witnesses": 2,
+    "repeated_bitstream_probes": 2,
+    "both": 1
+  },
+  {
+    "dial": "butter3",
+    "codec": "jpeg",
+    "reference": "diff-frag-820",
+    "witnessed": 50,
+    "K3_errors_gt1": 8,
+    "only_endpoint_witnesses": 2,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "butter3",
+    "codec": "jpeg",
+    "reference": "w-c",
+    "witnessed": 50,
+    "K3_errors_gt1": 9,
+    "only_endpoint_witnesses": 2,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "butter3",
+    "codec": "webp",
+    "reference": "diff-frag-820",
+    "witnessed": 51,
+    "K3_errors_gt1": 10,
+    "only_endpoint_witnesses": 1,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "butter3",
+    "codec": "webp",
+    "reference": "w-c",
+    "witnessed": 49,
+    "K3_errors_gt1": 9,
+    "only_endpoint_witnesses": 1,
+    "repeated_bitstream_probes": 0,
+    "both": 0
+  },
+  {
+    "dial": "butter3",
+    "codec": "avif",
+    "reference": "diff-frag-820",
+    "witnessed": 43,
+    "K3_errors_gt1": 9,
+    "only_endpoint_witnesses": 2,
+    "repeated_bitstream_probes": 2,
+    "both": 2
+  },
+  {
+    "dial": "butter3",
+    "codec": "avif",
+    "reference": "w-c",
+    "witnessed": 48,
+    "K3_errors_gt1": 10,
+    "only_endpoint_witnesses": 1,
+    "repeated_bitstream_probes": 2,
+    "both": 1
+  }
+]
