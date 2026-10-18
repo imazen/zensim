@@ -6,6 +6,7 @@
  *
  * Usage: node gauntlet_render_check.js <summer_gauntlet.html> [--dump-row <bake-name>]
  *                                      [--dump-failures <bake-name>]
+ *                                      [--reference mos|jnd|ssim2|butter|cvvdp]
  *                                      [--hash <fragment>] [--expect-visible a,b]
  *                                      [--expect-missing id1,id2] [--expect-no-banner]
  *                                      [--expect-prefix-resolved id=name]
@@ -69,6 +70,7 @@ const listOf = (flag) => {
   return v == null ? null : v.split(',').map(s => s.trim()).filter(Boolean);
 };
 const HASH = argOf('--hash');
+const REFERENCE = argOf('--reference');
 const EXPECT_VIS = listOf('--expect-visible');
 const EXPECT_MISSING = listOf('--expect-missing');
 const EXPECT_NO_BANNER = process.argv.includes('--expect-no-banner');
@@ -254,6 +256,7 @@ sandbox.window = {
 sandbox.matchMedia = matchMediaShim;
 try {
   vm.runInContext(js, sandbox, { filename: 'gauntlet-inline.js', timeout: 60000 });
+  if (REFERENCE) vm.runInContext('if(!DATA.references.includes('+JSON.stringify(REFERENCE)+'))throw new Error("unknown reference");state.ref='+JSON.stringify(REFERENCE)+';rerender();', sandbox, { timeout: 60000 });
 } catch (err) {
   console.error('FAIL: page script threw during render:');
   console.error(err && err.stack || err);
@@ -426,6 +429,13 @@ if (DATA) {
   const visibleNames = vm.runInContext('Array.from(state.visible)', sandbox);
   const visible = DATA.bakes.filter(b => visibleNames.includes(b.name));
   const panelCorpus = vm.runInContext('state.mcorp', sandbox);
+  if (REFERENCE) {
+    const expected=visible.reduce((n,b)=>n+Object.values(b.scatter||{}).filter(c=>c[REFERENCE]&&c[REFERENCE].pts.length).length,0);
+    let actual=0;
+    (function walk(e){if(e.attrs&&e.attrs['data-kind']==='scatter')actual++;(e.children||[]).forEach(walk);})(treeFind(e=>e.id==='scatter'));
+    if(actual!==expected)fail('reference '+REFERENCE+': expected '+expected+' attached scatter charts, got '+actual);
+    else console.log('reference '+REFERENCE+' check OK: '+actual+' attached scatter charts');
+  }
   const tradeCount = ['nonphoto','konjnd'].filter(c => visible.some(b =>
     b.rank && b.rank.cid22 && b.rank[c]
     && Number.isFinite(b.rank.cid22.srocc) && Number.isFinite(b.rank[c].srocc))).length;
