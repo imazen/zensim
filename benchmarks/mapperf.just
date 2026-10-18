@@ -194,3 +194,10 @@ perf2-evidence mode root manifest="":
 
 perf2-preserve-ignored root first second:
     python3 scripts/rev4_featpot/perf2_evidence.py preserve-ignored --root {{quote(root)}} --workspace {{quote(first)}} --workspace {{quote(second)}}
+
+# PERF3 uses PERF2's frozen oracles and SPEEDQ protocol in a separate evidence root.
+perf3 mode binary name:
+    python3 scripts/rev4_featpot/perf3.py {{quote(mode)}} --binary {{quote(binary)}} --name {{quote(name)}}
+
+perf3-build mode binary name:
+    python3 scripts/rev4_featpot/perf3.py {{quote(mode)}} --binary {{quote(binary)}} --name {{quote(name)}}

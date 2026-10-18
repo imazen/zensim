@@ -12,7 +12,7 @@ import speedq_run as owner
 from speed_matrix_report import percentile
 import mapperf
 
-ROOT = Path.home() / "tmp/perf2-20261018"
+ROOT = Path(os.environ.get("ZENSIM_PERF_ROOT", Path.home() / "tmp/perf2-20261018"))
 OLD = Path.home() / "tmp/mapperf-20261017"
 ARMS = ["e34_candidate", "e34_candidate_map_retained"]
 owner.CPUSETS.update({1:"10", 8:"4-11", 16:"0,1,3-13,15-17"})
@@ -82,7 +82,7 @@ def configure(model="diff-frag-820"):
     binding = json.loads((OLD / "JOB.json").read_text())["models"][model]
     path = OLD / binding["path"]
     assert hashlib.sha256(path.read_bytes()).hexdigest() == binding["sha256"]
-    os.environ.update(SPEEDQ_LOCK_OWNER="codex-perf2", TMPDIR=str(Path.home()/"tmp"),
+    os.environ.update(SPEEDQ_LOCK_OWNER=os.environ.get("ZENSIM_PERF_OWNER", "codex-perf2"), TMPDIR=str(Path.home()/"tmp"),
         ZENSIM_NEIGHBOUR_EXACT="1", ZEN_S2_E34_BAKE_CANDIDATE=str(path),
         ZEN_S2_E34_SHA_CANDIDATE=binding["sha256"],
         ZEN_S2_E34_HIDDEN_CANDIDATE=str(binding["hidden"]))
@@ -602,13 +602,18 @@ def profile_report(args):
     (dest/"TOP15.json").write_text(json.dumps(profiles,indent=2)+"\n")
     print(json.dumps({k:v["families"] for k,v in profiles.items()},indent=2))
 
-p=argparse.ArgumentParser()
-p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology","topology_report","serial","pin_inputs","source_archives"])
-p.add_argument("--binary",type=Path,required=True)
-p.add_argument("--name",required=True)
-p.add_argument("--source",type=Path)
-p.add_argument("--held-locks",action="store_true",help="caller owns both machine locks")
-p.add_argument("--before",type=Path)
-p.add_argument("--audit-after",type=Path,default=ROOT/"audits-after"/"AUDITS.json")
-args=p.parse_args()
-globals()[args.mode](args)
+def main():
+    p=argparse.ArgumentParser()
+    p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify","native_original","qualify","profile_stat","qualify_profile","topology","topology_report","serial","pin_inputs","source_archives"])
+    p.add_argument("--binary",type=Path,required=True)
+    p.add_argument("--name",required=True)
+    p.add_argument("--source",type=Path)
+    p.add_argument("--held-locks",action="store_true",help="caller owns both machine locks")
+    p.add_argument("--before",type=Path)
+    p.add_argument("--audit-after",type=Path,default=ROOT/"audits-after"/"AUDITS.json")
+    args=p.parse_args()
+    globals()[args.mode](args)
+
+
+if __name__ == "__main__":
+    main()
