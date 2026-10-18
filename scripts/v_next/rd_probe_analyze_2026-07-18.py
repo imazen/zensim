@@ -115,10 +115,10 @@ def target_loop_main():
         raise SystemExit("target-loop matrix incomplete; refusing a success summary")
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     inp = json.loads((root / "INPUTS.json").read_text())
-    if inp.get("schema") in ("native-jxl-target-v1", "native-codec-target-v1"):
+    if inp.get("schema") in ("native-jxl-target-v1", "native-codec-target-v1", "native-codec-target-scalar-v1"):
         return native_target_summary(root, inp, rows, args.target_only)
     if inp.get("schema") == "reachable-target-v1":
-        return reachable_target_summary(root, inp, rows)
+        return reachable_target_summary(root, inp, rows, args.target_only)
     expected = len(inp["sources"]) * len(inp["codecs"]) * len(inp["targets"]) * (2 + len(inp["bakes"]))
     if len(rows) != expected or any("achieved" not in r for r in rows):
         raise SystemExit("missing/failed target-loop cells")
@@ -184,7 +184,7 @@ def target_loop_main():
     print("\n".join(text))
 
 
-def reachable_target_summary(root, inp, rows):
+def reachable_target_summary(root, inp, rows, target_only=False):
     """Summarize witnessed targets only, checking the entire declared matrix.
 
     The bound oracle never contributes controller probes or seed choices.
@@ -310,10 +310,13 @@ def native_target_summary(root, inp, rows, target_only=False):
     sources = {s["origin"]: s for s in inp["sources"]["sources"]}
     arms = inp["arms"]
     tol = inp["tolerance"]
-    shared = inp["schema"] == "native-codec-target-v1"
+    scalar_only = inp["schema"] == "native-codec-target-scalar-v1"
+    shared = inp["schema"] in ("native-codec-target-v1", "native-codec-target-scalar-v1")
+    if scalar_only and arms != ["scalar"]:
+        raise SystemExit("invalid scalar-only scope")
     ladder_size = len(inp["quality_knots"]) if shared else 21
     codec = inp.get("codec", "jxl")
-    if shared and codec != "avif":
+    if shared and not scalar_only and codec != "avif":
         raise SystemExit("shared native accounting is only qualified for the AVIF adapter")
     ladders = defaultdict(list)
     for b in bounds:
@@ -378,7 +381,7 @@ def native_target_summary(root, inp, rows, target_only=False):
             admitted.add(key)
     expected_coverage = set()
     for origin in sources:
-        scores = sorted({b["score"] for b in ladders[(origin, "neutral")]})
+        scores = sorted({b["score"] for b in ladders[(origin, "scalar" if scalar_only else "neutral")]})
         targets = set(inp["fixed_requests"]) | {scores[i * (len(scores)-1)//4] for i in range(5)}
         expected_coverage.update((origin, t) for t in targets)
         for arm in arms:
@@ -458,7 +461,7 @@ def native_target_summary(root, inp, rows, target_only=False):
             verdict="PASS" if all(checks.values()) else "FAIL")
     index = dict(zip(keys, rows))
     paired = []
-    for base in ("scalar", "neutral"):
+    for base in (() if scalar_only else ("scalar", "neutral")):
         for budget in inp["budgets"]:
             family = defaultdict(list)
             for r in groups[("active", "train_curve", budget)]:
@@ -521,7 +524,7 @@ def native_target_summary(root, inp, rows, target_only=False):
                   "internal_reconstructions":sum(w["internal_reconstructions"] for r in bound_rows for w in r["work"]),
                   "native_pixel_comparisons":sum(w["native_pixel_comparisons"] for r in bound_rows for w in r["work"]),
                   "map_evaluations":sum(w["map_evaluations"] for r in bound_rows for w in r["work"])},
-              "qualification":"unqualified native development screen; sparse coverage, eight families, no universal perceptual tolerance",
+              "qualification":("scalar-only adapter validation; active/neutral-map targeting UNMEASURED; sparse coverage, no final qualification" if scalar_only else "unqualified native development screen; sparse coverage, eight families, no universal perceptual tolerance"),
               "cost_scope":"total ms = search plus terminal decode/score, excludes offline bounds/calibration and output PNG writes; map finite feature probes are not extra pixel comparisons",
               "rd_scope":"sparse per-image log-byte interpolation without extrapolation; deduplicated target outputs, independent judges; direct matched-quality confirmation required"}
     text = [f"# Native {codec.upper()} target steering", "", f"{len(admitted)}/{len(coverage)} targets witnessed across all arms; {len(rows)} cases on {len(sources)} validation families.", "",
