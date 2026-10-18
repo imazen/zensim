@@ -721,6 +721,10 @@ def scalar_target(args):
         manifests={n:sha(args.inputs/n) for n in ("train_source_manifest.json","source_manifest.json")},
         calibration="TRAIN families only; one separately fitted curve per codec/model",
         budgets=[1,2,3],policies=["midpoint","train_curve"],memory="8G",threads=1)
+    peer_specs=getattr(args,"peer_specs",None)
+    if peer_specs is not None:
+        design["peer_specs"]={c:{m:dict(path=str(p),sha256=sha(p)) for m,p in modelspecs.items()} for c,modelspecs in peer_specs.items()}
+        design["peer_metric"]=getattr(args,"peer_metric")
     if args.output.exists():
         assert json.loads((args.output/"DESIGN.json").read_text()) == design, "dispatch pins changed"
     else:
@@ -739,13 +743,19 @@ def scalar_target(args):
             if output.exists():
                 assert (output/sentinel).is_file(), "incomplete prior phase; preserve and diagnose it"
                 return
+            child_env=env.copy()
+            actual_action=action
+            if peer_specs is not None and action != "smoke":
+                model=next(k for k,v in models.items() if v["sha256"]==record["sha256"])
+                child_env["GTARGET_PEER_SPEC"]=str(peer_specs[codec][model])
+                actual_action="peer-"+action
             command=["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","8G","--jobs","1","--",
-                str(args.binary),action,codec,encoder["binary"],str(args.inputs),record["path"],
+                str(args.binary),actual_action,codec,encoder["binary"],str(args.inputs),record["path"],
                 str(calibration),str(output),encoder["oracle"]]
-            write(output.with_suffix(".command.json"),dict(argv=command,environment={k:env[k] for k in ("ZENSIM_FORMULA_REV","ZENSIM_NEIGHBOUR_EXACT","RAYON_NUM_THREADS")}))
+            write(output.with_suffix(".command.json"),dict(argv=command,environment={k:child_env[k] for k in ("ZENSIM_FORMULA_REV","ZENSIM_NEIGHBOUR_EXACT","RAYON_NUM_THREADS","GTARGET_PEER_SPEC") if k in child_env}))
             print(f"G-TARGET {codec} {output.parent.name} {action}: waiting/running",flush=True)
             with output.with_suffix(".log").open("x") as log:
-                subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+                subprocess.run(command,env=child_env,stdout=log,stderr=subprocess.STDOUT,check=True)
             assert (output/sentinel).is_file(), "native phase did not complete"
             print(f"G-TARGET {codec} {output.parent.name} {action}: COMPLETE",flush=True)
         phase("smoke",models["diff-frag-820"],codec_root/"smoke",Path("unused"))
@@ -791,6 +801,9 @@ def scalar_target_report(args):
             assert inputs["arms"] == ["scalar"]
             assert inputs["model_sha256"] == design["models"][model]["sha256"]
             assert inputs["driver_sha256"] == design["binary_sha256"]
+            if "peer_specs" in design:
+                peer=design["peer_specs"][codec][model]
+                assert sha(peer["path"])==peer["sha256"] and ("peer-spec-sha256="+peer["sha256"]) in inputs["config"]
             assert report["input_sha256"] == sha(root/"INPUTS.json")
             assert report["measurement_sha256"] == sha(root/"measurements.jsonl")
             keys=[(r["policy"],r["budget"]) for r in report["summary"]]
@@ -826,6 +839,9 @@ def scalar_target_report(args):
     totals["full_encodes"]=totals["training_encodes"]+totals["validation_encodes"]+smoke_encodes+routing_encodes
     result=dict(schema="native-scalar-target-panels-v1",scope="scalar adapter validation; active/neutral-map targeting UNMEASURED",
                 design_sha256=sha(args.reports/"DESIGN.json"),panels=panels,totals=totals)
+    if "peer_specs" in design:
+        result["peer_metric"]=design["peer_metric"]
+        result["unit_mappings"]={c:{m:json.loads(Path(spec["path"]).read_text()) for m,spec in values.items()} for c,values in design["peer_specs"].items()}
     write(args.output/"SUMMARY.json",result)
     lines=["# Native scalar G-TARGET", "", result["scope"], "",
         "C = diff+frag-820 (89cb4861); W-C = f73059ff. Each model has its own witnessed target population.", "",

@@ -2440,3 +2440,19 @@ gtarget-scalar-report reports output proof:
 
 gtarget-svt-selector encoder inputs previous oracle output:
     python3 scripts/rev4_featpot/shipgates.py svt-selector-check --encoder {{quote(encoder)}} --inputs {{quote(inputs)}} --previous {{quote(previous)}} --oracle {{quote(oracle)}} --output {{quote(output)}}
+
+# Matched peer controls reuse the native scalar dispatcher and statistical owner.
+gtarget-peer mode root binary output judge plan lock heavy:
+    python3 scripts/rev4_featpot/shipgates_peer_target.py {{quote(mode)}} --root {{quote(root)}} --binary {{quote(binary)}} --output {{quote(output)}} --judge {{quote(judge)}} --plan {{quote(plan)}} --lock {{quote(lock)}} --heavy {{quote(heavy)}}
+
+gtarget-peer-clippy config:
+    cargo clippy --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} -- -D warnings
+
+gtarget-peer-build config:
+    cargo build --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}}
+
+gtarget-peer-tests:
+    python3 -m unittest scripts.tests.test_shipgates_peer_target scripts.tests.test_reachable_target_analysis scripts.tests.test_shipgates_mirror_verify
+
+gtarget-controller-tests config:
+    cargo test --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --test controller

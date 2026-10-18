@@ -41,6 +41,11 @@ jobs:
       # two lanes each committed Markdown with a leaked jj conflict-marker
       # line, found only by a human re-read. No toolchain, no deps, <1s.
       - run: python3 scripts/test_lint_scripts.py
+      - name: Scalar target units, coverage and archive integrity
+        run: |
+          mkdir -p "$HOME/tmp"
+          export TMPDIR="$HOME/tmp"
+          python3 -B -m unittest scripts.tests.test_shipgates_peer_target scripts.tests.test_reachable_target_analysis scripts.tests.test_shipgates_mirror_verify
       - name: Synthetic palette pool and pair admission
         run: |
           mkdir -p "$HOME/tmp"
