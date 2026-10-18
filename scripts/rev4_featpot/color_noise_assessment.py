@@ -391,6 +391,13 @@ def report(out):
     for r in choice['decisions']:
         text.append('<tr><td>'+r['arm']+'</td>'+''.join(f'<td>{v:+.5f}</td>' for v in [r['human_mean_delta'],r['noise_mean_delta'],*[r['source_mean_delta'][s] for s in SOURCES]])+'<td>'+str(r['eligible'])+'</td></tr>')
     text.append('</table></div>')
+    if choice.get('models'):
+        text.append('<h2>Candidate bakes</h2><p>Fixed seed0 packed f16 artifacts, scored through the native serving surface. These are exploratory candidates; the named production profile has not changed.</p><div class="scroll"><table><tr><th>Arm</th><th>Download</th><th>SHA256</th></tr>')
+        for arm in ARMS:
+            binding=choice['models'][arm+'/s0']
+            relative=Path(binding['path']).relative_to(out).as_posix()
+            text.append('<tr><td>'+arm+(' (TRAIN-selected)' if arm==choice['selected'] else '')+'</td><td><a href="'+html.escape(relative,quote=True)+'">Packed bake</a></td><td><code>'+binding['sha256']+'</code></td></tr>')
+        text.append('</table></div>')
     if choice.get('local_noise'):
         text.append('<h2>TRAIN noise severity within each reference</h2><p>Report-only checks of individual reference × distortion-type ladders. Each cell below is the mean / minimum of canonical signed SROCCs across those ladders. Individual predictions, targets and statistics are retained in TRAIN_SELECTION.json. These checks do not change the registered pooled selection rule.</p><table><tr><th>Arm / seed</th><th>KADID</th><th>TID2013</th></tr>')
         for arm in ARMS:
