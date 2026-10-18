@@ -1141,7 +1141,70 @@ impl<'a> BakeScorer<'a> {
         Ok(result)
     }
 
-    /// Cache the SDR reference for [`Self::compute_with_ref_and_attribution`].
+    /// Score an SDR reconstruction using a reference cached by this scorer.
+    ///
+    /// Create `precomputed` with [`crate::BakeScorer::precompute_reference`] for the same
+    /// immutable `source` and model configuration. Dimensions and sampling are
+    /// checked; matching source pixels and cache arithmetic are the caller's
+    /// contract, as for [`crate::BakeScorer::compute_with_ref_and_attribution`].
+    ///
+    /// Returns the same score, features and identity behavior as [`crate::BakeScorer::compute`].
+    /// Supported folds reuse the reference pyramid without building a map,
+    /// gradient or refinement snapshot. Other plans and cache geometries use
+    /// the existing uncached scorer.
+    ///
+    /// # Errors
+    /// Refuses invalid dimensions, HDR inputs, incompatible cache sampling,
+    /// formula mismatches or failed model inference.
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    pub fn compute_with_ref(
+        &mut self,
+        source: &impl ImageSource,
+        precomputed: &crate::PrecomputedReference,
+        distorted: &impl ImageSource,
+        codec_hint: Option<&str>,
+    ) -> Result<ZensimResult, ZensimError> {
+        self.check_pixel_revision()?;
+        validate_pair(source, distorted)?;
+        validate_ref_dimensions(precomputed, distorted)?;
+        check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
+        let plan = self.plan()?;
+        if precomputed.sampling != plan.compute.sampling {
+            return Err(ZensimError::ModelLoadFailed {
+                reason: "reference cache sampling contract differs from model",
+            });
+        }
+        if crate::feature_v2::retained_ref_feed_admits(precomputed, distorted, &plan) {
+            let params = ZensimProfile::B.params();
+            let config = config_from_params(params, self.parallel);
+            if let Some(mut result) = crate::fold_engine::compute_fold_backed_with_ref_plan(
+                precomputed,
+                distorted,
+                &config,
+                params.weights,
+                &mut self.pixel_scratch,
+                Some(plan.compute.v1_pools),
+                Some(&plan),
+            ) {
+                if images_byte_identical(source, distorted) {
+                    result.score = 100.0;
+                    result.raw_distance = 0.0;
+                    return Ok(result.mark_identical());
+                }
+                result.score = self.score_features(
+                    result.features(),
+                    source.width() as u32,
+                    source.height() as u32,
+                    codec_hint,
+                )?;
+                return Ok(result);
+            }
+        }
+        self.compute(source, distorted, codec_hint)
+    }
+
+    /// Cache the SDR reference for [`crate::BakeScorer::compute_with_ref`] or
+    /// [`crate::BakeScorer::compute_with_ref_and_attribution`].
     /// Reuse this cache for comparisons against the same source image.
     ///
     /// # Errors
@@ -1167,15 +1230,21 @@ impl<'a> BakeScorer<'a> {
             ));
         }
         let plan = self.plan()?;
-        if plan.toggles().v1_only
-            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
-            && matches!(
-                plan.compute.v1_pools,
-                crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
-            )
+        if plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5
+            || (plan.toggles().v1_only
+                && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+                && matches!(
+                    plan.compute.v1_pools,
+                    crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
+                ))
         {
             validate_pair(source, source)?;
             check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
+            check_within_max_pixels(
+                source.width().max(crate::metric::MIN_PYRAMID_DIM),
+                source.height().max(crate::metric::MIN_PYRAMID_DIM),
+                Some(120_000_000),
+            )?;
             return Ok(crate::PrecomputedReference::for_candidate(
                 source,
                 self.parallel,
@@ -1624,6 +1693,14 @@ fn check_deadband(t: f64) -> Result<(), ZensimError> {
 
 #[cfg(test)]
 mod revision_contract_tests {
+    #[cfg(all(
+        feature = "custom-profiles",
+        feature = "feature-regime-v2",
+        feature = "threads"
+    ))]
+    #[path = "bake_cached_tests.rs"]
+    mod cached_score;
+
     #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
     use super::Arc;
     #[cfg(feature = "feature-regime-v2")]

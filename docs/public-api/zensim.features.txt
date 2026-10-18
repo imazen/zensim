@@ -13,7 +13,7 @@
 #   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                         10
 #   free functions                              9
-#   inherent methods                           60
+#   inherent methods                           61
 #   struct fields                              50
 #   enum variants                              14
 #   trait roster entries (type × trait)        53
@@ -21,13 +21,13 @@
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          135
+#   (root)                          136
 #   cvvdp_features                    2
 #   feature_v2                        5
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (164 lines)
+## items (165 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
@@ -98,6 +98,7 @@ pub struct AttributionSession
 pub fn AttributionSession::new() -> Self
 pub fn AttributionSession::recycle(&mut self, AttributionResult)
 pub fn AttributionSession::reset(&mut self)
+pub fn BakeScorer<'a>::compute_with_ref(&mut self, &impl source::ImageSource, &PrecomputedReference, &impl source::ImageSource, core::option::Option<&str>) -> core::result::Result<ZensimResult, ZensimError>
 pub fn BakeScorer<'a>::compute_with_ref_and_attribution(&mut self, &impl source::ImageSource, &PrecomputedReference, &impl source::ImageSource, core::option::Option<&str>, &mut Fused944Session, usize) -> core::result::Result<ScoredAttribution, ZensimError>
 pub fn BakeScorer<'a>::precompute_reference(&self, &impl source::ImageSource) -> core::result::Result<PrecomputedReference, ZensimError>
 pub fn BakeScorer<'a>::prepare_steering<'s, S: source::ImageSource>(&'s mut self, &'s S, usize) -> core::result::Result<SteeringSession<'s, 'a, S>, ZensimError>
