@@ -361,3 +361,17 @@ def recipe_correlations(predicted, target):
     denominator = float(np.sqrt(np.dot(xc,xc)*np.dot(yc,yc)))
     pearson = float(np.dot(xc,yc)/denominator) if denominator >= 1e-12 else 0.0
     return float(kendalltau(x,y,variant="b",method="asymptotic").statistic), pearson
+
+
+def reference_srocc_interval(predicted, target, reference, resamples=10000, seed=20261017):
+    """Canonical Spearman interval with whole-reference resampling; no row fallback."""
+    arrays = dict(predicted=list(predicted), target=list(target), reference=list(reference))
+    if len({len(v) for v in arrays.values()}) != 1:
+        raise ValueError("interval vectors must align")
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as stream:
+        json.dump(arrays, stream, allow_nan=False)
+        stream.flush()
+        result = subprocess.run([_find_panel_bin(), "rank-interval", "--input", stream.name,
+                                 "--resamples", str(resamples), "--seed", str(seed)],
+                                pass_fds=_panel_pass_fds(), capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
