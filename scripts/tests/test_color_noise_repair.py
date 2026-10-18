@@ -130,4 +130,27 @@ class DevelopmentBinding(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'registered full fit/packing missing'):
                 assessment.development_cell(root,'current',0)
 
+class RetainedStatistics(unittest.TestCase):
+    def test_jnd_population_and_statistics_are_retained_verbatim(self):
+        import color_noise_assessment as assessment
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
+            root=Path(td);base=root/'base';base.mkdir();out=root/'output';out.mkdir()
+            scores={'old':dict(pred=[3.,2.,1.])}
+            dataset=dict(axis='jnd',target=[30.,20.,10.],reference=['a','b','c'],scores=scores)
+            model=dict(name='old')
+            spec=dict(schema='zensim-frozen-gauntlet-v1',models=[model]+[dict(name='repair-'+a) for a in owner.ARMS],datasets=dict(konjnd_jpeg_select=dataset),notes=['current study'])
+            (out/'EXTERNAL_INPUTS.json').write_text(json.dumps(spec))
+            original=dict(name='old',rank=dict(konjnd_jpeg_select=dict(srocc_signed=.75),other=dict(srocc_signed=.2)),
+                scatter={},scatter_assessment={},training_overlap={},per_pair=dict(konjnd_jpeg_select=dict(pred=[3.,2.,1.],jnd=[30.,20.,10.])))
+            (base/'old.fulleval.json').write_text(json.dumps(original))
+            with patch.object(assessment,'BASE',base),patch('build_peer_fullevals.build_comparison') as native,patch.object(assessment.subprocess,'run'):
+                assessment.dashboard(out)
+            native.assert_called_once()
+            fresh=json.loads((out/'NEW_MODEL_INPUTS.json').read_text())
+            self.assertEqual([m['name'] for m in fresh['models']],['repair-'+a for a in owner.ARMS])
+            retained=json.loads((out/'old.fulleval.json').read_text())
+            self.assertEqual(retained['rank'],dict(konjnd_jpeg_select=dict(srocc_signed=.75)))
+            self.assertEqual(retained['per_pair'],original['per_pair'])
+            self.assertEqual(retained['comparison_notes'],['current study'])
+
 if __name__=='__main__':unittest.main()
