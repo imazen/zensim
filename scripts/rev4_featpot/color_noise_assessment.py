@@ -377,9 +377,9 @@ def dashboard(out):
 def report(out):
     from color_noise_repair import ARMS, read, write, sha
     choice=read(out/'TRAIN_SELECTION.json');data=read(out/'EXTERNAL_INPUTS.json')
-    names=['diff-frag-820','w-c','diff-410']+['repair-'+a for a in ARMS]
+    names=['diff-frag-820','w-c','diff-410']+['repair-'+a for a in ARMS]+['peer_cvvdp_fhd','peer_ssim2','peer_butter3']
     docs={n:read(out/(n+'.fulleval.json')) for n in names}
-    labels=['Frozen C','Frozen W-C','Frozen A','Matched current','+coverage','+fine chroma','Both']
+    labels=['Frozen C','Frozen W-C','Frozen A','Matched current','+coverage','+fine chroma','Both','CVVDP-FHD','SSIMULACRA2','Butteraugli 3-norm']
     text=['<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
         '<title>Color-noise repair comparison</title><style>body{max-width:1200px;margin:32px auto;padding:0 20px;font:16px system-ui;background:#10141d;color:#e4eaf5;line-height:1.6}a{color:#8ecaff}h1{font-size:28px}h2{font-size:22px;margin-top:36px}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:8px;border-bottom:1px solid #485166;text-align:right}th:first-child,td:first-child{text-align:left}.scroll{overflow:auto}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}figure{margin:0}img{width:100%}summary{cursor:pointer}@media(max-width:650px){.pair{grid-template-columns:1fr}}</style>',
         '<h1>Color-noise repair comparison</h1>',
