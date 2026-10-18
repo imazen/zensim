@@ -26,11 +26,11 @@ def plan(out):
         time_utc=assessment.now()))
 
 
-def predict(out,arm,table,dest):
+def predict(out,arm,table,dest,seeds=range(3)):
     from v2_common import dense_bake
     choice=read(out/'TRAIN_SELECTION.json')
     members=[]
-    for seed in range(3):
+    for seed in seeds:
         binding=choice['models'][f'{arm}/s{seed}'];model=Path(binding['path'])
         if sha(model)!=binding['sha256']:raise ValueError('ensemble member changed')
         members.append(dense_bake(model,dest.parent))
@@ -40,7 +40,7 @@ def predict(out,arm,table,dest):
             stdout=log,stderr=subprocess.STDOUT,check=True,
             env={**os.environ,'ZENSIM_FORMULA_REV':'5'})
     import pandas as pd
-    frame=pd.read_csv(dest,sep='\t')
+    frame=pd.read_csv(dest,sep='\t',float_precision='round_trip')
     if list(frame.columns)!=['row_idx','pred'] or not np.array_equal(frame.row_idx,np.arange(len(frame))):
         raise ValueError('ensemble row order differs')
     values=frame.pred.to_numpy(dtype=np.float64)
@@ -82,7 +82,7 @@ def score(out):
             native_surface='zensim::BakeScorer::ensemble(models, None)',formula_revision=5,qualification=False))
         models[arm]=dict(path=str(composition),sha256=sha(composition),members=members)
         pred=predict(out,arm,Path(population['table']),dest/'pred.tsv')
-        individual=[pd.read_csv(out/'development'/arm/f's{s}/pred.tsv',sep='\t').pred.to_numpy() for s in range(3)]
+        individual=[pd.read_csv(out/'development'/arm/f's{s}/pred.tsv',sep='\t',float_precision='round_trip').pred.to_numpy() for s in range(3)]
         oracle=np.mean(individual,axis=0)
         if len(pred)!=len(target):raise ValueError('ensemble development population differs')
         difference=float(np.max(np.abs(pred-oracle)))
@@ -135,9 +135,12 @@ def external(out):
         table=table.replace_schema_metadata(metadata)
         view=work/f'{corpus}.features.parquet';pq.write_table(table,view,compression='zstd')
         views[corpus]=view
+        control=predict(out,'current',view,work/f'{corpus}-view-control.tsv',seeds=[0])
+        if control.tolist()!=d['scores']['diff-frag-820']['pred']:
+            raise ValueError('native compatibility-view control differs from original frozen scores')
         receipts.append(dict(corpus=corpus,path=str(view),sha256=sha(view),source_sha256=sha(source),
             feature_manifest_sha256=sha(bank/'_MANIFEST.json'),rows=table.num_rows,feature_ids=list(range(720)),
-            role=metadata[b'prediction_view_role'].decode()))
+            original_control_vector_exact=True,role=metadata[b'prediction_view_role'].decode()))
     write(root/'PREDICTION_VIEWS.json',dict(schema='ensemble-prediction-views-v1',views=receipts))
     for arm in ARMS:
         binding=choice['models'][arm]
