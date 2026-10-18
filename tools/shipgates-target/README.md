@@ -24,3 +24,21 @@ incomplete phases refuse; a numerical target miss is retained and reported.
 The October 18 development evidence and its limits are recorded in
 [the measurement report](../../benchmarks/gtarget_2026-10-18.md). These runs
 neither select a shipping candidate nor qualify spatial steering or performance.
+
+Matched SSIMULACRA2 and butteraugli 3-norm controls use `just gtarget-peer`.
+The `replay` phase replays retained JPEG/WebP candidate bytes and checks every
+proposal, score, witness and selected hash; it performs zero new encodes. The
+`prepare` phase measures all nine TRAIN sources at conceptual q5/q95, preserving
+two independent bake runs and the frozen judge packets. Each peer tolerance is
+its oriented TRAIN endpoint-median span divided by the reference candidate's
+span. A TRAIN affine offset anchors q95. The `run` phase uses that fixed mapping
+and the same private controller, complete calibration grids, actual witnesses
+and full encode budgets. `report` invokes the existing statistical owner.
+
+Every butteraugli packet retains its map and max/2-/3-/4-norm scalars. The fixed
+CPU SSIMULACRA2 API uses the explicitly registered scalar-only artifact policy.
+Reports use normalized point errors; each spec records the native-unit tolerance,
+offset, orientation, fixed requests, endpoint evidence and frozen judge hash.
+Peer controls never qualify active-map targeting. Active-map targeting on all
+three codecs is NOT RUN: steering belongs to G-RD and first-encode map hooks
+remain unvalidated.

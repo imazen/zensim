@@ -1463,6 +1463,7 @@ version = "0.0.0"
 dependencies = [
  "almost-enough",
  "anyhow",
+ "bytemuck",
  "enough",
  "image",
  "serde",

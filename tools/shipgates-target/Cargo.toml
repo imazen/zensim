@@ -13,6 +13,7 @@ zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300a
 zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "4196fa93d422bc367d1e3ddadbaddfe672b9cdfc", default-features = false }
 zenwebp = { git = "https://github.com/imazen/zenwebp", rev = "160acc6588ebb57c4982c30ebb1c303e4fa7cabc", default-features = false, features = ["std"] }
 zenavif = { git = "https://github.com/imazen/zenavif", rev = "5712b80af91f17804d09b5eef0d888435594cd65", default-features = false }
+bytemuck = "1.25.2"
 anyhow = "1.0.104"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

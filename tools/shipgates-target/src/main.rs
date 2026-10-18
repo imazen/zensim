@@ -12,13 +12,18 @@ use std::{
     process::Command,
     time::Instant,
 };
-use zensim_target::{CodecKind, SeedCurve, TargetSpec, codec, target_search_with_backend_and_bake};
+use zensim_target::{CodecKind, SeedCurve, TargetSpec, codec};
 // Compile the existing owner as a private module so selecting a subset adds
 // no public API to the unpublished library or to any shipped codec.
+#[path = "../../../zensim-target/src/controller.rs"]
+mod controller;
 #[path = "../../../zensim-target/src/native_probe.rs"]
 #[allow(dead_code)]
 mod instrument;
+#[path = "../../../zensim-target/src/native_dial.rs"]
+mod native_dial;
 use instrument::{NativeProbeBackend, NativeProbeCodec, NativeProbeWork};
+use zensim_target::{ProbeRecord, TargetResult};
 
 fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -32,6 +37,7 @@ struct Adapter {
     sequence: Cell<usize>,
     knots: Vec<f32>,
     config: String,
+    replay: Option<PathBuf>,
 }
 impl Adapter {
     fn decode_native(&self, encoded: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
@@ -133,6 +139,48 @@ impl codec::CodecBackend for Backend<'_> {
             .source_by_pixels
             .get(&sha(rgb))
             .context("unregistered source pixels")?;
+        if let Some(replay) = &a.replay {
+            let seq = a.sequence.get();
+            a.sequence.set(seq + 1);
+            let old = replay.join(format!("probe-{seq:06}"));
+            let work: serde_json::Value =
+                serde_json::from_slice(&fs::read(old.join("WORK.json"))?)?;
+            ensure!(
+                work["knob"].as_f64().context("recorded knob")? as f32 == knob,
+                "replay controller proposed a different knob at {seq}"
+            );
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(old.join("native/result.json"))?)?;
+            ensure!(
+                manifest["source_sha256"] == sha(&fs::read(source)?),
+                "replay source differs"
+            );
+            let encoded = fs::read(old.join(format!("native/selected.{}", a.codec.extension())))?;
+            let decoded = a.decode_native(&encoded, w, h)?;
+            ensure!(
+                sha(&encoded) == work["encoded_sha256"] && sha(&decoded) == work["decoded_sha256"],
+                "replay payload changed"
+            );
+            self.work.borrow_mut().push(NativeProbeWork {
+                knob,
+                encode_seconds: 0.,
+                decode_seconds: 0.,
+                internal_reconstructions: 0,
+                native_pixel_comparisons: 0,
+                map_evaluations: 0,
+                consumed_maps: 0,
+                native_loop_ms: 0.,
+                encoded_sha256: sha(&encoded),
+                decoded_sha256: sha(&decoded),
+            });
+            fs::write(
+                a.root.join("REPLAY.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"source_retained":replay,"replayed_probes":seq+1,"new_encodes":0}),
+                )?,
+            )?;
+            return Ok((encoded, decoded));
+        }
         // Memory and storage admission are checked again before every actual encode.
         let available = fs::read_to_string("/proc/meminfo")?
             .lines()
@@ -376,6 +424,7 @@ fn main() -> Result<()> {
     let encoder_sha = sha(&fs::read(&binary)?);
     let mut a = Adapter {
         codec: kind,
+        replay: std::env::var_os("GTARGET_REPLAY_ROOT").map(PathBuf::from),
         binary,
         oracle: PathBuf::from(&args[7]).canonicalize()?,
         root: retained.clone(),
@@ -402,6 +451,24 @@ fn main() -> Result<()> {
         }
         _ => unreachable!(),
     };
+    if action.starts_with("peer-") {
+        let peer = PathBuf::from(std::env::var("GTARGET_PEER_SPEC")?);
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&peer)?)?;
+        ensure!(
+            value["reference_model_sha256"] == sha(&fs::read(&bake)?),
+            "peer reference bake binding"
+        );
+        ensure!(
+            value["codec"] == kind.extension()
+                || (kind == CodecKind::Jpeg && value["codec"] == "jpeg"),
+            "peer codec binding"
+        );
+        a.config += &format!(";peer-spec-sha256={}", sha(&fs::read(&peer)?));
+    }
+    ensure!(
+        a.replay.is_none() || matches!(action, "fit" | "eval"),
+        "replay is only for candidate plumbing verification"
+    );
     fs::write(
         retained.join("INPUTS.json"),
         serde_json::to_vec_pretty(
@@ -436,6 +503,81 @@ fn main() -> Result<()> {
                 serde_json::to_vec_pretty(
                     &json!({"encoded_sha256":sha(&encoded),"decoded_sha256":sha(&decoded),"work":native.take_work()}),
                 )?,
+            )?;
+            Ok(())
+        }
+        "peer-fit" => {
+            let peer = PathBuf::from(std::env::var("GTARGET_PEER_SPEC")?);
+            instrument::fit_arms_scored(&a, &inputs, &bake, &output, &["scalar"], Some(&peer))
+        }
+        "peer-eval" => {
+            let peer = PathBuf::from(std::env::var("GTARGET_PEER_SPEC")?);
+            instrument::evaluate_arms_scored(
+                &a,
+                &inputs,
+                &PathBuf::from(&args[5]),
+                &bake,
+                &output,
+                &["scalar"],
+                Some(&peer),
+            )
+        }
+        "endpoints" => {
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(inputs.join("train_source_manifest.json"))?)?;
+            fs::create_dir(&output)?;
+            let bytes = fs::read(&bake)?;
+            let model = zenpredict::Model::from_bytes(&bytes)?;
+            let mut scorer = zensim::BakeScorer::new(&model)?;
+            let mut rows = Vec::new();
+            for source in manifest["sources"].as_array().context("TRAIN sources")? {
+                let path = PathBuf::from(source["path"].as_str().context("TRAIN path")?);
+                let rgb = image::open(&path)?.to_rgb8();
+                for q in [5., 95.] {
+                    let knob = if kind == CodecKind::Avif {
+                        1. + (100. - q) * 254. / 100.
+                    } else {
+                        q
+                    };
+                    let native = Backend {
+                        adapter: &a,
+                        work: RefCell::new(Vec::new()),
+                    };
+                    let (_, decoded) = codec::CodecBackend::encode_decode(
+                        &native,
+                        rgb.as_raw(),
+                        rgb.width(),
+                        rgb.height(),
+                        knob,
+                    )?;
+                    let score = scorer
+                        .compute(
+                            &zensim::RgbSlice::new(
+                                rgb.as_raw().as_chunks::<3>().0,
+                                rgb.width() as usize,
+                                rgb.height() as usize,
+                            ),
+                            &zensim::RgbSlice::new(
+                                decoded.as_chunks::<3>().0,
+                                rgb.width() as usize,
+                                rgb.height() as usize,
+                            ),
+                            Some(kind.extension()),
+                        )?
+                        .score() as f32;
+                    let dist = output.join(format!(
+                        "{}-q{q}.png",
+                        source["origin"].as_str().context("origin")?
+                    ));
+                    image::RgbImage::from_raw(rgb.width(), rgb.height(), decoded)
+                        .context("shape")?
+                        .save(&dist)?;
+                    rows.push(json!({"origin":source["origin"],"q":q,"knob":knob,"score":score,"ref_path":path,"dist_path":dist,"work":native.take_work()}));
+                }
+            }
+            fs::write(
+                output.join("COMPLETE.json"),
+                serde_json::to_vec_pretty(&json!({"rows":rows,"model_sha256":sha(&bytes)}))?,
             )?;
             Ok(())
         }
