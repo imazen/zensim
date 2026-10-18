@@ -1,0 +1,49 @@
+Native scalar target development validation, 2026-10-18 UTC, host dev.
+Native build commit: e62f9cdd6b353925068b0feca7dd9899f904fec1.
+Command owner: just gtarget-scalar-panel; exact per-phase argv/environment retained in evidence .command.json files.
+No timing benchmark or performance qualification; below are original run-heavy operational receipts.
+
+scalar-v1/avif/diff-frag-820/eval.log
+run-heavy: done rc=0 254s | peak-RSS 0.17GiB | min-avail 34060MiB | peak-load 12.07
+
+scalar-v1/avif/diff-frag-820/fit.log
+run-heavy: done rc=0 68s | peak-RSS 0.17GiB | min-avail 34332MiB | peak-load 10.70
+
+scalar-v1/avif/smoke.log
+run-heavy: done rc=0 1s | peak-RSS 0.16GiB | min-avail 35759MiB | peak-load 10.59
+
+scalar-v1/avif/w-c/eval.log
+run-heavy: done rc=0 252s | peak-RSS 0.17GiB | min-avail 33704MiB | peak-load 11.97
+
+scalar-v1/avif/w-c/fit.log
+run-heavy: done rc=0 69s | peak-RSS 0.17GiB | min-avail 33781MiB | peak-load 11.79
+
+scalar-v1/jpeg/diff-frag-820/eval.log
+run-heavy: done rc=0 69s | peak-RSS 0.18GiB | min-avail 35710MiB | peak-load 10.99
+
+scalar-v1/jpeg/diff-frag-820/fit.log
+run-heavy: done rc=0 18s | peak-RSS 0.18GiB | min-avail 35775MiB | peak-load 10.50
+
+scalar-v1/jpeg/smoke.log
+run-heavy: done rc=0 0s | peak-RSS 0.18GiB | min-avail 35810MiB | peak-load 10.65
+
+scalar-v1/jpeg/w-c/eval.log
+run-heavy: done rc=0 65s | peak-RSS 0.18GiB | min-avail 35638MiB | peak-load 11.04
+
+scalar-v1/jpeg/w-c/fit.log
+run-heavy: done rc=0 19s | peak-RSS 0.18GiB | min-avail 35694MiB | peak-load 11.14
+
+scalar-v1/webp/diff-frag-820/eval.log
+run-heavy: done rc=0 14s | peak-RSS 0.02GiB | min-avail 35695MiB | peak-load 10.39
+
+scalar-v1/webp/diff-frag-820/fit.log
+run-heavy: done rc=0 4s | peak-RSS 0.02GiB | min-avail 35725MiB | peak-load 10.74
+
+scalar-v1/webp/smoke.log
+run-heavy: done rc=0 0s | peak-RSS 0.01GiB | min-avail 35776MiB | peak-load 10.65
+
+scalar-v1/webp/w-c/eval.log
+run-heavy: done rc=0 14s | peak-RSS 0.02GiB | min-avail 35712MiB | peak-load 10.44
+
+scalar-v1/webp/w-c/fit.log
+run-heavy: done rc=0 5s | peak-RSS 0.02GiB | min-avail 35459MiB | peak-load 10.25
