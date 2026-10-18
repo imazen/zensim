@@ -12,6 +12,14 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
+
+# The shared statistical owners use Python temporary files. Bind their scratch
+# before importing array/Parquet libraries that can cache tempfile's default.
+SCRATCH = Path.home()/'tmp'
+SCRATCH.mkdir(exist_ok=True)
+os.environ['TMPDIR'] = str(SCRATCH)
+tempfile.tempdir = str(SCRATCH)
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -39,6 +47,69 @@ def assessment_plan(out):
         populations=EXTERNAL,source=str(BASE/'WITHHELD_INPUTS.json'),source_sha256=sha(BASE/'WITHHELD_INPUTS.json'),
         amendment='Prospectively include the original exposed CID22-B and JPEG KonJND SELECT panels alongside CSIQ/PIPAL; LIVE remains diagnostic. No new population, selection metric, fit or qualification gate.',
         models='All four fixed arms at seed0 plus all six original gauntlet rows',time_utc=now()))
+
+
+def feature_compatibility(out):
+    """Replay twelve TRAIN pixel pairs through the existing bank owner."""
+    import pyarrow as pa
+    from color_noise_repair import read,write,sha,derived_declaration
+    from gauntlet_frozen import EXTRACT
+    root=out/'feature-compatibility';request=root/'request';request.mkdir(parents=True)
+    samples=[];keys=[];reference=[];pins={}
+    ids=sorted(set(derived_declaration('fx2')[2]['direct'])|
+        {b for _,b in derived_declaration('fx2')[2]['products']})
+    for member in MEMBER_SOURCE:
+        bank=BANK/member;m=read(bank/'_MANIFEST.json')
+        if sha(bank/'keys.parquet')!=m['keys_sha256'] or sha(bank/'features.parquet')!=m['features_parquet_sha256']:
+            raise ValueError('TRAIN feature bank identity changed')
+        rows=pq.read_table(bank/'keys.parquet').to_pylist()
+        subset=[r for r in rows if not r['pixels_identical']]
+        if member.startswith('kadid'):subset=[r for r in subset if r['codec']=='kadid_12']
+        elif member=='tid2013':subset=[r for r in subset if r['codec']=='tid_02']
+        chosen=[subset[0],subset[-1]]
+        features=pq.read_table(bank/'features.parquet',columns=['pair_key']+[f'f{i}' for i in ids])
+        index={k:i for i,k in enumerate(features['pair_key'].to_pylist())}
+        for row in chosen:
+            i=len(keys);keys.append({**{k:row[k] for k in ['pair_key','ref_path','dist_path']},'row_id':i})
+            reference.append([features[f'f{j}'][index[row['pair_key']]].as_py() for j in ids])
+            samples.append(dict(member=member,bank_pair_key=row['pair_key'],codec=row['codec'],
+                ref_pixels_sha256=row['ref_pixels_sha256'],dist_pixels_sha256=row['dist_pixels_sha256']))
+        pins[member]=dict(manifest_sha256=sha(bank/'_MANIFEST.json'),features_sha256=sha(bank/'features.parquet'),keys_sha256=sha(bank/'keys.parquet'))
+    keyfile=request/'keys.parquet';pq.write_table(pa.Table.from_pylist(keys),keyfile)
+    reference=np.asarray(reference,dtype='<f8')
+    pq.write_table(pa.table({f'f{j}':reference[:,k] for k,j in enumerate(ids)}),request/'reference.parquet')
+    spec=dict(schema='rev5-assessment-keys-v1',labels_read=False,
+        keys=dict(path=str(keyfile),sha256=sha(keyfile)),rows=len(keys),immutable_roots=[str(BANK)],
+        extractor=dict(sha256=sha(EXTRACT)),instrument='TRAIN-feature-compatibility-only; no labels or model scoring',
+        exposure_freeze=dict(path=str(out/'REGISTRATION.json'),sha256=sha(out/'REGISTRATION.json')))
+    write(request/'request.json',spec)
+    cmd=[sys.executable,str(REPO/'scripts/rev4_featpot/rev5_bank.py'),'extract','train_compatibility',
+        '--bin',str(EXTRACT),'--build-commit','unresolved-retained-binary-sha256-'+sha(EXTRACT),
+        '--revision','5','--era','rev5_localwin','--instrument-manifest',str(request/'request.json'),
+        '--out',str(root/'fresh'),'--threads','1','--chunk','12']
+    with (root/'extract.log').open('x') as log:
+        subprocess.run(cmd,check=True,stdout=log,stderr=subprocess.STDOUT)
+    bank=root/'fresh/train_compatibility'
+    fresh=pq.read_table(bank/'features.parquet',columns=[f'f{i}' for i in ids])
+    actual=np.column_stack([fresh[f'f{j}'].to_numpy() for j in ids]).astype('<f8')
+    pixels=pq.read_table(bank/'keys.parquet').to_pylist()
+    for expected,observed in zip(samples,pixels,strict=True):
+        if (expected['ref_pixels_sha256']!=observed['reference_pixels_sha256']
+                or expected['dist_pixels_sha256']!=observed['distorted_pixels_sha256']):
+            raise ValueError('TRAIN replay decoded pixels differ from feature producer')
+    a,b=reference.astype('<f4'),actual.astype('<f4')
+    changed=(a.view('<u4')!=b.view('<u4'))
+    differences=[dict(row=i,feature=ids[j],stored=float(reference[i,j]),fresh=float(actual[i,j]))
+        for i,j in np.argwhere(changed)]
+    result=dict(schema='color-noise-train-feature-compatibility-v1',rows=len(keys),feature_ids=ids,
+        source_banks=pins,request_sha256=sha(request/'request.json'),extractor_sha256=sha(EXTRACT),
+        fresh_manifest_sha256=sha(bank/'_MANIFEST.json'),decoded_pixels_exact=True,
+        f32_exact=not changed.any(),f32_differences=differences,
+        max_abs_difference=float(np.max(np.abs(reference-actual))),
+        f64_exact=bool(np.array_equal(reference.view('<u8'),actual.view('<u8'))),
+        scope='Bounded TRAIN arithmetic replay, not complete cross-corpus or source-commit qualification.',time_utc=now())
+    write(out/'FEATURE_COMPATIBILITY.json',result)
+    print(json.dumps({k:result[k] for k in ['rows','decoded_pixels_exact','f32_exact','f64_exact','max_abs_difference']}),flush=True)
 
 
 def prepare(out):
@@ -357,14 +428,14 @@ def report(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['assessment-plan','prepare','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
+    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'assessment-plan':assessment_plan,'prepare':prepare,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
+    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
 
 
 if __name__=='__main__':main()
