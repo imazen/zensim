@@ -8,7 +8,7 @@ None.
 
 ### Changed
 
-- Retain explicit scalar G-TARGET development reports for both frozen candidates on JPEG, WebP and AVIF-SVT; all calibrated budget configurations fail unchanged bars. Preserve exact encode/decode work, corruption misses and SHA256-verified archive provenance (`e62f9cdd`, `e6f2d621`, `4cb5973b`).
+- Correct AVIF G-TARGET routing with physical SVT selector proof and a fresh six-panel run: all18 calibrated budget gates fail unchanged bars. Preserve excluded legacy AVIF diagnostics and exact JPEG/WebP replay; matched SSIMULACRA2/butteraugli3 controls are registered and running (`56f875d2`, `48ff9618`, `f23cf7c1`, `61d8c31a`).
 
 - Report explicitly scoped native scalar G-TARGET validation with unchanged target-error bars and integrity guards. Preserve spatial qualification boundaries and fix reachable-target report flag propagation (`2acd4af7`).
 
