@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Render explicit frozen human comparisons with source-clustered SROCC intervals, fitted PLCC, KROCC, complete scatter populations and per-item training-overlap records. Keep withheld family fits distinct from packed deployment bakes; add exact BMP-to-PNG evaluation transport and preserve existing browser gates (`95a6c7f4`, `a5510e71`, `b476d7cc`, `b9196f8b`).
+
 - Replay owner-approved peer-relative scalar target comparisons and detector-disabled q20 ordering from retained evidence, with every statistic/failure and original absolute bars preserved; no new encodes or scorer calls (`47175b9c`).
 
 - Correct AVIF G-TARGET routing with physical SVT selector proof and a fresh six-panel run: all18 calibrated budget gates fail unchanged bars. Preserve excluded legacy AVIF diagnostics and exact JPEG/WebP replay; all12 matched SSIMULACRA2/butteraugli3 controls also fail every unchanged budget gate, with TRAIN-only native-unit mapping (`56f875d2`, `48ff9618`, `f23cf7c1`, `61d8c31a`).

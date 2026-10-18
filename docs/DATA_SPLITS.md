@@ -2352,3 +2352,35 @@ New artifact persistence uses the local SSD. Historical receipt locations remain
 E36 urgent disk-only amendment: coordinator directs pause below30GiB, resume above40GiB and absolute stop below20GiB, superseding earlier stronger resource thresholds. In-flight cells/transfers are retained; the17:00Z clock gets no further credit. Eager verified archival uses at most4transport streams, native DONE eligibility and the same relocation resolver/final evidence gate. Trainer-needed feature receipts/staging remain local. This changes no scientific or assessment guard.
 
 E36 resource-only budget4/archive amendment (2026-10-17): coordinator moves the absolute generation deadline to22Z, with original clocks/frozen interval preserved and no additional wait excluded. All12300 mandatory/424 optional surviving-codec views, source counts,61q,20sizes, teachers, TRAIN selection and assessment remain unchanged. Eight bounded archive streams write new zstd copies to a distinct direct-array directory, preserving every uncompressed bundle hash and old owner; actual map-owner decompression/readback precedes format admission. Existing raw and new compressed owners are resolved through the immutable relocation journal. Archive reconnects drain by EOF/join and retain live handles; no transfer is terminated for replacement. Final matrix, terminal-control, journal/native-eligibility/readback, pool and package evidence remain required before fits. Pointer: benchmarks/e36_generation_2026-10-17.pointer.md.
+
+## Frozen human gauntlet exploratory exposure — 2026-10-18
+
+The owner requested a frozen-model comparison with human scatter plots across
+all supported full-reference datasets. Model identities are diff+frag-820
+`89cb4861`, W-C `f73059ff` and diff-410 `7cf4cfd9`. No model was fitted,
+recalibrated or selected by this assessment.
+
+The four previously exposed D1 sources retain their TRAIN/development roles:
+KADID TRAIN+SELECT (7,869 observations), TID2013 (3,000), KonFiG (756) and
+CID22-A25 (2,192). Their comparison rows reuse seed0 source-withheld E33 A/C
+and E34 W-C predictions, rather than scoring full-data weights on training
+labels. Every physical item is marked fit/development using the full-data
+manifests' hash-bound keys. These raw fold fits differ from the packed
+full-data deployment artifacts; their intervals condition on the chosen fit.
+
+External exploratory reads cover CID22-B24 (2,100), CSIQ (865), the existing
+KonJND JPEG SELECT ruler (404), LIVE's audit-fixed clean10 subset (267), and
+PIPAL's published TRAIN ELO stimuli (23,200). Original dataset roles remain
+unchanged. KonJND's BPG half is outside the existing JPEG ruler. KonFiG uses
+the exposed reconstructed design grid, with its existing SSIMULACRA2 tuning
+caveat. The exact decoded-source screen finds no training matches in these
+external panels; broad crop/resize lineage remains unqualified beyond the
+previous LIVE audit. Protected and reserved populations remain untouched.
+
+SSIMULACRA2 and butteraugli3 reuse metric-only cache projections where keys
+match; absent coverage uses the retained CPU executable. CVVDP is pinned to
+`ca154a6a` with `standard_fhd`. Exact per-corpus implementation/column pins,
+complete populations and source bootstrap settings accompany the reports.
+Fresh external features use retained extractor `6dad3b66`; its unresolved
+source-commit closure remains disclosed. No new confirmation or production
+qualification follows. See the [evidence pointer](../benchmarks/gauntlet_human_2026-10-18.pointer.md).

@@ -617,6 +617,15 @@
       "report_url": "/zensim/reports/hdrteach-2026-10-04/",
       "bakes": [],
       "note": "All 7,425 TRAIN / 3,900 VAL pairs, fixed ppd 60 native PQ and absolute BT.709. Signed pooled SROCC vs CVVDP 0.828319 / 0.821198; within-reference means 0.998820 / 0.982051; preregistered agree 7,390/7,425 and 3,696/3,900. Full identity, native target and viewing audit PASS. No model fit or human qualification. HDR-VDP-3 quality calibration used UPIQ, so UPIQ is not an independent future student test. Record benchmarks/hdrteach_2026-10-04.md."
+    },
+    {
+      "id": "2026-10-18-frozen-human-gauntlet",
+      "date": "2026-10-18",
+      "role": "train-development",
+      "label": "2026-10-18 · Frozen models and peers against human ratings",
+      "report_url": "/zensim/reports/gauntlet-2026-10-18/index.html",
+      "bakes": [],
+      "note": "54 metric-by-panel cells across eight datasets/nine admitted panels. Three frozen model families and three peer metrics. D1 rows use cached seed0 withheld-source fits; external rows use packed full-data bakes. Source-clustered uncertainty, per-item overlap records and complete raw scatter populations retained. Exploratory; no qualification or default change. Record: benchmarks/gauntlet_human_2026-10-18.pointer.md."
     }
   ],
   "incumbent_notes": [
