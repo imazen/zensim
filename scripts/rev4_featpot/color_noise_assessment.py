@@ -76,14 +76,33 @@ def choose(rows):
     return selected,decisions
 
 
-def parity(out):
+def smoke_score(out):
+    from color_noise_repair import ARMS,read,write,sha
+    from v2_lodo_mlp import predict
+    population=read(out/'DEVELOPMENT_POPULATIONS.json');records=[]
+    for arm in ARMS:
+        r=read(out/'smokes'/arm/'s0/result.json');model=Path(r['selected_bake'])
+        if r['execution_contract']!='local-smoke' or sha(model)!=r['selected_bake_sha256']:
+            raise ValueError('expected original local smoke model')
+        dest=out/'smoke-scoring'/arm;dest.mkdir(parents=True)
+        pred=predict(model,Path(population['table']),dest/'pred.tsv')
+        if len(pred)!=len(population['rows']):raise ValueError('smoke prediction population differs')
+        records.append(dict(arm=arm,rows=len(pred),all_finite=True,model_sha256=sha(model),
+            predictions_sha256=sha(dest/'pred.tsv'),densification='native BIT-IDENTICAL gate passed'))
+    write(out/'SMOKE_SCORING.json',dict(schema='color-noise-native-smoke-scoring-v1',
+        cells=records,not_selection_data=True,time_utc=now()))
+
+
+def parity(out, seeds=range(3)):
+
     """Reuse the E33 parity owner's native metadata stripping operation."""
     from color_noise_repair import read,write,sha
     original=read(BASE/'models/diff-frag-820-training-manifest.json')
     oldroot=Path(original['selected_bake']).parent.parent.parent
-    dest=out/'control-parity';dest.mkdir()
+    partial=list(seeds)!=[0,1,2]
+    dest=out/('control-parity-seed0' if partial else 'control-parity');dest.mkdir()
     records=[]
-    for seed in range(3):
+    for seed in seeds:
         old=oldroot/f'full_s{seed}'/'result.json'
         new=out/'cells/current'/f's{seed}'/'result.json'
         a,b=read(old),read(new)
@@ -99,7 +118,7 @@ def parity(out):
                 stripped.append(sha(target))
             same[key+'_nonrepro_bytes']=stripped[0]==stripped[1]
         records.append(dict(seed=seed,fields_equal=same,pass_all=all(same.values())))
-    write(out/'CONTROL_PARITY.json',dict(schema='color-noise-control-replay-v1',
+    write(out/('CONTROL_PARITY_S0.json' if partial else 'CONTROL_PARITY.json'),dict(schema='color-noise-control-replay-v1',
         records=records,pass_all=all(r['pass_all'] for r in records),time_utc=now()))
     if not all(r['pass_all'] for r in records):raise ValueError('original control replay mismatch; inspect before assessment')
 
@@ -250,14 +269,14 @@ def report(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['prepare','parity','select','external','dashboard','report'])
+    p.add_argument('mode',choices=['prepare','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'prepare':prepare,'parity':parity,'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
+    {'prepare':prepare,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
 
 
 if __name__=='__main__':main()
