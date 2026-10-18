@@ -1,0 +1,32 @@
+[package]
+name = "shipgates-target"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zensim-target = { path = "../../zensim-target", default-features = false, features = ["native-probe"] }
+zensim = { path = "../../zensim", features = ["custom-profiles", "imgref"] }
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
+zenjpeg = { git = "https://github.com/imazen/zenjpeg", rev = "4196fa93d422bc367d1e3ddadbaddfe672b9cdfc", default-features = false }
+zenwebp = { git = "https://github.com/imazen/zenwebp", rev = "160acc6588ebb57c4982c30ebb1c303e4fa7cabc", default-features = false, features = ["std"] }
+zenavif = { git = "https://github.com/imazen/zenavif", rev = "5712b80af91f17804d09b5eef0d888435594cd65", default-features = false }
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10.9"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+enough = "0.4.5"
+almost-enough = "0.4.5"
+zenpixels = { version = ">=0.2.10, <0.4.0", default-features = false }
+
+[patch.crates-io]
+zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "f0903489300aea240ffae2e3f1359f8f2b9a0ba4" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

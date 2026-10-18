@@ -2411,3 +2411,20 @@ e36-ingress-freeze root target:
 
 e36-ingress-probe root pool out:
     python3 scripts/rev4_featpot/e36_ingress_integration.py probe --root {{quote(root)}} --pool {{quote(pool)}} --out {{quote(out)}}
+
+# Scalar-only native G-TARGET validation, using the existing instrument and reporter.
+gtarget-scalar-check config:
+    cargo clippy --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} -- -D warnings
+
+gtarget-scalar-build config:
+    cargo build --release --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}}
+
+gtarget-scalar-tests:
+    TMPDIR="$HOME/tmp" python3 -m unittest discover -s scripts/tests -p 'test_reachable_target_analysis.py'
+
+
+gtarget-scalar-run binary action codec encoder inputs bake calibration output oracle:
+    {{quote(binary)}} {{quote(action)}} {{quote(codec)}} {{quote(encoder)}} {{quote(inputs)}} {{quote(bake)}} {{quote(calibration)}} {{quote(output)}} {{quote(oracle)}}
+
+gtarget-scalar-panel models binary encoders inputs lock heavy output phase='all':
+    python3 scripts/rev4_featpot/shipgates.py scalar-target --models {{quote(models)}} --binary {{quote(binary)}} --encoders {{quote(encoders)}} --inputs {{quote(inputs)}} --heavy-lock {{quote(lock)}} --run-heavy {{quote(heavy)}} --output {{quote(output)}} --phase {{quote(phase)}}

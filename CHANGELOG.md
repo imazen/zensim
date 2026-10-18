@@ -8,7 +8,7 @@ None.
 
 ### Changed
 
-- Report explicitly scoped native scalar G-TARGET validation with unchanged target-error bars and integrity guards. Preserve spatial qualification boundaries and fix reachable-target report flag propagation.
+- Report explicitly scoped native scalar G-TARGET validation with unchanged target-error bars and integrity guards. Preserve spatial qualification boundaries and fix reachable-target report flag propagation (`2acd4af7`).
 
 - Recognize the exact approved E36 source-budget amendment and native-bound diagnostic budget, preserving full-fit guards and numerical sources; record successor binary/source identities and positive nontraining admission (`170dabe9`, `aeb1dd98`). Scientific fits remain unreleased.
 

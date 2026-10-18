@@ -281,6 +281,20 @@ fn ladder(
 }
 
 pub fn fit(codec: &impl NativeProbeCodec, root: &Path, bake: &Path, out: &Path) -> Result<()> {
+    fit_arms(codec, root, bake, out, &ARMS)
+}
+
+pub(crate) fn fit_arms(
+    codec: &impl NativeProbeCodec,
+    root: &Path,
+    bake: &Path,
+    out: &Path,
+    arms: &[&str],
+) -> Result<()> {
+    ensure!(
+        arms == ARMS || arms == ["scalar"],
+        "unsupported probe scope"
+    );
     validate_configuration(codec)?;
     let training = source_set(&root.join("train_source_manifest.json"), "train")?;
     let bytes = fs::read(bake)?;
@@ -289,7 +303,7 @@ pub fn fit(codec: &impl NativeProbeCodec, root: &Path, bake: &Path, out: &Path) 
     let mut scorer = BakeScorer::new(&model)?;
     let mut sink = fs::File::create(out.join("bounds.jsonl"))?;
     let mut curves = BTreeMap::new();
-    for arm in ARMS {
+    for &arm in arms {
         let mut training_rows = Vec::new();
         for source in &training.sources {
             let rows = ladder(
@@ -336,6 +350,21 @@ pub fn evaluate(
     bake: &Path,
     out: &Path,
 ) -> Result<()> {
+    evaluate_arms(codec, root, calibration_path, bake, out, &ARMS)
+}
+
+pub(crate) fn evaluate_arms(
+    codec: &impl NativeProbeCodec,
+    root: &Path,
+    calibration_path: &Path,
+    bake: &Path,
+    out: &Path,
+    arms: &[&str],
+) -> Result<()> {
+    ensure!(
+        arms == ARMS || arms == ["scalar"],
+        "unsupported probe scope"
+    );
     validate_configuration(codec)?;
     let validation = source_set(&root.join("source_manifest.json"), "validate")?;
     let calibration: Calibration = serde_json::from_slice(&fs::read(calibration_path)?)?;
@@ -362,10 +391,10 @@ pub fn evaluate(
         );
     }
     ensure!(
-        calibration.curves.len() == ARMS.len(),
+        calibration.curves.len() == arms.len(),
         "calibration arm count mismatch"
     );
-    for arm in ARMS {
+    for &arm in arms {
         calibration
             .curves
             .get(arm)
@@ -379,7 +408,7 @@ pub fn evaluate(
     let mut bounds = BTreeMap::new();
     // Every attained bound is established before any target controller runs.
     for source in &validation.sources {
-        for arm in ARMS {
+        for &arm in arms {
             bounds.insert(
                 (source.origin.clone(), arm.to_string()),
                 ladder(
@@ -399,7 +428,7 @@ pub fn evaluate(
     fs::write(
         out.join("INPUTS.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":"native-codec-target-v1","config":codec.configuration(),"codec":codec.codec().extension(),"quality_knots":codec.quality_knots(),"bound_encodes":ARMS.iter().map(|arm|(arm,codec.bound_encodes(arm))).collect::<BTreeMap<_,_>>(),"model_sha256":sha(&bytes),"driver_sha256":driver_sha()?,"calibration_sha256":sha(&fs::read(calibration_path)?),"sources":validation,"fixed_requests":FIXED,"tolerance":TOL,"budgets":[1,2,3],"policies":["midpoint","train_curve"],"arms":ARMS,"bounds_are_not_controller_inputs":true}),
+            &json!({"schema":if arms == ["scalar"] { "native-codec-target-scalar-v1" } else { "native-codec-target-v1" },"config":codec.configuration(),"codec":codec.codec().extension(),"quality_knots":codec.quality_knots(),"bound_encodes":arms.iter().map(|arm|(arm,codec.bound_encodes(arm))).collect::<BTreeMap<_,_>>(),"model_sha256":sha(&bytes),"driver_sha256":driver_sha()?,"calibration_sha256":sha(&fs::read(calibration_path)?),"sources":validation,"fixed_requests":FIXED,"tolerance":TOL,"budgets":[1,2,3],"policies":["midpoint","train_curve"],"arms":arms,"bounds_are_not_controller_inputs":true}),
         )?,
     )?;
     let mut measurements = fs::File::create(out.join("measurements.jsonl"))?;
@@ -407,7 +436,12 @@ pub fn evaluate(
     let mut cases = 0;
     for source in &validation.sources {
         let (rgb, w, h) = pixels(source)?;
-        let neutral = &bounds[&(source.origin.clone(), "neutral".into())];
+        let witness_arm = if arms.contains(&"neutral") {
+            "neutral"
+        } else {
+            "scalar"
+        };
+        let neutral = &bounds[&(source.origin.clone(), witness_arm.into())];
         let mut scores: Vec<f32> = neutral.iter().map(|r| r.score).collect();
         scores.sort_by(f32::total_cmp);
         scores.dedup();
@@ -423,10 +457,14 @@ pub fn evaluate(
                 .any(|r| (r.score - target).abs() <= TOL)
         };
         for &target in &targets {
-            coverage.push(json!({"origin":source.origin,"target":target,"scalar_witnessed":feasible("scalar",target),"neutral_witnessed":feasible("neutral",target),"active_witnessed":feasible("active",target)}));
+            let mut row = json!({"origin":source.origin,"target":target});
+            for &arm in arms {
+                row[format!("{arm}_witnessed")] = json!(feasible(arm, target));
+            }
+            coverage.push(row);
         }
-        targets.retain(|&t| ARMS.iter().all(|arm| feasible(arm, t)));
-        for arm in ARMS {
+        targets.retain(|&t| arms.iter().all(|arm| feasible(arm, t)));
+        for &arm in arms {
             for policy in ["midpoint", "train_curve"] {
                 for budget in 1..=3 {
                     for &target in &targets {
@@ -492,7 +530,7 @@ pub fn evaluate(
     fs::write(
         out.join("COMPLETE"),
         serde_json::to_vec_pretty(
-            &json!({"cases":cases,"bounds":validation.sources.len()*ARMS.len()*codec.quality_knots().len()}),
+            &json!({"cases":cases,"bounds":validation.sources.len()*arms.len()*codec.quality_knots().len()}),
         )?,
     )?;
     Ok(())

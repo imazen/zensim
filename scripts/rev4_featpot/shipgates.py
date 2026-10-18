@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 def sha(path):
@@ -705,6 +706,60 @@ def jxl_target(args):
             print(f"JXL {label}: native {mode} complete", flush=True)
 
 
+def scalar_target(args):
+    """Serial scalar-only native validation; release the paper lock each phase."""
+    models = json.loads(args.models.read_text())
+    encoders = json.loads(args.encoders.read_text())
+    assert set(models) == {"diff-frag-820", "w-c"}
+    assert set(encoders) == {"jpeg", "webp", "avif"}
+    design = dict(schema="native-scalar-target-dispatch-v1", scope="adapter validation, not final or spatial qualification",
+        models=models, encoders=encoders, binary=str(args.binary),binary_sha256=sha(args.binary),
+        manifests={n:sha(args.inputs/n) for n in ("train_source_manifest.json","source_manifest.json")},
+        calibration="TRAIN families only; one separately fitted curve per codec/model",
+        budgets=[1,2,3],policies=["midpoint","train_curve"],memory="8G",threads=1)
+    if args.output.exists():
+        assert json.loads((args.output/"DESIGN.json").read_text()) == design, "dispatch pins changed"
+    else:
+        args.output.mkdir(parents=True)
+        write(args.output/"DESIGN.json",design)
+    env = dict(os.environ,ZENSIM_FORMULA_REV="5",ZENSIM_NEIGHBOUR_EXACT="1",RAYON_NUM_THREADS="1")
+    for codec,encoder in encoders.items():
+        assert sha(encoder["binary"]) == encoder["sha256"]
+        assert sha(encoder["oracle"]) == encoder["oracle_sha256"]
+        if codec == "avif":
+            assert encoder["backend"] == "zenav1-svt"
+        codec_root=args.output/codec
+        codec_root.mkdir(exist_ok=True)
+        def phase(action, record, output, calibration):
+            sentinel="COMPLETE.json" if action == "smoke" else "COMPLETE"
+            if output.exists():
+                assert (output/sentinel).is_file(), "incomplete prior phase; preserve and diagnose it"
+                return
+            command=["flock",str(args.heavy_lock),str(args.run_heavy),"--mem","8G","--jobs","1","--",
+                str(args.binary),action,codec,encoder["binary"],str(args.inputs),record["path"],
+                str(calibration),str(output),encoder["oracle"]]
+            write(output.with_suffix(".command.json"),dict(argv=command,environment={k:env[k] for k in ("ZENSIM_FORMULA_REV","ZENSIM_NEIGHBOUR_EXACT","RAYON_NUM_THREADS")}))
+            print(f"G-TARGET {codec} {output.parent.name} {action}: waiting/running",flush=True)
+            with output.with_suffix(".log").open("x") as log:
+                subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+            assert (output/sentinel).is_file(), "native phase did not complete"
+            print(f"G-TARGET {codec} {output.parent.name} {action}: COMPLETE",flush=True)
+        phase("smoke",models["diff-frag-820"],codec_root/"smoke",Path("unused"))
+        if args.phase == "smoke":
+            continue
+        for label,record in models.items():
+            assert sha(record["path"]) == record["sha256"]
+            dest=codec_root/label;dest.mkdir(exist_ok=True)
+            calibration=dest/"fit/calibration.json"
+            phase("fit",record,dest/"fit",Path("unused"))
+            phase("eval",record,dest/"eval",calibration)
+            reporter=Path(__file__).resolve().parents[1]/"v_next/rd_probe_analyze_2026-07-18.py"
+            with (dest/"report.log").open("w") as log:
+                subprocess.run([sys.executable,str(reporter),"--target-loop",str(dest/"eval"),"--target-only"],env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+    if args.phase != "smoke":
+        write(args.output/"COMPLETE.json",dict(scope=design["scope"],codecs=list(encoders),models=list(models)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -713,6 +768,7 @@ def main():
                         ("jxl-smoke", ["inputs", "oracle"]),
                         ("jxl-interventions", ["inputs", "oracle", "heavy-lock", "run-heavy"]),
                         ("jxl-target", ["inputs", "resume-calibration-root", "heavy-lock", "run-heavy"]),
+                        ("scalar-target", ["inputs", "encoders", "heavy-lock", "run-heavy"]),
                         ("corruption-results", ["inputs", "audits", "bindings"]),
                         ("rd-sources", ["inputs", "tree"]),
                         ("rd-licenses", ["tree"]),
@@ -722,6 +778,8 @@ def main():
         common = ["output"] if mode in ["corruption-results", "rd-sources", "rd-licenses"] else ["models", "binary", "output"]
         for name in common + names:
             command.add_argument(f"--{name}", type=Path, required=True)
+        if mode == "scalar-target":
+            command.add_argument("--phase", choices=["smoke", "all"], default="all")
         if mode == "rd-sources":
             command.add_argument("--build-commit",required=True)
         if mode in ["jxl-rd","jxl-rd-source"]:
@@ -741,7 +799,7 @@ def main():
             command.add_argument("--features-root", type=Path,
                                 default=Path("/mnt/v/output/zensim/adjudicate-2026-10-07/no-human-corpus"))
     args = parser.parse_args()
-    {"gaddr": gaddr, "corruption": corruption, "jxl-smoke": jxl_smoke, "jxl-target": jxl_target,
+    {"gaddr": gaddr, "corruption": corruption, "jxl-smoke": jxl_smoke, "jxl-target": jxl_target, "scalar-target": scalar_target,
      "corruption-results": corruption_results, "rd-sources": rd_sources, "rd-licenses": rd_licenses, "jxl-rd": jxl_rd,
      "jxl-rd-source": jxl_rd_source, "jxl-interventions": jxl_interventions}[args.mode](args)
 
