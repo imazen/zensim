@@ -47,4 +47,36 @@ class ColorNoise(unittest.TestCase):
         arms=[owner.arm_record(n) for n in owner.ARMS]
         self.assertEqual([(a['coverage_mask'],a['input_count']) for a in arms],[(152,820),(158,820),(152,984),(158,984)])
 
+class Decision(unittest.TestCase):
+    def records(self):
+        import color_noise_assessment as assessment
+        rows=[]
+        for arm in owner.ARMS:
+            for seed in range(3):
+                for population in assessment.SOURCES+['kadid_noise','tid2013_noise']:
+                    rows.append(dict(arm=arm,seed=seed,population=population,statistics=dict(srocc_signed=.8)))
+        return rows
+
+    def test_noise_improvement_cannot_override_source_regression(self):
+        from color_noise_assessment import choose
+        rows=self.records()
+        for r in rows:
+            if r['arm']=='both':
+                r['statistics']['srocc_signed']+=.1 if r['population'].endswith('_noise') else 0
+                if r['population']=='konfig':r['statistics']['srocc_signed']-=.006
+        self.assertEqual(choose(rows)[0],'current')
+        for r in rows:
+            if r['arm']=='coverage' and r['population'].endswith('_noise'):
+                r['statistics']['srocc_signed']+=.01
+        self.assertEqual(choose(rows)[0],'coverage')
+
+    def test_seed_indices_never_choose_a_seed_and_ties_follow_registration(self):
+        from color_noise_assessment import choose
+        rows=self.records()
+        for r in rows:
+            if r['arm']!='current' and r['population'].endswith('_noise'):
+                r['statistics']['srocc_signed']+=.01
+        self.assertEqual(choose(rows)[0],'coverage')
+        with self.assertRaises(KeyError):choose(rows[:-1])
+
 if __name__=='__main__':unittest.main()
