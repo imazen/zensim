@@ -2543,3 +2543,7 @@ gauntlet-archive-resume source destination:
 gauntlet-reference-view html reference:
     node scripts/v_next/gauntlet_render_check.js {{quote(html)}} --reference {{quote(reference)}}
 
+
+# TRAIN-only color/noise comparison; local fits serialize through the shared heavy lock.
+color-noise-repair mode output:
+    TMPDIR="$HOME/tmp" python3 -u scripts/rev4_featpot/color_noise_repair.py {{quote(mode)}} --out {{quote(output)}}

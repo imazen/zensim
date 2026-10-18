@@ -80,6 +80,8 @@ HEADS = ("N", "F")
 # section 5.1), pinned by content so a cell can never train against an edited copy.
 FX1_DECLARATION = Path(__file__).resolve().parent / "e33_fx1_declaration.json"
 FX1_SHA256 = "a97a5fa63937ed8fade3c56fd7470765a031d1d309afc36e631f371a1796e648"
+FX2_DECLARATION = Path(__file__).resolve().parent / "color_noise_fx2_declaration.json"
+FX2_SHA256 = "a3802ddeeede6ec5c9e3d03efdd6cc5af683ab4ea2b0d1143c8e9183c5bd46e5"
 
 
 def fx1_declaration() -> dict:
@@ -88,6 +90,15 @@ def fx1_declaration() -> dict:
     if hashlib.sha256(data).hexdigest() != FX1_SHA256:
         raise ValueError(f"{FX1_DECLARATION}: content changed after registration pin")
     return json.loads(data)
+
+
+def derived_declaration(token):
+    """Pinned experiment declaration; existing fx1 bytes remain unchanged."""
+    if token == 'fx1':return FX1_DECLARATION, FX1_SHA256, fx1_declaration()
+    if token != 'fx2':raise ValueError('unknown derived-input recipe: '+str(token))
+    data=FX2_DECLARATION.read_bytes()
+    if hashlib.sha256(data).hexdigest()!=FX2_SHA256:raise ValueError('fx2 declaration changed after registration')
+    return FX2_DECLARATION, FX2_SHA256, json.loads(data)
 
 CANDIDATES = ("c1", "c2", "c3", "c4", "all", "csfw", "p1", "p3",
               "c8n", "a1", "a1m", "b2", "b2m")
@@ -258,8 +269,8 @@ def recipe_of(spec: str) -> dict:
             out.update(hdr_weight=4.0, hdr_mode={"hp": "rank", "ha": "withinref,both", "hb": "rank", "hc": "rank"}[tok[:2]], **({"hdr_consensus": tok} if tok[:2] in ("hb", "hc") else {}))
         elif tok == "sh1" and "smooth_hinge" not in out:
             out["smooth_hinge"] = True
-        elif tok == "fx1" and "derived_inputs" not in out:  # E33 Arm C: difference x same-cell fragility products
-            out["derived_inputs"] = "fx1"
+        elif tok in ("fx1", "fx2") and "derived_inputs" not in out:
+            out["derived_inputs"] = tok
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out
