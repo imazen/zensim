@@ -22,11 +22,23 @@ sys.path.insert(0, str(REPO/'scripts/v_next'))
 BASE = Path('/mnt/v/output/zensim/gauntlet-2026-10-18')
 BANK = Path('/var/tmp/rev5-featbank')
 SOURCES = ['kadid', 'tid2013', 'konfig', 'cid22_a25']
+EXTERNAL = ['csiq', 'pipal', 'cid22_b', 'konjnd_jpeg_select', 'live']
 MEMBER_SOURCE = {'kadid_train':'kadid','kadid_select':'kadid','tid2013':'tid2013',
                  'konfig_train':'konfig','konfig_val':'konfig','cid22_a25':'cid22_a25'}
 
 
 def now():return datetime.now(timezone.utc).isoformat()
+
+
+def assessment_plan(out):
+    from color_noise_repair import registration,write,sha
+    registration(out)
+    if (out/'TRAIN_SELECTION.json').exists():raise ValueError('assessment expansion must precede selection')
+    write(out/'ASSESSMENT_PLAN.json',dict(schema='color-noise-assessment-plan-v1',
+        state='frozen-before-selection',registration_sha256=sha(out/'REGISTRATION.json'),
+        populations=EXTERNAL,source=str(BASE/'WITHHELD_INPUTS.json'),source_sha256=sha(BASE/'WITHHELD_INPUTS.json'),
+        amendment='Prospectively include the original exposed CID22-B and JPEG KonJND SELECT panels alongside CSIQ/PIPAL; LIVE remains diagnostic. No new population, selection metric, fit or qualification gate.',
+        models='All four fixed arms at seed0 plus all six original gauntlet rows',time_utc=now()))
 
 
 def prepare(out):
@@ -156,6 +168,7 @@ def select(out):
     selected,decisions=choose(records)
     write(out/'TRAIN_SELECTION.json',dict(schema='color-noise-train-choice-v1',state='frozen-before-external-read',
         registration_sha256=sha(out/'REGISTRATION.json'),population_sha256=sha(out/'DEVELOPMENT_POPULATIONS.json'),
+        assessment_plan_sha256=sha(out/'ASSESSMENT_PLAN.json'),
         selected=selected,assessment_seed=0,decisions=decisions,models=models,statistics=records,
         selection_inputs='TRAIN-development only; no external/LIVE input',qualification=False,time_utc=now()))
     print('Frozen TRAIN decision:',selected,decisions,flush=True)
@@ -167,17 +180,21 @@ def external(out):
     registration(out);selection=read(out/'TRAIN_SELECTION.json')
     if selection['state']!='frozen-before-external-read' or selection['registration_sha256']!=sha(out/'REGISTRATION.json'):
         raise ValueError('frozen TRAIN decision required before external read')
+    plan=read(out/'ASSESSMENT_PLAN.json')
+    if plan['populations']!=EXTERNAL or sha(out/'ASSESSMENT_PLAN.json')!=selection['assessment_plan_sha256']:
+        raise ValueError('assessment population changed after selection')
     source=BASE/'WITHHELD_INPUTS.json';original=read(source)
+    if sha(source)!=plan['source_sha256']:raise ValueError('original assessment input changed')
     doc=dict(schema='zensim-frozen-gauntlet-v1',models=copy.deepcopy(original['models']),
-        datasets={s:copy.deepcopy(original['datasets'][s]) for s in ['csiq','pipal','live']},
+        datasets={s:copy.deepcopy(original['datasets'][s]) for s in EXTERNAL},
         references=original['references'],notes=[
             'Exploratory fixed 2x2 color/noise repair. Three matched seeds selected on TRAIN-development only; assessment seed0 is fixed. Selected arm: '+selection['selected']+'. No product qualification.',
-            'CSIQ/PIPAL and LIVE were previously exposed in the original gauntlet. LIVE motivated the diagnosis and is an exposed regression diagnostic, never fitting or selection data. This is not fresh independent holdout confirmation.',
+            'All five external panels were previously exposed in the original gauntlet. LIVE motivated the diagnosis and is an exposed regression diagnostic, never fitting or selection data. KonJND is JPEG SELECT only; terminal sources excluded. This is not fresh independent holdout confirmation.',
             'The source-pixel overlap screen found no exact matches in these admitted populations. LIVE retains the existing10-family subset. Other crop/resize lineage is not comprehensively cleared. Native feature/binary identities remain pinned; external extractor source-commit closure remains unresolved.',
             'All statistics and scatter diagnostics use the canonical native owners. SROCC intervals:10000 source-cluster draws; small-source intervals descriptive. PLCC/KROCC intervals unmeasured. Every population point is retained in JSON.',
             'The separate TRAIN-development decision and all three seeds are recorded in TRAIN_SELECTION.json. Original frozen comparators and peers reuse their exact original vectors.'])
     exposures=dict(schema='frozen-public-test-exposure-v1',secret_holdouts_accessed=False,
-        populations=['csiq','pipal','live'],prior_exposure=str(BASE),source_sha256=sha(source),
+        populations=EXTERNAL,prior_exposure=str(BASE),source_sha256=sha(source),
         choice_sha256=sha(out/'TRAIN_SELECTION.json'),models=selection['models'],time_utc=now(),
         use='Frozen assessment after TRAIN-only choice; no adaptive tuning or independent-holdout claim')
     write(out/'EXTERNAL_EXPOSURE.json',exposures)
@@ -186,6 +203,7 @@ def external(out):
         name='repair-'+arm;r=selection['models'][arm+'/s0'];model=Path(r['path'])
         if sha(model)!=r['sha256']:raise ValueError('frozen model changed')
         doc['models'].append(dict(name=name,bake=str(model),bake_sha256=r['sha256'],regime='TRAIN-only 2x2; seed0',
+            n_inputs=next(a['input_count'] for a in registration(out)['arms'] if a['name']==arm),
             model=dict(kind='mlp',note=arm+'; '+('TRAIN-selected' if arm==selection['selected'] else 'fixed comparison arm'))))
         for corpus,data in doc['datasets'].items():
             bank=Path(data['feature_bank']);manifest=read(bank/'_MANIFEST.json')
@@ -213,7 +231,25 @@ def external(out):
 
 def dashboard(out):
     from build_peer_fullevals import build_comparison
-    build_comparison(out/'EXTERNAL_INPUTS.json',out)
+    from color_noise_repair import read,write,sha
+    doc=read(out/'EXTERNAL_INPUTS.json')
+    fresh=copy.deepcopy(doc)
+    fresh['models']=[m for m in fresh['models'] if m['name'].startswith('repair-')]
+    write(out/'NEW_MODEL_INPUTS.json',fresh)
+    build_comparison(out/'NEW_MODEL_INPUTS.json',out)
+    for model in doc['models']:
+        if model['name'].startswith('repair-'):continue
+        source=BASE/(model['name']+'.fulleval.json');old=read(source)
+        for field in ['rank','scatter','scatter_assessment','per_pair','training_overlap']:
+            old[field]={k:v for k,v in old[field].items() if k in doc['datasets']}
+        old['comparison_notes']=doc['notes']
+        old['retained_statistics_provenance']=dict(path=str(source),sha256=sha(source),
+            requested_manifest_sha256=sha(out/'EXTERNAL_INPUTS.json'),
+            note='Original canonical statistics and complete vectors copied verbatim for unchanged populations.')
+        for corpus,d in doc['datasets'].items():
+            if old['per_pair'][corpus]['pred']!=d['scores'][model['name']]['pred'] or old['per_pair'][corpus][d['axis']]!=d['target']:
+                raise ValueError('retained comparison population changed')
+        write(out/(model['name']+'.fulleval.json'),old)
     subprocess.run([sys.executable,str(REPO/'scripts/v_next/gauntlet.py'),'--fulleval-dir',str(out),
         '--comparison-only','--include-all-scatter','--out',str(out/'gauntlet.html')],check=True)
 
@@ -229,14 +265,14 @@ def report(out):
         '<h1>Color-noise repair comparison</h1>',
         '<p>TRAIN-development selection: <strong>'+html.escape(choice['selected'])+'</strong>. Four fixed arms, three matched seeds, original 120-epoch budget. Assessment uses seed0. This is an exploratory repair experiment; original qualification gates remain required.</p>',
         '<p><a href="gauntlet.html">Open full scatter comparison</a> · <a href="TRAIN_SELECTION.json">All TRAIN-development results</a> · <a href="REGISTRATION.json">Frozen experiment</a></p>',
-        '<p>LIVE motivated this investigation and is an exposed diagnostic. It did not choose the repair. CSIQ/PIPAL were also previously exposed; this assessment cannot establish fresh independent holdout performance.</p>',
+        '<p>LIVE motivated this investigation and is an exposed diagnostic. It did not choose the repair. All five assessment panels were previously exposed; this assessment cannot establish fresh independent holdout performance. KonJND uses JPEG SELECT only.</p>',
         '<h2>TRAIN-only decision</h2><p>Deltas are three-seed means against matched current, using canonical signed SROCC. Noise combines the registered KADID/TID subsets with equal source weights.</p>',
         '<div class="scroll"><table><tr><th>Arm</th><th>Human mean Δ</th><th>Noise Δ</th>'+''.join('<th>'+html.escape(s)+' Δ</th>' for s in SOURCES)+'<th>Eligible</th></tr>']
     for r in choice['decisions']:
         text.append('<tr><td>'+r['arm']+'</td>'+''.join(f'<td>{v:+.5f}</td>' for v in [r['human_mean_delta'],r['noise_mean_delta'],*[r['source_mean_delta'][s] for s in SOURCES]])+'<td>'+str(r['eligible'])+'</td></tr>')
     text.append('</table></div><h2>Frozen external assessment</h2><p>Each cell shows signed SROCC / fitted PLCC. Full canonical statistics, source-cluster SROCC intervals and every point are in the downloadable JSONs and scatter comparison.</p><div class="scroll"><table><tr><th>Corpus</th>'+''.join('<th>'+s+'</th>' for s in labels)+'</tr>')
     ranks=[]
-    for corpus in ['csiq','pipal','live']:
+    for corpus in EXTERNAL:
         text.append('<tr><td>'+corpus+(' (exposed diagnostic)' if corpus=='live' else '')+'</td>')
         for name in names:
             r=docs[name]['rank'][corpus]
@@ -269,14 +305,14 @@ def report(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['prepare','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
+    p.add_argument('mode',choices=['assessment-plan','prepare','smoke-score','parity','parity-seed0','select','external','dashboard','report'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'prepare':prepare,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
+    {'assessment-plan':assessment_plan,'prepare':prepare,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report}[a.mode](a.out)
 
 
 if __name__=='__main__':main()

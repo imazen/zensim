@@ -46,3 +46,10 @@ Artifact root, checked on dev: `/mnt/v/output/zensim/color-noise-repair-2026-10-
 `ADMISSION.json` binds the seven TRAIN/development inputs and all504 read
 features. Native logs and every fitted/packed model are retained. NAS mirror:
 `/mnt/tower/output/zensim/color-noise-repair-2026-10-18/`.
+
+Prospective assessment extension, recorded before selection or new external
+scoring: `ASSESSMENT_PLAN.json` also includes the original CID22-B2100 and
+KonJND JPEG SELECT404 panels, with all six retained comparator rows. These
+inherit their exact original populations, prior exposure and exclusions.
+No selection metric or fitting budget changes. This extends the assessment
+list, not the training data or qualification claim.

@@ -85,7 +85,7 @@ class Report(unittest.TestCase):
         target=[i*.01 for i in range(10)]
         cases=[dict(primary=True,index=i,target=target[i],reference=f'ref{i}',filename=f'{i}.png',ref_image=f'images/ref{i}.png',dist_image=f'images/dist{i}.png') for i in range(10)]
         live=dict(target=target,reference=[f'ref{i}' for i in range(10)],pixels=[dict(dist_path=f'/corpus/wn/{i}.png') for i in range(10)])
-        doc=dict(rank={n:dict(srocc_signed=.8,plcc=.9) for n in ['csiq','pipal','live']},per_pair=dict(live=dict(pred=list(range(10)))))
+        doc=dict(rank={n:dict(srocc_signed=.8,plcc=.9) for n in assessment.EXTERNAL},per_pair=dict(live=dict(pred=list(range(10)))))
         with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
             root=Path(td)
             (root/'TRAIN_SELECTION.json').write_text('{}')
