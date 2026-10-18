@@ -272,6 +272,10 @@ impl AttributionResult {
 
     /// Internal: build from the f64 accumulation canvas (SAT keeps f64 truth).
     pub(crate) fn from_f64_canvas(canvas: Vec<f64>, width: usize, height: usize) -> Self {
+        Self::from_f64_values(&canvas, width, height)
+    }
+
+    fn from_f64_values(canvas: &[f64], width: usize, height: usize) -> Self {
         debug_assert_eq!(canvas.len(), width * height);
         let sat = build_sat(|i| canvas[i], width, height);
         let density = canvas.iter().map(|&v| v as f32).collect();
@@ -323,11 +327,15 @@ impl AttributionResult {
     /// Internal: build directly from bin SUMS (the Level-2 sink product) —
     /// SAT over sums, `f32` view = bin means over real clipped pixel counts.
     fn from_bin_sums(sums: Vec<f64>, width: usize, height: usize, bin: usize) -> Self {
+        Self::from_bin_values(&sums, width, height, bin)
+    }
+
+    fn from_bin_values(sums: &[f64], width: usize, height: usize, bin: usize) -> Self {
         debug_assert!(bin > 0);
         if bin == 1 {
             // Every bin has one real pixel, including image boundaries.
             // Dividing by its area is exactly division by one.
-            return Self::from_f64_canvas(sums, width, height);
+            return Self::from_f64_values(sums, width, height);
         }
         let grid_w = width.div_ceil(bin);
         let grid_h = height.div_ceil(bin);
@@ -964,6 +972,7 @@ const LATTICE_STEP: usize = 8;
 /// this type: the per-pixel paths are byte-identical to the pre-Level-2 code.
 pub(crate) struct BinAccum {
     bins: Vec<f64>,
+    parallel: bool,
     bin: usize,
     gw: usize,
     width: usize,
@@ -979,12 +988,49 @@ impl BinAccum {
         let gh = height.div_ceil(bin);
         Self {
             bins: vec![0.0; gw * gh],
+            parallel: false,
             bin,
             gw,
             width,
             height,
             lattice: Vec::new(),
         }
+    }
+
+    #[cfg(feature = "feature-regime-v2")]
+    fn new_reusing(
+        width: usize,
+        height: usize,
+        bin: usize,
+        scratch: &mut Vec<f64>,
+        parallel: bool,
+    ) -> Self {
+        assert!(bin > 0, "bin must be non-zero");
+        let gw = width.div_ceil(bin);
+        let mut bins = std::mem::take(scratch);
+        bins.resize(gw * height.div_ceil(bin), 0.0);
+        bins.fill(0.0);
+        Self {
+            bins,
+            parallel,
+            bin,
+            gw,
+            width,
+            height,
+            lattice: Vec::new(),
+        }
+    }
+
+    #[cfg(feature = "feature-regime-v2")]
+    fn into_result_reusing(mut self, scratch: &mut Vec<f64>) -> AttributionResult {
+        for lattice in &mut self.lattice {
+            lattice.finalize();
+        }
+        let mut result =
+            AttributionResult::from_bin_values(&self.bins, self.width, self.height, self.bin);
+        result.lattice = self.lattice;
+        *scratch = self.bins;
+        result
     }
 
     /// The logical image size queries are made against.
@@ -1095,44 +1141,51 @@ impl BinAccum {
     /// Each destination receives one addition per scale, in the same scale
     /// order as the general fold. Keep its zero handling and multiply order.
     fn add_pixel_plane(&mut self, plane: PlaneRef<'_>, sw: usize, sh: usize, factor: usize) {
-        if self.width == 0 {
+        let width = self.width;
+        if width == 0 {
             return;
         }
         if factor == 1 {
-            debug_assert!(sw >= self.width && sh >= self.height);
-            for (y, row) in self.bins.chunks_exact_mut(self.width).enumerate() {
-                match plane {
-                    PlaneRef::F64(src) => {
-                        for (cell, &v) in row.iter_mut().zip(&src[y * sw..y * sw + self.width]) {
-                            *cell += 0.0 + v;
-                        }
-                    }
-                    PlaneRef::F32(src) => {
-                        for (cell, &v) in row.iter_mut().zip(&src[y * sw..y * sw + self.width]) {
-                            *cell += 0.0 + f64::from(v);
+            debug_assert!(sw >= width && sh >= self.height);
+        }
+        let rows = self.height.min(sh * factor);
+        let run = |first: usize, bins: &mut [f64]| {
+            for (offset, row) in bins.chunks_exact_mut(width).enumerate() {
+                let base = ((first + offset) / factor) * sw;
+                let source = match plane {
+                    PlaneRef::F32(src) => PlaneRef::F32(&src[base..base + sw]),
+                    PlaneRef::F64(src) => PlaneRef::F64(&src[base..base + sw]),
+                };
+                match factor {
+                    1 => add_pixel_unit_row(source, row),
+                    2 => add_pixel_scaled_row::<2>(source, row),
+                    4 => add_pixel_scaled_row::<4>(source, row),
+                    8 => add_pixel_scaled_row::<8>(source, row),
+                    _ => {
+                        let inv_area = 1.0 / (factor * factor) as f64;
+                        for (sx, pixels) in row.chunks_mut(factor).enumerate().take(sw) {
+                            let v = source.get(sx) * inv_area;
+                            if v != 0.0 {
+                                for cell in pixels {
+                                    *cell += v;
+                                }
+                            }
                         }
                     }
                 }
             }
+        };
+        let _ = self.parallel;
+        #[cfg(feature = "threads")]
+        if self.parallel && rows > 64 && rayon::current_num_threads() > 1 {
+            use rayon::prelude::*;
+            self.bins[..rows * width]
+                .par_chunks_mut(64 * width)
+                .enumerate()
+                .for_each(|(band, bins)| run(band * 64, bins));
             return;
         }
-        let inv_area = 1.0 / (factor * factor) as f64;
-        for (y, row) in self
-            .bins
-            .chunks_exact_mut(self.width)
-            .enumerate()
-            .take(sh * factor)
-        {
-            let base = (y / factor) * sw;
-            for (sx, pixels) in row.chunks_mut(factor).enumerate().take(sw) {
-                let v = plane.get(base + sx) * inv_area;
-                if v != 0.0 {
-                    for cell in pixels {
-                        *cell += v;
-                    }
-                }
-            }
-        }
+        run(0, &mut self.bins[..rows * width]);
     }
 
     pub(crate) fn add_scale_plane_f64(
@@ -1169,6 +1222,41 @@ impl BinAccum {
 
 /// Source-plane dtype adapter for [`BinAccum`] — one fold algorithm for the
 /// f64 (standalone) and f32 (fused) accumulation pipelines.
+// Independent destination rows retain the original per-pixel addition order.
+// Dispatch widens only these elementwise operations; no reduction is reordered.
+#[autoversion]
+fn add_pixel_unit_row(plane: PlaneRef<'_>, row: &mut [f64]) {
+    match plane {
+        PlaneRef::F32(src) => {
+            for (cell, &v) in row.iter_mut().zip(src) {
+                *cell += 0.0 + f64::from(v);
+            }
+        }
+        PlaneRef::F64(src) => {
+            for (cell, &v) in row.iter_mut().zip(src) {
+                *cell += 0.0 + v;
+            }
+        }
+    }
+}
+
+#[autoversion]
+fn add_pixel_scaled_row<const FACTOR: usize>(plane: PlaneRef<'_>, row: &mut [f64]) {
+    let inv_area = 1.0 / (FACTOR * FACTOR) as f64;
+    let len = match plane {
+        PlaneRef::F32(v) => v.len(),
+        PlaneRef::F64(v) => v.len(),
+    };
+    for (sx, pixels) in row.chunks_mut(FACTOR).enumerate().take(len) {
+        let v = plane.get(sx) * inv_area;
+        if v != 0.0 {
+            for cell in pixels {
+                *cell += v;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum PlaneRef<'a> {
     F64(&'a [f64]),
@@ -2269,6 +2357,96 @@ mod tests {
         assert_eq!(spatial.len(), 228); // No stale v2 retention is consulted.
         assert_eq!(spatial[159], -1.);
         assert_eq!(spatial[227], -1.);
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn recycled_bin_storage_preserves_live_results_and_geometry_changes() {
+        let mut scratch = Vec::new();
+        let mut live = Vec::new();
+        for (w, h, bin) in [
+            (31, 17, 1),
+            (129, 65, 8),
+            (32, 9, 1),
+            (17, 31, 3),
+            (31, 17, 1),
+        ] {
+            let canvas: Vec<f64> = (0..w * h)
+                .map(|i| {
+                    if i % 7 == 0 {
+                        -0.0
+                    } else {
+                        (i as f64 - 173.0) / 113.0
+                    }
+                })
+                .collect();
+            let mut fresh = BinAccum::new(w, h, bin);
+            fresh.add_scale_plane_f64(&canvas, w, h, 1);
+            let expected = fresh.into_result();
+            let mut accum = BinAccum::new_reusing(w, h, bin, &mut scratch, false);
+            accum.add_scale_plane_f64(&canvas, w, h, 1);
+            let got = accum.into_result_reusing(&mut scratch);
+            assert_eq!(
+                got.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected
+                    .density
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                got.sat.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected.sat.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+            );
+            live.push((got, expected));
+            for (got, expected) in &live {
+                assert_eq!(
+                    got.query_rect(3, 2, 19, 13).to_bits(),
+                    expected.query_rect(3, 2, 19, 13).to_bits()
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(all(feature = "feature-regime-v2", feature = "threads"))]
+    fn pixel_bin_row_parallelism_preserves_bits() {
+        for threads in [1, 8, 16] {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    for (w, h) in [(31usize, 97usize), (127, 129), (64, 257), (129, 17)] {
+                        let mut serial = BinAccum::new(w, h, 1);
+                        let mut scratch = Vec::new();
+                        let mut parallel = BinAccum::new_reusing(w, h, 1, &mut scratch, true);
+                        for factor in [1, 2, 4, 8, 3] {
+                            let sw = w.div_ceil(factor);
+                            let sh = h.div_ceil(factor);
+                            let values: Vec<f32> = (0..sw * sh)
+                                .map(|i| {
+                                    if i % 7 == 0 {
+                                        -0.0
+                                    } else {
+                                        (i as f32 - 73.0) / 113.0
+                                    }
+                                })
+                                .collect();
+                            serial.add_scale_plane_f32(&values, sw, sh, factor);
+                            parallel.add_scale_plane_f32(&values, sw, sh, factor);
+                            assert_eq!(
+                                serial.bins.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                                parallel
+                                    .bins
+                                    .iter()
+                                    .map(|v| v.to_bits())
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                    }
+                });
+        }
     }
 
     #[test]
@@ -4496,6 +4674,12 @@ fn combine_basic_and_l8<const L8: bool>(
     win_plane: &mut [f32],
 ) {
     let n = id_plane.len();
+    let sd = &sd[..n];
+    let src = &src[..n];
+    let dst = &dst[..n];
+    let mu1 = &mu1[..n];
+    let mu2 = &mu2[..n];
+    let win_plane = &mut win_plane[..n];
     for i in 0..n {
         let sdv = sd[i];
         let sv = src[i];
@@ -5396,6 +5580,9 @@ struct BasicRetainedScale {
 pub struct Fused944Session {
     basic: BasicRetention,
     basic_map: BasicMapScratch,
+    // The temporary f64 accumulation canvas is not part of the returned map.
+    // Keep its storage in the session; density and SAT remain independently owned.
+    bin_scratch: Vec<f64>,
     scratch: crate::feature_v2::V2Scratch,
     retention: crate::feature_v2::FoldRetention,
     /// f32 pass-B scratch (appendix P lever 1) — plane-sized buffers
@@ -7005,7 +7192,13 @@ impl crate::metric::Zensim {
     ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
         let width = distorted.width();
         let height = distorted.height();
-        let mut accum = BinAccum::new(width, height, bin);
+        let mut accum = BinAccum::new_reusing(
+            width,
+            height,
+            bin,
+            &mut session.bin_scratch,
+            self.parallel(),
+        );
         let (result, _, _) = self.fused_basic_into_at_revision(
             precomputed,
             distorted,
@@ -7048,6 +7241,6 @@ impl crate::metric::Zensim {
                 precomputed.sampling_geometry.as_ref(),
             );
         }
-        Ok((result, accum.into_result()))
+        Ok((result, accum.into_result_reusing(&mut session.bin_scratch)))
     }
 }

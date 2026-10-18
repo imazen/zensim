@@ -181,13 +181,18 @@ def audit(args):
 
 def build(args):
     configure()
+    with owner.segment_lock(Path.home()/"tmp/zen-coz-heavy.lock"):
+        with owner.segment_lock(Path.home()/"tmp/r7900x-heavy.lock"):
+            build_locked(args)
+
+def build_locked(args):
     owner.quiet_gate(ROOT/(args.name+"-quiet.jsonl"))
     source=(args.source or Path(__file__).resolve().parents[2]).resolve()
     inputs=sorted((source/"zensim/src").rglob("*.rs"))
     inputs += [source/p for p in ["Cargo.toml","Cargo.lock","zensim/Cargo.toml",
         "zensim-bench/addrfix-runtime/Cargo.toml","zensim-bench/addrfix-runtime/Cargo.lock",
         "zensim-bench/benches/ssim2_speed_bar.rs","zensim-bench/benches/speedq/mod.rs",
-        "zensim-bench/benches/speedq/costcmp.rs"]]
+        "zensim-bench/benches/speedq/costcmp.rs","justfile","benchmarks/mapperf.just"]]
     pins={str(p.relative_to(source)):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
     commit=subprocess.check_output(["jj","log","-r","@","--no-graph","-T","commit_id"],cwd=source,text=True).strip()
     native=args.mode=="build_native"
@@ -196,14 +201,15 @@ def build(args):
          "CARGO_PROFILE_RELEASE_DEBUG":"1"}
     log=ROOT/(args.name+"-build.log")
     with log.open("x") as out:
-        subprocess.run(["flock",str(Path.home()/"tmp/r7900x-heavy.lock"),
-            str(Path.home()/"work/claudehints/scripts/run-heavy"),"--mem","16G","--jobs","8","--",
+        subprocess.run([str(Path.home()/"work/claudehints/scripts/run-heavy"),"--mem","16G","--jobs","8","--",
             "just",recipe],
             cwd=source,env=env,stdout=out,stderr=subprocess.STDOUT,check=True)
     assert all(hashlib.sha256(p.read_bytes()).hexdigest()==pins[str(p.relative_to(source))] for p in inputs), "source changed during compilation"
     (ROOT/(args.name+"-SOURCE.json")).write_text(json.dumps(dict(
         build_commit=commit,source_root=str(source),source_inputs=pins,
-        rustflags=env.get("RUSTFLAGS",""),profile_release_debug=1,
+        parent_rustflags=env.get("RUSTFLAGS",""),
+        effective_rustflags="--cfg steerfix_instrument" if native or args.mode=="build_profile" else env.get("RUSTFLAGS",""),
+        recipe=recipe,profile_release_debug=1,
         rustc=subprocess.check_output(["rustc","--version"],text=True).strip()),indent=2)+"\n")
     if native:
         records=[json.loads(line) for line in log.read_text().splitlines() if line.startswith("{")]
@@ -276,8 +282,14 @@ def options(args):
     dest.mkdir(exist_ok=False)
     arms=["e34_candidate_map_retained","e34_candidate_map_bin8","e34_candidate_map_bin16"]
     cells=[(f"{side}x{side}","v4x",n) for n in [1,16] for side in [256,1024,2048]]
+    audit_rows=load_audits(ROOT/"audits-after"/"AUDITS.json")
+    def ready(name,g,t,n,rec):
+        old=audit_rows[("diff-frag-820",n,int(g.split("x")[0]),0)]["record"]
+        assert rec["score_bits"]==old["score_bits"]
+        assert rec["input_sha256"]==old["input_sha256"]
+        assert rec["model"]["source_sha256"]==old["model"]["source_sha256"]
     owner.timing(args.binary,dest,32,None,OLD/"bin/paired-rounds-analyzer",
-        arms=arms,cells=cells,parity_loader=lambda _: {},baseline=arms[0])
+        arms=arms,cells=cells,parity_loader=lambda _: {},baseline=arms[0],ready_check=ready)
     movements=[]
     for side in [256,1024,2048]:
         for bin in [8,16]:
@@ -289,11 +301,37 @@ def options(args):
     (dest/"MOVEMENT.json").write_text(json.dumps(movements,indent=2)+"\n")
 
 
+def verify(args):
+    before=load_audits(ROOT/"audits-before"/"AUDITS.json")
+    after=load_audits(ROOT/"audits-after"/"AUDITS.json")
+    assert before.keys()==after.keys() and len(before)==54
+    for key in before:
+        for field in ["model","score_bits","input_sha256"]:
+            assert before[key]["record"][field]==after[key]["record"][field],(key,field)
+    assert args.before
+    artifacts=[json.loads(p.with_name(p.name+".artifact.json").read_text()) for p in [args.before,args.binary]]
+    assert artifacts[0]["dependencies"]==artifacts[1]["dependencies"], "dependency/features mismatch"
+    for path,artifact in zip([args.before,args.binary],artifacts):
+        assert hashlib.sha256(path.read_bytes()).hexdigest()==artifact["binary_sha256"]
+    proof=dict(status="PASS",cases=54,standard_cases=36,fresh_cases=18,
+        models=["diff-410","diff-frag-820","w-c"],threads=[1,8,16],
+        fields=["score_bits","all feature/gradient bits","density hash","all rectangle query hash","finite refinement hash"],
+        before_binary_sha256=artifacts[0]["binary_sha256"],after_binary_sha256=artifacts[1]["binary_sha256"],
+        dependencies=artifacts[0]["dependencies"])
+    owner.write(ROOT/args.name/"RUNTIME_PARITY.json",proof)
+    print(json.dumps({k:v for k,v in proof.items() if k!="dependencies"},indent=2))
+
 def profile_report(args):
     import re
     dest=ROOT/args.name
     profiles={}
-    def family(symbol):
+    def family(symbol,kind):
+        if kind=="k":
+            if any(x in symbol.lower() for x in ("page","fault","memcg","mem_cgroup","folio","pte_")):
+                return "kernel memory/page faults"
+            return "other kernel"
+        if "crossbeam" in symbol or "rayon" in symbol: return "thread scheduling"
+        if "ProfileControl" in symbol: return "profiling control"
         if "dense_block" in symbol: return "dense feature moments"
         if "gradient_block" in symbol or "gradient_interior" in symbol: return "gradient features"
         if "fused_vblur_ssim" in symbol: return "basic SSIM features"
@@ -312,7 +350,7 @@ def profile_report(args):
         for line in (dest/(info["tag"]+"-report.txt")).read_text().splitlines():
             m=re.match(r"^\s*(\d+\.\d+)%.*?\s+\[(.)\]\s+(.*)$",line)
             if m:
-                rows.append(dict(percent=float(m[1]),kind=m[2],symbol=m[3],family=family(m[3])))
+                rows.append(dict(percent=float(m[1]),kind=m[2],symbol=m[3],family=family(m[3],m[2])))
         assert rows and sum(r["percent"] for r in rows)>95
         families={}
         for row in rows:
@@ -325,7 +363,7 @@ def profile_report(args):
     print(json.dumps({k:v["families"] for k,v in profiles.items()},indent=2))
 
 p=argparse.ArgumentParser()
-p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report"])
+p.add_argument("mode",choices=["timing","profile","report","audit","build","build_native","build_profile","options","compare","profile_report","verify"])
 p.add_argument("--binary",type=Path,required=True)
 p.add_argument("--name",required=True)
 p.add_argument("--source",type=Path)

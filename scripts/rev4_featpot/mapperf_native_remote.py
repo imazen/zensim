@@ -126,7 +126,7 @@ def run(args):
             env={**os.environ,'TMPDIR':str(Path.home()/'tmp'),'ZENSIM_FORMULA_REV':'5',
                  'ZENSIM_NEIGHBOUR_EXACT':'1','RAYON_NUM_THREADS':'1','STEERFIX_PACKET':str(path)}
             with log.open('x') as out:
-                subprocess.run(['flock',str(Path.home()/'tmp/r7900x-heavy.lock'),
+                subprocess.run(['flock',str(Path.home()/'tmp/zen-coz-heavy.lock'),'flock',str(Path.home()/'tmp/r7900x-heavy.lock'),
                     'flock',str(Path.home()/'tmp/zensim-paper/rev4/heavy.lock'),
                     str(Path.home()/'work/claudehints/scripts/run-heavy'),'--mem','16G','--jobs','1','--',
                     str(args.binary),'metric::bake::steerfix_packet::engineering_packet','--exact','--nocapture'],
@@ -219,7 +219,7 @@ def original_cache_run(args):
         env={**os.environ,'TMPDIR':str(Path.home()/'tmp'),'ZENSIM_FORMULA_REV':'5',
              'ZENSIM_NEIGHBOUR_EXACT':'1','RAYON_NUM_THREADS':'1','STEERFIX_PACKET':str(dest/'job.json')}
         with (dest/'native.log').open('x') as out:
-            subprocess.run(['flock',str(Path.home()/'tmp/r7900x-heavy.lock'),
+            subprocess.run(['flock',str(Path.home()/'tmp/zen-coz-heavy.lock'),'flock',str(Path.home()/'tmp/r7900x-heavy.lock'),
                 str(Path.home()/'work/claudehints/scripts/run-heavy'),'--mem','16G','--jobs','1','--',
                 *prefix,str(args.binary),'metric::bake::steerfix_packet::engineering_packet',
                 '--exact','--nocapture'],env=env,stdout=out,stderr=subprocess.STDOUT,check=True)
