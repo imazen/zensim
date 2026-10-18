@@ -378,8 +378,13 @@ def report(out):
     from color_noise_repair import ARMS, read, write, sha
     choice=read(out/'TRAIN_SELECTION.json');data=read(out/'EXTERNAL_INPUTS.json')
     names=['diff-frag-820','w-c','diff-410']+['repair-'+a for a in ARMS]+['peer_cvvdp_fhd','peer_ssim2','peer_butter3']
-    docs={n:read(out/(n+'.fulleval.json')) for n in names}
     labels=['Frozen C','Frozen W-C','Frozen A','Matched current','+coverage','+fine chroma','Both','CVVDP-FHD','SSIMULACRA2','Butteraugli 3-norm']
+    ensemble_choice=None
+    if (out/'ensembles/TRAIN_SELECTION.json').exists():
+        ensemble_choice=read(out/'ensembles/TRAIN_SELECTION.json')
+        names+=['repair-ensemble-'+a for a in ARMS]
+        labels+=['Mean3 current','Mean3 coverage','Mean3 chroma','Mean3 both']
+    docs={n:read(out/('ensembles' if n.startswith('repair-ensemble-') else '')/(n+'.fulleval.json')) for n in names}
     text=['<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
         '<title>Color-noise repair comparison</title><style>body{max-width:1200px;margin:32px auto;padding:0 20px;font:16px system-ui;background:#10141d;color:#e4eaf5;line-height:1.6}a{color:#8ecaff}h1{font-size:28px}h2{font-size:22px;margin-top:36px}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:8px;border-bottom:1px solid #485166;text-align:right}th:first-child,td:first-child{text-align:left}.scroll{overflow:auto}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}figure{margin:0}img{width:100%}summary{cursor:pointer}@media(max-width:650px){.pair{grid-template-columns:1fr}}</style>',
         '<h1>Color-noise repair comparison</h1>',
@@ -391,6 +396,11 @@ def report(out):
     for r in choice['decisions']:
         text.append('<tr><td>'+r['arm']+'</td>'+''.join(f'<td>{v:+.5f}</td>' for v in [r['human_mean_delta'],r['noise_mean_delta'],*[r['source_mean_delta'][s] for s in SOURCES]])+'<td>'+str(r['eligible'])+'</td></tr>')
     text.append('</table></div>')
+    if ensemble_choice:
+        text.append('<h2>Fixed three-seed ensemble supplement</h2><p>Separate prospective TRAIN choice: <strong>'+html.escape(ensemble_choice['selected'])+'</strong>. Equal-weight native serving scores, fixed seeds0/1/2; no seed/weight search. Human deltas are against the current ensemble. Original single-model selection is unchanged. <a href="ensembles/gauntlet.html">Ensemble scatter comparison</a> · <a href="ensembles/TRAIN_SELECTION.json">TRAIN results and exact composition manifests</a></p><table><tr><th>Arm</th><th>Human mean Δ</th><th>Noise Δ</th><th>Eligible</th></tr>')
+        for r in ensemble_choice['decisions']:
+            text.append(f'<tr><td>{r["arm"]}</td><td>{r["human_mean_delta"]:+.5f}</td><td>{r["noise_mean_delta"]:+.5f}</td><td>{r["eligible"]}</td></tr>')
+        text.append('</table>')
     if choice.get('models'):
         text.append('<h2>Candidate bakes</h2><p>Fixed seed0 packed f16 artifacts, scored through the native serving surface. These are exploratory candidates; the named production profile has not changed.</p><div class="scroll"><table><tr><th>Arm</th><th>Download</th><th>SHA256</th></tr>')
         for arm in ARMS:
@@ -487,12 +497,28 @@ def finalize(out):
            'DEVELOPMENT_POPULATIONS.json','FEATURE_COMPATIBILITY.json','CONTROL_PARITY.json',
            'TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','REPORT.json',
            'gauntlet.html','index.html']
+    ensemble_cells=0
+    if (out/'ensembles/TRAIN_SELECTION.json').exists():
+        root=out/'ensembles';ec=read(root/'TRAIN_SELECTION.json');ed=read(root/'EXTERNAL_INPUTS.json')
+        if ec['parent_choice_sha256']!=sha(out/'TRAIN_SELECTION.json') or ec['qualification']:
+            raise ValueError('ensemble parent decision/qualification differs')
+        if read(root/'EXTERNAL_EXPOSURE.json')['choice_sha256']!=sha(root/'TRAIN_SELECTION.json'):
+            raise ValueError('ensemble exposure differs')
+        for binding in ec['models'].values():
+            if sha(binding['path'])!=binding['sha256']:raise ValueError('ensemble composition changed')
+        for model in ed['models']:
+            doc=read(root/(model['name']+'.fulleval.json'))
+            for corpus,d in ed['datasets'].items():
+                if doc['per_pair'][corpus]['pred']!=d['scores'][model['name']]['pred'] or doc['per_pair'][corpus][d['axis']]!=d['target']:
+                    raise ValueError('ensemble assessment vectors differ')
+                ensemble_cells+=1
+        files+=['ensembles/'+n for n in ['REGISTRATION.json','TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','gauntlet.html']]
     write(out/'_MANIFEST.json',dict(schema='color-noise-repair-complete-v1',
         build_commit=subprocess.check_output(['jj','log','--no-graph','-r','@-','-T','commit_id'],text=True,cwd=REPO).strip(),
         owner_sha256=sha(__file__),training_build_commit=execution['build_commit'],
         program_sha256=reg['program_sha256'],binaries=reg['binaries'],models=choice['models'],
         files={name:sha(out/name) for name in files},model_count=len(data['models']),
-        panel_count=len(EXTERNAL),statistical_cells=cells,selected=choice['selected'],
+        panel_count=len(EXTERNAL),statistical_cells=cells,ensemble_dashboard_cells=ensemble_cells,selected=choice['selected'],
         qualification_allowed=False,source_commit_limitation='Retained external extractor source commit unresolved; twelve TRAIN pixel pairs replay exactly at all504 consumed f32/f64 inputs.',
         scope='Completed exploratory three-seed 2x2 study. Original qualification gates remain required. External panels previously exposed; LIVE diagnostic only.',time_utc=now()))
     print('Completed evidence manifest:',len(data['models']),'models;',cells,'statistical cells',flush=True)

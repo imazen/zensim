@@ -53,3 +53,15 @@ KonJND JPEG SELECT404 panels, with all six retained comparator rows. These
 inherit their exact original populations, prior exposure and exclusions.
 No selection metric or fitting budget changes. This extends the assessment
 list, not the training data or qualification claim.
+
+Prospective SROCC supplement (23:46 UTC, before external scoring): compare
+equal-weight ensembles of the fixed seeds0/1/2 for each of the same four
+arms. The existing Rust serving owner averages each member’s calibrated
+score; no additional fit, seed choice or weight search. This is separate from
+the unchanged single-model decision. Relative to the current ensemble, retain
+the same human mean/per-source floors and positive noise-delta requirement;
+among eligible repairs prefer greatest human SROCC gain, then noise gain,
+then original arm order. Otherwise retain the current ensemble. All four
+ensembles are frozen before the same five exposed assessment panels.
+`ensembles/REGISTRATION.json` records this supplement; original ten-seed and
+product qualification remain required.

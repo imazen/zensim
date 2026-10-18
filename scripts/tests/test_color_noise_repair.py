@@ -79,6 +79,34 @@ class Decision(unittest.TestCase):
         self.assertEqual(choose(rows)[0],'coverage')
         with self.assertRaises(KeyError):choose(rows[:-1])
 
+class EnsembleDecision(unittest.TestCase):
+    def test_human_priority_preserves_noise_and_source_guards(self):
+        import color_noise_assessment as assessment
+        from color_noise_ensemble import choose
+        rows=[]
+        for arm in owner.ARMS:
+            for source in assessment.SOURCES+['kadid_noise','tid2013_noise']:
+                delta={'current':0.,'coverage':.001,'chroma':.002,'both':0.}[arm]
+                if source.endswith('_noise'):delta={'current':0.,'coverage':.03,'chroma':.01,'both':0.}[arm]
+                rows.append(dict(arm=arm,population=source,statistics=dict(srocc_signed=.8+delta)))
+        self.assertEqual(choose(rows)[0],'chroma')
+        for r in rows:
+            if r['arm']=='chroma' and r['population']=='kadid':r['statistics']['srocc_signed']=.794
+        self.assertEqual(choose(rows)[0],'coverage')
+        for r in rows:
+            if r['arm']=='coverage' and r['population']=='kadid_noise':r['statistics']['srocc_signed']=.76
+        self.assertEqual(choose(rows)[0],'current')
+        with self.assertRaises(KeyError):choose(rows[:-1])
+
+    def test_new_registration_refuses_prior_external_exposure(self):
+        import color_noise_ensemble as ensemble
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
+            root=Path(td);(root/'EXTERNAL_EXPOSURE.json').write_text('{}')
+            with patch.object(ensemble,'registration'):
+                with self.assertRaisesRegex(ValueError,'precede external reads'):ensemble.plan(root)
+            self.assertFalse((root/'ensembles').exists())
+
+
 class Report(unittest.TestCase):
     def test_report_keeps_every_inspection_pair_and_native_score(self):
         import color_noise_assessment as assessment
