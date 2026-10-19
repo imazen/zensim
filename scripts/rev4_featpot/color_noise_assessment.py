@@ -87,10 +87,11 @@ def auxiliary_d1_overlap(out):
     populations=read(out/'DEVELOPMENT_POPULATIONS.json');records=[]
     for member,pin in populations['bank_keys'].items():
         keys=BANK/member/'keys.parquet'
-        if sha(keys)!=pin:raise ValueError('D1 source keys changed')
+        if sha(keys)!=pin['keys_sha256'] or sha(BANK/member/'_MANIFEST.json')!=pin['manifest_sha256']:
+            raise ValueError('D1 source keys/manifest changed')
         refs=pq.read_table(keys,columns=['ref_pixels_sha256'])['ref_pixels_sha256'].to_pylist()
         indices=[i for i,digest in enumerate(refs) if digest in hashes]
-        records.append(dict(member=member,rows=len(refs),keys_sha256=pin,overlap_rows=indices))
+        records.append(dict(member=member,rows=len(refs),keys_sha256=pin['keys_sha256'],manifest_sha256=pin['manifest_sha256'],overlap_rows=indices))
     total=sum(len(r['overlap_rows']) for r in records)
     write(out/'AUXILIARY_D1_OVERLAP.json',dict(schema='auxiliary-d1-source-overlap-v1',
         auxiliary_sha256=sha(out/'AUXILIARY_OVERLAP.json'),populations=records,exact_matches=total,

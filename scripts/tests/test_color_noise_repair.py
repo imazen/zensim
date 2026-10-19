@@ -115,6 +115,28 @@ class EnsembleDecision(unittest.TestCase):
             self.assertFalse((root/'ensembles').exists())
 
 
+class AuxiliarySourceBinding(unittest.TestCase):
+    def test_d1_audit_reads_nested_receipt_pins_and_refuses_changed_keys(self):
+        import color_noise_assessment as assessment
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory(dir=Path.home()/'tmp') as td:
+            root=Path(td);bank=root/'bank';member=bank/'fixture';member.mkdir(parents=True)
+            keys=member/'keys.parquet';pq.write_table(pa.table({'ref_pixels_sha256':['b'*64,'c'*64]}),keys)
+            manifest=member/'_MANIFEST.json';manifest.write_text('{}')
+            pin=dict(keys_sha256=owner.sha(keys),manifest_sha256=owner.sha(manifest))
+            (root/'DEVELOPMENT_POPULATIONS.json').write_text(json.dumps(dict(bank_keys=dict(fixture=pin))))
+            (root/'AUXILIARY_OVERLAP.json').write_text(json.dumps(dict(references=[dict(rgb_sha256='a'*64)])))
+            with patch.object(assessment,'BANK',bank):
+                assessment.auxiliary_d1_overlap(root)
+                result=json.loads((root/'AUXILIARY_D1_OVERLAP.json').read_text())
+                self.assertEqual(result['exact_matches'],0)
+                self.assertEqual(result['populations'][0]['keys_sha256'],pin['keys_sha256'])
+                pq.write_table(pa.table({'ref_pixels_sha256':['a'*64]}),keys)
+                with self.assertRaisesRegex(ValueError,'D1 source keys/manifest changed'):
+                    assessment.auxiliary_d1_overlap(root)
+
+
 class Report(unittest.TestCase):
     def test_report_keeps_every_inspection_pair_and_native_score(self):
         import color_noise_assessment as assessment
