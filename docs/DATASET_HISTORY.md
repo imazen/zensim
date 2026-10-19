@@ -5072,3 +5072,7 @@ HDR judgment, encoder provenance completion and shipping gates remain missing.
 See [E27 worklog](../benchmarks/E27_WORKLOG.md),
 [complete measured summary](../benchmarks/e27_result_summary_2026-10-05.json) and
 [immutable Tower evidence](../benchmarks/e27_final_2026-10-05.pointer.json).
+
+## 2026-10-19 — matched existing B/D gauntlet assessment
+
+User-requested comparison on the exact previously exposed external populations: CSIQ865, PIPAL23200, CID22-B2100, KonJND JPEG SELECT404 and LIVE clean10/267. Existing B a96a5a66 and D cd1098b4 retain their Rev1 arithmetic and were scored on fresh default372 native features; Rev5 candidate banks are unchanged and incompatible columns were never substituted. All26836 B production predictions equal actual pixel/cache/literal/stored-f32 scores exactly; D has18 fixed exact native pixel audits spanning the five panels. Explicit integer row IDs restore extractor reference-grouped CSV ordering. Canonical native rank/scatter owners and10000 source-cluster interval draws remain unchanged. No fitting, selection, gate/threshold change, protected population access or qualification. Comparable B/D whole-dataset-withheld fits for the four D1 panels are unavailable, so those legacy entries remain absent. Historical source/crop lineage limits remain explicit. See [matched comparison](../benchmarks/gauntlet_legacy_comparison_2026-10-19.md) and [artifact pointer](../benchmarks/gauntlet_legacy_comparison_2026-10-19.pointer.md).

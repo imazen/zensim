@@ -798,15 +798,117 @@ def move_intermediates(source, out):
     (source/'INTERMEDIATES.pointer.md').write_text('# Gauntlet intermediate relocation\n\nHost checked: dev. Final dashboard and fulleval/statistical JSON remain local.\nOriginal intermediate paths are directory symlinks into `'+str(out)+'`.\n`INTERMEDIATES_RELOCATED.json` records each location and its complete original-inventory hash verification.\nThe original NAS archive remains at `/mnt/tower/output/zensim/gauntlet-2026-10-18/`.\n')
 
 
+def legacy_assess(source, out):
+    """Assess the pinned B/D profiles on the already exposed external pairs.
+
+    Fresh Rev1 pixels own the features; Rev5 caches are never reinterpreted.
+    Native pixel audits and the production predictor must agree exactly.
+    """
+    work=out/'legacy';plan=read(work/'PLAN.json');records=read(work/'ROWS.json')
+    inputs=Path(plan['source']['path'])
+    if sha(inputs)!=plan['source']['sha256']:raise ValueError('legacy inputs changed')
+    doc=read(inputs)
+    if sha(EXTRACT)!=plan['extractor']['sha256']:raise ValueError('extractor changed')
+    predictor=Path('/mnt/v/output/zensim/color-noise-repair-2026-10-18/bin/bake_dial_refit')
+    if sha(predictor)!='d6aa1b543425733eada5a44549c4cf56a145ff910f845a46ff7fff175b1f0db3':
+        raise ValueError('production predictor changed')
+    env=dict(os.environ,ZENSIM_FORMULA_REV='1',RAYON_NUM_THREADS='1')
+    env.pop('ZENSIM_ROOT_FORM',None)
+    write(work/'SCORING_TOOLS.json',dict(predictor=str(predictor),sha256=sha(predictor),
+        owner_sha256=sha(__file__),environment={'ZENSIM_FORMULA_REV':'1','RAYON_NUM_THREADS':'1'},
+        csv_row_order='Extractor groups references; restore global integer identity from human_score, which contains no human labels.'))
+    features=[f'f{i}' for i in range(372)]
+    table=pcsv.read_csv(work/'B-native.csv',convert_options=pcsv.ConvertOptions(
+        column_types={k:pa.float64() for k in [*features,'human_score']}))
+    if len(table)!=len(records) or sorted(table['human_score'].to_pylist())!=list(range(len(records))):
+        raise ValueError('legacy extraction row identity differs')
+    table=table.sort_by([('human_score','ascending')])
+    for name in features:
+        if not np.isfinite(table[name].to_numpy()).all():raise ValueError('nonfinite legacy features')
+    pq.write_table(table,work/'features.parquet',compression='zstd')
+    native=[json.loads(line) for line in (work/'B-native.jsonl').read_text().splitlines()]
+    if len(native)!=len(records):raise ValueError('incomplete B native audit')
+    for i,(audit,row) in enumerate(zip(native,records,strict=True)):
+        if audit['human_score']!=i or audit['reference']!=row['reference'] or audit['distorted']!=row['distorted']:
+            raise ValueError('native B pair identity differs')
+        if audit['max_consumed_feature_abs_delta']!=0 or any(
+            audit[k]!=audit['base_score'] for k in ['pixel_composed_score','cached_composed_score',
+                'literal_feature_composed_score','stored_f32_composed_score']):
+            raise ValueError('B native feature/serving parity failed')
+    predictions={}
+    for name,model in plan['models'].items():
+        if sha(model['path'])!=model['sha256']:raise ValueError('legacy bake changed')
+        command=[str(predictor),'predict','--bake',model['path'],'--corpus',str(work/'features.parquet'),
+                 '--out',str(work/(name+'-predictions.tsv')),'--score-units']
+        write(work/(name+'-command.json'),command)
+        with (work/(name+'-predict.log')).open('x') as log:
+            subprocess.run(command,env=env,check=True,stdout=log,stderr=subprocess.STDOUT)
+        values=tsv(work/(name+'-predictions.tsv'))
+        predictions[name]=[float(v['pred']) for v in values]
+        if len(values)!=len(records) or not np.isfinite(predictions[name]).all():
+            raise ValueError('incomplete legacy predictions')
+    if predictions['B']!=[a['base_score'] for a in native]:raise ValueError('B pixel/predictor mismatch')
+    command=[str(EXTRACT),'--corpus','pairs','--path',str(work/'D-audit-pairs.tsv'),
+        '--out',str(work/'D-native.csv'),'--audit-jsonl',str(work/'D-native.jsonl'),
+        '--audit-bake',plan['models']['D']['path']]
+    write(work/'D-pixel-command.json',command)
+    with (work/'D-native.log').open('x') as log:
+        subprocess.run(command,env=env,check=True,stdout=log,stderr=subprocess.STDOUT)
+    audits=[json.loads(line) for line in (work/'D-native.jsonl').read_text().splitlines()]
+    if [int(a['human_score']) for a in audits]!=plan['D_pixel_audit_indices']:
+        raise ValueError('D native audit population differs')
+    for a in audits:
+        i=int(a['human_score'])
+        if a['max_consumed_feature_abs_delta']!=0 or any(a[k]!=predictions['D'][i] for k in
+                ['base_score','pixel_composed_score','cached_composed_score','stored_f32_composed_score']):
+            raise ValueError('D pixel/predictor mismatch')
+    write(work/'PARITY.json',dict(B_rows=len(native),D_pixel_rows=len(audits),
+        exact_feature_and_score_equality=True,formula_revision=1,models=plan['models']))
+    external=list(plan['populations'])
+    spec=dict(schema='zensim-frozen-gauntlet-v1',references=doc['references'],models=[],datasets={},
+        notes=['Frozen named B/D profiles; fresh Rev1 native features on exactly the five previously exposed external populations. No fitting, selection or product qualification.',
+            'Research C / diff+frag-820 is distinct from the named public Profile C. Original research rows are copied unchanged; their four D1 panels use whole-dataset-withheld fits. B/D have no corresponding withheld fits and are not scored on those four panels.',
+            'Historical profile training and development differ. B blends metric-trained HDR and SafeSyn/CID22-training/KADID/TID heads; D fits SafeSyn with a separate negative-tail dial. LIVE retains the original known-overlap exclusions; no exhaustive historical crop/resize clearance is claimed.',
+            'Canonical source-cluster SROCC intervals use10000 draws and seed20261017. Small-source intervals are descriptive. All previous exclusions and exposure restrictions remain in effect.'])
+    for name,model in plan['models'].items():
+        spec['models'].append(dict(name='profile-'+name,bake=model['path'],bake_sha256=model['sha256'],
+            regime='Rev1; frozen named '+name,model=dict(kind='linear',note='Existing named profile bake, unchanged.')))
+    for corpus in external:
+        data=doc['datasets'][corpus]
+        ids=[r['index'] for r in records if r['corpus']==corpus]
+        if [records[i]['local_index'] for i in ids]!=list(range(len(data['target']))):
+            raise ValueError('legacy corpus local order differs')
+        for i,pixel in zip(ids,data['pixels'],strict=True):
+            if records[i]['reference']!=pixel['ref_path'] or records[i]['distorted']!=pixel['dist_path']:
+                raise ValueError('legacy corpus pixel identity differs')
+        spec['datasets'][corpus]=dict(data,scores={})
+        for name,model in plan['models'].items():
+            spec['datasets'][corpus]['scores']['profile-'+name]=dict(
+                pred=[predictions[name][i] for i in ids],status='external-screened',
+                note='Frozen existing profile on the identical exposed population; historical development and crop/resize overlap are not comprehensively cleared.',
+                provenance=dict(model_sha256=model['sha256'],native_parity_sha256=sha(work/'PARITY.json'),
+                    predictions_sha256=sha(work/(name+'-predictions.tsv')),formula_revision=1))
+    write(out/'LEGACY_INPUTS.json',spec)
+    import build_peer_fullevals
+    os.environ['ZEN_PANEL_BIN']=str(source/'bin/panel')
+    build_peer_fullevals.build_comparison(out/'LEGACY_INPUTS.json',out/'fulleval')
+    for name in [*MODELS,*doc['references']]:
+        shutil.copyfile(source/(name+'.fulleval.json'),out/'fulleval'/(name+'.fulleval.json'))
+    import gauntlet
+    bakes=gauntlet.load_fulleval(out/'fulleval',include_all_scatter=True,comparison_only=True)
+    gauntlet.build_html(bakes,out/'gauntlet.html',comparison_only=True)
+    print('Completed matched B/D assessment; original research results unchanged',flush=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['prepare','score','audit-overlap','peer-containers','summary','live-images','live-trace','live-matrix','live-report','move-intermediates'])
+    parser.add_argument('mode',choices=['prepare','score','audit-overlap','peer-containers','summary','live-images','live-trace','live-matrix','live-report','move-intermediates','legacy-assess'])
     parser.add_argument('--out',required=True,type=Path)
     parser.add_argument('--source',type=Path,help='Existing immutable gauntlet root for live-images')
     args=parser.parse_args()
-    if args.mode in ['live-images','live-trace','live-matrix','live-report','move-intermediates']:
+    if args.mode in ['live-images','live-trace','live-matrix','live-report','move-intermediates','legacy-assess']:
         if args.source is None:parser.error(args.mode+' requires --source')
-        {'live-images':live_images,'live-trace':live_trace,'live-matrix':live_matrix,'live-report':live_report,'move-intermediates':move_intermediates}[args.mode](args.source,args.out)
+        {'live-images':live_images,'live-trace':live_trace,'live-matrix':live_matrix,'live-report':live_report,'move-intermediates':move_intermediates,'legacy-assess':legacy_assess}[args.mode](args.source,args.out)
         return
     args.out.mkdir(parents=True,exist_ok=True)
     {'prepare':prepare,'score':score,'audit-overlap':audit_overlap,'peer-containers':peer_containers,'summary':summary}[args.mode](args.out)

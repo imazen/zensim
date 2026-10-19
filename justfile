@@ -2485,6 +2485,13 @@ gauntlet-live-report source output:
 gauntlet-move-intermediates source destination:
     TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py move-intermediates --source {{quote(source)}} --out {{quote(destination)}}
 
+# Frozen named profiles use fresh Rev1 extraction, independently of Rev5 caches.
+gauntlet-profile-audit binary pairs bake output:
+    TMPDIR="$HOME/tmp" ZENSIM_FORMULA_REV=1 RAYON_NUM_THREADS=1 {{quote(binary)}} --corpus pairs --path {{quote(pairs)}} --out {{quote(output + '.csv')}} --audit-jsonl {{quote(output + '.jsonl')}} --audit-bake {{quote(bake)}}
+
+gauntlet-legacy-assess source output:
+    TMPDIR="$HOME/tmp" python3 scripts/v_next/gauntlet_frozen.py legacy-assess --source {{quote(source)}} --out {{quote(output)}}
+
 gauntlet-build target:
     cargo build --release --locked -p zensim-validate --bin panel --target-dir {{quote(target)}}
 

@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Compare existing B/D profiles with frozen research candidates on identical external populations using fresh Rev1 features, exact native parity and canonical statistics; lead the comparison scoreboard with all measured corpus columns ([results](benchmarks/gauntlet_legacy_comparison_2026-10-19.md)). No production profile changes.
+
 - Add complete cached-reference bake scoring, direct retained moment outputs and measured Rev5 queue/SAT scaling; preserve exact native, map and refinement results ([report](benchmarks/perf3_2026-10-18.md); `f6348b9c`, `034d8e20`, `ec298b71`).
 
 - Complete the fixed TRAIN-only color/noise repair comparison and prospective three-seed ensemble supplement; retain all external tradeoffs, exact controls and the persistent LIVE severity inversion. No production profile changes ([results](benchmarks/color_noise_repair_2026-10-18.md)).

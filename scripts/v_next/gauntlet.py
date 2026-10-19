@@ -2675,6 +2675,17 @@ if(LT){COLS.push(
   ['loop2','2shot ±2',false,b=>{const c=ltCell(b,'k2_emit_best');return c?c.within2:null;}],
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
   ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
+// Explicit rank comparisons lead with every measured corpus, including new
+// admitted axes. Product-only columns otherwise swamp these rows with blanks.
+if(DATA.comparisonOnly){
+  const axes=DATA.corpOrder.filter(c=>DATA.bakes.some(b=>rawSigned(b.rank[c])!=null));
+  const measured=axes.map(c=>{COL_FIELD[c]='rank.'+c;
+    const existing=COLS.find(column=>column[0]===c);
+    return [c,existing?existing[1]:c.toUpperCase()+' SROCC',false,b=>rs(b,c)];});
+  const meta=key=>COLS.find(c=>c[0]===key);
+  COLS.splice(0,COLS.length,meta('name'),meta('measured'),...measured,
+    meta('qualification'),meta('composite'));
+}
 function fmtCell(key,v,b){
   if(key==='name'||key==='regime'||key==='fair'||key==='qualification'||key==='measured')return v;
   if(key==='k')return v==null?'—':(v===1?'1 ⚠':String(v));
@@ -2744,6 +2755,11 @@ function renderTable(){
     +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
     +'within ±2 of target in the bake’s own units at encode budget k=2/3, emit-best (emit-last + outer arms: '
     +'see the JXL loop targeting section).':'')});
+  if(DATA.comparisonOnly)cap.innerHTML='Measured human-rank comparison — click a corpus header to sort. '
+    +'Every recorded corpus is shown; hover a value for population size, interval and evaluation scope. '
+    +'Composite, targeting, spatial and other product-gate measurements are not part of this rank-only report. '
+    +'A missing cell is unmeasured, not zero. Higher SROCC is better; point estimates do not establish significance. '
+    +'Full statistics and training-overlap records appear below. No overall winner or product qualification is inferred.';
   const tbl=el('table',{});
   const thead=el('tr',{});
   COLS.forEach(c=>{const jnd=JND_CORPORA.has(c[0]);
@@ -2794,6 +2810,10 @@ function renderTable(){
     COLS.forEach(c=>{
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v,b)});
+      if(DATA.comparisonOnly&&b.rank[c[0]]){const r=b.rank[c[0]];
+        td.setAttribute('title','n='+r.n+(r.srocc_ci?' | 95% CI ['+r.srocc_ci.join(', ')+']':'')
+          +(r.evaluation_status?' | '+r.evaluation_status:'')
+          +(r.training_overlap?' | '+r.training_overlap:''));}
       if(c[0]==='measured')td.setAttribute('title',Object.entries(b.rank||{}).map(([corpus,r])=>corpus+': n='+r.n).join('\n')||'No rank results recorded');
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
       if(c[0]==='qualification'){td.title='Read from the qualification owner; research composite does not confer a pass.';
