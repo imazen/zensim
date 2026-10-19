@@ -1,6 +1,7 @@
 # Zensim Dataset & Experiment History — accurate record
 
 **October 18, completed TRAIN repair screens:**
+The conservative8794-reference auxiliary union has zero exact current RGB matches in all five external panels and all six admitted D1 human banks. Current raw-file hashes are retained; crop/resize and historical raw-source limits remain.
 [The comparison](../benchmarks/color_noise_repair_2026-10-18.md) records all12 packed fits, exact three-seed control reproduction, the unchanged single-model choice and the separate fixed fine-chroma ensemble choice. Both choices precede new external scoring. Every assessed population retains its original role/exposure; no protected input is admitted. The first LIVE severity inversion remains in all repair compositions.
 
 **October 18, prospective TRAIN-only color/noise repair:**

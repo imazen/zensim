@@ -116,3 +116,13 @@ and20original images. Recomputed C SROCC/CI/PLCC/KROCC exactly reproduce the
 original retained statistics on every panel. Native full assessment statistics
 receipt: `run-heavy: done rc=0 604s | peak-RSS 0.18GiB`; browser gates4s,
 peak-RSS0.18GiB. These are execution/resource receipts, not metric-speed claims.
+
+Auxiliary source closure: the entire retained ordinal-pool union contains8794
+reference PNGs, all decoded as RGB by an independent Pillow read. None matches
+any admitted external reference RGB hash, and none matches any of the six
+admitted D1 human banks. This conservatively includes unused families. Current
+file/pixel hashes and every compared row are recorded in AUXILIARY_OVERLAP.json
+and AUXILIARY_D1_OVERLAP.json. Crop/resize lineage and historical raw-source
+immutability remain outside this exact-current-source check. Audit receipt:
+`run-heavy: done rc=0 33s | peak-RSS 0.24GiB`; D1 metadata comparison1s,
+peak-RSS0.14GiB. All27focused policy/provenance/archive checks pass.
