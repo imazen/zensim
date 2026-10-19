@@ -2562,6 +2562,9 @@ color-noise-assess output:
     test -f {{quote(output + "/ensembles/TRAIN_SELECTION.json")}}
     just color-noise-assessment external {{quote(output)}}
     just color-noise-ensemble external {{quote(output)}}
+    just color-noise-render {{quote(output)}}
+
+color-noise-render output:
     just color-noise-assessment dashboard {{quote(output)}}
     just color-noise-assessment dashboard {{quote(output + "/ensembles")}}
     just color-noise-assessment report {{quote(output)}}
