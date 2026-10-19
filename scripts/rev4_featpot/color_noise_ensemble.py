@@ -11,6 +11,11 @@ import color_noise_assessment as assessment
 import numpy as np
 
 
+def production_lines(values):
+    """Match predict_features_with_bake --production's Rust {score:.17} wire."""
+    return [format(float(v),'.17f') for v in values]
+
+
 def plan(out):
     from color_noise_repair import ARMS,registration,write,sha
     registration(out)
@@ -141,7 +146,7 @@ def external(out):
         view=work/f'{corpus}.features.parquet';pq.write_table(table,view,compression='zstd')
         views[corpus]=view
         control=predict(out,'current',view,work/f'{corpus}-view-control.tsv',seeds=[0])
-        if control.tolist()!=d['scores']['diff-frag-820']['pred']:
+        if production_lines(control)!=(out/'external'/f'{corpus}-current.pred.txt').read_text().splitlines():
             raise ValueError('native compatibility-view control differs from original frozen scores')
         receipts.append(dict(corpus=corpus,path=str(view),sha256=sha(view),source_sha256=sha(source),
             feature_manifest_sha256=sha(bank/'_MANIFEST.json'),rows=table.num_rows,feature_ids=list(range(720)),
@@ -157,9 +162,10 @@ def external(out):
             bank=Path(d['feature_bank'])
             pred=predict(out,arm,views[corpus],work/f'{corpus}-{arm}.tsv')
             if len(pred)!=len(d['target']):raise ValueError('external ensemble population differs')
-            d['scores'][name]=dict(pred=pred.tolist(),status='external-screened',note='Prospectively frozen native ensemble; exposed assessment only.',
+            d['scores'][name]=dict(pred=[float(v) for v in production_lines(pred)],status='external-screened',note='Prospectively frozen native ensemble; exposed assessment only.',
                 provenance=dict(composition_sha256=binding['sha256'],feature_manifest_sha256=sha(bank/'_MANIFEST.json'),
-                    prediction_view_sha256=sha(views[corpus]),selection_sha256=sha(root/'TRAIN_SELECTION.json')))
+                    prediction_view_sha256=sha(views[corpus]),selection_sha256=sha(root/'TRAIN_SELECTION.json'),
+                    serialization='Original production CLI fixed17 decimal places; native round-trip score TSV retained.'))
             print(name,corpus,len(pred),flush=True)
     write(root/'EXTERNAL_INPUTS.json',data)
 

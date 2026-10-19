@@ -80,6 +80,14 @@ class Decision(unittest.TestCase):
         with self.assertRaises(KeyError):choose(rows[:-1])
 
 class EnsembleDecision(unittest.TestCase):
+    def test_native_debug_scores_match_original_fixed17_wire(self):
+        from color_noise_ensemble import production_lines
+        observed=['0.025049379607196443','-0.019119526768523798','-0.040900758155011374']
+        original=['0.02504937960719644','-0.01911952676852380','-0.04090075815501137']
+        self.assertEqual(production_lines(map(float,observed)),original)
+        changed=list(map(float,observed));changed[0]+=.001
+        self.assertNotEqual(production_lines(changed),original)
+
     def test_human_priority_preserves_noise_and_source_guards(self):
         import color_noise_assessment as assessment
         from color_noise_ensemble import choose
