@@ -158,6 +158,8 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-18 — fixed color/noise repairs retain the LIVE severity inversion.** The registered TRAIN-screened fine-chroma three-seed ensemble scores severe manfishing noise50.0116 versus moderate−9.3503. Coverage and combined arms also retain this ordering failure. No production profile changed. See [the repair comparison](benchmarks/color_noise_repair_2026-10-18.md).
+
 * **2026-10-18 — frozen E33/E34 models overrate severe LIVE color noise.** All three omit finest-scale X/B inputs. Large measured retained errors can also increase quality through signed affine/ReLU cancellation: on manfishing wn/img41, removing f136 lowers diff+frag49.7143→11.0847 and W-C57.9947→24.3266. All three rate this real severe noise above the less-damaged wn/img73. Native baseline replay and independent pixel/matrix checks pass; this is model behavior, not a repair. Keep these exposed examples out of fitting/selection. Evidence and limits: [matrix trace](benchmarks/gauntlet_live_color_trace_2026-10-18.md).
 
 * **2026-10-18 — standalone discovery of a private panel module. FIXED.** A helper placed directly in `zensim-validate/src/bin/` was also discovered as a separate binary, where its module visibility was invalid. It now lives in `panel_rank_interval/mod.rs`; Cargo metadata confirms there is no extra target. Focused module tests passed; the complete CI rebuild validates target discovery.

@@ -1,5 +1,8 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**October 18, completed TRAIN repair screens:**
+[The comparison](../benchmarks/color_noise_repair_2026-10-18.md) records all12 packed fits, exact three-seed control reproduction, the unchanged single-model choice and the separate fixed fine-chroma ensemble choice. Both choices precede new external scoring. Every assessed population retains its original role/exposure; no protected input is admitted. The first LIVE severity inversion remains in all repair compositions.
+
 **October 18, prospective TRAIN-only color/noise repair:**
 The [registered 2×2 comparison](../benchmarks/color_noise_repair_registration_2026-10-18.md)
 reuses the receipt-approved four-source D1 recipe, TRAIN oracle legs and pinned
