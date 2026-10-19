@@ -126,3 +126,5 @@ and AUXILIARY_D1_OVERLAP.json. Crop/resize lineage and historical raw-source
 immutability remain outside this exact-current-source check. Audit receipt:
 `run-heavy: done rc=0 33s | peak-RSS 0.24GiB`; D1 metadata comparison1s,
 peak-RSS0.14GiB. All27focused policy/provenance/archive checks pass.
+
+[Verified evidence locations and hashes](color_noise_repair_2026-10-18.pointer.md).
