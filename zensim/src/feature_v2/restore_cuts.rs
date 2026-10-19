@@ -372,8 +372,8 @@ fn restore_cuts_row_work(
     devv: Option<&mut [crate::featcanon::WelfordVar; MAPDEV_PER_CELL]>,
     exact: bool,
 ) {
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
     let full = width / 8;
     if !exact {
         let widen = |v: f32x8| -> [f64; 8] {
@@ -382,11 +382,11 @@ fn restore_cuts_row_work(
         };
         for c in 0..full {
             let x0 = c * 8;
-            let sv = f32x8::load(token, sp_row[x0..x0 + 8].try_into().unwrap());
-            let dv = f32x8::load(token, dp_row[x0..x0 + 8].try_into().unwrap());
-            let m1v = f32x8::load(token, mu1_row[x0..x0 + 8].try_into().unwrap());
-            let m2v = f32x8::load(token, mu2_row[x0..x0 + 8].try_into().unwrap());
-            let sdv = f32x8::load(token, sd_row[x0..x0 + 8].try_into().unwrap());
+            let sv = f32x8::load_t(token, sp_row[x0..x0 + 8].try_into().unwrap());
+            let dv = f32x8::load_t(token, dp_row[x0..x0 + 8].try_into().unwrap());
+            let m1v = f32x8::load_t(token, mu1_row[x0..x0 + 8].try_into().unwrap());
+            let m2v = f32x8::load_t(token, mu2_row[x0..x0 + 8].try_into().unwrap());
+            let sdv = f32x8::load_t(token, sd_row[x0..x0 + 8].try_into().unwrap());
             let diff1 = (sv - m1v).abs();
             let diff2 = (dv - m2v).abs();
             let ed = (one + diff2) / (one + diff1) - one;
@@ -421,13 +421,13 @@ fn restore_cuts_row_work(
                 crate::featcanon::WelfordVar::Lanes(lanes) => {
                     let row = &rows[map];
                     let mut n_v =
-                        f64x8::from_array(token, std::array::from_fn(|l| lanes[l].n as f64));
+                        f64x8::from_array_t(token, std::array::from_fn(|l| lanes[l].n as f64));
                     let mut mean_v =
-                        f64x8::from_array(token, std::array::from_fn(|l| lanes[l].mean));
-                    let mut m2_v = f64x8::from_array(token, std::array::from_fn(|l| lanes[l].m2));
-                    let n1 = f64x8::splat(token, 1.0);
+                        f64x8::from_array_t(token, std::array::from_fn(|l| lanes[l].mean));
+                    let mut m2_v = f64x8::from_array_t(token, std::array::from_fn(|l| lanes[l].m2));
+                    let n1 = f64x8::splat_t(token, 1.0);
                     for c in 0..full {
-                        let xv = f64x8::load(token, row[c * 8..c * 8 + 8].try_into().unwrap());
+                        let xv = f64x8::load_t(token, row[c * 8..c * 8 + 8].try_into().unwrap());
                         n_v += n1;
                         let change = xv - mean_v;
                         mean_v += change / n_v;

@@ -313,7 +313,7 @@ pub(crate) mod tests {
     /// variances, and signed residuals spanning ±[1e-4, 4].
     fn check_mscn_norm_tier<T: F32x8Backend + Copy>(token: T, tier: &str) {
         let c = C_MSCN_VAR as f32;
-        let cv = V8::<T>::splat(token, c);
+        let cv = V8::<T>::splat_t(token, c);
         // Deterministic LCG so the corpus is identical on every platform.
         let mut state = 0x9E37_79B9u32;
         let mut next = || {
@@ -341,8 +341,8 @@ pub(crate) mod tests {
             }
             let got = mscn_norm_v(
                 token,
-                V8::<T>::from_array(token, resid),
-                V8::<T>::from_array(token, var),
+                V8::<T>::from_array_t(token, resid),
+                V8::<T>::from_array_t(token, var),
                 cv,
             )
             .to_array();
@@ -8133,4 +8133,3 @@ pub(crate) mod tests {
 
     // ========================================================================
 }
-

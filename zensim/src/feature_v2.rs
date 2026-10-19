@@ -5322,13 +5322,13 @@ fn retain_basic_sd(
 ) {
     let form = crate::ssim_form::SsimLumaForm::Clamp;
     let splats = crate::ssim_form::SsimSplats8::new(token, form);
-    let zero = f32x8::zero(token);
+    let zero = f32x8::zero_t(token);
     let mut i = 0;
     while i + 8 <= sd.len() {
-        let m1 = f32x8::load(token, mu1[i..i + 8].try_into().unwrap());
-        let m2 = f32x8::load(token, mu2[i..i + 8].try_into().unwrap());
-        let sq = f32x8::load(token, ssq[i..i + 8].try_into().unwrap());
-        let er = f32x8::load(token, err[i..i + 8].try_into().unwrap());
+        let m1 = f32x8::load_t(token, mu1[i..i + 8].try_into().unwrap());
+        let m2 = f32x8::load_t(token, mu2[i..i + 8].try_into().unwrap());
+        let sq = f32x8::load_t(token, ssq[i..i + 8].try_into().unwrap());
+        let er = f32x8::load_t(token, err[i..i + 8].try_into().unwrap());
         splats
             .direct(m1, m2, sq, er)
             .max(zero)
@@ -6022,15 +6022,15 @@ fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
         acc.plane_v.resize(n_plane, 0.0);
         acc.plane_h.resize(n_plane, 0.0);
     }
-    let half = V8::<T>::splat(token, 0.5);
-    let c_act = V8::<T>::splat(token, C_ACTIVITY as f32);
+    let half = V8::<T>::splat_t(token, 0.5);
+    let c_act = V8::<T>::splat_t(token, C_ACTIVITY as f32);
     // Lane-phase accumulators for the chunked V span — folded to f64 once
     // per strip (see module doc above for the lane→phase map).
-    let mut acc_v_abs = [V8::<T>::zero(token), V8::<T>::zero(token)];
-    let mut acc_v_sgn = [V8::<T>::zero(token), V8::<T>::zero(token)];
+    let mut acc_v_abs = [V8::<T>::zero_t(token), V8::<T>::zero_t(token)];
+    let mut acc_v_sgn = [V8::<T>::zero_t(token), V8::<T>::zero_t(token)];
     macro_rules! ld_at {
         ($plane:expr, $off:expr) => {
-            V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+            V8::<T>::from_array_t(token, $plane[$off..$off + 8].try_into().unwrap())
         };
     }
     for k in 0..strip_h {
@@ -6078,8 +6078,8 @@ fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
         if y > 0 {
             let ph = y % period;
             let row_u = row - width;
-            let mut acc_h_abs = V8::<T>::zero(token);
-            let mut acc_h_sgn = V8::<T>::zero(token);
+            let mut acc_h_abs = V8::<T>::zero_t(token);
+            let mut acc_h_sgn = V8::<T>::zero_t(token);
             let chunk_end_h = width - (width % 8);
             let mut x = 0usize;
             while x < chunk_end_h {
@@ -6354,12 +6354,12 @@ fn dst_y_edge_mask_generic<T: F32x8Backend + Copy>(
     debug_assert_eq!(dh.len(), width * (strip_h + 4));
     debug_assert_eq!(ehd.len(), width * (strip_h + 2));
     debug_assert_eq!(mask.len(), width * strip_h);
-    let zero = V8::<T>::zero(token);
-    let one = V8::<T>::splat(token, 1.0);
-    let c_edge = V8::<T>::splat(token, C_RING_EDGE as f32);
+    let zero = V8::<T>::zero_t(token);
+    let one = V8::<T>::splat_t(token, 1.0);
+    let c_edge = V8::<T>::splat_t(token, C_RING_EDGE as f32);
     macro_rules! ld_at {
         ($plane:expr, $off:expr) => {
-            V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+            V8::<T>::from_array_t(token, $plane[$off..$off + 8].try_into().unwrap())
         };
     }
     // Scalar edge flag at plane row py = y0−1+j, column x — x-neighbours
@@ -6427,12 +6427,12 @@ fn dst_y_edge_mask_generic<T: F32x8Backend + Copy>(
             let chunk_end = 1 + interior_w - (interior_w % 8);
             let mut x = 1usize;
             while x < chunk_end {
-                let m = V8::<T>::from_array(token, e_row[x - 1..x + 7].try_into().unwrap())
-                    .max(V8::<T>::from_array(
+                let m = V8::<T>::from_array_t(token, e_row[x - 1..x + 7].try_into().unwrap())
+                    .max(V8::<T>::from_array_t(
                         token,
                         e_row[x..x + 8].try_into().unwrap(),
                     ))
-                    .max(V8::<T>::from_array(
+                    .max(V8::<T>::from_array_t(
                         token,
                         e_row[x + 1..x + 9].try_into().unwrap(),
                     ));
@@ -10617,9 +10617,9 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    let zero = V8::<T>::zero(token);
-    let one = V8::<T>::splat(token, 1.0);
-    let sp = |v: f32| V8::<T>::splat(token, v);
+    let zero = V8::<T>::zero_t(token);
+    let one = V8::<T>::splat_t(token, 1.0);
+    let sp = |v: f32| V8::<T>::splat_t(token, v);
     let c1 = sp(C1_V2 as f32);
     let c2 = sp(C2_V2 as f32);
     let c_edge = sp(C_EDGE as f32);
@@ -10656,7 +10656,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             let i = row + x;
             macro_rules! ld {
                 ($plane:expr) => {
-                    V8::<T>::from_array(token, $plane[i..i + 8].try_into().unwrap())
+                    V8::<T>::from_array_t(token, $plane[i..i + 8].try_into().unwrap())
                 };
             }
             let s = ld!(src);
@@ -10753,10 +10753,10 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             }
             let o = orow + x;
             let id_new =
-                V8::<T>::from_array(token, id_plane[o..o + 8].try_into().unwrap()) + a_id + a_res;
+                V8::<T>::from_array_t(token, id_plane[o..o + 8].try_into().unwrap()) + a_id + a_res;
             id_plane[o..o + 8].copy_from_slice(&id_new.to_array());
             let win_new =
-                V8::<T>::from_array(token, win_plane[o..o + 8].try_into().unwrap()) + a_win;
+                V8::<T>::from_array_t(token, win_plane[o..o + 8].try_into().unwrap()) + a_win;
             win_plane[o..o + 8].copy_from_slice(&win_new.to_array());
             x += 8;
         }
@@ -10949,10 +10949,10 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
     let need_bandvis = co.c_bv_gain != 0.0 || co.c_bv_loss != 0.0;
     let has_ringing = co.c_ringing != 0.0;
     let has_banding = co.c_banding != 0.0;
-    let zero = V8::<T>::zero(token);
-    let one = V8::<T>::splat(token, 1.0);
-    let two = V8::<T>::splat(token, 2.0);
-    let sp = |v: f32| V8::<T>::splat(token, v);
+    let zero = V8::<T>::zero_t(token);
+    let one = V8::<T>::splat_t(token, 1.0);
+    let two = V8::<T>::splat_t(token, 2.0);
+    let sp = |v: f32| V8::<T>::splat_t(token, v);
     let c_gms = sp(C_GMS as f32);
     let c_activity = sp(C_ACTIVITY as f32);
     let c_ring_err = sp(C_RING_ERR as f32);
@@ -11016,7 +11016,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
             let i = row + x;
             macro_rules! ldo {
                 ($plane:expr, $off:expr) => {
-                    V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+                    V8::<T>::from_array_t(token, $plane[$off..$off + 8].try_into().unwrap())
                 };
             }
             let s_c = ldo!(src, i);
@@ -11064,7 +11064,7 @@ fn attr_pass_b_grad_kernel_generic<T: F32x8Backend + Copy>(
             }
             acc += sp(co.c_edgew) * (gmag_d - gmag_s);
             let o = i - out_off;
-            let id_new = V8::<T>::from_array(token, id_plane[o..o + 8].try_into().unwrap()) + acc;
+            let id_new = V8::<T>::from_array_t(token, id_plane[o..o + 8].try_into().unwrap()) + acc;
             id_plane[o..o + 8].copy_from_slice(&id_new.to_array());
             x += 8;
         }

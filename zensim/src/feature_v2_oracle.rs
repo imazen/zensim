@@ -774,7 +774,7 @@ fn v8_add_first<T: F32x8Backend + Copy>(token: T, acc: V8<T>, t: &[f32; 8], n: u
     for k in 0..n {
         a[k] += t[k];
     }
-    V8::<T>::from_array(token, a)
+    V8::<T>::from_array_t(token, a)
 }
 
 /// `#[inline(always)]`, not `#[inline]` — this body exists ONLY to fuse into
@@ -812,20 +812,20 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     // loop-invariant, so every call site below unswitches on it.
     let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let _ = FUSED; // the split is chosen by tier; see the entries above
-    let zero = V8::<T>::zero(token);
-    let one = V8::<T>::splat(token, 1.0);
-    let c1 = V8::<T>::splat(token, C1_V2 as f32);
-    let c2 = V8::<T>::splat(token, C2_V2 as f32);
-    let c_edge = V8::<T>::splat(token, C_EDGE as f32);
-    let c_mse = V8::<T>::splat(token, C_MSE as f32);
-    let c_hf = V8::<T>::splat(token, C_HF as f32);
-    let c_pj = V8::<T>::splat(token, C_PJND_CLAMP as f32);
-    let k_mid = V8::<T>::splat(token, K_PJND_MASK as f32);
-    let k_lo = V8::<T>::splat(token, K_PJND_MASK_LOW as f32);
-    let k_hi = V8::<T>::splat(token, K_PJND_MASK_HIGH as f32);
-    let c_act = V8::<T>::splat(token, C_ACTIVITY as f32);
-    let c_peak = V8::<T>::splat(token, C_PEAK as f32);
-    let iw_floor = V8::<T>::splat(token, IW_WEIGHT_FLOOR as f32);
+    let zero = V8::<T>::zero_t(token);
+    let one = V8::<T>::splat_t(token, 1.0);
+    let c1 = V8::<T>::splat_t(token, C1_V2 as f32);
+    let c2 = V8::<T>::splat_t(token, C2_V2 as f32);
+    let c_edge = V8::<T>::splat_t(token, C_EDGE as f32);
+    let c_mse = V8::<T>::splat_t(token, C_MSE as f32);
+    let c_hf = V8::<T>::splat_t(token, C_HF as f32);
+    let c_pj = V8::<T>::splat_t(token, C_PJND_CLAMP as f32);
+    let k_mid = V8::<T>::splat_t(token, K_PJND_MASK as f32);
+    let k_lo = V8::<T>::splat_t(token, K_PJND_MASK_LOW as f32);
+    let k_hi = V8::<T>::splat_t(token, K_PJND_MASK_HIGH as f32);
+    let c_act = V8::<T>::splat_t(token, C_ACTIVITY as f32);
+    let c_peak = V8::<T>::splat_t(token, C_PEAK as f32);
+    let iw_floor = V8::<T>::splat_t(token, IW_WEIGHT_FLOOR as f32);
 
     let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
@@ -931,7 +931,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
             let mut x = 0usize;
             macro_rules! ld {
                 ($plane:expr, $off:expr) => {
-                    V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+                    V8::<T>::from_array_t(token, $plane[$off..$off + 8].try_into().unwrap())
                 };
             }
             while x < n8 {
@@ -991,7 +991,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                 let pad = |pl: &[f32]| -> V8<T> {
                     let mut o = [0.0f32; 8];
                     o[..rem].copy_from_slice(&pl[row + n8..row + width]);
-                    V8::<T>::from_array(token, o)
+                    V8::<T>::from_array_t(token, o)
                 };
                 let (t, art_i, det_i, mse_i, d, act) = terms!(
                     pad(src),
@@ -1380,20 +1380,20 @@ fn dense_terms32_v<T: F32x8Backend + Copy>(
     [V8<T>; 3],
     V8<T>,
 ) {
-    let c1 = V8::<T>::splat(token, C1_V2 as f32);
-    let c2 = V8::<T>::splat(token, C2_V2 as f32);
-    let c_edge = V8::<T>::splat(token, C_EDGE as f32);
-    let c_mse = V8::<T>::splat(token, C_MSE as f32);
-    let c_hf = V8::<T>::splat(token, C_HF as f32);
-    let c_pj = V8::<T>::splat(token, C_PJND_CLAMP as f32);
-    let k_mid = V8::<T>::splat(token, K_PJND_MASK as f32);
-    let k_lo = V8::<T>::splat(token, K_PJND_MASK_LOW as f32);
-    let k_hi = V8::<T>::splat(token, K_PJND_MASK_HIGH as f32);
-    let c_act = V8::<T>::splat(token, C_ACTIVITY as f32);
-    let c_peak = V8::<T>::splat(token, C_PEAK as f32);
-    let iw_floor = V8::<T>::splat(token, IW_WEIGHT_FLOOR as f32);
-    let one = V8::<T>::splat(token, 1.0);
-    let zero = V8::<T>::zero(token);
+    let c1 = V8::<T>::splat_t(token, C1_V2 as f32);
+    let c2 = V8::<T>::splat_t(token, C2_V2 as f32);
+    let c_edge = V8::<T>::splat_t(token, C_EDGE as f32);
+    let c_mse = V8::<T>::splat_t(token, C_MSE as f32);
+    let c_hf = V8::<T>::splat_t(token, C_HF as f32);
+    let c_pj = V8::<T>::splat_t(token, C_PJND_CLAMP as f32);
+    let k_mid = V8::<T>::splat_t(token, K_PJND_MASK as f32);
+    let k_lo = V8::<T>::splat_t(token, K_PJND_MASK_LOW as f32);
+    let k_hi = V8::<T>::splat_t(token, K_PJND_MASK_HIGH as f32);
+    let c_act = V8::<T>::splat_t(token, C_ACTIVITY as f32);
+    let c_peak = V8::<T>::splat_t(token, C_PEAK as f32);
+    let iw_floor = V8::<T>::splat_t(token, IW_WEIGHT_FLOOR as f32);
+    let one = V8::<T>::splat_t(token, 1.0);
+    let zero = V8::<T>::zero_t(token);
     let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct);
     let d2 = d * d;
     let diff_src = (s - m1).abs();
@@ -1583,13 +1583,13 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
             let arow = &activity[row..row + full * 8];
             for c in 0..full {
                 let i = c * 8;
-                let sv = f32x8::load(token, srow[i..i + 8].try_into().unwrap());
-                let dv = f32x8::load(token, drow[i..i + 8].try_into().unwrap());
-                let m1v = f32x8::load(token, m1row[i..i + 8].try_into().unwrap());
-                let m2v = f32x8::load(token, m2row[i..i + 8].try_into().unwrap());
-                let qv = f32x8::load(token, qrow[i..i + 8].try_into().unwrap());
-                let pv = f32x8::load(token, prow[i..i + 8].try_into().unwrap());
-                let actv = f32x8::load(token, arow[i..i + 8].try_into().unwrap());
+                let sv = f32x8::load_t(token, srow[i..i + 8].try_into().unwrap());
+                let dv = f32x8::load_t(token, drow[i..i + 8].try_into().unwrap());
+                let m1v = f32x8::load_t(token, m1row[i..i + 8].try_into().unwrap());
+                let m2v = f32x8::load_t(token, m2row[i..i + 8].try_into().unwrap());
+                let qv = f32x8::load_t(token, qrow[i..i + 8].try_into().unwrap());
+                let pv = f32x8::load_t(token, prow[i..i + 8].try_into().unwrap());
+                let actv = f32x8::load_t(token, arow[i..i + 8].try_into().unwrap());
                 let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd, act_v) = dense_terms32_v(
                     token,
                     sv,
@@ -1636,7 +1636,7 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
                 for j in 0..29 {
                     let a: [f64; 8] = std::array::from_fn(|l| bufs[j][l] as f64);
                     let lanes = pools[j].chunk8(i & (P::LANES - 1));
-                    (f64x8::load(token, lanes) + f64x8::from_array(token, a)).store(lanes);
+                    (f64x8::load_t(token, lanes) + f64x8::from_array_t(token, a)).store(lanes);
                 }
                 if stable {
                     let off = i & 15;
