@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Dependency compatibility
+
+- Admit the current SIMD beta and use equivalent token-explicit constructor aliases throughout the metric kernels (`639d5292`). Formatting, strict library lint and 450 library tests pass; ten existing ignored tests are unchanged. No metric coefficients, arithmetic or expected values changed.
+
 ### QUEUED BREAKING CHANGES
 
 None.
