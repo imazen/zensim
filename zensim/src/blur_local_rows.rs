@@ -63,14 +63,14 @@ fn box_blur_v_local11_rows(
     if width == 0 || height == 0 || window.is_empty() {
         return;
     }
-    let inv = f32x8::splat(token, 1.0 / 11.0);
+    let inv = f32x8::splat_t(token, 1.0 / 11.0);
     // Cache the frozen tree's pair and quadruple nodes, never an output
     // recurrence. Each node has the same two operands and rounding as before.
     // Eight vector columns bound scratch and keep adjacent rows in one tile.
     let blocks = width / 8;
     for tile in (0..blocks).step_by(8) {
         let count = (blocks - tile).min(8);
-        let mut pairs = [[f32x8::zero(token); 8]; 16];
+        let mut pairs = [[f32x8::zero_t(token); 8]; 16];
         let mut quads = pairs;
         for k in 0..9 {
             let a = crate::featcanon::tap_mirror(window.start as isize + k as isize - 5, height)
@@ -79,8 +79,8 @@ fn box_blur_v_local11_rows(
                 * width;
             for c in 0..count {
                 let x = (tile + c) * 8;
-                pairs[k][c] = f32x8::load(token, input[a + x..a + x + 8].try_into().unwrap())
-                    + f32x8::load(token, input[b + x..b + x + 8].try_into().unwrap());
+                pairs[k][c] = f32x8::load_t(token, input[a + x..a + x + 8].try_into().unwrap())
+                    + f32x8::load_t(token, input[b + x..b + x + 8].try_into().unwrap());
             }
         }
         for k in 0..7 {
@@ -93,9 +93,9 @@ fn box_blur_v_local11_rows(
             let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
             for c in 0..count {
                 let x = (tile + c) * 8;
-                let last = f32x8::load(token, input[b + x..b + x + 8].try_into().unwrap());
+                let last = f32x8::load_t(token, input[b + x..b + x + 8].try_into().unwrap());
                 pairs[(out_y + 9) & 15][c] =
-                    f32x8::load(token, input[a + x..a + x + 8].try_into().unwrap()) + last;
+                    f32x8::load_t(token, input[a + x..a + x + 8].try_into().unwrap()) + last;
                 quads[(out_y + 7) & 15][c] =
                     pairs[(out_y + 7) & 15][c] + pairs[(out_y + 9) & 15][c];
                 let sum = ((quads[out_y & 15][c] + quads[(out_y + 4) & 15][c])
@@ -139,14 +139,14 @@ fn box_blur_v_local11_rows_wide(
     if width == 0 || height == 0 || window.is_empty() {
         return;
     }
-    let inv = f32x16::splat(token, 1.0 / 11.0);
+    let inv = f32x16::splat_t(token, 1.0 / 11.0);
     // Cache the frozen tree's pair and quadruple nodes, never an output
     // recurrence. Each node has the same two operands and rounding as before.
     // Eight vector columns bound scratch and keep adjacent rows in one tile.
     let blocks = width / 16;
     for tile in (0..blocks).step_by(8) {
         let count = (blocks - tile).min(8);
-        let mut pairs = [[f32x16::zero(token); 8]; 16];
+        let mut pairs = [[f32x16::zero_t(token); 8]; 16];
         let mut quads = pairs;
         for k in 0..9 {
             let a = crate::featcanon::tap_mirror(window.start as isize + k as isize - 5, height)
@@ -155,8 +155,8 @@ fn box_blur_v_local11_rows_wide(
                 * width;
             for c in 0..count {
                 let x = (tile + c) * 16;
-                pairs[k][c] = f32x16::load(token, input[a + x..a + x + 16].try_into().unwrap())
-                    + f32x16::load(token, input[b + x..b + x + 16].try_into().unwrap());
+                pairs[k][c] = f32x16::load_t(token, input[a + x..a + x + 16].try_into().unwrap())
+                    + f32x16::load_t(token, input[b + x..b + x + 16].try_into().unwrap());
             }
         }
         for k in 0..7 {
@@ -169,9 +169,9 @@ fn box_blur_v_local11_rows_wide(
             let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
             for c in 0..count {
                 let x = (tile + c) * 16;
-                let last = f32x16::load(token, input[b + x..b + x + 16].try_into().unwrap());
+                let last = f32x16::load_t(token, input[b + x..b + x + 16].try_into().unwrap());
                 pairs[(out_y + 9) & 15][c] =
-                    f32x16::load(token, input[a + x..a + x + 16].try_into().unwrap()) + last;
+                    f32x16::load_t(token, input[a + x..a + x + 16].try_into().unwrap()) + last;
                 quads[(out_y + 7) & 15][c] =
                     pairs[(out_y + 7) & 15][c] + pairs[(out_y + 9) & 15][c];
                 let sum = ((quads[out_y & 15][c] + quads[(out_y + 4) & 15][c])

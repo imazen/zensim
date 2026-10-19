@@ -2586,3 +2586,9 @@ color-noise-verify output:
 
 color-noise-check:
     TMPDIR="$HOME/tmp" PYTHONPATH=scripts:scripts/rev4_featpot python3 -m unittest scripts.tests.test_color_noise_repair scripts.tests.test_e33_package
+
+# Validate stable compatibility while tool builds select the current SIMD beta.
+beta-cohort-check:
+    cargo fmt --check
+    cargo clippy --locked -p zensim --lib -- -D warnings
+    cargo test --locked -p zensim --lib

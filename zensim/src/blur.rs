@@ -188,7 +188,7 @@ fn box_blur_v_copy_inner_v4(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
@@ -208,7 +208,7 @@ fn box_blur_v_copy_inner_v4(
     for cg in 0..col_groups {
         let col_base = cg * 16;
 
-        let mut sum = f32x16::zero(token);
+        let mut sum = f32x16::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -216,7 +216,7 @@ fn box_blur_v_copy_inner_v4(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x16::from_array(token, src[base..][..16].try_into().unwrap());
+            sum = sum + f32x16::from_array_t(token, src[base..][..16].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -249,8 +249,8 @@ fn box_blur_v_copy_inner_v4(
 
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            let add_v = f32x16::from_array(token, src[add_base..][..16].try_into().unwrap());
-            let rem_v = f32x16::from_array(token, src[rem_base..][..16].try_into().unwrap());
+            let add_v = f32x16::from_array_t(token, src[add_base..][..16].try_into().unwrap());
+            let rem_v = f32x16::from_array_t(token, src[rem_base..][..16].try_into().unwrap());
             sum = sum + add_v - rem_v;
         }
     }
@@ -258,12 +258,12 @@ fn box_blur_v_copy_inner_v4(
     // Remainder with f32x8
     let col_base_8 = col_groups * 16;
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
     for cg in 0..remaining_8groups {
         let col_base = col_base_8 + cg * 8;
-        let mut sum = f32x8::zero(v3);
+        let mut sum = f32x8::zero_t(v3);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -271,7 +271,7 @@ fn box_blur_v_copy_inner_v4(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
+            sum = sum + f32x8::from_array_t(v3, src[base..][..8].try_into().unwrap());
         }
         for y in 0..height {
             let base = y * width + col_base;
@@ -301,8 +301,8 @@ fn box_blur_v_copy_inner_v4(
             let rem_idx = rem_idx.min(height - 1);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            sum = sum + f32x8::from_array(v3, src[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, src[rem_base..][..8].try_into().unwrap());
+            sum = sum + f32x8::from_array_t(v3, src[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, src[rem_base..][..8].try_into().unwrap());
         }
     }
 
@@ -358,7 +358,7 @@ fn box_blur_v_copy_inner_v4x(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
@@ -378,7 +378,7 @@ fn box_blur_v_copy_inner_v4x(
     for cg in 0..col_groups {
         let col_base = cg * 16;
 
-        let mut sum = f32x16::zero(token);
+        let mut sum = f32x16::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -386,7 +386,7 @@ fn box_blur_v_copy_inner_v4x(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x16::from_array(token, src[base..][..16].try_into().unwrap());
+            sum = sum + f32x16::from_array_t(token, src[base..][..16].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -419,8 +419,8 @@ fn box_blur_v_copy_inner_v4x(
 
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            let add_v = f32x16::from_array(token, src[add_base..][..16].try_into().unwrap());
-            let rem_v = f32x16::from_array(token, src[rem_base..][..16].try_into().unwrap());
+            let add_v = f32x16::from_array_t(token, src[add_base..][..16].try_into().unwrap());
+            let rem_v = f32x16::from_array_t(token, src[rem_base..][..16].try_into().unwrap());
             sum = sum + add_v - rem_v;
         }
     }
@@ -428,12 +428,12 @@ fn box_blur_v_copy_inner_v4x(
     // Remainder with f32x8
     let col_base_8 = col_groups * 16;
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
     for cg in 0..remaining_8groups {
         let col_base = col_base_8 + cg * 8;
-        let mut sum = f32x8::zero(v3);
+        let mut sum = f32x8::zero_t(v3);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -441,7 +441,7 @@ fn box_blur_v_copy_inner_v4x(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
+            sum = sum + f32x8::from_array_t(v3, src[base..][..8].try_into().unwrap());
         }
         for y in 0..height {
             let base = y * width + col_base;
@@ -471,8 +471,8 @@ fn box_blur_v_copy_inner_v4x(
             let rem_idx = rem_idx.min(height - 1);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            sum = sum + f32x8::from_array(v3, src[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, src[rem_base..][..8].try_into().unwrap());
+            sum = sum + f32x8::from_array_t(v3, src[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, src[rem_base..][..8].try_into().unwrap());
         }
     }
 
@@ -531,7 +531,7 @@ fn box_blur_v_copy_inner_v3(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
 
@@ -552,7 +552,7 @@ fn box_blur_v_copy_inner_v3(
         let col_base = cg * 8;
 
         // Initialize running sums for 8 columns
-        let mut sum = f32x8::zero(token);
+        let mut sum = f32x8::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -560,7 +560,7 @@ fn box_blur_v_copy_inner_v3(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x8::from_array(token, src[base..][..8].try_into().unwrap());
+            sum = sum + f32x8::from_array_t(token, src[base..][..8].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -593,8 +593,8 @@ fn box_blur_v_copy_inner_v3(
 
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            let add_v = f32x8::from_array(token, src[add_base..][..8].try_into().unwrap());
-            let rem_v = f32x8::from_array(token, src[rem_base..][..8].try_into().unwrap());
+            let add_v = f32x8::from_array_t(token, src[add_base..][..8].try_into().unwrap());
+            let rem_v = f32x8::from_array_t(token, src[rem_base..][..8].try_into().unwrap());
             sum = sum + add_v - rem_v;
         }
     }
@@ -654,7 +654,7 @@ fn box_blur_v_copy_inner(
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
 
@@ -662,7 +662,7 @@ fn box_blur_v_copy_inner(
         let col_base = cg * 8;
 
         // Initialize running sums for 8 columns
-        let mut sum = f32x8::zero(token);
+        let mut sum = f32x8::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -670,7 +670,7 @@ fn box_blur_v_copy_inner(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x8::from_array(token, src[base..][..8].try_into().unwrap());
+            sum = sum + f32x8::from_array_t(token, src[base..][..8].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -703,8 +703,8 @@ fn box_blur_v_copy_inner(
 
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            let add_v = f32x8::from_array(token, src[add_base..][..8].try_into().unwrap());
-            let rem_v = f32x8::from_array(token, src[rem_base..][..8].try_into().unwrap());
+            let add_v = f32x8::from_array_t(token, src[add_base..][..8].try_into().unwrap());
+            let rem_v = f32x8::from_array_t(token, src[rem_base..][..8].try_into().unwrap());
             sum = sum + add_v - rem_v;
         }
     }
@@ -874,7 +874,7 @@ fn box_blur_h_inner_v4(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -901,7 +901,7 @@ fn box_blur_h_inner_v4(
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
 
-        let mut sum = f32x16::zero(token);
+        let mut sum = f32x16::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -912,7 +912,7 @@ fn box_blur_h_inner_v4(
             for ro in 0..16 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x16::from_array(token, arr);
+            sum = sum + f32x16::from_array_t(token, arr);
         }
 
         for x in 0..width {
@@ -959,13 +959,13 @@ fn box_blur_h_inner_v4(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
+            sum = sum + f32x16::from_array_t(token, add_arr) - f32x16::from_array_t(token, rem_arr);
         }
     }
 
     // Remainder rows: use v3 (f32x8) path
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -974,7 +974,7 @@ fn box_blur_h_inner_v4(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum = f32x8::zero(v3);
+        let mut sum = f32x8::zero_t(v3);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -985,7 +985,7 @@ fn box_blur_h_inner_v4(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(v3, arr);
+            sum = sum + f32x8::from_array_t(v3, arr);
         }
         for x in 0..width {
             let result = (sum * inv_v8).to_array();
@@ -1029,7 +1029,7 @@ fn box_blur_h_inner_v4(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
+            sum = sum + f32x8::from_array_t(v3, add_arr) - f32x8::from_array_t(v3, rem_arr);
         }
     }
 
@@ -1143,7 +1143,7 @@ fn box_blur_h_v4x_strided(
     stride: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -1171,7 +1171,7 @@ fn box_blur_h_v4x_strided(
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
 
-        let mut sum = f32x16::zero(token);
+        let mut sum = f32x16::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1182,7 +1182,7 @@ fn box_blur_h_v4x_strided(
             for ro in 0..16 {
                 arr[ro] = input[(row_base + ro) * stride + idx];
             }
-            sum = sum + f32x16::from_array(token, arr);
+            sum = sum + f32x16::from_array_t(token, arr);
         }
 
         for x in 0..width {
@@ -1229,13 +1229,13 @@ fn box_blur_h_v4x_strided(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
+            sum = sum + f32x16::from_array_t(token, add_arr) - f32x16::from_array_t(token, rem_arr);
         }
     }
 
     // Remainder rows: use v3 (f32x8) path
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -1244,7 +1244,7 @@ fn box_blur_h_v4x_strided(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum = f32x8::zero(v3);
+        let mut sum = f32x8::zero_t(v3);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1255,7 +1255,7 @@ fn box_blur_h_v4x_strided(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * stride + idx];
             }
-            sum = sum + f32x8::from_array(v3, arr);
+            sum = sum + f32x8::from_array_t(v3, arr);
         }
         for x in 0..width {
             let result = (sum * inv_v8).to_array();
@@ -1299,7 +1299,7 @@ fn box_blur_h_v4x_strided(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
+            sum = sum + f32x8::from_array_t(v3, add_arr) - f32x8::from_array_t(v3, rem_arr);
         }
     }
 
@@ -1347,7 +1347,7 @@ fn box_blur_h_inner_v3(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
 
@@ -1375,7 +1375,7 @@ fn box_blur_h_inner_v3(
         let mut ring_pos = 0usize;
 
         // Initialize running sums for 8 rows
-        let mut sum = f32x8::zero(token);
+        let mut sum = f32x8::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1386,7 +1386,7 @@ fn box_blur_h_inner_v3(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(token, arr);
+            sum = sum + f32x8::from_array_t(token, arr);
         }
 
         for x in 0..width {
@@ -1433,7 +1433,7 @@ fn box_blur_h_inner_v3(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+            sum = sum + f32x8::from_array_t(token, add_arr) - f32x8::from_array_t(token, rem_arr);
         }
     }
 
@@ -1482,7 +1482,7 @@ fn box_blur_h_inner(
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
 
@@ -1493,7 +1493,7 @@ fn box_blur_h_inner(
         let mut ring_pos = 0usize;
 
         // Initialize running sums for 8 rows
-        let mut sum = f32x8::zero(token);
+        let mut sum = f32x8::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1504,7 +1504,7 @@ fn box_blur_h_inner(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(token, arr);
+            sum = sum + f32x8::from_array_t(token, arr);
         }
 
         for x in 0..width {
@@ -1551,7 +1551,7 @@ fn box_blur_h_inner(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+            sum = sum + f32x8::from_array_t(token, add_arr) - f32x8::from_array_t(token, rem_arr);
         }
     }
 
@@ -1732,7 +1732,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -1742,7 +1742,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
 
-        let mut sum = f32x16::zero(token);
+        let mut sum = f32x16::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1753,7 +1753,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
             for ro in 0..16 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x16::from_array(token, arr);
+            sum = sum + f32x16::from_array_t(token, arr);
         }
 
         for x in 0..width {
@@ -1764,7 +1764,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
             for ro in 0..16 {
                 src_arr[ro] = input[(row_base + ro) * width + x];
             }
-            let src_v = f32x16::from_array(token, src_arr);
+            let src_v = f32x16::from_array_t(token, src_arr);
             let blur_v = sum * inv_v;
             let act_v = (src_v - blur_v).abs();
             let result = act_v.to_array();
@@ -1808,13 +1808,13 @@ fn box_blur_h_into_abs_diff_inner_v4(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
+            sum = sum + f32x16::from_array_t(token, add_arr) - f32x16::from_array_t(token, rem_arr);
         }
     }
 
     // Remainder rows with v3 (f32x8)
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -1823,7 +1823,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum = f32x8::zero(v3);
+        let mut sum = f32x8::zero_t(v3);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1834,14 +1834,14 @@ fn box_blur_h_into_abs_diff_inner_v4(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(v3, arr);
+            sum = sum + f32x8::from_array_t(v3, arr);
         }
         for x in 0..width {
             let mut src_arr = [0.0f32; 8];
             for ro in 0..8 {
                 src_arr[ro] = input[(row_base + ro) * width + x];
             }
-            let src_v = f32x8::from_array(v3, src_arr);
+            let src_v = f32x8::from_array_t(v3, src_arr);
             let act_v = (src_v - sum * inv_v8).abs();
             let result = act_v.to_array();
             for ro in 0..8 {
@@ -1882,7 +1882,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
+            sum = sum + f32x8::from_array_t(v3, add_arr) - f32x8::from_array_t(v3, rem_arr);
         }
     }
 
@@ -1927,7 +1927,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -1937,7 +1937,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
 
-        let mut sum = f32x16::zero(token);
+        let mut sum = f32x16::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -1948,7 +1948,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
             for ro in 0..16 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x16::from_array(token, arr);
+            sum = sum + f32x16::from_array_t(token, arr);
         }
 
         for x in 0..width {
@@ -1959,7 +1959,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
             for ro in 0..16 {
                 src_arr[ro] = input[(row_base + ro) * width + x];
             }
-            let src_v = f32x16::from_array(token, src_arr);
+            let src_v = f32x16::from_array_t(token, src_arr);
             let blur_v = sum * inv_v;
             let act_v = (src_v - blur_v).abs();
             let result = act_v.to_array();
@@ -2003,13 +2003,13 @@ fn box_blur_h_into_abs_diff_inner_v4x(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
+            sum = sum + f32x16::from_array_t(token, add_arr) - f32x16::from_array_t(token, rem_arr);
         }
     }
 
     // Remainder rows with v3 (f32x8)
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -2018,7 +2018,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum = f32x8::zero(v3);
+        let mut sum = f32x8::zero_t(v3);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -2029,14 +2029,14 @@ fn box_blur_h_into_abs_diff_inner_v4x(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(v3, arr);
+            sum = sum + f32x8::from_array_t(v3, arr);
         }
         for x in 0..width {
             let mut src_arr = [0.0f32; 8];
             for ro in 0..8 {
                 src_arr[ro] = input[(row_base + ro) * width + x];
             }
-            let src_v = f32x8::from_array(v3, src_arr);
+            let src_v = f32x8::from_array_t(v3, src_arr);
             let act_v = (src_v - sum * inv_v8).abs();
             let result = act_v.to_array();
             for ro in 0..8 {
@@ -2077,7 +2077,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
+            sum = sum + f32x8::from_array_t(v3, add_arr) - f32x8::from_array_t(v3, rem_arr);
         }
     }
 
@@ -2123,7 +2123,7 @@ fn box_blur_h_into_abs_diff_inner_v3(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
 
@@ -2133,7 +2133,7 @@ fn box_blur_h_into_abs_diff_inner_v3(
         let row_base = rg * 8;
         let mut ring_pos = 0usize;
 
-        let mut sum = f32x8::zero(token);
+        let mut sum = f32x8::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -2144,14 +2144,14 @@ fn box_blur_h_into_abs_diff_inner_v3(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(token, arr);
+            sum = sum + f32x8::from_array_t(token, arr);
         }
         for x in 0..width {
             let mut src_arr = [0.0f32; 8];
             for ro in 0..8 {
                 src_arr[ro] = input[(row_base + ro) * width + x];
             }
-            let src_v = f32x8::from_array(token, src_arr);
+            let src_v = f32x8::from_array_t(token, src_arr);
             let act_v = (src_v - sum * inv_v).abs();
             let result = act_v.to_array();
             for ro in 0..8 {
@@ -2192,7 +2192,7 @@ fn box_blur_h_into_abs_diff_inner_v3(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+            sum = sum + f32x8::from_array_t(token, add_arr) - f32x8::from_array_t(token, rem_arr);
         }
     }
 
@@ -2239,7 +2239,7 @@ fn box_blur_h_into_abs_diff_inner(
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
 
@@ -2248,7 +2248,7 @@ fn box_blur_h_into_abs_diff_inner(
     for rg in 0..row_groups {
         let row_base = rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum = f32x8::zero(token);
+        let mut sum = f32x8::zero_t(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
@@ -2259,14 +2259,14 @@ fn box_blur_h_into_abs_diff_inner(
             for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x8::from_array(token, arr);
+            sum = sum + f32x8::from_array_t(token, arr);
         }
         for x in 0..width {
             let mut src_arr = [0.0f32; 8];
             for ro in 0..8 {
                 src_arr[ro] = input[(row_base + ro) * width + x];
             }
-            let src_v = f32x8::from_array(token, src_arr);
+            let src_v = f32x8::from_array_t(token, src_arr);
             let act_v = (src_v - sum * inv_v).abs();
             let result = act_v.to_array();
             for ro in 0..8 {
@@ -2307,7 +2307,7 @@ fn box_blur_h_into_abs_diff_inner(
                     ring_pos = 0;
                 }
             }
-            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+            sum = sum + f32x8::from_array_t(token, add_arr) - f32x8::from_array_t(token, rem_arr);
         }
     }
 
@@ -2401,7 +2401,7 @@ fn fused_blur_h_mu_inner_v4(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -2411,8 +2411,8 @@ fn fused_blur_h_mu_inner_v4(
     for rg in 0..row_groups {
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x16::zero(token);
-        let mut sum_d = f32x16::zero(token);
+        let mut sum_s = f32x16::zero_t(token);
+        let mut sum_d = f32x16::zero_t(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -2438,8 +2438,8 @@ fn fused_blur_h_mu_inner_v4(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            sum_s = sum_s + f32x16::from_array(token, s_arr);
-            sum_d = sum_d + f32x16::from_array(token, d_arr);
+            sum_s = sum_s + f32x16::from_array_t(token, s_arr);
+            sum_d = sum_d + f32x16::from_array_t(token, d_arr);
         }
 
         for x in 0..width {
@@ -2516,14 +2516,14 @@ fn fused_blur_h_mu_inner_v4(
                     ring_pos = 0;
                 }
             }
-            sum_s = sum_s + f32x16::from_array(token, s_add) - f32x16::from_array(token, s_rem);
-            sum_d = sum_d + f32x16::from_array(token, d_add) - f32x16::from_array(token, d_rem);
+            sum_s = sum_s + f32x16::from_array_t(token, s_add) - f32x16::from_array_t(token, s_rem);
+            sum_d = sum_d + f32x16::from_array_t(token, d_add) - f32x16::from_array_t(token, d_rem);
         }
     }
 
     // Remainder with f32x8
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -2533,8 +2533,8 @@ fn fused_blur_h_mu_inner_v4(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x8::zero(v3);
-        let mut sum_d = f32x8::zero(v3);
+        let mut sum_s = f32x8::zero_t(v3);
+        let mut sum_d = f32x8::zero_t(v3);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -2560,8 +2560,8 @@ fn fused_blur_h_mu_inner_v4(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            sum_s = sum_s + f32x8::from_array(v3, s_arr);
-            sum_d = sum_d + f32x8::from_array(v3, d_arr);
+            sum_s = sum_s + f32x8::from_array_t(v3, s_arr);
+            sum_d = sum_d + f32x8::from_array_t(v3, d_arr);
         }
 
         for x in 0..width {
@@ -2638,8 +2638,8 @@ fn fused_blur_h_mu_inner_v4(
                     ring_pos = 0;
                 }
             }
-            sum_s = sum_s + f32x8::from_array(v3, s_add) - f32x8::from_array(v3, s_rem);
-            sum_d = sum_d + f32x8::from_array(v3, d_add) - f32x8::from_array(v3, d_rem);
+            sum_s = sum_s + f32x8::from_array_t(v3, s_add) - f32x8::from_array_t(v3, s_rem);
+            sum_d = sum_d + f32x8::from_array_t(v3, d_add) - f32x8::from_array_t(v3, d_rem);
         }
     }
 
@@ -2694,7 +2694,7 @@ fn fused_blur_h_mu_inner_v4x(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -2704,8 +2704,8 @@ fn fused_blur_h_mu_inner_v4x(
     for rg in 0..row_groups {
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x16::zero(token);
-        let mut sum_d = f32x16::zero(token);
+        let mut sum_s = f32x16::zero_t(token);
+        let mut sum_d = f32x16::zero_t(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -2731,8 +2731,8 @@ fn fused_blur_h_mu_inner_v4x(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            sum_s = sum_s + f32x16::from_array(token, s_arr);
-            sum_d = sum_d + f32x16::from_array(token, d_arr);
+            sum_s = sum_s + f32x16::from_array_t(token, s_arr);
+            sum_d = sum_d + f32x16::from_array_t(token, d_arr);
         }
 
         for x in 0..width {
@@ -2809,14 +2809,14 @@ fn fused_blur_h_mu_inner_v4x(
                     ring_pos = 0;
                 }
             }
-            sum_s = sum_s + f32x16::from_array(token, s_add) - f32x16::from_array(token, s_rem);
-            sum_d = sum_d + f32x16::from_array(token, d_add) - f32x16::from_array(token, d_rem);
+            sum_s = sum_s + f32x16::from_array_t(token, s_add) - f32x16::from_array_t(token, s_rem);
+            sum_d = sum_d + f32x16::from_array_t(token, d_add) - f32x16::from_array_t(token, d_rem);
         }
     }
 
     // Remainder with f32x8
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -2826,8 +2826,8 @@ fn fused_blur_h_mu_inner_v4x(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x8::zero(v3);
-        let mut sum_d = f32x8::zero(v3);
+        let mut sum_s = f32x8::zero_t(v3);
+        let mut sum_d = f32x8::zero_t(v3);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -2853,8 +2853,8 @@ fn fused_blur_h_mu_inner_v4x(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            sum_s = sum_s + f32x8::from_array(v3, s_arr);
-            sum_d = sum_d + f32x8::from_array(v3, d_arr);
+            sum_s = sum_s + f32x8::from_array_t(v3, s_arr);
+            sum_d = sum_d + f32x8::from_array_t(v3, d_arr);
         }
 
         for x in 0..width {
@@ -2931,8 +2931,8 @@ fn fused_blur_h_mu_inner_v4x(
                     ring_pos = 0;
                 }
             }
-            sum_s = sum_s + f32x8::from_array(v3, s_add) - f32x8::from_array(v3, s_rem);
-            sum_d = sum_d + f32x8::from_array(v3, d_add) - f32x8::from_array(v3, d_rem);
+            sum_s = sum_s + f32x8::from_array_t(v3, s_add) - f32x8::from_array_t(v3, s_rem);
+            sum_d = sum_d + f32x8::from_array_t(v3, d_add) - f32x8::from_array_t(v3, d_rem);
         }
     }
 
@@ -2988,7 +2988,7 @@ fn fused_blur_h_mu_inner_v3(
     radius: usize,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
 
@@ -2998,8 +2998,8 @@ fn fused_blur_h_mu_inner_v3(
     for rg in 0..row_groups {
         let row_base = rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x8::zero(token);
-        let mut sum_d = f32x8::zero(token);
+        let mut sum_s = f32x8::zero_t(token);
+        let mut sum_d = f32x8::zero_t(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -3025,8 +3025,8 @@ fn fused_blur_h_mu_inner_v3(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            sum_s = sum_s + f32x8::from_array(token, s_arr);
-            sum_d = sum_d + f32x8::from_array(token, d_arr);
+            sum_s = sum_s + f32x8::from_array_t(token, s_arr);
+            sum_d = sum_d + f32x8::from_array_t(token, d_arr);
         }
 
         for x in 0..width {
@@ -3103,8 +3103,8 @@ fn fused_blur_h_mu_inner_v3(
                     ring_pos = 0;
                 }
             }
-            sum_s = sum_s + f32x8::from_array(token, s_add) - f32x8::from_array(token, s_rem);
-            sum_d = sum_d + f32x8::from_array(token, d_add) - f32x8::from_array(token, d_rem);
+            sum_s = sum_s + f32x8::from_array_t(token, s_add) - f32x8::from_array_t(token, s_rem);
+            sum_d = sum_d + f32x8::from_array_t(token, d_add) - f32x8::from_array_t(token, d_rem);
         }
     }
 
@@ -3161,7 +3161,7 @@ fn fused_blur_h_mu_inner(
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
 
     // Masked 8-row groups — same construction as `fused_blur_h_ssim_inner`:
@@ -3178,8 +3178,8 @@ fn fused_blur_h_mu_inner(
         for (ro, off) in row_off.iter_mut().enumerate() {
             *off = (row_base + ro.min(valid - 1)) * width;
         }
-        let mut sum_s = f32x8::zero(token);
-        let mut sum_d = f32x8::zero(token);
+        let mut sum_s = f32x8::zero_t(token);
+        let mut sum_d = f32x8::zero_t(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -3193,8 +3193,8 @@ fn fused_blur_h_mu_inner(
                 s_arr[ro] = src[off + idx];
                 d_arr[ro] = dst[off + idx];
             }
-            sum_s = sum_s + f32x8::from_array(token, s_arr);
-            sum_d = sum_d + f32x8::from_array(token, d_arr);
+            sum_s = sum_s + f32x8::from_array_t(token, s_arr);
+            sum_d = sum_d + f32x8::from_array_t(token, d_arr);
         }
 
         for x in 0..width {
@@ -3247,8 +3247,8 @@ fn fused_blur_h_mu_inner(
                     ring_pos = 0;
                 }
             }
-            sum_s = sum_s + f32x8::from_array(token, s_add) - f32x8::from_array(token, s_rem);
-            sum_d = sum_d + f32x8::from_array(token, d_add) - f32x8::from_array(token, d_rem);
+            sum_s = sum_s + f32x8::from_array_t(token, s_add) - f32x8::from_array_t(token, s_rem);
+            sum_d = sum_d + f32x8::from_array_t(token, d_add) - f32x8::from_array_t(token, d_rem);
         }
     };
 
@@ -3798,7 +3798,7 @@ fn fused_blur_h_ssim_inner_v4(
     err: bool,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -3839,10 +3839,10 @@ fn fused_blur_h_ssim_inner_v4(
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
 
-        let mut sum_s = f32x16::zero(token);
-        let mut sum_d = f32x16::zero(token);
-        let mut sum_sq = f32x16::zero(token);
-        let mut sum_prod = f32x16::zero(token);
+        let mut sum_s = f32x16::zero_t(token);
+        let mut sum_d = f32x16::zero_t(token);
+        let mut sum_sq = f32x16::zero_t(token);
+        let mut sum_prod = f32x16::zero_t(token);
 
         // Initialize running sums
         for i in 0..diam {
@@ -3869,8 +3869,8 @@ fn fused_blur_h_ssim_inner_v4(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            let sv = f32x16::from_array(token, s_arr);
-            let dv = f32x16::from_array(token, d_arr);
+            let sv = f32x16::from_array_t(token, s_arr);
+            let dv = f32x16::from_array_t(token, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
@@ -3961,10 +3961,10 @@ fn fused_blur_h_ssim_inner_v4(
                     ring_pos = 0;
                 }
             }
-            let sa = f32x16::from_array(token, s_add);
-            let da = f32x16::from_array(token, d_add);
-            let sr = f32x16::from_array(token, s_rem);
-            let dr = f32x16::from_array(token, d_rem);
+            let sa = f32x16::from_array_t(token, s_add);
+            let da = f32x16::from_array_t(token, d_add);
+            let sr = f32x16::from_array_t(token, s_rem);
+            let dr = f32x16::from_array_t(token, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
@@ -3983,7 +3983,7 @@ fn fused_blur_h_ssim_inner_v4(
 
     // Remainder with f32x8
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -3993,10 +3993,10 @@ fn fused_blur_h_ssim_inner_v4(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x8::zero(v3);
-        let mut sum_d = f32x8::zero(v3);
-        let mut sum_sq = f32x8::zero(v3);
-        let mut sum_prod = f32x8::zero(v3);
+        let mut sum_s = f32x8::zero_t(v3);
+        let mut sum_d = f32x8::zero_t(v3);
+        let mut sum_sq = f32x8::zero_t(v3);
+        let mut sum_prod = f32x8::zero_t(v3);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -4022,8 +4022,8 @@ fn fused_blur_h_ssim_inner_v4(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            let sv = f32x8::from_array(v3, s_arr);
-            let dv = f32x8::from_array(v3, d_arr);
+            let sv = f32x8::from_array_t(v3, s_arr);
+            let dv = f32x8::from_array_t(v3, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
@@ -4113,10 +4113,10 @@ fn fused_blur_h_ssim_inner_v4(
                     ring_pos = 0;
                 }
             }
-            let sa = f32x8::from_array(v3, s_add);
-            let da = f32x8::from_array(v3, d_add);
-            let sr = f32x8::from_array(v3, s_rem);
-            let dr = f32x8::from_array(v3, d_rem);
+            let sa = f32x8::from_array_t(v3, s_add);
+            let da = f32x8::from_array_t(v3, d_add);
+            let sr = f32x8::from_array_t(v3, s_rem);
+            let dr = f32x8::from_array_t(v3, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
@@ -4386,7 +4386,7 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
     err: bool,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 16;
 
@@ -4428,10 +4428,10 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
         let row_base = rg * 16;
         let mut ring_pos = 0usize;
 
-        let mut sum_s = f32x16::zero(token);
-        let mut sum_d = f32x16::zero(token);
-        let mut sum_sq = f32x16::zero(token);
-        let mut sum_prod = f32x16::zero(token);
+        let mut sum_s = f32x16::zero_t(token);
+        let mut sum_d = f32x16::zero_t(token);
+        let mut sum_sq = f32x16::zero_t(token);
+        let mut sum_prod = f32x16::zero_t(token);
 
         // Initialize running sums
         for i in 0..diam {
@@ -4458,8 +4458,8 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                     d_arr[ro] = cd[ro * stride];
                 }
             }
-            let sv = f32x16::from_array(token, s_arr);
-            let dv = f32x16::from_array(token, d_arr);
+            let sv = f32x16::from_array_t(token, s_arr);
+            let dv = f32x16::from_array_t(token, d_arr);
             if MU1 {
                 sum_s = sum_s + sv;
             }
@@ -4557,10 +4557,10 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                     ring_pos = 0;
                 }
             }
-            let sa = f32x16::from_array(token, s_add);
-            let da = f32x16::from_array(token, d_add);
-            let sr = f32x16::from_array(token, s_rem);
-            let dr = f32x16::from_array(token, d_rem);
+            let sa = f32x16::from_array_t(token, s_add);
+            let da = f32x16::from_array_t(token, d_add);
+            let sr = f32x16::from_array_t(token, s_rem);
+            let dr = f32x16::from_array_t(token, d_rem);
             if MU1 {
                 sum_s = sum_s + sa - sr;
             }
@@ -4581,7 +4581,7 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
 
     // Remainder with f32x8
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_start = row_groups * 16;
     let remaining_8groups = (height - remaining_start) / 8;
 
@@ -4591,10 +4591,10 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
     for rg in 0..remaining_8groups {
         let row_base = remaining_start + rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x8::zero(v3);
-        let mut sum_d = f32x8::zero(v3);
-        let mut sum_sq = f32x8::zero(v3);
-        let mut sum_prod = f32x8::zero(v3);
+        let mut sum_s = f32x8::zero_t(v3);
+        let mut sum_d = f32x8::zero_t(v3);
+        let mut sum_sq = f32x8::zero_t(v3);
+        let mut sum_prod = f32x8::zero_t(v3);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -4620,8 +4620,8 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                     d_arr[ro] = cd[ro * stride];
                 }
             }
-            let sv = f32x8::from_array(v3, s_arr);
-            let dv = f32x8::from_array(v3, d_arr);
+            let sv = f32x8::from_array_t(v3, s_arr);
+            let dv = f32x8::from_array_t(v3, d_arr);
             if MU1 {
                 sum_s = sum_s + sv;
             }
@@ -4718,10 +4718,10 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                     ring_pos = 0;
                 }
             }
-            let sa = f32x8::from_array(v3, s_add);
-            let da = f32x8::from_array(v3, d_add);
-            let sr = f32x8::from_array(v3, s_rem);
-            let dr = f32x8::from_array(v3, d_rem);
+            let sa = f32x8::from_array_t(v3, s_add);
+            let da = f32x8::from_array_t(v3, d_add);
+            let sr = f32x8::from_array_t(v3, s_rem);
+            let dr = f32x8::from_array_t(v3, d_rem);
             if MU1 {
                 sum_s = sum_s + sa - sr;
             }
@@ -4830,7 +4830,7 @@ fn fused_blur_h_ssim_inner_v3(
     err: bool,
 ) {
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let row_groups = height / 8;
 
@@ -4870,10 +4870,10 @@ fn fused_blur_h_ssim_inner_v3(
     for rg in 0..row_groups {
         let row_base = rg * 8;
         let mut ring_pos = 0usize;
-        let mut sum_s = f32x8::zero(token);
-        let mut sum_d = f32x8::zero(token);
-        let mut sum_sq = f32x8::zero(token);
-        let mut sum_prod = f32x8::zero(token);
+        let mut sum_s = f32x8::zero_t(token);
+        let mut sum_d = f32x8::zero_t(token);
+        let mut sum_sq = f32x8::zero_t(token);
+        let mut sum_prod = f32x8::zero_t(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -4899,8 +4899,8 @@ fn fused_blur_h_ssim_inner_v3(
                     d_arr[ro] = cd[ro * width];
                 }
             }
-            let sv = f32x8::from_array(token, s_arr);
-            let dv = f32x8::from_array(token, d_arr);
+            let sv = f32x8::from_array_t(token, s_arr);
+            let dv = f32x8::from_array_t(token, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
@@ -4990,10 +4990,10 @@ fn fused_blur_h_ssim_inner_v3(
                     ring_pos = 0;
                 }
             }
-            let sa = f32x8::from_array(token, s_add);
-            let da = f32x8::from_array(token, d_add);
-            let sr = f32x8::from_array(token, s_rem);
-            let dr = f32x8::from_array(token, d_rem);
+            let sa = f32x8::from_array_t(token, s_add);
+            let da = f32x8::from_array_t(token, d_add);
+            let sr = f32x8::from_array_t(token, s_rem);
+            let dr = f32x8::from_array_t(token, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
@@ -5094,7 +5094,7 @@ fn fused_blur_h_ssim_inner(
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
 
     // One 8-row group per call. `valid` (1..=8) is the number of real rows
@@ -5118,10 +5118,10 @@ fn fused_blur_h_ssim_inner(
         for (ro, off) in row_off.iter_mut().enumerate() {
             *off = (row_base + ro.min(valid - 1)) * width;
         }
-        let mut sum_s = f32x8::zero(token);
-        let mut sum_d = f32x8::zero(token);
-        let mut sum_sq = f32x8::zero(token);
-        let mut sum_prod = f32x8::zero(token);
+        let mut sum_s = f32x8::zero_t(token);
+        let mut sum_d = f32x8::zero_t(token);
+        let mut sum_sq = f32x8::zero_t(token);
+        let mut sum_prod = f32x8::zero_t(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -5135,8 +5135,8 @@ fn fused_blur_h_ssim_inner(
                 s_arr[ro] = src[off + idx];
                 d_arr[ro] = dst[off + idx];
             }
-            let sv = f32x8::from_array(token, s_arr);
-            let dv = f32x8::from_array(token, d_arr);
+            let sv = f32x8::from_array_t(token, s_arr);
+            let dv = f32x8::from_array_t(token, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
@@ -5202,10 +5202,10 @@ fn fused_blur_h_ssim_inner(
                     ring_pos = 0;
                 }
             }
-            let sa = f32x8::from_array(token, s_add);
-            let da = f32x8::from_array(token, d_add);
-            let sr = f32x8::from_array(token, s_rem);
-            let dr = f32x8::from_array(token, d_rem);
+            let sa = f32x8::from_array_t(token, s_add);
+            let da = f32x8::from_array_t(token, d_add);
+            let sr = f32x8::from_array_t(token, s_rem);
+            let dr = f32x8::from_array_t(token, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
@@ -6809,7 +6809,7 @@ fn fused_blur_h_local11(
     err: bool,
 ) {
     let _ = radius;
-    let inv = f32x8::splat(token, 1.0 / 11.0);
+    let inv = f32x8::splat_t(token, 1.0 / 11.0);
     // The two boundary blocks use the same mirrored columns on every row.
     // Gather each distinct leaf once, then load overlapping windows from it.
     let left: [usize; 18] =
@@ -6827,19 +6827,19 @@ fn fused_blur_h_local11(
                     let indices = if x == 0 { &left } else { &right };
                     (indices.map(|i| src[row + i]), indices.map(|i| dst[row + i]))
                 });
-                let mut a = [f32x8::zero(token); 11];
+                let mut a = [f32x8::zero_t(token); 11];
                 let mut b = a;
                 let mut q = a;
                 let mut p = a;
                 for k in 0..11 {
                     if x >= 5 && x + 8 + 5 <= width {
                         let i = row + x + k - 5;
-                        a[k] = f32x8::load(token, src[i..i + 8].try_into().unwrap());
-                        b[k] = f32x8::load(token, dst[i..i + 8].try_into().unwrap());
+                        a[k] = f32x8::load_t(token, src[i..i + 8].try_into().unwrap());
+                        b[k] = f32x8::load_t(token, dst[i..i + 8].try_into().unwrap());
                     } else {
                         let (a_edge, b_edge) = edge.as_ref().unwrap();
-                        a[k] = f32x8::load(token, a_edge[k..k + 8].try_into().unwrap());
-                        b[k] = f32x8::load(token, b_edge[k..k + 8].try_into().unwrap());
+                        a[k] = f32x8::load_t(token, a_edge[k..k + 8].try_into().unwrap());
+                        b[k] = f32x8::load_t(token, b_edge[k..k + 8].try_into().unwrap());
                     }
                     q[k] = a[k].mul_add(a[k], b[k] * b[k]);
                     p[k] = if err {
@@ -6949,7 +6949,7 @@ fn box_blur_h_local11(
     radius: usize,
 ) {
     let _ = radius;
-    let inv = f32x8::splat(token, 1.0 / 11.0);
+    let inv = f32x8::splat_t(token, 1.0 / 11.0);
     let left: [usize; 18] =
         std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
     let last = (width / 8).saturating_sub(1) * 8;
@@ -6967,10 +6967,10 @@ fn box_blur_h_local11(
                 });
                 let t: [f32x8; 11] = std::array::from_fn(|k| {
                     if let Some(edge) = &edge {
-                        f32x8::load(token, edge[k..k + 8].try_into().unwrap())
+                        f32x8::load_t(token, edge[k..k + 8].try_into().unwrap())
                     } else {
                         let i = row + x + k - 5;
-                        f32x8::load(token, input[i..i + 8].try_into().unwrap())
+                        f32x8::load_t(token, input[i..i + 8].try_into().unwrap())
                     }
                 });
                 let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
@@ -7046,22 +7046,22 @@ fn box_blur_v_local11(
     if width == 0 || height == 0 {
         return;
     }
-    let inv = f32x8::splat(token, 1.0 / 11.0);
+    let inv = f32x8::splat_t(token, 1.0 / 11.0);
     // Cache the frozen tree's pair and quadruple nodes, never an output
     // recurrence. Each node has the same two operands and rounding as before.
     // Eight vector columns bound scratch and keep adjacent rows in one tile.
     let blocks = width / 8;
     for tile in (0..blocks).step_by(8) {
         let count = (blocks - tile).min(8);
-        let mut pairs = [[f32x8::zero(token); 8]; 16];
+        let mut pairs = [[f32x8::zero_t(token); 8]; 16];
         let mut quads = pairs;
         for k in 0..9 {
             let a = crate::featcanon::tap_mirror(k as isize - 5, height) * width;
             let b = crate::featcanon::tap_mirror(k as isize - 4, height) * width;
             for c in 0..count {
                 let x = (tile + c) * 8;
-                pairs[k][c] = f32x8::load(token, input[a + x..a + x + 8].try_into().unwrap())
-                    + f32x8::load(token, input[b + x..b + x + 8].try_into().unwrap());
+                pairs[k][c] = f32x8::load_t(token, input[a + x..a + x + 8].try_into().unwrap())
+                    + f32x8::load_t(token, input[b + x..b + x + 8].try_into().unwrap());
             }
         }
         for k in 0..7 {
@@ -7074,9 +7074,9 @@ fn box_blur_v_local11(
             let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
             for c in 0..count {
                 let x = (tile + c) * 8;
-                let last = f32x8::load(token, input[b + x..b + x + 8].try_into().unwrap());
+                let last = f32x8::load_t(token, input[b + x..b + x + 8].try_into().unwrap());
                 pairs[(y + 9) & 15][c] =
-                    f32x8::load(token, input[a + x..a + x + 8].try_into().unwrap()) + last;
+                    f32x8::load_t(token, input[a + x..a + x + 8].try_into().unwrap()) + last;
                 quads[(y + 7) & 15][c] = pairs[(y + 7) & 15][c] + pairs[(y + 9) & 15][c];
                 let sum =
                     ((quads[y & 15][c] + quads[(y + 4) & 15][c]) + pairs[(y + 8) & 15][c]) + last;
@@ -7345,9 +7345,9 @@ fn downscale_2x_inner_v4(
     new_w: usize,
     new_h: usize,
 ) {
-    let quarter = f32x16::splat(token, 0.25);
+    let quarter = f32x16::splat_t(token, 0.25);
     let v3 = token.v3();
-    let quarter8 = f32x8::splat(v3, 0.25);
+    let quarter8 = f32x8::splat_t(v3, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * width;
@@ -7364,7 +7364,7 @@ fn downscale_2x_inner_v4(
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x16::from_array(token, arr) * quarter;
+            let result = f32x16::from_array_t(token, arr) * quarter;
             plane[out_row + ox..][..16].copy_from_slice(&result.to_array());
         }
 
@@ -7379,7 +7379,7 @@ fn downscale_2x_inner_v4(
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x8::from_array(v3, arr) * quarter8;
+            let result = f32x8::from_array_t(v3, arr) * quarter8;
             plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
         }
 
@@ -7400,9 +7400,9 @@ fn downscale_2x_inner_v4x(
     new_w: usize,
     new_h: usize,
 ) {
-    let quarter = f32x16::splat(token, 0.25);
+    let quarter = f32x16::splat_t(token, 0.25);
     let v3 = token.v3();
-    let quarter8 = f32x8::splat(v3, 0.25);
+    let quarter8 = f32x8::splat_t(v3, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * width;
@@ -7419,7 +7419,7 @@ fn downscale_2x_inner_v4x(
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x16::from_array(token, arr) * quarter;
+            let result = f32x16::from_array_t(token, arr) * quarter;
             plane[out_row + ox..][..16].copy_from_slice(&result.to_array());
         }
 
@@ -7434,7 +7434,7 @@ fn downscale_2x_inner_v4x(
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x8::from_array(v3, arr) * quarter8;
+            let result = f32x8::from_array_t(v3, arr) * quarter8;
             plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
         }
 
@@ -7457,7 +7457,7 @@ fn downscale_2x_inner_v3(
     new_w: usize,
     new_h: usize,
 ) {
-    let quarter = f32x8::splat(token, 0.25);
+    let quarter = f32x8::splat_t(token, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * width;
@@ -7474,7 +7474,7 @@ fn downscale_2x_inner_v3(
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x8::from_array(token, arr) * quarter;
+            let result = f32x8::from_array_t(token, arr) * quarter;
             plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
         }
 
@@ -7491,7 +7491,7 @@ fn downscale_2x_inner_v3(
 fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
-    let quarter = f32x8::splat(token, 0.25);
+    let quarter = f32x8::splat_t(token, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * width;
@@ -7508,7 +7508,7 @@ fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usiz
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x8::from_array(token, arr) * quarter;
+            let result = f32x8::from_array_t(token, arr) * quarter;
             plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
         }
 
@@ -7547,7 +7547,7 @@ fn downscale_2x_into_inner(
     new_w: usize,
     new_h: usize,
 ) {
-    let quarter = f32x16::splat(token, 0.25);
+    let quarter = f32x16::splat_t(token, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * src_w;
@@ -7579,7 +7579,7 @@ fn downscale_2x_into_inner(
             for i in 0..16 {
                 arr[i] = r0[2 * i] + r0[2 * i + 1] + r1[2 * i] + r1[2 * i + 1];
             }
-            let result = f32x16::from_array(token, arr) * quarter;
+            let result = f32x16::from_array_t(token, arr) * quarter;
             dst[out_row + ox..][..16].copy_from_slice(&result.to_array());
         }
 
@@ -7600,7 +7600,7 @@ fn downscale_2x_into_inner(
     new_w: usize,
     new_h: usize,
 ) {
-    let quarter = f32x8::splat(token, 0.25);
+    let quarter = f32x8::splat_t(token, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * src_w;
@@ -7624,7 +7624,7 @@ fn downscale_2x_into_inner(
             for i in 0..8 {
                 arr[i] = r0[2 * i] + r0[2 * i + 1] + r1[2 * i] + r1[2 * i + 1];
             }
-            let result = f32x8::from_array(token, arr) * quarter;
+            let result = f32x8::from_array_t(token, arr) * quarter;
             dst[out_row + ox..][..8].copy_from_slice(&result.to_array());
         }
 
@@ -10735,7 +10735,7 @@ fn fused_blur_h_local11_wide(
     err: bool,
 ) {
     let _ = radius;
-    let inv = f32x16::splat(token, 1.0 / 11.0);
+    let inv = f32x16::splat_t(token, 1.0 / 11.0);
     // The two boundary blocks use the same mirrored columns on every row.
     // Gather each distinct leaf once, then load overlapping windows from it.
     let left: [usize; 26] =
@@ -10757,14 +10757,14 @@ fn fused_blur_h_local11_wide(
                     let (a, b) = if x >= 5 && x + 16 + 5 <= width {
                         let i = row + x + k - 5;
                         (
-                            f32x16::load(token, src[i..i + 16].try_into().unwrap()),
-                            f32x16::load(token, dst[i..i + 16].try_into().unwrap()),
+                            f32x16::load_t(token, src[i..i + 16].try_into().unwrap()),
+                            f32x16::load_t(token, dst[i..i + 16].try_into().unwrap()),
                         )
                     } else {
                         let (a_edge, b_edge) = edge.as_ref().unwrap();
                         (
-                            f32x16::load(token, a_edge[k..k + 16].try_into().unwrap()),
-                            f32x16::load(token, b_edge[k..k + 16].try_into().unwrap()),
+                            f32x16::load_t(token, a_edge[k..k + 16].try_into().unwrap()),
+                            f32x16::load_t(token, b_edge[k..k + 16].try_into().unwrap()),
                         )
                     };
                     let q = a.mul_add(a, b * b);
@@ -10835,7 +10835,7 @@ fn box_blur_h_local11_wide(
     radius: usize,
 ) {
     let _ = radius;
-    let inv = f32x16::splat(token, 1.0 / 11.0);
+    let inv = f32x16::splat_t(token, 1.0 / 11.0);
     let left: [usize; 26] =
         std::array::from_fn(|i| crate::featcanon::tap_mirror(i as isize - 5, width));
     let last = (width / 16).saturating_sub(1) * 16;
@@ -10853,10 +10853,10 @@ fn box_blur_h_local11_wide(
                 });
                 let t: [f32x16; 11] = std::array::from_fn(|k| {
                     if let Some(edge) = &edge {
-                        f32x16::load(token, edge[k..k + 16].try_into().unwrap())
+                        f32x16::load_t(token, edge[k..k + 16].try_into().unwrap())
                     } else {
                         let i = row + x + k - 5;
-                        f32x16::load(token, input[i..i + 16].try_into().unwrap())
+                        f32x16::load_t(token, input[i..i + 16].try_into().unwrap())
                     }
                 });
                 let sum = (((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
@@ -10889,22 +10889,22 @@ fn box_blur_v_local11_wide(
     if width == 0 || height == 0 {
         return;
     }
-    let inv = f32x16::splat(token, 1.0 / 11.0);
+    let inv = f32x16::splat_t(token, 1.0 / 11.0);
     // Cache the frozen tree's pair and quadruple nodes, never an output
     // recurrence. Each node has the same two operands and rounding as before.
     // Eight vector columns bound scratch and keep adjacent rows in one tile.
     let blocks = width / 16;
     for tile in (0..blocks).step_by(8) {
         let count = (blocks - tile).min(8);
-        let mut pairs = [[f32x16::zero(token); 8]; 16];
+        let mut pairs = [[f32x16::zero_t(token); 8]; 16];
         let mut quads = pairs;
         for k in 0..9 {
             let a = crate::featcanon::tap_mirror(k as isize - 5, height) * width;
             let b = crate::featcanon::tap_mirror(k as isize - 4, height) * width;
             for c in 0..count {
                 let x = (tile + c) * 16;
-                pairs[k][c] = f32x16::load(token, input[a + x..a + x + 16].try_into().unwrap())
-                    + f32x16::load(token, input[b + x..b + x + 16].try_into().unwrap());
+                pairs[k][c] = f32x16::load_t(token, input[a + x..a + x + 16].try_into().unwrap())
+                    + f32x16::load_t(token, input[b + x..b + x + 16].try_into().unwrap());
             }
         }
         for k in 0..7 {
@@ -10917,9 +10917,9 @@ fn box_blur_v_local11_wide(
             let b = crate::featcanon::tap_mirror(y as isize + 5, height) * width;
             for c in 0..count {
                 let x = (tile + c) * 16;
-                let last = f32x16::load(token, input[b + x..b + x + 16].try_into().unwrap());
+                let last = f32x16::load_t(token, input[b + x..b + x + 16].try_into().unwrap());
                 pairs[(y + 9) & 15][c] =
-                    f32x16::load(token, input[a + x..a + x + 16].try_into().unwrap()) + last;
+                    f32x16::load_t(token, input[a + x..a + x + 16].try_into().unwrap()) + last;
                 quads[(y + 7) & 15][c] = pairs[(y + 7) & 15][c] + pairs[(y + 9) & 15][c];
                 let sum =
                     ((quads[y & 15][c] + quads[(y + 4) & 15][c]) + pairs[(y + 8) & 15][c]) + last;

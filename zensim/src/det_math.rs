@@ -1024,7 +1024,7 @@ mod rev4vec_midp_gate {
     /// exponents the canonical row decoder actually feeds it).
     #[magetypes(define(f32x16), v4x, v4, v3, -scalar)]
     fn midp_x16_vec(token: Token, which: u8, arr: [f32; 16]) -> [f32; 16] {
-        let v = f32x16::from_array(token, arr);
+        let v = f32x16::from_array_t(token, arr);
         match which {
             0 => v.log2_midp(),
             1 => v.exp2_midp(),
