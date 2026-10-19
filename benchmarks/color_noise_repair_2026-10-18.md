@@ -71,3 +71,48 @@ CLI retains round-trip float64 TSVs. The compatibility adapter records the
 original fixed17 protocol and requires exact original control strings on all
 five panels. The initial failed transport and its native outputs remain
 archived; no error tolerance, model, fitting or selection gate was changed.
+
+## Frozen external assessment
+
+Every row uses the same five original gauntlet populations. The four fixed
+seed0 arms and four fixed ensembles were specified before these reads; these
+results do not revise either TRAIN decision. This is previously exposed TEST
+assessment, not independent confirmation. KonJND is JPEG SELECT, not terminal.
+
+| Model | CSIQ865 | PIPAL23200 | CID22-B2100 | JPEG JND404 | LIVE267 |
+|---|---:|---:|---:|---:|---:|
+| Frozen C | 0.953279 | 0.607488 | 0.909689 | 0.511471 | 0.907877 |
+| Frozen W-C | 0.961758 | 0.617801 | 0.904991 | 0.589398 | 0.889548 |
+| Frozen A | 0.944465 | 0.613416 | 0.905267 | 0.521301 | 0.932257 |
+| Matched C seed0 | 0.953279 | 0.607488 | 0.909689 | 0.511471 | 0.907877 |
+| Coverage seed0 | 0.954923 | 0.606528 | 0.905948 | 0.525611 | 0.940478 |
+| Fine chroma seed0 | 0.956753 | 0.621236 | 0.906305 | 0.543026 | 0.877034 |
+| Both seed0 | 0.945456 | 0.609574 | 0.906312 | 0.544550 | 0.944441 |
+| CVVDP-FHD | 0.919116 | 0.588347 | 0.837048 | 0.427112 | 0.948960 |
+| SSIMULACRA2 | 0.904710 | 0.529307 | 0.913071 | 0.554131 | 0.960526 |
+| Butteraugli3 | 0.814693 | 0.497251 | 0.781063 | 0.128297 | 0.908635 |
+| Current Mean3 | 0.953827 | 0.607317 | 0.907892 | 0.534560 | 0.912888 |
+| Coverage Mean3 | 0.956288 | 0.608293 | 0.907282 | 0.545997 | 0.930138 |
+| Fine chroma Mean3 (TRAIN choice) | 0.959121 | 0.613893 | 0.905715 | 0.539797 | 0.905241 |
+| Both Mean3 | 0.952145 | 0.606724 | 0.905488 | 0.554351 | 0.923390 |
+
+Coverage seed0 improves LIVE while giving up some PIPAL/CID22 rank. Fine
+chroma seed0 improves PIPAL while reducing LIVE rank. The TRAIN-selected
+fine-chroma ensemble improves CSIQ/PIPAL against the matched current ensemble
+but reduces LIVE rank. None removes the first severity inversion. No default
+profile or release recommendation is promoted by this experiment.
+
+The HTML overview shows all14rows ×5panels and all10original severe-noise
+image pairs, with native before/after scores and every actual severity for
+each reference. Two canonical dashboards contain10rows ×5panels each; their
+shared retained comparators are identical. All original/new fulleval JSONs
+retain every population point, source-cluster SROCC intervals, fitted PLCC,
+KROCC and scatter/tail diagnostics. PLCC/KROCC intervals remain unmeasured.
+
+Validation: unchanged browser, URL-comparison and strict-JSON gates pass;
+each dashboard attaches40MOS and10JND charts. HTTP200/full-GET SHA256 matches
+cover the overview, both dashboards, all12packed models,4composition files
+and20original images. Recomputed C SROCC/CI/PLCC/KROCC exactly reproduce the
+original retained statistics on every panel. Native full assessment statistics
+receipt: `run-heavy: done rc=0 604s | peak-RSS 0.18GiB`; browser gates4s,
+peak-RSS0.18GiB. These are execution/resource receipts, not metric-speed claims.

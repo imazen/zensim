@@ -8,6 +8,8 @@ None.
 
 ### Changed
 
+- Complete the fixed TRAIN-only color/noise repair comparison and prospective three-seed ensemble supplement; retain all external tradeoffs, exact controls and the persistent LIVE severity inversion. No production profile changes ([results](benchmarks/color_noise_repair_2026-10-18.md)).
+
 - Register a matched TRAIN-only color/noise coverage × fine-chroma repair comparison with original native training/packing, three paired seeds, fixed exploratory selection and separate frozen external assessment (`206cf9d2`, `7d62b026`).
 
 - Trace frozen LIVE color-noise failures through declared inputs, signed affine/ReLU matrices and output calibration; retain exact native feature probes and independent pixel/matrix checks without modifying the models.
