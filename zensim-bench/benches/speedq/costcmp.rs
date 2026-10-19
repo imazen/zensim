@@ -105,6 +105,8 @@ pub(super) fn action(
         | "e34_candidate_map_before"
         | "e34_candidate_baseline"
         | "e34_candidate_map_retained"
+        | "e34_candidate_cached"
+        | "e34_candidate_prepare"
         | "e34_candidate_serial"
         | "e34_candidate_map_serial"
         | "e34_candidate_map_serial_audit"
@@ -257,6 +259,49 @@ pub(super) fn action(
                     let score = result.result().score();
                     Box::new(move || score)
                 }
+                "e34_candidate_cached" => {
+                    let reference = scorer.precompute_reference(source).unwrap();
+                    let direct = scorer
+                        .compute(source, &RgbSlice::new(dst, w, h), None)
+                        .unwrap();
+                    let cached = scorer
+                        .compute_with_ref(source, &reference, &RgbSlice::new(dst, w, h), None)
+                        .unwrap();
+                    assert_eq!(direct.score().to_bits(), cached.score().to_bits());
+                    assert_eq!(
+                        direct.raw_distance().to_bits(),
+                        cached.raw_distance().to_bits()
+                    );
+                    assert_eq!(
+                        direct
+                            .features()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>(),
+                        cached
+                            .features()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>()
+                    );
+                    assert_eq!(
+                        direct.mean_offset().map(f64::to_bits),
+                        cached.mean_offset().map(f64::to_bits)
+                    );
+                    info["cached_complete_result_parity"] = json!(true);
+                    Box::new(move || {
+                        let result = scorer
+                            .compute_with_ref(source, &reference, &RgbSlice::new(dst, w, h), None)
+                            .unwrap();
+                        let score = result.score();
+                        std::hint::black_box(result);
+                        score
+                    })
+                }
+                "e34_candidate_prepare" => Box::new(move || {
+                    std::hint::black_box(scorer.precompute_reference(source).unwrap());
+                    0.0
+                }),
                 "e34_candidate_baseline" => Box::new(move || {
                     std::hint::black_box(&scorer);
                     0.0

@@ -10945,3 +10945,9 @@ fn box_blur_v_local11_wide(
         }
     }
 }
+
+#[cfg(all(feature = "feature-regime-v2", feature = "threads"))]
+#[path = "blur_local_rows.rs"]
+mod local_rows;
+#[cfg(all(feature = "feature-regime-v2", feature = "threads"))]
+pub(crate) use local_rows::box_blur_v_local_rows;

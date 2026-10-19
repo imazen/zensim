@@ -216,3 +216,9 @@ perf3-frozen-gates binary:
     just mapperf-frozen-bin-check {{quote(binary)}}
     just mapperf-frozen-map-check {{quote(binary)}}
     just mapperf-subset-oracle {{quote(binary)}} "$HOME/tmp/mapperf-20261017"
+
+perf3-runtime-qualify binary before name:
+    python3 scripts/rev4_featpot/perf3.py qualify_runtime --binary {{quote(binary)}} --before {{quote(before)}} --name {{quote(name)}}
+
+perf3-export-compare binary before name:
+    python3 scripts/rev4_featpot/perf3.py export_summary --binary {{quote(binary)}} --before {{quote(before)}} --name {{quote(name)}}

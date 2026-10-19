@@ -158,6 +158,15 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-10-18 — PERF3 archive-helper CI path check (fixed).** Script lint interpreted the literal lane basename in an ownership assertion as a deleted sibling dependency. The helper now checks the supplied basename components with the same exact identity and lock-owner requirements. Keep lane names as input validation rather than embedded sibling paths; verify helper lint with no sibling checkout.
+
+
+* **2026-10-18 — PERF3 final combined API measurement.** Binary `8fd20366` has no significant score regression in its nine-cell paired grid and improves all nine map cells. This is a separate build from the isolated-parent finding below; retain both measurements. See [the full report](benchmarks/perf3_2026-10-18.md).
+
+
+* **2026-10-18 — PERF3 direct-retention candidate has a score trade-off (unmerged).** On r7900x, the shared-central-block candidate's 1024²/8T score has a significant +6.885% paired mean cost versus the frozen PERF2 rebuild. Its 256²/8T score and all nine retained-map cells improve; 54 complete output audits remain bit-identical. Keep the additional direct-core work in the cached scoring PR for review. Main's queue/fusion/SAT changes are separate. See [the implementation and scope](docs/PERF3_THREADING_DESIGN.md).
+
+
 * **2026-10-18 — fixed color/noise repairs retain the LIVE severity inversion.** The registered TRAIN-screened fine-chroma three-seed ensemble scores severe manfishing noise50.0116 versus moderate−9.3503. Coverage and combined arms also retain this ordering failure. No production profile changed. See [the repair comparison](benchmarks/color_noise_repair_2026-10-18.md).
 
 * **2026-10-18 — frozen E33/E34 models overrate severe LIVE color noise.** All three omit finest-scale X/B inputs. Large measured retained errors can also increase quality through signed affine/ReLU cancellation: on manfishing wn/img41, removing f136 lowers diff+frag49.7143→11.0847 and W-C57.9947→24.3266. All three rate this real severe noise above the less-damaged wn/img73. Native baseline replay and independent pixel/matrix checks pass; this is model behavior, not a repair. Keep these exposed examples out of fitting/selection. Evidence and limits: [matrix trace](benchmarks/gauntlet_live_color_trace_2026-10-18.md).
