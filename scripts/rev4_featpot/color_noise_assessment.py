@@ -80,6 +80,25 @@ def auxiliary_overlap(out):
     if result['exact_matches']:raise ValueError('auxiliary source overlap requires withheld-population correction')
 
 
+def auxiliary_d1_overlap(out):
+    from color_noise_repair import read,write,sha
+    auxiliary=read(out/'AUXILIARY_OVERLAP.json')
+    hashes={r['rgb_sha256'] for r in auxiliary['references']}
+    populations=read(out/'DEVELOPMENT_POPULATIONS.json');records=[]
+    for member,pin in populations['bank_keys'].items():
+        keys=BANK/member/'keys.parquet'
+        if sha(keys)!=pin:raise ValueError('D1 source keys changed')
+        refs=pq.read_table(keys,columns=['ref_pixels_sha256'])['ref_pixels_sha256'].to_pylist()
+        indices=[i for i,digest in enumerate(refs) if digest in hashes]
+        records.append(dict(member=member,rows=len(refs),keys_sha256=pin,overlap_rows=indices))
+    total=sum(len(r['overlap_rows']) for r in records)
+    write(out/'AUXILIARY_D1_OVERLAP.json',dict(schema='auxiliary-d1-source-overlap-v1',
+        auxiliary_sha256=sha(out/'AUXILIARY_OVERLAP.json'),populations=records,exact_matches=total,
+        scope='Same conservative auxiliary union versus all six admitted D1 human bank members. Exact RGB only; crop/resize and historical raw-source limitations remain.',time_utc=now()))
+    print('Auxiliary versus D1 banks:',len(records),'members;',total,'exact overlapping rows',flush=True)
+    if total:raise ValueError('auxiliary overlap with D1 source populations requires correction')
+
+
 def assessment_plan(out):
     from color_noise_repair import registration,write,sha
     registration(out)
@@ -517,6 +536,8 @@ def finalize(out):
         raise ValueError('TRAIN feature replay differs')
     if read(out/'AUXILIARY_OVERLAP.json')['exact_matches']!=0:
         raise ValueError('auxiliary source overlap unresolved')
+    if read(out/'AUXILIARY_D1_OVERLAP.json')['exact_matches']!=0:
+        raise ValueError('auxiliary D1 source overlap unresolved')
     for binding in choice['models'].values():
         if sha(binding['path'])!=binding['sha256']:
             raise ValueError('frozen model changed')
@@ -539,7 +560,7 @@ def finalize(out):
         relative='scripts/rev4_featpot/'+name
         if sha(REPO/relative)!=execution['sources'][relative]:
             raise ValueError('executed training owner changed')
-    files=['REGISTRATION.json','ADMISSION.json','EXECUTION_SOURCE.json','ASSESSMENT_PLAN.json','AUXILIARY_OVERLAP.json',
+    files=['REGISTRATION.json','ADMISSION.json','EXECUTION_SOURCE.json','ASSESSMENT_PLAN.json','AUXILIARY_OVERLAP.json','AUXILIARY_D1_OVERLAP.json',
            'DEVELOPMENT_POPULATIONS.json','FEATURE_COMPATIBILITY.json','CONTROL_PARITY.json',
            'TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','REPORT.json',
            'gauntlet.html','index.html']
@@ -576,14 +597,14 @@ def finalize(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report','finalize','aux-overlap'])
+    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report','finalize','aux-overlap','aux-d1-overlap'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report,'finalize':finalize,'aux-overlap':auxiliary_overlap}[a.mode](a.out)
+    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report,'finalize':finalize,'aux-overlap':auxiliary_overlap,'aux-d1-overlap':auxiliary_d1_overlap}[a.mode](a.out)
 
 
 if __name__=='__main__':main()
