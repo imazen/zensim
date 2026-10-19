@@ -1344,11 +1344,11 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
     pub(crate) fn new(token: T, form: SsimLumaForm) -> Self {
         Self {
             form,
-            one: f32x16::splat(token, 1.0),
-            two: f32x16::splat(token, 2.0),
-            zero: f32x16::zero(token),
-            c2: f32x16::splat(token, C2),
-            c1: f32x16::splat(token, C_SSIM_LUMA),
+            one: f32x16::splat_t(token, 1.0),
+            two: f32x16::splat_t(token, 2.0),
+            zero: f32x16::zero_t(token),
+            c2: f32x16::splat_t(token, C2),
+            c1: f32x16::splat_t(token, C_SSIM_LUMA),
         }
     }
 
@@ -1439,11 +1439,11 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
     pub(crate) fn new(token: T, form: SsimLumaForm) -> Self {
         Self {
             form,
-            one: GenericF32x8::splat(token, 1.0),
-            two: GenericF32x8::splat(token, 2.0),
-            zero: GenericF32x8::zero(token),
-            c2: GenericF32x8::splat(token, C2),
-            c1: GenericF32x8::splat(token, C_SSIM_LUMA),
+            one: GenericF32x8::splat_t(token, 1.0),
+            two: GenericF32x8::splat_t(token, 2.0),
+            zero: GenericF32x8::zero_t(token),
+            c2: GenericF32x8::splat_t(token, C2),
+            c1: GenericF32x8::splat_t(token, C_SSIM_LUMA),
         }
     }
 

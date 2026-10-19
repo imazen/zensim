@@ -109,12 +109,12 @@ fn ext_accumulate16<T: F32x16Backend + Copy>(
     act: f32x16<T>,
     ext: ExtPoolsWork,
 ) {
-    let one = f32x16::<T>::splat(token, 1.0);
-    let zero = f32x16::<T>::zero(token);
+    let one = f32x16::<T>::splat_t(token, 1.0);
+    let zero = f32x16::<T>::zero_t(token);
     acc.act_sum += act.reduce_add() as f64;
     let d2 = pd * pd;
     if ext.mask {
-        let w = one / f32x16::<T>::splat(token, ext.k_mask).mul_add(act, one);
+        let w = one / f32x16::<T>::splat_t(token, ext.k_mask).mul_add(act, one);
         let da = (sd * w).max(zero);
         let d2a = da * da;
         let d4a = d2a * d2a;
@@ -129,7 +129,7 @@ fn ext_accumulate16<T: F32x16Backend + Copy>(
         acc.masked_mse += (d2 * w).reduce_add() as f64;
     }
     if ext.iw {
-        let w = f32x16::<T>::splat(token, ext.k_iw).mul_add(act, one);
+        let w = f32x16::<T>::splat_t(token, ext.k_iw).mul_add(act, one);
         let db = (sd * w).max(zero);
         let d2b = db * db;
         let d4b = d2b * d2b;
@@ -156,12 +156,12 @@ fn ext_accumulate8<T: F32x8Backend + Copy>(
     act: GenericF32x8<T>,
     ext: ExtPoolsWork,
 ) {
-    let one = GenericF32x8::<T>::splat(token, 1.0);
-    let zero = GenericF32x8::<T>::zero(token);
+    let one = GenericF32x8::<T>::splat_t(token, 1.0);
+    let zero = GenericF32x8::<T>::zero_t(token);
     acc.act_sum += act.reduce_add() as f64;
     let d2 = pd * pd;
     if ext.mask {
-        let w = one / GenericF32x8::<T>::splat(token, ext.k_mask).mul_add(act, one);
+        let w = one / GenericF32x8::<T>::splat_t(token, ext.k_mask).mul_add(act, one);
         let da = (sd * w).max(zero);
         let d2a = da * da;
         let d4a = d2a * d2a;
@@ -176,7 +176,7 @@ fn ext_accumulate8<T: F32x8Backend + Copy>(
         acc.masked_mse += (d2 * w).reduce_add() as f64;
     }
     if ext.iw {
-        let w = GenericF32x8::<T>::splat(token, ext.k_iw).mul_add(act, one);
+        let w = GenericF32x8::<T>::splat_t(token, ext.k_iw).mul_add(act, one);
         let db = (sd * w).max(zero);
         let d2b = db * db;
         let d4b = d2b * d2b;
@@ -501,8 +501,8 @@ fn bounded_err_accumulate8<T: F32x8Backend + Copy>(
     be_m: &mut GenericF32x8<T>,
     pd: GenericF32x8<T>,
 ) -> GenericF32x8<T> {
-    let sq = (pd * pd).max(GenericF32x8::<T>::zero(token));
-    let m = sq / (sq + GenericF32x8::<T>::splat(token, C_MSE_F32));
+    let sq = (pd * pd).max(GenericF32x8::<T>::zero_t(token));
+    let m = sq / (sq + GenericF32x8::<T>::splat_t(token, C_MSE_F32));
     *be_m = *be_m + m;
     m
 }
@@ -521,9 +521,9 @@ fn lum_bins_accumulate8<T: F32x8Backend + Copy>(
     s: GenericF32x8<T>,
     m: GenericF32x8<T>,
 ) {
-    let ry = s.max(GenericF32x8::<T>::zero(token));
-    let t = ry / (ry + GenericF32x8::<T>::splat(token, C_LUM_T_F32));
-    let one_mt = GenericF32x8::<T>::splat(token, 1.0) - t;
+    let ry = s.max(GenericF32x8::<T>::zero_t(token));
+    let t = ry / (ry + GenericF32x8::<T>::splat_t(token, C_LUM_T_F32));
+    let one_mt = GenericF32x8::<T>::splat_t(token, 1.0) - t;
     let wd = one_mt * one_mt;
     let wb = t * t;
     *wd_num = *wd_num + wd * m;
@@ -567,8 +567,8 @@ fn bounded_err_accumulate16<T: F32x16Backend + Copy>(
     be_m: &mut f32x16<T>,
     pd: f32x16<T>,
 ) -> f32x16<T> {
-    let sq = (pd * pd).max(f32x16::<T>::zero(token));
-    let m = sq / (sq + f32x16::<T>::splat(token, C_MSE_F32));
+    let sq = (pd * pd).max(f32x16::<T>::zero_t(token));
+    let m = sq / (sq + f32x16::<T>::splat_t(token, C_MSE_F32));
     *be_m = *be_m + m;
     m
 }
@@ -592,9 +592,9 @@ fn lum_bins_accumulate16<T: F32x16Backend + Copy>(
     s: f32x16<T>,
     m: f32x16<T>,
 ) {
-    let ry = s.max(f32x16::<T>::zero(token));
-    let t = ry / (ry + f32x16::<T>::splat(token, C_LUM_T_F32));
-    let one_mt = f32x16::<T>::splat(token, 1.0) - t;
+    let ry = s.max(f32x16::<T>::zero_t(token));
+    let t = ry / (ry + f32x16::<T>::splat_t(token, C_LUM_T_F32));
+    let one_mt = f32x16::<T>::splat_t(token, 1.0) - t;
     let wd = one_mt * one_mt;
     let wb = t * t;
     *wd_num = *wd_num + wd * m;
@@ -1333,7 +1333,7 @@ fn fused_vblur_ssim_inner_v4(
 ) -> StripChannelAccum {
     let form = free.luma_form();
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
@@ -1398,8 +1398,8 @@ fn fused_vblur_ssim_inner_v4(
     };
 
     // SSIM constants
-    let one = f32x16::splat(token, 1.0);
-    let zero = f32x16::zero(token);
+    let one = f32x16::splat_t(token, 1.0);
+    let zero = f32x16::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
@@ -1408,48 +1408,48 @@ fn fused_vblur_ssim_inner_v4(
         let col_base = cg * 16;
 
         // Initialize 4 running sums for this column group
-        let mut sum_m1 = f32x16::zero(token);
-        let mut sum_m2 = f32x16::zero(token);
-        let mut sum_sq = f32x16::zero(token);
-        let mut sum_s12 = f32x16::zero(token);
-        let mut sum_act = f32x16::zero(token);
+        let mut sum_m1 = f32x16::zero_t(token);
+        let mut sum_m2 = f32x16::zero_t(token);
+        let mut sum_sq = f32x16::zero_t(token);
+        let mut sum_s12 = f32x16::zero_t(token);
+        let mut sum_act = f32x16::zero_t(token);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x16::zero(token);
-        let mut fm_ds = f32x16::zero(token);
+        let mut fm_dd = f32x16::zero_t(token);
+        let mut fm_ds = f32x16::zero_t(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
         let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
         );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
             let abase = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x16::from_array(token, h_mu1[base..][..16].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x16::from_array(token, h_mu2[base..][..16].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x16::from_array_t(token, h_mu1[base..][..16].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x16::from_array_t(token, h_mu2[base..][..16].try_into().unwrap());
             sum_sq =
-                sum_sq + f32x16::from_array(token, h_sigma_sq[base..][..16].try_into().unwrap());
+                sum_sq + f32x16::from_array_t(token, h_sigma_sq[base..][..16].try_into().unwrap());
             sum_s12 =
-                sum_s12 + f32x16::from_array(token, h_sigma12[base..][..16].try_into().unwrap());
+                sum_s12 + f32x16::from_array_t(token, h_sigma12[base..][..16].try_into().unwrap());
             if ext.on {
                 sum_act =
-                    sum_act + f32x16::from_array(token, h_act[abase..][..16].try_into().unwrap());
+                    sum_act + f32x16::from_array_t(token, h_act[abase..][..16].try_into().unwrap());
             }
         }
 
@@ -1465,8 +1465,8 @@ fn fused_vblur_ssim_inner_v4(
                 let s12 = sum_s12 * inv_v;
 
                 // Load raw pixel values
-                let s = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
-                let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
+                let s = f32x16::from_array_t(token, src[base..][..16].try_into().unwrap());
+                let d = f32x16::from_array_t(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
                 let sd = if direct {
@@ -1607,21 +1607,21 @@ fn fused_vblur_ssim_inner_v4(
             let arem = rem_idx * width + col_base;
 
             sum_m1 = sum_m1
-                + f32x16::from_array(token, h_mu1[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu1[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu1[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu1[rem_base..][..16].try_into().unwrap());
             sum_m2 = sum_m2
-                + f32x16::from_array(token, h_mu2[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu2[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu2[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu2[rem_base..][..16].try_into().unwrap());
             sum_sq = sum_sq
-                + f32x16::from_array(token, h_sigma_sq[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_sigma_sq[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_sigma_sq[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_sigma_sq[rem_base..][..16].try_into().unwrap());
             sum_s12 = sum_s12
-                + f32x16::from_array(token, h_sigma12[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_sigma12[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_sigma12[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_sigma12[rem_base..][..16].try_into().unwrap());
             if ext.on {
                 sum_act = sum_act
-                    + f32x16::from_array(token, h_act[aadd..][..16].try_into().unwrap())
-                    - f32x16::from_array(token, h_act[arem..][..16].try_into().unwrap());
+                    + f32x16::from_array_t(token, h_act[aadd..][..16].try_into().unwrap())
+                    - f32x16::from_array_t(token, h_act[arem..][..16].try_into().unwrap());
             }
         }
     }
@@ -1629,53 +1629,54 @@ fn fused_vblur_ssim_inner_v4(
     // Remainder columns with f32x8
     let col_base_8 = col_groups * 16;
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
-    let one8 = f32x8::splat(v3, 1.0);
-    let zero8 = f32x8::zero(v3);
+    let one8 = f32x8::splat_t(v3, 1.0);
+    let zero8 = f32x8::zero_t(v3);
 
     for cg in 0..remaining_8groups {
         let col_base = col_base_8 + cg * 8;
-        let mut sum_m1 = f32x8::zero(v3);
-        let mut sum_m2 = f32x8::zero(v3);
-        let mut sum_sq = f32x8::zero(v3);
-        let mut sum_s12 = f32x8::zero(v3);
-        let mut sum_act = f32x8::zero(v3);
+        let mut sum_m1 = f32x8::zero_t(v3);
+        let mut sum_m2 = f32x8::zero_t(v3);
+        let mut sum_sq = f32x8::zero_t(v3);
+        let mut sum_s12 = f32x8::zero_t(v3);
+        let mut sum_act = f32x8::zero_t(v3);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero(v3);
-        let mut fm_ds = f32x8::zero(v3);
+        let mut fm_dd = f32x8::zero_t(v3);
+        let mut fm_ds = f32x8::zero_t(v3);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
         let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
         );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
             let abase = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[base..][..8].try_into().unwrap());
-            sum_sq = sum_sq + f32x8::from_array(v3, h_sigma_sq[base..][..8].try_into().unwrap());
-            sum_s12 = sum_s12 + f32x8::from_array(v3, h_sigma12[base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[base..][..8].try_into().unwrap());
+            sum_sq = sum_sq + f32x8::from_array_t(v3, h_sigma_sq[base..][..8].try_into().unwrap());
+            sum_s12 = sum_s12 + f32x8::from_array_t(v3, h_sigma12[base..][..8].try_into().unwrap());
             if ext.on {
-                sum_act = sum_act + f32x8::from_array(v3, h_act[abase..][..8].try_into().unwrap());
+                sum_act =
+                    sum_act + f32x8::from_array_t(v3, h_act[abase..][..8].try_into().unwrap());
             }
         }
 
@@ -1686,8 +1687,8 @@ fn fused_vblur_ssim_inner_v4(
                 let mu2 = sum_m2 * inv_v8;
                 let ssq = sum_sq * inv_v8;
                 let s12 = sum_s12 * inv_v8;
-                let s = f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(v3, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
                 let sd = if direct {
@@ -1824,19 +1825,19 @@ fn fused_vblur_ssim_inner_v4(
             let rem_base = rem_idx * width + col_base;
             let aadd = add_idx * width + col_base;
             let arem = rem_idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu1[rem_base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu2[rem_base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu1[rem_base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu2[rem_base..][..8].try_into().unwrap());
             sum_sq = sum_sq
-                + f32x8::from_array(v3, h_sigma_sq[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_sigma_sq[rem_base..][..8].try_into().unwrap());
+                + f32x8::from_array_t(v3, h_sigma_sq[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_sigma_sq[rem_base..][..8].try_into().unwrap());
             sum_s12 = sum_s12
-                + f32x8::from_array(v3, h_sigma12[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_sigma12[rem_base..][..8].try_into().unwrap());
+                + f32x8::from_array_t(v3, h_sigma12[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_sigma12[rem_base..][..8].try_into().unwrap());
             if ext.on {
-                sum_act = sum_act + f32x8::from_array(v3, h_act[aadd..][..8].try_into().unwrap())
-                    - f32x8::from_array(v3, h_act[arem..][..8].try_into().unwrap());
+                sum_act = sum_act + f32x8::from_array_t(v3, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array_t(v3, h_act[arem..][..8].try_into().unwrap());
             }
         }
     }
@@ -2046,7 +2047,7 @@ fn fused_vblur_ssim_inner_v4x(
 ) -> StripChannelAccum {
     let form = free.luma_form();
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
@@ -2111,8 +2112,8 @@ fn fused_vblur_ssim_inner_v4x(
     };
 
     // SSIM constants
-    let one = f32x16::splat(token, 1.0);
-    let zero = f32x16::zero(token);
+    let one = f32x16::splat_t(token, 1.0);
+    let zero = f32x16::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
@@ -2121,48 +2122,48 @@ fn fused_vblur_ssim_inner_v4x(
         let col_base = cg * 16;
 
         // Initialize 4 running sums for this column group
-        let mut sum_m1 = f32x16::zero(token);
-        let mut sum_m2 = f32x16::zero(token);
-        let mut sum_sq = f32x16::zero(token);
-        let mut sum_s12 = f32x16::zero(token);
-        let mut sum_act = f32x16::zero(token);
+        let mut sum_m1 = f32x16::zero_t(token);
+        let mut sum_m2 = f32x16::zero_t(token);
+        let mut sum_sq = f32x16::zero_t(token);
+        let mut sum_s12 = f32x16::zero_t(token);
+        let mut sum_act = f32x16::zero_t(token);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x16::zero(token);
-        let mut fm_ds = f32x16::zero(token);
+        let mut fm_dd = f32x16::zero_t(token);
+        let mut fm_ds = f32x16::zero_t(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
         let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
-            f32x16::zero(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
+            f32x16::zero_t(token),
         );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
             let abase = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x16::from_array(token, h_mu1[base..][..16].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x16::from_array(token, h_mu2[base..][..16].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x16::from_array_t(token, h_mu1[base..][..16].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x16::from_array_t(token, h_mu2[base..][..16].try_into().unwrap());
             sum_sq =
-                sum_sq + f32x16::from_array(token, h_sigma_sq[base..][..16].try_into().unwrap());
+                sum_sq + f32x16::from_array_t(token, h_sigma_sq[base..][..16].try_into().unwrap());
             sum_s12 =
-                sum_s12 + f32x16::from_array(token, h_sigma12[base..][..16].try_into().unwrap());
+                sum_s12 + f32x16::from_array_t(token, h_sigma12[base..][..16].try_into().unwrap());
             if ext.on {
                 sum_act =
-                    sum_act + f32x16::from_array(token, h_act[abase..][..16].try_into().unwrap());
+                    sum_act + f32x16::from_array_t(token, h_act[abase..][..16].try_into().unwrap());
             }
         }
 
@@ -2178,8 +2179,8 @@ fn fused_vblur_ssim_inner_v4x(
                 let s12 = sum_s12 * inv_v;
 
                 // Load raw pixel values
-                let s = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
-                let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
+                let s = f32x16::from_array_t(token, src[base..][..16].try_into().unwrap());
+                let d = f32x16::from_array_t(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
                 let sd = if direct {
@@ -2320,21 +2321,21 @@ fn fused_vblur_ssim_inner_v4x(
             let arem = rem_idx * width + col_base;
 
             sum_m1 = sum_m1
-                + f32x16::from_array(token, h_mu1[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu1[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu1[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu1[rem_base..][..16].try_into().unwrap());
             sum_m2 = sum_m2
-                + f32x16::from_array(token, h_mu2[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu2[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu2[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu2[rem_base..][..16].try_into().unwrap());
             sum_sq = sum_sq
-                + f32x16::from_array(token, h_sigma_sq[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_sigma_sq[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_sigma_sq[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_sigma_sq[rem_base..][..16].try_into().unwrap());
             sum_s12 = sum_s12
-                + f32x16::from_array(token, h_sigma12[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_sigma12[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_sigma12[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_sigma12[rem_base..][..16].try_into().unwrap());
             if ext.on {
                 sum_act = sum_act
-                    + f32x16::from_array(token, h_act[aadd..][..16].try_into().unwrap())
-                    - f32x16::from_array(token, h_act[arem..][..16].try_into().unwrap());
+                    + f32x16::from_array_t(token, h_act[aadd..][..16].try_into().unwrap())
+                    - f32x16::from_array_t(token, h_act[arem..][..16].try_into().unwrap());
             }
         }
     }
@@ -2342,53 +2343,54 @@ fn fused_vblur_ssim_inner_v4x(
     // Remainder columns with f32x8
     let col_base_8 = col_groups * 16;
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
-    let one8 = f32x8::splat(v3, 1.0);
-    let zero8 = f32x8::zero(v3);
+    let one8 = f32x8::splat_t(v3, 1.0);
+    let zero8 = f32x8::zero_t(v3);
 
     for cg in 0..remaining_8groups {
         let col_base = col_base_8 + cg * 8;
-        let mut sum_m1 = f32x8::zero(v3);
-        let mut sum_m2 = f32x8::zero(v3);
-        let mut sum_sq = f32x8::zero(v3);
-        let mut sum_s12 = f32x8::zero(v3);
-        let mut sum_act = f32x8::zero(v3);
+        let mut sum_m1 = f32x8::zero_t(v3);
+        let mut sum_m2 = f32x8::zero_t(v3);
+        let mut sum_sq = f32x8::zero_t(v3);
+        let mut sum_s12 = f32x8::zero_t(v3);
+        let mut sum_act = f32x8::zero_t(v3);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero(v3);
-        let mut fm_ds = f32x8::zero(v3);
+        let mut fm_dd = f32x8::zero_t(v3);
+        let mut fm_ds = f32x8::zero_t(v3);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
         let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
-            f32x8::zero(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
+            f32x8::zero_t(v3),
         );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
             let abase = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[base..][..8].try_into().unwrap());
-            sum_sq = sum_sq + f32x8::from_array(v3, h_sigma_sq[base..][..8].try_into().unwrap());
-            sum_s12 = sum_s12 + f32x8::from_array(v3, h_sigma12[base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[base..][..8].try_into().unwrap());
+            sum_sq = sum_sq + f32x8::from_array_t(v3, h_sigma_sq[base..][..8].try_into().unwrap());
+            sum_s12 = sum_s12 + f32x8::from_array_t(v3, h_sigma12[base..][..8].try_into().unwrap());
             if ext.on {
-                sum_act = sum_act + f32x8::from_array(v3, h_act[abase..][..8].try_into().unwrap());
+                sum_act =
+                    sum_act + f32x8::from_array_t(v3, h_act[abase..][..8].try_into().unwrap());
             }
         }
 
@@ -2399,8 +2401,8 @@ fn fused_vblur_ssim_inner_v4x(
                 let mu2 = sum_m2 * inv_v8;
                 let ssq = sum_sq * inv_v8;
                 let s12 = sum_s12 * inv_v8;
-                let s = f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(v3, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
                 let sd = if direct {
@@ -2537,19 +2539,19 @@ fn fused_vblur_ssim_inner_v4x(
             let rem_base = rem_idx * width + col_base;
             let aadd = add_idx * width + col_base;
             let arem = rem_idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu1[rem_base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu2[rem_base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu1[rem_base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu2[rem_base..][..8].try_into().unwrap());
             sum_sq = sum_sq
-                + f32x8::from_array(v3, h_sigma_sq[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_sigma_sq[rem_base..][..8].try_into().unwrap());
+                + f32x8::from_array_t(v3, h_sigma_sq[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_sigma_sq[rem_base..][..8].try_into().unwrap());
             sum_s12 = sum_s12
-                + f32x8::from_array(v3, h_sigma12[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_sigma12[rem_base..][..8].try_into().unwrap());
+                + f32x8::from_array_t(v3, h_sigma12[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_sigma12[rem_base..][..8].try_into().unwrap());
             if ext.on {
-                sum_act = sum_act + f32x8::from_array(v3, h_act[aadd..][..8].try_into().unwrap())
-                    - f32x8::from_array(v3, h_act[arem..][..8].try_into().unwrap());
+                sum_act = sum_act + f32x8::from_array_t(v3, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array_t(v3, h_act[arem..][..8].try_into().unwrap());
             }
         }
     }
@@ -2764,7 +2766,7 @@ fn fused_vblur_ssim_inner_v3(
 ) -> StripChannelAccum {
     let form = free.luma_form();
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
     // One slice construction per plane: every row access below is
@@ -2827,55 +2829,56 @@ fn fused_vblur_ssim_inner_v3(
         s12_out
     };
 
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
 
     for cg in 0..col_groups {
         let col_base = cg * 8;
-        let mut sum_m1 = f32x8::zero(token);
-        let mut sum_m2 = f32x8::zero(token);
-        let mut sum_sq = f32x8::zero(token);
-        let mut sum_s12 = f32x8::zero(token);
-        let mut sum_act = f32x8::zero(token);
+        let mut sum_m1 = f32x8::zero_t(token);
+        let mut sum_m2 = f32x8::zero_t(token);
+        let mut sum_sq = f32x8::zero_t(token);
+        let mut sum_s12 = f32x8::zero_t(token);
+        let mut sum_act = f32x8::zero_t(token);
         // Free raw moments: one lane accumulator per column group, reduced
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero(token);
-        let mut fm_ds = f32x8::zero(token);
+        let mut fm_dd = f32x8::zero_t(token);
+        let mut fm_ds = f32x8::zero_t(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
         let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
         );
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
             let abase = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
-            sum_sq = sum_sq + f32x8::from_array(token, h_sigma_sq[base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(token, h_mu1[base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(token, h_mu2[base..][..8].try_into().unwrap());
+            sum_sq =
+                sum_sq + f32x8::from_array_t(token, h_sigma_sq[base..][..8].try_into().unwrap());
             sum_s12 =
-                sum_s12 + f32x8::from_array(token, h_sigma12[base..][..8].try_into().unwrap());
+                sum_s12 + f32x8::from_array_t(token, h_sigma12[base..][..8].try_into().unwrap());
             if ext.on {
                 sum_act =
-                    sum_act + f32x8::from_array(token, h_act[abase..][..8].try_into().unwrap());
+                    sum_act + f32x8::from_array_t(token, h_act[abase..][..8].try_into().unwrap());
             }
         }
 
@@ -2886,8 +2889,8 @@ fn fused_vblur_ssim_inner_v3(
                 let mu2 = sum_m2 * inv_v;
                 let ssq = sum_sq * inv_v;
                 let s12 = sum_s12 * inv_v;
-                let s = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(token, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
                 let sd = if direct {
@@ -3024,20 +3027,22 @@ fn fused_vblur_ssim_inner_v3(
             let rem_base = rem_idx * width + col_base;
             let aadd = add_idx * width + col_base;
             let arem = rem_idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(token, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu1[rem_base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(token, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu2[rem_base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1
+                + f32x8::from_array_t(token, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu1[rem_base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2
+                + f32x8::from_array_t(token, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu2[rem_base..][..8].try_into().unwrap());
             sum_sq = sum_sq
-                + f32x8::from_array(token, h_sigma_sq[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_sigma_sq[rem_base..][..8].try_into().unwrap());
+                + f32x8::from_array_t(token, h_sigma_sq[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_sigma_sq[rem_base..][..8].try_into().unwrap());
             sum_s12 = sum_s12
-                + f32x8::from_array(token, h_sigma12[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_sigma12[rem_base..][..8].try_into().unwrap());
+                + f32x8::from_array_t(token, h_sigma12[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_sigma12[rem_base..][..8].try_into().unwrap());
             if ext.on {
                 sum_act = sum_act
-                    + f32x8::from_array(token, h_act[aadd..][..8].try_into().unwrap())
-                    - f32x8::from_array(token, h_act[arem..][..8].try_into().unwrap());
+                    + f32x8::from_array_t(token, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array_t(token, h_act[arem..][..8].try_into().unwrap());
             }
         }
     }
@@ -3254,12 +3259,12 @@ fn fused_vblur_ssim_inner(
     type f32x8 = GenericF32x8<Token>;
 
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
 
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
@@ -3275,43 +3280,45 @@ fn fused_vblur_ssim_inner(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
         );
         // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
-        let mut fm_dd = f32x8::zero(token);
-        let mut fm_ds = f32x8::zero(token);
+        let mut fm_dd = f32x8::zero_t(token);
+        let mut fm_ds = f32x8::zero_t(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
         // last inner row.
         let (mut be_m, mut be_wdn, mut be_wdd, mut be_wbn, mut be_wbd) = (
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
-            f32x8::zero(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
+            f32x8::zero_t(token),
         );
 
         // Initialize running sums
         {
-            let mut sm1 = f32x8::zero(token);
-            let mut sm2 = f32x8::zero(token);
-            let mut ssq = f32x8::zero(token);
-            let mut ss12 = f32x8::zero(token);
-            let mut sact = f32x8::zero(token);
+            let mut sm1 = f32x8::zero_t(token);
+            let mut sm2 = f32x8::zero_t(token);
+            let mut ssq = f32x8::zero_t(token);
+            let mut ss12 = f32x8::zero_t(token);
+            let mut sact = f32x8::zero_t(token);
             for i in 0..diam {
                 let idx = mirror_idx(i, r, height);
                 let base = idx * width + col_base;
                 let abase = idx * width + col_base;
-                sm1 = sm1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
-                sm2 = sm2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
-                ssq = ssq + f32x8::from_array(token, h_sigma_sq[base..][..8].try_into().unwrap());
-                ss12 = ss12 + f32x8::from_array(token, h_sigma12[base..][..8].try_into().unwrap());
+                sm1 = sm1 + f32x8::from_array_t(token, h_mu1[base..][..8].try_into().unwrap());
+                sm2 = sm2 + f32x8::from_array_t(token, h_mu2[base..][..8].try_into().unwrap());
+                ssq = ssq + f32x8::from_array_t(token, h_sigma_sq[base..][..8].try_into().unwrap());
+                ss12 =
+                    ss12 + f32x8::from_array_t(token, h_sigma12[base..][..8].try_into().unwrap());
                 if ext.on {
-                    sact = sact + f32x8::from_array(token, h_act[abase..][..8].try_into().unwrap());
+                    sact =
+                        sact + f32x8::from_array_t(token, h_act[abase..][..8].try_into().unwrap());
                 }
             }
             sm1.store(&mut sum_m1_a);
@@ -3324,17 +3331,17 @@ fn fused_vblur_ssim_inner(
         for y in 0..height {
             if y >= inner_start && y < inner_end {
                 let base = y * width + col_base;
-                let sum_m1 = f32x8::from_array(token, sum_m1_a);
-                let sum_m2 = f32x8::from_array(token, sum_m2_a);
-                let sum_sq = f32x8::from_array(token, sum_sq_a);
-                let sum_s12 = f32x8::from_array(token, sum_s12_a);
+                let sum_m1 = f32x8::from_array_t(token, sum_m1_a);
+                let sum_m2 = f32x8::from_array_t(token, sum_m2_a);
+                let sum_sq = f32x8::from_array_t(token, sum_sq_a);
+                let sum_s12 = f32x8::from_array_t(token, sum_s12_a);
 
                 let mu1 = sum_m1 * inv_v;
                 let mu2 = sum_m2 * inv_v;
                 let ssq = sum_sq * inv_v;
                 let s12 = sum_s12 * inv_v;
-                let s = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(token, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
                 let sd = if direct {
@@ -3406,7 +3413,7 @@ fn fused_vblur_ssim_inner(
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
                 if ext.on {
-                    let act = f32x8::from_array(token, sum_act_a) * inv_v;
+                    let act = f32x8::from_array_t(token, sum_act_a) * inv_v;
                     ext_accumulate8(token, &mut acc, sd, ed, pd, act, ext);
                 }
 
@@ -3472,26 +3479,26 @@ fn fused_vblur_ssim_inner(
             let rem_base = rem_idx * width + col_base;
             let aadd = add_idx * width + col_base;
             let arem = rem_idx * width + col_base;
-            let new_m1 = f32x8::from_array(token, sum_m1_a)
-                + f32x8::from_array(token, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu1[rem_base..][..8].try_into().unwrap());
-            let new_m2 = f32x8::from_array(token, sum_m2_a)
-                + f32x8::from_array(token, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu2[rem_base..][..8].try_into().unwrap());
-            let new_sq = f32x8::from_array(token, sum_sq_a)
-                + f32x8::from_array(token, h_sigma_sq[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_sigma_sq[rem_base..][..8].try_into().unwrap());
-            let new_s12 = f32x8::from_array(token, sum_s12_a)
-                + f32x8::from_array(token, h_sigma12[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_sigma12[rem_base..][..8].try_into().unwrap());
+            let new_m1 = f32x8::from_array_t(token, sum_m1_a)
+                + f32x8::from_array_t(token, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu1[rem_base..][..8].try_into().unwrap());
+            let new_m2 = f32x8::from_array_t(token, sum_m2_a)
+                + f32x8::from_array_t(token, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu2[rem_base..][..8].try_into().unwrap());
+            let new_sq = f32x8::from_array_t(token, sum_sq_a)
+                + f32x8::from_array_t(token, h_sigma_sq[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_sigma_sq[rem_base..][..8].try_into().unwrap());
+            let new_s12 = f32x8::from_array_t(token, sum_s12_a)
+                + f32x8::from_array_t(token, h_sigma12[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_sigma12[rem_base..][..8].try_into().unwrap());
             new_m1.store(&mut sum_m1_a);
             new_m2.store(&mut sum_m2_a);
             new_sq.store(&mut sum_sq_a);
             new_s12.store(&mut sum_s12_a);
             if ext.on {
-                let new_act = f32x8::from_array(token, sum_act_a)
-                    + f32x8::from_array(token, h_act[aadd..][..8].try_into().unwrap())
-                    - f32x8::from_array(token, h_act[arem..][..8].try_into().unwrap());
+                let new_act = f32x8::from_array_t(token, sum_act_a)
+                    + f32x8::from_array_t(token, h_act[aadd..][..8].try_into().unwrap())
+                    - f32x8::from_array_t(token, h_act[arem..][..8].try_into().unwrap());
                 new_act.store(&mut sum_act_a);
             }
         }
@@ -3689,26 +3696,26 @@ fn fused_vblur_edge_inner_v4(
     store_mu: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
-    let one = f32x16::splat(token, 1.0);
-    let zero = f32x16::zero(token);
+    let one = f32x16::splat_t(token, 1.0);
+    let zero = f32x16::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
 
     for cg in 0..col_groups {
         let col_base = cg * 16;
-        let mut sum_m1 = f32x16::zero(token);
-        let mut sum_m2 = f32x16::zero(token);
+        let mut sum_m1 = f32x16::zero_t(token);
+        let mut sum_m2 = f32x16::zero_t(token);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x16::from_array(token, h_mu1[base..][..16].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x16::from_array(token, h_mu2[base..][..16].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x16::from_array_t(token, h_mu1[base..][..16].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x16::from_array_t(token, h_mu2[base..][..16].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -3716,8 +3723,8 @@ fn fused_vblur_edge_inner_v4(
                 let base = y * width + col_base;
                 let mu1 = sum_m1 * inv_v;
                 let mu2 = sum_m2 * inv_v;
-                let s = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
-                let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
+                let s = f32x16::from_array_t(token, src[base..][..16].try_into().unwrap());
+                let d = f32x16::from_array_t(token, dst[base..][..16].try_into().unwrap());
 
                 if store_mu {
                     mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
@@ -3765,33 +3772,33 @@ fn fused_vblur_edge_inner_v4(
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
             sum_m1 = sum_m1
-                + f32x16::from_array(token, h_mu1[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu1[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu1[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu1[rem_base..][..16].try_into().unwrap());
             sum_m2 = sum_m2
-                + f32x16::from_array(token, h_mu2[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu2[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu2[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu2[rem_base..][..16].try_into().unwrap());
         }
     }
 
     // Remainder with f32x8
     let col_base_8 = col_groups * 16;
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
-    let one8 = f32x8::splat(v3, 1.0);
-    let zero8 = f32x8::zero(v3);
+    let one8 = f32x8::splat_t(v3, 1.0);
+    let zero8 = f32x8::zero_t(v3);
 
     for cg in 0..remaining_8groups {
         let col_base = col_base_8 + cg * 8;
-        let mut sum_m1 = f32x8::zero(v3);
-        let mut sum_m2 = f32x8::zero(v3);
+        let mut sum_m1 = f32x8::zero_t(v3);
+        let mut sum_m2 = f32x8::zero_t(v3);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[base..][..8].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -3799,8 +3806,8 @@ fn fused_vblur_edge_inner_v4(
                 let base = y * width + col_base;
                 let mu1 = sum_m1 * inv_v8;
                 let mu2 = sum_m2 * inv_v8;
-                let s = f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(v3, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(v3, dst[base..][..8].try_into().unwrap());
 
                 if store_mu {
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
@@ -3842,10 +3849,10 @@ fn fused_vblur_edge_inner_v4(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu1[rem_base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu2[rem_base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu1[rem_base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu2[rem_base..][..8].try_into().unwrap());
         }
     }
 
@@ -3932,26 +3939,26 @@ fn fused_vblur_edge_inner_v4x(
     store_mu: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
-    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x16::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
-    let one = f32x16::splat(token, 1.0);
-    let zero = f32x16::zero(token);
+    let one = f32x16::splat_t(token, 1.0);
+    let zero = f32x16::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
 
     for cg in 0..col_groups {
         let col_base = cg * 16;
-        let mut sum_m1 = f32x16::zero(token);
-        let mut sum_m2 = f32x16::zero(token);
+        let mut sum_m1 = f32x16::zero_t(token);
+        let mut sum_m2 = f32x16::zero_t(token);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x16::from_array(token, h_mu1[base..][..16].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x16::from_array(token, h_mu2[base..][..16].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x16::from_array_t(token, h_mu1[base..][..16].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x16::from_array_t(token, h_mu2[base..][..16].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -3959,8 +3966,8 @@ fn fused_vblur_edge_inner_v4x(
                 let base = y * width + col_base;
                 let mu1 = sum_m1 * inv_v;
                 let mu2 = sum_m2 * inv_v;
-                let s = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
-                let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
+                let s = f32x16::from_array_t(token, src[base..][..16].try_into().unwrap());
+                let d = f32x16::from_array_t(token, dst[base..][..16].try_into().unwrap());
 
                 if store_mu {
                     mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
@@ -4008,33 +4015,33 @@ fn fused_vblur_edge_inner_v4x(
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
             sum_m1 = sum_m1
-                + f32x16::from_array(token, h_mu1[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu1[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu1[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu1[rem_base..][..16].try_into().unwrap());
             sum_m2 = sum_m2
-                + f32x16::from_array(token, h_mu2[add_base..][..16].try_into().unwrap())
-                - f32x16::from_array(token, h_mu2[rem_base..][..16].try_into().unwrap());
+                + f32x16::from_array_t(token, h_mu2[add_base..][..16].try_into().unwrap())
+                - f32x16::from_array_t(token, h_mu2[rem_base..][..16].try_into().unwrap());
         }
     }
 
     // Remainder with f32x8
     let col_base_8 = col_groups * 16;
     let v3 = token.v3();
-    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let inv_v8 = f32x8::splat_t(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
-    let one8 = f32x8::splat(v3, 1.0);
-    let zero8 = f32x8::zero(v3);
+    let one8 = f32x8::splat_t(v3, 1.0);
+    let zero8 = f32x8::zero_t(v3);
 
     for cg in 0..remaining_8groups {
         let col_base = col_base_8 + cg * 8;
-        let mut sum_m1 = f32x8::zero(v3);
-        let mut sum_m2 = f32x8::zero(v3);
+        let mut sum_m1 = f32x8::zero_t(v3);
+        let mut sum_m2 = f32x8::zero_t(v3);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[base..][..8].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -4042,8 +4049,8 @@ fn fused_vblur_edge_inner_v4x(
                 let base = y * width + col_base;
                 let mu1 = sum_m1 * inv_v8;
                 let mu2 = sum_m2 * inv_v8;
-                let s = f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(v3, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(v3, dst[base..][..8].try_into().unwrap());
 
                 if store_mu {
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
@@ -4085,10 +4092,10 @@ fn fused_vblur_edge_inner_v4x(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(v3, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu1[rem_base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(v3, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(v3, h_mu2[rem_base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(v3, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu1[rem_base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(v3, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(v3, h_mu2[rem_base..][..8].try_into().unwrap());
         }
     }
 
@@ -4176,26 +4183,26 @@ fn fused_vblur_edge_inner_v3(
     store_mu: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
 
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
 
     for cg in 0..col_groups {
         let col_base = cg * 8;
-        let mut sum_m1 = f32x8::zero(token);
-        let mut sum_m2 = f32x8::zero(token);
+        let mut sum_m1 = f32x8::zero_t(token);
+        let mut sum_m2 = f32x8::zero_t(token);
 
         for i in 0..diam {
             let idx = mirror_idx(i, r, height);
             let base = idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1 + f32x8::from_array_t(token, h_mu1[base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x8::from_array_t(token, h_mu2[base..][..8].try_into().unwrap());
         }
 
         for y in 0..height {
@@ -4203,8 +4210,8 @@ fn fused_vblur_edge_inner_v3(
                 let base = y * width + col_base;
                 let mu1 = sum_m1 * inv_v;
                 let mu2 = sum_m2 * inv_v;
-                let s = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(token, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(token, dst[base..][..8].try_into().unwrap());
 
                 if store_mu {
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
@@ -4246,10 +4253,12 @@ fn fused_vblur_edge_inner_v3(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            sum_m1 = sum_m1 + f32x8::from_array(token, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu1[rem_base..][..8].try_into().unwrap());
-            sum_m2 = sum_m2 + f32x8::from_array(token, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu2[rem_base..][..8].try_into().unwrap());
+            sum_m1 = sum_m1
+                + f32x8::from_array_t(token, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu1[rem_base..][..8].try_into().unwrap());
+            sum_m2 = sum_m2
+                + f32x8::from_array_t(token, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu2[rem_base..][..8].try_into().unwrap());
         }
     }
 
@@ -4339,12 +4348,12 @@ fn fused_vblur_edge_inner(
     type f32x8 = GenericF32x8<Token>;
 
     let diam = 2 * radius + 1;
-    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat_t(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
 
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
 
     let mut acc = StripChannelAccum::zero();
     let inner_end = inner_start + inner_h;
@@ -4356,13 +4365,13 @@ fn fused_vblur_edge_inner(
 
         // Initialize running sums
         {
-            let mut sm1 = f32x8::zero(token);
-            let mut sm2 = f32x8::zero(token);
+            let mut sm1 = f32x8::zero_t(token);
+            let mut sm2 = f32x8::zero_t(token);
             for i in 0..diam {
                 let idx = mirror_idx(i, r, height);
                 let base = idx * width + col_base;
-                sm1 = sm1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
-                sm2 = sm2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
+                sm1 = sm1 + f32x8::from_array_t(token, h_mu1[base..][..8].try_into().unwrap());
+                sm2 = sm2 + f32x8::from_array_t(token, h_mu2[base..][..8].try_into().unwrap());
             }
             sm1.store(&mut sum_m1_a);
             sm2.store(&mut sum_m2_a);
@@ -4371,13 +4380,13 @@ fn fused_vblur_edge_inner(
         for y in 0..height {
             if y >= inner_start && y < inner_end {
                 let base = y * width + col_base;
-                let sum_m1 = f32x8::from_array(token, sum_m1_a);
-                let sum_m2 = f32x8::from_array(token, sum_m2_a);
+                let sum_m1 = f32x8::from_array_t(token, sum_m1_a);
+                let sum_m2 = f32x8::from_array_t(token, sum_m2_a);
 
                 let mu1 = sum_m1 * inv_v;
                 let mu2 = sum_m2 * inv_v;
-                let s = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
-                let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
+                let s = f32x8::from_array_t(token, src[base..][..8].try_into().unwrap());
+                let d = f32x8::from_array_t(token, dst[base..][..8].try_into().unwrap());
 
                 if store_mu {
                     mu1.store((&mut mu1_out[base..base + 8]).try_into().unwrap());
@@ -4420,12 +4429,12 @@ fn fused_vblur_edge_inner(
             let rem_idx = vblur_rem_idx(y, r, height);
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            let new_m1 = f32x8::from_array(token, sum_m1_a)
-                + f32x8::from_array(token, h_mu1[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu1[rem_base..][..8].try_into().unwrap());
-            let new_m2 = f32x8::from_array(token, sum_m2_a)
-                + f32x8::from_array(token, h_mu2[add_base..][..8].try_into().unwrap())
-                - f32x8::from_array(token, h_mu2[rem_base..][..8].try_into().unwrap());
+            let new_m1 = f32x8::from_array_t(token, sum_m1_a)
+                + f32x8::from_array_t(token, h_mu1[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu1[rem_base..][..8].try_into().unwrap());
+            let new_m2 = f32x8::from_array_t(token, sum_m2_a)
+                + f32x8::from_array_t(token, h_mu2[add_base..][..8].try_into().unwrap())
+                - f32x8::from_array_t(token, h_mu2[rem_base..][..8].try_into().unwrap());
             new_m1.store(&mut sum_m1_a);
             new_m2.store(&mut sum_m2_a);
         }
@@ -4987,10 +4996,10 @@ macro_rules! vwin_slide64x8 {
                     for (o, (a8, r8)) in (&mut oc).zip((&mut ac).zip(&mut rc)) {
                         let a8: &[f32; 8] = a8.try_into().unwrap();
                         let r8: &[f32; 8] = r8.try_into().unwrap();
-                        let cur = f64x8::load($token, (&*o).try_into().unwrap());
+                        let cur = f64x8::load_t($token, (&*o).try_into().unwrap());
                         let a: [f64; 8] = std::array::from_fn(|i| a8[i] as f64);
                         let r: [f64; 8] = std::array::from_fn(|i| r8[i] as f64);
-                        (cur + f64x8::from_array($token, a) - f64x8::from_array($token, r))
+                        (cur + f64x8::from_array_t($token, a) - f64x8::from_array_t($token, r))
                             .store(o.try_into().unwrap());
                     }
                     for ((o, &a), &r) in oc
@@ -5683,14 +5692,14 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
         local || matches!(win, VWin::F64 { .. }),
         "canon64 vector body is entered only under the Rec64 axis"
     );
-    let inv_v = f64x8::splat(token, planes.inv64());
+    let inv_v = f64x8::splat_t(token, planes.inv64());
     let splats = crate::ssim_form::SsimSplats8::new(token, form);
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
-    let c_mse = f32x8::splat(token, C_MSE_F32);
-    let c_lumt = f32x8::splat(token, C_LUM_T_F32);
-    let km = f32x8::splat(token, ext.k_mask);
-    let kiw = f32x8::splat(token, ext.k_iw);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
+    let c_mse = f32x8::splat_t(token, C_MSE_F32);
+    let c_lumt = f32x8::splat_t(token, C_LUM_T_F32);
+    let km = f32x8::splat_t(token, ext.k_mask);
+    let kiw = f32x8::splat_t(token, ext.k_iw);
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<P>::zero();
     let full = width / 8;
@@ -5703,8 +5712,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     // `at32`'s F64 arm, one 8-column chunk: `(state[x] * inv64) as f32`
     // per lane — the narrow stays per-element inside the chunk.
     let narrow = |w: &[f64], x0: usize| -> f32x8 {
-        let a = (f64x8::load(token, w[x0..x0 + 8].try_into().unwrap()) * inv_v).to_array();
-        f32x8::from_array(token, std::array::from_fn(|i| a[i] as f32))
+        let a = (f64x8::load_t(token, w[x0..x0 + 8].try_into().unwrap()) * inv_v).to_array();
+        f32x8::from_array_t(token, std::array::from_fn(|i| a[i] as f32))
     };
 
     for y in if local {
@@ -5736,18 +5745,21 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                     return narrow(state, x0);
                 }
                 if radius == 0 {
-                    return f32x8::load(token, plane[base + x0..base + x0 + 8].try_into().unwrap());
+                    return f32x8::load_t(
+                        token,
+                        plane[base + x0..base + x0 + 8].try_into().unwrap(),
+                    );
                 }
                 debug_assert_eq!(radius, 5);
                 let t: [f32x8; 11] = std::array::from_fn(|k| {
                     let rb =
                         crate::featcanon::tap_mirror(y as isize + k as isize - 5, height) * width;
-                    f32x8::load(token, plane[rb + x0..rb + x0 + 8].try_into().unwrap())
+                    f32x8::load_t(token, plane[rb + x0..rb + x0 + 8].try_into().unwrap())
                 });
                 ((((t[0] + t[1]) + (t[2] + t[3])) + ((t[4] + t[5]) + (t[6] + t[7])))
                     + (t[8] + t[9])
                     + t[10])
-                    * f32x8::splat(token, 1.0 / 11.0)
+                    * f32x8::splat_t(token, 1.0 / 11.0)
             };
             for c in 0..full {
                 let x0 = c * 8;
@@ -5760,8 +5772,8 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
                 } else {
                     window(planes.act, wact, x0)
                 };
-                let sv = f32x8::load(token, srow[x0..x0 + 8].try_into().unwrap());
-                let dv = f32x8::load(token, drow[x0..x0 + 8].try_into().unwrap());
+                let sv = f32x8::load_t(token, srow[x0..x0 + 8].try_into().unwrap());
+                let dv = f32x8::load_t(token, drow[x0..x0 + 8].try_into().unwrap());
 
                 let sd = if direct {
                     splats.direct(m1v, m2v, ssqv, s12v)
@@ -6952,9 +6964,9 @@ fn fused_vblur_edge_canon64_vec(
         matches!(win, VWin::F64 { .. }),
         "canon64 vector body is entered only under the Rec64 axis"
     );
-    let inv_v = f64x8::splat(token, planes.inv64());
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
+    let inv_v = f64x8::splat_t(token, planes.inv64());
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
     let mut acc = StripChannelAccum::zero();
     let full = width / 8;
     // Same pre-slicing as `fused_vblur_ssim_canon64_vec`: provable lengths,
@@ -6962,8 +6974,8 @@ fn fused_vblur_edge_canon64_vec(
     let src = &src[..height * width];
     let dst = &dst[..height * width];
     let narrow = |w: &[f64], x0: usize| -> f32x8 {
-        let a = (f64x8::load(token, w[x0..x0 + 8].try_into().unwrap()) * inv_v).to_array();
-        f32x8::from_array(token, std::array::from_fn(|i| a[i] as f32))
+        let a = (f64x8::load_t(token, w[x0..x0 + 8].try_into().unwrap()) * inv_v).to_array();
+        f32x8::from_array_t(token, std::array::from_fn(|i| a[i] as f32))
     };
 
     for y in 0..height {
@@ -6983,8 +6995,8 @@ fn fused_vblur_edge_canon64_vec(
                     mu1_out[base + x0..base + x0 + 8].copy_from_slice(&m1v.to_array());
                     mu2_out[base + x0..base + x0 + 8].copy_from_slice(&m2v.to_array());
                 }
-                let sv = f32x8::load(token, srow[x0..x0 + 8].try_into().unwrap());
-                let dv = f32x8::load(token, drow[x0..x0 + 8].try_into().unwrap());
+                let sv = f32x8::load_t(token, srow[x0..x0 + 8].try_into().unwrap());
+                let dv = f32x8::load_t(token, drow[x0..x0 + 8].try_into().unwrap());
                 let diff1 = (sv - m1v).abs();
                 let diff2 = (dv - m2v).abs();
                 let ed = (one + diff2) / (one + diff1) - one;

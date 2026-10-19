@@ -509,7 +509,7 @@ struct CanonChunk<T: F32x16Convert> {
 impl<T: F32x16Convert> CanonChunk<T> {
     #[inline(always)]
     fn new(token: T) -> Self {
-        let splat = |v: f32| GenericF32x16::splat(token, v);
+        let splat = |v: f32| GenericF32x16::splat_t(token, v);
         Self {
             token,
             m: [
@@ -518,7 +518,7 @@ impl<T: F32x16Convert> CanonChunk<T> {
                 [splat(K_M20), splat(K_M21), splat(K_M22)],
             ],
             bias: splat(K_B0),
-            zero: GenericF32x16::zero(token),
+            zero: GenericF32x16::zero_t(token),
             one: splat(1.0),
             ab: splat(absorbance_bias_f32()),
             half: splat(0.5),
@@ -559,9 +559,9 @@ impl<T: F32x16Convert> CanonChunk<T> {
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
         (
-            GenericF32x16::from_array(self.token, r_arr),
-            GenericF32x16::from_array(self.token, g_arr),
-            GenericF32x16::from_array(self.token, b_arr),
+            GenericF32x16::from_array_t(self.token, r_arr),
+            GenericF32x16::from_array_t(self.token, g_arr),
+            GenericF32x16::from_array_t(self.token, b_arr),
         )
     }
 
@@ -582,9 +582,9 @@ impl<T: F32x16Convert> CanonChunk<T> {
             g_arr[i] = p[1];
             b_arr[i] = p[2];
         }
-        let r = GenericF32x16::from_array(self.token, r_arr);
-        let g = GenericF32x16::from_array(self.token, g_arr);
-        let b = GenericF32x16::from_array(self.token, b_arr);
+        let r = GenericF32x16::from_array_t(self.token, r_arr);
+        let g = GenericF32x16::from_array_t(self.token, g_arr);
+        let b = GenericF32x16::from_array_t(self.token, b_arr);
         if CLAMP {
             (
                 r.max(self.zero).min(self.one),
@@ -843,23 +843,23 @@ fn srgb_to_positive_xyb_planar_inner_v4(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x16::splat(token, K_M00);
-    let m01 = f32x16::splat(token, K_M01);
-    let m02 = f32x16::splat(token, K_M02);
-    let m10 = f32x16::splat(token, K_M10);
-    let m11 = f32x16::splat(token, K_M11);
-    let m12 = f32x16::splat(token, K_M12);
-    let m20 = f32x16::splat(token, K_M20);
-    let m21 = f32x16::splat(token, K_M21);
-    let m22 = f32x16::splat(token, K_M22);
-    let bias = f32x16::splat(token, K_B0);
-    let zero = f32x16::zero(token);
-    let ab = f32x16::splat(token, absorbance_bias);
-    let half = f32x16::splat(token, 0.5);
-    let fourteen = f32x16::splat(token, 14.0);
-    let x_bias = f32x16::splat(token, 0.42);
-    let y_bias = f32x16::splat(token, 0.01);
-    let b_bias = f32x16::splat(token, 0.55);
+    let m00 = f32x16::splat_t(token, K_M00);
+    let m01 = f32x16::splat_t(token, K_M01);
+    let m02 = f32x16::splat_t(token, K_M02);
+    let m10 = f32x16::splat_t(token, K_M10);
+    let m11 = f32x16::splat_t(token, K_M11);
+    let m12 = f32x16::splat_t(token, K_M12);
+    let m20 = f32x16::splat_t(token, K_M20);
+    let m21 = f32x16::splat_t(token, K_M21);
+    let m22 = f32x16::splat_t(token, K_M22);
+    let bias = f32x16::splat_t(token, K_B0);
+    let zero = f32x16::zero_t(token);
+    let ab = f32x16::splat_t(token, absorbance_bias);
+    let half = f32x16::splat_t(token, 0.5);
+    let fourteen = f32x16::splat_t(token, 14.0);
+    let x_bias = f32x16::splat_t(token, 0.42);
+    let y_bias = f32x16::splat_t(token, 0.01);
+    let b_bias = f32x16::splat_t(token, 0.55);
 
     let n = pixels.len();
     let chunks = n / 16;
@@ -885,9 +885,9 @@ fn srgb_to_positive_xyb_planar_inner_v4(
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
 
-        let r = f32x16::from_array(token, r_arr);
-        let g = f32x16::from_array(token, g_arr);
-        let b = f32x16::from_array(token, b_arr);
+        let r = f32x16::from_array_t(token, r_arr);
+        let g = f32x16::from_array_t(token, g_arr);
+        let b = f32x16::from_array_t(token, b_arr);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -923,23 +923,23 @@ fn srgb_to_positive_xyb_planar_inner_v4(
     // Remainder with AVX2 (f32x8)
     let v3 = token.v3();
     let absorbance_bias_neg = absorbance_bias;
-    let ab8 = f32x8::splat(v3, absorbance_bias);
-    let half8 = f32x8::splat(v3, 0.5);
-    let zero8 = f32x8::zero(v3);
-    let m00_8 = f32x8::splat(v3, K_M00);
-    let m01_8 = f32x8::splat(v3, K_M01);
-    let m02_8 = f32x8::splat(v3, K_M02);
-    let m10_8 = f32x8::splat(v3, K_M10);
-    let m11_8 = f32x8::splat(v3, K_M11);
-    let m12_8 = f32x8::splat(v3, K_M12);
-    let m20_8 = f32x8::splat(v3, K_M20);
-    let m21_8 = f32x8::splat(v3, K_M21);
-    let m22_8 = f32x8::splat(v3, K_M22);
-    let bias8 = f32x8::splat(v3, K_B0);
-    let fourteen8 = f32x8::splat(v3, 14.0);
-    let x_bias8 = f32x8::splat(v3, 0.42);
-    let y_bias8 = f32x8::splat(v3, 0.01);
-    let b_bias8 = f32x8::splat(v3, 0.55);
+    let ab8 = f32x8::splat_t(v3, absorbance_bias);
+    let half8 = f32x8::splat_t(v3, 0.5);
+    let zero8 = f32x8::zero_t(v3);
+    let m00_8 = f32x8::splat_t(v3, K_M00);
+    let m01_8 = f32x8::splat_t(v3, K_M01);
+    let m02_8 = f32x8::splat_t(v3, K_M02);
+    let m10_8 = f32x8::splat_t(v3, K_M10);
+    let m11_8 = f32x8::splat_t(v3, K_M11);
+    let m12_8 = f32x8::splat_t(v3, K_M12);
+    let m20_8 = f32x8::splat_t(v3, K_M20);
+    let m21_8 = f32x8::splat_t(v3, K_M21);
+    let m22_8 = f32x8::splat_t(v3, K_M22);
+    let bias8 = f32x8::splat_t(v3, K_B0);
+    let fourteen8 = f32x8::splat_t(v3, 14.0);
+    let x_bias8 = f32x8::splat_t(v3, 0.42);
+    let y_bias8 = f32x8::splat_t(v3, 0.01);
+    let b_bias8 = f32x8::splat_t(v3, 0.55);
 
     let rem_start = chunks * 16;
     let rem_chunks = (n - rem_start) / 8;
@@ -962,9 +962,9 @@ fn srgb_to_positive_xyb_planar_inner_v4(
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
-        let r = f32x8::from_array(v3, r_arr);
-        let g = f32x8::from_array(v3, g_arr);
-        let b = f32x8::from_array(v3, b_arr);
+        let r = f32x8::from_array_t(v3, r_arr);
+        let g = f32x8::from_array_t(v3, g_arr);
+        let b = f32x8::from_array_t(v3, b_arr);
 
         let mixed0 = m00_8
             .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
@@ -1033,23 +1033,23 @@ fn srgb_to_positive_xyb_planar_inner_v4x(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x16::splat(token, K_M00);
-    let m01 = f32x16::splat(token, K_M01);
-    let m02 = f32x16::splat(token, K_M02);
-    let m10 = f32x16::splat(token, K_M10);
-    let m11 = f32x16::splat(token, K_M11);
-    let m12 = f32x16::splat(token, K_M12);
-    let m20 = f32x16::splat(token, K_M20);
-    let m21 = f32x16::splat(token, K_M21);
-    let m22 = f32x16::splat(token, K_M22);
-    let bias = f32x16::splat(token, K_B0);
-    let zero = f32x16::zero(token);
-    let ab = f32x16::splat(token, absorbance_bias);
-    let half = f32x16::splat(token, 0.5);
-    let fourteen = f32x16::splat(token, 14.0);
-    let x_bias = f32x16::splat(token, 0.42);
-    let y_bias = f32x16::splat(token, 0.01);
-    let b_bias = f32x16::splat(token, 0.55);
+    let m00 = f32x16::splat_t(token, K_M00);
+    let m01 = f32x16::splat_t(token, K_M01);
+    let m02 = f32x16::splat_t(token, K_M02);
+    let m10 = f32x16::splat_t(token, K_M10);
+    let m11 = f32x16::splat_t(token, K_M11);
+    let m12 = f32x16::splat_t(token, K_M12);
+    let m20 = f32x16::splat_t(token, K_M20);
+    let m21 = f32x16::splat_t(token, K_M21);
+    let m22 = f32x16::splat_t(token, K_M22);
+    let bias = f32x16::splat_t(token, K_B0);
+    let zero = f32x16::zero_t(token);
+    let ab = f32x16::splat_t(token, absorbance_bias);
+    let half = f32x16::splat_t(token, 0.5);
+    let fourteen = f32x16::splat_t(token, 14.0);
+    let x_bias = f32x16::splat_t(token, 0.42);
+    let y_bias = f32x16::splat_t(token, 0.01);
+    let b_bias = f32x16::splat_t(token, 0.55);
 
     let n = pixels.len();
     let chunks = n / 16;
@@ -1075,9 +1075,9 @@ fn srgb_to_positive_xyb_planar_inner_v4x(
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
 
-        let r = f32x16::from_array(token, r_arr);
-        let g = f32x16::from_array(token, g_arr);
-        let b = f32x16::from_array(token, b_arr);
+        let r = f32x16::from_array_t(token, r_arr);
+        let g = f32x16::from_array_t(token, g_arr);
+        let b = f32x16::from_array_t(token, b_arr);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -1113,23 +1113,23 @@ fn srgb_to_positive_xyb_planar_inner_v4x(
     // Remainder with AVX2 (f32x8)
     let v3 = token.v3();
     let absorbance_bias_neg = absorbance_bias;
-    let ab8 = f32x8::splat(v3, absorbance_bias);
-    let half8 = f32x8::splat(v3, 0.5);
-    let zero8 = f32x8::zero(v3);
-    let m00_8 = f32x8::splat(v3, K_M00);
-    let m01_8 = f32x8::splat(v3, K_M01);
-    let m02_8 = f32x8::splat(v3, K_M02);
-    let m10_8 = f32x8::splat(v3, K_M10);
-    let m11_8 = f32x8::splat(v3, K_M11);
-    let m12_8 = f32x8::splat(v3, K_M12);
-    let m20_8 = f32x8::splat(v3, K_M20);
-    let m21_8 = f32x8::splat(v3, K_M21);
-    let m22_8 = f32x8::splat(v3, K_M22);
-    let bias8 = f32x8::splat(v3, K_B0);
-    let fourteen8 = f32x8::splat(v3, 14.0);
-    let x_bias8 = f32x8::splat(v3, 0.42);
-    let y_bias8 = f32x8::splat(v3, 0.01);
-    let b_bias8 = f32x8::splat(v3, 0.55);
+    let ab8 = f32x8::splat_t(v3, absorbance_bias);
+    let half8 = f32x8::splat_t(v3, 0.5);
+    let zero8 = f32x8::zero_t(v3);
+    let m00_8 = f32x8::splat_t(v3, K_M00);
+    let m01_8 = f32x8::splat_t(v3, K_M01);
+    let m02_8 = f32x8::splat_t(v3, K_M02);
+    let m10_8 = f32x8::splat_t(v3, K_M10);
+    let m11_8 = f32x8::splat_t(v3, K_M11);
+    let m12_8 = f32x8::splat_t(v3, K_M12);
+    let m20_8 = f32x8::splat_t(v3, K_M20);
+    let m21_8 = f32x8::splat_t(v3, K_M21);
+    let m22_8 = f32x8::splat_t(v3, K_M22);
+    let bias8 = f32x8::splat_t(v3, K_B0);
+    let fourteen8 = f32x8::splat_t(v3, 14.0);
+    let x_bias8 = f32x8::splat_t(v3, 0.42);
+    let y_bias8 = f32x8::splat_t(v3, 0.01);
+    let b_bias8 = f32x8::splat_t(v3, 0.55);
 
     let rem_start = chunks * 16;
     let rem_chunks = (n - rem_start) / 8;
@@ -1152,9 +1152,9 @@ fn srgb_to_positive_xyb_planar_inner_v4x(
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
-        let r = f32x8::from_array(v3, r_arr);
-        let g = f32x8::from_array(v3, g_arr);
-        let b = f32x8::from_array(v3, b_arr);
+        let r = f32x8::from_array_t(v3, r_arr);
+        let g = f32x8::from_array_t(v3, g_arr);
+        let b = f32x8::from_array_t(v3, b_arr);
 
         let mixed0 = m00_8
             .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
@@ -1225,24 +1225,24 @@ fn srgb_to_positive_xyb_planar_inner_v3(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x8::splat(token, K_M00);
-    let m01 = f32x8::splat(token, K_M01);
-    let m02 = f32x8::splat(token, K_M02);
-    let m10 = f32x8::splat(token, K_M10);
-    let m11 = f32x8::splat(token, K_M11);
-    let m12 = f32x8::splat(token, K_M12);
-    let m20 = f32x8::splat(token, K_M20);
-    let m21 = f32x8::splat(token, K_M21);
-    let m22 = f32x8::splat(token, K_M22);
-    let bias = f32x8::splat(token, K_B0);
-    let zero = f32x8::zero(token);
-    let ab = f32x8::splat(token, absorbance_bias);
-    let half = f32x8::splat(token, 0.5);
+    let m00 = f32x8::splat_t(token, K_M00);
+    let m01 = f32x8::splat_t(token, K_M01);
+    let m02 = f32x8::splat_t(token, K_M02);
+    let m10 = f32x8::splat_t(token, K_M10);
+    let m11 = f32x8::splat_t(token, K_M11);
+    let m12 = f32x8::splat_t(token, K_M12);
+    let m20 = f32x8::splat_t(token, K_M20);
+    let m21 = f32x8::splat_t(token, K_M21);
+    let m22 = f32x8::splat_t(token, K_M22);
+    let bias = f32x8::splat_t(token, K_B0);
+    let zero = f32x8::zero_t(token);
+    let ab = f32x8::splat_t(token, absorbance_bias);
+    let half = f32x8::splat_t(token, 0.5);
     // Positive-shift constants
-    let fourteen = f32x8::splat(token, 14.0);
-    let x_bias = f32x8::splat(token, 0.42);
-    let y_bias = f32x8::splat(token, 0.01);
-    let b_bias = f32x8::splat(token, 0.55);
+    let fourteen = f32x8::splat_t(token, 14.0);
+    let x_bias = f32x8::splat_t(token, 0.42);
+    let y_bias = f32x8::splat_t(token, 0.01);
+    let b_bias = f32x8::splat_t(token, 0.55);
 
     let n = pixels.len();
     let chunks = n / 8;
@@ -1268,9 +1268,9 @@ fn srgb_to_positive_xyb_planar_inner_v3(
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
 
-        let r = f32x8::from_array(token, r_arr);
-        let g = f32x8::from_array(token, g_arr);
-        let b = f32x8::from_array(token, b_arr);
+        let r = f32x8::from_array_t(token, r_arr);
+        let g = f32x8::from_array_t(token, g_arr);
+        let b = f32x8::from_array_t(token, b_arr);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -1382,7 +1382,7 @@ impl<T: F32x8Convert> OpsinChunk<T> {
     #[inline(always)]
     fn new(token: T) -> Self {
         let absorbance_bias = -cbrtf_fast(K_B0);
-        let splat = |v: f32| GenericF32x8::splat(token, v);
+        let splat = |v: f32| GenericF32x8::splat_t(token, v);
         Self {
             token,
             m: [
@@ -1391,7 +1391,7 @@ impl<T: F32x8Convert> OpsinChunk<T> {
                 [splat(K_M20), splat(K_M21), splat(K_M22)],
             ],
             bias: splat(K_B0),
-            zero: GenericF32x8::zero(token),
+            zero: GenericF32x8::zero_t(token),
             one: splat(1.0),
             ab: splat(absorbance_bias),
             half: splat(0.5),
@@ -1415,9 +1415,9 @@ impl<T: F32x8Convert> OpsinChunk<T> {
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
         (
-            GenericF32x8::from_array(self.token, r_arr),
-            GenericF32x8::from_array(self.token, g_arr),
-            GenericF32x8::from_array(self.token, b_arr),
+            GenericF32x8::from_array_t(self.token, r_arr),
+            GenericF32x8::from_array_t(self.token, g_arr),
+            GenericF32x8::from_array_t(self.token, b_arr),
         )
     }
 
@@ -1576,19 +1576,19 @@ fn srgb_to_xyb_planar_inner_v3(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x8::splat(token, K_M00);
-    let m01 = f32x8::splat(token, K_M01);
-    let m02 = f32x8::splat(token, K_M02);
-    let m10 = f32x8::splat(token, K_M10);
-    let m11 = f32x8::splat(token, K_M11);
-    let m12 = f32x8::splat(token, K_M12);
-    let m20 = f32x8::splat(token, K_M20);
-    let m21 = f32x8::splat(token, K_M21);
-    let m22 = f32x8::splat(token, K_M22);
-    let bias = f32x8::splat(token, K_B0);
-    let zero = f32x8::zero(token);
-    let ab = f32x8::splat(token, absorbance_bias);
-    let half = f32x8::splat(token, 0.5);
+    let m00 = f32x8::splat_t(token, K_M00);
+    let m01 = f32x8::splat_t(token, K_M01);
+    let m02 = f32x8::splat_t(token, K_M02);
+    let m10 = f32x8::splat_t(token, K_M10);
+    let m11 = f32x8::splat_t(token, K_M11);
+    let m12 = f32x8::splat_t(token, K_M12);
+    let m20 = f32x8::splat_t(token, K_M20);
+    let m21 = f32x8::splat_t(token, K_M21);
+    let m22 = f32x8::splat_t(token, K_M22);
+    let bias = f32x8::splat_t(token, K_B0);
+    let zero = f32x8::zero_t(token);
+    let ab = f32x8::splat_t(token, absorbance_bias);
+    let half = f32x8::splat_t(token, 0.5);
 
     let n = pixels.len();
     let chunks = n / 8;
@@ -1613,9 +1613,9 @@ fn srgb_to_xyb_planar_inner_v3(
             b_arr[i] = srgb_u8_to_linear(p[2]);
         }
 
-        let r = f32x8::from_array(token, r_arr);
-        let g = f32x8::from_array(token, g_arr);
-        let b = f32x8::from_array(token, b_arr);
+        let r = f32x8::from_array_t(token, r_arr);
+        let g = f32x8::from_array_t(token, g_arr);
+        let b = f32x8::from_array_t(token, b_arr);
 
         // Opsin absorbance matrix multiply with FMA
         let mixed0 = m00.mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)));
@@ -1805,25 +1805,25 @@ fn linear_to_positive_xyb_planar_inner_v4(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x16::splat(token, K_M00);
-    let m01 = f32x16::splat(token, K_M01);
-    let m02 = f32x16::splat(token, K_M02);
-    let m10 = f32x16::splat(token, K_M10);
-    let m11 = f32x16::splat(token, K_M11);
-    let m12 = f32x16::splat(token, K_M12);
-    let m20 = f32x16::splat(token, K_M20);
-    let m21 = f32x16::splat(token, K_M21);
-    let m22 = f32x16::splat(token, K_M22);
-    let bias = f32x16::splat(token, K_B0);
-    let zero = f32x16::zero(token);
-    let ab = f32x16::splat(token, absorbance_bias);
-    let half = f32x16::splat(token, 0.5);
-    let fourteen = f32x16::splat(token, 14.0);
-    let x_bias = f32x16::splat(token, 0.42);
-    let y_bias = f32x16::splat(token, 0.01);
-    let b_bias = f32x16::splat(token, 0.55);
+    let m00 = f32x16::splat_t(token, K_M00);
+    let m01 = f32x16::splat_t(token, K_M01);
+    let m02 = f32x16::splat_t(token, K_M02);
+    let m10 = f32x16::splat_t(token, K_M10);
+    let m11 = f32x16::splat_t(token, K_M11);
+    let m12 = f32x16::splat_t(token, K_M12);
+    let m20 = f32x16::splat_t(token, K_M20);
+    let m21 = f32x16::splat_t(token, K_M21);
+    let m22 = f32x16::splat_t(token, K_M22);
+    let bias = f32x16::splat_t(token, K_B0);
+    let zero = f32x16::zero_t(token);
+    let ab = f32x16::splat_t(token, absorbance_bias);
+    let half = f32x16::splat_t(token, 0.5);
+    let fourteen = f32x16::splat_t(token, 14.0);
+    let x_bias = f32x16::splat_t(token, 0.42);
+    let y_bias = f32x16::splat_t(token, 0.01);
+    let b_bias = f32x16::splat_t(token, 0.55);
 
-    let one = f32x16::splat(token, 1.0);
+    let one = f32x16::splat_t(token, 1.0);
 
     let n = pixels.len();
     let chunks = n / 16;
@@ -1848,9 +1848,9 @@ fn linear_to_positive_xyb_planar_inner_v4(
         }
 
         // Clamp to display gamut [0, 1]
-        let r = f32x16::from_array(token, r_arr).max(zero).min(one);
-        let g = f32x16::from_array(token, g_arr).max(zero).min(one);
-        let b = f32x16::from_array(token, b_arr).max(zero).min(one);
+        let r = f32x16::from_array_t(token, r_arr).max(zero).min(one);
+        let g = f32x16::from_array_t(token, g_arr).max(zero).min(one);
+        let b = f32x16::from_array_t(token, b_arr).max(zero).min(one);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -1883,25 +1883,25 @@ fn linear_to_positive_xyb_planar_inner_v4(
 
     // AVX2 remainder
     let v3 = token.v3();
-    let ab8 = f32x8::splat(v3, absorbance_bias);
-    let half8 = f32x8::splat(v3, 0.5);
-    let zero8 = f32x8::zero(v3);
-    let m00_8 = f32x8::splat(v3, K_M00);
-    let m01_8 = f32x8::splat(v3, K_M01);
-    let m02_8 = f32x8::splat(v3, K_M02);
-    let m10_8 = f32x8::splat(v3, K_M10);
-    let m11_8 = f32x8::splat(v3, K_M11);
-    let m12_8 = f32x8::splat(v3, K_M12);
-    let m20_8 = f32x8::splat(v3, K_M20);
-    let m21_8 = f32x8::splat(v3, K_M21);
-    let m22_8 = f32x8::splat(v3, K_M22);
-    let bias8 = f32x8::splat(v3, K_B0);
-    let fourteen8 = f32x8::splat(v3, 14.0);
-    let x_bias8 = f32x8::splat(v3, 0.42);
-    let y_bias8 = f32x8::splat(v3, 0.01);
-    let b_bias8 = f32x8::splat(v3, 0.55);
+    let ab8 = f32x8::splat_t(v3, absorbance_bias);
+    let half8 = f32x8::splat_t(v3, 0.5);
+    let zero8 = f32x8::zero_t(v3);
+    let m00_8 = f32x8::splat_t(v3, K_M00);
+    let m01_8 = f32x8::splat_t(v3, K_M01);
+    let m02_8 = f32x8::splat_t(v3, K_M02);
+    let m10_8 = f32x8::splat_t(v3, K_M10);
+    let m11_8 = f32x8::splat_t(v3, K_M11);
+    let m12_8 = f32x8::splat_t(v3, K_M12);
+    let m20_8 = f32x8::splat_t(v3, K_M20);
+    let m21_8 = f32x8::splat_t(v3, K_M21);
+    let m22_8 = f32x8::splat_t(v3, K_M22);
+    let bias8 = f32x8::splat_t(v3, K_B0);
+    let fourteen8 = f32x8::splat_t(v3, 14.0);
+    let x_bias8 = f32x8::splat_t(v3, 0.42);
+    let y_bias8 = f32x8::splat_t(v3, 0.01);
+    let b_bias8 = f32x8::splat_t(v3, 0.55);
 
-    let one8 = f32x8::splat(v3, 1.0);
+    let one8 = f32x8::splat_t(v3, 1.0);
 
     let rem_start = chunks * 16;
     let rem_chunks = (n - rem_start) / 8;
@@ -1923,9 +1923,9 @@ fn linear_to_positive_xyb_planar_inner_v4(
             b_arr[i] = p[2];
         }
         // Clamp to display gamut [0, 1]
-        let r = f32x8::from_array(v3, r_arr).max(zero8).min(one8);
-        let g = f32x8::from_array(v3, g_arr).max(zero8).min(one8);
-        let b = f32x8::from_array(v3, b_arr).max(zero8).min(one8);
+        let r = f32x8::from_array_t(v3, r_arr).max(zero8).min(one8);
+        let g = f32x8::from_array_t(v3, g_arr).max(zero8).min(one8);
+        let b = f32x8::from_array_t(v3, b_arr).max(zero8).min(one8);
 
         let mixed0 = m00_8
             .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
@@ -1995,25 +1995,25 @@ fn linear_to_positive_xyb_planar_inner_v4x(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x16::splat(token, K_M00);
-    let m01 = f32x16::splat(token, K_M01);
-    let m02 = f32x16::splat(token, K_M02);
-    let m10 = f32x16::splat(token, K_M10);
-    let m11 = f32x16::splat(token, K_M11);
-    let m12 = f32x16::splat(token, K_M12);
-    let m20 = f32x16::splat(token, K_M20);
-    let m21 = f32x16::splat(token, K_M21);
-    let m22 = f32x16::splat(token, K_M22);
-    let bias = f32x16::splat(token, K_B0);
-    let zero = f32x16::zero(token);
-    let ab = f32x16::splat(token, absorbance_bias);
-    let half = f32x16::splat(token, 0.5);
-    let fourteen = f32x16::splat(token, 14.0);
-    let x_bias = f32x16::splat(token, 0.42);
-    let y_bias = f32x16::splat(token, 0.01);
-    let b_bias = f32x16::splat(token, 0.55);
+    let m00 = f32x16::splat_t(token, K_M00);
+    let m01 = f32x16::splat_t(token, K_M01);
+    let m02 = f32x16::splat_t(token, K_M02);
+    let m10 = f32x16::splat_t(token, K_M10);
+    let m11 = f32x16::splat_t(token, K_M11);
+    let m12 = f32x16::splat_t(token, K_M12);
+    let m20 = f32x16::splat_t(token, K_M20);
+    let m21 = f32x16::splat_t(token, K_M21);
+    let m22 = f32x16::splat_t(token, K_M22);
+    let bias = f32x16::splat_t(token, K_B0);
+    let zero = f32x16::zero_t(token);
+    let ab = f32x16::splat_t(token, absorbance_bias);
+    let half = f32x16::splat_t(token, 0.5);
+    let fourteen = f32x16::splat_t(token, 14.0);
+    let x_bias = f32x16::splat_t(token, 0.42);
+    let y_bias = f32x16::splat_t(token, 0.01);
+    let b_bias = f32x16::splat_t(token, 0.55);
 
-    let one = f32x16::splat(token, 1.0);
+    let one = f32x16::splat_t(token, 1.0);
 
     let n = pixels.len();
     let chunks = n / 16;
@@ -2038,9 +2038,9 @@ fn linear_to_positive_xyb_planar_inner_v4x(
         }
 
         // Clamp to display gamut [0, 1]
-        let r = f32x16::from_array(token, r_arr).max(zero).min(one);
-        let g = f32x16::from_array(token, g_arr).max(zero).min(one);
-        let b = f32x16::from_array(token, b_arr).max(zero).min(one);
+        let r = f32x16::from_array_t(token, r_arr).max(zero).min(one);
+        let g = f32x16::from_array_t(token, g_arr).max(zero).min(one);
+        let b = f32x16::from_array_t(token, b_arr).max(zero).min(one);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -2073,25 +2073,25 @@ fn linear_to_positive_xyb_planar_inner_v4x(
 
     // AVX2 remainder
     let v3 = token.v3();
-    let ab8 = f32x8::splat(v3, absorbance_bias);
-    let half8 = f32x8::splat(v3, 0.5);
-    let zero8 = f32x8::zero(v3);
-    let m00_8 = f32x8::splat(v3, K_M00);
-    let m01_8 = f32x8::splat(v3, K_M01);
-    let m02_8 = f32x8::splat(v3, K_M02);
-    let m10_8 = f32x8::splat(v3, K_M10);
-    let m11_8 = f32x8::splat(v3, K_M11);
-    let m12_8 = f32x8::splat(v3, K_M12);
-    let m20_8 = f32x8::splat(v3, K_M20);
-    let m21_8 = f32x8::splat(v3, K_M21);
-    let m22_8 = f32x8::splat(v3, K_M22);
-    let bias8 = f32x8::splat(v3, K_B0);
-    let fourteen8 = f32x8::splat(v3, 14.0);
-    let x_bias8 = f32x8::splat(v3, 0.42);
-    let y_bias8 = f32x8::splat(v3, 0.01);
-    let b_bias8 = f32x8::splat(v3, 0.55);
+    let ab8 = f32x8::splat_t(v3, absorbance_bias);
+    let half8 = f32x8::splat_t(v3, 0.5);
+    let zero8 = f32x8::zero_t(v3);
+    let m00_8 = f32x8::splat_t(v3, K_M00);
+    let m01_8 = f32x8::splat_t(v3, K_M01);
+    let m02_8 = f32x8::splat_t(v3, K_M02);
+    let m10_8 = f32x8::splat_t(v3, K_M10);
+    let m11_8 = f32x8::splat_t(v3, K_M11);
+    let m12_8 = f32x8::splat_t(v3, K_M12);
+    let m20_8 = f32x8::splat_t(v3, K_M20);
+    let m21_8 = f32x8::splat_t(v3, K_M21);
+    let m22_8 = f32x8::splat_t(v3, K_M22);
+    let bias8 = f32x8::splat_t(v3, K_B0);
+    let fourteen8 = f32x8::splat_t(v3, 14.0);
+    let x_bias8 = f32x8::splat_t(v3, 0.42);
+    let y_bias8 = f32x8::splat_t(v3, 0.01);
+    let b_bias8 = f32x8::splat_t(v3, 0.55);
 
-    let one8 = f32x8::splat(v3, 1.0);
+    let one8 = f32x8::splat_t(v3, 1.0);
 
     let rem_start = chunks * 16;
     let rem_chunks = (n - rem_start) / 8;
@@ -2113,9 +2113,9 @@ fn linear_to_positive_xyb_planar_inner_v4x(
             b_arr[i] = p[2];
         }
         // Clamp to display gamut [0, 1]
-        let r = f32x8::from_array(v3, r_arr).max(zero8).min(one8);
-        let g = f32x8::from_array(v3, g_arr).max(zero8).min(one8);
-        let b = f32x8::from_array(v3, b_arr).max(zero8).min(one8);
+        let r = f32x8::from_array_t(v3, r_arr).max(zero8).min(one8);
+        let g = f32x8::from_array_t(v3, g_arr).max(zero8).min(one8);
+        let b = f32x8::from_array_t(v3, b_arr).max(zero8).min(one8);
 
         let mixed0 = m00_8
             .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
@@ -2187,24 +2187,24 @@ fn linear_to_positive_xyb_planar_inner_v3(
 ) {
     let absorbance_bias = -cbrtf_fast(K_B0);
 
-    let m00 = f32x8::splat(token, K_M00);
-    let m01 = f32x8::splat(token, K_M01);
-    let m02 = f32x8::splat(token, K_M02);
-    let m10 = f32x8::splat(token, K_M10);
-    let m11 = f32x8::splat(token, K_M11);
-    let m12 = f32x8::splat(token, K_M12);
-    let m20 = f32x8::splat(token, K_M20);
-    let m21 = f32x8::splat(token, K_M21);
-    let m22 = f32x8::splat(token, K_M22);
-    let bias = f32x8::splat(token, K_B0);
-    let zero = f32x8::zero(token);
-    let one = f32x8::splat(token, 1.0);
-    let ab = f32x8::splat(token, absorbance_bias);
-    let half = f32x8::splat(token, 0.5);
-    let fourteen = f32x8::splat(token, 14.0);
-    let x_bias = f32x8::splat(token, 0.42);
-    let y_bias = f32x8::splat(token, 0.01);
-    let b_bias = f32x8::splat(token, 0.55);
+    let m00 = f32x8::splat_t(token, K_M00);
+    let m01 = f32x8::splat_t(token, K_M01);
+    let m02 = f32x8::splat_t(token, K_M02);
+    let m10 = f32x8::splat_t(token, K_M10);
+    let m11 = f32x8::splat_t(token, K_M11);
+    let m12 = f32x8::splat_t(token, K_M12);
+    let m20 = f32x8::splat_t(token, K_M20);
+    let m21 = f32x8::splat_t(token, K_M21);
+    let m22 = f32x8::splat_t(token, K_M22);
+    let bias = f32x8::splat_t(token, K_B0);
+    let zero = f32x8::zero_t(token);
+    let one = f32x8::splat_t(token, 1.0);
+    let ab = f32x8::splat_t(token, absorbance_bias);
+    let half = f32x8::splat_t(token, 0.5);
+    let fourteen = f32x8::splat_t(token, 14.0);
+    let x_bias = f32x8::splat_t(token, 0.42);
+    let y_bias = f32x8::splat_t(token, 0.01);
+    let b_bias = f32x8::splat_t(token, 0.55);
 
     let n = pixels.len();
     let chunks = n / 8;
@@ -2230,9 +2230,9 @@ fn linear_to_positive_xyb_planar_inner_v3(
 
         // Clamp to display gamut: out-of-range values from lossy reconstruction
         // aren't visible on a real display, so measuring them would overcount error.
-        let r = f32x8::from_array(token, r_arr).max(zero).min(one);
-        let g = f32x8::from_array(token, g_arr).max(zero).min(one);
-        let b = f32x8::from_array(token, b_arr).max(zero).min(one);
+        let r = f32x8::from_array_t(token, r_arr).max(zero).min(one);
+        let g = f32x8::from_array_t(token, g_arr).max(zero).min(one);
+        let b = f32x8::from_array_t(token, b_arr).max(zero).min(one);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -2325,7 +2325,7 @@ fn linear_positive_xyb_generic<T: F32x8Convert + PaddedTail, const CLAMP: bool>(
             b_arr[i] = p[2];
         }
         let load = |arr: [f32; 8]| {
-            let v = GenericF32x8::from_array(k.token, arr);
+            let v = GenericF32x8::from_array_t(k.token, arr);
             if CLAMP { v.max(k.zero).min(k.one) } else { v }
         };
         let (r, g, b) = (load(r_arr), load(g_arr), load(b_arr));
@@ -2803,18 +2803,18 @@ fn pu_xyb_rows_inner(
     const P4: f32 = crate::pu21::P[4];
     const P5: f32 = crate::pu21::P[5];
     const P6: f32 = crate::pu21::P[6];
-    let l_min = f32x8::splat(token, crate::pu21::PU21_L_MIN);
-    let l_max = f32x8::splat(token, crate::pu21::PU21_L_MAX);
-    let zero = f32x8::splat(token, 0.0);
-    let one = f32x8::splat(token, 1.0);
-    let p0 = f32x8::splat(token, P0);
-    let p1 = f32x8::splat(token, P1);
-    let p2 = f32x8::splat(token, P2);
-    let p3 = f32x8::splat(token, P3);
-    let p4 = f32x8::splat(token, P4);
-    let p5 = f32x8::splat(token, P5);
-    let p6 = f32x8::splat(token, P6);
-    let inv_white = f32x8::splat(token, 1.0 / PU_WHITE);
+    let l_min = f32x8::splat_t(token, crate::pu21::PU21_L_MIN);
+    let l_max = f32x8::splat_t(token, crate::pu21::PU21_L_MAX);
+    let zero = f32x8::splat_t(token, 0.0);
+    let one = f32x8::splat_t(token, 1.0);
+    let p0 = f32x8::splat_t(token, P0);
+    let p1 = f32x8::splat_t(token, P1);
+    let p2 = f32x8::splat_t(token, P2);
+    let p3 = f32x8::splat_t(token, P3);
+    let p4 = f32x8::splat_t(token, P4);
+    let p5 = f32x8::splat_t(token, P5);
+    let p6 = f32x8::splat_t(token, P6);
+    let inv_white = f32x8::splat_t(token, 1.0 / PU_WHITE);
     let pu = |v: f32x8| -> f32x8 {
         let y = v.max(l_min).min(l_max);
         let yp = (p3 * y.log2_midp_precise()).exp2_midp_precise();
@@ -2834,35 +2834,35 @@ fn pu_xyb_rows_inner(
             g[j] = px[1];
             b[j] = px[2];
         }
-        let vr = f32x8::from_array(token, r);
-        let vg = f32x8::from_array(token, g);
-        let vb = f32x8::from_array(token, b);
-        let kb0 = f32x8::splat(token, K_B0);
-        let m0 = (f32x8::splat(token, K_M00) * vr
-            + f32x8::splat(token, K_M01) * vg
-            + f32x8::splat(token, K_M02) * vb
+        let vr = f32x8::from_array_t(token, r);
+        let vg = f32x8::from_array_t(token, g);
+        let vb = f32x8::from_array_t(token, b);
+        let kb0 = f32x8::splat_t(token, K_B0);
+        let m0 = (f32x8::splat_t(token, K_M00) * vr
+            + f32x8::splat_t(token, K_M01) * vg
+            + f32x8::splat_t(token, K_M02) * vb
             + kb0)
             .max(zero);
-        let m1 = (f32x8::splat(token, K_M10) * vr
-            + f32x8::splat(token, K_M11) * vg
-            + f32x8::splat(token, K_M12) * vb
+        let m1 = (f32x8::splat_t(token, K_M10) * vr
+            + f32x8::splat_t(token, K_M11) * vg
+            + f32x8::splat_t(token, K_M12) * vb
             + kb0)
             .max(zero);
-        let m2 = (f32x8::splat(token, K_M20) * vr
-            + f32x8::splat(token, K_M21) * vg
-            + f32x8::splat(token, K_M22) * vb
+        let m2 = (f32x8::splat_t(token, K_M20) * vr
+            + f32x8::splat_t(token, K_M21) * vg
+            + f32x8::splat_t(token, K_M22) * vb
             + kb0)
             .max(zero);
         let c0 = pu(m0) * inv_white;
         let c1 = pu(m1) * inv_white;
         let c2 = pu(m2) * inv_white;
-        let half = f32x8::splat(token, 0.5);
+        let half = f32x8::splat_t(token, 0.5);
         let x = half * (c0 - c1);
         let y = half * (c0 + c1);
-        (x * f32x8::splat(token, PU_X_SCALE) + f32x8::splat(token, 0.42))
+        (x * f32x8::splat_t(token, PU_X_SCALE) + f32x8::splat_t(token, 0.42))
             .store((&mut x_out[base..base + 8]).try_into().unwrap());
-        (y + f32x8::splat(token, 0.01)).store((&mut y_out[base..base + 8]).try_into().unwrap());
-        ((c2 - y) + f32x8::splat(token, 0.55))
+        (y + f32x8::splat_t(token, 0.01)).store((&mut y_out[base..base + 8]).try_into().unwrap());
+        ((c2 - y) + f32x8::splat_t(token, 0.55))
             .store((&mut b_out[base..base + 8]).try_into().unwrap());
     }
     for i in (chunks * 8)..n {

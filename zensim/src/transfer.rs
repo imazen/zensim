@@ -318,14 +318,14 @@ fn decode_pq_row_canon_vec(token: Token, flat: &mut [f32], dm: DisplayModel) {
     const C2: f32 = 18.851_562; // 2413 / 4096 * 32
     const C3: f32 = 18.687_5; // 2392 / 4096 * 32
 
-    let c1 = f32x16::splat(token, C1);
-    let c2 = f32x16::splat(token, C2);
-    let c3 = f32x16::splat(token, C3);
-    let l_max = f32x16::splat(token, L_MAX);
-    let zero = f32x16::zero(token);
-    let peak = f32x16::splat(token, dm.y_peak);
-    let black = f32x16::splat(token, dm.y_black);
-    let refl = f32x16::splat(token, dm.y_refl);
+    let c1 = f32x16::splat_t(token, C1);
+    let c2 = f32x16::splat_t(token, C2);
+    let c3 = f32x16::splat_t(token, C3);
+    let l_max = f32x16::splat_t(token, L_MAX);
+    let zero = f32x16::zero_t(token);
+    let peak = f32x16::splat_t(token, dm.y_peak);
+    let black = f32x16::splat_t(token, dm.y_black);
+    let refl = f32x16::splat_t(token, dm.y_refl);
 
     let n = flat.len();
     let chunks = n / 16;
@@ -335,7 +335,7 @@ fn decode_pq_row_canon_vec(token: Token, flat: &mut [f32], dm: DisplayModel) {
         let chunk: &[f32; 16] = flat[base..base + 16]
             .try_into()
             .expect("16 channels per chunk");
-        let v = f32x16::from_array(token, *chunk);
+        let v = f32x16::from_array_t(token, *chunk);
         let im = v.pow_midp(1.0 / M2);
         let num = (im - c1).max(zero);
         let den = c2 - c3 * im;
@@ -567,20 +567,20 @@ fn decode_hlg_row_canon_vec(
     const B: f32 = 1.0 - 4.0 * A; // 0.28466892
     const C: f32 = 0.559_910_7;
 
-    let a = f32x16::splat(token, A);
-    let bb = f32x16::splat(token, B);
-    let cc = f32x16::splat(token, C);
-    let zero = f32x16::zero(token);
-    let one = f32x16::splat(token, 1.0);
-    let half = f32x16::splat(token, 0.5);
-    let three = f32x16::splat(token, 3.0);
-    let twelve = f32x16::splat(token, 12.0);
-    let l0 = f32x16::splat(token, luma[0]);
-    let l1 = f32x16::splat(token, luma[1]);
-    let l2 = f32x16::splat(token, luma[2]);
+    let a = f32x16::splat_t(token, A);
+    let bb = f32x16::splat_t(token, B);
+    let cc = f32x16::splat_t(token, C);
+    let zero = f32x16::zero_t(token);
+    let one = f32x16::splat_t(token, 1.0);
+    let half = f32x16::splat_t(token, 0.5);
+    let three = f32x16::splat_t(token, 3.0);
+    let twelve = f32x16::splat_t(token, 12.0);
+    let l0 = f32x16::splat_t(token, luma[0]);
+    let l1 = f32x16::splat_t(token, luma[1]);
+    let l2 = f32x16::splat_t(token, luma[2]);
     let gm1 = gamma - 1.0;
-    let peak = f32x16::splat(token, peak_nits);
-    let lifts = f32x16::splat(token, lift);
+    let peak = f32x16::splat_t(token, peak_nits);
+    let lifts = f32x16::splat_t(token, lift);
 
     /// The branch structure of `v <= 0.5 ? (v·v)/3 : (exp_midp((v−C)/A)+B)/12`
     /// lane-parallel — both arms are evaluated and `blend`ed, like the
@@ -617,9 +617,9 @@ fn decode_hlg_row_canon_vec(
             g_arr[i] = p[1];
             b_arr[i] = p[2];
         }
-        let r = clamp01_canon(GenericF32x16::from_array(token, r_arr), zero, one);
-        let g = clamp01_canon(GenericF32x16::from_array(token, g_arr), zero, one);
-        let b = clamp01_canon(GenericF32x16::from_array(token, b_arr), zero, one);
+        let r = clamp01_canon(GenericF32x16::from_array_t(token, r_arr), zero, one);
+        let g = clamp01_canon(GenericF32x16::from_array_t(token, g_arr), zero, one);
+        let b = clamp01_canon(GenericF32x16::from_array_t(token, b_arr), zero, one);
         let rs = hlg_e(r, a, bb, cc, half, three, twelve);
         let gs = hlg_e(g, a, bb, cc, half, three, twelve);
         let bs = hlg_e(b, a, bb, cc, half, three, twelve);
