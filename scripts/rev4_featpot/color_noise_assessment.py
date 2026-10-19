@@ -38,6 +38,48 @@ MEMBER_SOURCE = {'kadid_train':'kadid','kadid_select':'kadid','tid2013':'tid2013
 def now():return datetime.now(timezone.utc).isoformat()
 
 
+def auxiliary_overlap(out):
+    """Independent RGB source-identity audit of the entire auxiliary pool."""
+    import hashlib
+    from PIL import Image
+    from color_noise_repair import DATA,registration,read,write,sha
+    registration(out)
+    keys=DATA/'e15/coverage_pool.keys.parquet'
+    wanted=set(pq.read_table(keys,columns=['source_filename'])['source_filename'].to_pylist())
+    selection=Path('/var/tmp/rev5-featpot/v2c/e15/selection.parquet')
+    paths={}
+    for row in pq.read_table(selection,columns=['source_filename','ref_path']).to_pylist():
+        if row['source_filename'] not in wanted:continue
+        previous=paths.setdefault(row['source_filename'],row['ref_path'])
+        if previous!=row['ref_path']:raise ValueError('ambiguous auxiliary source path')
+    if set(paths)!=wanted:raise ValueError('auxiliary selection coverage differs')
+    references=[];hashes=set()
+    for index,(name,path) in enumerate(sorted(paths.items()),1):
+        with Image.open(path) as image:
+            if image.mode!='RGB':raise ValueError('independent auxiliary hash needs explicit RGB source: '+path)
+            digest=hashlib.sha256(image.tobytes()).hexdigest();width,height=image.size
+        hashes.add(digest)
+        references.append(dict(source_filename=name,path=path,file_sha256=sha(path),rgb_sha256=digest,width=width,height=height))
+        if index%500==0:print('Auxiliary RGB source hashes',index,'/',len(paths),flush=True)
+    original=read(out/'EXTERNAL_INPUTS.json');populations={}
+    for corpus,d in original['datasets'].items():
+        bank=Path(d['feature_bank']);meta=pq.read_table(bank/'keys.parquet').to_pylist()
+        if len(meta)!=len(d['target']):raise ValueError('external auxiliary-audit population differs')
+        overlap=[]
+        for index,row in enumerate(meta):
+            digest=row.get('ref_pixels_sha256',row.get('reference_pixels_sha256'))
+            if digest is None:raise ValueError('external reference digest missing')
+            if digest in hashes:overlap.append(index)
+        populations[corpus]=dict(rows=len(meta),keys_sha256=sha(bank/'keys.parquet'),overlap_rows=overlap)
+    result=dict(schema='auxiliary-source-overlap-v1',time_utc=now(),selection_sha256=sha(selection),
+        pool_keys_sha256=sha(keys),source_count=len(paths),references=references,populations=populations,
+        exact_matches=sum(len(v['overlap_rows']) for v in populations.values()),
+        scope='Conservative entire auxiliary-pool source union, including unused families; current retained RGB reference PNGs hashed independently through Pillow. Exact RGB only; crop/resize lineage and historical raw-source immutability are not established by this check.')
+    write(out/'AUXILIARY_OVERLAP.json',result)
+    print('Auxiliary source audit:',len(paths),'references;',result['exact_matches'],'exact overlapping rows',flush=True)
+    if result['exact_matches']:raise ValueError('auxiliary source overlap requires withheld-population correction')
+
+
 def assessment_plan(out):
     from color_noise_repair import registration,write,sha
     registration(out)
@@ -473,6 +515,8 @@ def finalize(out):
     compatibility=read(out/'FEATURE_COMPATIBILITY.json')
     if not all(compatibility[k] for k in ['decoded_pixels_exact','f32_exact','f64_exact']):
         raise ValueError('TRAIN feature replay differs')
+    if read(out/'AUXILIARY_OVERLAP.json')['exact_matches']!=0:
+        raise ValueError('auxiliary source overlap unresolved')
     for binding in choice['models'].values():
         if sha(binding['path'])!=binding['sha256']:
             raise ValueError('frozen model changed')
@@ -495,7 +539,7 @@ def finalize(out):
         relative='scripts/rev4_featpot/'+name
         if sha(REPO/relative)!=execution['sources'][relative]:
             raise ValueError('executed training owner changed')
-    files=['REGISTRATION.json','ADMISSION.json','EXECUTION_SOURCE.json','ASSESSMENT_PLAN.json',
+    files=['REGISTRATION.json','ADMISSION.json','EXECUTION_SOURCE.json','ASSESSMENT_PLAN.json','AUXILIARY_OVERLAP.json',
            'DEVELOPMENT_POPULATIONS.json','FEATURE_COMPATIBILITY.json','CONTROL_PARITY.json',
            'TRAIN_SELECTION.json','EXTERNAL_EXPOSURE.json','EXTERNAL_INPUTS.json','REPORT.json',
            'gauntlet.html','index.html']
@@ -532,14 +576,14 @@ def finalize(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report','finalize'])
+    p.add_argument('mode',choices=['assessment-plan','prepare','feature-compatibility','development-completed','smoke-score','parity','parity-seed0','select','external','dashboard','report','finalize','aux-overlap'])
     p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     os.environ['REV4_V2_BIN_DIR']=str(a.out/'bin')
     os.environ['ZEN_PANEL_BIN']=str(BASE/'bin/panel')
     from color_noise_repair import sha, read
     if sha(BASE/'bin/panel')!=read(BASE/'_MANIFEST.json')['panel_binary_sha256']:
         raise ValueError('canonical panel binary changed')
-    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report,'finalize':finalize}[a.mode](a.out)
+    {'assessment-plan':assessment_plan,'prepare':prepare,'feature-compatibility':feature_compatibility,'development-completed':development_completed,'smoke-score':smoke_score,'parity':parity,'parity-seed0':lambda r:parity(r,[0]),'select':select,'external':external,'dashboard':dashboard,'report':report,'finalize':finalize,'aux-overlap':auxiliary_overlap}[a.mode](a.out)
 
 
 if __name__=='__main__':main()
