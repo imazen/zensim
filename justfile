@@ -2529,17 +2529,53 @@ r8-severe-tests config:
     TMPDIR="$HOME/tmp" cargo test --release --locked --manifest-path tools/shipgates-target/Cargo.toml --config {{quote(config)}} --bin r8-severe-quant
 
 
-gauntlet-archive source destination:
+gauntlet-archive source destination kind="encoded":
     test ! -e {{quote(destination)}}
     rsync -a --no-owner --no-group {{quote(source + "/")}} {{quote(destination + "/")}}
-    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json
+    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json --payload-kind {{quote(kind)}}
 
 # Resume only an owned partial mirror with the exact same completion identity.
-gauntlet-archive-resume source destination:
+gauntlet-archive-resume source destination kind="encoded":
     cmp {{quote(source + "/_MANIFEST.json")}} {{quote(destination + "/_MANIFEST.json")}}
     rsync -a --no-owner --no-group {{quote(source + "/")}} {{quote(destination + "/")}}
-    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json
+    python3 scripts/rev4_featpot/shipgates_mirror_verify.py --source {{quote(source)}} --destination {{quote(destination)}} --complete-marker _MANIFEST.json --payload-kind {{quote(kind)}}
 
 gauntlet-reference-view html reference:
     node scripts/v_next/gauntlet_render_check.js {{quote(html)}} --reference {{quote(reference)}}
 
+
+# TRAIN-only color/noise comparison; local fits serialize through the shared heavy lock.
+color-noise-repair mode output:
+    TMPDIR="$HOME/tmp" python3 -u scripts/rev4_featpot/color_noise_repair.py {{quote(mode)}} --out {{quote(output)}}
+
+color-noise-assessment mode output:
+    TMPDIR="$HOME/tmp" python3 -u scripts/rev4_featpot/color_noise_assessment.py {{quote(mode)}} --out {{quote(output)}}
+
+color-noise-ensemble mode output:
+    TMPDIR="$HOME/tmp" python3 -u scripts/rev4_featpot/color_noise_ensemble.py {{quote(mode)}} --out {{quote(output)}}
+
+color-noise-freeze output:
+    just color-noise-assessment select {{quote(output)}}
+    just color-noise-ensemble score {{quote(output)}}
+
+color-noise-assess output:
+    test -f {{quote(output + "/ensembles/TRAIN_SELECTION.json")}}
+    just color-noise-assessment external {{quote(output)}}
+    just color-noise-ensemble external {{quote(output)}}
+    just color-noise-render {{quote(output)}}
+
+color-noise-render output:
+    just color-noise-assessment dashboard {{quote(output)}}
+    just color-noise-assessment dashboard {{quote(output + "/ensembles")}}
+    just color-noise-assessment report {{quote(output)}}
+
+color-noise-verify output:
+    scripts/v_next/gauntlet_gates.sh {{quote(output + "/gauntlet.html")}} {{quote(output)}}
+    scripts/v_next/gauntlet_gates.sh {{quote(output + "/ensembles/gauntlet.html")}} {{quote(output + "/ensembles")}}
+    just gauntlet-reference-view {{quote(output + "/gauntlet.html")}} mos
+    just gauntlet-reference-view {{quote(output + "/gauntlet.html")}} jnd
+    just gauntlet-reference-view {{quote(output + "/ensembles/gauntlet.html")}} mos
+    just gauntlet-reference-view {{quote(output + "/ensembles/gauntlet.html")}} jnd
+
+color-noise-check:
+    TMPDIR="$HOME/tmp" PYTHONPATH=scripts:scripts/rev4_featpot python3 -m unittest scripts.tests.test_color_noise_repair scripts.tests.test_e33_package

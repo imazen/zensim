@@ -146,9 +146,9 @@ def main() -> None:
         if args.strict_admission:
             strict_training_groups(groups, args.data_role_decision)
         read = keep
-        if recipe.get("derived_inputs") == "fx1":  # E33 Arm C: product factors are read too
-            from v2_common import fx1_declaration
-            read = sorted(set(keep) | {b for _, b in fx1_declaration()["products"]})
+        if recipe.get("derived_inputs") in ("fx1", "fx2"):
+            from v2_common import derived_declaration
+            read = sorted(set(keep) | {b for _, b in derived_declaration(recipe["derived_inputs"])[2]["products"]})
         refuse_nonfinite_kept([g[1] for g in groups], read)  # Rev5 tables mark absent slots NaN
         bake, curve, selection = train_and_select(groups, init_seed, sample_seed, width, keep_file, args.head, dest, recipe,
                                                   strict_admission=args.strict_admission,
@@ -189,7 +189,7 @@ def main() -> None:
             "selected_bake": str(bake), "selected_bake_sha256": sha(bake), "dev_curve": curve,
             "spec": args.spec, "head": args.head, "init_seed": init_seed, "sample_seed": sample_seed,
             "train_weights": weights, "coverage_leg": coverage_record, **packed,
-            **({"derived_inputs": {"token": "fx1", "declaration_sha256": __import__("v2_common").FX1_SHA256}}
+            **({"derived_inputs": {"token": recipe["derived_inputs"], "declaration_sha256": __import__("v2_common").derived_declaration(recipe["derived_inputs"])[1]}}
                if recipe.get("derived_inputs") else {})}) + "\n")
         from e36_training import model_binding
         model_binding(dest,recipe,args,init_seed,sample_seed,bake,packed,selection=selection)
