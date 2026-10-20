@@ -26,8 +26,10 @@
 
 #![cfg(all(feature = "training", feature = "feature-regime-v2"))]
 
+mod common;
+
 use zensim::feature_v2::{V1FreeExtras, V1PoolsMode, V2NewFeatureToggles, V2Scratch};
-use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
+use zensim::{RgbSlice, Zensim, ZensimConfig, compute_zensim_with_config};
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -138,7 +140,7 @@ fn fold944(
         free_extras: free,
         ..Default::default()
     };
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+    let z = Zensim::new(common::legacy_full_profile()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     z.compute_folded720_features_streaming(
         &RgbSlice::new(r, w, h),
@@ -163,7 +165,7 @@ fn free_set_walk(r: &[[u8; 3]], d: &[[u8; 3]], w: usize, h: usize, free: V1FreeE
         free_extras: free,
         ..Default::default()
     };
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+    let z = Zensim::new(common::legacy_full_profile()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     z.compute_folded720_features_streaming(
         &RgbSlice::new(r, w, h),
@@ -303,7 +305,7 @@ fn identity_short_circuit_and_computed_residue_follow_the_formula_revision() {
         let r = value_noise(w, h, 0xC0FFEE);
 
         // (i) the product entry fabricates.
-        let z = Zensim::new(ZensimProfile::codec_target());
+        let z = Zensim::new(common::legacy_full_profile());
         let res = z
             .compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&r, w, h))
             .expect("compute");
@@ -407,7 +409,7 @@ fn folded944_is_bit_identical_at_28_threads() {
                     free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
                     ..Default::default()
                 };
-                let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(true);
+                let z = Zensim::new(common::legacy_full_profile()).with_parallel(true);
                 let mut scratch = V2Scratch::new();
                 z.compute_folded720_features_streaming(
                     &RgbSlice::new(&r, w, h),
@@ -582,7 +584,7 @@ fn degenerate_inputs_produce_no_nan_or_inf() {
                 }
             }
             // and through the product entry, which also has to produce a score
-            let z = Zensim::new(ZensimProfile::codec_target());
+            let z = Zensim::new(common::legacy_full_profile());
             let res = z
                 .compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
                 .expect("compute");
@@ -616,7 +618,7 @@ fn sub64_inputs_still_emit_a_full_width_vector_on_both_entries() {
             .features()
             .len();
         assert_eq!(a, 372, "{w}x{h}: extractor entry emitted {a} features");
-        let z = Zensim::new(ZensimProfile::codec_target());
+        let z = Zensim::new(common::legacy_full_profile());
         let b = z
             .compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
             .expect("compute")
@@ -707,7 +709,7 @@ fn free_extras_are_silently_inert_without_the_append_block_declaration() {
             free_extras: free,
             ..Default::default()
         };
-        let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+        let z = Zensim::new(common::legacy_full_profile()).with_parallel(false);
         let mut scratch = V2Scratch::new();
         z.compute_folded720_features_streaming(
             &RgbSlice::new(&r, w, h),

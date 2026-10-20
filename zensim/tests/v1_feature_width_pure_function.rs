@@ -33,7 +33,7 @@
 mod common;
 
 use common::generators::{distort_block_artifacts, gen_value_noise};
-use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
+use zensim::{RgbSlice, Zensim, ZensimConfig, compute_zensim_with_config};
 
 /// Full v1 `with-iw` 372-feature config — the one both v1-372 extractors
 /// (`zensim-bench extract_features_372col`, `zensim/examples/v2_ab_extract`
@@ -139,7 +139,7 @@ fn v1_with_ref_entry_emits_372_at_every_r1b_size_class() {
 /// localizes the defect to the training free functions.
 #[test]
 fn product_compute_path_was_always_372() {
-    let z = Zensim::new(ZensimProfile::codec_target());
+    let z = Zensim::new(common::legacy_full_profile());
     for &(w, h, _) in R1B_SIZE_CLASSES {
         let (r, d) = pair(w, h, 0xB0B);
         let n = z
@@ -241,7 +241,7 @@ const SUB64: &[(usize, usize)] = &[(43, 64), (64, 48), (96, 54), (48, 64), (36, 
 /// to a reflect-padded `PrecomputedReference`.
 #[test]
 fn every_public_v1_entry_handles_sub64_sides() {
-    let z = Zensim::new(ZensimProfile::codec_target());
+    let z = Zensim::new(common::legacy_full_profile());
     for &(w, h) in SUB64 {
         let (r, d) = pair(w, h, 0xA11CE);
         let rs = RgbSlice::new(&r, w, h);
@@ -310,7 +310,7 @@ fn every_public_v1_entry_handles_sub64_sides() {
 /// previously panicked.
 #[test]
 fn compute_with_ref_into_matches_compute_with_ref_at_sub64() {
-    let z = Zensim::new(ZensimProfile::codec_target());
+    let z = Zensim::new(common::legacy_full_profile());
     let mut scratch = zensim::ZensimScratch::default();
     for &(w, h) in SUB64 {
         let (r, d) = pair(w, h, 0xD00D);
@@ -371,7 +371,7 @@ fn v1_372_is_bit_identical_across_rayon_pool_sizes() {
     // exercise it.
     cfg.allow_multithreading = true;
 
-    let z = Zensim::new(ZensimProfile::codec_target());
+    let z = Zensim::new(common::legacy_full_profile());
 
     for &(w, h) in &[(256usize, 256usize), (96, 320), (320, 96), (64, 512)] {
         let (r, d) = pair(w, h, 0xBADC0DE);

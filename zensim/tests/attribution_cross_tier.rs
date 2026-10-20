@@ -14,6 +14,8 @@
 //! Tolerances mirror the unit tests in `zensim/src/attribution.rs`.
 #![cfg(feature = "custom-profiles")]
 
+mod common;
+
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use std::sync::OnceLock;
 use zensim::profile::ProfileParams;
@@ -209,7 +211,7 @@ fn attribution_identities_hold_on_every_tier() {
         {
             let (w, h) = (150, 170);
             let (src, dst) = test_pair(w, h);
-            let z = Zensim::new(ZensimProfile::codec_target());
+            let z = Zensim::new(common::legacy_full_profile());
             let rs = RgbSlice::new(&src, w, h);
             let ds = RgbSlice::new(&dst, w, h);
             let pre = z.precompute_reference(&rs).unwrap();

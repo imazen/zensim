@@ -196,7 +196,7 @@ fn served_feature_rows(
 ) -> Vec<(String, zensim::feature_set_id::SlotSet, Vec<f64>)> {
     use zensim::feature_set_id::SlotSet;
     let mut out: Vec<(String, SlotSet, Vec<f64>)> = Vec::new();
-    let z = Zensim::new(ZensimProfile::B).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::BHdr).with_parallel(false);
     let mut scratch = V2Scratch::new();
     // The fold entries (research's own walk, through the served API): the
     // materialized append2 impl (944) and the streaming append impl (924).
@@ -231,14 +231,14 @@ fn served_feature_rows(
         .to_vec(),
     ));
     // The profile compute on BOTH engines — fold-backed (where backable)
-    // and the forced-buffered strips walk. B's config (extended + IW) populates
+    // and the forced-buffered strips walk. BHdr's config (extended + IW) populates
     // all of v1's 372 slots.
     let v1_full = SlotSet::from_ranges([(0, 372)]);
     for (name, engine) in [
         ("fold", ScoringEngine::Fold),
         ("buffered", ScoringEngine::Buffered),
     ] {
-        let res = Zensim::new(ZensimProfile::B)
+        let res = Zensim::new(ZensimProfile::BHdr)
             .with_parallel(false)
             .with_engine(engine)
             .compute(src, dst)
@@ -313,7 +313,7 @@ fn served_hdr_rows(
     use zensim::feature_set_id::SlotSet;
     let hs = HdrLinear::new(src, w, h);
     let hd = HdrLinear::new(dst, w, h);
-    let z = Zensim::new(ZensimProfile::B).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::BHdr).with_parallel(false);
     let mut scratch = V2Scratch::new();
     let mut out = Vec::new();
     let app2 = V2NewFeatureToggles {
@@ -443,7 +443,7 @@ fn rev4_maps_are_tier_identical() {
             let (src, dst) = pair(w, h, 0xABBA ^ w as u32);
             let s = RgbSlice::new(&src, w, h);
             let d = RgbSlice::new(&dst, w, h);
-            let z = Zensim::new(ZensimProfile::B).with_parallel(false);
+            let z = Zensim::new(ZensimProfile::BHdr).with_parallel(false);
             // Diffmap: v2 tail weighting.
             let s_v2 = vec![0.5f64; 8 * 3 * zensim::feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL];
             let map = z
@@ -704,7 +704,7 @@ fn capture_lines(rev: &str) -> Vec<String> {
         let (src, dst) = pair(w, h, 0xC001 ^ i as u32);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
-        let z = Zensim::new(ZensimProfile::B).with_parallel(false);
+        let z = Zensim::new(ZensimProfile::BHdr).with_parallel(false);
         let l = entry(|| {
             let res = z.compute(&s, &d)?;
             Ok(format!(
@@ -715,7 +715,7 @@ fn capture_lines(rev: &str) -> Vec<String> {
         });
         lines.push(format!("{i}\t{l}"));
         let l = entry(|| {
-            let res = Zensim::new(ZensimProfile::B)
+            let res = Zensim::new(ZensimProfile::BHdr)
                 .with_parallel(false)
                 .with_engine(ScoringEngine::Fold)
                 .compute(&s, &d)?;

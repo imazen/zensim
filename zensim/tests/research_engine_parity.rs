@@ -28,7 +28,7 @@ mod common;
 use common::parity_cells::{CELLS, pool_sweep_cells};
 use zensim::feature_set_id::{ComputeToken, SlotSet};
 use zensim::research::{self, Request};
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 fn pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     let r = common::generators::gen_value_noise(w, h, 0xC0FFEE);
@@ -41,7 +41,7 @@ fn pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
 /// every cell of the shared geometry matrix.
 #[test]
 fn research_and_production_agree_bit_exactly_at_the_v1_layout() {
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+    let z = Zensim::new(common::legacy_full_profile()).with_parallel(false);
     let mut checked = 0usize;
     for &(w, h) in CELLS {
         let (s, d) = pair(w, h);
@@ -79,7 +79,7 @@ fn research_and_production_agree_bit_exactly_at_the_v1_layout() {
 #[test]
 fn research_and_production_agree_bit_exactly_at_the_944_layout() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+    let z = Zensim::new(common::legacy_full_profile()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     for &(w, h) in CELLS {
         let (s, d) = pair(w, h);
@@ -129,7 +129,7 @@ fn research_everything_agrees_with_the_production_walk() {
     let full = research::full_width();
     // The production walk excludes the research-only palette tail.
     let served_width = 1820;
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+    let z = Zensim::new(common::legacy_full_profile()).with_parallel(false);
     let mut scratch = V2Scratch::new();
     for &(w, h) in CELLS {
         let (s, d) = pair(w, h);

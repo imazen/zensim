@@ -439,7 +439,7 @@ fn sampling_contracts_serve_and_spatialize_through_public_api() {
                     assert_eq!(direct.score().to_bits(), cached.to_bits(), "{tag}");
                     let pre = scorer.precompute_reference(&rs).unwrap();
                     assert!(
-                        zensim::Zensim::new(zensim::ZensimProfile::B)
+                        zensim::Zensim::new(common::legacy_full_profile())
                             .compute_with_ref(&pre, &ds)
                             .is_err()
                     );
@@ -449,7 +449,7 @@ fn sampling_contracts_serve_and_spatialize_through_public_api() {
                             .is_err()
                     );
 
-                    let legacy = zensim::Zensim::new(zensim::ZensimProfile::B);
+                    let legacy = zensim::Zensim::new(common::legacy_full_profile());
                     assert!(
                         legacy
                             .compute_with_ref_score_and_attribution(&pre, &ds, &[0.0; 156])
@@ -494,7 +494,7 @@ fn sampling_contracts_serve_and_spatialize_through_public_api() {
                         mapped.unsupported_refinement_feature_ids()
                     );
                     assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.);
-                    let wrong = zensim::Zensim::new(zensim::ZensimProfile::B)
+                    let wrong = zensim::Zensim::new(common::legacy_full_profile())
                         .precompute_reference(&rs)
                         .unwrap();
                     assert!(

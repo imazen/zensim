@@ -155,7 +155,7 @@ fn compute_is_bit_identical_across_engines() {
     for &parallel in &[false, true] {
         for &(w, h) in CELLS {
             let (r, d) = pair(w, h);
-            let (b, f) = run_both(ZensimProfile::codec_target(), parallel, |z| {
+            let (b, f) = run_both(common::legacy_full_profile(), parallel, |z| {
                 z.compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
                     .expect("compute")
             });
@@ -172,7 +172,7 @@ fn compute_is_bit_identical_across_engines() {
 #[test]
 fn extended_features_are_bit_identical_across_engines() {
     for &(profile, want) in &[
-        (ZensimProfile::codec_target(), 372usize),
+        (common::legacy_full_profile(), 372usize),
         (ZensimProfile::PreviewV0_2, 300usize),
     ] {
         for &parallel in &[false, true] {
@@ -204,12 +204,12 @@ fn extended_features_are_bit_identical_across_engines() {
 fn golden_real_fixture_is_bit_identical_across_engines() {
     let (r, d, w, h) = golden_real();
     for &parallel in &[false, true] {
-        let (b, f) = run_both(ZensimProfile::codec_target(), parallel, |z| {
+        let (b, f) = run_both(common::legacy_full_profile(), parallel, |z| {
             z.compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
                 .expect("compute")
         });
         assert_result_bit_identical(&format!("GOLDEN_REAL compute par={parallel}"), &b, &f);
-        let (b, f) = run_both(ZensimProfile::codec_target(), parallel, |z| {
+        let (b, f) = run_both(common::legacy_full_profile(), parallel, |z| {
             z.compute_extended_features(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
                 .expect("compute_extended_features")
         });
@@ -242,7 +242,7 @@ fn both_engines_are_bit_identical_across_rayon_pool_sizes() {
                 .build()
                 .expect("build rayon pool");
             let (b, f) = pool.install(|| {
-                run_both(ZensimProfile::codec_target(), true, |z| {
+                run_both(common::legacy_full_profile(), true, |z| {
                     z.compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
                         .expect("compute")
                 })
@@ -296,7 +296,7 @@ fn fold_falls_back_on_a_weight_skipping_profile() {
 fn identical_pair_short_circuit_is_shared() {
     let (w, h) = (200usize, 150usize);
     let (r, _) = pair(w, h);
-    let (b, f) = run_both(ZensimProfile::codec_target(), true, |z| {
+    let (b, f) = run_both(common::legacy_full_profile(), true, |z| {
         z.compute(&RgbSlice::new(&r, w, h), &RgbSlice::new(&r, w, h))
             .expect("compute")
     });
@@ -314,8 +314,8 @@ fn identical_pair_short_circuit_is_shared() {
 fn classify_is_bit_identical_across_engines() {
     for &(w, h) in &[(200usize, 150usize), (96, 64), (127, 93)] {
         let (r, d) = pair(w, h);
-        let buffered = Zensim::new(ZensimProfile::codec_target());
-        let fold = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+        let buffered = Zensim::new(common::legacy_full_profile());
+        let fold = Zensim::new(common::legacy_full_profile()).with_engine(ScoringEngine::Fold);
         let cb = buffered
             .classify(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
             .expect("classify");
@@ -363,7 +363,7 @@ fn fold_ref_cache_matches_independent_computes() {
             })
             .collect();
         for parallel in [false, true] {
-            let z = Zensim::new(ZensimProfile::codec_target())
+            let z = Zensim::new(common::legacy_full_profile())
                 .with_parallel(parallel)
                 .with_engine(ScoringEngine::Fold);
             let rs = RgbSlice::new(&r, w, h);
@@ -399,7 +399,7 @@ fn fold_ref_cache_matches_independent_computes() {
 #[test]
 fn fold_ref_scratch_reuse_is_bit_identical() {
     for parallel in [false, true] {
-        let z = Zensim::new(ZensimProfile::codec_target())
+        let z = Zensim::new(common::legacy_full_profile())
             .with_parallel(parallel)
             .with_engine(ScoringEngine::Fold);
         // ONE scratch across every geometry and every candidate — claim 3.
@@ -453,8 +453,8 @@ fn compute_with_ref_cross_engine() {
         let rs = RgbSlice::new(&r, w, h);
         let ds = RgbSlice::new(&d, w, h);
         for parallel in [false, true] {
-            let zb = Zensim::new(ZensimProfile::codec_target()).with_parallel(parallel);
-            let zf = Zensim::new(ZensimProfile::codec_target())
+            let zb = Zensim::new(common::legacy_full_profile()).with_parallel(parallel);
+            let zf = Zensim::new(common::legacy_full_profile())
                 .with_parallel(parallel)
                 .with_engine(ScoringEngine::Fold);
             let pb = zb.precompute_reference(&rs).expect("precompute");
@@ -526,8 +526,8 @@ fn attribution_density_is_engine_independent() {
         let (r, d) = pair(w, h);
         let rs = RgbSlice::new(&r, w, h);
         let ds = RgbSlice::new(&d, w, h);
-        let zb = Zensim::new(ZensimProfile::codec_target());
-        let zf = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+        let zb = Zensim::new(common::legacy_full_profile());
+        let zf = Zensim::new(common::legacy_full_profile()).with_engine(ScoringEngine::Fold);
 
         let cmp = |name: &str, a: &zensim::AttributionResult, b: &zensim::AttributionResult| {
             assert_eq!(
@@ -597,8 +597,8 @@ fn fused_compare_splits_into_fold_score_plus_standalone_map() {
         let (r, d) = pair(w, h);
         let rs = RgbSlice::new(&r, w, h);
         let ds = RgbSlice::new(&d, w, h);
-        let zb = Zensim::new(ZensimProfile::codec_target());
-        let zf = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+        let zb = Zensim::new(common::legacy_full_profile());
+        let zf = Zensim::new(common::legacy_full_profile()).with_engine(ScoringEngine::Fold);
         let pre_b = zb.precompute_reference(&rs).unwrap();
         let pre_f = zf.precompute_reference(&rs).unwrap();
 
@@ -646,7 +646,7 @@ fn fused_compare_splits_into_fold_score_plus_standalone_map() {
 #[test]
 fn unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block() {
     assert_eq!(
-        Zensim::new(ZensimProfile::B)
+        Zensim::new(common::legacy_full_profile())
             .with_unread_feature_skipping(true)
             .score_pool_mode(),
         zensim::feature_v2::V1PoolsMode::Full,
@@ -662,10 +662,10 @@ fn unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block() {
                 .expect("build rayon pool");
             pool.install(|| {
                 for engine in [ScoringEngine::Buffered, ScoringEngine::Fold] {
-                    let base = Zensim::new(ZensimProfile::B)
+                    let base = Zensim::new(common::legacy_full_profile())
                         .with_parallel(true)
                         .with_engine(engine);
-                    let skipping = Zensim::new(ZensimProfile::B)
+                    let skipping = Zensim::new(common::legacy_full_profile())
                         .with_parallel(true)
                         .with_engine(engine)
                         .with_unread_feature_skipping(true);
@@ -740,7 +740,7 @@ fn folded944_is_bit_identical_across_rayon_pool_sizes() {
                 .build()
                 .expect("build rayon pool");
             let bits: Vec<u64> = pool.install(|| {
-                let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(true);
+                let z = Zensim::new(common::legacy_full_profile()).with_parallel(true);
                 let mut scratch = V2Scratch::new();
                 let v2 = z
                     .compute_folded720_features_streaming(

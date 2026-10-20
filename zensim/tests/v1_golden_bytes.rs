@@ -1421,8 +1421,8 @@ pub const GOLDEN_NONTIGHT: [f64; 372] = [
 #[cfg(feature = "feature-regime-v2")]
 #[test]
 fn fold_backed_fixtures_match_golden() {
-    use zensim::{RgbSlice, Zensim, ZensimProfile, fold_engine::ScoringEngine};
-    let z = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
+    use zensim::{RgbSlice, Zensim, fold_engine::ScoringEngine};
+    let z = Zensim::new(common::legacy_full_profile()).with_engine(ScoringEngine::Fold);
     let feats = |r: &[[u8; 3]], d: &[[u8; 3]], w: usize, h: usize| -> Vec<f64> {
         z.compute_extended_features(&RgbSlice::new(r, w, h), &RgbSlice::new(d, w, h))
             .expect("fold-backed extended features")
