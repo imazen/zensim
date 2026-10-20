@@ -3428,13 +3428,14 @@ pub(crate) mod tests {
         let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert_eq!(
             cs.v1_pools,
-            V1PoolsMode::Full,
-            "B reads the whole pool block"
+            V1PoolsMode::Off,
+            "diff+frag B reads no pooled v1 inputs"
         );
-        assert!(!cs.v2_blocks, "B's bake is a 372-wide v1-layout bake");
+        assert!(cs.v2_blocks, "diff+frag B reads the v2 block");
 
         let config = crate::metric::config_from_params(params, false);
-        let want = crate::fold_engine::score_pool_mode(params, &config, true);
+        let want = crate::Zensim::new(ZensimProfile::B).score_pool_mode();
+        assert_eq!(config.revision(), FormulaRevision::Rev5);
         assert_eq!(
             cs.v1_pools, want,
             "bake plan disagrees with the tested score_pool_mode path"
@@ -5778,7 +5779,7 @@ pub(crate) mod tests {
         let sref = RgbSlice::new(&src, w, h);
         let dref = RgbSlice::new(&dst, w, h);
 
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let z = crate::Zensim::new(crate::ZensimProfile::PreviewV0_2).with_parallel(false);
         let v1 = z.compute_extended_features(&sref, &dref).unwrap();
         let v1f = v1.features();
         let folded = z.compute_folded720_features(&sref, &dref).unwrap();

@@ -703,9 +703,14 @@ pub(crate) mod tests {
                     continue;
                 };
                 let l = declared_layout(&m);
+                let derived = crate::derived_inputs::from_model(&m).unwrap();
+                let gather = derived.as_ref().map_or(m.caller_input_width(), |d| {
+                    assert_eq!(d.model_width(), m.caller_input_width());
+                    d.gather_width()
+                });
                 assert_eq!(
                     l.width(),
-                    m.caller_input_width(),
+                    gather,
                     "{name}: layout {} is {} wide but the bake asks for {}",
                     l.name(),
                     l.width(),
@@ -723,8 +728,8 @@ pub(crate) mod tests {
                     );
                     assert_eq!(
                         l.width(),
-                        m.n_inputs(),
-                        "{name}: a dense bake's layout, caller width and n_inputs are one number"
+                        gather,
+                        "{name}: a dense bake must fill every gathered input"
                     );
                 }
                 n += 1;

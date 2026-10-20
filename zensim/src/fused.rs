@@ -5675,11 +5675,9 @@ fn fused_vblur_ssim_canon64_vec<P: crate::featcanon::Pool64>(
     let local = P::LANES == 16;
     if local {
         if radius > 0 {
-            #[cfg(feature = "feature-regime-v2")]
             crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 4);
         }
         if !free.local_only && !free.omit_peaks {
-            #[cfg(feature = "feature-regime-v2")]
             crate::fold_timing::work(crate::fold_timing::Work::PeakBand, 1);
         }
     }

@@ -906,7 +906,7 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 mod tests {
     #[test]
     fn declared_difference_plan_omits_reference_fragility_and_union_restores_it() {
@@ -1093,7 +1093,7 @@ mod tests {
                             "{w}x{h} parallel={parallel} f{id}"
                         );
                     }
-                    let pre = crate::Zensim::new(crate::ZensimProfile::B)
+                    let pre = crate::Zensim::new(crate::ZensimProfile::PreviewV0_2)
                         .with_parallel(parallel)
                         .precompute_reference(&crate::RgbSlice::new(&src, w, h))
                         .unwrap();
@@ -1521,7 +1521,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 mod toggle_gates {
     use super::*;
 
@@ -1720,7 +1720,7 @@ pub(crate) fn apply_registered_slot_selection(
 /// filesystem tier (board bakes, stored-table parity) is
 /// `zensim/examples/serve_custom_bake.rs --census`, which drives the same
 /// `Zensim::compute` entry.
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 pub(crate) mod servability_census {
     use super::*;
     use crate::feature_set_id::ComputeToken as T;
@@ -1848,6 +1848,26 @@ pub(crate) mod servability_census {
                 );
                 let mut scorer = BakeScorer::new(&model).unwrap();
                 let served = scorer.compute(&rs, &ds, None).unwrap();
+                let full = if plan.compute.formula_revision
+                    == crate::feature_defs::FormulaRevision::Rev5
+                {
+                    let want = SlotSet::from_slots((0..228).chain(372..720));
+                    let mut baseline = Plan::derive(&want, 720).unwrap();
+                    baseline.compute.formula_revision = crate::feature_defs::FormulaRevision::Rev5;
+                    baseline.compute.rev5_scope();
+                    crate::feature_v2::compute_folded720_streaming_impl(
+                        &rs,
+                        &ds,
+                        None,
+                        true,
+                        baseline.toggles(),
+                        &mut V2Scratch::new(),
+                        Some(baseline.compute),
+                    )
+                    .unwrap()
+                } else {
+                    full.clone()
+                };
                 for id in want.iter_slots() {
                     let a = served.features()[id];
                     let b = full.features()[id];

@@ -148,7 +148,6 @@ impl DerivedInputs {
     /// its id, a live `product` reads both factors. `declared` is the bake's
     /// ascending declared id list; `live` is indexed by model input.
     /// Only the feature planner (`feature-regime-v2`) asks.
-    #[cfg(feature = "feature-regime-v2")]
     pub(crate) fn read_slots(&self, declared: &[usize], live: &[bool]) -> Option<SlotSet> {
         if live.len() != self.inputs.len() || declared.len() != self.gather_width {
             return None;

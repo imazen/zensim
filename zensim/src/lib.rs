@@ -331,17 +331,18 @@ pub mod feature_set_id;
 #[allow(dead_code)]
 pub(crate) mod feature_defs;
 
-#[cfg(feature = "feature-regime-v2")]
 mod gmsbank_constants;
 
-// V2 "bounded" feature extraction — opt-in, strictly additive. See
+// The Rev5 runtime is mandatory for B; its research API remains opt-in. See
 // feature_v2.rs's module doc and docs/FEATURE_V2_SPEC_2026-07-18.md.
 #[cfg(feature = "feature-regime-v2")]
 pub mod feature_v2;
+#[cfg(not(feature = "feature-regime-v2"))]
+#[allow(dead_code)] // private runtime; research API stays opt-in
+mod feature_v2;
 
 // Streaming strip-plane producer for the folded-720+append walk
 // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
-#[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
 
 // NEIGHSTEER (lane 2026-10-04): exact local refinement of the coarse-scale
@@ -450,7 +451,6 @@ pub fn declared_feature_ids(model: &crate::mlp::Model) -> Option<Vec<u16>> {
     )
 }
 
-#[cfg(feature = "feature-regime-v2")]
 #[allow(dead_code)]
 pub(crate) mod feature_plan;
 
@@ -458,7 +458,6 @@ pub(crate) mod feature_plan;
 // streaming fold walk — diagnostic only, no public surface, and every hook is
 // a resolved-`OnceLock` load when disabled.
 // benchmarks/fold_mt_scaling_2026-08-31.md
-#[cfg(feature = "feature-regime-v2")]
 pub(crate) mod fold_timing;
 
 // The fold-backed scoring engine (benchmarks/fold_engine_2026-08-31.md):
@@ -469,15 +468,15 @@ pub(crate) mod fold_timing;
 // engine selector for the parity gates and the perf comparison, not a product
 // knob. `Buffered` is the default for every profile except `ZensimProfile::D`
 // (`benchmarks/profile_d_notax_2026-09-01.md` — `D`'s whole reason to exist is
-// speed, so `Zensim::new` opts it into `Fold` itself). `feature-regime-v2` is
-// default-on as of 2026-09-01, so `fold_engine` is reachable (though still
-// `#[doc(hidden)]`, an internal selector rather than a documented product
-// knob) in a plain `cargo add zensim` build; `--no-default-features` still
-// removes the module and its type entirely, in which case every profile
-// including `D` runs the buffered walk unconditionally.
+// speed, so `Zensim::new` opts it into `Fold` itself). The feature gates the
+// public engine selector; private fold execution is also compiled in minimal
+// builds because B requires its model-bound Rev5 extraction.
 #[cfg(feature = "feature-regime-v2")]
 #[doc(hidden)]
 pub mod fold_engine;
+#[cfg(not(feature = "feature-regime-v2"))]
+#[allow(dead_code)] // private runtime; engine selector stays opt-in
+mod fold_engine;
 
 // **The RESEARCH engine** (phase 2 of the feature-system refactor,
 // `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`): one plan-driven, full-width,

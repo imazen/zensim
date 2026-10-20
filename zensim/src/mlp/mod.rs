@@ -1,10 +1,7 @@
 //! MLP runtime — load + forward pass for small dense networks.
 //!
-//! This module is the inference path for the deprecated
-//! [`ZensimProfile::A`](crate::profile::ZensimProfile) (behind the default-on
-//! `deprecated-profiles` feature), which scores feature vectors through a
-//! small MLP rather than the linear dot product used by the current default
-//! `B` and by V0_2. The on-disk format is ZNPR v3 — a
+//! This module serves the default diff+frag-820 B MLP and other named bakes.
+//! Historical V0_2 retains its in-source linear weights. The on-disk format is ZNPR v3 — a
 //! packed binary shipped via `include_bytes!` from the trained weights
 //! file. (v2 bakes are still loadable for backwards compatibility, but
 //! NEW bakes must be v3 per CLAUDE.md.)
@@ -46,8 +43,5 @@
 // re-export here only what `zensim::metric` and `zensim::profile`
 // actually consume.
 pub(crate) use zenpredict::{Model, Predictor};
-/// Layer-weight readers — used only by the fold engine's per-profile
-/// weight-skipping (`feature-regime-v2`), so re-exported under that gate to
-/// keep a default build free of unused imports.
-#[cfg(feature = "feature-regime-v2")]
+/// Layer-weight readers used by mandatory per-model feature planning.
 pub(crate) use zenpredict::{WeightStorage, f16_bits_to_f32};

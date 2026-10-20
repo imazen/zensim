@@ -145,7 +145,21 @@ pub(crate) fn compute_fold_backed(
     // `V1PoolsMode::Full`. See `score_plan`.
     plan: Option<&crate::feature_plan::Plan>,
 ) -> Result<ZensimResult, ZensimError> {
-    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_streaming_impl(
+    compute_fold_backed_stoppable(source, distorted, config, weights, scratch, plan, None)
+}
+
+pub(crate) fn compute_fold_backed_stoppable(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    scratch: &mut V2Scratch,
+    // The serving plan; `None` = today's unconditional v1 walk at
+    // `V1PoolsMode::Full`. See `score_plan`.
+    plan: Option<&crate::feature_plan::Plan>,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<ZensimResult, ZensimError> {
+    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_streaming_stoppable(
         source,
         distorted,
         None,
@@ -154,6 +168,7 @@ pub(crate) fn compute_fold_backed(
         plan,
         #[cfg(feature = "custom-profiles")]
         None,
+        stop,
     )?;
     // The fold emits its regime's width with `f372..` structurally zero. Keep
     // whichever is WIDER: the config's v1 width (a prefix, which the linear
@@ -256,13 +271,37 @@ pub(crate) fn compute_fold_backed_with_ref_plan(
     pool_mode: Option<crate::feature_v2::V1PoolsMode>,
     plan: Option<&crate::feature_plan::Plan>,
 ) -> Option<ZensimResult> {
-    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_with_ref_impl(
+    compute_fold_backed_with_ref_stoppable_plan(
+        precomputed,
+        distorted,
+        config,
+        weights,
+        scratch,
+        pool_mode,
+        plan,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_fold_backed_with_ref_stoppable_plan(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    scratch: &mut V2Scratch,
+    pool_mode: Option<crate::feature_v2::V1PoolsMode>,
+    plan: Option<&crate::feature_plan::Plan>,
+    stop: Option<&dyn enough::Stop>,
+) -> Option<ZensimResult> {
+    let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_with_ref_stoppable(
         precomputed,
         distorted,
         config.allow_multithreading,
         scratch,
         pool_mode,
         plan,
+        stop,
     )?;
     if let Some(plan) = plan {
         plan.check_emit_covered(features.len()).ok()?;
@@ -677,7 +716,7 @@ pub(crate) fn pools_mode_for_need(need: V1PoolNeed) -> crate::feature_v2::V1Pool
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 mod skip_policy_tests {
     use super::*;
     use crate::feature_v2::V1PoolsMode;
@@ -698,7 +737,7 @@ mod skip_policy_tests {
         // A one-element list today; it exists so a second shipped profile is a
         // one-line addition rather than a copy-paste of the body.
         #[allow(clippy::single_element_loop)]
-        for p in [ZensimProfile::B] {
+        for p in [ZensimProfile::BHdr] {
             let (params, config) = cfg_for(p);
             assert_eq!(
                 score_pool_mode(params, &config, true),
@@ -713,7 +752,7 @@ mod skip_policy_tests {
     /// no matter what the bake looks like.
     #[test]
     fn skipping_is_off_by_default() {
-        let z = crate::Zensim::new(ZensimProfile::B);
+        let z = crate::Zensim::new(ZensimProfile::BHdr);
         assert_eq!(z.score_pool_mode(), V1PoolsMode::Full);
         assert_eq!(
             z.clone()
@@ -736,9 +775,9 @@ mod skip_policy_tests {
         assert_eq!(
             need,
             V1PoolNeed {
-                peaks: true,
-                masked: true,
-                iw: true
+                peaks: false,
+                masked: false,
+                iw: false
             }
         );
         // Interned: the second call must agree with the first.
