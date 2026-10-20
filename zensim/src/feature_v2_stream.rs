@@ -38,7 +38,7 @@
 //! the window as a zero-copy slice when no reflection is needed
 //! (interior strips — the fast path the C2 walk reads in place).
 
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 use crate::feature_v2::gather_strip_halo;
 use crate::feature_v2::{HALO_P, HdrEncoding, STRIP_ROWS, reflect_101};
 use crate::source::{ImageSource, PixelFormat, SubsetView};
@@ -568,7 +568,8 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// [`Self::recycle`] refills it — steady-state batch extraction
     /// performs zero producer allocation (measured ~1.7k page
     /// faults/pair from fresh per-pair Vecs before this).
-    #[cfg_attr(not(test), allow(dead_code))] // production sites pass FrontEnd explicitly (new_with_front_end)
+    #[cfg(feature = "feature-regime-v2")]
+    #[cfg_attr(not(test), allow(dead_code))] // research/test constructor
     pub(crate) fn new(
         source: &'a S,
         distorted: &'a D,
@@ -579,6 +580,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     }
 
     /// Test/instrument constructor: the walk runs at the process revision.
+    #[cfg(feature = "feature-regime-v2")]
     pub(crate) fn new_with_front_end(
         source: &'a S,
         distorted: &'a D,
@@ -677,7 +679,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// [`Self::new`] with the production advance replaced — the injection point
     /// for `producer_windows_are_advance_invariant`, which is the direct gate
     /// on [`advance_rows_for`] being a schedule knob and not semantics.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "feature-regime-v2"))]
     pub(crate) fn new_with_advance(
         source: &'a S,
         distorted: &'a D,
@@ -1224,7 +1226,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     }
 
     /// Peak rows held per scale (test telemetry).
-    #[cfg(test)]
+    #[cfg(all(test, feature = "feature-regime-v2"))]
     pub(crate) fn max_held_rows(&self) -> &[usize] {
         &self.max_held_rows
     }
@@ -1352,7 +1354,7 @@ fn hdr_source_row_to_nits(
 // C1 unit gate: producer windows byte-equal the materialized-path planes.
 // ============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 mod tests {
     use super::*;
     use crate::source::RgbSlice;

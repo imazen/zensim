@@ -2465,25 +2465,54 @@ fn run_blur_pass_inner(
 
     let __t_pa = crate::fold_timing::start();
     let mu1 = &mut mu1[..n];
-    crate::blur::box_blur_v_from_copy(mu1_h, mu1, width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy_at_revision(
+        mu1_h,
+        mu1,
+        width,
+        height_local,
+        BLUR_RADIUS,
+        revision,
+    );
     let mu2 = &mut mu2[..n];
-    crate::blur::box_blur_v_from_copy(mu2_h, mu2, width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy_at_revision(
+        mu2_h,
+        mu2,
+        width,
+        height_local,
+        BLUR_RADIUS,
+        revision,
+    );
     let ssq = &mut ssq[..n];
-    crate::blur::box_blur_v_from_copy(ssq_h, ssq, width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy_at_revision(
+        ssq_h,
+        ssq,
+        width,
+        height_local,
+        BLUR_RADIUS,
+        revision,
+    );
     let s12 = &mut s12[..n];
-    crate::blur::box_blur_v_from_copy(s12_h, s12, width, height_local, BLUR_RADIUS);
+    crate::blur::box_blur_v_from_copy_at_revision(
+        s12_h,
+        s12,
+        width,
+        height_local,
+        BLUR_RADIUS,
+        revision,
+    );
 
     crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
     let abs_src = &mut abs_src[..n];
     crate::simd_ops::abs_diff_into(src, mu1, abs_src);
     let activity = &mut activity[..n];
-    crate::blur::box_blur_1pass_into(
+    crate::blur::box_blur_1pass_at_revision(
         abs_src,
         activity,
         &mut activity_tmp[..n],
         width,
         height_local,
         BLUR_RADIUS,
+        revision,
     );
     crate::fold_timing::stop(__t_pa, crate::fold_timing::Phase::PhaseAV2Planes, t_scale);
 }
@@ -3280,16 +3309,45 @@ fn dense_block_kernel(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
+    dense_block_kernel_at_revision(
+        src,
+        dst,
+        mu1,
+        mu2,
+        ssq,
+        s12,
+        activity,
+        width,
+        height,
+        transducer_bank,
+        r4,
+        crate::ssim_form::active_revision(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_at_revision(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
+    revision: FormulaRevision,
+) -> DenseAccum {
     // rev4canon: the computation's own mode selects the scalar
     // `Pool`-generic canon body — `LanesF64` (c64) at Rev4, the oracle arms
     // under `ZENSIM_FEATCANON` (`LanesF32` replays era-2 bitwise — the
     // superseded c32 canon). `compute_mode()` is `mode(comp_rev)` here (see
     // it for the guarantee); `Off` at every revision < 4 keeps the shipped
     // era-1/era-2 dispatch byte-for-byte.
-    let mode = crate::featcanon::compute_mode();
-    if crate::ssim_form::active_revision() >= FormulaRevision::Rev5
-        && matches!(mode, crate::featcanon::Mode::Canon64)
-    {
+    let mode = crate::featcanon::mode(revision);
+    if revision >= FormulaRevision::Rev5 && matches!(mode, crate::featcanon::Mode::Canon64) {
         let acc = incant!(
             dense_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64>(
                 src,
@@ -3303,6 +3361,7 @@ fn dense_block_kernel(
                 height,
                 transducer_bank,
                 r4,
+                revision,
             ),
             [v4x, v4, v3, neon, wasm128, scalar]
         );
@@ -3339,6 +3398,7 @@ fn dense_block_kernel(
                         height,
                         transducer_bank,
                         r4,
+                        revision,
                     ),
                     [v4x, v4, v3, neon, wasm128, scalar]
                 );
@@ -3357,6 +3417,7 @@ fn dense_block_kernel(
                     height,
                     transducer_bank,
                     r4,
+                    revision,
                 );
             }
             #[cfg(feature = "oracle")]
@@ -3373,6 +3434,7 @@ fn dense_block_kernel(
                     height,
                     transducer_bank,
                     r4,
+                    revision,
                 );
             }
             #[cfg(feature = "oracle")]
@@ -5431,6 +5493,33 @@ fn gradient_block_kernel(
     r4: Option<Rev4Grad<'_>>,
     gmsbank: bool,
 ) -> GradientAccum {
+    gradient_block_kernel_at_revision(
+        src,
+        dst,
+        activity,
+        width,
+        height,
+        bandvis,
+        bv_act_dst,
+        r4,
+        gmsbank,
+        crate::ssim_form::active_revision(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gradient_block_kernel_at_revision(
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    bandvis: Option<(f32, f32)>,
+    bv_act_dst: Option<&[f32]>,
+    r4: Option<Rev4Grad<'_>>,
+    gmsbank: bool,
+    revision: FormulaRevision,
+) -> GradientAccum {
     // rev4canon: the computation's own mode routes through the scalar
     // `Pool`-generic mirror (same halo contract, same borders) — `LanesF64`
     // (the Rev4 canon) or the oracle arms under `ZENSIM_FEATCANON`.
@@ -5438,7 +5527,7 @@ fn gradient_block_kernel(
     // `Off` below Rev4 keeps the shipped SIMD bodies byte-for-byte.
     // `bv_act_dst` is ignored without `bandvis`, as in the production match
     // below.
-    let mode = crate::featcanon::compute_mode();
+    let mode = crate::featcanon::mode(revision);
     if mode.active() {
         use crate::featcanon::Mode;
         #[cfg(feature = "oracle")]
@@ -5517,7 +5606,7 @@ fn gradient_block_kernel(
         // keep the generic scalar canonical body.
         macro_rules! go64 {
             ($b:literal, $v:literal, $k:literal, $act_dst:expr, $lo:expr, $hi:expr) => {
-                if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+                if revision >= FormulaRevision::Rev5 {
                 incant!(
                     gradient_block_kernel_canon64_vec::<crate::featcanon::Lanes16F64, $b, $v, $k>(
                         src, dst, activity, $act_dst, width, height, $lo, $hi, r4, m,

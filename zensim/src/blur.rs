@@ -74,6 +74,21 @@ pub fn box_blur_1pass_into(
     box_blur_v_from_copy(temp, output, width, height, radius);
 }
 
+/// One-pass blur using the request's arithmetic on both axes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn box_blur_1pass_at_revision(
+    input: &[f32],
+    output: &mut [f32],
+    temp: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    box_blur_h_at_revision(input, temp, width, height, radius, revision);
+    box_blur_v_from_copy_at_revision(temp, output, width, height, radius, revision);
+}
+
 /// Vertical box blur: read from `src`, write to `dst`.
 pub fn box_blur_v_from_copy(
     src: &[f32],
@@ -82,9 +97,26 @@ pub fn box_blur_v_from_copy(
     height: usize,
     radius: usize,
 ) {
+    box_blur_v_from_copy_at_revision(
+        src,
+        dst,
+        width,
+        height,
+        radius,
+        crate::ssim_form::active_revision(),
+    )
+}
+
+pub(crate) fn box_blur_v_from_copy_at_revision(
+    src: &[f32],
+    dst: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) {
     #[cfg(feature = "feature-regime-v2")]
     crate::fold_timing::work(crate::fold_timing::Work::VerticalPlane, 1);
-    let revision = crate::ssim_form::active_revision();
     if matches!(
         crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
         crate::featcanon::BlurMode::Local
@@ -760,7 +792,24 @@ pub(crate) fn box_blur_h(
     height: usize,
     radius: usize,
 ) {
-    let revision = crate::ssim_form::active_revision();
+    box_blur_h_at_revision(
+        input,
+        output,
+        width,
+        height,
+        radius,
+        crate::ssim_form::active_revision(),
+    )
+}
+
+pub(crate) fn box_blur_h_at_revision(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) {
     if matches!(
         crate::featcanon::canon_blur_axis_for(crate::featcanon::mode(revision), revision),
         crate::featcanon::BlurMode::Local

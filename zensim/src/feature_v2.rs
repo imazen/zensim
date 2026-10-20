@@ -1782,7 +1782,7 @@ fn pjnd_transducer(raw_abs_err: f64, act: f64, k: f64, c: f64) -> f64 {
 
 include!("feature_v2_kernels.rs");
 
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 mod global_contrast_rev2_tests {
     use super::*;
 
@@ -2129,51 +2129,55 @@ impl V1BasicSums {
 
     /// Merge-level accumulator fed by `accumulate` (f64 strip partials).
     fn meas_f64() -> Self {
+        Self::at_revision(crate::ssim_form::active_revision())
+    }
+
+    fn at_revision(revision: FormulaRevision) -> Self {
         use crate::featcanon::SumVar;
         Self {
-            ssim_d: SumVar::f64_elems_meas(),
-            ssim_d4: SumVar::f64_elems_meas(),
-            ssim_d2: SumVar::f64_elems_meas(),
-            edge_art: SumVar::f64_elems_meas(),
-            edge_art4: SumVar::f64_elems_meas(),
-            edge_art2: SumVar::f64_elems_meas(),
-            edge_det: SumVar::f64_elems_meas(),
-            edge_det4: SumVar::f64_elems_meas(),
-            edge_det2: SumVar::f64_elems_meas(),
-            mse: SumVar::f64_elems_meas(),
-            hf_sq_src: SumVar::f64_elems_meas(),
-            hf_sq_dst: SumVar::f64_elems_meas(),
-            hf_abs_src: SumVar::f64_elems_meas(),
-            hf_abs_dst: SumVar::f64_elems_meas(),
-            ssim_d8: SumVar::f64_elems_meas(),
-            edge_art8: SumVar::f64_elems_meas(),
-            edge_det8: SumVar::f64_elems_meas(),
+            ssim_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            ssim_d4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            ssim_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_art: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_art4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_art2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_det: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_det4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_det2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            mse: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            hf_sq_src: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            hf_sq_dst: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            hf_abs_src: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            hf_abs_dst: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            ssim_d8: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_art8: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            edge_det8: SumVar::f64_elems(crate::featcanon::mode(revision)),
             ssim_max: 0.0,
             edge_art_max: 0.0,
             edge_det_max: 0.0,
-            masked_ssim_d: SumVar::f64_elems_meas(),
-            masked_ssim_d4: SumVar::f64_elems_meas(),
-            masked_ssim_d2: SumVar::f64_elems_meas(),
-            masked_art4: SumVar::f64_elems_meas(),
-            masked_det4: SumVar::f64_elems_meas(),
-            masked_mse: SumVar::f64_elems_meas(),
-            iw_ssim_d: SumVar::f64_elems_meas(),
-            iw_ssim_d4: SumVar::f64_elems_meas(),
-            iw_ssim_d2: SumVar::f64_elems_meas(),
-            iw_art4: SumVar::f64_elems_meas(),
-            iw_det4: SumVar::f64_elems_meas(),
-            iw_mse: SumVar::f64_elems_meas(),
-            sum_s: SumVar::f64_elems_meas(),
-            sum_d: SumVar::f64_elems_meas(),
-            sum_s2: SumVar::f64_elems_meas(),
-            sum_d2: SumVar::f64_elems_meas(),
-            sum_dd: SumVar::f64_elems_meas(),
-            sum_ds: SumVar::f64_elems_meas(),
-            sum_msat: SumVar::f64_elems_meas(),
-            lum_wd_num: SumVar::f64_elems_meas(),
-            lum_wd_den: SumVar::f64_elems_meas(),
-            lum_wb_num: SumVar::f64_elems_meas(),
-            lum_wb_den: SumVar::f64_elems_meas(),
+            masked_ssim_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            masked_ssim_d4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            masked_ssim_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            masked_art4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            masked_det4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            masked_mse: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            iw_ssim_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            iw_ssim_d4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            iw_ssim_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            iw_art4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            iw_det4: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            iw_mse: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_s: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_d: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_s2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_d2: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_dd: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_ds: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            sum_msat: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            lum_wd_num: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            lum_wd_den: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            lum_wb_num: SumVar::f64_elems(crate::featcanon::mode(revision)),
+            lum_wb_den: SumVar::f64_elems(crate::featcanon::mode(revision)),
         }
     }
 
@@ -3171,7 +3175,7 @@ fn fold_v1_basic_bands(
                         let mut out = Vec::with_capacity(chunk.len());
                         for &b0 in chunk {
                             let __t = crate::fold_timing::start();
-                            let mut local = V1BasicSums::meas_f64();
+                            let mut local = V1BasicSums::at_revision(free.revision());
                             fold_v1_one_band(
                                 b0,
                                 width,
@@ -3202,7 +3206,7 @@ fn fold_v1_basic_bands(
                 .par_iter()
                 .map(|&b0| {
                     let __t = crate::fold_timing::start();
-                    let mut local = V1BasicSums::meas_f64();
+                    let mut local = V1BasicSums::at_revision(free.revision());
                     fold_v1_one_band(
                         b0,
                         width,
@@ -3231,7 +3235,7 @@ fn fold_v1_basic_bands(
 
     let mut pools = pools;
     for (i, &b0) in starts.iter().enumerate() {
-        let mut local = V1BasicSums::meas_f64();
+        let mut local = V1BasicSums::at_revision(free.revision());
         fold_v1_one_band(
             b0,
             width,
@@ -3612,6 +3616,27 @@ pub(crate) fn finish_channel_scale_planned(
     out: &mut [f64],
     omit_pjnd_fragility: bool,
 ) -> (f64, f64) {
+    finish_channel_scale_at_revision(
+        dense,
+        grad,
+        sum_blockiness,
+        n,
+        out,
+        omit_pjnd_fragility,
+        crate::ssim_form::active_revision(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn finish_channel_scale_at_revision(
+    dense: &DenseAccum,
+    grad: &GradientAccum,
+    sum_blockiness: f64,
+    n: usize,
+    out: &mut [f64],
+    omit_pjnd_fragility: bool,
+    revision: FormulaRevision,
+) -> (f64, f64) {
     let n_f = n as f64;
 
     // --- Raw-moment -> central-moment conversion (§A.14 module doc):
@@ -3635,7 +3660,7 @@ pub(crate) fn finish_channel_scale_planned(
         )
     };
     let dev2 = m2.sqrt();
-    let dev4 = m4.quarter_root(crate::det_math::active_root_form());
+    let dev4 = m4.quarter_root(crate::det_math::RootForm::at_revision(Some(revision)));
 
     // Phase-6 (§A.16): defensive bounds clamp on the FINAL feature value
     // (called once per channel-scale, O(1) not O(pixels) — cheap). Not
@@ -4663,8 +4688,8 @@ impl Rev5StripJob {
             ch,
             scratch: ScratchV2Strip::new(0),
             sized_for: 0,
-            result: StreamChannelAccums::new(crate::NUM_SCALES, 1),
-            bands: core::array::from_fn(|_| V1BasicSums::meas_f64()),
+            result: StreamChannelAccums::at_revision(crate::NUM_SCALES, 1, FormulaRevision::Rev5),
+            bands: core::array::from_fn(|_| V1BasicSums::at_revision(FormulaRevision::Rev5)),
         }
     }
 
@@ -4784,22 +4809,24 @@ fn rev5_job_blur(
         (&ssq_h[..n], &mut ssq[..n]),
         (&s12_h[..n], &mut s12[..n]),
     ] {
-        crate::blur::box_blur_v_from_copy(
+        crate::blur::box_blur_v_from_copy_at_revision(
             horizontal,
             vertical,
             info.plane_w,
             info.wide_h(),
             BLUR_RADIUS,
+            revision,
         );
     }
     crate::simd_ops::abs_diff_into(src, &mu1[..n], &mut mu1_h[..n]);
-    crate::blur::box_blur_1pass_into(
+    crate::blur::box_blur_1pass_at_revision(
         &mu1_h[..n],
         &mut activity[..n],
         &mut mu2_h[..n],
         info.plane_w,
         info.wide_h(),
         BLUR_RADIUS,
+        revision,
     );
     crate::fold_timing::work(crate::fold_timing::Work::ActivityChain, 1);
     crate::fold_timing::work(crate::fold_timing::Work::V2Cell, 1);
@@ -4909,7 +4936,7 @@ fn rev5_run_jobs(
             ]);
             let mut b0 = info.y0;
             for band in &mut job.bands[..info.strip_h.div_ceil(V1_BAND_ROWS)] {
-                *band = V1BasicSums::meas_f64();
+                *band = V1BasicSums::at_revision(FormulaRevision::Rev5);
                 b0 = fold_v1_one_band(
                     b0,
                     info.plane_w,
@@ -4979,17 +5006,17 @@ impl StreamChannelAccums {
     /// see [`band_slots_for`]. It is a CAPACITY, not a tiling: bands are
     /// chunked across whatever slots exist (`fold_v1_basic_bands`), so any
     /// count in `1..=V1_BANDS_PER_STRIP` computes the same bytes.
-    fn new(n_scales: usize, n_band_slots: usize) -> Self {
+    fn at_revision(n_scales: usize, n_band_slots: usize, revision: FormulaRevision) -> Self {
         Self {
             retained_strips: None,
             dense: vec![DenseAccum::default(); n_scales],
             grad: vec![GradientAccum::default(); n_scales],
             app: vec![AppendAccum::default(); n_scales],
-            v1: vec![V1BasicSums::meas_f64(); n_scales],
+            v1: vec![V1BasicSums::at_revision(revision); n_scales],
             block: vec![
                 (
-                    crate::featcanon::SumVar::f64_elems_meas(),
-                    crate::featcanon::SumVar::f64_elems_meas()
+                    crate::featcanon::SumVar::f64_elems(crate::featcanon::mode(revision)),
+                    crate::featcanon::SumVar::f64_elems(crate::featcanon::mode(revision))
                 );
                 n_scales
             ],
@@ -5609,7 +5636,7 @@ fn stream_phase_b(
         } else {
             None
         };
-        let d = dense_block_kernel(
+        let d = dense_block_kernel_at_revision(
             src_strip,
             dst_strip,
             mu1_strip,
@@ -5621,6 +5648,7 @@ fn stream_phase_b(
             strip_h,
             toggles.transducer_bank,
             r4d,
+            toggles.formula_revision,
         );
         crate::fold_timing::stop(__t_dense, crate::fold_timing::Phase::DenseKernel, scale);
         acc.dense[scale].accumulate(&d);
@@ -5658,7 +5686,7 @@ fn stream_phase_b(
                 None
             };
             let __t_grad = crate::fold_timing::start();
-            let g = gradient_block_kernel(
+            let g = gradient_block_kernel_at_revision(
                 &src_win[g_off..g_off + g_n],
                 &dst_win[g_off..g_off + g_n],
                 act_strip,
@@ -5668,6 +5696,7 @@ fn stream_phase_b(
                 bv_act_dst,
                 r4g,
                 r4w.gmsbank,
+                toggles.formula_revision,
             );
             crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
@@ -6549,7 +6578,12 @@ pub(crate) fn compute_folded720_streaming_extras(
     scratch: &mut V2Scratch,
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
-    validate_wide_revision(toggles)?;
+    if !extras
+        .compute
+        .is_some_and(|c| c.formula_revision == FormulaRevision::Rev5)
+    {
+        validate_wide_revision(toggles)?;
+    }
     if extras.compute.is_none() {
         validate_raw_rev5_request(toggles)?;
     }
@@ -6655,6 +6689,34 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
     plan: Option<&crate::feature_plan::Plan>,
     #[cfg(feature = "custom-profiles")] retention: Option<&mut FoldRetention>,
 ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
+    compute_folded_v1_372_streaming_stoppable(
+        source,
+        distorted,
+        max_pixels,
+        parallel,
+        scratch,
+        plan,
+        #[cfg(feature = "custom-profiles")]
+        retention,
+        None,
+    )
+}
+
+pub(crate) fn compute_folded_v1_372_streaming_stoppable(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    scratch: &mut V2Scratch,
+    // The serving PLAN, resolved by `fold_engine::score_plan` from the
+    // profile's bakes. `None` = the unconditional pre-2026-08-31 behaviour
+    // (`V1PoolsMode::Full`, v1-only, v1 layout) — spelled out below as a
+    // literal rather than reconstructed from a plan, so the default path is
+    // the SAME code, not merely an equivalent one.
+    plan: Option<&crate::feature_plan::Plan>,
+    #[cfg(feature = "custom-profiles")] retention: Option<&mut FoldRetention>,
+    stop: Option<&dyn enough::Stop>,
+) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     if source.is_hdr() || distorted.is_hdr() {
@@ -6674,7 +6736,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         && let Some(sampling) = p.compute.sampling
     {
         let dims = sampling.dims(source.width(), source.height());
-        let mut mo = MeanOffsetRows::new(dims[0].0, dims[0].1);
+        let mut mo = MeanOffsetRows::at_revision(dims[0].0, dims[0].1, toggles.formula_revision);
         let res = foldapp_streaming_walk(
             source,
             distorted,
@@ -6683,6 +6745,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
             FoldWalkExtras {
+                stop,
                 compute: Some(p.compute),
                 mean_offset: Some(&mut mo),
                 #[cfg(feature = "custom-profiles")]
@@ -6702,7 +6765,11 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
     {
         let padded_src = crate::metric::reflect_pad_to_min(source);
         let padded_dst = crate::metric::reflect_pad_to_min(distorted);
-        let mut mo = MeanOffsetRows::new(padded_src.width(), padded_src.height());
+        let mut mo = MeanOffsetRows::at_revision(
+            padded_src.width(),
+            padded_src.height(),
+            toggles.formula_revision,
+        );
         let res = foldapp_streaming_walk(
             &padded_src,
             &padded_dst,
@@ -6711,6 +6778,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
             FoldWalkExtras {
+                stop,
                 compute: plan.map(|p| p.compute),
                 mean_offset: Some(&mut mo),
                 #[cfg(feature = "custom-profiles")]
@@ -6720,7 +6788,8 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         );
         return Ok((res.into_features(), mo.finish()));
     }
-    let mut mo = MeanOffsetRows::new(source.width(), source.height());
+    let mut mo =
+        MeanOffsetRows::at_revision(source.width(), source.height(), toggles.formula_revision);
     let res = foldapp_streaming_walk(
         source,
         distorted,
@@ -6729,6 +6798,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
         FoldWalkExtras {
+            stop,
             compute: plan.map(|p| p.compute),
             mean_offset: Some(&mut mo),
             #[cfg(feature = "custom-profiles")]
@@ -6794,6 +6864,26 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     pool_mode: Option<V1PoolsMode>,
     plan: Option<&crate::feature_plan::Plan>,
 ) -> Option<(Vec<f64>, [f64; 3])> {
+    compute_folded_v1_372_with_ref_stoppable(
+        precomputed,
+        distorted,
+        parallel,
+        scratch,
+        pool_mode,
+        plan,
+        None,
+    )
+}
+
+pub(crate) fn compute_folded_v1_372_with_ref_stoppable(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+    parallel: bool,
+    scratch: &mut V2Scratch,
+    pool_mode: Option<V1PoolsMode>,
+    plan: Option<&crate::feature_plan::Plan>,
+    stop: Option<&dyn enough::Stop>,
+) -> Option<(Vec<f64>, [f64; 3])> {
     if !ref_feed_admits(precomputed, distorted, plan) {
         return None;
     }
@@ -6806,7 +6896,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
         },
         crate::feature_plan::Plan::toggles,
     );
-    let mut mo = MeanOffsetRows::new(cw, ch);
+    let mut mo = MeanOffsetRows::at_revision(cw, ch, toggles.formula_revision);
     // `source` is unused by the producer on the cached feed (every source-side
     // row is copied from the cache); it is still the type parameter, so pass
     // the distorted image and let the feed override it. The producer's
@@ -6820,6 +6910,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
         FoldWalkExtras {
+            stop,
             mean_offset: Some(&mut mo),
             ref_planes: Some(&precomputed.scales),
             compute: plan.map(|p| p.compute),
@@ -6893,7 +6984,8 @@ pub(crate) fn retained_ref_feed_admits(
         return false;
     }
     plan.compute.formula_revision >= FormulaRevision::Rev5
-        && crate::ssim_form::active_revision() == plan.compute.formula_revision
+        && crate::featcanon::mode(precomputed.formula_revision)
+            == crate::featcanon::mode(plan.compute.formula_revision)
         && ref_feed_admits(precomputed, distorted, Some(plan))
 }
 
@@ -6917,7 +7009,11 @@ pub(crate) fn compute_folded_with_ref_retained(
     debug_assert!(retained_ref_feed_admits(precomputed, distorted, plan));
     #[cfg(test)]
     REF_FEED_HITS.with(|hits| hits.set(hits.get() + 1));
-    let mut mo = MeanOffsetRows::new(source.width(), source.height());
+    let mut mo = MeanOffsetRows::at_revision(
+        source.width(),
+        source.height(),
+        plan.compute.formula_revision,
+    );
     let res = foldapp_streaming_walk(
         source,
         distorted,
@@ -6930,6 +7026,7 @@ pub(crate) fn compute_folded_with_ref_retained(
             mean_offset: Some(&mut mo),
             retention,
             ref_planes: Some(&precomputed.scales),
+            stop: None,
         },
     );
     (res.into_features(), mo.finish())
@@ -6988,7 +7085,12 @@ pub(crate) fn compute_folded720_hdr_streaming_extras(
     scratch: &mut V2Scratch,
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
-    validate_wide_revision(toggles)?;
+    if !extras
+        .compute
+        .is_some_and(|c| c.formula_revision == FormulaRevision::Rev5)
+    {
+        validate_wide_revision(toggles)?;
+    }
     if extras.compute.is_none() {
         validate_raw_rev5_request(toggles)?;
     }
@@ -7468,9 +7570,13 @@ pub(crate) struct MeanOffsetRows {
 
 impl MeanOffsetRows {
     pub(crate) fn new(width: usize, height: usize) -> Self {
+        Self::at_revision(width, height, crate::ssim_form::active_revision())
+    }
+
+    fn at_revision(width: usize, height: usize, revision: FormulaRevision) -> Self {
         // Rev5 exposes no global XYB offset: the supported model inputs do
         // not consume it. Keep a zero metadata value without an image pass.
-        let height = if crate::ssim_form::active_revision() >= FormulaRevision::Rev5 {
+        let height = if revision >= FormulaRevision::Rev5 {
             0
         } else {
             height
@@ -7586,6 +7692,8 @@ impl MeanOffsetRows {
 /// byte-for-byte the walk as it was before any of them existed.
 #[derive(Default)]
 pub(crate) struct FoldWalkExtras<'a> {
+    // A cancelled partial walk is discarded by the named scorer's post-check.
+    pub(crate) stop: Option<&'a dyn enough::Stop>,
     /// Resolved model/research plan; raw public extraction keeps all channels.
     pub(crate) compute: Option<ComputeSet>,
     /// Appendix-N retention hooks (the fused-944 attribution session).
@@ -7632,6 +7740,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     extras: FoldWalkExtras<'_>,
 ) -> ZensimV2Result {
     let FoldWalkExtras {
+        stop,
         mut retention,
         mut mean_offset,
         ref_planes,
@@ -7851,8 +7960,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         && retention.is_some()
         && compute.formula_revision >= FormulaRevision::Rev5
         && compute.v2_blocks;
-    let mut accums: [StreamChannelAccums; 3] =
-        std::array::from_fn(|_| StreamChannelAccums::new(n_scales, band_slots_for(band_parallel)));
+    let mut accums: [StreamChannelAccums; 3] = std::array::from_fn(|_| {
+        StreamChannelAccums::at_revision(
+            n_scales,
+            band_slots_for(band_parallel),
+            compute.formula_revision,
+        )
+    });
     // REV4 C4's strip scratch — sized for the largest plane width; the
     // per-strip build slices it down to `info.plane_w`.
     let mut bleed_work = compute
@@ -7908,6 +8022,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
 
     let __t_walk = crate::fold_timing::start();
     loop {
+        if stop.is_some_and(|token| token.check().is_err()) {
+            break;
+        }
         let __t_prod = crate::fold_timing::start();
         let next = producer.next_strip();
         let Some(info) = next else {
@@ -8653,13 +8770,14 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             } else {
                 0.0
             };
-            grads[ch] = finish_channel_scale_planned(
+            grads[ch] = finish_channel_scale_at_revision(
                 &acc.dense[scale],
                 &acc.grad[scale],
                 sum_blockiness,
                 n,
                 out,
                 compute.omit_pjnd_fragility,
+                compute.formula_revision,
             );
             if append_cell_active(append_on, ch, scale) {
                 let out_app = &mut features_app
@@ -12050,6 +12168,7 @@ fn compute_v2_append_attribution_impl(
 // Tests
 // ============================================================================
 
+#[cfg(feature = "feature-regime-v2")]
 include!("feature_v2_tests.rs");
 
 include!("feature_v2_oracle.rs");

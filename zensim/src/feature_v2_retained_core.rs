@@ -12,7 +12,6 @@ pub(super) struct RetainedCoreWork {
 
 pub(super) fn retained_core_admits(local: &ComputeSet) -> bool {
     local.formula_revision == FormulaRevision::Rev5
-        && crate::ssim_form::active_revision() == FormulaRevision::Rev5
         && matches!(
             crate::featcanon::mode(local.formula_revision),
             crate::featcanon::Mode::Canon64
@@ -117,7 +116,14 @@ pub(super) fn rev5_blur_into_retained(
         &mu1[end * width..n],
         &mut mu1_h[end * width..n],
     );
-    crate::blur::box_blur_h(&mu1_h[..n], &mut mu2_h[..n], width, height, BLUR_RADIUS);
+    crate::blur::box_blur_h_at_revision(
+        &mu1_h[..n],
+        &mut mu2_h[..n],
+        width,
+        height,
+        BLUR_RADIUS,
+        FormulaRevision::Rev5,
+    );
     crate::blur::box_blur_v_local_rows(&mu2_h[..n], act, width, height, first..end);
     // Five logical vertical planes; the mean-reference plane is partitioned
     // into two scratch halos and the retained core.
@@ -144,7 +150,7 @@ pub(super) fn rev5_retained_phase_b(
     let off = HALO_P * width;
     let [m1, m2, sq, err, act] = planes;
     let start = crate::fold_timing::start();
-    let d = dense_block_kernel(
+    let d = dense_block_kernel_at_revision(
         &raw[0][off..off + n],
         &raw[1][off..off + n],
         m1,
@@ -156,6 +162,7 @@ pub(super) fn rev5_retained_phase_b(
         info.strip_h,
         work.toggles.transducer_bank,
         None,
+        work.toggles.formula_revision,
     );
     crate::fold_timing::stop(start, crate::fold_timing::Phase::DenseKernel, info.scale);
     acc.dense[info.scale].accumulate(&d);
@@ -164,7 +171,7 @@ pub(super) fn rev5_retained_phase_b(
         let start = crate::fold_timing::start();
         let g_off = (HALO_P - 1) * width;
         let g_n = width * (info.strip_h + 2);
-        gradient = gradient_block_kernel(
+        gradient = gradient_block_kernel_at_revision(
             &raw[0][g_off..g_off + g_n],
             &raw[1][g_off..g_off + g_n],
             act,
@@ -174,6 +181,7 @@ pub(super) fn rev5_retained_phase_b(
             None,
             None,
             false,
+            work.toggles.formula_revision,
         );
         crate::fold_timing::stop(start, crate::fold_timing::Phase::GradKernel, info.scale);
         acc.grad[info.scale].accumulate(&gradient);
@@ -192,7 +200,7 @@ pub(super) fn rev5_retained_phase_b(
         let end = (first + V1_BAND_ROWS).min(info.strip_h);
         let core = first * width..end * width;
         let input = off + first * width..off + end * width;
-        *band = V1BasicSums::meas_f64();
+        *band = V1BasicSums::at_revision(work.toggles.formula_revision);
         // Radius zero reads only these inner rows. The same canonical owner
         // executes the same pixels in the same 32-row band order.
         band.accumulate(&crate::fused::fused_vblur_features_ssim(
@@ -245,7 +253,7 @@ pub(super) fn rev5_retained_single_channel<S: ImageSource, D: ImageSource>(
     rev5_blur_into_retained(info, scr, overrides, output);
     let (src, dst) = stream_windows_shared(producer, info, ch, scr);
     let mut bands: [V1BasicSums; V1_BANDS_PER_STRIP] =
-        core::array::from_fn(|_| V1BasicSums::meas_f64());
+        core::array::from_fn(|_| V1BasicSums::at_revision(work.toggles.formula_revision));
     rev5_retained_phase_b(
         info,
         [src, dst],

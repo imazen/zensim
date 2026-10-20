@@ -1250,9 +1250,10 @@ fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
     height: usize,
     transducer_bank: bool,
     mut r4: Option<Rev4Dense<'_>>,
+    revision: FormulaRevision,
 ) -> DenseAccum {
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    let stable = crate::ssim_form::active_revision() >= FormulaRevision::Rev5;
+    let direct = revision >= FormulaRevision::Rev3;
+    let stable = revision >= FormulaRevision::Rev5;
     let mut acc = DenseAccum::default();
     let mut b0 = 0usize;
     while b0 < height {
@@ -1542,9 +1543,10 @@ fn dense_block_kernel_canon64_vec<P: crate::featcanon::Pool64>(
     height: usize,
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
+    revision: FormulaRevision,
 ) -> DenseAccum {
     let mut r4 = r4;
-    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let direct = revision >= FormulaRevision::Rev3;
     let stable = P::LANES == 16;
     let mut acc = DenseAccum::default();
     // Provable-length plane slices: the chunk loop reads `i + 8 <= row +
@@ -1765,6 +1767,7 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64>(
     height: usize,
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
+    revision: FormulaRevision,
 ) -> DenseAccum {
     dense_block_kernel_canon::<P>(
         src,
@@ -1778,6 +1781,7 @@ fn dense_block_kernel_canon64_vec_scalar<P: crate::featcanon::Pool64>(
         height,
         transducer_bank,
         r4,
+        revision,
     )
 }
 
@@ -1796,6 +1800,7 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
     height: usize,
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
+    revision: FormulaRevision,
 ) -> DenseAccum {
     dense_block_kernel_canon::<P>(
         src,
@@ -1809,6 +1814,7 @@ fn dense_block_kernel_canon64_vec_wasm128<P: crate::featcanon::Pool64>(
         height,
         transducer_bank,
         r4,
+        revision,
     )
 }
 
@@ -1828,6 +1834,7 @@ fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64>(
     height: usize,
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
+    revision: FormulaRevision,
 ) -> DenseAccum {
     dense_block_kernel_canon::<P>(
         src,
@@ -1841,6 +1848,7 @@ fn dense_block_kernel_canon64_vec_neon<P: crate::featcanon::Pool64>(
         height,
         transducer_bank,
         r4,
+        revision,
     )
 }
 
@@ -2016,7 +2024,7 @@ fn dense_block_kernel_exact(
 /// public entries refuse a Rev4 request first (D2), so this pins the walk's
 /// OWN refusal — the guard `research::extract` and every internal caller rely
 /// on — in both directions.
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))]
 mod featcanon_contract_tests {
     use super::*;
     use crate::feature_defs::FormulaRevision;
@@ -2281,7 +2289,18 @@ mod featcanon_contract_tests {
                         let (want_acc, want_hooks) = run_dense(
                             |s, d, m1, m2, q, p, _act_dup, w, h, bank, r4| {
                                 dense_block_kernel_canon::<LanesF64>(
-                                    s, d, m1, m2, q, p, &planes[5], w, h, bank, r4,
+                                    s,
+                                    d,
+                                    m1,
+                                    m2,
+                                    q,
+                                    p,
+                                    &planes[5],
+                                    w,
+                                    h,
+                                    bank,
+                                    r4,
+                                    crate::ssim_form::active_revision(),
                                 )
                             },
                             &planes,
@@ -2344,6 +2363,7 @@ mod featcanon_contract_tests {
                         h,
                         bank,
                         r4,
+                        crate::ssim_form::active_revision(),
                     )
                 }
             );
@@ -2363,7 +2383,19 @@ mod featcanon_contract_tests {
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
                         dense_block_kernel_canon64_vec_v3::<crate::featcanon::LanesF64>(
-                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
+                            t,
+                            s,
+                            d,
+                            m1,
+                            m2,
+                            q,
+                            p,
+                            act,
+                            w,
+                            h,
+                            bank,
+                            r4,
+                            crate::ssim_form::active_revision(),
                         )
                     }
                 );
@@ -2384,7 +2416,19 @@ mod featcanon_contract_tests {
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
                         dense_block_kernel_canon64_vec_v4::<crate::featcanon::LanesF64>(
-                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
+                            t,
+                            s,
+                            d,
+                            m1,
+                            m2,
+                            q,
+                            p,
+                            act,
+                            w,
+                            h,
+                            bank,
+                            r4,
+                            crate::ssim_form::active_revision(),
                         )
                     }
                 );
@@ -2405,7 +2449,19 @@ mod featcanon_contract_tests {
                           bank: bool,
                           r4: Option<Rev4Dense<'_>>| {
                         dense_block_kernel_canon64_vec_v4x::<crate::featcanon::LanesF64>(
-                            t, s, d, m1, m2, q, p, act, w, h, bank, r4,
+                            t,
+                            s,
+                            d,
+                            m1,
+                            m2,
+                            q,
+                            p,
+                            act,
+                            w,
+                            h,
+                            bank,
+                            r4,
+                            crate::ssim_form::active_revision(),
                         )
                     }
                 );
