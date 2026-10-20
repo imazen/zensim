@@ -14,6 +14,8 @@ None.
 
 ### Changed
 
+- Complete the matched reconstructed-JND comparison with native Rust DVIFM 0.3, exact retained-score parity and frozen runtime provenance; preserve its AIC2026 training-exposure distinction ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).
+
 - Bind explicitly selected reproduced Rust metric TSVs to the frozen reconstructed-JND read, preserving exact pixel paths, directions and input hashes; report absent DVIFM 0.3-rs distinctly ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).
 
 - Compare saved B predictions with supplied DVIFM variants, SSIMULACRA2, butteraugli and GMSD against exact reconstructed-JND populations after full crop byte-identity verification; no pixel rescoring ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).

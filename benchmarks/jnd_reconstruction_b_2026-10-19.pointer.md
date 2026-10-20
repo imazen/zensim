@@ -115,3 +115,41 @@ Native reporting resource receipt: `run-heavy: done rc=0 6s | peak-RSS
 0.02GiB | min-avail 39150MiB | peak-load 20.29`. This is statistical
 reporting, not metric execution timing. Admission completed in 7s,
 peak-RSS 0.08GiB.
+
+
+## Complete native DVIFM 0.3-rs comparison (2026-10-20)
+
+The previously missing DVIFM 0.3-rs leg is now measured. One fresh batch
+used `dvifmish` source `31c4e256`, the native full-color `port-lap-v0.3`
+preset and all 5,768 matched pairs, four scoring threads. The resulting
+TSV now sits beside the owner-selected reproduced Rust metric TSVs.
+Every raw and JND value is exactly equal to the retained Rust `f24a08a`
+result for these 5,768 pairs. No fit, parameter selection or JND calibration.
+B predictions are unchanged.
+
+| Metric | Curve SROCC | Pointwise SROCC | Curve PLCC | Pointwise PLCC |
+|---|---:|---:|---:|---:|
+| DVIFM 0.3-rs (port-lap-v0.3) | 0.9570774651 | 0.9330864427 | 0.9494058223 | 0.9364946319 |
+| butteraugli p-norm 3 (Rust) | 0.9379679674 | 0.9236754588 | 0.9155803147 | 0.9055571094 |
+| zensim-b (diff+frag-820) | 0.9112672374 | 0.8972082446 | 0.8881425161 | 0.8857370772 |
+| GMSD (Rust) | 0.9079590282 | 0.8800915412 | 0.8741044853 | 0.8658165895 |
+| SSIMULACRA2 (Rust) | 0.9075910932 | 0.8907853818 | 0.8840582700 | 0.8794177084 |
+| butteraugli max (Rust) | 0.8831858014 | 0.8610585000 | 0.8531678367 | 0.8390876461 |
+
+Both populations cover42references, with zero score failures or dropped
+rows. All5,810 original crop hashes and native score-table pixel paths
+match the first B admission. DVIFM's frozen preset provenance states that
+the author constants were trained on AIC2026; this is not an unseen-corpus
+test for DVIFM. No claim of paired statistical significance.
+
+Full results checked on dev:
+`/mnt/v/output/zensim/jnd-reconstruction-2026-10-20-dvifm03/`;
+matching fully SHA256-verified archive under `/mnt/tower/output/zensim/`.
+Exact DVIFM binary, source commit, preset, Cargo.lock, input pairs and
+parity receipt are retained under `dvifm-runtime/`; full native statistics
+are in `report/report.json`. `suite.json` binds every score input.
+
+DVIFM scoring resource receipt: `run-heavy: done rc=0 32s | peak-RSS
+0.07GiB | min-avail 36946MiB | peak-load 19.74`. This is the contended
+batch including image I/O, not a comparative performance benchmark.
+Native statistical reporting: 9s, peak-RSS0.02GiB.

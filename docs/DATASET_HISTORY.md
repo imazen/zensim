@@ -5114,3 +5114,18 @@ butteraugli max are measured; DVIFM 0.3-rs is missing because the selected
 directory contains no DVIFM table. No old DVIFM column is substituted.
 No new pixel scoring or fitting.
 [Results and bindings](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
+
+
+## 2026-10-20: native DVIFM 0.3-rs comparison completed
+
+Following the owner's DVIFM0.3-rs request and reproduced-score directory
+selection, one fresh native `port-lap-v0.3` batch (dvifmish `31c4e256`)
+scored the exact5,768pairs/42references. All raw and JND scores exactly
+match retained Rust `f24a08a` results. Native curve/pointwise SROCC is
+0.95707746508388 /0.9330864427036173; no failures or drops. Frozen B and
+other reproduced Rust metrics retain their prior predictions and populations.
+No fitting, parameter selection or JND calibration. The frozen preset
+provenance states its author constants were trained on AIC2026; this
+comparison is not an unseen-corpus test for DVIFM. Original target and
+image hashes remain bound.
+[Complete results and runtime bindings](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
