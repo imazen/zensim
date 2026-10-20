@@ -45,3 +45,40 @@ min-avail 10633MiB | peak-load 4.41`. This is the whole evaluation process,
 not a quiet benchmark or a per-image memory claim. Native assessment completed
 in 1s, peak-RSS 0.01GiB; source-bootstrap calls completed in 3s and 1s,
 peak-RSS 0.01GiB each. No comparative runtime claim.
+
+
+## Owner-requested matched peer comparison (2026-10-20)
+
+| Metric | Curve SROCC | Pointwise SROCC | Curve PLCC | Pointwise PLCC |
+|---|---:|---:|---:|---:|
+| zensim-b (diff+frag-820) | 0.9112672374 | 0.8972082446 | 0.8881425161 | 0.8857370772 |
+| SSIMULACRA2 | 0.9075910932 | 0.8907853818 | 0.8840582700 | 0.8794177084 |
+| Butteraugli (proposal) | 0.9379678144 | 0.9236748528 | 0.9156786733 | 0.9055576203 |
+| DVIFM (proposal) | 0.6574823375 | 0.6323718520 | 0.6407661925 | 0.6338429951 |
+| DVIFM 0.2 (proposal) | 0.8818749291 | 0.8670391190 | 0.8414741030 | 0.8399897263 |
+| DVIFM 0.2 use_chroma (proposal) | 0.7785456847 | 0.7728807655 | 0.7293202653 | 0.7285206407 |
+| GMSD | 0.9079580431 | 0.8800895537 | 0.8741040690 | 0.8658162975 |
+
+Same 5,768/2,050 rows and 42 references; zero missing/dropped scores.
+B predictions are unchanged, bit-for-bit equal to the first report. Peers use
+the supplied `metrics_cropped.csv` (SHA256
+`3fb7208165c039cdc4bdea2e1244ea52020b60019c9c96f4b00a9b9967a7ad99`),
+not fresh runs of current metric implementations. DVIFM variants retain the
+supplier's column identities. Every one of the 5,810 original crop files was
+SHA256-equal to the frozen B image admission before joining exact distorted
+and reference IDs. Bitrate is not an identity key. No new pixel scoring,
+training, model selection or JND calibration. Small rank differences are
+descriptive; paired significance was not assessed.
+
+Comparison artifacts, checked on dev:
+`/mnt/v/output/zensim/jnd-reconstruction-2026-10-19-peers/`;
+full SHA-verified mirror under `/mnt/tower/output/zensim/`.
+`SUMMARY.json`, native `report/report.json`, `suite.json`, `ADMISSION.json`
+and final `_MANIFEST.json` retain values, inputs and native ownership.
+The initial preflight rejected dots in metric IDs before statistics; it is
+preserved in the adjacent `.preflight.bak` directory. Final IDs use `v02`.
+
+Native reporting: `run-heavy: done rc=0 10s | peak-RSS 0.03GiB |
+min-avail 36279MiB | peak-load 25.70`. This is statistical reporting, not
+metric execution timing. Pixel identity verification completed in 4s,
+peak-RSS 0.09GiB. [Supplied dataset](https://doi.org/10.18419/DARUS-6156).

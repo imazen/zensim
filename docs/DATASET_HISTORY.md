@@ -5090,3 +5090,16 @@ assessment, without a claim of an untouched independent final test or propagated
 observer-label uncertainty. Earlier objective-only release descriptions remain
 historical; no earlier raw artifact or target was replaced.
 [Results, native statistical ownership and pointer](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
+
+
+## 2026-10-20: owner-requested reconstructed-JND peer comparison
+
+The owner requested DVIFM, SSIMULACRA2, butteraugli and GMSD comparisons
+against the same supplied reconstruction. Exact 5,768 curve/2,050 pointwise
+rows, 42 references, saved B predictions and supplied cropped metric columns
+were joined by original distorted/reference IDs after all 5,810 image hashes
+matched the original admission. All three supplied DVIFM variants are retained.
+No pixel rescoring, training, model selection or JND calibration; zero dropped
+rows. This extends the prior single-model exposure with explicit peer
+assessment, without changing the historical first-read scope.
+[Matched results and provenance](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).

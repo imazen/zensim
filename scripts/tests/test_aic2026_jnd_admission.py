@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from scripts.prepare_aic2026_evaluation import bind_jnd_scores, prepare_jnd
+from scripts.prepare_aic2026_evaluation import bind_jnd_peers, bind_jnd_scores, prepare_jnd
 
 
 class Admission(unittest.TestCase):
@@ -88,6 +88,38 @@ class Admission(unittest.TestCase):
         scores.write_text('id\tscore\terror\nPTC_S01_AVIF_01\t89.25\t\n')
         with self.assertRaisesRegex(ValueError, 'exactly'):
             bind_jnd_scores(self.root / 'out', scores)
+
+    def peer_fixture(self):
+        self.run_admission()
+        scores = self.root / 'native.tsv'
+        scores.write_text('id\tscore\terror\nPTC_S01_AVIF_01\t89.25\t\nPTC_S01_AVIF_02\t80.5\t\n')
+        bind_jnd_scores(self.root / 'out', scores)
+        peers = self.root / 'peers.csv'
+        columns = ['distorted', 'source', 'SSIMULACRA2', 'proposal-Butteraugli',
+                   'proposal-DVIFM', 'proposal-DVIFM-0.2',
+                   'proposal-DVIFM-0.2-use_chroma', 'GMSD']
+        with peers.open('w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            for i in (2, 1):
+                writer.writerow([f'PTC_S01_AVIF_0{i}.png', 'PTC_S01_Ref_00.png'] + [str(i)] * 6)
+        return peers
+
+    def test_peers_join_by_id_preserving_sparse_labels_and_saved_b(self):
+        peers = self.peer_fixture()
+        suite = bind_jnd_peers(self.root / 'out', peers, self.images, self.root / 'comparison')
+        self.assertEqual(len(suite['metrics']), 7)
+        with Path(suite['datasets'][1]['path']).open() as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual([(r['distorted'], r['score_b'], r['dvifm']) for r in rows],
+                         [('PTC_S01_AVIF_02', '80.5', '2')])
+
+    def test_peer_identity_mismatch_refuses_before_writing(self):
+        peers = self.peer_fixture()
+        (self.images / 'PTC_S01_AVIF_01.png').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'bytes differ'):
+            bind_jnd_peers(self.root / 'out', peers, self.images, self.root / 'comparison')
+        self.assertFalse((self.root / 'comparison').exists())
 
 
 if __name__ == '__main__':

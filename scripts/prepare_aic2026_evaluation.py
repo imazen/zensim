@@ -161,6 +161,75 @@ def bind_jnd_scores(output, scores_tsv):
     return suite
 
 
+def bind_jnd_peers(output, peer_table, peer_images, destination):
+    """Bind supplied crop metrics to exact saved B populations; never rescore."""
+    admission = json.loads((output / 'ADMISSION.json').read_text())
+    for index, (name, identity) in enumerate(admission['images'].items()):
+        if digest(peer_images / f'{name}.png') != identity['sha256']:
+            raise ValueError(f'peer crop bytes differ from scored image: {name}')
+        if (index + 1) % 500 == 0:
+            print(f'Peer crop identity: {index + 1}/{len(admission["images"])}', flush=True)
+    peer_sha = digest(peer_table)
+    with peer_table.open(newline='', encoding='utf-8-sig') as f:
+        peers = {}
+        for row in csv.DictReader(f):
+            key = row['distorted']
+            if key in peers:
+                raise ValueError(f'duplicate peer ID: {key}')
+            peers[key] = row
+    declarations = [('ssim2', 'SSIMULACRA2', 'higher'),
+                    ('butteraugli', 'proposal-Butteraugli', 'lower'),
+                    ('dvifm', 'proposal-DVIFM', 'lower'),
+                    ('dvifm-v02', 'proposal-DVIFM-0.2', 'lower'),
+                    ('dvifm-v02-chroma', 'proposal-DVIFM-0.2-use_chroma', 'lower'),
+                    ('gmsd', 'GMSD', 'lower')]
+    suite = json.loads((output / 'suite.scored.json').read_text())
+    populations = []
+    for dataset in suite['datasets']:
+        path = Path(dataset['path'])
+        if digest(path) != dataset['sha256']:
+            raise ValueError('saved B target table changed')
+        with path.open(newline='') as f:
+            reader = csv.DictReader(f)
+            columns = list(reader.fieldnames)
+            rows = list(reader)
+        for row in rows:
+            peer = peers[row['distorted'] + '.png']
+            if peer['source'] != row['source'] + '.png':
+                raise ValueError('peer reference ID mismatch')
+            for key, column, _ in declarations:
+                if not math.isfinite(float(peer[column])):
+                    raise ValueError(f'nonfinite peer {column}: {row["distorted"]}')
+                row[key] = peer[column]
+        populations.append((dataset, columns, rows))
+    if digest(peer_table) != peer_sha:
+        raise ValueError('peer CSV changed during join')
+    destination.mkdir(parents=True, exist_ok=False)
+    for dataset, columns, rows in populations:
+        path = destination / f'{dataset["id"]}.csv'
+        with path.open('x', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=columns + [d[0] for d in declarations])
+            writer.writeheader()
+            writer.writerows(rows)
+        dataset.update(path=str(path), sha256=digest(path))
+        dataset['columns'].update({d[0]: d[0] for d in declarations})
+    for key, column, direction in declarations:
+        suite['metrics'].append({'id': key, 'direction': direction,
+                                'implementation': f'AIC2026 supplied cropped column {column}',
+                                'input_contract': 'Supplied scores, original PTC crop bytes hash-equal to frozen B admission; no fresh peer implementation run',
+                                'ladder_epsilon': 0,
+                                'source': {'kind': 'column', 'column': key},
+                                'artifacts': [{'path': str(peer_table), 'sha256': peer_sha}]})
+    (destination / 'suite.json').write_text(json.dumps(suite, indent=2) + '\n')
+    (destination / 'ADMISSION.json').write_text(json.dumps({
+        'build_commit': admission['build_commit'], 'base_admission_sha256': digest(output / 'ADMISSION.json'),
+        'peer_table_sha256': peer_sha, 'peer_images_verified': len(admission['images']),
+        'populations': admission['populations'], 'new_pixel_scoring_runs': 0,
+        'join': 'exact distorted PNG ID and reference PNG ID; bpp is not a join key',
+        'metric_columns': declarations}, indent=2) + '\n')
+    return suite
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', type=Path)
@@ -172,8 +241,19 @@ def main():
     parser.add_argument('--build-commit', help='Scorer source identity for JND mode')
     parser.add_argument('--bind-scores-tsv', type=Path,
                         help='Bind a complete native id/score/error export to admitted JND tables')
+    parser.add_argument('--bind-peer-table', type=Path,
+                        help='Join supplied crop metric columns to an existing scored JND directory')
+    parser.add_argument('--peer-images', type=Path,
+                        help='Original PTC crop directory for exact byte-identity verification')
     args = parser.parse_args()
     root = args.root.resolve(strict=True)
+    if args.bind_peer_table:
+        if not args.peer_images:
+            parser.error('--bind-peer-table requires --peer-images')
+        bind_jnd_peers(root, args.bind_peer_table.resolve(strict=True),
+                       args.peer_images.resolve(strict=True), args.output.resolve())
+        print(args.output / 'suite.json')
+        return
     if args.bind_scores_tsv:
         bind_jnd_scores(args.output.resolve(strict=True), args.bind_scores_tsv.resolve(strict=True))
         print(args.output / 'suite.scored.json')
