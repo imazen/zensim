@@ -141,7 +141,7 @@ mod tests {
             .params()
             .scoring_bake_bytes()
             .filter_map(|b| crate::mlp::Model::from_bytes(b).ok())
-            .map(|m| m.caller_input_width())
+            .map(|m| crate::feature_layout::declared_layout(&m).walk_width())
             .max()
             .unwrap_or(0);
         let z = Zensim::new(p);
@@ -321,10 +321,11 @@ mod tests {
         /// on these very cells (0.945195).
         const TOL: f64 = 0.16;
         // (profile, quantize+shift pair, single-LSB pair). Captured from the
-        // default build at 2026-09-06 with the dense gather live.
+        // default build at 2026-09-06 with the dense gather live. B was
+        // remeasured on the owner-approved diff+frag-820 rotation (2026-10-19).
         let pins: &[(&str, f64, f64)] = &[
             ("A", 38.570_207_155_687, 93.833_130_065_237),
-            ("B", 40.856_948_769_824, 96.104_862_895_129),
+            ("B", 22.196_183_902_237_486, 97.800_779_621_166_41),
             ("BHdr", 60.136_845_729_586, 95.561_810_768_036),
             ("PreviewV0_1", 40.823_327_058_061, 98.394_762_958_421),
             ("PreviewV0_2", 46.958_140_610_559, 98.185_741_680_479),

@@ -88,6 +88,7 @@ fn decode_assessment_pair(
     ))
 }
 
+#[cfg(feature = "custom-profiles")]
 fn deliver_assessment_pixels(reference: &str, distorted: &str, output: &str) {
     use sha2::{Digest, Sha256};
     use std::path::{Path, PathBuf};
@@ -191,8 +192,16 @@ fn main() {
             args.len() == 4 && args[2] == "--json",
             "expected --refinement-analysis INPUT --json NEW_OUTPUT"
         );
-        analyze_refinement(&args[1], &args[3]);
-        return;
+        #[cfg(feature = "custom-profiles")]
+        {
+            analyze_refinement(&args[1], &args[3]);
+            return;
+        }
+        #[cfg(not(feature = "custom-profiles"))]
+        {
+            eprintln!("--refinement-analysis requires --features custom-profiles");
+            std::process::exit(2);
+        }
     }
     // E-JBU perf mode (protocol: ms/MP of the redistribution pass): `--perf WxH`
     // synthesizes a pair and times the diffmap render with the guided option

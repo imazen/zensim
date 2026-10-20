@@ -194,3 +194,37 @@ fn diffmap_entry_is_cancellable() {
         Ok(_) => panic!("pre-cancelled diffmap compute must fail"),
     }
 }
+
+#[test]
+fn cancellation_interrupts_cached_default_mid_walk() {
+    let (src, dst, w, h) = test_pair();
+    let s = RgbSlice::new(&src, w, h);
+    let d = RgbSlice::new(&dst, w, h);
+    let base = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
+    let reference = base.precompute_reference(&s).unwrap();
+    let baseline = CountingStop::new(usize::MAX);
+    let score = base
+        .clone()
+        .with_stop(baseline.clone())
+        .compute_with_ref(&reference, &d)
+        .unwrap()
+        .score();
+    assert_eq!(
+        score.to_bits(),
+        base.compute_with_ref(&reference, &d)
+            .unwrap()
+            .score()
+            .to_bits()
+    );
+    assert!(
+        baseline.checks_seen() > 4,
+        "cached walk must check between strips"
+    );
+    let trip = CountingStop::new(1);
+    let error = base
+        .with_stop(trip.clone())
+        .compute_with_ref(&reference, &d)
+        .unwrap_err();
+    assert!(matches!(error, ZensimError::Cancelled { .. }));
+    assert!(trip.checks_seen() < baseline.checks_seen());
+}

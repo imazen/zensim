@@ -2592,3 +2592,31 @@ beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked -p zensim --lib -- -D warnings
     cargo test --locked -p zensim --lib
+
+# B / diff+frag-820 promotion: run these through run-heavy on shared hosts.
+default-b-tests:
+    cargo test -p zensim --lib --tests --examples --no-fail-fast
+
+default-b-minimal-tests:
+    cargo test -p zensim --no-default-features --lib --test default_b_diff_frag --no-fail-fast
+
+default-b-all-feature-tests:
+    cargo test -p zensim --all-features --lib --tests --no-fail-fast
+
+default-b-clippy:
+    cargo clippy -p zensim --all-targets --all-features -- -D warnings
+
+default-b-doc-tests:
+    cargo test -p zensim --doc
+
+# Existing tier-parity tests also cover the training-tool constructor aliases.
+default-b-final-compat:
+    cargo test -p zensim --all-features --test default_b_diff_frag --test medium_hardening
+    cargo test -p zensim-train-core --lib
+    cargo test -p zensim-validate --lib adam_simd
+    just default-b-minimal-head-check
+    cargo test -p zensim --doc
+
+# Compile the production library with the optional head and no research API.
+default-b-minimal-head-check:
+    cargo clippy -p zensim --no-default-features --lib --features corruption-head -- -D warnings
