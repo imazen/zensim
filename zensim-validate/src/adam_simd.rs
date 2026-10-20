@@ -135,15 +135,15 @@ pub fn adam_update_scalar_ref(args: &mut AdamUpdateArgs<'_>) {
 #[cfg(target_arch = "x86_64")]
 #[arcane]
 fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'_>) {
-    let beta1_v = f64x8::splat(token, args.beta1);
-    let beta2_v = f64x8::splat(token, args.beta2);
-    let one_minus_b1_v = f64x8::splat(token, 1.0 - args.beta1);
-    let one_minus_b2_v = f64x8::splat(token, 1.0 - args.beta2);
-    let inv_bc1_v = f64x8::splat(token, 1.0 / args.bc1);
-    let inv_bc2_v = f64x8::splat(token, 1.0 / args.bc2);
-    let lr_v = f64x8::splat(token, args.lr);
-    let eps_v = f64x8::splat(token, args.eps);
-    let zero_v = f64x8::zero(token);
+    let beta1_v = f64x8::splat_t(token, args.beta1);
+    let beta2_v = f64x8::splat_t(token, args.beta2);
+    let one_minus_b1_v = f64x8::splat_t(token, 1.0 - args.beta1);
+    let one_minus_b2_v = f64x8::splat_t(token, 1.0 - args.beta2);
+    let inv_bc1_v = f64x8::splat_t(token, 1.0 / args.bc1);
+    let inv_bc2_v = f64x8::splat_t(token, 1.0 / args.bc2);
+    let lr_v = f64x8::splat_t(token, args.lr);
+    let eps_v = f64x8::splat_t(token, args.eps);
+    let zero_v = f64x8::zero_t(token);
 
     // `as_chunks_mut` gives `&mut [f64; 8]` so LLVM can prove all
     // intra-chunk indexes are bounded, eliminating per-iteration bounds
@@ -167,10 +167,10 @@ fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'
         // arrays, so LLVM emits straight-line vector loads/stores with no
         // bounds checks.
 
-        let g = f64x8::load(token, gc_fixed);
-        let m = f64x8::load(token, mc_fixed);
-        let v = f64x8::load(token, vc_fixed);
-        let w = f64x8::load(token, wc_fixed);
+        let g = f64x8::load_t(token, gc_fixed);
+        let m = f64x8::load_t(token, mc_fixed);
+        let v = f64x8::load_t(token, vc_fixed);
+        let w = f64x8::load_t(token, wc_fixed);
 
         // m_new = β1·m + (1-β1)·g  →  fma(one_minus_b1, g, β1*m)
         let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
@@ -361,8 +361,8 @@ impl RsqrtPrecisionTier for RsqrtNr1 {
     ) -> f64x8<archmage::X64V4Token> {
         // y ← 0.5·y·(3 − v·y·y), one step from the raw estimate — the same
         // (unfused) step magetypes' full rsqrt applies twice.
-        let half = f64x8::splat(token, 0.5);
-        let three = f64x8::splat(token, 3.0);
+        let half = f64x8::splat_t(token, 0.5);
+        let three = f64x8::splat_t(token, 3.0);
         let y = v.rsqrt_approx();
         (half * y) * (three - v * (y * y))
     }
@@ -372,7 +372,7 @@ impl RsqrtPrecisionTier for RsqrtNr1 {
         d: f64x8<archmage::X64V4Token>,
     ) -> f64x8<archmage::X64V4Token> {
         // r ← r·(2 − d·r), one step from the raw estimate.
-        let two = f64x8::splat(token, 2.0);
+        let two = f64x8::splat_t(token, 2.0);
         let r = d.rcp_approx();
         r * (two - d * r)
     }
@@ -425,15 +425,15 @@ fn adam_update_inner_v4_rsqrt_body<P: RsqrtPrecisionTier>(
     token: archmage::X64V4Token,
     args: &mut AdamUpdateArgs<'_>,
 ) {
-    let beta1_v = f64x8::splat(token, args.beta1);
-    let beta2_v = f64x8::splat(token, args.beta2);
-    let one_minus_b1_v = f64x8::splat(token, 1.0 - args.beta1);
-    let one_minus_b2_v = f64x8::splat(token, 1.0 - args.beta2);
-    let inv_bc1_v = f64x8::splat(token, 1.0 / args.bc1);
-    let inv_bc2_v = f64x8::splat(token, 1.0 / args.bc2);
-    let lr_v = f64x8::splat(token, args.lr);
-    let eps_v = f64x8::splat(token, args.eps);
-    let zero_v = f64x8::zero(token);
+    let beta1_v = f64x8::splat_t(token, args.beta1);
+    let beta2_v = f64x8::splat_t(token, args.beta2);
+    let one_minus_b1_v = f64x8::splat_t(token, 1.0 - args.beta1);
+    let one_minus_b2_v = f64x8::splat_t(token, 1.0 - args.beta2);
+    let inv_bc1_v = f64x8::splat_t(token, 1.0 / args.bc1);
+    let inv_bc2_v = f64x8::splat_t(token, 1.0 / args.bc2);
+    let lr_v = f64x8::splat_t(token, args.lr);
+    let eps_v = f64x8::splat_t(token, args.eps);
+    let zero_v = f64x8::zero_t(token);
 
     let n = args.w.len();
     let tail_len = n % 8;
@@ -448,10 +448,10 @@ fn adam_update_inner_v4_rsqrt_body<P: RsqrtPrecisionTier>(
         .zip(m_chunks)
         .zip(v_chunks)
     {
-        let g = f64x8::load(token, gc_fixed);
-        let m = f64x8::load(token, mc_fixed);
-        let v = f64x8::load(token, vc_fixed);
-        let w = f64x8::load(token, wc_fixed);
+        let g = f64x8::load_t(token, gc_fixed);
+        let m = f64x8::load_t(token, mc_fixed);
+        let v = f64x8::load_t(token, vc_fixed);
+        let w = f64x8::load_t(token, wc_fixed);
 
         let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
         let gg = g * g;
@@ -557,15 +557,15 @@ fn adam_update_inner_v3(token: archmage::X64V3Token, args: &mut AdamUpdateArgs<'
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 fn adam_update_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamUpdateArgs<'_>) {
-    let beta1_v = f64x4::splat(token, args.beta1);
-    let beta2_v = f64x4::splat(token, args.beta2);
-    let one_minus_b1_v = f64x4::splat(token, 1.0 - args.beta1);
-    let one_minus_b2_v = f64x4::splat(token, 1.0 - args.beta2);
-    let inv_bc1_v = f64x4::splat(token, 1.0 / args.bc1);
-    let inv_bc2_v = f64x4::splat(token, 1.0 / args.bc2);
-    let lr_v = f64x4::splat(token, args.lr);
-    let eps_v = f64x4::splat(token, args.eps);
-    let zero_v = f64x4::zero(token);
+    let beta1_v = f64x4::splat_t(token, args.beta1);
+    let beta2_v = f64x4::splat_t(token, args.beta2);
+    let one_minus_b1_v = f64x4::splat_t(token, 1.0 - args.beta1);
+    let one_minus_b2_v = f64x4::splat_t(token, 1.0 - args.beta2);
+    let inv_bc1_v = f64x4::splat_t(token, 1.0 / args.bc1);
+    let inv_bc2_v = f64x4::splat_t(token, 1.0 / args.bc2);
+    let lr_v = f64x4::splat_t(token, args.lr);
+    let eps_v = f64x4::splat_t(token, args.eps);
+    let zero_v = f64x4::zero_t(token);
 
     let n = args.w.len();
     let tail_len = n % 4;
@@ -580,10 +580,10 @@ fn adam_update_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamUpdateA
         .zip(m_chunks)
         .zip(v_chunks)
     {
-        let g = f64x4::load(token, gc_fixed);
-        let m = f64x4::load(token, mc_fixed);
-        let v = f64x4::load(token, vc_fixed);
-        let w = f64x4::load(token, wc_fixed);
+        let g = f64x4::load_t(token, gc_fixed);
+        let m = f64x4::load_t(token, mc_fixed);
+        let v = f64x4::load_t(token, vc_fixed);
+        let w = f64x4::load_t(token, wc_fixed);
 
         let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
         let gg = g * g;
@@ -631,15 +631,15 @@ fn adam_update_inner(token: Token, args: &mut AdamUpdateArgs<'_>) {
     #[allow(non_camel_case_types)]
     type f64x4 = GenericF64x4<Token>;
 
-    let beta1_v = f64x4::splat(token, args.beta1);
-    let beta2_v = f64x4::splat(token, args.beta2);
-    let one_minus_b1_v = f64x4::splat(token, 1.0 - args.beta1);
-    let one_minus_b2_v = f64x4::splat(token, 1.0 - args.beta2);
-    let inv_bc1_v = f64x4::splat(token, 1.0 / args.bc1);
-    let inv_bc2_v = f64x4::splat(token, 1.0 / args.bc2);
-    let lr_v = f64x4::splat(token, args.lr);
-    let eps_v = f64x4::splat(token, args.eps);
-    let zero_v = f64x4::zero(token);
+    let beta1_v = f64x4::splat_t(token, args.beta1);
+    let beta2_v = f64x4::splat_t(token, args.beta2);
+    let one_minus_b1_v = f64x4::splat_t(token, 1.0 - args.beta1);
+    let one_minus_b2_v = f64x4::splat_t(token, 1.0 - args.beta2);
+    let inv_bc1_v = f64x4::splat_t(token, 1.0 / args.bc1);
+    let inv_bc2_v = f64x4::splat_t(token, 1.0 / args.bc2);
+    let lr_v = f64x4::splat_t(token, args.lr);
+    let eps_v = f64x4::splat_t(token, args.eps);
+    let zero_v = f64x4::zero_t(token);
 
     let n = args.w.len();
     let tail_len = n % 4;
@@ -654,10 +654,10 @@ fn adam_update_inner(token: Token, args: &mut AdamUpdateArgs<'_>) {
         .zip(m_chunks)
         .zip(v_chunks)
     {
-        let g = f64x4::load(token, gc_fixed);
-        let m = f64x4::load(token, mc_fixed);
-        let v = f64x4::load(token, vc_fixed);
-        let w = f64x4::load(token, wc_fixed);
+        let g = f64x4::load_t(token, gc_fixed);
+        let m = f64x4::load_t(token, mc_fixed);
+        let v = f64x4::load_t(token, vc_fixed);
+        let w = f64x4::load_t(token, wc_fixed);
 
         let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
         let gg = g * g;
@@ -979,18 +979,18 @@ fn fwd_accum_row_v3(
     if !do_a && !do_b {
         return;
     }
-    let sa_v = f64x4::splat(token, sa);
-    let sb_v = f64x4::splat(token, sb);
+    let sa_v = f64x4::splat_t(token, sa);
+    let sb_v = f64x4::splat_t(token, sb);
     let (w4, _) = w_row.as_chunks::<4>();
     let (ha4, _) = f.hpa.as_chunks_mut::<4>();
     let (hb4, _) = f.hpb.as_chunks_mut::<4>();
     for ((wc, hac), hbc) in w4.iter().zip(ha4.iter_mut()).zip(hb4.iter_mut()) {
-        let wv = f64x4::load(token, wc);
+        let wv = f64x4::load_t(token, wc);
         if do_a {
-            sa_v.mul_add(wv, f64x4::load(token, hac)).store(hac);
+            sa_v.mul_add(wv, f64x4::load_t(token, hac)).store(hac);
         }
         if do_b {
-            sb_v.mul_add(wv, f64x4::load(token, hbc)).store(hbc);
+            sb_v.mul_add(wv, f64x4::load_t(token, hbc)).store(hbc);
         }
     }
 }
@@ -1152,15 +1152,15 @@ fn adam_pair_fused_inner_v3(token: archmage::X64V3Token, args: &mut AdamW1FusedA
 #[inline(always)]
 #[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
 fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1FusedArgs<'_>) {
-    let beta1_v = f64x4::splat(token, args.beta1);
-    let beta2_v = f64x4::splat(token, args.beta2);
-    let one_minus_b1_v = f64x4::splat(token, 1.0 - args.beta1);
-    let one_minus_b2_v = f64x4::splat(token, 1.0 - args.beta2);
-    let inv_bc1_v = f64x4::splat(token, 1.0 / args.bc1);
-    let inv_bc2_v = f64x4::splat(token, 1.0 / args.bc2);
-    let lr_v = f64x4::splat(token, args.lr);
-    let eps_v = f64x4::splat(token, args.eps);
-    let zero_v = f64x4::zero(token);
+    let beta1_v = f64x4::splat_t(token, args.beta1);
+    let beta2_v = f64x4::splat_t(token, args.beta2);
+    let one_minus_b1_v = f64x4::splat_t(token, 1.0 - args.beta1);
+    let one_minus_b2_v = f64x4::splat_t(token, 1.0 - args.beta2);
+    let inv_bc1_v = f64x4::splat_t(token, 1.0 / args.bc1);
+    let inv_bc2_v = f64x4::splat_t(token, 1.0 / args.bc2);
+    let lr_v = f64x4::splat_t(token, args.lr);
+    let eps_v = f64x4::splat_t(token, args.eps);
+    let zero_v = f64x4::zero_t(token);
 
     let nh = args.n_hidden;
     let n = args.w.len();
@@ -1187,11 +1187,11 @@ fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1F
                 let base = row * nh;
                 let sa = args.xa[row];
                 let sb = args.xb[row];
-                let sa_v = f64x4::splat(token, sa);
-                let sb_v = f64x4::splat(token, sb);
+                let sa_v = f64x4::splat_t(token, sa);
+                let sb_v = f64x4::splat_t(token, sb);
                 let do_a = sa != 0.0;
                 let do_b = sb != 0.0;
-                let sm_v = f64x4::splat(
+                let sm_v = f64x4::splat_t(
                     token,
                     match args.l2_mult {
                         Some(mult) => args.l2_scale * mult[row],
@@ -1213,20 +1213,20 @@ fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1F
                     .zip(v_chunks.iter_mut())
                     .enumerate()
                 {
-                    let mut g = if gz { zero_v } else { f64x4::load(token, gc) };
+                    let mut g = if gz { zero_v } else { f64x4::load_t(token, gc) };
                     if do_a {
-                        g = sa_v.mul_add(f64x4::load(token, &dha_chunks[c]), g);
+                        g = sa_v.mul_add(f64x4::load_t(token, &dha_chunks[c]), g);
                     }
                     if do_b {
-                        g = sb_v.mul_add(f64x4::load(token, &dhb_chunks[c]), g);
+                        g = sb_v.mul_add(f64x4::load_t(token, &dhb_chunks[c]), g);
                     }
-                    let w = f64x4::load(token, wc);
+                    let w = f64x4::load_t(token, wc);
                     if l2_on {
                         // mul+add — two roundings, matching l2_row_avx exactly.
                         g += sm_v * w;
                     }
-                    let m = f64x4::load(token, mc);
-                    let v = f64x4::load(token, vc);
+                    let m = f64x4::load_t(token, mc);
+                    let v = f64x4::load_t(token, vc);
                     let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
                     let gg = g * g;
                     let v_new = one_minus_b2_v.mul_add(gg, beta2_v * v);
