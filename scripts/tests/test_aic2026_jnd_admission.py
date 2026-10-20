@@ -121,6 +121,38 @@ class Admission(unittest.TestCase):
             bind_jnd_peers(self.root / 'out', peers, self.images, self.root / 'comparison')
         self.assertFalse((self.root / 'comparison').exists())
 
+    def test_explicit_reproduced_tables_bind_columns_paths_and_directions(self):
+        self.peer_fixture()
+        scores = self.root / 'reproduced.tsv'
+        with scores.open('w', newline='') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['ref_path', 'dist_path', 'raw_jnd'])
+            for i in (2, 1):
+                writer.writerow([self.images / 'PTC_S01_Ref_00.png',
+                                 self.images / f'PTC_S01_AVIF_0{i}.png', str(i / 10)])
+        specs = [dict(id='dvifm-v03-rs', path=str(scores), column='raw_jnd',
+                      direction='lower', implementation='explicit synthetic retained fixture')]
+        suite = bind_jnd_peers(self.root / 'out', None, self.images,
+                               self.root / 'comparison', specs)
+        self.assertEqual(suite['metrics'][1]['direction'], 'lower')
+        with Path(suite['datasets'][1]['path']).open() as f:
+            sparse = list(csv.DictReader(f))
+        self.assertEqual(sparse[0]['dvifm-v03-rs'], '0.2')
+        self.assertEqual(sparse[0]['score_b'], '80.5')
+
+    def test_explicit_missing_column_and_invalid_metric_id_refuse(self):
+        peers = self.peer_fixture()
+        specs = [dict(id='dvifm-0.3', path=str(peers), column='absent',
+                      direction='lower', implementation='synthetic fixture')]
+        with self.assertRaisesRegex(ValueError, 'metric ID'):
+            bind_jnd_peers(self.root / 'out', None, self.images,
+                           self.root / 'comparison', specs)
+        specs[0].update(id='dvifm-v03', delimiter=',')
+        with self.assertRaises(KeyError):
+            bind_jnd_peers(self.root / 'out', None, self.images,
+                           self.root / 'comparison', specs)
+        self.assertFalse((self.root / 'comparison').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

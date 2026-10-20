@@ -82,3 +82,36 @@ Native reporting: `run-heavy: done rc=0 10s | peak-RSS 0.03GiB |
 min-avail 36279MiB | peak-load 25.70`. This is statistical reporting, not
 metric execution timing. Pixel identity verification completed in 4s,
 peak-RSS 0.09GiB. [Supplied dataset](https://doi.org/10.18419/DARUS-6156).
+
+
+## Owner-selected reproduced Rust score tables (2026-10-20)
+
+**Missing: DVIFM 0.3-rs.** No DVIFM table was present in the selected
+score directory when inspected; its path was requested. The historical
+DVIFM proposal columns above do not measure DVIFM 0.3-rs.
+
+The owner directed this comparison to retained native Rust score tables.
+These reproduce SSIMULACRA2, GMSD and both butteraugli p-norm-3 and max
+without substituting the dataset's proposal column. Exact file SHA256s and
+column names are in `suite.json` and `ADMISSION.json`.
+
+| Metric | Curve SROCC | Pointwise SROCC | Curve PLCC | Pointwise PLCC |
+|---|---:|---:|---:|---:|
+| butteraugli p-norm 3 (Rust) | 0.9379679674 | 0.9236754588 | 0.9155803147 | 0.9055571094 |
+| zensim-b (diff+frag-820) | 0.9112672374 | 0.8972082446 | 0.8881425161 | 0.8857370772 |
+| GMSD (Rust) | 0.9079590282 | 0.8800915412 | 0.8741044853 | 0.8658165895 |
+| SSIMULACRA2 (Rust) | 0.9075910932 | 0.8907853818 | 0.8840582700 | 0.8794177084 |
+| butteraugli max (Rust) | 0.8831858014 | 0.8610585000 | 0.8531678367 | 0.8390876461 |
+
+Both populations are unchanged (5,768/2,050 rows,42references), with no
+dropped scores and exact original B statistics. All 5,810 crop hashes and
+the native score tables' pixel paths match the B admission. No new pixel
+scoring, training, model selection or JND calibration.
+
+Artifacts checked on dev:
+`/mnt/v/output/zensim/jnd-reconstruction-2026-10-20-reproduced/`;
+full SHA256-verified mirror under `/mnt/tower/output/zensim/`.
+Native reporting resource receipt: `run-heavy: done rc=0 6s | peak-RSS
+0.02GiB | min-avail 39150MiB | peak-load 20.29`. This is statistical
+reporting, not metric execution timing. Admission completed in 7s,
+peak-RSS 0.08GiB.

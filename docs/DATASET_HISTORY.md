@@ -5103,3 +5103,14 @@ No pixel rescoring, training, model selection or JND calibration; zero dropped
 rows. This extends the prior single-model exposure with explicit peer
 assessment, without changing the historical first-read scope.
 [Matched results and provenance](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
+
+
+## 2026-10-20: owner-selected reproduced Rust baseline tables
+
+The owner subsequently selected retained reproduced metric TSVs for this
+comparison. Exact rows, source/destination pixel identities and saved B
+predictions remain unchanged. SSIMULACRA2, GMSD, butteraugli p-norm-3 and
+butteraugli max are measured; DVIFM 0.3-rs is missing because the selected
+directory contains no DVIFM table. No old DVIFM column is substituted.
+No new pixel scoring or fitting.
+[Results and bindings](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).

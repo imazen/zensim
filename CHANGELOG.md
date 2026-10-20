@@ -14,6 +14,8 @@ None.
 
 ### Changed
 
+- Bind explicitly selected reproduced Rust metric TSVs to the frozen reconstructed-JND read, preserving exact pixel paths, directions and input hashes; report absent DVIFM 0.3-rs distinctly ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).
+
 - Compare saved B predictions with supplied DVIFM variants, SSIMULACRA2, butteraugli and GMSD against exact reconstructed-JND populations after full crop byte-identity verification; no pixel rescoring ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).
 
 - Assess frozen default B once against the owner-supplied reconstructed-JND CSV, preserving both label populations, exact image/runtime hashes and canonical statistics ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)). No model fit or JND calibration (`b8f5ac6a`).

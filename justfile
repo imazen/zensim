@@ -2645,6 +2645,10 @@ aic2026-jnd-admission-tests:
 aic2026-jnd-peer-suite scored peer_table peer_images output:
     python3 -B scripts/prepare_aic2026_evaluation.py {{quote(scored)}} --bind-peer-table {{quote(peer_table)}} --peer-images {{quote(peer_images)}} --output {{quote(output)}}
 
+# Bind explicitly selected retained native tables, with per-column identities.
+aic2026-jnd-reproduced-suite scored spec peer_images output:
+    python3 -B scripts/prepare_aic2026_evaluation.py {{quote(scored)}} --peer-scores-spec {{quote(spec)}} --peer-images {{quote(peer_images)}} --output {{quote(output)}}
+
 # Current B intentionally has no JND map; the report owner must agree.
 default-b-verdict-jnd-tests:
     cargo test -p zensim-validate --bin bake_verdict
