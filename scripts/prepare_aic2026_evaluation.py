@@ -29,6 +29,7 @@ def prepare_jnd(root, labels, output, bake, build_commit):
     no statistic, decoder, model fit or JND calibration is implemented here.
     """
     images = root / 'extracted/AIC2026-dataset-cropped/PTC-crops-all'
+    label_sha = digest(labels)
     with labels.open(newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         original = list(reader.fieldnames or [])
@@ -68,6 +69,11 @@ def prepare_jnd(root, labels, output, bake, build_commit):
         codec, rung = row['distorted'].rsplit('_', 2)[-2:]
         prepared.append(dict(row, row_index=str(index), codec=codec,
                              quality=rung, ref_path=a['path'], dist_path=b['path']))
+        if (index + 1) % 250 == 0 or index + 1 == len(rows):
+            print(f'JND admission: {index + 1}/{len(rows)} rows, {len(audited)} image hashes',
+                  flush=True)
+    if digest(labels) != label_sha:
+        raise ValueError('reconstruction CSV changed during admission')
     # Refuse reuse/overwrite, including a previous scoring attempt.
     output.mkdir(parents=True, exist_ok=False)
     columns = original + ['row_index', 'codec', 'quality', 'ref_path', 'dist_path']
@@ -102,7 +108,7 @@ def prepare_jnd(root, labels, output, bake, build_commit):
              'max_panel_rows': 10000}
     # The score-table digest is bound only after the single scoring run finishes.
     (output / 'suite.pending.json').write_text(json.dumps(suite, indent=2) + '\n')
-    admission = {'build_commit': build_commit, 'labels_sha256': digest(labels),
+    admission = {'build_commit': build_commit, 'labels_sha256': label_sha,
                  'bake_sha256': bake_sha, 'primary_target': 'JND_curve',
                  'supplementary_target': 'JND_pointwise', 'populations': populations,
                  'rows': len(rows), 'references': len({r['source'] for r in rows}),
