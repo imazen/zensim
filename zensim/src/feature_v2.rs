@@ -5104,7 +5104,7 @@ pub(crate) struct FoldRetention {
     pub(crate) strips: Vec<[Vec<(DenseAccum, GradientAccum)>; 3]>,
     /// Prepared finite-query snapshots can move all distorted scale-0 channels.
     pub(crate) complete_distorted0: bool,
-    #[cfg(feature = "custom-profiles")]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     pub(crate) snapshot_reuse: Option<crate::local_refine::SnapshotReuse>,
     pub(crate) basic_stats: Vec<crate::metric::ScaleStats>,
     pub(crate) basic_hf: Vec<[(f64, f64); 3]>,
@@ -5131,7 +5131,7 @@ impl FoldRetention {
             mg: Vec::new(),
             strips: Vec::new(),
             complete_distorted0: false,
-            #[cfg(feature = "custom-profiles")]
+            #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
             snapshot_reuse: None,
             basic_stats: Vec::new(),
             basic_hf: Vec::new(),
@@ -5151,7 +5151,7 @@ impl FoldRetention {
         retain_basic: bool,
         complete_distorted0: bool,
     ) {
-        #[cfg(feature = "custom-profiles")]
+        #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
         crate::local_refine::restore_snapshot_buffers(self);
         self.strips.clear();
         self.strips

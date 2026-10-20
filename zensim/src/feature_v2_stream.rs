@@ -1257,6 +1257,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 /// gated on `feature-regime-v2` alone and still calls this unconditionally,
 /// so cfg-stripping the function under `feature-regime-v2`-only would break
 /// that compile rather than just leave it unreached.
+#[cfg(feature = "feature-regime-v2")]
 #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
 pub(crate) fn hdr_source_to_xyb(
     source: &impl ImageSource,
