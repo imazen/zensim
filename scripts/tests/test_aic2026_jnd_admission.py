@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from scripts.prepare_aic2026_evaluation import prepare_jnd
+from scripts.prepare_aic2026_evaluation import bind_jnd_scores, prepare_jnd
 
 
 class Admission(unittest.TestCase):
@@ -71,6 +71,23 @@ class Admission(unittest.TestCase):
         path.write_bytes(self.header[:16] + struct.pack('>II', 841, 944) + self.header[24:])
         with self.assertRaisesRegex(ValueError, 'dimensions'):
             self.run_admission()
+
+    def test_sparse_target_joins_exactly_once_without_rescoring(self):
+        self.run_admission()
+        scores = self.root / 'native.tsv'
+        scores.write_text('id\tscore\terror\nPTC_S01_AVIF_01\t89.25\t\nPTC_S01_AVIF_02\t80.5\t\n')
+        suite = bind_jnd_scores(self.root / 'out', scores)
+        self.assertEqual(suite['metrics'][0]['source'], {'kind': 'column', 'column': 'score_b'})
+        with Path(suite['datasets'][1]['path']).open() as f:
+            sparse = list(csv.DictReader(f))
+        self.assertEqual([(r['distorted'], r['score_b']) for r in sparse], [('PTC_S01_AVIF_02', '80.5')])
+
+    def test_incomplete_score_population_refuses(self):
+        self.run_admission()
+        scores = self.root / 'native.tsv'
+        scores.write_text('id\tscore\terror\nPTC_S01_AVIF_01\t89.25\t\n')
+        with self.assertRaisesRegex(ValueError, 'exactly'):
+            bind_jnd_scores(self.root / 'out', scores)
 
 
 if __name__ == '__main__':

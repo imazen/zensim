@@ -119,6 +119,48 @@ def prepare_jnd(root, labels, output, bake, build_commit):
     return admission
 
 
+def bind_jnd_scores(output, scores_tsv):
+    """Join the native full-population score export onto each declared subset.
+
+    The panel's table adapter deliberately refuses extra IDs, so the sparse
+    pointwise labels need their own exact-population table. No pixel is rescored.
+    """
+    suite = json.loads((output / 'suite.pending.json').read_text())
+    scores = {}
+    with scores_tsv.open(newline='') as f:
+        for row in csv.DictReader(f, delimiter='\t'):
+            if row['id'] in scores or row['error'] or not math.isfinite(float(row['score'])):
+                raise ValueError('unique finite native scores without errors required')
+            scores[row['id']] = row['score']
+    primary = next(d for d in suite['datasets'] if d['id'] == 'JND_curve')
+    with Path(primary['path']).open(newline='') as f:
+        expected = {r['distorted'] for r in csv.DictReader(f)}
+    if set(scores) != expected:
+        raise ValueError('native scores must cover exactly the declared curve population')
+    for dataset in suite['datasets']:
+        path = Path(dataset['path'])
+        if digest(path) != dataset['sha256']:
+            raise ValueError('declared label table changed before score join')
+        with path.open(newline='') as f:
+            reader = csv.DictReader(f)
+            columns = list(reader.fieldnames)
+            rows = [dict(r, score_b=scores[r['distorted']]) for r in reader]
+        joined = path.with_suffix('.scored.csv')
+        with joined.open('x', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=columns + ['score_b'])
+            writer.writeheader()
+            writer.writerows(rows)
+        dataset.update(path=str(joined), sha256=digest(joined))
+        dataset['columns']['score_b'] = 'score_b'
+    metric = suite['metrics'][0]
+    metric['source'] = {'kind': 'column', 'column': 'score_b'}
+    metric['artifacts'] = [{'path': str(scores_tsv), 'sha256': digest(scores_tsv)}]
+    with (output / 'suite.scored.json').open('x') as f:
+        json.dump(suite, f, indent=2)
+        f.write('\n')
+    return suite
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', type=Path)
@@ -128,8 +170,14 @@ def main():
                         help='Explicit owner-authorized JND CSV; output becomes a new directory')
     parser.add_argument('--bake', type=Path, help='Frozen model identity for JND mode')
     parser.add_argument('--build-commit', help='Scorer source identity for JND mode')
+    parser.add_argument('--bind-scores-tsv', type=Path,
+                        help='Bind a complete native id/score/error export to admitted JND tables')
     args = parser.parse_args()
     root = args.root.resolve(strict=True)
+    if args.bind_scores_tsv:
+        bind_jnd_scores(args.output.resolve(strict=True), args.bind_scores_tsv.resolve(strict=True))
+        print(args.output / 'suite.scored.json')
+        return
     if args.jnd_reconstruction:
         if not args.bake or not args.build_commit or args.objective_target:
             parser.error('JND mode requires --bake and --build-commit, without --objective-target')
