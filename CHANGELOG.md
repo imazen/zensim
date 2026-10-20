@@ -14,6 +14,9 @@ None.
 
 ### Changed
 
+- Assess frozen default B once against the owner-supplied reconstructed-JND CSV, preserving both label populations, exact image/runtime hashes and canonical statistics ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)). No model fit or JND calibration (`b8f5ac6a`).
+- Align the JND report's artifact identity and absence-of-calibration checks with the promoted B; preserve rejection of retired, composed and peer surfaces (`24ad9e20`).
+
 - Promote the frozen diff+frag-820 Rev5 bake to **B / zensim-b**, selected by `codec_target()` and `latest_preview()`. Serve its declared revision in minimal builds and cached-reference scoring, detach the historical B JND map, and preserve BHdr routing and the known color-noise/qualification limits ([record](docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md); `a20067f7`).
 
 - Compare existing B/D profiles with frozen research candidates on identical external populations using fresh Rev1 features, exact native parity and canonical statistics; lead the comparison scoreboard with all measured corpus columns ([results](benchmarks/gauntlet_legacy_comparison_2026-10-19.md)). No production profile changes.

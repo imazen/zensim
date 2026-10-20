@@ -2384,3 +2384,19 @@ complete populations and source bootstrap settings accompany the reports.
 Fresh external features use retained extractor `6dad3b66`; its unresolved
 source-commit closure remains disclosed. No new confirmation or production
 qualification follows. See the [evidence pointer](../benchmarks/gauntlet_human_2026-10-18.pointer.md).
+
+## Exposure ledger — 2026-10-19: one frozen B read of supplied JND reconstruction
+
+The owner explicitly requested one evaluation against
+`jnd_reconstruction_2026-10-19.csv` (SHA256
+`5bdbf5402c41b2cccf22b62ad352160b88f952a53bea1cce6ae4ef14c5890e61`).
+Frozen B/diff+frag-820 (`89cb4861…`) scored its 5,768 PTC crop pairs, 42
+references, once. `JND_curve` is the primary supplied target; the available
+`JND_pointwise` population has 2,050 rows and the same 42 references.
+These are reconstructed JND labels, oriented lower-is-better, not individual
+observer ratings. Both label populations and their supplied confidence columns
+are retained; missing pointwise labels are not filled or treated as zero.
+This is evaluation-only exposure: no fitting, calibration, model comparison or
+selection. Older objective-only AIC2026 release entries retain their dated scope;
+this CSV is a separately provided label overlay. Protected populations remain
+untouched. [Results and exact artifact bindings](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).

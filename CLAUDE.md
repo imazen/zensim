@@ -162,6 +162,8 @@ because cleanup tests or a historical training reproduction pass.
 
 * **2026-10-19 — strict workspace lint found deprecated SIMD constructors in training tools.** Token-explicit aliases replace their equivalent deprecated forwarders in `zensim-train-core/src/simd_encoder.rs` and `zensim-validate/src/adam_simd.rs`. Strict workspace Clippy passes; no arithmetic, dependency version or test expectation changes.
 
+* **2026-10-19 — JND report identity still named retired linear B after the profile rotation.** Fixed the report owner's B artifact hash and checked current-B/no-map and retired-B refusal explicitly. Its two stale profile-map expectations failed platform CI; the reporting tests now exercise the approved unmapped default without fabricating JND estimates. The historical map's arithmetic tests remain in the library.
+
 * **2026-10-19 — default B retains the frozen diff+frag-820 color-noise inversion.** Owner-directed promotion does not close the existing severe LIVE noise, dial or spatial gates. No corruption head or old-B JND map is attached. See [the B record](docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md).
 
 * **2026-10-18 — PERF3 archive-helper CI path check (fixed).** Script lint interpreted the literal lane basename in an ownership assertion as a deleted sibling dependency. The helper now checks the supplied basename components with the same exact identity and lock-owner requirements. Keep lane names as input validation rather than embedded sibling paths; verify helper lint with no sibling checkout.

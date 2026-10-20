@@ -5076,3 +5076,17 @@ See [E27 worklog](../benchmarks/E27_WORKLOG.md),
 ## 2026-10-19 — matched existing B/D gauntlet assessment
 
 User-requested comparison on the exact previously exposed external populations: CSIQ865, PIPAL23200, CID22-B2100, KonJND JPEG SELECT404 and LIVE clean10/267. Existing B a96a5a66 and D cd1098b4 retain their Rev1 arithmetic and were scored on fresh default372 native features; Rev5 candidate banks are unchanged and incompatible columns were never substituted. All26836 B production predictions equal actual pixel/cache/literal/stored-f32 scores exactly; D has18 fixed exact native pixel audits spanning the five panels. Explicit integer row IDs restore extractor reference-grouped CSV ordering. Canonical native rank/scatter owners and10000 source-cluster interval draws remain unchanged. No fitting, selection, gate/threshold change, protected population access or qualification. Comparable B/D whole-dataset-withheld fits for the four D1 panels are unavailable, so those legacy entries remain absent. Historical source/crop lineage limits remain explicit. See [matched comparison](../benchmarks/gauntlet_legacy_comparison_2026-10-19.md) and [artifact pointer](../benchmarks/gauntlet_legacy_comparison_2026-10-19.pointer.md).
+
+## 2026-10-19: supplied reconstructed-JND CSV, single frozen B assessment
+
+Owner-authorized label overlay on AIC2026 public PTC crops: 5,768 pairs/42
+references; primary curve labels cover all pairs and pointwise labels cover
+2,050 pairs. The exact CSV and all 5,810 original RGB8 PNG hashes are bound in
+ADMISSION.json. One named-profile native scoring run used frozen B `89cb4861…`,
+source `8d6aa6cc`, with no head, fit or JND calibration. All predictions are finite.
+Canonical signed quality SROCC is 0.9112672374317565 for curve labels and
+0.8972082446190002 for pointwise labels; target orientation is −JND. This is one
+assessment, without a claim of an untouched independent final test or propagated
+observer-label uncertainty. Earlier objective-only release descriptions remain
+historical; no earlier raw artifact or target was replaced.
+[Results, native statistical ownership and pointer](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
