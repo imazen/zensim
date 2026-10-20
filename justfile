@@ -2620,3 +2620,19 @@ default-b-final-compat:
 # Compile the production library with the optional head and no research API.
 default-b-minimal-head-check:
     cargo clippy -p zensim --no-default-features --lib --features corruption-head -- -D warnings
+
+# Check default and threaded minimal production shapes, plus bare wasm compilation.
+default-b-portability-checks:
+    cargo clippy -p zensim --lib -- -D warnings
+    cargo clippy -p zensim --no-default-features --lib --features threads,corruption-head -- -D warnings
+    cargo clippy -p zensim --no-default-features --lib --features custom-profiles -- -D warnings
+    cargo check -p zensim --no-default-features --target wasm32-unknown-unknown --lib
+
+# The regress crate enables custom profiles without enabling the research API.
+default-b-custom-minimal-tests:
+    cargo test -p zensim --no-default-features --features custom-profiles --test default_b_diff_frag
+
+# Exercise the in-workspace consumers of the promoted default.
+default-b-consumer-tests:
+    cargo test -p zensim-regress --lib --tests
+    cargo test -p zensim-validate --lib --test bake_surface

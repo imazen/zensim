@@ -1,5 +1,10 @@
 # Matched comparison with the existing B/D profiles
 
+Here **B** denotes the historical linear bake `a96a5a66…`. After this
+comparison, the owner assigned diff+frag-820 (`89cb4861…`) to the public B
+slot. The frozen measurements below retain their original identities; see
+[the current B record](../docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md).
+
 C / diff+frag-820 has higher signed SROCC than B on four of five exposed
 external panels and D on three. W-C has higher point estimates than B on
 all five. These are descriptive comparisons, not significance tests or a

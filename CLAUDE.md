@@ -29,7 +29,9 @@ The end user controls **one target score**. Quality includes content/codec
 consistency, identity and near-lossless behavior, negative tails and distinct
 codec floors, target accuracy, bytes, passes, latency and memory. Rank and a
 research composite alone cannot establish a useful dial. B is currently
-`codec_target()`; the [integration guide](docs/CODEC_TARGET_METRIC.md) owns the
+`codec_target()` and, since 2026-10-19, names the frozen diff+frag-820 Rev5
+bake (`89cb4861…`), without a corruption head or JND map. See the
+[promotion record](docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md); the [integration guide](docs/CODEC_TARGET_METRIC.md) owns the
 profile mapping. No consumers are calibrated to B/C/D; they may be improved
 or replaced, with explicit evidence and versioned experiment identities.
 
@@ -157,6 +159,10 @@ and unresolved product limitations; do not declare a model qualified merely
 because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
+
+* **2026-10-19 — strict workspace lint found deprecated SIMD constructors in training tools.** Token-explicit aliases replace their equivalent deprecated forwarders in `zensim-train-core/src/simd_encoder.rs` and `zensim-validate/src/adam_simd.rs`. Strict workspace Clippy passes; no arithmetic, dependency version or test expectation changes.
+
+* **2026-10-19 — default B retains the frozen diff+frag-820 color-noise inversion.** Owner-directed promotion does not close the existing severe LIVE noise, dial or spatial gates. No corruption head or old-B JND map is attached. See [the B record](docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md).
 
 * **2026-10-18 — PERF3 archive-helper CI path check (fixed).** Script lint interpreted the literal lane basename in an ownership assertion as a deleted sibling dependency. The helper now checks the supplied basename components with the same exact identity and lock-owner requirements. Keep lane names as input validation rather than embedded sibling paths; verify helper lint with no sibling checkout.
 

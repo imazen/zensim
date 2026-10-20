@@ -7,8 +7,8 @@ score, and encoders choose the settings to reach it.
 
 Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
 
-**Current checkout (2026-09-07):** the user-facing control is one target score.
-`codec_target()` returns B; D is an explicit fast profile. Negative scores are
+**Current checkout (2026-10-19):** the user-facing control is one target score.
+`codec_target()` returns **B / zensim-b: diff+frag-820 (Rev5)**; D is an explicit fast profile. See the [B promotion record](https://github.com/imazen/zensim/blob/main/docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md) for its exact bake, known color-noise inversions and remaining qualification. Negative scores are
 valid. The benchmark tables below are historical measurements, not a fresh
 qualification of today's profiles. See the [current integration guide](https://github.com/imazen/zensim/blob/main/docs/CODEC_TARGET_METRIC.md)
 for bake identities, actual consumer behavior and the remaining dial requirements.
@@ -76,7 +76,7 @@ pub fn compute(
 ) -> Result<ZensimResult, zensim::ZensimError>
 ```
 
-`ZensimError` is a `#[non_exhaustive]` enum (so match it with a `_` arm) — the variants `compute` can return are `DimensionMismatch`, `ImageTooSmall`, and `ImageTooLarge` (dimensions exceed the configured `max_pixels` cap — **120 MP by default** since #49; tighten it with `Zensim::with_max_pixels`, or pass `with_max_pixels(usize::MAX)` to opt out for trusted input — or `width × height` overflows `usize` on 32-bit / wasm32). HDR-flagged sources (`ImageSource::is_hdr` returns `true`) are refused with `HdrInputRequiresPuPath` — score HDR via the PU21 front-end (`Zensim::compute_pu_linear`, fed absolute-luminance linear RGB in cd/m²) instead. On success, `ZensimResult::score()` is the `0..100` similarity; `raw_distance()`, `approx_ssim2()`, `approx_dssim()`, and `approx_butteraugli()` are also available (see "What the score means").
+`ZensimError` is a `#[non_exhaustive]` enum (so match it with a `_` arm) — the variants `compute` can return are `DimensionMismatch`, `ImageTooSmall`, and `ImageTooLarge` (dimensions exceed the configured `max_pixels` cap — **120 MP by default** since #49; tighten it with `Zensim::with_max_pixels`, or pass `with_max_pixels(usize::MAX)` to opt out for trusted input — or `width × height` overflows `usize` on 32-bit / wasm32). HDR-flagged sources (`ImageSource::is_hdr` returns `true`) are refused with `HdrInputRequiresPuPath` — score HDR via the PU21 front-end (`Zensim::compute_pu_linear`, fed absolute-luminance linear RGB in cd/m²) instead. On success, `ZensimResult::score()` is the signed similarity score (identity is 100 and severe damage can score below zero); `raw_distance()`, `approx_ssim2()`, `approx_dssim()`, and `approx_butteraugli()` are also available (see "What the score means").
 
 ### Strided / padded rows
 
@@ -217,11 +217,11 @@ Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-
 
 Each `ZensimProfile` bundles weights and score-mapping parameters. A profile
 name is not a frozen model: pin the bake and extraction revision when
-reproducing scores. Current checkout mapping, checked September 7:
+reproducing scores. Current checkout mapping, checked October 19, 2026:
 
 | Profile | Role and declared features | Bake size |
 |---------|----------------------------|----------:|
-| `B` (**default** — `codec_target()`) | SDR linear ensemble + dial spline; 95 IDs | 2,012 B |
+| `B` (**default** — `codec_target()`) | SDR diff+frag-820 MLP, Rev5; 420 feature IDs / 820 derived inputs | 214,904 B |
 | `BHdr` | HDR linear ensemble on absolute-luminance features; 133 IDs | 5,331 B |
 | `D` | Fast SDR linear profile + id100/negative-tail spline; 28 IDs | 1,420 B |
 | `C` / `CHdr` | SDR/HDR candidates; 667 / 697 declared IDs, canonical activity semantics | 151,785 / 182,826 B |
@@ -235,7 +235,7 @@ Exact filenames, hashes, serving limitations and evaluation records are in the
 
 **`D` dial-era v2 (2026-09-05).** `D`'s bake changed from `d_sdr_add156_dense_dial_2026-08-31.bin` to `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`. **The forward pass is byte-identical** (both strip to the same weight bytes), so rank and speed do not move — pooled SROCC is bit-identical on 11 of 14 canonical corpora and within a monotone remap's tie residue on the other three (`kadid` −1.3e-7, `live` +5.8e-7, `tid` +7.9e-6); CID22 is 0.863380 before and after. What changes is the **dial**: a perfect copy now reads **100.000** instead of 96.116, the dial-grid top moves 96.05 → 99.38 (p95 95.28 → 95.52) and the bottom −12.20 → −57.17 (p5 9.52 → 8.83), reach 108.25 → 156.55, and the deepest negative-tail probe row −100.0 → −213.1 — negative scores work further out, which is the product contract, not a regression. No grid cell out-scores identity, before or after (0 of 4,424). **Stored `zensim-d` dial values predate this and must be re-read, not rescaled** — the remap is a PCHIP spline, not an affine. Details + gates: [`benchmarks/d_ship_flip_2026-09-05.md`](benchmarks/d_ship_flip_2026-09-05.md).
 
-`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the linear profiles that shipped in 0.2.7) are RETAINED as first-class, non-deprecated, selectable variants — the 0.3.0 line reverted their removal (commit `493c91cd`) to preserve semver compatibility with 0.2.7; see the CHANGELOG `[Unreleased]` **Restored** entry. `B` is the current deterministic-linear default for SDR content.
+`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the linear profiles that shipped in 0.2.7) are RETAINED as first-class, non-deprecated, selectable variants — the 0.3.0 line reverted their removal (commit `493c91cd`) to preserve semver compatibility with 0.2.7; see the CHANGELOG `[Unreleased]` **Restored** entry. `B` is the current diff+frag-820 default for SDR content.
 
 The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 
@@ -377,9 +377,50 @@ returns the score with its features; `compute_hdr` uses the explicit HDR
 encoding; `score_features` scores admitted cached rows. The user still controls
 one target score. Model metadata and disposition are model-author settings.
 
+For rectangle steering, `prepare_steering(&source, bin)` binds SDR input;
+`prepare_steering_hdr(&source, encoding, bin)` binds native PQ, HLG or absolute
+linear HDR input. Both reuse the reference and retain basic/peak signals from
+the scoring extraction for subsequent map assembly. The SDR session also serves
+bakes that read v2 (f372-f719) and append/append2 (f720-f943) features with the same score and the same map owner
+as the cached-reference attribution path; masked/IW (f228-f371) and f944+
+reads are refused up front. The HDR route preserves
+declared primaries and native precision; it currently refuses fractional
+sampling and unsupported feature families. These are input/implementation
+contracts, not evidence that an SDR-trained model is calibrated for HDR.
+The optional
+`with_finite_moment_refinement(true)` improves finite L2/L4/L8 removal estimates
+using binned base-image moments; it preserves scalar scores and additive density.
+It is disabled by default and adds preparation cost; see the
+[measured runtime and qualification](benchmarks/recovery_completion_2026-09-15.md).
+See the [accuracy evidence](benchmarks/finite_moments_2026-09-14.md) and
+[updated preparation cost](benchmarks/aligned_bins_2026-09-14.md)
+before enabling it. Map coverage and small TRAIN checks do not qualify native
+encoder improvements.
+
 New candidates must be evaluated through this same Rust surface. See
 [the workflow](docs/WAVE_PLAYBOOK.md), [feature identity](docs/FEATURE_SET_IDS.md)
 and [evaluation contract](docs/FULL_EVAL.md). The `serve_custom_bake` example
 loads models without leaked bytes or a static loader. Formula revision is
-validated; candidate pixel scoring refuses if the process's SSIM luminance
-form differs from the bake's revision (`ZENSIM_FORMULA_REV`).
+validated. Rev5 models select their declared arithmetic without a process
+environment pin. Raw research requests and older wide models retain their
+process-revision admission guards (`ZENSIM_FORMULA_REV`).
+
+`ZENSIM_FORMULA_REV=5` selects the `localwin` revision for bakes and research
+requests reading only basic (f0–155), peaks (f156–227), and v2 (f372–719).
+Explicit raw extraction requests for other families are refused, including
+masked/IW and SDR/PU extended-feature requests. With `training`,
+`compute_all_features` computes all 576 supported slots independently of
+the bake's serving subset. Rev5 mean-offset metadata is zero on scalar and
+basic-only prepared steering paths. Requests for supported slots can retain
+a wider storage layout. Rev5 uses local f32 blur windows,
+sixteen fixed accumulator lanes, fused expressions, and stable central moments.
+Identical inputs retain computed reference-only features while difference and
+similarity slots have exact identities. Prepared SDR and HDR steering support Rev5.
+`ZENSIM_NEIGHBOUR_EXACT=1` enables exact coarse-scale v2 refinement through local
+window replay and ordered stable-moment merges. Sampled SDR bakes use canonical
+resize reductions; the strip and bounded-v2 entries route through the canonical
+owner. See the
+[Rev5 contract](benchmarks/rev5_spec_2026-10-04.md) and
+[implementation gates](benchmarks/rev5_WORKLOG.md) and
+[entry/refinement panel](benchmarks/rev5_entries_2026-10-04.md). Rev5 model retraining and
+quiet-box performance qualification remain separate follow-up work.

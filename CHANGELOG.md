@@ -4,6 +4,8 @@
 
 ### Dependency compatibility
 
+- Update training-core and Adam constructor calls to equivalent token-explicit aliases; strict workspace lint passes. No arithmetic or dependency-version change (`872adce9`).
+
 - Admit the current SIMD beta and use equivalent token-explicit constructor aliases throughout the metric kernels (`639d5292`). Formatting, strict library lint and 450 library tests pass; ten existing ignored tests are unchanged. No metric coefficients, arithmetic or expected values changed.
 
 ### QUEUED BREAKING CHANGES
@@ -11,6 +13,8 @@
 None.
 
 ### Changed
+
+- Promote the frozen diff+frag-820 Rev5 bake to **B / zensim-b**, selected by `codec_target()` and `latest_preview()`. Serve its declared revision in minimal builds and cached-reference scoring, detach the historical B JND map, and preserve BHdr routing and the known color-noise/qualification limits ([record](docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md); `a20067f7`).
 
 - Compare existing B/D profiles with frozen research candidates on identical external populations using fresh Rev1 features, exact native parity and canonical statistics; lead the comparison scoreboard with all measured corpus columns ([results](benchmarks/gauntlet_legacy_comparison_2026-10-19.md)). No production profile changes.
 

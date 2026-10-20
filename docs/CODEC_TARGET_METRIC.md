@@ -1,6 +1,6 @@
 # Codec-target metric — the one user-facing quality dial
 
-**Current integration guide, checked against source on 2026-09-07.**
+**Current integration guide, checked against source on 2026-10-19.**
 `ZensimProfile::codec_target()` and `latest_preview()` return **B**.
 D is available explicitly; the September 5 change replaced D’s calibration,
 not the `codec_target()` alias. The implementation in
@@ -57,18 +57,24 @@ See the [ladder measurement](../benchmarks/board_ladder_ruler_2026-09-06.md).
 ## Current variant → backing bake mapping
 
 All filenames below are relative to `zensim/weights/`. Hashes are SHA-256
-prefixes checked from those files on 2026-09-07. Each bake has a same-stem
+prefixes; the B rotation was checked on 2026-10-19. Each bake has a same-stem
 TOML under [`weights/manifests/`](../zensim/weights/manifests/).
 
 | Public variant | Current bake | Role |
 |---|---|---|
-| **B** (`zensim-b`) | `b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin` · `a96a5a66…` | Default SDR scorer; `codec_target()` and `latest_preview()` |
+| **B** (`zensim-b`) | `b_sdr_diff_frag_820_rev5_2026-10-19.bin` · `89cb4861…` | Default SDR scorer; `codec_target()` and `latest_preview()` |
 | **BHdr** (`zensim-b-hdr`) | `bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin` · `8461ac55…` | Default HDR route through the absolute-luminance entry points |
 | **C** (`zensim-c`) | `c_sdr_purity944_byid_2026-09-07.bin` · `996dfbb1…` | Available SDR candidate; not the default |
 | **CHdr** (`zensim-c-hdr`) | `c_hdr_l1t1944_byid_2026-09-07.bin` · `3ea640d3…` | Available HDR candidate; BHdr remains the default |
 | **D** (`zensim-d`) | `d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin` · `cd1098b4…` | Fast SDR profile; 28 declared feature IDs, 1,420-byte bake |
 | **A** (`zensim-a`) | `v47_strict_qat_native_byid_2026-09-06.bin` · `de0ddb3d…` | Deprecated profile |
 | `PreviewV0_1`, `PreviewV0_2` | In-source weight arrays | Historical compatibility profiles |
+
+B now means the frozen **diff+frag-820** model, with model-bound Rev5
+extraction, no attached corruption head and no JND map. Its runtime is present
+in minimal builds. HDR still routes to BHdr. This intentionally changes B's
+SDR scores and retains known severe color-noise inversions and incomplete
+qualification. See the [promotion record](PROFILE_B_DIFF_FRAG_820_2026-10-19.md).
 
 C/CHdr/D use the default-on `candidate-profiles` feature; A uses
 `deprecated-profiles`. The September 6 explicit-ID conversion of A/B/BHdr/D

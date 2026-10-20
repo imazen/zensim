@@ -5,8 +5,8 @@ score, and encoders choose the settings to reach it.
 
 Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
 
-**Current checkout (2026-09-07):** the user-facing control is one target score.
-`codec_target()` returns B; D is an explicit fast profile. Negative scores are
+**Current checkout (2026-10-19):** the user-facing control is one target score.
+`codec_target()` returns **B / zensim-b: diff+frag-820 (Rev5)**; D is an explicit fast profile. See the [B promotion record](https://github.com/imazen/zensim/blob/main/docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md) for its exact bake, known color-noise inversions and remaining qualification. Negative scores are
 valid. The benchmark tables below are historical measurements, not a fresh
 qualification of today's profiles. See the [current integration guide](https://github.com/imazen/zensim/blob/main/docs/CODEC_TARGET_METRIC.md)
 for bake identities, actual consumer behavior and the remaining dial requirements.
@@ -369,11 +369,11 @@ Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-
 
 Each `ZensimProfile` bundles weights and score-mapping parameters. A profile
 name is not a frozen model: pin the bake and extraction revision when
-reproducing scores. Current checkout mapping, checked September 7:
+reproducing scores. Current checkout mapping, checked October 19, 2026:
 
 | Profile | Role and declared features | Bake size |
 |---------|----------------------------|----------:|
-| `B` (**default** — `codec_target()`) | SDR linear ensemble + dial spline; 95 IDs | 2,012 B |
+| `B` (**default** — `codec_target()`) | SDR diff+frag-820 MLP, Rev5; 420 feature IDs / 820 derived inputs | 214,904 B |
 | `BHdr` | HDR linear ensemble on absolute-luminance features; 133 IDs | 5,331 B |
 | `D` | Fast SDR linear profile + id100/negative-tail spline; 28 IDs | 1,420 B |
 | `C` / `CHdr` | SDR/HDR candidates; 667 / 697 declared IDs, canonical activity semantics | 151,785 / 182,826 B |
@@ -387,7 +387,7 @@ Exact filenames, hashes, serving limitations and evaluation records are in the
 
 **`D` dial-era v2 (2026-09-05).** `D`'s bake changed from `d_sdr_add156_dense_dial_2026-08-31.bin` to `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`. **The forward pass is byte-identical** (both strip to the same weight bytes), so rank and speed do not move — pooled SROCC is bit-identical on 11 of 14 canonical corpora and within a monotone remap's tie residue on the other three (`kadid` −1.3e-7, `live` +5.8e-7, `tid` +7.9e-6); CID22 is 0.863380 before and after. What changes is the **dial**: a perfect copy now reads **100.000** instead of 96.116, the dial-grid top moves 96.05 → 99.38 (p95 95.28 → 95.52) and the bottom −12.20 → −57.17 (p5 9.52 → 8.83), reach 108.25 → 156.55, and the deepest negative-tail probe row −100.0 → −213.1 — negative scores work further out, which is the product contract, not a regression. No grid cell out-scores identity, before or after (0 of 4,424). **Stored `zensim-d` dial values predate this and must be re-read, not rescaled** — the remap is a PCHIP spline, not an affine. Details + gates: [`benchmarks/d_ship_flip_2026-09-05.md`](benchmarks/d_ship_flip_2026-09-05.md).
 
-`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the linear profiles that shipped in 0.2.7) are RETAINED as first-class, non-deprecated, selectable variants — the 0.3.0 line reverted their removal (commit `493c91cd`) to preserve semver compatibility with 0.2.7; see the CHANGELOG `[Unreleased]` **Restored** entry. `B` is the current deterministic-linear default for SDR content.
+`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the linear profiles that shipped in 0.2.7) are RETAINED as first-class, non-deprecated, selectable variants — the 0.3.0 line reverted their removal (commit `493c91cd`) to preserve semver compatibility with 0.2.7; see the CHANGELOG `[Unreleased]` **Restored** entry. `B` is the current diff+frag-820 default for SDR content.
 
 The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 
@@ -576,8 +576,9 @@ New candidates must be evaluated through this same Rust surface. See
 [the workflow](docs/WAVE_PLAYBOOK.md), [feature identity](docs/FEATURE_SET_IDS.md)
 and [evaluation contract](docs/FULL_EVAL.md). The `serve_custom_bake` example
 loads models without leaked bytes or a static loader. Formula revision is
-validated; candidate pixel scoring refuses if the process's SSIM luminance
-form differs from the bake's revision (`ZENSIM_FORMULA_REV`).
+validated. Rev5 models select their declared arithmetic without a process
+environment pin. Raw research requests and older wide models retain their
+process-revision admission guards (`ZENSIM_FORMULA_REV`).
 
 `ZENSIM_FORMULA_REV=5` selects the `localwin` revision for bakes and research
 requests reading only basic (f0–155), peaks (f156–227), and v2 (f372–719).
