@@ -9,12 +9,9 @@ readme = "../README.crates.md"
 rust-version = "1.93.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
-# Ship ONLY the source + the embedded bakes that `profile.rs` `include_bytes!`s
-# — the `A` profile (v47-strict-QAT) plus the generation-B linear profiles
-# (`B` SDR + `BHdr`) — and A's recipe. Every bake named here is loaded at
-# compile time, so all three MUST ship or a packaged build fails. The raw
-# pre-guard B ensemble (823 B) ships too so downstream can byte-reproduce B
-# via `scripts/reproduce_b.sh` (recipe: benchmarks/profile_b_methodology_2026-07-12.md).
+# Ship source and the bakes embedded by `profile.rs`, including the Rev5
+# diff+frag-820 SDR default B, BHdr and the feature-gated named profiles.
+# Retired B artifacts remain for explicit historical regression/reproduction.
 # The rest of `weights/` (archive bakes, picker checkpoints, historical/
 # experimental bakes, other manifests) stays on disk for the workspace's
 # research tooling but is NOT shipped to crates.io — every experimental bake
@@ -30,6 +27,7 @@ include = [
     "src/**/*.rs",
     # SERVED bakes — `include_bytes!`ed by `profile.rs` outside `cfg(test)`.
     "weights/v47_strict_qat_native_byid_2026-09-06.bin",
+    "weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin",
     "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin",
     "weights/bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin",
     "weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
@@ -48,6 +46,7 @@ include = [
     # `scripts/reproduce_b.sh`. Not `include_bytes!`ed.
     "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
     "weights/manifests/v47_strict_qat.toml",
+    "weights/manifests/b_sdr_diff_frag_820_rev5_2026-10-19.toml",
 ]
 
 [package.metadata.docs.rs]
@@ -130,7 +129,7 @@ custom-profiles = []
 ## MLP codec-target bake). ON by default so existing code keeps compiling and
 ## `A` stays selectable — but `A` is `#[deprecated]`: new code should use
 ## `ZensimProfile::codec_target()` / `latest_preview()` (both now return the
-## generation-B linear profile `B`) or name `ZensimProfile::B` directly.
+## current B profile) or name `ZensimProfile::B` directly.
 ## Disable via `--no-default-features` (re-add the other defaults you need) to
 ## drop `A` and its ~27 KB MLP bake entirely. A future minor release may move
 ## this feature out of `default`; migrate off `A` now.
@@ -152,7 +151,7 @@ deprecated-profiles = []
 # than an incidental coupling. A feature that ships a variant must ship what
 # serves it.
 candidate-profiles = ["feature-regime-v2"]
-## The "bounded" v2 feature-extraction regime (`feature_v2` module,
+## Exposes the "bounded" v2 research API (`feature_v2` module,
 ## `Zensim::compute_v2_features`, `FeatureViewV2`) AND the streaming fold
 ## engine it carries (`fold_engine.rs`, `benchmarks/fold_engine_2026-08-31.md`)
 ## — **ON by default since 2026-09-01** (the Profile-D no-tax refactor,

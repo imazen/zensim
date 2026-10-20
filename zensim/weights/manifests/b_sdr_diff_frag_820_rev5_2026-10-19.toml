@@ -1,0 +1,25 @@
+# Frozen artifact promoted to B by the owner on 2026-10-19. No retraining.
+[bake]
+name = "zensim-b"
+internal_version = "diff+frag-820-full-seed0-rev5"
+file = "../b_sdr_diff_frag_820_rev5_2026-10-19.bin"
+sha256 = "89cb4861e2651ff8d4a98bb879feed83a0f9eb3f22b83e644e42eb2291d74b2e"
+file_bytes = 214904
+formula_revision = 5
+declared_ids = 420
+date = "2026-10-19"
+output_disposition = "existing bake calibration; extrapolate_score"
+corruption_head = false
+jnd_calibration = false
+
+[provenance]
+training_manifest_sha256 = "871e2a8216b37f6e85d9635d73e63a7168036ee37ba57c11bfa1ae2d7c48d3fc"
+packed_model_sha256 = "89cb4861e2651ff8d4a98bb879feed83a0f9eb3f22b83e644e42eb2291d74b2e"
+dense_model_sha256 = "c8366d2a3348e8f42df4bfb36c60f29084a2c8273f7400b46c9ed41c6d94252d"
+selection_epoch_rule = "last"
+selected_epoch = 119
+seed_index = 0
+
+[qualification]
+status = "owner-directed promotion; existing FAIL and INCOMPLETE findings retained"
+record = "../../../docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md"
