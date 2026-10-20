@@ -242,6 +242,7 @@ impl Sampling {
         revision: crate::feature_defs::FormulaRevision,
     ) -> crate::PrecomputedReference {
         crate::PrecomputedReference {
+            formula_revision: revision,
             scales: self.pyramid(source, parallel, revision),
             ref_width: source.width(),
             ref_height: source.height(),

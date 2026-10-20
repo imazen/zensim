@@ -775,8 +775,10 @@ impl crate::metric::Zensim {
 
         let width = distorted.width();
         let height = distorted.height();
+        self.check_stop()?;
         let config = config_from_params(params, self.parallel());
-        crate::ssim_form::check_route(&config)?;
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,
@@ -833,7 +835,6 @@ impl crate::metric::Zensim {
         // metric. Two paths scoring the same pair differently is a bug per the
         // parity contract; no-op for linear-weight legacy profiles
         // (`mlp_bytes: None` early-returns).
-        #[cfg(feature = "feature-regime-v2")]
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::score_plan(params, &config, true)
                 .is_some_and(|p| p.compute.v2_blocks)
@@ -843,12 +844,9 @@ impl crate::metric::Zensim {
             // canonical reference-fed fold, including every v2 read.
             result = self.compute_with_ref(precomputed, distorted)?;
         }
-        #[cfg(feature = "feature-regime-v2")]
         let already_scored = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::score_plan(params, &config, true)
                 .is_some_and(|p| p.compute.v2_blocks);
-        #[cfg(not(feature = "feature-regime-v2"))]
-        let already_scored = false;
         if !already_scored {
             crate::metric::apply_mlp_scoring_with_codec(
                 &mut result,
@@ -973,8 +971,10 @@ impl crate::metric::Zensim {
             }
         }
 
+        self.check_stop()?;
         let config = config_from_params(params, self.parallel());
-        crate::ssim_form::check_route(&config)?;
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,
@@ -1032,7 +1032,6 @@ impl crate::metric::Zensim {
         let mut result = result.with_profile(self.profile());
         // Same real-scoring fix as `compute_with_ref_and_diffmap` (2026-07-18):
         // apply the profile's bake forward + spline; no-op for legacy profiles.
-        #[cfg(feature = "feature-regime-v2")]
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::score_plan(params, &config, true)
                 .is_some_and(|p| p.compute.v2_blocks)
@@ -1061,12 +1060,9 @@ impl crate::metric::Zensim {
             );
             result = self.compute_with_ref(precomputed, &image)?;
         }
-        #[cfg(feature = "feature-regime-v2")]
         let already_scored = config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::score_plan(params, &config, true)
                 .is_some_and(|p| p.compute.v2_blocks);
-        #[cfg(not(feature = "feature-regime-v2"))]
-        let already_scored = false;
         if !already_scored {
             crate::metric::apply_mlp_scoring_with_codec(
                 &mut result,
@@ -1240,7 +1236,7 @@ mod tests {
         for &(w, h) in &[(37usize, 29usize), (64usize, 64usize), (129usize, 128usize)] {
             let px = synth(w, h);
             let img = RgbSlice::new(&px, w, h);
-            let z = crate::Zensim::new(ZensimProfile::codec_target());
+            let z = crate::Zensim::new(ZensimProfile::BHdr);
             let baseline = z.compute(&img, &img).unwrap().score();
             assert_eq!(baseline, 100.0, "compute must certify identity at {w}x{h}");
 
@@ -1347,7 +1343,7 @@ mod tests {
         let (w, h) = (129usize, 128usize);
         let px = synth(w, h);
         let img = RgbSlice::new(&px, w, h);
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::BHdr);
         let pre = z.precompute_reference(&img).unwrap();
         let mut scratch = crate::ZensimScratch::default();
 
@@ -1428,7 +1424,7 @@ mod tests {
         dst_px[(h / 2) * w + w / 2][1] = dst_px[(h / 2) * w + w / 2][1].wrapping_add(1);
         let src = RgbSlice::new(&src_px, w, h);
         let dst = RgbSlice::new(&dst_px, w, h);
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
 
         let scalar = z.compute(&src, &dst).unwrap().score();
         assert_ne!(
@@ -1456,7 +1452,7 @@ mod tests {
         let pixels: Vec<[u8; 3]> = (0..64)
             .map(|i| [i as u8 * 4, 128, 255 - i as u8 * 4])
             .collect();
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&pixels, 8, 8);
         let result = z
             .compute_with_diffmap(&src, &src, DiffmapWeighting::default())
@@ -1487,7 +1483,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
         let result = z
@@ -1541,7 +1537,7 @@ mod tests {
             })
             .collect();
 
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1589,7 +1585,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1625,7 +1621,7 @@ mod tests {
     #[test]
     fn test_diffmap_weighting_into_options() {
         // Verify backward compatibility: DiffmapWeighting converts to DiffmapOptions
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let pixels: Vec<[u8; 3]> = vec![[100, 150, 200]; 8 * 8];
         let src = RgbSlice::new(&pixels, 8, 8);
 
@@ -1653,7 +1649,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1705,7 +1701,7 @@ mod tests {
             p[0] = p[0].wrapping_add(40);
         }
 
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1779,7 +1775,7 @@ mod tests {
     /// Stress-test diffmap for NaN/Inf with adversarial inputs at realistic sizes.
     #[test]
     fn test_diffmap_no_nan() {
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let weightings = [
             DiffmapWeighting::Trained,
             DiffmapWeighting::Balanced,
@@ -1954,7 +1950,7 @@ mod tests {
                 dst[y * w + x] = p;
             }
         }
-        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let z = crate::Zensim::new(ZensimProfile::B);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let base_opts = super::DiffmapOptions {

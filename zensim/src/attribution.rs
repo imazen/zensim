@@ -1970,7 +1970,8 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
-        crate::ssim_form::check_route(&config)?;
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "attribution density requires blur_passes == 1 (all shipped profiles)",
@@ -2642,7 +2643,8 @@ mod tests {
                 crate::RgbSlice::new(&dst, w, h),
             );
             for parallel in [false, true] {
-                let z = crate::Zensim::new(crate::ZensimProfile::B).with_parallel(parallel);
+                let z = crate::Zensim::new(crate::profile::historical_b_for_test())
+                    .with_parallel(parallel);
                 let pre = z.precompute_reference(&rs).unwrap();
                 for mode in 0..4 {
                     let mut s = vec![0.0; 156];
@@ -4054,7 +4056,7 @@ mod tests {
     fn fused_score_bit_matches_diffmap_path() {
         let (w, h) = (150, 170);
         let (src, dst) = test_pair(w, h);
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let z = crate::Zensim::new(crate::profile::historical_b_for_test());
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
         let pre = z.precompute_reference(&rs).unwrap();
@@ -4085,7 +4087,7 @@ mod tests {
     fn fused_matches_standalone_attribution() {
         let (w, h) = (150, 170);
         let (src, dst) = test_pair(w, h);
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let z = crate::Zensim::new(crate::profile::historical_b_for_test());
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
         let pre = z.precompute_reference(&rs).unwrap();
@@ -4166,14 +4168,14 @@ mod tests {
         // The forward over the features (the loop's score step) — the
         // caller-width prefix branch accepts the 944 vector.
         let sf = crate::score_features_with_profile(
-            crate::ZensimProfile::B,
+            crate::profile::historical_b_for_test(),
             fused_v2.features(),
             w as u32,
             h as u32,
         )
         .unwrap();
         let ss = crate::score_features_with_profile(
-            crate::ZensimProfile::B,
+            crate::profile::historical_b_for_test(),
             std_v2.features(),
             w as u32,
             h as u32,
@@ -4311,7 +4313,7 @@ mod tests {
     fn stale_same_pair_second_call_equals_fresh_map_exactly() {
         let (w, h) = (150, 170);
         let (src, dst) = test_pair(w, h);
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let z = crate::Zensim::new(crate::profile::historical_b_for_test());
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
         let pre = z.precompute_reference(&rs).unwrap();
@@ -4378,7 +4380,7 @@ mod tests {
                 ]
             })
             .collect();
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let z = crate::Zensim::new(crate::profile::historical_b_for_test());
         let rs = RgbSlice::new(&src, w, h);
         let dsa = RgbSlice::new(&dst_a, w, h);
         let dsb = RgbSlice::new(&dst_b, w, h);
@@ -4492,7 +4494,7 @@ mod tests {
     fn stale_reprimes_on_gradient_change() {
         let (w, h) = (96, 80);
         let (src, dst) = test_pair(w, h);
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let z = crate::Zensim::new(crate::profile::historical_b_for_test());
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
         let pre = z.precompute_reference(&rs).unwrap();
@@ -4523,7 +4525,7 @@ mod tests {
     fn stale_recycled_buffers_produce_identical_maps() {
         let (w, h) = (150, 170);
         let (src, dst) = test_pair(w, h);
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let z = crate::Zensim::new(crate::profile::historical_b_for_test());
         let rs = RgbSlice::new(&src, w, h);
         let ds = RgbSlice::new(&dst, w, h);
         let pre = z.precompute_reference(&rs).unwrap();
@@ -5735,7 +5737,7 @@ impl Fused944Session {
         parallel: bool,
         encoding: Option<crate::feature_v2::HdrEncoding>,
     ) -> crate::ZensimResult {
-        let mut config = config_from_params(crate::ZensimProfile::B.params(), parallel);
+        let mut config = config_from_params(crate::ZensimProfile::BHdr.params(), parallel);
         config.formula_revision = Some(plan.compute.formula_revision);
         config.compute_all_features = true;
         config.extended_features = false;
@@ -5771,7 +5773,7 @@ impl Fused944Session {
             precomputed,
             distorted,
             &config,
-            crate::ZensimProfile::B.params().weights,
+            crate::ZensimProfile::BHdr.params().weights,
             supplied_xyb,
             |scale, stats, _src, dst, planes, w, h| {
                 let n = w * h;
@@ -5862,6 +5864,7 @@ impl Fused944Session {
                 plan.toggles(),
                 &mut self.scratch,
                 crate::feature_v2::FoldWalkExtras {
+                    stop: None,
                     compute: Some(plan.compute),
                     retention: Some(&mut self.retention),
                     mean_offset: Some(&mut mean),
@@ -6405,7 +6408,8 @@ impl crate::metric::Zensim {
             && s.iter()
                 .enumerate()
                 .all(|(id, v)| *v == 0.0 || matches!(id % FPC, 0..=2 | 9));
-        crate::ssim_form::check_route(&config)?;
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",
@@ -6816,7 +6820,8 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
-        crate::ssim_form::check_route(&config)?;
+        crate::metric::check_profile_route(params, &config)?;
+        crate::metric::validate_cached_revision(precomputed, config.revision())?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",

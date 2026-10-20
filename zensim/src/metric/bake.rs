@@ -32,7 +32,6 @@ pub struct BakeScorer<'a> {
     gathered: Vec<f64>,
     inputs: Vec<f32>,
     standardized: Vec<f64>,
-    #[cfg(feature = "feature-regime-v2")]
     pixel_scratch: crate::feature_v2::V2Scratch,
     disposition: Option<&'a ProfileParams>,
     parallel: bool,
@@ -46,7 +45,6 @@ pub struct BakeScorer<'a> {
     /// the model (and the process formula revision, fixed per process), and a
     /// scorer's model never changes, so the cache needs no invalidation.
     /// Composition (members, weights, companion) stays per call in [`Self::plan`].
-    #[cfg(feature = "feature-regime-v2")]
     model_plan: std::sync::OnceLock<crate::feature_plan::Plan>,
 }
 
@@ -243,7 +241,6 @@ impl<'a> BakeScorer<'a> {
             gathered: Vec::new(),
             inputs: Vec::with_capacity(model.caller_input_width()),
             standardized: Vec::new(),
-            #[cfg(feature = "feature-regime-v2")]
             pixel_scratch: crate::feature_v2::V2Scratch::default(),
             disposition: None,
             parallel: true,
@@ -253,7 +250,6 @@ impl<'a> BakeScorer<'a> {
             weights: None,
             #[cfg(feature = "corruption-head")]
             corruption: None,
-            #[cfg(feature = "feature-regime-v2")]
             model_plan: std::sync::OnceLock::new(),
         })
     }
@@ -660,7 +656,6 @@ impl<'a> BakeScorer<'a> {
     #[cfg(feature = "feature-regime-v2")]
     fn mark_feature_reads(&self, reads: &mut [bool]) {
         if self.weights.as_ref().is_none_or(|w| w[0] != 0.0) {
-            #[cfg(feature = "feature-regime-v2")]
             let known = crate::feature_plan::bake_read_slots(self.model)
                 .map(|slots| {
                     for id in slots.iter_slots() {
@@ -670,8 +665,6 @@ impl<'a> BakeScorer<'a> {
                     }
                 })
                 .is_some();
-            #[cfg(not(feature = "feature-regime-v2"))]
-            let known = false;
             if !known {
                 for pos in 0..self.layout.width() {
                     if let Some(id) = self.layout.slot_at(pos)
@@ -702,7 +695,6 @@ impl<'a> BakeScorer<'a> {
         }
     }
 
-    #[cfg(feature = "feature-regime-v2")]
     fn plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
         use crate::feature_plan::Plan;
         let mut combined: Option<Plan> = None;
@@ -804,7 +796,6 @@ impl<'a> BakeScorer<'a> {
     /// over a 104,960-weight first layer) that was a fixed ~0.1 ms per call.
     /// Only a successful plan is cached; an error is rebuilt and returned on
     /// every call, exactly as before.
-    #[cfg(feature = "feature-regime-v2")]
     fn model_plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
         if let Some(plan) = self.model_plan.get() {
             return Ok(plan.clone());
@@ -818,44 +809,8 @@ impl<'a> BakeScorer<'a> {
     }
 
     fn check_servable(&self) -> Result<(), ZensimError> {
-        #[cfg(feature = "feature-regime-v2")]
         {
             self.plan()?;
-        }
-        #[cfg(not(feature = "feature-regime-v2"))]
-        {
-            if crate::sampling::Sampling::from_model(self.model)?.is_some()
-                || self.layout.walk_width() > 372
-                || crate::feature_layout::formula_revision(self.model)?
-                    != crate::ssim_form::active_revision()
-            {
-                return Err(ZensimError::ModelLoadFailed {
-                    reason: "bake requires feature-regime-v2 for its extraction requirements",
-                });
-            }
-            for member in &self.members {
-                member.check_servable()?;
-            }
-            #[cfg(feature = "corruption-head")]
-            if let Some(head) = &self.corruption {
-                match head {
-                    Companion::Tree(h, _)
-                        if h.formula_revision()
-                            != crate::feature_layout::formula_revision(self.model)? =>
-                    {
-                        return Err(ZensimError::ModelLoadFailed {
-                            reason: "corruption head requires another feature revision",
-                        });
-                    }
-                    Companion::Tree(h, _) if h.caller_input_width() > 372 => {
-                        return Err(ZensimError::ModelLoadFailed {
-                            reason: "corruption head requires feature-regime-v2",
-                        });
-                    }
-                    Companion::Linear(h, _) => h.check_servable()?,
-                    _ => (),
-                }
-            }
         }
         Ok(())
     }
@@ -872,18 +827,15 @@ impl<'a> BakeScorer<'a> {
                 reason: "ensemble has no active member",
             })?;
         let revision = crate::feature_layout::formula_revision(model)?;
-        // featcanon D1, before any exemption: no bake crosses the Rev4
-        // boundary (a Rev1–Rev3 bake in a Rev4 process would run the
-        // process's canonical Rev4 arithmetic under the bake's declared
-        // revision — measured: the D bake, declared Rev1, scored 12/12
-        // pairs with Rev4 features; the reverse mix is equally mislabelled).
-        // REV4SERVE: a Rev4 bake IS served in a pure Rev4 process — the
-        // served leaves are canonical there. No diagnostic bypass.
-        crate::ssim_form::refuse_rev4_mix(revision)?;
+        // Raw/older wide walks retain the process-mix guard. Validated Rev5
+        // plans carry their revision through conversion, blur, pooling and
+        // finalization, so they can serve alongside older named models.
+        if revision != crate::feature_defs::FormulaRevision::Rev5 {
+            crate::ssim_form::refuse_rev4_mix(revision)?;
+        }
         // Basic/peak plans carry their arithmetic explicitly through both
         // SIMD passes and the cached spatial owner. Wide-family kernels still
         // use process defaults and must retain the mismatch refusal below.
-        #[cfg(feature = "feature-regime-v2")]
         {
             let plan = self.plan()?;
             #[cfg(feature = "corruption-head")]
@@ -1020,14 +972,13 @@ impl<'a> BakeScorer<'a> {
         self.check_pixel_revision()?;
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
-        // B supplies the established four-scale SDR pixel front end. The
-        // candidate's own plan determines which feature families run; B's
+        // BHdr supplies the established four-scale pixel front end. The
+        // candidate's own plan determines which feature families run; BHdr's
         // weights only fill the intermediate result and are never returned.
-        let params = ZensimProfile::B.params();
-        let config = config_from_params(params, self.parallel);
-        #[cfg(feature = "feature-regime-v2")]
+        let params = ZensimProfile::BHdr.params();
+        let mut config = config_from_params(params, self.parallel);
+        config.formula_revision = Some(self.plan()?.compute.formula_revision);
         let plan = self.plan()?;
-        #[cfg(feature = "feature-regime-v2")]
         if plan.compute.formula_revision >= crate::feature_defs::FormulaRevision::Rev5 {
             #[cfg(steerfix_instrument)]
             let mut mapperf_stage = mapperf_audit::start();
@@ -1060,13 +1011,6 @@ impl<'a> BakeScorer<'a> {
             mapperf_audit::total(mapperf_total, "scalar");
             return Ok(result);
         }
-        #[cfg(not(feature = "feature-regime-v2"))]
-        if self.layout.walk_width() > 372 {
-            return Err(ZensimError::ModelLoadFailed {
-                reason: "this bake requires feature-regime-v2 for image extraction",
-            });
-        }
-        #[cfg(feature = "feature-regime-v2")]
         if let Some(sampling) = plan.compute.sampling {
             check_within_max_pixels(
                 source.width().max(sampling.min_dim()),
@@ -1128,7 +1072,6 @@ impl<'a> BakeScorer<'a> {
             params.weights,
             None,
             true,
-            #[cfg(feature = "feature-regime-v2")]
             Some(&plan),
         );
         result.score = self.score_features_with_identity(
@@ -1167,6 +1110,7 @@ impl<'a> BakeScorer<'a> {
         self.check_pixel_revision()?;
         validate_pair(source, distorted)?;
         validate_ref_dimensions(precomputed, distorted)?;
+        validate_cached_revision(precomputed, self.plan()?.compute.formula_revision)?;
         check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
         let plan = self.plan()?;
         if precomputed.sampling != plan.compute.sampling {
@@ -1175,8 +1119,9 @@ impl<'a> BakeScorer<'a> {
             });
         }
         if crate::feature_v2::retained_ref_feed_admits(precomputed, distorted, &plan) {
-            let params = ZensimProfile::B.params();
-            let config = config_from_params(params, self.parallel);
+            let params = ZensimProfile::BHdr.params();
+            let mut config = config_from_params(params, self.parallel);
+            config.formula_revision = Some(self.plan()?.compute.formula_revision);
             if let Some(mut result) = crate::fold_engine::compute_fold_backed_with_ref_plan(
                 precomputed,
                 distorted,
@@ -1252,9 +1197,14 @@ impl<'a> BakeScorer<'a> {
                 plan.compute.formula_revision,
             ));
         }
-        Zensim::new(ZensimProfile::B)
-            .with_parallel(self.parallel)
-            .precompute_reference(source)
+        validate_pair(source, source)?;
+        check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
+        Ok(crate::PrecomputedReference::new(
+            source,
+            crate::NUM_SCALES,
+            self.parallel,
+            plan.compute.formula_revision,
+        ))
     }
 
     /// Compare SDR pixels and spatialize this complete candidate's score.
@@ -1330,6 +1280,7 @@ impl<'a> BakeScorer<'a> {
             validate_pair(source, distorted)?;
         }
         validate_ref_dimensions(precomputed, distorted)?;
+        validate_cached_revision(precomputed, self.plan()?.compute.formula_revision)?;
         check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
         let plan = match serving_plan {
             Some(plan) => plan,
@@ -1340,8 +1291,9 @@ impl<'a> BakeScorer<'a> {
                 reason: "reference cache sampling contract differs from model",
             });
         }
-        let params = ZensimProfile::B.params();
-        let config = config_from_params(params, self.parallel);
+        let params = ZensimProfile::BHdr.params();
+        let mut config = config_from_params(params, self.parallel);
+        config.formula_revision = Some(self.plan()?.compute.formula_revision);
         #[cfg(feature = "corruption-head")]
         let has_corruption_gate = self.corruption.is_some();
         #[cfg(not(feature = "corruption-head"))]
@@ -1491,7 +1443,7 @@ impl<'a> BakeScorer<'a> {
         }
         let mut max_removals = Vec::new();
         let mut moment_removals = Vec::new();
-        let (_, attribution) = Zensim::new(ZensimProfile::B)
+        let (_, attribution) = Zensim::new(ZensimProfile::BHdr)
             .with_parallel(self.parallel)
             .attribution_from_retention_binned(
                 precomputed,
@@ -1703,7 +1655,7 @@ mod revision_contract_tests {
 
     #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
     use super::Arc;
-    #[cfg(feature = "feature-regime-v2")]
+    #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
     use super::BakeScorer;
     use crate::feature_defs::FormulaRevision;
     use crate::ssim_form::SsimLumaForm;
@@ -1711,7 +1663,9 @@ mod revision_contract_tests {
     // `bake_declaring` fixes a v2 extraction requirement, so `BakeScorer::new`
     // refuses it without the feature and the pixel-path tests are gated.
     #[cfg(feature = "feature-regime-v2")]
-    use crate::ssim_form::{run_at_revision, run_in_own_process};
+    use crate::ssim_form::run_at_revision;
+    #[cfg(all(feature = "feature-regime-v2", feature = "custom-profiles"))]
+    use crate::ssim_form::run_in_own_process;
     #[cfg(feature = "feature-regime-v2")]
     use crate::{RgbSlice, ZensimError};
 

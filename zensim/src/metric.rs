@@ -1426,8 +1426,7 @@ impl Zensim {
         mut self,
         head: crate::corruption_head::CorruptionHead,
     ) -> Result<Self, crate::corruption_head::CorruptionHeadError> {
-        #[cfg(feature = "feature-regime-v2")]
-        head.check_servable_by(self.profile)?;
+        head.check_servable_for_profile(self.profile)?;
         self.corruption_head = Some(std::sync::Arc::new(head));
         Ok(self)
     }
@@ -1517,7 +1516,10 @@ impl Zensim {
     pub fn score_pool_mode(&self) -> crate::feature_v2::V1PoolsMode {
         let params = self.profile.params();
         let config = config_from_params(params, self.parallel);
-        crate::fold_engine::score_pool_mode(params, &config, self.skip_unread_pools)
+        self.scoring_plan(params, &config).map_or_else(
+            || crate::fold_engine::score_pool_mode(params, &config, self.skip_unread_pools),
+            |plan| plan.compute.v1_pools,
+        )
     }
 
     /// The serving PLAN for a SCORING entry: `None` (today's unconditional v1
@@ -1530,7 +1532,6 @@ impl Zensim {
     /// vector and was refused with `"bake declares more input features than
     /// the caller supplied"` — a true statement about a situation the runtime
     /// created by never asking for the width the bake declared.
-    #[cfg(feature = "feature-regime-v2")]
     fn scoring_plan(
         &self,
         params: &ProfileParams,
@@ -1549,7 +1550,10 @@ impl Zensim {
     #[cfg(feature = "feature-regime-v2")]
     #[doc(hidden)]
     pub fn engine(&self) -> crate::fold_engine::ScoringEngine {
-        if self.fold_engine {
+        if self.fold_engine
+            || config_from_params(self.profile.params(), self.parallel).revision()
+                >= crate::feature_defs::FormulaRevision::Rev5
+        {
             crate::fold_engine::ScoringEngine::Fold
         } else {
             crate::fold_engine::ScoringEngine::Buffered
@@ -1602,9 +1606,9 @@ impl Zensim {
     /// (`compute_streaming_strips*`, where the caller already controls
     /// cadence between strips) do not check the token yet.
     ///
-    /// At Rev5, canonical fold scoring checks the token before and after
-    /// the fold; it has no intra-fold cancellation hook. Earlier buffered
-    /// paths retain the following band-level cancellation granularity.
+    /// At Rev5, canonical fold scoring checks the token between strips as
+    /// well as before and after the fold. Earlier buffered paths retain
+    /// the following band-level cancellation granularity.
     /// Cancellation granularity is one row band (a few dozen rows) at the
     /// current scale; a fired token is detected within roughly one band's
     /// worth of work per rayon worker.
@@ -1741,7 +1745,7 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         self.check_stop()?;
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         let mut result = compute_with_config_inner(
             source,
             distorted,
@@ -1749,7 +1753,6 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
-            #[cfg(feature = "feature-regime-v2")]
             self.scoring_plan(params, &config).as_ref(),
         );
         self.check_stop()?;
@@ -1805,7 +1808,7 @@ impl Zensim {
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         config.extended_features = true;
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             return Err(ZensimError::ModelLoadFailed {
@@ -1819,7 +1822,6 @@ impl Zensim {
             params.weights,
             self.stop_ref(),
             self.fold_engine,
-            #[cfg(feature = "feature-regime-v2")]
             None,
         );
         self.check_stop()?;
@@ -2362,7 +2364,7 @@ impl Zensim {
             source,
             params.num_scales,
             self.parallel,
-            crate::ssim_form::active_revision(),
+            config_from_params(params, self.parallel).revision(),
         ))
     }
 
@@ -2394,9 +2396,7 @@ impl Zensim {
         weights: &[f64],
         scratch: Option<&mut crate::streaming::ZensimScratch>,
     ) -> ZensimResult {
-        #[cfg(feature = "feature-regime-v2")]
         let mut scratch = scratch;
-        #[cfg(feature = "feature-regime-v2")]
         if (config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             || (self.fold_engine && self.stop.is_none()))
             && crate::fold_engine::is_fold_backable(config)
@@ -2411,15 +2411,18 @@ impl Zensim {
             };
             if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
                 let plan = self.scoring_plan(self.profile.params(), config);
-                if let Some(result) = crate::fold_engine::compute_fold_backed_with_ref_plan(
-                    precomputed,
-                    distorted,
-                    config,
-                    weights,
-                    v2,
-                    plan.as_ref().map(|p| p.compute.v1_pools),
-                    plan.as_ref(),
-                ) {
+                if let Some(result) =
+                    crate::fold_engine::compute_fold_backed_with_ref_stoppable_plan(
+                        precomputed,
+                        distorted,
+                        config,
+                        weights,
+                        v2,
+                        plan.as_ref().map(|p| p.compute.v1_pools),
+                        plan.as_ref(),
+                        self.stop_ref(),
+                    )
+                {
                     return result;
                 }
             }
@@ -2441,8 +2444,6 @@ impl Zensim {
                 return r;
             }
         }
-        #[cfg(not(feature = "feature-regime-v2"))]
-        let _ = scratch;
         crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
@@ -2482,7 +2483,8 @@ impl Zensim {
         // here. Symmetry across the call path is preserved.
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
+        validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
         // (also-padded) reference pyramid; score with the original dims. The
@@ -2581,7 +2583,7 @@ impl Zensim {
         }
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             return self.compute(source, distorted);
         }
@@ -2685,7 +2687,8 @@ impl Zensim {
         }
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
+        validate_cached_revision(precomputed, config.revision())?;
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             return self.compute_with_ref(precomputed, distorted);
         }
@@ -2750,7 +2753,8 @@ impl Zensim {
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
+        validate_cached_revision(precomputed, config.revision())?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
         // fold since the fold-engine lane; this entry did not, so a ref LOOP —
@@ -2760,7 +2764,6 @@ impl Zensim {
         // per-compare `V2Scratch` is reused exactly like buffered's
         // `dst_planes`. Out-of-domain requests still degrade to the buffered
         // walk below, byte-for-byte.
-        #[cfg(feature = "feature-regime-v2")]
         if (config.revision() >= crate::feature_defs::FormulaRevision::Rev5
             || (self.fold_engine && self.stop.is_none()))
             && crate::fold_engine::is_fold_backable(&config)
@@ -2860,7 +2863,7 @@ impl Zensim {
             stride,
             params.num_scales,
             self.parallel,
-            crate::ssim_form::active_revision(),
+            config_from_params(params, self.parallel).revision(),
         ))
     }
 
@@ -2923,7 +2926,7 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         // Identical inputs must score exactly 100.0 through the same
         // `mark_identical` contract the SDR path uses (compares only the
         // valid `3 * width` of each row, so stride padding is ignored here
@@ -2934,7 +2937,6 @@ impl Zensim {
                     == dist_rgb[y * dist_stride..y * dist_stride + 3 * width]
             })
         };
-        #[cfg(feature = "feature-regime-v2")]
         if let Some(route) = self.pu_fold_route(params, &config) {
             if route.short_circuit_identity && is_identical() {
                 return self.pu_wide_identity(
@@ -3014,14 +3016,13 @@ impl Zensim {
             }
         }
         let mut config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         config.extended_features = true;
         if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             return Err(ZensimError::ModelLoadFailed {
                 reason: "formula revision 5 supports only basic + peaks + v2; extended extraction requests masked features",
             });
         }
-        #[cfg(feature = "feature-regime-v2")]
         if crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5
             && crate::fold_engine::is_fold_backable(&config)
         {
@@ -3096,7 +3097,7 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         // Same identity short-circuit as the interleaved entry (valid
         // `width` of each plane row only).
         let is_identical = || {
@@ -3105,7 +3106,6 @@ impl Zensim {
                     .all(|y| r[y * stride..y * stride + width] == d[y * stride..y * stride + width])
             })
         };
-        #[cfg(feature = "feature-regime-v2")]
         if let Some(route) = self.pu_fold_route(params, &config) {
             if route.short_circuit_identity && is_identical() {
                 return self.pu_wide_identity(
@@ -3163,7 +3163,6 @@ impl Zensim {
     /// `HdrEncoding::Linear` walk with the plan's toggles is today's build of
     /// the extraction CHdr was trained and validated on
     /// (`benchmarks/chdr_pu_2026-10-10.md`).
-    #[cfg(feature = "feature-regime-v2")]
     fn pu_fold_route(
         &self,
         params: &'static ProfileParams,
@@ -3190,7 +3189,6 @@ impl Zensim {
     /// The below-Rev5 wide-plan identity result: exactly 100 with zeros at
     /// the plan width, as SDR `compute` returns through
     /// `identical_result_at` for the same profiles.
-    #[cfg(feature = "feature-regime-v2")]
     fn pu_wide_identity(
         &self,
         params: &ProfileParams,
@@ -3208,7 +3206,6 @@ impl Zensim {
     /// Canonical PU fold for the planar/interleaved nits APIs, with the plan
     /// [`Self::pu_fold_route`] resolved: every fold-backable config at Rev5,
     /// and wide-plan bakes below Rev5 without a stop token.
-    #[cfg(feature = "feature-regime-v2")]
     fn compute_pu_fold(
         &self,
         source: &impl ImageSource,
@@ -3287,9 +3284,8 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel);
-        crate::ssim_form::check_route(&config)?;
+        check_profile_route(params, &config)?;
         config.compute_all_features = true;
-        #[cfg(feature = "feature-regime-v2")]
         let extraction_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             use crate::feature_defs::family_slots;
             use crate::feature_set_id::ComputeToken;
@@ -3313,7 +3309,6 @@ impl Zensim {
             self.fold_engine,
             // Research extraction requests every supported slot, independently
             // of the profile's serving read set.
-            #[cfg(feature = "feature-regime-v2")]
             extraction_plan.as_ref(),
         );
         self.check_stop()?;
@@ -3370,8 +3365,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
-        crate::ssim_form::check_route(&config)?;
-        #[cfg(feature = "feature-regime-v2")]
+        check_profile_route(params, &config)?;
         let serving_plan = if config.revision() >= crate::feature_defs::FormulaRevision::Rev5 {
             crate::fold_engine::score_plan(params, &config, true)
         } else {
@@ -3384,7 +3378,6 @@ impl Zensim {
             params.weights,
             None,
             false,
-            #[cfg(feature = "feature-regime-v2")]
             serving_plan.as_ref(),
         );
         Ok(result)
@@ -3663,6 +3656,18 @@ pub(crate) fn validate_ref_match(
     validate_ref_dimensions(precomputed, distorted)
 }
 
+pub(crate) fn validate_cached_revision(
+    precomputed: &crate::PrecomputedReference,
+    revision: crate::feature_defs::FormulaRevision,
+) -> Result<(), ZensimError> {
+    if crate::featcanon::mode(precomputed.formula_revision) != crate::featcanon::mode(revision) {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "reference cache color conversion revision differs from scorer; precompute with this profile",
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_ref_dimensions(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
@@ -3847,7 +3852,6 @@ pub(crate) struct OwnedImage {
 /// Preserve absolute linear-sRGB nits when adapting the existing raw APIs
 /// to the typed fold front end. These legacy entries materialize an opaque
 /// RGBA image; the ImageSource/BakeScorer HDR entries remain row streamed.
-#[cfg(feature = "feature-regime-v2")]
 fn nits_image(
     width: usize,
     height: usize,
@@ -3970,7 +3974,7 @@ fn compute_with_config_inner(
     // Deliberately a resolved plan rather than a flag: the decision belongs
     // to `fold_engine::score_plan`, and passing the answer keeps this shared
     // front ignorant of bakes.
-    #[cfg(feature = "feature-regime-v2")] plan: Option<&crate::feature_plan::Plan>,
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
     // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
     // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
@@ -3979,27 +3983,9 @@ fn compute_with_config_inner(
     if needs_pyramid_pad(w, h, config.num_scales) {
         let s = reflect_pad_for_scales(source, config.num_scales);
         let d = reflect_pad_for_scales(distorted, config.num_scales);
-        return compute_with_config_core(
-            &s,
-            &d,
-            config,
-            weights,
-            stop,
-            use_fold,
-            #[cfg(feature = "feature-regime-v2")]
-            plan,
-        );
+        return compute_with_config_core(&s, &d, config, weights, stop, use_fold, plan);
     }
-    compute_with_config_core(
-        source,
-        distorted,
-        config,
-        weights,
-        stop,
-        use_fold,
-        #[cfg(feature = "feature-regime-v2")]
-        plan,
-    )
+    compute_with_config_core(source, distorted, config, weights, stop, use_fold, plan)
 }
 
 fn compute_with_config_core(
@@ -4009,23 +3995,23 @@ fn compute_with_config_core(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
     use_fold: bool,
-    #[cfg(feature = "feature-regime-v2")] plan: Option<&crate::feature_plan::Plan>,
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
     // Rev5 identity features are computed by the same canonical walk as
-    // nonidentity pairs. A live stop token is checked by the public entry
-    // before/after this walk; Rev5 currently has no intra-fold stop hook.
-    #[cfg(feature = "feature-regime-v2")]
-    if crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev5
+    // nonidentity pairs. The canonical walk checks a live stop token between
+    // strips; public entries discard partial results when cancellation fires.
+    if config.revision() >= crate::feature_defs::FormulaRevision::Rev5
         && crate::fold_engine::is_fold_backable(config)
     {
         let mut scratch = crate::feature_v2::V2Scratch::new();
-        if let Ok(mut result) = crate::fold_engine::compute_fold_backed(
+        if let Ok(mut result) = crate::fold_engine::compute_fold_backed_stoppable(
             source,
             distorted,
             config,
             weights,
             &mut scratch,
             plan,
+            stop,
         ) {
             if images_byte_identical(source, distorted) {
                 result.score = 100.0;
@@ -4039,7 +4025,6 @@ fn compute_with_config_core(
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
-        #[cfg(feature = "feature-regime-v2")]
         {
             // An identity result must be as wide as the bake that will read
             // it, or a wide bake is refused on a PERFECT COPY — the one pair
@@ -4047,8 +4032,6 @@ fn compute_with_config_core(
             // what changes is the length.
             return identical_result_at(config, plan.map_or(0, |p| p.walk_width()));
         }
-        #[cfg(not(feature = "feature-regime-v2"))]
-        return identical_result(config);
     }
 
     // A live cancellation token keeps the request on buffered: issue #48's
@@ -4057,7 +4040,6 @@ fn compute_with_config_core(
     // stoppable request to it would silently downgrade cancellation to the
     // caller's before/after `check_stop`. Named in `is_fold_backable`'s
     // caller rather than hidden.
-    #[cfg(feature = "feature-regime-v2")]
     {
         // A plan whose layout is wider than the buffered walk can emit MUST
         // take the fold: falling back to buffered there is not a safe default,
@@ -4080,20 +4062,19 @@ fn compute_with_config_core(
             // The fold's only failure modes here are the dimension/HDR checks
             // the caller already made; a surprise falls back rather than
             // erroring out of a path whose signature is infallible.
-            if let Ok(r) = crate::fold_engine::compute_fold_backed(
+            if let Ok(r) = crate::fold_engine::compute_fold_backed_stoppable(
                 source,
                 distorted,
                 config,
                 weights,
                 &mut scratch,
                 plan,
+                stop,
             ) {
                 return r;
             }
         }
     }
-    #[cfg(not(feature = "feature-regime-v2"))]
-    let _ = use_fold;
 
     crate::streaming::compute_zensim_streaming_stoppable(source, distorted, config, weights, stop)
 }
@@ -4143,9 +4124,27 @@ fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult 
     .mark_identical()
 }
 
+// Named Rev5 models own their declared plans. Raw research configs retain the process-mix guard.
+pub(crate) fn check_profile_route(
+    params: &ProfileParams,
+    config: &ZensimConfig,
+) -> Result<(), ZensimError> {
+    if params.mlp_bytes.is_some()
+        && config.formula_revision == Some(crate::feature_defs::FormulaRevision::Rev5)
+        && crate::fold_engine::is_fold_backable(config)
+    {
+        return Ok(());
+    }
+    crate::ssim_form::check_route(config)
+}
+
 pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
     ZensimConfig {
-        formula_revision: None,
+        formula_revision: params
+            .mlp_bytes
+            .and_then(|load| cached_profile_model(load()).ok())
+            .and_then(|model| crate::feature_layout::formula_revision(&model).ok())
+            .filter(|revision| *revision == crate::feature_defs::FormulaRevision::Rev5),
         local_only: false,
         omit_edges: false,
         attribution_channels: None,
@@ -4256,7 +4255,9 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     // weights against another era's features. `BakeScorer` refuses that
     // outright; this path cannot, because the same call also produces the
     // features a research extraction is there to collect. So it says so, once.
-    crate::ssim_form::warn_pinned_revision_scoring_once();
+    if config_from_params(params, false).formula_revision.is_none() {
+        crate::ssim_form::warn_pinned_revision_scoring_once();
+    }
     // **Score-disposition guard (D9).** A bake carrying
     // `zentrain.output_calibration_spline` emits an already-calibrated
     // 0-100 score. Scoring it with `skip_score_mapping == false` applies
@@ -4718,7 +4719,6 @@ fn forward_one_bake(
 }
 
 /// The PU-linear route [`Zensim::pu_fold_route`] resolved for one call.
-#[cfg(feature = "feature-regime-v2")]
 pub(crate) struct PuFoldRoute {
     plan: Option<std::sync::Arc<crate::feature_plan::Plan>>,
     /// Below Rev5 a wide-plan pair of identical pixels returns 100 with zeros
@@ -4736,7 +4736,6 @@ pub(crate) struct PuFoldRoute {
 /// params address, the skip flag and the v1 width covers every input, so the
 /// PU entries no longer derive a plan (`Plan::for_bake`) on every call. The
 /// cache holds at most a few entries per shipped profile.
-#[cfg(feature = "feature-regime-v2")]
 pub(crate) fn cached_pu_plan(
     params: &'static ProfileParams,
     config: &ZensimConfig,
@@ -5877,9 +5876,12 @@ mod tests {
 
         // Control: the SHIPPED, correct configuration (PROFILE_B sets
         // `skip_score_mapping: true` + `extrapolate_score: true`).
-        let control = Zensim::new(ZensimProfile::B)
+        let historical =
+            crate::mlp::Model::from_bytes(crate::profile::linear_bake_b_cid80()).unwrap();
+        let control = BakeScorer::new(&historical)
+            .unwrap()
             .with_parallel(false)
-            .compute(&src, &dst)
+            .compute(&src, &dst, None)
             .expect("control compute with the shipped B profile");
         let good_score = control.score();
         assert!(
@@ -5918,10 +5920,10 @@ mod tests {
             mlp_bytes_compression: None,
         };
 
-        // (1) Pin the pathology. `control.raw_distance()` is the bake's
+        // (1) Pin the pathology. The dynamic control score is the bake's
         // post-spline raw output — already a 0–100 score. Running it through
         // the misconfigured disposition yields EXACTLY zero.
-        let raw = control.raw_distance();
+        let raw = good_score;
         assert!(
             raw > 7.5,
             "fixture raw output {raw} is too small to trigger the pathology"
@@ -6772,7 +6774,7 @@ mod pu_linear_extended_tests {
         for v in dist.iter_mut().step_by(7) {
             *v = v.saturating_sub(12);
         }
-        let z = Zensim::new(ZensimProfile::latest_preview());
+        let z = Zensim::new(ZensimProfile::PreviewV0_2);
         let src = StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
         let dst = StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
         let srgb = z.compute_extended_features(&src, &dst).unwrap();

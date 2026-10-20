@@ -458,7 +458,6 @@ pub(crate) struct ScaleAccumulators {
 }
 
 impl ScaleAccumulators {
-    #[cfg(feature = "feature-regime-v2")]
     pub(crate) fn from_basic(
         channels: [crate::fused::StripChannelAccum; 3],
         n: usize,
@@ -3115,7 +3114,6 @@ pub struct ZensimScratch {
     /// fully overwrites before reading, which
     /// `fold_ref_scratch_reuse_is_bit_identical` pins by comparing a reused
     /// scratch against a fresh one across a run of compares.
-    #[cfg(feature = "feature-regime-v2")]
     pub(crate) v2: crate::feature_v2::V2Scratch,
 }
 
@@ -3150,6 +3148,7 @@ impl ZensimScratch {
 pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 
 pub struct PrecomputedReference {
+    pub(crate) formula_revision: crate::feature_defs::FormulaRevision,
     pub(crate) sampling: Option<crate::sampling::Sampling>,
     #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
     pub(crate) sampling_geometry: Option<crate::sampling::Geometry>,
@@ -3242,13 +3241,20 @@ impl PrecomputedReference {
         encoding: Option<crate::feature_v2::HdrEncoding>,
         revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
-        Self::build_from_dims(4, source.width(), source.height(), parallel, |planes| {
-            if let Some(encoding) = encoding {
-                crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes, revision);
-            } else {
-                convert_source_to_xyb_into(source, planes, source.width(), parallel, revision);
-            }
-        })
+        Self::build_from_dims(
+            4,
+            source.width(),
+            source.height(),
+            parallel,
+            revision,
+            |planes| {
+                if let Some(encoding) = encoding {
+                    crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes, revision);
+                } else {
+                    convert_source_to_xyb_into(source, planes, source.width(), parallel, revision);
+                }
+            },
+        )
         .with_ref_dims(source.width(), source.height())
     }
 
@@ -3261,9 +3267,16 @@ impl PrecomputedReference {
         let width = source.width();
         let height = source.height();
         let padded_width = pyramid_plane_stride(width);
-        Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
-            convert_source_to_xyb_into(source, scale0, padded_width, parallel, revision);
-        })
+        Self::build_from_dims(
+            num_scales,
+            padded_width,
+            height,
+            parallel,
+            revision,
+            |scale0| {
+                convert_source_to_xyb_into(source, scale0, padded_width, parallel, revision);
+            },
+        )
         .with_ref_dims(width, height)
     }
 
@@ -3276,6 +3289,7 @@ impl PrecomputedReference {
         padded_width: usize,
         height: usize,
         #[allow(unused_variables)] parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
         fill_scale0: impl FnOnce(&mut [Vec<f32>; 3]),
     ) -> Self {
         // Compute scale dimensions up front (powers-of-2 down)
@@ -3341,6 +3355,7 @@ impl PrecomputedReference {
         }
 
         Self {
+            formula_revision: revision,
             sampling: None,
             sampling_geometry: None,
             scales,
@@ -3400,32 +3415,46 @@ impl PrecomputedReference {
                 });
                 let padded_refs: [&[f32]; 3] = [&padded[0], &padded[1], &padded[2]];
                 let padded_width = pyramid_plane_stride(bw);
-                return Self::build_from_dims(num_scales, padded_width, bh, parallel, |scale0| {
-                    convert_linear_planar_to_xyb_into(
-                        padded_refs,
-                        bw,
-                        bh,
-                        bw,
-                        padded_width,
-                        scale0,
-                        revision,
-                    );
-                })
+                return Self::build_from_dims(
+                    num_scales,
+                    padded_width,
+                    bh,
+                    parallel,
+                    revision,
+                    |scale0| {
+                        convert_linear_planar_to_xyb_into(
+                            padded_refs,
+                            bw,
+                            bh,
+                            bw,
+                            padded_width,
+                            scale0,
+                            revision,
+                        );
+                    },
+                )
                 .with_ref_dims(width, height);
             }
         }
         let padded_width = pyramid_plane_stride(width);
-        Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
-            convert_linear_planar_to_xyb_into(
-                planes,
-                width,
-                height,
-                stride,
-                padded_width,
-                scale0,
-                revision,
-            );
-        })
+        Self::build_from_dims(
+            num_scales,
+            padded_width,
+            height,
+            parallel,
+            revision,
+            |scale0| {
+                convert_linear_planar_to_xyb_into(
+                    planes,
+                    width,
+                    height,
+                    stride,
+                    padded_width,
+                    scale0,
+                    revision,
+                );
+            },
+        )
         .with_ref_dims(width, height)
     }
 
@@ -7746,7 +7775,7 @@ mod tests {
             "the probe must cross a strip boundary or it never exercises the banded walk"
         );
         let (src, dst) = locality_fixture(w, h);
-        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+        let z = crate::Zensim::new(crate::ZensimProfile::PreviewV0_2).with_parallel(parallel);
         let params = z.profile().params();
         let config = crate::metric::config_from_params(params, false);
         assert_eq!(config.blur_passes, 1, "probe assumes the fused route");

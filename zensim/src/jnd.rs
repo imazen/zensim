@@ -136,10 +136,11 @@ impl fmt::Display for JndEstimate {
 }
 
 /// `ZensimProfile::B`'s map: fitted on B's served score over the KonFiG-IQA
-/// F-scale TRAIN sources (SRC06, SRC28, SRC50; 252 stimuli), knee fixed at 100.
+/// Historical linear-B F-scale TRAIN sources (SRC06, SRC28, SRC50; 252 stimuli), knee fixed at 100.
 /// Out-of-fold RMSE 1.427 JND over the whole range. The registered join-point
 /// rule found no supported bin, so the map supports no range above identity.
 /// Provenance: `benchmarks/jnd_phase_a_2026-10-11.md`.
+#[cfg(test)]
 pub(crate) const PROFILE_B_JND: JndMap = JndMap {
     a: 0.012_653_289_786_345_816,
     c: 1.317_411_381_194_271_6,

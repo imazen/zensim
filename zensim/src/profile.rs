@@ -1,23 +1,14 @@
 //! Named metric profiles.
 //!
-//! Each [`ZensimProfile`] variant bundles weights and parameters that affect
-//! score output. A given profile produces approximately the same scores
-//! across crate patch versions. The canonical shipping profile is
-//! [`ZensimProfile::A`]; the underlying bake bytes inside a variant may
-//! be swapped during patch releases as long as scores stay approximately
-//! stable (per the [`zensim::CLAUDE.md`] shipping policy).
+//! Each [`ZensimProfile`] variant selects a named model slot. The current
+//! SDR default is [`ZensimProfile::B`] (`zensim-b`), backed by diff+frag-820
+//! since 2026-10-19. Pin the crate version and bake hash for reproducibility;
+//! a profile name alone does not freeze its coefficients or calibration.
 //!
-//! Profile names and crate-version names are **two different things**:
-//! - **Profile name** (`A`, `PreviewV0_2`) is the API surface — what
-//!   downstream code matches on or constructs.
-//! - **Bake-bytes version** (V0_18, V0_18-zerobiased, ...) is the
-//!   implementation detail recorded in the methodology doc paired
-//!   with each crate release.
-//!
-//! [`zensim::CLAUDE.md`]: https://github.com/imazen/zensim/blob/main/CLAUDE.md
+//! Profile names and crate versions are separate identities. The mapping and
+//! promotion record live in `docs/CODEC_TARGET_METRIC.md`.
 
-/// Named metric profile. Scores for a given profile stay approximately
-/// stable across crate versions. Variants may be removed in future
+/// Named metric profile. Pin the crate revision and bake hash to freeze scores. Variants may be removed in future
 /// major (or minor-for-0.x) version bumps.
 // `PartialEq`/`Eq`/`Hash` are hand-written below (not derived): the
 // `Custom` variant holds `&'static ProfileParams`, and `ProfileParams`
@@ -29,7 +20,7 @@
 pub enum ZensimProfile {
     /// **`A` — the DEPRECATED generation-A profile (external name
     /// `zensim-a`), the v47-strict-QAT MLP bake.** Superseded by the
-    /// deterministic generation-B linear profile [`Self::B`], which
+    /// current generation-B profile [`Self::B`], which
     /// [`Self::codec_target`] / [`Self::latest_preview`] now return.
     ///
     /// **Deprecated since 0.3.0.** Gated behind the `deprecated-profiles`
@@ -48,7 +39,7 @@ pub enum ZensimProfile {
     #[cfg(feature = "deprecated-profiles")]
     #[deprecated(
         since = "0.3.0",
-        note = "generation-A (v47 MLP) is superseded by the deterministic linear `B`; \
+        note = "generation-A (v47 MLP) is superseded by the current `B`; \
                 use ZensimProfile::codec_target() / latest_preview() (now `B`) or name \
                 ZensimProfile::B directly. `A` remains behind the default-on \
                 `deprecated-profiles` feature; disable it to drop `A`."
@@ -72,23 +63,22 @@ pub enum ZensimProfile {
     /// Linear-weights profile, no MLP forward pass. The historical
     /// stable default — `latest()` returned this through zensim 0.2.x.
     PreviewV0_2,
-    /// **`B` — generation-B SDR profile (external name `zensim-b`).**
-    /// Deterministic LINEAR core: a 35-weight lasso ensemble over the 372
-    /// features (`ens-Pline-cid80`, 823 B), dial-calibrated against the
-    /// shared multiband anchor scale. Ships the 2026-07-04 campaign's SDR
-    /// pick: beats `A` on 7/9 held-out panel axes (CID22 0.8733 vs 0.8657,
-    /// KonJND 0.5439 vs 0.4185) with the dial panel green (monotonicity
-    /// 0.9711, 0 dead zones). Fit is closed-form and byte-reproducible —
-    /// no training seed exists, so the MLP family's collapse mode
-    /// structurally cannot occur. Provenance + repro:
-    /// `benchmarks/provenance_best_results_2026-07-04.md`.
+    /// **`B` — the default SDR profile (`zensim-b`), diff+frag-820.**
+    /// Promoted by the owner on 2026-10-19. The frozen packed MLP declares
+    /// its feature IDs and Rev5 extraction; the runtime uses that declared
+    /// arithmetic without an environment setting. Its calibration and negative
+    /// scores are retained exactly. This profile has no attached corruption
+    /// companion and no JND map calibrated to these weights.
     ///
-    /// **SDR content only** — for HDR (absolute-luminance) content use
-    /// [`ZensimProfile::BHdr`]. The two share a *partial* mid-range dial
-    /// anchor (cross-model MAE ≈5pt, seam ≤0.92pt inside the overlap) but
-    /// NOT a full range: `B`'s dial is calibrated `[0,100]`, `BHdr`'s only
-    /// over its HDR data range — outside that it extrapolates. See
-    /// `benchmarks/profile_b_methodology_2026-07-12.md` §3b.
+    /// The prior linear B remains in the repository as a historical control.
+    /// `compute_extended_features` refuses Rev5 masked/IW extraction.
+    /// Legacy diffmaps retain their basic-plane proxy meaning with the full
+    /// B scalar score; `BakeScorer` supplies model-specific attribution.
+    /// Earlier B measurements describe that prior model. Known noise-severity
+    /// inversions and incomplete product qualification remain documented in
+    /// `docs/PROFILE_B_DIFF_FRAG_820_2026-10-19.md`.
+    ///
+    /// Absolute-luminance HDR entry points continue to route to [`Self::BHdr`].
     B,
     /// **`BHdr` — generation-B HDR profile (external name `zensim-b-hdr`).**
     /// Deterministic LINEAR core on SHAPED features (11.8 KB,
@@ -313,15 +303,8 @@ pub enum ZensimProfile {
 }
 
 impl ZensimProfile {
-    /// Current preview-stable profile. Returns [`Self::B`] (the
-    /// deterministic generation-B linear profile; generation-A is
-    /// deprecated).
-    ///
-    /// Use this only when you explicitly want "whatever the current
-    /// preview is" — the returned variant will rotate as new previews
-    /// ship. For pinned reproducibility, name the variant directly
-    /// (`ZensimProfile::B`). For the stable codec-target contract that
-    /// codec crates should target, use [`Self::codec_target`] (also `B`).
+    /// Current default profile: [`Self::B`] (diff+frag-820).
+    /// Pin the crate version and bake hash when reproducing exact scores.
     pub const fn latest_preview() -> Self {
         Self::B
     }
@@ -337,84 +320,27 @@ impl ZensimProfile {
         Self::B
     }
 
-    /// **Canonical codec-target metric.** The stable, version-independent
-    /// alias for "the bake all zen codecs train and target to."
-    /// Returns [`Self::B`] — the deterministic generation-B linear profile
-    /// (generation-A, the prior return value, is deprecated).
-    ///
-    /// Codec crates (`zenjpeg`, `zenwebp`, `zenjxl`, `zenavif`, ...)
-    /// should construct their `Zensim` instance via
-    /// `Zensim::new(ZensimProfile::codec_target())` so that profile
-    /// rotations flow through automatically without per-codec version edits.
-    ///
-    /// **Use cases this is purpose-built for:**
-    /// - **Quality-target dial** — `Zensim::compute(source, distorted)`
-    ///   inside an iterative encode-rescore-adjust outer loop
-    ///   (see `zenwebp::EncodeConfig::target_zensim` for the reference
-    ///   pattern; pattern is ~100 LOC per codec). The user names a target
-    ///   score, the codec binary-searches the quality knob that hits it.
-    /// - **Picker training** — train cross-codec pickers against this
-    ///   profile's per-codec score parquets.
-    ///
-    /// **Why `B` for the dial (measured 2026-07-11 with real encoders,
-    /// `benchmarks/b_knob_validation_real_encoders_2026-07-11.md`):**
-    /// - **Mechanics:** |ρ| = 0.953 vs codec quality, 79.9 % strict-monotone
-    ///   q-steps — a search converges.
-    /// - **Consistency at a target:** at a fixed dial value the true
-    ///   quality (MOS) scatter is resid-SD ±6.33 score units — on par with
-    ///   ssim2 (±6.04) and tighter than deprecated `A` (±6.60).
-    /// - **Reach:** normalized reachable-dial span 0.68 (vs `A` 0.64,
-    ///   ssim2 0.40) — more of the 0–100 dial is actually addressable.
-    /// - **Independent-reference consistency at scale:** on ~1 M codec
-    ///   cells, η²(butteraugli | dial-decile) = 0.582 (vs `A` 0.344) — a
-    ///   fixed `B` value pins an independent perceptual reference far
-    ///   tighter than `A` does.
-    /// - **Deterministic + byte-reproducible** (closed-form linear fit, no
-    ///   training seed) — the MLP family's collapse mode structurally
-    ///   cannot occur. Repro: `benchmarks/profile_b_methodology_2026-07-12.md`.
-    ///
-    /// **What this is NOT for:**
-    /// - In-encoder per-block RDO distortion term. zensim is per-image
-    ///   (~14 ms at 1024² × 5–20k RDO calls = 70–280 s/image, infeasible).
-    ///   See `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md`.
-    ///
-    /// **Known dial limits (honest gaps):**
-    /// - On jxl/webp the 85–92 top-shoulder band is compressed (a raw-output
-    ///   ceiling; recalibratable only by trading away calibration). Per-codec
-    ///   reachable zones + the JXL butteraugli-distance→dial table are in
-    ///   `benchmarks/jxl_nearlossless_dial_2026-07-05.md` (Part 11).
-    /// - `B` ↔ `A` is a **trade**, not strict dominance: `B` wins the human-MOS
-    ///   holdouts (CID22 0.876, AIC-3/AIC-4) while `A` wins raw ssim2-agreement
-    ///   on the ~1 M-cell codec sweeps. `B` is the better *dial*; both are
-    ///   documented in the methodology doc.
-    ///
-    /// **SDR path uses `B`; HDR (absolute-nits) content routes to the
-    /// `BHdr` weights automatically** via `params_pu_linear` — one dial,
-    /// two domains. See `docs/CODEC_TARGET_METRIC.md` for the integration
-    /// guide.
+    /// Canonical codec-target profile, currently [`Self::B`] (diff+frag-820).
+    /// Codec callers use this alias so owner-approved model rotations flow
+    /// through without changing their profile selection. SDR and HDR inputs
+    /// use their respective B and BHdr weights; the input path chooses the
+    /// domain, never a pixel-value threshold.
     pub const fn codec_target() -> Self {
         Self::B
     }
 
-    /// The profile's declared JND side output, if it has one.
+    /// The profile's declared JND side output, if calibrated to its current bake.
     ///
-    /// Maps this profile's served [`score`](crate::ZensimResult::score) to a
-    /// [`JndEstimate`](crate::JndEstimate) (Phase A of
-    /// `docs/JND_DIAL_PLAN_2026-10-11.md`); the score itself is unchanged.
-    /// `Some` only for [`ZensimProfile::B`]; every other profile returns
-    /// `None`. B's map is calibrated on SDR input at native pixels, and its
-    /// calibration supports no range above identity, so every score short of
-    /// 100 reports "beyond JND range" (`benchmarks/jnd_phase_a_2026-10-11.md`).
+    /// No current profile has a supported map. The historical linear B map
+    /// does not apply to diff+frag-820; its calibration record is retained in
+    /// `benchmarks/jnd_phase_a_2026-10-11.md`.
     ///
     /// ```
     /// use zensim::ZensimProfile;
-    /// let map = ZensimProfile::B.jnd_map().unwrap();
-    /// assert_eq!(map.estimate(100.0).jnd(), Some(0.0));
-    /// assert!(!map.estimate(90.0).in_range());
-    /// assert!(ZensimProfile::BHdr.jnd_map().is_none());
+    /// assert!(ZensimProfile::B.jnd_map().is_none());
     /// ```
     pub fn jnd_map(&self) -> Option<crate::JndMap> {
-        matches!(self, Self::B).then_some(crate::jnd::PROFILE_B_JND)
+        None
     }
 
     /// Canonical name string, e.g. `"zensim-b"`.
@@ -1134,41 +1060,34 @@ static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80`, INCLUSIVE-WINSOR + DENSE-DIAL
-/// (7.3 KB, sha256 `b6fe5233…`, rotated 2026-07-07 from the 2026-07-05
-/// `b78adb15` bake — same raw weights/spline, only the winsor fit corpus
-/// changed; see the near-lossless fix in guard 1). Two rank-invariant
-/// guards on the raw linear ensemble, both via the standard metadata:
-///
-/// 1. **Winsor tail guard** — 372 `winsor_p99` `zentrain.feature_transforms`
-///    (fit-corpus [p0.1, p99.9] per feature), applied by
-///    `Predictor::predict_transformed` (the SAME mechanism `BHdr` uses).
-///    Clips the tail, bounding raw output inside the spline domain and
-///    eliminating the f155 tiny-screen pathology (f155 p99.9 = 0.776 still
-///    catches the 14,532 offender). CID22 0.8732 -> 0.8764, KonJND 0.5466.
-///    **Fit corpus is near-lossless-INCLUSIVE (2026-07-07):** the predecessor's
-///    hdr_v3mix-only bounds clamped 245/372 features CONSTANT across SDR
-///    near-lossless, pinning that dial band at ~91.5; adding the zenjxl
-///    near-lossless SDR sweep to the corpus frees 340/372 lower bounds so the
-///    features pass through (dial climbs to ~96.1, matching ssim2 ~96;
-///    near-lossless per-image rank-vs-ssim2 0.657 -> 0.771), f155's upper
-///    guard unmoved. Recipe: scripts/v_next/build_inclusive_winsor_corpus.py.
-///    See benchmarks/jxl_nearlossless_dial_2026-07-05.md §7 + §8.
-/// 2. **Dense-dial spline** — ONLY the output spline's TOP is extended, by the
-///    training-fitted concave saturation (`dense_dial_refit_b.py`, decay
-///    k=3.31 fit on 600 near-lossless multiband-anchor rows), so near-lossless
-///    codec-knob configs (raw up to ~2.8, above any training/real-content raw
-///    ~1.12) resolve toward 100 instead of piling at the top knot. The winsor
-///    bake's bottom + in-distribution knots are kept VERBATIM, so both raw
-///    tails stay inside the knot domain [-1.97, 3.92] (outlier gate G-RANGE
-///    PASS, 0 extrapolating). Clears the dial dead-zone (0.0563 FAIL -> 0.0005
-///    PASS, all G3 dial gates green) with rank IDENTICAL to the winsor-only
-///    bake (spline is monotone => rank-invariant: CID22 0.8764 / KonJND 0.5466
-///    / AIC-3 0.7774; inversions ~0.026 ~= the winsor bake's).
-///    Identity=100 is guaranteed by the `is_identical` short-circuit, not the
-///    spline top. See benchmarks/provenance "best-of-both dial probe".
+/// Default B: the exact packed diff+frag-820 artifact, selected 2026-10-19.
+/// SHA256: 89cb4861e2651ff8d4a98bb879feed83a0f9eb3f22b83e644e42eb2291d74b2e.
+pub(crate) fn mlp_bake_b_diff_frag_820() -> &'static [u8] {
+    include_bytes!("../weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin")
+}
+
+/// Historical linear B bytes retained for explicit regression controls.
+#[cfg(test)]
 pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
     include_bytes!("../weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin")
+}
+
+/// Exact prior B for tests of the historical 372-feature serving contract.
+#[cfg(all(test, feature = "custom-profiles"))]
+pub(crate) fn historical_b_for_test() -> ZensimProfile {
+    static PARAMS: std::sync::OnceLock<ProfileParams> = std::sync::OnceLock::new();
+    ZensimProfile::Custom {
+        name: "historical-linear-B",
+        params: PARAMS.get_or_init(|| {
+            ProfileParams::builder()
+                .mlp(linear_bake_b_cid80)
+                .extended_features(true)
+                .compute_iw_features(true)
+                .skip_score_mapping(true)
+                .extrapolate_score(true)
+                .build()
+        }),
+    }
 }
 
 /// `ZensimProfile::BHdr` bake bytes — `hdrmix-lasso0.0003-shaped`
@@ -1187,10 +1106,8 @@ pub(crate) fn linear_bake_bhdr_shaped() -> &'static [u8] {
     include_bytes!("../weights/bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin")
 }
 
-/// Generation-B SDR profile params. Same 372-feature front end as
-/// `PROFILE_A`; the bake is a single identity-activation linear layer with
-/// its own anchored dial spline, so the MLP forward path drives it
-/// unchanged.
+/// Default SDR profile parameters. Feature IDs, Rev5 and calibration come
+/// from the frozen diff+frag-820 bake through the standard model owner.
 static PROFILE_B: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,
     blur_radius: 5,
@@ -1200,7 +1117,7 @@ static PROFILE_B: ProfileParams = ProfileParams {
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
-    mlp_bytes: Some(linear_bake_b_cid80),
+    mlp_bytes: Some(mlp_bake_b_diff_frag_820),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
     extended_features: true,
@@ -1904,8 +1821,10 @@ mod profile_b_tests {
     /// benchmarks/provenance_best_results_2026-07-04.md §f155.
     #[test]
     fn both_b_bakes_carry_winsorizing_transforms() {
-        for profile in [ZensimProfile::B, ZensimProfile::BHdr] {
-            let loader = profile.params().mlp_bytes.expect("B/BHdr ship an mlp bake");
+        for (profile, loader) in [
+            ("historical B", linear_bake_b_cid80 as fn() -> &'static [u8]),
+            ("BHdr", linear_bake_bhdr_shaped),
+        ] {
             let model = crate::mlp::Model::from_bytes(loader()).expect("bake parses");
             assert!(
                 model.has_nontrivial_feature_transforms(),
@@ -2681,11 +2600,16 @@ mod dense_bake_flip_gate {
 
     #[test]
     fn profile_b_dense_bake_scores_bit_identically_to_its_retired_wide_bake() {
-        assert_flipped(&super::PROFILE_B, WIDE_B, "B");
+        let dense = with_bake(&super::PROFILE_B, super::linear_bake_b_cid80);
+        assert_flipped(&dense, WIDE_B, "historical B");
+        let dense = Box::leak(Box::new(dense));
         let twin: &'static ProfileParams =
             Box::leak(Box::new(with_bake(&super::PROFILE_B, wide_b)));
         assert_same_on_cells(
-            ZensimProfile::B,
+            ZensimProfile::Custom {
+                name: "historical-B-dense",
+                params: dense,
+            },
             ZensimProfile::Custom {
                 name: "B-wide-twin",
                 params: twin,
@@ -2784,7 +2708,17 @@ mod dense_bake_flip_gate {
         }
         let pairs: Vec<(ZensimProfile, ZensimProfile, &str)> = [
             (ZensimProfile::A, wide_a as fn() -> &'static [u8], "A"),
-            (ZensimProfile::B, wide_b, "B"),
+            (
+                ZensimProfile::Custom {
+                    name: "historical-B-dense",
+                    params: Box::leak(Box::new(with_bake(
+                        &super::PROFILE_B,
+                        super::linear_bake_b_cid80,
+                    ))),
+                },
+                wide_b,
+                "historical B",
+            ),
             (ZensimProfile::BHdr, wide_bhdr, "BHdr"),
             (ZensimProfile::C, wide_c, "C"),
             (ZensimProfile::CHdr, wide_chdr, "CHdr"),
@@ -2836,9 +2770,14 @@ mod dense_bake_flip_gate {
                 .unwrap_or_else(|e| panic!("{label}: parse: {e:?}"));
             let ids = crate::declared_feature_ids(&m)
                 .unwrap_or_else(|| panic!("{label}: shipped bake declares no feature ids"));
+            let derived = crate::derived_inputs::from_model(&m).unwrap();
+            let declared_width = derived.as_ref().map_or(m.n_inputs(), |d| {
+                assert_eq!(d.model_width(), m.caller_input_width());
+                d.gather_width()
+            });
             assert_eq!(
                 ids.len(),
-                m.n_inputs(),
+                declared_width,
                 "{label}: declares {} ids for {} inputs",
                 ids.len(),
                 m.n_inputs()

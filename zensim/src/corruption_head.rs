@@ -1069,7 +1069,6 @@ fn interp_linear(q: f64, xs: &[f64], ys: &[f64]) -> f64 {
 }
 
 // ── Servability: attaching a head must never widen the walk ──────────────
-#[cfg(feature = "feature-regime-v2")]
 impl CorruptionHead {
     /// Refuse unless the head's arithmetic revision matches the profile and
     /// every declared id is a slot its extraction plan already populates.
@@ -1082,7 +1081,15 @@ impl CorruptionHead {
     /// was chosen; a head that reached into `f228..f371` would force
     /// `V1PoolsMode::Full` and silently make D as expensive as B, so it is
     /// refused rather than served.
+    #[cfg(feature = "feature-regime-v2")]
     pub fn check_servable_by(
+        &self,
+        profile: crate::profile::ZensimProfile,
+    ) -> Result<(), CorruptionHeadError> {
+        self.check_servable_for_profile(profile)
+    }
+
+    pub(crate) fn check_servable_for_profile(
         &self,
         profile: crate::profile::ZensimProfile,
     ) -> Result<(), CorruptionHeadError> {
@@ -1092,9 +1099,11 @@ impl CorruptionHead {
         // head — the walk that would gate the score never runs. Reported as
         // NotServable with the refusal's own wording rather than a bare
         // "mismatch", per this enum's contract.
-        crate::ssim_form::check_route(&config).map_err(|e| CorruptionHeadError::NotServable {
-            profile: profile.name(),
-            detail: e.to_string(),
+        crate::metric::check_profile_route(params, &config).map_err(|e| {
+            CorruptionHeadError::NotServable {
+                profile: profile.name(),
+                detail: e.to_string(),
+            }
         })?;
         let plan = crate::fold_engine::score_plan(params, &config, true).ok_or_else(|| {
             CorruptionHeadError::NotServable {
@@ -2356,19 +2365,36 @@ mod wiring_tests {
         assert!(z.corruption_head().is_none());
     }
 
-    /// What makes a 372-wide head attachable at all: every shipped profile
-    /// emits 372 features, and `D` — which turns `skip_unread_pools` on by
-    /// itself — still POPULATES the peaks block `f156..228` that the head
-    /// reads, zeroing only the masked/IW pools above it.
-    ///
-    /// This is the availability half of "the `f0..f227` slice is free at D".
-    /// The plan check (`check_servable_by`) says the walk COMPUTES those
-    /// slots; this says the result VECTOR carries them.
+    /// BHdr still emits the full legacy row; D retains the peaks block a
+    /// Rev1 head can read. Current B has a separate Rev5 contract below.
+    #[test]
+    fn default_b_does_not_reuse_a_legacy_head_contract() {
+        let mut builder = Builder::single_stump(13, 0.5, -1.0, 1.0);
+        builder.caller_input_width = 372;
+        let head = CorruptionHead::from_bytes(&builder.build()).unwrap();
+        let error = crate::Zensim::new(ZensimProfile::B)
+            .with_corruption_head(head)
+            .unwrap_err();
+        assert!(
+            matches!(error, CorruptionHeadError::NotServable { detail, .. }
+            if detail.contains("another feature revision"))
+        );
+        let reference = fx::reference(W, H);
+        let distorted = fx::honest_blur_quantize(&reference, W, H, true, 1);
+        let scored = score(
+            &crate::Zensim::new(ZensimProfile::B),
+            &reference,
+            &distorted,
+        );
+        assert_eq!(scored.features().len(), 720);
+        assert!(scored.features()[156..372].iter().all(|v| *v == 0.0));
+    }
+
     #[test]
     fn every_shipped_profile_emits_372_and_d_keeps_the_peaks_block() {
         let refimg = fx::reference(W, H);
         let honest = fx::honest_blur_quantize(&refimg, W, H, true, 1);
-        for p in [ZensimProfile::B, ZensimProfile::D] {
+        for p in [ZensimProfile::BHdr, ZensimProfile::D] {
             let z = crate::Zensim::new(p);
             let r = score(&z, &refimg, &honest);
             let f = r.features();
