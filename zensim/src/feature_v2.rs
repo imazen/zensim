@@ -6856,6 +6856,7 @@ pub(crate) fn cached_ref_feed_usable(
 ///
 /// Bit-identical to N independent [`compute_folded_v1_372_streaming_impl`]
 /// calls; `fold_ref_cache_matches_independent_computes` is the gate.
+#[cfg(any(test, feature = "custom-profiles"))]
 pub(crate) fn compute_folded_v1_372_with_ref_impl(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
