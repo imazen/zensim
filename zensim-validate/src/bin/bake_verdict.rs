@@ -2326,9 +2326,9 @@ const ZONE_LABELS: [&str; 3] = ["q<50", "q50-85", "q>=85"];
 const JND_DIAL_POINTS: [f64; 3] = [90.0, 80.0, 70.0];
 
 /// sha256 of the bake embedded as `ZensimProfile::B`
-/// (`zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin`).
+/// (`zensim/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin`).
 const PROFILE_B_BAKE_SHA256: &str =
-    "a96a5a66cd16282ded84580c37207b403334f1af069c924d9883346d23941276";
+    "89cb4861e2651ff8d4a98bb879feed83a0f9eb3f22b83e644e42eb2291d74b2e";
 
 /// The declared JND map that applies to the scored surface, with the profile
 /// name it belongs to, or the reason none applies. A map is calibrated on one
@@ -7380,7 +7380,7 @@ mod tests {
     #[test]
     fn profile_b_bake_hash_is_the_embedded_bake() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin");
+            .join("../zensim/weights/b_sdr_diff_frag_820_rev5_2026-10-19.bin");
         assert_eq!(
             zensim_validate::train_manifest::sha256_file(&path).unwrap(),
             super::PROFILE_B_BAKE_SHA256
@@ -7388,12 +7388,19 @@ mod tests {
     }
 
     #[test]
-    fn jnd_map_applies_only_to_the_profile_surface_itself() {
+    fn current_b_without_a_map_and_retired_b_both_refuse_jnd_calibration() {
         let b = super::PROFILE_B_BAKE_SHA256.to_string();
-        let (name, map) =
-            super::jnd_map_for_surface(std::slice::from_ref(&b), false, false).unwrap();
-        assert_eq!(name, "zensim-b");
-        assert_eq!(Some(map), zensim::ZensimProfile::B.jnd_map());
+        assert!(zensim::ZensimProfile::B.jnd_map().is_none());
+        assert_eq!(
+            super::jnd_map_for_surface(std::slice::from_ref(&b), false, false),
+            Err("profile B declares no JND map".into())
+        );
+        let retired_b = "a96a5a66cd16282ded84580c37207b403334f1af069c924d9883346d23941276".into();
+        assert!(
+            super::jnd_map_for_surface(&[retired_b], false, false)
+                .unwrap_err()
+                .contains("not a served profile")
+        );
         let other = "0".repeat(64);
         assert!(super::jnd_map_for_surface(&[other], false, false).is_err());
         assert!(super::jnd_map_for_surface(&[b.clone(), b.clone()], false, false).is_err());
@@ -7402,7 +7409,7 @@ mod tests {
     }
 
     #[test]
-    fn jnd_section_reports_no_number_beyond_range_and_names_a_missing_map() {
+    fn jnd_section_names_the_missing_current_b_map_without_estimates() {
         let curve = super::CodecCurve {
             codec: "jpeg".into(),
             pts: vec![
@@ -7414,17 +7421,14 @@ mod tests {
         let b = super::PROFILE_B_BAKE_SHA256.to_string();
         let map = super::jnd_map_for_surface(std::slice::from_ref(&b), false, false);
         let (md, json) = super::jnd_side_output(&map, std::slice::from_ref(&curve));
-        assert!(md.contains("Supported maximum: none"));
-        // dial 90 → the q=80 point (median 88); 70 → q=50 (median 65)
-        assert!(md.contains(
-            "| jpeg | 90 | 80 | 88.00 | beyond JND range | beyond JND range | beyond JND range |"
-        ));
-        assert_eq!(json["map"], "zensim-b");
-        assert_eq!(json["per_codec"].as_array().unwrap().len(), 3);
-        for row in json["per_codec"].as_array().unwrap() {
-            assert_eq!(row["jnd_at_median"]["in_range"], false);
-            assert!(row["jnd_at_median"]["jnd"].is_null());
-        }
+        assert!(md.contains("No declared JND map: profile B declares no JND map."));
+        assert!(json["map"].is_null());
+        assert_eq!(json["points"].as_array().unwrap().len(), 0);
+        assert_eq!(json["per_codec"].as_array().unwrap().len(), 0);
+        let unsupported = super::jnd_estimate_json(zensim::JndEstimate::BeyondRange);
+        assert_eq!(unsupported["in_range"], false);
+        assert!(unsupported["jnd"].is_null());
+        assert!(unsupported["uncertainty"].is_null());
         let none: Result<(&'static str, zensim::JndMap), String> = Err("an ensemble".into());
         let (md, json) = super::jnd_side_output(&none, std::slice::from_ref(&curve));
         assert!(md.contains("No declared JND map: an ensemble."));

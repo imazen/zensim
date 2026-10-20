@@ -2640,3 +2640,7 @@ default-b-consumer-tests:
 # Explicit single-read JND CSV admission; native tools own scoring/statistics.
 aic2026-jnd-admission-tests:
     python3 -B -m unittest scripts.tests.test_aic2026_jnd_admission
+
+# Current B intentionally has no JND map; the report owner must agree.
+default-b-verdict-jnd-tests:
+    cargo test -p zensim-validate --bin bake_verdict
