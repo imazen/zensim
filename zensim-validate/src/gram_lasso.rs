@@ -451,6 +451,165 @@ pub fn py_repr_f64(x: f64) -> String {
     if neg { format!("-{body}") } else { body }
 }
 
+/// Ridge on the SAME standardized system as [`lasso_cd`]: the exact solution of
+/// `min ½ wᵀ(G/W)w − (c/W)ᵀw + (λ/2)‖w‖²`, i.e. `(G/W + λI) w = c/W`, in z-space,
+/// by Cholesky. `λ = 0` is the OLS optimum [`lasso_cd`] reaches at `lam = 0`.
+/// With row weights normalised to mean 1 (`W` = row count) the classic weighted
+/// ridge `Σ wᵢ rᵢ² + α‖w‖²` is `λ = α / W`. Errors when the system is not
+/// positive definite (collinear features at `λ = 0`).
+pub fn ridge_solve(sg: &StandardizedGram, lam: f64) -> Result<Vec<f64>, String> {
+    let n = sg.n_feat;
+    if !lam.is_finite() || lam < 0.0 {
+        return Err(format!("ridge_solve: lambda {lam} must be finite and >= 0"));
+    }
+    // A = G/W + λI (row-major), b = c/W.
+    let mut a: Vec<f64> = sg.g.iter().map(|v| v / sg.w_total).collect();
+    for i in 0..n {
+        a[i * n + i] += lam;
+    }
+    let b: Vec<f64> = sg.c.iter().map(|v| v / sg.w_total).collect();
+    // In-place Cholesky A = L Lᵀ (lower triangle).
+    for j in 0..n {
+        let mut d = a[j * n + j];
+        for k in 0..j {
+            d -= a[j * n + k] * a[j * n + k];
+        }
+        if d.is_nan() || d <= 0.0 {
+            return Err(format!(
+                "ridge_solve: system not positive definite at pivot {j} (lambda {lam})"
+            ));
+        }
+        let d = d.sqrt();
+        a[j * n + j] = d;
+        for i in j + 1..n {
+            let mut s = a[i * n + j];
+            for k in 0..j {
+                s -= a[i * n + k] * a[j * n + k];
+            }
+            a[i * n + j] = s / d;
+        }
+    }
+    // L y = b, then Lᵀ w = y.
+    let mut y = vec![0.0f64; n];
+    for i in 0..n {
+        let mut s = b[i];
+        for k in 0..i {
+            s -= a[i * n + k] * y[k];
+        }
+        y[i] = s / a[i * n + i];
+    }
+    let mut w = vec![0.0f64; n];
+    for i in (0..n).rev() {
+        let mut s = y[i];
+        for k in i + 1..n {
+            s -= a[k * n + i] * w[k];
+        }
+        w[i] = s / a[i * n + i];
+    }
+    Ok(w)
+}
+
+/// Eigen-decomposition of a symmetric `n × n` matrix (row-major) by cyclic
+/// Jacobi rotations — the principal-component owner for linear projections
+/// (`G/W` of a [`StandardizedGram`] is the weighted correlation matrix).
+/// Returns `(values, vectors)`: eigenvalues in DESCENDING order and the unit
+/// eigenvectors as the COLUMNS of a row-major `n × n` matrix, column `k`
+/// matching value `k`. Each vector's sign is fixed so its largest-magnitude
+/// component is positive. Deterministic: fixed sweep order, no seed. Stops
+/// when the off-diagonal sum of squares falls below `tol · ‖A‖²_F`.
+pub fn symmetric_eigen(
+    a: &[f64],
+    n: usize,
+    max_sweeps: usize,
+    tol: f64,
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    if a.len() != n * n {
+        return Err(format!("symmetric_eigen: {} values for n = {n}", a.len()));
+    }
+    for i in 0..n {
+        for j in 0..i {
+            if a[i * n + j] != a[j * n + i] {
+                return Err(format!("symmetric_eigen: not symmetric at ({i}, {j})"));
+            }
+        }
+    }
+    let mut m = a.to_vec();
+    let mut v = vec![0.0f64; n * n];
+    for i in 0..n {
+        v[i * n + i] = 1.0;
+    }
+    let total: f64 = m.iter().map(|x| x * x).sum();
+    let off = |m: &[f64]| -> f64 {
+        let mut s = 0.0;
+        for i in 0..n {
+            for j in 0..n {
+                if i != j {
+                    s += m[i * n + j] * m[i * n + j];
+                }
+            }
+        }
+        s
+    };
+    let mut converged = n < 2 || off(&m) <= tol * total;
+    for _ in 0..max_sweeps {
+        if converged {
+            break;
+        }
+        for p in 0..n {
+            for q in p + 1..n {
+                let apq = m[p * n + q];
+                if apq == 0.0 {
+                    continue;
+                }
+                let theta = (m[q * n + q] - m[p * n + p]) / (2.0 * apq);
+                let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
+                let c = 1.0 / (t * t + 1.0).sqrt();
+                let s = t * c;
+                for k in 0..n {
+                    let (mkp, mkq) = (m[k * n + p], m[k * n + q]);
+                    m[k * n + p] = c * mkp - s * mkq;
+                    m[k * n + q] = s * mkp + c * mkq;
+                }
+                for k in 0..n {
+                    let (mpk, mqk) = (m[p * n + k], m[q * n + k]);
+                    m[p * n + k] = c * mpk - s * mqk;
+                    m[q * n + k] = s * mpk + c * mqk;
+                }
+                for k in 0..n {
+                    let (vkp, vkq) = (v[k * n + p], v[k * n + q]);
+                    v[k * n + p] = c * vkp - s * vkq;
+                    v[k * n + q] = s * vkp + c * vkq;
+                }
+            }
+        }
+        converged = off(&m) <= tol * total;
+    }
+    if !converged {
+        return Err(format!(
+            "symmetric_eigen: not converged in {max_sweeps} sweeps"
+        ));
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&i, &j| m[j * n + j].total_cmp(&m[i * n + i]).then(i.cmp(&j)));
+    let values: Vec<f64> = order.iter().map(|&i| m[i * n + i]).collect();
+    let mut vectors = vec![0.0f64; n * n];
+    for (k, &col) in order.iter().enumerate() {
+        let lead = (0..n)
+            .max_by(|&i, &j| {
+                v[i * n + col]
+                    .abs()
+                    .total_cmp(&v[j * n + col].abs())
+                    .then(j.cmp(&i))
+            })
+            .unwrap_or(0);
+        let sign = if v[lead * n + col] < 0.0 { -1.0 } else { 1.0 };
+        for i in 0..n {
+            vectors[i * n + k] = sign * v[i * n + col];
+        }
+    }
+    Ok((values, vectors))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,5 +1016,152 @@ mod tests {
         assert_eq!(np_sign(-2.0), -1.0);
         assert_eq!(np_sign(0.0).to_bits(), 0.0f64.to_bits());
         assert_eq!(np_sign(-0.0).to_bits(), (-0.0f64).to_bits());
+    }
+
+    // -------------------------------------------------------------- ridge
+
+    /// λ = 0 ridge is the OLS optimum: same normal-equation residual as the
+    /// λ = 0 lasso fixture, and agrees with lasso_cd to solver tolerance.
+    #[test]
+    fn ridge_lam0_matches_lam0_lasso() {
+        let x = [
+            [0.9, 0.1, -0.3],
+            [0.2, -0.7, 0.5],
+            [-0.4, 0.6, 0.8],
+            [0.1, 0.2, -0.9],
+            [-0.8, -0.5, 0.2],
+            [0.5, 0.9, 0.4],
+            [0.3, -0.2, -0.6],
+            [-0.6, 0.4, 0.1],
+        ];
+        let y = [0.7, -0.2, 0.9, -0.5, -0.6, 1.1, -0.1, 0.3];
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        let r = ridge_solve(&sg, 0.0).expect("ridge");
+        let l = lasso_cd(&sg, 0.0, 10_000, 1e-14);
+        for i in 0..3 {
+            let gw: f64 = (0..3).map(|j| sg.g[i * 3 + j] * r[j]).sum();
+            assert!((gw - sg.c[i]).abs() < 1e-12, "row {i}: {gw} vs {}", sg.c[i]);
+            assert!(
+                (r[i] - l[i]).abs() < 1e-9,
+                "coord {i}: {} vs {}",
+                r[i],
+                l[i]
+            );
+        }
+    }
+
+    /// On the orthogonal standardized design (G/W = I), ridge has the closed
+    /// form w_j = corr_j / (1 + λ); the noise feature shrinks, never zeroes.
+    #[test]
+    fn ridge_shrinks_orthogonal_design_by_one_plus_lambda() {
+        let x = [
+            [1.0, 1.0, 0.001],
+            [1.0, -1.0, -0.001],
+            [-1.0, 1.0, 0.001],
+            [-1.0, -1.0, -0.001],
+            [1.0, 1.0, -0.001],
+            [1.0, -1.0, 0.001],
+            [-1.0, 1.0, -0.001],
+            [-1.0, -1.0, 0.001],
+        ];
+        let y: Vec<f64> = x.iter().map(|r| 0.8 * r[0] + 0.3 * r[1]).collect();
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        for lam in [0.0, 0.25, 3.0] {
+            let w = ridge_solve(&sg, lam).expect("ridge");
+            assert!(
+                (w[0] - 0.8 / (1.0 + lam)).abs() < 1e-12,
+                "lam {lam}: w0 {}",
+                w[0]
+            );
+            assert!(
+                (w[1] - 0.3 / (1.0 + lam)).abs() < 1e-12,
+                "lam {lam}: w1 {}",
+                w[1]
+            );
+            assert!(w[2].abs() < 1e-12, "lam {lam}: w2 {}", w[2]);
+        }
+    }
+
+    /// Exactly collinear columns: λ = 0 refuses (not positive definite),
+    /// any λ > 0 solves and splits the shared weight equally.
+    #[test]
+    fn ridge_refuses_singular_and_regularizes_collinear() {
+        let x = [
+            [1.0, 1.0, 0.5],
+            [2.0, 2.0, -0.5],
+            [3.0, 3.0, 0.25],
+            [4.0, 4.0, -0.25],
+        ];
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        assert!(ridge_solve(&sg, 0.0).is_err());
+        assert!(ridge_solve(&sg, -1.0).is_err());
+        let w = ridge_solve(&sg, 0.1).expect("ridge");
+        assert!((w[0] - w[1]).abs() < 1e-12, "{} vs {}", w[0], w[1]);
+    }
+
+    // -------------------------------------------------------------- eigen
+
+    /// A = V Λ Vᵀ, Vᵀ V = I, descending values, deterministic signs, on a
+    /// dense symmetric matrix (the standardized Gram of the lasso fixture).
+    #[test]
+    fn symmetric_eigen_reconstructs_and_orders() {
+        let x = [
+            [0.9, 0.1, -0.3],
+            [0.2, -0.7, 0.5],
+            [-0.4, 0.6, 0.8],
+            [0.1, 0.2, -0.9],
+            [-0.8, -0.5, 0.2],
+            [0.5, 0.9, 0.4],
+            [0.3, -0.2, -0.6],
+            [-0.6, 0.4, 0.1],
+        ];
+        let y = [0.0; 8];
+        let (s_mat, s_vec, q, y1, n) = moments(&x, &y);
+        let sg = standardize_gram(3, 1.0, &s_mat, &s_vec, &q, y1, n).expect("standardize");
+        let a: Vec<f64> = sg.g.iter().map(|v| v / sg.w_total).collect();
+        let (vals, vecs) = symmetric_eigen(&a, 3, 50, 1e-30).expect("eigen");
+        assert!(vals[0] >= vals[1] && vals[1] >= vals[2]);
+        let trace: f64 = (0..3).map(|i| a[i * 3 + i]).sum();
+        assert!((vals.iter().sum::<f64>() - trace).abs() < 1e-12);
+        for i in 0..3 {
+            for j in 0..3 {
+                let rec: f64 = (0..3)
+                    .map(|k| vecs[i * 3 + k] * vals[k] * vecs[j * 3 + k])
+                    .sum();
+                assert!((rec - a[i * 3 + j]).abs() < 1e-12, "A[{i},{j}]");
+                let dot: f64 = (0..3).map(|k| vecs[k * 3 + i] * vecs[k * 3 + j]).sum();
+                assert!(
+                    (dot - if i == j { 1.0 } else { 0.0 }).abs() < 1e-12,
+                    "VtV[{i},{j}]"
+                );
+            }
+            let lead = (0..3)
+                .max_by(|&p, &r| vecs[p * 3 + i].abs().total_cmp(&vecs[r * 3 + i].abs()))
+                .unwrap();
+            assert!(vecs[lead * 3 + i] > 0.0, "sign convention on vector {i}");
+        }
+    }
+
+    /// Known spectrum: [[2,1],[1,2]] has eigenvalues 3 and 1 with vectors
+    /// (1,1)/√2 and (1,−1)/√2 (sign fixed by the largest component); a
+    /// diagonal matrix is returned sorted; asymmetry is refused.
+    #[test]
+    fn symmetric_eigen_known_spectra_and_refusal() {
+        let (vals, vecs) = symmetric_eigen(&[2.0, 1.0, 1.0, 2.0], 2, 50, 1e-30).expect("eigen");
+        assert!((vals[0] - 3.0).abs() < 1e-14 && (vals[1] - 1.0).abs() < 1e-14);
+        let h = 0.5f64.sqrt();
+        assert!((vecs[0] - h).abs() < 1e-14 && (vecs[2] - h).abs() < 1e-14);
+        assert!((vecs[1].abs() - h).abs() < 1e-14 && (vecs[3].abs() - h).abs() < 1e-14);
+        assert!(vecs[1] * vecs[3] < 0.0);
+        let (vals, vecs) =
+            symmetric_eigen(&[1.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0], 3, 5, 1e-30)
+                .expect("diag");
+        assert_eq!(vals, vec![5.0, 3.0, 1.0]);
+        assert_eq!(vecs, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        assert!(symmetric_eigen(&[1.0, 2.0, 3.0, 1.0], 2, 5, 1e-30).is_err());
     }
 }

@@ -12,6 +12,10 @@
 
 None.
 
+### Added
+
+- zensim-validate `gram_lasso`: `ridge_solve`, the exact L2 solution on the standardized z-space system shared with `lasso_cd`/`box_cd` (`(G/W + λI) w = c/W`, Cholesky; λ = 0 is the OLS optimum), and `symmetric_eigen`, a deterministic cyclic-Jacobi eigendecomposition for principal-component projections of a standardized Gram. Five unit tests (λ = 0 parity with `lasso_cd`, orthogonal closed form, singular refusal, reconstruction/ordering, known spectra). New public items in the unpublished validation crate; reviewed through a PR assigned to lilith.
+
 ### Changed
 
 - Complete the matched reconstructed-JND comparison with native Rust DVIFM 0.3, exact retained-score parity and frozen runtime provenance; preserve its AIC2026 training-exposure distinction ([results](benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md)).
