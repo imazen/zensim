@@ -2390,9 +2390,10 @@ qualification follows. See the [evidence pointer](../benchmarks/gauntlet_human_2
 The owner explicitly requested one evaluation against
 `jnd_reconstruction_2026-10-19.csv` (SHA256
 `5bdbf5402c41b2cccf22b62ad352160b88f952a53bea1cce6ae4ef14c5890e61`).
-Frozen B/diff+frag-820 (`89cb4861…`) scored its 5,768 PTC crop pairs, 42
-references, once. `JND_curve` is the primary supplied target; the available
-`JND_pointwise` population has 2,050 rows and the same 42 references.
+Frozen B/diff+frag-820 (`89cb4861…`) scored the admitted PTC crop pairs
+once. `JND_curve` is the primary supplied target; the available
+`JND_pointwise` population is assessed separately.
+Results on this data are not published here.
 These are reconstructed JND labels, oriented lower-is-better, not individual
 observer ratings. Both label populations and their supplied confidence columns
 are retained; missing pointwise labels are not filled or treated as zero.
@@ -2405,10 +2406,10 @@ untouched. [Results and exact artifact bindings](../benchmarks/jnd_reconstructio
 ## 2026-10-20: owner-requested reconstructed-JND peer comparison
 
 The owner requested DVIFM, SSIMULACRA2, butteraugli and GMSD comparisons
-against the same supplied reconstruction. Exact 5,768 curve/2,050 pointwise
-rows, 42 references, saved B predictions and supplied cropped metric columns
-were joined by original distorted/reference IDs after all 5,810 image hashes
-matched the original admission. All three supplied DVIFM variants are retained.
+against the same supplied reconstruction. Saved B predictions and supplied
+cropped metric columns were joined by original distorted/reference IDs after
+image hashes matched the original admission. Results on this data are not
+published here. All three supplied DVIFM variants are retained.
 No pixel rescoring, training, model selection or JND calibration; zero dropped
 rows. This extends the prior single-model exposure with explicit peer
 assessment, without changing the historical first-read scope.
@@ -2419,9 +2420,10 @@ assessment, without changing the historical first-read scope.
 
 Following the owner's DVIFM0.3-rs request and reproduced-score directory
 selection, one fresh native `port-lap-v0.3` batch (dvifmish `31c4e256`)
-scored the exact5,768pairs/42references. All raw and JND scores exactly
-match retained Rust `f24a08a` results. Native curve/pointwise SROCC is
-0.95707746508388 /0.9330864427036173; no failures or drops. Frozen B and
+scored the exact admitted pairs. Raw and JND predictions were checked
+against retained Rust `f24a08a` results. Native curve/pointwise statistics
+are retained with the assessment artifacts. Results on this data are not
+published here. Frozen B and
 other reproduced Rust metrics retain their prior predictions and populations.
 No fitting, parameter selection or JND calibration. The frozen preset
 provenance states its author constants were trained on AIC2026; this
