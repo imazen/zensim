@@ -582,3 +582,18 @@ summed over its 12 cells; outputs `/mnt/v/output/zensim/byconstruction-2026-10-2
 - **hf_loss** falls when luma noise is added to the blurred image on only 6 of 24 references;
   the hypothesis that it drives M's blur + noise inversions is not supported.
 - `mse` / `iw_mse` respond to a mean shift by definition (they measure it); not a defect.
+
+### Full-data M: every product gate passes, best dial numbers in this study
+
+Full-data M seed 0 (packed by the E33 output stage; `certify-monotone`: monotone, 1 live max
+pair). Gates in `/mnt/v/output/zensim/byconstruction-2026-10-22/gates-M/`:
+
+| Gate | M (full) | `base-c` s0 |
+|---|---|---|
+| C1 dial monotonicity, standard / ladder | **0.9984 / 0.9935** | 0.9954 / 0.9882 |
+| C2–C6, G-DIAL (both grids) | pass | pass |
+| NEARID N1–N3 | pass, **143/144** monotone ladders | pass, 130/144 |
+| G-STEER (D12 exact gradients) | **135/135** | 130/135 |
+| Identity at every SIMD tier | 62 sources × 10 permutations pass | — |
+
+GitHub: imazen/zensim#72 records the ringing feature defect found here.
