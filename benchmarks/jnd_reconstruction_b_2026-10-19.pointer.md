@@ -44,9 +44,9 @@ The comparison uses the original admitted curve and pointwise populations.
 
 | Metric | Curve SROCC | Pointwise SROCC | Curve PLCC | Pointwise PLCC |
 |---|---:|---:|---:|---:|
-| DVIFM (proposal) | 0.6574823375 | 0.6323718520 | 0.6407661925 | 0.6338429951 |
-| DVIFM 0.2 (proposal) | 0.8818749291 | 0.8670391190 | 0.8414741030 | 0.8399897263 |
-| DVIFM 0.2 use_chroma (proposal) | 0.7785456847 | 0.7728807655 | 0.7293202653 | 0.7285206407 |
+| DVIFM (proposal) | Not published | Not published | Not published | Not published |
+| DVIFM 0.2 (proposal) | Not published | Not published | Not published | Not published |
+| DVIFM 0.2 use_chroma (proposal) | Not published | Not published | Not published | Not published |
 
 Curve and pointwise populations match the original admission.
 B predictions are unchanged, bit-for-bit equal to the first report. Peers use
@@ -104,7 +104,7 @@ B predictions are unchanged.
 
 | Metric | Curve SROCC | Pointwise SROCC | Curve PLCC | Pointwise PLCC |
 |---|---:|---:|---:|---:|
-| DVIFM 0.3-rs (port-lap-v0.3) | 0.9570774651 | 0.9330864427 | 0.9494058223 | 0.9364946319 |
+| DVIFM 0.3-rs (port-lap-v0.3) | Not published | Not published | Not published | Not published |
 
 Original crop hashes and native score-table pixel paths match the first
 B admission for both populations. DVIFM's frozen preset provenance states that
