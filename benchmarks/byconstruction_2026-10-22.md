@@ -543,3 +543,9 @@ The fix is at the feature level: a ringing measure that does not respond to glob
 saturation changes (or the two components as separate features, with the global-change part
 treated as a non-damage descriptor). Then a monotone combiner can use the damage part without
 subtracting anything.
+
+**Arm DR (`mono:thr:dropring`), recorded before its result.** T with the same 20 ringing
+inputs *dropped* (zeroed every step via `--monotone-feature-mask … --monotone-strict`): exactly
+monotone over the remaining 800, certificate passes, no subtraction route. Tests whether
+ringing forced to count as damage is what over-penalizes the global-change types. Smoke:
+certified, 20 zero input rows, no negative weights. Queued after `mp64`.

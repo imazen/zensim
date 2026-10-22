@@ -285,6 +285,8 @@ def recipe_of(spec: str) -> dict:
             out["gated_products"] = True
         elif tok == "freering" and "free_mask" not in out:  # partial monotone: v2 ringing inputs sign-free
             out["free_mask"] = "free_ringing"
+        elif tok == "dropring" and "free_mask" not in out:  # exactly monotone, v2 ringing inputs dropped
+            out.update(free_mask="free_ringing", drop_masked=True)
         elif tok.startswith("mp") and tok[2:].isdigit() and int(tok[2:]) > 0 and "max_pairs" not in out:
             out["max_pairs"] = int(tok[2:])  # certified monotone pairwise max
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
