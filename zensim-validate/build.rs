@@ -2,6 +2,8 @@
 use std::{env, fs, path::PathBuf, process::Command};
 const OWNER: &str = "81a545a3ff3457c9fabae93bc9d262b19b50952e";
 fn main() {
+    // By-construction perf prototype (`--cfg byc_hp_ring`); see benchmarks/byconstruction_2026-10-22.md.
+    println!("cargo:rustc-check-cfg=cfg(byc_hp_ring)");
     println!("cargo:rustc-check-cfg=cfg(e36_tv)");
     println!("cargo:rerun-if-env-changed=E36_TV_PROTOCOL");
     if env::var("E36_TV_PROTOCOL").as_deref() == Ok("1") {

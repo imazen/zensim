@@ -3927,7 +3927,12 @@ fn gradient_block_kernel_generic<
         acc.sum_gms += g;
         acc.sum_gms2 += g * g;
 
+        // `byc_hp_ring` (perf prototype, benchmarks/byconstruction_2026-10-22.md):
+        // high-pass ringing error from the already-loaded 4-neighbourhood.
+        #[cfg(not(byc_hp_ring))]
         let raw_abs_err = (s - dd).abs();
+        #[cfg(byc_hp_ring)]
+        let raw_abs_err = ((s - 0.25 * (sxl + sxr + syu + syd)) - (dd - 0.25 * (dxl + dxr + dyu + dyd))).abs();
         let err_b = saturate(raw_abs_err, C_RING_ERR);
         let act_b = saturate(act, C_ACTIVITY);
         let edge_r = saturate(grad_src_mag, C_RING_EDGE);
@@ -4070,7 +4075,13 @@ fn gradient_block_kernel_generic<
                 r_gms += g;
                 r_gms2 += g * g;
 
+                #[cfg(not(byc_hp_ring))]
                 let raw_abs_err = (s - dd).abs();
+                #[cfg(byc_hp_ring)]
+                let raw_abs_err = {
+                    let q = V8::<T>::splat_t(token, 0.25f32);
+                    ((s - (sxl + sxr + syu + syd) * q) - (dd - (dxl + dxr + dyu + dyd) * q)).abs()
+                };
                 let err_b = saturate_v(token, raw_abs_err, c_ring_err);
                 let act_b = saturate_v(token, act, c_activity);
                 let edge_r = saturate_v(token, grad_src_mag, c_ring_edge);
@@ -4395,7 +4406,10 @@ pub(crate) fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool>(
     let gdst = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
     let g = 1.0 - bounded_sim(gsrc, gdst, C_GMS);
 
+    #[cfg(not(byc_hp_ring))]
     let raw_abs_err = (s - dd).abs();
+    #[cfg(byc_hp_ring)]
+    let raw_abs_err = ((s - 0.25 * (sxl + sxr + syu + syd)) - (dd - 0.25 * (dxl + dxr + dyu + dyd))).abs();
     let err_b = saturate(raw_abs_err, C_RING_ERR);
     let act_b = saturate(act, C_ACTIVITY);
     let edge_r = saturate(gsrc, C_RING_EDGE);
@@ -4630,7 +4644,10 @@ fn gradient_interior_elem_canon<
     r_gms.add(lane, g);
     r_gms2.add(lane, g * g);
 
+    #[cfg(not(byc_hp_ring))]
     let raw_abs_err = (s - dd).abs();
+    #[cfg(byc_hp_ring)]
+    let raw_abs_err = ((s - 0.25f32 * (sxl + sxr + syu + syd)) - (dd - 0.25f32 * (dxl + dxr + dyu + dyd))).abs();
     let err_b = sat32(raw_abs_err, C_RING_ERR as f32);
     let act_b = sat32(act, C_ACTIVITY as f32);
     let edge_r = sat32(gsrc, C_RING_EDGE as f32);
@@ -4870,7 +4887,13 @@ fn gradient_terms32_v<T: F32x8Backend + Copy, const BANDVIS: bool, const BV_DSTA
     let g = one - bounded_sim_v(token, gsrc, gdst, c_gms);
     let g2 = g * g;
 
+    #[cfg(not(byc_hp_ring))]
     let raw_abs_err = (s - dd).abs();
+    #[cfg(byc_hp_ring)]
+    let raw_abs_err = {
+        let q = V8::<T>::splat_t(token, 0.25f32);
+        ((s - (sxl + sxr + syu + syd) * q) - (dd - (dxl + dxr + dyu + dyd) * q)).abs()
+    };
     let err_b = saturate_v(token, raw_abs_err, c_ring_err);
     let act_b = saturate_v(token, act, c_act);
     let edge_r = saturate_v(token, gsrc, c_ring_edge);
