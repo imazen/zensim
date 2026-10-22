@@ -90,8 +90,16 @@ Each T cell: 984–1013 s single-threaded on a contended box, peak RSS 0.99 GiB.
 | KADID / TID2013 / KonFiG / CID22-A | −0.0192 / −0.0423 / −0.0267 / **+0.0060** |
 | absolute SROCC | 0.8714 / 0.8590 / 0.7904 / 0.8860 |
 
-That is close to E34's linear L (−0.0226, A family): convex thresholds recover little. By the
-rule above T is not extended. The loss has a specific shape.
+That is close to E34's linear L (−0.0226, A family). **Correction (same session, after
+inspecting the bakes):** T did not use its convex capacity. Every T cell, and the full-data T
+fit, ends with **one** live hidden unit out of 128 (two in one cell), sometimes with a small
+threshold: the model is at most a single hinge `pin − c·max(0, a·x − t)`, essentially E34 L's
+linear class with a dead zone. The other units' output weights sit at the `w2 ≤ 0` clamp.
+Hinges are convex (they accelerate distance with damage); the training loss, through its
+MSE leg on the teacher groups, wants a *saturating* response, so it pushes hinge output weights
+positive and the clamp kills them. So T measures the linear monotone class on this data, not
+convex monotone capacity, and the ramp arm R (saturating, still monotone) is the real capacity
+test. By the rule above T is not extended. The loss has a specific shape.
 
 **Pair classes** (`byc_cells.py pairclass`, an independent numpy implementation of E34 §4.6's
 classes; concordance on target-ordered pairs, exact target ties excluded, cross-source pairs
@@ -163,3 +171,29 @@ banding-type features fall, and dithered banding often looks better, so these ar
 correct. B's inversions are blur followed by chroma noise, with no such rationale. T's
 guarantee is in feature space; a feature that falls when damage is added (here, banding under
 dither) is the only route to an end-to-end rise.
+
+### Arm R (`mono:thr:rp32`, saturating monotone): uses its capacity, no E21 gain
+
+`4024c31b` trainer. 12 cells, 2006 s for the batch on a contended box, peak RSS 1.04 GiB.
+
+| | E21 Δ vs `base-c`, seeds 0–2 |
+|---|---|
+| mean (seed-unit SE) | **−0.0225 (0.0024)**; per seed −0.0181, −0.0265, −0.0230 |
+| KADID / TID2013 / KonFiG / CID22-A | −0.0168 / −0.0391 / −0.0299 / −0.0043 |
+
+Unlike T, R keeps its structure: 13–29 live ramp pairs per cell (`live_units.py`), plus exactly
+one live plain hinge (the other 63 hinges die, as in T). Saturation is used and does not move
+E21: the missing ingredient is not the response shape.
+
+Pair classes (Δ vs `base-c`): same ladder KADID +0.0070, TID +0.0085, KonFiG +0.0016, CID22-A
+−0.0001; cross-type KADID −0.0109, TID −0.0172, KonFiG −0.0004, CID22-A −0.0019; cross-source
+KADID −0.0098, TID −0.0226, KonFiG −0.0170, CID22-A −0.0031.
+
+**Development curves revise the overfitting reading.** R's human-dev SROCC falls over training,
+0.8080 → 0.7903 (−0.0177; `base-c` −0.0108), while teacher dev rises (+0.0016 SafeSyn, +0.0027
+CID22). T's flat human-dev curve came from collapsing to a linear model, not from monotonicity:
+with capacity, a monotone model also trades human ranking for teacher fit. The drift is a
+capacity × teacher/human-recipe effect, not a sign-freedom effect.
+
+Mixture test: 4–9 inversions per cell, max +5.22, all posterize followed by light noise
+(dithering), the same cases as T.
