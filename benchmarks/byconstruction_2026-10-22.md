@@ -637,3 +637,15 @@ e.g. per channel, the fraction of the error explained by a global affine map `ds
 damage gains through the existing gated-product structure (gain ≥ 0). The model stays monotone
 in every damage feature, forgives global changes explicitly, and noise cannot exploit the
 descriptor because noise is not affine-explainable. Posted to imazen/zensim#72 as a correction.
+
+**Prior art for the revised design (zenpapers corpus).** The decomposition is the classical
+one: SSIM factors local similarity into luminance, contrast and structure, the structure term
+being invariant to local affine luminance/contrast changes (Wang et al. 2004,
+doi:10.1109/TIP.2003.819861; multiscale 2003, doi:10.1109/ACSSC.2003.1292216); CW-SSIM is
+designed to be insensitive to luminance and contrast changes (2009, doi:10.1109/TIP.2009.2025923);
+MAD separates detection-based from appearance-based judgment (Larson & Chandler 2010,
+doi:10.1117/1.3267105). Applied here: compute the damage bank on the distorted image after
+removing the best global (or low-frequency) affine tone map per channel — the residual damage —
+plus a small set of global-change magnitude features, and combine all of them monotonically.
+Global changes are then discounted by a small learned weight on their own terms, with nothing
+subtracted.
