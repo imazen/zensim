@@ -1,12 +1,16 @@
 # Pointer: by-construction exploration data (2026-10-22)
 
 Record: [byconstruction_2026-10-22.md](byconstruction_2026-10-22.md). Paths checked on **dev** only
-(`/mnt/v` differs between hosts). Not yet mirrored to tower.
+(`/mnt/v` differs between hosts). Mirrored to tower at `/mnt/tower/output/zensim/byconstruction-2026-10-22/`
+(265 MB, 2026-10-22; spot-checked sha256 equal for the mixture manifest, B's mixture scores, M's G-STEER result and
+the all-family probe).
 
 | What | Path (dev) | Size |
 |---|---|---|
 | Damage-mixture images, manifest, per-bake scores | `/mnt/v/output/zensim/byconstruction-2026-10-22/mixture/` | 137 MB |
-| Label-free gate outputs (NEARID, verdicts, G-STEER) | `/mnt/v/output/zensim/byconstruction-2026-10-22/gates/` | 55 MB |
+| Label-free gate outputs for full-data T (NEARID, verdicts, G-STEER, identity) | `/mnt/v/output/zensim/byconstruction-2026-10-22/gates/` | 55 MB |
+| Gate outputs for full-data M | `/mnt/v/output/zensim/byconstruction-2026-10-22/gates-M/` | |
+| Feature probe (global edits vs visible damage, dumped feature vectors) | `/mnt/v/output/zensim/byconstruction-2026-10-22/feature-probe/` | |
 | LODO cells (train.log, bakes, held-out predictions, `byc_record.json`) | `~/tmp/byc/cells/<arm>/without_<fold>_s<seed>/` | per cell ~2 MB |
 | Full-data T fit and packed bake | `~/tmp/byc/full/mono-thr_s0/` | |
 | Pinned trainer/predictor builds, with `SHA256SUMS` and `BUILD_COMMIT` | `/var/tmp/byconstruction-bin/<commit>/` | |
