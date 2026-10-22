@@ -412,3 +412,22 @@ room on the same inversions.
 
 **Not supported by the data:** that sign freedom causes memorization (the logged dev decline
 is pooled across sources; selecting by it lowers B's E21 by 0.008).
+
+### A feature-level lead for the cross-type deficit (descriptive)
+
+T's KADID-held-out seed-0 cell has one live unit (bias 0), so its distance splits exactly into
+per-input contributions (`scripts/byconstruction/feature_contributions.py`). Share of total
+distance by feature family, global-change types vs all KADID rows:
+
+| Types | v2 ringing | other over-represented families | mean distance |
+|---|---|---|---|
+| contrast change | 15.0% (all types 7.2%) | hf_loss 9.0% (6.7%), transducers ~1.5% (0.9%) | 68.9 |
+| saturation 1+2 | 12.6% | iw_ssim 8.1% (2.6%), iw_mse 3.3% (0.9%) | 129.1 |
+| mean shift / brighten / darken | 16.4% | det family slightly up | 67.9 |
+| all types | 7.2% | — | 86.1 |
+
+The ringing feature (dilated-edge form) responds strongly to global tone and saturation
+changes, which a ringing detector should not; on saturation the IW-weighted SSIM/MSE features
+are about 3× over-represented. Tone-normalized versions of these features are the concrete
+feature-side experiment for letting a monotone combiner calibrate across types. Not tested
+here.
