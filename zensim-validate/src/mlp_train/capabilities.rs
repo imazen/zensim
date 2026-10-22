@@ -34,6 +34,15 @@ pub fn validate_training_capabilities(
             "--nonneg-thresholds requires plain one-layer N without smooth hinge, heads or the K penalty"
         );
     }
+    if hyperparams.monotone_ramps > 0 {
+        assert!(
+            hyperparams.nonneg_thresholds
+                && hyperparams.monotone_cbc
+                && hyperparams.monotone_feature_pin.is_none()
+                && 2 * hyperparams.monotone_ramps <= hyperparams.n_hidden,
+            "--monotone-ramps requires --nonneg-thresholds, --monotone-cbc on every input and 2*ramps <= hidden"
+        );
+    }
     assert!(
         hyperparams.steer_lambda.is_finite() && hyperparams.steer_lambda >= 0.0,
         "--steer-lambda must be finite and nonnegative"

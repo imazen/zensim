@@ -874,6 +874,12 @@ struct Args {
     #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "smooth_hinge", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
     nonneg_thresholds: bool,
 
+    /// With `--nonneg-thresholds --monotone-cbc`: tie the last `2*N` hidden
+    /// units into N bounded monotone ramps (shared W1 row, two thresholds,
+    /// opposite output weights). Adds saturation inside the monotone class.
+    #[arg(long, default_value_t = 0, requires = "nonneg_thresholds")]
+    monotone_ramps: usize,
+
     /// STEER S: fixed tau1/8 C1 convex hinge; plain N only.
     #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
     smooth_hinge: bool,
@@ -3320,6 +3326,7 @@ fn main() {
         nonneg_distance: args.nonneg_distance,
         nonneg_pin: args.nonneg_pin,
         nonneg_thresholds: args.nonneg_thresholds,
+        monotone_ramps: args.monotone_ramps,
         n_hidden: args.hidden,
         n_epochs: args.epochs,
         pairs_per_epoch: args.pairs_per_epoch,

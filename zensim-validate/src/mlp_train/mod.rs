@@ -128,6 +128,16 @@ pub struct MlpHyperparams {
     /// inside the monotone class: `raw` stays non-increasing in every input,
     /// pinned at identity, and convex piecewise-linear. Plain one-layer N only.
     pub nonneg_thresholds: bool,
+    /// Requires `nonneg_thresholds` and `monotone_cbc`. The last
+    /// `2·monotone_ramps` hidden units form tied pairs `(p, p+1)`: one W1 row,
+    /// `b1[p+1] <= b1[p] <= 0`, and `w2[p+1] = -w2[p] >= 0`. Each pair is the
+    /// bounded ramp `w2[p]·(ReLU(z + b1[p]) - ReLU(z + b1[p+1]))`: non-increasing
+    /// in `z = a·x` (a >= 0) and <= 0, so `raw` stays monotone, `<= pin` and
+    /// pinned at identity while gaining saturation (non-convex). The other units
+    /// stay plain hinges. Representable in the existing ReLU wire format; the
+    /// guarantee is the pair structure, which identical values keep through
+    /// packing. `0` = off.
+    pub monotone_ramps: usize,
     pub n_hidden: usize,
     pub n_epochs: usize,
     pub pairs_per_epoch: usize,
@@ -966,6 +976,7 @@ impl Default for MlpHyperparams {
             nonneg_distance: false,
             nonneg_pin: 100.0,
             nonneg_thresholds: false,
+            monotone_ramps: 0,
             n_hidden: 32,
             n_epochs: 200,
             pairs_per_epoch: 50_000,
@@ -1381,6 +1392,16 @@ fn project_plain(
     pin: Option<f64>,
     hp: &MlpHyperparams,
 ) {
+    // A ramp's upper unit carries `-w2[p] >= 0`; read the pair's tied output
+    // weight before the `w2 <= 0` clamp erases it.
+    let n_hidden = b1.len();
+    let first_pair = n_hidden - 2 * hp.monotone_ramps;
+    let ramp_w2: Vec<f64> = (0..hp.monotone_ramps)
+        .map(|i| {
+            let p = first_pair + 2 * i;
+            ((w2[p] - w2[p + 1]) / 2.0).min(0.0)
+        })
+        .collect();
     if hp.nonneg_thresholds && pin.is_some() {
         nonneg_project_thresholds(b1);
         nonneg_project_w2b2(w2, b2, pin);
@@ -1390,10 +1411,40 @@ fn project_plain(
     if hp.monotone_cbc {
         project_monotone_w1(
             w1,
-            b1.len(),
+            n_hidden,
             hp.monotone_feature_pin.as_deref(),
             hp.monotone_strict && !hp.monotone_pin_during_training,
         );
+    }
+    if hp.monotone_ramps > 0 {
+        project_ramp_pairs(w1, w2, b1, n_hidden, first_pair, &ramp_w2);
+    }
+}
+
+/// Ties each ramp pair `(p, p+1)` after the per-unit projections: averaged W1
+/// rows (already `>= 0`), `w2[p+1] = -w2[p]` with `w2[p] <= 0`, and
+/// `b1[p+1] <= b1[p]`. Averaging is the Euclidean projection onto the tie, so
+/// the pair follows the mean of its two gradients.
+fn project_ramp_pairs(
+    w1: &mut [f64],
+    w2: &mut [f64],
+    b1: &mut [f64],
+    n_hidden: usize,
+    first_pair: usize,
+    ramp_w2: &[f64],
+) {
+    for (i, &v) in ramp_w2.iter().enumerate() {
+        let p = first_pair + 2 * i;
+        w2[p] = v;
+        w2[p + 1] = -v;
+        if b1[p + 1] > b1[p] {
+            b1[p + 1] = b1[p];
+        }
+        for row in w1.chunks_exact_mut(n_hidden) {
+            let a = 0.5 * (row[p] + row[p + 1]);
+            row[p] = a;
+            row[p + 1] = a;
+        }
     }
 }
 
@@ -1405,6 +1456,98 @@ fn nonneg_project_thresholds(b1: &mut [f64]) {
             *b = 0.0;
         }
     }
+}
+
+/// Checks, from the baked bytes alone, the structure that makes a one-hidden-
+/// layer model monotone by construction, and returns its number of ramp pairs:
+///
+/// - ReLU hidden layer, identity scalar output, no feature transforms;
+/// - `scaler_mean = 0`, `scaler_scale > 0` (standardization is increasing and
+///   maps `0⃗` to `0⃗`);
+/// - every `W1 >= 0`, every `b1 <= 0`, output bias `== pin`;
+/// - every hidden unit with a positive output weight is a ramp's upper unit,
+///   matched one-to-one to a distinct lower unit with a bit-identical W1
+///   column, the exactly negated output weight and `b1_lower >= b1_upper`.
+///   Hidden units may be stored in any order.
+///
+/// Then each plain unit contributes `w2·ReLU(z + b) <= 0`, non-increasing in
+/// `z = a·x` with `a >= 0`, and each pair `w2·(ReLU(z + b_lo) - ReLU(z + b_up))`
+/// is bounded, `<= 0` and non-increasing in `z`. So `raw(0⃗) = pin`,
+/// `raw <= pin` and `raw` is non-increasing in every input, on all of input
+/// space. Floating-point evaluation follows this exactly for plain units; a
+/// ramp's two terms can cancel to within rounding.
+pub fn certify_monotone_bake(model: &zenpredict::Model, pin: f32) -> Result<usize, String> {
+    fn values(w: &zenpredict::WeightStorage<'_>, out_dim: usize) -> Vec<f32> {
+        match w {
+            zenpredict::WeightStorage::F32(w) => w.to_vec(),
+            zenpredict::WeightStorage::F16(w) => {
+                w.iter().map(|&b| zenpredict::f16_bits_to_f32(b)).collect()
+            }
+            zenpredict::WeightStorage::I8 { weights, scales } => weights
+                .iter()
+                .enumerate()
+                .map(|(i, &q)| f32::from(q) * scales[i % out_dim])
+                .collect(),
+        }
+    }
+    if model.n_layers() != 2 {
+        return Err(format!("{} layers, expected 2", model.n_layers()));
+    }
+    let (l0, l1) = (model.layer(0), model.layer(1));
+    if l0.activation != Activation::Relu || l1.activation != Activation::Identity || l1.out_dim != 1 {
+        return Err("needs ReLU hidden layer and identity scalar output".into());
+    }
+    if model
+        .feature_transforms()
+        .is_some_and(|ts| ts.iter().any(|t| *t != FeatureTransform::Identity))
+    {
+        return Err("feature transforms present".into());
+    }
+    if model.scaler_mean().iter().any(|&m| m != 0.0)
+        || model.scaler_scale().iter().any(|&s| !(s > 0.0 && s.is_finite()))
+    {
+        return Err("standardization is not scale-only and positive".into());
+    }
+    let (n_in, n_hidden) = (l0.in_dim, l0.out_dim);
+    let w1 = values(&l0.weights, n_hidden);
+    let w2 = values(&l1.weights, 1);
+    if w1.iter().any(|&w| !(w >= 0.0)) {
+        return Err("a first-layer weight is negative or NaN".into());
+    }
+    if l0.biases.iter().any(|&b| !(b <= 0.0)) {
+        return Err("a hidden bias is positive or NaN".into());
+    }
+    if l1.biases[0].to_bits() != pin.to_bits() {
+        return Err(format!("output bias {} != pin {pin}", l1.biases[0]));
+    }
+    let column = |j: usize| -> Vec<u32> { (0..n_in).map(|k| w1[k * n_hidden + j].to_bits()).collect() };
+    let mut used = vec![false; n_hidden];
+    let mut pairs = 0;
+    for up in 0..n_hidden {
+        if !(w2[up] > 0.0) {
+            if w2[up].is_nan() {
+                return Err(format!("unit {up}: NaN output weight"));
+            }
+            continue;
+        }
+        let col = column(up);
+        let lo = (0..n_hidden).find(|&j| {
+            !used[j]
+                && j != up
+                && w2[j].to_bits() == (-w2[up]).to_bits()
+                && l0.biases[j] >= l0.biases[up]
+                && column(j) == col
+        });
+        match lo {
+            Some(lo) => {
+                used[lo] = true;
+                used[up] = true;
+                pairs += 1;
+            }
+            None => return Err(format!("unit {up}: positive output weight without a ramp partner")),
+        }
+    }
+    Ok(pairs)
 }
 
 /// Upper end of the per-unit quantile range [`init_thresholds`] draws from.
@@ -2829,6 +2972,16 @@ pub fn train_mlp_strategy_pairs(
             n_hidden,
             hyperparams.init_seed.unwrap_or(hyperparams.seed),
         );
+        // A ramp pair's two units share a W1 row, so their quantile thresholds
+        // order cleanly: the lower unit takes the smaller threshold.
+        let first_pair = n_hidden - 2 * hyperparams.monotone_ramps;
+        for i in 0..hyperparams.monotone_ramps {
+            let p = first_pair + 2 * i;
+            if b1[p + 1] > b1[p] {
+                b1.swap(p, p + 1);
+            }
+        }
+        project_plain(&mut w1, &mut w2, &mut b1, &mut b2, nonneg, hyperparams);
         log_line(
             &format!(
                 "[nonneg-thresholds] b1 initialized at per-unit pre-activation quantiles \
