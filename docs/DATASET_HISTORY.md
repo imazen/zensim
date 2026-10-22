@@ -5083,8 +5083,8 @@ Owner-authorized label overlay on AIC2026 public PTC crops: primary curve
 labels and the available pointwise labels are evaluated separately. The exact
 CSV and original RGB8 PNG hashes are bound in ADMISSION.json. One named-profile native scoring run used frozen B `89cb4861…`,
 source `8d6aa6cc`, with no head, fit or JND calibration. All predictions are finite.
-Canonical signed quality SROCC is 0.9112672374317565 for curve labels and
-0.8972082446190002 for pointwise labels; target orientation is −JND. This is one
+Canonical signed quality SROCC uses target orientation −JND.
+Results on this data are not published here. This is one
 assessment, without a claim of an untouched independent final test or propagated
 observer-label uncertainty. Earlier objective-only release descriptions remain
 historical; no earlier raw artifact or target was replaced.
@@ -5098,8 +5098,7 @@ against the same supplied reconstruction. Saved B predictions and supplied
 cropped metric columns were joined by original distorted/reference IDs after
 image hashes matched the original admission. Results on this data are not
 published here. All three supplied DVIFM variants are retained.
-No pixel rescoring, training, model selection or JND calibration; zero dropped
-rows. This extends the prior single-model exposure with explicit peer
+No pixel rescoring, training, model selection or JND calibration. This extends the prior single-model exposure with explicit peer
 assessment, without changing the historical first-read scope.
 [Matched results and provenance](../benchmarks/jnd_reconstruction_b_2026-10-19.pointer.md).
 
@@ -5122,8 +5121,7 @@ selection, one fresh native `port-lap-v0.3` batch (dvifmish `31c4e256`)
 scored the exact admitted pairs. Raw and JND predictions were checked
 against retained Rust `f24a08a` results. Native curve/pointwise statistics
 are retained with the assessment artifacts. Results on this data are not
-published here. Frozen B and
-other reproduced Rust metrics retain their prior predictions and populations.
+published here. Frozen B and other reproduced Rust metrics retain their prior predictions and populations.
 No fitting, parameter selection or JND calibration. The frozen preset
 provenance states its author constants were trained on AIC2026; this
 comparison is not an unseen-corpus test for DVIFM. Original target and
