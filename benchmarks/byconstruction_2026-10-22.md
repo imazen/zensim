@@ -125,3 +125,27 @@ metric avoids counting one artifact several times through redundant features; wi
 non-negative rows, a distortion type that lights many correlated features is over-weighted
 relative to one that lights few. That is the measured cross-type loss. Monotone classes that
 do allow max-pooling (min-max networks; certifiable signed constructions) are the next arms.
+
+### Damage-mixture test (label-free): B inverts, monotone does not
+
+`scripts/byconstruction/mixture_test.py` (generate / score / report). 48 TRAIN-eligible 256-px
+references from E34's inventory (`p4-inventory-r2/references`; E34's 128 augmentation and 8
+development origins excluded; sha256 order within category), 4 base distortions D1 (Gaussian
+blur σ 1.2, luma noise σ 4, chroma noise σ 8, posterize 12 levels) × 6 added distortions D2
+(luma noise σ 4/8/16, chroma noise σ 8/16/32, BT.601 YCbCr, fixed seeds): 1,152 D1 → D2∘D1
+steps, every one of which raises RGB error against the reference. Scored with
+`score_pair_with_bake --bake-post raw` (`526261c3` build). An inversion is a score that rises
+when D2 is added. Images and scores: `/mnt/v/output/zensim/byconstruction-2026-10-22/mixture/`.
+
+| Model | Inversions / 1,152 | > 1 point | Max rise |
+|---|---|---|---|
+| B (production `89cb4861`) | **148** | 131 | **+44.2** |
+| E34 `base-c` cell (KADID held out, seed 0) | 110 | 107 | +42.9 |
+| T cell (same fold and seed) | **0** | 0 | −0.10 (smallest drop) |
+
+B's worst cell, blur σ 1.2 then chroma noise σ 8, inverts on **48 of 48** references: mean B
+score 15.0 for the blurred image, 33.8 after adding chroma noise (median rise +17.1, max +44.2).
+Example 9940: B 26.5 → 67.3 while RGB MSE rises 6.0 → 80.3; T 66.8 → 33.1. This is the LIVE
+color-noise failure mode reproduced systematically on TRAIN images, without labels. The
+monotone model's guarantee is in feature space; on these pixel mixtures it also held end to
+end.

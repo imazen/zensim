@@ -277,6 +277,10 @@ def recipe_of(spec: str) -> dict:
             out["thresholds"] = True
         elif tok.startswith("rp") and tok[2:].isdigit() and int(tok[2:]) > 0 and "ramps" not in out:
             out["ramps"] = int(tok[2:])  # by-construction exploration: tied monotone ramp pairs
+        elif tok.startswith("fr") and tok[2:].isdigit() and int(tok[2:]) > 0 and "free_ramps" not in out:
+            out["free_ramps"] = int(tok[2:])  # by-construction exploration: budgeted sign-free ramp pairs
+        elif tok.startswith("fb") and "free_budget" not in out and 0 <= float(tok[2:]) <= 1000:
+            out["free_budget"] = float(tok[2:])
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out
@@ -284,6 +288,8 @@ def recipe_of(spec: str) -> dict:
             out["coverage_mask"] = int(tok[2:], 16)
         else:
             raise ValueError(f"bad recipe token {tok!r} in {spec!r}")
+    if ("free_ramps" in out) != ("free_budget" in out):
+        raise ValueError(f"{spec!r}: fr<N> and fb<budget> go together")
     if ("coverage_weight" in out) != ("coverage_mask" in out):
         raise ValueError(f"{spec!r}: cv<w> and cf<mask> go together")
     return out
