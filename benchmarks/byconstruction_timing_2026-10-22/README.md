@@ -23,3 +23,6 @@ Commands: `scripts/byconstruction/ring_timing.sh <A_BIN> <B_BIN> <BAKE> 512 40 1
 script's optional 8th argument (`B_BAKE`) now reproduces it with labels A/B.
 Single thread, `taskset -c 2`, 3 warmup calls per round, 12 rounds with alternating arm order.
 Load average 3–8 (decaying from this lane's finished jobs; no foreign build or training).
+
+`perf_2048_symbols.txt`: flat profile (top 20 symbols) of the baseline binary at 2048², single thread;
+the raw `perf.data` is on dev at `/mnt/v/output/zensim/byconstruction-2026-10-22/perf/perf_2048.data`.

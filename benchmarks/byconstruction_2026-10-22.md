@@ -733,10 +733,38 @@ Limits:
 - It changes ringing values (512² timing pair: 88.2805 → 88.2424), so it is a new arithmetic
   revision. No stored table or bake is valid with it.
 - Whether it improves accuracy is not measured; that needs re-extracted training tables and refits.
-- The cost of the affine-residual design is not measured. A global per-channel affine fit needs
-  a full-image moment pass before the damage bank runs, which conflicts with strip streaming unless
-  the fit is done at a coarse pyramid scale. A local fit needs per-channel local means and
-  variances; whether it can share those with the existing SSIM passes has not been checked.
+- The cost of the affine-residual design is not measured; whether each design streams is in the
+  next section. (An earlier version of this note said a coarse-scale fit would avoid a pre-pass.
+  It would not: the streaming walk builds coarse rows from fine rows as they arrive.)
+
+### Can the fixes stream?
+
+The Rev5 scorer is a single streaming pass. `StripPlaneProducer` (`zensim/src/feature_v2_stream.rs`)
+keeps rolling row windows per scale and builds each coarser scale from finer rows as they arrive.
+It emits 128-row kernel strips top to bottom, and per-strip accumulators merge in a fixed reduction
+tree, so strip geometry does not change the result. The timings above ran through this walk: the
+profile below shows `StripPlaneProducer`, `RollingPlane` and `stream_phase_b` samples.
+
+| Design | Streams? |
+|---|---|
+| High-pass ringing | Yes, unchanged: the same 4-neighbourhood inside the same strip halo. |
+| Global-change descriptor used as a non-negative gate | Yes, in the same pass. The affine fit `dst ≈ a·src + b` per channel, and the share of the error it explains, need only five sums (Σs, Σd, Σs², Σd², Σs·d) that add across strips in the existing reduction tree. The descriptor is final when the walk ends, which is when the model runs anyway. |
+| Damage bank recomputed on the global affine residual | Not in one pass. The fit must exist before the damage kernels run, and every scale's rows arrive top to bottom. It needs a moment pre-pass. |
+| Damage bank on a local affine residual (window means and variances, as in SSIM's structure term) | Yes, within the existing halo. |
+
+Notes:
+- The steering map would need the gate descriptor's gradient as an extra term; whether the map's
+  retained per-strip data covers it is not checked.
+- A pre-pass keeps memory bounded: `ImageSource` gives random access to borrowed rows, so it can
+  accumulate moments without materializing planes. Its cost is not measured. It would repeat the
+  sRGB→XYB conversion, which took 13.2% of all samples in a single-thread 2048² profile of this
+  scorer (`benchmarks/byconstruction_timing_2026-10-22/perf_2048_symbols.txt`; about 8% of the
+  samples are the benchmark's own image synthesis). A subsampled pre-pass converts proportionally
+  fewer pixels. In reference-fed encoder loops the reference pyramid is already cached, so only the
+  distorted side would need it.
+- A fit taken from the strips seen so far is not an option: the top of the image would use a
+  different fit than the bottom.
+- Whether a local residual can share the SSIM pass's local moments is not checked.
 
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 
