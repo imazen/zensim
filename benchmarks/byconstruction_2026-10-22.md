@@ -149,3 +149,17 @@ Example 9940: B 26.5 → 67.3 while RGB MSE rises 6.0 → 80.3; T 66.8 → 33.1.
 color-noise failure mode reproduced systematically on TRAIN images, without labels. The
 monotone model's guarantee is in feature space; on these pixel mixtures it also held end to
 end.
+
+Across all 12 matched LODO cells (4 folds × seeds 0–2; E34's stored `base-c` dense bakes vs T's):
+
+| | Inversions / 1,152 per cell | Max rise per cell |
+|---|---|---|
+| `base-c` (B's recipe) | 86–171 | +24.7 to +61.5 |
+| T (convex monotone) | 0–4 | ≤ +4.03 |
+
+T's only inversions are posterize-12 followed by *light* noise (luma σ 4 or chroma σ 8), at most
+3 references per cell: dithering. Light noise breaks up posterization contours and the
+banding-type features fall, and dithered banding often looks better, so these are plausibly
+correct. B's inversions are blur followed by chroma noise, with no such rationale. T's
+guarantee is in feature space; a feature that falls when damage is added (here, banding under
+dither) is the only route to an end-to-end rise.
