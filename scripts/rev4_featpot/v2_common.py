@@ -281,6 +281,8 @@ def recipe_of(spec: str) -> dict:
             out["free_ramps"] = int(tok[2:])  # by-construction exploration: budgeted sign-free ramp pairs
         elif tok.startswith("fb") and "free_budget" not in out and 0 <= float(tok[2:]) <= 1000:
             out["free_budget"] = float(tok[2:])
+        elif tok == "gate" and "gated_products" not in out:  # content-gated monotone over fx1 products
+            out["gated_products"] = True
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out

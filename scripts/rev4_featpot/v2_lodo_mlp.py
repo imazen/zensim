@@ -167,6 +167,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
             cmd += ["--monotone-ramps", str(recipe["ramps"])]
         if recipe.get("free_ramps"):
             cmd += ["--free-ramps", str(recipe["free_ramps"]), "--free-budget", repr(recipe["free_budget"])]
+    if recipe.get("gated_products"):
+        if not (recipe.get("mono_all") and recipe.get("derived_inputs") == "fx1"):
+            raise ValueError("gate requires mono and fx1")
+        cmd.append("--monotone-gated-products")
     if recipe.get("monotone_cbc"):
         if head != "N" or recipe.get("derived_inputs") or recipe.get("hidden") != 1:
             raise ValueError("E34 L requires A's plain N H1 recipe")

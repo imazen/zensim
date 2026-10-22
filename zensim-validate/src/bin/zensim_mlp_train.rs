@@ -3347,6 +3347,8 @@ fn main() {
         monotone_ramps: args.monotone_ramps,
         free_ramps: args.free_ramps,
         free_budget: args.free_budget,
+        monotone_product_pairs: Vec::new(),
+        monotone_product_scales: Vec::new(),
         n_hidden: args.hidden,
         n_epochs: args.epochs,
         pairs_per_epoch: args.pairs_per_epoch,
