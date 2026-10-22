@@ -386,3 +386,29 @@ there. Under the `best_dev` rule the arm deltas shrink (T −0.0124, E5 −0.010
 stands, and the earlier statements that R's or B's dev decline shows memorization are
 withdrawn: what the logged metric shows is a shift in pooled cross-source ranking on the
 in-population dev references, not an E21 loss.
+
+## Where this stands (09:40Z; G, M, Lc, Ts still running)
+
+**Can a metric that is correct by construction be competitive with B?**
+
+- *Product gates:* yes. The certified-monotone full-data model passes every label-free gate
+  run here (C1–C6, G-DIAL, N1–N3, identity at every tier, G-STEER 135/135 where `base-c` gets
+  130/135), with higher dial monotonicity.
+- *Robustness:* strictly better. 0–9 mixture inversions per cell (all dithering) against
+  86–171 with rises to +61 for B's recipe; the exposed LIVE pair is ordered correctly. A
+  registered repair with more coverage and inputs did not achieve this on B's signed class.
+- *Codec calibration:* at parity. CID22-A (codec types) is +0.006 for T in raw form.
+- *E21:* not yet. Best certified-monotone arm −0.0194 (E5); with a certified non-monotone
+  budget of 20 raw units, −0.0154. The deficit is cross-type severity calibration on synthetic
+  distortion sets: with an oracle per-type affine calibration the monotone arms are at parity on
+  KADID (+0.002) and within −0.005 to −0.008 on TID.
+
+**Mechanism.** B places distortion types on one severity scale with sign contrasts between
+correlated damage features (half of its damage features have a positive derivative on a
+typical row). The same contrasts produce its inversions. Coordinate-wise monotone combiners
+built from these features cannot do that calibration; response shape (saturating ramps) does
+not help, and a certified non-monotone budget buys it back slowly while spending part of the
+room on the same inversions.
+
+**Not supported by the data:** that sign freedom causes memorization (the logged dev decline
+is pooled across sources; selecting by it lowers B's E21 by 0.008).
