@@ -539,6 +539,9 @@ slot values 0.0012 → 0.0582 and 0.0019 → 0.0349 (references 3318 and 5050 be
 *and* to chroma noise. Calibrating the benign changes requires subtracting it; the same
 subtraction forgives chroma noise. That one conflation explains most of the cross-type
 calibration gap and B's blur + chroma-noise inversion (and plausibly the LIVE color-noise case).
+*Correction (arm Bnr, below): this holds for FR, whose only free features are ringing. It does not
+hold for B: B retrained without ringing keeps the same inversion, so B's comes from its sign
+freedom over correlated features, not from ringing alone.*
 The fix is at the feature level: a ringing measure that does not respond to global tone or
 saturation changes (or the two components as separate features, with the global-change part
 treated as a non-damage descriptor). Then a monotone combiner can use the damage part without
@@ -672,11 +675,75 @@ E21 Δ **−0.0131 (0.0023)**; KADID −0.0166, TID −0.0215, KonFiG −0.0150,
 −0.0111, −0.0177, −0.0107). Certified monotone; 1–2 live max pairs in 11 of 12 cells (one cell
 keeps all 128 units). Mixture test 1–6 inversions per cell, max +7.56. Within noise of M (−0.0144).
 
+### Arm Bnr (`fx1nr`): B without ringing, signed
+
+Owner question (13:00Z): is ringing essential, and what does doing it right cost? Bnr is B's signed
+recipe (`sel:c6a94f8337b0@h32:H128:cv16:cf98:fx1nr`) with the 10 ringing ids removed from both legs:
+400 direct inputs plus 400 fragility products (`scripts/rev4_featpot/byc_fx1nr_declaration.json`,
+sha256 `923da70c…`). Everything else, including the signed first layer, is B's.
+
+E21 Δ **−0.0003 (0.0009)**; KADID −0.0010, TID −0.0023, KonFiG +0.0041, CID22-A −0.0019 (per seed
++0.0008, +0.0002, −0.0020); E33 point form passes. B does not need ringing for its rank
+performance: the signed model finds the same global-change discount through other features.
+
+Mixture test: 72–178 inversions per cell (`base-c` 86–171), max rise +53.1 (`base-c` +61.5). The
+worst combination is still blur σ1.2 + chroma noise σ8, which inverts on 28–48 of 48 references per
+cell, followed by blur + chroma σ16, blur + luma σ4 and posterize + chroma noise. Removing ringing
+does not remove B's inversion; sign freedom does. In the monotone class, ringing's only value was
+as a subtractable global-change signal (FR −0.0039 vs DR −0.0216).
+
+### Cost of the ringing fix, and of dropping ringing
+
+Bench: `byc_score_timing` (new, `zensim-validate/src/bin/`) times `BakeScorer::compute` (score only,
+no diffmap) on one deterministic textured pair with uniform ±3 noise. Settings: single thread
+(`RAYON_NUM_THREADS=1`), pinned to core 2, default dispatch on dev (Zen 5). Each round is the median
+of 40 calls (512²) or 8 calls (2048²) after 3 warmups; 12 rounds alternate the order of the two arms
+(`scripts/byconstruction/ring_timing.sh`). Paired Δ is the median of the per-round ratios, with a
+95% bootstrap CI (5,000 resamples). Raw rounds and hashes are in
+`benchmarks/byconstruction_timing_2026-10-22/`.
+
+**High-pass ringing prototype** (`RUSTFLAGS=--cfg byc_hp_ring`, all five ringing sites in
+`zensim/src/feature_v2_kernels.rs`). The ringing error becomes `(src − mean4(src)) − (dst − mean4(dst))`
+over the 4-neighbourhood the kernel already loads, instead of `src − dst`, so a global offset or
+a smooth tone map no longer counts as ringing. Both builds score B's served bake (`89cb4861`):
+
+| Size | Baseline median | High-pass median | Paired Δ (95% CI) |
+|---|---|---|---|
+| 512² | 5.979 ms | 6.021 ms | +0.78% (+0.62..+0.92) |
+| 2048² | 87.016 ms | 87.263 ms | +0.24% (−0.39..+0.71) |
+
+**Dropping ringing from the model** (baseline binary only; `base-c` kadid_s0 bake `7bd14f56` vs
+Bnr kadid_s0 bake `3b7af590`):
+
+| Size | `base-c` median | Bnr median | Paired Δ (95% CI) |
+|---|---|---|---|
+| 512² | 6.017 ms | 6.017 ms | −0.03% (−0.08..+0.09) |
+| 2048² | 86.658 ms | 86.739 ms | +0.07% (−0.11..+0.41) |
+
+Ringing is computed in the shared gradient kernel whether or not a bake reads it, so dropping it
+saves nothing measurable, and fixing it costs under 1% single-threaded.
+
+Limits:
+- Load average was 3–8 during the runs, decaying from my own finished jobs; no foreign build or
+  training ran.
+- Tested on one synthetic content type, one host and one dispatch tier. Not measured
+  multi-threaded.
+- The prototype changes only the extraction kernel, not the spatial/diffmap sites in
+  `feature_v2.rs`.
+- It changes ringing values (512² timing pair: 88.2805 → 88.2424), so it is a new arithmetic
+  revision. No stored table or bake is valid with it.
+- Whether it improves accuracy is not measured; that needs re-extracted training tables and refits.
+- The cost of the affine-residual design is not measured. A global per-channel affine fit needs
+  a full-image moment pass before the damage bank runs, which conflicts with strip streaming unless
+  the fit is done at a coarse pyramid scale. A local fit needs per-channel local means and
+  variances; whether it can share those with the existing SSIM passes has not been checked.
+
 ## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
 
 | Arm | Guarantee | E21 Δ (SE) | Mixture inversions / cell (max rise) |
 |---|---|---|---|
 | Ts: B + thresholds | pin only | −0.0008 (0.0012) | — |
+| Bnr: B without ringing | pin only | −0.0003 (0.0009) | 72–178 (+53.1) |
 | FR: ringing sign-free | monotone in 800 of 820 | −0.0039 (0.0029) | 2–41 (+26.2) |
 | **M64: max pairs** | **certified monotone** | **−0.0131 (0.0023)** | 1–6 (+7.6) |
 | **M: max pairs + hinges** | **certified monotone** | **−0.0144 (0.0016)** | 1–32 (+6.5) |
@@ -699,8 +766,10 @@ few points, no blur + chroma-noise failure), and at parity on codec data (CID22-
 competitive on the E21 cross-dataset rank statistic: the best certified-monotone arm is −0.013.
 That gap is cross-type severity calibration on synthetic distortion sets; with oracle per-type
 calibration the monotone models match B. Max-pooling recovers about a third of it inside the
-monotone class. Most of the rest runs through one conflated feature (v2 ringing,
-imazen/zensim#72): B subtracts it as an accidental global-change detector, and the same
-subtraction forgives chroma noise. Closing the remaining gap by construction needs a feature
+monotone class. Inside the monotone class most of the rest runs through one conflated feature
+(v2 ringing, imazen/zensim#72): freeing its sign alone recovers it (FR −0.0039), because ringing
+doubles as a global-change detector. B itself does not depend on ringing (Bnr −0.0003, the same
+inversions): its sign freedom finds that discount in other features and forgives chroma noise
+with it. The high-pass ringing fix costs under 1% single-threaded. Closing the remaining gap by construction needs a feature
 change: damage measured on the affine-residual difference plus explicit global-change terms
 (the SSIM luminance/contrast/structure decomposition applied to this bank).
