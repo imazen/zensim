@@ -439,3 +439,12 @@ v2 ringing direct inputs and their 10 fragility products (20 of 820 inputs;
 after reading contributions on KADID assessment rows, so FR is exploratory and cannot by itself
 support a claim. It tests whether the cross-type deficit sits in a few mis-specified features.
 Queued after Ts.
+
+### Arm G (`mono:thr:gate`, content-gated monotone): no change
+
+`4112601a` trainer. E21 Δ **−0.0202 (0.0030)**; KADID −0.0178, TID −0.0429, KonFiG −0.0261,
+CID22-A +0.0060 (T: −0.0205). Dense bakes certify monotone through the gate rule. Like T, each
+cell keeps one live unit, now a linear model whose damage gains move with fragility in both
+directions (product weights down to −1.99, inside the cone). Pair classes match T (cross-type
+KADID −0.0123, TID −0.0205). Content-dependent gain is not what the monotone class lacks; the
+deficit is cross-type.
