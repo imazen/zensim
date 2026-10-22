@@ -11,8 +11,9 @@ the all-family probe).
 | Label-free gate outputs for full-data T (NEARID, verdicts, G-STEER, identity) | `/mnt/v/output/zensim/byconstruction-2026-10-22/gates/` | 55 MB |
 | Gate outputs for full-data M | `/mnt/v/output/zensim/byconstruction-2026-10-22/gates-M/` | |
 | Feature probe (global edits vs visible damage, dumped feature vectors) | `/mnt/v/output/zensim/byconstruction-2026-10-22/feature-probe/` | |
-| LODO cells (train.log, bakes, held-out predictions, `byc_record.json`) | `~/tmp/byc/cells/<arm>/without_<fold>_s<seed>/` | per cell ~2 MB |
-| Full-data T fit and packed bake | `~/tmp/byc/full/mono-thr_s0/` | |
+| LODO cells (train.log, bakes, held-out predictions, `byc_record.json`) | `/mnt/v/output/zensim/byconstruction-2026-10-22/cells/<arm>/without_<fold>_s<seed>/` (working copy `~/tmp/byc/cells/`) | 64 MB total |
+| Best-dev-epoch predictions (`predict-best`) | `/mnt/v/output/zensim/byconstruction-2026-10-22/best/` | 28 MB |
+| Full-data T and M fits with packed bakes | `/mnt/v/output/zensim/byconstruction-2026-10-22/full/` | |
 | Pinned trainer/predictor builds, with `SHA256SUMS` and `BUILD_COMMIT` | `/var/tmp/byconstruction-bin/<commit>/` | |
 
 The mixture images are browsable at `http://dev.lan:3300/zensim/byconstruction-2026-10-22/mixture/img/`.
