@@ -480,3 +480,9 @@ monotone in pixel damage: `hf_loss` (detail lost) falls when noise adds high-fre
 back to a blurred image, and a max lets the score follow whichever detector dominates. The
 rises are small next to B's (+61), but a pixel-level guarantee needs damage-monotone features
 as well as a monotone combiner; the mixture test is the practical check.
+
+### Arm Lc (`H1:mono`, linear monotone in B's family)
+
+E21 Δ **−0.0204 (0.0029)**; KADID −0.0186, TID −0.0423, KonFiG −0.0266, CID22-A +0.0060 — the
+same as T, confirming T was the linear class in effect. (E34's L in the A family: −0.0226.)
+12 cells in 68 s: width 1 is cheap.
