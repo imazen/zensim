@@ -167,6 +167,11 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
             cmd += ["--monotone-ramps", str(recipe["ramps"])]
         if recipe.get("free_ramps"):
             cmd += ["--free-ramps", str(recipe["free_ramps"]), "--free-budget", repr(recipe["free_budget"])]
+    if recipe.get("free_mask"):
+        if not recipe.get("mono_all") or recipe.get("ramps") or recipe.get("free_ramps") or recipe.get("max_pairs") \
+                or recipe.get("gated_products"):
+            raise ValueError("freering applies to the plain mono recipe only")
+        cmd += ["--monotone-feature-mask", str(REPO / "scripts/byconstruction/masks" / f"{recipe['free_mask']}.tsv")]
     if recipe.get("max_pairs"):
         if not (recipe.get("mono_all") and recipe.get("thresholds")) or recipe.get("gated_products"):
             raise ValueError("mp<N> requires mono and thr, without gate")

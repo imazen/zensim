@@ -431,3 +431,11 @@ changes, which a ringing detector should not; on saturation the IW-weighted SSIM
 are about 3× over-represented. Tone-normalized versions of these features are the concrete
 feature-side experiment for letting a monotone combiner calibrate across types. Not tested
 here.
+
+**Arm FR (`mono:thr:freering`), recorded before its result; post hoc.** Same as T, but the 10
+v2 ringing direct inputs and their 10 fragility products (20 of 820 inputs;
+`scripts/byconstruction/masks/free_ringing.tsv`) are sign-free via the existing
+`--monotone-feature-mask`. Guarantee: monotone in the other 800 inputs. The feature was chosen
+after reading contributions on KADID assessment rows, so FR is exploratory and cannot by itself
+support a claim. It tests whether the cross-type deficit sits in a few mis-specified features.
+Queued after Ts.
