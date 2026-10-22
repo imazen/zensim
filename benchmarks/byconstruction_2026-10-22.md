@@ -448,3 +448,35 @@ cell keeps one live unit, now a linear model whose damage gains move with fragil
 directions (product weights down to −1.99, inside the cone). Pair classes match T (cross-type
 KADID −0.0123, TID −0.0205). Content-dependent gain is not what the monotone class lacks; the
 deficit is cross-type. Mixture test: 0–4 inversions per cell, max +4.49, dithering cases only.
+
+### Arm M (`mono:thr:mp32`, certified monotone max pairs): best exactly-monotone arm
+
+`d2b7ce30` trainer. Every dense bake certifies monotone (1–2 live signed max pairs each).
+
+| | E21 Δ vs `base-c`, seeds 0–2 |
+|---|---|
+| mean (seed-unit SE) | **−0.0144 (0.0016)**; per seed −0.0133, −0.0123, −0.0175 |
+| KADID / TID2013 / KonFiG / CID22-A | −0.0147 / −0.0252 / −0.0183 / +0.0008 |
+
+Paired with T by seed: +0.0021, +0.0132, +0.0032. In 10 of 12 cells exactly two hidden units are
+live, i.e. the whole model is `pin − c·max(a·x, b·x − t)`: one learned maximum between two
+non-negative damage detectors. That single pooled pair recovers a large part of the cross-type
+deficit:
+
+| Pair class, Δ vs `base-c` | T | M |
+|---|---|---|
+| TID2013 cross-type | −0.0205 | **−0.0120** |
+| TID2013 cross-source | −0.0234 | **−0.0152** |
+| KADID cross-type | −0.0133 | **−0.0101** |
+| KonFiG cross-source | −0.0132 | **−0.0088** |
+| same ladder (all sets) | +0.0015 to +0.0067 | +0.0016 to +0.0064 |
+
+Max-pooling is the monotone mechanism for cross-type calibration, as predicted from the
+`max(x₁, x₂)` argument, and training keeps only one pair alive.
+
+**Mixture test: feature-space monotonicity is not pixel-space monotonicity.** M has 1–32
+inversions per cell (max +6.54), now including blur followed by noise. Some features are not
+monotone in pixel damage: `hf_loss` (detail lost) falls when noise adds high-frequency energy
+back to a blurred image, and a max lets the score follow whichever detector dominates. The
+rises are small next to B's (+61), but a pixel-level guarantee needs damage-monotone features
+as well as a monotone combiner; the mixture test is the practical check.
