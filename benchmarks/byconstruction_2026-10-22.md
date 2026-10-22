@@ -302,3 +302,25 @@ non-monotone room than 5 points, and 5 points buys nothing measurable on E21. Pa
 match T (same ladder KADID +0.0067, TID +0.0057; cross-type −0.0110 / −0.0189; cross-source
 −0.0099 / −0.0226). Mixture test: 3–8 inversions per cell, max rise +5.01 (dithering cases; the
 budget bound plus the feature-space-to-pixel gap).
+
+### Information vs calibration: an oracle per-type calibration (diagnostic upper bound)
+
+`scripts/byconstruction/oracle_type_calibration.py` gives each distortion type its own
+least-squares affine map from prediction to human score, using the labels themselves (an
+oracle, not a model), applied identically to the arm and to `base-c`; then pooled SROCC Δ:
+
+| Arm | KADID raw → calibrated | TID2013 | KonFiG | CID22-A |
+|---|---|---|---|---|
+| T | −0.0192 → **+0.0015** | −0.0423 → −0.0054 | −0.0267 → −0.0153 | +0.0060 → +0.0078 |
+| R | −0.0168 → **+0.0025** | −0.0391 → −0.0081 | −0.0299 → −0.0159 | −0.0043 → −0.0025 |
+| E5 | −0.0158 → **+0.0019** | −0.0403 → −0.0058 | −0.0231 → −0.0144 | +0.0014 → +0.0055 |
+
+Within each distortion type, across content and severity, the monotone models carry as much
+human ranking information as B's recipe (slightly more on KADID). The E21 gap is almost
+entirely how *different distortion types* are placed on one severity scale, which B obtains
+from sign contrasts between correlated damage features. KonFiG keeps about −0.015. CID22-A,
+whose "types" are codecs, is positive in raw form for T and E5.
+
+So, on this feature set: coordinate-wise monotonicity and cross-type severity calibration
+conflict; ranking within a distortion type does not suffer. For codec targeting, where the
+types are codecs (CID22-A), the monotone models are at parity or better.
