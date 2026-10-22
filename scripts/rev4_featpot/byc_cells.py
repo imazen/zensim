@@ -74,7 +74,9 @@ def run_cell(tokens: str, fold: str, seed: int) -> dict:
     pred = predict(dest / "refit/last.bin", ROOT / "wide/main/real" / f"{fold}.parquet", dest / f"pred_{fold}.tsv")
     rec = {"tokens": tokens, "spec": spec_of(tokens), "fold": fold, "seed": seed, "train_seconds": round(train_s, 1),
            "last_bin_sha256": sha(dest / "refit/last.bin"), "pred_sha256": sha(dest / f"pred_{fold}.tsv"),
-           "rows": int(len(pred)), "curve": read_curve(dest / "train.log")}
+           "rows": int(len(pred)), "curve": read_curve(dest / "train.log"),
+           "bin_dir": os.environ["REV4_V2_BIN_DIR"],
+           "trainer_sha256": sha(Path(os.environ["REV4_V2_BIN_DIR"]) / "zensim_mlp_train")}
     for line in (dest / "train.log").read_text().splitlines():
         if line.startswith("  epoch 119 "):
             rec["epoch119"] = line.split("| t=")[0].strip()
@@ -148,6 +150,127 @@ def cmd_score(args) -> int:
     return 0
 
 
+E34_CONTROL_CELLS = Path("/var/tmp/rev4-featpot/e34-controlc-results/cells/sel:3b7bd5ebe929@h32:H128:cv16:cf98:fx1__N")
+DEV_RE = None
+
+
+def dev_points(log: Path) -> dict:
+    """{epoch: {group: srocc}} for the logged development groups of one train.log."""
+    import re
+    global DEV_RE
+    DEV_RE = DEV_RE or re.compile(r"(\w+_development): srocc=([0-9.]+)")
+    out = {}
+    for line in log.read_text().splitlines():
+        if line.startswith("  epoch "):
+            epoch = int(line.split()[1])
+            out[epoch] = {g: float(v) for g, v in DEV_RE.findall(line)}
+    return out
+
+
+def cmd_curves(args) -> int:
+    """TRAIN-internal development SROCC (teacher and human dev groups) at epochs 0 and 119, arm vs E34 control."""
+    import numpy as np
+    seeds = [int(s) for s in args.seeds.split(",")]
+    rows = []
+    for f in FOLDS:
+        for s in seeds:
+            cell = f"without_{f}_s{s}"
+            a, c = dev_points(CELLS / args.arm / cell / "train.log"), dev_points(E34_CONTROL_CELLS / cell / "train.log")
+            rows.append({g: (a[0][g], a[119][g], c[0][g], c[119][g]) for g in a[119]})
+    summary = {}
+    for g in rows[0]:
+        v = np.array([r[g] for r in rows])
+        summary[g] = {"arm_e0": v[:, 0].mean(), "arm_e119": v[:, 1].mean(), "control_e0": v[:, 2].mean(),
+                      "control_e119": v[:, 3].mean(), "arm_minus_control_e119": (v[:, 1] - v[:, 3]).mean(),
+                      "arm_change_e0_to_e119": (v[:, 1] - v[:, 0]).mean(),
+                      "control_change_e0_to_e119": (v[:, 3] - v[:, 2]).mean(), "n_cells": len(v)}
+    print(json.dumps({args.arm: summary}, indent=1))
+    return 0
+
+
+def _preds(d: dict, arm: str, seed: int):
+    import numpy as np
+    import pandas as pd
+    if arm in d["predictions"]:
+        return np.asarray(d["predictions"][arm][seed], dtype=float)
+    f = d["name"]
+    return pd.read_csv(CELLS / arm / f"without_{f}_s{seed}" / f"pred_{f}.tsv", sep="\t").pred.to_numpy(dtype=float)
+
+
+def cmd_pairclass(args) -> int:
+    """Pair-class concordance (E34 section 4.6's classes; an independent numpy reference, not the registered owner):
+    same ladder (same reference and distortion type), cross-type (same reference, other type), cross-source (other
+    reference). Concordance = share of target-ordered pairs the model orders alike (prediction ties count half); exact
+    target ties excluded. Datasets above 4,000 rows use every within-reference pair plus a fixed-seed 2M cross-source
+    sample."""
+    import numpy as np
+    panel = json.loads(E34_PANEL.read_text())
+    arms = args.arms.split(",")
+    seeds = [int(s) for s in args.seeds.split(",")]
+    rng = np.random.default_rng(20261022)
+    out = {}
+    for d in panel["datasets"]:
+        t, ref, cod = (np.asarray(d[k]) for k in ("target", "reference", "codec"))
+        n = len(t)
+        if n < 4000:
+            ii, jj = np.triu_indices(n, 1)
+        else:
+            parts_i, parts_j = [], []
+            for r in np.unique(ref):
+                idx = np.where(ref == r)[0]
+                a, b = np.triu_indices(len(idx), 1)
+                parts_i.append(idx[a])
+                parts_j.append(idx[b])
+            si, sj = rng.integers(0, n, 2_000_000), rng.integers(0, n, 2_000_000)
+            keep = ref[si] != ref[sj]
+            ii, jj = np.concatenate(parts_i + [si[keep]]), np.concatenate(parts_j + [sj[keep]])
+        same_ref, same_type = ref[ii] == ref[jj], cod[ii] == cod[jj]
+        classes = {"same_ladder": same_ref & same_type, "cross_type": same_ref & ~same_type,
+                   "cross_source": ~same_ref}
+        for cname, cm in classes.items():
+            dt = t[ii[cm]] - t[jj[cm]]
+            ok = dt != 0
+            row = {"pairs": int(ok.sum())}
+            for arm in arms:
+                vals = []
+                for s in seeds:
+                    p = _preds(d, arm, s)
+                    sg = np.sign(dt[ok]) * np.sign(p[ii[cm]][ok] - p[jj[cm]][ok])
+                    vals.append(float((np.sum(sg > 0) + 0.5 * np.sum(sg == 0)) / ok.sum()))
+                row[arm] = float(np.mean(vals))
+            out.setdefault(d["name"], {})[cname] = row
+    print(json.dumps(out, indent=1))
+    return 0
+
+
+def cmd_bytype(args) -> int:
+    """Per distortion type: mean within-reference SROCC (ladder ordering) and pooled SROCC, arm vs control."""
+    import numpy as np
+    panel = json.loads(E34_PANEL.read_text())
+    seeds = [int(s) for s in args.seeds.split(",")]
+    out = {}
+    for d in panel["datasets"]:
+        t, ref, cod = (np.asarray(d[k]) for k in ("target", "reference", "codec"))
+        for typ in sorted(set(cod.tolist())):
+            m = cod == typ
+            acc = {"within": [], "pooled": []}
+            for s in seeds:
+                pa, pc = _preds(d, args.arm, s), _preds(d, args.control, s)
+                wa, wc = [], []
+                for r in set(ref[m].tolist()):
+                    mm = m & (ref == r)
+                    if mm.sum() >= 3 and np.ptp(t[mm]) > 0:
+                        wa.append(srocc(pa[mm], t[mm]))
+                        wc.append(srocc(pc[mm], t[mm]))
+                acc["within"].append(np.nanmean(wa) - np.nanmean(wc) if wa else np.nan)
+                acc["pooled"].append(srocc(pa[m], t[m]) - srocc(pc[m], t[m]))
+            out.setdefault(d["name"], {})[str(typ)] = {"n": int(m.sum()),
+                                                       "within_ref_delta": float(np.nanmean(acc["within"])),
+                                                       "pooled_delta": float(np.nanmean(acc["pooled"]))}
+    print(json.dumps(out, indent=1))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -160,8 +283,19 @@ def main() -> int:
     s.add_argument("--arms", required=True)
     s.add_argument("--control", default="base-c")
     s.add_argument("--seeds", default="0,1,2")
+    c = sub.add_parser("curves")
+    c.add_argument("--arm", required=True, help="arm directory name, e.g. mono-thr")
+    c.add_argument("--seeds", default="0,1,2")
+    pc = sub.add_parser("pairclass")
+    pc.add_argument("--arms", required=True, help="comma list; base-c and other E34 arms come from the panel input")
+    pc.add_argument("--seeds", default="0,1,2")
+    bt = sub.add_parser("bytype")
+    bt.add_argument("--arm", required=True)
+    bt.add_argument("--control", default="base-c")
+    bt.add_argument("--seeds", default="0,1,2")
     args = ap.parse_args()
-    return {"run": cmd_run, "score": cmd_score}[args.cmd](args)
+    return {"run": cmd_run, "score": cmd_score, "curves": cmd_curves, "pairclass": cmd_pairclass,
+            "bytype": cmd_bytype}[args.cmd](args)
 
 
 if __name__ == "__main__":

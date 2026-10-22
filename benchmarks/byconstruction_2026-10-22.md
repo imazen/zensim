@@ -48,6 +48,19 @@ separately registered assessment before it can claim more than "competitive on E
 | Lc | `H1:mono` | linear, `W1 ≥ 0` | monotone + pin |
 | T | `mono:thr` | sum of hinges, `W1 ≥ 0`, `b1 ≤ 0`, H128 | monotone + pin |
 | Ts | `thr` | B plus thresholds, signed `W1` | pin only (capacity control) |
+| R | `mono:thr:rp32` | 64 hinges + 32 tied ramp pairs (H128), `W1 ≥ 0` | monotone + pin, non-convex |
+
+**Amendment before any arm result (2026-10-22 ~07:55Z), from a methodology review.** T tests
+*convex* monotonicity, so a T loss falsifies convexity, not "monotone by construction". R is the
+non-convex monotone arm: each tied pair `w2·(ReLU(z − t₁) − ReLU(z − t₂))`, `t₂ ≥ t₁ ≥ 0`, is a
+bounded saturating ramp in the existing wire format; `certify_monotone_bake` verifies the
+structure from the bake bytes. B's fragility products are already a narrow content gain under
+`W1 ≥ 0` (effective weight `a_k + b_k·f_k ≥ 0`, `f_k ∈ (0, 1]`); a richer content-gated
+partial-monotone arm (free content network × monotone damage terms) is a later step.
+Because E21 is leave-one-dataset-out, it cannot see damage-mixture shift (the LIVE color-noise
+failure came from families the coverage mask excluded). Two checks are added beside it for any
+competitive arm: pair classes by distortion type (E34 §4.6 owner), and a label-free
+damage-mixture test (adding a second distortion to a distorted image must not raise the score).
 
 ## Decision rules (fixed before any arm result)
 
@@ -63,4 +76,52 @@ separately registered assessment before it can claim more than "competitive on E
 
 ## Results
 
-(filled in as cells land)
+Cells: `~/tmp/byc/cells/<arm>/without_<fold>_s<seed>/` on dev (train.log, `byc_record.json` with
+bake and prediction hashes, held-out `pred_<fold>.tsv`). Arm T used the `8ba33c7a` trainer
+(`/var/tmp/byconstruction-target/release` at the time), its predictions the `4024c31b`
+`bake_dial_refit`, which was re-checked bit-identical on E34's `base-c` KADID seed-0 cell.
+Each T cell: 984–1013 s single-threaded on a contended box, peak RSS 0.99 GiB.
+
+### Arm T (`mono:thr`, convex monotone): not competitive on E21
+
+| | E21 Δ vs `base-c`, seeds 0–2 |
+|---|---|
+| mean (seed-unit SE) | **−0.0205 (0.0029)**; per seed −0.0154, −0.0255, −0.0207 |
+| KADID / TID2013 / KonFiG / CID22-A | −0.0192 / −0.0423 / −0.0267 / **+0.0060** |
+| absolute SROCC | 0.8714 / 0.8590 / 0.7904 / 0.8860 |
+
+That is close to E34's linear L (−0.0226, A family): convex thresholds recover little. By the
+rule above T is not extended. The loss has a specific shape.
+
+**Pair classes** (`byc_cells.py pairclass`, an independent numpy implementation of E34 §4.6's
+classes; concordance on target-ordered pairs, exact target ties excluded, cross-source pairs
+for KADID a fixed 2M sample; mean over seeds 0–2; Δ = T − `base-c`):
+
+| Dataset | same ladder | cross-type, same reference | cross-source |
+|---|---|---|---|
+| KADID | **+0.0067** | −0.0133 | −0.0120 |
+| TID2013 | **+0.0053** | −0.0205 | −0.0234 |
+| KonFiG | **+0.0015** | +0.0041 | −0.0132 |
+| CID22-A (codecs) | −0.0006 | −0.0019 | **+0.0032** |
+
+Within a ladder (same reference, same distortion) the monotone model orders as well or better,
+up to +0.22 within-reference SROCC on KADID's contrast-change type (`byc_cells.py bytype`).
+What it loses is calibration of severity *between* distortion types and contents on the
+synthetic-distortion sets. On codec data it is neutral to slightly better.
+
+**Development curves** (TRAIN-internal reference-disjoint dev groups, 12 paired cells, epoch 0 →
+119): B's recipe loses human-dev SROCC while it keeps fitting the metric teachers; T does not.
+
+| Dev group | T | `base-c` | T − `base-c` at 119 |
+|---|---|---|---|
+| human | 0.8122 → 0.8204 (+0.0082) | 0.8201 → 0.8092 (−0.0108) | **+0.0112** |
+| CID22 teacher | +0.0028 | +0.0054 | −0.0041 |
+| SafeSyn teacher | +0.0027 | +0.0035 | −0.0007 |
+
+**Why convex monotone cannot calibrate across types.** A non-negative sum of hinges
+`Σ c·ReLU(a·x − t)`, `a ≥ 0`, cannot express `max(x₁, x₂)`, which is monotone and convex:
+`max(x₁, x₂) = x₁ + ReLU(x₂ − x₁)` needs a signed first-layer row. Max-like pooling is how a
+metric avoids counting one artifact several times through redundant features; with only
+non-negative rows, a distortion type that lights many correlated features is over-weighted
+relative to one that lights few. That is the measured cross-type loss. Monotone classes that
+do allow max-pooling (min-max networks; certifiable signed constructions) are the next arms.

@@ -275,6 +275,8 @@ def recipe_of(spec: str) -> dict:
             out["mono_all"] = True
         elif tok == "thr" and "thresholds" not in out:  # by-construction exploration: trainable b1 <= 0
             out["thresholds"] = True
+        elif tok.startswith("rp") and tok[2:].isdigit() and int(tok[2:]) > 0 and "ramps" not in out:
+            out["ramps"] = int(tok[2:])  # by-construction exploration: tied monotone ramp pairs
         elif tok.startswith("cv") and "coverage_weight" not in out and 0 < float(tok[2:]) <= 64:
             out["coverage_weight"] = float(tok[2:])
         elif (tok.startswith("cf") and "coverage_mask" not in out
