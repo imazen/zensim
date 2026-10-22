@@ -197,3 +197,33 @@ capacity × teacher/human-recipe effect, not a sign-freedom effect.
 
 Mixture test: 4–9 inversions per cell, max +5.22, all posterize followed by light noise
 (dithering), the same cases as T.
+
+### Where the monotone deficit lives (post hoc)
+
+The type set below was chosen after reading the per-type table, so this is descriptive, not a
+test. Removing the "benign global change" distortion types (KADID 7/8 saturation, 16 brighten,
+17 darken, 18 mean shift, 20 non-eccentricity patch, 25 contrast change; TID2013 16 mean
+shift, 17 contrast change, 18 saturation change; `scripts/byconstruction/benign_types.py`):
+
+| Arm | KADID: all types → without | TID2013: all types → without |
+|---|---|---|
+| T | −0.0192 → −0.0090 | −0.0423 → −0.0129 |
+| R | −0.0168 → −0.0062 | −0.0391 → −0.0114 |
+
+Roughly 60–70% of the deficit on these two sets comes from distortions that move many damage
+features while humans object little; a signed model can subtract the explained part, a
+monotone one cannot. KonFiG (−0.027 / −0.030) has none of these types and keeps its deficit.
+
+### The exposed LIVE color-noise case (report-only)
+
+`manfishing`, `wn/img41` (severe, human 1 − DMOS/100 = −0.0024) vs `wn/img73` (milder, 0.3097),
+`score_pair_with_bake --bake-post raw`. These examples are exposed and stay out of fitting and
+selection (CLAUDE.md, 2026-10-18 Known Bug); this is a diagnostic read only.
+
+| Model | severe img41 | milder img73 | ordered correctly |
+|---|---|---|---|
+| B (`89cb4861`) | 49.71 | −13.91 | no (matches the trace's 49.7143 / −13.9146) |
+| `base-c` KADID-held-out cell s0 | 1.72 | −21.65 | no |
+| T same cell | −207.42 | −68.62 | yes |
+| R same cell | −171.78 | −46.56 | yes |
+| T full-data, packed f16 + spline | −163.72 | −60.27 | yes |
