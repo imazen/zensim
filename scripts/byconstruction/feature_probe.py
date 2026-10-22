@@ -52,6 +52,8 @@ def main():
     ap.add_argument("--bake", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--refs", type=int, default=24)
+    ap.add_argument("--all-families", action="store_true", help="report every v2 family, not the six of interest")
+    ap.add_argument("--reuse", action="store_true", help="reuse dumped feature files already under --out")
     a = ap.parse_args()
     mix, out = Path(a.mixture), Path(a.out)
     (out / "img").mkdir(parents=True, exist_ok=True)
@@ -62,19 +64,20 @@ def main():
         ref = np.asarray(Image.open(mix / "img" / f"{o}_ref.png").convert("RGB"))
         for name, img in edits(ref, 7000 + 10 * ri).items():
             p = out / "img" / f"{o}_{name}.png"
-            Image.fromarray(to8(img)).save(p)
             dump = out / "img" / f"{o}_{name}.f32"
-            subprocess.run([str(Path(a.bin_dir) / "score_pair_with_bake"), "--bake", a.bake, "--bake-post", "raw",
-                            "--ref", str(mix / "img" / f"{o}_ref.png"), "--dist", str(p),
-                            "--dump-features-to", str(dump)], check=True, capture_output=True)
+            if not (a.reuse and dump.is_file()):
+                Image.fromarray(to8(img)).save(p)
+                subprocess.run([str(Path(a.bin_dir) / "score_pair_with_bake"), "--bake", a.bake, "--bake-post", "raw",
+                                "--ref", str(mix / "img" / f"{o}_ref.png"), "--dist", str(p),
+                                "--dump-features-to", str(dump)], check=True, capture_output=True)
             b = dump.read_bytes()
             n = int.from_bytes(b[:4], "little")
             feats.setdefault(name, []).append(np.frombuffer(b[8:8 + 4 * n], dtype="<f4").astype(np.float64))
     report = {}
-    for fam in ("ringing", "iw_ssim", "iw_mse", "hf_loss", "mse", "ssim_mean"):
+    for fam in (V2 if a.all_families else ("ringing", "iw_ssim", "iw_mse", "hf_loss", "mse", "ssim_mean")):
         ids = slots(fam)
         report[fam] = {name: float(np.median([v[ids].sum() for v in vs])) for name, vs in feats.items()}
-    (out / "probe.json").write_text(json.dumps({"origins": origins, "bake": a.bake, "median_family_sum": report},
+    (out / ("probe_all.json" if a.all_families else "probe.json")).write_text(json.dumps({"origins": origins, "bake": a.bake, "median_family_sum": report},
                                                indent=1) + "\n")
     names = list(feats)
     print(f"{'family (sum over 12 cells), median over refs':40s} " + " ".join(f"{n:>20s}" for n in names))

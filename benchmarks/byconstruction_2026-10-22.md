@@ -597,3 +597,27 @@ pair). Gates in `/mnt/v/output/zensim/byconstruction-2026-10-22/gates-M/`:
 | Identity at every SIMD tier | 62 sources × 10 permutations pass | — |
 
 GitHub: imazen/zensim#72 records the ringing feature defect found here.
+
+### Feature probe, all families (`feature_probe.py --all-families`)
+
+Median over the 24 references, each v2 family summed over its 12 cells (outputs
+`feature-probe/probe_all.json`). Clipping caveat: `mean_shift+8` and `saturation_x1.25` can clip
+at 255, which creates real plateaus and contours; `contrast_x0.85` and `saturation_x0.8` do not.
+
+| Family | +8 shift | contrast ×0.85 | sat ×1.25 | sat ×0.8 | blur σ1.2 | luma noise σ4 | chroma noise σ8 |
+|---|---|---|---|---|---|---|---|
+| ringing | 0.334 | **0.231** | 0.187 | **0.160** | 0.139 | 0.083 | 0.203 |
+| banding | 0.011 | 0.011 | 0.198 | 0.011 | 0.132 | 0.196 | 1.269 |
+| blockiness | 0.008 | 0.010 | 0.109 | 0.018 | 0.135 | 0.148 | 0.619 |
+| hf_gain | 0.038 | 0.022 | 0.543 | 0.035 | 0.275 | 0.288 | 1.194 |
+| hf_loss | 0.065 | 0.533 | 0.044 | 0.489 | 0.897 | 0.205 | 0.464 |
+| pjnd_transducer | 0.705 | 0.494 | 0.376 | 0.314 | 0.357 | 0.151 | 0.407 |
+| transducer_lowk | 0.801 | 0.575 | 0.398 | 0.330 | 0.399 | 0.169 | 0.425 |
+| mse | 0.258 | 0.179 | 0.037 | 0.025 | 0.154 | 0.022 | 0.051 |
+| edge_width | 0.000 | 0.000 | 0.036 | 0.038 | 0.181 | 0.003 | 0.913 |
+
+Only **ringing** responds to clipping-free global edits more than to a visible blur, against
+its purpose (filed as imazen/zensim#72, with this check added as a comment). banding,
+blockiness and hf_gain spike only on the clipping-prone saturation-up edit; the transducers'
+response to contrast reduction tracks a visible change; hf_loss under contrast/saturation
+reduction and mse under a mean shift are what those measures define. Not filed.
