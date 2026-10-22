@@ -549,3 +549,14 @@ inputs *dropped* (zeroed every step via `--monotone-feature-mask … --monotone-
 monotone over the remaining 800, certificate passes, no subtraction route. Tests whether
 ringing forced to count as damage is what over-penalizes the global-change types. Smoke:
 certified, 20 zero input rows, no negative weights. Queued after `mp64`.
+
+**Why ringing conflates the two** (`zensim/src/feature_v2.rs`, `idx::RINGING`): per pixel,
+`saturate(|src − dst|, C_RING_ERR=0.05) · saturate(activity, C_ACTIVITY) ·
+(1 − saturate(|∇src|, C_RING_EDGE=0.02))`, mean-pooled. The error term is the raw per-pixel
+difference with no local mean removed, so a global tone, contrast or saturation change makes it
+uniformly large off edges, and chroma noise raises it in X/B. **Proposed feature fix (not
+done; a feature-system change for the owner):** compute the ringing error on a local-mean-removed
+(high-pass) difference, as a new append-only slot, so low-frequency tone shifts stop
+registering while noise and true ringing still do. The IW-weighted SSIM/MSE slots, 3×
+over-represented on saturation changes, are the next candidates for the same check. Any such
+change means new feature ids or a formula revision and re-extraction of every training table.
