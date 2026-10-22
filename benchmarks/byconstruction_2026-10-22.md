@@ -560,3 +560,25 @@ done; a feature-system change for the owner):** compute the ringing error on a l
 registering while noise and true ringing still do. The IW-weighted SSIM/MSE slots, 3×
 over-represented on saturation changes, are the next candidates for the same check. Any such
 change means new feature ids or a formula revision and re-extraction of every training table.
+
+### Feature probe: ringing confirmed flawed; IW-SSIM and hf_loss not confirmed
+
+`scripts/byconstruction/feature_probe.py` (24 of the mixture references; B's computed Rev5
+vector via `score_pair_with_bake --dump-features-to`; median over references of each family
+summed over its 12 cells; outputs `/mnt/v/output/zensim/byconstruction-2026-10-22/feature-probe/`):
+
+| Family | mean shift +8 | contrast ×0.85 | saturation ×1.25 | saturation ×0.8 | blur σ1.2 | luma noise σ4 | chroma noise σ8 | blur + luma noise |
+|---|---|---|---|---|---|---|---|---|
+| ringing | **0.3336** | 0.2308 | 0.1869 | 0.1596 | 0.1389 | 0.0829 | 0.2031 | 0.1710 |
+| iw_ssim | 0.0168 | 0.0533 | 0.0481 | 0.0408 | 0.2856 | 0.0344 | 0.2892 | 0.3256 |
+| iw_mse | 0.2579 | 0.1837 | 0.0422 | 0.0304 | 0.1989 | 0.0218 | 0.0512 | 0.2137 |
+| hf_loss | 0.0653 | 0.5329 | 0.0440 | 0.4889 | 0.8970 | 0.2048 | 0.4639 | 0.9086 |
+| mse | 0.2580 | 0.1787 | 0.0369 | 0.0254 | 0.1536 | 0.0218 | 0.0508 | 0.1702 |
+
+- **Ringing is flawed**: a barely visible +8 luma shift is its largest response in the probe,
+  2.4× a visible blur and 4× luma noise; contrast and saturation edits also exceed blur.
+- **IW-SSIM** responds weakly to global edits; the earlier share-of-distance excess on
+  saturation was not a feature defect.
+- **hf_loss** falls when luma noise is added to the blurred image on only 6 of 24 references;
+  the hypothesis that it drives M's blur + noise inversions is not supported.
+- `mse` / `iw_mse` respond to a mean shift by definition (they measure it); not a defect.
