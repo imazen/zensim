@@ -665,3 +665,42 @@ DR −0.0216). The mse-type, transducer and ringing families still carry informa
 model needs (for noise, for example); removing them costs more than their over-penalization of
 global changes. The calibration cannot be fixed by subtracting families from the bank: it needs
 the same measures recomputed on the affine-residual difference, or an explicit discount signal.
+
+### Arm M64 (`mono:thr:mp64`, all units max pairs)
+
+E21 Δ **−0.0131 (0.0023)**; KADID −0.0166, TID −0.0215, KonFiG −0.0150, CID22-A +0.0005 (per seed
+−0.0111, −0.0177, −0.0107). Certified monotone; 1–2 live max pairs in 11 of 12 cells (one cell
+keeps all 128 units). Mixture test 1–6 inversions per cell, max +7.56. Within noise of M (−0.0144).
+
+## Summary (all arms, E21 screen, seeds 0–2, Δ vs `base-c`)
+
+| Arm | Guarantee | E21 Δ (SE) | Mixture inversions / cell (max rise) |
+|---|---|---|---|
+| Ts: B + thresholds | pin only | −0.0008 (0.0012) | — |
+| FR: ringing sign-free | monotone in 800 of 820 | −0.0039 (0.0029) | 2–41 (+26.2) |
+| **M64: max pairs** | **certified monotone** | **−0.0131 (0.0023)** | 1–6 (+7.6) |
+| **M: max pairs + hinges** | **certified monotone** | **−0.0144 (0.0016)** | 1–32 (+6.5) |
+| E20: budget 20 | ≤ +20 certified | −0.0154 (0.0026) | 4–37 (+7.3) |
+| E5: budget 5 | ≤ +5 certified | −0.0194 (0.0027) | 3–8 (+5.0) |
+| G: content-gated | certified monotone | −0.0202 (0.0030) | 0–4 (+4.5) |
+| Lc: linear | certified monotone | −0.0204 (0.0029) | — |
+| T: thresholds | certified monotone | −0.0205 (0.0029) | 0–4 (+4.0) |
+| DR: ringing dropped | certified monotone | −0.0216 (0.0031) | 0–3 (+4.3) |
+| R: ramps | certified monotone | −0.0225 (0.0024) | 4–9 (+5.2) |
+| DG: global-sensitive dropped | certified monotone | −0.0229 (0.0032) | — |
+| `base-c` (B's recipe) | pin only | 0 | 86–171 (+61.5) |
+
+Full-data certified-monotone models (T, M) pass every label-free product gate; M: C1
+0.9984 / 0.9935, NEARID 143/144, G-STEER 135/135, identity at all tiers.
+
+**Answer to the question.** A metric that is monotone by construction is competitive with B
+on the product contract (dial, identity, steering) and far more robust (inversions bounded to a
+few points, no blur + chroma-noise failure), and at parity on codec data (CID22-A). It is not yet
+competitive on the E21 cross-dataset rank statistic: the best certified-monotone arm is −0.013.
+That gap is cross-type severity calibration on synthetic distortion sets; with oracle per-type
+calibration the monotone models match B. Max-pooling recovers about a third of it inside the
+monotone class. Most of the rest runs through one conflated feature (v2 ringing,
+imazen/zensim#72): B subtracts it as an accidental global-change detector, and the same
+subtraction forgives chroma noise. Closing the remaining gap by construction needs a feature
+change: damage measured on the affine-residual difference plus explicit global-change terms
+(the SSIM luminance/contrast/structure decomposition applied to this bank).
