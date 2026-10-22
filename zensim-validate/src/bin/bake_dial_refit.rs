@@ -1574,7 +1574,8 @@ fn cmd_certify_monotone(a: &CertifyMonotoneArgs) -> Result<bool, String> {
         Err("feature bounds present".into())
     };
     let line = match &verdict {
-        Ok(ramps) => serde_json::json!({"certified": true, "ramps": ramps, "bake": a.bake}),
+        Ok(c) => serde_json::json!({"certified": true, "ramps": c.ramps, "free_ramps": c.free_ramps,
+            "free_amplitude": c.free_amplitude, "monotone": c.free_amplitude == 0.0, "bake": a.bake}),
         Err(e) => serde_json::json!({"certified": false, "reason": e, "bake": a.bake}),
     };
     println!("{line}");

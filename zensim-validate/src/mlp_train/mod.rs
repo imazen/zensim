@@ -138,6 +138,17 @@ pub struct MlpHyperparams {
     /// guarantee is the pair structure, which identical values keep through
     /// packing. `0` = off.
     pub monotone_ramps: usize,
+    /// Bounded non-monotone budget. The last `2·free_ramps` hidden units form
+    /// tied ramp pairs whose W1 rows are NOT sign-constrained; every other
+    /// unit stays monotone. A free pair contributes `v·ramp(z)` with
+    /// `ramp ∈ [0, b_p - b_q]` and `v <= 0`, so `raw <= pin` and the identity
+    /// pin still hold, and the summed amplitude `Σ |v|·(b_p - b_q)` is
+    /// projected to at most `free_budget`. Then increasing any input raises
+    /// `raw` by at most `free_budget`: an explicit, certified cap on
+    /// non-monotonicity. `0` = off.
+    pub free_ramps: usize,
+    /// Cap on the free ramps' summed amplitude, in raw score units.
+    pub free_budget: f64,
     pub n_hidden: usize,
     pub n_epochs: usize,
     pub pairs_per_epoch: usize,
@@ -977,6 +988,8 @@ impl Default for MlpHyperparams {
             nonneg_pin: 100.0,
             nonneg_thresholds: false,
             monotone_ramps: 0,
+            free_ramps: 0,
+            free_budget: 0.0,
             n_hidden: 32,
             n_epochs: 200,
             pairs_per_epoch: 50_000,
@@ -1395,8 +1408,10 @@ fn project_plain(
     // A ramp's upper unit carries `-w2[p] >= 0`; read the pair's tied output
     // weight before the `w2 <= 0` clamp erases it.
     let n_hidden = b1.len();
-    let first_pair = n_hidden - 2 * hp.monotone_ramps;
-    let ramp_w2: Vec<f64> = (0..hp.monotone_ramps)
+    let n_pairs = hp.monotone_ramps + hp.free_ramps;
+    let first_pair = n_hidden - 2 * n_pairs;
+    let first_free = n_hidden - 2 * hp.free_ramps;
+    let ramp_w2: Vec<f64> = (0..n_pairs)
         .map(|i| {
             let p = first_pair + 2 * i;
             ((w2[p] - w2[p + 1]) / 2.0).min(0.0)
@@ -1408,7 +1423,14 @@ fn project_plain(
     } else {
         nonneg_project(w2, b1, b2, pin);
     }
-    if hp.monotone_cbc {
+    if hp.monotone_cbc && hp.free_ramps > 0 {
+        // Free ramp rows keep their sign; only the monotone units are clamped.
+        for block in w1.chunks_exact_mut(n_hidden) {
+            for v in &mut block[..first_free] {
+                *v = v.max(0.0);
+            }
+        }
+    } else if hp.monotone_cbc {
         project_monotone_w1(
             w1,
             n_hidden,
@@ -1416,8 +1438,30 @@ fn project_plain(
             hp.monotone_strict && !hp.monotone_pin_during_training,
         );
     }
-    if hp.monotone_ramps > 0 {
+    if n_pairs > 0 {
         project_ramp_pairs(w1, w2, b1, n_hidden, first_pair, &ramp_w2);
+    }
+    if hp.free_ramps > 0 {
+        project_free_budget(w2, b1, first_free, hp.free_ramps, hp.free_budget);
+    }
+}
+
+/// Scales the free ramps' output weights so `Σ |v|·(b_p - b_q) <= budget`.
+/// Thresholds are left alone; shrinking `|v|` keeps every tie and sign.
+fn project_free_budget(w2: &mut [f64], b1: &[f64], first_free: usize, n: usize, budget: f64) {
+    let amplitude: f64 = (0..n)
+        .map(|i| {
+            let p = first_free + 2 * i;
+            -w2[p] * (b1[p] - b1[p + 1])
+        })
+        .sum();
+    if amplitude > budget {
+        let s = if amplitude > 0.0 { budget / amplitude } else { 0.0 };
+        for i in 0..n {
+            let p = first_free + 2 * i;
+            w2[p] *= s;
+            w2[p + 1] = -w2[p];
+        }
     }
 }
 
@@ -1458,25 +1502,43 @@ fn nonneg_project_thresholds(b1: &mut [f64]) {
     }
 }
 
+/// What [`certify_monotone_bake`] proved about a bake.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MonotoneCertificate {
+    /// Live monotone ramp pairs (non-negative W1 column).
+    pub ramps: usize,
+    /// Live free ramp pairs (sign-free W1 column).
+    pub free_ramps: usize,
+    /// Certified bound: for `x' >= x` (every input), `raw(x') <= raw(x) + free_amplitude`.
+    /// `0.0` means exactly non-increasing.
+    pub free_amplitude: f64,
+}
+
 /// Checks, from the baked bytes alone, the structure that makes a one-hidden-
-/// layer model monotone by construction, and returns its number of ramp pairs:
+/// layer model monotone by construction (up to an explicit bounded budget):
 ///
 /// - ReLU hidden layer, identity scalar output, no feature transforms;
 /// - `scaler_mean = 0`, `scaler_scale > 0` (standardization is increasing and
 ///   maps `0⃗` to `0⃗`);
-/// - every `W1 >= 0`, every `b1 <= 0`, output bias `== pin`;
+/// - every `b1 <= 0`, output bias `== pin`;
 /// - every hidden unit with a positive output weight is a ramp's upper unit,
 ///   matched one-to-one to a distinct lower unit with a bit-identical W1
-///   column, the exactly negated output weight and `b1_lower >= b1_upper`.
+///   column, the exactly negated output weight and `b1_lower >= b1_upper`;
+/// - a negative W1 entry appears only in such a pair (a *free* ramp).
 ///   Hidden units may be stored in any order.
 ///
-/// Then each plain unit contributes `w2·ReLU(z + b) <= 0`, non-increasing in
-/// `z = a·x` with `a >= 0`, and each pair `w2·(ReLU(z + b_lo) - ReLU(z + b_up))`
-/// is bounded, `<= 0` and non-increasing in `z`. So `raw(0⃗) = pin`,
-/// `raw <= pin` and `raw` is non-increasing in every input, on all of input
-/// space. Floating-point evaluation follows this exactly for plain units; a
-/// ramp's two terms can cancel to within rounding.
-pub fn certify_monotone_bake(model: &zenpredict::Model, pin: f32) -> Result<usize, String> {
+/// Each plain unit contributes `w2·ReLU(z + b) <= 0` with `w2 <= 0`, non-
+/// increasing in `z = a·x` for `a >= 0`. Each pair contributes
+/// `w2·(ReLU(z + b_lo) - ReLU(z + b_up)) ∈ [w2·(b_lo - b_up), 0]`, non-increasing
+/// in `z`; for a free pair `z` may fall as inputs rise, which raises `raw` by
+/// at most that pair's amplitude. So `raw(0⃗) = pin`, `raw <= pin`, and for
+/// `x' >= x`, `raw(x') <= raw(x) + free_amplitude`, on all of input space.
+/// Floating-point evaluation follows this exactly for plain units; a pair's
+/// two terms can cancel to within rounding.
+pub fn certify_monotone_bake(
+    model: &zenpredict::Model,
+    pin: f32,
+) -> Result<MonotoneCertificate, String> {
     fn values(w: &zenpredict::WeightStorage<'_>, out_dim: usize) -> Vec<f32> {
         match w {
             zenpredict::WeightStorage::F32(w) => w.to_vec(),
@@ -1511,8 +1573,8 @@ pub fn certify_monotone_bake(model: &zenpredict::Model, pin: f32) -> Result<usiz
     let (n_in, n_hidden) = (l0.in_dim, l0.out_dim);
     let w1 = values(&l0.weights, n_hidden);
     let w2 = values(&l1.weights, 1);
-    if w1.iter().any(|&w| !(w >= 0.0)) {
-        return Err("a first-layer weight is negative or NaN".into());
+    if w1.iter().any(|w| w.is_nan()) || w2.iter().any(|w| w.is_nan()) {
+        return Err("NaN weight".into());
     }
     if l0.biases.iter().any(|&b| !(b <= 0.0)) {
         return Err("a hidden bias is positive or NaN".into());
@@ -1521,33 +1583,38 @@ pub fn certify_monotone_bake(model: &zenpredict::Model, pin: f32) -> Result<usiz
         return Err(format!("output bias {} != pin {pin}", l1.biases[0]));
     }
     let column = |j: usize| -> Vec<u32> { (0..n_in).map(|k| w1[k * n_hidden + j].to_bits()).collect() };
+    let signed = |j: usize| (0..n_in).any(|k| w1[k * n_hidden + j] < 0.0);
     let mut used = vec![false; n_hidden];
-    let mut pairs = 0;
+    let mut cert = MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 };
     for up in 0..n_hidden {
         if !(w2[up] > 0.0) {
-            if w2[up].is_nan() {
-                return Err(format!("unit {up}: NaN output weight"));
-            }
             continue;
         }
         let col = column(up);
+        let b_up = l0.biases[up];
         let lo = (0..n_hidden).find(|&j| {
             !used[j]
                 && j != up
                 && w2[j].to_bits() == (-w2[up]).to_bits()
-                && l0.biases[j] >= l0.biases[up]
+                && l0.biases[j] >= b_up
                 && column(j) == col
         });
-        match lo {
-            Some(lo) => {
-                used[lo] = true;
-                used[up] = true;
-                pairs += 1;
-            }
-            None => return Err(format!("unit {up}: positive output weight without a ramp partner")),
+        let Some(lo) = lo else {
+            return Err(format!("unit {up}: positive output weight without a ramp partner"));
+        };
+        used[lo] = true;
+        used[up] = true;
+        if signed(up) {
+            cert.free_ramps += 1;
+            cert.free_amplitude += f64::from(w2[up]) * (f64::from(l0.biases[lo]) - f64::from(b_up));
+        } else {
+            cert.ramps += 1;
         }
     }
-    Ok(pairs)
+    if let Some(j) = (0..n_hidden).find(|&j| !used[j] && signed(j) && w2[j] != 0.0) {
+        return Err(format!("unit {j}: negative first-layer weight outside a ramp pair"));
+    }
+    Ok(cert)
 }
 
 /// Upper end of the per-unit quantile range [`init_thresholds`] draws from.
@@ -2974,8 +3041,9 @@ pub fn train_mlp_strategy_pairs(
         );
         // A ramp pair's two units share a W1 row, so their quantile thresholds
         // order cleanly: the lower unit takes the smaller threshold.
-        let first_pair = n_hidden - 2 * hyperparams.monotone_ramps;
-        for i in 0..hyperparams.monotone_ramps {
+        let n_pairs = hyperparams.monotone_ramps + hyperparams.free_ramps;
+        let first_pair = n_hidden - 2 * n_pairs;
+        for i in 0..n_pairs {
             let p = first_pair + 2 * i;
             if b1[p + 1] > b1[p] {
                 b1.swap(p, p + 1);

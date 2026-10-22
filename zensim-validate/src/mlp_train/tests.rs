@@ -3892,7 +3892,11 @@ fn byc_monotone_thresholds_identity_and_monotonicity() {
             "a hinge target must move at least one threshold: {biases:?}\n{}",
             log.join("\n")
         );
-        assert_eq!(certify_monotone_bake(&model, 100.0), Ok(0), "certificate");
+        assert_eq!(
+            certify_monotone_bake(&model, 100.0),
+            Ok(MonotoneCertificate { ramps: 0, free_ramps: 0, free_amplitude: 0.0 }),
+            "certificate"
+        );
         let mut predictor = zenpredict::Predictor::new(&model);
         assert_eq!(
             predictor.predict(&[0., 0.]).unwrap()[0].to_bits(),
@@ -3958,8 +3962,8 @@ fn byc_monotone_ramps_structure_identity_and_monotonicity() {
         let bytes = train_mlp(&mut groups, 2, &hp, &mut Vec::new());
         let model = zenpredict::Model::from_bytes(&bytes).unwrap();
         // A pair can train to output weight 0 (two dead units), so live ramps <= ramps.
-        let live = certify_monotone_bake(&model, 100.0).expect("certificate");
-        assert!(live <= ramps, "{live} live ramps from {ramps} pairs");
+        let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
+        assert!(cert.ramps <= ramps && cert.free_ramps == 0 && cert.free_amplitude == 0.0, "{cert:?}");
         let mut predictor = zenpredict::Predictor::new(&model);
         assert_eq!(
             predictor.predict(&[0., 0.]).unwrap()[0].to_bits(),
@@ -3980,6 +3984,153 @@ fn byc_monotone_ramps_structure_identity_and_monotonicity() {
             assert!(fy <= fx && fx <= 100., "monotone violation {x:?}->{fx} {y:?}->{fy}");
         }
     }
+}
+
+/// `--free-ramps` with a budget: the certificate reports the free pairs and an
+/// amplitude within the budget, and no non-negative step raises the score by
+/// more than that amplitude (plus f32 rounding). The target needs a
+/// non-monotone term, so the budget binds.
+#[test]
+fn byc_free_ramps_certified_budget() {
+    let rows: Vec<Vec<f64>> = (0..64)
+        .map(|i| vec![(i % 16) as f64 / 15., (i / 16) as f64 / 3.])
+        .collect();
+    let refs: Vec<&[f64]> = rows.iter().map(Vec::as_slice).collect();
+    let scores: Vec<f64> = rows.iter().map(|x| 100. - 40. * x[0] + 15. * x[1] * x[0]).collect();
+    let budget = 3.0;
+    for dtype in [WeightDtype::F32, WeightDtype::F16] {
+        let hp = MlpHyperparams {
+            nonneg_distance: true,
+            monotone_cbc: true,
+            nonneg_thresholds: true,
+            monotone_ramps: 1,
+            free_ramps: 2,
+            free_budget: budget,
+            n_hidden: 8,
+            n_epochs: 40,
+            pairs_per_epoch: 1024,
+            seed: 5,
+            out_dtype: dtype,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut groups = [TrainingGroup {
+            name: "invented".into(),
+            human_scores: &scores,
+            features: FeatureRows::Borrowed(&refs),
+            metric_sigmas: None,
+            train_weight: 1.,
+            validation_weight: 1.,
+            ref_ids: None,
+            loss_mode: GroupLossMode::Both,
+        }];
+        let bytes = train_mlp(&mut groups, 2, &hp, &mut Vec::new());
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
+        assert!(cert.free_amplitude <= budget * (1. + 1e-3), "{cert:?}");
+        let mut predictor = zenpredict::Predictor::new(&model);
+        assert_eq!(predictor.predict(&[0., 0.]).unwrap()[0].to_bits(), 100.0_f32.to_bits());
+        let mut rng = 0x1234_5678_9abc_def1u64;
+        let mut next = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            (rng >> 11) as f32 / (1u64 << 53) as f32
+        };
+        let slack = cert.free_amplitude as f32 + 1e-3;
+        for _ in 0..2000 {
+            let x = [2. * next(), 2. * next()];
+            let y = [x[0] + next(), x[1] + next()];
+            let fx = predictor.predict(&x).unwrap()[0];
+            let fy = predictor.predict(&y).unwrap()[0];
+            assert!(fy <= fx + slack && fx <= 100., "budget violation {x:?}->{fx} {y:?}->{fy} {cert:?}");
+        }
+    }
+}
+
+/// Projection with free ramps, on hand-set weights: monotone rows clamp to
+/// `>= 0`, free rows keep their sign (averaged within the pair), every pair is
+/// tied, `b1 <= 0` with `b_q <= b_p`, and the free amplitude meets the budget.
+#[test]
+fn byc_free_ramp_projection_contract() {
+    // 2 inputs, 6 hidden: unit 0 plain, (1,2) monotone ramp, (3,4) free ramp, 5 plain? No:
+    // the layout is [plain | monotone ramps | free ramps], so use 1 plain, 1 monotone pair, 2 free pairs = 7 units.
+    let h = 7;
+    let hp = MlpHyperparams {
+        nonneg_distance: true,
+        monotone_cbc: true,
+        nonneg_thresholds: true,
+        monotone_ramps: 1,
+        free_ramps: 2,
+        free_budget: 2.0,
+        n_hidden: h,
+        ..Default::default()
+    };
+    let mut w1 = vec![
+        -1.0, -2.0, 3.0, -4.0, -5.0, 6.0, -7.0, // feature 0 across units
+        2.0, -1.0, -3.0, 4.0, 2.0, -6.0, 1.0, // feature 1
+    ];
+    let mut w2 = vec![0.5, -3.0, 1.0, -4.0, 2.0, -6.0, 6.0];
+    let mut b1 = vec![0.3, -0.1, -0.5, -1.0, -3.0, 0.2, -2.0];
+    let mut b2 = vec![0.0];
+    project_plain(&mut w1, &mut w2, &mut b1, &mut b2, Some(100.0), &hp);
+    let col = |j: usize| [w1[j], w1[h + j]];
+    assert!(col(0).iter().all(|&v| v >= 0.0) && col(1) == col(2) && col(1).iter().all(|&v| v >= 0.0));
+    assert_eq!(col(3), col(4));
+    assert_eq!(col(5), col(6));
+    assert!(col(3).iter().chain(col(5).iter()).any(|&v| v < 0.0), "free rows must keep their sign");
+    assert!(b1.iter().all(|&b| b <= 0.0) && b1[2] <= b1[1] && b1[4] <= b1[3] && b1[6] <= b1[5]);
+    for p in [1, 3, 5] {
+        assert!(w2[p] <= 0.0 && w2[p + 1] == -w2[p]);
+    }
+    assert!(w2[0] <= 0.0 && b2[0] == 100.0);
+    let amplitude = -w2[3] * (b1[3] - b1[4]) - w2[5] * (b1[5] - b1[6]);
+    assert!(amplitude <= 2.0 + 1e-12 && amplitude > 1.9, "amplitude {amplitude}");
+}
+
+/// A hand-built bake with one free ramp certifies to exactly its amplitude, and
+/// that bound is tight: raising an input raises the score by up to (and not
+/// beyond) the amplitude.
+#[test]
+fn byc_certificate_free_amplitude_is_exact_and_tight() {
+    // 2 inputs, 3 hidden units: one monotone hinge, one free ramp (units 1, 2).
+    // free row = (1, -1): z = x0 - x1 falls as x1 rises.
+    // The hinge reads only x0, so raising x1 moves the score through the free ramp alone.
+    let w1 = [0.5, 1.0, 1.0, 0.0, -1.0, -1.0];
+    let b1 = [-0.1, 0.0, -2.0];
+    let w2 = [-4.0, -1.5, 1.5];
+    let b2 = [100.0];
+    let bytes = bake_two_layer_znpr_v3(
+        &[0.0, 0.0],
+        &[1.0, 1.0],
+        &w1,
+        &b1,
+        &w2,
+        &b2,
+        2,
+        3,
+        1,
+        WeightDtype::F32,
+        None,
+        None,
+        Activation::Relu,
+    );
+    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+    let cert = certify_monotone_bake(&model, 100.0).expect("certificate");
+    assert_eq!(cert, MonotoneCertificate { ramps: 0, free_ramps: 1, free_amplitude: 3.0 });
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let lo = predictor.predict(&[3.0, 0.0]).unwrap()[0];
+    let hi = predictor.predict(&[3.0, 5.0]).unwrap()[0];
+    assert!(hi > lo, "the free ramp must make this step raise the score");
+    assert!((hi - lo - 3.0).abs() <= 1e-5, "rise {} should equal the certified amplitude 3", hi - lo);
+    // Breaking the tie (one weight changed) must refuse.
+    let mut w2_bad = w2;
+    w2_bad[2] = 1.4;
+    let bad = bake_two_layer_znpr_v3(
+        &[0.0, 0.0], &[1.0, 1.0], &w1, &b1, &w2_bad, &b2, 2, 3, 1, WeightDtype::F32, None, None,
+        Activation::Relu,
+    );
+    assert!(certify_monotone_bake(&zenpredict::Model::from_bytes(&bad).unwrap(), 100.0).is_err());
 }
 
 /// Negative control: B's recipe class (`--nonneg-distance`, signed W1) trains

@@ -880,6 +880,17 @@ struct Args {
     #[arg(long, default_value_t = 0, requires = "nonneg_thresholds")]
     monotone_ramps: usize,
 
+    /// With `--nonneg-thresholds --monotone-cbc`: the last `2*N` hidden units
+    /// form tied ramp pairs with sign-free W1 rows, their summed amplitude
+    /// capped at `--free-budget` raw units. Certified bound: increasing any
+    /// input raises the score by at most the budget.
+    #[arg(long, default_value_t = 0, requires = "nonneg_thresholds")]
+    free_ramps: usize,
+
+    /// Cap on the free ramps' summed amplitude (raw score units).
+    #[arg(long, default_value_t = 0.0)]
+    free_budget: f64,
+
     /// STEER S: fixed tau1/8 C1 convex hinge; plain N only.
     #[arg(long, requires = "nonneg_distance", conflicts_with_all = ["steer_pairs", "pool_head", "hybrid_head", "per_sample_alpha_head", "skip_connection"])]
     smooth_hinge: bool,
@@ -3327,6 +3338,8 @@ fn main() {
         nonneg_pin: args.nonneg_pin,
         nonneg_thresholds: args.nonneg_thresholds,
         monotone_ramps: args.monotone_ramps,
+        free_ramps: args.free_ramps,
+        free_budget: args.free_budget,
         n_hidden: args.hidden,
         n_epochs: args.epochs,
         pairs_per_epoch: args.pairs_per_epoch,
