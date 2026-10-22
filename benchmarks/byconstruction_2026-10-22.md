@@ -506,3 +506,10 @@ stable and higher than B's own width: plain capacity reduction is a cheap stabil
 certified-monotone models stays monotone): `base-c` 0.8722 → 0.8760, M 0.8579 → 0.8599, E20
 0.8569 → 0.8578, T 0.8517 → 0.8519. Ensemble gaps vs `base-c`: M −0.0161, E20 −0.0182, T
 −0.0241. B's recipe gains more from ensembling, so this does not close the gap.
+
+### Arm Ts (`thr`, B plus thresholds, signed W1): parity
+
+E21 Δ **−0.0008 (0.0012)**; KADID −0.0004, TID −0.0036, KonFiG +0.0016, CID22-A −0.0006 (per seed
++0.0004, −0.0032, +0.0005). 12–15 live units per cell (B's own bake has 87). Thresholds and unit
+count do not matter for the signed class; the 0.02 between the monotone arms and B is the sign
+structure.
