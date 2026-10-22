@@ -125,12 +125,17 @@ def cmd_score(args) -> int:
                 d = data[f]
                 target = np.asarray(d["target"], dtype=float)
                 orient = float(d["orientation"])
-                if arm in d["predictions"]:
-                    pa = np.asarray(d["predictions"][arm][s], dtype=float)
+                if args.rule == "best":
+                    read = lambda a: pd.read_csv(BEST / a / f"without_{f}_s{s}" / f"pred_{f}.tsv",
+                                                 sep="\t").pred.to_numpy(dtype=float)
+                    pa, pc = read(arm), read(args.control)
                 else:
-                    t = pd.read_csv(CELLS / arm / f"without_{f}_s{s}" / f"pred_{f}.tsv", sep="\t")
-                    pa = t.pred.to_numpy(dtype=float)
-                pc = np.asarray(d["predictions"][args.control][s], dtype=float)
+                    if arm in d["predictions"]:
+                        pa = np.asarray(d["predictions"][arm][s], dtype=float)
+                    else:
+                        t = pd.read_csv(CELLS / arm / f"without_{f}_s{s}" / f"pred_{f}.tsv", sep="\t")
+                        pa = t.pred.to_numpy(dtype=float)
+                    pc = np.asarray(d["predictions"][args.control][s], dtype=float)
                 if len(pa) != len(target):
                     raise ValueError(f"{arm}/{f}/s{s}: {len(pa)} predictions for {len(target)} targets")
                 ra, rc = orient * srocc(pa, target), orient * srocc(pc, target)
@@ -271,6 +276,29 @@ def cmd_bytype(args) -> int:
     return 0
 
 
+BEST = Path(os.environ.get("BYC_BEST", str(Path.home() / "tmp/byc/best")))
+
+
+def cmd_predict_best(args) -> int:
+    """Held-out predictions from each cell's `refit/best.bin` (the trainer's best dev-geomean3 epoch: the harness's
+    `best_dev` rule) for an arm, or for E34's stored control cells with `--arm base-c`."""
+    seeds = [int(s) for s in args.seeds.split(",")]
+    for f in FOLDS:
+        for s in seeds:
+            cell = f"without_{f}_s{s}"
+            src = (E34_CONTROL_CELLS if args.arm == "base-c" else CELLS / args.arm) / cell / "refit/best.bin"
+            dest = BEST / args.arm / cell
+            out = dest / f"pred_{f}.tsv"
+            if out.is_file():
+                continue
+            dest.mkdir(parents=True, exist_ok=True)
+            bake = dest / "best.bin"
+            bake.write_bytes(src.read_bytes())
+            predict(bake, ROOT / "wide/main/real" / f"{f}.parquet", out)
+            print(json.dumps({"arm": args.arm, "cell": cell, "best_sha256": sha(bake)}), flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -283,6 +311,8 @@ def main() -> int:
     s.add_argument("--arms", required=True)
     s.add_argument("--control", default="base-c")
     s.add_argument("--seeds", default="0,1,2")
+    s.add_argument("--rule", choices=("last", "best"), default="last",
+                   help="last = registered final epoch; best = refit/best.bin (predict-best first)")
     c = sub.add_parser("curves")
     c.add_argument("--arm", required=True, help="arm directory name, e.g. mono-thr")
     c.add_argument("--seeds", default="0,1,2")
@@ -293,9 +323,12 @@ def main() -> int:
     bt.add_argument("--arm", required=True)
     bt.add_argument("--control", default="base-c")
     bt.add_argument("--seeds", default="0,1,2")
+    pb = sub.add_parser("predict-best")
+    pb.add_argument("--arm", required=True, help="arm directory name, or base-c for E34's control cells")
+    pb.add_argument("--seeds", default="0,1,2")
     args = ap.parse_args()
     return {"run": cmd_run, "score": cmd_score, "curves": cmd_curves, "pairclass": cmd_pairclass,
-            "bytype": cmd_bytype}[args.cmd](args)
+            "bytype": cmd_bytype, "predict-best": cmd_predict_best}[args.cmd](args)
 
 
 if __name__ == "__main__":

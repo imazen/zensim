@@ -363,3 +363,26 @@ In one E20 cell (TID held out, seed 0) the free room reproduces B's failure mode
 then chroma noise σ 8 inverts on 26 of 48 references (max +7.3, inside the certificate's 20).
 The non-monotone room that buys E21 is spent partly on the same inversions B makes; the
 certificate bounds their size.
+
+### Correction: the logged human-dev decline is not a clean memorization signal
+
+The trainer's per-epoch dev SROCC (`compute_light_panel_subsampled` over all rows of a group)
+is pooled across the human dev group's sources, each with its own label scale; E21 scores each
+held-out dataset separately. Testing it directly: every cell also saved `refit/best.bin`, the
+trainer's best dev-geomean3 epoch (the harness's `best_dev` rule).
+`byc_cells.py predict-best` + `score --rule best` and `scripts/byconstruction/epoch_rules.py`:
+
+| Model | mean E21 pooled SROCC, last epoch → best-dev epoch |
+|---|---|
+| `base-c` | 0.8722 → 0.8642 (**−0.0080**) |
+| T | 0.8517 → 0.8518 |
+| E5 | 0.8528 → 0.8533 |
+| E20 | 0.8569 → 0.8529 |
+| R | 0.8497 → 0.8461 |
+
+Selecting by dev hurts B's recipe on held-out datasets; later epochs are what make it better
+there. Under the `best_dev` rule the arm deltas shrink (T −0.0124, E5 −0.0109, E20 −0.0113, R
+−0.0181) only because the control gets worse. The registered last-epoch comparison above
+stands, and the earlier statements that R's or B's dev decline shows memorization are
+withdrawn: what the logged metric shows is a shift in pooled cross-source ranking on the
+in-population dev references, not an E21 loss.
