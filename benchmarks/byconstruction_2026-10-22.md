@@ -248,3 +248,22 @@ The model is effectively linear, which is E34 L's class (E34's L also cleared G-
 steering pass is expected, but it is now attached to a certified-monotone bake with a measured
 mixture-test record. The identity-tier step (`e33_gates.identity`) was not run; C5 from both
 verdicts passes.
+
+### Arms added after T/R (definitions recorded before their results)
+
+| Arm | Tokens | Class | Certified guarantee |
+|---|---|---|---|
+| E5 / E20 | `mono:thr:fr32:fb5` / `…:fb20` | 64 monotone hinges + 32 sign-free ramp pairs, summed amplitude ≤ 5 / 20 raw units | pin; raising any input raises the score by ≤ 5 / 20 |
+| G | `mono:thr:gate` | monotone hinges; each fx1 (direct, product) pair projected onto `{a ≥ 0, a/s_d + b/s_p ≥ 0}` | pin; non-increasing in every damage feature for every fragility in (0, 1] |
+| Lc | `H1:mono` | linear, `W1 ≥ 0`, C family | monotone (E34 L in B's family) |
+| Ts | `thr` | B + trainable thresholds, signed `W1` | pin only (capacity control) |
+
+G is the content-gated partial-monotone class: T forced both weights ≥ 0, so a unit's gain on
+damage could only grow with fragility; G lets it rise or fall with content while staying
+non-negative. The gate cone keeps a 2⁻⁸ margin and a direct-weight floor so f16 packing
+cannot cross it; `certify_monotone_bake` checks it from the bake's `zensim.derived_inputs`
+declaration (product factors must be `pjnd_fragility` slots). Smoke: a 2-epoch real-data G
+cell's dense bake certifies monotone with 5,535 negative product weights.
+
+The same decision rule applies to each: E33 point form on the 3-seed screen, then seeds 3–9
+and the full-data gates for any arm that meets it.
