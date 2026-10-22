@@ -167,6 +167,10 @@ def train_command(groups: list, init_seed: int, sample_seed: int, width: int, ke
             cmd += ["--monotone-ramps", str(recipe["ramps"])]
         if recipe.get("free_ramps"):
             cmd += ["--free-ramps", str(recipe["free_ramps"]), "--free-budget", repr(recipe["free_budget"])]
+    if recipe.get("max_pairs"):
+        if not (recipe.get("mono_all") and recipe.get("thresholds")) or recipe.get("gated_products"):
+            raise ValueError("mp<N> requires mono and thr, without gate")
+        cmd += ["--max-pairs", str(recipe["max_pairs"])]
     if recipe.get("gated_products"):
         if not (recipe.get("mono_all") and recipe.get("derived_inputs") == "fx1"):
             raise ValueError("gate requires mono and fx1")

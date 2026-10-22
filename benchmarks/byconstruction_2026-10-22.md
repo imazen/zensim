@@ -324,3 +324,12 @@ whose "types" are codecs, is positive in raw form for T and E5.
 So, on this feature set: coordinate-wise monotonicity and cross-type severity calibration
 conflict; ranking within a distortion type does not suffer. For codec targeting, where the
 types are codecs (CID22-A), the monotone models are at parity or better.
+
+**Arm M (`mono:thr:mp32`), recorded before its result.** The oracle above says the monotone
+deficit is cross-type severity calibration. The standard monotone way to stop one artifact
+being counted several times through redundant features is to pool with a maximum instead of a
+sum, and `W1 ≥ 0` hinge sums cannot express `max(x₁, x₂)`. M's first 64 hidden units form 32
+certified max pairs `c·max(a·x, b·x − t)` (u: row `a ≥ 0`, bias 0; v: row `b − a`, `b ≥ 0`,
+bias `−t ≤ 0`; tied `c ≤ 0`), the other 64 stay monotone hinges. A 2-epoch real-data smoke keeps
+31 live max pairs and certifies monotone. Queue order (serial, one heavy job at a time): E20, G,
+M, Lc, Ts.
