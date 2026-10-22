@@ -334,3 +334,32 @@ certified max pairs `c·max(a·x, b·x − t)` (u: row `a ≥ 0`, bias 0; v: row
 bias `−t ≤ 0`; tied `c ≤ 0`), the other 64 stay monotone hinges. A 2-epoch real-data smoke keeps
 31 live max pairs and certifies monotone. Queue order (serial, one heavy job at a time): E20, G,
 M, Lc, Ts.
+
+### Prior evidence: data and inputs alone do not remove the inversion (registered, 2026-10-18)
+
+[color_noise_repair_2026-10-18.md](color_noise_repair_2026-10-18.md) added the color/noise
+coverage families that `cf98` excludes, restored fine-scale X/B inputs, and did both, on B's
+signed class, as single models and as 3-seed ensembles. Every composition still scores the
+severe LIVE `wn/img41` above the milder `wn/img73` (severe 0.26–62.6 vs milder −31.3 to −5.95).
+The monotone bakes here order that pair correctly by construction. Coverage is a complement to
+the guarantee, not a substitute for it.
+
+### Arm E20 (`mono:thr:fr32:fb20`): the certified budget trades E21 for bounded inversions
+
+`526261c3` trainer, 1,915 s for 12 cells, peak RSS 1.02 GiB. Every dense bake certifies; the
+free amplitude is 19.67–20.00 in 9 cells and 5.3–6.6 in 3.
+
+| Non-monotone budget ε (certified) | E21 Δ vs `base-c` (seed-unit SE) | Mixture inversions / cell | Max rise |
+|---|---|---|---|
+| 0 (T) | −0.0205 (0.0029) | 0–4 | +4.0 (dithering) |
+| 5 (E5) | −0.0194 (0.0027) | 3–8 | +5.0 (dithering) |
+| 20 (E20) | **−0.0154 (0.0026)** | 4–37 | +7.3 |
+| unbounded (`base-c`) | 0 | 86–171 | +24.7 to +61.5 |
+
+E20 per dataset: KADID −0.0110, TID2013 −0.0364, KonFiG −0.0167, CID22-A +0.0026. Pair
+classes vs `base-c`: cross-type KADID −0.0078 (T −0.0133), TID −0.0160 (T −0.0205).
+
+In one E20 cell (TID held out, seed 0) the free room reproduces B's failure mode: blur σ 1.2
+then chroma noise σ 8 inverts on 26 of 48 references (max +7.3, inside the certificate's 20).
+The non-monotone room that buys E21 is spent partly on the same inversions B makes; the
+certificate bounds their size.
