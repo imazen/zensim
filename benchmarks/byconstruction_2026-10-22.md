@@ -243,11 +243,12 @@ hidden unit is live). `bake_dial_refit certify-monotone`: certified, monotone. G
 | G-DIAL (p5 ≤ 25, p95 ≥ 85, mono ≥ .93) | pass (p5 13.8 / −9.9, p95 97.5 / 95.2) | pass |
 | NEARID N1–N3 | pass, **140/144** monotone ladders | pass, 130/144 |
 | G-STEER (D12 exact gradients, 135 cases) | **135/135** | 130/135 |
+| Identity at every SIMD tier (`e33_gates.identity`, C5 as registered) | 62 sources pass at all 10 permutations (620 rows) | (E34 gate record) |
+
 
 The model is effectively linear, which is E34 L's class (E34's L also cleared G-STEER), so the
 steering pass is expected, but it is now attached to a certified-monotone bake with a measured
-mixture-test record. The identity-tier step (`e33_gates.identity`) was not run; C5 from both
-verdicts passes.
+mixture-test record.
 
 ### Arms added after T/R (definitions recorded before their results)
 
