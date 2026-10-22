@@ -657,3 +657,11 @@ edit exceeds its response to a visible σ1.2 blur: mse, masked_mse, iw_mse, pjnd
 transducer_lowk, transducer_highk, ringing (`masks/global_sensitive.tsv`). The selection uses
 only the label-free probe, not assessment labels. A cheap proxy for "structure-only residual
 damage"; if it beats T clearly, the affine-residual feature design is worth building.
+
+### Arm DG (`mono:thr:dropglobal`): removing the global-sensitive families does not help
+
+E21 Δ **−0.0229 (0.0032)**; KADID −0.0198, TID −0.0478, KonFiG −0.0304, CID22-A +0.0064 (T −0.0205,
+DR −0.0216). The mse-type, transducer and ringing families still carry information a monotone
+model needs (for noise, for example); removing them costs more than their over-penalization of
+global changes. The calibration cannot be fixed by subtracting families from the bank: it needs
+the same measures recomputed on the affine-residual difference, or an explicit discount signal.
