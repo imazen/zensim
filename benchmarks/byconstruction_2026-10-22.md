@@ -621,3 +621,19 @@ its purpose (filed as imazen/zensim#72, with this check added as a comment). ban
 blockiness and hf_gain spike only on the clipping-prone saturation-up edit; the transducers'
 response to contrast reduction tracks a visible change; hf_loss under contrast/saturation
 reduction and mse under a mean shift are what those measures define. Not filed.
+
+### Arm DR (`mono:thr:dropring`): dropping ringing does not help
+
+E21 Δ **−0.0216 (0.0031)**; KADID −0.0192, TID −0.0447, KonFiG −0.0280, CID22-A +0.0053 (T −0.0205;
+FR −0.0039). Ringing forced to count as damage is not what over-penalizes the global-change
+types; the mse-type, transducer and hf_loss families do that. What ringing gives a signed model
+is an accidental **global-change detector**, which it subtracts to discount those other
+features (FR's large negative ringing weights). Fixing ringing alone would remove that signal.
+
+**Revised design.** (1) Make ringing measure ringing (high-pass error), closing the chroma-noise
+loophole. (2) Add an explicit global-change descriptor, zero at identity and blind to noise —
+e.g. per channel, the fraction of the error explained by a global affine map `dst ≈ a·src + b`
+(≈1 for mean shift, contrast or saturation, ≈0 for noise or blur) — and let it *reduce*
+damage gains through the existing gated-product structure (gain ≥ 0). The model stays monotone
+in every damage feature, forgives global changes explicitly, and noise cannot exploit the
+descriptor because noise is not affine-explainable. Posted to imazen/zensim#72 as a correction.
