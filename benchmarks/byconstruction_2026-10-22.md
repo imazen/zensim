@@ -743,7 +743,8 @@ The Rev5 scorer is a single streaming pass. `StripPlaneProducer` (`zensim/src/fe
 keeps rolling row windows per scale and builds each coarser scale from finer rows as they arrive.
 It emits 128-row kernel strips top to bottom, and per-strip accumulators merge in a fixed reduction
 tree, so strip geometry does not change the result. The timings above ran through this walk: the
-profile below shows `StripPlaneProducer`, `RollingPlane` and `stream_phase_b` samples.
+raw 2048² profile (`perf.data`, see the timing README) has samples in `StripPlaneProducer`,
+`RollingPlane` and `stream_phase_b`.
 
 | Design | Streams? |
 |---|---|
