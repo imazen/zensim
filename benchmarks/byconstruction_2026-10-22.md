@@ -513,3 +513,33 @@ E21 Δ **−0.0008 (0.0012)**; KADID −0.0004, TID −0.0036, KonFiG +0.0016, C
 +0.0004, −0.0032, +0.0005). 12–15 live units per cell (B's own bake has 87). Thresholds and unit
 count do not matter for the signed class; the 0.02 between the monotone arms and B is the sign
 structure.
+
+### Arm FR (`mono:thr:freering`, monotone in 800 of 820 inputs): one feature carries both the gap and the inversion
+
+`d2b7ce30` trainer, 12 cells in 757 s. Exploratory (ringing was chosen after reading KADID
+assessment rows).
+
+| | E21 Δ vs `base-c`, seeds 0–2 |
+|---|---|
+| mean (seed-unit SE) | **−0.0039 (0.0029)**; per seed −0.0011, −0.0097, −0.0009 |
+| KADID / TID2013 / KonFiG / CID22-A | −0.0046 / −0.0153 / −0.0043 / **+0.0085** |
+
+Pair classes vs `base-c`: cross-type KADID −0.0028, TID −0.0056 (T: −0.0133, −0.0205);
+cross-source KADID −0.0022, TID −0.0086; same ladder still ≥ 0 except CID22-A −0.0002. Freeing
+the sign of one feature family (20 inputs) recovers about 80% of the E21 gap. The learned
+ringing weights are large and negative (to −22): the model subtracts ringing.
+
+**And the inversion comes back through the same feature.** Mixture test: 2–41 inversions per
+cell, max rise +26.2, dominated by blur σ 1.2 then chroma noise σ 8 (up to 27 of 48 references)
+— B's signature failure. Feature dump (`score_pair_with_bake --dump-features-to`, B's read set):
+adding chroma noise to the blurred image raises the ringing slots sharply, e.g. reference 9940
+slot values 0.0012 → 0.0582 and 0.0019 → 0.0349 (references 3318 and 5050 behave alike).
+
+**Mechanism.** The v2 ringing feature responds to benign global tone and saturation changes
+*and* to chroma noise. Calibrating the benign changes requires subtracting it; the same
+subtraction forgives chroma noise. That one conflation explains most of the cross-type
+calibration gap and B's blur + chroma-noise inversion (and plausibly the LIVE color-noise case).
+The fix is at the feature level: a ringing measure that does not respond to global tone or
+saturation changes (or the two components as separate features, with the global-change part
+treated as a non-damage descriptor). Then a monotone combiner can use the damage part without
+subtracting anything.
